@@ -1,0 +1,20 @@
+{
+  "vendor": "github",
+  "purpose": "Repo Actions secrets CRUD + deploy-key inspection",
+  "kit_plugin": "sandstream-kit-plugin-github",
+  "env_var": "GITHUB_TOKEN",
+  "creation_url": "https://github.com/settings/personal-access-tokens",
+  "minimum_scope": {
+    "description": "Use a fine-grained PAT (NOT a classic PAT). Restrict 'Resource owner' to the org that owns the repo and 'Repository access' to the SPECIFIC repos kit manages.",
+    "repository_permissions": {
+      "Secrets": "Read and write",
+      "Administration": "Read-only (for deploy keys listing)",
+      "Actions": "Read-only (for workflow-run inspection)",
+      "Metadata": "Read-only (auto-granted; required for the PAT to function)"
+    },
+    "organization_permissions": "None — keep all toggles off",
+    "expiration": "Recommend 30-90 days; rotate via kit"
+  },
+  "docs": "https://docs.github.com/en/rest/actions/secrets",
+  "last_reviewed": "2026-06-08"
+}

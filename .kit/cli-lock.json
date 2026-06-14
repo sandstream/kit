@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "tools": {
+    "node": {
+      "version": "22",
+      "source": "mise",
+      "installedAt": "2026-03-30T15:48:16.532Z"
+    },
+    "pnpm": {
+      "version": "latest",
+      "source": "mise",
+      "installedAt": "2026-03-30T15:48:16.532Z"
+    }
+  }
+}

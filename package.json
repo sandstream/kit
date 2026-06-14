@@ -1,0 +1,52 @@
+{
+  "name": "sandstream-kit",
+  "version": "1.0.1",
+  "description": "developer kit. zero LLM, local-first, multi-vault. one command from git clone to working dev environment.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "bin": {
+    "kit": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/mcp-server.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "npm run build --workspace=packages/adapter-sdk && npm run build --workspace=packages/kit-plugin-railway && npm run build --workspace=packages/kit-plugin-supabase && npm run build --workspace=packages/kit-plugin-vercel && npm run build --workspace=packages/kit-plugin-github && npm run build --workspace=packages/kit-plugin-stripe && npm run build --workspace=packages/kit-plugin-fly && npm run build --workspace=packages/kit-plugin-cloudflare && npm run build --workspace=packages/kit-plugin-snyk && npm run build --workspace=packages/kit-plugin-wiz && npm run build --workspace=packages/kit-plugin-sentry && tsc && chmod +x dist/cli.js",
+    "build:prod": "npm run build --workspace=packages/adapter-sdk && npm run build --workspace=packages/kit-plugin-railway && npm run build --workspace=packages/kit-plugin-supabase && npm run build --workspace=packages/kit-plugin-vercel && npm run build --workspace=packages/kit-plugin-github && npm run build --workspace=packages/kit-plugin-stripe && npm run build --workspace=packages/kit-plugin-fly && npm run build --workspace=packages/kit-plugin-cloudflare && npm run build --workspace=packages/kit-plugin-snyk && npm run build --workspace=packages/kit-plugin-wiz && npm run build --workspace=packages/kit-plugin-sentry && rm -rf dist && tsc -p tsconfig.prod.json && chmod +x dist/cli.js",
+    "prepublishOnly": "npm run build:prod",
+    "dev": "tsx src/cli.ts",
+    "test": "KIT_BUMBLEBEE=0 KIT_NO_FAILURE_SIM=1 KIT_NO_UPDATE_CHECK=1 node --test --test-timeout=180000 --test-concurrency=2 dist/*.test.js dist/**/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@upstash/redis": "^1.37.0",
+    "smol-toml": "1.6.1",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.15",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sandstream/kit.git"
+  },
+  "homepage": "https://github.com/sandstream/kit#readme",
+  "bugs": {
+    "url": "https://github.com/sandstream/kit/issues"
+  }
+}

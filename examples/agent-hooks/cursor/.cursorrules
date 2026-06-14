@@ -1,0 +1,16 @@
+# Cursor rules — kit integration
+#
+# Cursor reads .cursorrules from project root. These rules tell the
+# agent to lean on kit instead of inventing ad-hoc shell.
+# Copy this file into your project root.
+
+After any non-trivial edit batch, run `kit check --category security`
+and surface any `fail` results before continuing. If the user asks to
+install a dependency, run `kit triage <ecosystem> <package>` first.
+
+The kit MCP server is registered at `.cursor/mcp.json`; prefer the
+`kit_check`, `kit_fix`, `kit_install`, and `kit_triage`
+tools over raw shell when available.
+
+Never bypass `kit check` failures with `--no-verify` or by editing
+the hook configuration without explicit user approval.

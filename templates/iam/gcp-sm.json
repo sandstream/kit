@@ -1,0 +1,27 @@
+{
+  "vendor": "gcp-secret-manager",
+  "purpose": "Read + write secret versions under a project-specific prefix",
+  "kit_plugin": "src/check-secrets.ts case 'gcp-sm' + src/secrets-migrate.ts",
+  "env_var": "GOOGLE_APPLICATION_CREDENTIALS (path to service-account JSON) OR gcloud auth application-default login",
+  "creation_url": "https://console.cloud.google.com/iam-admin/iam",
+  "minimum_scope": {
+    "description": "Create a service account dedicated to kit, then grant the two roles below at the SECRET-level (not project-level). Use IAM conditions to scope by resource.name prefix.",
+    "service_account_recommendation": "kit-bot@<project>.iam.gserviceaccount.com",
+    "iam_bindings": [
+      {
+        "role": "roles/secretmanager.secretAccessor",
+        "scope": "secret-level",
+        "condition": "resource.name.startsWith('projects/<project>/secrets/<prefix>-')"
+      },
+      {
+        "role": "roles/secretmanager.secretVersionAdder",
+        "scope": "secret-level",
+        "condition": "resource.name.startsWith('projects/<project>/secrets/<prefix>-')"
+      }
+    ],
+    "key_file_handling": "Store the SA JSON in the operator's vault (1Password / Infisical); never commit it. Reference via GOOGLE_APPLICATION_CREDENTIALS pointing at a tmp file generated at runtime.",
+    "key_rotation": "Rotate the service-account key quarterly via gcloud iam service-accounts keys"
+  },
+  "docs": "https://cloud.google.com/secret-manager/docs/access-control",
+  "last_reviewed": "2026-06-08"
+}

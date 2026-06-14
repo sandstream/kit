@@ -1,0 +1,534 @@
+import { readFile } from "node:fs/promises";
+import { parse } from "smol-toml";
+import { z } from "zod";
+
+export interface ToolConfig {
+  [name: string]: string;
+}
+
+export interface ServiceConfig {
+  login: string;
+  check: string;
+  link?: string;
+  [key: string]: string | undefined;
+}
+
+export interface SecretKeyConfig {
+  source:
+    | "1password"
+    | "env"
+    | "eas"
+    | "config"
+    | "dotenvx"
+    | "infisical"
+    | "bitwarden"
+    | "doppler"
+    | "vault"
+    | "aws-sm"
+    | "gcp-sm"
+    | "azure-kv";
+  ref?: string;
+  value?: string;
+  name?: string;
+  /** HashiCorp Vault: KV v2 path (e.g. "secret/data/myapp/db") */
+  vault_path?: string;
+  /** HashiCorp Vault: field inside the secret object */
+  vault_field?: string;
+  /** AWS Secrets Manager: explicit region override (else AWS_REGION) */
+  aws_region?: string;
+  /** GCP Secret Manager: project (else env GCP_PROJECT/GOOGLE_CLOUD_PROJECT) */
+  gcp_project?: string;
+  /** GCP Secret Manager: version label (default "latest") */
+  gcp_version?: string;
+  /** Azure Key Vault: vault name (else env AZURE_KEYVAULT_NAME) */
+  azure_vault?: string;
+}
+
+export interface InfisicalConfig {
+  project_id?: string;
+  environment?: string;
+  path?: string;
+}
+
+export interface SecretsConfig {
+  store?:
+    | "bitwarden"
+    | "1password"
+    | "env"
+    | "dotenvx"
+    | "doppler"
+    | "infisical"
+    | "vault"
+    | "aws-sm"
+    | "gcp-sm"
+    | "azure-kv";
+  template?: string;
+  keys?: Record<string, SecretKeyConfig>;
+  infisical?: InfisicalConfig;
+}
+
+export interface SkillsConfig {
+  registry?: string;
+  required?: Record<string, string>;
+  optional?: Record<string, string>;
+}
+
+/**
+ * Web search provider configuration
+ * Allows agents to use local or alternative search providers
+ */
+export interface WebSearchConfig {
+  provider?: "brave" | "searxng" | "google" | "custom";
+  url?: string;
+  apiKey?: string;
+}
+
+/**
+ * Environment-specific access permissions
+ * Parsed from [governance.access.dev], [governance.access.staging], [governance.access.prod]
+ */
+export interface EnvironmentAccess {
+  read: boolean;
+  write: boolean;
+  delete: boolean;
+}
+
+/**
+ * Access control configuration per environment
+ * Parsed from [governance.access]
+ */
+export interface GovernanceAccessConfig {
+  dev?: EnvironmentAccess;
+  staging?: EnvironmentAccess;
+  prod?: EnvironmentAccess;
+}
+
+/**
+ * Agent identification and budget limits
+ * Parsed from [governance.agent]
+ */
+export interface GovernanceAgentConfig {
+  id?: string;
+  name?: string;
+  max_tokens_per_day?: number;
+  max_operations_per_hour?: number;
+}
+
+/**
+ * Audit logging configuration
+ * Parsed from [governance.audit]
+ */
+/**
+ * Per-MCP-server configuration declared in `.kit.toml [mcp.<name>]`.
+ * Each block describes one MCP kit may auth against + the scopes the
+ * operator pre-approves for that workspace.
+ */
+export interface McpServerConfig {
+  /** Vendor URL — e.g. https://mcp.sentry.dev, mcp.stripe.com, etc. */
+  url?: string;
+  /** Region hint (us / eu / self-hosted). */
+  region?: string;
+  /** Scopes the operator declares kit can request. */
+  scopes?: string[];
+  /** Optional project/team scope tightener. */
+  project?: string;
+  /** Optional team-id scope tightener. */
+  team?: string;
+}
+
+export interface McpConfig {
+  [name: string]: McpServerConfig;
+}
+
+/**
+ * Agent-write pre-approval policy. Declares which sensitive vendor ops the
+ * operator pre-authorizes for this repo. Classifiers / agents reading
+ * `KIT_POLICY_HASH` know which ops are explicit-OK vs require fresh
+ * confirmation. See docs/THREAT_MODEL.md + src/policy.ts.
+ *
+ * Example:
+ *   [policy.agent_writes]
+ *   sentry = ["resolve_issue", "create_release"]
+ *   supabase = ["rotate_jwt", "list_projects"]
+ *   vercel = ["env_set", "trigger_deploy"]
+ *   stripe = []  # all writes still gated
+ */
+export interface PolicyAgentWritesConfig {
+  [vendor: string]: string[];
+}
+
+export interface PolicyConfig {
+  agent_writes?: PolicyAgentWritesConfig;
+  /** Force read-only mode for this repo. Same effect as `--read-only` flag. */
+  default_mode?: "read-write" | "read-only";
+}
+
+export interface GovernanceAuditConfig {
+  enabled?: boolean;
+  log_file?: string;
+  log_level?: "debug" | "info" | "warn" | "error";
+  include_secrets?: boolean;
+  /**
+   * Ship audit events to KIT_REMOTE_URL in addition to the local JSONL.
+   * Default false — audit-log is local-first per docs/THREAT_MODEL.md. The
+   * first remote-push attempt emits a loud stderr notice so operators know
+   * data is leaving the machine.
+   */
+  remote?: boolean;
+}
+
+/**
+ * Approval gate configuration for destructive operations
+ * Parsed from [governance.approval]
+ */
+export interface GovernanceApprovalConfig {
+  destructive_operations?: string[];
+  production_writes?: boolean;
+  secret_rotations?: boolean;
+  approval_timeout?: number;
+}
+
+/**
+ * Secret lifecycle management configuration
+ * Parsed from [governance.secrets]
+ */
+export interface GovernanceSecretsConfig {
+  check_expiration?: boolean;
+  warn_days_before_expiry?: number;
+  rotate_on_expiry?: boolean;
+  revoke_on_agent_disable?: boolean;
+}
+
+/**
+ * Emergency access revocation configuration
+ * Parsed from [governance.revocation]
+ */
+export interface GovernanceRevocationConfig {
+  enabled?: boolean;
+  check_interval?: number;
+  revocation_endpoint?: string;
+}
+
+/**
+ * Complete governance configuration
+ * Parsed from [governance] and sub-sections
+ * See GOVERNANCE.md for complete documentation
+ */
+export interface GovernanceConfig {
+  enabled?: boolean;
+  environment?: "dev" | "staging" | "prod";
+  access?: GovernanceAccessConfig;
+  agent?: GovernanceAgentConfig;
+  audit?: GovernanceAuditConfig;
+  approval?: GovernanceApprovalConfig;
+  secrets?: GovernanceSecretsConfig;
+  revocation?: GovernanceRevocationConfig;
+}
+
+/**
+ * Git hooks configuration
+ * Parsed from [hooks]
+ */
+export interface HooksConfig {
+  "pre-commit"?: string[];
+  "pre-push"?: string[];
+  "post-commit"?: string[];
+  "post-merge"?: string[];
+  [hookName: string]: string[] | undefined;
+}
+
+/** Per-environment overrides — a partial kitConfig without nested env sections */
+export interface EnvOverride {
+  tools?: ToolConfig;
+  services?: Record<string, ServiceConfig>;
+  secrets?: SecretsConfig;
+  skills?: SkillsConfig;
+  governance?: GovernanceConfig;
+}
+
+export interface kitConfig {
+  tools?: ToolConfig;
+  services?: Record<string, ServiceConfig>;
+  secrets?: SecretsConfig;
+  skills?: SkillsConfig;
+  governance?: GovernanceConfig;
+  hooks?: HooksConfig;
+  web?: {
+    search?: WebSearchConfig;
+  };
+  /** Named environment overrides: [env.staging.*], [env.production.*] */
+  env?: Record<string, EnvOverride>;
+  /** Declared MCP-server connections. See McpConfig + src/mcp-orchestrator.ts. */
+  mcp?: McpConfig;
+  /** Agent-write pre-approval policy. See PolicyConfig + src/policy.ts. */
+  policy?: PolicyConfig;
+}
+
+// ─── Zod validation schemas ──────────────────────────────────────────────────
+// Use .passthrough() at every level for forward compatibility: unknown keys
+// are allowed (no error), but wrong types on known keys are caught.
+
+const SecretKeyConfigSchema = z
+  .object({
+    source: z.enum([
+      "1password",
+      "env",
+      "eas",
+      "config",
+      "dotenvx",
+      "infisical",
+      "bitwarden",
+      "doppler",
+      "vault",
+      "aws-sm",
+      "gcp-sm",
+      "azure-kv",
+    ]),
+    ref: z.string().optional(),
+    value: z.string().optional(),
+    name: z.string().optional(),
+    vault_path: z.string().optional(),
+    vault_field: z.string().optional(),
+    aws_region: z.string().optional(),
+    gcp_project: z.string().optional(),
+    gcp_version: z.string().optional(),
+    azure_vault: z.string().optional(),
+  })
+  .passthrough();
+
+const SecretsConfigSchema = z
+  .object({
+    store: z
+      .enum([
+        "bitwarden",
+        "1password",
+        "env",
+        "dotenvx",
+        "doppler",
+        "infisical",
+        "vault",
+        "aws-sm",
+        "gcp-sm",
+        "azure-kv",
+      ])
+      .optional(),
+    template: z.string().optional(),
+    keys: z.record(z.string(), SecretKeyConfigSchema).optional(),
+    infisical: z
+      .object({
+        project_id: z.string().optional(),
+        environment: z.string().optional(),
+        path: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+const ServiceConfigSchema = z
+  .object({
+    login: z.string(),
+    check: z.string(),
+    link: z.string().optional(),
+  })
+  .passthrough();
+
+const SkillsConfigSchema = z
+  .object({
+    registry: z.string().optional(),
+    required: z.record(z.string(), z.string()).optional(),
+    optional: z.record(z.string(), z.string()).optional(),
+  })
+  .passthrough();
+
+const GovernanceConfigSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    environment: z.enum(["dev", "staging", "prod"]).optional(),
+    access: z
+      .object({
+        dev: z
+          .object({ read: z.boolean(), write: z.boolean(), delete: z.boolean() })
+          .passthrough()
+          .optional(),
+        staging: z
+          .object({ read: z.boolean(), write: z.boolean(), delete: z.boolean() })
+          .passthrough()
+          .optional(),
+        prod: z
+          .object({ read: z.boolean(), write: z.boolean(), delete: z.boolean() })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
+    agent: z
+      .object({
+        id: z.string().optional(),
+        name: z.string().optional(),
+        max_tokens_per_day: z.number().optional(),
+        max_operations_per_hour: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
+    audit: z
+      .object({
+        enabled: z.boolean().optional(),
+        log_file: z.string().optional(),
+        log_level: z.enum(["debug", "info", "warn", "error"]).optional(),
+        include_secrets: z.boolean().optional(),
+      })
+      .passthrough()
+      .optional(),
+    approval: z
+      .object({
+        destructive_operations: z.array(z.string()).optional(),
+        production_writes: z.boolean().optional(),
+        secret_rotations: z.boolean().optional(),
+        approval_timeout: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
+    secrets: z
+      .object({
+        check_expiration: z.boolean().optional(),
+        warn_days_before_expiry: z.number().optional(),
+        rotate_on_expiry: z.boolean().optional(),
+        revoke_on_agent_disable: z.boolean().optional(),
+      })
+      .passthrough()
+      .optional(),
+    revocation: z
+      .object({
+        enabled: z.boolean().optional(),
+        check_interval: z.number().optional(),
+        revocation_endpoint: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+const HooksConfigSchema = z.record(z.string(), z.array(z.string()).optional()).optional();
+
+const WebConfigSchema = z
+  .object({
+    search: z
+      .object({
+        provider: z.enum(["brave", "searxng", "google", "custom"]).optional(),
+        url: z.string().optional(),
+        apiKey: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough()
+  .optional();
+
+// Known top-level section names — used to detect typos
+const KNOWN_SECTIONS = new Set([
+  "tools", "services", "secrets", "skills", "governance", "hooks", "web", "setup", "env",
+]);
+
+const kitConfigSchema = z
+  .object({
+    tools: z.record(z.string(), z.string()).optional(),
+    services: z.record(z.string(), ServiceConfigSchema).optional(),
+    secrets: SecretsConfigSchema.optional(),
+    skills: SkillsConfigSchema.optional(),
+    governance: GovernanceConfigSchema.optional(),
+    hooks: HooksConfigSchema,
+    web: WebConfigSchema,
+    setup: z
+      .object({
+        install: z.string().optional(),
+        migrate: z.string().optional(),
+        seed: z.string().optional(),
+        verify: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough(); // allow unknown top-level keys (warn, not error)
+
+/**
+ * Format Zod validation errors into human-readable messages.
+ */
+function formatValidationErrors(errors: z.ZodIssue[]): string {
+  return errors
+    .map((issue) => {
+      const path = issue.path.length > 0 ? issue.path.join(".") : "(root)";
+      return `  • ${path}: ${issue.message}`;
+    })
+    .join("\n");
+}
+
+/**
+ * Detect the active environment name from CLI args, env vars, or NODE_ENV.
+ * Resolution order:
+ *   1. --env=<name> CLI flag
+ *   2. KIT_ENV environment variable
+ *   3. NODE_ENV (development→dev, production→prod, test→test)
+ *   4. "dev" default
+ */
+export function resolveActiveEnvironment(cliArgs: string[] = process.argv.slice(2)): string {
+  const flag = cliArgs.find((a) => a.startsWith("--env="));
+  if (flag) return flag.split("=")[1];
+
+  if (process.env.KIT_ENV) return process.env.KIT_ENV;
+
+  const nodeEnv = process.env.NODE_ENV;
+  if (nodeEnv === "production") return "prod";
+  if (nodeEnv === "development") return "dev";
+  if (nodeEnv) return nodeEnv;
+
+  return "dev";
+}
+
+/**
+ * Merge a base kitConfig with an environment-specific override.
+ * Override values take precedence; missing override keys fall back to base.
+ */
+export function mergeEnvironmentConfig(base: kitConfig, override: EnvOverride): kitConfig {
+  return {
+    ...base,
+    tools: override.tools ?? base.tools,
+    services: override.services
+      ? { ...(base.services ?? {}), ...override.services }
+      : base.services,
+    secrets: override.secrets ?? base.secrets,
+    skills: override.skills ?? base.skills,
+    governance: override.governance ?? base.governance,
+  };
+}
+
+export async function loadConfig(path: string, envName?: string): Promise<kitConfig> {
+  const content = await readFile(path, "utf-8");
+  const raw = parse(content) as Record<string, unknown>;
+
+  // Validate — surface friendly errors for wrong types, invalid enum values, etc.
+  const result = kitConfigSchema.safeParse(raw);
+
+  if (!result.success) {
+    const formatted = formatValidationErrors(result.error.issues);
+    throw new Error(`Invalid .kit.toml:\n${formatted}`);
+  }
+
+  // Warn about unknown top-level sections (likely typos like [tolls] vs [tools])
+  for (const key of Object.keys(raw)) {
+    if (!KNOWN_SECTIONS.has(key)) {
+      console.warn(`Warning: unknown section [${key}] in .kit.toml (known: ${[...KNOWN_SECTIONS].join(", ")})`);
+    }
+  }
+
+  const base = result.data as unknown as kitConfig;
+
+  // Apply environment override if requested and available
+  const activeEnv = envName ?? resolveActiveEnvironment();
+  const override = base.env?.[activeEnv];
+  if (override && activeEnv !== "dev") {
+    return mergeEnvironmentConfig(base, override);
+  }
+
+  return base;
+}

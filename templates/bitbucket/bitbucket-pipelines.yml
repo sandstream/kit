@@ -1,0 +1,104 @@
+# kit security checks — drop-in Bitbucket Pipelines.
+#
+# Copy to `bitbucket-pipelines.yml` (repo root) for any Bitbucket project
+# that uses sandstream-kit. Mirrors templates/github/kit-security.yml.
+#
+# Bitbucket runs steps sequentially within a pipeline; parallel: groups
+# let independent steps fan out.
+
+image: node:22
+
+definitions:
+  caches:
+    kit: .kit/cache
+  steps:
+    - step: &install-kit
+        name: Install kit
+        script:
+          - npm install -g sandstream-kit
+          - kit --version
+
+pipelines:
+  pull-requests:
+    '**':
+      - parallel:
+          - step:
+              name: Status check (kit check)
+              caches: [kit, node]
+              script:
+                - npm install -g sandstream-kit
+                - kit check
+          - step:
+              name: Scan staged (kit security scan-staged)
+              caches: [kit]
+              script:
+                - npm install -g sandstream-kit
+                # Stage the PR diff so scan-staged sees it.
+                - export BASE_REF="$BITBUCKET_PR_DESTINATION_BRANCH"
+                - if [ -n "$BASE_REF" ]; then
+                    git fetch origin "$BASE_REF";
+                    git diff --name-only "origin/$BASE_REF...HEAD" | xargs -r git add -N;
+                  fi
+                - KIT_NON_INTERACTIVE=1 kit security scan-staged
+          - step:
+              name: SAST (semgrep)
+              image: returntocorp/semgrep:latest
+              script:
+                - semgrep ci --config=auto --error
+          - step:
+              name: Secret scan history (gitleaks)
+              image: zricethezav/gitleaks:latest
+              script:
+                - gitleaks detect --redact --no-banner --exit-code 1
+          - step:
+              name: Supply-chain (bumblebee)
+              caches: [kit, node]
+              script:
+                - npm install -g sandstream-kit
+                - KIT_BUMBLEBEE_PROFILE=project kit check --security
+      - step:
+          name: Verify pull range
+          caches: [kit, node]
+          script:
+            - npm install -g sandstream-kit
+            - export BASE_REF="$BITBUCKET_PR_DESTINATION_BRANCH"
+            - if [ -n "$BASE_REF" ]; then
+                git fetch origin "$BASE_REF";
+                kit security verify-pull --base "origin/$BASE_REF" --head HEAD;
+              fi
+
+  branches:
+    main:
+      - parallel:
+          - step:
+              name: kit check
+              caches: [kit, node]
+              script:
+                - npm install -g sandstream-kit
+                - kit check
+          - step:
+              name: SAST (semgrep)
+              image: returntocorp/semgrep:latest
+              script:
+                - semgrep ci --config=auto --error
+          - step:
+              name: Secret scan history (gitleaks)
+              image: zricethezav/gitleaks:latest
+              script:
+                - gitleaks detect --redact --no-banner --exit-code 1
+
+  # Nightly schedule — same as GitHub workflow_dispatch monthly cron.
+  custom:
+    nightly:
+      - parallel:
+          - step:
+              name: kit check (deep)
+              caches: [kit, node]
+              script:
+                - npm install -g sandstream-kit
+                - KIT_BUMBLEBEE_PROFILE=deep kit check --security
+          - step:
+              name: Secret scan history (gitleaks)
+              image: zricethezav/gitleaks:latest
+              script:
+                - gitleaks detect --redact --no-banner --exit-code 1

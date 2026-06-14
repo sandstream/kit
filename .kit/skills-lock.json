@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "coding-agent": {
+      "source": "coding-agent@^2.0",
+      "sourceType": "clawhub",
+      "computedHash": "8ac027bcf2a1a507",
+      "installedAt": "2026-03-30T15:39:26.303Z"
+    },
+    "github": {
+      "source": "github@^1.5",
+      "sourceType": "clawhub",
+      "computedHash": "99fd725aea88738a",
+      "installedAt": "2026-03-30T15:39:26.304Z"
+    },
+    "gh-issues": {
+      "source": "gh-issues@^1.0",
+      "sourceType": "clawhub",
+      "computedHash": "3e7ab9cbdb3fb53c",
+      "installedAt": "2026-03-30T15:39:26.304Z"
+    },
+    "discord": {
+      "source": "discord@*",
+      "sourceType": "clawhub",
+      "computedHash": "1f0bae2f7caec22d",
+      "installedAt": "2026-03-30T15:39:26.304Z"
+    }
+  }
+}

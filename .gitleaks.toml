@@ -1,0 +1,30 @@
+# gitleaks config — extends defaults, adds allowlist for known false-positives.
+# See https://github.com/gitleaks/gitleaks#configuration
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow test fixtures and example/placeholder values"
+
+# Files that intentionally contain fake/test secrets for unit tests.
+paths = [
+  '''.*\.test\.ts$''',
+  '''.*\.test\.js$''',
+  '''.*__tests__/.*''',
+  '''.*__mocks__/.*''',
+  '''^\.env\.template$''',
+  '''^\.env\.example$''',
+  '''^docs/.*''',
+  '''^examples/.*''',
+  '''^SECURITY-SCANNING\.md$''',
+  '''^README\.md$''',
+]
+
+# Common test-fixture patterns: sk-prod-..., test-secret, dummy-token, etc.
+# Also: ${VAR} env-var placeholders in config files (not real secrets).
+regexes = [
+  '''sk-(test|prod|dev|fake|dummy)-[A-Za-z0-9_-]+''',
+  '''(test|dummy|fake|example|placeholder)[-_]?(secret|token|key|password)''',
+  '''\$\{[A-Z_]+[A-Z0-9_]*\}''',
+]

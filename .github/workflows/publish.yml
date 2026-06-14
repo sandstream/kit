@@ -1,0 +1,142 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read       # checkout
+      id-token: write      # npm provenance via OIDC (SLSA attestation)
+      packages: write
+      attestations: write  # GitHub artifact attestations
+
+    steps:
+      # SHA-pinned actions — protects against tag-rewrite supply-chain attacks.
+      # Updates handled by Dependabot. See:
+      # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # Full history so semantic-release / changelog tools work + git audits.
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        # npm ci uses package-lock.json exactly — no version drift.
+        run: npm ci
+
+      - name: Verify tag matches package.json version
+        # Refuse to publish if someone pushes `v1.2.3` but package.json says
+        # something else. Catches accidental tag/version skew before npm sees it.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${TAG#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag $TAG ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
+            exit 1
+          fi
+          echo "Tag $TAG matches package.json version $PKG_VERSION"
+
+      - name: Verify tag is GPG-signed
+        # Refuse to publish unsigned tags. Operators verify the same way via
+        # `git tag -v <tag>` (see docs/VERIFY.md). Prevents tag-rewrite +
+        # bus-factor accidents (random maintainer pushing a bare tag).
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # GH_TOKEN gives us the public key for the org / maintainer. We
+          # don't import it eagerly — git verify-tag handles trust chain.
+          if ! git verify-tag "$TAG" 2>&1 | tee /tmp/tag-verify.log; then
+            if grep -q 'no signature found' /tmp/tag-verify.log; then
+              echo "::error::Tag $TAG is not GPG-signed. Sign with: git tag -s $TAG"
+              exit 1
+            fi
+            echo "::error::Tag $TAG signature is invalid."
+            cat /tmp/tag-verify.log
+            exit 1
+          fi
+          echo "Tag $TAG signature verified."
+
+      - name: npm audit (high+)
+        # Refuse to publish a tarball that ships a known-high CVE.
+        run: npm audit --audit-level=high
+
+      - name: Bumblebee supply-chain gate
+        # Refuse to publish if any installed pkg matches a known-compromise
+        # catalog (Shai-Hulud, typosquats, credential stealers, ...).
+        # Uses the deep profile against the checked-out repo.
+        env:
+          KIT_BUMBLEBEE_PROFILE: deep
+          KIT_BUMBLEBEE_ROOTS: '.'
+        run: |
+          npm run build
+          node scripts/run-supply-chain-check.mjs
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build production artifacts
+        run: npm run build:prod
+
+      - name: Show what will be published
+        # `npm publish --dry-run` lists the exact files going into the tarball
+        # and prints the tarball SHA — gives auditors a verifiable trail.
+        run: npm publish --dry-run
+
+      - name: Publish to npm with provenance
+        # --provenance generates an SLSA build provenance attestation signed
+        # by the GitHub Actions OIDC identity. Consumers can verify with:
+        #   npm audit signatures
+        # or
+        #   npm view sandstream-kit --json | jq '.dist'
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Generate GitHub artifact attestation
+        # Independent of npm provenance — attaches a signed manifest of the
+        # built dist/ tree to the GitHub release for cross-verification.
+        if: always()
+        uses: actions/attest-build-provenance@1c608d11d69870c2092266b3f9a6f3abbf17002c # v1.4.3
+        continue-on-error: true
+        with:
+          subject-path: 'dist/**/*'
+
+      - name: Generate SBOM (CycloneDX)
+        # CycloneDX SBOM is required by EU CRA and US EO 14028 for shipped
+        # software. Lets downstream consumers introspect the dep tree.
+        uses: anchore/sbom-action@61119d458adab75f756bc0b9e4bde25725f86a7a # v0.17.8
+        with:
+          path: .
+          format: cyclonedx-json
+          artifact-name: sbom.cyclonedx.json
+          output-file: sbom.cyclonedx.json
+
+      - name: Generate SBOM (SPDX)
+        # Some consumers (e.g. RHEL, federal) require SPDX format.
+        uses: anchore/sbom-action@61119d458adab75f756bc0b9e4bde25725f86a7a # v0.17.8
+        with:
+          path: .
+          format: spdx-json
+          artifact-name: sbom.spdx.json
+          output-file: sbom.spdx.json
+
+      - name: Attach SBOMs to GitHub release
+        # gh release upload skips silently if there's no release for the tag;
+        # downstream we create the release in a later step or via Releases UI.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release upload "$TAG" sbom.cyclonedx.json sbom.spdx.json --clobber || true

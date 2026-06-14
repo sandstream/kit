@@ -1,0 +1,20 @@
+{
+  "vendor": "cloudflare",
+  "purpose": "Workers script secrets CRUD + user API token list/revoke",
+  "kit_plugin": "sandstream-kit-plugin-cloudflare",
+  "env_var": "CLOUDFLARE_API_TOKEN",
+  "extra_env_var": "CLOUDFLARE_ACCOUNT_ID",
+  "creation_url": "https://dash.cloudflare.com/profile/api-tokens",
+  "minimum_scope": {
+    "description": "Use a custom Cloudflare API token (NOT the global API key). Restrict 'Account Resources' to the SPECIFIC account ID and add only the permissions below.",
+    "permissions": [
+      { "scope": "Account", "permission": "Workers Scripts", "access": "Edit" },
+      { "scope": "User", "permission": "User Details", "access": "Read" }
+    ],
+    "account_resources": "Include — Specific account — <your account ID>",
+    "ip_filter": "Optional but recommended: restrict to known CI runner IPs",
+    "ttl": "Set TTL to 1-90 days based on usage"
+  },
+  "docs": "https://developers.cloudflare.com/api/tokens/create/",
+  "last_reviewed": "2026-06-08"
+}

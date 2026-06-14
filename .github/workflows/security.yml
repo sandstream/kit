@@ -1,0 +1,245 @@
+name: Security — Full App Scan
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  pull-requests: read
+
+jobs:
+  # Stage 1: Dependency scanning (npm audit + Snyk)
+  deps:
+    name: Stage 1 — Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: npm audit (high+)
+        # Matches pre-push hook policy (.kit.toml). Moderates tracked separately;
+        # postcss/qs remaining moderates only fixable via next 9.3.3 downgrade (breaking).
+        run: npm audit --audit-level=high
+      - name: Snyk scan
+        if: env.SNYK_TOKEN != ''
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --all-projects
+
+  # Stage 1b: Supply-chain (bumblebee — known compromises, not CVEs)
+  supply-chain:
+    name: Stage 1b — Supply-chain (bumblebee)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Build CLI
+        run: npm run build
+      - name: Bumblebee deep scan on repo
+        env:
+          KIT_BUMBLEBEE_PROFILE: deep
+          KIT_BUMBLEBEE_ROOTS: '.'
+        # Run checkSecurity and filter to supply-chain category. Avoids the full
+        # `kit ci` pipeline which expects gh auth / 1password / etc.
+        run: node scripts/run-supply-chain-check.mjs
+
+  # Stage 1c: Triage new deps on PRs — handled by separate triage-deps.yml workflow
+
+  # Stage 2: SAST (ESLint security + semgrep + SonarCloud)
+  sast:
+    name: Stage 2 — SAST
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: ESLint security plugin
+        run: npx eslint --plugin security 'src/**/*.{ts,js}' || true
+      - name: Semgrep (application code only)
+        # Excludes set in .semgrepignore — terraform/k8s handled by Stage 5
+        # Checkov/tfsec so they're skipped here to avoid duplicate findings.
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/owasp-top-ten
+            p/typescript
+            p/nodejs
+      - name: SonarCloud
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Stage 3: DAST — N/A for this repo.
+  # kit is a CLI + MCP (stdio) tool — no HTTP surface to scan.
+  # ZAP baseline can't run without a reachable target. The marketplace
+  # frontend has its own DAST in its deploy pipeline. If a future HTTP
+  # endpoint lands here, restore the ZAP job at this anchor.
+  dast:
+    name: Stage 3 — DAST (skipped — no HTTP surface)
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "skipped"
+
+  # Stage 4: Container scanning (Trivy)
+  container:
+    name: Stage 4 — Container (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t kit:${{ github.sha }} .
+      - name: Trivy scan (HIGH+CRITICAL — gating)
+        # scanners: vuln — only CVE scan. Secret scanning handled by gitleaks.
+        # Image is clean of HIGH/CRITICAL after npm removal + picomatch bump.
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: kit:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+          scanners: vuln
+          limit-severities-for-sarif: true
+      - name: Upload SARIF
+        # SARIF upload requires Code Scanning enabled in repo settings.
+        # Don't fail the job if Code Scanning is off — scan result is the gate.
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+  # Stage 5: Infrastructure (Checkov + tfsec + kubesec)
+  infra:
+    name: Stage 5 — Infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkov (terraform + kubernetes)
+        # Baseline of pre-existing findings in .checkov.yaml skip-check.
+        # Gating on net-new findings only — see .checkov.yaml header for context.
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          config_file: .checkov.yaml
+          output_format: sarif
+          output_file_path: checkov.sarif
+          soft_fail: false
+      - name: tfsec
+        if: hashFiles('terraform/**/*.tf') != ''
+        continue-on-error: true
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: terraform
+          soft_fail: true
+      - name: Upload Checkov SARIF
+        # SARIF upload requires Code Scanning enabled in repo settings.
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov.sarif
+
+  # Secret scanning (gitleaks)
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  # GDPR + headers + cert
+  # Scopes: only enforce for user-data-handling sub-packages.
+  # kit CLI is a dev tool, no user data — runs informational only.
+  compliance:
+    name: GDPR + security headers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: GDPR compliance check (user-data packages only)
+        run: |
+          set -e
+          USER_DATA_DIRS=""
+          if [ -z "$USER_DATA_DIRS" ]; then
+            echo "No user-data-handling packages detected — GDPR check N/A for dev CLI"
+            exit 0
+          fi
+          if [ ! -f PRIVACY.md ]; then
+            echo "::warning::PRIVACY.md missing — required when shipping user-data packages"
+          fi
+          for dir in $USER_DATA_DIRS; do
+            grep -rq "right_to_be_forgotten\|deleteUserData" "$dir" || echo "::warning::$dir: data deletion fn not found"
+            grep -rq "consent\|recordConsent" "$dir" || echo "::warning::$dir: consent mgmt not found"
+            grep -rq "exportUserData\|dataExport" "$dir" || echo "::warning::$dir: data export not found"
+          done
+          echo "GDPR scan complete (warnings only)"
+      - name: Security headers in code
+        run: |
+          if grep -rE "Content-Security-Policy|Strict-Transport-Security|X-Frame-Options" src/ packages/ 2>/dev/null | head -1; then
+            echo "Security headers configured"
+          else
+            echo "::warning::No security headers found in src/ or packages/ — required for web-facing code"
+          fi
+
+  # kit self-check (uses kit check-security)
+  self-check:
+    name: kit check-security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci && npm run build
+      - name: Run checkSecurity directly
+        # Avoid `kit check` which also runs services/secrets/skills checks
+        # that need gh auth, 1password, etc. — unavailable in CI.
+        run: node scripts/run-security-check.mjs
+
+  # Aggregated gate — all stages must pass
+  gate:
+    name: Security gate
+    needs: [deps, supply-chain, sast, container, infra, secrets, compliance, self-check]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Verify all jobs passed
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
+            echo "Security gate FAILED — one or more scans failed"
+            exit 1
+          fi
+          echo "Security gate PASSED"

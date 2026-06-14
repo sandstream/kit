@@ -1,0 +1,28 @@
+{
+  "vendor": "azure-key-vault",
+  "purpose": "Read + write secrets in a specific Key Vault",
+  "kit_plugin": "src/check-secrets.ts case 'azure-kv' + src/secrets-migrate.ts",
+  "env_var": "AZURE_KEYVAULT_NAME (vault name resolved by az CLI; auth via az login or managed identity)",
+  "creation_url": "https://portal.azure.com → Key Vaults → <vault> → Access control (IAM)",
+  "minimum_scope": {
+    "description": "Use RBAC role assignments at the Key Vault scope (NOT subscription scope). Create a dedicated service principal or managed identity for kit and assign the two built-in roles below.",
+    "auth_recommendation": "Managed Identity > Service Principal > User credentials. Use the lowest-privilege account that works for your runtime.",
+    "rbac_assignments": [
+      {
+        "role": "Key Vault Secrets User",
+        "role_id": "4633458b-17de-408a-b874-0445c86b69e6",
+        "scope": "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.KeyVault/vaults/<vault>"
+      },
+      {
+        "role": "Key Vault Secrets Officer",
+        "role_id": "b86a8fe4-44ce-4948-aee5-eccb2c155cd7",
+        "scope": "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.KeyVault/vaults/<vault>",
+        "note": "Only assign if kit needs to WRITE secrets. Drop this if kit is read-only against the vault."
+      }
+    ],
+    "network_acl": "Restrict the vault firewall to known runner IPs",
+    "soft_delete": "Ensure soft-delete is enabled on the vault for accidental-delete recovery"
+  },
+  "docs": "https://learn.microsoft.com/en-us/azure/key-vault/general/rbac-guide",
+  "last_reviewed": "2026-06-08"
+}

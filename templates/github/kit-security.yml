@@ -1,0 +1,164 @@
+# kit security checks — drop-in GitHub Actions workflow.
+#
+# Copy this to `.github/workflows/kit-security.yml` in any repo that
+# uses sandstream-kit. Runs on every PR + on the default branch + on a
+# nightly schedule. Each step is a separate job so the failing surface
+# is clear in the PR Checks panel.
+#
+# Required repo setup:
+#   - kit must be invocable on the runner (`npm install -g
+#     sandstream-kit` in the install step, or pin via kit's own
+#     installer once that ships).
+#   - If you use `kit security policy check`, commit a
+#     `.kit-allowlist.json` first (`kit security policy init`).
+
+name: kit security
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+  schedule:
+    # Nightly at 04:17 UTC — picks up newly-disclosed CVEs and any
+    # secrets that slipped in via a force-push since the last PR.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: kit-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    outputs:
+      cache-hit: ${{ steps.cache-bin.outputs.cache-hit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # kit security verify-pull diffs HEAD~1..HEAD
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install sandstream-kit
+        run: npm install -g sandstream-kit
+
+      - name: Print kit version
+        run: kit version
+
+  secret-scan-staged:
+    needs: install
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install -g sandstream-kit
+
+      - name: Scan files added/changed in this PR
+        env:
+          KIT_NON_INTERACTIVE: "1"
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # Fake "stage" the PR diff so the pre-commit scanner sees it.
+          # BASE_REF via env (not inline ${{...}}) — prevents shell-injection
+          # via crafted branch names; semgrep yaml.github-actions.security.
+          # run-shell-injection enforces this pattern.
+          git diff --name-only "origin/$BASE_REF...HEAD" | xargs -r git add -N
+          kit security scan-staged
+
+  build-artifact-scan:
+    needs: install
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install -g sandstream-kit
+
+      - name: Install project deps
+        run: npm ci || pnpm install --frozen-lockfile || yarn install --frozen-lockfile
+
+      - name: Build
+        run: npm run build || pnpm build || yarn build || echo "no build script"
+
+      - name: Scan build artifacts
+        env:
+          KIT_NON_INTERACTIVE: "1"
+        run: kit security scan-build
+
+  gitignore-check:
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install -g sandstream-kit
+
+      - name: Verify .gitignore covers sensitive paths
+        env:
+          KIT_NON_INTERACTIVE: "1"
+        run: kit security check-gitignore
+
+  verify-pull:
+    needs: install
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install -g sandstream-kit
+
+      - name: Audit pull range (new deps, ignore drops, plaintext)
+        env:
+          KIT_NON_INTERACTIVE: "1"
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          kit security verify-pull \
+            --base "origin/$BASE_REF" \
+            --head HEAD
+
+  policy-check:
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install -g sandstream-kit
+
+      - name: Skip if no allowlist
+        id: has-allowlist
+        run: |
+          if [ -f .kit-allowlist.json ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Dependency + secrets policy check
+        if: steps.has-allowlist.outputs.present == 'true'
+        env:
+          KIT_NON_INTERACTIVE: "1"
+        run: kit security policy check

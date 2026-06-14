@@ -1,0 +1,11 @@
+# Semgrep: skip dirs covered by other stages (Checkov/tfsec do terraform + k8s)
+# and build/vendor artifacts.
+
+terraform/
+kubernetes/
+dist/
+node_modules/
+*.min.js
+coverage/
+.next/
+.turbo/

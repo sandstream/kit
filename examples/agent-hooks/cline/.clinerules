@@ -1,0 +1,11 @@
+# Cline rules — kit integration
+#
+# Cline reads .clinerules from project root. Mirrors .cursorrules.
+
+After any non-trivial edit batch, call the `kit_check` MCP tool
+(category=security) and surface any `fail` results before continuing.
+If the user asks to install a dependency, call `kit_triage` first.
+
+Never bypass `kit_check` failures by skipping pre-commit hooks
+(`--no-verify`) or by editing hook configuration without explicit
+user approval.

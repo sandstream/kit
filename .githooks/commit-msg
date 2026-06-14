@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# commit-msg — block internal references in the commit MESSAGE itself
+# (the leak vector a file-only scan misses: a "scrub" commit naming what it removed).
+exec "$(git rev-parse --show-toplevel)/.githooks/no-internal-leaks.sh" --msg "$1"

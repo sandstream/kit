@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  # kit CLI - for testing CLI commands
+  kit-cli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kit-cli
+    working_dir: /app
+    environment:
+      NODE_ENV: development
+      DEBUG: kit:*
+    volumes:
+      - ./src:/app/src
+      - ./dist:/app/dist
+    command: npm run dev
+    networks:
+      - kit-network
+
+  # Marketplace Frontend
+  marketplace:
+    build:
+      context: .
+      dockerfile: Dockerfile.marketplace
+    container_name: kit-marketplace
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      DATABASE_URL: postgresql://kit:password@postgres:5432/kit
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - kit-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: kit-postgres
+    environment:
+      POSTGRES_USER: kit
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: kit
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - kit-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: kit-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - kit-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
+  # Infisical Secrets Management (optional)
+  # infisical:
+  #   image: infisical/infisical:latest
+  #   container_name: kit-infisical
+  #   ports:
+  #     - "8080:3000"
+  #   environment:
+  #     ENCRYPTION_KEY: dev-encryption-key-64-chars-minimum-required-length
+  #   volumes:
+  #     - infisical_data:/app/backend/data
+  #   networks:
+  #     - kit-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  # infisical_data:
+  #   driver: local
+
+networks:
+  kit-network:
+    driver: bridge

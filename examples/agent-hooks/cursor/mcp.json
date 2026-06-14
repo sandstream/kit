@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "kit": {
+      "command": "node",
+      "args": ["node_modules/sandstream-kit/dist/cli.js", "mcp"]
+    }
+  }
+}

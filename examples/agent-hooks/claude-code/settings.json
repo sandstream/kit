@@ -1,0 +1,28 @@
+{
+  "_comment": "Drop this into .claude/settings.json (project) or ~/.claude/settings.json (user) to auto-run kit security checks after AI edits. Merge with existing settings if any.",
+
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $CLAUDE_PROJECT_DIR/node_modules/sandstream-kit/dist/cli.js check --category security --json 2>/dev/null | node -e 'process.stdin.resume();let d=\"\";process.stdin.on(\"data\",c=>d+=c);process.stdin.on(\"end\",()=>{try{const j=JSON.parse(d);const fail=j.checks.filter(c=>c.status===\"fail\");if(fail.length){console.error(\"::kit:: \"+fail.length+\" security check(s) failed:\");fail.forEach(f=>console.error(\"  - \"+f.name+\": \"+f.detail));process.exit(2)}}catch(e){}})'"
+          }
+        ]
+      }
+    ],
+
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $CLAUDE_PROJECT_DIR/node_modules/sandstream-kit/dist/cli.js triage skill sentinel 2>/dev/null | grep -q 'TRIAGE PASSED' || true"
+          }
+        ]
+      }
+    ]
+  }
+}

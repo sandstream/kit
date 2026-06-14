@@ -1,0 +1,28 @@
+{
+  "name": "sandstream-kit-plugin-railway",
+  "version": "0.1.0",
+  "description": "kit adapter plugin for Railway deployment platform",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test dist/*.test.js"
+  },
+  "peerDependencies": {
+    "sandstream-kit-adapter-sdk": ">=0.1.0"
+  },
+  "devDependencies": {
+    "sandstream-kit-adapter-sdk": "*",
+    "typescript": "5.9.3"
+  }
+}

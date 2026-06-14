@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# pre-commit — block internal references in staged content before they land.
+# Term list is resolved outside this repo (see no-internal-leaks.sh header).
+exec "$(git rev-parse --show-toplevel)/.githooks/no-internal-leaks.sh" --staged

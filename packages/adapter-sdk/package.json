@@ -1,0 +1,23 @@
+{
+  "name": "sandstream-kit-adapter-sdk",
+  "version": "0.1.0",
+  "description": "Type definitions for building kit service adapters",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "echo 'No tests (types only)'"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

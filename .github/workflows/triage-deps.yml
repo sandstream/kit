@@ -1,0 +1,96 @@
+name: Triage New Dependencies
+
+on:
+  pull_request:
+    paths:
+      - 'package-lock.json'
+      - 'pnpm-lock.yaml'
+      - 'requirements.txt'
+      - 'package.json'
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Detect new dependencies
+        id: detect
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          NEW_DEPS=""
+
+          # npm
+          if git diff "origin/${BASE_REF}...HEAD" --name-only | grep -q "package-lock.json"; then
+            NEW_DEPS=$(git diff "origin/${BASE_REF}...HEAD" -- package-lock.json | grep '^\+.*"resolved":' | grep -oP '"https://registry.npmjs.org/([^/]+)' | sed 's|"https://registry.npmjs.org/||' | sort -u | head -20)
+          fi
+
+          # pnpm
+          if git diff "origin/${BASE_REF}...HEAD" --name-only | grep -q "pnpm-lock.yaml"; then
+            PNPM_DEPS=$(git diff "origin/${BASE_REF}...HEAD" -- pnpm-lock.yaml | grep '^\+.*npmjs.org' | grep -oP '/([^/]+)/-/' | sed 's|/||g;s|-/||' | sort -u | head -20)
+            NEW_DEPS="$NEW_DEPS $PNPM_DEPS"
+          fi
+
+          # pip
+          if git diff "origin/${BASE_REF}...HEAD" --name-only | grep -q "requirements.txt"; then
+            PIP_DEPS=$(git diff "origin/${BASE_REF}...HEAD" -- requirements.txt | grep '^\+[^+]' | sed 's/^+//' | cut -d= -f1 | sort -u | head -20)
+            NEW_DEPS="$NEW_DEPS $PIP_DEPS"
+          fi
+
+          # Collapse newlines to spaces so multi-line value fits single-line GITHUB_OUTPUT format.
+          # Scoped packages like @upstash/foo would otherwise be parsed as separate keys.
+          DEPS_FLAT=$(echo "$NEW_DEPS" | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^ //;s/ $//')
+          echo "deps=$DEPS_FLAT" >> "$GITHUB_OUTPUT"
+          echo "Found new deps: $DEPS_FLAT"
+
+      - name: Run triage on new dependencies
+        if: steps.detect.outputs.deps != ''
+        env:
+          DEPS: ${{ steps.detect.outputs.deps }}
+        run: |
+          FAILED=false
+          REPORT=""
+
+          # Validate each dep matches npm package name format before passing to triage.
+          # Pkg names from package-lock diff are attacker-controllable, so enforce strict regex.
+          for dep in $DEPS; do
+            [ -z "$dep" ] && continue
+            [[ "$dep" == "@types/"* ]] && continue
+            if ! [[ "$dep" =~ ^(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$ ]]; then
+              echo "::warning::Skipping invalid package name: $dep"
+              continue
+            fi
+
+            echo "Triaging: $dep"
+            RESULT=$(python3 .claude/skills/triage/scripts/triage.py npm "$dep" 2>&1 || true)
+
+            if echo "$RESULT" | grep -q "TRIAGE WARNING"; then
+              echo "::warning::$dep failed triage"
+              REPORT="$REPORT\n[WARN] $dep: WARNING"
+              FAILED=true
+            elif echo "$RESULT" | grep -q "TRIAGE PASSED"; then
+              REPORT="$REPORT\n[PASS] $dep: passed"
+            fi
+          done
+
+          echo -e "\n## Triage Results\n$REPORT"
+
+          if [ "$FAILED" = true ]; then
+            echo "::error::Some dependencies failed triage. Review before merging."
+            exit 1
+          fi

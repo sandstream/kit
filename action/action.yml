@@ -1,0 +1,95 @@
+name: "kit"
+description: "Run kit commands in CI — check environment, install tools, and validate secrets"
+author: "Sandstream"
+
+branding:
+  icon: "check-circle"
+  color: "green"
+
+inputs:
+  command:
+    description: "kit command to run: ci, check, install, setup"
+    required: false
+    default: "ci"
+  kit-toml:
+    description: "Path to .kit.toml (relative to repo root)"
+    required: false
+    default: ".kit.toml"
+  fail-on-warning:
+    description: "Exit with code 1 if warnings are present"
+    required: false
+    default: "false"
+  non-interactive:
+    description: "Run in non-interactive mode (no prompts)"
+    required: false
+    default: "true"
+  working-directory:
+    description: "Working directory for the command"
+    required: false
+    default: "."
+  bumblebee-profile:
+    description: "Supply-chain scan profile (baseline | project | deep). In CI 'deep' scans the checked-out repo. To skip the scan entirely, set the KIT_BUMBLEBEE=0 env var on the job."
+    required: false
+    default: "deep"
+  bumblebee-roots:
+    description: "Comma-separated roots for the supply-chain scan (deep requires explicit roots; '.' = the repo)"
+    required: false
+    default: "."
+
+outputs:
+  result:
+    description: "JSON result from kit ci --json"
+    value: ${{ steps.run-kit.outputs.result }}
+  passed:
+    description: "Whether all checks passed (true/false)"
+    value: ${{ steps.run-kit.outputs.passed }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+
+    - name: Run kit
+      id: run-kit
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        KIT_FILE: ${{ inputs.kit-toml }}
+        # In CI, scan the checked-out repo rather than the runner's machine baseline.
+        KIT_BUMBLEBEE_PROFILE: ${{ inputs.bumblebee-profile }}
+        KIT_BUMBLEBEE_ROOTS: ${{ inputs.bumblebee-roots }}
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_NON_INTERACTIVE: ${{ inputs.non-interactive }}
+        INPUT_FAIL_ON_WARNING: ${{ inputs.fail-on-warning }}
+      run: |
+        # Validate command is a known kit subcommand to prevent injection.
+        case "$INPUT_COMMAND" in
+          check|ci|init|run|clone|open|context|triage|pkg|team)
+            ;;
+          *)
+            echo "Invalid command: $INPUT_COMMAND"
+            exit 1
+            ;;
+        esac
+
+        ARGS="$INPUT_COMMAND"
+        if [ "$INPUT_NON_INTERACTIVE" = "true" ]; then
+          ARGS="$ARGS --non-interactive"
+        fi
+        if [ "$INPUT_FAIL_ON_WARNING" = "true" ]; then
+          ARGS="$ARGS --fail-on-warning"
+        fi
+
+        # Capture JSON output for the outputs
+        if [ "$INPUT_COMMAND" = "ci" ]; then
+          JSON_OUT=$(npx --yes sandstream-kit@latest ci --json 2>/dev/null || echo '{"ok":false,"checks":[],"summary":{"passed":0,"failed":1,"warnings":0,"skipped":0}}')
+          PASSED=$(echo "$JSON_OUT" | node -e "process.stdin.resume();let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).ok))")
+          echo "result=$JSON_OUT" >> "$GITHUB_OUTPUT"
+          echo "passed=$PASSED" >> "$GITHUB_OUTPUT"
+        fi
+
+        # Run with annotations format
+        npx --yes sandstream-kit@latest $ARGS

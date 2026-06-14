@@ -1,0 +1,20 @@
+{
+  "vendor": "supabase",
+  "purpose": "Mgmt API ops: project-introspection, scoped-key mint, JWT-secret rotation",
+  "kit_plugin": "sandstream-kit-plugin-supabase",
+  "env_var": "SUPABASE_ACCESS_TOKEN",
+  "creation_url": "https://supabase.com/dashboard/account/tokens",
+  "minimum_scope": {
+    "description": "Mgmt API PATs are all-or-nothing in Supabase today — the token grants access to every project the issuing user can see. Mitigate by issuing the PAT from a dedicated service-user that's a member of ONLY the projects kit needs.",
+    "required_calls": [
+      "GET /v1/projects",
+      "GET /v1/projects/{ref}",
+      "GET /v1/projects/{ref}/api-keys",
+      "POST /v1/projects/{ref}/api-keys/legacy/rotate",
+      "POST /v1/projects/{ref}/api-keys"
+    ],
+    "recommended_org_membership": "single project per kit-PAT; rotate the PAT itself quarterly"
+  },
+  "docs": "https://supabase.com/docs/reference/api/introduction",
+  "last_reviewed": "2026-06-08"
+}

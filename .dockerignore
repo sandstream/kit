@@ -1,0 +1,59 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Dependencies
+node_modules
+npm-debug.log
+yarn-error.log
+pnpm-error.log
+
+# Build artifacts
+dist
+.next
+out
+build
+
+# Test files
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+coverage
+.nyc_output
+
+# Development
+.env
+.env.local
+.env.*.local
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Documentation
+docs
+*.md
+LICENSE
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.circleci
+
+# Lock files (but include in final build)
+pnpm-lock.yaml
+yarn.lock
+
+# Temporary files
+tmp
+temp
+.tmp
+
+# IDE
+.eslintcache
+.stylelintcache

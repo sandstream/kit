@@ -1,0 +1,23 @@
+{
+  "vendor": "vercel",
+  "purpose": "Env-var CRUD + redeploy trigger on a specific project",
+  "kit_plugin": "sandstream-kit-plugin-vercel",
+  "env_var": "VERCEL_TOKEN",
+  "creation_url": "https://vercel.com/account/tokens",
+  "minimum_scope": {
+    "description": "Vercel Account API tokens carry the full set of scopes the issuing user has. The narrowest practical setup is a dedicated team-bot user with membership ONLY in the team that owns the project kit manages, and the token's 'Scope' set to that specific team (not 'All teams').",
+    "required_calls": [
+      "GET /v9/projects",
+      "GET /v9/projects/{id}",
+      "GET /v9/projects/{id}/env",
+      "POST /v10/projects/{id}/env",
+      "PATCH /v9/projects/{id}/env/{envId}",
+      "DELETE /v9/projects/{id}/env/{envId}",
+      "POST /v13/deployments"
+    ],
+    "team_scope": "Limit to one team",
+    "expiration": "Set token expiration to 90 days; renew via kit secrets rotate"
+  },
+  "docs": "https://vercel.com/docs/rest-api",
+  "last_reviewed": "2026-06-08"
+}

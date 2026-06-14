@@ -1,0 +1,21 @@
+{
+  "vendor": "fly",
+  "purpose": "App-secrets set/unset + machine introspection",
+  "kit_plugin": "sandstream-kit-plugin-fly",
+  "env_var": "FLY_API_TOKEN",
+  "creation_url": "https://fly.io/dashboard/personal/tokens",
+  "minimum_scope": {
+    "description": "Fly recommends app-scoped tokens (NOT account-wide deploy tokens). One token per Fly app kit needs to manage.",
+    "token_type": "App-scoped deploy token",
+    "scope": "Specific Fly app",
+    "permissions": [
+      "secrets:set",
+      "secrets:unset",
+      "machines:read",
+      "graphql: app.secrets, setSecrets, unsetSecrets"
+    ],
+    "creation_via_cli": "fly tokens create deploy --app <app-name> --expiry 90d"
+  },
+  "docs": "https://fly.io/docs/security/tokens/",
+  "last_reviewed": "2026-06-08"
+}

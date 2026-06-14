@@ -1,0 +1,27 @@
+{
+  "vendor": "sentry",
+  "purpose": "Issue search/resolve + release creation + project introspection",
+  "kit_plugin": "sandstream-kit-plugin-sentry (planned)",
+  "env_var": "SENTRY_AUTH_TOKEN",
+  "creation_url": "https://sentry.io/settings/account/api/auth-tokens/ (or your org's regional URL e.g. de.sentry.io)",
+  "minimum_scope": {
+    "description": "Sentry supports User Auth Tokens and Internal Integration Tokens. For agents, prefer Internal Integration Tokens — they're org-scoped and revocable per integration without affecting the user account.",
+    "token_type": "Internal Integration (preferred) OR User Auth Token (interactive use)",
+    "scopes": [
+      "org:read",
+      "project:read",
+      "event:read",
+      "event:write",
+      "release:write (only if kit triggers release creation)"
+    ],
+    "excluded": [
+      "org:admin",
+      "member:admin",
+      "team:admin",
+      "project:admin"
+    ],
+    "region": "Match the org's region (us.sentry.io / de.sentry.io / etc.)"
+  },
+  "docs": "https://docs.sentry.io/api/auth/",
+  "last_reviewed": "2026-06-08"
+}

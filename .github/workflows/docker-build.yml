@@ -1,0 +1,175 @@
+name: Docker Build & Push
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - master
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: sandstream/kit
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+      id-token: write   # cosign keyless signing via Sigstore OIDC
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: --debug
+
+      # Docker Hub creds — only attempt login when both secrets are set.
+      # Master pushes without creds previously hard-failed; now they
+      # build-only (no push) until DOCKER_USERNAME/PASSWORD are configured.
+      - name: Check Docker Hub creds present
+        id: docker-creds
+        if: github.event_name != 'pull_request'
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        run: |
+          if [ -n "$DOCKER_USERNAME" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::DOCKER_USERNAME/DOCKER_PASSWORD secrets not set — skipping push to ${REGISTRY}"
+          fi
+
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata (CLI)
+        id: meta-cli
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # PR builds: GHA cache (no registry creds needed).
+      # Master/tag builds: registry cache for cross-runner reuse.
+      - name: Build and push CLI image
+        id: build-cli
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          # Only push when we have creds. Otherwise build-only so we still
+          # exercise the Dockerfile + Trivy scan on master.
+          push: ${{ github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true' }}
+          tags: ${{ steps.meta-cli.outputs.tags }}
+          labels: ${{ steps.meta-cli.outputs.labels }}
+          # Registry cache requires creds; gate it same as push.
+          cache-from: |
+            type=gha,scope=cli
+            ${{ steps.docker-creds.outputs.present == 'true' && format('type=registry,ref={0}/{1}:buildcache', env.REGISTRY, env.IMAGE_NAME) || '' }}
+          cache-to: |
+            type=gha,scope=cli,mode=max
+            ${{ steps.docker-creds.outputs.present == 'true' && format('type=registry,ref={0}/{1}:buildcache,mode=max', env.REGISTRY, env.IMAGE_NAME) || '' }}
+
+      # Sigstore keyless signing — only when an image was actually pushed.
+      # Consumers verify with:
+      #   cosign verify <image> --certificate-identity-regexp '...'
+      - name: Install cosign
+        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true'
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+        with:
+          cosign-release: 'v2.4.1'
+
+      - name: Sign CLI image (keyless)
+        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true' && steps.build-cli.outputs.digest != ''
+        env:
+          DIGEST: ${{ steps.build-cli.outputs.digest }}
+          TAGS: ${{ steps.meta-cli.outputs.tags }}
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          for tag in $TAGS; do
+            cosign sign --yes "${tag}@${DIGEST}"
+          done
+
+      # SBOM per image — attached to the registry alongside the signature.
+      - name: Generate SBOM for CLI image
+        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true' && steps.build-cli.outputs.digest != ''
+        uses: anchore/sbom-action@61119d458adab75f756bc0b9e4bde25725f86a7a # v0.17.8
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build-cli.outputs.digest }}
+          format: cyclonedx-json
+          artifact-name: cli-sbom.cyclonedx.json
+          output-file: cli-sbom.cyclonedx.json
+          upload-release-assets: false
+
+      - name: Attest CLI image SBOM
+        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true' && steps.build-cli.outputs.digest != ''
+        env:
+          DIGEST: ${{ steps.build-cli.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          cosign attest --yes --predicate cli-sbom.cyclonedx.json --type cyclonedx \
+            "${IMAGE}@${DIGEST}"
+
+      - name: Build test image (PR only)
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: kit:test
+
+      - name: Test CLI image
+        if: github.event_name == 'pull_request'
+        run: |
+          docker run --rm kit:test --version
+          docker run --rm kit:test --help
+
+      - name: Image vulnerability scan
+        # Skip when no registry push happened — Trivy can't pull an image that
+        # wasn't published (DOCKER_USERNAME/PASSWORD missing → push step skipped).
+        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          format: 'sarif'
+          output: 'trivy-results.json'
+
+      - name: Upload Trivy scan results
+        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true'
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.json'
+
+      - name: Comment PR with image details
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ Docker image built successfully\n\n- CLI image: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test`'
+            })

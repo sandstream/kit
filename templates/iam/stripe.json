@@ -1,0 +1,20 @@
+{
+  "vendor": "stripe",
+  "purpose": "Webhook-endpoint rotation + account introspection",
+  "kit_plugin": "sandstream-kit-plugin-stripe",
+  "env_var": "STRIPE_SECRET_KEY",
+  "creation_url": "https://dashboard.stripe.com/apikeys",
+  "minimum_scope": {
+    "description": "Use a Restricted API Key (NOT a standard Secret Key). 'Restricted' means resource-permissioned. Set everything to 'None' first, then enable only what kit needs.",
+    "key_type": "Restricted Key (rk_test_* / rk_live_*)",
+    "permissions": {
+      "Webhook Endpoints": "Write",
+      "Account": "Read",
+      "everything_else": "None"
+    },
+    "mode": "Test mode for dev/staging projects; Live mode only when truly needed",
+    "rotation": "Use kit secrets rotate to mint a new restricted key and revoke the old one in the same flow"
+  },
+  "docs": "https://docs.stripe.com/keys#restricted-api-keys",
+  "last_reviewed": "2026-06-08"
+}

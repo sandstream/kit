@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# pre-push — last gate: scan every tracked file for internal references
+# before anything reaches the public remote.
+exec "$(git rev-parse --show-toplevel)/.githooks/no-internal-leaks.sh" --tracked

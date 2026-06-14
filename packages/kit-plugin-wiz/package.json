@@ -1,0 +1,16 @@
+{
+  "name": "sandstream-kit-plugin-wiz",
+  "version": "0.1.0",
+  "description": "Wiz issue-graph ingestion for kit (read-only).",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.15",
+    "typescript": "5.9.3"
+  }
+}

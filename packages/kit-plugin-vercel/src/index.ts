@@ -1,0 +1,16 @@
+export {
+  makeClient,
+  listProjects,
+  listEnvVars,
+  createEnvVar,
+  updateEnvVar,
+  deleteEnvVar,
+  upsertEnvVar,
+  redeployLatest,
+  type MgmtClient,
+  type MgmtClientConfig,
+  type ProjectSummary,
+  type EnvVar,
+  type VercelEnvTarget,
+  type RedeployResult,
+} from "./mgmt-api.js";

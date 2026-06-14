@@ -1,0 +1,114 @@
+# kit security checks — drop-in GitLab CI/CD pipeline.
+#
+# Copy to `.gitlab-ci.yml` (repo root) for any GitLab project that uses
+# sandstream-kit. Mirrors the GitHub Actions workflow in
+# templates/github/kit-security.yml — same stages, GitLab syntax.
+#
+# Stages run as separate jobs so failure is surface-able per check.
+
+stages:
+  - install
+  - secrets
+  - sast
+  - supply-chain
+  - build-artifact
+  - verify
+
+variables:
+  # Override per-job below — kit defaults that play well in CI.
+  KIT_NON_INTERACTIVE: "1"
+  NODE_VERSION: "22"
+
+default:
+  image: node:${NODE_VERSION}
+  before_script:
+    - npm install -g sandstream-kit
+  cache:
+    key: $CI_COMMIT_REF_SLUG
+    paths:
+      - .kit/cache/
+      - node_modules/
+
+# Stage 1 — install + status
+install:
+  stage: install
+  script:
+    - kit --version
+    - kit check
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Stage 2 — secret-scan on the PR diff
+scan-staged:
+  stage: secrets
+  variables:
+    # GitLab equivalent of github.base_ref — set via merge-request var.
+    BASE_REF: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+  script:
+    # Stage the MR diff so the pre-commit scanner sees it.
+    - if [ -n "$BASE_REF" ]; then
+        git diff --name-only "origin/$BASE_REF...HEAD" | xargs -r git add -N;
+      fi
+    - kit security scan-staged
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Stage 3 — SAST (semgrep on application code only)
+sast:
+  stage: sast
+  image: returntocorp/semgrep:latest
+  before_script: []
+  cache: []
+  script:
+    - semgrep ci --config=auto --error
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Stage 4 — supply-chain (bumblebee)
+supply-chain:
+  stage: supply-chain
+  variables:
+    KIT_BUMBLEBEE_PROFILE: project
+  script:
+    - kit check --security
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Stage 5 — build-artifact secret-scan (after build)
+build-artifact-scan:
+  stage: build-artifact
+  script:
+    - npm ci
+    - npm run build || true
+    - kit security scan-build
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Stage 6 — verify the pull range (new deps, gitignore drops, plaintext)
+verify-pull:
+  stage: verify
+  variables:
+    BASE_REF: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+  script:
+    - if [ -n "$BASE_REF" ]; then
+        kit security verify-pull --base "origin/$BASE_REF" --head HEAD;
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Gitleaks — secret scan over git history.
+secret-scan-history:
+  stage: secrets
+  image:
+    name: zricethezav/gitleaks:latest
+    entrypoint: [""]
+  before_script: []
+  cache: []
+  script:
+    - gitleaks detect --redact --no-banner --exit-code 1
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

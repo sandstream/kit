@@ -1,0 +1,37 @@
+{
+  "vendor": "aws-secretsmanager",
+  "purpose": "Read + write secrets under a project-specific path-prefix",
+  "kit_plugin": "src/check-secrets.ts case 'aws-sm' + src/secrets-migrate.ts",
+  "env_var": "(uses standard AWS credential chain: AWS_PROFILE / AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY / IRSA / IAM Role)",
+  "creation_url": "https://console.aws.amazon.com/iam/home#/policies/create",
+  "minimum_scope": {
+    "description": "Paste the IAM policy below into an inline policy on the IAM principal kit will assume. Replace <region>, <account-id>, and <project-prefix> with your values. The Resource ARN is scoped to a prefix so kit can only touch secrets under that namespace.",
+    "policy": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "kitReadOwnSecrets",
+          "Effect": "Allow",
+          "Action": [
+            "secretsmanager:GetSecretValue",
+            "secretsmanager:DescribeSecret"
+          ],
+          "Resource": "arn:aws:secretsmanager:<region>:<account-id>:secret:<project-prefix>/*"
+        },
+        {
+          "Sid": "kitWriteOwnSecrets",
+          "Effect": "Allow",
+          "Action": [
+            "secretsmanager:CreateSecret",
+            "secretsmanager:PutSecretValue",
+            "secretsmanager:UpdateSecret"
+          ],
+          "Resource": "arn:aws:secretsmanager:<region>:<account-id>:secret:<project-prefix>/*"
+        }
+      ]
+    },
+    "notes": "Do NOT grant secretsmanager:DeleteSecret in the same role — separate it into a manual-cleanup policy."
+  },
+  "docs": "https://docs.aws.amazon.com/secretsmanager/latest/userguide/auth-and-access_identity-based-policies.html",
+  "last_reviewed": "2026-06-08"
+}

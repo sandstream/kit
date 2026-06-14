@@ -1,0 +1,17 @@
+{
+  "_comment": "Drop into ~/.cline/cline_mcp_settings.json (user) or .cline/cline_mcp_settings.json (project). Cline auto-discovers MCP servers from this file.",
+
+  "mcpServers": {
+    "kit": {
+      "command": "node",
+      "args": ["node_modules/sandstream-kit/dist/cli.js", "mcp"],
+      "disabled": false,
+      "autoApprove": [
+        "kit_check",
+        "kit_ci",
+        "kit_context",
+        "kit_triage"
+      ]
+    }
+  }
+}

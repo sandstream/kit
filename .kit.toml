@@ -1,0 +1,78 @@
+[tools]
+node = "22"
+pnpm = "latest"
+
+[hooks]
+pre-commit = ["kit security scan-staged", "npm run build", "npm test"]
+pre-push = ["npm audit --audit-level=high"]
+
+[services.github]
+login = "gh auth login"
+check = "gh auth status"
+
+[services.infisical]
+login = "infisical login"
+check = "infisical user get"
+
+[secrets]
+store = "infisical"
+template = ".env.template"
+
+[secrets.infisical]
+environment = "dev"
+
+[secrets.keys]
+NODE_ENV = { source = "env" }
+
+[skills]
+registry = "clawhub"
+
+[skills.required]
+"coding-agent" = "^2.0"
+"github" = "^1.5"
+"gh-issues" = "^1.0"
+
+[skills.optional]
+"discord" = "*"
+
+[web.search]
+provider = "searxng"
+url = "http://localhost:8080"
+
+[governance]
+enabled = true
+environment = "dev"  # dev, staging, prod (auto-detected from git branch if not set)
+
+[governance.access]
+dev = { read = true, write = true, delete = true }
+staging = { read = true, write = true, delete = false }
+prod = { read = true, write = false, delete = false }
+
+[governance.agent]
+id = "00000000-0000-0000-0000-000000000000"
+name = "Founding Engineer"
+max_tokens_per_day = 1000000
+max_operations_per_hour = 100
+
+[governance.audit]
+enabled = true
+log_file = ".kit-audit.jsonl"
+log_level = "info"
+include_secrets = false
+
+[governance.approval]
+destructive_operations = ["delete", "drop", "truncate", "destroy", "remove"]
+production_writes = true
+secret_rotations = false
+approval_timeout = 3600
+
+[governance.secrets]
+check_expiration = true
+warn_days_before_expiry = 30
+rotate_on_expiry = false
+revoke_on_agent_disable = true
+
+[governance.revocation]
+enabled = false
+check_interval = 300
+# revocation_endpoint = "http://localhost:3199/api/agents/{agent_id}/status"
