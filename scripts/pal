@@ -1,0 +1,388 @@
+#!/usr/bin/env python3
+"""pal — Pending Action Ledger.
+
+A single GLOBAL ledger of "blocked-on-you" action items that survives across
+sessions and repos, surfaced by your agent's SessionStart hook, and AUTO-CLOSED
+the moment an item's verify command starts passing — so handed-off tasks stop
+getting forgotten.
+
+Wire `pal surface` into a SessionStart hook (see kit's examples/agent-hooks/ for
+Claude Code, Codex, Cursor and Cline templates) to print the open block at the
+start of every agent session.
+
+Storage: ~/.kit/pal/ledger.jsonl  (append-only JSONL, chmod 600, never synced).
+State is the fold of all lines: group by id, merge in order, last field wins.
+
+Subcommands:
+  pal add --title T [--why W] [--owner user|agent|other] [--repo R] [--verify CMD]
+  pal list [--all]
+  pal done <id>            mark resolved by hand (only path for verify-less items)
+  pal snooze <id> <Nd>     hide until N days from now
+  pal drop <id>            abandon (hidden, kept for audit)
+  pal verify-all           run due verify commands, auto-close / backoff (no output block)
+  pal surface              verify-all + print the compact open block to stdout (SessionStart hook)
+
+Auto-close rules (the correctness core):
+  - A verify must exit 0 IFF the action is genuinely done.
+  - Requires N=2 CONSECUTIVE passes before closing  -> kills flaky-network false closes.
+  - Non-zero exit  -> "not done": reset streak, exponential backoff (60min -> 24h cap).
+  - Timeout / unreachable -> "no info": neither pass nor fail, retry soon, shown as (unverified).
+  - exit 127 (verify itself broken) -> flagged ⚠, treated as no-info so a typo never false-closes.
+  - reopen-on-regress: a done item whose verify later fails resurfaces (live health-check).
+  - fail-open everywhere: a broken verify or a corrupt line never breaks the hook.
+"""
+
+import sys, os, json, subprocess, secrets
+from datetime import datetime, timezone, timedelta
+from collections import OrderedDict
+
+HOME = os.path.expanduser("~")
+PAL_DIR = os.path.join(HOME, ".kit", "pal")
+LEDGER = os.path.join(PAL_DIR, "ledger.jsonl")
+
+VERIFY_TIMEOUT = 8          # seconds per verify
+BATCH_BUDGET = 15.0         # seconds total per surface/verify-all run
+CLOSE_STREAK = 2            # consecutive passes required to auto-close
+BACKOFF_START = 60          # minutes
+BACKOFF_CAP = 1440          # minutes (24h)
+NOINFO_RETRY = 10           # minutes — retry soon after a no-info result
+DONE_RECHECK = 1440         # minutes between regress re-checks of done items
+STALE_DAYS = 7
+DECIDE_DAYS = 21
+USER_SHELL = os.environ.get("SHELL", "/bin/sh")
+
+
+# ---------- time helpers ----------
+def now():
+    return datetime.now(timezone.utc)
+
+def iso(dt):
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def parse(s):
+    try:
+        return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except Exception:
+        return now()
+
+def days_since(s):
+    return (now() - parse(s)).total_seconds() / 86400.0
+
+
+# ---------- ledger io ----------
+def ensure_dir():
+    os.makedirs(PAL_DIR, exist_ok=True)
+    try:
+        os.chmod(PAL_DIR, 0o700)
+    except OSError:
+        pass
+
+def fold():
+    """Return OrderedDict id -> merged state (first-seen order preserved)."""
+    state = OrderedDict()
+    if not os.path.exists(LEDGER):
+        return state
+    with open(LEDGER, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                rid = rec.get("id")
+                if not rid:
+                    continue
+            except Exception:
+                continue  # tolerate corrupt lines
+            if rid in state:
+                state[rid].update(rec)
+            else:
+                state[rid] = rec
+    return state
+
+def append(rec):
+    ensure_dir()
+    new = not os.path.exists(LEDGER)
+    with open(LEDGER, "a") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    if new:
+        try:
+            os.chmod(LEDGER, 0o600)
+        except OSError:
+            pass
+
+def new_id():
+    return "pal_%s_%s" % (now().strftime("%Y-%m-%d"), secrets.token_hex(2))
+
+
+# ---------- verify execution (python-native timeout = no `timeout` binary needed) ----------
+def run_verify(cmd):
+    """Return one of: 'pass' | 'fail' | 'noinfo' | 'error'."""
+    if not cmd:
+        return "noinfo"
+    try:
+        r = subprocess.run([USER_SHELL, "-lc", cmd],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=VERIFY_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return "noinfo"           # slow / hung — no information, retry soon
+    except Exception:
+        return "error"            # could not even launch the shell
+    if r.returncode == 0:
+        return "pass"
+    if r.returncode == 127:
+        return "error"            # command-not-found -> the verify itself is broken
+    return "fail"                 # genuine "not done yet"
+
+
+# ---------- commands ----------
+def cmd_add(args):
+    opts = parse_opts(args)
+    title = opts.get("title")
+    if not title:
+        die("pal add: --title is required")
+    rec = {
+        "id": new_id(),
+        "ts": iso(now()),
+        "status": "open",
+        "owner": opts.get("owner", "user"),
+        "repo": opts.get("repo", repo_basename()),
+        "title": title,
+        "why": opts.get("why", ""),
+        "next_check": iso(now()),
+        "backoff_min": BACKOFF_START,
+        "pass_streak": 0,
+    }
+    if opts.get("verify"):
+        rec["verify"] = opts["verify"]
+    append(rec)
+    print("added %s  %s" % (rec["id"], title))
+
+def cmd_done(args):
+    rid = first(args, "pal done <id>")
+    require_id(rid)
+    append({"id": rid, "ts": iso(now()), "status": "done", "closed_by": "user"})
+    print("done %s" % rid)
+
+def cmd_snooze(args):
+    rid = first(args, "pal snooze <id> <Nd>")
+    require_id(rid)
+    span = args[1] if len(args) > 1 else "7d"
+    n = int("".join(c for c in span if c.isdigit()) or "7")
+    until = iso(now() + timedelta(days=n))
+    append({"id": rid, "ts": iso(now()), "status": "open",
+            "next_check": until, "snoozed_until": until})
+    print("snoozed %s until %s" % (rid, until))
+
+def cmd_drop(args):
+    rid = first(args, "pal drop <id>")
+    require_id(rid)
+    append({"id": rid, "ts": iso(now()), "status": "dropped"})
+    print("dropped %s" % rid)
+
+def cmd_list(args):
+    show_all = "--all" in args
+    state = fold()
+    rows = [it for it in state.values()
+            if show_all or it.get("status") == "open"]
+    if not rows:
+        print("PAL: nothing open." if not show_all else "PAL: ledger empty.")
+        return
+    for it in rows:
+        print(fmt_row(it, verbose=True))
+
+def cmd_verify_all(args, surface=False):
+    state = fold()
+    start = now()
+    changed = []
+    for it in state.values():
+        if (now() - start).total_seconds() > BATCH_BUDGET:
+            break
+        st = it.get("status")
+        if st not in ("open", "done"):
+            continue
+        if parse(it.get("next_check", "1970-01-01T00:00:00Z")) > now():
+            continue            # not due yet (backoff / snooze)
+        verify = it.get("verify")
+        if not verify:
+            continue            # verify-less: manual close only, nothing to check
+        result = run_verify(verify)
+
+        if st == "open":
+            if result == "pass":
+                streak = int(it.get("pass_streak", 0)) + 1
+                if streak >= CLOSE_STREAK:
+                    append({"id": it["id"], "ts": iso(now()), "status": "done",
+                            "closed_by": "auto", "pass_streak": streak})
+                    changed.append(("closed", it))
+                else:
+                    # first pass: re-check at the very next run to confirm (N=2),
+                    # so a single flaky success can't close but confirmation is fast.
+                    append({"id": it["id"], "ts": iso(now()), "pass_streak": streak,
+                            "next_check": iso(now()), "err_streak": 0})
+            elif result == "fail":
+                bo = min(int(it.get("backoff_min", BACKOFF_START)) * 2, BACKOFF_CAP)
+                append({"id": it["id"], "ts": iso(now()), "pass_streak": 0,
+                        "backoff_min": bo,
+                        "next_check": iso(now() + timedelta(minutes=bo)),
+                        "err_streak": 0})
+            elif result == "noinfo":
+                append({"id": it["id"], "ts": iso(now()),
+                        "next_check": iso(now() + timedelta(minutes=NOINFO_RETRY)),
+                        "unverified": True})
+            else:  # error — verify itself is broken
+                es = int(it.get("err_streak", 0)) + 1
+                append({"id": it["id"], "ts": iso(now()), "err_streak": es,
+                        "next_check": iso(now() + timedelta(minutes=BACKOFF_CAP)),
+                        "verify_broken": es >= 5})
+        else:  # done — reopen-on-regress
+            if result == "fail":
+                append({"id": it["id"], "ts": iso(now()), "status": "open",
+                        "note": "regressed", "pass_streak": 0,
+                        "backoff_min": BACKOFF_START, "next_check": iso(now())})
+                changed.append(("reopened", it))
+            else:
+                append({"id": it["id"], "ts": iso(now()),
+                        "next_check": iso(now() + timedelta(minutes=DONE_RECHECK))})
+
+    if surface:
+        print_surface(fold(), changed)
+    else:
+        for kind, it in changed:
+            print("%s  %s  %s" % (kind, it["id"], it.get("title", "")))
+        if not changed:
+            print("pal: no changes (nothing due, or no verifies passed).")
+
+def cmd_surface(args):
+    cmd_verify_all(args, surface=True)
+
+
+# ---------- surfacing ----------
+def print_surface(state, changed):
+    opens = [it for it in state.values() if it.get("status") == "open"]
+    if not opens:
+        return  # empty == silent
+    user_items = [it for it in opens if it.get("owner", "user") == "user"]
+    agent_n = len(opens) - len(user_items)
+    closed_n = sum(1 for k, _ in changed if k == "closed")
+    reopened_n = sum(1 for k, _ in changed if k == "reopened")
+
+    print("[PAL · %d open — blocked on YOU]" % len(user_items) if user_items
+          else "[PAL · %d open]" % len(opens))
+    for it in user_items:
+        print("  " + fmt_row(it, verbose=False))
+    tail = []
+    if agent_n:
+        tail.append("%d agent-owned hidden" % agent_n)
+    if closed_n:
+        tail.append("✅ %d auto-resolved this session" % closed_n)
+    if reopened_n:
+        tail.append("↩ %d regressed/reopened" % reopened_n)
+    tail.append("close: pal done <id>")
+    tail.append("snooze: pal snooze <id> 7d")
+    print("  (" + " · ".join(tail) + ")")
+
+def fmt_row(it, verbose):
+    rid = it.get("id", "?")
+    short = rid.split("_")[-1] if "_" in rid else rid
+    repo = it.get("repo", "") or "-"
+    title = it.get("title", "")
+    age = days_since(it.get("ts_open") or it.get("ts", iso(now())))
+    meta = []
+    if it.get("verify"):
+        meta.append("auto")
+        if it.get("unverified"):
+            meta.append("(unverified)")
+        if it.get("verify_broken"):
+            meta.append("⚠verify-broken")
+    else:
+        meta.append("manual")
+    if it.get("note") == "regressed":
+        meta.append("↩regressed")
+    d = days_since(it.get("ts", iso(now())))
+    if d >= DECIDE_DAYS:
+        meta.append("🔴%dd+ decide: do it or pal drop" % int(d))
+    elif d >= STALE_DAYS:
+        meta.append("⏳STALE %dd" % int(d))
+    line = "! %-8s %-10s %s  · %s" % (short, repo[:10], title, " ".join(meta))
+    if verbose:
+        why = it.get("why")
+        st = it.get("status")
+        line = "[%s] %s" % (st, line)
+        if why:
+            line += "\n        why: " + why
+        if it.get("verify"):
+            line += "\n        verify: " + it["verify"]
+    return line
+
+
+# ---------- arg parsing ----------
+def parse_opts(args):
+    opts = {}
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("--"):
+            key = a[2:]
+            if i + 1 < len(args) and not args[i + 1].startswith("--"):
+                opts[key] = args[i + 1]
+                i += 2
+            else:
+                opts[key] = True
+                i += 1
+        else:
+            i += 1
+    return opts
+
+def first(args, usage):
+    if not args or args[0].startswith("--"):
+        die("usage: " + usage)
+    return args[0]
+
+def require_id(rid):
+    if rid not in fold():
+        die("pal: unknown id %s (run `pal list --all`)" % rid)
+
+def repo_basename():
+    try:
+        r = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3)
+        if r.returncode == 0:
+            return os.path.basename(r.stdout.decode().strip())
+    except Exception:
+        pass
+    return "-"
+
+def die(msg):
+    print(msg, file=sys.stderr)
+    sys.exit(2)
+
+
+def main():
+    argv = sys.argv[1:]
+    if not argv:
+        die(__doc__)
+    cmd, rest = argv[0], argv[1:]
+    table = {
+        "add": cmd_add, "list": cmd_list, "done": cmd_done,
+        "snooze": cmd_snooze, "drop": cmd_drop,
+        "verify-all": lambda a: cmd_verify_all(a, surface=False),
+        "surface": cmd_surface,
+    }
+    fn = table.get(cmd)
+    if not fn:
+        die("pal: unknown command %r" % cmd)
+    fn(rest)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as e:
+        # fail-open: never let the SessionStart hook break a session
+        if len(sys.argv) > 1 and sys.argv[1] == "surface":
+            sys.exit(0)
+        print("pal error: %s" % e, file=sys.stderr)
+        sys.exit(1)
