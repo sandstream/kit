@@ -138,6 +138,12 @@ import { parsePkgSpec, installPkg } from "./pkg.js";
 import { openMemoryDb, getStats, searchMessages } from "./memory/db.js";
 import { indexClaudeTranscripts, getClaudeProjectsDir } from "./memory/parser.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
+import { userPromptSubmitReminder, runSessionEndIndex } from "./memory/hook.js";
+import {
+  installMemoryHooks,
+  uninstallMemoryHooks,
+  getClaudeSettingsPath,
+} from "./memory/install.js";
 
 const KIT_FILE = ".kit.toml";
 
@@ -4247,6 +4253,7 @@ const COMMAND_HELP: Record<string, string> = {
   "memory index": "Index ~/.claude transcripts into the SQLite memory store",
   "memory search": "Full-text search memory (current project; --global for all)",
   "memory stats": "Show what the local memory store contains",
+  "memory install": "Wire UserPromptSubmit + SessionEnd hooks into ~/.claude/settings.json",
   init:           "Detect stack, generate .kit.toml, and run full setup",
   upgrade:        "Update lock files from .kit.toml",
   install:        "Install missing tools via mise",
@@ -4788,6 +4795,8 @@ async function cmdMemory(): Promise<boolean> {
     console.log("  kit memory index            Index ~/.claude transcripts into the memory store");
     console.log("  kit memory search <query>   Search memory (current project; --global for all)");
     console.log("  kit memory stats            Show what the memory store contains");
+    console.log("  kit memory install          Wire the 2 hooks into ~/.claude/settings.json");
+    console.log("  kit memory uninstall        Remove the hooks");
     return true;
   }
 
@@ -4860,8 +4869,44 @@ async function cmdMemory(): Promise<boolean> {
     return true;
   }
 
+  if (subcommand === "hook") {
+    // Internal: invoked by Claude Code hooks. Fail-open — never block.
+    const event = process.argv[4];
+    if (event === "user-prompt-submit") {
+      const text = userPromptSubmitReminder();
+      if (text) console.log(text);
+      return true;
+    }
+    if (event === "session-end") {
+      runSessionEndIndex();
+      return true;
+    }
+    console.error(`${c.red}Unknown hook event: ${event ?? "(none)"}${c.reset}`);
+    return false;
+  }
+
+  if (subcommand === "install") {
+    const { added, alreadyPresent } = installMemoryHooks();
+    for (const e of added) console.log(`${c.green}✓${c.reset} installed ${e} hook`);
+    for (const e of alreadyPresent) console.log(`${c.dim}• ${e} hook already present${c.reset}`);
+    console.log(`${c.dim}settings: ${getClaudeSettingsPath()}${c.reset}`);
+    return true;
+  }
+
+  if (subcommand === "uninstall") {
+    const { removed } = uninstallMemoryHooks();
+    if (removed.length) {
+      for (const e of removed) console.log(`${c.green}✓${c.reset} removed ${e} hook`);
+    } else {
+      console.log(`${c.dim}no kit memory hooks were installed${c.reset}`);
+    }
+    return true;
+  }
+
   console.error(`${c.red}Unknown memory subcommand: ${subcommand}${c.reset}`);
-  console.error("Use: kit memory index | kit memory search <query> | kit memory stats");
+  console.error(
+    "Use: kit memory index | search <query> | stats | install | uninstall",
+  );
   return false;
 }
 
