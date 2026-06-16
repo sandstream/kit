@@ -81,6 +81,8 @@ export interface WebSearchConfig {
   provider?: "brave" | "searxng" | "google" | "custom";
   url?: string;
   apiKey?: string;
+  /** Google Programmable Search engine id (cx) — required for the google provider. */
+  cx?: string;
 }
 
 /**
@@ -418,6 +420,7 @@ const WebConfigSchema = z
         provider: z.enum(["brave", "searxng", "google", "custom"]).optional(),
         url: z.string().optional(),
         apiKey: z.string().optional(),
+        cx: z.string().optional(),
       })
       .passthrough()
       .optional(),
