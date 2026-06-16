@@ -5162,7 +5162,8 @@ async function cmdMemory(): Promise<boolean> {
   }
 
   if (subcommand === "pal") {
-    const action = process.argv[4] ?? "list";
+    const action =
+      process.argv[4] && !process.argv[4].startsWith("--") ? process.argv[4] : "list";
     const db = openMemoryDb();
     try {
       if (action === "list") {
