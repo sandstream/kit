@@ -10,8 +10,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import { KIT_BLOCK_BEGIN } from "./agent-config.js";
+import { checkGitignore } from "./check-gitignore.js";
 import { openMemoryDb, getStats } from "./memory/db.js";
 import { getClaudeSettingsPath } from "./memory/install.js";
+
+// Dependency allowlist file (kept as a literal here, matching security-policy.ts
+// + post-pull-audit.ts — the convention isn't exported).
+const ALLOWLIST_FILE = ".kit-allowlist.json";
 
 export interface StatusItem {
   key: string;
@@ -70,6 +75,29 @@ export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusI
       // malformed config — skip the derived checks rather than crash
     }
   }
+
+  // Secret hygiene — does .gitignore cover the sensitive paths kit cares about?
+  const ignore = await checkGitignore(cwd);
+  items.push({
+    key: "gitignore",
+    label: "gitignore hygiene",
+    ok: ignore.missingPatterns.length === 0,
+    detail:
+      ignore.missingPatterns.length === 0
+        ? "sensitive paths covered"
+        : `${ignore.missingPatterns.length} sensitive path(s) unignored`,
+    hint: ignore.missingPatterns.length === 0 ? undefined : "run `kit security check-gitignore --fix`",
+  });
+
+  // Supply chain — is there a dependency allowlist to enforce on install?
+  const hasAllowlist = existsSync(join(cwd, ALLOWLIST_FILE));
+  items.push({
+    key: "dep-policy",
+    label: "dependency policy",
+    ok: hasAllowlist,
+    detail: hasAllowlist ? "allowlist present" : "no allowlist",
+    hint: hasAllowlist ? undefined : "run `kit security policy init`",
+  });
 
   const wired = fileIncludes(join(cwd, "CLAUDE.md"), KIT_BLOCK_BEGIN);
   items.push({
