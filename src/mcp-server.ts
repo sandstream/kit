@@ -41,6 +41,36 @@ export function createMcpServer(): McpServer {
     { capabilities: { tools: {} } },
   );
 
+  // One registrar per tool — keeps this composition flat (was a 774-line
+  // function). Each register_* attaches its tool to the server.
+  register_kit_check(server);
+  register_kit_install(server);
+  register_kit_login(server);
+  register_kit_secrets(server);
+  register_kit_fix(server);
+  register_kit_add(server);
+  register_kit_env(server);
+  register_kit_init(server);
+  register_kit_ci(server);
+  register_kit_run(server);
+  register_kit_context(server);
+  register_kit_configure(server);
+  register_kit_adapter_check(server);
+  register_kit_adapter_install(server);
+  register_kit_workflow_execute(server);
+  register_kit_skill_marketplace(server);
+  register_kit_agent_governance(server);
+
+  return server;
+}
+
+export async function startMcpServer(): Promise<void> {
+  const server = createMcpServer();
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+function register_kit_check(server: McpServer): void {
   // kit_check — run all checks, return structured JSON
   server.tool(
     "kit_check",
@@ -103,6 +133,9 @@ export function createMcpServer(): McpServer {
     },
   );
 
+}
+
+function register_kit_install(server: McpServer): void {
   // kit_install — install missing tools via mise
   server.tool(
     "kit_install",
@@ -136,6 +169,9 @@ export function createMcpServer(): McpServer {
     },
   );
 
+}
+
+function register_kit_login(server: McpServer): void {
   // kit_login — attempt service logins (non-interactive)
   server.tool(
     "kit_login",
@@ -171,6 +207,9 @@ export function createMcpServer(): McpServer {
     },
   );
 
+}
+
+function register_kit_secrets(server: McpServer): void {
   // kit_secrets — generate .env.local from config
   server.tool(
     "kit_secrets",
@@ -208,6 +247,9 @@ export function createMcpServer(): McpServer {
     },
   );
 
+}
+
+function register_kit_fix(server: McpServer): void {
   // kit_fix — auto-fix issues (generate lock files, install tools)
   server.tool(
     "kit_fix",
@@ -274,6 +316,9 @@ export function createMcpServer(): McpServer {
     },
   );
 
+}
+
+function register_kit_add(server: McpServer): void {
   // kit_add — provision a service (stripe, supabase, etc.)
   server.tool(
     "kit_add",
@@ -320,6 +365,9 @@ export function createMcpServer(): McpServer {
     },
   );
 
+}
+
+function register_kit_env(server: McpServer): void {
   // kit_env — inspect environment variables loaded from .env.local
   server.tool(
     "kit_env",
@@ -362,6 +410,9 @@ export function createMcpServer(): McpServer {
     },
   );
 
+}
+
+function register_kit_init(server: McpServer): void {
   // kit_init — detect stack, generate .kit.toml, optionally write it
   server.tool(
     "kit_init",
@@ -428,6 +479,9 @@ export function createMcpServer(): McpServer {
     },
   );
 
+}
+
+function register_kit_ci(server: McpServer): void {
   server.tool(
     "kit_ci",
     "Run kit CI checks and return structured results. Use before deploying or merging to validate the environment is correctly configured. Returns pass/fail/warn status for tools, services, secrets, lock files, and security.",
@@ -551,6 +605,9 @@ export function createMcpServer(): McpServer {
     }
   );
 
+}
+
+function register_kit_run(server: McpServer): void {
   // kit_run — execute a command with project env vars loaded
   server.tool(
     "kit_run",
@@ -595,6 +652,9 @@ export function createMcpServer(): McpServer {
     }
   );
 
+}
+
+function register_kit_context(server: McpServer): void {
   // kit_context — gather structured project context for agents
   server.tool(
     "kit_context",
@@ -625,6 +685,9 @@ export function createMcpServer(): McpServer {
     }
   );
 
+}
+
+function register_kit_configure(server: McpServer): void {
   // kit_configure — interactive project configuration
   server.tool(
     "kit_configure",
@@ -669,6 +732,9 @@ export function createMcpServer(): McpServer {
     }
   );
 
+}
+
+function register_kit_adapter_check(server: McpServer): void {
   // kit_adapter_check — check adapter status and compatibility
   server.tool(
     "kit_adapter_check",
@@ -706,6 +772,9 @@ export function createMcpServer(): McpServer {
     }
   );
 
+}
+
+function register_kit_adapter_install(server: McpServer): void {
   // kit_adapter_install — install or update adapters
   server.tool(
     "kit_adapter_install",
@@ -746,6 +815,9 @@ export function createMcpServer(): McpServer {
     }
   );
 
+}
+
+function register_kit_workflow_execute(server: McpServer): void {
   // kit_workflow_execute — execute defined workflows
   server.tool(
     "kit_workflow_execute",
@@ -792,6 +864,9 @@ export function createMcpServer(): McpServer {
     }
   );
 
+}
+
+function register_kit_skill_marketplace(server: McpServer): void {
   // kit_skill_marketplace — browse and manage skills
   server.tool(
     "kit_skill_marketplace",
@@ -836,6 +911,9 @@ export function createMcpServer(): McpServer {
     }
   );
 
+}
+
+function register_kit_agent_governance(server: McpServer): void {
   // kit_agent_governance — configure agent governance and policies
   server.tool(
     "kit_agent_governance",
@@ -886,11 +964,4 @@ export function createMcpServer(): McpServer {
     }
   );
 
-  return server;
-}
-
-export async function startMcpServer(): Promise<void> {
-  const server = createMcpServer();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
 }
