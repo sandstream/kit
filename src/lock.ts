@@ -170,9 +170,11 @@ export async function writekitMeta(meta: kitMeta): Promise<void> {
 }
 
 /**
- * Compute a hash for skill content
- * For now, this creates a hash from the source+version string
- * In the future, this should fetch and hash the actual skill content
+ * Pin identifier for a skill: sha256 of "source@version" (first 16 hex chars).
+ * This identifies WHICH skill + version the lockfile pinned — it is NOT a
+ * content-integrity hash and does not detect tampering of fetched skill content.
+ * Content verification is tracked separately; kit's public docs do not claim
+ * content verification, so this stays honest.
  */
 function computeSkillHash(source: string, version: string): string {
   const content = `${source}@${version}`;

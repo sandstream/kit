@@ -243,25 +243,23 @@ export class DatabaseManager {
   /**
    * Create a database backup.
    */
-  async createBackup(filename: string): Promise<{ success: boolean; backupFile: string }> {
-    // In real implementation, would use pg_dump
-    // For now, return mock response
-    return {
-      success: true,
-      backupFile: `backups/${filename}-${Date.now()}.sql`,
-    };
+  async createBackup(_filename: string): Promise<{ success: boolean; backupFile: string }> {
+    // Not implemented. kit does not manage database backups. Throwing keeps this
+    // honest instead of returning a fake success that could mask data loss if a
+    // caller ever relied on it.
+    throw new Error(
+      "DatabaseManager.createBackup is not implemented — kit does not perform database backups",
+    );
   }
 
   /**
    * Restore from backup.
    */
-  async restoreBackup(backupFile: string): Promise<{ success: boolean; message: string }> {
-    // In real implementation, would use psql restore
-    // For now, return mock response
-    return {
-      success: true,
-      message: `Restored from ${backupFile}`,
-    };
+  async restoreBackup(_backupFile: string): Promise<{ success: boolean; message: string }> {
+    // Not implemented (see createBackup).
+    throw new Error(
+      "DatabaseManager.restoreBackup is not implemented — kit does not perform database restores",
+    );
   }
 
   // ─── Health & Monitoring ──────────────────────────────────────────────
@@ -439,6 +437,7 @@ class MockConnection {
   }
 
   async query(sql: string, params: unknown[] = []): Promise<{ rows: unknown[]; rowCount: number }> {
+    void params;
     // Simulate query execution
     await new Promise((resolve) => setTimeout(resolve, Math.random() * 10));
 
