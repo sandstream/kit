@@ -469,7 +469,17 @@ export async function cmdMemory(): Promise<boolean> {
     return true;
   }
 
-  if (subcommand === "pal") {
+  if (subcommand === "pal") return memPal();
+
+  console.error(`${c.red}Unknown memory subcommand: ${subcommand}${c.reset}`);
+  console.error(
+    "Use: kit memory index | search <query> | stats | install | uninstall | pal",
+  );
+  return false;
+}
+
+async function memPal(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
     const action =
       process.argv[4] && !process.argv[4].startsWith("--") ? process.argv[4] : "list";
     const db = openMemoryDb();
@@ -556,11 +566,4 @@ export async function cmdMemory(): Promise<boolean> {
     } finally {
       db.close();
     }
-  }
-
-  console.error(`${c.red}Unknown memory subcommand: ${subcommand}${c.reset}`);
-  console.error(
-    "Use: kit memory index | search <query> | stats | install | uninstall | pal",
-  );
-  return false;
 }
