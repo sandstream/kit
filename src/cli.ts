@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { writeFile, access, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "node:path";
@@ -135,9 +135,11 @@ import { listServices, openService } from "./open.js";
 import { gatherProjectContext } from "./context.js";
 import { runTriage, listTriageTools, type TriageType } from "./triage.js";
 import { parsePkgSpec, installPkg } from "./pkg.js";
-import { openMemoryDb, getStats, searchMessages } from "./memory/db.js";
+import { openMemoryDb, getStats, getMemoryDbPath, searchMessages } from "./memory/db.js";
 import { indexClaudeTranscripts, getClaudeProjectsDir } from "./memory/parser.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
+import { scanDbForSecrets } from "./memory/scan.js";
+import { backupEncrypted, restoreEncrypted } from "./memory/backup.js";
 import { userPromptSubmitReminder, runSessionEndIndex } from "./memory/hook.js";
 import {
   installMemoryHooks,
@@ -4269,6 +4271,9 @@ const COMMAND_HELP: Record<string, string> = {
   "memory search": "Full-text search memory (current project; --global for all)",
   "memory stats": "Show what the local memory store contains",
   "memory install": "Wire UserPromptSubmit + SessionEnd hooks into ~/.claude/settings.json",
+  "memory scan": "Scan the memory store for stored secrets (exit 1 if any found)",
+  "memory backup": "Encrypted backup of the memory store (AES-256-GCM; KIT_MEMORY_PASSPHRASE)",
+  "memory restore": "Restore an encrypted memory backup (e.g. on a new machine)",
   "memory pal": "Pending action ledger — list/add/done/snooze/verify/import 'blocked-on-you' items",
   "memory save": "Bookmark the current session as a named copilot",
   "memory threads": "List saved copilots (current project; --global for all)",
@@ -4821,6 +4826,9 @@ async function cmdMemory(): Promise<boolean> {
     console.log("  kit memory threads          List saved copilots (--global for all)");
     console.log("  kit memory resume <name|n>  Print the resume command for a saved copilot");
     console.log("  kit memory forget <name>    Remove a saved copilot");
+    console.log("  kit memory scan             Scan the store for stored secrets");
+    console.log("  kit memory backup <file>    Encrypted backup (set KIT_MEMORY_PASSPHRASE)");
+    console.log("  kit memory restore <file>   Restore an encrypted backup (new machine)");
     return true;
   }
 
@@ -4924,6 +4932,71 @@ async function cmdMemory(): Promise<boolean> {
     } else {
       console.log(`${c.dim}no kit memory hooks were installed${c.reset}`);
     }
+    return true;
+  }
+
+  if (subcommand === "scan") {
+    const db = openMemoryDb();
+    const hits = scanDbForSecrets(db);
+    db.close();
+    if (jsonMode) {
+      console.log(JSON.stringify(hits));
+      return hits.length === 0;
+    }
+    if (!hits.length) {
+      console.log(`${c.green}✓${c.reset} no stored secrets found in the memory store`);
+      return true;
+    }
+    console.log(`${c.red}⚠ ${hits.length} potential secret(s) found:${c.reset}`);
+    for (const h of hits) {
+      console.log(
+        `  ${c.dim}${h.table}#${h.id}.${h.column}${c.reset}  ${c.bold}${h.label}${c.reset} ${c.dim}${h.preview}${c.reset}`,
+      );
+    }
+    return false; // non-zero exit → usable as a gate
+  }
+
+  if (subcommand === "backup") {
+    const out = process.argv[4];
+    const pass = process.env.KIT_MEMORY_PASSPHRASE ?? flagValue(process.argv, "--passphrase");
+    if (!out) {
+      console.error(`${c.red}usage: kit memory backup <file>  (set KIT_MEMORY_PASSPHRASE)${c.reset}`);
+      return false;
+    }
+    if (!pass) {
+      console.error(
+        `${c.red}set KIT_MEMORY_PASSPHRASE (or --passphrase) — the key is never stored${c.reset}`,
+      );
+      return false;
+    }
+    backupEncrypted(pass, getMemoryDbPath(), out);
+    console.log(`${c.green}✓${c.reset} encrypted backup → ${out} ${c.dim}(AES-256-GCM · scrypt)${c.reset}`);
+    return true;
+  }
+
+  if (subcommand === "restore") {
+    const inFile = process.argv[4];
+    const pass = process.env.KIT_MEMORY_PASSPHRASE ?? flagValue(process.argv, "--passphrase");
+    if (!inFile) {
+      console.error(`${c.red}usage: kit memory restore <file> [--to <path>] [--force]${c.reset}`);
+      return false;
+    }
+    if (!pass) {
+      console.error(`${c.red}set KIT_MEMORY_PASSPHRASE (or --passphrase)${c.reset}`);
+      return false;
+    }
+    const dest = flagValue(process.argv, "--to") ?? getMemoryDbPath();
+    if (existsSync(dest) && !hasFlag(process.argv, "--force")) {
+      console.error(`${c.red}${dest} exists — pass --force to overwrite${c.reset}`);
+      return false;
+    }
+    try {
+      restoreEncrypted(pass, inFile, dest);
+    } catch {
+      console.error(`${c.red}restore failed — wrong passphrase or corrupt backup${c.reset}`);
+      return false;
+    }
+    console.log(`${c.green}✓${c.reset} restored → ${dest}`);
     return true;
   }
 
