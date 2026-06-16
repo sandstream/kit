@@ -77,8 +77,10 @@ store. The store is a single `~/.kit/memory.db` at mode `0600`.
 **Multi-harness.** `kit memory index` is the lead-agent's store but pulls
 transcripts from every supported coding agent on the machine, each tagged with a
 `harness` so recall spans them: **Claude Code** (`~/.claude`), **Codex**
-(`~/.codex/sessions`), and **Gemini CLI** (`~/.gemini/tmp`). Absent agents are
-skipped silently. Adding one is a single parser in `indexAllHarnesses()`.
+(`~/.codex/sessions`), **Gemini CLI** (`~/.gemini/tmp`), and **Continue.dev**
+(`~/.continue/sessions`). Absent agents are skipped silently. Adding one is a
+single parser in `indexAllHarnesses()`. Each parser is built against the agent's
+own serialization format (verified from its source), never guessed.
 
 ### Pending actions (PAL)
 
