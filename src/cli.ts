@@ -135,6 +135,8 @@ import { listServices, openService } from "./open.js";
 import { gatherProjectContext } from "./context.js";
 import { runTriage, listTriageTools, type TriageType } from "./triage.js";
 import { parsePkgSpec, installPkg } from "./pkg.js";
+import { openMemoryDb, getStats } from "./memory/db.js";
+import { indexClaudeTranscripts, getClaudeProjectsDir } from "./memory/parser.js";
 
 const KIT_FILE = ".kit.toml";
 
@@ -4240,6 +4242,9 @@ function cmdVersion(): boolean {
 
 const COMMAND_HELP: Record<string, string> = {
   check:          "Check status of all tools, services, secrets, and lock files",
+  memory:         "Local conversation memory — index transcripts + show stats",
+  "memory index": "Index ~/.claude transcripts into the SQLite memory store",
+  "memory stats": "Show what the local memory store contains",
   init:           "Detect stack, generate .kit.toml, and run full setup",
   upgrade:        "Update lock files from .kit.toml",
   install:        "Install missing tools via mise",
@@ -4767,6 +4772,61 @@ async function showSkippedCommitBanner(): Promise<void> {
   }
 }
 
+/**
+ * `kit memory` — local conversation memory (SQLite + FTS5). Deterministic and
+ * zero-LLM: it stores raw transcripts and searches them; it never calls a model.
+ */
+async function cmdMemory(): Promise<boolean> {
+  const subcommand = process.argv[3];
+  const jsonMode = hasFlag(process.argv, "--json");
+
+  if (!subcommand || subcommand === "--help" || subcommand === "-h") {
+    console.log("kit memory — local conversation memory (SQLite + FTS5)");
+    console.log("\nUsage:");
+    console.log("  kit memory index    Index ~/.claude transcripts into the memory store");
+    console.log("  kit memory stats    Show what the memory store contains");
+    return true;
+  }
+
+  if (subcommand === "index") {
+    const db = openMemoryDb();
+    const t0 = Date.now();
+    const res = indexClaudeTranscripts(db);
+    const ms = Date.now() - t0;
+    db.close();
+    if (jsonMode) {
+      console.log(JSON.stringify({ ...res, ms }));
+      return true;
+    }
+    console.log(
+      `${c.green}✓${c.reset} indexed ${c.bold}${res.messages}${c.reset} messages + ${res.toolUses} tool-uses from ${res.files} sessions ${c.dim}(${ms}ms)${c.reset}`,
+    );
+    console.log(`${c.dim}source: ${getClaudeProjectsDir()}${c.reset}`);
+    return true;
+  }
+
+  if (subcommand === "stats") {
+    const db = openMemoryDb();
+    const s = getStats(db);
+    db.close();
+    if (jsonMode) {
+      console.log(JSON.stringify(s));
+      return true;
+    }
+    console.log(`${c.bold}kit memory${c.reset}  ${c.dim}${s.dbPath}${c.reset}`);
+    console.log(`  sessions   ${s.sessions}`);
+    console.log(`  messages   ${s.messages}`);
+    console.log(`  tool-uses  ${s.toolUses}`);
+    console.log(`  pending    ${s.pendingOpen} ${c.dim}(open action items)${c.reset}`);
+    console.log(`  size       ${Math.round(s.sizeBytes / 1024)} KB`);
+    return true;
+  }
+
+  console.error(`${c.red}Unknown memory subcommand: ${subcommand}${c.reset}`);
+  console.error("Use: kit memory index | kit memory stats");
+  return false;
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];
@@ -4944,6 +5004,9 @@ async function main(): Promise<void> {
         break;
       case "team":
         ok = await cmdTeam();
+        break;
+      case "memory":
+        ok = await cmdMemory();
         break;
       default: {
         console.error(`Unknown command: ${command}`);
