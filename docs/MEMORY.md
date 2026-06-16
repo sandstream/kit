@@ -78,10 +78,14 @@ store. The store is a single `~/.kit/memory.db` at mode `0600`.
 **Multi-harness.** `kit memory index` is the lead-agent's store but pulls
 transcripts from every supported coding agent on the machine, each tagged with a
 `harness` so recall spans them: **Claude Code** (`~/.claude`), **Codex**
-(`~/.codex/sessions`), **Gemini CLI** (`~/.gemini/tmp`), and **Continue.dev**
-(`~/.continue/sessions`). Absent agents are skipped silently. Adding one is a
-single parser in `indexAllHarnesses()`. Each parser is built against the agent's
-own serialization format (verified from its source), never guessed.
+(`~/.codex/sessions`), **Gemini CLI** (`~/.gemini/tmp`), **Continue.dev**
+(`~/.continue/sessions`), and **Cursor** (`state.vscdb`). Absent agents are
+skipped silently. Adding one is a single parser in `indexAllHarnesses()`. Each
+parser is built against the agent's own serialization format (verified from its
+source), never guessed. Cursor's store is app-internal + reverse-engineered, so
+its parser is deliberately defensive — if the shape ever differs it indexes
+nothing rather than risk wrong data. (GitHub Copilot CLI stays out until its
+`events.jsonl` has a documented schema/stability contract.)
 
 ### Pending actions (PAL)
 

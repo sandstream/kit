@@ -22,6 +22,7 @@ import {
 import { indexCodexSessions } from "./codex.js";
 import { indexGeminiSessions } from "./gemini.js";
 import { indexContinueSessions } from "./continue.js";
+import { indexCursorSessions } from "./cursor.js";
 
 export interface IndexResult {
   files: number;
@@ -238,5 +239,6 @@ export function indexAllHarnesses(db: DatabaseSync): HarnessResults {
     codex: indexCodexSessions(db),
     gemini: indexGeminiSessions(db),
     continue: indexContinueSessions(db),
+    cursor: indexCursorSessions(db),
   };
 }
