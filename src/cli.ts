@@ -140,6 +140,13 @@ import { indexClaudeTranscripts, getClaudeProjectsDir } from "./memory/parser.js
 import { getCurrentProjectRoot } from "./memory/project.js";
 import { scanDbForSecrets } from "./memory/scan.js";
 import { backupEncrypted, restoreEncrypted } from "./memory/backup.js";
+import {
+  shareEntry,
+  listAreas,
+  queryArea,
+  getSharedPath,
+  type SharedKind,
+} from "./memory/shared.js";
 import { userPromptSubmitReminder, runSessionEndIndex } from "./memory/hook.js";
 import {
   installMemoryHooks,
@@ -4274,6 +4281,9 @@ const COMMAND_HELP: Record<string, string> = {
   "memory scan": "Scan the memory store for stored secrets (exit 1 if any found)",
   "memory backup": "Encrypted backup of the memory store (AES-256-GCM; KIT_MEMORY_PASSPHRASE)",
   "memory restore": "Restore an encrypted memory backup (e.g. on a new machine)",
+  "memory share": "Promote a curated, secret-scanned entry to the shared (team) memory",
+  "memory areas": "List shared responsibility areas (stripe, whatsapp, …)",
+  "memory area": "Show shared entries for one area (decisions, how-built, status, security)",
   "memory pal": "Pending action ledger — list/add/done/snooze/verify/import 'blocked-on-you' items",
   "memory save": "Bookmark the current session as a named copilot",
   "memory threads": "List saved copilots (current project; --global for all)",
@@ -4829,6 +4839,9 @@ async function cmdMemory(): Promise<boolean> {
     console.log("  kit memory scan             Scan the store for stored secrets");
     console.log("  kit memory backup <file>    Encrypted backup (set KIT_MEMORY_PASSPHRASE)");
     console.log("  kit memory restore <file>   Restore an encrypted backup (new machine)");
+    console.log("  kit memory share …          Promote a curated entry to shared (team) memory");
+    console.log("  kit memory areas            List shared responsibility areas");
+    console.log("  kit memory area <name>      Show shared entries for one area");
     return true;
   }
 
@@ -4931,6 +4944,80 @@ async function cmdMemory(): Promise<boolean> {
       for (const e of removed) console.log(`${c.green}✓${c.reset} removed ${e} hook`);
     } else {
       console.log(`${c.dim}no kit memory hooks were installed${c.reset}`);
+    }
+    return true;
+  }
+
+  if (subcommand === "share") {
+    const area = flagValue(process.argv, "--area");
+    const title = flagValue(process.argv, "--title");
+    const kind = (flagValue(process.argv, "--kind") ?? "note") as SharedKind;
+    const body = flagValue(process.argv, "--body") ?? "";
+    const ref = flagValue(process.argv, "--ref");
+    if (!area || !title) {
+      console.error(
+        `${c.red}usage: kit memory share --area <a> --title <t> [--kind decision|convention|how-built|status|security|note] [--body <b>] [--ref <r>]${c.reset}`,
+      );
+      return false;
+    }
+    const root = getCurrentProjectRoot();
+    try {
+      const e = shareEntry(
+        root,
+        { area, kind, title, body, refs: ref ? [ref] : [] },
+        new Date().toISOString(),
+      );
+      console.log(
+        `${c.green}✓${c.reset} shared ${c.bold}${e.id}${c.reset} to area ${c.bold}${area}${c.reset} ${c.dim}(${getSharedPath(root)})${c.reset}`,
+      );
+      console.log(
+        `${c.dim}commit .kit/shared/memory.jsonl + open a PR — shared memory is reviewed like code${c.reset}`,
+      );
+    } catch (err) {
+      console.error(`${c.red}${(err as Error).message}${c.reset}`);
+      return false;
+    }
+    return true;
+  }
+
+  if (subcommand === "areas") {
+    const areas = listAreas(getCurrentProjectRoot());
+    if (jsonMode) {
+      console.log(JSON.stringify(areas));
+      return true;
+    }
+    if (!areas.length) {
+      console.log(`${c.dim}no shared areas yet — add one with kit memory share${c.reset}`);
+      return true;
+    }
+    console.log(`${c.bold}${areas.length}${c.reset} responsibility area(s):`);
+    for (const a of areas) {
+      console.log(`  ${c.bold}${a.area}${c.reset} ${c.dim}· ${a.count} entr${a.count === 1 ? "y" : "ies"}${c.reset}`);
+    }
+    return true;
+  }
+
+  if (subcommand === "area") {
+    const name = process.argv[4];
+    if (!name) {
+      console.error(`${c.red}usage: kit memory area <name>${c.reset}`);
+      return false;
+    }
+    const entries = queryArea(getCurrentProjectRoot(), name);
+    if (jsonMode) {
+      console.log(JSON.stringify(entries));
+      return true;
+    }
+    if (!entries.length) {
+      console.log(`${c.dim}no shared memory for area '${name}'${c.reset}`);
+      return true;
+    }
+    console.log(`${c.bold}${name}${c.reset} ${c.dim}· ${entries.length} entr${entries.length === 1 ? "y" : "ies"}${c.reset}`);
+    for (const e of entries) {
+      const prov = `${e.author}${e.source_ref ? ` @${e.source_ref}` : ""}`;
+      console.log(`  ${c.bold}[${e.kind}]${c.reset} ${e.title} ${c.dim}— ${prov}${c.reset}`);
+      if (e.body) console.log(`    ${e.body}`);
+      if (e.refs.length) console.log(`    ${c.dim}refs: ${e.refs.join(", ")}${c.reset}`);
     }
     return true;
   }
