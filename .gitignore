@@ -18,3 +18,8 @@ sandstream-kit-*.tgz
 .claude/
 .cursor/
 opencode.json
+
+# editor/cloud-sync conflict copies ("filename 2.ext")
+*\ 2.ts
+*\ 2.js
+*\ 2.md
