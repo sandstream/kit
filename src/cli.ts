@@ -124,6 +124,7 @@ import { promptConfirm } from "./utils/prompt.js";
 import { startMcpServer } from "./mcp-server.js";
 import { c } from "./utils/colors.js";
 import { gatherStatus } from "./status.js";
+import { resolveAllAuth } from "./service-auth.js";
 import { runDoctor } from "./doctor.js";
 import { inspectEnv } from "./env-inspect.js";
 import { detectStack } from "./stack-detector.js";
@@ -139,6 +140,7 @@ import { parsePkgSpec, installPkg } from "./pkg.js";
 import { openMemoryDb, getStats, getMemoryDbPath, searchMessages } from "./memory/db.js";
 import { indexAllHarnesses } from "./memory/parser.js";
 import { mergeDb } from "./memory/merge.js";
+import { buildSuggestPrompt } from "./memory/suggest.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
 import { scanDbForSecrets } from "./memory/scan.js";
 import { backupEncrypted, restoreEncrypted } from "./memory/backup.js";
@@ -643,6 +645,25 @@ async function cmdLogin(): Promise<boolean> {
       `${c.dim}Filtering to service "${serviceFilter}"${retryCount ? ` (retries=${retryCount})` : ""}${c.reset}`,
     );
   }
+
+  // `--plan`: read-only. Show the resolved auth strategy per service (vault /
+  // interactive / capture, + passkey warnings) without logging in to anything.
+  if (hasFlag(args, "--plan")) {
+    const plan = resolveAllAuth(servicesConfig);
+    if (hasFlag(args, "--json")) {
+      console.log(JSON.stringify(plan, null, 2));
+      return true;
+    }
+    console.log(`${c.bold}auth plan${c.reset}  ${c.dim}${plan.length} service(s)${c.reset}`);
+    for (const p of plan) {
+      const tag = p.passkey
+        ? `${c.yellow}${p.strategy} ⚿${c.reset}`
+        : `${c.cyan}${p.strategy}${c.reset}`;
+      console.log(`  ${tag}  ${p.name}  ${c.dim}${p.instruction}${c.reset}`);
+    }
+    return true;
+  }
+
   console.log(`${c.bold}${c.cyan}Authenticating services...${c.reset}`);
 
   return await withGovernance(
@@ -4296,6 +4317,7 @@ const COMMAND_HELP: Record<string, string> = {
   "memory index": "Index ~/.claude transcripts into the SQLite memory store",
   "memory search": "Full-text search memory (current project; --global for all)",
   "memory stats": "Show what the local memory store contains",
+  "memory suggest": "Emit a BYO-LLM review prompt (recent activity + open items) — pipe to your own model",
   "memory merge": "Merge another machine's memory.db into this one (dedup by uuid)",
   "memory install": "Wire UserPromptSubmit + SessionEnd + SessionStart (recovery) hooks into ~/.claude/settings.json",
   "memory scan": "Scan the memory store for stored secrets (exit 1 if any found)",
@@ -4312,6 +4334,7 @@ const COMMAND_HELP: Record<string, string> = {
   upgrade:        "Update lock files from .kit.toml",
   install:        "Install missing tools via mise",
   login:          "Guided login to all configured services",
+  "login --plan": "Show the resolved auth strategy per service (vault/interactive/capture + passkey) without logging in",
   secrets:        "Generate .env.local from template + secret store",
   "secrets sync": "Push resolved secrets to GitHub Actions / .env.ci / stdout",
   "secrets migrate": "Migrate plaintext secrets in .env* → configured vault",
@@ -4934,6 +4957,22 @@ async function cmdMemory(): Promise<boolean> {
     console.log(`  tool-uses  ${s.toolUses}`);
     console.log(`  pending    ${s.pendingOpen} ${c.dim}(open action items)${c.reset}`);
     console.log(`  size       ${Math.round(s.sizeBytes / 1024)} KB`);
+    return true;
+  }
+
+  if (subcommand === "suggest") {
+    // BYO-LLM: kit emits a prompt; it never calls a model. Pipe to your own:
+    //   kit memory suggest | <your-llm>
+    const limitArg = flagValue(process.argv, "--limit");
+    const limit = limitArg ? Math.max(1, parseInt(limitArg, 10) || 30) : undefined;
+    const db = openMemoryDb();
+    const out = buildSuggestPrompt(db, { limit });
+    db.close();
+    if (jsonMode) {
+      console.log(JSON.stringify(out));
+      return true;
+    }
+    console.log(out.prompt);
     return true;
   }
 

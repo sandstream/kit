@@ -23,6 +23,7 @@
 | `kit status [--json]` | Adoption checklist — which subsystems are set up (config, vault, tools, gitignore hygiene, dependency policy, agent-config, memory, hooks) + the next step for each gap. |
 | `kit install` | Install missing tools declared in `[tools]` via mise. |
 | `kit login [--service <name>] [--retry-count <N>]` | Guided login to configured services. Optionally narrow to one service / retry failures with backoff. |
+| `kit login --plan [--json]` | Read-only: show the resolved auth strategy per service (vault / interactive / capture) + a passkey warning for browser logins that can't be scripted on a fresh machine. |
 | `kit skills` | Check status of agent skills declared in `[skills]` against the registry (clawhub default). |
 | `kit fix` | Auto-remediate common gaps (tools, lockfiles, gitignore, hooks, .env.template). |
 | `kit upgrade` | Refresh lockfiles from `.kit.toml`. |
@@ -162,6 +163,7 @@ Local-first second brain — SQLite + FTS5, deterministic, zero model calls. Ful
 | `kit memory index` | Index `~/.claude` transcripts into `~/.kit/memory.db` (idempotent). |
 | `kit memory search <query>` | Full-text recall; defaults to the current project, `--global` across all. |
 | `kit memory stats` | Sessions / messages / tool-uses / DB size. |
+| `kit memory suggest [--limit N] [--json]` | Emit a BYO-LLM review prompt (recent activity + open items) to stdout — pipe to your own model. kit never calls a model. |
 | `kit memory install` / `uninstall` | Wire (or remove) the `UserPromptSubmit` + `SessionEnd` hooks in `~/.claude/settings.json`. |
 | `kit memory scan` | Scan the store for stored secrets (masked; exits 1 if any found). |
 | `kit memory backup <file>` / `restore <file>` | Encrypted AES-256-GCM backup/restore (`KIT_MEMORY_PASSPHRASE`). |
