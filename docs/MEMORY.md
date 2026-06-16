@@ -68,6 +68,7 @@ Keyword search is the default; embeddings remain an explicit, opt-in escalation.
 kit memory index                      # build/refresh from ~/.claude transcripts
 kit memory search <query> [--global]  # FTS5; defaults to the current project, --global = across all
 kit memory stats                      # sessions / messages / tool-uses / size
+kit memory suggest | <your-llm>       # BYO-LLM review: kit emits a prompt, never calls a model
 ```
 
 Search is **project-scoped by default** (the git repo you are in) for relevance
