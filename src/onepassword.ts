@@ -200,6 +200,6 @@ export function generate1PasswordRef(
  */
 export function validate1PasswordRef(ref: string): boolean {
   // ref should be op://vault/item or op://vault/item/field
-  const pattern = /^op:\/\/[^\/]+\/[^\/]+(\/.+)?$/;
+  const pattern = /^op:\/\/[^/]+\/[^/]+(\/.+)?$/;
   return pattern.test(ref);
 }

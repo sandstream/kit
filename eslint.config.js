@@ -77,6 +77,14 @@ export default tseslint.config(
     },
   },
   {
+    // completions.ts generates bash/zsh completion scripts in a template literal
+    // where `$` is uniformly escaped (`\$`) — load-bearing for `\${...}` (prevents
+    // JS interpolation) and kept on bare `\$x` for a consistent, readable template.
+    // De-escaping the bare ones would only create inconsistency + risk.
+    files: ["src/completions.ts"],
+    rules: { "no-useless-escape": "off" },
+  },
+  {
     // Test files: keep correctness rules but exempt the size/complexity metrics —
     // a describe() block is one big "function" + long fixtures are normal there.
     files: ["**/*.test.ts"],
