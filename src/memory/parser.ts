@@ -19,6 +19,7 @@ import {
   isFileIndexed,
   markFileIndexed,
 } from "./db.js";
+import { indexCodexSessions } from "./codex.js";
 
 export interface IndexResult {
   files: number;
@@ -220,4 +221,18 @@ export function indexClaudeTranscripts(db: DatabaseSync): IndexResult {
     }
   }
   return result;
+}
+
+/** Per-harness index results, keyed by harness name. */
+export type HarnessResults = Record<string, IndexResult>;
+
+/**
+ * Index every supported harness's transcripts into the store. Returns per-harness
+ * counts. Adding a harness = one more parser here (Copilot, Gemini, Aider, Cursor…).
+ */
+export function indexAllHarnesses(db: DatabaseSync): HarnessResults {
+  return {
+    "claude-code": indexClaudeTranscripts(db),
+    codex: indexCodexSessions(db),
+  };
 }

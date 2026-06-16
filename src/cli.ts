@@ -136,7 +136,7 @@ import { gatherProjectContext } from "./context.js";
 import { runTriage, listTriageTools, type TriageType } from "./triage.js";
 import { parsePkgSpec, installPkg } from "./pkg.js";
 import { openMemoryDb, getStats, getMemoryDbPath, searchMessages } from "./memory/db.js";
-import { indexClaudeTranscripts, getClaudeProjectsDir } from "./memory/parser.js";
+import { indexAllHarnesses } from "./memory/parser.js";
 import { mergeDb } from "./memory/merge.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
 import { scanDbForSecrets } from "./memory/scan.js";
@@ -4851,17 +4851,33 @@ async function cmdMemory(): Promise<boolean> {
   if (subcommand === "index") {
     const db = openMemoryDb();
     const t0 = Date.now();
-    const res = indexClaudeTranscripts(db);
+    const byHarness = indexAllHarnesses(db);
     const ms = Date.now() - t0;
     db.close();
     if (jsonMode) {
-      console.log(JSON.stringify({ ...res, ms }));
+      console.log(JSON.stringify({ byHarness, ms }));
       return true;
     }
+    let messages = 0;
+    let toolUses = 0;
+    let files = 0;
+    let skipped = 0;
+    for (const r of Object.values(byHarness)) {
+      messages += r.messages;
+      toolUses += r.toolUses;
+      files += r.files;
+      skipped += r.filesSkipped;
+    }
     console.log(
-      `${c.green}✓${c.reset} indexed ${c.bold}${res.messages}${c.reset} messages + ${res.toolUses} tool-uses from ${res.files} sessions${res.filesSkipped ? `, ${res.filesSkipped} unchanged` : ""} ${c.dim}(${ms}ms)${c.reset}`,
+      `${c.green}✓${c.reset} indexed ${c.bold}${messages}${c.reset} messages + ${toolUses} tool-uses from ${files} sessions${skipped ? `, ${skipped} unchanged` : ""} ${c.dim}(${ms}ms)${c.reset}`,
     );
-    console.log(`${c.dim}source: ${getClaudeProjectsDir()}${c.reset}`);
+    for (const [harness, r] of Object.entries(byHarness)) {
+      if (r.files || r.messages) {
+        console.log(
+          `  ${c.dim}${harness}: ${r.messages} msg · ${r.files} sessions${r.filesSkipped ? ` · ${r.filesSkipped} unchanged` : ""}${c.reset}`,
+        );
+      }
+    }
     return true;
   }
 
