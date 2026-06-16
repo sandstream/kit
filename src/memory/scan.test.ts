@@ -32,6 +32,22 @@ describe("memory secret-scan", () => {
     db.close();
   });
 
+  it("attributes a finding to the project it leaked in (via cwd)", () => {
+    const db = openMemoryDb(":memory:");
+    upsertSession(db, { sessionId: "s1", harness: "claude-code" });
+    const fake = "sk_live_" + "C".repeat(24);
+    insertMessage(db, {
+      uuid: "u1",
+      sessionId: "s1",
+      type: "user",
+      content: `key ${fake}`,
+      cwd: "/Users/me/dev/app-a",
+    });
+    const findings = scanDbForSecrets(db);
+    assert.deepEqual(findings[0]?.projects, ["app-a"]);
+    db.close();
+  });
+
   it("returns nothing for a clean db", () => {
     const db = openMemoryDb(":memory:");
     upsertSession(db, { sessionId: "s1", harness: "claude-code" });

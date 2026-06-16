@@ -5040,8 +5040,9 @@ async function cmdMemory(): Promise<boolean> {
     if (high.length) {
       console.log(`${c.red}⚠ ${high.length} high-confidence secret(s):${c.reset}`);
       for (const f of high) {
+        const proj = f.projects.length ? `${c.bold}[${f.projects.join(", ")}]${c.reset}${c.dim} · ` : "";
         console.log(
-          `  ${c.bold}${f.label}${c.reset} ${c.dim}${f.preview}${times(f.count)} · ${f.sample}${c.reset}`,
+          `  ${c.bold}${f.label}${c.reset} ${c.dim}${f.preview}${times(f.count)} · ${proj}${f.sample}${c.reset}`,
         );
       }
     } else {
