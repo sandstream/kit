@@ -10,15 +10,21 @@
  */
 import { openMemoryDb, getStats } from "./db.js";
 import { indexClaudeTranscripts } from "./parser.js";
+import { palList } from "./pal.js";
 
 /** Reminder injected before every prompt. Empty string on any error (fail-open). */
 export function userPromptSubmitReminder(): string {
   try {
     const db = openMemoryDb();
     const s = getStats(db);
+    const open = s.pendingOpen > 0 ? palList(db).slice(0, 3) : [];
     db.close();
-    const pending =
-      s.pendingOpen > 0 ? ` (${s.pendingOpen} open action item(s) tracked)` : "";
+    let pending = "";
+    if (s.pendingOpen > 0) {
+      const titles = open.map((p) => `${p.id} ${p.title}`).join("; ");
+      const more = s.pendingOpen > open.length ? " …" : "";
+      pending = ` ${s.pendingOpen} open action item(s) blocked on you: ${titles}${more}.`;
+    }
     return (
       `You have local conversation memory: ${s.messages} messages indexed. ` +
       "Before answering anything project-specific, run `kit memory search <terms>` " +

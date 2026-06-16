@@ -24,7 +24,7 @@ import type {
   ToolUseInput,
 } from "./types.js";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export function getMemoryDir(): string {
   return process.env.KIT_MEMORY_DIR ?? join(homedir(), ".kit");
@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS pending_actions (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   next_check TEXT,
   snooze_until TEXT,
-  closed_at TEXT
+  closed_at TEXT,
+  verify_passes INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
@@ -123,14 +124,31 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
 END;
 `;
 
+function ensureColumn(
+  db: DatabaseSync,
+  table: string,
+  column: string,
+  decl: string,
+): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((col) => col.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+  }
+}
+
 function migrate(db: DatabaseSync): void {
   db.exec("CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL)");
   db.exec(SCHEMA_SQL);
+  // v2: pending_actions.verify_passes (N=2 auto-verify confirmation). Add to
+  // tables created before this column existed.
+  ensureColumn(db, "pending_actions", "verify_passes", "INTEGER NOT NULL DEFAULT 0");
   const row = db.prepare("SELECT version FROM schema_meta LIMIT 1").get() as
     | { version: number }
     | undefined;
   if (!row) {
     db.prepare("INSERT INTO schema_meta(version) VALUES (?)").run(SCHEMA_VERSION);
+  } else if (row.version < SCHEMA_VERSION) {
+    db.prepare("UPDATE schema_meta SET version = ?").run(SCHEMA_VERSION);
   }
 }
 

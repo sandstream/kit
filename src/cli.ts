@@ -144,6 +144,14 @@ import {
   uninstallMemoryHooks,
   getClaudeSettingsPath,
 } from "./memory/install.js";
+import {
+  palAdd,
+  palList,
+  palDone,
+  palSnooze,
+  palAutoVerify,
+  importLegacyLedger,
+} from "./memory/pal.js";
 
 const KIT_FILE = ".kit.toml";
 
@@ -4254,6 +4262,7 @@ const COMMAND_HELP: Record<string, string> = {
   "memory search": "Full-text search memory (current project; --global for all)",
   "memory stats": "Show what the local memory store contains",
   "memory install": "Wire UserPromptSubmit + SessionEnd hooks into ~/.claude/settings.json",
+  "memory pal": "Pending action ledger — list/add/done/snooze/verify/import 'blocked-on-you' items",
   init:           "Detect stack, generate .kit.toml, and run full setup",
   upgrade:        "Update lock files from .kit.toml",
   install:        "Install missing tools via mise",
@@ -4797,6 +4806,7 @@ async function cmdMemory(): Promise<boolean> {
     console.log("  kit memory stats            Show what the memory store contains");
     console.log("  kit memory install          Wire the 2 hooks into ~/.claude/settings.json");
     console.log("  kit memory uninstall        Remove the hooks");
+    console.log("  kit memory pal [list|add|done|snooze|verify|import]   Pending action ledger");
     return true;
   }
 
@@ -4903,9 +4913,94 @@ async function cmdMemory(): Promise<boolean> {
     return true;
   }
 
+  if (subcommand === "pal") {
+    const action = process.argv[4] ?? "list";
+    const db = openMemoryDb();
+    try {
+      if (action === "list") {
+        const items = palList(db);
+        if (jsonMode) {
+          console.log(JSON.stringify(items));
+          return true;
+        }
+        if (!items.length) {
+          console.log(`${c.dim}no open action items${c.reset}`);
+          return true;
+        }
+        console.log(`${c.bold}${items.length}${c.reset} open action item(s):`);
+        for (const p of items) {
+          const tag = p.kind === "auto" ? ` ${c.dim}· auto${c.reset}` : "";
+          const scope = p.scope ? ` ${c.dim}[${p.scope}]${c.reset}` : "";
+          console.log(`  ${c.bold}${p.id}${c.reset}  ${p.title}${scope}${tag}`);
+        }
+        return true;
+      }
+      if (action === "add") {
+        const title = process.argv.slice(5).filter((a) => !a.startsWith("--")).join(" ").trim();
+        if (!title) {
+          console.error(
+            `${c.red}usage: kit memory pal add <title> [--verify=<cmd>] [--scope=<s>]${c.reset}`,
+          );
+          return false;
+        }
+        const id = palAdd(db, {
+          title,
+          verifyCmd: flagValue(process.argv, "--verify"),
+          scope: flagValue(process.argv, "--scope"),
+        });
+        console.log(`${c.green}✓${c.reset} added ${c.bold}${id}${c.reset}`);
+        return true;
+      }
+      if (action === "done") {
+        const id = process.argv[5];
+        if (!id) {
+          console.error(`${c.red}usage: kit memory pal done <id>${c.reset}`);
+          return false;
+        }
+        console.log(
+          palDone(db, id)
+            ? `${c.green}✓${c.reset} closed ${id}`
+            : `${c.dim}${id} not found or already closed${c.reset}`,
+        );
+        return true;
+      }
+      if (action === "snooze") {
+        const id = process.argv[5];
+        const days = Number(process.argv[6] ?? "7") || 7;
+        if (!id) {
+          console.error(`${c.red}usage: kit memory pal snooze <id> [days]${c.reset}`);
+          return false;
+        }
+        console.log(
+          palSnooze(db, id, days)
+            ? `${c.green}✓${c.reset} snoozed ${id} for ${days}d`
+            : `${c.dim}${id} not found${c.reset}`,
+        );
+        return true;
+      }
+      if (action === "verify") {
+        const r = palAutoVerify(db);
+        console.log(
+          `${c.dim}checked ${r.checked} · closed ${r.closed.length} · reopened ${r.reopened.length}${c.reset}`,
+        );
+        return true;
+      }
+      if (action === "import") {
+        const r = importLegacyLedger(db);
+        console.log(`${c.green}✓${c.reset} imported ${r.imported} item(s) from the legacy ledger`);
+        return true;
+      }
+      console.error(`${c.red}Unknown pal action: ${action}${c.reset}`);
+      console.error("Use: kit memory pal [list|add|done|snooze|verify|import]");
+      return false;
+    } finally {
+      db.close();
+    }
+  }
+
   console.error(`${c.red}Unknown memory subcommand: ${subcommand}${c.reset}`);
   console.error(
-    "Use: kit memory index | search <query> | stats | install | uninstall",
+    "Use: kit memory index | search <query> | stats | install | uninstall | pal",
   );
   return false;
 }
