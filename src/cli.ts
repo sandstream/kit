@@ -152,6 +152,13 @@ import {
   palAutoVerify,
   importLegacyLedger,
 } from "./memory/pal.js";
+import {
+  saveThread,
+  listThreads,
+  removeThread,
+  latestSessionId,
+  resolveThread,
+} from "./memory/threads.js";
 
 const KIT_FILE = ".kit.toml";
 
@@ -4263,6 +4270,9 @@ const COMMAND_HELP: Record<string, string> = {
   "memory stats": "Show what the local memory store contains",
   "memory install": "Wire UserPromptSubmit + SessionEnd hooks into ~/.claude/settings.json",
   "memory pal": "Pending action ledger — list/add/done/snooze/verify/import 'blocked-on-you' items",
+  "memory save": "Bookmark the current session as a named copilot",
+  "memory threads": "List saved copilots (current project; --global for all)",
+  "memory resume": "Print the resume command for a saved copilot (by name or number)",
   init:           "Detect stack, generate .kit.toml, and run full setup",
   upgrade:        "Update lock files from .kit.toml",
   install:        "Install missing tools via mise",
@@ -4807,6 +4817,10 @@ async function cmdMemory(): Promise<boolean> {
     console.log("  kit memory install          Wire the 2 hooks into ~/.claude/settings.json");
     console.log("  kit memory uninstall        Remove the hooks");
     console.log("  kit memory pal [list|add|done|snooze|verify|import]   Pending action ledger");
+    console.log("  kit memory save <name>      Bookmark the current session as a named copilot");
+    console.log("  kit memory threads          List saved copilots (--global for all)");
+    console.log("  kit memory resume <name|n>  Print the resume command for a saved copilot");
+    console.log("  kit memory forget <name>    Remove a saved copilot");
     return true;
   }
 
@@ -4910,6 +4924,80 @@ async function cmdMemory(): Promise<boolean> {
     } else {
       console.log(`${c.dim}no kit memory hooks were installed${c.reset}`);
     }
+    return true;
+  }
+
+  if (subcommand === "save") {
+    const name = process.argv.slice(4).filter((a) => !a.startsWith("--")).join(" ").trim();
+    if (!name) {
+      console.error(`${c.red}usage: kit memory save <name> [--session=<id>]${c.reset}`);
+      return false;
+    }
+    const root = getCurrentProjectRoot();
+    const db = openMemoryDb();
+    const sessionId = flagValue(process.argv, "--session") ?? latestSessionId(db, { projectPath: root });
+    if (!sessionId) {
+      db.close();
+      console.error(`${c.red}no session found for ${root} — index first or pass --session=<id>${c.reset}`);
+      return false;
+    }
+    saveThread(db, { name, sessionId, projectPath: root });
+    db.close();
+    console.log(`${c.green}✓${c.reset} saved copilot ${c.bold}${name}${c.reset} ${c.dim}→ ${sessionId}${c.reset}`);
+    return true;
+  }
+
+  if (subcommand === "threads") {
+    const projectPath = hasFlag(process.argv, "--global") ? undefined : getCurrentProjectRoot();
+    const db = openMemoryDb();
+    const list = listThreads(db, { projectPath });
+    db.close();
+    if (jsonMode) {
+      console.log(JSON.stringify(list));
+      return true;
+    }
+    if (!list.length) {
+      console.log(`${c.dim}no saved copilots${projectPath ? ` in ${projectPath}` : ""}${c.reset}`);
+      return true;
+    }
+    const scope = projectPath ? `${c.dim}in ${projectPath}${c.reset}` : `${c.dim}(global)${c.reset}`;
+    console.log(`${c.bold}${list.length}${c.reset} saved copilot(s) ${scope}:`);
+    list.forEach((t, i) => {
+      console.log(`  ${c.bold}${i + 1}${c.reset}. ${t.name}  ${c.dim}${t.session_id}${c.reset}`);
+    });
+    console.log(`${c.dim}resume with: kit memory resume <name|number>${c.reset}`);
+    return true;
+  }
+
+  if (subcommand === "resume") {
+    const ref = process.argv[4];
+    if (!ref) {
+      console.error(`${c.red}usage: kit memory resume <name|number>${c.reset}`);
+      return false;
+    }
+    const projectPath = hasFlag(process.argv, "--global") ? undefined : getCurrentProjectRoot();
+    const db = openMemoryDb();
+    const t = resolveThread(db, ref, { projectPath });
+    db.close();
+    if (!t) {
+      console.error(`${c.red}no saved copilot '${ref}'${c.reset}`);
+      return false;
+    }
+    console.log(`${c.bold}${t.name}${c.reset} — run:`);
+    console.log(`  claude --resume ${t.session_id}`);
+    return true;
+  }
+
+  if (subcommand === "forget") {
+    const name = process.argv.slice(4).filter((a) => !a.startsWith("--")).join(" ").trim();
+    if (!name) {
+      console.error(`${c.red}usage: kit memory forget <name>${c.reset}`);
+      return false;
+    }
+    const db = openMemoryDb();
+    const ok = removeThread(db, name);
+    db.close();
+    console.log(ok ? `${c.green}✓${c.reset} forgot ${name}` : `${c.dim}no copilot '${name}'${c.reset}`);
     return true;
   }
 
