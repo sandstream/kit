@@ -79,8 +79,9 @@ store. The store is a single `~/.kit/memory.db` at mode `0600`.
 transcripts from every supported coding agent on the machine, each tagged with a
 `harness` so recall spans them: **Claude Code** (`~/.claude`), **Codex**
 (`~/.codex/sessions`), **Gemini CLI** (`~/.gemini/tmp`), **Continue.dev**
-(`~/.continue/sessions`), **Cursor** (`state.vscdb`), and **Amazon Q Developer
-CLI** (`amazon-q/data.sqlite3`). Absent agents are skipped silently. Adding one
+(`~/.continue/sessions`), **Cursor** (`state.vscdb`), **Amazon Q Developer CLI**
+(`amazon-q/data.sqlite3`), and **Cline** (VS Code `saoudrizwan.claude-dev/tasks`).
+Absent agents are skipped silently. Adding one
 is a single parser in `indexAllHarnesses()`. Each parser is built against the
 agent's own serialization format (verified from its source), never guessed. The
 Cursor + Amazon Q parsers read app-internal SQLite defensively — if the shape
