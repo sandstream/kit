@@ -124,6 +124,7 @@ import { promptConfirm } from "./utils/prompt.js";
 import { startMcpServer } from "./mcp-server.js";
 import { c } from "./utils/colors.js";
 import { gatherStatus } from "./status.js";
+import { resolveAllAuth } from "./service-auth.js";
 import { runDoctor } from "./doctor.js";
 import { inspectEnv } from "./env-inspect.js";
 import { detectStack } from "./stack-detector.js";
@@ -643,6 +644,25 @@ async function cmdLogin(): Promise<boolean> {
       `${c.dim}Filtering to service "${serviceFilter}"${retryCount ? ` (retries=${retryCount})` : ""}${c.reset}`,
     );
   }
+
+  // `--plan`: read-only. Show the resolved auth strategy per service (vault /
+  // interactive / capture, + passkey warnings) without logging in to anything.
+  if (hasFlag(args, "--plan")) {
+    const plan = resolveAllAuth(servicesConfig);
+    if (hasFlag(args, "--json")) {
+      console.log(JSON.stringify(plan, null, 2));
+      return true;
+    }
+    console.log(`${c.bold}auth plan${c.reset}  ${c.dim}${plan.length} service(s)${c.reset}`);
+    for (const p of plan) {
+      const tag = p.passkey
+        ? `${c.yellow}${p.strategy} ⚿${c.reset}`
+        : `${c.cyan}${p.strategy}${c.reset}`;
+      console.log(`  ${tag}  ${p.name}  ${c.dim}${p.instruction}${c.reset}`);
+    }
+    return true;
+  }
+
   console.log(`${c.bold}${c.cyan}Authenticating services...${c.reset}`);
 
   return await withGovernance(
@@ -4312,6 +4332,7 @@ const COMMAND_HELP: Record<string, string> = {
   upgrade:        "Update lock files from .kit.toml",
   install:        "Install missing tools via mise",
   login:          "Guided login to all configured services",
+  "login --plan": "Show the resolved auth strategy per service (vault/interactive/capture + passkey) without logging in",
   secrets:        "Generate .env.local from template + secret store",
   "secrets sync": "Push resolved secrets to GitHub Actions / .env.ci / stdout",
   "secrets migrate": "Migrate plaintext secrets in .env* → configured vault",

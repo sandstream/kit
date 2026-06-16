@@ -332,6 +332,9 @@ const ServiceConfigSchema = z
     login: z.string(),
     check: z.string(),
     link: z.string().optional(),
+    /** How kit obtains this service's credential. Inferred when omitted
+     * (interactive if a login command exists, else vault). See service-auth.ts. */
+    auth: z.enum(["vault", "capture", "interactive"]).optional(),
   })
   .passthrough();
 
