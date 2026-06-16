@@ -252,6 +252,24 @@ Production credentials are gated behind explicit env-switching and short-lived e
 - Supply-chain findings auto-append to `.kit-audit.jsonl` (one JSON line per finding) for SIEM ingest
 - Releases ship with SLSA provenance (`npm publish --provenance`), CycloneDX + SPDX SBOMs on every GitHub release, cosign-signed Docker images, and weekly OpenSSF Scorecard
 
+## Memory
+
+`kit memory` gives an agent a local-first, deterministic second brain — it stores
+your raw conversation history and searches it *before answering*, so it pulls
+receipts instead of guessing. SQLite + FTS5, two hooks, no vectors, no model calls.
+A private personal tier (encrypted backup so a stolen laptop doesn't lose your
+context) plus a curated, area-organized **shared** tier that travels with the repo
+and is reviewed like code.
+
+```bash
+kit memory install && kit memory index
+kit memory search "what did we decide about X"   # project-scoped recall
+kit memory area stripe                            # shared: how we built it, status, security
+```
+
+Full reference: [`docs/MEMORY.md`](docs/MEMORY.md). Schema + two-hook design
+credited to [cloudctx](https://github.com/chadptk1238/cloudctx) (MIT).
+
 ## Lock Files
 
 kit uses lock files in `.kit/` to track exact versions of skills and tools:
