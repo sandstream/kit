@@ -152,6 +152,22 @@
 | `kit version` | Print kit version + exit. |
 | `kit completions <bash\|zsh\|fish>` | Output shell completion script for the given shell. |
 
+## Memory
+
+Local-first second brain — SQLite + FTS5, deterministic, zero model calls. Full guide: `docs/MEMORY.md`.
+
+| Command | Purpose |
+|---|---|
+| `kit memory index` | Index `~/.claude` transcripts into `~/.kit/memory.db` (idempotent). |
+| `kit memory search <query>` | Full-text recall; defaults to the current project, `--global` across all. |
+| `kit memory stats` | Sessions / messages / tool-uses / DB size. |
+| `kit memory install` / `uninstall` | Wire (or remove) the `UserPromptSubmit` + `SessionEnd` hooks in `~/.claude/settings.json`. |
+| `kit memory scan` | Scan the store for stored secrets (masked; exits 1 if any found). |
+| `kit memory backup <file>` / `restore <file>` | Encrypted AES-256-GCM backup/restore (`KIT_MEMORY_PASSPHRASE`). |
+| `kit memory pal [list\|add\|done\|snooze\|verify\|import]` | Pending-action ledger; auto-closes on verify. Project-scoped (`--global` for all). |
+| `kit memory save <name>` / `threads` / `resume <name\|n>` / `forget <name>` | Named copilots — bookmark + resume sessions. |
+| `kit memory share …` / `areas` / `area <name>` | Shared, area-organized team memory (committed, secret-scanned, reviewed like code). |
+
 ## Exit codes
 
 | Code | Meaning |

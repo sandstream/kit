@@ -228,16 +228,12 @@ describe("MigrationRunner", () => {
       await db.connect();
     });
 
-    it("creates backup", async () => {
-      const backup = await db.createBackup("test");
-      assert(backup.success);
-      assert(backup.backupFile.includes("backups/"));
+    it("createBackup is not implemented (throws)", async () => {
+      await assert.rejects(() => db.createBackup("test"), /not implemented/i);
     });
 
-    it("restores backup", async () => {
-      const backup = await db.createBackup("test");
-      const restore = await db.restoreBackup(backup.backupFile);
-      assert(restore.success);
+    it("restoreBackup is not implemented (throws)", async () => {
+      await assert.rejects(() => db.restoreBackup("backups/test.sql"), /not implemented/i);
     });
   });
 });

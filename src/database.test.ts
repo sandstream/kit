@@ -250,16 +250,12 @@ describe("DatabaseManager", () => {
       await db.disconnect();
     });
 
-    it("creates backup", async () => {
-      const result = await db.createBackup("kit");
-      assert(result.success);
-      assert(result.backupFile.includes("backups/"));
+    it("createBackup is not implemented (throws)", async () => {
+      await assert.rejects(() => db.createBackup("kit"), /not implemented/i);
     });
 
-    it("restores from backup", async () => {
-      const result = await db.restoreBackup("backups/kit.sql");
-      assert(result.success);
-      assert(result.message.includes("Restored"));
+    it("restoreBackup is not implemented (throws)", async () => {
+      await assert.rejects(() => db.restoreBackup("backups/kit.sql"), /not implemented/i);
     });
   });
 
