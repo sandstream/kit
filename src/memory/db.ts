@@ -162,7 +162,10 @@ export function upsertSession(db: DatabaseSync, s: SessionInput): void {
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(session_id) DO UPDATE SET
        last_message_at = COALESCE(excluded.last_message_at, sessions.last_message_at),
-       project = COALESCE(excluded.project, sessions.project)`,
+       first_message_at = COALESCE(sessions.first_message_at, excluded.first_message_at),
+       project = COALESCE(excluded.project, sessions.project),
+       harness = excluded.harness,
+       is_agent_sidechain = MAX(sessions.is_agent_sidechain, excluded.is_agent_sidechain)`,
   ).run(
     s.sessionId,
     s.harness,
