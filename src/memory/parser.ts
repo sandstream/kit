@@ -20,6 +20,7 @@ import {
   markFileIndexed,
 } from "./db.js";
 import { indexCodexSessions } from "./codex.js";
+import { indexGeminiSessions } from "./gemini.js";
 
 export interface IndexResult {
   files: number;
@@ -234,5 +235,6 @@ export function indexAllHarnesses(db: DatabaseSync): HarnessResults {
   return {
     "claude-code": indexClaudeTranscripts(db),
     codex: indexCodexSessions(db),
+    gemini: indexGeminiSessions(db),
   };
 }

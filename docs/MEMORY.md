@@ -74,6 +74,12 @@ Search is **project-scoped by default** (the git repo you are in) for relevance
 and blast-radius containment; `--global` searches every project in your personal
 store. The store is a single `~/.kit/memory.db` at mode `0600`.
 
+**Multi-harness.** `kit memory index` is the lead-agent's store but pulls
+transcripts from every supported coding agent on the machine, each tagged with a
+`harness` so recall spans them: **Claude Code** (`~/.claude`), **Codex**
+(`~/.codex/sessions`), and **Gemini CLI** (`~/.gemini/tmp`). Absent agents are
+skipped silently. Adding one is a single parser in `indexAllHarnesses()`.
+
 ### Pending actions (PAL)
 
 A structured "blocked-on-you" ledger on top of the raw log — items that survive
