@@ -137,6 +137,7 @@ import { runTriage, listTriageTools, type TriageType } from "./triage.js";
 import { parsePkgSpec, installPkg } from "./pkg.js";
 import { openMemoryDb, getStats, getMemoryDbPath, searchMessages } from "./memory/db.js";
 import { indexClaudeTranscripts, getClaudeProjectsDir } from "./memory/parser.js";
+import { mergeDb } from "./memory/merge.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
 import { scanDbForSecrets } from "./memory/scan.js";
 import { backupEncrypted, restoreEncrypted } from "./memory/backup.js";
@@ -4277,6 +4278,7 @@ const COMMAND_HELP: Record<string, string> = {
   "memory index": "Index ~/.claude transcripts into the SQLite memory store",
   "memory search": "Full-text search memory (current project; --global for all)",
   "memory stats": "Show what the local memory store contains",
+  "memory merge": "Merge another machine's memory.db into this one (dedup by uuid)",
   "memory install": "Wire UserPromptSubmit + SessionEnd hooks into ~/.claude/settings.json",
   "memory scan": "Scan the memory store for stored secrets (exit 1 if any found)",
   "memory backup": "Encrypted backup of the memory store (AES-256-GCM; KIT_MEMORY_PASSPHRASE)",
@@ -4829,6 +4831,7 @@ async function cmdMemory(): Promise<boolean> {
     console.log("  kit memory index            Index ~/.claude transcripts into the memory store");
     console.log("  kit memory search <query>   Search memory (current project; --global for all)");
     console.log("  kit memory stats            Show what the memory store contains");
+    console.log("  kit memory merge <file>     Merge another machine's memory.db into this one");
     console.log("  kit memory install          Wire the 2 hooks into ~/.claude/settings.json");
     console.log("  kit memory uninstall        Remove the hooks");
     console.log("  kit memory pal [list|add|done|snooze|verify|import]   Pending action ledger");
@@ -4859,6 +4862,27 @@ async function cmdMemory(): Promise<boolean> {
       `${c.green}✓${c.reset} indexed ${c.bold}${res.messages}${c.reset} messages + ${res.toolUses} tool-uses from ${res.files} sessions${res.filesSkipped ? `, ${res.filesSkipped} unchanged` : ""} ${c.dim}(${ms}ms)${c.reset}`,
     );
     console.log(`${c.dim}source: ${getClaudeProjectsDir()}${c.reset}`);
+    return true;
+  }
+
+  if (subcommand === "merge") {
+    const sourcePath = process.argv[4];
+    if (!sourcePath) {
+      console.error(`${c.red}usage: kit memory merge <other-machine-memory.db>${c.reset}`);
+      return false;
+    }
+    const db = openMemoryDb();
+    try {
+      const r = mergeDb(db, sourcePath);
+      console.log(
+        `${c.green}✓${c.reset} merged ${c.bold}${r.messages}${c.reset} messages + ${r.toolUses} tool-uses · ${r.sessions} sessions · ${r.pending} pending · ${r.threads} copilots ${c.dim}from ${sourcePath}${c.reset}`,
+      );
+    } catch (err) {
+      db.close();
+      console.error(`${c.red}${(err as Error).message}${c.reset}`);
+      return false;
+    }
+    db.close();
     return true;
   }
 
