@@ -1,8 +1,20 @@
-import { describe, it } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { listServices, findService, getServiceUrl, openService } from "./open.js";
+import { listServices, findService, getServiceUrl, openService, openInBrowser } from "./open.js";
 
 describe("openService", () => {
+  // Force non-interactive so openInBrowser never spawns a real browser window
+  // during the suite (Stripe's dashboard URL would otherwise pop open). Hermetic
+  // regardless of how this file is run, not just via the npm test env.
+  const prev = process.env.KIT_NON_INTERACTIVE;
+  before(() => {
+    process.env.KIT_NON_INTERACTIVE = "1";
+  });
+  after(() => {
+    if (prev === undefined) delete process.env.KIT_NON_INTERACTIVE;
+    else process.env.KIT_NON_INTERACTIVE = prev;
+  });
+
   it("lists all services", () => {
     const services = listServices();
     assert.ok(services.length > 0, "Should have at least one service");
@@ -68,7 +80,8 @@ describe("openService", () => {
   });
 
   it("returns proper result for valid service", async () => {
-    // Mock openInBrowser to avoid actually opening URLs in tests
+    // openInBrowser is a no-op here (KIT_NON_INTERACTIVE set above) — it returns
+    // the URL instead of spawning a browser, so this stays hermetic.
     const result = await openService("stripe", {});
 
     assert.ok(result, "Should return result object");
@@ -84,6 +97,13 @@ describe("openService", () => {
     assert.equal(result.success, false);
     assert.ok(result.message.includes("Unknown service"));
     assert.equal(result.url, "");
+  });
+
+  it("openInBrowser never spawns a browser in non-interactive mode", async () => {
+    // Guards against the regression where the suite popped Stripe's dashboard.
+    const result = await openInBrowser("https://dashboard.stripe.com");
+    assert.equal(result.success, true);
+    assert.match(result.message, /visit: https:\/\/dashboard\.stripe\.com/i);
   });
 
   it("includes correct service label in dashboard URLs", () => {

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { platform } from "node:os";
+import { isNonInteractive } from "./environment.js";
 
 export interface ServiceDashboard {
   name: string;
@@ -110,6 +111,13 @@ export function getServiceUrl(name: string, env: Record<string, string>): string
  * Falls back to printing the URL if opening fails.
  */
 export async function openInBrowser(url: string): Promise<{ success: boolean; message: string }> {
+  // Never spawn a browser in automation/CI/tests — print the URL instead. This
+  // mirrors login.ts's runInteractive guard and keeps `npm test` hermetic
+  // (no service's dashboard, e.g. Stripe's, pops a window during the suite).
+  if (isNonInteractive()) {
+    return { success: true, message: `Non-interactive — visit: ${url}` };
+  }
+
   // Determine the open command based on platform
   const cmd = platform() === "darwin" ? "open" : platform() === "win32" ? "start" : "xdg-open";
 
