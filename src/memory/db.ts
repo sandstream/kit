@@ -24,7 +24,7 @@ import type {
   ToolUseInput,
 } from "./types.js";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export function getMemoryDir(): string {
   return process.env.KIT_MEMORY_DIR ?? join(homedir(), ".kit");
@@ -100,6 +100,13 @@ CREATE TABLE IF NOT EXISTS pending_actions (
   verify_passes INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS file_index (
+  path TEXT PRIMARY KEY,
+  mtime_ms INTEGER NOT NULL,
+  size INTEGER NOT NULL,
+  indexed_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_type ON messages(type);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
@@ -172,6 +179,32 @@ export function openMemoryDb(path?: string): DatabaseSync {
     }
   }
   return db;
+}
+
+/** Has this file already been indexed at exactly this mtime + size? (incremental index) */
+export function isFileIndexed(
+  db: DatabaseSync,
+  path: string,
+  mtimeMs: number,
+  size: number,
+): boolean {
+  return !!db
+    .prepare("SELECT 1 FROM file_index WHERE path = ? AND mtime_ms = ? AND size = ?")
+    .get(path, mtimeMs, size);
+}
+
+/** Record (or refresh) a file's mtime + size after indexing it. */
+export function markFileIndexed(
+  db: DatabaseSync,
+  path: string,
+  mtimeMs: number,
+  size: number,
+): void {
+  db.prepare(
+    `INSERT INTO file_index (path, mtime_ms, size, indexed_at)
+     VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT(path) DO UPDATE SET mtime_ms = excluded.mtime_ms, size = excluded.size, indexed_at = datetime('now')`,
+  ).run(path, mtimeMs, size);
 }
 
 export function upsertSession(db: DatabaseSync, s: SessionInput): void {

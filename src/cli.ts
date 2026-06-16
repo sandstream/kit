@@ -4856,7 +4856,7 @@ async function cmdMemory(): Promise<boolean> {
       return true;
     }
     console.log(
-      `${c.green}✓${c.reset} indexed ${c.bold}${res.messages}${c.reset} messages + ${res.toolUses} tool-uses from ${res.files} sessions ${c.dim}(${ms}ms)${c.reset}`,
+      `${c.green}✓${c.reset} indexed ${c.bold}${res.messages}${c.reset} messages + ${res.toolUses} tool-uses from ${res.files} sessions${res.filesSkipped ? `, ${res.filesSkipped} unchanged` : ""} ${c.dim}(${ms}ms)${c.reset}`,
     );
     console.log(`${c.dim}source: ${getClaudeProjectsDir()}${c.reset}`);
     return true;

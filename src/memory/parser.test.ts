@@ -107,11 +107,15 @@ describe("memory parser — indexing", () => {
     db.close();
   });
 
-  it("is idempotent — re-indexing adds no duplicate rows", () => {
+  it("is idempotent + incremental — re-indexing skips the unchanged file", () => {
     const db = openMemoryDb(":memory:");
-    indexClaudeTranscripts(db);
+    const first = indexClaudeTranscripts(db);
+    assert.equal(first.files, 1);
+    assert.equal(first.filesSkipped, 0);
     const second = indexClaudeTranscripts(db);
     assert.equal(second.messages, 0); // nothing new on the second pass
+    assert.equal(second.files, 0); // the file was not re-read
+    assert.equal(second.filesSkipped, 1); // it was skipped (unchanged mtime + size)
     assert.equal(getStats(db).messages, 2);
     db.close();
   });
