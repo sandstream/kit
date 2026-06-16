@@ -53,7 +53,7 @@ export const expoEasAdapter: ServiceAdapter = {
       }
       
       // Step 2: Check if EXPO_TOKEN is already set
-      let expoToken = context.existingEnv.EXPO_TOKEN;
+      const expoToken = context.existingEnv.EXPO_TOKEN;
       
       if (!expoToken) {
         return {

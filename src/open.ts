@@ -124,10 +124,8 @@ export async function openInBrowser(url: string): Promise<{ success: boolean; me
   return new Promise((resolve) => {
     const child = spawn(cmd, [url], { stdio: "pipe" });
 
-    let timeout: ReturnType<typeof setTimeout>;
-
     // Set a timeout to consider it successful if no error within 100ms
-    timeout = setTimeout(() => {
+    const timeout = setTimeout(() => {
       resolve({
         success: true,
         message: `Opened in browser: ${url}`,

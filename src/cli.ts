@@ -4145,7 +4145,7 @@ async function cmdOpen(): Promise<boolean> {
   const serviceName = args[1];
 
   // Load env from .env.local for dashboard URL resolution
-  let env: Record<string, string> = {};
+  const env: Record<string, string> = {};
   try {
     const envPath = resolve(process.cwd(), ".env.local");
     const { readFileSync } = await import("node:fs");

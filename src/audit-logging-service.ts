@@ -209,7 +209,7 @@ export function getChangeHistory(
   limit: number = 50,
   offset: number = 0,
 ): { history: ChangeHistory[]; total: number } {
-  let all = Array.from(changeHistory.values()).filter((h) => h.resource_id === resource_id);
+  const all = Array.from(changeHistory.values()).filter((h) => h.resource_id === resource_id);
 
   all.sort(
     (a, b) =>

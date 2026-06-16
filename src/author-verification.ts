@@ -249,7 +249,7 @@ export class AuthorVerificationSystem {
     claVersion: string,
     ipAddress?: string,
   ): Promise<VerificationResult> {
-    let record = this.records.get(authorId);
+    const record = this.records.get(authorId);
     if (!record) {
       return {
         success: false,
