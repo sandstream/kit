@@ -18,17 +18,28 @@ describe("memory encrypted backup / restore", () => {
     insertMessage(db, { uuid: "u1", sessionId: "s1", type: "user", content: "october plans" });
     db.close();
 
-    backupEncrypted("correct horse battery", src, enc);
+    backupEncrypted("Galaxy-Vortex-Quartz-2026-x9", src, enc);
     assert.ok(existsSync(enc));
 
     assert.throws(() => restoreEncrypted("wrong passphrase", enc, dest), /./);
     assert.ok(!existsSync(dest), "no plaintext db is written on a failed restore");
 
-    restoreEncrypted("correct horse battery", enc, dest);
+    restoreEncrypted("Galaxy-Vortex-Quartz-2026-x9", enc, dest);
     db = openMemoryDb(dest);
     assert.equal(getStats(db).messages, 1);
     db.close();
 
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("refuses a too-short or obviously-weak passphrase (fail before encrypting)", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "kit-bak3-"));
+    const src = join(tmp, "memory.db");
+    const enc = join(tmp, "backup.kitmem");
+    openMemoryDb(src).close();
+    assert.throws(() => backupEncrypted("short", src, enc), /weak/);
+    assert.throws(() => backupEncrypted("valfri-stark-passphrase", src, enc), /weak/); // long but placeholder
+    assert.ok(!existsSync(enc), "no backup is written when the passphrase is rejected");
     rmSync(tmp, { recursive: true, force: true });
   });
 

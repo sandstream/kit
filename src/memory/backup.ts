@@ -23,6 +23,36 @@ function deriveKey(passphrase: string, salt: Buffer): Buffer {
   return scryptSync(passphrase, salt, 32);
 }
 
+const MIN_PASSPHRASE_LEN = 12;
+// Substrings that mark an obviously guessable / placeholder passphrase. A long
+// phrase is worthless if it is predictable — the passphrase is the ONLY thing
+// protecting an encrypted backup that may sit on a USB stick or in the cloud.
+const WEAK_MARKERS = [
+  "passphrase",
+  "password",
+  "changeme",
+  "example",
+  "valfri",
+  "correct horse",
+  "testpass",
+  "123456",
+];
+
+/** Reject a too-short or obviously-weak backup passphrase (fail before encrypting). */
+export function validatePassphrase(passphrase: string): void {
+  if (passphrase.length < MIN_PASSPHRASE_LEN) {
+    throw new Error(
+      `passphrase too weak: use at least ${MIN_PASSPHRASE_LEN} characters — it is the only thing protecting your encrypted backup`,
+    );
+  }
+  const low = passphrase.toLowerCase();
+  if (WEAK_MARKERS.some((m) => low.includes(m))) {
+    throw new Error(
+      "passphrase too weak: it looks like an example/placeholder — choose a long, non-obvious phrase",
+    );
+  }
+}
+
 /** Encrypt the memory DB file into `outPath`. WAL is checkpointed first so the file is complete. */
 export function backupEncrypted(
   passphrase: string,
@@ -30,6 +60,7 @@ export function backupEncrypted(
   outPath?: string,
 ): void {
   if (!outPath) throw new Error("backupEncrypted requires an output path");
+  validatePassphrase(passphrase);
   // Flush WAL into the main file so reading the .db captures everything.
   const db = openMemoryDb(srcPath);
   db.exec("PRAGMA wal_checkpoint(TRUNCATE)");

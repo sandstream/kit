@@ -5078,7 +5078,12 @@ async function cmdMemory(): Promise<boolean> {
       );
       return false;
     }
-    backupEncrypted(pass, getMemoryDbPath(), out);
+    try {
+      backupEncrypted(pass, getMemoryDbPath(), out);
+    } catch (err) {
+      console.error(`${c.red}${(err as Error).message}${c.reset}`);
+      return false;
+    }
     console.log(`${c.green}✓${c.reset} encrypted backup → ${out} ${c.dim}(AES-256-GCM · scrypt)${c.reset}`);
     return true;
   }
