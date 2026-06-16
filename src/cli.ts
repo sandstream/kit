@@ -5024,23 +5024,45 @@ async function cmdMemory(): Promise<boolean> {
 
   if (subcommand === "scan") {
     const db = openMemoryDb();
-    const hits = scanDbForSecrets(db);
+    const findings = scanDbForSecrets(db);
     db.close();
     if (jsonMode) {
-      console.log(JSON.stringify(hits));
-      return hits.length === 0;
+      console.log(JSON.stringify(findings));
+      return !findings.some((f) => f.confidence === "high");
     }
-    if (!hits.length) {
+    if (!findings.length) {
       console.log(`${c.green}✓${c.reset} no stored secrets found in the memory store`);
       return true;
     }
-    console.log(`${c.red}⚠ ${hits.length} potential secret(s) found:${c.reset}`);
-    for (const h of hits) {
-      console.log(
-        `  ${c.dim}${h.table}#${h.id}.${h.column}${c.reset}  ${c.bold}${h.label}${c.reset} ${c.dim}${h.preview}${c.reset}`,
-      );
+    const high = findings.filter((f) => f.confidence === "high");
+    const heuristic = findings.filter((f) => f.confidence === "heuristic");
+    const times = (n: number) => (n > 1 ? ` ×${n}` : "");
+    if (high.length) {
+      console.log(`${c.red}⚠ ${high.length} high-confidence secret(s):${c.reset}`);
+      for (const f of high) {
+        console.log(
+          `  ${c.bold}${f.label}${c.reset} ${c.dim}${f.preview}${times(f.count)} · ${f.sample}${c.reset}`,
+        );
+      }
+    } else {
+      console.log(`${c.green}✓${c.reset} no high-confidence secrets`);
     }
-    return false; // non-zero exit → usable as a gate
+    if (heuristic.length) {
+      const showAll = hasFlag(process.argv, "--all");
+      if (showAll) {
+        console.log(
+          `${c.dim}${heuristic.length} heuristic match(es) (KEY=value patterns — usually env vars / paths):${c.reset}`,
+        );
+        for (const f of heuristic) {
+          console.log(`  ${c.dim}${f.label} ${f.preview}${times(f.count)} · ${f.sample}${c.reset}`);
+        }
+      } else {
+        console.log(
+          `${c.dim}+ ${heuristic.length} heuristic match(es) (likely env vars / paths) — run with --all to see${c.reset}`,
+        );
+      }
+    }
+    return high.length === 0; // exit non-zero only on high-confidence findings
   }
 
   if (subcommand === "backup") {
