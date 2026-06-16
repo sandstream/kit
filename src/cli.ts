@@ -125,6 +125,7 @@ import { promptConfirm } from "./utils/prompt.js";
 import { startMcpServer } from "./mcp-server.js";
 import { c } from "./utils/colors.js";
 import { gatherStatus } from "./status.js";
+import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
 import { resolveAllAuth } from "./service-auth.js";
 import { runDoctor } from "./doctor.js";
 import { inspectEnv } from "./env-inspect.js";
@@ -174,16 +175,10 @@ import {
   resolveThread,
 } from "./memory/threads.js";
 
-const KIT_FILE = ".kit.toml";
-
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const KIT_VERSION = (
   JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8")) as { version: string }
 ).version;
-
-function resolveConfigPath(): string {
-  return resolve(process.cwd(), KIT_FILE);
-}
 
 interface JsonCheck {
   name: string;
