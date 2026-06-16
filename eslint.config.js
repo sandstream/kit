@@ -61,6 +61,22 @@ export default tseslint.config(
     },
   },
   {
+    // Type-aware pass — only the two promise rules (not the full typed-recommended,
+    // which would add a large new backlog). These catch real bugs an async CLI is
+    // prone to: an unawaited promise that silently swallows failures.
+    files: ["src/**/*.ts"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-misused-promises": "error",
+    },
+  },
+  {
     // Test files: keep correctness rules but exempt the size/complexity metrics —
     // a describe() block is one big "function" + long fixtures are normal there.
     files: ["**/*.test.ts"],
@@ -68,6 +84,9 @@ export default tseslint.config(
       "max-lines-per-function": "off",
       "max-lines": "off",
       complexity: "off",
+      // node:test's it()/test() return promises by design — not floating bugs.
+      "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-misused-promises": "off",
     },
   },
 );

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { writeFile, access, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join, basename } from "node:path";
@@ -3063,10 +3063,9 @@ function emitGitlabJunit(checks: JsonCheck[], allOk: boolean): void {
   }
   lines.push(`  </testsuite>`, `</testsuites>`);
   const xml = lines.join("\n");
-  // Write to file for GitLab artifact collection
-  import("node:fs/promises").then(({ writeFile }) =>
-    writeFile("kit-report.xml", xml, "utf8")
-  );
+  // Write to file for GitLab artifact collection — synchronous so the report is
+  // guaranteed flushed before this (sync) function returns.
+  writeFileSync("kit-report.xml", xml, "utf8");
   if (!allOk || warnings.length > 0) {
     console.log(`CI report written to kit-report.xml (${failures.length} failures, ${warnings.length} warnings)`);
   }
@@ -5677,4 +5676,6 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+// Entrypoint — fire-and-forget by design; main() handles its own errors and sets
+// process.exitCode. `void` marks the intentional non-await for no-floating-promises.
+void main();
