@@ -134,12 +134,44 @@ export async function checkWebSearch(config?: WebSearchConfig): Promise<WebSearc
       }
 
     case "google":
-      return {
-        provider,
-        configured: true,
-        healthy: true,
-        error: "Google Search not yet implemented in kit",
-      };
+      if (!config.apiKey || !config.cx) {
+        return {
+          provider,
+          configured: false,
+          healthy: false,
+          error: "Google Custom Search needs web.search.apiKey + web.search.cx (Programmable Search engine id)",
+        };
+      }
+      try {
+        // Custom Search JSON API — key + cx are query params by design.
+        const response = await fetchWithTimeout(
+          `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(config.apiKey)}&cx=${encodeURIComponent(config.cx)}&q=test&num=1`,
+        );
+        if (response.ok) {
+          return { provider, configured: true, healthy: true };
+        }
+        if (response.status === 400 || response.status === 401 || response.status === 403) {
+          return {
+            provider,
+            configured: true,
+            healthy: false,
+            error: "Invalid Google API key or cx (request rejected)",
+          };
+        }
+        return {
+          provider,
+          configured: true,
+          healthy: false,
+          error: `API returned status ${response.status}`,
+        };
+      } catch (err) {
+        return {
+          provider,
+          configured: true,
+          healthy: false,
+          error: err instanceof Error ? err.message : "API check failed",
+        };
+      }
 
     case "custom":
       if (!url) {

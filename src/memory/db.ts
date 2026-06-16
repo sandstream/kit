@@ -24,7 +24,7 @@ import type {
   ToolUseInput,
 } from "./types.js";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export function getMemoryDir(): string {
   return process.env.KIT_MEMORY_DIR ?? join(homedir(), ".kit");
@@ -100,6 +100,13 @@ CREATE TABLE IF NOT EXISTS pending_actions (
   verify_passes INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS file_index (
+  path TEXT PRIMARY KEY,
+  mtime_ms INTEGER NOT NULL,
+  size INTEGER NOT NULL,
+  indexed_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_type ON messages(type);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
@@ -172,6 +179,32 @@ export function openMemoryDb(path?: string): DatabaseSync {
     }
   }
   return db;
+}
+
+/** Has this file already been indexed at exactly this mtime + size? (incremental index) */
+export function isFileIndexed(
+  db: DatabaseSync,
+  path: string,
+  mtimeMs: number,
+  size: number,
+): boolean {
+  return !!db
+    .prepare("SELECT 1 FROM file_index WHERE path = ? AND mtime_ms = ? AND size = ?")
+    .get(path, mtimeMs, size);
+}
+
+/** Record (or refresh) a file's mtime + size after indexing it. */
+export function markFileIndexed(
+  db: DatabaseSync,
+  path: string,
+  mtimeMs: number,
+  size: number,
+): void {
+  db.prepare(
+    `INSERT INTO file_index (path, mtime_ms, size, indexed_at)
+     VALUES (?, ?, ?, datetime('now'))
+     ON CONFLICT(path) DO UPDATE SET mtime_ms = excluded.mtime_ms, size = excluded.size, indexed_at = datetime('now')`,
+  ).run(path, mtimeMs, size);
 }
 
 export function upsertSession(db: DatabaseSync, s: SessionInput): void {
@@ -271,6 +304,32 @@ export function searchMessages(
        JOIN messages m ON m.id = f.rowid
        WHERE ${where}
        ORDER BY rank
+       LIMIT ?`,
+    )
+    .all(...params) as unknown as SearchHit[];
+}
+
+/**
+ * Most-recent messages by wall-clock time (newest first) — the basis for session
+ * recovery (re-injecting "where you left off" after a compaction/resume). Unlike
+ * searchMessages this needs no query; pass opts.projectPath to scope to one repo.
+ * Skips empty-content rows so the recovery block stays signal, not blank tool turns.
+ */
+export function recentMessages(db: DatabaseSync, opts: SearchOptions = {}): SearchHit[] {
+  const limit = opts.limit ?? 10;
+  const params: (string | number)[] = [];
+  let where = "content IS NOT NULL AND content != ''";
+  if (opts.projectPath) {
+    where += " AND (cwd = ? OR cwd LIKE ?)";
+    params.push(opts.projectPath, `${opts.projectPath}/%`);
+  }
+  params.push(limit);
+  return db
+    .prepare(
+      `SELECT id, uuid, session_id AS sessionId, role, content, timestamp
+       FROM messages
+       WHERE ${where}
+       ORDER BY timestamp DESC, id DESC
        LIMIT ?`,
     )
     .all(...params) as unknown as SearchHit[];

@@ -20,6 +20,7 @@
 | `kit init` | Auto-detect project stack → generate `.kit.toml` + lockfiles. |
 | `kit setup` | 5-step orchestrator: install → hooks → login → secrets → check. |
 | `kit check` | Verify tools / services / secrets / skills / hooks / security / tests. |
+| `kit status [--json]` | Adoption checklist — which subsystems are set up (config, vault, tools, gitignore hygiene, dependency policy, agent-config, memory, hooks) + the next step for each gap. |
 | `kit install` | Install missing tools declared in `[tools]` via mise. |
 | `kit login [--service <name>] [--retry-count <N>]` | Guided login to configured services. Optionally narrow to one service / retry failures with backoff. |
 | `kit skills` | Check status of agent skills declared in `[skills]` against the registry (clawhub default). |

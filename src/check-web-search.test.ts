@@ -126,11 +126,29 @@ describe("checkWebSearch - brave", () => {
 });
 
 describe("checkWebSearch - google", () => {
-  it("returns healthy with not-implemented note", async () => {
+  afterEach(() => mock.restoreAll());
+
+  it("returns not configured without apiKey + cx", async () => {
     const result = await checkWebSearch({ provider: "google" });
+    assert.equal(result.configured, false);
+    assert.equal(result.healthy, false);
+    assert.ok(result.error?.includes("cx"));
+  });
+
+  it("returns healthy with valid apiKey + cx (200 response)", async () => {
+    mock.method(globalThis, "fetch", async () =>
+      new Response(JSON.stringify({ items: [] }), { status: 200 }),
+    );
+    const result = await checkWebSearch({ provider: "google", apiKey: "k", cx: "engine-id" });
     assert.equal(result.configured, true);
     assert.equal(result.healthy, true);
-    assert.ok(result.error?.includes("not yet implemented"));
+  });
+
+  it("returns unhealthy on 403 (invalid key or cx)", async () => {
+    mock.method(globalThis, "fetch", async () => new Response("Forbidden", { status: 403 }));
+    const result = await checkWebSearch({ provider: "google", apiKey: "k", cx: "x" });
+    assert.equal(result.healthy, false);
+    assert.ok(result.error?.includes("Invalid"));
   });
 });
 

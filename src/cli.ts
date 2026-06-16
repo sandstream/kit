@@ -123,6 +123,7 @@ import { cmdFix } from "./fix.js";
 import { promptConfirm } from "./utils/prompt.js";
 import { startMcpServer } from "./mcp-server.js";
 import { c } from "./utils/colors.js";
+import { gatherStatus } from "./status.js";
 import { runDoctor } from "./doctor.js";
 import { inspectEnv } from "./env-inspect.js";
 import { detectStack } from "./stack-detector.js";
@@ -136,7 +137,8 @@ import { gatherProjectContext } from "./context.js";
 import { runTriage, listTriageTools, type TriageType } from "./triage.js";
 import { parsePkgSpec, installPkg } from "./pkg.js";
 import { openMemoryDb, getStats, getMemoryDbPath, searchMessages } from "./memory/db.js";
-import { indexClaudeTranscripts, getClaudeProjectsDir } from "./memory/parser.js";
+import { indexAllHarnesses } from "./memory/parser.js";
+import { mergeDb } from "./memory/merge.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
 import { scanDbForSecrets } from "./memory/scan.js";
 import { backupEncrypted, restoreEncrypted } from "./memory/backup.js";
@@ -147,7 +149,7 @@ import {
   getSharedPath,
   type SharedKind,
 } from "./memory/shared.js";
-import { userPromptSubmitReminder, runSessionEndIndex } from "./memory/hook.js";
+import { userPromptSubmitReminder, runSessionEndIndex, sessionStartRecovery } from "./memory/hook.js";
 import {
   installMemoryHooks,
   uninstallMemoryHooks,
@@ -4182,6 +4184,22 @@ async function cmdContext(): Promise<boolean> {
   }
 }
 
+async function cmdStatus(): Promise<boolean> {
+  const items = await gatherStatus();
+  if (hasFlag(process.argv, "--json")) {
+    console.log(JSON.stringify(items, null, 2));
+    return true;
+  }
+  const done = items.filter((i) => i.ok).length;
+  console.log(`${c.bold}kit status${c.reset}  ${c.dim}${done}/${items.length} set up${c.reset}`);
+  for (const item of items) {
+    const mark = item.ok ? `${c.green}✓${c.reset}` : `${c.yellow}○${c.reset}`;
+    const hint = !item.ok && item.hint ? `  ${c.dim}→ ${item.hint}${c.reset}` : "";
+    console.log(`  ${mark} ${item.label}  ${c.dim}${item.detail}${c.reset}${hint}`);
+  }
+  return true;
+}
+
 async function cmdWhoami(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
 
@@ -4272,12 +4290,14 @@ function cmdVersion(): boolean {
 }
 
 const COMMAND_HELP: Record<string, string> = {
+  status:         "Adoption checklist — what's set up across kit + the next step for each gap",
   check:          "Check status of all tools, services, secrets, and lock files",
   memory:         "Local conversation memory — index transcripts + show stats",
   "memory index": "Index ~/.claude transcripts into the SQLite memory store",
   "memory search": "Full-text search memory (current project; --global for all)",
   "memory stats": "Show what the local memory store contains",
-  "memory install": "Wire UserPromptSubmit + SessionEnd hooks into ~/.claude/settings.json",
+  "memory merge": "Merge another machine's memory.db into this one (dedup by uuid)",
+  "memory install": "Wire UserPromptSubmit + SessionEnd + SessionStart (recovery) hooks into ~/.claude/settings.json",
   "memory scan": "Scan the memory store for stored secrets (exit 1 if any found)",
   "memory backup": "Encrypted backup of the memory store (AES-256-GCM; KIT_MEMORY_PASSPHRASE)",
   "memory restore": "Restore an encrypted memory backup (e.g. on a new machine)",
@@ -4829,6 +4849,7 @@ async function cmdMemory(): Promise<boolean> {
     console.log("  kit memory index            Index ~/.claude transcripts into the memory store");
     console.log("  kit memory search <query>   Search memory (current project; --global for all)");
     console.log("  kit memory stats            Show what the memory store contains");
+    console.log("  kit memory merge <file>     Merge another machine's memory.db into this one");
     console.log("  kit memory install          Wire the 2 hooks into ~/.claude/settings.json");
     console.log("  kit memory uninstall        Remove the hooks");
     console.log("  kit memory pal [list|add|done|snooze|verify|import]   Pending action ledger");
@@ -4848,17 +4869,54 @@ async function cmdMemory(): Promise<boolean> {
   if (subcommand === "index") {
     const db = openMemoryDb();
     const t0 = Date.now();
-    const res = indexClaudeTranscripts(db);
+    const byHarness = indexAllHarnesses(db);
     const ms = Date.now() - t0;
     db.close();
     if (jsonMode) {
-      console.log(JSON.stringify({ ...res, ms }));
+      console.log(JSON.stringify({ byHarness, ms }));
       return true;
     }
+    let messages = 0;
+    let toolUses = 0;
+    let files = 0;
+    let skipped = 0;
+    for (const r of Object.values(byHarness)) {
+      messages += r.messages;
+      toolUses += r.toolUses;
+      files += r.files;
+      skipped += r.filesSkipped;
+    }
     console.log(
-      `${c.green}✓${c.reset} indexed ${c.bold}${res.messages}${c.reset} messages + ${res.toolUses} tool-uses from ${res.files} sessions ${c.dim}(${ms}ms)${c.reset}`,
+      `${c.green}✓${c.reset} indexed ${c.bold}${messages}${c.reset} messages + ${toolUses} tool-uses from ${files} sessions${skipped ? `, ${skipped} unchanged` : ""} ${c.dim}(${ms}ms)${c.reset}`,
     );
-    console.log(`${c.dim}source: ${getClaudeProjectsDir()}${c.reset}`);
+    for (const [harness, r] of Object.entries(byHarness)) {
+      if (r.files || r.messages) {
+        console.log(
+          `  ${c.dim}${harness}: ${r.messages} msg · ${r.files} sessions${r.filesSkipped ? ` · ${r.filesSkipped} unchanged` : ""}${c.reset}`,
+        );
+      }
+    }
+    return true;
+  }
+
+  if (subcommand === "merge") {
+    const sourcePath = process.argv[4];
+    if (!sourcePath) {
+      console.error(`${c.red}usage: kit memory merge <other-machine-memory.db>${c.reset}`);
+      return false;
+    }
+    const db = openMemoryDb();
+    try {
+      const r = mergeDb(db, sourcePath);
+      console.log(
+        `${c.green}✓${c.reset} merged ${c.bold}${r.messages}${c.reset} messages + ${r.toolUses} tool-uses · ${r.sessions} sessions · ${r.pending} pending · ${r.threads} copilots ${c.dim}from ${sourcePath}${c.reset}`,
+      );
+    } catch (err) {
+      db.close();
+      console.error(`${c.red}${(err as Error).message}${c.reset}`);
+      return false;
+    }
+    db.close();
     return true;
   }
 
@@ -4924,6 +4982,11 @@ async function cmdMemory(): Promise<boolean> {
     }
     if (event === "session-end") {
       runSessionEndIndex();
+      return true;
+    }
+    if (event === "session-start") {
+      const text = sessionStartRecovery();
+      if (text) console.log(text);
       return true;
     }
     console.error(`${c.red}Unknown hook event: ${event ?? "(none)"}${c.reset}`);
@@ -5357,6 +5420,9 @@ async function main(): Promise<void> {
         ok = true;
         break;
       }
+      case "status":
+        ok = await cmdStatus();
+        break;
       case "whoami":
         ok = await cmdWhoami();
         break;

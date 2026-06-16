@@ -4,7 +4,7 @@ Local-first, deterministic memory for AI agents. `kit memory` gives a (swappable
 model a **verifiable second brain**: it stores your raw conversation history and
 lets the agent *search it before answering* — so it pulls receipts instead of
 guessing. No vector database, no embeddings, no model calls. Just SQLite + FTS5
-and two hooks.
+and a few fail-open hooks.
 
 > **Memory is not context.** Context is durable, curated rules (`.kit.toml`,
 > policy, `CLAUDE.md`). Memory is the experiential log of what happened. The bridge
@@ -28,7 +28,7 @@ secret-scanned (see [Shared memory](#shared-memory)).
 
 ```bash
 npm i -g sandstream-kit
-kit memory install          # wire the two hooks into ~/.claude/settings.json
+kit memory install          # wire the hooks into ~/.claude/settings.json
 kit memory index            # index ~/.claude transcripts into ~/.kit/memory.db
 kit memory search "october pricing decision"
 ```
@@ -37,16 +37,19 @@ kit memory search "october pricing decision"
 hooks). After it runs, the `SessionEnd` hook keeps the store up to date
 incrementally — you rarely need to `index` again.
 
-## How it works — two hooks, nothing more
+## How it works — a few fail-open hooks, nothing more
 
-The entire system is two Claude Code hooks (both **fail-open**: an error yields a
-no-op, so a hook can never block a prompt or break a session):
+The entire system is a handful of Claude Code hooks (all **fail-open**: an error
+yields a no-op, so a hook can never block a prompt or break a session):
 
 - **`UserPromptSubmit`** runs before every message and injects a two-sentence
   reminder that searchable memory exists (plus any open action items). The agent
   decides when to search — memory is *pulled on demand*, never bulk-loaded into
   context every turn.
 - **`SessionEnd`** indexes the just-ended session into the store.
+- **`SessionStart`** (recovery) re-injects "where you left off" for the current
+  project — the most recent messages + open action items — so a resumed or
+  post-compaction session regains continuity instead of starting blank.
 
 That's it. No reranker, no summarization pipeline, no chunking, no sync service,
 no thirty-knob config. Less code, less surface area to break.
@@ -70,6 +73,14 @@ kit memory stats                      # sessions / messages / tool-uses / size
 Search is **project-scoped by default** (the git repo you are in) for relevance
 and blast-radius containment; `--global` searches every project in your personal
 store. The store is a single `~/.kit/memory.db` at mode `0600`.
+
+**Multi-harness.** `kit memory index` is the lead-agent's store but pulls
+transcripts from every supported coding agent on the machine, each tagged with a
+`harness` so recall spans them: **Claude Code** (`~/.claude`), **Codex**
+(`~/.codex/sessions`), **Gemini CLI** (`~/.gemini/tmp`), and **Continue.dev**
+(`~/.continue/sessions`). Absent agents are skipped silently. Adding one is a
+single parser in `indexAllHarnesses()`. Each parser is built against the agent's
+own serialization format (verified from its source), never guessed.
 
 ### Pending actions (PAL)
 

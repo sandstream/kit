@@ -12,13 +12,24 @@ import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { insertMessage, insertToolUse, upsertSession } from "./db.js";
+import {
+  insertMessage,
+  insertToolUse,
+  upsertSession,
+  isFileIndexed,
+  markFileIndexed,
+} from "./db.js";
+import { indexCodexSessions } from "./codex.js";
+import { indexGeminiSessions } from "./gemini.js";
+import { indexContinueSessions } from "./continue.js";
 
 export interface IndexResult {
   files: number;
   sessions: number;
   messages: number;
   toolUses: number;
+  /** Files skipped because they were unchanged since the last index (incremental). */
+  filesSkipped: number;
 }
 
 export function getClaudeProjectsDir(): string {
@@ -174,7 +185,7 @@ function indexFile(
 /** Walk ~/.claude/projects and index every transcript. Idempotent. */
 export function indexClaudeTranscripts(db: DatabaseSync): IndexResult {
   const projectsDir = getClaudeProjectsDir();
-  const result: IndexResult = { files: 0, sessions: 0, messages: 0, toolUses: 0 };
+  const result: IndexResult = { files: 0, sessions: 0, messages: 0, toolUses: 0, filesSkipped: 0 };
   if (!existsSync(projectsDir)) return result;
 
   for (const projectName of readdirSync(projectsDir).sort()) {
@@ -189,7 +200,22 @@ export function indexClaudeTranscripts(db: DatabaseSync): IndexResult {
 
     for (const entry of readdirSync(projectPath).sort()) {
       if (!entry.endsWith(".jsonl")) continue;
-      const counts = indexFile(db, join(projectPath, entry), projectName);
+      const filePath = join(projectPath, entry);
+      let st;
+      try {
+        st = statSync(filePath);
+      } catch {
+        continue;
+      }
+      // Skip files unchanged since the last index (incremental — avoids re-reading
+      // every transcript each run; the per-message uuid dedup still backstops it).
+      const mtimeMs = Math.floor(st.mtimeMs);
+      if (isFileIndexed(db, filePath, mtimeMs, st.size)) {
+        result.filesSkipped++;
+        continue;
+      }
+      const counts = indexFile(db, filePath, projectName);
+      markFileIndexed(db, filePath, mtimeMs, st.size);
       result.files++;
       result.sessions++;
       result.messages += counts.messages;
@@ -197,4 +223,20 @@ export function indexClaudeTranscripts(db: DatabaseSync): IndexResult {
     }
   }
   return result;
+}
+
+/** Per-harness index results, keyed by harness name. */
+export type HarnessResults = Record<string, IndexResult>;
+
+/**
+ * Index every supported harness's transcripts into the store. Returns per-harness
+ * counts. Adding a harness = one more parser here (Copilot, Gemini, Aider, Cursor…).
+ */
+export function indexAllHarnesses(db: DatabaseSync): HarnessResults {
+  return {
+    "claude-code": indexClaudeTranscripts(db),
+    codex: indexCodexSessions(db),
+    gemini: indexGeminiSessions(db),
+    continue: indexContinueSessions(db),
+  };
 }
