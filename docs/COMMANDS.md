@@ -46,6 +46,7 @@
 | `kit secrets sync [--target=<github\|dotenv-ci\|stdout>]` | Sync vault → CI / `.env.local`. |
 | `kit secrets migrate [--keep-commented \| --purge]` | Plaintext `.env*` → vault. Default leaves `KEY=` (value blanked). |
 | `kit secrets vault-migrate --from <a> --to <b>` | Cross-vault key transfer (1Password → Infisical, etc.). |
+| `kit secrets set <KEY> [--stdin \| --value <v>] [--store <backend>]` | Capture a value to the vault. `--stdin` (safer — not in argv/ps) or `--value`. Execution behind `auth = "capture"`. |
 | `kit secrets rotate [--mode <jwt-secret-roll \| scoped-key-mint>]` | Rotate via supabase-mgmt-api. JWT roll is one-shot elevation. |
 | `kit secrets onecli register` | Register fake-key in OneCLI gateway. |
 | `kit secrets purge-history --force-history` | git-history rewrite to scrub leaked credentials. |

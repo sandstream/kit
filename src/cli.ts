@@ -26,6 +26,7 @@ import {
 } from "./secrets-migrate.js";
 import { analyzeRepo, renderClaudeMd, renderRulesMd } from "./analyze.js";
 import { cmdSecretsRotate, pickBackendOpts } from "./secrets-rotate-cli.js";
+import { setSecretValue, type SetValueOptions } from "./secrets-set.js";
 import {
   detectTools as detectPurgeTools,
   previewMatches,
@@ -750,6 +751,9 @@ async function cmdSecrets(): Promise<boolean> {
   }
   if (process.argv[3] === "propagate") {
     return cmdSecretsPropagateStandalone();
+  }
+  if (process.argv[3] === "set") {
+    return cmdSecretsSet();
   }
   if (process.argv[3] === "revoke-old") {
     return cmdSecretsRevokeOld();
@@ -2476,6 +2480,63 @@ async function cmdSecretsRevokeOld(): Promise<boolean> {
   console.log(`  ${c.green}✓${c.reset} ${result.detail}`);
   console.log(
     `\n${c.dim}Verify with ${c.bold}kit secrets onecli status${c.reset}${c.dim} or the Supabase Dashboard.${c.reset}\n`,
+  );
+  return true;
+}
+
+async function cmdSecretsSet(): Promise<boolean> {
+  // kit secrets set <KEY> [--value <v> | --stdin] [--store <backend>]
+  // Capture-to-vault: write a user-provided value to the configured vault. This
+  // is the execution behind a service's `auth = "capture"` strategy. The value
+  // is read via --stdin (safer — not in argv/ps) or --value; kit reuses the
+  // existing setSecretValue path, so it never echoes or logs the secret.
+  const args = process.argv.slice(3);
+  const keyName = process.argv[4];
+  if (!keyName || keyName.startsWith("--")) {
+    console.error(
+      `${c.red}Usage: kit secrets set <KEY> [--value <v> | --stdin] [--store <backend>]${c.reset}`,
+    );
+    return false;
+  }
+
+  const config = await loadConfig(resolveConfigPath());
+
+  // Read value: --value <v> (visible in argv/ps) or --stdin (safer).
+  let value: string | undefined;
+  const valueIdx = args.indexOf("--value");
+  if (valueIdx >= 0) value = args[valueIdx + 1];
+  if (!value && hasFlag(args, "--stdin")) {
+    value = await new Promise<string>((resolve) => {
+      let buf = "";
+      process.stdin.setEncoding("utf-8");
+      process.stdin.on("data", (chunk: string) => {
+        buf += chunk;
+      });
+      process.stdin.on("end", () => resolve(buf.trim()));
+    });
+  }
+  if (!value) {
+    console.error(
+      `${c.red}Provide the value via --stdin (safer) or --value <v> (visible in argv/ps).${c.reset}`,
+    );
+    return false;
+  }
+
+  const storeIdx = args.indexOf("--store");
+  const storeOverride = storeIdx >= 0 ? args[storeIdx + 1] : undefined;
+  const backendOpts = pickBackendOpts(config.secrets ?? {}, keyName, { envFallback: true });
+
+  const result = await setSecretValue(config.secrets, keyName, value, {
+    ...backendOpts,
+    store: storeOverride as SetValueOptions["store"],
+  });
+
+  if (!result.ok) {
+    console.error(`${c.red}✗ ${result.detail}${c.reset}`);
+    return false;
+  }
+  console.log(
+    `${c.green}✓${c.reset} captured ${c.bold}${keyName}${c.reset} to the vault ${c.dim}(${result.detail})${c.reset}`,
   );
   return true;
 }
@@ -4338,6 +4399,7 @@ const COMMAND_HELP: Record<string, string> = {
   secrets:        "Generate .env.local from template + secret store",
   "secrets sync": "Push resolved secrets to GitHub Actions / .env.ci / stdout",
   "secrets migrate": "Migrate plaintext secrets in .env* → configured vault",
+  "secrets set": "Capture a value to the vault: kit secrets set <KEY> --stdin (safer) | --value <v>",
   "secrets rotate": "Rotate a key: write new value to vault (explicit / random)",
   "secrets onecli": "Register a key with OneCLI gateway so agent never sees the real value",
   "secrets purge-history": "Destructive: rewrite git history to remove a leaked value (--force-history)",

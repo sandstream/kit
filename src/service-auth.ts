@@ -63,7 +63,7 @@ export function resolveServiceAuth(name: string, config: ServiceConfig): Resolve
       instruction = "credential resolved from the configured vault (run `kit secrets`)";
       break;
     case "capture":
-      instruction = "paste the token once — kit stores it to the vault (run `kit secrets`)";
+      instruction = "capture-to-vault: `kit secrets set <KEY> --stdin` (paste once, stored in the vault)";
       break;
     case "interactive":
       instruction = config.login

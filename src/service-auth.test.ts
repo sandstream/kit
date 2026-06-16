@@ -38,7 +38,8 @@ describe("service auth resolver", () => {
   it("describes the capture strategy as paste-once-to-vault", () => {
     const r = resolveServiceAuth("openai", svc({ login: "", check: "x", auth: "capture" }));
     assert.equal(r.strategy, "capture");
-    assert.match(r.instruction, /paste the token once/);
+    assert.match(r.instruction, /kit secrets set/);
+    assert.match(r.instruction, /paste once/);
   });
 
   it("resolveAllAuth returns one plan per service, sorted by name", () => {
