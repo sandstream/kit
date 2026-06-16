@@ -221,22 +221,41 @@ export function insertToolUse(db: DatabaseSync, t: ToolUseInput): void {
   );
 }
 
+export interface SearchOptions {
+  limit?: number;
+  /** Restrict to messages whose cwd is this repo root (or a subdirectory). */
+  projectPath?: string;
+}
+
 /**
- * Full-text search over raw message content. Basic FTS5 MATCH ranked by `rank`;
- * richer ranking, filters and snippeting arrive in stage B3.
+ * Full-text search over raw message content (FTS5 MATCH, ranked by `rank`).
+ * Pass opts.projectPath to scope to one repo (relevance + blast-radius); omit it
+ * for cross-project ("--global") recall over the personal store.
  */
-export function searchMessages(db: DatabaseSync, query: string, limit = 20): SearchHit[] {
+export function searchMessages(
+  db: DatabaseSync,
+  query: string,
+  opts: SearchOptions = {},
+): SearchHit[] {
+  const limit = opts.limit ?? 20;
+  const params: (string | number)[] = [query];
+  let where = "messages_fts MATCH ?";
+  if (opts.projectPath) {
+    where += " AND (m.cwd = ? OR m.cwd LIKE ?)";
+    params.push(opts.projectPath, `${opts.projectPath}/%`);
+  }
+  params.push(limit);
   return db
     .prepare(
       `SELECT m.id AS id, m.uuid AS uuid, m.session_id AS sessionId, m.role AS role,
               m.content AS content, m.timestamp AS timestamp
        FROM messages_fts f
        JOIN messages m ON m.id = f.rowid
-       WHERE messages_fts MATCH ?
+       WHERE ${where}
        ORDER BY rank
        LIMIT ?`,
     )
-    .all(query, limit) as unknown as SearchHit[];
+    .all(...params) as unknown as SearchHit[];
 }
 
 export function getStats(db: DatabaseSync): MemoryStats {

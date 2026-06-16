@@ -84,4 +84,35 @@ describe("memory db", () => {
     assert.equal(stats.pendingOpen, 1);
     db.close();
   });
+
+  it("search scopes to a project by cwd (and global sees all)", () => {
+    const db = fresh();
+    upsertSession(db, { sessionId: "s1", harness: "claude-code" });
+    insertMessage(db, {
+      uuid: "a",
+      sessionId: "s1",
+      type: "user",
+      content: "october pricing for app-a",
+      cwd: "/repo/app-a",
+    });
+    insertMessage(db, {
+      uuid: "b",
+      sessionId: "s1",
+      type: "user",
+      content: "october pricing for app-b",
+      cwd: "/repo/app-b",
+    });
+    insertMessage(db, {
+      uuid: "c",
+      sessionId: "s1",
+      type: "user",
+      content: "october deep in app-a",
+      cwd: "/repo/app-a/src",
+    });
+    assert.equal(searchMessages(db, "october").length, 3); // global — no scope
+    const scoped = searchMessages(db, "october", { projectPath: "/repo/app-a" });
+    assert.equal(scoped.length, 2); // exact root + subdir, not /repo/app-b
+    assert.deepEqual(scoped.map((h) => h.uuid).sort(), ["a", "c"]);
+    db.close();
+  });
 });

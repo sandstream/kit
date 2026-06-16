@@ -135,8 +135,9 @@ import { listServices, openService } from "./open.js";
 import { gatherProjectContext } from "./context.js";
 import { runTriage, listTriageTools, type TriageType } from "./triage.js";
 import { parsePkgSpec, installPkg } from "./pkg.js";
-import { openMemoryDb, getStats } from "./memory/db.js";
+import { openMemoryDb, getStats, searchMessages } from "./memory/db.js";
 import { indexClaudeTranscripts, getClaudeProjectsDir } from "./memory/parser.js";
+import { getCurrentProjectRoot } from "./memory/project.js";
 
 const KIT_FILE = ".kit.toml";
 
@@ -4244,6 +4245,7 @@ const COMMAND_HELP: Record<string, string> = {
   check:          "Check status of all tools, services, secrets, and lock files",
   memory:         "Local conversation memory — index transcripts + show stats",
   "memory index": "Index ~/.claude transcripts into the SQLite memory store",
+  "memory search": "Full-text search memory (current project; --global for all)",
   "memory stats": "Show what the local memory store contains",
   init:           "Detect stack, generate .kit.toml, and run full setup",
   upgrade:        "Update lock files from .kit.toml",
@@ -4783,8 +4785,9 @@ async function cmdMemory(): Promise<boolean> {
   if (!subcommand || subcommand === "--help" || subcommand === "-h") {
     console.log("kit memory — local conversation memory (SQLite + FTS5)");
     console.log("\nUsage:");
-    console.log("  kit memory index    Index ~/.claude transcripts into the memory store");
-    console.log("  kit memory stats    Show what the memory store contains");
+    console.log("  kit memory index            Index ~/.claude transcripts into the memory store");
+    console.log("  kit memory search <query>   Search memory (current project; --global for all)");
+    console.log("  kit memory stats            Show what the memory store contains");
     return true;
   }
 
@@ -4822,8 +4825,43 @@ async function cmdMemory(): Promise<boolean> {
     return true;
   }
 
+  if (subcommand === "search") {
+    const terms = process.argv.slice(4).filter((a) => !a.startsWith("--"));
+    const query = terms.join(" ").trim();
+    if (!query) {
+      console.error(
+        `${c.red}usage: kit memory search <query> [--global] [--project=<path>] [--limit=N]${c.reset}`,
+      );
+      return false;
+    }
+    const limit = Number(flagValue(process.argv, "--limit") ?? "20") || 20;
+    const projectPath = hasFlag(process.argv, "--global")
+      ? undefined
+      : (flagValue(process.argv, "--project") ?? getCurrentProjectRoot());
+    const db = openMemoryDb();
+    const hits = searchMessages(db, query, { limit, projectPath });
+    db.close();
+    if (jsonMode) {
+      console.log(JSON.stringify(hits));
+      return true;
+    }
+    const scope = projectPath ? `${c.dim}in ${projectPath}${c.reset}` : `${c.dim}(global)${c.reset}`;
+    if (!hits.length) {
+      console.log(`${c.dim}no matches for "${query}" ${projectPath ?? "(global)"}${c.reset}`);
+      return true;
+    }
+    console.log(`${c.bold}${hits.length}${c.reset} match(es) ${scope}`);
+    for (const h of hits) {
+      const snippet = (h.content ?? "").replace(/\s+/g, " ").slice(0, 120);
+      console.log(
+        `  ${c.dim}${h.timestamp ?? "?"}${c.reset} ${c.bold}${h.role ?? h.uuid ?? ""}${c.reset}  ${snippet}`,
+      );
+    }
+    return true;
+  }
+
   console.error(`${c.red}Unknown memory subcommand: ${subcommand}${c.reset}`);
-  console.error("Use: kit memory index | kit memory stats");
+  console.error("Use: kit memory index | kit memory search <query> | kit memory stats");
   return false;
 }
 
