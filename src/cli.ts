@@ -2914,7 +2914,7 @@ async function cmdSecretsVaultMigrate(): Promise<boolean> {
     console.log("");
     console.log("Migration is gated by elevation (one-shot — consumed on use):");
     console.log("  kit auth elevate --scope vault-migrate");
-    return !fromArg || !toArg ? false : true;
+    return !(!fromArg || !toArg);
   }
 
   console.log(`${c.bold}${c.cyan}kit secrets vault-migrate${c.reset}`);

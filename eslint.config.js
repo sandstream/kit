@@ -43,6 +43,31 @@ export default tseslint.config(
       // This is a terminal CLI — regexes legitimately match ANSI/control chars
       // (e.g. \x1b colour-code stripping). Not a bug class here.
       "no-control-regex": "off",
+
+      // --- Correctness (error — mechanical to fix, prevents real bugs) ---
+      eqeqeq: ["error", "smart"], // === / !== (allows == null idiom)
+      "no-throw-literal": "error", // always throw Error objects, not strings
+      "no-unneeded-ternary": "error",
+
+      // --- Maintainability metrics (warn — surface hotspots without blocking;
+      // the existing CLI has known-large modules, e.g. cli.ts, to split over time) ---
+      complexity: ["warn", 20], // cyclomatic complexity per function
+      "max-lines-per-function": ["warn", { max: 120, skipBlankLines: true, skipComments: true }],
+      "max-lines": ["warn", { max: 700, skipBlankLines: true, skipComments: true }],
+      "max-depth": ["warn", 4], // nesting depth
+      "max-params": ["warn", 5],
+      "no-nested-ternary": "warn",
+      "@typescript-eslint/no-non-null-assertion": "warn", // `!` hides real null risk
+    },
+  },
+  {
+    // Test files: keep correctness rules but exempt the size/complexity metrics —
+    // a describe() block is one big "function" + long fixtures are normal there.
+    files: ["**/*.test.ts"],
+    rules: {
+      "max-lines-per-function": "off",
+      "max-lines": "off",
+      complexity: "off",
     },
   },
 );

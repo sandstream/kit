@@ -3,12 +3,12 @@ name: Docker Build & Push
 on:
   push:
     branches:
-      - master
+      - main
     tags:
       - 'v*'
   pull_request:
     branches:
-      - master
+      - main
 
 env:
   REGISTRY: docker.io
