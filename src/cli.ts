@@ -123,6 +123,7 @@ import { cmdFix } from "./fix.js";
 import { promptConfirm } from "./utils/prompt.js";
 import { startMcpServer } from "./mcp-server.js";
 import { c } from "./utils/colors.js";
+import { gatherStatus } from "./status.js";
 import { runDoctor } from "./doctor.js";
 import { inspectEnv } from "./env-inspect.js";
 import { detectStack } from "./stack-detector.js";
@@ -4183,6 +4184,22 @@ async function cmdContext(): Promise<boolean> {
   }
 }
 
+async function cmdStatus(): Promise<boolean> {
+  const items = await gatherStatus();
+  if (hasFlag(process.argv, "--json")) {
+    console.log(JSON.stringify(items, null, 2));
+    return true;
+  }
+  const done = items.filter((i) => i.ok).length;
+  console.log(`${c.bold}kit status${c.reset}  ${c.dim}${done}/${items.length} set up${c.reset}`);
+  for (const item of items) {
+    const mark = item.ok ? `${c.green}✓${c.reset}` : `${c.yellow}○${c.reset}`;
+    const hint = !item.ok && item.hint ? `  ${c.dim}→ ${item.hint}${c.reset}` : "";
+    console.log(`  ${mark} ${item.label}  ${c.dim}${item.detail}${c.reset}${hint}`);
+  }
+  return true;
+}
+
 async function cmdWhoami(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
 
@@ -4273,6 +4290,7 @@ function cmdVersion(): boolean {
 }
 
 const COMMAND_HELP: Record<string, string> = {
+  status:         "Adoption checklist — what's set up across kit + the next step for each gap",
   check:          "Check status of all tools, services, secrets, and lock files",
   memory:         "Local conversation memory — index transcripts + show stats",
   "memory index": "Index ~/.claude transcripts into the SQLite memory store",
@@ -5397,6 +5415,9 @@ async function main(): Promise<void> {
         ok = true;
         break;
       }
+      case "status":
+        ok = await cmdStatus();
+        break;
       case "whoami":
         ok = await cmdWhoami();
         break;
