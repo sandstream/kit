@@ -309,6 +309,32 @@ export function searchMessages(
     .all(...params) as unknown as SearchHit[];
 }
 
+/**
+ * Most-recent messages by wall-clock time (newest first) — the basis for session
+ * recovery (re-injecting "where you left off" after a compaction/resume). Unlike
+ * searchMessages this needs no query; pass opts.projectPath to scope to one repo.
+ * Skips empty-content rows so the recovery block stays signal, not blank tool turns.
+ */
+export function recentMessages(db: DatabaseSync, opts: SearchOptions = {}): SearchHit[] {
+  const limit = opts.limit ?? 10;
+  const params: (string | number)[] = [];
+  let where = "content IS NOT NULL AND content != ''";
+  if (opts.projectPath) {
+    where += " AND (cwd = ? OR cwd LIKE ?)";
+    params.push(opts.projectPath, `${opts.projectPath}/%`);
+  }
+  params.push(limit);
+  return db
+    .prepare(
+      `SELECT id, uuid, session_id AS sessionId, role, content, timestamp
+       FROM messages
+       WHERE ${where}
+       ORDER BY timestamp DESC, id DESC
+       LIMIT ?`,
+    )
+    .all(...params) as unknown as SearchHit[];
+}
+
 export function getStats(db: DatabaseSync): MemoryStats {
   const count = (sql: string): number => {
     const r = db.prepare(sql).get() as { n: number } | undefined;

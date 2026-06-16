@@ -34,9 +34,9 @@ describe("memory hook installer", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("installs both hooks without clobbering existing ones", () => {
+  it("installs all hooks without clobbering existing ones", () => {
     const res = installMemoryHooks();
-    assert.deepEqual(res.added.sort(), ["SessionEnd", "UserPromptSubmit"]);
+    assert.deepEqual(res.added.sort(), ["SessionEnd", "SessionStart", "UserPromptSubmit"]);
     const s = JSON.parse(readFileSync(settingsPath, "utf8"));
     const ups = s.hooks.UserPromptSubmit.flatMap((g: { hooks: { command: string }[] }) =>
       g.hooks.map((h) => h.command),
@@ -48,13 +48,18 @@ describe("memory hook installer", () => {
         g.hooks.some((h) => h.command === "kit memory hook session-end"),
       ),
     );
+    assert.ok(
+      s.hooks.SessionStart.some((g: { hooks: { command: string }[] }) =>
+        g.hooks.some((h) => h.command === "kit memory hook session-start"),
+      ),
+    );
   });
 
   it("is idempotent — re-install adds nothing and creates no duplicates", () => {
     installMemoryHooks();
     const res2 = installMemoryHooks();
     assert.deepEqual(res2.added, []);
-    assert.deepEqual(res2.alreadyPresent.sort(), ["SessionEnd", "UserPromptSubmit"]);
+    assert.deepEqual(res2.alreadyPresent.sort(), ["SessionEnd", "SessionStart", "UserPromptSubmit"]);
     const s = JSON.parse(readFileSync(settingsPath, "utf8"));
     const ours = s.hooks.UserPromptSubmit.filter((g: { hooks: { command: string }[] }) =>
       g.hooks.some((h) => h.command === "kit memory hook user-prompt-submit"),
@@ -65,7 +70,7 @@ describe("memory hook installer", () => {
   it("uninstall removes only our hooks, leaving others intact", () => {
     installMemoryHooks();
     const res = uninstallMemoryHooks();
-    assert.deepEqual(res.removed.sort(), ["SessionEnd", "UserPromptSubmit"]);
+    assert.deepEqual(res.removed.sort(), ["SessionEnd", "SessionStart", "UserPromptSubmit"]);
     const s = JSON.parse(readFileSync(settingsPath, "utf8"));
     const ups = s.hooks.UserPromptSubmit.flatMap((g: { hooks: { command: string }[] }) =>
       g.hooks.map((h) => h.command),

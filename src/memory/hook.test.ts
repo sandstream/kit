@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, upsertSession, insertMessage } from "./db.js";
-import { userPromptSubmitReminder } from "./hook.js";
+import { userPromptSubmitReminder, sessionStartRecovery } from "./hook.js";
+import { getCurrentProjectRoot } from "./project.js";
 
 describe("memory hook — UserPromptSubmit reminder", () => {
   let tmp: string;
@@ -33,5 +34,56 @@ describe("memory hook — UserPromptSubmit reminder", () => {
 
   it("never throws (fail-open)", () => {
     assert.doesNotThrow(() => userPromptSubmitReminder());
+  });
+});
+
+describe("memory hook — SessionStart recovery", () => {
+  let tmp: string;
+  const prev = process.env.KIT_MEMORY_DB;
+
+  before(() => {
+    tmp = mkdtempSync(join(tmpdir(), "kit-recover-"));
+    process.env.KIT_MEMORY_DB = join(tmp, "memory.db");
+  });
+
+  after(() => {
+    if (prev === undefined) delete process.env.KIT_MEMORY_DB;
+    else process.env.KIT_MEMORY_DB = prev;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("returns empty when there is nothing to recover (fail-open)", () => {
+    assert.equal(sessionStartRecovery(), "");
+  });
+
+  it("re-injects this project's recent messages newest-first with a search hint", () => {
+    const root = getCurrentProjectRoot();
+    const db = openMemoryDb();
+    upsertSession(db, { sessionId: "r1", harness: "claude-code" });
+    insertMessage(db, {
+      uuid: "r-old",
+      sessionId: "r1",
+      type: "user",
+      content: "older note",
+      cwd: root,
+      timestamp: "2026-01-01T10:00:00Z",
+    });
+    insertMessage(db, {
+      uuid: "r-new",
+      sessionId: "r1",
+      type: "assistant",
+      role: "assistant",
+      content: "latest decision",
+      cwd: root,
+      timestamp: "2026-01-02T10:00:00Z",
+    });
+    db.close();
+
+    const text = sessionStartRecovery();
+    assert.match(text, /Picking up in/);
+    assert.match(text, /latest decision/);
+    assert.match(text, /kit memory search/);
+    // newest-first ordering: the latest message precedes the older one
+    assert.ok(text.indexOf("latest decision") < text.indexOf("older note"));
   });
 });

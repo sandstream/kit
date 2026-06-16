@@ -149,7 +149,7 @@ import {
   getSharedPath,
   type SharedKind,
 } from "./memory/shared.js";
-import { userPromptSubmitReminder, runSessionEndIndex } from "./memory/hook.js";
+import { userPromptSubmitReminder, runSessionEndIndex, sessionStartRecovery } from "./memory/hook.js";
 import {
   installMemoryHooks,
   uninstallMemoryHooks,
@@ -4297,7 +4297,7 @@ const COMMAND_HELP: Record<string, string> = {
   "memory search": "Full-text search memory (current project; --global for all)",
   "memory stats": "Show what the local memory store contains",
   "memory merge": "Merge another machine's memory.db into this one (dedup by uuid)",
-  "memory install": "Wire UserPromptSubmit + SessionEnd hooks into ~/.claude/settings.json",
+  "memory install": "Wire UserPromptSubmit + SessionEnd + SessionStart (recovery) hooks into ~/.claude/settings.json",
   "memory scan": "Scan the memory store for stored secrets (exit 1 if any found)",
   "memory backup": "Encrypted backup of the memory store (AES-256-GCM; KIT_MEMORY_PASSPHRASE)",
   "memory restore": "Restore an encrypted memory backup (e.g. on a new machine)",
@@ -4982,6 +4982,11 @@ async function cmdMemory(): Promise<boolean> {
     }
     if (event === "session-end") {
       runSessionEndIndex();
+      return true;
+    }
+    if (event === "session-start") {
+      const text = sessionStartRecovery();
+      if (text) console.log(text);
       return true;
     }
     console.error(`${c.red}Unknown hook event: ${event ?? "(none)"}${c.reset}`);

@@ -12,6 +12,7 @@ import { join, dirname } from "node:path";
 const MEMORY_HOOKS: { event: string; command: string }[] = [
   { event: "UserPromptSubmit", command: "kit memory hook user-prompt-submit" },
   { event: "SessionEnd", command: "kit memory hook session-end" },
+  { event: "SessionStart", command: "kit memory hook session-start" },
 ];
 
 export function getClaudeSettingsPath(): string {
