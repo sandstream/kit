@@ -8,22 +8,26 @@
  * Both are FAIL-OPEN: any error yields an empty/no-op result so a hook can never
  * block a prompt or break a session. Deterministic, zero model calls.
  */
+import { basename } from "node:path";
 import { openMemoryDb, getStats } from "./db.js";
 import { indexClaudeTranscripts } from "./parser.js";
 import { palList } from "./pal.js";
+import { getCurrentProjectRoot } from "./project.js";
 
 /** Reminder injected before every prompt. Empty string on any error (fail-open). */
 export function userPromptSubmitReminder(): string {
   try {
     const db = openMemoryDb();
     const s = getStats(db);
-    const open = s.pendingOpen > 0 ? palList(db).slice(0, 3) : [];
+    // Only surface THIS project's open items (plus globally-scoped) — no cross-project noise.
+    const openItems = palList(db, { scope: basename(getCurrentProjectRoot()) });
     db.close();
     let pending = "";
-    if (s.pendingOpen > 0) {
-      const titles = open.map((p) => `${p.id} ${p.title}`).join("; ");
-      const more = s.pendingOpen > open.length ? " …" : "";
-      pending = ` ${s.pendingOpen} open action item(s) blocked on you: ${titles}${more}.`;
+    if (openItems.length > 0) {
+      const shown = openItems.slice(0, 3);
+      const titles = shown.map((p) => `${p.id} ${p.title}`).join("; ");
+      const more = openItems.length > shown.length ? " …" : "";
+      pending = ` ${openItems.length} open action item(s) blocked on you: ${titles}${more}.`;
     }
     return (
       `You have local conversation memory: ${s.messages} messages indexed. ` +

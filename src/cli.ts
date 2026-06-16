@@ -3,7 +3,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { writeFile, access, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { resolve, dirname, join } from "node:path";
+import { resolve, dirname, join, basename } from "node:path";
 import { loadConfig, resolveActiveEnvironment, type kitConfig } from "./config.js";
 import { checkTools } from "./check-tools.js";
 import { checkServices } from "./check-services.js";
@@ -5166,7 +5166,10 @@ async function cmdMemory(): Promise<boolean> {
     const db = openMemoryDb();
     try {
       if (action === "list") {
-        const items = palList(db);
+        const scope = hasFlag(process.argv, "--global")
+          ? undefined
+          : basename(getCurrentProjectRoot());
+        const items = palList(db, { scope });
         if (jsonMode) {
           console.log(JSON.stringify(items));
           return true;
@@ -5194,7 +5197,7 @@ async function cmdMemory(): Promise<boolean> {
         const id = palAdd(db, {
           title,
           verifyCmd: flagValue(process.argv, "--verify"),
-          scope: flagValue(process.argv, "--scope"),
+          scope: flagValue(process.argv, "--scope") ?? basename(getCurrentProjectRoot()),
         });
         console.log(`${c.green}✓${c.reset} added ${c.bold}${id}${c.reset}`);
         return true;

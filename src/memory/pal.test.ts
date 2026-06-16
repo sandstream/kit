@@ -33,7 +33,7 @@ describe("PAL — pending actions", () => {
     const id = palAdd(db, { title: "x" });
     assert.equal(palDone(db, id), true);
     assert.equal(palList(db).length, 0);
-    assert.equal(palList(db, "closed").length, 1);
+    assert.equal(palList(db, { status: "closed" }).length, 1);
     assert.equal(palDone(db, id), false); // already closed
     db.close();
   });
@@ -43,7 +43,7 @@ describe("PAL — pending actions", () => {
     const id = palAdd(db, { title: "later" });
     assert.equal(palSnooze(db, id, 7), true);
     assert.equal(palList(db).length, 0);
-    assert.equal(palList(db, "snoozed").length, 1);
+    assert.equal(palList(db, { status: "snoozed" }).length, 1);
     db.close();
   });
 
@@ -66,7 +66,7 @@ describe("PAL — pending actions", () => {
     const db = fresh();
     const id = palAdd(db, { title: "regressing check", verifyCmd: "false" });
     palDone(db, id); // force-close
-    assert.equal(palList(db, "closed").length, 1);
+    assert.equal(palList(db, { status: "closed" }).length, 1);
     const r = palAutoVerify(db); // verify 'false' on a closed auto item → reopen
     assert.deepEqual(r.reopened, [id]);
     assert.equal(palList(db).length, 1);
@@ -101,9 +101,26 @@ describe("PAL — pending actions", () => {
     assert.equal(a?.scope, "app-a"); // repo → scope
     assert.equal(a?.detail, "branch not merged"); // why → detail
     assert.equal(a?.verify_passes, 1); // pass_streak → verify_passes
-    assert.equal(palList(db, "closed").find((p) => p.id === "bbbb")?.title, "cert fixed"); // done → closed
+    assert.equal(
+      palList(db, { status: "closed" }).find((p) => p.id === "bbbb")?.title,
+      "cert fixed",
+    ); // done → closed
     assert.equal(importLegacyLedger(db, led).imported, 0); // idempotent
     rmSync(tmp, { recursive: true, force: true });
+    db.close();
+  });
+
+  it("scopes the open list to a project (plus globally-scoped items)", () => {
+    const db = fresh();
+    palAdd(db, { title: "kit item", scope: "kit" });
+    palAdd(db, { title: "other item", scope: "other" });
+    palAdd(db, { title: "global item" }); // no scope
+    assert.equal(palList(db).length, 3); // no scope filter = every project
+    const scoped = palList(db, { scope: "kit" });
+    assert.deepEqual(
+      scoped.map((p) => p.title).sort(),
+      ["global item", "kit item"], // "kit" + the null-scope global one, NOT "other"
+    );
     db.close();
   });
 });

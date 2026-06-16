@@ -55,7 +55,21 @@ export function palAdd(db: DatabaseSync, input: PalAddInput): string {
   return id;
 }
 
-export function palList(db: DatabaseSync, status = "open"): PendingAction[] {
+export interface PalListOptions {
+  status?: string;
+  /** Restrict to this scope plus globally-scoped (NULL) items. Omit = every scope. */
+  scope?: string;
+}
+
+export function palList(db: DatabaseSync, opts: PalListOptions = {}): PendingAction[] {
+  const status = opts.status ?? "open";
+  if (opts.scope !== undefined) {
+    return db
+      .prepare(
+        "SELECT * FROM pending_actions WHERE status = ? AND (scope = ? OR scope IS NULL) ORDER BY created_at, id",
+      )
+      .all(status, opts.scope) as unknown as PendingAction[];
+  }
   return db
     .prepare("SELECT * FROM pending_actions WHERE status = ? ORDER BY created_at, id")
     .all(status) as unknown as PendingAction[];
