@@ -197,7 +197,9 @@ async function cmdCheck(): Promise<boolean> {
       const lockOk = lockResults.every((l) => l.inSync);
       const allOk =
         toolResults.every((t) => t.ok) &&
-        serviceResults.every((s) => s.authenticated) &&
+        // Informational services (no CLI login — `#`-documented, e.g. resend
+        // env keys) are manual setup, not a failed gate. They surface as warns.
+        serviceResults.every((s) => s.authenticated || s.informational) &&
         secretResults.keys.every((s) => s.available) &&
         skillResults.filter((s) => s.required).every((s) => s.installed) &&
         hookResults.every((h) => h.installed && h.upToDate) &&
@@ -215,8 +217,10 @@ async function cmdCheck(): Promise<boolean> {
           })),
           ...serviceResults.map((s) => ({
             name: s.name,
-            status: (s.authenticated ? "pass" : "fail") as JsonCheck["status"],
-            detail: s.output ?? (s.authenticated ? "authenticated" : "not authenticated"),
+            status: (s.authenticated ? "pass" : s.informational ? "warn" : "fail") as JsonCheck["status"],
+            detail: s.informational
+              ? (s.output || "manual setup (no CLI login)")
+              : (s.output ?? (s.authenticated ? "authenticated" : "not authenticated")),
             category: "services",
           })),
           ...secretResults.keys.map((s) => ({
@@ -2295,8 +2299,12 @@ async function cmdCi(): Promise<boolean> {
         })),
         ...serviceResults.map((s) => ({
           name: s.name,
-          status: (s.authenticated ? "pass" : "fail") as JsonCheck["status"],
-          detail: s.output ?? (s.authenticated ? "authenticated" : "not authenticated"),
+          // Informational services (no CLI login) are a manual-setup warning,
+          // not a CI failure.
+          status: (s.authenticated ? "pass" : s.informational ? "warn" : "fail") as JsonCheck["status"],
+          detail: s.informational
+            ? (s.output || "manual setup (no CLI login)")
+            : (s.output ?? (s.authenticated ? "authenticated" : "not authenticated")),
           category: "services",
         })),
         ...secretResults.keys.map((s) => ({
@@ -3648,6 +3656,9 @@ function cmdVersion(): boolean {
 const COMMAND_HELP: Record<string, string> = {
   status:         "Adoption checklist — what's set up across kit + the next step for each gap",
   check:          "Check status of all tools, services, secrets, and lock files",
+  review:         "Full repo audit — runs check + design in one gate (for agents / PR checks)",
+  design:         "Check design quality (a11y, design tokens) against the baseline",
+  baseline:       "Freeze current warnings into .kit-baseline.json so future runs gate only net-new findings",
   memory:         "Local conversation memory — index transcripts + show stats",
   "memory index": "Index ~/.claude transcripts into the SQLite memory store",
   "memory search": "Full-text search memory (current project; --global for all)",
