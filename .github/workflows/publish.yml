@@ -48,6 +48,17 @@ jobs:
           fi
           echo "Tag $TAG matches package.json version $PKG_VERSION"
 
+      - name: Import maintainer public key
+        # A fresh runner has an empty GPG keyring, so verify-tag would have
+        # nothing to check the signature against. Import the committed PUBLIC
+        # key (.github/maintainer-pubkey.asc — public only, safe to commit; the
+        # private signing key never leaves the maintainer's machine) and mark
+        # it ultimately trusted so a valid signature verifies cleanly.
+        run: |
+          gpg --batch --import .github/maintainer-pubkey.asc
+          FPR=$(gpg --list-keys --with-colons | awk -F: '/^fpr:/{print $10; exit}')
+          echo "$FPR:6:" | gpg --batch --import-ownertrust
+
       - name: Verify tag is GPG-signed
         # Refuse to publish unsigned tags. Operators verify the same way via
         # `git tag -v <tag>` (see docs/VERIFY.md). Prevents tag-rewrite +
@@ -55,8 +66,8 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          # GH_TOKEN gives us the public key for the org / maintainer. We
-          # don't import it eagerly — git verify-tag handles trust chain.
+          # The maintainer public key was imported + trusted in the previous
+          # step, so git verify-tag can now check the signature chain.
           if ! git verify-tag "$TAG" 2>&1 | tee /tmp/tag-verify.log; then
             if grep -q 'no signature found' /tmp/tag-verify.log; then
               echo "::error::Tag $TAG is not GPG-signed. Sign with: git tag -s $TAG"
