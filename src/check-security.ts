@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { readFile, access } from "node:fs/promises";
 import { resolve } from "node:path";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
+import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
 import {
   ensureBumblebee,
   runScan,
@@ -51,6 +52,7 @@ export interface SecurityCheckResult {
   severity?: "critical" | "high" | "medium" | "low";
   files?: string[]; // Files with issues (for secrets scan)
   suggestion?: string; // Installation or remediation instructions
+  rule?: RuleRef; // citation for the rule this check enforces (CWE/OWASP), if mapped
 }
 
 /**
@@ -1005,7 +1007,13 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
   const exposureResults = await checkServiceExposure();
   results.push(...exposureResults);
 
-  return results;
+  // Attach a rule citation (CWE/OWASP) to each finding whose check is mapped in
+  // the local rules catalog. Deterministic lookup, no network. Unmapped checks
+  // pass through unchanged.
+  return results.map((r) => {
+    const rule = ruleForCheck(r.name);
+    return rule ? { ...r, rule } : r;
+  });
 }
 
 /**
