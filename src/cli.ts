@@ -4256,6 +4256,16 @@ async function main(): Promise<void> {
       process.exitCode = 0;
       return;
     }
+    // A `--help`/`-h` anywhere after the command means "show that command's
+    // help" — NEVER execute the command. Critical for side-effectful commands
+    // (agent-config, fix, secrets, hooks add): `kit <cmd> --help` previously
+    // fell through to the dispatch and ran <cmd>. (Generalizes the 1.4.0 fix
+    // that only covered `kit memory <sub> --help`.)
+    if (command && command !== "help" && (hasFlag(args, "--help") || hasFlag(args, "-h"))) {
+      cmdHelp(command);
+      process.exitCode = 0;
+      return;
+    }
 
     // version/help/completions need bespoke handling; everything else is a flat
     // command->fn dispatch (was a ~40-case switch — the main complexity driver).
