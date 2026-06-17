@@ -33,6 +33,26 @@ vault instead of on the loose, and puts a pre-install **triage** step in front o
 dependencies so an unknown package gets looked at before it lands. Zero LLM calls,
 local-first, no telemetry, the intelligence stays where you put it.
 
+## kit is not another scanner
+
+You already have Semgrep, Snyk, Trivy, Socket, your linters. kit does not compete
+with them. It runs them, folds in their results, and adds the layer they do not have.
+
+- **They go deep on one axis** (code vulns, dependency CVEs, container images). kit
+  goes **broad across the whole setup lifecycle**: tools, auth, secrets and vaults,
+  git hooks, supply-chain triage, env routing, memory, governance. One command from
+  `git clone` to a working, secret-safe environment.
+- **kit orchestrates, it does not replace.** `kit check` runs Semgrep, Trivy and
+  Socket when present; the `snyk` and `wiz` plugins ingest their findings; everything
+  lands in one consolidated report next to kit's own checks, each with a remediation
+  step.
+- **The one gate your agent runs.** Before an AI agent acts it runs `kit review` once
+  and gets a single deterministic verdict across every source. No agent, no socket,
+  no telemetry, zero LLM calls. Your code never leaves the machine.
+
+Use kit **with** your scanners. It is the connective tissue that turns them into one
+local-first, agent-native gate.
+
 ## Solution
 
 `.kit.toml` per project:
