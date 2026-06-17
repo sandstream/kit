@@ -1,6 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { compareContext, parseGithubRemote, type LiveContext } from "./context-lock.js";
+import {
+  compareContext,
+  parseGithubRemote,
+  planContext,
+  parseGcloudProject,
+  type LiveContext,
+} from "./context-lock.js";
 
 describe("context lock", () => {
   it("passes only when the exact declared pair matches", () => {
@@ -57,5 +63,31 @@ describe("context lock", () => {
     });
     assert.deepEqual(parseGithubRemote(null), { org: null, remote: null });
     assert.deepEqual(parseGithubRemote("https://gitlab.com/x/y"), { org: null, remote: null });
+  });
+
+  it("plans gcloud + git activation from the declared context (local config only)", () => {
+    const steps = planContext({
+      gcloud: { config: "prod-cfg", account: "ops@example.com", project: "prod-project", region: "europe-west4" },
+      git: { email: "dev@example.com" },
+    });
+    const describes = steps.map((s) => s.describe);
+    assert.ok(describes.some((d) => d.includes("activate config prod-cfg")));
+    assert.ok(describes.some((d) => d.includes("project=prod-project")));
+    assert.ok(describes.some((d) => d.includes("account=ops@example.com")));
+    // git identity is repo-local, not global
+    const gitStep = steps.find((s) => s.tool === "git");
+    assert.equal(gitStep?.local, true);
+    assert.deepEqual(gitStep?.argv, ["config", "user.email", "dev@example.com"]);
+    // nothing planned for vercel/npm (no clean per-repo activation)
+    assert.equal(steps.some((s) => s.tool === "vercel" || s.tool === "npm"), false);
+  });
+
+  it("plans nothing when no activatable context is declared", () => {
+    assert.deepEqual(planContext({ npm: { registry: "https://registry.npmjs.org" } }), []);
+  });
+
+  it("parses the gcloud project from a config INI", () => {
+    assert.equal(parseGcloudProject("[core]\naccount = a@b.com\nproject = prod-project\n"), "prod-project");
+    assert.equal(parseGcloudProject("[core]\naccount = a@b.com\n"), null);
   });
 });

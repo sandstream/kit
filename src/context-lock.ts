@@ -12,7 +12,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { resolve, join } from "node:path";
+import { homedir } from "node:os";
 import type { ContextConfig } from "./config.js";
 
 const exec = promisify(execFile);
@@ -138,4 +140,85 @@ export async function checkContext(
     ? { ...ctx, npm: { ...ctx.npm, registry: ctx.npm.registry.replace(/\/+$/, "") } }
     : ctx;
   return compareContext(declared, await gatherLive(cwd));
+}
+
+// ── kit context use — activate the declared context ──────────────────────────
+
+export interface ContextStep {
+  tool: string;
+  argv: string[];
+  /** Run in the repo (cwd) rather than affecting global state — e.g. git config. */
+  local?: boolean;
+  describe: string;
+}
+
+/**
+ * Plan the commands that would activate the declared context. PURE (no I/O) so
+ * the mapping is unit-testable. Only LOCAL CLI config is ever touched (gcloud
+ * config, repo git identity) — never an account or a deploy. vercel/npm are not
+ * auto-activated (no clean per-repo "active" state); `use` prints guidance.
+ */
+export function planContext(ctx: ContextConfig): ContextStep[] {
+  const steps: ContextStep[] = [];
+  const g = ctx.gcloud;
+  if (g?.config)
+    steps.push({ tool: "gcloud", argv: ["config", "configurations", "activate", g.config], describe: `activate config ${g.config}` });
+  if (g?.account)
+    steps.push({ tool: "gcloud", argv: ["config", "set", "account", g.account], describe: `account=${g.account}` });
+  if (g?.project)
+    steps.push({ tool: "gcloud", argv: ["config", "set", "project", g.project], describe: `project=${g.project}` });
+  if (g?.region)
+    steps.push({ tool: "gcloud", argv: ["config", "set", "run/region", g.region], describe: `run/region=${g.region}` });
+  if (ctx.git?.email)
+    steps.push({ tool: "git", argv: ["config", "user.email", ctx.git.email], local: true, describe: `git user.email=${ctx.git.email}` });
+  return steps;
+}
+
+export interface ApplyResult {
+  step: ContextStep;
+  ok: boolean;
+}
+
+/** Execute the activation plan. Each step runs via execFile (no shell). */
+export async function applyContext(
+  ctx: ContextConfig,
+  cwd: string = process.cwd(),
+): Promise<ApplyResult[]> {
+  const results: ApplyResult[] = [];
+  for (const step of planContext(ctx)) {
+    let ok = false;
+    try {
+      await exec(step.tool, step.argv, { timeout: 8_000, cwd: step.local ? cwd : undefined });
+      ok = true;
+    } catch {
+      ok = false;
+    }
+    results.push({ step, ok });
+  }
+  return results;
+}
+
+// ── kit context --prompt — a fast, read-only PS1 indicator ───────────────────
+
+/** Extract `project = <value>` from a gcloud configuration INI. PURE. */
+export function parseGcloudProject(ini: string): string | null {
+  const m = ini.match(/^\s*project\s*=\s*(.+?)\s*$/m);
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * A compact indicator of the ACTIVE gcloud context for a shell prompt, read from
+ * gcloud's config files (no subprocess, so it is cheap to call per prompt).
+ * Returns "" if gcloud config cannot be read. Example: "[gcp:cbd-platform]".
+ */
+export function contextPrompt(): string {
+  try {
+    const dir = process.env.CLOUDSDK_CONFIG || join(homedir(), ".config", "gcloud");
+    const active = readFileSync(join(dir, "active_config"), "utf8").trim();
+    const ini = readFileSync(join(dir, "configurations", `config_${active}`), "utf8");
+    const project = parseGcloudProject(ini);
+    return project ? `[gcp:${project}]` : active ? `[gcp:${active}]` : "";
+  } catch {
+    return "";
+  }
 }

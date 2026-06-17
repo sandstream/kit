@@ -102,7 +102,7 @@ import { promptConfirm } from "./utils/prompt.js";
 import { c } from "./utils/colors.js";
 import { gatherStatus } from "./status.js";
 import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
-import { checkContext } from "./context-lock.js";
+import { checkContext, applyContext, contextPrompt } from "./context-lock.js";
 import { cmdEnv } from "./commands/env.js";
 import { cmdAuth } from "./commands/auth.js";
 import { cmdAudit } from "./commands/audit.js";
@@ -3409,8 +3409,46 @@ async function cmdContextCheck(): Promise<boolean> {
   return mismatches.length === 0;
 }
 
+async function cmdContextUse(): Promise<boolean> {
+  const config = await loadConfig(resolveConfigPath());
+  if (!config.context) {
+    console.log(
+      `${c.dim}No [context] declared in .kit.toml. Add one to lock each CLI to its account + project.${c.reset}`,
+    );
+    return true;
+  }
+  console.log(`${c.bold}Context use${c.reset}\n`);
+  const results = await applyContext(config.context, process.cwd());
+  for (const r of results) {
+    const icon = r.ok ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
+    console.log(`  ${icon} ${r.step.tool}  ${c.dim}${r.step.describe}${c.reset}`);
+  }
+  // vercel/npm have no clean per-repo "active" state to switch — guide instead.
+  if (config.context.vercel) {
+    console.log(
+      `  ${c.dim}vercel: pass --scope per command or run \`vercel link\`; kit does not switch the dashboard link.${c.reset}`,
+    );
+  }
+  if (config.context.npm) {
+    console.log(
+      `  ${c.dim}npm: registry is global — set with \`npm config set registry <url>\` if it differs.${c.reset}`,
+    );
+  }
+  const failed = results.filter((r) => !r.ok).length;
+  if (failed > 0) {
+    console.log(`\n${c.yellow}${failed} step(s) failed (tool not installed?). Run kit context check to verify.${c.reset}`);
+  }
+  return failed === 0;
+}
+
 async function cmdContext(): Promise<boolean> {
   if (process.argv[3] === "check") return cmdContextCheck();
+  if (process.argv[3] === "use") return cmdContextUse();
+  // Fast, read-only PS1 indicator: `kit context --prompt` -> "[gcp:<project>]".
+  if (hasFlag(process.argv, "--prompt")) {
+    console.log(contextPrompt());
+    return true;
+  }
 
   const jsonMode = hasFlag(process.argv, "--json");
 
@@ -3656,6 +3694,9 @@ const COMMAND_HELP: Record<string, string> = {
   run:            "Execute a command with project env vars loaded",
   open:           "Open service dashboard in browser (stripe, vercel, railway, etc.)",
   context:        "Show project context: tools, services, secrets, environment",
+  "context check": "Verify each CLI's live account+project matches .kit.toml [context] (exits non-zero on mismatch)",
+  "context use":   "Activate the declared context: gcloud config + repo git identity",
+  "context --prompt": "Print a compact active-gcloud indicator for your shell prompt (PS1)",
   mcp:            "MCP server over stdio (Claude Code/Cursor/Codex); 'kit mcp list|auth|set-token|clear' manages declared servers",
   whoami:         "Show current agent / user identity",
   version:        "Print kit version",
