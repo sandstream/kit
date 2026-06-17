@@ -5,6 +5,7 @@ import {
   parseGithubRemote,
   planContext,
   parseGcloudProject,
+  suggestContextToml,
   type LiveContext,
 } from "./context-lock.js";
 
@@ -89,5 +90,36 @@ describe("context lock", () => {
   it("parses the gcloud project from a config INI", () => {
     assert.equal(parseGcloudProject("[core]\naccount = a@b.com\nproject = prod-project\n"), "prod-project");
     assert.equal(parseGcloudProject("[core]\naccount = a@b.com\n"), null);
+  });
+
+  describe("suggestContextToml", () => {
+    it("emits only the tables it could read, with source annotations", () => {
+      const live: LiveContext = {
+        git: { email: "dev@example.com" },
+        github: { org: "acme", remote: "github.com/acme/widget" },
+        vercel: { orgId: "team_123", projectId: "prj_456" },
+        gcloud: { account: "dev@example.com", project: "acme-prod" },
+        npm: { registry: "https://registry.npmjs.org" },
+      };
+      const toml = suggestContextToml(live);
+      assert.ok(toml.includes('[context.git]'));
+      assert.ok(toml.includes('email = "dev@example.com"'));
+      assert.ok(toml.includes('team = "team_123"'));
+      assert.ok(toml.includes('project = "prj_456"'));
+      // gcloud is ambient → carries a verify warning, github is authoritative.
+      assert.ok(/gcloud[\s\S]*VERIFY/.test(toml));
+      assert.ok(toml.includes("authoritative"));
+    });
+
+    it("omits tables with no readable value", () => {
+      const toml = suggestContextToml({ git: { email: "x@y.z" } });
+      assert.ok(toml.includes("[context.git]"));
+      assert.ok(!toml.includes("[context.gcloud]"));
+      assert.ok(!toml.includes("[context.vercel]"));
+    });
+
+    it("returns empty string when nothing is readable", () => {
+      assert.equal(suggestContextToml({}), "");
+    });
   });
 });

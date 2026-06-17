@@ -102,7 +102,7 @@ import { promptConfirm } from "./utils/prompt.js";
 import { c } from "./utils/colors.js";
 import { gatherStatus } from "./status.js";
 import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
-import { checkContext, applyContext, contextPrompt } from "./context-lock.js";
+import { checkContext, applyContext, contextPrompt, gatherLive, suggestContextToml } from "./context-lock.js";
 import { cmdEnv } from "./commands/env.js";
 import { cmdAuth } from "./commands/auth.js";
 import { cmdAudit } from "./commands/audit.js";
@@ -3387,8 +3387,20 @@ async function cmdContextCheck(): Promise<boolean> {
   }
   if (!config.context) {
     console.log(
-      `${c.dim}No [context] declared in .kit.toml. Add one to lock each CLI to its account + project.${c.reset}`,
+      `${c.dim}No [context] declared in .kit.toml — each CLI is unlocked from its account + project.${c.reset}`,
     );
+    const suggestion = suggestContextToml(await gatherLive(process.cwd()));
+    if (suggestion) {
+      console.log(`\nDetected here — add a ${c.bold}[context]${c.reset} block to .kit.toml to lock it:\n`);
+      console.log(suggestion);
+      console.log(
+        `\n${c.yellow}Verify each value is correct for THIS repo before trusting it.${c.reset} ${c.dim}kit detected the currently-active CLI state, which is exactly what the lock exists to question. Then re-run kit context check.${c.reset}`,
+      );
+    } else {
+      console.log(
+        `${c.dim}Add one to lock each CLI to its account + project (gcloud/vercel/github/git/npm).${c.reset}`,
+      );
+    }
     return true;
   }
   console.log(`${c.bold}Context lock${c.reset}\n`);

@@ -77,6 +77,43 @@ export function compareContext(declared: ContextConfig, live: LiveContext): Cont
   );
 }
 
+/**
+ * Build a ready-to-paste `[context]` block from a live snapshot, for the
+ * empty-state hint. Every value is what kit DETECTED as the currently-active
+ * CLI state — which is exactly what the lock exists to question, not trust.
+ * So each field is annotated with its source: git/github/vercel come from
+ * repo-local truth (config, origin remote, .vercel/project.json) and are
+ * authoritative; gcloud/npm are ambient/global and are flagged to verify.
+ * Tools kit could not read are omitted. PURE so it is unit-testable.
+ */
+export function suggestContextToml(live: LiveContext): string {
+  const out: string[] = [];
+  const emit = (header: string, rows: [string, string | null | undefined, string][]): void => {
+    const present = rows.filter(([, v]) => v);
+    if (present.length === 0) return;
+    out.push(header);
+    for (const [k, v, note] of present) {
+      out.push(`${k} = "${v}"${note ? `   # ${note}` : ""}`);
+    }
+    out.push("");
+  };
+  emit("[context.git]", [["email", live.git?.email, "this repo's git config"]]);
+  emit("[context.github]", [
+    ["org", live.github?.org, "from origin remote — authoritative"],
+    ["remote", live.github?.remote, ""],
+  ]);
+  emit("[context.vercel]", [
+    ["team", live.vercel?.orgId, "orgId from .vercel/project.json — authoritative"],
+    ["project", live.vercel?.projectId, "projectId"],
+  ]);
+  emit("[context.gcloud]", [
+    ["account", live.gcloud?.account, "⚠ currently-active gcloud — VERIFY it is right for THIS repo"],
+    ["project", live.gcloud?.project, "⚠ verify"],
+  ]);
+  emit("[context.npm]", [["registry", live.npm?.registry, "global npm registry"]]);
+  return out.join("\n").trimEnd();
+}
+
 async function run(cmd: string, args: string[]): Promise<string | null> {
   try {
     const { stdout } = await exec(cmd, args, { timeout: 8_000 });
