@@ -185,7 +185,7 @@ async function memPal(): Promise<boolean> {
 async function memHelp(): Promise<boolean> {
     console.log("kit memory — local conversation memory (SQLite + FTS5)");
     console.log("\nUsage:");
-    console.log("  kit memory index            Index ~/.claude transcripts into the memory store");
+    console.log("  kit memory index            Index all agent transcripts (Claude Code, Codex, Gemini, Cursor, …) into the store");
     console.log("  kit memory search <query>   Search memory (current project; --global for all)");
     console.log("  kit memory stats            Show what the memory store contains");
     console.log("  kit memory merge <file>     Merge another machine's memory.db into this one");
@@ -271,6 +271,10 @@ async function memStats(): Promise<boolean> {
     }
     console.log(`${c.bold}kit memory${c.reset}  ${c.dim}${s.dbPath}${c.reset}`);
     console.log(`  sessions   ${s.sessions}`);
+    if (s.byHarness.length > 1) {
+      const breakdown = s.byHarness.map((h) => `${h.harness} ${h.sessions}`).join(", ");
+      console.log(`             ${c.dim}${breakdown}${c.reset}`);
+    }
     console.log(`  messages   ${s.messages}`);
     console.log(`  tool-uses  ${s.toolUses}`);
     console.log(`  pending    ${s.pendingOpen} ${c.dim}(open action items)${c.reset}`);

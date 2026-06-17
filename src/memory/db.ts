@@ -354,6 +354,14 @@ export function getStats(db: DatabaseSync): MemoryStats {
       // best-effort: size is informational only
     }
   }
+  const byHarness = (
+    db
+      .prepare(
+        "SELECT harness, COUNT(*) AS n FROM sessions GROUP BY harness ORDER BY n DESC, harness ASC",
+      )
+      .all() as { harness: string; n: number }[]
+  ).map((r) => ({ harness: r.harness, sessions: Number(r.n) }));
+
   return {
     sessions: count("SELECT COUNT(*) AS n FROM sessions"),
     messages: count("SELECT COUNT(*) AS n FROM messages"),
@@ -363,5 +371,6 @@ export function getStats(db: DatabaseSync): MemoryStats {
     ),
     dbPath,
     sizeBytes,
+    byHarness,
   };
 }

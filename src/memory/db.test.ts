@@ -85,6 +85,19 @@ describe("memory db", () => {
     db.close();
   });
 
+  it("getStats breaks sessions down by harness, descending", () => {
+    const db = fresh();
+    upsertSession(db, { sessionId: "c1", harness: "claude-code" });
+    upsertSession(db, { sessionId: "c2", harness: "claude-code" });
+    upsertSession(db, { sessionId: "x1", harness: "codex" });
+    const { byHarness } = getStats(db);
+    assert.deepEqual(byHarness, [
+      { harness: "claude-code", sessions: 2 },
+      { harness: "codex", sessions: 1 },
+    ]);
+    db.close();
+  });
+
   it("search scopes to a project by cwd (and global sees all)", () => {
     const db = fresh();
     upsertSession(db, { sessionId: "s1", harness: "claude-code" });
