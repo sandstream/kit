@@ -102,7 +102,7 @@ import { promptConfirm } from "./utils/prompt.js";
 import { c } from "./utils/colors.js";
 import { gatherStatus } from "./status.js";
 import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
-import { checkContext, applyContext, contextPrompt } from "./context-lock.js";
+import { checkContext, applyContext, contextPrompt, gatherLive, suggestContextToml } from "./context-lock.js";
 import { cmdEnv } from "./commands/env.js";
 import { cmdAuth } from "./commands/auth.js";
 import { cmdAudit } from "./commands/audit.js";
@@ -652,7 +652,9 @@ async function cmdLogin(): Promise<boolean> {
             ? `${c.red}✗${c.reset}`
             : r.action === "login_unverified"
               ? `${c.yellow}?${c.reset}`
-              : `${c.green}✓${c.reset}`;
+              : r.action === "manual"
+                ? `${c.yellow}!${c.reset}`
+                : `${c.green}✓${c.reset}`;
         const label =
           r.action === "already_authenticated"
             ? `${c.dim}already authenticated${c.reset}`
@@ -660,7 +662,9 @@ async function cmdLogin(): Promise<boolean> {
               ? `${c.green}logged in${c.reset}`
               : r.action === "login_unverified"
                 ? `${c.yellow}login unverified${c.reset}`
-                : `${c.red}failed${c.reset}`;
+                : r.action === "manual"
+                  ? `${c.yellow}manual${c.reset}`
+                  : `${c.red}failed${c.reset}`;
         console.log(`  ${icon} ${r.name}  ${label}  ${c.dim}${r.detail}${c.reset}`);
         if (r.action === "failed" || r.action === "login_unverified") allOk = false;
       }
@@ -753,7 +757,7 @@ async function cmdSecrets(): Promise<boolean> {
       },
     },
     async () => {
-      const { results, written, fromTemplate } = await generateSecrets(secretsConfig);
+      const { results, written, fromTemplate, skipped } = await generateSecrets(secretsConfig);
       let allOk = true;
 
       for (const r of results) {
@@ -772,6 +776,10 @@ async function cmdSecrets(): Promise<boolean> {
           ? `from ${secretsConfig.template}`
           : "from keys";
         console.log(`\n  ${c.green}✓${c.reset} Wrote .env.local ${c.dim}(${source})${c.reset}`);
+      } else if (skipped === "nothing-resolved") {
+        console.log(
+          `\n  ${c.yellow}!${c.reset} Skipped .env.local ${c.dim}— no secrets resolved (vault empty/unauthed); existing file left intact${c.reset}`,
+        );
       }
 
       console.log();
@@ -3379,8 +3387,20 @@ async function cmdContextCheck(): Promise<boolean> {
   }
   if (!config.context) {
     console.log(
-      `${c.dim}No [context] declared in .kit.toml. Add one to lock each CLI to its account + project.${c.reset}`,
+      `${c.dim}No [context] declared in .kit.toml — each CLI is unlocked from its account + project.${c.reset}`,
     );
+    const suggestion = suggestContextToml(await gatherLive(process.cwd()));
+    if (suggestion) {
+      console.log(`\nDetected here — add a ${c.bold}[context]${c.reset} block to .kit.toml to lock it:\n`);
+      console.log(suggestion);
+      console.log(
+        `\n${c.yellow}Verify each value is correct for THIS repo before trusting it.${c.reset} ${c.dim}kit detected the currently-active CLI state, which is exactly what the lock exists to question. Then re-run kit context check.${c.reset}`,
+      );
+    } else {
+      console.log(
+        `${c.dim}Add one to lock each CLI to its account + project (gcloud/vercel/github/git/npm).${c.reset}`,
+      );
+    }
     return true;
   }
   console.log(`${c.bold}Context lock${c.reset}\n`);

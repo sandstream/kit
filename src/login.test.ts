@@ -179,4 +179,49 @@ describe("loginServices", () => {
     assert.equal(results[1].action, "logged_in");
     assert.equal(results[2].action, "failed");
   });
+
+  it("never echoes secrets from an authenticated service's check output", async () => {
+    // `stripe config --list` dumps the whole config including API keys. Build
+    // the secret-SHAPED fixtures by concatenation so no contiguous secret
+    // literal exists in source (platform secret-scanners flag those).
+    const skBody = "51AbcdEfGhIjKlMnOpQrStUv";
+    const pkBody = "51ZyXwVuTsRqPoNmLkJiHgFe";
+    const stripeDump = [
+      "color = ''",
+      "['cdb agency-sandlåda']",
+      `test_mode_api_key = '${"sk_" + "test_" + skBody}'`,
+      `test_mode_pub_key = '${"pk_" + "test_" + pkBody}'`,
+    ].join("\n");
+    const deps = makeDeps({
+      checkServices: async () => [
+        { name: "stripe", checkCommand: "stripe config --list", authenticated: true, output: stripeDump },
+      ],
+    });
+
+    const [result] = await loginServices(
+      { stripe: { login: "stripe login", check: "stripe config --list" } },
+      deps,
+    );
+
+    assert.equal(result.action, "already_authenticated");
+    assert.ok(!result.detail.includes("\n"), "detail must be a single line");
+    assert.ok(!result.detail.includes(skBody), "must not contain the secret key body");
+    assert.ok(!result.detail.includes(pkBody), "must not contain the pub key body");
+  });
+
+  it("marks a service with an informational (no-CLI) login as manual, not failed", async () => {
+    const services: Record<string, ServiceConfig> = {
+      resend: { login: "# resend — no CLI login; set RESEND_API_KEY in env", check: "# check env" },
+    };
+    const deps = makeDeps({
+      checkServices: async () => [
+        { name: "resend", checkCommand: "# check env", authenticated: false, output: "" },
+      ],
+    });
+
+    const [result] = await loginServices(services, deps);
+
+    assert.equal(result.action, "manual");
+    assert.ok(result.detail.includes("RESEND_API_KEY"));
+  });
 });

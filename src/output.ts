@@ -5,6 +5,7 @@ import type { SkillCheckResult } from "./check-skills.js";
 import type { SecurityCheckResult } from "./check-security.js";
 import type { LockCheckResult } from "./check-lock.js";
 import type { WebSearchStatus } from "./check-web-search.js";
+import { safeStatusLine } from "./utils/redactSecrets.js";
 
 // ANSI color codes
 const c = {
@@ -119,7 +120,7 @@ export function printServicesTable(services: ServiceStatus[]): void {
     const status = svc.authenticated
       ? `${c.green}authenticated${c.reset}`
       : `${c.red}not authenticated${c.reset}`;
-    const detail = svc.output ? `  ${c.gray}${svc.output.substring(0, 60)}${c.reset}` : "";
+    const detail = svc.output ? `  ${c.gray}${safeStatusLine(svc.output, 60)}${c.reset}` : "";
     console.log(`  ${icon} ${name} ${status}${detail}`);
   }
 }

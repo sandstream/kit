@@ -4,6 +4,7 @@ import type { ServiceConfig } from "./config.js";
 import { checkServices, type ServiceStatus } from "./check-services.js";
 import { isNonInteractive } from "./environment.js";
 import { parseCommand } from "./utils/parseCommand.js";
+import { safeStatusLine } from "./utils/redactSecrets.js";
 
 const exec = promisify(execFile);
 
@@ -13,6 +14,7 @@ export interface LoginResult {
     | "already_authenticated"
     | "logged_in"
     | "login_unverified"
+    | "manual"
     | "failed";
   detail: string;
 }
@@ -98,7 +100,7 @@ export async function loginServices(
       results.push({
         name: status.name,
         action: "already_authenticated",
-        detail: status.output,
+        detail: safeStatusLine(status.output),
       });
       continue;
     }
@@ -109,6 +111,19 @@ export async function loginServices(
         name: status.name,
         action: "failed",
         detail: "No login command configured",
+      });
+      continue;
+    }
+
+    // A service whose "login" is informational (no CLI login — set an env var,
+    // paste a DSN) is expected manual setup, not a failure. Surface it as
+    // "manual" so it doesn't fail the step or get pointlessly retried.
+    const parsedLogin = parseCommand(config.login);
+    if (parsedLogin.kind === "informational") {
+      results.push({
+        name: status.name,
+        action: "manual",
+        detail: parsedLogin.message,
       });
       continue;
     }
@@ -142,7 +157,7 @@ export async function loginServices(
         results.push({
           name: status.name,
           action: "logged_in",
-          detail: verify.output,
+          detail: safeStatusLine(verify.output),
         });
       } else {
         results.push({

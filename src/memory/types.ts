@@ -54,4 +54,8 @@ export interface MemoryStats {
   pendingOpen: number;
   dbPath: string;
   sizeBytes: number;
+  /** Session count per harness (claude-code, codex, gemini, …), descending.
+   *  This is the portability proof: it shows the store spans agents, so the
+   *  externalized state is not locked to one tool. */
+  byHarness: { harness: string; sessions: number }[];
 }
