@@ -31,12 +31,24 @@ export function collectEscalations(
 
   for (const s of services) {
     if (!s.authenticated) {
-      items.push({
-        category: "service",
-        name: s.name,
-        issue: "Not authenticated",
-        action: `Run: ${s.checkCommand.replace(/\bstatus\b|whoami|--list/g, "login").trim()}`,
-      });
+      // An informational service (no CLI login — `#`-documented, e.g. set an
+      // env var) is manual setup, not a failed login. Surface the
+      // documentation message verbatim instead of a bogus `Run: # …`.
+      if (s.informational) {
+        items.push({
+          category: "service",
+          name: s.name,
+          issue: "Manual setup (no CLI login)",
+          action: s.output,
+        });
+      } else {
+        items.push({
+          category: "service",
+          name: s.name,
+          issue: "Not authenticated",
+          action: `Run: ${s.checkCommand.replace(/\bstatus\b|whoami|--list/g, "login").trim()}`,
+        });
+      }
     }
   }
 

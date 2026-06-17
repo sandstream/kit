@@ -44,6 +44,24 @@ describe("collectEscalations", () => {
     assert.equal(items[0].name, "github");
   });
 
+  it("renders an informational service as manual setup, not a `Run: #` command", () => {
+    const services: ServiceStatus[] = [
+      {
+        name: "resend",
+        checkCommand: "# resend — check RESEND_API_KEY is set",
+        authenticated: false,
+        output: "resend — check RESEND_API_KEY is set",
+        informational: true,
+      },
+    ];
+
+    const items = collectEscalations([], services, []);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].issue, "Manual setup (no CLI login)");
+    assert.ok(!items[0].action.startsWith("Run:"), `action should not be a Run: command, got: ${items[0].action}`);
+    assert.ok(items[0].action.includes("RESEND_API_KEY"));
+  });
+
   it("collects missing secrets with source-specific actions", () => {
     const secrets: SecretStatus[] = [
       { name: "DB_URL", source: "1password", available: false, detail: "op read failed" },

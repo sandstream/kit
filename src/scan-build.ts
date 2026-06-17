@@ -56,6 +56,13 @@ const SKIP_DIRS = new Set([
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MiB
 
+// Terraform / tfstate finding labels do not apply to build artifacts and
+// false-positive on framework manifests — e.g. Next.js `routes-manifest.json`
+// has many `"value":"…"` route entries that match the tfstate `"value"` rule.
+// A build-artifact leak is an inlined CREDENTIAL (sk_/JWT/AWS/…), not an HCL or
+// state construct, so these labels are filtered out here.
+const BUILD_IRRELEVANT_LABELS = new Set(["tfstate-value", "terraform-sensitive"]);
+
 async function walk(
   dir: string,
   out: string[],
@@ -112,7 +119,9 @@ export async function scanBuildArtifacts(
     } catch {
       continue;
     }
-    const findings = findSecrets(content);
+    const findings = findSecrets(content).filter(
+      (f) => !BUILD_IRRELEVANT_LABELS.has(f.label),
+    );
     if (findings.length > 0) {
       // Strip leading cwd from path for readable reporting.
       const rel = path.startsWith(cwd) ? path.slice(cwd.length + 1) : path;

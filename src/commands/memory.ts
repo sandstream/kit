@@ -54,6 +54,7 @@ export async function cmdMemory(): Promise<boolean> {
     index: memIndex,
     merge: memMerge,
     stats: memStats,
+    status: memStats, // common typo/alias for `stats`
     suggest: memSuggest,
     search: memSearch,
     hook: memHook,

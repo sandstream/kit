@@ -69,6 +69,44 @@ describe("scanBuildArtifacts", () => {
     }
   });
 
+  it("does not flag a framework manifest's `value` fields (tfstate FP filter)", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, ".next"), { recursive: true });
+      // Next.js routes-manifest.json carries `"value":"…"` header/redirect
+      // entries that match the tfstate `"value"` rule but are not secrets.
+      writeFileSync(
+        join(dir, ".next", "routes-manifest.json"),
+        JSON.stringify({
+          headers: [
+            { source: "/", headers: [{ key: "x-mw", value: "twenty-plus-character-route-value-login" }] },
+          ],
+        }),
+      );
+      const hits = await scanBuildArtifacts(dir);
+      assert.equal(hits.length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still flags a real inlined credential alongside a manifest", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, ".next"), { recursive: true });
+      writeFileSync(
+        join(dir, ".next", "routes-manifest.json"),
+        JSON.stringify({ headers: [{ value: "another-twenty-plus-character-value" }] }),
+      );
+      writeFileSync(join(dir, ".next", "leak.js"), "sk_" + "live_AaBbCcDdEeFfGgHhIiJjKkLl\n");
+      const hits = await scanBuildArtifacts(dir);
+      assert.equal(hits.length, 1);
+      assert.ok(hits[0].file.includes("leak.js"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("respects customDirs override", async () => {
     const dir = makeRepo();
     try {
