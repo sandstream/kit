@@ -69,7 +69,9 @@ export function backupEncrypted(
   const data = readFileSync(srcPath);
   const salt = randomBytes(SALT_LEN);
   const iv = randomBytes(IV_LEN);
-  const cipher = createCipheriv("aes-256-gcm", deriveKey(passphrase, salt), iv);
+  const cipher = createCipheriv("aes-256-gcm", deriveKey(passphrase, salt), iv, {
+    authTagLength: TAG_LEN,
+  });
   const ciphertext = Buffer.concat([cipher.update(data), cipher.final()]);
   const tag = cipher.getAuthTag();
   writeFileSync(outPath, Buffer.concat([MAGIC, salt, iv, tag, ciphertext]));
@@ -86,7 +88,9 @@ export function restoreEncrypted(passphrase: string, inPath: string, destPath: s
   const iv = blob.subarray(off, (off += IV_LEN));
   const tag = blob.subarray(off, (off += TAG_LEN));
   const ciphertext = blob.subarray(off);
-  const decipher = createDecipheriv("aes-256-gcm", deriveKey(passphrase, salt), iv);
+  const decipher = createDecipheriv("aes-256-gcm", deriveKey(passphrase, salt), iv, {
+    authTagLength: TAG_LEN,
+  });
   decipher.setAuthTag(tag);
   const data = Buffer.concat([decipher.update(ciphertext), decipher.final()]); // throws if wrong key
   writeFileSync(destPath, data);
