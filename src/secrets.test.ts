@@ -1,6 +1,6 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { readFile, unlink } from "node:fs/promises";
+import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { generateSecrets } from "./secrets.js";
@@ -120,5 +120,30 @@ describe("generateSecrets", () => {
     const { results } = await generateSecrets(config, tmpOut);
     assert.equal(results[0].resolved, false);
     assert.ok(results[0].detail.includes("Unknown source"));
+  });
+
+  it("does not clobber an existing .env.local when nothing resolved", async () => {
+    const original = "NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54521\nKEEP=me\n";
+    await writeFile(tmpOut, original, "utf-8");
+    delete process.env._KIT_NONE;
+    const config: SecretsConfig = { keys: { _KIT_NONE: { source: "env" } } };
+
+    const { written, skipped } = await generateSecrets(config, tmpOut);
+
+    assert.equal(written, false);
+    assert.equal(skipped, "nothing-resolved");
+    const after = await readFile(tmpOut, "utf-8");
+    assert.equal(after, original, "existing file must be left untouched");
+  });
+
+  it("writes a scaffold when nothing resolved and no file exists yet", async () => {
+    try { await unlink(tmpOut); } catch { /* ignore */ }
+    delete process.env._KIT_NONE2;
+    const config: SecretsConfig = { keys: { _KIT_NONE2: { source: "env" } } };
+
+    const { written, skipped } = await generateSecrets(config, tmpOut);
+
+    assert.equal(written, true);
+    assert.equal(skipped, undefined);
   });
 });

@@ -36,7 +36,12 @@ async function loadTemplate(templatePath: string): Promise<string | null> {
 export async function generateSecrets(
   secrets: SecretsConfig,
   outputPath: string = ".env.local",
-): Promise<{ results: SecretResolveResult[]; written: boolean; fromTemplate: boolean }> {
+): Promise<{
+  results: SecretResolveResult[];
+  written: boolean;
+  fromTemplate: boolean;
+  skipped?: "nothing-resolved";
+}> {
   const results: SecretResolveResult[] = [];
 
   if (!secrets.keys) {
@@ -93,6 +98,20 @@ export async function generateSecrets(
 
     lines.push("");
     content = lines.join("\n");
+  }
+
+  // Never clobber an existing .env.local when we resolved nothing. The source
+  // (vault) being empty/unauthed is not a reason to replace a working file
+  // with an empty scaffold — that destroys local-dev credentials. Leave it
+  // untouched and report the skip so the caller can say so.
+  if (resolved.size === 0) {
+    const fileExists = await access(outputPath).then(
+      () => true,
+      () => false,
+    );
+    if (fileExists) {
+      return { results, written: false, fromTemplate, skipped: "nothing-resolved" };
+    }
   }
 
   await writeFile(outputPath, content, "utf-8");

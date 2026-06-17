@@ -652,7 +652,9 @@ async function cmdLogin(): Promise<boolean> {
             ? `${c.red}✗${c.reset}`
             : r.action === "login_unverified"
               ? `${c.yellow}?${c.reset}`
-              : `${c.green}✓${c.reset}`;
+              : r.action === "manual"
+                ? `${c.yellow}!${c.reset}`
+                : `${c.green}✓${c.reset}`;
         const label =
           r.action === "already_authenticated"
             ? `${c.dim}already authenticated${c.reset}`
@@ -660,7 +662,9 @@ async function cmdLogin(): Promise<boolean> {
               ? `${c.green}logged in${c.reset}`
               : r.action === "login_unverified"
                 ? `${c.yellow}login unverified${c.reset}`
-                : `${c.red}failed${c.reset}`;
+                : r.action === "manual"
+                  ? `${c.yellow}manual${c.reset}`
+                  : `${c.red}failed${c.reset}`;
         console.log(`  ${icon} ${r.name}  ${label}  ${c.dim}${r.detail}${c.reset}`);
         if (r.action === "failed" || r.action === "login_unverified") allOk = false;
       }
@@ -753,7 +757,7 @@ async function cmdSecrets(): Promise<boolean> {
       },
     },
     async () => {
-      const { results, written, fromTemplate } = await generateSecrets(secretsConfig);
+      const { results, written, fromTemplate, skipped } = await generateSecrets(secretsConfig);
       let allOk = true;
 
       for (const r of results) {
@@ -772,6 +776,10 @@ async function cmdSecrets(): Promise<boolean> {
           ? `from ${secretsConfig.template}`
           : "from keys";
         console.log(`\n  ${c.green}✓${c.reset} Wrote .env.local ${c.dim}(${source})${c.reset}`);
+      } else if (skipped === "nothing-resolved") {
+        console.log(
+          `\n  ${c.yellow}!${c.reset} Skipped .env.local ${c.dim}— no secrets resolved (vault empty/unauthed); existing file left intact${c.reset}`,
+        );
       }
 
       console.log();

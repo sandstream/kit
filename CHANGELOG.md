@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security
+- **Auth checks never echo credentials.** `kit login` / `kit setup` previously printed an authenticated service's raw check-command output as its status detail — for `stripe config --list` that dumped Stripe API keys (test- and live-mode) to the terminal. kit now shows a single, secret-redacted status line (the identity the tool prints, e.g. "Logged in as …") via `redactSecrets` / `safeStatusDetail`, which mask Stripe/GitHub/Slack/AWS tokens, JWTs, and `key = value` assignments and collapse multi-line dumps to one line. Account *correctness* is verified by `kit context check`, not by echoing check output.
+
+### Fixed
+- **`kit secrets` no longer clobbers a working `.env.local`.** When the vault resolved zero secrets (e.g. Infisical unauthed), `generateSecrets` overwrote an existing `.env.local` with an empty comment-only scaffold, destroying local-dev credentials. It now skips the write and leaves the file intact when nothing resolved (it still writes a scaffold when no file exists yet).
+- **Services with no CLI login show as "manual", not "failed".** A service whose `.kit.toml` `login` is informational (`# … set X in env`, e.g. resend, sentry) is expected manual setup — it no longer counts as a login failure, and is no longer pointlessly retried with backoff on every `kit setup`.
+
 ## [1.4.0] - 2026-06-17
 
 ### Added

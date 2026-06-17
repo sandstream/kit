@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { loginServices, type LoginDeps } from "./login.js";
+import { loginServices, redactSecrets, safeStatusDetail, type LoginDeps } from "./login.js";
 import type { ServiceConfig } from "./config.js";
 
 function makeDeps(overrides: Partial<LoginDeps> = {}): LoginDeps {
@@ -178,5 +178,79 @@ describe("loginServices", () => {
     assert.equal(results[0].action, "already_authenticated");
     assert.equal(results[1].action, "logged_in");
     assert.equal(results[2].action, "failed");
+  });
+
+  it("never echoes secrets from an authenticated service's check output", async () => {
+    // `stripe config --list` dumps the whole config including API keys. Build
+    // the secret-SHAPED fixtures by concatenation so no contiguous secret
+    // literal exists in source (platform secret-scanners flag those).
+    const skBody = "51AbcdEfGhIjKlMnOpQrStUv";
+    const pkBody = "51ZyXwVuTsRqPoNmLkJiHgFe";
+    const stripeDump = [
+      "color = ''",
+      "['cdb agency-sandlåda']",
+      `test_mode_api_key = '${"sk_" + "test_" + skBody}'`,
+      `test_mode_pub_key = '${"pk_" + "test_" + pkBody}'`,
+    ].join("\n");
+    const deps = makeDeps({
+      checkServices: async () => [
+        { name: "stripe", checkCommand: "stripe config --list", authenticated: true, output: stripeDump },
+      ],
+    });
+
+    const [result] = await loginServices(
+      { stripe: { login: "stripe login", check: "stripe config --list" } },
+      deps,
+    );
+
+    assert.equal(result.action, "already_authenticated");
+    assert.ok(!result.detail.includes("\n"), "detail must be a single line");
+    assert.ok(!result.detail.includes(skBody), "must not contain the secret key body");
+    assert.ok(!result.detail.includes(pkBody), "must not contain the pub key body");
+  });
+
+  it("marks a service with an informational (no-CLI) login as manual, not failed", async () => {
+    const services: Record<string, ServiceConfig> = {
+      resend: { login: "# resend — no CLI login; set RESEND_API_KEY in env", check: "# check env" },
+    };
+    const deps = makeDeps({
+      checkServices: async () => [
+        { name: "resend", checkCommand: "# check env", authenticated: false, output: "" },
+      ],
+    });
+
+    const [result] = await loginServices(services, deps);
+
+    assert.equal(result.action, "manual");
+    assert.ok(result.detail.includes("RESEND_API_KEY"));
+  });
+});
+
+describe("redactSecrets", () => {
+  // Secret-SHAPED fixtures built by concatenation so no contiguous secret
+  // literal lands in source (platform secret-scanners flag those).
+  const skBody = "0123456789ABCDEFGHIJ";
+  const ghBody = "ABCDEFabcdef0123456789";
+  const jwt = "eyJ" + "aGVhZGVy" + "." + "cGF5bG9hZA" + "." + "c2lnbmF0dXJl";
+
+  it("masks Stripe, GitHub and JWT tokens and key=value assignments", () => {
+    assert.ok(!redactSecrets("k = '" + "sk_" + "test_" + skBody + "'").includes(skBody));
+    assert.ok(!redactSecrets("token " + "ghp_" + ghBody).includes(ghBody));
+    assert.ok(!redactSecrets("jwt " + jwt).includes("cGF5bG9hZA"));
+    assert.equal(redactSecrets("api_key = supersecretvalue").endsWith("…"), true);
+  });
+
+  it("leaves non-secret text intact", () => {
+    assert.equal(redactSecrets("Logged in as octocat"), "Logged in as octocat");
+    assert.equal(redactSecrets("sandstream"), "sandstream");
+  });
+});
+
+describe("safeStatusDetail", () => {
+  it("returns the first non-empty line, redacted and capped", () => {
+    const skLine = "test_mode_api_key = '" + "sk_" + "test_" + "0123456789ABCDEF" + "'";
+    assert.equal(safeStatusDetail("\n\nLogged in as octocat\nmore"), "Logged in as octocat");
+    assert.equal(safeStatusDetail("color = ''\n" + skLine), "color = ''");
+    assert.ok(safeStatusDetail("x".repeat(200)).length <= 80);
   });
 });
