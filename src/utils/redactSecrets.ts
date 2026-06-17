@@ -87,6 +87,25 @@ export function redactSecrets(input: string): string {
   return out;
 }
 
+/**
+ * Reduce a command's (possibly multi-line, secret-bearing) output to a single
+ * line safe to show as an auth-status detail. Redacts known credentials, then
+ * takes the first non-empty line and caps its length. Belt-and-suspenders:
+ * callers such as `checkServices` already redact at the source, but a verbose
+ * `stripe config --list` dump still spans many lines of account metadata, and
+ * not every producer redacts (e.g. login.ts's post-login verify). This makes a
+ * single redacted line the only thing that can reach a status table or
+ * `--json` detail.
+ */
+export function safeStatusLine(output: string, max = 80): string {
+  const line =
+    redactSecrets(output || "")
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.length > 0) ?? "";
+  return line.slice(0, max);
+}
+
 export interface SecretFinding {
   label: string;
   preview: string;

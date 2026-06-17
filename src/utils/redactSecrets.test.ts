@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { redactSecrets } from "./redactSecrets.js";
+import { redactSecrets, safeStatusLine } from "./redactSecrets.js";
 
 describe("redactSecrets", () => {
   it("redacts stripe test secret keys", () => {
@@ -57,5 +57,35 @@ describe("redactSecrets", () => {
 
   it("handles empty input", () => {
     assert.equal(redactSecrets(""), "");
+  });
+});
+
+describe("safeStatusLine", () => {
+  it("collapses a multi-line check dump to the first non-empty line", () => {
+    const dump = "color = ''\nproject-name = 'default'\n['acme']\naccount_id = 'acct_123'";
+    assert.equal(safeStatusLine(dump), "color = ''");
+  });
+
+  it("skips leading blank lines", () => {
+    assert.equal(safeStatusLine("\n\n  Logged in as octocat\nmore"), "Logged in as octocat");
+  });
+
+  it("redacts a secret that lands on the surfaced line", () => {
+    // 24-char body → matches the canonical stripe pattern; built by concat so
+    // no contiguous secret literal lands in source.
+    const line = "key " + "sk_" + "test_" + "0123456789ABCDEFGHIJKLMN";
+    const out = safeStatusLine(line);
+    assert.ok(out.includes("[REDACTED]"));
+    assert.ok(!out.includes("0123456789ABCDEFGHIJKLMN"));
+  });
+
+  it("caps the line length", () => {
+    assert.ok(safeStatusLine("x".repeat(200)).length <= 80);
+    assert.equal(safeStatusLine("y".repeat(100), 60).length, 60);
+  });
+
+  it("returns empty string for empty/whitespace input", () => {
+    assert.equal(safeStatusLine(""), "");
+    assert.equal(safeStatusLine("\n  \n"), "");
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { loginServices, redactSecrets, safeStatusDetail, type LoginDeps } from "./login.js";
+import { loginServices, type LoginDeps } from "./login.js";
 import type { ServiceConfig } from "./config.js";
 
 function makeDeps(overrides: Partial<LoginDeps> = {}): LoginDeps {
@@ -223,34 +223,5 @@ describe("loginServices", () => {
 
     assert.equal(result.action, "manual");
     assert.ok(result.detail.includes("RESEND_API_KEY"));
-  });
-});
-
-describe("redactSecrets", () => {
-  // Secret-SHAPED fixtures built by concatenation so no contiguous secret
-  // literal lands in source (platform secret-scanners flag those).
-  const skBody = "0123456789ABCDEFGHIJ";
-  const ghBody = "ABCDEFabcdef0123456789";
-  const jwt = "eyJ" + "aGVhZGVy" + "." + "cGF5bG9hZA" + "." + "c2lnbmF0dXJl";
-
-  it("masks Stripe, GitHub and JWT tokens and key=value assignments", () => {
-    assert.ok(!redactSecrets("k = '" + "sk_" + "test_" + skBody + "'").includes(skBody));
-    assert.ok(!redactSecrets("token " + "ghp_" + ghBody).includes(ghBody));
-    assert.ok(!redactSecrets("jwt " + jwt).includes("cGF5bG9hZA"));
-    assert.equal(redactSecrets("api_key = supersecretvalue").endsWith("…"), true);
-  });
-
-  it("leaves non-secret text intact", () => {
-    assert.equal(redactSecrets("Logged in as octocat"), "Logged in as octocat");
-    assert.equal(redactSecrets("sandstream"), "sandstream");
-  });
-});
-
-describe("safeStatusDetail", () => {
-  it("returns the first non-empty line, redacted and capped", () => {
-    const skLine = "test_mode_api_key = '" + "sk_" + "test_" + "0123456789ABCDEF" + "'";
-    assert.equal(safeStatusDetail("\n\nLogged in as octocat\nmore"), "Logged in as octocat");
-    assert.equal(safeStatusDetail("color = ''\n" + skLine), "color = ''");
-    assert.ok(safeStatusDetail("x".repeat(200)).length <= 80);
   });
 });

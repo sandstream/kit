@@ -4,6 +4,7 @@ import type { ServiceConfig } from "./config.js";
 import { checkServices, type ServiceStatus } from "./check-services.js";
 import { isNonInteractive } from "./environment.js";
 import { parseCommand } from "./utils/parseCommand.js";
+import { safeStatusLine } from "./utils/redactSecrets.js";
 
 const exec = promisify(execFile);
 
@@ -16,42 +17,6 @@ export interface LoginResult {
     | "manual"
     | "failed";
   detail: string;
-}
-
-/**
- * Mask secret-looking tokens in a string before it is shown to the user. Auth
- * "check" commands sometimes echo credentials — e.g. `stripe config --list`
- * prints `test_mode_api_key = 'sk_test_…'` — and that output must never reach
- * the terminal verbatim. Conservative: masks known key/token shapes (Stripe,
- * GitHub, Slack, AWS, JWTs) and any `key = value` assignment, keeping the
- * surrounding context. PURE so it can be unit-tested.
- */
-export function redactSecrets(s: string): string {
-  return s
-    .replace(/\b((?:sk|rk|pk|whsec)_(?:live_|test_)?)[A-Za-z0-9]{6,}/g, "$1…")
-    .replace(/\b(gh[pousr]_|github_pat_)[A-Za-z0-9_]{6,}/g, "$1…")
-    .replace(/\bxox[baprs]-[A-Za-z0-9-]{6,}/g, "xox…")
-    .replace(/\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g, "eyJ…")
-    .replace(/\b(AKIA|ASIA)[A-Z0-9]{12,}/g, "$1…")
-    .replace(
-      /\b(api[_-]?key|secret|token|password|pub_key|pwd|auth)\b(\s*[:=]\s*)\S+/gi,
-      "$1$2…",
-    );
-}
-
-/**
- * Turn an auth-check command's raw output into a single, secret-free status
- * line safe to display (the account identity is whatever the tool prints on
- * its first non-empty line — "Logged in as octocat", "sandstream"). Multi-line
- * config dumps collapse to one line; secret-looking tokens are masked.
- */
-export function safeStatusDetail(output: string): string {
-  const line =
-    (output || "")
-      .split("\n")
-      .map((l) => l.trim())
-      .find((l) => l.length > 0) ?? "";
-  return redactSecrets(line).slice(0, 80);
 }
 
 function runInteractive(command: string): Promise<{ ok: boolean; detail: string }> {
@@ -135,7 +100,7 @@ export async function loginServices(
       results.push({
         name: status.name,
         action: "already_authenticated",
-        detail: safeStatusDetail(status.output),
+        detail: safeStatusLine(status.output),
       });
       continue;
     }
@@ -192,7 +157,7 @@ export async function loginServices(
         results.push({
           name: status.name,
           action: "logged_in",
-          detail: safeStatusDetail(verify.output),
+          detail: safeStatusLine(verify.output),
         });
       } else {
         results.push({
