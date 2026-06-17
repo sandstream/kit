@@ -56,6 +56,9 @@ check = "vercel whoami"
 [services.stripe]
 login = "stripe login"
 check = "stripe config --list"
+# auth strategy is inferred (interactive here, since a `login` command exists);
+# override explicitly with: auth = "vault" | "capture" | "interactive"
+# `kit login --plan` shows the resolved strategy per service before logging in.
 
 [secrets]
 store = "1password"  # or env, dotenvx, vault, aws-sm, gcp-sm, azure-kv, infisical, doppler, bitwarden, eas
@@ -81,7 +84,9 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit setup` — Full pipeline: install → hooks → login → secrets → check
 - `kit check` — Status of tools, services, secrets, hooks, security, tests
 - `kit fix` — Auto-remediate gaps (tools, gitignore, hooks, .env.template)
-- `kit secrets {migrate,vault-migrate,rotate,pull,set-value,validate}` — Secret lifecycle
+- `kit login --plan` — Show the resolved auth strategy (vault/capture/interactive) per service without logging in
+- `kit secrets {set,migrate,rotate,propagate,onecli,validate}` — Secret lifecycle
+- `kit memory {index,search,suggest,pal,share,backup}` — Local-first second brain + pending-action ledger
 - `kit auth {elevate,setup-totp,status,revoke}` — Elevation gate + TOTP
 - `kit mcp {list,auth,set-token,clear}` — MCP-server orchestrator
 - `kit env {list,switch,current,diff}` — Environment routing + drift detection
@@ -197,6 +202,7 @@ End-to-end secret lifecycle — from `.env*` plaintext discovery, through vault
 migration, to deploy-platform propagation, to destructive history cleanup.
 
 - `kit secrets` — Materialize `.env.local` from the configured vault store
+- `kit secrets set <KEY> --stdin | --value <v>` — Capture a value straight into the vault (stdin-safe, never in argv). The execution behind a service's `auth = "capture"` strategy
 - `kit secrets migrate` — Move plaintext credentials from `.env*` into the vault
 - `kit secrets rotate <KEY>` — Mint a new value (`--random` opaque token / `--value <new>` explicit)
 - `kit secrets rotate <KEY> --from-cli` — Provider-native playbooks (Stripe / AWS-IAM / GCP-IAM / GitHub PAT / OpenAI)
@@ -257,14 +263,17 @@ Production credentials are gated behind explicit env-switching and short-lived e
 `kit memory` gives an agent a local-first, deterministic second brain — it stores
 your raw conversation history and searches it *before answering*, so it pulls
 receipts instead of guessing. SQLite + FTS5, two hooks, no vectors, no model calls.
-A private personal tier (encrypted backup so a stolen laptop doesn't lose your
-context) plus a curated, area-organized **shared** tier that travels with the repo
-and is reviewed like code.
+It indexes transcripts from **seven** coding agents (Claude Code, Codex, Gemini,
+Continue, Cursor, Amazon Q, and Cline), each parsed against the agent's own
+serialization format, never guessed. A private personal tier (encrypted backup so a
+stolen laptop doesn't lose your context) plus a curated, area-organized **shared**
+tier that travels with the repo and is reviewed like code.
 
 ```bash
 kit memory install && kit memory index
 kit memory search "what did we decide about X"   # project-scoped recall
 kit memory area stripe                            # shared: how we built it, status, security
+kit memory suggest | your-llm                     # zero-LLM core; pipe a review prompt to YOUR model
 ```
 
 Full reference: [`docs/MEMORY.md`](docs/MEMORY.md). Schema + two-hook design
@@ -274,7 +283,7 @@ credited to [cloudctx](https://github.com/chadptk1238/cloudctx) (MIT).
 
 kit uses lock files in `.kit/` to track exact versions of skills and tools:
 
-- `.kit/kit.json` — Identifies which kit this project uses (e.g., "sandstream/standard@1.2.0")
+- `.kit/kit.json` — Identifies which kit this project uses (e.g., "sandstream/standard@1.3.0")
 - `.kit/skills-lock.json` — Agent skills with versions and metadata
 - `.kit/cli-lock.json` — CLI tools with versions and installation sources
 
