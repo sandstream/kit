@@ -209,15 +209,21 @@ export function importLegacyLedger(
     }
     if (!e.id || !e.title) continue;
     const status = e.status === "done" ? "closed" : (e.status ?? "open");
-    const kind = e.verify ? "auto" : "manual";
+    // SECURITY: a `verify` command read from a file is NOT operator-authored in
+    // this session — the ledger path is overridable (KIT_PAL_LEDGER) and its
+    // content is arbitrary. Import every legacy entry as `manual` with no
+    // executable command, so palAutoVerify can never run a command that crossed
+    // the file boundary. Re-authorise auto-verify by re-adding via `pal add`
+    // (typed input). Invariant: kind='auto' + verify_cmd is only ever created
+    // by palAdd.
     const res = insert.run(
       e.id,
       status,
       e.title,
       e.why ?? null,
       e.repo ?? null,
-      kind,
-      e.verify ?? null,
+      "manual",
+      null,
       e.ts ?? null,
       e.next_check ?? null,
       e.pass_streak ?? 0,

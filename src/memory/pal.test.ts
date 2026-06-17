@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb } from "./db.js";
@@ -97,7 +97,10 @@ describe("PAL — pending actions", () => {
     assert.equal(r.imported, 2);
     const open = palList(db);
     const a = open.find((p) => p.id === "aaaa");
-    assert.equal(a?.kind, "auto"); // had a verify
+    // SECURITY: a `verify` command from a file is never imported as an
+    // auto-executing command. The item is demoted to `manual` with no verify_cmd.
+    assert.equal(a?.kind, "manual");
+    assert.equal(a?.verify_cmd ?? null, null);
     assert.equal(a?.scope, "app-a"); // repo → scope
     assert.equal(a?.detail, "branch not merged"); // why → detail
     assert.equal(a?.verify_passes, 1); // pass_streak → verify_passes
@@ -106,6 +109,31 @@ describe("PAL — pending actions", () => {
       "cert fixed",
     ); // done → closed
     assert.equal(importLegacyLedger(db, led).imported, 0); // idempotent
+    rmSync(tmp, { recursive: true, force: true });
+    db.close();
+  });
+
+  it("SECURITY: a verify command imported from a legacy ledger is never auto-executed", () => {
+    const db = fresh();
+    const tmp = mkdtempSync(join(tmpdir(), "kit-pal-sec-"));
+    const led = join(tmp, "ledger.jsonl");
+    const marker = join(tmp, "PWNED");
+    writeFileSync(
+      led,
+      JSON.stringify({
+        id: "evil",
+        ts: "2026-06-01",
+        status: "open",
+        title: "attacker-controlled entry",
+        verify: `touch ${marker}`, // would run if imported as auto + auto-verified
+      }) + "\n",
+    );
+    importLegacyLedger(db, led);
+    const item = palList(db).find((p) => p.id === "evil");
+    assert.equal(item?.kind, "manual"); // demoted: not an auto item
+    assert.equal(item?.verify_cmd ?? null, null); // executable command dropped on import
+    palAutoVerify(db); // must NOT run `touch ${marker}`
+    assert.equal(existsSync(marker), false, "imported verify_cmd must never execute");
     rmSync(tmp, { recursive: true, force: true });
     db.close();
   });

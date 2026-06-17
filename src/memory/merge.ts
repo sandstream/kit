@@ -101,8 +101,13 @@ export function mergeDb(target: DatabaseSync, sourcePath: string): MergeResult {
         p.title as string,
         (str(p.detail) ?? null) as string | null,
         (str(p.scope) ?? null) as string | null,
-        str(p.kind) ?? "manual",
-        (str(p.verify_cmd) ?? null) as string | null,
+        // SECURITY: never carry an executable verify_cmd across a DB merge — a
+        // command from another machine's store is not operator-authored in this
+        // session. Demote merged pending actions to `manual` with no verify_cmd
+        // (same invariant as importLegacyLedger) so palAutoVerify can't execute a
+        // command that crossed the merge boundary. Re-add via `pal add` to re-arm.
+        "manual",
+        null,
         (str(p.created_at) ?? null) as string | null,
         (str(p.next_check) ?? null) as string | null,
         (str(p.snooze_until) ?? null) as string | null,
