@@ -4024,6 +4024,8 @@ function cmdHelp(subcommand?: string): boolean {
   const bold = c.bold, cyan = c.cyan, dim = c.dim, reset = c.reset, green = c.green;
 
   console.log(`${bold}kit${reset} ${dim}v${KIT_VERSION}${reset} — developer environment manager\n`);
+  console.log(`${bold}Get going:${reset}  ${dim}npx sandstream-kit setup${reset}  ${dim}or${reset}  ${green}kit init${reset} ${dim}→${reset} ${green}kit check${reset} ${dim}→${reset} ${green}kit setup${reset}`);
+  console.log(`${dim}Prereqs: Node 22+, git, and mise (brew install mise) for installing tools.${reset}\n`);
   console.log(`${bold}Usage:${reset}  kit ${cyan}<command>${reset} ${dim}[options]${reset}\n`);
   console.log(`${bold}Commands:${reset}`);
 

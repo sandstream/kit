@@ -6,8 +6,28 @@ For AI agents and humans. Manages tools, auth, secrets, and project setup. Zero 
 
 🌐 [sandstre.am/kit](https://sandstre.am/kit)
 
+## Quick start
+
+**Prerequisites:** Node.js 22+, git, and [mise](https://mise.jdx.dev) for installing tools (`brew install mise`, or `curl https://mise.run | sh`).
+
 ```bash
+# zero install (also sidesteps npm -g permission issues):
 npx sandstream-kit setup
+
+# or install globally:
+npm i -g sandstream-kit
+# if npm -g is permission-blocked, use a user-owned prefix instead of sudo:
+#   npm config set prefix ~/.npm-global
+#   echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+```
+
+Then, in a repo:
+
+```bash
+kit init           # detect the stack → generate .kit.toml
+kit check          # what's set up vs missing (tools, services, secrets, hooks, security)
+kit setup          # install tools (via mise), git hooks, logins, secrets
+kit context check  # lock each CLI to the declared account + project (no wrong-org pushes)
 ```
 
 ## Problem
