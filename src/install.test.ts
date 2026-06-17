@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { installTools, type InstallDeps } from "./install.js";
+import { installTools, miseErrorDetail, type InstallDeps } from "./install.js";
 
 function makeDeps(overrides: Partial<InstallDeps> = {}): InstallDeps {
   return {
@@ -114,5 +114,31 @@ describe("installTools", () => {
     assert.equal(results.length, 2);
     assert.equal(results[0].action, "already_ok");
     assert.equal(results[1].action, "installed");
+  });
+});
+
+describe("miseErrorDetail", () => {
+  it("turns a missing-mise spawn error into an actionable message", () => {
+    const detail = miseErrorDetail("spawn mise ENOENT");
+    assert.ok(/mise is not installed/i.test(detail));
+    assert.ok(/brew install mise|mise\.run/i.test(detail));
+  });
+
+  it("passes other errors through (first line only)", () => {
+    assert.equal(miseErrorDetail("mise: plugin not found\nmore noise"), "mise: plugin not found");
+  });
+
+  it("detects an untrusted .mise.toml from stderr and points at mise trust", () => {
+    const stderr =
+      "mise ERROR Config files in ~/repo/.mise.toml are not trusted.\nmise ERROR Trust them with `mise trust`.";
+    const detail = miseErrorDetail("Command failed: mise install node@24", stderr);
+    assert.ok(/not trusted/i.test(detail));
+    assert.ok(/mise trust/.test(detail));
+  });
+
+  it("surfaces the real mise ERROR line instead of the generic Command failed", () => {
+    const stderr = "mise ERROR error parsing config file: ~/repo/.mise.toml\nmise ERROR Version: 2026.6.11";
+    const detail = miseErrorDetail("Command failed: mise install node@24", stderr);
+    assert.equal(detail, "error parsing config file: ~/repo/.mise.toml");
   });
 });
