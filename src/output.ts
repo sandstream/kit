@@ -264,7 +264,9 @@ export function printSkillsTable(skills: SkillCheckResult[]): void {
         ? `${c.dim}[${result.severity}]${c.reset}`
         : "";
 
-      console.log(`  ${icon} ${name} ${statusColor}${result.status}${c.reset}  ${detail} ${severity}`);
+      const ruleTag = result.rule ? ` ${c.dim}[${result.rule.id}]${c.reset}` : "";
+
+      console.log(`  ${icon} ${name} ${statusColor}${result.status}${c.reset}  ${detail} ${severity}${ruleTag}`);
       
       // Show affected files if available (limit to first 5)
       if (result.files && result.files.length > 0) {
