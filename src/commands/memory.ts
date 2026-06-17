@@ -43,6 +43,9 @@ import {
 export async function cmdMemory(): Promise<boolean> {
   const subcommand = process.argv[3];
   if (!subcommand || subcommand === "--help" || subcommand === "-h") return memHelp();
+  // A --help/-h flag after a subcommand means "show help", never run a
+  // side-effectful subcommand (e.g. `kit memory install --help` must not install).
+  if (hasFlag(process.argv, "--help") || hasFlag(process.argv, "-h")) return memHelp();
 
   // One handler per subcommand — keeps this dispatcher flat (was a complexity-132
   // if-chain). Each handler reads process.argv itself, so no args thread through.
