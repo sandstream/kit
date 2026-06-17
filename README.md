@@ -21,7 +21,7 @@ Every time you (or an agent) starts on a new project:
 
 ## Why kit exists
 
-The same wall kept showing up — for a human at a new laptop and for an AI agent in a
+The same wall kept showing up, for a human at a new laptop and for an AI agent in a
 fresh checkout: API keys scattered across `.env` files, shell history and password
 managers (some live, some expired, none in one place); the same setup prompts burning
 tokens to rediscover what the last session already knew; and an agent one `npm install`
@@ -31,7 +31,7 @@ kit makes "get this project running, safely" declarative and repeatable: one con
 materializes tools, logins and secrets the same way every time, keeps credentials in a
 vault instead of on the loose, and puts a pre-install **triage** step in front of new
 dependencies so an unknown package gets looked at before it lands. Zero LLM calls,
-local-first, no telemetry — the intelligence stays where you put it.
+local-first, no telemetry, the intelligence stays where you put it.
 
 ## Solution
 
@@ -80,39 +80,39 @@ verify = "pnpm dev & sleep 5 && curl localhost:3000"
 
 Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 
-- `kit init` — Auto-detect project stack → generate `.kit.toml`
-- `kit setup` — Full pipeline: install → hooks → login → secrets → check
-- `kit check` — Status of tools, services, secrets, hooks, security, tests
-- `kit fix` — Auto-remediate gaps (tools, gitignore, hooks, .env.template)
-- `kit login --plan` — Show the resolved auth strategy (vault/capture/interactive) per service without logging in
-- `kit secrets {set,migrate,rotate,propagate,onecli,validate}` — Secret lifecycle
-- `kit memory {index,search,suggest,pal,share,backup}` — Local-first second brain + pending-action ledger
-- `kit auth {elevate,setup-totp,status,revoke}` — Elevation gate + TOTP
-- `kit mcp {list,auth,set-token,clear}` — MCP-server orchestrator
-- `kit env {list,switch,current,diff}` — Environment routing + drift detection
-- `kit triage {npm,pip,docker,repo,skill}` — Pre-install security check
-- `kit security {scan-build,scan-staged,verify-pull,costs,policy}` — Security ops
-- `kit hooks {install,add,sync}` — Git hooks + bypass detector
-- `kit governance` / `kit audit` — Policy + audit-log inspection
-- `kit --read-only <subcommand>` — Session-wide refusal of all writes
+- `kit init`: Auto-detect project stack → generate `.kit.toml`
+- `kit setup`: Full pipeline: install → hooks → login → secrets → check
+- `kit check`: Status of tools, services, secrets, hooks, security, tests
+- `kit fix`: Auto-remediate gaps (tools, gitignore, hooks, .env.template)
+- `kit login --plan`: Show the resolved auth strategy (vault/capture/interactive) per service without logging in
+- `kit secrets {set,migrate,rotate,propagate,onecli,validate}`: Secret lifecycle
+- `kit memory {index,search,suggest,pal,share,backup}`: Local-first second brain + pending-action ledger
+- `kit auth {elevate,setup-totp,status,revoke}`: Elevation gate + TOTP
+- `kit mcp {list,auth,set-token,clear}`: MCP-server orchestrator
+- `kit env {list,switch,current,diff}`: Environment routing + drift detection
+- `kit triage {npm,pip,docker,repo,skill}`: Pre-install security check
+- `kit security {scan-build,scan-staged,verify-pull,costs,policy}`: Security ops
+- `kit hooks {install,add,sync}`: Git hooks + bypass detector
+- `kit governance` / `kit audit`: Policy + audit-log inspection
+- `kit --read-only <subcommand>`: Session-wide refusal of all writes
 
 ### What you'll see
 
-`kit init` — detects the stack, previews `.kit.toml`, then runs setup:
+`kit init`, detects the stack, previews `.kit.toml`, then runs setup:
 
 ```text
 kit init
 ──────────────────────────────────────────────────
   ✓ Detected: TypeScript / Next.js  (confidence: 92%)
 
-Preview — .kit.toml
+Preview, .kit.toml
   + [tools]
   + node = "22"
   ...
   ✓ Generated .kit.toml
 ```
 
-`kit setup` — six-stage pipeline, each stage gated on the last:
+`kit setup`, six-stage pipeline, each stage gated on the last:
 
 ```text
 kit setup
@@ -124,16 +124,16 @@ kit setup
 [4/6] Secrets      ✓ Wrote .env.local (from keys)
 [5/6] Agent config ✓ Claude Code → CLAUDE.md (created)
 [6/6] Verify
-Setup complete — you're ready to go! ✓
+Setup complete, you're ready to go! ✓
 ```
 
 Step 5 teaches the agent in the repo (Claude Code, Codex, Cursor, Cline) to
-*use* kit — it writes a small managed "run kit check / triage before install /
+*use* kit, it writes a small managed "run kit check / triage before install /
 vault your secrets" block into the agent's rules file (`CLAUDE.md`, `AGENTS.md`,
 `.cursorrules`, `.clinerules`). Run it standalone any time with `kit agent-config`.
 The block is regenerated in place on re-run; edit outside its markers freely.
 
-`kit check` — grouped status tables with a pass/fail summary:
+`kit check`, grouped status tables with a pass/fail summary:
 
 ```text
 Tools
@@ -149,7 +149,7 @@ Security
 Run kit install to fix tools, kit login to fix auth
 ```
 
-`kit fix` — six remediation steps, then a fixed/manual summary:
+`kit fix`, six remediation steps, then a fixed/manual summary:
 
 ```text
 kit fix
@@ -165,7 +165,7 @@ Summary
      • Login to stripe: run 'kit login' or 'stripe login'
 ```
 
-`kit secrets` — resolves each key from the vault and writes `.env.local`:
+`kit secrets`, resolves each key from the vault and writes `.env.local`:
 
 ```text
 Generating secrets...  (env=dev)
@@ -177,7 +177,7 @@ Generating secrets...  (env=dev)
   ✓ Wrote .env.local (from keys)
 ```
 
-`kit triage <type> <target>` — security verdict before you install:
+`kit triage <type> <target>`, security verdict before you install:
 
 ```text
 Running triage on npm: left-pad
@@ -191,76 +191,76 @@ TRIAGE PASSED
 Trust model documented in [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md);
 data flow per command in [`docs/DATA_FLOW.md`](./docs/DATA_FLOW.md);
 release-verification in [`docs/VERIFY.md`](./docs/VERIFY.md).
-- `kit doctor` — Deep diagnostics: Node.js version, mise, .env.local, tools in PATH, git hooks
-- `kit env` — Inspect environment variables from .env.local (`--show-values`, `--missing`, `--json`)
-- `kit mcp` — Run the MCP server over stdio for AI assistants (auto-detected: no sub-command + non-TTY). Interactively, `kit mcp list|auth|set-token|clear` manages declared servers
-- `kit analyze` — Detect stack + emit draft `CLAUDE.md` / `RULES.md` from git history + framework markers
+- `kit doctor`: Deep diagnostics: Node.js version, mise, .env.local, tools in PATH, git hooks
+- `kit env`: Inspect environment variables from .env.local (`--show-values`, `--missing`, `--json`)
+- `kit mcp`: Run the MCP server over stdio for AI assistants (auto-detected: no sub-command + non-TTY). Interactively, `kit mcp list|auth|set-token|clear` manages declared servers
+- `kit analyze`: Detect stack + emit draft `CLAUDE.md` / `RULES.md` from git history + framework markers
 
 ### Secrets management
 
-End-to-end secret lifecycle — from `.env*` plaintext discovery, through vault
+End-to-end secret lifecycle, from `.env*` plaintext discovery, through vault
 migration, to deploy-platform propagation, to destructive history cleanup.
 
-- `kit secrets` — Materialize `.env.local` from the configured vault store
-- `kit secrets set <KEY> --stdin | --value <v>` — Capture a value straight into the vault (stdin-safe, never in argv). The execution behind a service's `auth = "capture"` strategy
-- `kit secrets migrate` — Move plaintext credentials from `.env*` into the vault
-- `kit secrets rotate <KEY>` — Mint a new value (`--random` opaque token / `--value <new>` explicit)
-- `kit secrets rotate <KEY> --from-cli` — Provider-native playbooks (Stripe / AWS-IAM / GCP-IAM / GitHub PAT / OpenAI)
-- `kit secrets rotate <KEY> --via supabase-mgmt-api --project <ref>` — Full automation via Supabase Mgmt API. Auto-detects scoped-key-mint vs jwt-secret-roll.
-- `kit secrets propagate <KEY> --to vercel,github,...` — Push value to deploy targets (stdin-safe via `--stdin`)
-- `kit secrets revoke-old --via supabase-mgmt-api --key-id <id>` — Revoke a previously-minted scoped key
-- `kit secrets onecli register <KEY> --host <pattern>` — Register with the OneCLI gateway so the agent process never sees the real value
-- `kit secrets purge-history <pattern> --force-history` — Destructive: rewrite git history to scrub a leaked value (wraps `git filter-repo` / `bfg`). Requires elevation + explicit flag.
+- `kit secrets`: Materialize `.env.local` from the configured vault store
+- `kit secrets set <KEY> --stdin | --value <v>`: Capture a value straight into the vault (stdin-safe, never in argv). The execution behind a service's `auth = "capture"` strategy
+- `kit secrets migrate`: Move plaintext credentials from `.env*` into the vault
+- `kit secrets rotate <KEY>`: Mint a new value (`--random` opaque token / `--value <new>` explicit)
+- `kit secrets rotate <KEY> --from-cli`: Provider-native playbooks (Stripe / AWS-IAM / GCP-IAM / GitHub PAT / OpenAI)
+- `kit secrets rotate <KEY> --via supabase-mgmt-api --project <ref>`: Full automation via Supabase Mgmt API. Auto-detects scoped-key-mint vs jwt-secret-roll.
+- `kit secrets propagate <KEY> --to vercel,github,...`: Push value to deploy targets (stdin-safe via `--stdin`)
+- `kit secrets revoke-old --via supabase-mgmt-api --key-id <id>`: Revoke a previously-minted scoped key
+- `kit secrets onecli register <KEY> --host <pattern>`: Register with the OneCLI gateway so the agent process never sees the real value
+- `kit secrets purge-history <pattern> --force-history`: Destructive: rewrite git history to scrub a leaked value (wraps `git filter-repo` / `bfg`). Requires elevation + explicit flag.
 
 ### Security scanners
 
-- `kit security scan-staged` — Pre-commit: scan staged blobs for known credential patterns
-- `kit security scan-build` — Walk `.next/`, `dist/`, `build/` for credentials inlined into artifacts (`NEXT_PUBLIC_` typos)
-- `kit security scan-transcripts` — Walk `.claude/`, `~/.claude/projects/`, `.opencode/` for replayed-secret leaks
-- `kit security check-gitignore [--fix]` — Verify `.env*`, `*.pem`, `id_rsa`, `.kit/elevation.json` are ignored
-- `kit security verify-pull [--base <ref>]` — After `git pull`: audit new deps, gitignore drops, introduced secrets, policy changes
-- `kit security policy [init|add <pkg>|check]` — Dependency allowlist enforcement + per-key spend caps/TTL/scope
-- `kit security costs` — Snapshot per-key spend vs policy cap (Stripe live; OpenAI/Anthropic/Resend/Vercel stubbed)
-- `kit security clear-cache` — Reset the cached supply-chain scanner binary (use after an intentional rebuild)
+- `kit security scan-staged`: Pre-commit: scan staged blobs for known credential patterns
+- `kit security scan-build`: Walk `.next/`, `dist/`, `build/` for credentials inlined into artifacts (`NEXT_PUBLIC_` typos)
+- `kit security scan-transcripts`: Walk `.claude/`, `~/.claude/projects/`, `.opencode/` for replayed-secret leaks
+- `kit security check-gitignore [--fix]`: Verify `.env*`, `*.pem`, `id_rsa`, `.kit/elevation.json` are ignored
+- `kit security verify-pull [--base <ref>]`: After `git pull`: audit new deps, gitignore drops, introduced secrets, policy changes
+- `kit security policy [init|add <pkg>|check]`: Dependency allowlist enforcement + per-key spend caps/TTL/scope
+- `kit security costs`: Snapshot per-key spend vs policy cap (Stripe live; OpenAI/Anthropic/Resend/Vercel stubbed)
+- `kit security clear-cache`: Reset the cached supply-chain scanner binary (use after an intentional rebuild)
 
 ### Built-in git hooks
 
 `kit hooks add <name>` installs a managed hook that calls back into kit. No `.kit.toml` config required.
 
-- `secret-scan` (pre-commit) — Block commits that introduce known credential patterns
-- `post-pull-audit` (post-merge) — Run `verify-pull` after every `git pull` / merge
+- `secret-scan` (pre-commit): Block commits that introduce known credential patterns
+- `post-pull-audit` (post-merge): Run `verify-pull` after every `git pull` / merge
 
 ### Environments + elevation
 
 Production credentials are gated behind explicit env-switching and short-lived elevation.
 
-- `kit env switch <dev|staging|prod>` — Toggle the active environment marker
-- `kit env current` — Show active env (color-coded), `kit env list` for available
-- `kit auth elevate [--scope <op>] [--ttl-minutes N]` — Mint a TTL'd elevation marker (TOTP or yes-prompt). Required before any destructive secret op.
-- `kit auth setup-totp` — One-time TOTP enrollment (writes `~/.kit/totp-secret` 0600)
-- `kit auth status` — Show active elevation
-- `kit auth revoke` — Drop the elevation marker early
-- `kit audit secrets [--since-days N] [--key <name>]` — Forensics: who touched which key, when
+- `kit env switch <dev|staging|prod>`: Toggle the active environment marker
+- `kit env current`: Show active env (color-coded), `kit env list` for available
+- `kit auth elevate [--scope <op>] [--ttl-minutes N]`: Mint a TTL'd elevation marker (TOTP or yes-prompt). Required before any destructive secret op.
+- `kit auth setup-totp`: One-time TOTP enrollment (writes `~/.kit/totp-secret` 0600)
+- `kit auth status`: Show active elevation
+- `kit auth revoke`: Drop the elevation marker early
+- `kit audit secrets [--since-days N] [--key <name>]`: Forensics: who touched which key, when
 
 ### Quality gates (baseline-aware)
 
-- `kit check --enforce-tests` — Fail when net-new source files lack a sibling `.test.ts`
-- `kit design` — Static a11y scan (img-alt, button-empty, anchor-no-href, input-no-label) + design-token consistency (raw `#hex` / `px` bypass). `--enforce` to gate, `--json` for machine output
-- `kit review` — Meta-runner: `check` + `design` in one command. Use as a single PR-gate entry point for AI agents
-- `kit baseline freeze` — Snapshot current findings (untested files, a11y, tokens) into `.kit-baseline.json` so pre-existing warnings stay warnings and only net-new findings can fail
-- `kit baseline show` — Print current baseline
+- `kit check --enforce-tests`: Fail when net-new source files lack a sibling `.test.ts`
+- `kit design`: Static a11y scan (img-alt, button-empty, anchor-no-href, input-no-label) + design-token consistency (raw `#hex` / `px` bypass). `--enforce` to gate, `--json` for machine output
+- `kit review`: Meta-runner: `check` + `design` in one command. Use as a single PR-gate entry point for AI agents
+- `kit baseline freeze`: Snapshot current findings (untested files, a11y, tokens) into `.kit-baseline.json` so pre-existing warnings stay warnings and only net-new findings can fail
+- `kit baseline show`: Print current baseline
 
 ### Supply chain
 
-- **Bumblebee** — Built-in supply-chain scanner. Verifies every dependency against pinned SHA-256 checksums in `bumblebee.lock.json`. Re-verifies the cache before reuse so a tampered local file is caught (kind `integrity`). Runs in CI on every PR
-- `kit triage npm|pip|docker|repo|skill <target>` — Pre-install security evaluation via triage skill
-- `kit triage npm <pkg> --sandbox` — Offline behavioral inspection: `npm pack` → extract → scan for install scripts, eval/base64/network patterns, unexpected scripts, oversized files. No code executes
+- **Bumblebee**: Built-in supply-chain scanner. Verifies every dependency against pinned SHA-256 checksums in `bumblebee.lock.json`. Re-verifies the cache before reuse so a tampered local file is caught (kind `integrity`). Runs in CI on every PR
+- `kit triage npm|pip|docker|repo|skill <target>`: Pre-install security evaluation via triage skill
+- `kit triage npm <pkg> --sandbox`: Offline behavioral inspection: `npm pack` → extract → scan for install scripts, eval/base64/network patterns, unexpected scripts, oversized files. No code executes
 - Supply-chain findings auto-append to `.kit-audit.jsonl` (one JSON line per finding) for SIEM ingest
 - Releases ship with SLSA provenance (`npm publish --provenance`), CycloneDX + SPDX SBOMs on every GitHub release, cosign-signed Docker images, and weekly OpenSSF Scorecard
 
 ## Memory
 
-`kit memory` gives an agent a local-first, deterministic second brain — it stores
+`kit memory` gives an agent a local-first, deterministic second brain, it stores
 your raw conversation history and searches it *before answering*, so it pulls
 receipts instead of guessing. SQLite + FTS5, two hooks, no vectors, no model calls.
 It indexes transcripts from **seven** coding agents (Claude Code, Codex, Gemini,
@@ -283,9 +283,9 @@ credited to [cloudctx](https://github.com/chadptk1238/cloudctx) (MIT).
 
 kit uses lock files in `.kit/` to track exact versions of skills and tools:
 
-- `.kit/kit.json` — Identifies which kit this project uses (e.g., "sandstream/standard@1.3.0")
-- `.kit/skills-lock.json` — Agent skills with versions and metadata
-- `.kit/cli-lock.json` — CLI tools with versions and installation sources
+- `.kit/kit.json`: Identifies which kit this project uses (e.g., "sandstream/standard@1.3.0")
+- `.kit/skills-lock.json`: Agent skills with versions and metadata
+- `.kit/cli-lock.json`: CLI tools with versions and installation sources
 
 This allows teams to codify and version their development methodology, similar to `package-lock.json` for dependencies.
 
@@ -297,7 +297,7 @@ kit check     # Verify lock files are in sync
 
 ## Service Provisioning
 
-kit can automatically provision and configure services for your project — designed for agent-native workflows (no browser required):
+kit can automatically provision and configure services for your project, designed for agent-native workflows (no browser required):
 
 ```bash
 kit add stripe/payments    # Set up Stripe with API keys
@@ -315,7 +315,7 @@ kit add vercel/hosting     # Link repository to Vercel
 
 ### Available Services
 
-- **stripe/payments** — Payment processing with Stripe
+- **stripe/payments**: Payment processing with Stripe
   - Requires: `stripe` CLI ([install](https://stripe.com/docs/stripe-cli))
   - Provisions: API keys, creates test mode configuration
   - Secrets: `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`
@@ -326,7 +326,7 @@ kit add vercel/hosting     # Link repository to Vercel
     kit add stripe/payments
     ```
 
-- **supabase/db** — Database and authentication with Supabase
+- **supabase/db**: Database and authentication with Supabase
   - Requires: `supabase` CLI ([install](https://supabase.com/docs/guides/cli))
   - Provisions: Local dev instance or links existing project
   - Secrets: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
@@ -337,7 +337,7 @@ kit add vercel/hosting     # Link repository to Vercel
     kit add supabase/db
     ```
 
-- **vercel/hosting** — Hosting and deployment with Vercel
+- **vercel/hosting**: Hosting and deployment with Vercel
   - Requires: `vercel` CLI ([install](https://vercel.com/docs/cli))
   - Provisions: Links repository, sets up deployment
   - Secrets: `VERCEL_PROJECT_ID`, `VERCEL_ORG_ID`
@@ -348,7 +348,7 @@ kit add vercel/hosting     # Link repository to Vercel
     kit add vercel/hosting
     ```
 
-- **expo/eas** — Mobile app builds with Expo EAS
+- **expo/eas**: Mobile app builds with Expo EAS
   - Requires: `eas` CLI ([install](https://docs.expo.dev/eas/))
   - Provisions: EAS project, build configuration
   - Secrets: `EXPO_TOKEN`, EAS credentials
@@ -359,7 +359,7 @@ kit add vercel/hosting     # Link repository to Vercel
     kit add expo/eas
     ```
 
-- **searxng/instance** — Privacy-respecting search engine
+- **searxng/instance**: Privacy-respecting search engine
   - Requires: `docker` and `docker-compose`
   - Provisions: Local SearXNG instance
   - Secrets: `SEARXNG_URL`, `SEARXNG_SECRET`
@@ -438,9 +438,9 @@ See [docs/CUSTOM_ADAPTERS.md](./docs/CUSTOM_ADAPTERS.md) for a complete guide on
 **Troubleshooting:**
 
 Common issues and solutions:
-- **"Required tool not installed"** — Install the service's CLI tool (see examples above)
-- **"Not authenticated"** — Run the service's login command (e.g., `stripe login`)
-- **"Provisioning failed"** — Check CLI is in your PATH: `which stripe`
+- **"Required tool not installed"**: Install the service's CLI tool (see examples above)
+- **"Not authenticated"**: Run the service's login command (e.g., `stripe login`)
+- **"Provisioning failed"**: Check CLI is in your PATH: `which stripe`
 - For more help, see [docs/CUSTOM_ADAPTERS.md](./docs/CUSTOM_ADAPTERS.md#troubleshooting)
 
 ## Agent Integration
@@ -485,12 +485,12 @@ revocation_endpoint = "https://audit.example.com/agents/{agent_id}/status"
 
 ### Features
 
-- **Environment-based access control** — Different permissions per environment
-- **Audit logging** — All operations logged with automatic secret redaction
-- **Budget limits** — Token (daily) and operation (hourly) tracking
-- **Approval gates** — Interactive prompts for destructive operations
-- **Revocation** — Remote status checking via API
-- **Secret expiration** — Monitoring with warnings for expiring secrets
+- **Environment-based access control**: Different permissions per environment
+- **Audit logging**: All operations logged with automatic secret redaction
+- **Budget limits**: Token (daily) and operation (hourly) tracking
+- **Approval gates**: Interactive prompts for destructive operations
+- **Revocation**: Remote status checking via API
+- **Secret expiration**: Monitoring with warnings for expiring secrets
 
 ### Environment Detection
 
@@ -588,7 +588,7 @@ For Cline, add the same config to your `cline_mcp_settings.json`.
 | `kit_secrets` | Generate `.env.local` from configured sources |
 | `kit_fix` | Auto-fix issues (install tools, generate lock files) |
 | `kit_add` | Provision a service integration (stripe, supabase, etc.) |
-| `kit_env` | Inspect `.env.local` — list keys with set/missing status and redacted values |
+| `kit_env` | Inspect `.env.local`, list keys with set/missing status and redacted values |
 
 ### Example: kit_check response
 
@@ -615,10 +615,10 @@ For Cline, add the same config to your `cline_mcp_settings.json`.
 
 ### Getting Help
 
-- 📚 **Plugin Development** — [docs/PLUGIN_DEVELOPMENT.md](docs/PLUGIN_DEVELOPMENT.md), [docs/ADAPTER_GUIDE.md](docs/ADAPTER_GUIDE.md), [docs/MCP_TOOLS_GUIDE.md](docs/MCP_TOOLS_GUIDE.md)
-- 💬 **Discussions** — [github.com/sandstream/kit/discussions](https://github.com/sandstream/kit/discussions)
-- 🐛 **Issues** — [github.com/sandstream/kit/issues](https://github.com/sandstream/kit/issues)
-- 🤝 **Contributing** — [CONTRIBUTING.md](CONTRIBUTING.md), [COMMUNITY.md](COMMUNITY.md)
+- 📚 **Plugin Development**: [docs/PLUGIN_DEVELOPMENT.md](docs/PLUGIN_DEVELOPMENT.md), [docs/ADAPTER_GUIDE.md](docs/ADAPTER_GUIDE.md), [docs/MCP_TOOLS_GUIDE.md](docs/MCP_TOOLS_GUIDE.md)
+- 💬 **Discussions**: [github.com/sandstream/kit/discussions](https://github.com/sandstream/kit/discussions)
+- 🐛 **Issues**: [github.com/sandstream/kit/issues](https://github.com/sandstream/kit/issues)
+- 🤝 **Contributing**: [CONTRIBUTING.md](CONTRIBUTING.md), [COMMUNITY.md](COMMUNITY.md)
 
 ### Code of Conduct
 
@@ -626,6 +626,6 @@ See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## Stack
 
-- [mise-en-place](https://mise.jdx.dev) — tool version management
-- [1Password CLI](https://developer.1password.com/docs/cli/) — secret management
+- [mise-en-place](https://mise.jdx.dev): tool version management
+- [1Password CLI](https://developer.1password.com/docs/cli/): secret management
 - Node.js CLI (TypeScript)
