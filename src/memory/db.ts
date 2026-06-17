@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS pending_actions (
   scope TEXT,
   kind TEXT NOT NULL DEFAULT 'manual',
   verify_cmd TEXT,
+  verify_check TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   next_check TEXT,
   snooze_until TEXT,
@@ -149,6 +150,10 @@ function migrate(db: DatabaseSync): void {
   // v2: pending_actions.verify_passes (N=2 auto-verify confirmation). Add to
   // tables created before this column existed.
   ensureColumn(db, "pending_actions", "verify_passes", "INTEGER NOT NULL DEFAULT 0");
+  // v3: pending_actions.verify_check (declarative typed verify replacing raw
+  // shell verify_cmd). Legacy verify_cmd rows have a NULL verify_check and are
+  // never auto-executed.
+  ensureColumn(db, "pending_actions", "verify_check", "TEXT");
   const row = db.prepare("SELECT version FROM schema_meta LIMIT 1").get() as
     | { version: number }
     | undefined;

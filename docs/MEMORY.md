@@ -92,15 +92,24 @@ source-verifiable: see the table in the repo notes.)
 ### Pending actions (PAL)
 
 A structured "blocked-on-you" ledger on top of the raw log — items that survive
-across sessions and **auto-close when their verify command starts passing**.
+across sessions and **auto-close when their declarative verify check starts
+passing**. A verify is a typed, native check (no shell), so it is safe to
+auto-run unattended and a planted value can never execute code:
 
 ```bash
-kit memory pal                                  # list open items
-kit memory pal add "ship the release" --verify "curl -fsS https://… | grep -q 200"
+kit memory pal                                   # list open items
+kit memory pal add "ship the release" --verify-http https://example.com --expect 200
+kit memory pal add "build artifact exists" --verify-file ./dist/cli.js
 kit memory pal done <id> | snooze <id> <days>
-kit memory pal verify                            # run verifies: N=2 consecutive passes closes; a regression reopens
-kit memory pal import                            # migrate a legacy ~/.claude/pal/ledger.jsonl
+kit memory pal verify                            # run checks: N=2 consecutive passes closes; a regression reopens
+kit memory pal import                            # migrate a legacy ~/.claude/pal/ledger.jsonl (verifies become manual)
 ```
+
+Supported verify checks: `--verify-http <url> [--expect <code>]` (kit makes the
+request and compares the status) and `--verify-file <path>` (file exists). kit
+never runs a shell verify. For a check these types do not cover, run it yourself
+and close the item manually. Raw shell `verify_cmd` from pre-1.4 stores is never
+auto-executed.
 
 Open items surface in the `UserPromptSubmit` reminder so handed-off tasks stop
 getting forgotten. Verify commands run in your shell — they are **operator-authored
@@ -183,8 +192,10 @@ Shared memory is **treated like code**:
   cell contents. It reports masked findings and exits non-zero if any are found,
   so you can use it as a gate.
 - Backups are encrypted (AES-256-GCM, scrypt). The passphrase is never stored.
-- Shared writes are secret-scanned fail-closed; executable verify commands never
-  cross the sharing boundary.
+- Shared writes are secret-scanned fail-closed. Verify checks are declarative
+  and typed (no shell), and a verify imported or merged from another store is
+  demoted to a manual item, so no executable ever crosses a file, DB, or sharing
+  boundary and auto-runs.
 
 ## Where it sits
 

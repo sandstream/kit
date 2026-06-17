@@ -31,6 +31,7 @@ import {
   palSnooze,
   palAutoVerify,
   importLegacyLedger,
+  type VerifyCheck,
 } from "../memory/pal.js";
 import {
   saveThread,
@@ -109,13 +110,23 @@ async function memPal(): Promise<boolean> {
         const title = process.argv.slice(5).filter((a) => !a.startsWith("--")).join(" ").trim();
         if (!title) {
           console.error(
-            `${c.red}usage: kit memory pal add <title> [--verify=<cmd>] [--scope=<s>]${c.reset}`,
+            `${c.red}usage: kit memory pal add <title> [--verify-http <url> [--expect <code>]] [--verify-file <path>] [--scope=<s>]${c.reset}`,
           );
           return false;
         }
+        // Declarative verify only (no shell). http-status or file-exists.
+        const httpUrl = flagValue(process.argv, "--verify-http");
+        const filePath = flagValue(process.argv, "--verify-file");
+        let check: VerifyCheck | undefined;
+        if (httpUrl) {
+          const expect = Number(flagValue(process.argv, "--expect") ?? "200");
+          check = { type: "http-status", url: httpUrl, expect: Number.isFinite(expect) ? expect : 200 };
+        } else if (filePath) {
+          check = { type: "file-exists", path: filePath };
+        }
         const id = palAdd(db, {
           title,
-          verifyCmd: flagValue(process.argv, "--verify"),
+          check,
           scope: flagValue(process.argv, "--scope") ?? basename(getCurrentProjectRoot()),
         });
         console.log(`${c.green}✓${c.reset} added ${c.bold}${id}${c.reset}`);
@@ -149,7 +160,7 @@ async function memPal(): Promise<boolean> {
         return true;
       }
       if (action === "verify") {
-        const r = palAutoVerify(db);
+        const r = await palAutoVerify(db);
         console.log(
           `${c.dim}checked ${r.checked} · closed ${r.closed.length} · reopened ${r.reopened.length}${c.reset}`,
         );

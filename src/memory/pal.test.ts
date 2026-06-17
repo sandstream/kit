@@ -16,10 +16,13 @@ import {
 describe("PAL — pending actions", () => {
   const fresh = () => openMemoryDb(":memory:");
 
-  it("adds + lists; kind inferred from verifyCmd", () => {
+  it("adds + lists; kind inferred from a verify check", () => {
     const db = fresh();
     const manual = palAdd(db, { title: "ship the harvest branch" });
-    const auto = palAdd(db, { title: "endpoint returns 200", verifyCmd: "true" });
+    const auto = palAdd(db, {
+      title: "endpoint returns 200",
+      check: { type: "http-status", url: "https://example.com", expect: 200 },
+    });
     assert.match(manual, /^[0-9a-f]{4}$/);
     const open = palList(db);
     assert.equal(open.length, 2);
@@ -47,29 +50,39 @@ describe("PAL — pending actions", () => {
     db.close();
   });
 
-  it("auto-verify closes after N=2 passes; a failing verify stays open", () => {
+  it("auto-verify closes after N=2 passes; a failing check stays open", async () => {
     const db = fresh();
-    const passes = palAdd(db, { title: "passing check", verifyCmd: "true" });
-    const fails = palAdd(db, { title: "failing check", verifyCmd: "false" });
-    let r = palAutoVerify(db);
+    const tmp = mkdtempSync(join(tmpdir(), "kit-pal-"));
+    const present = join(tmp, "present");
+    writeFileSync(present, "x");
+    const missing = join(tmp, "missing");
+    const passes = palAdd(db, { title: "passing check", check: { type: "file-exists", path: present } });
+    const fails = palAdd(db, { title: "failing check", check: { type: "file-exists", path: missing } });
+    let r = await palAutoVerify(db);
     assert.deepEqual(r.closed, []); // first pass: streak = 1
     assert.equal(palList(db).length, 2);
-    r = palAutoVerify(db);
+    r = await palAutoVerify(db);
     assert.deepEqual(r.closed, [passes]); // second consecutive pass closes it
     const open = palList(db);
     assert.equal(open.length, 1);
     assert.equal(open[0]?.id, fails);
+    rmSync(tmp, { recursive: true, force: true });
     db.close();
   });
 
-  it("reopens a closed auto item when its verify regresses", () => {
+  it("reopens a closed auto item when its check regresses", async () => {
     const db = fresh();
-    const id = palAdd(db, { title: "regressing check", verifyCmd: "false" });
+    const tmp = mkdtempSync(join(tmpdir(), "kit-pal-"));
+    const artifact = join(tmp, "artifact");
+    writeFileSync(artifact, "x");
+    const id = palAdd(db, { title: "regressing check", check: { type: "file-exists", path: artifact } });
     palDone(db, id); // force-close
     assert.equal(palList(db, { status: "closed" }).length, 1);
-    const r = palAutoVerify(db); // verify 'false' on a closed auto item → reopen
+    rmSync(artifact); // artifact gone -> the check now fails
+    const r = await palAutoVerify(db); // fail on a closed auto item -> reopen
     assert.deepEqual(r.reopened, [id]);
     assert.equal(palList(db).length, 1);
+    rmSync(tmp, { recursive: true, force: true });
     db.close();
   });
 
@@ -113,7 +126,7 @@ describe("PAL — pending actions", () => {
     db.close();
   });
 
-  it("SECURITY: a verify command imported from a legacy ledger is never auto-executed", () => {
+  it("SECURITY: a verify command imported from a legacy ledger is never auto-executed", async () => {
     const db = fresh();
     const tmp = mkdtempSync(join(tmpdir(), "kit-pal-sec-"));
     const led = join(tmp, "ledger.jsonl");
@@ -132,8 +145,26 @@ describe("PAL — pending actions", () => {
     const item = palList(db).find((p) => p.id === "evil");
     assert.equal(item?.kind, "manual"); // demoted: not an auto item
     assert.equal(item?.verify_cmd ?? null, null); // executable command dropped on import
-    palAutoVerify(db); // must NOT run `touch ${marker}`
+    await palAutoVerify(db); // must NOT run `touch ${marker}`
     assert.equal(existsSync(marker), false, "imported verify_cmd must never execute");
+    rmSync(tmp, { recursive: true, force: true });
+    db.close();
+  });
+
+  it("SECURITY: an unknown/injected verify_check shape is never executed", async () => {
+    const db = fresh();
+    const tmp = mkdtempSync(join(tmpdir(), "kit-pal-sec2-"));
+    const marker = join(tmp, "PWNED");
+    // Simulate DB tampering: inject a row with a bogus verify_check that a naive
+    // executor might run as a command. parseCheck must reject the unknown shape;
+    // nothing executes.
+    db.prepare(
+      `INSERT INTO pending_actions (id, status, title, kind, verify_check)
+       VALUES ('evil', 'open', 'injected', 'auto', ?)`,
+    ).run(JSON.stringify({ type: "shell", cmd: `touch ${marker}` }));
+    const r = await palAutoVerify(db);
+    assert.equal(r.checked, 0); // unknown shape -> not even run
+    assert.equal(existsSync(marker), false, "injected verify_check must never execute");
     rmSync(tmp, { recursive: true, force: true });
     db.close();
   });
