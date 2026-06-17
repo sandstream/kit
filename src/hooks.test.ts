@@ -1,10 +1,11 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
-import { installHooks, uninstallHooks } from "./hooks.js";
+import { execFileSync } from "node:child_process";
+import { installHooks, uninstallHooks, resolveHooksDir } from "./hooks.js";
 import { checkHooks, isGitRepository } from "./check-hooks.js";
 import type { HooksConfig } from "./config.js";
 
@@ -37,6 +38,21 @@ describe("installHooks", () => {
     assert.ok(existsSync(join(testGitDir, "hooks", "pre-commit")));
     // The bypass detector also writes a post-commit hook unconditionally.
     assert.ok(existsSync(join(testGitDir, "hooks", "post-commit")));
+  });
+
+  it("does not overwrite a hook kit did not generate", async () => {
+    const hooksDir = join(testGitDir, "hooks");
+    await mkdir(hooksDir, { recursive: true });
+    const foreign = "#!/bin/sh\necho 'my own pre-push gate'\nexit 0\n";
+    await writeFile(join(hooksDir, "pre-push"), foreign, "utf-8");
+
+    const results = await installHooks({ "pre-push": ["kit context check"] }, testGitDir);
+
+    const pp = results.find((r) => r.hookName === "pre-push");
+    assert.equal(pp?.action, "skipped");
+    assert.ok(pp?.detail.includes("non-kit"));
+    // The operator's hook is untouched.
+    assert.equal(await readFile(join(hooksDir, "pre-push"), "utf-8"), foreign);
   });
 
   it("installs multiple hooks", async () => {
@@ -288,5 +304,28 @@ describe("isGitRepository", () => {
   it("returns false for non-existent directory", () => {
     const result = isGitRepository("/nonexistent/path/.git");
     assert.equal(result, false);
+  });
+});
+
+describe("resolveHooksDir", () => {
+  it("honors core.hooksPath so installed hooks actually run", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "kit-hookpath-"));
+    try {
+      execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
+      execFileSync("git", ["-C", repo, "config", "core.hooksPath", "myhooks"], { stdio: "ignore" });
+      assert.equal(resolveHooksDir(join(repo, ".git")), join(repo, "myhooks"));
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to <gitDir>/hooks when hooksPath is unset", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "kit-nohookpath-"));
+    try {
+      execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
+      assert.equal(resolveHooksDir(join(repo, ".git")), join(repo, ".git", "hooks"));
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
   });
 });
