@@ -145,6 +145,43 @@ describe("CLI error handling", () => {
 });
 
 // ---------------------------------------------------------------------------
+// --help never executes a command (esp. side-effectful ones)
+// ---------------------------------------------------------------------------
+
+describe("kit <command> --help", () => {
+  let tempDir: string;
+
+  before(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "kit-integ-help-"));
+    await writeFile(join(tempDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
+    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
+  });
+
+  after(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  const exists = (p: string) => access(p).then(() => true, () => false);
+
+  it("agent-config --help prints help and does NOT inject a rules block", async () => {
+    const result = await runCli(["agent-config", "--help"], tempDir);
+    assert.equal(result.exitCode, 0);
+    assert.ok(/agent-config/.test(result.stdout), `expected help; got: ${result.stdout}`);
+    // The side effect (writing CLAUDE.md / AGENTS.md) must not have happened.
+    assert.equal(await exists(join(tempDir, "CLAUDE.md")), false, "must not create CLAUDE.md");
+    assert.equal(await exists(join(tempDir, "AGENTS.md")), false, "must not create AGENTS.md");
+  });
+
+  it("status --help prints help, not the adoption checklist", async () => {
+    const result = await runCli(["status", "--help"], tempDir);
+    assert.equal(result.exitCode, 0);
+    assert.ok(/status/.test(result.stdout), `expected help; got: ${result.stdout}`);
+    // The checklist run uses ✓ / ○ status markers; the help line has none.
+    assert.ok(!/[✓○]/.test(result.stdout), "should show help, not run the status checklist");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // kit check
 // ---------------------------------------------------------------------------
 
