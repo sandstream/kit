@@ -248,6 +248,22 @@ export interface EnvOverride {
   governance?: GovernanceConfig;
 }
 
+/**
+ * Per-project CLI context lock. Each tool declares the EXACT (account, project)
+ * pair this repo must use. kit verifies the live tool state against these
+ * declarations and never infers a pairing from whatever happens to be logged in
+ * or selected (a logged-in account + a selected project are not assumed to belong
+ * together). These are non-secret pointers; the credentials they authenticate
+ * with stay in the vault (`[secrets]`).
+ */
+export interface ContextConfig {
+  gcloud?: { account?: string; project?: string; config?: string; region?: string };
+  vercel?: { team?: string; project?: string };
+  github?: { org?: string; remote?: string };
+  git?: { email?: string };
+  npm?: { registry?: string };
+}
+
 export interface kitConfig {
   tools?: ToolConfig;
   services?: Record<string, ServiceConfig>;
@@ -255,6 +271,8 @@ export interface kitConfig {
   skills?: SkillsConfig;
   governance?: GovernanceConfig;
   hooks?: HooksConfig;
+  /** Per-project CLI context lock (account+project per tool). */
+  context?: ContextConfig;
   web?: {
     search?: WebSearchConfig;
   };
@@ -444,6 +462,30 @@ const kitConfigSchema = z
     skills: SkillsConfigSchema.optional(),
     governance: GovernanceConfigSchema.optional(),
     hooks: HooksConfigSchema,
+    context: z
+      .object({
+        gcloud: z
+          .object({
+            account: z.string().optional(),
+            project: z.string().optional(),
+            config: z.string().optional(),
+            region: z.string().optional(),
+          })
+          .passthrough()
+          .optional(),
+        vercel: z
+          .object({ team: z.string().optional(), project: z.string().optional() })
+          .passthrough()
+          .optional(),
+        github: z
+          .object({ org: z.string().optional(), remote: z.string().optional() })
+          .passthrough()
+          .optional(),
+        git: z.object({ email: z.string().optional() }).passthrough().optional(),
+        npm: z.object({ registry: z.string().optional() }).passthrough().optional(),
+      })
+      .passthrough()
+      .optional(),
     web: WebConfigSchema,
     setup: z
       .object({

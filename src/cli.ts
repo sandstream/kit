@@ -102,6 +102,7 @@ import { promptConfirm } from "./utils/prompt.js";
 import { c } from "./utils/colors.js";
 import { gatherStatus } from "./status.js";
 import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
+import { checkContext } from "./context-lock.js";
 import { cmdEnv } from "./commands/env.js";
 import { cmdAuth } from "./commands/auth.js";
 import { cmdAudit } from "./commands/audit.js";
@@ -3367,7 +3368,50 @@ async function cmdOpen(): Promise<boolean> {
   }
 }
 
+async function cmdContextCheck(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  const config = await loadConfig(resolveConfigPath());
+  const findings = await checkContext(config.context);
+
+  if (jsonMode) {
+    console.log(JSON.stringify(findings, null, 2));
+    return findings.every((f) => f.status !== "mismatch");
+  }
+  if (!config.context) {
+    console.log(
+      `${c.dim}No [context] declared in .kit.toml. Add one to lock each CLI to its account + project.${c.reset}`,
+    );
+    return true;
+  }
+  console.log(`${c.bold}Context lock${c.reset}\n`);
+  for (const f of findings) {
+    const icon =
+      f.status === "ok"
+        ? `${c.green}✓${c.reset}`
+        : f.status === "mismatch"
+          ? `${c.red}✗${c.reset}`
+          : `${c.yellow}!${c.reset}`;
+    const actual = f.actual ?? `${c.dim}(unreadable)${c.reset}`;
+    const detail =
+      f.status === "ok"
+        ? `${c.dim}${f.expected}${c.reset}`
+        : `expected ${c.bold}${f.expected}${c.reset}, live ${c.bold}${actual}${c.reset}`;
+    console.log(`  ${icon} ${f.tool}.${f.field}  ${detail}`);
+  }
+  const mismatches = findings.filter((f) => f.status === "mismatch");
+  if (mismatches.length > 0) {
+    console.log(
+      `\n${c.red}${mismatches.length} mismatch(es) — you are NOT locked to the declared account/project. Do not run outward/destructive commands until this is green.${c.reset}`,
+    );
+  }
+  // Mismatch = non-zero exit so this can gate a hook / agent before acting.
+  // Unknown (tool absent / unreadable) does not block.
+  return mismatches.length === 0;
+}
+
 async function cmdContext(): Promise<boolean> {
+  if (process.argv[3] === "check") return cmdContextCheck();
+
   const jsonMode = hasFlag(process.argv, "--json");
 
   try {
