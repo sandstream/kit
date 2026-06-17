@@ -4150,138 +4150,67 @@ async function main(): Promise<void> {
       return;
     }
 
-    switch (command) {
-      case "version":
-        ok = cmdVersion();
-        break;
-      case "help":
-        ok = cmdHelp(args[1]);
-        break;
-      case "completions": {
-        const shell = args[1];
-        const script = generateCompletions(shell);
-        if (!script) {
-          console.error(`Unknown shell: ${shell}. Use: bash, zsh, fish`);
-          process.exitCode = 1;
-          return;
-        }
-        process.stdout.write(script);
-        ok = true;
-        break;
+    // version/help/completions need bespoke handling; everything else is a flat
+    // command->fn dispatch (was a ~40-case switch — the main complexity driver).
+    if (command === "version") {
+      ok = cmdVersion();
+    } else if (command === "help") {
+      ok = cmdHelp(args[1]);
+    } else if (command === "completions") {
+      const shell = args[1];
+      const script = generateCompletions(shell);
+      if (!script) {
+        console.error(`Unknown shell: ${shell}. Use: bash, zsh, fish`);
+        process.exitCode = 1;
+        return;
       }
-      case "status":
-        ok = await cmdStatus();
-        break;
-      case "whoami":
-        ok = await cmdWhoami();
-        break;
-      case "check":
-      case undefined:
-        ok = await cmdCheck();
-        break;
-      case "init":
-        ok = await cmdInit();
-        break;
-      case "upgrade":
-        ok = await cmdUpgrade();
-        break;
-      case "install":
-        ok = await cmdInstall();
-        break;
-      case "login":
-        ok = await cmdLogin();
-        break;
-      case "secrets":
-        ok = await cmdSecrets();
-        break;
-      case "setup":
-        ok = await cmdSetup();
-        break;
-      case "skills":
-        ok = await cmdSkills();
-        break;
-      case "fix":
-        ok = await cmdFix();
-        break;
-      case "escalate":
-        ok = await cmdEscalate();
-        break;
-      case "governance":
-        ok = await cmdGovernance();
-        break;
-      case "agent-config":
-        ok = await cmdAgentConfig();
-        break;
-      case "hooks":
-        ok = await cmdHooks();
-        break;
-      case "add":
-        ok = await cmdAdd();
-        break;
-      case "audit":
-        ok = await cmdAudit();
-        break;
-      case "auth":
-        ok = await cmdAuth();
-        break;
-      case "mcp":
-        ok = await cmdMcp();
-        break;
-      case "env":
-        ok = await cmdEnv();
-        break;
-      case "doctor":
-        ok = await cmdDoctor();
-        break;
-      case "analyze":
-        ok = await cmdAnalyze();
-        break;
-      case "security":
-        ok = await cmdSecurity();
-        break;
-      case "create-plugin":
-        ok = await cmdCreatePlugin();
-        break;
-      case "plugin":
-        ok = await cmdPlugin();
-        break;
-      case "ci":
-        ok = await cmdCi();
-        break;
-      case "clone":
-        ok = await cmdClone();
-        break;
-      case "run":
-        ok = await cmdRun();
-        break;
-      case "open":
-        ok = await cmdOpen();
-        break;
-      case "context":
-        ok = await cmdContext();
-        break;
-      case "triage":
-        ok = await cmdTriage();
-        break;
-      case "baseline":
-        ok = await cmdBaseline();
-        break;
-      case "design":
-        ok = await cmdDesign();
-        break;
-      case "review":
-        ok = await cmdReview();
-        break;
-      case "pkg":
-        ok = await cmdPkg();
-        break;
-      case "team":
-        ok = await cmdTeam();
-        break;
-      case "memory":
-        ok = await cmdMemory();
-        break;
-      default: {
+      process.stdout.write(script);
+      ok = true;
+    } else {
+      const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
+        status: cmdStatus,
+        whoami: cmdWhoami,
+        check: cmdCheck,
+        init: cmdInit,
+        upgrade: cmdUpgrade,
+        install: cmdInstall,
+        login: cmdLogin,
+        secrets: cmdSecrets,
+        setup: cmdSetup,
+        skills: cmdSkills,
+        fix: cmdFix,
+        escalate: cmdEscalate,
+        governance: cmdGovernance,
+        "agent-config": cmdAgentConfig,
+        hooks: cmdHooks,
+        add: cmdAdd,
+        audit: cmdAudit,
+        auth: cmdAuth,
+        mcp: cmdMcp,
+        env: cmdEnv,
+        doctor: cmdDoctor,
+        analyze: cmdAnalyze,
+        security: cmdSecurity,
+        "create-plugin": cmdCreatePlugin,
+        plugin: cmdPlugin,
+        ci: cmdCi,
+        clone: cmdClone,
+        run: cmdRun,
+        open: cmdOpen,
+        context: cmdContext,
+        triage: cmdTriage,
+        baseline: cmdBaseline,
+        design: cmdDesign,
+        review: cmdReview,
+        pkg: cmdPkg,
+        team: cmdTeam,
+        memory: cmdMemory,
+      };
+      // no command → `check` (the prior `case undefined` behaviour).
+      const handler = COMMANDS[command ?? "check"];
+      if (handler) {
+        ok = await handler();
+      } else {
         console.error(`Unknown command: ${command}`);
         const { didYouMean } = await import("./utils/didYouMean.js");
         const knownCommands = [
