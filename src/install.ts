@@ -9,6 +9,19 @@ export interface InstallResult {
   detail: string;
 }
 
+/**
+ * Turn a mise exec failure into an actionable message. The common case is mise
+ * not being installed at all (`spawn mise ENOENT`), which otherwise surfaces as
+ * a cryptic spawn error. PURE so it can be unit-tested.
+ */
+export function miseErrorDetail(message: string): string {
+  const first = message.split("\n")[0];
+  if (/ENOENT/.test(first)) {
+    return "mise is not installed — kit installs and pins tool versions with it. Install mise (brew install mise, or: curl https://mise.run | sh) and re-run, or install the tool yourself.";
+  }
+  return first;
+}
+
 async function miseInstall(
   tool: string,
   version: string,
@@ -27,7 +40,7 @@ async function miseInstall(
     return { ok: true, detail: `Installed ${tool}@${versionArg} via mise` };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, detail: message.split("\n")[0] };
+    return { ok: false, detail: miseErrorDetail(message) };
   }
 }
 
