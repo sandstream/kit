@@ -60,6 +60,42 @@ function detectPackageManager(pkg: PackageJson, cwd: string): Promise<string> {
   })();
 }
 
+// Service = matched if any dep is present OR any marker file exists. Order here
+// is the order services are reported. Adding a service is one row, not a new if.
+const SERVICE_DETECTORS: { service: string; deps?: string[]; files?: string[] }[] = [
+  { service: "stripe", deps: ["stripe"] },
+  { service: "supabase", deps: ["@supabase/supabase-js"], files: ["supabase"] },
+  { service: "prisma", deps: ["prisma", "@prisma/client"] },
+  { service: "resend", deps: ["resend"] },
+  { service: "clerk", deps: ["@clerk/nextjs", "@clerk/clerk-react"] },
+  { service: "drizzle", deps: ["drizzle-orm"] },
+  { service: "liveblocks", deps: ["liveblocks", "@liveblocks/client"] },
+  { service: "trigger", deps: ["@trigger.dev/sdk", "trigger.dev"] },
+  { service: "inngest", deps: ["inngest"] },
+  { service: "vercel", deps: ["@vercel/analytics", "vercel"], files: ["vercel.json"] },
+  { service: "expo", files: [".expo"] },
+  {
+    service: "sentry",
+    deps: ["@sentry/nextjs", "@sentry/node", "@sentry/react", "@sentry/svelte", "@sentry/astro", "@sentry/remix"],
+  },
+  { service: "typeorm", deps: ["typeorm", "@nestjs/typeorm"] },
+  { service: "mongoose", deps: ["mongoose", "@nestjs/mongoose"] },
+  { service: "netlify", files: ["netlify.toml"] },
+  { service: "cloudflare-pages", files: ["wrangler.toml"] },
+];
+
+// Framework = first match wins (priority order: meta-frameworks before their base).
+const FRAMEWORK_DETECTORS: { framework: string; deps: string[] }[] = [
+  { framework: "nextjs", deps: ["next"] },
+  { framework: "remix", deps: ["@remix-run/node", "@remix-run/react"] },
+  { framework: "astro", deps: ["astro"] },
+  { framework: "sveltekit", deps: ["@sveltejs/kit"] },
+  { framework: "nestjs", deps: ["@nestjs/core"] },
+  { framework: "express", deps: ["express"] },
+  { framework: "react", deps: ["react"] },
+  { framework: "vue", deps: ["vue"] },
+];
+
 async function detectFromPackageJson(cwd: string): Promise<DetectedStack | null> {
   const pkg = await readJson<PackageJson>(join(cwd, "package.json"));
   if (!pkg) return null;
@@ -71,77 +107,26 @@ async function detectFromPackageJson(cwd: string): Promise<DetectedStack | null>
 
   const services: string[] = [];
 
-  // Detect services by dependencies
-  if (hasDep(pkg, "stripe")) services.push("stripe");
-  if (hasDep(pkg, "@supabase/supabase-js") || (await fileExists(join(cwd, "supabase")))) {
-    services.push("supabase");
-  }
-  if (hasDep(pkg, "prisma") || hasDep(pkg, "@prisma/client")) {
-    services.push("prisma");
-  }
-  if (hasDep(pkg, "resend")) services.push("resend");
-  if (hasDep(pkg, "@clerk/nextjs") || hasDep(pkg, "@clerk/clerk-react")) {
-    services.push("clerk");
-  }
-  if (hasDep(pkg, "drizzle-orm")) services.push("drizzle");
-  if (hasDep(pkg, "liveblocks") || hasDep(pkg, "@liveblocks/client")) {
-    services.push("liveblocks");
-  }
-  if (hasDep(pkg, "@trigger.dev/sdk") || hasDep(pkg, "trigger.dev")) {
-    services.push("trigger");
-  }
-  if (hasDep(pkg, "inngest")) services.push("inngest");
-  if (
-    hasDep(pkg, "@vercel/analytics") ||
-    hasDep(pkg, "vercel") ||
-    (await fileExists(join(cwd, "vercel.json")))
-  ) {
-    services.push("vercel");
-  }
-  if (await fileExists(join(cwd, ".expo"))) services.push("expo");
-
-  // Sentry — any @sentry/* package
-  if (
-    hasDep(pkg, "@sentry/nextjs") ||
-    hasDep(pkg, "@sentry/node") ||
-    hasDep(pkg, "@sentry/react") ||
-    hasDep(pkg, "@sentry/svelte") ||
-    hasDep(pkg, "@sentry/astro") ||
-    hasDep(pkg, "@sentry/remix")
-  ) {
-    services.push("sentry");
+  // Detect services by dependency or marker file (table-driven; preserves order).
+  for (const d of SERVICE_DETECTORS) {
+    const byDep = d.deps?.some((dep) => hasDep(pkg, dep)) ?? false;
+    let byFile = false;
+    for (const file of d.files ?? []) {
+      if (await fileExists(join(cwd, file))) {
+        byFile = true;
+        break;
+      }
+    }
+    if (byDep || byFile) services.push(d.service);
   }
 
-  // NestJS specific: TypeORM, Mongoose
-  if (hasDep(pkg, "typeorm") || hasDep(pkg, "@nestjs/typeorm")) {
-    services.push("typeorm");
-  }
-  if (hasDep(pkg, "mongoose") || hasDep(pkg, "@nestjs/mongoose")) {
-    services.push("mongoose");
-  }
-
-  // Netlify / Cloudflare Pages via config files
-  if (await fileExists(join(cwd, "netlify.toml"))) services.push("netlify");
-  if (await fileExists(join(cwd, "wrangler.toml"))) services.push("cloudflare-pages");
-
-  // Detect framework
+  // Framework — first match wins (priority order in FRAMEWORK_DETECTORS).
   let framework: string | undefined;
-  if (hasDep(pkg, "next")) {
-    framework = "nextjs";
-  } else if (hasDep(pkg, "@remix-run/node") || hasDep(pkg, "@remix-run/react")) {
-    framework = "remix";
-  } else if (hasDep(pkg, "astro")) {
-    framework = "astro";
-  } else if (hasDep(pkg, "@sveltejs/kit")) {
-    framework = "sveltekit";
-  } else if (hasDep(pkg, "@nestjs/core")) {
-    framework = "nestjs";
-  } else if (hasDep(pkg, "express")) {
-    framework = "express";
-  } else if (hasDep(pkg, "react")) {
-    framework = "react";
-  } else if (hasDep(pkg, "vue")) {
-    framework = "vue";
+  for (const fw of FRAMEWORK_DETECTORS) {
+    if (fw.deps.some((dep) => hasDep(pkg, dep))) {
+      framework = fw.framework;
+      break;
+    }
   }
 
   const confidence = framework ? 0.9 : 0.6;
