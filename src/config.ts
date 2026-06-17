@@ -451,7 +451,7 @@ const WebConfigSchema = z
 
 // Known top-level section names — used to detect typos
 const KNOWN_SECTIONS = new Set([
-  "tools", "services", "secrets", "skills", "governance", "hooks", "web", "setup", "env",
+  "tools", "services", "secrets", "skills", "governance", "hooks", "web", "setup", "env", "context",
 ]);
 
 const kitConfigSchema = z
