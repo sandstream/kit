@@ -2667,6 +2667,42 @@ async function cmdSecurityPrescanDiff(): Promise<boolean> {
   return diff.added.length === 0;
 }
 
+async function cmdSecuritySemgrep(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  const { runSemgrep } = await import("./semgrep-ingest.js");
+  const { available, findings } = await runSemgrep();
+
+  if (jsonMode) {
+    console.log(JSON.stringify({ available, findings }, null, 2));
+    return !findings.some((f) => f.severity === "error");
+  }
+  if (!available) {
+    console.log(`${c.dim}semgrep not installed — brew install semgrep (or pipx install semgrep)${c.reset}`);
+    return true;
+  }
+  if (findings.length === 0) {
+    console.log(`${c.green}✓${c.reset} semgrep: no findings`);
+    return true;
+  }
+  console.log(`${c.bold}Semgrep${c.reset}  ${c.dim}${findings.length} finding(s)${c.reset}\n`);
+  for (const f of findings) {
+    const icon =
+      f.severity === "error"
+        ? `${c.red}✗${c.reset}`
+        : f.severity === "warning"
+          ? `${c.yellow}!${c.reset}`
+          : `${c.dim}·${c.reset}`;
+    const loc = f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : "(unknown location)";
+    const tag = f.rule ? ` ${c.dim}[${f.rule.id}]${c.reset}` : "";
+    console.log(`  ${icon} ${loc}${tag}`);
+    if (f.message) console.log(`      ${c.dim}${f.message.split("\n")[0].slice(0, 120)}${c.reset}`);
+    console.log(`      ${c.dim}${f.ruleId}${c.reset}`);
+  }
+  const errors = findings.filter((f) => f.severity === "error").length;
+  if (errors > 0) console.log(`\n${c.red}${errors} error-severity finding(s).${c.reset}`);
+  return errors === 0;
+}
+
 async function cmdSecurity(): Promise<boolean> {
   // Subcommand routing
   const sub = process.argv[3];
@@ -2705,6 +2741,10 @@ async function cmdSecurity(): Promise<boolean> {
 
   if (sub === "prescan-diff") {
     return cmdSecurityPrescanDiff();
+  }
+
+  if (sub === "semgrep") {
+    return cmdSecuritySemgrep();
   }
 
   if (sub !== "policy") {

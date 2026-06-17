@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **`kit security semgrep` — cited Semgrep findings (1.5.0 consolidation, first step).** Runs Semgrep when installed, parses its JSON, and lists each finding normalized into kit's finding + citation shape: `file:line`, severity, and a `[CWE-…]`/`[OWASP-…]` tag derived from Semgrep's own rule metadata. `--json` for machine output. kit wraps scanners, it does not rebuild SAST; folding these into `kit review` (single-run consolidation) follows.
+
 ## [1.4.0] - 2026-06-17
 
 ### Added
