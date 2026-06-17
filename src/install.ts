@@ -10,16 +10,32 @@ export interface InstallResult {
 }
 
 /**
- * Turn a mise exec failure into an actionable message. The common case is mise
- * not being installed at all (`spawn mise ENOENT`), which otherwise surfaces as
- * a cryptic spawn error. PURE so it can be unit-tested.
+ * Turn a mise exec failure into an actionable message. PURE so it can be
+ * unit-tested. `message` is the error's `.message` (often just the generic
+ * "Command failed: mise install node@24"); `stderr` is mise's real output,
+ * which carries the actionable cause. Common cases:
+ *   - mise not installed at all (`spawn mise ENOENT`)
+ *   - the repo's .mise.toml is untrusted (mise refuses to run until `mise trust`)
+ * Otherwise prefer the real `mise ERROR` line from stderr over "Command failed".
  */
-export function miseErrorDetail(message: string): string {
-  const first = message.split("\n")[0];
-  if (/ENOENT/.test(first)) {
+export function miseErrorDetail(message: string, stderr = ""): string {
+  const firstMsg = message.split("\n")[0];
+  if (/ENOENT/.test(firstMsg)) {
     return "mise is not installed — kit installs and pins tool versions with it. Install mise (brew install mise, or: curl https://mise.run | sh) and re-run, or install the tool yourself.";
   }
-  return first;
+  const combined = `${message}\n${stderr}`;
+  if (/not trusted|mise trust/i.test(combined)) {
+    return "mise refused this repo's .mise.toml because it is not trusted. Review the file, then run `mise trust` here and re-run kit setup.";
+  }
+  // Prefer a concrete `mise ERROR ...` line over the generic "Command failed".
+  const miseErr = stderr
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => /^mise ERROR/.test(l));
+  if (miseErr) return miseErr.replace(/^mise ERROR\s*/, "");
+  const firstStderr = stderr.trim().split("\n")[0];
+  if (firstStderr) return firstStderr;
+  return firstMsg;
 }
 
 async function miseInstall(
@@ -40,7 +56,11 @@ async function miseInstall(
     return { ok: true, detail: `Installed ${tool}@${versionArg} via mise` };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, detail: miseErrorDetail(message) };
+    const stderr =
+      typeof (err as { stderr?: unknown } | null)?.stderr === "string"
+        ? (err as { stderr: string }).stderr
+        : "";
+    return { ok: false, detail: miseErrorDetail(message, stderr) };
   }
 }
 
