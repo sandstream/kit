@@ -110,6 +110,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit auth {elevate,setup-totp,status,revoke}`: Elevation gate + TOTP
 - `kit mcp {list,auth,set-token,clear}`: MCP-server orchestrator
 - `kit env {list,switch,current,diff}`: Environment routing + drift detection
+- `kit context {check,use,--prompt}`: Lock each CLI to its declared account + project (no wrong-org pushes)
 - `kit triage {npm,pip,docker,repo,skill}`: Pre-install security check
 - `kit security {scan-build,scan-staged,verify-pull,costs,policy}`: Security ops
 - `kit hooks {install,add,sync}`: Git hooks + bypass detector
@@ -249,6 +250,7 @@ migration, to deploy-platform propagation, to destructive history cleanup.
 
 - `secret-scan` (pre-commit): Block commits that introduce known credential patterns
 - `post-pull-audit` (post-merge): Run `verify-pull` after every `git pull` / merge
+- `context-check` (pre-push): Block a push when the live CLI context does not match `.kit.toml [context]` (see Context lock)
 
 ### Environments + elevation
 
@@ -261,6 +263,26 @@ Production credentials are gated behind explicit env-switching and short-lived e
 - `kit auth status`: Show active elevation
 - `kit auth revoke`: Drop the elevation marker early
 - `kit audit secrets [--since-days N] [--key <name>]`: Forensics: who touched which key, when
+
+### Context lock
+
+When you work across several accounts and projects (gcloud, Vercel, GitHub, npm) it is easy to be in the wrong one without noticing, and a logged-in account plus a selected project are not assumed to belong together. Declare the exact pair per repo and kit verifies the live tools against it:
+
+```toml
+[context]
+gcloud = { account = "ops@acme.com", project = "acme-prod", config = "acme", region = "europe-west4" }
+vercel = { team = "team_…", project = "prj_…" }   # the ids in .vercel/project.json
+github = { org = "acme", remote = "github.com/acme/app" }
+git    = { email = "you@acme.com" }
+npm    = { registry = "https://registry.npmjs.org" }
+```
+
+- `kit context check`: verify the live account+project of each CLI matches the declaration. A right account with the wrong project is a mismatch, not a pass. Read-only; exits non-zero so it can gate.
+- `kit context use`: activate the declared context (gcloud config + repo git identity). Touches only local config, never an account or a deploy.
+- `kit context --prompt`: a fast, read-only indicator (e.g. `[gcp:acme-prod]`) for your shell prompt, so the context you are in is always visible.
+- `kit hooks add context-check`: install a pre-push hook so a push to the wrong org/project is blocked before it leaves the machine.
+
+Context pointers are non-secret and live in config; the credentials they authenticate with stay in the vault.
 
 ### Quality gates (baseline-aware)
 

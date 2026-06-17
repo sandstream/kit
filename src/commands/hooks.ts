@@ -18,6 +18,12 @@ const BUILTIN_HOOKS: Record<string, { hookName: string; commands: string[]; desc
     commands: ["kit security verify-pull"],
     description: "After git pull/merge, audit new deps, gitignore drops, and introduced secrets.",
   },
+  "context-check": {
+    hookName: "pre-push",
+    commands: ["kit context check"],
+    description:
+      "Block a push when the live CLI context (account/project) does not match .kit.toml [context]. Stops pushes to the wrong org/project.",
+  },
 };
 
 export async function cmdHooks(): Promise<boolean> {

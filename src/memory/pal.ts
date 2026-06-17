@@ -3,16 +3,32 @@
  *
  * PAL is the STRUCTURED, actionable layer on top of raw conversation memory:
  * "blocked-on-you" items that survive sessions and auto-close when their verify
- * command starts passing. It lives in the `pending_actions` table of the same
- * SQLite store. Deterministic; the only side effect is running operator-defined
- * verify commands (local shell, with a timeout). Fail-open / no-info aware.
+ * check starts passing. It lives in the `pending_actions` table of the same
+ * SQLite store.
+ *
+ * SECURITY: a verify is a DECLARATIVE, typed check (see `VerifyCheck`), executed
+ * natively (fetch / fs) with a timeout. kit NEVER runs a shell, and never
+ * interpolates a stored string into a command, so there is no arbitrary-command-
+ * execution sink: a planted or imported value can only ever do what the fixed
+ * check types allow (nothing). This is deliberately compatible with autonomous
+ * agents: auto-verify needs no human gate, yet a prompt-injected agent cannot
+ * plant a command that detonates later in a more-trusted session. Fail-open /
+ * no-info aware.
  */
 import { randomBytes } from "node:crypto";
-import { execSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+
+/**
+ * A declarative verify check. Fixed shapes only, executed natively by kit (no
+ * shell, no arbitrary binary). Add a new shape here only if it can be run as a
+ * pure data operation that cannot be coerced into command execution.
+ */
+export type VerifyCheck =
+  | { type: "http-status"; url: string; expect: number }
+  | { type: "file-exists"; path: string };
 
 export interface PendingAction {
   id: string;
@@ -21,7 +37,11 @@ export interface PendingAction {
   detail: string | null;
   scope: string | null;
   kind: string;
+  /** Legacy raw shell command from pre-1.4 stores. NEVER executed; kept only so
+   *  `kit memory scan` can still find secrets leaked into old rows. */
   verify_cmd: string | null;
+  /** JSON-encoded VerifyCheck. The only field auto-verify ever executes. */
+  verify_check: string | null;
   created_at: string | null;
   next_check: string | null;
   snooze_until: string | null;
@@ -34,7 +54,7 @@ export interface PalAddInput {
   detail?: string;
   scope?: string;
   kind?: "manual" | "auto";
-  verifyCmd?: string;
+  check?: VerifyCheck;
 }
 
 function newId(db: DatabaseSync): string {
@@ -47,11 +67,12 @@ function newId(db: DatabaseSync): string {
 
 export function palAdd(db: DatabaseSync, input: PalAddInput): string {
   const id = newId(db);
-  const kind = input.kind ?? (input.verifyCmd ? "auto" : "manual");
+  const kind = input.kind ?? (input.check ? "auto" : "manual");
+  const verifyCheck = input.check ? JSON.stringify(input.check) : null;
   db.prepare(
-    `INSERT INTO pending_actions (id, status, title, detail, scope, kind, verify_cmd)
+    `INSERT INTO pending_actions (id, status, title, detail, scope, kind, verify_check)
      VALUES (?, 'open', ?, ?, ?, ?, ?)`,
-  ).run(id, input.title, input.detail ?? null, input.scope ?? null, kind, input.verifyCmd ?? null);
+  ).run(id, input.title, input.detail ?? null, input.scope ?? null, kind, verifyCheck);
   return id;
 }
 
@@ -95,24 +116,51 @@ export function palSnooze(db: DatabaseSync, id: string, days: number): boolean {
 }
 
 /**
- * Run a verify command. true = pass (exit 0), false = ran but failed, null = no-info.
- *
- * SECURITY: this runs `cmd` through a shell on purpose — verify commands routinely
- * need pipes / `&&` (e.g. `curl -fsS … | grep 200`). The trust boundary: `verify_cmd`
- * is OPERATOR-AUTHORED and lives only in the PERSONAL store (~/.kit/memory.db); running
- * it is equivalent to the operator running their own command — no untrusted data is
- * interpolated, so this is not a command-injection sink. INVARIANT for Track D (shared
- * memory): shared/synced items must NEVER carry an executable `verify_cmd` that runs
- * unreviewed — only manual items or review-gated verifies cross the sharing boundary.
+ * Parse the stored JSON into a VerifyCheck, defensively. Only known shapes are
+ * accepted; anything malformed, unknown, or legacy returns null and is never
+ * executed. This is the gate that makes a planted/imported value inert.
  */
-function runVerify(cmd: string): boolean | null {
+function parseCheck(json: string | null): VerifyCheck | null {
+  if (!json) return null;
+  let raw: unknown;
   try {
-    execSync(cmd, { stdio: "ignore", timeout: 15_000 });
-    return true;
-  } catch (err) {
-    const status = (err as { status?: number | null }).status;
-    if (typeof status === "number") return false; // ran, non-zero exit
-    return null; // spawn error / timeout → no-info, leave state unchanged
+    raw = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (o.type === "file-exists" && typeof o.path === "string") {
+    return { type: "file-exists", path: o.path };
+  }
+  if (o.type === "http-status" && typeof o.url === "string" && typeof o.expect === "number") {
+    return { type: "http-status", url: o.url, expect: o.expect };
+  }
+  return null;
+}
+
+/**
+ * Run a declarative verify check. true = pass, false = ran but failed, null =
+ * no-info (leave state unchanged). Executed NATIVELY (fetch / fs), never through
+ * a shell and never by interpolating a stored string into a command, so there is
+ * no command-execution sink: a check can only do what its fixed type allows.
+ */
+async function runCheck(check: VerifyCheck): Promise<boolean | null> {
+  try {
+    if (check.type === "file-exists") {
+      return existsSync(check.path);
+    }
+    // http-status: kit makes the request itself; the URL is data, not a command.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const res = await fetch(check.url, { signal: controller.signal, redirect: "manual" });
+      return res.status === check.expect;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return null; // network/fs error or timeout → no-info
   }
 }
 
@@ -127,15 +175,20 @@ export interface AutoVerifyResult {
  * times is closed (a pass increments the streak, a fail resets it). A CLOSED item
  * whose verify now FAILS is reopened (reopen-on-regress). No-info leaves it alone.
  */
-export function palAutoVerify(db: DatabaseSync, confirmPasses = 2): AutoVerifyResult {
+export async function palAutoVerify(
+  db: DatabaseSync,
+  confirmPasses = 2,
+): Promise<AutoVerifyResult> {
   const out: AutoVerifyResult = { checked: 0, closed: [], reopened: [] };
   const rows = db
     .prepare(
-      "SELECT * FROM pending_actions WHERE kind='auto' AND verify_cmd IS NOT NULL AND status IN ('open','closed')",
+      "SELECT * FROM pending_actions WHERE kind='auto' AND verify_check IS NOT NULL AND status IN ('open','closed')",
     )
     .all() as unknown as PendingAction[];
   for (const r of rows) {
-    const result = runVerify(r.verify_cmd as string);
+    const check = parseCheck(r.verify_check);
+    if (!check) continue; // malformed/unknown/legacy shape -> never executed
+    const result = await runCheck(check);
     if (result === null) continue; // no-info
     out.checked++;
     if (r.status === "open") {
