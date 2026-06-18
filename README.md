@@ -126,7 +126,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit fix`: Auto-remediate gaps (tools, gitignore, hooks, .env.template)
 - `kit login --plan`: Show the resolved auth strategy (vault/capture/interactive) per service without logging in
 - `kit secrets {set,migrate,rotate,propagate,onecli,validate}`: Secret lifecycle
-- `kit memory {index,search,suggest,pal,share,backup}`: Local-first second brain + pending-action ledger
+- `kit memory {index,search,stats,suggest,merge,save,threads,share,backup}`: Local-first, cross-harness second brain (per-harness `stats`, project recall, saved copilots) + `kit memory pal` pending-action ledger
 - `kit auth {elevate,setup-totp,status,revoke}`: Elevation gate + TOTP
 - `kit mcp {list,auth,set-token,clear}`: MCP-server orchestrator
 - `kit env {list,switch,current,diff}`: Environment routing + drift detection
