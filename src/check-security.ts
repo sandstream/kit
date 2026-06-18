@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, access } from "node:fs/promises";
+import { readFile, access, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
@@ -721,6 +721,91 @@ async function checkTrivy(): Promise<SecurityCheckResult> {
   }
 }
 
+/** Count HIGH/CRITICAL misconfigurations in a `trivy config --format json`
+ *  payload. PURE so it can be unit-tested without running trivy. */
+export function parseTrivyMisconfigCount(stdout: string): number {
+  try {
+    const parsed = JSON.parse(stdout) as {
+      Results?: { Misconfigurations?: { Severity?: string }[] }[];
+    };
+    return (parsed.Results ?? [])
+      .flatMap((r) => r.Misconfigurations ?? [])
+      .filter((m) => m.Severity === "HIGH" || m.Severity === "CRITICAL").length;
+  } catch {
+    return -1; // unparseable
+  }
+}
+
+/**
+ * IaC misconfiguration scan (Dockerfile / Compose / Terraform) via
+ * `trivy config`. Distinct from the container-CVE scan above: that finds
+ * vulnerable packages, this finds insecure infrastructure config (root user,
+ * privileged containers, public buckets, missing healthchecks, …). Runs only
+ * when there is IaC to scan; resolves trivy mise-first like the CVE scan.
+ */
+async function checkTrivyConfig(): Promise<SecurityCheckResult> {
+  const name = "trivy config (IaC)";
+  const cwd = process.cwd();
+  const fileMarkers = [
+    "Dockerfile",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "compose.yml",
+    "compose.yaml",
+  ];
+  let hasIaC = false;
+  for (const m of fileMarkers) {
+    if (await access(resolve(cwd, m)).then(() => true).catch(() => false)) {
+      hasIaC = true;
+      break;
+    }
+  }
+  if (!hasIaC) {
+    // Any top-level Terraform?
+    try {
+      const entries = await readdir(cwd);
+      hasIaC = entries.some((e) => e.endsWith(".tf"));
+    } catch {
+      /* unreadable cwd — treat as no IaC */
+    }
+  }
+  if (!hasIaC) {
+    return { category: "supply-chain", name, status: "skip", detail: "no Dockerfile/Compose/Terraform found" };
+  }
+
+  const trivyBin = await resolveToolBin("trivy");
+  if (!trivyBin) {
+    return {
+      category: "supply-chain",
+      name,
+      status: "warn",
+      detail: "trivy not installed -IaC misconfigurations undetected",
+      severity: "medium",
+      suggestion: "mise use aqua:aquasecurity/trivy  (or: brew install trivy)",
+    };
+  }
+
+  const result = await execFileNoThrow(
+    trivyBin,
+    ["config", ".", "--format", "json", "--severity", "HIGH,CRITICAL", "--quiet"],
+    { timeout: 120_000 },
+  );
+  const count = parseTrivyMisconfigCount(result.stdout);
+  if (count < 0) {
+    return { category: "supply-chain", name, status: "warn", detail: "trivy config scan failed", severity: "medium" };
+  }
+  if (count === 0) {
+    return { category: "supply-chain", name, status: "pass", detail: "no high/critical IaC misconfigurations" };
+  }
+  return {
+    category: "supply-chain",
+    name,
+    status: "warn",
+    detail: `${count} high/critical IaC misconfiguration(s) -run: trivy config .`,
+    severity: "high",
+  };
+}
+
 /**
  * Check dependency licenses for GPL/AGPL that create legal obligations.
  */
@@ -980,6 +1065,7 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
     licenseResult,
     semgrepResult,
     bumblebeeResult,
+    trivyConfigResult,
     ...lockfileResults
   ] = await Promise.all([
     checkNpmAudit(),
@@ -992,6 +1078,7 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
     checkLicenses(),
     checkSemgrep(),
     checkBumblebee(),
+    checkTrivyConfig(),
     ...await checkLockfilesCommitted(),
   ]);
 
@@ -1006,6 +1093,7 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
     licenseResult,
     semgrepResult,
     bumblebeeResult,
+    trivyConfigResult,
   );
   results.push(...lockfileResults);
 
