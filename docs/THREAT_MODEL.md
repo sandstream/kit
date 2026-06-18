@@ -149,6 +149,43 @@ yours — kit ships no default value.
 - The published `kit` binary chmod's its dist artifacts to 0755 explicitly
   in `npm run build`; no runtime arbitrary-permission grants.
 
+### Trusting the host toolchain (gcloud, brew, system CLIs)
+
+kit pins and triages what **it** manages: mise-installed tools (versioned in
+`.kit.toml`), project dependencies (`kit triage` before install, bumblebee per
+release), and its own actions (SHA-pinned in CI). It does **not** verify CLIs you
+install or update **outside** kit, and those are a separate supply chain worth
+understanding:
+
+- **`gcloud components update`** rests on TLS to Google's servers plus checksums
+  in Google's own component manifest. That blocks an in-transit MITM and a
+  corrupted download, but the checksum comes from the same manifest, so it is
+  integrity *from Google*, not independent of Google. There is no GPG/Sigstore
+  signature you pin. A friendly `Continue (Y/n)?` prompt confirms intent, not
+  authenticity.
+- **Homebrew** is a second supply chain (bottles from ghcr.io). Its tap-trust
+  feature ignores formulae from untrusted taps by default; trust only the
+  specific formula you need (`brew trust --formula <user>/<tap>/<formula>`),
+  never a blanket trust.
+- **`curl | sh` installers** fetch a moving target unless pinned to a release
+  or commit.
+
+How to harden host CLIs (kit cannot do this for you):
+
+1. **Verify the first install.** Vendors publish a SHA256 for the initial
+   download (Google for the gcloud SDK tarball, etc.). Verify it once; every
+   later self-update inherits that binary's trust.
+2. **Pin versions and keep rollback.** e.g. `gcloud components update --version X`
+   is revertible. Reproducibility over "always latest".
+3. **In CI, prefer the official container pinned by digest** (e.g.
+   `google/cloud-sdk@sha256:...`) over an auto-updating CLI. Those images are
+   attested and verifiable with `cosign verify`.
+4. **Least privilege.** Never run a self-update as root; consider egress
+   monitoring on dev machines.
+
+The principle is the same one kit applies to npm/pip/docker (pin, verify,
+reproduce); host CLIs just live outside kit's reach.
+
 ## Out of scope (and why)
 
 - **LLM-router / orchestrator features.** kit is not Ruflo / Gas Town.
