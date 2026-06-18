@@ -233,6 +233,28 @@ export const SERVICE_REGISTRY: ServiceDef[] = [
     check: "# snowflake - check SNOWFLAKE_ACCOUNT is set",
     secrets: ["SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD"],
   },
+  {
+    id: "redshift",
+    deps: ["@aws-sdk/client-redshift", "@aws-sdk/client-redshift-data"],
+    login: "# redshift - no CLI login; set DATABASE_URL (or assume an IAM role)",
+    check: "# redshift - check DATABASE_URL is set",
+    secrets: ["DATABASE_URL"],
+  },
+  {
+    id: "redis",
+    deps: ["@upstash/redis", "ioredis", "redis"],
+    pyDeps: ["redis"],
+    login: "# redis - no CLI login; set REDIS_URL (or UPSTASH_REDIS_REST_*)",
+    check: "# redis - check REDIS_URL is set",
+    secrets: ["REDIS_URL", "UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN"],
+  },
+  {
+    id: "auth0",
+    deps: ["@auth0/nextjs-auth0", "@auth0/auth0-react", "auth0"],
+    login: "# auth0 - no CLI login; get keys from https://manage.auth0.com",
+    check: "# auth0 - check AUTH0_CLIENT_ID is set",
+    secrets: ["AUTH0_SECRET", "AUTH0_BASE_URL", "AUTH0_ISSUER_BASE_URL", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET"],
+  },
 ];
 
 /** Lookup by service id, for the generator. */

@@ -81,7 +81,10 @@ describe("service-registry", () => {
     });
 
     it("the new DB/BaaS services are present", () => {
-      for (const id of ["convex", "firebase", "mysql", "planetscale", "neon", "turso", "bigquery", "snowflake"]) {
+      for (const id of [
+        "convex", "firebase", "mysql", "planetscale", "neon", "turso", "bigquery", "snowflake",
+        "redshift", "redis", "auth0",
+      ]) {
         assert.ok(SERVICE_BY_ID[id], `missing new service: ${id}`);
       }
     });

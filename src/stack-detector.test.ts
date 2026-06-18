@@ -333,4 +333,40 @@ describe("detectStack", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("respects .nvmrc over the default node version", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-nvmrc`);
+    await makeProject(dir, {
+      "package.json": JSON.stringify({ dependencies: { next: "14.0.0" } }),
+      ".nvmrc": "20\n",
+    });
+    try {
+      assert.equal((await detectStack(dir)).tools.node, "20");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it(".tool-versions nodejs wins over engines.node", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-toolversions`);
+    await makeProject(dir, {
+      "package.json": JSON.stringify({ engines: { node: ">=18.0.0" }, dependencies: { next: "14.0.0" } }),
+      ".tool-versions": "nodejs 22.11.0\npython 3.11.4\n",
+    });
+    try {
+      assert.equal((await detectStack(dir)).tools.node, "22");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("respects .python-version for Python projects", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-pyver`);
+    await makeProject(dir, { "requirements.txt": "fastapi\n", ".python-version": "3.11\n" });
+    try {
+      assert.equal((await detectStack(dir)).tools.python, "3.11");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

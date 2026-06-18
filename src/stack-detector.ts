@@ -16,6 +16,7 @@ interface PackageJson {
   packageManager?: string;
   engines?: { node?: string };
   workspaces?: string[] | { packages?: string[] };
+  volta?: { node?: string };
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -77,13 +78,46 @@ async function collectWorkspaceDeps(cwd: string, pkg: PackageJson): Promise<stri
   return [...deps];
 }
 
-function nodeVersion(pkg: PackageJson): string {
-  const engines = pkg.engines?.node;
-  if (engines) {
-    const match = engines.match(/(\d+)/);
-    if (match) return match[1];
+/** Resolve the Node major to pin, respecting the repo's existing truth.
+ *  Precedence: .tool-versions > Volta > .node-version / .nvmrc > engines.node > 22.
+ *  (Respecting these avoids installing the wrong runtime, the #1 brownfield trap.) */
+async function resolveNodeVersion(cwd: string, pkg: PackageJson): Promise<string> {
+  const toolVersions = await readFile(join(cwd, ".tool-versions"), "utf-8").catch(() => null);
+  if (toolVersions) {
+    const m = toolVersions.match(/^\s*nodejs?\s+v?(\d+)/m);
+    if (m) return m[1];
+  }
+  if (pkg.volta?.node) {
+    const m = pkg.volta.node.match(/(\d+)/);
+    if (m) return m[1];
+  }
+  for (const f of [".node-version", ".nvmrc"]) {
+    const c = await readFile(join(cwd, f), "utf-8").catch(() => null);
+    if (c) {
+      const m = c.match(/v?(\d+)/);
+      if (m) return m[1];
+    }
+  }
+  if (pkg.engines?.node) {
+    const m = pkg.engines.node.match(/(\d+)/);
+    if (m) return m[1];
   }
   return "22";
+}
+
+/** Resolve the Python minor to pin: .python-version > .tool-versions > 3.12. */
+async function resolvePythonVersion(cwd: string): Promise<string> {
+  const pv = await readFile(join(cwd, ".python-version"), "utf-8").catch(() => null);
+  if (pv) {
+    const m = pv.match(/(\d+\.\d+)/);
+    if (m) return m[1];
+  }
+  const tv = await readFile(join(cwd, ".tool-versions"), "utf-8").catch(() => null);
+  if (tv) {
+    const m = tv.match(/^\s*python\s+v?(\d+\.\d+)/m);
+    if (m) return m[1];
+  }
+  return "3.12";
 }
 
 function detectPackageManager(pkg: PackageJson, cwd: string): Promise<string> {
@@ -120,7 +154,7 @@ async function detectFromPackageJson(cwd: string): Promise<DetectedStack | null>
   const pkg = await readJson<PackageJson>(join(cwd, "package.json"));
   if (!pkg) return null;
 
-  const node = nodeVersion(pkg);
+  const node = await resolveNodeVersion(cwd, pkg);
   const pm = await detectPackageManager(pkg, cwd);
   const tools: Record<string, string> = { node };
   if (pm !== "npm") tools[pm] = "latest";
@@ -183,7 +217,7 @@ async function detectFromPython(cwd: string): Promise<DetectedStack | null> {
     language: "python",
     framework,
     services,
-    tools: { python: "3.12", uv: "latest" },
+    tools: { python: await resolvePythonVersion(cwd), uv: "latest" },
     confidence: framework ? 0.85 : 0.5,
   };
 }
