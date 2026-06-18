@@ -264,9 +264,20 @@ export interface ContextConfig {
   npm?: { registry?: string };
 }
 
+/** [setup] — project bootstrap commands run by `kit setup`. install/verify run
+ *  by default; migrate/seed are opt-in (may mutate a real DB). */
+export interface SetupConfig {
+  install?: string;
+  migrate?: string;
+  seed?: string;
+  verify?: string;
+}
+
 export interface kitConfig {
   tools?: ToolConfig;
   services?: Record<string, ServiceConfig>;
+  /** Project bootstrap commands (deps install, migrate, verify). */
+  setup?: SetupConfig;
   secrets?: SecretsConfig;
   skills?: SkillsConfig;
   governance?: GovernanceConfig;

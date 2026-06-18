@@ -103,7 +103,7 @@ import { promptConfirm } from "./utils/prompt.js";
 import { c } from "./utils/colors.js";
 import { gatherStatus } from "./status.js";
 import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
-import { checkContext, applyContext, contextPrompt, gatherLive, suggestContextToml } from "./context-lock.js";
+import { checkContext, applyContext, contextPrompt, gatherLive, suggestContextToml, hasLockableContext } from "./context-lock.js";
 import { cmdEnv } from "./commands/env.js";
 import { cmdAuth } from "./commands/auth.js";
 import { cmdAudit } from "./commands/audit.js";
@@ -113,6 +113,8 @@ import { resolveAllAuth } from "./service-auth.js";
 import { runDoctor } from "./doctor.js";
 import { detectStack } from "./stack-detector.js";
 import { generateToml } from "./toml-generator.js";
+import { vaultMeta } from "./vault-meta.js";
+import { vaultCliInstalled } from "./secret-backends.js";
 import { createPlugin } from "./create-plugin.js";
 import { cmdPlugin } from "./plugins-cli.js";
 import { cloneRepository } from "./clone.js";
@@ -787,6 +789,33 @@ async function cmdSecrets(): Promise<boolean> {
         );
       }
 
+      // Loud, actionable vault-readiness flag. A chosen vault that resolves zero
+      // secrets is almost always "CLI installed but not logged in" — surface
+      // that once, with the exact next command, instead of leaving the user to
+      // infer it from a column of per-key ✗ lines.
+      const meta = vaultMeta(secretsConfig.store);
+      const resolvedCount = results.filter((r) => r.resolved).length;
+      if (meta && results.length > 0 && resolvedCount === 0) {
+        const installed = meta.miseTool ? await vaultCliInstalled(meta.miseTool) : true;
+        console.log(
+          `\n  ${c.yellow}${c.bold}! Vault "${secretsConfig.store}" is configured but resolved 0 secrets.${c.reset}`,
+        );
+        if (meta.miseTool && !installed) {
+          console.log(
+            `  ${c.dim}The ${meta.label} CLI isn't installed yet — run ${c.reset}${c.bold}kit setup${c.reset}${c.dim} (installs it via mise).${c.reset}`,
+          );
+        } else if (meta.loginCmd) {
+          console.log(
+            `  ${c.dim}The ${meta.label} CLI is installed but not authenticated. Log in:${c.reset}`,
+          );
+          console.log(`      ${c.bold}${meta.loginCmd}${c.reset}`);
+          if (meta.initCmd) {
+            console.log(`  ${c.dim}then bind this repo:${c.reset}  ${c.bold}${meta.initCmd}${c.reset}`);
+          }
+          console.log(`  ${c.dim}then re-run ${c.reset}${c.bold}kit secrets${c.reset}${c.dim}.${c.reset}`);
+        }
+      }
+
       console.log();
       return allOk;
     }
@@ -889,6 +918,30 @@ async function cmdEscalate(): Promise<boolean> {
   );
 }
 
+/**
+ * Run a command string from a `.kit.toml [setup]` field. These are commands the
+ * user configured themselves, but kit's exec invariant forbids a shell — so we
+ * split on whitespace (fine for `pnpm install`, `supabase db push`, `uv sync`,
+ * `go mod download`) and REFUSE anything with shell operators rather than
+ * mis-running it. Returns true on exit 0.
+ */
+async function runConfiguredCommand(label: string, cmdStr: string): Promise<boolean> {
+  if (/[&|;<>`$()]/.test(cmdStr)) {
+    console.log(
+      `  ${c.yellow}!${c.reset} ${label}: ${c.dim}has shell operators — run it yourself: ${c.reset}${c.bold}${cmdStr}${c.reset}`,
+    );
+    return false;
+  }
+  console.log(`  ${c.dim}$ ${cmdStr}${c.reset}`);
+  const res = await executeCommand({ commandArgs: cmdStr.trim().split(/\s+/), cwd: process.cwd() });
+  if (res.exitCode === 0) {
+    console.log(`  ${c.green}✓${c.reset} ${label}`);
+    return true;
+  }
+  console.log(`  ${c.red}✗${c.reset} ${label} ${c.dim}(exit ${res.exitCode})${c.reset}`);
+  return false;
+}
+
 async function cmdSetup(): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit setup${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
@@ -929,6 +982,14 @@ async function cmdSetup(): Promise<boolean> {
     return false;
   }
 
+  // Project dependencies. cmdInstall above provisions the TOOLCHAIN (node, pnpm,
+  // … via mise); now install the project's own deps so the repo actually works
+  // after setup. The generated [setup].install was never executed before — kit
+  // installed the toolchain but left node_modules absent.
+  if (config.setup?.install) {
+    await runConfiguredCommand("deps installed", config.setup.install);
+  }
+
   // Step 2: Git Hooks
   if (config.hooks && Object.keys(config.hooks).length > 0 && isGitRepository()) {
     console.log(`${c.bold}[2/6] Git Hooks${c.reset}`);
@@ -946,7 +1007,43 @@ async function cmdSetup(): Promise<boolean> {
 
   // Step 4: Secrets
   console.log(`${c.bold}[4/6] Secrets${c.reset}`);
+
+  // Harden .gitignore BEFORE secrets are materialized. kit's headline is
+  // "secret-safe", but cmdSecrets writes .env.local below — if the repo's
+  // .gitignore doesn't already cover it, the next `git add .` stages real
+  // secrets. Patching is a non-destructive, repo-local append, so we do it by
+  // default and announce it (standalone `kit security check-gitignore --fix`
+  // remains for the manual path).
+  if (isGitRepository()) {
+    const gi = await checkGitignore(process.cwd());
+    if (gi.missingPatterns.length > 0) {
+      const patched = await patchGitignore(process.cwd());
+      const names = gi.missingPatterns.slice(0, 3).map((m) => m.pattern).join(", ");
+      console.log(
+        `  ${c.green}✓${c.reset} hardened .gitignore ${c.dim}(+${patched.added}: ${names}${gi.missingPatterns.length > 3 ? ", …" : ""}) — review + commit it${c.reset}`,
+      );
+    }
+  }
+
   const secretsOk = await cmdSecrets();
+
+  // [setup].migrate / .seed are intentionally NOT auto-run: a configured migrate
+  // (`supabase db push`, `prisma migrate deploy`) can mutate a linked — possibly
+  // production — database. Run only on explicit opt-in; otherwise surface the
+  // exact command so applying it stays a deliberate human action.
+  if (config.setup?.migrate || config.setup?.seed) {
+    if (hasFlag(process.argv, "--with-migrate")) {
+      console.log(`${c.bold}[+] Migrate / seed${c.reset}`);
+      if (config.setup.migrate) await runConfiguredCommand("migrate", config.setup.migrate);
+      if (config.setup.seed) await runConfiguredCommand("seed", config.setup.seed);
+      console.log();
+    } else {
+      const cmds = [config.setup.migrate, config.setup.seed].filter(Boolean).join("  ·  ");
+      console.log(
+        `  ${c.yellow}!${c.reset} ${c.dim}Skipping migrate/seed (may mutate a real DB). Run deliberately: ${c.reset}${c.bold}${cmds}${c.reset}${c.dim}  or  ${c.reset}${c.bold}kit setup --with-migrate${c.reset}`,
+      );
+    }
+  }
 
   // Step 5: Agent config — teach the present agent(s) to use kit. Idempotent;
   // only writes a managed block, so re-running setup leaves it unchanged.
@@ -988,7 +1085,17 @@ async function cmdSetup(): Promise<boolean> {
     console.log();
   }
 
-  const allOk = installOk && loginOk && secretsOk && verifyOk;
+  // Project verify (e.g. the configured build). Distinct from cmdCheck above,
+  // which audits setup STATE — this proves the app actually builds. Run last so
+  // deps + secrets are in place.
+  let setupVerifyOk = true;
+  if (config.setup?.verify) {
+    console.log(`\n${c.bold}[+] Verify build${c.reset}`);
+    setupVerifyOk = await runConfiguredCommand(config.setup.verify, config.setup.verify);
+    console.log();
+  }
+
+  const allOk = installOk && loginOk && secretsOk && verifyOk && setupVerifyOk;
 
   if (allOk) {
     console.log(`${c.bold}${c.green}Setup complete — you're ready to go! ✓${c.reset}\n`);
@@ -1226,7 +1333,66 @@ async function generateConfigFile(
 
   await writeFile(configPath, tomlContent, "utf-8");
   console.log(`  ${c.green}✓${c.reset} Generated ${c.bold}.kit.toml${c.reset}\n`);
+
+  // Close the loop on the vault choice: tell the user exactly what `kit setup`
+  // will provision and what they still have to do themselves (login is their
+  // account action — kit guides it, never runs it).
+  const meta = vaultMeta(chosenStore);
+  if (meta) {
+    console.log(`  ${c.dim}Secret backend: ${c.reset}${c.bold}${meta.label}${c.reset}`);
+    if (meta.miseTool) {
+      console.log(`    ${c.green}✓${c.reset} ${c.dim}${c.reset}${c.bold}kit setup${c.reset}${c.dim} will install its CLI via mise${c.reset}`);
+    }
+    if (meta.loginCmd) {
+      const steps = meta.initCmd ? `${meta.loginCmd} && ${meta.initCmd}` : meta.loginCmd;
+      console.log(`    ${c.yellow}!${c.reset} ${c.dim}then authenticate (your account): ${c.reset}${c.bold}${steps}${c.reset}`);
+    }
+    console.log();
+  }
+
   return "written";
+}
+
+/**
+ * Brownfield context-lock offer. If the repo already talks to gcloud / vercel /
+ * github but `.kit.toml` declares no `[context]`, surface the detected
+ * account+project and offer to lock it. kit does NOT install or authenticate
+ * these (cloud env's job) — it locks which account+project this repo is bound to,
+ * the exact pairing where cross-account contamination bugs hide. Default is NO:
+ * the values are the currently-active CLI state, which is what the lock exists to
+ * question, so the user must confirm they're right for THIS repo first.
+ */
+async function offerContextLock(configPath: string, nonInteractive: boolean): Promise<void> {
+  const live = await gatherLive(process.cwd());
+  if (!hasLockableContext(live)) return;
+  const block = suggestContextToml(live);
+  if (!block.trim()) return;
+
+  console.log(
+    `${c.bold}Detected environment${c.reset} ${c.dim}— lock account+project so kit verifies the right one each session:${c.reset}\n`,
+  );
+  for (const line of block.split("\n")) {
+    console.log(line.trim() === "" ? "" : `  ${c.dim}${line}${c.reset}`);
+  }
+  console.log(
+    `\n${c.yellow}⚠ These are the currently-active CLI values — verify each is right for THIS repo before locking.${c.reset}`,
+  );
+
+  if (nonInteractive) {
+    console.log(
+      `${c.dim}Non-interactive: not writing. Add the block above to .kit.toml, or run ${c.reset}${c.bold}kit context check${c.reset}${c.dim} to lock it.${c.reset}\n`,
+    );
+    return;
+  }
+
+  const ok = await promptConfirm("Add this [context] lock to .kit.toml? [y/N] ", 10000, false);
+  if (!ok) {
+    console.log(`${c.dim}Skipped — run ${c.reset}${c.bold}kit context check${c.reset}${c.dim} later to add it.${c.reset}\n`);
+    return;
+  }
+  const existing = readFileSync(configPath, "utf-8");
+  await writeFile(configPath, existing.trimEnd() + "\n\n" + block + "\n", "utf-8");
+  console.log(`  ${c.green}✓${c.reset} Locked ${c.bold}[context]${c.reset} ${c.dim}→ verify with ${c.reset}${c.bold}kit context check${c.reset}\n`);
 }
 
 async function cmdInit(): Promise<boolean> {
@@ -1253,6 +1419,12 @@ async function cmdInit(): Promise<boolean> {
   }
 
   const config = await loadConfig(configPath);
+
+  // Brownfield: offer to lock the already-active cloud/repo context (no install,
+  // no login — just pin account+project) when none is declared yet.
+  if (!config.context) {
+    await offerContextLock(configPath, nonInteractive);
+  }
 
   // Check if lock files exist
   const kitMeta = await readkitMeta();

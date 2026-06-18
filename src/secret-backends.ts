@@ -1,7 +1,32 @@
 import { check1PasswordStatus } from "./onepassword.js";
 import { exec } from "./utils/exec.js";
+import { resolveToolBin } from "./utils/resolveTool.js";
 import type { SecretKeyConfig, InfisicalConfig } from "./config.js";
 import type { SecretResolveResult } from "./secrets.js";
+
+/**
+ * Run a vault CLI, resolving its binary mise-first.
+ *
+ * kit installs vault CLIs via mise (see `VAULT_META`), but mise shims aren't on
+ * kit's process PATH, so a bare `execCli("infisical", …)` can't find the binary kit
+ * just installed — the same PATH dead-end that bit the security scanners. We
+ * resolve the absolute path first and fall back to the bare name (so a
+ * system-PATH install, or a tool kit doesn't provision, behaves exactly as
+ * before). Args stay an array per the exec security invariant. */
+async function execCli(
+  tool: string,
+  args: string[],
+  opts?: Parameters<typeof exec>[2],
+): Promise<{ stdout: string; stderr: string }> {
+  const bin = (await resolveToolBin(tool)) ?? tool;
+  return exec(bin, args, opts) as Promise<{ stdout: string; stderr: string }>;
+}
+
+/** Is a vault CLI installed (mise or PATH)? Used to tell "not installed" apart
+ *  from "installed but not logged in" in user-facing hints. */
+export async function vaultCliInstalled(tool: string): Promise<boolean> {
+  return (await resolveToolBin(tool)) !== null;
+}
 
 /**
  * Single source of truth for every secret backend kit speaks to.
@@ -75,7 +100,7 @@ async function fetchInfisicalSecrets(
       exportArgs.push("--path", infisicalConfig.path);
     }
 
-    const { stdout } = await exec("infisical", exportArgs, {
+    const { stdout } = await execCli("infisical", exportArgs, {
       timeout: 15_000,
       env: { ...process.env },
     });
@@ -145,7 +170,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
         };
       }
       try {
-        const { stdout } = await exec("op", ["read", config.ref, "--no-newline"], {
+        const { stdout } = await execCli("op", ["read", config.ref, "--no-newline"], {
           timeout: 10_000,
         });
         return { name, resolved: !!stdout, value: stdout || null, detail: "From 1Password" };
@@ -182,11 +207,11 @@ export const BACKENDS: Record<string, SecretBackend> = {
       // PIPE stdin so the parent doesn't inherit op's interactive prompts even if
       // auth lapses mid-flight.
       try {
-        await exec("op", ["item", "edit", project, `${key}=${value}`, "--vault", vault], {
+        await execCli("op", ["item", "edit", project, `${key}=${value}`, "--vault", vault], {
           timeout: 15_000,
         });
       } catch {
-        await exec("op", [
+        await execCli("op", [
           "item",
           "create",
           `--category=Login`,
@@ -234,11 +259,16 @@ export const BACKENDS: Record<string, SecretBackend> = {
           detail: val !== null ? "From Infisical" : "Not found in Infisical",
         };
       } catch {
-        return { name, resolved: false, value: null, detail: "Infisical CLI not available" };
+        return {
+          name,
+          resolved: false,
+          value: null,
+          detail: "Infisical CLI unavailable or not logged in — run `infisical login`",
+        };
       }
     },
     async write(key, value) {
-      await exec("infisical", ["secrets", "set", `${key}=${value}`], { timeout: 15_000 });
+      await execCli("infisical", ["secrets", "set", `${key}=${value}`], { timeout: 15_000 });
       return { ok: true, detail: "wrote to Infisical" };
     },
   },
@@ -250,7 +280,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
       }
       try {
         const fieldName = config.name || config.ref || name;
-        const { stdout } = await exec("bw", ["get", fieldName], { timeout: 10_000 });
+        const { stdout } = await execCli("bw", ["get", fieldName], { timeout: 10_000 });
         return { name, resolved: !!stdout, value: stdout || null, detail: "From Bitwarden" };
       } catch {
         return {
@@ -270,7 +300,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
         return { name, resolved: false, value: null, detail: "No Doppler secret name configured" };
       }
       try {
-        const { stdout } = await exec("doppler", ["secrets", "get", config.name, "--plain"], {
+        const { stdout } = await execCli("doppler", ["secrets", "get", config.name, "--plain"], {
           timeout: 10_000,
         });
         return { name, resolved: !!stdout, value: stdout || null, detail: "From Doppler" };
@@ -284,7 +314,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
       }
     },
     async write(key, value) {
-      await exec("doppler", ["secrets", "set", `${key}=${value}`], { timeout: 15_000 });
+      await execCli("doppler", ["secrets", "set", `${key}=${value}`], { timeout: 15_000 });
       return { ok: true, detail: "wrote to Doppler" };
     },
   },
@@ -334,7 +364,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
         };
       }
       try {
-        const { stdout } = await exec("vault", ["kv", "get", "-field", field, path], {
+        const { stdout } = await execCli("vault", ["kv", "get", "-field", field, path], {
           timeout: 10_000,
         });
         const val = stdout.trim();
@@ -357,7 +387,7 @@ export const BACKENDS: Record<string, SecretBackend> = {
       const path = opts.vaultPath || "secret/data/kit";
       // `vault kv put - <path>` reads KEY=value pairs from stdin; keeps value out
       // of argv (and out of any error message).
-      await exec("vault", ["kv", "put", "-", path], {
+      await execCli("vault", ["kv", "put", "-", path], {
         timeout: 15_000,
         input: `${key}=${value}\n`,
       } as Parameters<typeof exec>[2]);

@@ -114,6 +114,17 @@ export function suggestContextToml(live: LiveContext): string {
   return out.join("\n").trimEnd();
 }
 
+/**
+ * Does a live snapshot carry account/project context worth locking at init?
+ * git email + npm registry alone don't qualify (low contamination risk, noisy
+ * to prompt about); the cross-account bugs this lock exists for live in the
+ * gcloud / vercel / github bindings, so the brownfield `kit init` offer gates on
+ * those. PURE so it's unit-testable.
+ */
+export function hasLockableContext(live: LiveContext): boolean {
+  return Boolean(live.gcloud?.account || live.vercel?.projectId || live.github?.org);
+}
+
 async function run(cmd: string, args: string[]): Promise<string | null> {
   try {
     const { stdout } = await exec(cmd, args, { timeout: 8_000 });

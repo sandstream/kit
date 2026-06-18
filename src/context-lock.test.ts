@@ -6,6 +6,7 @@ import {
   planContext,
   parseGcloudProject,
   suggestContextToml,
+  hasLockableContext,
   type LiveContext,
 } from "./context-lock.js";
 
@@ -90,6 +91,22 @@ describe("context lock", () => {
   it("parses the gcloud project from a config INI", () => {
     assert.equal(parseGcloudProject("[core]\naccount = a@b.com\nproject = prod-project\n"), "prod-project");
     assert.equal(parseGcloudProject("[core]\naccount = a@b.com\n"), null);
+  });
+
+  describe("hasLockableContext", () => {
+    it("is true when an account/project binding (gcloud/vercel/github) is present", () => {
+      assert.equal(hasLockableContext({ gcloud: { account: "ops@x.com", project: null } }), true);
+      assert.equal(hasLockableContext({ vercel: { orgId: null, projectId: "prj_123" } }), true);
+      assert.equal(hasLockableContext({ github: { org: "sandstream", remote: null } }), true);
+    });
+    it("is false for git-email / npm-registry only (low contamination risk, too noisy to prompt)", () => {
+      assert.equal(
+        hasLockableContext({ git: { email: "a@b.com" }, npm: { registry: "https://registry.npmjs.org" } }),
+        false,
+      );
+      assert.equal(hasLockableContext({}), false);
+      assert.equal(hasLockableContext({ gcloud: { account: null, project: null } }), false);
+    });
   });
 
   describe("suggestContextToml", () => {

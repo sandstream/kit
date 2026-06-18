@@ -102,6 +102,9 @@ check = "stripe config --list"
 
 [secrets]
 store = "1password"  # or env, dotenvx, vault, aws-sm, gcp-sm, azure-kv, infisical, doppler, bitwarden, eas
+# Choosing a vault wires it up: kit adds its CLI to [tools] so `kit setup` installs
+# it via mise (1password, infisical, doppler, bitwarden, vault), then guides login.
+# Cloud secret managers (aws-sm, gcp-sm, azure-kv) are an exception — see below.
 template = ".env.template"
 
 [secrets.keys]
@@ -252,6 +255,29 @@ migration, to deploy-platform propagation, to destructive history cleanup.
 - `kit secrets revoke-old --via supabase-mgmt-api --key-id <id>`: Revoke a previously-minted scoped key
 - `kit secrets onecli register <KEY> --host <pattern>`: Register with the OneCLI gateway so the agent process never sees the real value
 - `kit secrets purge-history <pattern> --force-history`: Destructive: rewrite git history to scrub a leaked value (wraps `git filter-repo` / `bfg`). Requires elevation + explicit flag.
+
+**Which vault CLIs kit installs.** When you pick a secret backend at `kit init`, kit
+provisions its CLI like any other tool — it adds the CLI to `[tools]`, so `kit setup`
+installs it via mise, resolves it mise-first at read time, and prints the login step.
+This covers the dedicated vault CLIs:
+
+| Backend | CLI installed by `kit setup`? | Authenticate with |
+|---|---|---|
+| 1Password | yes (`op` via mise) | `op signin` |
+| Infisical | yes (`infisical` via mise) | `infisical login` + `infisical init` |
+| Doppler | yes (`doppler` via mise) | `doppler login` + `doppler setup` |
+| Bitwarden | yes (`bw` via mise) | `bw login` + `bw unlock` |
+| HashiCorp Vault | yes (`vault` via mise) | `vault login` |
+| AWS Secrets Manager | **no** — uses your existing `aws` CLI | `aws configure` / IAM role |
+| GCP Secret Manager | **no** — uses your existing `gcloud` CLI | `gcloud auth login` |
+| Azure Key Vault | **no** — uses your existing `az` CLI | `az login` |
+
+The three cloud secret managers are a deliberate exception: their CLIs are normally
+already present (cloud installer, CI image, IAM environment), authenticate through
+cloud-native mechanisms rather than a CLI login, and a second mise-managed copy could
+shadow the system one. kit therefore **guides** their login but does not install the
+CLI — it resolves the binary from your `PATH` and falls back cleanly if absent. Logging
+in to any vault is always your own account action; kit never does it for you.
 
 ### Security scanners
 

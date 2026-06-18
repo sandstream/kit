@@ -63,6 +63,45 @@ describe("generateToml", () => {
     assert.equal(go.tools["aqua:google/osv-scanner"], "latest", "osv-scanner for go (no dedicated scanner)");
   });
 
+  it("provisions the chosen vault's CLI into [tools] (mise-installable backends)", () => {
+    const infisical = parseTOML(
+      generateToml(stack({ services: ["supabase"] }), { secretsStore: "infisical" }),
+    ) as { tools: Record<string, string> };
+    assert.equal(infisical.tools.infisical, "latest", "infisical CLI should be provisioned");
+
+    const doppler = parseTOML(
+      generateToml(stack({ services: ["supabase"] }), { secretsStore: "doppler" }),
+    ) as { tools: Record<string, string> };
+    assert.equal(doppler.tools.doppler, "latest", "doppler CLI should be provisioned");
+
+    const vault = parseTOML(
+      generateToml(stack({ services: ["supabase"] }), { secretsStore: "vault" }),
+    ) as { tools: Record<string, string> };
+    assert.equal(vault.tools.vault, "latest", "vault CLI should be provisioned");
+  });
+
+  it("does not provision a CLI for env or cloud-managed backends (aws/gcp/azure)", () => {
+    const env = parseTOML(
+      generateToml(stack({ services: ["supabase"] }), { secretsStore: "env" }),
+    ) as { tools: Record<string, string> };
+    // env: nothing vault-y; cloud SMs ship their CLI via the cloud env, not mise.
+    const awsSm = parseTOML(
+      generateToml(stack({ services: ["supabase"] }), { secretsStore: "aws-sm" }),
+    ) as { tools: Record<string, string> };
+    assert.ok(!awsSm.tools.aws && !awsSm.tools["aws-sm"], "no aws CLI provisioned for aws-sm");
+    assert.ok(env.tools, "env still has a tools table (scanners etc.)");
+  });
+
+  it("scaffolds a [secrets.infisical] binding block when infisical is chosen", () => {
+    const toml = generateToml(stack({ services: ["supabase", "stripe"] }), { secretsStore: "infisical" });
+    assert.ok(toml.includes("[secrets.infisical]"), `missing binding block: ${toml}`);
+    const parsed = parseTOML(toml) as { secrets: { infisical?: { environment?: string } } };
+    assert.equal(parsed.secrets.infisical?.environment, "dev", "binding should default environment to dev");
+    // No binding block for a non-infisical store.
+    const op = generateToml(stack({ services: ["supabase"] }), { secretsStore: "1password" });
+    assert.ok(!op.includes("[secrets.infisical]"), "1password config must not carry an infisical block");
+  });
+
   it("generates Next.js + Supabase + Stripe config", () => {
     const s = stack({
       framework: "nextjs",
