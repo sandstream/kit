@@ -55,3 +55,17 @@ export function vaultMeta(store: string | undefined): VaultMeta | null {
   if (!store || store === "env") return null;
   return (VAULT_META as Record<string, VaultMeta>)[store] ?? null;
 }
+
+/**
+ * Detect a secret backend a brownfield repo is already bound to, from its
+ * marker files, so `kit init` can pre-select the right store instead of
+ * defaulting to 1Password (and hardcoding the wrong one in `--yes` runs).
+ * Returns null when nothing recognizable is present.
+ */
+export async function detectSecretStore(
+  fileExists: (relPath: string) => Promise<boolean>,
+): Promise<SecretsStore | null> {
+  if (await fileExists(".infisical.json")) return "infisical";
+  if ((await fileExists("doppler.yaml")) || (await fileExists(".doppler.yaml"))) return "doppler";
+  return null;
+}

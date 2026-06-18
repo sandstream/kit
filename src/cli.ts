@@ -112,8 +112,8 @@ import { cmdHooks } from "./commands/hooks.js";
 import { resolveAllAuth } from "./service-auth.js";
 import { runDoctor } from "./doctor.js";
 import { detectStack } from "./stack-detector.js";
-import { generateToml } from "./toml-generator.js";
-import { vaultMeta } from "./vault-meta.js";
+import { generateToml, parseEnvTemplateKeys } from "./toml-generator.js";
+import { vaultMeta, detectSecretStore } from "./vault-meta.js";
 import { vaultCliInstalled } from "./secret-backends.js";
 import { createPlugin } from "./create-plugin.js";
 import { cmdPlugin } from "./plugins-cli.js";
@@ -1287,10 +1287,16 @@ async function generateConfigFile(
   }
 
   // ── Secret-backend choice (interactive) ────────────────────────────────
-  let chosenStore: SecretsStore = "1password";
+  // Respect a backend the repo is already bound to (.infisical.json / doppler.yaml);
+  // it becomes the default (and the non-interactive choice) instead of 1Password.
+  const detectedStore = await detectSecretStore(async (p) => existsSync(resolve(process.cwd(), p)));
+  let chosenStore: SecretsStore = detectedStore ?? "1password";
+  if (detectedStore) {
+    console.log(`  ${c.green}✓${c.reset} Detected ${c.bold}${detectedStore}${c.reset} config in repo — using it as the secret backend.\n`);
+  }
   if (!nonInteractive) {
-    chosenStore = (await promptSelect("Secret backend?", [
-      { value: "1password", label: "1Password", hint: "interactive signin via op CLI", recommended: true },
+    const opts = [
+      { value: "1password", label: "1Password", hint: "interactive signin via op CLI" },
       { value: "infisical", label: "Infisical", hint: "self-hosted or cloud, token-based" },
       { value: "vault", label: "HashiCorp Vault", hint: "KV v2 paths" },
       { value: "aws-sm", label: "AWS Secrets Manager", hint: "IAM credentials required" },
@@ -1299,7 +1305,8 @@ async function generateConfigFile(
       { value: "doppler", label: "Doppler", hint: "doppler login required" },
       { value: "bitwarden", label: "Bitwarden", hint: "bw login + unlock required" },
       { value: "env", label: "env (no vault)", hint: "not recommended — use only for local dev" },
-    ])) as SecretsStore;
+    ].map((o) => ({ ...o, recommended: o.value === chosenStore }));
+    chosenStore = (await promptSelect("Secret backend?", opts)) as SecretsStore;
     console.log();
   }
 
@@ -1309,7 +1316,22 @@ async function generateConfigFile(
     existsSync(resolve(process.cwd(), "Dockerfile")) ||
     existsSync(resolve(process.cwd(), "docker-compose.yml")) ||
     existsSync(resolve(process.cwd(), "compose.yml"));
-  const tomlContent = generateToml(stack, { secretsStore: chosenStore, hasDockerfile });
+
+  // Seed [secrets.keys] from an existing .env example so the project's real
+  // secret contract isn't lost to just the detected services' template keys.
+  let extraSecretKeys: string[] = [];
+  for (const f of [".env.example", ".env.template", ".env.sample"]) {
+    const p = resolve(process.cwd(), f);
+    if (existsSync(p)) {
+      extraSecretKeys = parseEnvTemplateKeys(readFileSync(p, "utf-8"));
+      if (extraSecretKeys.length > 0) {
+        console.log(`  ${c.green}✓${c.reset} Seeded ${extraSecretKeys.length} key(s) from ${c.bold}${f}${c.reset}\n`);
+      }
+      break;
+    }
+  }
+
+  const tomlContent = generateToml(stack, { secretsStore: chosenStore, hasDockerfile, extraSecretKeys });
 
   // Show diff preview
   console.log(`${c.bold}Preview — .kit.toml${c.reset}\n`);

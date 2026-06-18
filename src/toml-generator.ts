@@ -88,12 +88,33 @@ export type SecretsStore =
   | "azure-kv"
   | "env";
 
-function secretsSection(services: string[], store: SecretsStore = "1password"): string {
+/** Extract env keys from a `.env.example`/`.env.template` file body —
+ *  `^KEY=` lines (KEY = upper/underscore/digit). Comments + blanks ignored. */
+export function parseEnvTemplateKeys(content: string): string[] {
+  const keys: string[] = [];
+  for (const line of content.split("\n")) {
+    const m = line.match(/^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=/);
+    if (m) keys.push(m[1]);
+  }
+  return keys;
+}
+
+function secretsSection(services: string[], store: SecretsStore = "1password", extraKeys: string[] = []): string {
   const allKeys: string[] = [];
+  const seen = new Set<string>();
+  const add = (k: string): void => {
+    if (!seen.has(k)) {
+      seen.add(k);
+      allKeys.push(k);
+    }
+  };
   for (const svc of services) {
     const def = SERVICE_BY_ID[svc];
-    if (def?.secrets?.length) allKeys.push(...def.secrets);
+    def?.secrets?.forEach(add);
   }
+  // Keys from an existing .env.example the project already documents (deduped
+  // against service-template keys) — so a project's real secret contract is kept.
+  extraKeys.forEach(add);
   if (allKeys.length === 0) return "";
 
   const keyLines = allKeys.map((k) => {
@@ -194,7 +215,7 @@ function setupSection(stack: DetectedStack): string {
  */
 export function generateToml(
   stack: DetectedStack,
-  options: { secretsStore?: SecretsStore; hasDockerfile?: boolean } = {},
+  options: { secretsStore?: SecretsStore; hasDockerfile?: boolean; extraSecretKeys?: string[] } = {},
 ): string {
   // Merge service tools into tools map
   const tools = { ...stack.tools };
@@ -251,7 +272,7 @@ export function generateToml(
 
   const toolsSec = toolsSection(tools);
   const servicesSec = servicesSection(stack.services);
-  const secretsSec = secretsSection(stack.services, options.secretsStore ?? "1password");
+  const secretsSec = secretsSection(stack.services, options.secretsStore ?? "1password", options.extraSecretKeys ?? []);
   const setupSec = setupSection(stack);
 
   const parts = [header, toolsSec, servicesSec, secretsSec, setupSec].filter(

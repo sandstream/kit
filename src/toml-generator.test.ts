@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { generateToml } from "./toml-generator.js";
+import { generateToml, parseEnvTemplateKeys } from "./toml-generator.js";
 import type { DetectedStack } from "./stack-detector.js";
 import { parse as parseTOML } from "smol-toml";
 
@@ -61,6 +61,23 @@ describe("generateToml", () => {
 
     const go = parseTOML(generateToml(stack({ language: "go", tools: {} }))) as { tools: Record<string, string> };
     assert.equal(go.tools["aqua:google/osv-scanner"], "latest", "osv-scanner for go (no dedicated scanner)");
+  });
+
+  it("parseEnvTemplateKeys extracts KEY= names, ignoring comments / blanks / lowercase", () => {
+    assert.deepEqual(
+      parseEnvTemplateKeys("# comment\nFOO=1\nexport BAR=2\n\nbaz=3\nQUX_1=\n"),
+      ["FOO", "BAR", "QUX_1"],
+    );
+  });
+
+  it("seeds extra secret keys from an env template, deduped against service keys", () => {
+    const toml = generateToml(stack({ services: ["supabase"] }), {
+      secretsStore: "1password",
+      extraSecretKeys: ["OPENAI_API_KEY", "NEXT_PUBLIC_SUPABASE_URL"],
+    });
+    assert.ok(toml.includes("OPENAI_API_KEY"), `extra key missing: ${toml}`);
+    const dupes = (toml.match(/^NEXT_PUBLIC_SUPABASE_URL = /gm) || []).length;
+    assert.equal(dupes, 1, "service key must not be duplicated by the env-template seed");
   });
 
   it("generates config for a new registry-only service (convex) — no code change needed", () => {
