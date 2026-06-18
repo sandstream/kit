@@ -21,7 +21,8 @@ jobs:
       contents: read
       packages: write
       pull-requests: write
-      id-token: write   # cosign keyless signing via Sigstore OIDC
+      id-token: write          # cosign keyless signing via Sigstore OIDC
+      security-events: write   # upload Trivy SARIF to Code Scanning
 
     steps:
       - name: Checkout repository
@@ -157,8 +158,11 @@ jobs:
           output: 'trivy-results.json'
 
       - name: Upload Trivy scan results
+        # continue-on-error: SARIF upload needs Code Scanning enabled on the repo;
+        # the scan result above is the gate, so a failed upload must not fail the publish.
         if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true'
-        uses: github/codeql-action/upload-sarif@v2
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.json'
 
