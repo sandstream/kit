@@ -257,7 +257,7 @@ function setupSection(stack: DetectedStack): string {
  */
 export function generateToml(
   stack: DetectedStack,
-  options: { secretsStore?: SecretsStore } = {},
+  options: { secretsStore?: SecretsStore; hasDockerfile?: boolean } = {},
 ): string {
   // Merge service tools into tools map
   const tools = { ...stack.tools };
@@ -268,12 +268,29 @@ export function generateToml(
     }
   }
 
-  // Default security scanners — mise-provisioned and on by default, so
+  // Universal security scanners — mise-provisioned and on by default, so
   // `kit check` runs them out of the box (kit orchestrates scanners; it
   // shouldn't just warn they're missing). semgrep = SAST (your code);
-  // socket = supply-chain (your deps). Remove from [tools] to opt out.
+  // socket = deps; trufflehog = secrets. Remove from [tools] to opt out.
   for (const [tool, ref] of Object.entries(DEFAULT_SECURITY_SCANNERS)) {
     if (!tools[tool]) tools[tool] = ref;
+  }
+
+  // Conditional scanners — only where they apply, to avoid noise/redundancy:
+  //  - trivy: container/IaC, only when a Dockerfile is present (caller-detected).
+  //  - pip-audit: Python dep CVEs.
+  //  - osv-scanner: dep CVEs for ecosystems kit has no dedicated scanner for
+  //    (go/rust/php/…). Skipped for node (npm audit) and python (pip-audit) to
+  //    avoid duplicating their coverage.
+  if (options.hasDockerfile && !tools["aqua:aquasecurity/trivy"]) {
+    tools["aqua:aquasecurity/trivy"] = "latest";
+  }
+  if (stack.language === "python" && !tools["pipx:pip-audit"]) {
+    tools["pipx:pip-audit"] = "latest";
+  }
+  const hasEcosystemScanner = ["typescript", "javascript", "python"].includes(stack.language);
+  if (!hasEcosystemScanner && !tools["aqua:google/osv-scanner"]) {
+    tools["aqua:google/osv-scanner"] = "latest";
   }
 
   const header = lines(

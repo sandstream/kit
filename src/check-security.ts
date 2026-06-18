@@ -809,6 +809,56 @@ async function checkTrivyConfig(): Promise<SecurityCheckResult> {
   };
 }
 
+/** Count vulnerabilities in an `osv-scanner --format json` payload. PURE so it
+ *  can be unit-tested without running osv-scanner. -1 = unparseable. */
+export function parseOsvVulnCount(stdout: string): number {
+  try {
+    const parsed = JSON.parse(stdout) as {
+      results?: { packages?: { vulnerabilities?: unknown[] }[] }[];
+    };
+    return (parsed.results ?? [])
+      .flatMap((r) => r.packages ?? [])
+      .flatMap((p) => p.vulnerabilities ?? []).length;
+  } catch {
+    return -1;
+  }
+}
+
+/**
+ * Multi-ecosystem dependency CVE scan via osv-scanner (Google OSV). Provisioned
+ * only for ecosystems kit has no dedicated scanner for (go/rust/php/…) — for
+ * node it's npm audit, for python pip-audit — so it skips cleanly when absent
+ * rather than duplicating those. Resolves mise-first.
+ */
+async function checkOsvScanner(): Promise<SecurityCheckResult> {
+  const name = "osv-scanner (deps)";
+  const osvBin = await resolveToolBin("osv-scanner");
+  if (!osvBin) {
+    return {
+      category: "supply-chain",
+      name,
+      status: "skip",
+      detail: "osv-scanner not installed (mise use aqua:google/osv-scanner)",
+    };
+  }
+  const result = await execFileNoThrow(osvBin, ["--format", "json", "-r", "."], { timeout: 120_000 });
+  const count = parseOsvVulnCount(result.stdout);
+  if (count < 0) {
+    // osv exits non-zero with no JSON when there are no lockfiles to scan.
+    return { category: "supply-chain", name, status: "skip", detail: "no lockfiles to scan" };
+  }
+  if (count === 0) {
+    return { category: "supply-chain", name, status: "pass", detail: "no known dependency vulnerabilities" };
+  }
+  return {
+    category: "supply-chain",
+    name,
+    status: "warn",
+    detail: `${count} known dependency vulnerability(ies) -run: osv-scanner -r .`,
+    severity: "high",
+  };
+}
+
 /**
  * Check dependency licenses for GPL/AGPL that create legal obligations.
  */
@@ -1069,6 +1119,7 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
     semgrepResult,
     bumblebeeResult,
     trivyConfigResult,
+    osvResult,
     ...lockfileResults
   ] = await Promise.all([
     checkNpmAudit(),
@@ -1082,6 +1133,7 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
     checkSemgrep(),
     checkBumblebee(),
     checkTrivyConfig(),
+    checkOsvScanner(),
     ...await checkLockfilesCommitted(),
   ]);
 
@@ -1097,6 +1149,7 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
     semgrepResult,
     bumblebeeResult,
     trivyConfigResult,
+    osvResult,
   );
   results.push(...lockfileResults);
 

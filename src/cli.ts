@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { writeFile, access, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "node:path";
@@ -1196,7 +1196,13 @@ async function generateConfigFile(
     console.log();
   }
 
-  const tomlContent = generateToml(stack, { secretsStore: chosenStore });
+  // Detect a Dockerfile so generateToml can provision the trivy container/IaC
+  // scanner only where it applies.
+  const hasDockerfile =
+    existsSync(resolve(process.cwd(), "Dockerfile")) ||
+    existsSync(resolve(process.cwd(), "docker-compose.yml")) ||
+    existsSync(resolve(process.cwd(), "compose.yml"));
+  const tomlContent = generateToml(stack, { secretsStore: chosenStore, hasDockerfile });
 
   // Show diff preview
   console.log(`${c.bold}Preview — .kit.toml${c.reset}\n`);
