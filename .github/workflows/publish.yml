@@ -118,7 +118,11 @@ jobs:
       - name: Generate GitHub artifact attestation
         # Independent of npm provenance — attaches a signed manifest of the
         # built dist/ tree to the GitHub release for cross-verification.
+        # timeout-minutes guards against Sigstore (Fulcio/Rekor) hangs, which
+        # once left this step running ~15min; npm publish already succeeded by
+        # here, so a slow attestation must fail fast (continue-on-error) not block.
         if: always()
+        timeout-minutes: 5
         uses: actions/attest-build-provenance@1c608d11d69870c2092266b3f9a6f3abbf17002c # v1.4.3
         continue-on-error: true
         with:

@@ -8,6 +8,9 @@ on:
       - 'requirements.txt'
       - 'package.json'
 
+permissions:
+  contents: read
+
 jobs:
   triage:
     runs-on: ubuntu-latest

@@ -150,7 +150,7 @@ jobs:
         # Skip when no registry push happened — Trivy can't pull an image that
         # wasn't published (DOCKER_USERNAME/PASSWORD missing → push step skipped).
         if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true'
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           format: 'sarif'

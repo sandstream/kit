@@ -33,7 +33,7 @@ jobs:
         run: npm audit --audit-level=high
       - name: Snyk scan
         if: env.SNYK_TOKEN != ''
-        uses: snyk/actions/node@master
+        uses: snyk/actions/node@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
@@ -80,7 +80,7 @@ jobs:
       - name: Semgrep (application code only)
         # Excludes set in .semgrepignore — terraform/k8s handled by Stage 5
         # Checkov/tfsec so they're skipped here to avoid duplicate findings.
-        uses: semgrep/semgrep-action@v1
+        uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
         with:
           config: >-
             p/security-audit
@@ -89,7 +89,7 @@ jobs:
             p/nodejs
       - name: SonarCloud
         if: env.SONAR_TOKEN != ''
-        uses: SonarSource/sonarcloud-github-action@master
+        uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8 # v5.0.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -117,7 +117,7 @@ jobs:
       - name: Trivy scan (HIGH+CRITICAL — gating)
         # scanners: vuln — only CVE scan. Secret scanning handled by gitleaks.
         # Image is clean of HIGH/CRITICAL after npm removal + picomatch bump.
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: kit:${{ github.sha }}
           format: sarif
@@ -145,7 +145,7 @@ jobs:
       - name: Checkov (terraform + kubernetes)
         # Baseline of pre-existing findings in .checkov.yaml skip-check.
         # Gating on net-new findings only — see .checkov.yaml header for context.
-        uses: bridgecrewio/checkov-action@master
+        uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
         with:
           directory: .
           config_file: .checkov.yaml
