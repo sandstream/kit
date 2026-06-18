@@ -28,6 +28,16 @@ describe("generateToml", () => {
     assert.ok(toml.includes('pnpm = "latest"'), `missing pnpm in: ${toml}`);
   });
 
+  it("includes the default security scanners (semgrep + socket) as mise tools", () => {
+    const parsed = parseTOML(generateToml(stack())) as { tools: Record<string, string> };
+    assert.equal(parsed.tools.semgrep, "latest", "semgrep should be a default tool");
+    assert.equal(
+      parsed.tools["npm:@socketsecurity/cli"],
+      "latest",
+      "socket should be a default tool (npm backend ref, quoted key)",
+    );
+  });
+
   it("generates Next.js + Supabase + Stripe config", () => {
     const s = stack({
       framework: "nextjs",
