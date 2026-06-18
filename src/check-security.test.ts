@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
-import { checkSecurity, parseTrivyMisconfigCount } from "./check-security.js";
+import { checkSecurity, parseTrivyMisconfigCount, parseOsvVulnCount } from "./check-security.js";
 
 describe("parseTrivyMisconfigCount", () => {
   it("counts only HIGH/CRITICAL misconfigurations", () => {
@@ -16,6 +16,23 @@ describe("parseTrivyMisconfigCount", () => {
   it("returns 0 for a clean scan and -1 for unparseable output", () => {
     assert.strictEqual(parseTrivyMisconfigCount(JSON.stringify({ Results: [] })), 0);
     assert.strictEqual(parseTrivyMisconfigCount("not json"), -1);
+  });
+});
+
+describe("parseOsvVulnCount", () => {
+  it("sums vulnerabilities across results/packages", () => {
+    const json = JSON.stringify({
+      results: [
+        { packages: [{ vulnerabilities: [{}, {}] }, { vulnerabilities: [{}] }] },
+        { packages: [{ vulnerabilities: [] }] },
+      ],
+    });
+    assert.strictEqual(parseOsvVulnCount(json), 3);
+  });
+
+  it("returns 0 for a clean scan and -1 for unparseable output", () => {
+    assert.strictEqual(parseOsvVulnCount(JSON.stringify({ results: [] })), 0);
+    assert.strictEqual(parseOsvVulnCount(""), -1);
   });
 });
 
