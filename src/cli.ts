@@ -88,6 +88,7 @@ import { formatGovernanceStatus, mergeGovernanceConfigAsync } from "./governance
 import { withGovernance } from "./governance-middleware.js";
 import { SKIPPED_COMMITS_LOG } from "./hooks.js";
 import { writeAgentConfig, detectAgentTargets, installKitPermissions } from "./agent-config.js";
+import { applyRecommendedHardening } from "./recommended.js";
 import { checkHooks, isGitRepository } from "./check-hooks.js";
 import {
   readkitMeta,
@@ -889,10 +890,18 @@ async function cmdEscalate(): Promise<boolean> {
 }
 
 async function cmdSetup(): Promise<boolean> {
-  console.log(`${c.bold}${c.cyan}kit setup${c.reset}`);
+  const recommended = hasFlag(process.argv, "--recommended");
+  console.log(`${c.bold}${c.cyan}kit setup${recommended ? " --recommended" : ""}${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   const config = await loadConfig(resolveConfigPath());
+
+  if (recommended) {
+    console.log(
+      `${c.dim}Recommended profile also wires cross-harness memory hooks (in ~/.claude) ` +
+        `and git hooks (secret-scan${config.context ? " + context-check" : ""}) after the core steps.${c.reset}\n`,
+    );
+  }
 
   // Step 1: Install
   console.log(`${c.bold}[1/6] Install${c.reset}`);
@@ -935,11 +944,33 @@ async function cmdSetup(): Promise<boolean> {
       console.log(`  ${mark}${c.reset} ${r.agent} ${c.dim}→ ${r.file} (${r.action})${c.reset}`);
     }
   }
+  // Let the agent actually run kit: grant the read-only kit commands (same as
+  // `kit agent-config`). Without this the agent hits the permission wall.
+  const perms = await installKitPermissions();
+  if (perms.action === "created" || perms.action === "updated") {
+    console.log(`  ${c.green}✓${c.reset} allowed ${perms.added.length} read-only kit command(s) ${c.dim}→ ${perms.file}${c.reset}`);
+  }
   console.log();
 
   // Step 6: Verify
   console.log(`${c.bold}[6/6] Verify${c.reset}`);
   const verifyOk = await cmdCheck();
+
+  // Recommended hardening: memory hooks + git hooks (opt-in via --recommended).
+  if (recommended) {
+    console.log(`\n${c.bold}[+] Recommended hardening${c.reset}`);
+    const h = await applyRecommendedHardening(config);
+    for (const e of h.memory.added) console.log(`  ${c.green}✓${c.reset} memory hook ${c.dim}${e}${c.reset}`);
+    if (h.memory.added.length === 0) console.log(`  ${c.dim}= memory hooks already wired${c.reset}`);
+    if (!h.memory.resolved) {
+      console.log(`  ${c.yellow}!${c.reset} ${c.dim}memory hooks use a bare \`kit\` (kit not resolvable to an absolute path)${c.reset}`);
+    }
+    for (const r of h.hooks) {
+      const icon = r.action === "failed" ? `${c.red}✗` : r.action === "skipped" ? `${c.yellow}!` : `${c.green}✓`;
+      console.log(`  ${icon}${c.reset} git ${r.hookName} ${c.dim}(${r.action})${c.reset}`);
+    }
+    console.log();
+  }
 
   const allOk = installOk && loginOk && secretsOk && verifyOk;
 
@@ -3722,7 +3753,8 @@ const COMMAND_HELP: Record<string, string> = {
   "auth revoke":    "Drop the elevation marker",
   "auth setup-totp": "Enroll TOTP secret (writes ~/.kit/totp-secret 0600)",
   "hooks add": "Install a built-in hook (e.g. secret-scan)",
-  setup:          "Full pipeline: install → login → secrets → project setup",
+  setup:          "Full pipeline: install → login → secrets → agent config → verify",
+  "setup --recommended": "Opinionated profile: setup + memory hooks + git secret-scan/context-check gates",
   fix:            "Auto-fix what is possible",
   escalate:       "List what needs human action",
   governance:     "View governance status and agent access controls",
