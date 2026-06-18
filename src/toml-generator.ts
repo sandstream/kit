@@ -21,6 +21,11 @@ const FRAMEWORK_SETUP: Record<
   fiber: { install: "go mod download", dev: "go run .", verify: "go build ./..." },
   laravel: { install: "composer install", migrate: "php artisan migrate", verify: "php artisan test" },
   symfony: { install: "composer install", verify: "php bin/console lint:all" },
+  // native mobile
+  "react-native": { install: "pnpm install", dev: "pnpm start", verify: "pnpm tsc --noEmit" },
+  flutter: { install: "flutter pub get", dev: "flutter run", verify: "flutter analyze" },
+  ios: { install: "pod install", verify: "swift build" },
+  android: { install: "./gradlew dependencies", verify: "./gradlew build" },
 };
 
 /**
@@ -158,6 +163,9 @@ function setupSection(stack: DetectedStack): string {
   else if (stack.language === "go") installCmd = "go mod download";
   else if (stack.language === "rust") installCmd = "cargo fetch";
   else if (stack.language === "php") installCmd = "composer install";
+  else if (stack.language === "dart") installCmd = frameworkSetup?.install ?? "dart pub get";
+  else if (stack.language === "swift") installCmd = frameworkSetup?.install ?? "swift build";
+  else if (stack.language === "kotlin") installCmd = frameworkSetup?.install ?? "./gradlew build";
   else installCmd = frameworkSetup?.install ?? "npm install";
 
   // First detected service that declares a migrate command wins. Registry order

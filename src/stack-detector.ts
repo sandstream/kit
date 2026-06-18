@@ -72,6 +72,8 @@ const FRAMEWORK_DETECTORS: { framework: string; deps: string[] }[] = [
   { framework: "sveltekit", deps: ["@sveltejs/kit"] },
   { framework: "nestjs", deps: ["@nestjs/core"] },
   { framework: "express", deps: ["express"] },
+  // react-native before react: an RN app depends on both, RN is the real story.
+  { framework: "react-native", deps: ["react-native"] },
   { framework: "react", deps: ["react"] },
   { framework: "vue", deps: ["vue"] },
 ];
@@ -208,18 +210,82 @@ async function detectFromPhp(cwd: string): Promise<DetectedStack | null> {
   };
 }
 
+async function detectFromFlutter(cwd: string): Promise<DetectedStack | null> {
+  const pubspec = await readFile(join(cwd, "pubspec.yaml"), "utf-8").catch(() => null);
+  if (pubspec === null) return null;
+
+  // pubspec.yaml is also used by pure-Dart packages; "flutter:" / sdk: flutter
+  // marks an actual Flutter app.
+  const framework = /flutter/i.test(pubspec) ? "flutter" : undefined;
+  const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
+
+  return {
+    language: "dart",
+    framework,
+    services,
+    tools: {},
+    confidence: framework ? 0.9 : 0.7,
+  };
+}
+
+async function detectFromSwift(cwd: string): Promise<DetectedStack | null> {
+  const hasPackage = await fileExists(join(cwd, "Package.swift"));
+  const hasPodfile = await fileExists(join(cwd, "Podfile"));
+  if (!hasPackage && !hasPodfile) return null;
+
+  // Podfile (CocoaPods) is an iOS-app signal; bare Package.swift can also be
+  // server-side Swift (Vapor), so it stays framework-less.
+  const framework = hasPodfile ? "ios" : undefined;
+  const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
+
+  return {
+    language: "swift",
+    framework,
+    services,
+    tools: {},
+    confidence: hasPodfile ? 0.85 : 0.7,
+  };
+}
+
+async function detectFromAndroid(cwd: string): Promise<DetectedStack | null> {
+  const gradle =
+    (await readFile(join(cwd, "build.gradle.kts"), "utf-8").catch(() => null)) ??
+    (await readFile(join(cwd, "build.gradle"), "utf-8").catch(() => null));
+  const hasSettings =
+    (await fileExists(join(cwd, "settings.gradle.kts"))) || (await fileExists(join(cwd, "settings.gradle")));
+  if (gradle === null && !hasSettings) return null;
+
+  // Only call it Android when the Android Gradle plugin is applied; otherwise
+  // it's a generic JVM/Gradle project (label the language, not a mobile framework).
+  const framework = gradle && /com\.android\.(application|library)/.test(gradle) ? "android" : undefined;
+  const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
+
+  return {
+    language: "kotlin",
+    framework,
+    services,
+    tools: {},
+    confidence: framework ? 0.85 : 0.6,
+  };
+}
+
 /**
  * Detect the project stack from files in the given directory.
  * Returns null only if no recognizable project files are found.
  */
 export async function detectStack(cwd: string): Promise<DetectedStack> {
-  // Try detection in priority order — first match wins
+  // Try detection in priority order — first match wins. Node first (RN/Expo apps
+  // carry package.json); native-mobile detectors are reached only when none of
+  // the language manifests above them matched.
   const result =
     (await detectFromPackageJson(cwd)) ??
     (await detectFromPython(cwd)) ??
     (await detectFromGo(cwd)) ??
     (await detectFromRust(cwd)) ??
-    (await detectFromPhp(cwd));
+    (await detectFromPhp(cwd)) ??
+    (await detectFromFlutter(cwd)) ??
+    (await detectFromSwift(cwd)) ??
+    (await detectFromAndroid(cwd));
 
   if (result) return result;
 

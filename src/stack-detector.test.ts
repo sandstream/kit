@@ -261,4 +261,58 @@ describe("detectStack", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("detects React Native (framework wins over plain react)", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-rn`);
+    await makeProject(dir, {
+      "package.json": JSON.stringify({ dependencies: { react: "18.0.0", "react-native": "0.74.0" } }),
+    });
+    try {
+      const stack = await detectStack(dir);
+      assert.equal(stack.framework, "react-native", `got ${stack.framework}`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects a Flutter app from pubspec.yaml", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-flutter`);
+    await makeProject(dir, {
+      "pubspec.yaml": "name: myapp\ndependencies:\n  flutter:\n    sdk: flutter\n",
+    });
+    try {
+      const stack = await detectStack(dir);
+      assert.equal(stack.language, "dart");
+      assert.equal(stack.framework, "flutter");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects an iOS app from a Podfile", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-ios`);
+    await makeProject(dir, { Podfile: "platform :ios, '16.0'\ntarget 'App' do\nend\n" });
+    try {
+      const stack = await detectStack(dir);
+      assert.equal(stack.language, "swift");
+      assert.equal(stack.framework, "ios");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects Android from a build.gradle applying the Android plugin", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-android`);
+    await makeProject(dir, {
+      "settings.gradle": "include ':app'\n",
+      "build.gradle": "plugins { id 'com.android.application' }\n",
+    });
+    try {
+      const stack = await detectStack(dir);
+      assert.equal(stack.language, "kotlin");
+      assert.equal(stack.framework, "android");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
