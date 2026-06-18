@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { readFile, access } from "node:fs/promises";
 import { resolve } from "node:path";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
+import { resolveToolBin } from "./utils/resolveTool.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
 import {
   ensureBumblebee,
@@ -608,19 +609,21 @@ async function checkSocket(): Promise<SecurityCheckResult> {
     return { category: "supply-chain", name: "socket scan", status: "skip", detail: "no package.json found" };
   }
 
-  const versionCheck = await execFileNoThrow("socket", ["--version"], { timeout: 5_000 });
-  if (!versionCheck.ok) {
+  // Resolve mise-first: kit installs scanners via mise, whose shims aren't on
+  // kit's PATH. A bare "socket" lookup would miss a mise-installed one.
+  const socketBin = await resolveToolBin("socket");
+  if (!socketBin) {
     return {
       category: "supply-chain",
       name: "socket scan",
       status: "warn",
       detail: "socket not installed -supply chain malware undetected",
       severity: "medium",
-      suggestion: "npm install -g @socketsecurity/cli",
+      suggestion: "mise use npm:@socketsecurity/cli  (or: npm install -g @socketsecurity/cli)",
     };
   }
 
-  const result = await execFileNoThrow("socket", ["check", "--json"], { timeout: 60_000 });
+  const result = await execFileNoThrow(socketBin, ["check", "--json"], { timeout: 60_000 });
   const raw = result.stdout || result.stderr;
 
   try {
@@ -793,18 +796,19 @@ async function checkLicenses(): Promise<SecurityCheckResult> {
  * Run static analysis using Semgrep to catch security anti-patterns in source code.
  */
 async function checkSemgrep(): Promise<SecurityCheckResult> {
-  const versionCheck = await execFileNoThrow("semgrep", ["--version"], { timeout: 5_000 });
-  if (!versionCheck.ok) {
+  // Resolve mise-first (see socket): a mise-installed semgrep isn't on kit's PATH.
+  const semgrepBin = await resolveToolBin("semgrep");
+  if (!semgrepBin) {
     return {
       category: "supply-chain",
       name: "semgrep SAST",
       status: "skip",
-      detail: "semgrep not installed (brew install semgrep)",
+      detail: "semgrep not installed (mise use pipx:semgrep, or brew install semgrep)",
     };
   }
 
   const result = await execFileNoThrow(
-    "semgrep",
+    semgrepBin,
     ["scan", "--config", "auto", "--json", "--quiet", "--no-rewrite-rule-ids"],
     { timeout: 120_000 },
   );
