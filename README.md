@@ -6,6 +6,8 @@ For AI agents and humans. Manages tools, auth, secrets, and project setup. Zero 
 
 🌐 [sandstre.am/kit](https://sandstre.am/kit)
 
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/sandstream)
+
 ## Quick start
 
 **Prerequisites:** Node.js 22+, git, and [mise](https://mise.jdx.dev) for installing tools (`brew install mise`, or `curl https://mise.run | sh`).
@@ -707,6 +709,10 @@ For Cline, add the same config to your `cline_mcp_settings.json`.
 - 💬 **Discussions**: [github.com/sandstream/kit/discussions](https://github.com/sandstream/kit/discussions)
 - 🐛 **Issues**: [github.com/sandstream/kit/issues](https://github.com/sandstream/kit/issues)
 - 🤝 **Contributing**: [CONTRIBUTING.md](CONTRIBUTING.md), [COMMUNITY.md](COMMUNITY.md)
+
+### Support
+
+kit is free and MIT-licensed. If it saved you setup time or caught a leak before it shipped, you can [buy me a coffee](https://buymeacoffee.com/sandstream). It funds development time and keeps kit free and open.
 
 ### Code of Conduct
 

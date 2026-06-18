@@ -3,6 +3,7 @@
   "version": "1.5.0",
   "description": "developer kit. zero LLM, local-first, multi-vault. one command from git clone to working dev environment.",
   "license": "MIT",
+  "funding": "https://buymeacoffee.com/sandstream",
   "type": "module",
   "workspaces": [
     "packages/*"
