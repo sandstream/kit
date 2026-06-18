@@ -42,15 +42,19 @@ describe("memory hook installer", () => {
       g.hooks.map((h) => h.command),
     );
     assert.ok(ups.includes("some-other-tool"), "preserves the pre-existing hook");
-    assert.ok(ups.includes("kit memory hook user-prompt-submit"));
+    const upsHook = ups.find((c: string) => c.endsWith("memory hook user-prompt-submit"));
+    assert.ok(upsHook, "wires the user-prompt-submit hook");
+    // Must be an ABSOLUTE invocation (node + cli.js), not a bare `kit` that the
+    // hook shell's PATH can't resolve.
+    assert.ok(upsHook.includes("/"), `hook command must be absolute, got: ${upsHook}`);
     assert.ok(
       s.hooks.SessionEnd.some((g: { hooks: { command: string }[] }) =>
-        g.hooks.some((h) => h.command === "kit memory hook session-end"),
+        g.hooks.some((h) => h.command.endsWith("memory hook session-end")),
       ),
     );
     assert.ok(
       s.hooks.SessionStart.some((g: { hooks: { command: string }[] }) =>
-        g.hooks.some((h) => h.command === "kit memory hook session-start"),
+        g.hooks.some((h) => h.command.endsWith("memory hook session-start")),
       ),
     );
   });
@@ -62,9 +66,36 @@ describe("memory hook installer", () => {
     assert.deepEqual(res2.alreadyPresent.sort(), ["SessionEnd", "SessionStart", "UserPromptSubmit"]);
     const s = JSON.parse(readFileSync(settingsPath, "utf8"));
     const ours = s.hooks.UserPromptSubmit.filter((g: { hooks: { command: string }[] }) =>
-      g.hooks.some((h) => h.command === "kit memory hook user-prompt-submit"),
+      g.hooks.some((h) => h.command.endsWith("memory hook user-prompt-submit")),
     );
     assert.equal(ours.length, 1);
+  });
+
+  it("recognizes a legacy bare-`kit` hook and neither duplicates nor leaves it on uninstall", () => {
+    // Simulate a settings file written by an older kit (bare command).
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [{ hooks: [{ type: "command", command: "kit memory hook user-prompt-submit" }] }],
+        },
+      }),
+    );
+    // Re-install must treat the legacy entry as already present (no duplicate).
+    const res = installMemoryHooks();
+    assert.ok(!res.added.includes("UserPromptSubmit"), "must not add a second UPS hook");
+    const s = JSON.parse(readFileSync(settingsPath, "utf8"));
+    const ours = s.hooks.UserPromptSubmit.filter((g: { hooks: { command: string }[] }) =>
+      g.hooks.some((h) => h.command.endsWith("memory hook user-prompt-submit")),
+    );
+    assert.equal(ours.length, 1, "no duplicate UPS hook");
+    // Uninstall removes the legacy bare entry too (suffix match).
+    uninstallMemoryHooks();
+    const s2 = JSON.parse(readFileSync(settingsPath, "utf8"));
+    const left = (s2.hooks.UserPromptSubmit ?? []).filter((g: { hooks: { command: string }[] }) =>
+      g.hooks?.some((h) => h.command.endsWith("memory hook user-prompt-submit")),
+    );
+    assert.equal(left.length, 0, "legacy hook removed");
   });
 
   it("uninstall removes only our hooks, leaving others intact", () => {

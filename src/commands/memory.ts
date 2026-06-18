@@ -358,10 +358,17 @@ async function memHook(): Promise<boolean> {
 }
 
 async function memInstall(): Promise<boolean> {
-    const { added, alreadyPresent } = installMemoryHooks();
+    const { added, alreadyPresent, resolved } = installMemoryHooks();
     for (const e of added) console.log(`${c.green}✓${c.reset} installed ${e} hook`);
     for (const e of alreadyPresent) console.log(`${c.dim}• ${e} hook already present${c.reset}`);
     console.log(`${c.dim}settings: ${getClaudeSettingsPath()}${c.reset}`);
+    if (!resolved) {
+      console.log(
+        `${c.yellow}!${c.reset} Could not resolve kit's absolute path — hooks use a bare \`kit\`, ` +
+          `which only fires if kit is on the hook shell's PATH (often not the case). ` +
+          `Reinstall kit globally and re-run, or edit the commands in ${getClaudeSettingsPath()} to an absolute path.`,
+      );
+    }
     return true;
 }
 
