@@ -515,29 +515,38 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
     if (!trufflehogBin) throw new Error("trufflehog not installed");
 
     try {
+      // Scan GIT (committed content) — not the raw filesystem. `filesystem .`
+      // walks node_modules (times out) and flags gitignored local files like
+      // `.env.production.local` that were never committed (false positives).
+      // Git mode is fast and only sees what's actually in the repo's history.
       const { stdout } = await exec(
         trufflehogBin,
-        ["filesystem", ".", "--json", "--no-update"],
-        { timeout: 60_000 }
+        ["git", `file://${process.cwd()}`, "--json", "--no-update"],
+        { timeout: 90_000 }
       );
-      
-      const findings = stdout.trim().split("\n").filter(Boolean);
-      
+
+      // trufflehog --json prefixes an info LOG line ({"level":...}); only count
+      // lines that are real findings (they carry a DetectorName).
+      const findings = stdout
+        .trim()
+        .split("\n")
+        .filter((l) => l.includes('"DetectorName"'));
+
       if (findings.length > 0) {
         return {
           category: "secrets",
           name: "secrets scan",
           status: "fail",
-          detail: `${findings.length} potential secret(s) found`,
+          detail: `${findings.length} secret(s) committed in git history -run: trufflehog git file://.`,
           severity: "critical",
         };
       }
-      
+
       return {
         category: "secrets",
         name: "secrets scan",
         status: "pass",
-        detail: "no secrets detected (trufflehog)",
+        detail: "no committed secrets (trufflehog git)",
       };
     } catch {
       return {
