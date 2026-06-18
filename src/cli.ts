@@ -87,7 +87,7 @@ import { getBudgetStatus, formatBudgetStatus } from "./budget.js";
 import { formatGovernanceStatus, mergeGovernanceConfigAsync } from "./governance.js";
 import { withGovernance } from "./governance-middleware.js";
 import { SKIPPED_COMMITS_LOG } from "./hooks.js";
-import { writeAgentConfig, detectAgentTargets } from "./agent-config.js";
+import { writeAgentConfig, detectAgentTargets, installKitPermissions } from "./agent-config.js";
 import { checkHooks, isGitRepository } from "./check-hooks.js";
 import {
   readkitMeta,
@@ -973,9 +973,21 @@ async function cmdAgentConfig(): Promise<boolean> {
       console.log(`  ${mark}${c.reset} ${r.agent} ${c.dim}→ ${r.file} (${r.action})${c.reset}`);
     }
   }
-  console.log();
+  // Let the agent actually RUN kit: grant read-only kit commands in
+  // .claude/settings.json, so they don't hit the permission wall in auto mode.
+  const perms = await installKitPermissions();
+  if (perms.action === "created" || perms.action === "updated") {
+    console.log(
+      `\n  ${c.green}✓${c.reset} allowed ${c.bold}${perms.added.length}${c.reset} read-only kit command(s) in ${c.dim}${perms.file}${c.reset} ${c.dim}(so the agent can run them without a prompt)${c.reset}`,
+    );
+  } else if (perms.action === "unchanged") {
+    console.log(`\n  ${c.dim}= read-only kit commands already allowed in ${perms.file}${c.reset}`);
+  } else if (perms.action === "failed") {
+    console.log(`\n  ${c.yellow}!${c.reset} could not update ${perms.file}: ${perms.detail}`);
+  }
   console.log(
-    `${c.dim}The block is regenerated in place on re-run; edit outside the markers freely.${c.reset}`,
+    `\n${c.dim}Blocks regenerate in place on re-run; edit outside the markers freely. ` +
+      `Mutating kit commands (secrets/fix/hooks) still prompt by design.${c.reset}`,
   );
   return !failed;
 }

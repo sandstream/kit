@@ -1,6 +1,6 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
 
 /**
  * Teach the coding agent to use kit.
@@ -151,4 +151,88 @@ export async function writeAgentConfig(
   }
 
   return results;
+}
+
+/**
+ * The READ-ONLY kit commands an agent should be allowed to run without a
+ * permission prompt. Teaching the agent to "use kit" is useless if every
+ * `kit …` hits the permission wall in auto/non-interactive mode and the agent
+ * silently never runs it. These are all non-mutating: no `secrets`, `fix`,
+ * `hooks add`, `agent-config`, `context use`, or `memory install` — those keep
+ * prompting on purpose. We never write a `deny` rule or a bypass mode.
+ */
+export const READONLY_KIT_PERMISSIONS: string[] = [
+  "Bash(kit check:*)",
+  "Bash(kit status:*)",
+  "Bash(kit doctor:*)",
+  "Bash(kit ci:*)",
+  "Bash(kit analyze:*)",
+  "Bash(kit escalate:*)",
+  "Bash(kit context check:*)",
+  "Bash(kit triage:*)",
+  "Bash(kit memory search:*)",
+  "Bash(kit memory stats:*)",
+  "Bash(kit memory index:*)",
+];
+
+export interface PermissionResult {
+  file: string;
+  added: string[];
+  alreadyPresent: number;
+  action: "created" | "updated" | "unchanged" | "skipped" | "failed";
+  detail?: string;
+}
+
+/**
+ * Grant the agent permission to run kit's read-only commands by merging
+ * allow-rules into the project's `.claude/settings.json`. Idempotent and
+ * non-destructive: preserves the user's other allow rules, never touches
+ * `deny`, never sets a permission mode. Only wired for Claude Code (the agent
+ * whose settings schema we know).
+ */
+export async function installKitPermissions(cwd: string = process.cwd()): Promise<PermissionResult> {
+  const file = ".claude/settings.json";
+  const path = resolve(cwd, file);
+
+  const { isReadOnlyMode } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) {
+    return { file, added: [], alreadyPresent: 0, action: "skipped", detail: "read-only mode" };
+  }
+  // Only meaningful in a Claude Code project.
+  if (!existsSync(resolve(cwd, ".claude")) && !existsSync(resolve(cwd, "CLAUDE.md"))) {
+    return { file, added: [], alreadyPresent: 0, action: "skipped", detail: "no Claude Code project detected" };
+  }
+
+  let settings: { permissions?: { allow?: string[] }; [k: string]: unknown } = {};
+  let existed = false;
+  try {
+    settings = JSON.parse(await readFile(path, "utf-8")) as typeof settings;
+    existed = true;
+  } catch {
+    settings = {}; // absent or unreadable → start fresh (preserve nothing we can't parse)
+  }
+
+  const perms = (settings.permissions ??= {});
+  const allow = (perms.allow ??= []);
+  const added: string[] = [];
+  let alreadyPresent = 0;
+  for (const rule of READONLY_KIT_PERMISSIONS) {
+    if (allow.includes(rule)) {
+      alreadyPresent++;
+      continue;
+    }
+    allow.push(rule);
+    added.push(rule);
+  }
+
+  if (added.length === 0) {
+    return { file, added, alreadyPresent, action: "unchanged" };
+  }
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    return { file, added, alreadyPresent, action: existed ? "updated" : "created" };
+  } catch (err) {
+    return { file, added: [], alreadyPresent, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+  }
 }
