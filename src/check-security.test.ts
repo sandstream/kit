@@ -1,6 +1,23 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
-import { checkSecurity } from "./check-security.js";
+import { checkSecurity, parseTrivyMisconfigCount } from "./check-security.js";
+
+describe("parseTrivyMisconfigCount", () => {
+  it("counts only HIGH/CRITICAL misconfigurations", () => {
+    const json = JSON.stringify({
+      Results: [
+        { Misconfigurations: [{ Severity: "HIGH" }, { Severity: "LOW" }, { Severity: "CRITICAL" }] },
+        { Misconfigurations: [{ Severity: "MEDIUM" }] },
+      ],
+    });
+    assert.strictEqual(parseTrivyMisconfigCount(json), 2);
+  });
+
+  it("returns 0 for a clean scan and -1 for unparseable output", () => {
+    assert.strictEqual(parseTrivyMisconfigCount(JSON.stringify({ Results: [] })), 0);
+    assert.strictEqual(parseTrivyMisconfigCount("not json"), -1);
+  });
+});
 
 describe("checkSecurity", () => {
   // Bumblebee disabled so tests stay fast/offline (real scan downloads binary, walks machine).
