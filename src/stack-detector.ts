@@ -1,4 +1,4 @@
-import { readFile, access } from "node:fs/promises";
+import { readFile, access, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { detectServices } from "./service-registry.js";
 
@@ -15,6 +15,7 @@ interface PackageJson {
   devDependencies?: Record<string, string>;
   packageManager?: string;
   engines?: { node?: string };
+  workspaces?: string[] | { packages?: string[] };
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -35,8 +36,45 @@ async function readJson<T>(path: string): Promise<T | null> {
   }
 }
 
-function hasDep(pkg: PackageJson, name: string): boolean {
-  return !!(pkg.dependencies?.[name] || pkg.devDependencies?.[name]);
+/** Expand a workspace glob. Supports exact paths and a single trailing `/*`
+ *  (one directory level) — covers the common `apps/*` / `packages/*` layouts;
+ *  deeper globs are rare for stack detection and fall back to no match. */
+async function expandWorkspaceGlob(cwd: string, pattern: string): Promise<string[]> {
+  if (!pattern.includes("*")) return [pattern];
+  const base = pattern.replace(/\/?\*+$/, "");
+  try {
+    const entries = await readdir(join(cwd, base), { withFileTypes: true });
+    return entries.filter((e) => e.isDirectory()).map((e) => (base ? `${base}/${e.name}` : e.name));
+  } catch {
+    return [];
+  }
+}
+
+/** Monorepo support: union the dependencies of every workspace member so a
+ *  turborepo whose `next`/`stripe`/etc. live in `apps/*` is detected from the
+ *  root, instead of coming up empty. Reads `package.json#workspaces` and
+ *  `pnpm-workspace.yaml`. Returns [] for a non-workspace repo. */
+async function collectWorkspaceDeps(cwd: string, pkg: PackageJson): Promise<string[]> {
+  const globs: string[] = [];
+  if (Array.isArray(pkg.workspaces)) globs.push(...pkg.workspaces);
+  else if (pkg.workspaces?.packages) globs.push(...pkg.workspaces.packages);
+
+  const pnpmWs = await readFile(join(cwd, "pnpm-workspace.yaml"), "utf-8").catch(() => null);
+  if (pnpmWs) {
+    for (const m of pnpmWs.matchAll(/^\s*-\s*['"]?([^'"\n]+?)['"]?\s*$/gm)) globs.push(m[1].trim());
+  }
+  if (globs.length === 0) return [];
+
+  const deps = new Set<string>();
+  for (const g of globs) {
+    for (const dir of await expandWorkspaceGlob(cwd, g)) {
+      const member = await readJson<PackageJson>(join(cwd, dir, "package.json"));
+      if (member) {
+        for (const k of Object.keys({ ...member.dependencies, ...member.devDependencies })) deps.add(k);
+      }
+    }
+  }
+  return [...deps];
 }
 
 function nodeVersion(pkg: PackageJson): string {
@@ -87,7 +125,11 @@ async function detectFromPackageJson(cwd: string): Promise<DetectedStack | null>
   const tools: Record<string, string> = { node };
   if (pm !== "npm") tools[pm] = "latest";
 
-  const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+  // Union root deps with workspace-member deps so monorepos (turborepo, pnpm
+  // workspaces) whose framework/services live in apps/* or packages/* are not
+  // detected as an empty root.
+  const rootDeps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+  const deps = [...new Set([...rootDeps, ...(await collectWorkspaceDeps(cwd, pkg))])];
   const services = await detectServices({
     deps,
     fileExists: (p) => fileExists(join(cwd, p)),
@@ -96,7 +138,7 @@ async function detectFromPackageJson(cwd: string): Promise<DetectedStack | null>
   // Framework — first match wins (priority order in FRAMEWORK_DETECTORS).
   let framework: string | undefined;
   for (const fw of FRAMEWORK_DETECTORS) {
-    if (fw.deps.some((dep) => hasDep(pkg, dep))) {
+    if (fw.deps.some((dep) => deps.includes(dep))) {
       framework = fw.framework;
       break;
     }

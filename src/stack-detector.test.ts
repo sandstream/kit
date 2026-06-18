@@ -315,4 +315,22 @@ describe("detectStack", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("detects framework + services from monorepo workspace members (not just root)", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-monorepo`);
+    await makeProject(dir, {
+      // root manifest has only tooling + a workspaces glob
+      "package.json": JSON.stringify({ workspaces: ["apps/*", "packages/*"], devDependencies: { turbo: "2.0.0" } }),
+      "apps/web/package.json": JSON.stringify({ dependencies: { next: "14.0.0", stripe: "14.0.0" } }),
+      "packages/db/package.json": JSON.stringify({ dependencies: { "@supabase/supabase-js": "2.0.0" } }),
+    });
+    try {
+      const stack = await detectStack(dir);
+      assert.equal(stack.framework, "nextjs", `expected nextjs from apps/web: ${stack.framework}`);
+      assert.ok(stack.services.includes("stripe"), `expected stripe: ${JSON.stringify(stack.services)}`);
+      assert.ok(stack.services.includes("supabase"), `expected supabase: ${JSON.stringify(stack.services)}`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
