@@ -890,17 +890,33 @@ async function cmdEscalate(): Promise<boolean> {
 }
 
 async function cmdSetup(): Promise<boolean> {
-  const recommended = hasFlag(process.argv, "--recommended");
-  console.log(`${c.bold}${c.cyan}kit setup${recommended ? " --recommended" : ""}${c.reset}`);
+  console.log(`${c.bold}${c.cyan}kit setup${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   const config = await loadConfig(resolveConfigPath());
 
-  if (recommended) {
-    console.log(
-      `${c.dim}Recommended profile also wires cross-harness memory hooks (in ~/.claude) ` +
-        `and git hooks (secret-scan${config.context ? " + context-check" : ""}) after the core steps.${c.reset}\n`,
+  // Recommended profile: an explicit flag always wins; otherwise ASK
+  // interactively (the flag is just the scriptable answer to this question).
+  // CI/agents without a flag get the core setup — we never silently wire global
+  // ~/.claude hooks or the repo's git hooks without an explicit yes.
+  let recommended: boolean;
+  if (hasFlag(process.argv, "--recommended")) {
+    recommended = true;
+  } else if (hasFlag(process.argv, "--minimal") || hasFlag(process.argv, "--no-recommended")) {
+    recommended = false;
+  } else if (isNonInteractive()) {
+    recommended = false;
+  } else {
+    recommended = await promptConfirm(
+      `Use the recommended profile? Wires cross-harness memory hooks (in ~/.claude) + git secret-scan${config.context ? " + context-check" : ""} gates after the core steps. [Y/n] `,
+      10000,
+      true,
     );
+    console.log();
+  }
+
+  if (recommended) {
+    console.log(`${c.dim}Recommended profile on — memory + git hooks wired after the core steps.${c.reset}\n`);
   }
 
   // Step 1: Install
