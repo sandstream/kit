@@ -1,94 +1,6 @@
 import type { DetectedStack } from "./stack-detector.js";
 import { VAULT_META } from "./vault-meta.js";
-
-/**
- * Service config: login command + check command + secret keys
- */
-interface ServiceTemplate {
-  login: string;
-  check: string;
-  secrets: string[];
-  tool?: string; // mise tool to add if needed
-}
-
-const SERVICE_TEMPLATES: Record<string, ServiceTemplate> = {
-  stripe: {
-    login: "stripe login",
-    check: "stripe config --list",
-    secrets: ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET"],
-    tool: "stripe",
-  },
-  supabase: {
-    login: "supabase login",
-    check: "supabase projects list",
-    secrets: ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"],
-    tool: "supabase",
-  },
-  vercel: {
-    login: "vercel login",
-    check: "vercel whoami",
-    secrets: [],
-    tool: "vercel",
-  },
-  expo: {
-    login: "eas login",
-    check: "eas whoami",
-    secrets: ["EXPO_TOKEN"],
-    tool: "eas-cli",
-  },
-  resend: {
-    login: "# resend — no CLI login; set RESEND_API_KEY in env",
-    check: "# resend — check RESEND_API_KEY is set",
-    secrets: ["RESEND_API_KEY", "RESEND_FROM_EMAIL"],
-  },
-  clerk: {
-    login: "# clerk — no CLI login; get keys from https://dashboard.clerk.com",
-    check: "# clerk — check CLERK_SECRET_KEY is set",
-    secrets: ["CLERK_SECRET_KEY", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"],
-  },
-  liveblocks: {
-    login: "# liveblocks — no CLI login; get keys from https://liveblocks.io/dashboard",
-    check: "# liveblocks — check LIVEBLOCKS_SECRET_KEY is set",
-    secrets: ["LIVEBLOCKS_SECRET_KEY", "NEXT_PUBLIC_LIVEBLOCKS_PUBLIC_KEY"],
-  },
-  trigger: {
-    login: "# trigger — no CLI login; get key from https://cloud.trigger.dev",
-    check: "# trigger — check TRIGGER_SECRET_KEY is set",
-    secrets: ["TRIGGER_SECRET_KEY"],
-  },
-  inngest: {
-    login: "# inngest — no CLI login; get keys from https://app.inngest.com",
-    check: "# inngest — check INNGEST_EVENT_KEY is set",
-    secrets: ["INNGEST_EVENT_KEY", "INNGEST_SIGNING_KEY"],
-  },
-  sentry: {
-    login: "# sentry — no CLI login; get DSN from https://sentry.io",
-    check: "# sentry — check SENTRY_DSN is set",
-    secrets: ["SENTRY_DSN", "SENTRY_ORG", "SENTRY_PROJECT", "SENTRY_AUTH_TOKEN"],
-  },
-  netlify: {
-    login: "netlify login",
-    check: "netlify status",
-    secrets: ["NETLIFY_AUTH_TOKEN", "NETLIFY_SITE_ID"],
-    tool: "netlify",
-  },
-  "cloudflare-pages": {
-    login: "wrangler login",
-    check: "wrangler whoami",
-    secrets: ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
-    tool: "wrangler",
-  },
-  typeorm: {
-    login: "# typeorm — no CLI login; configure DATABASE_URL",
-    check: "# typeorm — check DATABASE_URL is set",
-    secrets: ["DATABASE_URL"],
-  },
-  mongoose: {
-    login: "# mongoose — no CLI login; configure MONGODB_URI",
-    check: "# mongoose — check MONGODB_URI is set",
-    secrets: ["MONGODB_URI"],
-  },
-};
+import { SERVICE_BY_ID } from "./service-registry.js";
 
 const FRAMEWORK_SETUP: Record<
   string,
@@ -148,11 +60,13 @@ function toolsSection(tools: Record<string, string>): string {
 function servicesSection(services: string[]): string {
   const sections: string[] = [];
   for (const svc of services) {
-    const tmpl = SERVICE_TEMPLATES[svc];
-    if (!tmpl) continue;
+    const def = SERVICE_BY_ID[svc];
+    // Only services with a login/check get a [services.X] block. ORM-only
+    // entries (prisma/drizzle) declare just deps+migrate, so they're skipped here.
+    if (!def?.login || !def.check) continue;
     // Tools are merged into [tools] by generateToml; here we only emit login/check.
     sections.push(
-      `[services.${svc}]\nlogin = "${tmpl.login}"\ncheck = "${tmpl.check}"`
+      `[services.${svc}]\nlogin = "${def.login}"\ncheck = "${def.check}"`
     );
   }
   return sections.join("\n\n");
@@ -172,8 +86,8 @@ export type SecretsStore =
 function secretsSection(services: string[], store: SecretsStore = "1password"): string {
   const allKeys: string[] = [];
   for (const svc of services) {
-    const tmpl = SERVICE_TEMPLATES[svc];
-    if (tmpl?.secrets.length) allKeys.push(...tmpl.secrets);
+    const def = SERVICE_BY_ID[svc];
+    if (def?.secrets?.length) allKeys.push(...def.secrets);
   }
   if (allKeys.length === 0) return "";
 
@@ -246,15 +160,17 @@ function setupSection(stack: DetectedStack): string {
   else if (stack.language === "php") installCmd = "composer install";
   else installCmd = frameworkSetup?.install ?? "npm install";
 
-  const hasSupabase = stack.services.includes("supabase");
-  const hasPrisma = stack.services.includes("prisma");
-  const hasDrizzle = stack.services.includes("drizzle");
-
+  // First detected service that declares a migrate command wins. Registry order
+  // puts supabase before prisma before drizzle, preserving the old precedence.
   let migrateCmd: string | null = null;
-  if (hasSupabase) migrateCmd = "supabase db push";
-  else if (hasPrisma) migrateCmd = "npx prisma migrate deploy";
-  else if (hasDrizzle) migrateCmd = "npx drizzle-kit migrate";
-  else if (frameworkSetup?.migrate) migrateCmd = frameworkSetup.migrate;
+  for (const svc of stack.services) {
+    const m = SERVICE_BY_ID[svc]?.migrate;
+    if (m) {
+      migrateCmd = m;
+      break;
+    }
+  }
+  if (!migrateCmd && frameworkSetup?.migrate) migrateCmd = frameworkSetup.migrate;
 
   const verifyCmd = frameworkSetup?.verify ?? null;
 
@@ -275,9 +191,9 @@ export function generateToml(
   // Merge service tools into tools map
   const tools = { ...stack.tools };
   for (const svc of stack.services) {
-    const tmpl = SERVICE_TEMPLATES[svc];
-    if (tmpl?.tool && !tools[tmpl.tool]) {
-      tools[tmpl.tool] = "latest";
+    const def = SERVICE_BY_ID[svc];
+    if (def?.tool && !tools[def.tool]) {
+      tools[def.tool] = "latest";
     }
   }
 

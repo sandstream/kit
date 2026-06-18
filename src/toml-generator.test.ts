@@ -63,6 +63,14 @@ describe("generateToml", () => {
     assert.equal(go.tools["aqua:google/osv-scanner"], "latest", "osv-scanner for go (no dedicated scanner)");
   });
 
+  it("generates config for a new registry-only service (convex) — no code change needed", () => {
+    const toml = generateToml(stack({ services: ["convex"] }));
+    const parsed = parseTOML(toml) as Record<string, unknown>;
+    assert.ok(parsed, "valid TOML");
+    assert.ok(toml.includes("[services.convex]"), `missing convex service section: ${toml}`);
+    assert.ok(toml.includes("CONVEX_DEPLOYMENT"), `missing convex secret key: ${toml}`);
+  });
+
   it("provisions the chosen vault's CLI into [tools] (mise-installable backends)", () => {
     const infisical = parseTOML(
       generateToml(stack({ services: ["supabase"] }), { secretsStore: "infisical" }),

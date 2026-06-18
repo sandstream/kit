@@ -72,6 +72,22 @@ describe("detectStack", () => {
     }
   });
 
+  it("detects services in a NON-Node project (Python + Stripe + Sentry)", async () => {
+    // Regression for the Node-only gap: services used to be [] for python/go/etc.
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-py-services`);
+    await makeProject(dir, {
+      "requirements.txt": "fastapi==0.110.0\nstripe==8.0.0\nsentry-sdk[fastapi]==1.40.0\n",
+    });
+    try {
+      const stack = await detectStack(dir);
+      assert.equal(stack.language, "python");
+      assert.ok(stack.services.includes("stripe"), `expected stripe: ${JSON.stringify(stack.services)}`);
+      assert.ok(stack.services.includes("sentry"), `expected sentry: ${JSON.stringify(stack.services)}`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("detects Django project via pyproject.toml", async () => {
     const dir = join(tmpdir(), `kit-detect-${process.pid}-django`);
     await makeProject(dir, {

@@ -1,5 +1,6 @@
 import { readFile, access } from "node:fs/promises";
 import { join } from "node:path";
+import { detectServices } from "./service-registry.js";
 
 export interface DetectedStack {
   language: string;
@@ -60,29 +61,8 @@ function detectPackageManager(pkg: PackageJson, cwd: string): Promise<string> {
   })();
 }
 
-// Service = matched if any dep is present OR any marker file exists. Order here
-// is the order services are reported. Adding a service is one row, not a new if.
-const SERVICE_DETECTORS: { service: string; deps?: string[]; files?: string[] }[] = [
-  { service: "stripe", deps: ["stripe"] },
-  { service: "supabase", deps: ["@supabase/supabase-js"], files: ["supabase"] },
-  { service: "prisma", deps: ["prisma", "@prisma/client"] },
-  { service: "resend", deps: ["resend"] },
-  { service: "clerk", deps: ["@clerk/nextjs", "@clerk/clerk-react"] },
-  { service: "drizzle", deps: ["drizzle-orm"] },
-  { service: "liveblocks", deps: ["liveblocks", "@liveblocks/client"] },
-  { service: "trigger", deps: ["@trigger.dev/sdk", "trigger.dev"] },
-  { service: "inngest", deps: ["inngest"] },
-  { service: "vercel", deps: ["@vercel/analytics", "vercel"], files: ["vercel.json"] },
-  { service: "expo", files: [".expo"] },
-  {
-    service: "sentry",
-    deps: ["@sentry/nextjs", "@sentry/node", "@sentry/react", "@sentry/svelte", "@sentry/astro", "@sentry/remix"],
-  },
-  { service: "typeorm", deps: ["typeorm", "@nestjs/typeorm"] },
-  { service: "mongoose", deps: ["mongoose", "@nestjs/mongoose"] },
-  { service: "netlify", files: ["netlify.toml"] },
-  { service: "cloudflare-pages", files: ["wrangler.toml"] },
-];
+// Service detection now lives in the data-driven SERVICE_REGISTRY (service-registry.ts),
+// shared with the generator and matched across languages via detectServices().
 
 // Framework = first match wins (priority order: meta-frameworks before their base).
 const FRAMEWORK_DETECTORS: { framework: string; deps: string[] }[] = [
@@ -105,20 +85,11 @@ async function detectFromPackageJson(cwd: string): Promise<DetectedStack | null>
   const tools: Record<string, string> = { node };
   if (pm !== "npm") tools[pm] = "latest";
 
-  const services: string[] = [];
-
-  // Detect services by dependency or marker file (table-driven; preserves order).
-  for (const d of SERVICE_DETECTORS) {
-    const byDep = d.deps?.some((dep) => hasDep(pkg, dep)) ?? false;
-    let byFile = false;
-    for (const file of d.files ?? []) {
-      if (await fileExists(join(cwd, file))) {
-        byFile = true;
-        break;
-      }
-    }
-    if (byDep || byFile) services.push(d.service);
-  }
+  const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+  const services = await detectServices({
+    deps,
+    fileExists: (p) => fileExists(join(cwd, p)),
+  });
 
   // Framework — first match wins (priority order in FRAMEWORK_DETECTORS).
   let framework: string | undefined;
@@ -159,10 +130,15 @@ async function detectFromPython(cwd: string): Promise<DetectedStack | null> {
   else if (/django/i.test(contents)) framework = "django";
   else if (/flask/i.test(contents)) framework = "flask";
 
+  const services = await detectServices({
+    pyText: contents,
+    fileExists: (p) => fileExists(join(cwd, p)),
+  });
+
   return {
     language: "python",
     framework,
-    services: [],
+    services,
     tools: { python: "3.12", uv: "latest" },
     confidence: framework ? 0.85 : 0.5,
   };
@@ -177,10 +153,15 @@ async function detectFromGo(cwd: string): Promise<DetectedStack | null> {
   else if (/github\.com\/labstack\/echo/.test(goMod)) framework = "echo";
   else if (/github\.com\/gofiber\/fiber/.test(goMod)) framework = "fiber";
 
+  const services = await detectServices({
+    goMod,
+    fileExists: (p) => fileExists(join(cwd, p)),
+  });
+
   return {
     language: "go",
     framework,
-    services: [],
+    services,
     tools: { go: "1.22" },
     confidence: framework ? 0.85 : 0.7,
   };
@@ -195,10 +176,12 @@ async function detectFromRust(cwd: string): Promise<DetectedStack | null> {
   else if (/actix/.test(cargoToml)) framework = "actix";
   else if (/rocket/.test(cargoToml)) framework = "rocket";
 
+  const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
+
   return {
     language: "rust",
     framework,
-    services: [],
+    services,
     tools: { rust: "latest" },
     confidence: framework ? 0.85 : 0.7,
   };
@@ -214,10 +197,12 @@ async function detectFromPhp(cwd: string): Promise<DetectedStack | null> {
   if (composer.require?.["laravel/framework"]) framework = "laravel";
   else if (composer.require?.["symfony/framework-bundle"]) framework = "symfony";
 
+  const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
+
   return {
     language: "php",
     framework,
-    services: [],
+    services,
     tools: { php: "8.3", composer: "latest" },
     confidence: framework ? 0.85 : 0.6,
   };
