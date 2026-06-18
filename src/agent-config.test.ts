@@ -9,6 +9,8 @@ import {
   upsertKitBlock,
   detectAgentTargets,
   writeAgentConfig,
+  installKitPermissions,
+  READONLY_KIT_PERMISSIONS,
 } from "./agent-config.js";
 
 function tmpRepo(): string {
@@ -145,6 +147,61 @@ describe("writeAgentConfig", () => {
       assert.equal(existsSync(join(dir, "CLAUDE.md")), false);
     } finally {
       delete process.env.KIT_READ_ONLY;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installKitPermissions", () => {
+  it("grants the read-only kit allow-rules in .claude/settings.json, idempotently", async () => {
+    const dir = tmpRepo();
+    try {
+      writeFileSync(join(dir, "CLAUDE.md"), "# x\n");
+      const r1 = await installKitPermissions(dir);
+      assert.equal(r1.action, "created");
+      assert.equal(r1.added.length, READONLY_KIT_PERMISSIONS.length);
+
+      const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
+      assert.ok(s.permissions.allow.includes("Bash(kit check:*)"));
+      assert.ok(s.permissions.allow.includes("Bash(kit memory search:*)"));
+      // Never grants mutating commands, never writes a deny rule or a mode.
+      assert.ok(!s.permissions.allow.some((r: string) => r.includes("kit secrets") || r.includes("kit fix")));
+      assert.equal(s.permissions.deny, undefined);
+      assert.equal(s.permissions.defaultMode, undefined);
+
+      const r2 = await installKitPermissions(dir);
+      assert.equal(r2.action, "unchanged");
+      assert.equal(r2.added.length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves existing allow rules and other settings keys", async () => {
+    const dir = tmpRepo();
+    try {
+      mkdirSync(join(dir, ".claude"), { recursive: true });
+      writeFileSync(
+        join(dir, ".claude", "settings.json"),
+        JSON.stringify({ permissions: { allow: ["Bash(npm run:*)"] }, enableAllProjectMcpServers: true }),
+      );
+      await installKitPermissions(dir);
+      const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
+      assert.ok(s.permissions.allow.includes("Bash(npm run:*)"), "keeps the user's rule");
+      assert.ok(s.permissions.allow.includes("Bash(kit check:*)"), "adds kit rules");
+      assert.equal(s.enableAllProjectMcpServers, true, "preserves unrelated keys");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when no Claude Code project is present", async () => {
+    const dir = tmpRepo();
+    try {
+      const r = await installKitPermissions(dir);
+      assert.equal(r.action, "skipped");
+      assert.equal(existsSync(join(dir, ".claude", "settings.json")), false);
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
