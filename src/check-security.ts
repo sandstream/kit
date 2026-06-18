@@ -507,13 +507,16 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
     };
   }
   
-  // Try trufflehog first
+  // Deep scan with trufflehog — resolve mise-first so a mise-installed one is
+  // used (kit provisions it as a default), not just a bare-PATH one. Throwing
+  // when it's absent falls through to the basic pattern-matching below.
   try {
-    await exec("trufflehog", ["--version"], { timeout: 5_000 });
-    
+    const trufflehogBin = await resolveToolBin("trufflehog");
+    if (!trufflehogBin) throw new Error("trufflehog not installed");
+
     try {
       const { stdout } = await exec(
-        "trufflehog",
+        trufflehogBin,
         ["filesystem", ".", "--json", "--no-update"],
         { timeout: 60_000 }
       );

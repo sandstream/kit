@@ -120,6 +120,10 @@ const FRAMEWORK_SETUP: Record<
 export const DEFAULT_SECURITY_SCANNERS: Record<string, string> = {
   semgrep: "latest",
   "npm:@socketsecurity/cli": "latest",
+  // trufflehog (single Go binary via aqua) → deep secret scan on by default;
+  // `kit check` resolves the `trufflehog` bin mise-first and uses it instead of
+  // the basic regex fallback.
+  "aqua:trufflesecurity/trufflehog": "latest",
 };
 
 function lines(...parts: (string | null | undefined)[]): string {

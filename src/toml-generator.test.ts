@@ -28,13 +28,18 @@ describe("generateToml", () => {
     assert.ok(toml.includes('pnpm = "latest"'), `missing pnpm in: ${toml}`);
   });
 
-  it("includes the default security scanners (semgrep + socket) as mise tools", () => {
+  it("includes the default security scanners (semgrep + socket + trufflehog) as mise tools", () => {
     const parsed = parseTOML(generateToml(stack())) as { tools: Record<string, string> };
     assert.equal(parsed.tools.semgrep, "latest", "semgrep should be a default tool");
     assert.equal(
       parsed.tools["npm:@socketsecurity/cli"],
       "latest",
       "socket should be a default tool (npm backend ref, quoted key)",
+    );
+    assert.equal(
+      parsed.tools["aqua:trufflesecurity/trufflehog"],
+      "latest",
+      "trufflehog should be a default tool (deep secret scan on by default)",
     );
   });
 
