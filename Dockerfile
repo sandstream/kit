@@ -14,8 +14,8 @@ RUN apk add --no-cache python3 make g++
 COPY package*.json ./
 COPY packages ./packages
 
-# Install dependencies
-RUN npm install
+# Install dependencies (npm ci = reproducible from the committed lockfile)
+RUN npm ci
 
 # Copy source code
 COPY src ./src
@@ -63,7 +63,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 ENTRYPOINT ["/usr/bin/dumb-init", "--", "node", "/app/dist/cli.js"]
 CMD ["--help"]
 
-# Metadata
+# Metadata (version comes from the image tag, not a hardcoded label)
 LABEL maintainer="kit Team"
 LABEL description="kit CLI - Automated developer environment setup"
-LABEL version="0.1.0"

@@ -23,6 +23,26 @@ npm i -g sandstream-kit
 #   echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 ```
 
+### Run via Docker
+
+Prefer a container (no local Node or mise)? The CLI ships as a signed image on
+Docker Hub. Mount your project and point the workdir at it:
+
+```bash
+docker run --rm sandstream/kit:latest --version
+docker run --rm -v "$PWD":/work -w /work sandstream/kit:latest check
+```
+
+Each release publishes `sandstream/kit` (version + `latest` tags), keyless-signed
+with cosign and shipped with a CycloneDX SBOM. Verify the signature before
+trusting an image:
+
+```bash
+cosign verify sandstream/kit:latest \
+  --certificate-identity-regexp 'https://github.com/sandstream/kit/\.github/workflows/docker-build\.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 Then, in a repo:
 
 ```bash
