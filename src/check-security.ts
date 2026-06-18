@@ -677,20 +677,21 @@ async function checkTrivy(): Promise<SecurityCheckResult> {
     return { category: "supply-chain", name: "trivy container scan", status: "skip", detail: "no Dockerfile found" };
   }
 
-  const versionCheck = await execFileNoThrow("trivy", ["--version"], { timeout: 5_000 });
-  if (!versionCheck.ok) {
+  // Resolve mise-first (like socket/semgrep): a mise-installed trivy isn't on kit's PATH.
+  const trivyBin = await resolveToolBin("trivy");
+  if (!trivyBin) {
     return {
       category: "supply-chain",
       name: "trivy container scan",
       status: "warn",
       detail: "trivy not installed -container CVEs undetected",
       severity: "medium",
-      suggestion: "brew install trivy",
+      suggestion: "mise use aqua:aquasecurity/trivy  (or: brew install trivy)",
     };
   }
 
   const result = await execFileNoThrow(
-    "trivy",
+    trivyBin,
     ["fs", ".", "--format", "json", "--severity", "HIGH,CRITICAL", "--quiet"],
     { timeout: 120_000 },
   );
