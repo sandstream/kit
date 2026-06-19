@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   resolveTarget,
   sha256,
@@ -10,6 +13,7 @@ import {
   IntegrityError,
   TARBALL_CHECKSUMS,
   BUMBLEBEE_VERSION,
+  ensureBumblebee,
   type BumblebeeFinding,
 } from "./bumblebee.js";
 
@@ -200,5 +204,69 @@ describe("IntegrityError", () => {
     assert.ok(e instanceof IntegrityError);
     assert.ok(e instanceof Error);
     assert.equal(e.name, "IntegrityError");
+  });
+});
+
+describe("ensureBumblebee — cache reuse verifies the binary against its sidecar (F3)", () => {
+  const bin = Buffer.from("fake-bumblebee-binary-bytes");
+  const goodHash = sha256(bin);
+
+  // Build an isolated cache (KIT_BUMBLEBEE_CACHE) holding a binary + catalog and,
+  // unless sidecar:null, a `bumblebee.sha256` recording the binary's hash.
+  async function makeCache(opts: { sidecar?: string | null } = {}): Promise<{
+    cache: string;
+    restore: () => void;
+  }> {
+    const cache = await mkdtemp(join(tmpdir(), "kit-bb-"));
+    const verDir = join(cache, BUMBLEBEE_VERSION);
+    await mkdir(join(verDir, "threat_intel"), { recursive: true });
+    await writeFile(join(verDir, "bumblebee"), bin);
+    if (opts.sidecar !== null) {
+      await writeFile(join(verDir, "bumblebee.sha256"), `${opts.sidecar ?? goodHash}\n`);
+    }
+    const prev = process.env.KIT_BUMBLEBEE_CACHE;
+    process.env.KIT_BUMBLEBEE_CACHE = cache;
+    return {
+      cache,
+      restore: () => {
+        if (prev === undefined) delete process.env.KIT_BUMBLEBEE_CACHE;
+        else process.env.KIT_BUMBLEBEE_CACHE = prev;
+      },
+    };
+  }
+
+  it("reuses the cached binary when it matches its sidecar", async () => {
+    const { cache, restore } = await makeCache();
+    try {
+      const res = await ensureBumblebee({ allowDownload: false });
+      assert.ok("install" in res && res.install, `expected reuse, got ${JSON.stringify(res)}`);
+    } finally {
+      restore();
+      await rm(cache, { recursive: true, force: true });
+    }
+  });
+
+  it("flags integrity when the cached binary no longer matches its sidecar", async () => {
+    const { cache, restore } = await makeCache({ sidecar: "0".repeat(64) });
+    try {
+      const res = await ensureBumblebee({ allowDownload: false });
+      assert.equal("kind" in res ? res.kind : null, "integrity");
+    } finally {
+      restore();
+      await rm(cache, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT silently reuse a legacy cache with no sidecar", async () => {
+    const { cache, restore } = await makeCache({ sidecar: null });
+    try {
+      // No sidecar → falls through to the (here disabled) download path rather
+      // than trusting an unverifiable legacy binary.
+      const res = await ensureBumblebee({ allowDownload: false });
+      assert.equal("kind" in res ? res.kind : null, "network");
+    } finally {
+      restore();
+      await rm(cache, { recursive: true, force: true });
+    }
   });
 });

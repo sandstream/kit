@@ -16,6 +16,7 @@ import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import {
   writeFile,
+  readFile,
   mkdir,
   mkdtemp,
   rm,
@@ -128,7 +129,9 @@ async function pathExists(p: string): Promise<boolean> {
 }
 
 function cacheParent(): string {
-  return join(homedir(), ".kit", "tools", "bumblebee");
+  // KIT_BUMBLEBEE_CACHE overrides the cache root (test isolation + CI sandboxes).
+  const override = process.env.KIT_BUMBLEBEE_CACHE;
+  return override && override.length > 0 ? override : join(homedir(), ".kit", "tools", "bumblebee");
 }
 
 function cacheRoot(version = BUMBLEBEE_VERSION): string {
@@ -203,15 +206,22 @@ export async function ensureBumblebee(
   const binPath = join(root, "bumblebee");
   const catalogDir = join(root, "threat_intel");
 
-  if ((await pathExists(binPath)) && (await pathExists(catalogDir))) {
-    // F3 — re-verify the cached binary's SHA-256 against the pinned checksum
-    // before reuse. Catches tampering or accidental corruption since download.
+  const sidecarPath = join(root, "bumblebee.sha256");
+  if ((await pathExists(binPath)) && (await pathExists(catalogDir)) && (await pathExists(sidecarPath))) {
+    // F3 — re-verify the cached binary against the hash recorded at trusted
+    // INSTALL time (the sidecar), NOT the tarball checksum. The pinned
+    // TARBALL_CHECKSUMS gate the DOWNLOAD (authoritative supply-chain anchor);
+    // the sidecar gates CACHE reuse, catching corruption/tampering of the
+    // cached binary since install. (A prior version compared the extracted
+    // binary to the *tarball* digest — different artifacts, so it mismatched on
+    // every reuse and silently disabled the scanner after first download.)
     try {
+      const expected = (await readFile(sidecarPath, "utf8")).trim();
       const actual = await sha256File(binPath);
-      if (actual !== target.checksum) {
+      if (actual !== expected) {
         return {
           kind: "integrity",
-          reason: `cached binary checksum mismatch (expected ${target.checksum}, got ${actual}); clear ~/.kit/tools/bumblebee and retry`,
+          reason: `cached binary checksum mismatch (expected ${expected}, got ${actual}); clear ~/.kit/tools/bumblebee and retry`,
         };
       }
     } catch (err) {
@@ -222,6 +232,8 @@ export async function ensureBumblebee(
     }
     return { install: { binPath, catalogDir } };
   }
+  // A cached binary with no sidecar is a legacy cache (pre-fix): fall through and
+  // re-download to re-establish trust via the pinned tarball checksum.
 
   if (opts.allowDownload === false) {
     return {
@@ -301,6 +313,11 @@ async function downloadAndInstall(
       throw new Error("extracted archive is missing threat_intel catalogs");
     }
     await chmod(stagedBin, 0o755);
+    // Record the extracted binary's own SHA-256 so cache reuse (F3) can verify
+    // the BINARY — the tarball is discarded after extraction. Authenticity was
+    // already proven by the pinned tarball checksum above; this anchors the
+    // cached binary to that trusted install.
+    await writeFile(join(staging, "bumblebee.sha256"), `${await sha256File(stagedBin)}\n`);
     await rm(tarPath, { force: true });
 
     await rm(root, { recursive: true, force: true });
