@@ -288,13 +288,29 @@ export interface SearchOptions {
  * Pass opts.projectPath to scope to one repo (relevance + blast-radius); omit it
  * for cross-project ("--global") recall over the personal store.
  */
+/**
+ * Turn a raw user query into a safe FTS5 MATCH expression. A raw string is
+ * otherwise parsed AS an FTS5 expression, so a hyphen, colon, quote, `*`, or a
+ * bare `AND`/`OR`/`NEAR` either crashes the query ("no such column: …") or acts
+ * as an unintended operator. We split on whitespace, quote each term (escaping
+ * embedded quotes by doubling them — the FTS5 string-literal rule), and
+ * prefix-match it; terms are joined by implicit AND. Returns "" for an
+ * empty/whitespace query so the caller can short-circuit.
+ */
+export function toFtsMatchQuery(raw: string): string {
+  const terms = raw.trim().split(/\s+/).filter(Boolean);
+  return terms.map((t) => `"${t.replace(/"/g, '""')}"*`).join(" ");
+}
+
 export function searchMessages(
   db: DatabaseSync,
   query: string,
   opts: SearchOptions = {},
 ): SearchHit[] {
+  const match = toFtsMatchQuery(query);
+  if (!match) return [];
   const limit = opts.limit ?? 20;
-  const params: (string | number)[] = [query];
+  const params: (string | number)[] = [match];
   let where = "messages_fts MATCH ?";
   if (opts.projectPath) {
     where += " AND (m.cwd = ? OR m.cwd LIKE ?)";

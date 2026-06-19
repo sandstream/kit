@@ -7,6 +7,7 @@ import {
   insertMessage,
   searchMessages,
   getStats,
+  toFtsMatchQuery,
 } from "./db.js";
 
 describe("memory db", () => {
@@ -35,6 +36,41 @@ describe("memory db", () => {
     const hits = searchMessages(db, "october");
     assert.equal(hits.length, 1);
     assert.equal(hits[0]?.uuid, "u1");
+    db.close();
+  });
+
+  describe("toFtsMatchQuery (FTS5 query sanitization)", () => {
+    it("quotes + prefix-matches each term, joined by implicit AND", () => {
+      assert.equal(toFtsMatchQuery("vault secret"), '"vault"* "secret"*');
+    });
+    it("neutralizes FTS5 operators in terms (hyphen, colon)", () => {
+      assert.equal(toFtsMatchQuery("auto-close foo:bar"), '"auto-close"* "foo:bar"*');
+    });
+    it("escapes embedded double-quotes by doubling them", () => {
+      assert.equal(toFtsMatchQuery('say "hi"'), '"say"* """hi"""*');
+    });
+    it("returns empty string for blank input", () => {
+      assert.equal(toFtsMatchQuery("   "), "");
+    });
+  });
+
+  it("does not crash on queries with FTS5 special chars (regression)", () => {
+    const db = fresh();
+    upsertSession(db, { sessionId: "s1", harness: "claude-code", project: "/repo" });
+    insertMessage(db, {
+      uuid: "u1",
+      sessionId: "s1",
+      type: "assistant",
+      role: "assistant",
+      content: "the auto-close verify type closes a config:foo pal item",
+    });
+    // Each of these would throw "no such column: …" against a raw FTS5 MATCH.
+    for (const q of ["auto-close", "config:foo", 'say "hi"', "a OR b", "x*"]) {
+      assert.doesNotThrow(() => searchMessages(db, q), `crashed on: ${q}`);
+    }
+    // And it still finds the row via the sanitized terms.
+    assert.equal(searchMessages(db, "auto-close config").length, 1);
+    assert.equal(searchMessages(db, "   ").length, 0); // blank → no query
     db.close();
   });
 
