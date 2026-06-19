@@ -296,6 +296,9 @@ export interface kitConfig {
   /** Memory/PAL behavior. `track_findings` (default true): auto-track `kit check`
    *  findings as PAL items for cross-session reminders + auto-close on re-scan. */
   memory?: { track_findings?: boolean };
+  /** Update behavior. `check` (default true): surface a newer published kit in
+   *  `kit check` + the update banner. (Set false, or KIT_NO_UPDATE_CHECK=1.) */
+  update?: { check?: boolean };
 }
 
 // ─── Zod validation schemas ──────────────────────────────────────────────────
@@ -465,7 +468,7 @@ const WebConfigSchema = z
 
 // Known top-level section names — used to detect typos
 const KNOWN_SECTIONS = new Set([
-  "tools", "services", "secrets", "skills", "governance", "hooks", "web", "setup", "env", "context", "memory",
+  "tools", "services", "secrets", "skills", "governance", "hooks", "web", "setup", "env", "context", "memory", "update",
 ]);
 
 const kitConfigSchema = z
@@ -513,6 +516,12 @@ const kitConfigSchema = z
     memory: z
       .object({
         track_findings: z.boolean().optional(),
+      })
+      .passthrough()
+      .optional(),
+    update: z
+      .object({
+        check: z.boolean().optional(),
       })
       .passthrough()
       .optional(),

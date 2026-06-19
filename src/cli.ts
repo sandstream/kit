@@ -410,6 +410,20 @@ async function cmdCheck(): Promise<boolean> {
 
       printSummary(toolResults, serviceResults, secretResults.keys, securityResults);
 
+      // Surface a stale kit (a newer published version) as a warn — a stale CLI
+      // can carry already-fixed bugs. Gated by [update].check; checkForUpdate
+      // also self-skips in CI and with KIT_NO_UPDATE_CHECK=1, and returns null
+      // when already on latest or the check fails.
+      if (config.update?.check !== false) {
+        const { checkForUpdate } = await import("./update-check.js");
+        const u = await checkForUpdate(KIT_VERSION);
+        if (u) {
+          console.log(
+            `${c.yellow}! kit ${u.current} → ${u.latest} available${c.reset} ${c.dim}— run ${c.reset}${c.bold}kit upgrade${c.reset}${c.dim} (npm i -g sandstream-kit@latest)${c.reset}\n`,
+          );
+        }
+      }
+
       return allOk;
     }
   );
