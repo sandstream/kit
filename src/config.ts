@@ -293,6 +293,9 @@ export interface kitConfig {
   mcp?: McpConfig;
   /** Agent-write pre-approval policy. See PolicyConfig + src/policy.ts. */
   policy?: PolicyConfig;
+  /** Memory/PAL behavior. `track_findings` (default true): auto-track `kit check`
+   *  findings as PAL items for cross-session reminders + auto-close on re-scan. */
+  memory?: { track_findings?: boolean };
 }
 
 // ─── Zod validation schemas ──────────────────────────────────────────────────
@@ -462,7 +465,7 @@ const WebConfigSchema = z
 
 // Known top-level section names — used to detect typos
 const KNOWN_SECTIONS = new Set([
-  "tools", "services", "secrets", "skills", "governance", "hooks", "web", "setup", "env", "context",
+  "tools", "services", "secrets", "skills", "governance", "hooks", "web", "setup", "env", "context", "memory",
 ]);
 
 const kitConfigSchema = z
@@ -504,6 +507,12 @@ const kitConfigSchema = z
         migrate: z.string().optional(),
         seed: z.string().optional(),
         verify: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+    memory: z
+      .object({
+        track_findings: z.boolean().optional(),
       })
       .passthrough()
       .optional(),

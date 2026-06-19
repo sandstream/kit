@@ -8,7 +8,8 @@ import { loadConfig, type kitConfig } from "./config.js";
 import { checkTools } from "./check-tools.js";
 import { checkServices } from "./check-services.js";
 import { checkSecrets } from "./check-secrets.js";
-import { checkSecurity } from "./check-security.js";
+import { checkSecurity, type SecurityCheckResult } from "./check-security.js";
+import type { SyncFinding } from "./memory/pal.js";
 import { checkWebSearch } from "./check-web-search.js";
 import { installTools } from "./install.js";
 import { loginServices } from "./login.js";
@@ -143,6 +144,55 @@ interface JsonCheckOutput {
   summary: { passed: number; failed: number; warnings: number; skipped: number };
 }
 
+/** Map a security finding to a short, actionable PAL title/detail. */
+function securityFindingToSync(r: SecurityCheckResult): SyncFinding {
+  const detail = [r.detail, r.suggestion ? `Fix: ${r.suggestion}` : null]
+    .filter(Boolean)
+    .join(" · ");
+  return {
+    dedupKey: `${r.category}:${r.name}`,
+    title: `${r.name}: ${r.status}`,
+    detail: detail || undefined,
+  };
+}
+
+/**
+ * Track `kit check` security findings in the PAL ledger so they become
+ * cross-session reminders and auto-close on a clean re-scan. Selective: only
+ * fails + warns in security-relevant categories (not every warn). Fail-open —
+ * tracking must never break `kit check`.
+ */
+async function trackSecurityFindingsInPal(
+  results: SecurityCheckResult[],
+  opts: { quiet?: boolean } = {},
+): Promise<void> {
+  const TRACK_WARN = new Set(["secrets", "exposure", "supply-chain"]);
+  const actionable = results.filter(
+    (r) => r.status === "fail" || (r.status === "warn" && TRACK_WARN.has(r.category)),
+  );
+  try {
+    const { openMemoryDb } = await import("./memory/db.js");
+    const { palSyncFindings } = await import("./memory/pal.js");
+    const { getCurrentProjectRoot } = await import("./memory/project.js");
+    const { basename } = await import("node:path");
+    const scope = basename(getCurrentProjectRoot());
+    const db = openMemoryDb();
+    try {
+      const r = palSyncFindings(db, "sec", actionable.map(securityFindingToSync), { scope });
+      if (!opts.quiet && (r.added || r.closed.length || r.reopened)) {
+        const parts = [`+${r.added} tracked`];
+        if (r.reopened) parts.push(`${r.reopened} reopened`);
+        if (r.closed.length) parts.push(`−${r.closed.length} auto-closed`);
+        console.log(`${c.dim}PAL: ${parts.join(" · ")}${c.reset}`);
+      }
+    } finally {
+      db.close();
+    }
+  } catch {
+    // fail-open: never let ledger tracking break the check
+  }
+}
+
 async function cmdCheck(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
   const enforceTests = hasFlag(process.argv, "--enforce-tests");
@@ -209,6 +259,12 @@ async function cmdCheck(): Promise<boolean> {
         securityOk &&
         testsOk &&
         lockOk;
+
+      // Track security findings in the PAL ledger (cross-session reminders +
+      // auto-close on a clean re-scan). Opt out with [memory] track_findings = false.
+      if (config.memory?.track_findings !== false) {
+        await trackSecurityFindingsInPal(securityResults, { quiet: jsonMode });
+      }
 
       if (jsonMode) {
         const checks: JsonCheck[] = [

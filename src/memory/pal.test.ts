@@ -11,6 +11,8 @@ import {
   palSnooze,
   palAutoVerify,
   importLegacyLedger,
+  palSyncFindings,
+  findingPalId,
 } from "./pal.js";
 
 describe("PAL — pending actions", () => {
@@ -180,6 +182,59 @@ describe("PAL — pending actions", () => {
       scoped.map((p) => p.title).sort(),
       ["global item", "kit item"], // "kit" + the null-scope global one, NOT "other"
     );
+    db.close();
+  });
+});
+
+describe("palSyncFindings — findings → ledger (track layer)", () => {
+  const fresh = () => openMemoryDb(":memory:");
+  const f = (dedupKey: string, title = dedupKey) => ({ dedupKey, title });
+
+  it("findingPalId is deterministic + source-prefixed", () => {
+    assert.equal(findingPalId("sec", "dep:npm audit"), findingPalId("sec", "dep:npm audit"));
+    assert.ok(findingPalId("sec", "x").startsWith("sec-"));
+    assert.notEqual(findingPalId("sec", "x"), findingPalId("secret", "x"));
+  });
+
+  it("is idempotent — re-syncing the same findings adds no duplicates", () => {
+    const db = fresh();
+    assert.equal(palSyncFindings(db, "sec", [f("a"), f("b")], { scope: "repo" }).added, 2);
+    assert.equal(palSyncFindings(db, "sec", [f("a"), f("b")], { scope: "repo" }).added, 0);
+    assert.equal(palList(db, { scope: "repo" }).length, 2);
+    db.close();
+  });
+
+  it("auto-closes a finding the scan no longer reports", () => {
+    const db = fresh();
+    palSyncFindings(db, "sec", [f("a"), f("b")], { scope: "repo" });
+    const r = palSyncFindings(db, "sec", [f("a")], { scope: "repo" });
+    assert.equal(r.closed.length, 1);
+    const open = palList(db, { scope: "repo" });
+    assert.equal(open.length, 1);
+    assert.ok(open[0]?.id.startsWith("sec-"));
+    db.close();
+  });
+
+  it("reopens a finding that cleared and then regressed", () => {
+    const db = fresh();
+    palSyncFindings(db, "sec", [f("a")], { scope: "repo" });
+    palSyncFindings(db, "sec", [], { scope: "repo" }); // clears → closed
+    assert.equal(palList(db, { scope: "repo" }).length, 0);
+    const r = palSyncFindings(db, "sec", [f("a")], { scope: "repo" }); // regress
+    assert.equal(r.reopened, 1);
+    assert.equal(palList(db, { scope: "repo" }).length, 1);
+    db.close();
+  });
+
+  it("reconciles only its own source tag (sec vs secret isolated)", () => {
+    const db = fresh();
+    palSyncFindings(db, "sec", [f("a")], { scope: "repo" });
+    palSyncFindings(db, "secret", [f("x")], { scope: "repo" });
+    const r = palSyncFindings(db, "secret", [], { scope: "repo" }); // clears only secret-*
+    assert.equal(r.closed.length, 1);
+    const open = palList(db, { scope: "repo" });
+    assert.equal(open.length, 1);
+    assert.ok(open[0]?.id.startsWith("sec-"));
     db.close();
   });
 });

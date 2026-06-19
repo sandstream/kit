@@ -15,7 +15,7 @@
  * plant a command that detonates later in a more-trusted session. Fail-open /
  * no-info aware.
  */
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -113,6 +113,89 @@ export function palSnooze(db: DatabaseSync, id: string, days: number): boolean {
     )
     .run(`+${d} days`, id);
   return Number(res.changes) > 0;
+}
+
+/** One scanner finding to track. `dedupKey` is stable per finding within its
+ *  source (e.g. `category:name`), so re-scans map to the same ledger item. */
+export interface SyncFinding {
+  dedupKey: string;
+  title: string;
+  detail?: string;
+}
+
+export interface SyncFindingsResult {
+  added: number;
+  reopened: number;
+  closed: string[];
+}
+
+/** Deterministic pal id for a finding: `${sourceTag}-${6 hex}`. The source tag
+ *  prefix lets a per-source sync reconcile only its own items. */
+export function findingPalId(sourceTag: string, dedupKey: string): string {
+  const h = createHash("sha256").update(dedupKey).digest("hex").slice(0, 6);
+  return `${sourceTag}-${h}`;
+}
+
+/**
+ * Sync a scanner's CURRENT findings into the ledger — the "track" layer.
+ *
+ * Each finding becomes an open `kind='finding'` item (deterministic id, so a
+ * re-scan is idempotent). An item that had cleared (closed) and now recurs is
+ * REOPENED; an open item whose finding the scan no longer reports is auto-CLOSED.
+ * Finding-presence IS the verify, so this needs no shell and no stored command —
+ * same security posture as the rest of PAL. Reconciliation is per source-tag and
+ * per scope, so a partial sync never touches another source's or repo's items.
+ */
+export function palSyncFindings(
+  db: DatabaseSync,
+  sourceTag: string,
+  findings: SyncFinding[],
+  opts: { scope?: string } = {},
+): SyncFindingsResult {
+  const scope = opts.scope ?? null;
+  const currentIds = new Set<string>();
+  let added = 0;
+  let reopened = 0;
+
+  for (const f of findings) {
+    const id = findingPalId(sourceTag, f.dedupKey);
+    currentIds.add(id);
+    const existing = db.prepare("SELECT status FROM pending_actions WHERE id = ?").get(id) as
+      | { status: string }
+      | undefined;
+    if (!existing) {
+      db.prepare(
+        `INSERT INTO pending_actions (id, status, title, detail, scope, kind)
+         VALUES (?, 'open', ?, ?, ?, 'finding')`,
+      ).run(id, f.title, f.detail ?? null, scope);
+      added++;
+    } else if (existing.status === "closed") {
+      db.prepare(
+        "UPDATE pending_actions SET status='open', closed_at=NULL, title=?, detail=? WHERE id=?",
+      ).run(f.title, f.detail ?? null, id);
+      reopened++;
+    } else {
+      // already open/snoozed — refresh the text so the reminder stays accurate
+      db.prepare("UPDATE pending_actions SET title=?, detail=? WHERE id=?").run(
+        f.title,
+        f.detail ?? null,
+        id,
+      );
+    }
+  }
+
+  // Auto-close findings of THIS source + scope that the scan no longer reports.
+  const open = db
+    .prepare(
+      "SELECT id FROM pending_actions WHERE kind='finding' AND status='open' AND id LIKE ? AND scope IS ?",
+    )
+    .all(`${sourceTag}-%`, scope) as { id: string }[];
+  const closed: string[] = [];
+  for (const row of open) {
+    if (!currentIds.has(row.id) && palDone(db, row.id)) closed.push(row.id);
+  }
+
+  return { added, reopened, closed };
 }
 
 /**
