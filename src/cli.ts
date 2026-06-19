@@ -8,8 +8,8 @@ import { loadConfig, type kitConfig } from "./config.js";
 import { checkTools } from "./check-tools.js";
 import { checkServices } from "./check-services.js";
 import { checkSecrets } from "./check-secrets.js";
-import { checkSecurity, type SecurityCheckResult } from "./check-security.js";
-import type { SyncFinding } from "./memory/pal.js";
+import { checkSecurity } from "./check-security.js";
+import { syncSecurityFindings } from "./findings-track.js";
 import { checkWebSearch } from "./check-web-search.js";
 import { installTools } from "./install.js";
 import { loginServices } from "./login.js";
@@ -145,52 +145,61 @@ interface JsonCheckOutput {
 }
 
 /** Map a security finding to a short, actionable PAL title/detail. */
-function securityFindingToSync(r: SecurityCheckResult): SyncFinding {
-  const detail = [r.detail, r.suggestion ? `Fix: ${r.suggestion}` : null]
-    .filter(Boolean)
-    .join(" · ");
-  return {
-    dedupKey: `${r.category}:${r.name}`,
-    title: `${r.name}: ${r.status}`,
-    detail: detail || undefined,
-  };
-}
+async function cmdHeal(): Promise<boolean> {
+  const dryRun = hasFlag(process.argv, "--dry-run");
+  const agent = hasFlag(process.argv, "--agent");
+  console.log(`${c.bold}${c.cyan}kit heal${c.reset}${dryRun ? `${c.dim} (dry-run)${c.reset}` : ""}`);
+  console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
-/**
- * Track `kit check` security findings in the PAL ledger so they become
- * cross-session reminders and auto-close on a clean re-scan. Selective: only
- * fails + warns in security-relevant categories (not every warn). Fail-open —
- * tracking must never break `kit check`.
- */
-async function trackSecurityFindingsInPal(
-  results: SecurityCheckResult[],
-  opts: { quiet?: boolean } = {},
-): Promise<void> {
-  const TRACK_WARN = new Set(["secrets", "exposure", "supply-chain"]);
-  const actionable = results.filter(
-    (r) => r.status === "fail" || (r.status === "warn" && TRACK_WARN.has(r.category)),
-  );
-  try {
-    const { openMemoryDb } = await import("./memory/db.js");
-    const { palSyncFindings } = await import("./memory/pal.js");
-    const { getCurrentProjectRoot } = await import("./memory/project.js");
-    const { basename } = await import("node:path");
-    const scope = basename(getCurrentProjectRoot());
-    const db = openMemoryDb();
-    try {
-      const r = palSyncFindings(db, "sec", actionable.map(securityFindingToSync), { scope });
-      if (!opts.quiet && (r.added || r.closed.length || r.reopened)) {
-        const parts = [`+${r.added} tracked`];
-        if (r.reopened) parts.push(`${r.reopened} reopened`);
-        if (r.closed.length) parts.push(`−${r.closed.length} auto-closed`);
-        console.log(`${c.dim}PAL: ${parts.join(" · ")}${c.reset}`);
-      }
-    } finally {
-      db.close();
+  const { runHeal } = await import("./heal.js");
+  const res = await runHeal({ dryRun });
+
+  if (dryRun) {
+    if (res.plannedSafe.length > 0) {
+      console.log(`${c.bold}Would auto-fix (safe):${c.reset}`);
+      for (const k of res.plannedSafe) console.log(`  ${c.green}✓${c.reset} ${k}`);
+    } else {
+      console.log(`${c.dim}Nothing to auto-fix.${c.reset}`);
     }
-  } catch {
-    // fail-open: never let ledger tracking break the check
+  } else if (res.healed.length > 0) {
+    console.log(`${c.green}${c.bold}Healed ${res.healed.length}:${c.reset}`);
+    for (const k of res.healed) console.log(`  ${c.green}✓${c.reset} ${k}`);
   }
+
+  // FAIL-CLOSED — loud, never auto-healed.
+  if (res.failClosed.length > 0) {
+    console.log(`\n${c.red}${c.bold}⚠ FAIL-CLOSED — not auto-healed (possible tampering):${c.reset}`);
+    for (const r of res.failClosed) {
+      console.log(`  ${c.red}✗${c.reset} ${r.name}: ${r.detail}`);
+      if (r.suggestion) console.log(`    ${c.dim}${r.suggestion}${c.reset}`);
+    }
+  }
+
+  // GATED — proposed, never auto-run by kit.
+  if (res.gated.length > 0) {
+    console.log(`\n${c.yellow}${c.bold}Gated — needs you (kit won't auto-run these):${c.reset}`);
+    for (const g of res.gated) {
+      console.log(`  ${c.yellow}!${c.reset} ${g.name}: ${g.issue}`);
+      console.log(`    ${c.dim}→ ${g.action}${c.reset}`);
+    }
+    if (agent) {
+      console.log(
+        `\n${c.dim}# agent: each command below still hits the elevation gate + audit log${c.reset}`,
+      );
+      for (const g of res.gated) console.log(g.action);
+    }
+  }
+
+  const green = res.failClosed.length === 0 && res.gated.length === 0;
+  console.log();
+  if (!dryRun) {
+    console.log(
+      green
+        ? `${c.green}${c.bold}All findings healed or clean ✓${c.reset}`
+        : `${c.yellow}Auto-heal done; items above need you.${c.reset}`,
+    );
+  }
+  return green;
 }
 
 async function cmdCheck(): Promise<boolean> {
@@ -263,7 +272,13 @@ async function cmdCheck(): Promise<boolean> {
       // Track security findings in the PAL ledger (cross-session reminders +
       // auto-close on a clean re-scan). Opt out with [memory] track_findings = false.
       if (config.memory?.track_findings !== false) {
-        await trackSecurityFindingsInPal(securityResults, { quiet: jsonMode });
+        const r = await syncSecurityFindings(securityResults);
+        if (!jsonMode && r && (r.added || r.closed.length || r.reopened)) {
+          const parts = [`+${r.added} tracked`];
+          if (r.reopened) parts.push(`${r.reopened} reopened`);
+          if (r.closed.length) parts.push(`−${r.closed.length} auto-closed`);
+          console.log(`${c.dim}PAL: ${parts.join(" · ")}${c.reset}`);
+        }
       }
 
       if (jsonMode) {
@@ -4028,6 +4043,7 @@ const COMMAND_HELP: Record<string, string> = {
   setup:          "Full pipeline: install → login → secrets → agent config → verify",
   "setup --recommended": "Opinionated profile: setup + memory hooks + git secret-scan/context-check gates",
   fix:            "Auto-fix what is possible",
+  heal:           "Loop: auto-fix safe findings, re-scan until green; gate destructive, fail-closed on tamper (--dry-run, --agent)",
   escalate:       "List what needs human action",
   governance:     "View governance status and agent access controls",
   skills:         "Check status of agent skills",
@@ -4623,6 +4639,7 @@ async function main(): Promise<void> {
         setup: cmdSetup,
         skills: cmdSkills,
         fix: cmdFix,
+        heal: cmdHeal,
         escalate: cmdEscalate,
         governance: cmdGovernance,
         "agent-config": cmdAgentConfig,

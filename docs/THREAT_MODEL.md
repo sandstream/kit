@@ -186,6 +186,33 @@ How to harden host CLIs (kit cannot do this for you):
 The principle is the same one kit applies to npm/pip/docker (pin, verify,
 reproduce); host CLIs just live outside kit's reach.
 
+### `kit heal`: what auto-heal will and will not do
+
+`kit heal` loops over `kit check` findings and applies fixes, within a fixed
+contract that an autonomous agent cannot widen:
+
+- **SAFE-AUTO** (applied without a gate): deterministic, reversible, with no
+  credentials, outward writes, or history mutation. Installing a missing tool
+  via mise, patching `.gitignore`, regenerating a lockfile, installing git
+  hooks. These are the same primitives `kit setup`/`kit fix` already run.
+- **GATED** (proposed, never auto-run by kit): secret rotation, git-history
+  purge, deploy-target propagation, `npm audit fix`. heal prints the exact
+  command; the human or agent runs it, and it still passes the existing
+  `requireElevation` gate (TTL + HMAC-signed marker + TOTP/prompt) and is
+  audit-logged. heal never calls elevation itself.
+- **FAIL-CLOSED** (refused + alerted, never auto-healed): a supply-chain
+  checksum mismatch is a possible tamper signal, so heal will not "fix" it
+  (auto-clearing + re-downloading could mask an attack). It is surfaced loudly
+  and heal exits non-zero. It does NOT block applying unrelated safe fixes (the
+  tamper-suspect binary is never trusted or run, so an independent `.gitignore`
+  patch is unaffected), but the mismatch itself stays a human decision.
+
+So `kit heal --agent` can drive an environment toward green autonomously, yet it
+can never rotate a secret, rewrite history, force-push, or trust a
+checksum-mismatched binary on its own. zero-LLM: heal classifies + applies
+deterministic fixers and emits proposals; the intelligence is the external
+agent, not embedded in kit.
+
 ## Out of scope (and why)
 
 - **LLM-router / orchestrator features.** kit is not Ruflo / Gas Town.
