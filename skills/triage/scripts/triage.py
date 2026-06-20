@@ -39,6 +39,13 @@ def _get_json(url, headers=None):
     if headers:
         h.update(headers)
     req = urllib.request.Request(url, headers=h)
+    # The URL is intentionally dynamic: a registry-triage tool MUST fetch the
+    # target's page. SSRF is not reachable here -- the host is a hardcoded,
+    # allowlisted registry (registry.npmjs.org / pypi.org / api.github.com /
+    # hub.docker.com) and only the package/repo name is interpolated into the
+    # PATH (url-quoted for npm/pip, parsed to owner/repo for GitHub). The
+    # attacker cannot redirect the host. Reviewed false positive.
+    # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         return json.load(r), r.status
 

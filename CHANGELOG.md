@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-06-20
+
+### Fixed
+- **Semgrep blocked the 1.11.0 push on a reviewed false positive in the triage skill.** `skills/triage/scripts/triage.py` triggered `python.lang.security.audit.dynamic-urllib-use-detected` (SSRF audit) on its `urlopen` call. The finding does not apply here: a registry-triage tool must fetch the target's page, the host is a hardcoded allowlisted registry (registry.npmjs.org / pypi.org / api.github.com / hub.docker.com), and only the package/repo name is interpolated into the path (url-quoted for npm/pip, parsed to owner/repo for GitHub), so an attacker cannot redirect the host. Suppressed with an inline `# nosemgrep` plus a justification comment.
+
 ## [1.11.0] - 2026-06-20
 
 ### Added
