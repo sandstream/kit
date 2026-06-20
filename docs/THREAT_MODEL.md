@@ -79,11 +79,17 @@ config knob says otherwise.
   `KIT_POLICY_HASH` declaring the operator's pre-approved scopes — but it does
   not restrict which shell commands Claude Code / Codex / any agent may run.
   That enforcement lives in the agent host, which can honor the policy hash.
-- **No interception of arbitrary installs.** `kit triage` and the pre-commit
-  dependency check are verification gates you invoke (or wire as a hook); kit
-  does not hook `npm`/`pip`/`docker` to block an un-triaged `npm install` an
-  agent runs directly. Triage is a check to put in front of installs, not a
-  kernel that intercepts them.
+- **kit triages every install it performs — including itself.** Any tool kit
+  would install (`kit install`, `kit fix`, `kit heal`'s scanner recipes) and
+  `kit upgrade --self` run through the triage gate first: only an explicit triage
+  PASS (or a trusted core language runtime) installs. WARN, FAIL, offline,
+  missing triage script, or an unmappable ref all block (fail-closed). The only
+  bypass is `--no-triage`, which requires a one-shot elevation and is audit-logged;
+  `kit heal` never takes it. See "The triage gate" below.
+- **No interception of arbitrary installs run OUTSIDE kit.** The gate covers
+  installs kit itself drives. kit does not hook `npm`/`pip`/`docker` to block an
+  un-triaged `npm install` an agent runs directly in the shell — that enforcement
+  would live in the agent host. For installs kit performs, the gate is the kernel.
 
 ## Trust controls
 
@@ -186,20 +192,49 @@ How to harden host CLIs (kit cannot do this for you):
 The principle is the same one kit applies to npm/pip/docker (pin, verify,
 reproduce); host CLIs just live outside kit's reach.
 
+### The triage gate: kit installs nothing untriaged
+
+Every install kit performs passes through one gate (`src/triage-gate.ts`), and it
+is watertight / fail-closed by design:
+
+- A third-party tool/package (a mise ref carrying a scheme — `aqua:owner/repo`,
+  `npm:pkg`, `pipx:pkg`) is mapped to a `kit triage` target and triaged. It is
+  installed ONLY on an explicit `TRIAGE PASSED`.
+- A core language runtime (a bare mise name like `node`, `pnpm`) is the trusted
+  base — mise installs it from its registry with checksum verification — and
+  passes without a reputation triage.
+- Everything else blocks: a triage WARN, a FAIL, triage offline, the triage
+  script missing, or a ref kit cannot map to a target. "Cannot verify" is treated
+  as "do not install", never as "probably fine".
+
+The single bypass is `--no-triage` on `kit install`, which must hold a one-shot
+elevation (`kit auth elevate --scope tools.install.no-triage`) and is audit-logged.
+`kit heal` (autonomous) never bypasses — a tool it cannot install through the gate
+becomes a GATED proposal instead.
+
+This extends to kit itself: `kit upgrade --self` (and opt-in `[update].auto`)
+triages the `sandstream-kit` npm package before installing a new version, and
+installs only on PASS. kit will not auto-install an untriaged version of itself.
+The raw `npm i -g sandstream-kit` remains available to the operator, but that path
+is outside kit's governance.
+
 ### `kit heal`: what auto-heal will and will not do
 
 `kit heal` loops over `kit check` findings and applies fixes, within a fixed
 contract that an autonomous agent cannot widen:
 
-- **SAFE-AUTO** (applied without a gate): deterministic, reversible, with no
-  credentials, outward writes, or history mutation. Installing a missing tool
-  via mise, patching `.gitignore`, regenerating a lockfile, installing git
-  hooks. These are the same primitives `kit setup`/`kit fix` already run.
+- **SAFE-AUTO** (applied without a gate): deterministic, reversible, purely
+  local, with no credentials, outward writes, or history mutation. Patching
+  `.gitignore`, regenerating a lockfile, installing git hooks. Installing a
+  missing scanner via mise is also safe-auto **only when the triage gate passes**
+  — heal routes the install through the gate, so an untriaged binary is never
+  fetched (see "The triage gate"). A tool whose triage does not pass is demoted
+  to a GATED proposal, not installed.
 - **GATED** (proposed, never auto-run by kit): secret rotation, git-history
-  purge, deploy-target propagation, `npm audit fix`. heal prints the exact
-  command; the human or agent runs it, and it still passes the existing
-  `requireElevation` gate (TTL + HMAC-signed marker + TOTP/prompt) and is
-  audit-logged. heal never calls elevation itself.
+  purge, deploy-target propagation, `npm audit fix`, and any tool install the
+  triage gate refused. heal prints the exact command; the human or agent runs it,
+  and it still passes the existing `requireElevation` gate (TTL + HMAC-signed
+  marker + TOTP/prompt) and is audit-logged. heal never calls elevation itself.
 - **FAIL-CLOSED** (refused + alerted, never auto-healed): a supply-chain
   checksum mismatch is a possible tamper signal, so heal will not "fix" it
   (auto-clearing + re-downloading could mask an attack). It is surfaced loudly

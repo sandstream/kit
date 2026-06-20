@@ -297,8 +297,12 @@ export interface kitConfig {
    *  findings as PAL items for cross-session reminders + auto-close on re-scan. */
   memory?: { track_findings?: boolean };
   /** Update behavior. `check` (default true): surface a newer published kit in
-   *  `kit check` + the update banner. (Set false, or KIT_NO_UPDATE_CHECK=1.) */
-  update?: { check?: boolean };
+   *  `kit check` + the update banner. (Set false, or KIT_NO_UPDATE_CHECK=1.)
+   *  `auto` (default false, opt-in): when a newer kit is found during `kit check`,
+   *  run the GOVERNED self-upgrade — triage kit's own package first and install
+   *  ONLY on a triage PASS (never on fail/offline). Stays off by default because
+   *  auto-installing is a deliberate trust decision. */
+  update?: { check?: boolean; auto?: boolean };
 }
 
 // ─── Zod validation schemas ──────────────────────────────────────────────────
@@ -522,6 +526,7 @@ const kitConfigSchema = z
     update: z
       .object({
         check: z.boolean().optional(),
+        auto: z.boolean().optional(),
       })
       .passthrough()
       .optional(),

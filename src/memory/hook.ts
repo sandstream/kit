@@ -13,6 +13,23 @@ import { openMemoryDb, getStats, recentMessages } from "./db.js";
 import { indexClaudeTranscripts } from "./parser.js";
 import { palList } from "./pal.js";
 import { getCurrentProjectRoot } from "./project.js";
+import { readCachedUpdateSync, getKitVersionSync } from "../update-check.js";
+
+/**
+ * A one-line, actionable stale-kit notice for Claude Code context, or "". Reads
+ * the update cache only (no network) so it is safe on the every-prompt hook. The
+ * point: surface "kit needs updating" where the user actually works (Claude Code),
+ * not only in a terminal banner they rarely see.
+ */
+function staleKitNotice(): string {
+  try {
+    const u = readCachedUpdateSync(getKitVersionSync());
+    if (!u) return "";
+    return `kit is out of date: ${u.current} → ${u.latest}. Update with \`kit upgrade --self\` (triages the package first, installs only on a triage PASS).`;
+  } catch {
+    return ""; // fail-open
+  }
+}
 
 /** Reminder injected before every prompt. Empty string on any error (fail-open). */
 export function userPromptSubmitReminder(): string {
@@ -29,7 +46,9 @@ export function userPromptSubmitReminder(): string {
       const more = openItems.length > shown.length ? " …" : "";
       pending = ` ${openItems.length} open action item(s) blocked on you: ${titles}${more}.`;
     }
+    const stale = staleKitNotice();
     return (
+      (stale ? `${stale}\n` : "") +
       `You have local conversation memory: ${s.messages} messages indexed. ` +
       "Before answering anything project-specific, run `kit memory search <terms>` " +
       `to retrieve what was actually said instead of reconstructing it.${pending}`
@@ -52,9 +71,14 @@ export function sessionStartRecovery(opts: { limit?: number } = {}): string {
     const recent = recentMessages(db, { projectPath: root, limit: opts.limit ?? 6 });
     const openItems = palList(db, { scope: basename(root) });
     db.close();
-    if (recent.length === 0 && openItems.length === 0) return "";
+    const stale = staleKitNotice();
+    if (recent.length === 0 && openItems.length === 0 && !stale) return "";
 
-    const lines: string[] = [`Picking up in ${basename(root)} — recent memory (newest first):`];
+    const lines: string[] = [];
+    if (stale) lines.push(stale);
+    if (recent.length > 0 || openItems.length > 0) {
+      lines.push(`Picking up in ${basename(root)} — recent memory (newest first):`);
+    }
     for (const m of recent) {
       const who = m.role === "assistant" ? "assistant" : "you";
       const text = (m.content ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
@@ -66,7 +90,9 @@ export function sessionStartRecovery(opts: { limit?: number } = {}): string {
         `Open action items blocked on you: ${titles}${openItems.length > 3 ? " …" : ""}.`,
       );
     }
-    lines.push("Run `kit memory search <terms>` to pull more of what was actually said.");
+    if (recent.length > 0 || openItems.length > 0) {
+      lines.push("Run `kit memory search <terms>` to pull more of what was actually said.");
+    }
     return lines.join("\n");
   } catch {
     return ""; // fail-open: never block a session start

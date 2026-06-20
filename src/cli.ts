@@ -152,7 +152,10 @@ async function cmdHeal(): Promise<boolean> {
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   const { runHeal } = await import("./heal.js");
-  const res = await runHeal({ dryRun });
+  // Progress goes to stderr: live feedback for a human watching, without
+  // polluting the machine-readable proposals on stdout (--agent).
+  const res = await runHeal({ dryRun, onProgress: (m) => console.error(`${c.dim}${m}${c.reset}`) });
+  console.log();
 
   if (dryRun) {
     if (res.plannedSafe.length > 0) {
@@ -418,9 +421,18 @@ async function cmdCheck(): Promise<boolean> {
         const { checkForUpdate } = await import("./update-check.js");
         const u = await checkForUpdate(KIT_VERSION);
         if (u) {
-          console.log(
-            `${c.yellow}! kit ${u.current} → ${u.latest} available${c.reset} ${c.dim}— run ${c.reset}${c.bold}kit upgrade${c.reset}${c.dim} (npm i -g sandstream-kit@latest)${c.reset}\n`,
-          );
+          if (config.update?.auto === true) {
+            // Opt-in auto-update — still WATERTIGHT: selfUpgrade triages kit's own
+            // package and installs ONLY on a triage PASS. Never installs on fail.
+            console.log(
+              `${c.yellow}! kit ${u.current} → ${u.latest} — auto-update on, triaging before install…${c.reset}`,
+            );
+            await selfUpgrade();
+          } else {
+            console.log(
+              `${c.yellow}! kit ${u.current} → ${u.latest} available${c.reset} ${c.dim}— run ${c.reset}${c.bold}kit upgrade --self${c.reset}${c.dim} (triages before installing)${c.reset}\n`,
+            );
+          }
         }
       }
 
@@ -537,6 +549,24 @@ async function cmdInstall(): Promise<boolean> {
   }
 
   const toolsConfig = config.tools;
+
+  // WATERTIGHT: kit triages every third-party tool before installing it. The
+  // `--no-triage` override is a deliberate, audited security action — it must
+  // hold a one-shot elevation, or the install is refused.
+  let skipTriage = false;
+  if (hasFlag(process.argv, "--no-triage")) {
+    const elev = await consumeElevation("tools.install.no-triage");
+    if (!elev.ok) {
+      console.error(`${c.red}✗ --no-triage refused: ${elev.reason}${c.reset}`);
+      console.error(
+        `${c.dim}Run 'kit auth elevate --scope tools.install.no-triage' first, or drop --no-triage to let triage run.${c.reset}`,
+      );
+      return false;
+    }
+    skipTriage = true;
+    console.log(`${c.yellow}⚠ --no-triage: triage gate bypassed (elevation consumed, audit-logged)${c.reset}`);
+  }
+
   console.log(`${c.bold}${c.cyan}Installing tools via mise...${c.reset}\n`);
 
   return await withGovernance(
@@ -546,25 +576,30 @@ async function cmdInstall(): Promise<boolean> {
       operationType: "write",
       metadata: {
         tools: Object.keys(toolsConfig),
+        skipTriage,
       },
     },
     async () => {
-      const results = await installTools(toolsConfig);
+      const results = await installTools(toolsConfig, undefined, { skipTriage });
       let allOk = true;
 
       for (const r of results) {
         const icon =
           r.action === "failed"
             ? `${c.red}✗${c.reset}`
-            : `${c.green}✓${c.reset}`;
+            : r.action === "blocked"
+              ? `${c.yellow}⛔${c.reset}`
+              : `${c.green}✓${c.reset}`;
         const label =
           r.action === "already_ok"
             ? `${c.dim}already installed${c.reset}`
             : r.action === "installed"
               ? `${c.green}installed${c.reset}`
-              : `${c.red}failed${c.reset}`;
+              : r.action === "blocked"
+                ? `${c.yellow}blocked by triage${c.reset}`
+                : `${c.red}failed${c.reset}`;
         console.log(`  ${icon} ${r.name}  ${label}  ${c.dim}${r.detail}${c.reset}`);
-        if (r.action === "failed") allOk = false;
+        if (r.action === "failed" || r.action === "blocked") allOk = false;
       }
 
       console.log();
@@ -1274,9 +1309,46 @@ async function cmdGovernance(): Promise<boolean> {
   return true;
 }
 
+/**
+ * Governed self-upgrade: kit triages its OWN npm package before installing a new
+ * version of itself. WATERTIGHT — an untriaged kit is never installed; offline /
+ * triage-unavailable → blocked (fail-closed). The raw `npm i -g sandstream-kit`
+ * is still available to the user, but that path is outside kit's governance.
+ */
+async function selfUpgrade(): Promise<boolean> {
+  const { gateInstall } = await import("./triage-gate.js");
+  console.log(`${c.dim}Triaging sandstream-kit before upgrading itself…${c.reset}`);
+  const verdict = await gateInstall("npm:sandstream-kit");
+  if (verdict.decision === "blocked") {
+    console.error(`${c.red}✗ self-upgrade blocked: ${verdict.reason}${c.reset}`);
+    console.error(
+      `${c.dim}kit will not install an untriaged version of itself. Get online with the triage skill installed, then retry.${c.reset}`,
+    );
+    return false;
+  }
+  console.log(`${c.green}✓${c.reset} ${verdict.reason} — upgrading…\n`);
+  try {
+    const { exec } = await import("./utils/exec.js");
+    await exec("npm", ["install", "-g", "sandstream-kit@latest"], {
+      timeout: 180_000,
+      env: { ...process.env },
+    });
+    console.log(`\n${c.green}${c.bold}✓ kit upgraded${c.reset} — run ${c.bold}kit --version${c.reset} to confirm.`);
+    return true;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`${c.red}✗ npm install failed: ${msg.split("\n")[0]}${c.reset}`);
+    return false;
+  }
+}
+
 async function cmdUpgrade(): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit upgrade${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
+
+  if (hasFlag(process.argv, "--self")) {
+    return await selfUpgrade();
+  }
 
   const config = await loadConfig(resolveConfigPath());
 

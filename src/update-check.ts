@@ -1,7 +1,10 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_NAME = "sandstream-kit";
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const CACHE_DIR = join(homedir(), ".kit");
@@ -84,6 +87,37 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateInfo
   }
 }
 
+/** Current kit version from the installed package.json (sync, fail-safe). */
+export function getKitVersionSync(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8")) as {
+      version?: string;
+    };
+    return pkg.version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * Cache-only update check — NO network. For hot paths (the Claude Code hooks that
+ * run on every prompt): reads the cache the post-command banner / `kit check`
+ * already refresh, never fetches. Returns null on cache miss, error, suppression,
+ * or when current is already latest.
+ */
+export function readCachedUpdateSync(currentVersion: string): UpdateInfo | null {
+  try {
+    if (process.env.KIT_NO_UPDATE_CHECK === "1") return null;
+    const cache = JSON.parse(readFileSync(CACHE_FILE, "utf8")) as UpdateCheckCache;
+    if (cache?.latestVersion && isNewer(cache.latestVersion, currentVersion)) {
+      return { available: true, latest: cache.latestVersion, current: currentVersion };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Returns true if `latest` is strictly newer than `current` (semver comparison). */
 function isNewer(latest: string, current: string): boolean {
   try {
@@ -106,6 +140,6 @@ export function printUpdateNotice(info: UpdateInfo): void {
   const cyan = "\x1b[36m";
   console.log(
     `\n  ${dim}╰─${reset} ${yellow}Update available${reset}: ${dim}${info.current}${reset} → ${cyan}${info.latest}${reset}  ` +
-    `${dim}npm install -g ${PACKAGE_NAME}${reset}`
+    `${dim}run ${reset}${cyan}kit upgrade --self${reset}${dim} (triages before installing)${reset}`
   );
 }

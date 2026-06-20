@@ -1,11 +1,13 @@
 import type { ToolConfig } from "./config.js";
 import { checkTools, type ToolStatus } from "./check-tools.js";
+import { gateInstall, type GateVerdict } from "./triage-gate.js";
 import { exec } from "./utils/exec.js";
 
 
 export interface InstallResult {
   name: string;
-  action: "installed" | "already_ok" | "failed";
+  /** `blocked` = triage gate refused this install (watertight, fail-closed). */
+  action: "installed" | "already_ok" | "failed" | "blocked";
   detail: string;
 }
 
@@ -67,13 +69,23 @@ async function miseInstall(
 export interface InstallDeps {
   checkTools: (tools: ToolConfig) => Promise<ToolStatus[]>;
   miseInstall: (tool: string, version: string) => Promise<{ ok: boolean; detail: string }>;
+  gateInstall: (tool: string) => Promise<GateVerdict>;
 }
 
-const defaultDeps: InstallDeps = { checkTools, miseInstall };
+const defaultDeps: InstallDeps = { checkTools, miseInstall, gateInstall };
 
+/**
+ * Install missing tools via mise. WATERTIGHT: every third-party tool is run
+ * through the triage gate first; only a triage PASS (or a trusted core runtime)
+ * is installed. A blocked tool is reported as `action: "blocked"` and never
+ * touched. `opts.skipTriage` bypasses the gate and MUST only be set by a caller
+ * that has consumed an elevation (the `--no-triage` override) — it is audit-
+ * logged at the command layer.
+ */
 export async function installTools(
   tools: ToolConfig,
   deps: InstallDeps = defaultDeps,
+  opts: { skipTriage?: boolean } = {},
 ): Promise<InstallResult[]> {
   const statuses = await deps.checkTools(tools);
   const results: InstallResult[] = [];
@@ -86,6 +98,14 @@ export async function installTools(
         detail: `${status.installed} satisfies ${status.required}`,
       });
       continue;
+    }
+
+    if (!opts.skipTriage) {
+      const verdict = await deps.gateInstall(status.name);
+      if (verdict.decision === "blocked") {
+        results.push({ name: status.name, action: "blocked", detail: verdict.reason });
+        continue;
+      }
     }
 
     const { ok, detail } = await deps.miseInstall(status.name, status.required);

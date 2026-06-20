@@ -42,6 +42,17 @@ export interface HealResult {
 
 const dedupKey = (r: SecurityCheckResult): string => `${r.category}:${r.name}`;
 
+/** A tool install the triage gate refused. heal proposes it instead of running it. */
+export class TriageBlocked extends Error {
+  constructor(
+    public ref: string,
+    public reason: string,
+  ) {
+    super(reason);
+    this.name = "TriageBlocked";
+  }
+}
+
 /** A checksum/integrity mismatch is a tamper signal — never auto-healed. */
 export function isFailClosed(r: SecurityCheckResult): boolean {
   if (r.status !== "fail") return false;
@@ -56,12 +67,15 @@ export function isFailClosed(r: SecurityCheckResult): boolean {
  */
 export function safeRecipe(r: SecurityCheckResult): (() => Promise<void>) | null {
   if (isFailClosed(r)) return null;
-  // A missing scanner/tool whose suggestion is `mise use <ref>` → install it.
+  // A missing scanner/tool whose suggestion is `mise use <ref>` → install it,
+  // but ONLY through the triage gate. If triage refuses, throw TriageBlocked so
+  // heal proposes the install instead of running an untriaged binary.
   const m = r.suggestion?.match(/mise use (\S+)/);
   if (m) {
     const ref = m[1];
     return async () => {
-      await installTools({ [ref]: "latest" });
+      const [res] = await installTools({ [ref]: "latest" });
+      if (res?.action === "blocked") throw new TriageBlocked(ref, res.detail);
     };
   }
   // A .gitignore missing a sensitive pattern → patch it (idempotent, reversible).
@@ -87,10 +101,14 @@ function toGated(r: SecurityCheckResult): GatedFinding {
  * confirms a finding cleared. Bounded by `maxIterations` and a no-progress
  * guard (a safe fix that doesn't clear its finding is not retried).
  */
-export async function runHeal(opts: { dryRun?: boolean; maxIterations?: number } = {}): Promise<HealResult> {
+export async function runHeal(
+  opts: { dryRun?: boolean; maxIterations?: number; onProgress?: (msg: string) => void } = {},
+): Promise<HealResult> {
   const max = opts.maxIterations ?? 3;
+  const log = opts.onProgress ?? ((): void => undefined);
   const tried = new Set<string>();
   let gated: GatedFinding[] = [];
+  const triageGated: GatedFinding[] = []; // tool installs the triage gate refused
   let failClosed: SecurityCheckResult[] = [];
   let plannedSafe: string[] = [];
   let iterations = 0;
@@ -99,10 +117,13 @@ export async function runHeal(opts: { dryRun?: boolean; maxIterations?: number }
 
   for (let i = 0; i < max; i++) {
     iterations = i + 1;
+    log(`scanning (round ${i + 1}/${max}) — running checks, this can take a minute…`);
+    const t0 = Date.now();
     lastResults = await checkSecurity();
     await syncSecurityFindings(lastResults); // track + auto-close (fail-open)
 
     const actionable = actionableFindings(lastResults);
+    log(`  scan ${((Date.now() - t0) / 1000).toFixed(1)}s — ${actionable.length} actionable finding(s)`);
     failClosed = actionable.filter(isFailClosed);
     gated = actionable.filter((r) => classify(r) === "gated").map(toGated);
 
@@ -119,13 +140,28 @@ export async function runHeal(opts: { dryRun?: boolean; maxIterations?: number }
       break;
     }
 
+    log(`  applying ${toApply.length} safe fix(es)…`);
     for (const r of toApply) {
       tried.add(dedupKey(r));
+      log(`  • ${dedupKey(r)} → ${r.suggestion ?? "safe recipe"}`);
       try {
         await safeRecipe(r)!();
         appliedAny = true;
-      } catch {
-        // leave it — the next re-scan will still surface it
+        log(`    ✓ applied`);
+      } catch (e) {
+        if (e instanceof TriageBlocked) {
+          log(`    ⚠ triage blocked — proposing instead of installing`);
+          if (!triageGated.some((g) => g.name === r.name)) {
+            triageGated.push({
+              name: r.name,
+              issue: `${r.detail} — install blocked by triage gate`,
+              action: `${r.suggestion ?? "install the scanner"}  (triage: ${e.reason})`,
+            });
+          }
+        } else {
+          log(`    ✗ failed (will resurface on re-scan)`);
+          // leave it — the next re-scan will still surface it
+        }
       }
     }
   }
@@ -133,7 +169,10 @@ export async function runHeal(opts: { dryRun?: boolean; maxIterations?: number }
   // Confirm the final state when we changed anything (loop applies then the next
   // iteration scans; a final scan covers fixes applied in the last iteration).
   if (appliedAny && !opts.dryRun) {
+    log(`re-scanning to confirm fixes…`);
+    const t1 = Date.now();
     lastResults = await checkSecurity();
+    log(`  confirm scan ${((Date.now() - t1) / 1000).toFixed(1)}s`);
     await syncSecurityFindings(lastResults);
     const actionable = actionableFindings(lastResults);
     failClosed = actionable.filter(isFailClosed);
@@ -142,5 +181,6 @@ export async function runHeal(opts: { dryRun?: boolean; maxIterations?: number }
 
   const finalActionable = new Set(actionableFindings(lastResults).map(dedupKey));
   const healed = [...tried].filter((k) => !finalActionable.has(k));
-  return { healed, gated, failClosed, plannedSafe, iterations };
+  // triage-blocked tool installs are surfaced as gated proposals (never auto-run).
+  return { healed, gated: [...gated, ...triageGated], failClosed, plannedSafe, iterations };
 }

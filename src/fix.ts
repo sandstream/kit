@@ -58,7 +58,10 @@ export async function autoFix(options: FixOptions): Promise<FixResult[]> {
       results.push({
         category: "tool",
         name: r.name,
-        action: r.action === "installed" ? "fixed" : r.action,
+        // A triage-blocked install is not a failure — it needs a human triage
+        // decision (review + elevate, or fix the package), so surface it manual.
+        action:
+          r.action === "installed" ? "fixed" : r.action === "blocked" ? "needs_manual" : "failed",
         detail: r.detail,
       });
     }

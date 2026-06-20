@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-06-20
+
+### Added
+- **The triage gate: kit installs nothing untriaged — including itself.** Every install kit performs now passes through one watertight, fail-closed gate (`src/triage-gate.ts`). A third-party tool (a mise ref carrying a scheme — `aqua:owner/repo`, `npm:pkg`, `pipx:pkg`) is mapped to a `kit triage` target and installed **only on an explicit `TRIAGE PASSED`**. A core language runtime (a bare mise name like `node`/`pnpm`, installed by mise with checksum verification) is the trusted base and passes without a reputation triage. Everything else **blocks**: a triage WARN, a FAIL, triage offline, the triage script missing, or a ref kit cannot map — "cannot verify" is treated as "do not install", never "probably fine". This closes a real hole: `kit heal` previously auto-installed a missing scanner (e.g. trivy) via `mise install` with no triage at all. Wired into `installTools`, so `kit install` / `kit fix` / `kit heal` are all governed; `kit heal` demotes a tool it cannot install through the gate to a GATED proposal (never bypasses). The single bypass is `kit install --no-triage`, which must hold a one-shot elevation (`kit auth elevate --scope tools.install.no-triage`) and is audit-logged.
+- **`kit upgrade --self` — governed self-update.** kit triages the `sandstream-kit` npm package before installing a new version of itself, and installs **only on a triage PASS** (offline / triage-unavailable → refused). The stale-version notices now point here instead of raw `npm i -g`.
+- **Opt-in `[update] auto`.** When set, a newer kit found during `kit check` triggers the governed self-upgrade automatically — same gate, still fail-closed (never installs on triage fail). Off by default (auto-installing stays a deliberate trust decision). This refines the 1.9.0 stance ("auto-update deliberately NOT added"): auto-update now exists, but only through triage.
+- **The stale-kit notice now reaches Claude Code, not just a terminal banner.** The memory hooks (`kit memory hook session-start` / `user-prompt-submit`) inject an actionable "kit X → Y — run `kit upgrade --self`" line into the agent's context when a newer version is cached — so the prompt to update appears where the work happens. It is cache-only (no network on the per-prompt hot path; the cache is refreshed by `kit check` / the post-command banner) and fail-open.
+
+### Fixed
+- **`kit heal` looked frozen during long scans.** `runHeal` re-ran the full security suite (trivy / semgrep / socket / trufflehog / bumblebee) up to four times with zero output, so a multi-minute run appeared hung. It now streams progress to stderr — per-round "scanning…" with elapsed time, each safe fix as it is applied, and the confirm re-scan — keeping stdout clean for `--agent`'s machine-readable proposals.
+
 ## [1.9.0] - 2026-06-20
 
 ### Added

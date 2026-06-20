@@ -6,6 +6,7 @@ function makeDeps(overrides: Partial<InstallDeps> = {}): InstallDeps {
   return {
     checkTools: async () => [],
     miseInstall: async () => ({ ok: true, detail: "" }),
+    gateInstall: async (tool) => ({ tool, decision: "pass", reason: "stub" }),
     ...overrides,
   };
 }
@@ -94,7 +95,7 @@ describe("installTools", () => {
   it("handles multiple tools with mixed results", async () => {
     let callCount = 0;
     const deps = makeDeps({
-      checkTools: async (tools) => {
+      checkTools: async () => {
         callCount++;
         if (callCount === 1) {
           // Initial check: node ok, deno missing
@@ -114,6 +115,43 @@ describe("installTools", () => {
     assert.equal(results.length, 2);
     assert.equal(results[0].action, "already_ok");
     assert.equal(results[1].action, "installed");
+  });
+
+  it("triage-blocked tool is NOT installed (watertight gate)", async () => {
+    let miseCalled = false;
+    const deps = makeDeps({
+      checkTools: async () => [{ name: "aqua:aquasecurity/trivy", required: "latest", installed: null, ok: false }],
+      gateInstall: async (tool) => ({ tool, decision: "blocked", reason: "triage did not pass (repo ...): typosquat" }),
+      miseInstall: async () => {
+        miseCalled = true;
+        return { ok: true, detail: "installed" };
+      },
+    });
+
+    const results = await installTools({ "aqua:aquasecurity/trivy": "latest" }, deps);
+
+    assert.equal(results[0].action, "blocked");
+    assert.match(results[0].detail, /typosquat/);
+    assert.equal(miseCalled, false); // gate blocked before mise ran
+  });
+
+  it("skipTriage bypasses the gate (elevation-gated override path)", async () => {
+    let gateCalled = false;
+    const deps = makeDeps({
+      checkTools: async (tools) =>
+        Object.keys(tools).map((name) => ({ name, required: "latest", installed: null, ok: false })),
+      gateInstall: async (tool) => {
+        gateCalled = true;
+        return { tool, decision: "blocked", reason: "would block" };
+      },
+      miseInstall: async () => ({ ok: true, detail: "installed" }),
+    });
+
+    const results = await installTools({ "aqua:x/y": "latest" }, deps, { skipTriage: true });
+
+    assert.equal(gateCalled, false); // gate skipped entirely
+    // post-install verify re-checks; with stub checkTools it stays not-ok → failed, but mise DID run
+    assert.notEqual(results[0].action, "blocked");
   });
 });
 
