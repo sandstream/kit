@@ -182,6 +182,59 @@ of which runtime consumes it, passes the same gates:
 
 No source, no registry, and no runtime is trusted by fiat.
 
+## Discovery (search, then add or author)
+
+When a capability is missing, kit finds a skill across the federated registries.
+If nothing exists anywhere, the same flow falls through to authoring a new one, and
+optionally publishing it back so the next person's search finds it.
+
+```
+need (agent, LLM)
+ -> kit skills search <q>            (kit, deterministic, federated)
+    |- HIT:  pick -> kit skills add  -> triage -> lock -> place -> install
+    \- MISS: kit skills new <name>   (kit, deterministic scaffold)
+             -> author               (Claude / Cowork, LLM)
+             -> kit skills validate  (kit, deterministic: frontmatter, secret-scan, lint)
+             -> kit skills add ./skills/<name>  -> lock -> place
+             -> kit skills publish    (kit delegates to GitHub / a registry)
+                -> now discoverable in the NEXT person's `kit skills search`
+```
+
+### `kit skills search`
+
+A deterministic, federated search. Each `SkillSource` adapter gains a `search(query)`
+verb alongside `resolve`/`fetch`; the command fans out across the configured sources
+and returns ranked candidates (name, source, description). Read-only: it discovers, it
+does not install. Per-registry search capability varies and is verified per adapter:
+the GitHub adapter can search `SKILL.md` repos universally; clawhub / skills.sh /
+agentskills use their own search APIs, or fall back to list-and-filter.
+
+### The zero-LLM boundary (the load-bearing design point)
+
+Detecting that a skill is *needed* is LLM judgment and is therefore NOT kit's job. The
+division mirrors the rest of kit (kit provides the deterministic capability; the agent
+decides when to use it):
+
+| Step | Who |
+| --- | --- |
+| Detect the gap ("I need a skill for X") | the agent (LLM) |
+| `kit skills search` | kit (deterministic) |
+| Author the skill body | Claude / Cowork (LLM) |
+| scaffold / validate / lock / place / publish | kit (deterministic) |
+
+So `kit skills search` is exposed as an MCP tool: when an agent realizes mid-task it
+lacks a capability, it calls the tool, kit returns candidates, and the agent or user
+picks. kit never guesses what you need and never writes the content. It finds, vets,
+locks, places, and publishes.
+
+### The virtuous loop
+
+A skill authored to fill a gap can be published back to a registry (delegated, kit
+does not host it), making it discoverable for everyone. Gap -> authored skill ->
+published -> discoverable becomes a first-class workflow rather than something only a
+power user rigs by hand. `steipete/agent-scripts` is this loop already running in the
+wild: gaps hit, own `SKILL.md` skills authored, published to skills.sh, now findable.
+
 ## Authoring loop (create your own skills with Claude)
 
 Clear division of labor: **Claude creates, kit governs.**
