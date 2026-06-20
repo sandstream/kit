@@ -3,17 +3,40 @@
  * Wraps the Python triage script and integrates with kit's check-security system.
  */
 
-import { access } from "node:fs/promises";
-import { resolve } from "node:path";
+import { access, cp, mkdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { triageNpmSandbox, type SandboxResult } from "./triage-sandbox.js";
 import { exec } from "./utils/exec.js";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const TRIAGE_SCRIPT = resolve(
-  process.env.HOME || "~",
-  ".claude/skills/triage/scripts/triage.py"
-);
+/** Where kit looks for the triage skill at runtime. */
+const TRIAGE_SKILL_DIR = resolve(homedir(), ".claude/skills/triage");
+const TRIAGE_SCRIPT = resolve(TRIAGE_SKILL_DIR, "scripts/triage.py");
+/** The copy kit ships in its own package (published via package.json "files"). */
+const BUNDLED_TRIAGE_SKILL = resolve(__dirname, "..", "skills", "triage");
+
+/**
+ * Self-bootstrap the gate: copy the triage skill kit ships with into
+ * ~/.claude/skills/triage. Copying kit's OWN bundled, provenance-published asset
+ * is not a third-party install, so it does not itself need triage. Returns true
+ * if the script is in place afterwards.
+ */
+export async function installBundledTriageSkill(
+  targetDir: string = TRIAGE_SKILL_DIR,
+): Promise<boolean> {
+  try {
+    await mkdir(dirname(targetDir), { recursive: true });
+    await cp(BUNDLED_TRIAGE_SKILL, targetDir, { recursive: true });
+    await access(resolve(targetDir, "scripts/triage.py"));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export type TriageType = "docker" | "npm" | "pip" | "repo" | "skill" | "all" | "tools";
 
@@ -27,14 +50,16 @@ export interface TriageResult {
 }
 
 /**
- * Check if the triage script exists
+ * Ensure the triage script is present. If it is missing, self-bootstrap from the
+ * copy kit ships, so the watertight gate works on a fresh machine without a
+ * manual "copy the triage skill" step.
  */
 async function ensureTriageScript(): Promise<boolean> {
   try {
     await access(TRIAGE_SCRIPT);
     return true;
   } catch {
-    return false;
+    return installBundledTriageSkill();
   }
 }
 

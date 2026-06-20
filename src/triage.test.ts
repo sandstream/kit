@@ -1,6 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { runTriage, parseTriageOutput, listTriageTools } from "./triage.js";
+import { mkdtemp, rm, readFile, access, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import {
+  runTriage,
+  parseTriageOutput,
+  listTriageTools,
+  installBundledTriageSkill,
+} from "./triage.js";
 
 describe("parseTriageOutput", () => {
   it("extracts health score, critical, warnings, and section headings", () => {
@@ -77,5 +85,37 @@ describe("listTriageTools", () => {
     assert.equal(result.target, "");
     assert.equal(typeof result.passed, "boolean");
     assert.equal(typeof result.output, "string");
+  });
+});
+
+describe("installBundledTriageSkill (self-bootstrapping the gate)", () => {
+  it("copies the bundled triage skill into a target dir", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "kit-triage-"));
+    const target = resolve(dir, ".claude/skills/triage");
+    try {
+      const ok = await installBundledTriageSkill(target);
+      assert.equal(ok, true);
+      await access(resolve(target, "scripts/triage.py"));
+      const skill = await readFile(resolve(target, "SKILL.md"), "utf8");
+      assert.match(skill, /name:\s*triage/);
+      const py = await readFile(resolve(target, "scripts/triage.py"), "utf8");
+      assert.match(py, /TRIAGE PASSED/);
+      assert.match(py, /Health score:/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false when the target cannot be created", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "kit-triage-"));
+    try {
+      const filePath = join(dir, "afile");
+      await writeFile(filePath, "x");
+      // installing "under" a regular file cannot create the dir tree -> false
+      const ok = await installBundledTriageSkill(join(filePath, "triage"));
+      assert.equal(ok, false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

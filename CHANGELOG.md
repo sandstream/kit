@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-06-20
+
+### Added
+- **kit ships and self-installs its own triage skill, so the gate works out of the box.** The watertight install gate (1.10.0) shells to `~/.claude/skills/triage/scripts/triage.py`, but kit never provided that skill: on a fresh machine the script was absent, so the gate (and `kit triage`) fell back to fail-closed and blocked every install. kit now bundles a deterministic, zero-LLM, stdlib-only triage skill (`skills/triage/`, shipped via the package `files` list) and self-bootstraps it. The first time the gate or `kit triage` runs and the script is missing, kit copies its own bundled, provenance-published copy into `~/.claude/skills/triage/` (copying kit's own shipped asset is not a third-party install, so it needs no triage). The script does real per-type checks: npm (existence, deprecation, age, maintainer count), pip (yanked, age, license), repo (archived/disabled, maintenance, license, honoring `GITHUB_TOKEN` for rate limits), docker (freshness, publisher), and skill (local `SKILL.md` frontmatter plus a secret scan). It prints `Health score: N/100`, `Critical issues: N`, `Warnings: N`, and `TRIAGE PASSED` only when there are zero critical issues. Warnings are scored but do not, by themselves, withhold a pass. Fail-closed: an unreachable registry (offline, timeout, HTTP error) is a critical ("cannot verify"), so the pass is withheld and kit blocks the install.
+
 ## [1.10.0] - 2026-06-20
 
 ### Added
