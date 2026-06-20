@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-06-20
+
 ### Added
 - **`kit check` flags a stale kit version.** A newer published kit now surfaces as a warn in `kit check` ("kit X → Y available — run `kit upgrade`"), not just the passive banner — so a stale CLI carrying already-fixed bugs (e.g. the `kit memory search` crash fixed in 1.6.1) is visible during a normal health check. Gated by a new `[update] check` config (default true; also honors `KIT_NO_UPDATE_CHECK=1` and self-skips in CI). Reuses the existing update-check + cache, no extra network in CI. (Auto-update deliberately NOT added: auto-trusting whatever npm serves next is at odds with kit's pin-and-verify posture — use `kit upgrade` deliberately.)
 
