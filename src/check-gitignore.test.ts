@@ -127,6 +127,27 @@ describe("patchGitignore", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("ignores .kit contents via .kit/* and re-includes the curated shared tier", async () => {
+    const dir = tmpRepo();
+    try {
+      await patchGitignore(dir);
+      const text = readFileSync(join(dir, ".gitignore"), "utf-8");
+      // Must use the descendable `.kit/*` form, never the wholesale `.kit/`
+      // (which would make the `!.kit/shared/` negation a no-op).
+      const lines = text.split("\n").map((l) => l.split("#")[0].trim());
+      assert.ok(lines.includes(".kit/*"), "expected .kit/* contents-ignore");
+      assert.ok(!lines.includes(".kit/"), "must not emit wholesale .kit/");
+      assert.ok(lines.includes("!.kit/shared/"), "expected shared re-include");
+      // Order matters: the negation must come AFTER .kit/*.
+      assert.ok(
+        lines.indexOf("!.kit/shared/") > lines.indexOf(".kit/*"),
+        "negation must follow .kit/*",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("findCommittedSensitive", () => {
