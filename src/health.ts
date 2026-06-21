@@ -73,3 +73,12 @@ export function selectSensors(ctx: HealthCtx): HealthSensor[] {
 export const defaultHealthDeps: HealthDeps = {
   runCli: (command, args) => execFileNoThrow(command, args, { timeout: 15_000 }),
 };
+
+const MARK: Record<HealthStatus, string> = { green: "✓", red: "✗", unknown: "?" };
+
+/** Pure human formatter — returns lines + red count (CLI adds color). */
+export function formatHealth(findings: HealthFinding[]): { lines: string[]; redCount: number } {
+  const lines = findings.map((f) => `${MARK[f.status]} [${f.sensor}] ${f.title}  (${f.source})`);
+  const redCount = findings.filter((f) => f.status === "red").length;
+  return { lines, redCount };
+}
