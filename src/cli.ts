@@ -3980,6 +3980,51 @@ async function cmdStatus(): Promise<boolean> {
   return true;
 }
 
+async function cmdHealth(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  const config = await loadConfig(resolveConfigPath());
+
+  return await withGovernance(
+    config,
+    { operation: "health", operationType: "read", metadata: {} },
+    async () => {
+      const { runHealth, selectSensors, defaultHealthDeps, formatHealth } = await import("./health.js");
+      const { syncHealthFindings } = await import("./health-track.js");
+      const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
+
+      // git remote presence drives sensor selection
+      const remote = await execFileNoThrow("git", ["remote"], { timeout: 5_000 });
+      const ctx = {
+        cwd: process.cwd(),
+        config,
+        gitRemote: remote.ok && remote.stdout.trim().length > 0,
+      };
+
+      const sensors = selectSensors(ctx);
+      const findings = await runHealth(ctx, sensors, defaultHealthDeps);
+      await syncHealthFindings(findings); // mirror red into PAL (fail-open)
+
+      if (jsonMode) {
+        const redCount = findings.filter((f) => f.status === "red").length;
+        console.log(JSON.stringify({ ok: redCount === 0, findings }, null, 2));
+        return redCount === 0;
+      }
+
+      const { lines, redCount } = formatHealth(findings);
+      console.log(`${c.bold}kit health${c.reset}  ${c.dim}${sensors.length} sensor(s)${c.reset}`);
+      if (findings.length === 0) {
+        console.log(`  ${c.dim}no connected external systems detected${c.reset}`);
+      }
+      for (const line of lines) {
+        const color = line.startsWith("✗") ? c.red : line.startsWith("?") ? c.yellow : c.green;
+        console.log(`  ${color}${line}${c.reset}`);
+      }
+      if (redCount > 0) console.log(`${c.red}${redCount} red${c.reset}`);
+      return redCount === 0;
+    },
+  );
+}
+
 async function cmdWhoami(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
 
@@ -4717,6 +4762,7 @@ async function main(): Promise<void> {
         status: cmdStatus,
         whoami: cmdWhoami,
         check: cmdCheck,
+        health: cmdHealth,
         init: cmdInit,
         upgrade: cmdUpgrade,
         install: cmdInstall,

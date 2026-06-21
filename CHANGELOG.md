@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-06-21
+
+### Added
+- **`kit health` — deterministic external-system health probe (kit sentinel, layer 1).** A new read-only command that probes the project's connected external systems and surfaces failing ones, mirroring red findings into the PAL ledger under a new `health` source tag so they appear cross-session and auto-close when the system goes green again. Account-verified: it records which org/repo it checked and reports `unknown` rather than a false `green` when it cannot confirm the account or a probe errors. First sensor is GitHub Actions — flags workflows whose latest completed run failed, excluding disabled workflows (so a stale failure from a dead workflow is not reported). `--json` for machine output; the command is wrapped in the governance read path. Sensors are derived from the project's connected services; more (Vercel, Sentry, Supabase, Resend, TLS cert) land incrementally. Design and plan are in `docs/specs/2026-06-21-kit-sentinel-design.md` and `docs/plans/2026-06-21-kit-health-v1a.md`.
+
 ## [1.11.1] - 2026-06-20
 
 ### Fixed
