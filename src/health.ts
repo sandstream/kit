@@ -1,5 +1,6 @@
 import type { kitConfig } from "./config.js";
-import type { ExecResult } from "./utils/execFileNoThrow.js";
+import { execFileNoThrow, type ExecResult } from "./utils/execFileNoThrow.js";
+import { githubActionsSensor } from "./health-sensors/github-actions.js";
 
 export type HealthStatus = "green" | "red" | "unknown";
 export type HealthClass = "code" | "human" | "noise";
@@ -56,3 +57,19 @@ export async function runHealth(
   );
   return all.flat();
 }
+
+export const HEALTH_SENSORS: HealthSensor[] = [githubActionsSensor];
+
+/** Returns the sensors whose underlying service the project is connected to. */
+export function selectSensors(ctx: HealthCtx): HealthSensor[] {
+  return HEALTH_SENSORS.filter((s) => {
+    if (s.id === "github-actions") {
+      return ctx.gitRemote === true || ctx.config.context?.github !== undefined;
+    }
+    return false;
+  });
+}
+
+export const defaultHealthDeps: HealthDeps = {
+  runCli: (command, args) => execFileNoThrow(command, args, { timeout: 15_000 }),
+};

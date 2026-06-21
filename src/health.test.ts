@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { runHealth, type HealthSensor, type HealthCtx, type HealthDeps } from "./health.js";
+import { selectSensors, defaultHealthDeps, HEALTH_SENSORS } from "./health.js";
 
 const ctx: HealthCtx = { cwd: "/tmp/repo", config: {} };
 const deps: HealthDeps = { runCli: async () => ({ stdout: "", stderr: "", exitCode: 0, ok: true }) };
@@ -21,5 +22,22 @@ describe("runHealth", () => {
     assert.equal(out[0].status, "unknown");
     assert.equal(out[0].sensor, "boom");
     assert.match(out[0].detail ?? "", /network down/);
+  });
+});
+
+describe("selectSensors", () => {
+  it("includes github-actions when a git remote is present", () => {
+    const sel = selectSensors({ cwd: "/tmp/repo", config: {}, gitRemote: true });
+    assert.ok(sel.some((s) => s.id === "github-actions"));
+  });
+
+  it("excludes github-actions with no git remote and no github context", () => {
+    const sel = selectSensors({ cwd: "/tmp/repo", config: {}, gitRemote: false });
+    assert.equal(sel.some((s) => s.id === "github-actions"), false);
+  });
+
+  it("registry is non-empty and defaultHealthDeps exposes runCli", () => {
+    assert.ok(HEALTH_SENSORS.length >= 1);
+    assert.equal(typeof defaultHealthDeps.runCli, "function");
   });
 });
