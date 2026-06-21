@@ -8,6 +8,12 @@ For AI agents and humans. Manages tools, auth, secrets, and project setup. Zero 
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/sandstream)
 
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/sandstream/kit/badge)](https://securityscorecards.dev/viewer/?uri=github.com/sandstream/kit)
+[![Security scan](https://github.com/sandstream/kit/actions/workflows/security.yml/badge.svg)](https://github.com/sandstream/kit/actions/workflows/security.yml)
+[![Signed releases](https://img.shields.io/badge/releases-cosign%20signed-blue?logo=sigstore&logoColor=white)](#security-posture)
+[![SBOM](https://img.shields.io/badge/SBOM-CycloneDX-brightgreen)](#security-posture)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 ## Quick start
 
 **Prerequisites:** Node.js 22+, git, and [mise](https://mise.jdx.dev) for installing tools (`brew install mise`, or `curl https://mise.run | sh`).
@@ -94,6 +100,28 @@ with them. It runs them, folds in their results, and adds the layer they do not 
 
 Use kit **with** your scanners. It is the connective tissue that turns them into one
 local-first, agent-native gate.
+
+## Security posture
+
+kit is a security tool, so it holds itself to the bar it sets. The receipts:
+
+- **kit scans kit.** Every push runs CodeQL, Semgrep, Trivy, gitleaks, `npm audit`, OpenSSF
+  Scorecard — and `kit check` itself (dogfooding) in CI.
+- **Signed, attestable releases.** Docker images are keyless-signed with cosign and ship a
+  CycloneDX **SBOM**; verify before trusting (see [Run via Docker](#run-via-docker)).
+- **Coordinated disclosure.** Report a vulnerability via [SECURITY.md](SECURITY.md) — it
+  carries the reporting path, a threat model + data-flow, an OWASP Top 10 assessment, and an
+  incident-response plan with severity SLAs.
+- **Secrets never live in the repo.** kit keeps credentials in a vault, materializes
+  `.env.local` locally (gitignored), and scans code, staged diffs, git history and its own
+  memory store for leaked keys. A stolen *repo* should contain no live secrets.
+- **Supply chain is gated, not trusted.** `kit triage` runs before any install — fail-closed,
+  "installs nothing untriaged" (aligns with OpenSSF S2C2F).
+- **Local-first, zero LLM, no telemetry.** Your code never leaves the machine.
+
+> At-rest note: kit's local memory store (`~/.kit/memory.db`, `0600`) relies on OS full-disk
+> encryption (FileVault / LUKS / BitLocker) today; application-level at-rest encryption is
+> tracked as a follow-up.
 
 ## Solution
 
