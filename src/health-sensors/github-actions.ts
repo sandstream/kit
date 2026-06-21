@@ -19,16 +19,37 @@ export function parseGitHubRuns(json: string): GhRun[] {
   }
 }
 
-/** Latest completed run per workflow name; included when that run failed. */
-export function failingWorkflows(runs: GhRun[]): { name: string; createdAt: string }[] {
+/** Names of workflows whose state is "active" (i.e. not disabled). */
+export function activeWorkflowNames(json: string): Set<string> {
+  try {
+    const arr = JSON.parse(json) as { name: string; state: string }[];
+    if (!Array.isArray(arr)) return new Set();
+    return new Set(arr.filter((w) => w.state === "active").map((w) => w.name));
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Latest completed run per workflow name; included when that run failed.
+ * When `active` is a non-empty set, workflows not in it (disabled) are excluded
+ * so a stale failure from a dead workflow is not reported. An empty/omitted set
+ * means "states unknown" and applies no filter (fail open to reporting).
+ */
+export function failingWorkflows(
+  runs: GhRun[],
+  active?: Set<string>,
+): { name: string; createdAt: string }[] {
   const latest = new Map<string, GhRun>();
   for (const r of runs) {
     if (r.status !== "completed") continue;
     const cur = latest.get(r.name);
     if (!cur || r.createdAt > cur.createdAt) latest.set(r.name, r);
   }
+  const filterDisabled = active !== undefined && active.size > 0;
   return [...latest.values()]
     .filter((r) => FAIL_CONCLUSIONS.has(r.conclusion))
+    .filter((r) => !filterDisabled || active.has(r.name))
     .map((r) => ({ name: r.name, createdAt: r.createdAt }));
 }
 
@@ -86,7 +107,12 @@ export const githubActionsSensor: HealthSensor = {
       ];
     }
 
-    const failing = failingWorkflows(parseGitHubRuns(listRes.stdout));
+    // Workflow states so a disabled workflow's stale failure is not flagged.
+    // If this call fails, `active` stays empty → no filtering (fail open).
+    const wfRes = await deps.runCli("gh", ["workflow", "list", "--json", "name,state"]);
+    const active = wfRes.ok ? activeWorkflowNames(wfRes.stdout) : new Set<string>();
+
+    const failing = failingWorkflows(parseGitHubRuns(listRes.stdout), active);
     if (failing.length === 0) {
       return [
         {
