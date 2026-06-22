@@ -4,7 +4,9 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { writeFile, access, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "node:path";
-import { loadConfig, type kitConfig } from "./config.js";
+import { loadConfig, type kitConfig, type SecretKeyConfig } from "./config.js";
+import { createInterface } from "node:readline/promises";
+import { validateSecrets, summarizeValidation } from "./secrets-validate.js";
 import { checkTools } from "./check-tools.js";
 import { checkServices } from "./check-services.js";
 import { checkSecrets } from "./check-secrets.js";
@@ -115,7 +117,7 @@ import { runDoctor } from "./doctor.js";
 import { detectStack } from "./stack-detector.js";
 import { generateToml, parseEnvTemplateKeys } from "./toml-generator.js";
 import { vaultMeta, detectSecretStore } from "./vault-meta.js";
-import { vaultCliInstalled } from "./secret-backends.js";
+import { vaultCliInstalled, resolveViaBackend } from "./secret-backends.js";
 import { createPlugin } from "./create-plugin.js";
 import { cmdPlugin } from "./plugins-cli.js";
 import { cloneRepository } from "./clone.js";
@@ -802,10 +804,77 @@ async function cmdLogin(): Promise<boolean> {
   );
 }
 
+/**
+ * `kit secrets validate [--fix] [--auto]` — verify every declared key resolves
+ * to a non-empty value in the configured backend. Read-only by default; exits
+ * non-zero when keys are missing/unfixable. `--fix` prompts interactively,
+ * `--auto` pulls from .env.template. Writes go through the gated backend writer.
+ */
+async function cmdSecretsValidate(): Promise<boolean> {
+  const config = await loadConfig(resolveConfigPath());
+  if (!config.secrets) {
+    console.log(`${c.dim}No secrets configured in ${KIT_FILE}${c.reset}`);
+    return true;
+  }
+  const fix = hasFlag(process.argv, "--fix");
+  const auto = hasFlag(process.argv, "--auto");
+
+  // Real availability check: env vars locally, everything else via its backend.
+  const checkAvailability = async (
+    key: string,
+    source: SecretKeyConfig["source"],
+    cfg: SecretKeyConfig,
+  ): Promise<boolean> => {
+    if (source === "env") return Boolean(process.env[key]);
+    if (source === "config") return Boolean(cfg.value);
+    const r = await resolveViaBackend(key, cfg, config.secrets?.infisical);
+    return r.resolved && Boolean(r.value);
+  };
+
+  const rl = fix ? createInterface({ input: process.stdin, output: process.stdout }) : null;
+  const prompt = rl
+    ? async (key: string): Promise<string | null> => {
+        const answer = (await rl.question(`  ${c.cyan}${key}${c.reset} value (blank to skip): `)).trim();
+        return answer.length > 0 ? answer : null;
+      }
+    : undefined;
+
+  console.log(`${c.bold}${c.cyan}kit secrets validate${c.reset}`);
+  try {
+    const results = await validateSecrets(config, { fix, auto, prompt }, checkAvailability);
+    for (const r of results) {
+      const icon =
+        r.status === "present" || r.status === "fixed"
+          ? `${c.green}✓${c.reset}`
+          : r.status === "missing"
+            ? `${c.red}✗${c.reset}`
+            : `${c.yellow}⚠${c.reset}`;
+      console.log(`  ${icon} ${r.key} ${c.dim}(${r.source})${c.reset}${r.detail ? ` — ${r.detail}` : ""}`);
+    }
+    const s = summarizeValidation(results);
+    const tail = [
+      s.missing ? `${s.missing} missing` : "",
+      s.unfixable ? `${s.unfixable} unfixable` : "",
+      s.fixed ? `${s.fixed} fixed` : "",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    console.log(
+      `\n${s.ok ? c.green : c.red}${s.present + s.fixed}/${s.total} resolvable${c.reset}${tail ? ` ${c.dim}(${tail})${c.reset}` : ""}`,
+    );
+    return s.ok;
+  } finally {
+    rl?.close();
+  }
+}
+
 async function cmdSecrets(): Promise<boolean> {
   // Route subcommand: kit secrets sync [--target=...] [--dry-run]
   if (process.argv[3] === "sync") {
     return cmdSecretsSync();
+  }
+  if (process.argv[3] === "validate") {
+    return cmdSecretsValidate();
   }
   if (process.argv[3] === "migrate") {
     return cmdSecretsMigrate();

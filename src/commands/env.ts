@@ -5,8 +5,9 @@ import { promptConfirm } from "../utils/prompt.js";
 import { inspectEnv } from "../env-inspect.js";
 import { isNonInteractive } from "../environment.js";
 import { c } from "../utils/colors.js";
-import { hasFlag } from "../utils/flags.js";
+import { hasFlag, flagValue } from "../utils/flags.js";
 import { resolveConfigPath } from "../cli-shared.js";
+import { diffEnvFiles } from "../env-diff.js";
 
 async function cmdEnvList(): Promise<boolean> {
   let config: kitConfig;
@@ -121,12 +122,42 @@ async function cmdEnvCurrent(): Promise<boolean> {
   return true;
 }
 
+/**
+ * `kit env diff --compare <env>` — surface drift between the local .env.local
+ * and a target env file (.env.<env>). Values are never printed — only key
+ * presence and short value hashes — so it is safe to run anywhere.
+ */
+async function cmdEnvDiff(): Promise<boolean> {
+  const args = process.argv.slice(2);
+  const target = flagValue(args, "--compare");
+  if (!target) {
+    console.error(`${c.red}Usage: kit env diff --compare <${KNOWN_ENVS.join("|")}|name>${c.reset}`);
+    return false;
+  }
+  const a = ".env.local";
+  const b = `.env.${target}`;
+  const res = await diffEnvFiles(a, b);
+  console.log(`${c.bold}${c.cyan}kit env diff${c.reset} ${c.dim}(${a} vs ${b})${c.reset}`);
+  for (const k of res.onlyInA) console.log(`  ${c.yellow}- ${k}${c.reset} ${c.dim}only in ${a}${c.reset}`);
+  for (const k of res.onlyInB) console.log(`  ${c.green}+ ${k}${c.reset} ${c.dim}only in ${b}${c.reset}`);
+  for (const ch of res.changed)
+    console.log(`  ${c.yellow}~ ${ch.key}${c.reset} ${c.dim}(${ch.aHash} → ${ch.bHash})${c.reset}`);
+  const drift = res.onlyInA.length + res.onlyInB.length + res.changed.length;
+  console.log(
+    drift === 0
+      ? `  ${c.green}✓ no drift${c.reset} ${c.dim}(${res.identicalCount} identical)${c.reset}`
+      : `\n  ${c.dim}${drift} differing, ${res.identicalCount} identical${c.reset}`,
+  );
+  return true;
+}
+
 export async function cmdEnv(): Promise<boolean> {
   const args = process.argv.slice(2); // includes "env"
-  // Route subcommand: kit env list / switch / current / validate
+  // Route subcommand: kit env list / switch / current / diff
   if (args[1] === "list") return cmdEnvList();
   if (args[1] === "switch") return cmdEnvSwitch();
   if (args[1] === "current") return cmdEnvCurrent();
+  if (args[1] === "diff") return cmdEnvDiff();
 
   const showValues = hasFlag(args, "--show-values");
   const missingOnly = hasFlag(args, "--missing");
