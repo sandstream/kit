@@ -260,6 +260,8 @@ export interface ContextConfig {
   gcloud?: { account?: string; project?: string; config?: string; region?: string };
   vercel?: { team?: string; project?: string };
   github?: { org?: string; remote?: string };
+  gitlab?: { group?: string; remote?: string };
+  bitbucket?: { workspace?: string; remote?: string };
   git?: { email?: string };
   npm?: { registry?: string };
 }
@@ -500,6 +502,14 @@ const kitConfigSchema = z
           .optional(),
         github: z
           .object({ org: z.string().optional(), remote: z.string().optional() })
+          .passthrough()
+          .optional(),
+        gitlab: z
+          .object({ group: z.string().optional(), remote: z.string().optional() })
+          .passthrough()
+          .optional(),
+        bitbucket: z
+          .object({ workspace: z.string().optional(), remote: z.string().optional() })
           .passthrough()
           .optional(),
         git: z.object({ email: z.string().optional() }).passthrough().optional(),

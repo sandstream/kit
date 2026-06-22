@@ -32,6 +32,8 @@ export interface LiveContext {
   gcloud?: { account: string | null; project: string | null };
   git?: { email: string | null };
   github?: { org: string | null; remote: string | null };
+  gitlab?: { group: string | null; remote: string | null };
+  bitbucket?: { workspace: string | null; remote: string | null };
   npm?: { registry: string | null };
   vercel?: { orgId: string | null; projectId: string | null };
 }
@@ -62,6 +64,10 @@ const FIELD_SPECS: {
   { tool: "git", field: "email", declared: (d) => d.git?.email, live: (l) => l.git?.email ?? null },
   { tool: "github", field: "org", declared: (d) => d.github?.org, live: (l) => l.github?.org ?? null },
   { tool: "github", field: "remote", declared: (d) => d.github?.remote, live: (l) => l.github?.remote ?? null },
+  { tool: "gitlab", field: "group", declared: (d) => d.gitlab?.group, live: (l) => l.gitlab?.group ?? null },
+  { tool: "gitlab", field: "remote", declared: (d) => d.gitlab?.remote, live: (l) => l.gitlab?.remote ?? null },
+  { tool: "bitbucket", field: "workspace", declared: (d) => d.bitbucket?.workspace, live: (l) => l.bitbucket?.workspace ?? null },
+  { tool: "bitbucket", field: "remote", declared: (d) => d.bitbucket?.remote, live: (l) => l.bitbucket?.remote ?? null },
   { tool: "npm", field: "registry", declared: (d) => d.npm?.registry, live: (l) => l.npm?.registry ?? null },
   { tool: "vercel", field: "team(orgId)", declared: (d) => d.vercel?.team, live: (l) => l.vercel?.orgId ?? null },
   { tool: "vercel", field: "project(projectId)", declared: (d) => d.vercel?.project, live: (l) => l.vercel?.projectId ?? null },
@@ -102,6 +108,14 @@ export function suggestContextToml(live: LiveContext): string {
     ["org", live.github?.org, "from origin remote — authoritative"],
     ["remote", live.github?.remote, ""],
   ]);
+  emit("[context.gitlab]", [
+    ["group", live.gitlab?.group, "from origin remote — authoritative"],
+    ["remote", live.gitlab?.remote, ""],
+  ]);
+  emit("[context.bitbucket]", [
+    ["workspace", live.bitbucket?.workspace, "from origin remote — authoritative"],
+    ["remote", live.bitbucket?.remote, ""],
+  ]);
   emit("[context.vercel]", [
     ["team", live.vercel?.orgId, "orgId from .vercel/project.json — authoritative"],
     ["project", live.vercel?.projectId, "projectId"],
@@ -122,7 +136,13 @@ export function suggestContextToml(live: LiveContext): string {
  * those. PURE so it's unit-testable.
  */
 export function hasLockableContext(live: LiveContext): boolean {
-  return Boolean(live.gcloud?.account || live.vercel?.projectId || live.github?.org);
+  return Boolean(
+    live.gcloud?.account ||
+      live.vercel?.projectId ||
+      live.github?.org ||
+      live.gitlab?.group ||
+      live.bitbucket?.workspace,
+  );
 }
 
 async function run(cmd: string, args: string[]): Promise<string | null> {
@@ -140,6 +160,24 @@ export function parseGithubRemote(url: string | null): { org: string | null; rem
   const m = url.match(/github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/);
   if (!m) return { org: null, remote: null };
   return { org: m[1], remote: `github.com/${m[1]}/${m[2]}` };
+}
+
+/** gitlab.com[:/]group(/subgroups)/repo(.git) -> { group (top-level), "gitlab.com/<path>" }. */
+export function parseGitlabRemote(url: string | null): { group: string | null; remote: string | null } {
+  if (!url) return { group: null, remote: null };
+  const m = url.match(/gitlab\.com[:/](.+?)(?:\.git)?$/);
+  if (!m) return { group: null, remote: null };
+  const path = m[1].replace(/\/+$/, "");
+  const group = path.split("/")[0] || null;
+  return { group, remote: `gitlab.com/${path}` };
+}
+
+/** bitbucket.org[:/]workspace/repo(.git) -> { workspace, "bitbucket.org/workspace/repo" }. */
+export function parseBitbucketRemote(url: string | null): { workspace: string | null; remote: string | null } {
+  if (!url) return { workspace: null, remote: null };
+  const m = url.match(/bitbucket\.org[:/]([^/]+)\/(.+?)(?:\.git)?$/);
+  if (!m) return { workspace: null, remote: null };
+  return { workspace: m[1], remote: `bitbucket.org/${m[1]}/${m[2]}` };
 }
 
 /** Read the live context from each tool. Every read fails soft to null. */
@@ -161,7 +199,10 @@ export async function gatherLive(cwd: string = process.cwd()): Promise<LiveConte
   live.git = { email: await run("git", ["config", "user.email"]) };
 
   const remote = await run("git", ["remote", "get-url", "origin"]);
+  // The single origin remote parsed per host; only the matching host yields values.
   live.github = parseGithubRemote(remote);
+  live.gitlab = parseGitlabRemote(remote);
+  live.bitbucket = parseBitbucketRemote(remote);
 
   const registry = await run("npm", ["config", "get", "registry"]);
   live.npm = { registry: registry ? registry.replace(/\/+$/, "") : null };

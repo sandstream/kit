@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   compareContext,
   parseGithubRemote,
+  parseGitlabRemote,
+  parseBitbucketRemote,
   planContext,
   parseGcloudProject,
   suggestContextToml,
@@ -65,6 +67,43 @@ describe("context lock", () => {
     });
     assert.deepEqual(parseGithubRemote(null), { org: null, remote: null });
     assert.deepEqual(parseGithubRemote("https://gitlab.com/x/y"), { org: null, remote: null });
+  });
+
+  it("parses gitlab group + remote (incl. subgroups), and ignores non-gitlab hosts", () => {
+    assert.deepEqual(parseGitlabRemote("git@gitlab.com:acme/team/web.git"), {
+      group: "acme",
+      remote: "gitlab.com/acme/team/web",
+    });
+    assert.deepEqual(parseGitlabRemote("https://gitlab.com/acme/web"), {
+      group: "acme",
+      remote: "gitlab.com/acme/web",
+    });
+    assert.deepEqual(parseGitlabRemote("git@github.com:acme/web.git"), { group: null, remote: null });
+  });
+
+  it("parses bitbucket workspace + remote, and ignores non-bitbucket hosts", () => {
+    assert.deepEqual(parseBitbucketRemote("git@bitbucket.org:acme/web.git"), {
+      workspace: "acme",
+      remote: "bitbucket.org/acme/web",
+    });
+    assert.deepEqual(parseBitbucketRemote("https://x@bitbucket.org/acme/web"), {
+      workspace: "acme",
+      remote: "bitbucket.org/acme/web",
+    });
+    assert.deepEqual(parseBitbucketRemote("https://github.com/acme/web"), { workspace: null, remote: null });
+  });
+
+  it("locks a gitlab group: only the declared group passes (wrong group = mismatch)", () => {
+    const declared = { gitlab: { group: "acme" } };
+    assert.equal(compareContext(declared, { gitlab: { group: "acme", remote: null } })[0]?.status, "ok");
+    assert.equal(compareContext(declared, { gitlab: { group: "evil", remote: null } })[0]?.status, "mismatch");
+    assert.equal(compareContext(declared, { gitlab: { group: null, remote: null } })[0]?.status, "unknown");
+  });
+
+  it("locks a bitbucket workspace: only the declared workspace passes", () => {
+    const declared = { bitbucket: { workspace: "acme" } };
+    assert.equal(compareContext(declared, { bitbucket: { workspace: "acme", remote: null } })[0]?.status, "ok");
+    assert.equal(compareContext(declared, { bitbucket: { workspace: "other", remote: null } })[0]?.status, "mismatch");
   });
 
   it("plans gcloud + git activation from the declared context (local config only)", () => {
