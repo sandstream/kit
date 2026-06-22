@@ -34,7 +34,13 @@ const REQUIRED_PATTERNS: RequiredEntry[] = [
   { pattern: ".env.local", reason: "local secrets materialized by kit secrets", aliases: [".env*"] },
   { pattern: ".env.*.local", reason: "per-env local secrets", aliases: [".env*"] },
   { pattern: "node_modules", reason: "dependency tree", aliases: ["node_modules/"] },
-  { pattern: ".kit/", reason: "kit local state (elevation, env, runtime)", aliases: [".kit", ".kit/*"] },
+  // Ignore kit's local-state CONTENTS via `.kit/*` (not the wholesale `.kit/`):
+  // git won't descend into a wholesale-excluded dir, so a later `!.kit/shared/`
+  // negation cannot re-include the curated, committed-by-design shared tier
+  // (.kit/shared/memory.jsonl). `.kit/*` ignores the contents while leaving the
+  // dir descendable, so the negation below works.
+  { pattern: ".kit/*", reason: "kit local state (elevation, env, runtime)", aliases: [".kit", ".kit/", ".kit/*"] },
+  { pattern: "!.kit/shared/", reason: "keep curated shared memory tracked (committed by design)", aliases: ["!.kit/shared", "!.kit/shared/**"] },
   { pattern: ".kit-audit.jsonl", reason: "audit log can contain secret labels + paths" },
   { pattern: "*.pem", reason: "PEM keys / certs" },
   { pattern: "*.key", reason: "private keys" },

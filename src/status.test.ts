@@ -59,7 +59,8 @@ describe("kit status", () => {
       [
         ".env*",
         "node_modules",
-        ".kit/",
+        ".kit/*",
+        "!.kit/shared/",
         ".kit-audit.jsonl",
         "*.pem",
         "*.key",
