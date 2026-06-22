@@ -469,15 +469,6 @@ kit add vercel/hosting     # Link repository to Vercel
     kit add expo/eas
     ```
 
-- **searxng/instance**: Privacy-respecting search engine
-  - Requires: `docker` and `docker-compose`
-  - Provisions: Local SearXNG instance
-  - Secrets: `SEARXNG_URL`, `SEARXNG_SECRET`
-  - Example:
-    ```bash
-    kit add searxng/instance
-    ```
-
 The full adapter set (each provisions/reuses the relevant keys; run `kit add <id>`):
 
 | Service | Purpose |
@@ -502,7 +493,6 @@ The full adapter set (each provisions/reuses the relevant keys; run `kit add <id
 | `inngest/background` | Inngest event-driven background jobs |
 | `flagsmith/flags` | Flagsmith feature flags + remote config |
 | `expo/eas` | Expo Application Services (mobile builds) |
-| `searxng/instance` | Self-hosted SearXNG search engine |
 
 Add your own with `kit create-plugin <name>` (see [docs/PLUGIN_DEVELOPMENT.md](./docs/PLUGIN_DEVELOPMENT.md)).
 

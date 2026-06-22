@@ -7,7 +7,6 @@ import { stripePaymentsAdapter } from "./stripe-payments.js";
 import { supabaseDbAdapter } from "./supabase-db.js";
 import { vercelHostingAdapter } from "./vercel-hosting.js";
 import { expoEasAdapter } from "./expo-eas.js";
-import { searxngInstanceAdapter } from "./searxng-instance.js";
 import { neonDbAdapter } from "./neon-db.js";
 import { clerkAuthAdapter } from "./clerk-auth.js";
 import { upstashRedisAdapter } from "./upstash-redis.js";
@@ -30,7 +29,6 @@ export const adapters: AdapterRegistry = {
   "supabase/db": supabaseDbAdapter,
   "vercel/hosting": vercelHostingAdapter,
   "expo/eas": expoEasAdapter,
-  "searxng/instance": searxngInstanceAdapter,
   "neon/db": neonDbAdapter,
   "clerk/auth": clerkAuthAdapter,
   "upstash/redis": upstashRedisAdapter,

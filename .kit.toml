@@ -35,10 +35,6 @@ registry = "clawhub"
 [skills.optional]
 "discord" = "*"
 
-[web.search]
-provider = "searxng"
-url = "http://localhost:8080"
-
 [governance]
 enabled = true
 environment = "dev"  # dev, staging, prod (auto-detected from git branch if not set)

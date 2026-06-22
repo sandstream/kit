@@ -12,7 +12,6 @@ import { checkLockFiles } from "./check-lock.js";
 import { installTools } from "./install.js";
 import { loginServices } from "./login.js";
 import { generateSecrets } from "./secrets.js";
-import { checkWebSearch } from "./check-web-search.js";
 import { checkHooks, isGitRepository } from "./check-hooks.js";
 import {
   readSkillsLock,
@@ -88,7 +87,6 @@ function register_kit_check(server: McpServer): void {
         const skillResults = config.skills ? await checkSkills(config.skills) : [];
         const hookResults =
           config.hooks && isGitRepository() ? await checkHooks(config.hooks) : [];
-        const webSearchResult = config.web?.search ? await checkWebSearch(config.web.search) : null;
         const securityResults = await checkSecurity();
         const lockResults = await checkLockFiles(config);
 
@@ -114,7 +112,6 @@ function register_kit_check(server: McpServer): void {
                   secrets: secretResults.keys,
                   skills: skillResults,
                   hooks: hookResults,
-                  webSearch: webSearchResult,
                   security: securityResults,
                   locks: lockResults,
                 },

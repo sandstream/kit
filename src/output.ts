@@ -4,7 +4,6 @@ import type { SecretStatus } from "./check-secrets.js";
 import type { SkillCheckResult } from "./check-skills.js";
 import type { SecurityCheckResult } from "./check-security.js";
 import type { LockCheckResult } from "./check-lock.js";
-import type { WebSearchStatus } from "./check-web-search.js";
 import { safeStatusLine } from "./utils/redactSecrets.js";
 
 // ANSI color codes
@@ -196,23 +195,6 @@ export function printSkillsTable(skills: SkillCheckResult[]): void {
         : `${c.yellow}not installed${c.reset}`;
      const version = `${c.dim}${skill.versionSpec}${c.reset}`;
      console.log(`  ${icon} ${name} ${tag} ${status}  ${version}`);
-   }
- }
-
- export function printWebSearchStatus(status: WebSearchStatus | null): void {
-   if (!status) return;
-
-   header("Web Search");
-
-   const icon = status.healthy ? CHECK : CROSS;
-   const name = pad(status.provider, 14);
-   const configured = status.configured ? `${c.green}configured${c.reset}` : `${c.yellow}not configured${c.reset}`;
-   const health = status.healthy ? `${c.green}healthy${c.reset}` : `${c.red}unhealthy${c.reset}`;
-   const detail = status.error ? `${c.gray}${status.error}${c.reset}` : status.url ? `${c.gray}${status.url}${c.reset}` : "";
-
-   console.log(`  ${icon} ${name} ${configured}  ${health}`);
-   if (detail) {
-     console.log(`    ${detail}`);
    }
  }
 

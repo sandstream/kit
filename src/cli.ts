@@ -10,7 +10,6 @@ import { checkServices } from "./check-services.js";
 import { checkSecrets } from "./check-secrets.js";
 import { checkSecurity } from "./check-security.js";
 import { syncSecurityFindings } from "./findings-track.js";
-import { checkWebSearch } from "./check-web-search.js";
 import { installTools } from "./install.js";
 import { loginServices } from "./login.js";
 import { check1PasswordStatus, detect1PasswordMode } from "./onepassword.js";
@@ -76,7 +75,6 @@ import {
    printServicesTable,
    printSecretsTable,
    printSkillsTable,
-   printWebSearchStatus,
    printSecurityTable,
    printLockTable,
    printSummary,
@@ -239,9 +237,6 @@ async function cmdCheck(): Promise<boolean> {
          config.hooks && isGitRepository()
            ? await step("git hooks", () => checkHooks(config.hooks!))
            : [];
-       const webSearchResult = config.web?.search
-         ? await step("web search", () => checkWebSearch(config.web!.search!))
-         : null;
        const securityResults = await step("security scan", () => checkSecurity());
       const lockResults = await step("lock files", () => checkLockFiles(config));
 
@@ -318,16 +313,6 @@ async function cmdCheck(): Promise<boolean> {
             detail: h.detail,
             category: "hooks",
           })),
-          ...(webSearchResult
-            ? [
-                {
-                  name: webSearchResult.provider,
-                  status: (webSearchResult.healthy ? "pass" : "fail") as JsonCheck["status"],
-                  detail: webSearchResult.error ?? (webSearchResult.healthy ? "healthy" : "unhealthy"),
-                  category: "web-search",
-                },
-              ]
-            : []),
           ...lockResults.map((l) => ({
             name: l.category === "skills-lock" ? "skills-lock.json" : "cli-lock.json",
             status: (l.inSync ? "pass" : l.exists ? "warn" : "fail") as JsonCheck["status"],
@@ -368,7 +353,6 @@ async function cmdCheck(): Promise<boolean> {
        printServicesTable(serviceResults);
        printSecretsTable(secretResults.templateExists, secretResults.keys);
        printSkillsTable(skillResults);
-       printWebSearchStatus(webSearchResult);
        printLockTable(lockResults);
 
        // Print hooks status if configured

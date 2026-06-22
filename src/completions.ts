@@ -12,7 +12,7 @@ const COMMANDS = [
 
 const ADAPTERS = [
   "stripe/payments", "supabase/db", "vercel/hosting", "expo/eas",
-  "searxng/instance", "neon/db", "clerk/auth", "upstash/redis",
+  "neon/db", "clerk/auth", "upstash/redis",
   "cloudflare/r2", "resend/email", "planetscale/db", "loops/email",
   "liveblocks/realtime", "trigger/background", "inngest/background",
   "flagsmith/flags", "sentry/monitoring", "tinybird/analytics", "posthog/analytics",

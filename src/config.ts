@@ -74,18 +74,6 @@ export interface SkillsConfig {
 }
 
 /**
- * Web search provider configuration
- * Allows agents to use local or alternative search providers
- */
-export interface WebSearchConfig {
-  provider?: "brave" | "searxng" | "google" | "custom";
-  url?: string;
-  apiKey?: string;
-  /** Google Programmable Search engine id (cx) — required for the google provider. */
-  cx?: string;
-}
-
-/**
  * Environment-specific access permissions
  * Parsed from [governance.access.dev], [governance.access.staging], [governance.access.prod]
  */
@@ -284,9 +272,6 @@ export interface kitConfig {
   hooks?: HooksConfig;
   /** Per-project CLI context lock (account+project per tool). */
   context?: ContextConfig;
-  web?: {
-    search?: WebSearchConfig;
-  };
   /** Named environment overrides: [env.staging.*], [env.production.*] */
   env?: Record<string, EnvOverride>;
   /** Declared MCP-server connections. See McpConfig + src/mcp-orchestrator.ts. */
@@ -455,24 +440,9 @@ const GovernanceConfigSchema = z
 
 const HooksConfigSchema = z.record(z.string(), z.array(z.string()).optional()).optional();
 
-const WebConfigSchema = z
-  .object({
-    search: z
-      .object({
-        provider: z.enum(["brave", "searxng", "google", "custom"]).optional(),
-        url: z.string().optional(),
-        apiKey: z.string().optional(),
-        cx: z.string().optional(),
-      })
-      .passthrough()
-      .optional(),
-  })
-  .passthrough()
-  .optional();
-
 // Known top-level section names — used to detect typos
 const KNOWN_SECTIONS = new Set([
-  "tools", "services", "secrets", "skills", "governance", "hooks", "web", "setup", "env", "context", "memory", "update",
+  "tools", "services", "secrets", "skills", "governance", "hooks", "setup", "env", "context", "memory", "update",
 ]);
 
 const kitConfigSchema = z
@@ -507,7 +477,6 @@ const kitConfigSchema = z
       })
       .passthrough()
       .optional(),
-    web: WebConfigSchema,
     setup: z
       .object({
         install: z.string().optional(),
