@@ -115,13 +115,13 @@ export async function checkDiskEncryption(): Promise<SecurityCheckResult> {
       if (interpretLsblk(stdout) === true) {
         return { category: "exposure", name: "disk encryption", status: "pass", detail: "LUKS-encrypted volume detected" };
       }
-      // No crypt device found — can't confirm. Warn at low severity (honest "verify").
+      // No crypt device found. Per this module's fail-open contract, absence is
+      // NOT proof FDE is off (encrypted host VM, LVM-on-LUKS not surfaced, etc.),
+      // and unlike macOS/Windows, Linux has no authoritative "off" signal. Skip
+      // rather than cry wolf with a warn that would flip kit check's exit code.
       return {
-        category: "exposure",
-        name: "disk encryption",
-        status: "warn",
-        severity: "low",
-        detail: "could not confirm full-disk encryption (no LUKS device found) — verify your disk is encrypted",
+        ...SKIP,
+        detail: "could not confirm full-disk encryption on Linux (no LUKS device found) — verify your disk is encrypted",
         suggestion: "Confirm with: lsblk (look for type 'crypt'), or your distro's disk-encryption settings",
       };
     }
