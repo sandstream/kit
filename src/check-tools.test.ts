@@ -61,4 +61,25 @@ describe("checkTools", () => {
     const results = await checkTools({});
     assert.deepEqual(results, []);
   });
+
+  it("detects a tool via the resolver when it is not on PATH (mise-global case)", async () => {
+    // A globally mise-installed tool isn't on PATH when mise isn't activated in the
+    // shell, but resolveToolBin finds it via `mise which`. Stand in for that resolved
+    // binary with the real node executable so the version read is deterministic.
+    const results = await checkTools(
+      { "mise-global-tool": "latest" },
+      async () => process.execPath,
+    );
+    assert.equal(results[0].ok, true);
+    assert.ok(results[0].installed !== null, "resolved tool should report a version");
+  });
+
+  it("reports not installed when the resolver finds nothing", async () => {
+    const results = await checkTools(
+      { "ghost-tool": "1.0" },
+      async () => null,
+    );
+    assert.equal(results[0].ok, false);
+    assert.equal(results[0].installed, null);
+  });
 });

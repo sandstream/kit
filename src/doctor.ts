@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { kitConfig } from "./config.js";
+import { resolveToolBin } from "./utils/resolveTool.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -99,18 +100,20 @@ async function checkToolsInPath(config: kitConfig): Promise<DoctorCheck[]> {
   const checks: DoctorCheck[] = [];
 
   for (const toolName of Object.keys(config.tools)) {
-    const name = `${toolName} in PATH`;
+    const name = `${toolName} resolvable`;
     const category = "tools";
 
-    try {
-      const { stdout } = await execFileAsync("which", [toolName]);
-      const path = stdout.trim();
-      checks.push({ name, status: "pass", detail: path, category });
-    } catch {
+    // resolveToolBin is mise-first (`mise which`), so it finds tools installed via
+    // `mise use -g` even when mise isn't activated and its shims aren't on PATH —
+    // before falling back to a system PATH lookup.
+    const bin = await resolveToolBin(toolName);
+    if (bin) {
+      checks.push({ name, status: "pass", detail: bin, category });
+    } else {
       checks.push({
         name,
         status: "warn",
-        detail: "not in PATH (run: kit install, then re-open terminal)",
+        detail: "not found (run: kit install)",
         category,
       });
     }
