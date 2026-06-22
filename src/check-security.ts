@@ -1165,6 +1165,12 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
   const exposureResults = await checkServiceExposure();
   results.push(...exposureResults);
 
+  // At-rest exposure of kit's own secret-dense local state: verify full-disk
+  // encryption is on, and that the memory store isn't redirected into a repo.
+  const { checkDiskEncryption, checkMemoryDirSafety } = await import("./check-disk-encryption.js");
+  results.push(await checkDiskEncryption());
+  results.push(checkMemoryDirSafety());
+
   // Attach a rule citation (CWE/OWASP) to each finding whose check is mapped in
   // the local rules catalog. Deterministic lookup, no network. Unmapped checks
   // pass through unchanged.
