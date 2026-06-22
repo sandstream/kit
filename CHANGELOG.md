@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-06-22
+
+### Fixed
+- **`kit check` no longer exits non-zero on Linux hosts without a detected LUKS device.** The disk-encryption check returned a low-severity `warn` whenever `lsblk` found no `crypt` device, and a warn counts as an issue — so `kit check` exited `1` on any non-CI Linux machine without confirmable full-disk encryption (only masked in GitHub Actions by the `CI=true` skip). Absence of a crypt device is not proof FDE is off (encrypted host VMs, LVM layouts), and Linux has no authoritative "off" signal like macOS `fdesetup` / Windows `manage-bde`. The Linux indeterminate branch now follows the module's documented fail-open contract and `skip`s, matching the macOS/Windows indeterminate paths. Authoritative "OFF" detection on macOS/Windows still warns at high severity.
+
+### Added
+- **Platform-support documentation.** A new `docs/PLATFORM_SUPPORT.md` and a README section spell out the support matrix: macOS and Linux are supported natively; Windows is supported via WSL2, Git Bash, or the signed Docker image. Native Windows (PowerShell/cmd) is not supported yet — the concrete blockers (POSIX-shell git hooks, `which`/`tar` assumptions, NTFS mode-bit no-ops, POSIX build script) are documented and tracked.
+
 ## [1.14.0] - 2026-06-22
 
 ### Added
