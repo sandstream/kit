@@ -34,6 +34,7 @@ export interface LiveContext {
   github?: { org: string | null; remote: string | null };
   gitlab?: { group: string | null; remote: string | null };
   bitbucket?: { workspace: string | null; remote: string | null };
+  ssh?: { identity: string | null; fingerprint: string | null; host_alias: string | null };
   npm?: { registry: string | null };
   vercel?: { orgId: string | null; projectId: string | null };
 }
@@ -68,6 +69,9 @@ const FIELD_SPECS: {
   { tool: "gitlab", field: "remote", declared: (d) => d.gitlab?.remote, live: (l) => l.gitlab?.remote ?? null },
   { tool: "bitbucket", field: "workspace", declared: (d) => d.bitbucket?.workspace, live: (l) => l.bitbucket?.workspace ?? null },
   { tool: "bitbucket", field: "remote", declared: (d) => d.bitbucket?.remote, live: (l) => l.bitbucket?.remote ?? null },
+  { tool: "ssh", field: "identity", declared: (d) => d.ssh?.identity, live: (l) => l.ssh?.identity ?? null },
+  { tool: "ssh", field: "fingerprint", declared: (d) => d.ssh?.fingerprint, live: (l) => l.ssh?.fingerprint ?? null },
+  { tool: "ssh", field: "host_alias", declared: (d) => d.ssh?.host_alias, live: (l) => l.ssh?.host_alias ?? null },
   { tool: "npm", field: "registry", declared: (d) => d.npm?.registry, live: (l) => l.npm?.registry ?? null },
   { tool: "vercel", field: "team(orgId)", declared: (d) => d.vercel?.team, live: (l) => l.vercel?.orgId ?? null },
   { tool: "vercel", field: "project(projectId)", declared: (d) => d.vercel?.project, live: (l) => l.vercel?.projectId ?? null },
@@ -180,6 +184,46 @@ export function parseBitbucketRemote(url: string | null): { workspace: string | 
   return { workspace: m[1], remote: `bitbucket.org/${m[1]}/${m[2]}` };
 }
 
+/** The literal host token of a remote URL (the `Host` alias when one is used). */
+export function parseRemoteHost(url: string | null): string | null {
+  if (!url) return null;
+  const ssh = url.match(/^(?:ssh:\/\/)?[^@]+@([^:/]+)/);
+  if (ssh) return ssh[1];
+  const https = url.match(/^https?:\/\/(?:[^@/]+@)?([^/]+)/);
+  if (https) return https[1];
+  return null;
+}
+
+/** The `-i <path>` identity from a git `core.sshCommand`, if set. */
+export function parseSshCommandIdentity(cmd: string | null): string | null {
+  if (!cmd) return null;
+  const m = cmd.match(/-i\s+("[^"]+"|'[^']+'|\S+)/);
+  return m ? m[1].replace(/^["']|["']$/g, "") : null;
+}
+
+/** First configured IdentityFile from `ssh -G <host>` output (configured precede defaults). */
+export function parseSshConfigIdentity(sshGOutput: string | null): string | null {
+  if (!sshGOutput) return null;
+  for (const line of sshGOutput.split("\n")) {
+    const m = line.match(/^identityfile\s+(.+)$/);
+    if (m) return m[1].trim();
+  }
+  return null;
+}
+
+/** The SHA256 fingerprint from `ssh-keygen -lf <file>` output. */
+export function parseKeygenFingerprint(out: string | null): string | null {
+  if (!out) return null;
+  const m = out.match(/SHA256:[A-Za-z0-9+/=]+/);
+  return m ? m[0] : null;
+}
+
+/** Expand a leading `~` to the home dir, for comparing declared vs live paths. */
+function expandHome(p: string | null): string | null {
+  if (!p) return null;
+  return p.startsWith("~") ? join(homedir(), p.slice(1)) : p;
+}
+
 /** Read the live context from each tool. Every read fails soft to null. */
 export async function gatherLive(cwd: string = process.cwd()): Promise<LiveContext> {
   const live: LiveContext = {};
@@ -204,6 +248,19 @@ export async function gatherLive(cwd: string = process.cwd()): Promise<LiveConte
   live.gitlab = parseGitlabRemote(remote);
   live.bitbucket = parseBitbucketRemote(remote);
 
+  // SSH identity this repo would actually push with: a per-repo core.sshCommand
+  // override wins; otherwise resolve the remote host through `ssh -G`. The host
+  // token (a `Host` alias when one is used) is the third comparable signal.
+  const host = parseRemoteHost(remote);
+  const sshCommand = await run("git", ["config", "--get", "core.sshCommand"]);
+  let identity = parseSshCommandIdentity(sshCommand);
+  if (!identity && host) identity = parseSshConfigIdentity(await run("ssh", ["-G", host]));
+  identity = expandHome(identity);
+  const fingerprint = identity
+    ? parseKeygenFingerprint(await run("ssh-keygen", ["-lf", identity]))
+    : null;
+  live.ssh = { identity, fingerprint, host_alias: host };
+
   const registry = await run("npm", ["config", "get", "registry"]);
   live.npm = { registry: registry ? registry.replace(/\/+$/, "") : null };
 
@@ -224,10 +281,15 @@ export async function checkContext(
   cwd: string = process.cwd(),
 ): Promise<ContextFinding[]> {
   if (!ctx) return [];
-  // Normalize a declared npm registry the same way the live read is normalized.
-  const declared: ContextConfig = ctx.npm?.registry
-    ? { ...ctx, npm: { ...ctx.npm, registry: ctx.npm.registry.replace(/\/+$/, "") } }
-    : ctx;
+  // Normalize declared values the same way the live reads are normalized:
+  // npm registry trailing slash, and ssh identity `~` expansion (compared as paths).
+  let declared: ContextConfig = ctx;
+  if (ctx.npm?.registry) {
+    declared = { ...declared, npm: { ...declared.npm, registry: ctx.npm.registry.replace(/\/+$/, "") } };
+  }
+  if (declared.ssh?.identity) {
+    declared = { ...declared, ssh: { ...declared.ssh, identity: expandHome(declared.ssh.identity) ?? declared.ssh.identity } };
+  }
   return compareContext(declared, await gatherLive(cwd));
 }
 

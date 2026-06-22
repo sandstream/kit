@@ -262,6 +262,8 @@ export interface ContextConfig {
   github?: { org?: string; remote?: string };
   gitlab?: { group?: string; remote?: string };
   bitbucket?: { workspace?: string; remote?: string };
+  /** SSH identity this repo must push/deploy with. Declare any of these. */
+  ssh?: { identity?: string; fingerprint?: string; host_alias?: string };
   git?: { email?: string };
   npm?: { registry?: string };
 }
@@ -510,6 +512,14 @@ const kitConfigSchema = z
           .optional(),
         bitbucket: z
           .object({ workspace: z.string().optional(), remote: z.string().optional() })
+          .passthrough()
+          .optional(),
+        ssh: z
+          .object({
+            identity: z.string().optional(),
+            fingerprint: z.string().optional(),
+            host_alias: z.string().optional(),
+          })
           .passthrough()
           .optional(),
         git: z.object({ email: z.string().optional() }).passthrough().optional(),

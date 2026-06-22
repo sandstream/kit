@@ -5,6 +5,10 @@ import {
   parseGithubRemote,
   parseGitlabRemote,
   parseBitbucketRemote,
+  parseRemoteHost,
+  parseSshCommandIdentity,
+  parseSshConfigIdentity,
+  parseKeygenFingerprint,
   planContext,
   parseGcloudProject,
   suggestContextToml,
@@ -104,6 +108,42 @@ describe("context lock", () => {
     const declared = { bitbucket: { workspace: "acme" } };
     assert.equal(compareContext(declared, { bitbucket: { workspace: "acme", remote: null } })[0]?.status, "ok");
     assert.equal(compareContext(declared, { bitbucket: { workspace: "other", remote: null } })[0]?.status, "mismatch");
+  });
+
+  it("parses the SSH identity from core.sshCommand, ssh -G output, and a keygen fingerprint", () => {
+    assert.equal(parseSshCommandIdentity('ssh -i ~/.ssh/id_work -o IdentitiesOnly=yes'), "~/.ssh/id_work");
+    assert.equal(parseSshCommandIdentity('ssh -i "/home/me/.ssh/id work"'), "/home/me/.ssh/id work");
+    assert.equal(parseSshCommandIdentity("ssh"), null);
+    assert.equal(parseSshConfigIdentity("user me\nidentityfile /home/me/.ssh/id_work\nidentityfile ~/.ssh/id_rsa"), "/home/me/.ssh/id_work");
+    assert.equal(parseKeygenFingerprint("256 SHA256:abc123DEF+/ me@host (ED25519)"), "SHA256:abc123DEF+/");
+    assert.equal(parseKeygenFingerprint("not a fingerprint"), null);
+  });
+
+  it("parses the literal remote host (the Host alias when one is used)", () => {
+    assert.equal(parseRemoteHost("git@github.com-work:acme/web.git"), "github.com-work");
+    assert.equal(parseRemoteHost("https://gitlab.com/acme/web"), "gitlab.com");
+    assert.equal(parseRemoteHost(null), null);
+  });
+
+  it("locks the SSH identity: wrong key/fingerprint/host-alias is a mismatch, missing is unknown", () => {
+    const byFp = { ssh: { fingerprint: "SHA256:GOOD" } };
+    assert.equal(
+      compareContext(byFp, { ssh: { identity: null, fingerprint: "SHA256:GOOD", host_alias: null } })[0]?.status,
+      "ok",
+    );
+    assert.equal(
+      compareContext(byFp, { ssh: { identity: null, fingerprint: "SHA256:EVIL", host_alias: null } })[0]?.status,
+      "mismatch",
+    );
+    assert.equal(
+      compareContext(byFp, { ssh: { identity: null, fingerprint: null, host_alias: null } })[0]?.status,
+      "unknown",
+    );
+    const byAlias = { ssh: { host_alias: "github.com-work" } };
+    assert.equal(
+      compareContext(byAlias, { ssh: { identity: null, fingerprint: null, host_alias: "github.com-personal" } })[0]?.status,
+      "mismatch",
+    );
   });
 
   it("plans gcloud + git activation from the declared context (local config only)", () => {
