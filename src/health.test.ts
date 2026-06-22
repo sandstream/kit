@@ -4,7 +4,10 @@ import { runHealth, type HealthSensor, type HealthCtx, type HealthDeps } from ".
 import { selectSensors, defaultHealthDeps, HEALTH_SENSORS } from "./health.js";
 
 const ctx: HealthCtx = { cwd: "/tmp/repo", config: {} };
-const deps: HealthDeps = { runCli: async () => ({ stdout: "", stderr: "", exitCode: 0, ok: true }) };
+const deps: HealthDeps = {
+  runCli: async () => ({ stdout: "", stderr: "", exitCode: 0, ok: true }),
+  httpGet: async () => ({ ok: true, status: 200, body: "" }),
+};
 
 describe("runHealth", () => {
   it("aggregates findings from all sensors", async () => {
@@ -36,8 +39,19 @@ describe("selectSensors", () => {
     assert.equal(sel.some((s) => s.id === "github-actions"), false);
   });
 
-  it("registry is non-empty and defaultHealthDeps exposes runCli", () => {
-    assert.ok(HEALTH_SENSORS.length >= 1);
+  it("includes gitlab-ci only when a .gitlab-ci.yml is present", () => {
+    assert.ok(selectSensors({ cwd: "/r", config: {}, gitlabCi: true }).some((s) => s.id === "gitlab-ci"));
+    assert.equal(selectSensors({ cwd: "/r", config: {} }).some((s) => s.id === "gitlab-ci"), false);
+  });
+
+  it("includes bitbucket-pipelines only when a bitbucket-pipelines.yml is present", () => {
+    assert.ok(selectSensors({ cwd: "/r", config: {}, bitbucketPipelines: true }).some((s) => s.id === "bitbucket-pipelines"));
+    assert.equal(selectSensors({ cwd: "/r", config: {} }).some((s) => s.id === "bitbucket-pipelines"), false);
+  });
+
+  it("registry has all three CI sensors and defaultHealthDeps exposes runCli + httpGet", () => {
+    assert.ok(HEALTH_SENSORS.length >= 3);
     assert.equal(typeof defaultHealthDeps.runCli, "function");
+    assert.equal(typeof defaultHealthDeps.httpGet, "function");
   });
 });
