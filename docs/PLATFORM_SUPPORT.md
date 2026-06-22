@@ -1,0 +1,75 @@
+# Platform support
+
+kit targets POSIX environments. The runtime is careful about cross-platform
+APIs (it uses `execFile` with argument arrays, `os.homedir()`, and
+platform-routed commands), but a handful of operational dependencies at the
+edges assume a POSIX shell and Unix tooling.
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| **macOS** (Apple Silicon + Intel) | ✅ Supported | Full feature set. FileVault detected via `fdesetup`. |
+| **Linux** (x86_64 + arm64) | ✅ Supported | Full feature set. LUKS detected via `lsblk`. |
+| **Windows via WSL2** | ✅ Supported (recommended) | Run kit inside your WSL2 distro. Treat it as Linux. |
+| **Windows via Git Bash / MSYS2** | ✅ Supported | Provides the POSIX shell + tools kit relies on. |
+| **Native Windows** (PowerShell / cmd) | ⛔ Not supported yet | Hard blockers below. Use WSL2 instead. |
+
+## Running on Windows
+
+Install [WSL2](https://learn.microsoft.com/windows/wsl/install) and run kit
+from inside a Linux distro:
+
+```powershell
+wsl --install            # one-time, reboots
+```
+
+Then, inside the WSL2 shell, follow the normal [Quick start](../README.md#quick-start):
+
+```bash
+npm i -g sandstream-kit   # or: npx sandstream-kit setup
+cd /path/to/your/repo     # a path inside the WSL filesystem is fastest
+kit check
+```
+
+> **Tip:** Keep the repo on the Linux filesystem (`~/projects/...`), not under
+> `/mnt/c/...`. Working across the Windows↔WSL boundary is slow and can confuse
+> git hooks and file permissions.
+
+Git Bash works too for the core commands, but WSL2 is the better experience
+(real Linux tooling, mise support, sandboxing).
+
+**Or skip the shell entirely:** the signed Docker image runs the same on
+Windows (Docker Desktop), macOS, and Linux — see
+[Run via Docker](../README.md#run-via-docker):
+
+```powershell
+docker run --rm -v "${PWD}:/work" -w /work sandstream/kit:latest check
+```
+
+## Why native Windows is not supported yet
+
+These are the concrete blockers, not a blanket "we didn't try". Each is
+tracked for a future native-Windows effort:
+
+1. **Git hooks are POSIX shell scripts.** kit installs pre-/post-commit hooks
+   written as `#!/bin/sh` with `date`, `stat`, and `rm` (`src/hooks.ts`).
+   cmd/PowerShell ignore the shebang and the syntax.
+2. **Tool resolution uses `which`.** `src/utils/resolveTool.ts` shells out to
+   `which`, which does not exist on native Windows (`where` is the equivalent).
+   The `mise which` fast path works, but bare tools won't resolve.
+3. **Archive extraction assumes `tar`.** The supply-chain scanner download
+   path (`src/bumblebee.ts`, `src/triage-sandbox.ts`) calls `tar`.
+4. **Secret-file permissions rely on POSIX mode bits.** kit writes
+   `~/.kit/memory.db`, `elevation.key`, and materialized `.env.local` with
+   `0600`. `chmod` is a no-op on NTFS, so on a multi-user native-Windows box
+   those files would not get owner-only protection. WSL2 enforces them
+   normally.
+5. **The build script is POSIX** (`rm -rf` + `chmod +x`). Contributors building
+   from source need a POSIX shell.
+
+What already works cross-platform: home/config dir resolution (`os.homedir()`,
+`%APPDATA%`), git operations (`execFile`, no shell), browser open
+(`start`/`open`/`xdg-open` routing), and the BitLocker branch of the
+disk-encryption check.
+
+If you want to help bring up native Windows, the remediation checklist lives in
+the tracking issue linked from this repo's issues.

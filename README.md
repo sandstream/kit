@@ -18,6 +18,8 @@ For AI agents and humans. Manages tools, auth, secrets, and project setup. Zero 
 
 **Prerequisites:** Node.js 22+, git, and [mise](https://mise.jdx.dev) for installing tools (`brew install mise`, or `curl https://mise.run | sh`).
 
+**Platform support:** macOS, Linux, and Windows **via [WSL2](https://learn.microsoft.com/windows/wsl/install) or Git Bash**. Native Windows (PowerShell/cmd) is not supported yet — kit's git hooks, tool resolution, and secret-file permissions assume a POSIX shell. On Windows, run kit from inside a WSL2 distro (recommended) or Git Bash. See [docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md).
+
 ```bash
 # zero install (also sidesteps npm -g permission issues):
 npx sandstream-kit setup
