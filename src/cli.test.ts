@@ -582,3 +582,63 @@ describe("kit init — auto-generate", () => {
     assert.equal(result.exitCode, 1, "should exit 1 when confidence too low");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Wired commands that were previously documented but unrouted
+// ---------------------------------------------------------------------------
+
+describe("kit env diff", () => {
+  let tempDir: string;
+
+  before(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "kit-integ-envdiff-"));
+    await writeFile(join(tempDir, ".env.local"), "A=1\nB=2\nC=3\n", "utf-8");
+    await writeFile(join(tempDir, ".env.staging"), "A=1\nB=changed\nD=4\n", "utf-8");
+  });
+
+  after(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("routes and reports drift between .env.local and the target", async () => {
+    const result = await runCli(["env", "diff", "--compare", "staging"], tempDir);
+    assert.equal(result.exitCode, 0);
+    assert.ok(!result.stderr.includes("Unknown subcommand"), "must be routed");
+    // C only local, D only staging, B changed; values never printed
+    assert.ok(result.stdout.includes("C"), "key only in local");
+    assert.ok(result.stdout.includes("D"), "key only in staging");
+    assert.ok(!result.stdout.includes("changed"), "raw values must not leak");
+  });
+
+  it("exits 1 with usage when --compare is missing", async () => {
+    const result = await runCli(["env", "diff"], tempDir);
+    assert.equal(result.exitCode, 1);
+  });
+});
+
+describe("kit secrets validate", () => {
+  let tempDir: string;
+
+  before(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "kit-integ-secval-"));
+    await writeFile(join(tempDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
+    await writeFile(
+      join(tempDir, ".kit.toml"),
+      `[secrets]\nstore = "env"\n\n[secrets.keys]\n_KIT_VAL_PRESENT = { source = "env" }\n_KIT_VAL_ABSENT = { source = "env" }\n`,
+      "utf-8",
+    );
+  });
+
+  after(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("exits non-zero and flags the missing key", async () => {
+    const result = await runCli(["secrets", "validate"], tempDir, {
+      _KIT_VAL_PRESENT: "set",
+    });
+    assert.equal(result.exitCode, 1, "missing key → non-zero");
+    assert.ok(!result.stderr.includes("Unknown subcommand"), "must be routed");
+    assert.ok(result.stdout.includes("_KIT_VAL_ABSENT"), "names the missing key");
+  });
+});
