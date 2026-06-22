@@ -104,6 +104,7 @@ async function detectCiFiles(cwd: string): Promise<string[]> {
     }
   }
   if (await fileExists(join(cwd, ".gitlab-ci.yml"))) ci.push(".gitlab-ci.yml");
+  if (await fileExists(join(cwd, "bitbucket-pipelines.yml"))) ci.push("bitbucket-pipelines.yml");
   if (await fileExists(join(cwd, "circleci", "config.yml")))
     ci.push("circleci/config.yml");
   return ci;
