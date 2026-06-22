@@ -22,6 +22,7 @@ function deps(over: Record<string, { stdout: string; ok: boolean }> = {}): Healt
       if (r) return { stdout: r.stdout, stderr: "", exitCode: r.ok ? 0 : 1, ok: r.ok };
       return { stdout: "", stderr: "", exitCode: 0, ok: true };
     },
+    httpGet: async () => ({ ok: true, status: 200, body: "" }),
   };
 }
 const ctx: HealthCtx = { cwd: "/tmp/repo", config: {} };

@@ -1,6 +1,8 @@
 import type { kitConfig } from "./config.js";
 import { execFileNoThrow, type ExecResult } from "./utils/execFileNoThrow.js";
 import { githubActionsSensor } from "./health-sensors/github-actions.js";
+import { gitlabSensor } from "./health-sensors/gitlab-ci.js";
+import { bitbucketSensor } from "./health-sensors/bitbucket-pipelines.js";
 
 export type HealthStatus = "green" | "red" | "unknown";
 export type HealthClass = "code" | "human" | "noise";
@@ -21,10 +23,22 @@ export interface HealthCtx {
   config: kitConfig;
   /** True when the repo has a git remote (computed by the CLI layer). */
   gitRemote?: boolean;
+  /** True when a .gitlab-ci.yml is present (GitLab CI in use). */
+  gitlabCi?: boolean;
+  /** True when a bitbucket-pipelines.yml is present (Bitbucket Pipelines in use). */
+  bitbucketPipelines?: boolean;
+}
+
+export interface HttpResponse {
+  ok: boolean;
+  status: number;
+  body: string;
 }
 
 export interface HealthDeps {
   runCli(command: string, args: string[]): Promise<ExecResult>;
+  /** Read-only HTTP GET for API-based probes (Bitbucket, future Vercel/Sentry/Resend). */
+  httpGet(url: string, headers?: Record<string, string>): Promise<HttpResponse>;
 }
 
 export interface HealthSensor {
@@ -58,20 +72,35 @@ export async function runHealth(
   return all.flat();
 }
 
-export const HEALTH_SENSORS: HealthSensor[] = [githubActionsSensor];
+export const HEALTH_SENSORS: HealthSensor[] = [githubActionsSensor, gitlabSensor, bitbucketSensor];
 
-/** Returns the sensors whose underlying service the project is connected to. */
+/** Returns the sensors whose underlying CI platform the project actually uses. */
 export function selectSensors(ctx: HealthCtx): HealthSensor[] {
   return HEALTH_SENSORS.filter((s) => {
-    if (s.id === "github-actions") {
-      return ctx.gitRemote === true || ctx.config.context?.github !== undefined;
+    switch (s.id) {
+      case "github-actions":
+        return ctx.gitRemote === true || ctx.config.context?.github !== undefined;
+      case "gitlab-ci":
+        return ctx.gitlabCi === true;
+      case "bitbucket-pipelines":
+        return ctx.bitbucketPipelines === true;
+      default:
+        return false;
     }
-    return false;
   });
 }
 
 export const defaultHealthDeps: HealthDeps = {
   runCli: (command, args) => execFileNoThrow(command, args, { timeout: 15_000 }),
+  httpGet: async (url, headers) => {
+    try {
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
+      return { ok: res.ok, status: res.status, body: await res.text() };
+    } catch (e) {
+      // Network error / timeout → not ok, status 0; the sensor maps this to `unknown`.
+      return { ok: false, status: 0, body: e instanceof Error ? e.message : String(e) };
+    }
+  },
 };
 
 const MARK: Record<HealthStatus, string> = { green: "✓", red: "✗", unknown: "?" };

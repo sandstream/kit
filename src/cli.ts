@@ -4061,12 +4061,15 @@ async function cmdHealth(): Promise<boolean> {
       const { syncHealthFindings } = await import("./health-track.js");
       const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
 
-      // git remote presence drives sensor selection
+      // git remote + CI-file presence drive sensor selection
       const remote = await execFileNoThrow("git", ["remote"], { timeout: 5_000 });
+      const cwd = process.cwd();
       const ctx = {
-        cwd: process.cwd(),
+        cwd,
         config,
         gitRemote: remote.ok && remote.stdout.trim().length > 0,
+        gitlabCi: existsSync(resolve(cwd, ".gitlab-ci.yml")),
+        bitbucketPipelines: existsSync(resolve(cwd, "bitbucket-pipelines.yml")),
       };
 
       const sensors = selectSensors(ctx);
