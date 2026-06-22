@@ -4,6 +4,8 @@ import { githubActionsSensor } from "./health-sensors/github-actions.js";
 import { gitlabSensor } from "./health-sensors/gitlab-ci.js";
 import { bitbucketSensor } from "./health-sensors/bitbucket-pipelines.js";
 import { vercelSensor } from "./health-sensors/vercel.js";
+import { sentrySensor } from "./health-sensors/sentry.js";
+import { resendSensor } from "./health-sensors/resend.js";
 
 export type HealthStatus = "green" | "red" | "unknown";
 export type HealthClass = "code" | "human" | "noise";
@@ -30,6 +32,8 @@ export interface HealthCtx {
   bitbucketPipelines?: boolean;
   /** Vercel link from .vercel/project.json (orgId = teamId, projectId), if present. */
   vercel?: { orgId?: string; projectId?: string };
+  /** Service ids the project is connected to (from the registry), for dep-detected sensors. */
+  services?: string[];
 }
 
 export interface HttpResponse {
@@ -75,7 +79,14 @@ export async function runHealth(
   return all.flat();
 }
 
-export const HEALTH_SENSORS: HealthSensor[] = [githubActionsSensor, gitlabSensor, bitbucketSensor, vercelSensor];
+export const HEALTH_SENSORS: HealthSensor[] = [
+  githubActionsSensor,
+  gitlabSensor,
+  bitbucketSensor,
+  vercelSensor,
+  sentrySensor,
+  resendSensor,
+];
 
 /** Returns the sensors whose underlying CI platform the project actually uses. */
 export function selectSensors(ctx: HealthCtx): HealthSensor[] {
@@ -89,6 +100,10 @@ export function selectSensors(ctx: HealthCtx): HealthSensor[] {
         return ctx.bitbucketPipelines === true;
       case "vercel":
         return Boolean(ctx.vercel?.projectId);
+      case "sentry":
+        return ctx.services?.includes("sentry") === true;
+      case "resend":
+        return ctx.services?.includes("resend") === true;
       default:
         return false;
     }
