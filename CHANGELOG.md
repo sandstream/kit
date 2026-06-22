@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Two services in the registry: Keycloak and Atlassian (acli).** Keycloak is detected from its clients (`keycloak-js`, `keycloak-connect`, `keycloak-admin-client`, `keycloak-angular`, `python-keycloak`, Go `gocloak`) and declares its realm/admin secrets (`KEYCLOAK_URL`, `KEYCLOAK_REALM`, `KEYCLOAK_CLIENT_ID/SECRET`, `KEYCLOAK_ADMIN/_PASSWORD`); it carries no mise tool because it is a self-hosted server (run via Docker), with admin through the server's own `kcadm.sh`. Atlassian is detected from `bitbucket-pipelines.yml` / `.bitbucket`, provisions the Atlassian CLI via mise (`tool: acli` → `aqua:atlassian.com/acli`), and tracks `ATLASSIAN_API_TOKEN` / `ATLASSIAN_SITE_URL`; its auth is left as an informational note rather than a guessed login command. Adding each was a single registry data row (no detector/generator edits), per the unified-registry design.
+
 ### Fixed
 - **Flaky local test runs (intermittent file-level failures + drifting test counts) traced to a dirty `dist/`.** The `build` script (unlike `build:prod`) never cleaned `dist/`, so compiled output from deleted/renamed sources accumulated, and editor/sync conflict copies (` 2.ts`, ` 3.ts`, …) left stale `dist/* [0-9].js` files. The `test` glob (`dist/*.test.js`) then ran those orphans as duplicate/divergent tests, producing nondeterministic counts (e.g. 2355 → 2359 → 2361) and sporadic "not ok" with zero failing subtests. Fix: `build` now `rm -rf dist` before compiling (matching `build:prod`), so every run tests only current sources, and the tsconfig conflict-copy exclude was widened from `* 2.ts` to `* [0-9].ts`/`.tsx` to cover all numbered copies. Verified: 16 consecutive clean runs held a stable 2355 tests / 0 failures.
 

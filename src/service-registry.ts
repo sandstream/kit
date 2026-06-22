@@ -255,6 +255,43 @@ export const SERVICE_REGISTRY: ServiceDef[] = [
     check: "# auth0 - check AUTH0_CLIENT_ID is set",
     secrets: ["AUTH0_SECRET", "AUTH0_BASE_URL", "AUTH0_ISSUER_BASE_URL", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET"],
   },
+  {
+    id: "keycloak",
+    deps: [
+      "keycloak-js",
+      "keycloak-connect",
+      "keycloak-admin-client",
+      "@keycloak/keycloak-admin-client",
+      "keycloak-angular",
+    ],
+    pyDeps: ["python-keycloak"],
+    goMods: ["github.com/Nerzal/gocloak"],
+    // Keycloak is a self-hosted server (run via Docker/standalone), not a mise
+    // CLI — so no `tool`; admin is the server's own kcadm.sh.
+    login: "# keycloak - no CLI login; admin via the server's kcadm.sh or set KEYCLOAK_* env",
+    check: "# keycloak - verify KEYCLOAK_URL + realm are reachable",
+    secrets: [
+      "KEYCLOAK_URL",
+      "KEYCLOAK_REALM",
+      "KEYCLOAK_CLIENT_ID",
+      "KEYCLOAK_CLIENT_SECRET",
+      "KEYCLOAK_ADMIN",
+      "KEYCLOAK_ADMIN_PASSWORD",
+    ],
+  },
+  {
+    id: "atlassian",
+    // Bitbucket Pipelines is the one reliable in-repo Atlassian marker; Jira/
+    // Confluence usage isn't detectable from a checkout, so detection is
+    // conservative (acli still covers all three once installed).
+    files: ["bitbucket-pipelines.yml", ".bitbucket"],
+    // acli auth is interactive + subcommand-specific; left as a note so kit
+    // doesn't run a guessed login. The CLI itself is provisioned via mise.
+    login: "# atlassian - run the acli auth flow (acli --help); needs ATLASSIAN_API_TOKEN",
+    check: "# atlassian - check ATLASSIAN_API_TOKEN is set",
+    secrets: ["ATLASSIAN_API_TOKEN", "ATLASSIAN_SITE_URL"],
+    tool: "acli",
+  },
 ];
 
 /** Lookup by service id, for the generator. */

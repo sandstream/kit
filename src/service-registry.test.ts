@@ -37,6 +37,35 @@ describe("service-registry", () => {
       const s = await detectServices({ deps: [], fileExists: async (p) => p === "firebase.json" });
       assert.deepEqual(s, ["firebase"]);
     });
+
+    it("matches atlassian by bitbucket-pipelines.yml", async () => {
+      const s = await detectServices({ deps: [], fileExists: async (p) => p === "bitbucket-pipelines.yml" });
+      assert.deepEqual(s, ["atlassian"]);
+    });
+  });
+
+  describe("new services — keycloak + atlassian", () => {
+    it("detects keycloak by a node client dep", async () => {
+      const s = await detectServices({ deps: ["keycloak-js"], fileExists: noFiles });
+      assert.deepEqual(s, ["keycloak"]);
+    });
+
+    it("detects keycloak by the python client", async () => {
+      const s = await detectServices({ pyText: "python-keycloak==3.9.1", fileExists: noFiles });
+      assert.deepEqual(s, ["keycloak"]);
+    });
+
+    it("keycloak declares admin/realm secrets and no mise tool (it is a server)", () => {
+      const kc = SERVICE_BY_ID["keycloak"];
+      assert.ok(kc.secrets?.includes("KEYCLOAK_CLIENT_SECRET"));
+      assert.ok(kc.secrets?.includes("KEYCLOAK_REALM"));
+      assert.equal(kc.tool, undefined);
+    });
+
+    it("atlassian provisions the acli CLI as its mise tool", () => {
+      assert.equal(SERVICE_BY_ID["atlassian"].tool, "acli");
+      assert.ok(SERVICE_BY_ID["atlassian"].secrets?.includes("ATLASSIAN_API_TOKEN"));
+    });
   });
 
   describe("detectServices — cross-language (the Node-only gap fix)", () => {
