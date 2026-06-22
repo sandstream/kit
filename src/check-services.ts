@@ -2,6 +2,7 @@ import type { ServiceConfig } from "./config.js";
 import { parseCommand } from "./utils/parseCommand.js";
 import { redactSecrets } from "./utils/redactSecrets.js";
 import { exec } from "./utils/exec.js";
+import { resolveToolBin } from "./utils/resolveTool.js";
 
 
 export interface ServiceStatus {
@@ -21,7 +22,11 @@ async function runCheck(
     return { ok: false, output: parsed.message, informational: true };
   }
   try {
-    const { stdout, stderr } = await exec(parsed.cmd, parsed.args, {
+    // Resolve the CLI mise-first so a service tool installed via `mise use -g`
+    // (stripe, vercel, supabase, …) is found even when mise isn't activated in
+    // the shell; fall back to the bare name for non-mise installs.
+    const bin = (await resolveToolBin(parsed.cmd)) ?? parsed.cmd;
+    const { stdout, stderr } = await exec(bin, parsed.args, {
       timeout: 15_000,
       env: { ...process.env },
     });

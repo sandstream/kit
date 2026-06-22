@@ -130,9 +130,12 @@ async function checkPipAudit(): Promise<SecurityCheckResult> {
     };
   }
 
+  // Resolve pip-audit mise-first (commonly a pipx / `mise use -g` global, off PATH
+  // when mise isn't activated); fall back to the bare name for non-mise installs.
+  const pipAuditBin = (await resolveToolBin("pip-audit")) ?? "pip-audit";
   try {
     // Check if pip-audit is installed
-    await exec("pip-audit", ["--version"], { timeout: 5_000 });
+    await exec(pipAuditBin, ["--version"], { timeout: 5_000 });
   } catch {
     return {
       category: "dependency",
@@ -144,7 +147,7 @@ async function checkPipAudit(): Promise<SecurityCheckResult> {
   }
 
   try {
-    const { stdout } = await exec("pip-audit", ["--format=json"], {
+    const { stdout } = await exec(pipAuditBin, ["--format=json"], {
       timeout: 30_000,
     });
     
@@ -882,9 +885,12 @@ async function checkLicenses(): Promise<SecurityCheckResult> {
   // license-checker` so we don't force users to `npm install -g`.
   // npx first-run can fetch the package, so allow generous timeout.
   let runner: { cmd: string; baseArgs: string[] } | null = null;
-  const direct = await execFileNoThrow("license-checker", ["--version"], { timeout: 5_000 });
+  // Resolve mise-first so a `mise use -g` license-checker is found even when mise
+  // isn't activated; otherwise fall back to npx (below).
+  const licenseCheckerBin = (await resolveToolBin("license-checker")) ?? "license-checker";
+  const direct = await execFileNoThrow(licenseCheckerBin, ["--version"], { timeout: 5_000 });
   if (direct.ok) {
-    runner = { cmd: "license-checker", baseArgs: [] };
+    runner = { cmd: licenseCheckerBin, baseArgs: [] };
   } else {
     const npxAvailable = await execFileNoThrow("npx", ["--version"], { timeout: 5_000 });
     if (npxAvailable.ok) {
