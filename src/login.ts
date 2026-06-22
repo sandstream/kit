@@ -5,6 +5,7 @@ import { checkServices, type ServiceStatus } from "./check-services.js";
 import { isNonInteractive } from "./environment.js";
 import { parseCommand } from "./utils/parseCommand.js";
 import { safeStatusLine } from "./utils/redactSecrets.js";
+import { resolveToolBin } from "./utils/resolveTool.js";
 
 const exec = promisify(execFile);
 
@@ -19,27 +20,30 @@ export interface LoginResult {
   detail: string;
 }
 
-function runInteractive(command: string): Promise<{ ok: boolean; detail: string }> {
+async function runInteractive(command: string): Promise<{ ok: boolean; detail: string }> {
   const parsed = parseCommand(command);
   if (parsed.kind === "informational") {
     if (!isNonInteractive()) {
       console.log(`\x1b[33m${parsed.message}\x1b[0m`);
     }
-    return Promise.resolve({
+    return {
       ok: false,
       detail: `manual setup required: ${parsed.message}`,
-    });
+    };
   }
 
   if (isNonInteractive()) {
-    return Promise.resolve({
+    return {
       ok: false,
       detail: "skipped in non-interactive mode",
-    });
+    };
   }
 
+  // Resolve the CLI mise-first so a `mise use -g`-installed tool is found even
+  // when mise isn't activated; fall back to the bare name for non-mise installs.
+  const bin = (await resolveToolBin(parsed.cmd)) ?? parsed.cmd;
   return new Promise((resolve) => {
-    const child = spawn(parsed.cmd, parsed.args, {
+    const child = spawn(bin, parsed.args, {
       stdio: "inherit",
       env: { ...process.env },
     });
@@ -64,7 +68,8 @@ async function runQuiet(command: string): Promise<{ ok: boolean; output: string 
     return { ok: false, output: parsed.message };
   }
   try {
-    const { stdout, stderr } = await exec(parsed.cmd, parsed.args, {
+    const bin = (await resolveToolBin(parsed.cmd)) ?? parsed.cmd;
+    const { stdout, stderr } = await exec(bin, parsed.args, {
       timeout: 15_000,
       env: { ...process.env },
     });
