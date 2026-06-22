@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Context-lock now covers your SSH identity per project.** A new `[context.ssh]` block locks which key a repo pushes/deploys with — declare any of `identity` (the IdentityFile path), `fingerprint` (`SHA256:…`, machine-portable), or `host_alias` (the `~/.ssh/config` Host the remote uses). `kit context check` reads the repo's *effective* identity — a per-repo `core.sshCommand` `-i` override wins, otherwise it resolves the remote host through `ssh -G` — derives the key fingerprint via `ssh-keygen -lf`, and verifies it matches. Pushing a repo with the wrong account's key is a mismatch, not a silent pass — the SSH analog of the git-host remote lock. Pure parsers (`core.sshCommand` `-i`, `ssh -G` identityfile, keygen fingerprint, remote host) are unit-tested; the live `ssh -G` read smoke-tests on a real machine.
+
 ## [1.13.0] - 2026-06-22
 
 ### Added
