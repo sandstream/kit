@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **`kit health` adds Sentry + Resend sensors (runtime errors + email-delivery).** Sentry probes the issues API (`GET /api/0/projects/:org/:project/issues/?query=is:unresolved firstSeen:-24h`) with `SENTRY_AUTH_TOKEN` (`SENTRY_URL` overrides the region) and goes red on new unresolved issues in the last 24h. Resend probes `GET /domains` with `RESEND_API_KEY` and goes red (class `human` — a DNS/customer action, not a code fix) when any sending domain is not `verified`. Both report `unknown` (never a false `green`) on missing creds or a non-OK response. These two are **selected by connected-service detection** (the registry sees `@sentry/*` / `resend` in deps), per the sentinel design's "derive from connected services". Live API smoke pending real tokens; parsers fixture-tested.
 - **`kit health` adds a Vercel sensor (failed production deploys).** Probes the Vercel REST API (`GET /v6/deployments?target=production`) with `VERCEL_TOKEN`, using the `projectId`/`teamId` from `.vercel/project.json`; flags the most recent *terminal* production deployment as red when its state is `ERROR` (`CANCELED` is not red), and reports `unknown` (never a false `green`) when the project isn't linked, the token is missing, or the API errors. Reuses the `httpGet` probe path the GitLab/Bitbucket sensors introduced. Live API smoke is pending a real token; the parsers are fixture-tested.
 
 ## [1.13.0] - 2026-06-22

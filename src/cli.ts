@@ -4074,6 +4074,19 @@ async function cmdHealth(): Promise<boolean> {
       } catch {
         vercel = undefined;
       }
+      // Connected services (registry detection) drive the dep-detected sensors (sentry/resend).
+      let services: string[] = [];
+      try {
+        const pkg = JSON.parse(readFileSync(resolve(cwd, "package.json"), "utf8")) as {
+          dependencies?: Record<string, string>;
+          devDependencies?: Record<string, string>;
+        };
+        const deps = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})];
+        const { detectServices } = await import("./service-registry.js");
+        services = await detectServices({ deps, fileExists: async (p) => existsSync(resolve(cwd, p)) });
+      } catch {
+        services = [];
+      }
       const ctx = {
         cwd,
         config,
@@ -4081,6 +4094,7 @@ async function cmdHealth(): Promise<boolean> {
         gitlabCi: existsSync(resolve(cwd, ".gitlab-ci.yml")),
         bitbucketPipelines: existsSync(resolve(cwd, "bitbucket-pipelines.yml")),
         vercel,
+        services,
       };
 
       const sensors = selectSensors(ctx);
