@@ -4061,15 +4061,26 @@ async function cmdHealth(): Promise<boolean> {
       const { syncHealthFindings } = await import("./health-track.js");
       const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
 
-      // git remote + CI-file presence drive sensor selection
+      // git remote + CI-file presence + Vercel link drive sensor selection
       const remote = await execFileNoThrow("git", ["remote"], { timeout: 5_000 });
       const cwd = process.cwd();
+      let vercel: { orgId?: string; projectId?: string } | undefined;
+      try {
+        const vj = JSON.parse(readFileSync(resolve(cwd, ".vercel", "project.json"), "utf8")) as {
+          orgId?: string;
+          projectId?: string;
+        };
+        if (vj.projectId) vercel = { orgId: vj.orgId, projectId: vj.projectId };
+      } catch {
+        vercel = undefined;
+      }
       const ctx = {
         cwd,
         config,
         gitRemote: remote.ok && remote.stdout.trim().length > 0,
         gitlabCi: existsSync(resolve(cwd, ".gitlab-ci.yml")),
         bitbucketPipelines: existsSync(resolve(cwd, "bitbucket-pipelines.yml")),
+        vercel,
       };
 
       const sensors = selectSensors(ctx);

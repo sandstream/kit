@@ -3,6 +3,7 @@ import { execFileNoThrow, type ExecResult } from "./utils/execFileNoThrow.js";
 import { githubActionsSensor } from "./health-sensors/github-actions.js";
 import { gitlabSensor } from "./health-sensors/gitlab-ci.js";
 import { bitbucketSensor } from "./health-sensors/bitbucket-pipelines.js";
+import { vercelSensor } from "./health-sensors/vercel.js";
 
 export type HealthStatus = "green" | "red" | "unknown";
 export type HealthClass = "code" | "human" | "noise";
@@ -27,6 +28,8 @@ export interface HealthCtx {
   gitlabCi?: boolean;
   /** True when a bitbucket-pipelines.yml is present (Bitbucket Pipelines in use). */
   bitbucketPipelines?: boolean;
+  /** Vercel link from .vercel/project.json (orgId = teamId, projectId), if present. */
+  vercel?: { orgId?: string; projectId?: string };
 }
 
 export interface HttpResponse {
@@ -72,7 +75,7 @@ export async function runHealth(
   return all.flat();
 }
 
-export const HEALTH_SENSORS: HealthSensor[] = [githubActionsSensor, gitlabSensor, bitbucketSensor];
+export const HEALTH_SENSORS: HealthSensor[] = [githubActionsSensor, gitlabSensor, bitbucketSensor, vercelSensor];
 
 /** Returns the sensors whose underlying CI platform the project actually uses. */
 export function selectSensors(ctx: HealthCtx): HealthSensor[] {
@@ -84,6 +87,8 @@ export function selectSensors(ctx: HealthCtx): HealthSensor[] {
         return ctx.gitlabCi === true;
       case "bitbucket-pipelines":
         return ctx.bitbucketPipelines === true;
+      case "vercel":
+        return Boolean(ctx.vercel?.projectId);
       default:
         return false;
     }
