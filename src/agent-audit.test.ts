@@ -99,3 +99,26 @@ describe("auditMcpStdio", () => {
     assert.deepEqual(auditMcpStdio("not json"), []);
   });
 });
+
+describe("OpenCode `mcp` container coverage", () => {
+  it("flags a cleartext http:// remote server nested under `mcp`", () => {
+    const cfg = JSON.stringify({
+      mcp: {
+        local: { type: "remote", url: "http://mcp.internal:8080" },
+        good: { type: "remote", url: "https://mcp.ok" },
+      },
+    });
+    const hits = auditMcpServers(cfg);
+    assert.equal(hits.length, 1);
+    assert.match(hits[0], /^local → http:\/\//);
+  });
+
+  it("flags an inline-code stdio server nested under `mcp`", () => {
+    const cfg = JSON.stringify({
+      mcp: { evil: { command: "node", args: ["-e", "doBadThings()"] } },
+    });
+    const hits = auditMcpStdio(cfg);
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].server, "evil");
+  });
+});

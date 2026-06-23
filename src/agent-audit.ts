@@ -39,6 +39,7 @@ export function auditMcpServers(json: string): string[] {
   const containers = [
     (obj as { mcpServers?: Record<string, unknown> })?.mcpServers,
     (obj as { servers?: Record<string, unknown> })?.servers,
+    (obj as { mcp?: Record<string, unknown> })?.mcp, // OpenCode nests servers under `mcp`
   ].filter((c): c is Record<string, unknown> => !!c && typeof c === "object");
   for (const servers of containers) {
     for (const [name, def] of Object.entries(servers)) {
@@ -110,6 +111,7 @@ export function auditMcpStdio(json: string): StdioMcpFinding[] {
   const containers = [
     (obj as { mcpServers?: Record<string, unknown> })?.mcpServers,
     (obj as { servers?: Record<string, unknown> })?.servers,
+    (obj as { mcp?: Record<string, unknown> })?.mcp, // OpenCode nests servers under `mcp`
   ].filter((c): c is Record<string, unknown> => !!c && typeof c === "object");
   const out: StdioMcpFinding[] = [];
   for (const servers of containers) {
@@ -154,6 +156,13 @@ const CONFIG_FILES = [
   ".vscode/mcp.json",
   ".claude/settings.json",
   ".claude/settings.local.json",
+  // OpenCode (project config carries an `mcp` block) + Codex CLI. secrets-in-config
+  // is format-agnostic (findSecrets reads raw text); the JSON-shaped MCP checks
+  // simply no-op on the TOML files.
+  "opencode.json",
+  "opencode.jsonc",
+  ".codex/config.toml",
+  ".codex/config.json",
 ];
 
 const HOOK_DIRS = [".git/hooks", ".githooks", ".husky"];
