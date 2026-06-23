@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Removed
+- **`Redacted<T>` wrapper (`src/utils/redacted.ts`), added in 1.15.0.** Removed as dead code — it was never threaded through any secret-bearing path, so it protected nothing in practice (a false sense of security). Concrete leak prevention lives where the values actually flow: `redactSecrets` / `safeErrorMessage` at the log/error boundaries (e.g. the `kit secrets sync` error-leak fix) and the opt-in `KIT_MEMORY_REDACT` redaction-at-capture. Re-introduce only if it is genuinely wired through the resolve→write→sync chain (exposing via `.expose()` only at the exec/stdin boundary). (#46)
+
 ## [1.22.0] - 2026-06-23
 
 ### Added
