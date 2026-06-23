@@ -16,6 +16,10 @@ export interface AirGapSettings {
   threatDataDir?: string;
   /** Trusted Ed25519 public key — a file path or an inline PEM. */
   threatDataPubkey?: string;
+  /** Offline provenance: shipped-in Sigstore trusted_root.json + identity constraints. */
+  provenanceTrustedRoot?: string;
+  provenanceCertIdentity?: string;
+  provenanceCertIssuer?: string;
 }
 
 function envTrue(v: string | undefined): boolean {
@@ -44,6 +48,9 @@ export function resolveAirGap(
     dockerRegistry: pick(env.KIT_DOCKER_REGISTRY, ag.docker_registry),
     threatDataDir: pick(env.KIT_THREAT_DATA_DIR, ag.threat_data_dir),
     threatDataPubkey: pick(env.KIT_THREAT_DATA_PUBKEY, ag.threat_data_pubkey),
+    provenanceTrustedRoot: pick(env.KIT_PROVENANCE_TRUSTED_ROOT, ag.provenance_trusted_root),
+    provenanceCertIdentity: pick(env.KIT_PROVENANCE_CERT_IDENTITY, ag.provenance_cert_identity),
+    provenanceCertIssuer: pick(env.KIT_PROVENANCE_CERT_ISSUER, ag.provenance_cert_issuer),
   };
 }
 
