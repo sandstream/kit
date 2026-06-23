@@ -11,6 +11,7 @@ import { checkTools } from "./check-tools.js";
 import { checkServices } from "./check-services.js";
 import { checkSecrets } from "./check-secrets.js";
 import { checkSecurity } from "./check-security.js";
+import type { HealthCtx } from "./health.js";
 import { syncSecurityFindings } from "./findings-track.js";
 import { checkWebSearch } from "./check-web-search.js";
 import { installTools } from "./install.js";
@@ -4049,6 +4050,44 @@ async function cmdStatus(): Promise<boolean> {
   return true;
 }
 
+/** Build the health context (sensor selection inputs) — shared by health + sentinel. */
+async function buildHealthCtx(config: kitConfig): Promise<HealthCtx> {
+  const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
+  const remote = await execFileNoThrow("git", ["remote"], { timeout: 5_000 });
+  const cwd = process.cwd();
+  let vercel: { orgId?: string; projectId?: string } | undefined;
+  try {
+    const vj = JSON.parse(readFileSync(resolve(cwd, ".vercel", "project.json"), "utf8")) as {
+      orgId?: string;
+      projectId?: string;
+    };
+    if (vj.projectId) vercel = { orgId: vj.orgId, projectId: vj.projectId };
+  } catch {
+    vercel = undefined;
+  }
+  let services: string[] = [];
+  try {
+    const pkg = JSON.parse(readFileSync(resolve(cwd, "package.json"), "utf8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    const deps = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})];
+    const { detectServices } = await import("./service-registry.js");
+    services = await detectServices({ deps, fileExists: async (p) => existsSync(resolve(cwd, p)) });
+  } catch {
+    services = [];
+  }
+  return {
+    cwd,
+    config,
+    gitRemote: remote.ok && remote.stdout.trim().length > 0,
+    gitlabCi: existsSync(resolve(cwd, ".gitlab-ci.yml")),
+    bitbucketPipelines: existsSync(resolve(cwd, "bitbucket-pipelines.yml")),
+    vercel,
+    services,
+  };
+}
+
 async function cmdHealth(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
   const config = await loadConfig(resolveConfigPath());
@@ -4059,43 +4098,8 @@ async function cmdHealth(): Promise<boolean> {
     async () => {
       const { runHealth, selectSensors, defaultHealthDeps, formatHealth } = await import("./health.js");
       const { syncHealthFindings } = await import("./health-track.js");
-      const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
 
-      // git remote + CI-file presence + Vercel link drive sensor selection
-      const remote = await execFileNoThrow("git", ["remote"], { timeout: 5_000 });
-      const cwd = process.cwd();
-      let vercel: { orgId?: string; projectId?: string } | undefined;
-      try {
-        const vj = JSON.parse(readFileSync(resolve(cwd, ".vercel", "project.json"), "utf8")) as {
-          orgId?: string;
-          projectId?: string;
-        };
-        if (vj.projectId) vercel = { orgId: vj.orgId, projectId: vj.projectId };
-      } catch {
-        vercel = undefined;
-      }
-      // Connected services (registry detection) drive the dep-detected sensors (sentry/resend).
-      let services: string[] = [];
-      try {
-        const pkg = JSON.parse(readFileSync(resolve(cwd, "package.json"), "utf8")) as {
-          dependencies?: Record<string, string>;
-          devDependencies?: Record<string, string>;
-        };
-        const deps = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})];
-        const { detectServices } = await import("./service-registry.js");
-        services = await detectServices({ deps, fileExists: async (p) => existsSync(resolve(cwd, p)) });
-      } catch {
-        services = [];
-      }
-      const ctx = {
-        cwd,
-        config,
-        gitRemote: remote.ok && remote.stdout.trim().length > 0,
-        gitlabCi: existsSync(resolve(cwd, ".gitlab-ci.yml")),
-        bitbucketPipelines: existsSync(resolve(cwd, "bitbucket-pipelines.yml")),
-        vercel,
-        services,
-      };
+      const ctx = await buildHealthCtx(config);
 
       const sensors = selectSensors(ctx);
       const findings = await runHealth(ctx, sensors, defaultHealthDeps);
@@ -4214,6 +4218,66 @@ async function cmdAgentAudit(): Promise<boolean> {
   }
   if (fails > 0) console.log(`${c.red}${fails} fail${c.reset}`);
   return fails === 0;
+}
+
+async function cmdSentinel(): Promise<boolean> {
+  if (process.argv[3] !== "run") {
+    console.error(`${c.red}usage: kit sentinel run [--json]${c.reset}`);
+    process.exitCode = 1;
+    return false;
+  }
+  const jsonMode = hasFlag(process.argv, "--json");
+  const config = await loadConfig(resolveConfigPath());
+  const { runSentinel, healthToRedFindings } = await import("./sentinel.js");
+  const { runHealth, selectSensors, defaultHealthDeps } = await import("./health.js");
+  const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
+
+  const proposals = await runSentinel(process.cwd(), {
+    gatherRed: async () => {
+      const ctx = await buildHealthCtx(config);
+      return healthToRedFindings(await runHealth(ctx, selectSensors(ctx), defaultHealthDeps));
+    },
+    openMarkers: async () => {
+      // Read-only dedup: open issues + PRs labeled kit-sentinel, scrape findingId markers.
+      const out = new Set<string>();
+      for (const base of [
+        ["issue", "list"],
+        ["pr", "list"],
+      ]) {
+        const res = await execFileNoThrow(
+          "gh",
+          [...base, "--label", "kit-sentinel", "--state", "open", "--json", "body", "--limit", "200"],
+          { timeout: 15_000 },
+        );
+        if (!res.ok) return null; // gh absent/unauth → agent dedups (fail-open)
+        try {
+          for (const it of JSON.parse(res.stdout) as { body?: string }[]) {
+            for (const g of (it.body ?? "").matchAll(/kit-sentinel:([^\s]+?)\s*-->/g)) out.add(g[1]);
+          }
+        } catch {
+          return null;
+        }
+      }
+      return out;
+    },
+  });
+
+  if (jsonMode) {
+    console.log(JSON.stringify({ proposals }, null, 2));
+    return true;
+  }
+
+  const fresh = proposals.filter((p) => p.alreadyOpen !== true);
+  console.log(`${c.bold}kit sentinel${c.reset}  ${c.dim}${proposals.length} proposal(s), ${fresh.length} fresh${c.reset}`);
+  if (proposals.length === 0) console.log(`  ${c.dim}no red findings — nothing to propose${c.reset}`);
+  for (const p of proposals) {
+    const tag = p.alreadyOpen === true ? ` ${c.dim}(already open)${c.reset}` : "";
+    const color = p.class === "human" ? c.red : p.class === "code" ? c.yellow : c.dim;
+    console.log(`  ${color}${p.artifact}${c.reset} ${p.title}${tag}`);
+    console.log(`    ${c.dim}${p.findingId} — your agent opens this with its own creds${c.reset}`);
+  }
+  if (proposals.length > 0) console.log(`${c.dim}run with --json and have any agent act on the fresh proposals${c.reset}`);
+  return true;
 }
 
 async function cmdWhoami(): Promise<boolean> {
@@ -4957,6 +5021,7 @@ async function main(): Promise<void> {
         ingest: cmdIngest,
         "supply-chain": cmdSupplyChain,
         "agent-audit": cmdAgentAudit,
+        sentinel: cmdSentinel,
         init: cmdInit,
         upgrade: cmdUpgrade,
         install: cmdInstall,

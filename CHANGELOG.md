@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-06-23
+
+### Added
+- **Sentinel layer 2 — the agent-agnostic responder (`kit sentinel run`).** kit **proposes**, any agent **disposes**, any scheduler **triggers**. `kit sentinel run --json` turns red layer-1 findings into a stable, typed remediation-proposal document — kit never calls an LLM and never opens a PR/issue; whichever agent (Claude Code, Codex, Cursor, …) reads the JSON and performs the writes with its own model + creds (the JSON contract is the agnostic seam). Triage→artifact: **code**→draft-PR, **human/infra**→issue, **noise**→suppression-PR (never a silent mute). Each artifact carries a `<!-- kit-sentinel:<id> -->` marker; kit dedups read-only against open issues/PRs via `gh` (agent stays write-only), and `.kit/sentinel-suppress.toml` (`suppress = [...]`) filters findings. Pure proposal engine fixture-tested; the `buildHealthCtx` sensor-selection builder is now shared by `kit health` + sentinel. Design: `docs/specs/2026-06-23-sentinel-layer2-responder.md`. (#52)
+
 ## [1.18.0] - 2026-06-23
 
 ### Added
