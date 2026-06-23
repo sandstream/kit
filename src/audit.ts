@@ -264,9 +264,10 @@ export async function logAuditEvent(
   config: Required<GovernanceConfig>,
   event: Omit<AuditEvent, "timestamp" | "agent_id" | "agent_name">,
   companyId?: string,
-): Promise<void> {
+): Promise<boolean> {
+  // Audit disabled by config → nothing to write, nothing to gate on.
   if (!config.audit.enabled) {
-    return;
+    return true;
   }
 
   const auditEvent: AuditEvent = {
@@ -281,12 +282,16 @@ export async function logAuditEvent(
     auditEvent.metadata = sanitizeMetadata(auditEvent.metadata);
   }
 
-  // Write to local JSONL file (hash-chained for tamper-evidence)
+  // Write to local JSONL file (hash-chained for tamper-evidence). The boolean
+  // return lets fail-closed callers (e.g. destructive ops in withGovernance)
+  // refuse to proceed when the local audit append fails.
   const logFile = config.audit.log_file || ".kit-audit.jsonl";
   const logPath = resolve(process.cwd(), logFile);
 
+  let wroteLocal = false;
   try {
     await appendChained(logPath, auditEvent);
+    wroteLocal = true;
   } catch (error) {
     console.error(`Failed to write audit log: ${error}`);
   }
@@ -299,6 +304,9 @@ export async function logAuditEvent(
     warnFirstRemotePush(companyId);
     await sendToRemoteAPI(auditEvent, companyId);
   }
+
+  // Auditability is the local append; remote is best-effort and does not gate.
+  return wroteLocal;
 }
 
 /**

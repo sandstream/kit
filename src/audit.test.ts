@@ -408,3 +408,49 @@ describe("verifyAuditChain (tamper-evidence)", () => {
     assert.match(r.reason!, /missing hash/);
   });
 });
+
+describe("logAuditEvent return value (fail-closed signal)", () => {
+  function cfg(logFile: string): any {
+    return {
+      enabled: true,
+      environment: "dev",
+      access: {},
+      agent: { id: "a", name: "A" },
+      audit: { enabled: true, log_file: logFile, include_secrets: false },
+      approval: {},
+      secrets: {},
+      revocation: {},
+    };
+  }
+
+  it("returns true when the local append succeeds", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-audit-ok-"));
+    try {
+      const ok = await logAuditEvent(cfg(join(dir, ".kit-audit.jsonl")), {
+        operation: "x",
+        environment: "dev",
+        success: true,
+      });
+      assert.equal(ok, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false when the local append fails (unwritable path)", async () => {
+    const bad = join(tmpdir(), `kit-audit-nope-${process.pid}`, "deep", ".kit-audit.jsonl");
+    const ok = await logAuditEvent(cfg(bad), {
+      operation: "x",
+      environment: "dev",
+      success: true,
+    });
+    assert.equal(ok, false);
+  });
+
+  it("returns true when audit is disabled (nothing to gate)", async () => {
+    const c = cfg("/whatever");
+    c.audit.enabled = false;
+    const ok = await logAuditEvent(c, { operation: "x", environment: "dev", success: true });
+    assert.equal(ok, true);
+  });
+});
