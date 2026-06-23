@@ -33,6 +33,15 @@ UA = {"User-Agent": "kit-triage/1.0 (+https://github.com/sandstream/kit)"}
 NEW_DAYS = 30          # younger than this => warning (insufficient track record)
 ABANDONED_DAYS = 730   # no release/push in this long => warning
 
+# Registry endpoints — overridable so an AIR-GAPPED / no-egress environment can
+# point triage at INTERNAL MIRRORS instead of the public hosts. These are set by
+# the operator (trusted env), default to the public registries, and have any
+# trailing slash trimmed. See docs/AIR_GAP.md.
+NPM_REGISTRY = os.environ.get("KIT_NPM_REGISTRY", "https://registry.npmjs.org").rstrip("/")
+PYPI_INDEX = os.environ.get("KIT_PYPI_INDEX", "https://pypi.org").rstrip("/")
+GITHUB_API = os.environ.get("KIT_GITHUB_API", "https://api.github.com").rstrip("/")
+DOCKER_REGISTRY = os.environ.get("KIT_DOCKER_REGISTRY", "https://hub.docker.com").rstrip("/")
+
 
 def _get_json(url, headers=None):
     h = dict(UA)
@@ -40,11 +49,11 @@ def _get_json(url, headers=None):
         h.update(headers)
     req = urllib.request.Request(url, headers=h)
     # The URL is intentionally dynamic: a registry-triage tool MUST fetch the
-    # target's page. SSRF is not reachable here -- the host is a hardcoded,
-    # allowlisted registry (registry.npmjs.org / pypi.org / api.github.com /
-    # hub.docker.com) and only the package/repo name is interpolated into the
-    # PATH (url-quoted for npm/pip, parsed to owner/repo for GitHub). The
-    # attacker cannot redirect the host. Reviewed false positive.
+    # target's page. SSRF is not reachable here -- the host comes from an
+    # operator-set registry constant (public registry by default, or an internal
+    # mirror via KIT_*_REGISTRY/INDEX/API env) and only the package/repo name is
+    # interpolated into the PATH (url-quoted for npm/pip, parsed to owner/repo for
+    # GitHub). The attacker controls the path, never the host. Reviewed false positive.
     # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         return json.load(r), r.status
@@ -103,7 +112,7 @@ class Report:
 
 def triage_npm(rep):
     pkg = rep.target
-    url = f"https://registry.npmjs.org/{urllib.parse.quote(pkg, safe='@/')}"
+    url = f"{NPM_REGISTRY}/{urllib.parse.quote(pkg, safe='@/')}"
     try:
         data, _ = _get_json(url)
     except urllib.error.HTTPError as e:
@@ -140,7 +149,7 @@ def triage_npm(rep):
 
 def triage_pip(rep):
     pkg = rep.target
-    url = f"https://pypi.org/pypi/{urllib.parse.quote(pkg)}/json"
+    url = f"{PYPI_INDEX}/pypi/{urllib.parse.quote(pkg)}/json"
     try:
         data, _ = _get_json(url)
     except urllib.error.HTTPError as e:
@@ -190,7 +199,7 @@ def triage_repo(rep):
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:
-        data, _ = _get_json(f"https://api.github.com/repos/{or_}", headers=headers)
+        data, _ = _get_json(f"{GITHUB_API}/repos/{or_}", headers=headers)
     except urllib.error.HTTPError as e:
         if e.code == 404:
             rep.critical(f"repo '{or_}' not found (or private)")
@@ -223,7 +232,7 @@ def triage_docker(rep):
     repo = rep.target
     api_repo = repo if "/" in repo else f"library/{repo}"
     try:
-        data, _ = _get_json(f"https://hub.docker.com/v2/repositories/{api_repo}")
+        data, _ = _get_json(f"{DOCKER_REGISTRY}/v2/repositories/{api_repo}")
     except urllib.error.HTTPError as e:
         if e.code == 404:
             rep.critical(f"image '{repo}' not found on Docker Hub")
