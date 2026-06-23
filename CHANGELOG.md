@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-06-23
+
+### Added
+- **`kit health` completes connected-service sensor coverage: Supabase advisor + TLS-cert.** The Supabase sensor probes the Management API security advisors (`GET /v1/projects/:ref/advisors/security` with `SUPABASE_ACCESS_TOKEN` + `SUPABASE_PROJECT_REF`) and goes red (class `code`) on ERROR-level lints (RLS-disabled / exposed-data); selected when `supabase` is a detected service. The TLS-cert sensor checks certificate expiry for the host(s) in `KIT_TLS_HOST` (warn window `KIT_TLS_WARN_DAYS`, default 21) over a native TLS handshake — red (critical) when already expired, red (high) within the window, green otherwise. Both report `unknown`, never a false `green`. Pure parsers/evaluators are unit-tested; live API/handshake smoke is pending real creds. (#51)
+- **Context-lock now covers app-service auth identity: Keycloak realm, Auth0 tenant, Clerk environment.** `[context.keycloak] realm`, `[context.auth0] tenant`, and `[context.clerk] env` join the lock table; `kit context check` reads the live value from the app's env (`KEYCLOAK_REALM`, `AUTH0_DOMAIN`/`AUTH0_TENANT`, and the `pk_live_`/`pk_test_` prefix of `CLERK_PUBLISHABLE_KEY`) and verifies it matches the declared one — a "dev pointed at prod" guard (a prod Clerk key in a dev checkout is a mismatch, not a silent pass). One data row each; the lock stays data-driven. (#38)
+- **`Redacted<T>` secret wrapper (`src/utils/redacted.ts`).** A value held in a module-private WeakMap that masks as `<redacted>` through `String()`, `JSON.stringify`, `util.inspect`/`console.log`, and object-key enumeration; the only path to the value is the explicit `.expose()`, so secret reads stay grep-able. Borrowed from Effect's `Redacted` pattern (the pattern, not the framework). (#46)
+
 ## [1.14.1] - 2026-06-22
 
 ### Fixed

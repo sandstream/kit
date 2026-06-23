@@ -13,6 +13,7 @@ import {
   parseGcloudProject,
   suggestContextToml,
   hasLockableContext,
+  clerkEnvFromKey,
   type LiveContext,
 } from "./context-lock.js";
 
@@ -217,5 +218,46 @@ describe("context lock", () => {
     it("returns empty string when nothing is readable", () => {
       assert.equal(suggestContextToml({}), "");
     });
+  });
+});
+
+describe("app-service auth realm/tenant lock (#38)", () => {
+  it("keycloak realm: ok on match, mismatch on the wrong realm (dev→prod guard)", () => {
+    const declared = { keycloak: { realm: "myapp-dev" } };
+    assert.equal(
+      compareContext(declared, { keycloak: { realm: "myapp-dev" } })[0]?.status,
+      "ok",
+    );
+    assert.equal(
+      compareContext(declared, { keycloak: { realm: "myapp-prod" } })[0]?.status,
+      "mismatch",
+    );
+  });
+
+  it("auth0 tenant: unknown when the live tenant can't be read", () => {
+    const declared = { auth0: { tenant: "myapp.eu.auth0.com" } };
+    const f = compareContext(declared, { auth0: { tenant: null } })[0];
+    assert.equal(f?.status, "unknown");
+    assert.equal(f?.tool, "auth0");
+  });
+
+  it("clerk env: mismatch when a prod (live) key is used where test is declared", () => {
+    const declared = { clerk: { env: "test" } };
+    assert.equal(compareContext(declared, { clerk: { env: "test" } })[0]?.status, "ok");
+    assert.equal(compareContext(declared, { clerk: { env: "live" } })[0]?.status, "mismatch");
+  });
+
+  it("undeclared auth services are not checked", () => {
+    assert.equal(compareContext({}, { keycloak: { realm: "anything" } }).length, 0);
+  });
+});
+
+describe("clerkEnvFromKey", () => {
+  it("extracts live/test from a publishable key; null otherwise", () => {
+    assert.equal(clerkEnvFromKey("pk_live_abc123"), "live");
+    assert.equal(clerkEnvFromKey("pk_test_abc123"), "test");
+    assert.equal(clerkEnvFromKey("sk_live_nope"), null);
+    assert.equal(clerkEnvFromKey(null), null);
+    assert.equal(clerkEnvFromKey(""), null);
   });
 });

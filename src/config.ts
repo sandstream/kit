@@ -266,6 +266,14 @@ export interface ContextConfig {
   ssh?: { identity?: string; fingerprint?: string; host_alias?: string };
   git?: { email?: string };
   npm?: { registry?: string };
+  /**
+   * App-service auth identity — guards "dev pointed at prod". Declares which
+   * Keycloak realm / Auth0 tenant / Clerk environment this repo must run against;
+   * `kit context check` reads the live value from the app's env and verifies it.
+   */
+  keycloak?: { realm?: string };
+  auth0?: { tenant?: string };
+  clerk?: { env?: string };
 }
 
 /** [setup] — project bootstrap commands run by `kit setup`. install/verify run
@@ -524,6 +532,9 @@ const kitConfigSchema = z
           .optional(),
         git: z.object({ email: z.string().optional() }).passthrough().optional(),
         npm: z.object({ registry: z.string().optional() }).passthrough().optional(),
+        keycloak: z.object({ realm: z.string().optional() }).passthrough().optional(),
+        auth0: z.object({ tenant: z.string().optional() }).passthrough().optional(),
+        clerk: z.object({ env: z.string().optional() }).passthrough().optional(),
       })
       .passthrough()
       .optional(),

@@ -37,6 +37,9 @@ export interface LiveContext {
   ssh?: { identity: string | null; fingerprint: string | null; host_alias: string | null };
   npm?: { registry: string | null };
   vercel?: { orgId: string | null; projectId: string | null };
+  keycloak?: { realm: string | null };
+  auth0?: { tenant: string | null };
+  clerk?: { env: string | null };
 }
 
 function field(
@@ -75,6 +78,10 @@ const FIELD_SPECS: {
   { tool: "npm", field: "registry", declared: (d) => d.npm?.registry, live: (l) => l.npm?.registry ?? null },
   { tool: "vercel", field: "team(orgId)", declared: (d) => d.vercel?.team, live: (l) => l.vercel?.orgId ?? null },
   { tool: "vercel", field: "project(projectId)", declared: (d) => d.vercel?.project, live: (l) => l.vercel?.projectId ?? null },
+  // App-service auth identity — "dev pointed at prod" guard.
+  { tool: "keycloak", field: "realm", declared: (d) => d.keycloak?.realm, live: (l) => l.keycloak?.realm ?? null },
+  { tool: "auth0", field: "tenant", declared: (d) => d.auth0?.tenant, live: (l) => l.auth0?.tenant ?? null },
+  { tool: "clerk", field: "env", declared: (d) => d.clerk?.env, live: (l) => l.clerk?.env ?? null },
 ];
 
 /**
@@ -225,6 +232,14 @@ function expandHome(p: string | null): string | null {
 }
 
 /** Read the live context from each tool. Every read fails soft to null. */
+/** Clerk publishable keys are `pk_live_…` / `pk_test_…`; the env segment is the
+ * "dev pointed at prod" signal. Returns "live" | "test" | null. */
+export function clerkEnvFromKey(pk: string | null): string | null {
+  if (!pk) return null;
+  const m = /^pk_(live|test)_/.exec(pk.trim());
+  return m ? m[1] : null;
+}
+
 export async function gatherLive(cwd: string = process.cwd()): Promise<LiveContext> {
   const live: LiveContext = {};
 
@@ -271,6 +286,18 @@ export async function gatherLive(cwd: string = process.cwd()): Promise<LiveConte
   } catch {
     live.vercel = { orgId: null, projectId: null };
   }
+
+  // App-service auth identity from the app's env — the "live" realm/tenant the app
+  // would actually authenticate against. Only set when the env names it (so an
+  // undeclared service stays unchecked rather than reporting a spurious unknown).
+  const kcRealm = process.env.KEYCLOAK_REALM ?? null;
+  if (kcRealm) live.keycloak = { realm: kcRealm };
+  const auth0Tenant = process.env.AUTH0_DOMAIN ?? process.env.AUTH0_TENANT ?? null;
+  if (auth0Tenant) live.auth0 = { tenant: auth0Tenant };
+  const clerkEnv = clerkEnvFromKey(
+    process.env.CLERK_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,
+  );
+  if (clerkEnv) live.clerk = { env: clerkEnv };
 
   return live;
 }
