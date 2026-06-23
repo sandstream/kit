@@ -772,4 +772,4 @@ See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 - [mise-en-place](https://mise.jdx.dev): tool version management
 - [1Password CLI](https://developer.1password.com/docs/cli/): secret management
-- Node.js CLI (TypeScript)
+- Node.js CLI (primarily TypeScript; JavaScript tooling/scripts, plus a Python triage checker)
