@@ -313,6 +313,10 @@ export interface kitConfig {
     docker_registry?: string;
     threat_data_dir?: string;
     threat_data_pubkey?: string;
+    /** Offline provenance (`kit verify-provenance`): shipped-in Sigstore trust + identity constraints. */
+    provenance_trusted_root?: string;
+    provenance_cert_identity?: string;
+    provenance_cert_issuer?: string;
   };
   web?: {
     search?: WebSearchConfig;
@@ -589,6 +593,9 @@ const kitConfigSchema = z
         docker_registry: z.string().optional(),
         threat_data_dir: z.string().optional(),
         threat_data_pubkey: z.string().optional(),
+        provenance_trusted_root: z.string().optional(),
+        provenance_cert_identity: z.string().optional(),
+        provenance_cert_issuer: z.string().optional(),
       })
       .passthrough()
       .optional(),

@@ -116,13 +116,33 @@ Build the bundle on a connected host (sync DBs → write manifest with SHA-256 �
 - `KIT_BUMBLEBEE_CATALOG` — point at an internally-mirrored exposure catalog.
 - `KIT_BUMBLEBEE=0` — disable the download/scan entirely where policy forbids it.
 
-## 4. Known limitation: provenance verification
+## 4. Offline provenance verification
 
-cosign/SLSA provenance verification depends on Sigstore's Fulcio CA + Rekor
-transparency log, which are public services. Full online verification is not
-possible in a no-egress enclave today; use offline-bundle verification where
-your toolchain supports it, or treat provenance as an out-of-band, connected-host
-check. (Tracked as an air-gap follow-up.)
+cosign/SLSA verification normally reaches Sigstore's Fulcio CA + Rekor log
+(public). `kit verify-provenance` runs cosign **fully offline** instead: it uses
+the bundle's inclusion proof (`--offline`) and a **shipped-in** Sigstore
+`trusted_root.json` (`--trusted-root`) that you distribute and refresh into the
+enclave — no Fulcio/Rekor egress. kit does not reimplement the crypto; it
+orchestrates cosign and is **fail-closed** (missing cosign, missing trust root,
+missing identity constraints, or any non-zero cosign exit ⇒ NOT verified).
+
+```bash
+kit verify-provenance dist/app.tar.gz \
+  --bundle dist/app.sigstore \
+  --trusted-root /etc/kit/trusted_root.json \
+  --identity "https://github.com/org/repo/.github/workflows/release.yml@refs/tags/v1" \
+  --issuer  "https://token.actions.githubusercontent.com"
+```
+
+Defaults for `--trusted-root` / `--identity` / `--issuer` can live in
+`.kit.toml [air_gap]` (`provenance_trusted_root` / `provenance_cert_identity` /
+`provenance_cert_issuer`) or the matching `KIT_PROVENANCE_*` env vars, so the
+command is just `kit verify-provenance <artifact> --bundle <file>`.
+
+**Operational note:** the enclave owner is responsible for distributing and
+periodically refreshing `trusted_root.json` (a TUF mirror snapshot or pinned
+roots) from a connected host — that is the trust anchor for offline
+verification.
 
 ## What still never leaves the enclave
 
