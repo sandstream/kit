@@ -68,8 +68,7 @@ export async function checkOneCliStatus(
   }
 
   if (!cfg.apiKey) {
-    status.error =
-      "ONECLI_API_KEY not set — generate one at /settings/api-keys";
+    status.error = "ONECLI_API_KEY not set — generate one at /settings/api-keys";
     return status;
   }
 
@@ -121,9 +120,7 @@ export async function registerSecretInOneCli(
   cfg: OneCliConfig = resolveOneCliConfig(),
 ): Promise<RegisterSecretResult> {
   if (!cfg.apiKey) {
-    throw new Error(
-      "ONECLI_API_KEY not set — generate one in OneCLI's UI (Settings → API Keys)",
-    );
+    throw new Error("ONECLI_API_KEY not set — generate one in OneCLI's UI (Settings → API Keys)");
   }
   const body = {
     name: input.name,

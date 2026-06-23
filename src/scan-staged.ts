@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import { findSecrets, type SecretFinding } from "./utils/redactSecrets.js";
 import { exec } from "./utils/exec.js";
 
-
 export interface StagedHit {
   file: string;
   findings: SecretFinding[];
@@ -35,8 +34,14 @@ export async function scanStagedFiles(cwd: string = process.cwd()): Promise<Stag
     }
     const args = hasHead
       ? ["diff", "--cached", "--name-only", "--diff-filter=AM", "-z"]
-      : ["diff", "--cached", "--name-only", "--diff-filter=AM", "-z",
-         "4b825dc642cb6eb9a060e54bf8d69288fbee4904"]; // Git's well-known empty tree
+      : [
+          "diff",
+          "--cached",
+          "--name-only",
+          "--diff-filter=AM",
+          "-z",
+          "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        ]; // Git's well-known empty tree
     const { stdout } = await exec("git", args, { cwd, timeout: 5_000 });
     paths = stdout.split("\0").filter(Boolean);
   } catch {

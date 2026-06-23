@@ -14,12 +14,20 @@ const FRAMEWORK_SETUP: Record<
   express: { install: "pnpm install", dev: "pnpm dev", verify: "pnpm build" },
   react: { install: "pnpm install", dev: "pnpm dev", verify: "pnpm build" },
   fastapi: { install: "uv sync", dev: "uv run uvicorn main:app --reload", verify: "uv run pytest" },
-  django: { install: "uv sync", migrate: "uv run python manage.py migrate", verify: "uv run python manage.py check" },
+  django: {
+    install: "uv sync",
+    migrate: "uv run python manage.py migrate",
+    verify: "uv run python manage.py check",
+  },
   flask: { install: "uv sync", dev: "uv run flask run", verify: "uv run pytest" },
   gin: { install: "go mod download", dev: "go run .", verify: "go build ./..." },
   echo: { install: "go mod download", dev: "go run .", verify: "go build ./..." },
   fiber: { install: "go mod download", dev: "go run .", verify: "go build ./..." },
-  laravel: { install: "composer install", migrate: "php artisan migrate", verify: "php artisan test" },
+  laravel: {
+    install: "composer install",
+    migrate: "php artisan migrate",
+    verify: "php artisan test",
+  },
   symfony: { install: "composer install", verify: "php bin/console lint:all" },
   // native mobile
   "react-native": { install: "pnpm install", dev: "pnpm start", verify: "pnpm tsc --noEmit" },
@@ -70,9 +78,7 @@ function servicesSection(services: string[]): string {
     // entries (prisma/drizzle) declare just deps+migrate, so they're skipped here.
     if (!def?.login || !def.check) continue;
     // Tools are merged into [tools] by generateToml; here we only emit login/check.
-    sections.push(
-      `[services.${svc}]\nlogin = "${def.login}"\ncheck = "${def.check}"`
-    );
+    sections.push(`[services.${svc}]\nlogin = "${def.login}"\ncheck = "${def.check}"`);
   }
   return sections.join("\n\n");
 }
@@ -99,7 +105,11 @@ export function parseEnvTemplateKeys(content: string): string[] {
   return keys;
 }
 
-function secretsSection(services: string[], store: SecretsStore = "1password", extraKeys: string[] = []): string {
+function secretsSection(
+  services: string[],
+  store: SecretsStore = "1password",
+  extraKeys: string[] = [],
+): string {
   const allKeys: string[] = [];
   const seen = new Set<string>();
   const add = (k: string): void => {
@@ -215,7 +225,11 @@ function setupSection(stack: DetectedStack): string {
  */
 export function generateToml(
   stack: DetectedStack,
-  options: { secretsStore?: SecretsStore; hasDockerfile?: boolean; extraSecretKeys?: string[] } = {},
+  options: {
+    secretsStore?: SecretsStore;
+    hasDockerfile?: boolean;
+    extraSecretKeys?: string[];
+  } = {},
 ): string {
   // Merge service tools into tools map
   const tools = { ...stack.tools };
@@ -256,7 +270,9 @@ export function generateToml(
   // leaving the CLI absent and `kit secrets` failing key-by-key — fix that by
   // wiring the CLI in here. Cloud secret managers (no `miseTool`) ship their CLI
   // through the cloud env, so they're guided at login but not provisioned.
-  const vaultTool = options.secretsStore && VAULT_META[options.secretsStore as Exclude<SecretsStore, "env">]?.miseTool;
+  const vaultTool =
+    options.secretsStore &&
+    VAULT_META[options.secretsStore as Exclude<SecretsStore, "env">]?.miseTool;
   if (vaultTool && !tools[vaultTool]) {
     tools[vaultTool] = "latest";
   }
@@ -267,16 +283,20 @@ export function generateToml(
       ? `# Detected: ${stack.language} / ${stack.framework}${stack.services.length ? ` + ${stack.services.join(", ")}` : ""}`
       : `# Detected: ${stack.language}${stack.services.length ? ` + ${stack.services.join(", ")}` : ""}`,
     `# Includes default security scanners (semgrep, socket) installed via mise.`,
-    ``
+    ``,
   );
 
   const toolsSec = toolsSection(tools);
   const servicesSec = servicesSection(stack.services);
-  const secretsSec = secretsSection(stack.services, options.secretsStore ?? "1password", options.extraSecretKeys ?? []);
+  const secretsSec = secretsSection(
+    stack.services,
+    options.secretsStore ?? "1password",
+    options.extraSecretKeys ?? [],
+  );
   const setupSec = setupSection(stack);
 
   const parts = [header, toolsSec, servicesSec, secretsSec, setupSec].filter(
-    (s) => s.trim().length > 0
+    (s) => s.trim().length > 0,
   );
 
   return parts.join("\n") + "\n";

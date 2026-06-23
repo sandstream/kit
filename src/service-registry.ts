@@ -61,7 +61,11 @@ export const SERVICE_REGISTRY: ServiceDef[] = [
     files: ["supabase"],
     login: "supabase login",
     check: "supabase projects list",
-    secrets: ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"],
+    secrets: [
+      "NEXT_PUBLIC_SUPABASE_URL",
+      "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+      "SUPABASE_SERVICE_ROLE_KEY",
+    ],
     tool: "supabase",
     migrate: "supabase db push",
   },
@@ -130,7 +134,14 @@ export const SERVICE_REGISTRY: ServiceDef[] = [
   },
   {
     id: "sentry",
-    deps: ["@sentry/nextjs", "@sentry/node", "@sentry/react", "@sentry/svelte", "@sentry/astro", "@sentry/remix"],
+    deps: [
+      "@sentry/nextjs",
+      "@sentry/node",
+      "@sentry/react",
+      "@sentry/svelte",
+      "@sentry/astro",
+      "@sentry/remix",
+    ],
     pyDeps: ["sentry-sdk"],
     goMods: ["github.com/getsentry/sentry-go"],
     login: "# sentry — no CLI login; get DSN from https://sentry.io",
@@ -253,7 +264,13 @@ export const SERVICE_REGISTRY: ServiceDef[] = [
     deps: ["@auth0/nextjs-auth0", "@auth0/auth0-react", "auth0"],
     login: "# auth0 - no CLI login; get keys from https://manage.auth0.com",
     check: "# auth0 - check AUTH0_CLIENT_ID is set",
-    secrets: ["AUTH0_SECRET", "AUTH0_BASE_URL", "AUTH0_ISSUER_BASE_URL", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET"],
+    secrets: [
+      "AUTH0_SECRET",
+      "AUTH0_BASE_URL",
+      "AUTH0_ISSUER_BASE_URL",
+      "AUTH0_CLIENT_ID",
+      "AUTH0_CLIENT_SECRET",
+    ],
   },
   {
     id: "keycloak",

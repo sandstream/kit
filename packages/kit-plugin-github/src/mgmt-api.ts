@@ -69,10 +69,10 @@ export async function listRepoSecrets(
   owner: string,
   repo: string,
 ): Promise<RepoSecretSummary[]> {
-  const res = await fetch(
-    `${client.baseUrl}/repos/${owner}/${repo}/actions/secrets`,
-    { headers: client.headers, signal: AbortSignal.timeout(10_000) },
-  );
+  const res = await fetch(`${client.baseUrl}/repos/${owner}/${repo}/actions/secrets`, {
+    headers: client.headers,
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!res.ok) {
     throw new Error(
       `GET /repos/${owner}/${repo}/actions/secrets returned ${res.status}: ${await safeText(res)}`,
@@ -92,10 +92,10 @@ async function getRepoPublicKey(
   owner: string,
   repo: string,
 ): Promise<RepoPublicKey> {
-  const res = await fetch(
-    `${client.baseUrl}/repos/${owner}/${repo}/actions/secrets/public-key`,
-    { headers: client.headers, signal: AbortSignal.timeout(10_000) },
-  );
+  const res = await fetch(`${client.baseUrl}/repos/${owner}/${repo}/actions/secrets/public-key`, {
+    headers: client.headers,
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!res.ok) {
     throw new Error(`GET .../public-key returned ${res.status}: ${await safeText(res)}`);
   }
@@ -198,10 +198,10 @@ export async function listDeployKeys(
   owner: string,
   repo: string,
 ): Promise<DeployKey[]> {
-  const res = await fetch(
-    `${client.baseUrl}/repos/${owner}/${repo}/keys`,
-    { headers: client.headers, signal: AbortSignal.timeout(10_000) },
-  );
+  const res = await fetch(`${client.baseUrl}/repos/${owner}/${repo}/keys`, {
+    headers: client.headers,
+    signal: AbortSignal.timeout(10_000),
+  });
   if (!res.ok) {
     throw new Error(`GET .../keys returned ${res.status}: ${await safeText(res)}`);
   }

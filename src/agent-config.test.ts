@@ -43,7 +43,8 @@ describe("upsertKitBlock", () => {
   it("updates only the marked region, preserving surrounding edits", () => {
     const base = upsertKitBlock("# Doc\n").next;
     // Simulate a user editing OUTSIDE the markers + a stale block INSIDE.
-    const edited = base.replace("kit triage", "STALE_PLACEHOLDER") + "\n## My own section\nkeep me\n";
+    const edited =
+      base.replace("kit triage", "STALE_PLACEHOLDER") + "\n## My own section\nkeep me\n";
     const { next, action } = upsertKitBlock(edited);
     assert.equal(action, "updated");
     assert.ok(next.includes("kit triage"), "block refreshed");
@@ -64,7 +65,9 @@ describe("detectAgentTargets", () => {
   it("defaults to CLAUDE.md + AGENTS.md when nothing is present", () => {
     const dir = tmpRepo();
     try {
-      const files = detectAgentTargets(dir).map((t) => t.file).sort();
+      const files = detectAgentTargets(dir)
+        .map((t) => t.file)
+        .sort();
       assert.deepEqual(files, ["AGENTS.md", "CLAUDE.md"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -87,7 +90,9 @@ describe("detectAgentTargets", () => {
     try {
       writeFileSync(join(dir, ".cursorrules"), "rules\n");
       writeFileSync(join(dir, ".clinerules"), "rules\n");
-      const agents = detectAgentTargets(dir).map((t) => t.agent).sort();
+      const agents = detectAgentTargets(dir)
+        .map((t) => t.agent)
+        .sort();
       assert.deepEqual(agents, ["Cline", "Cursor"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -165,7 +170,11 @@ describe("installKitPermissions", () => {
       assert.ok(s.permissions.allow.includes("Bash(kit check:*)"));
       assert.ok(s.permissions.allow.includes("Bash(kit memory search:*)"));
       // Never grants mutating commands, never writes a deny rule or a mode.
-      assert.ok(!s.permissions.allow.some((r: string) => r.includes("kit secrets") || r.includes("kit fix")));
+      assert.ok(
+        !s.permissions.allow.some(
+          (r: string) => r.includes("kit secrets") || r.includes("kit fix"),
+        ),
+      );
       assert.equal(s.permissions.deny, undefined);
       assert.equal(s.permissions.defaultMode, undefined);
 
@@ -183,7 +192,10 @@ describe("installKitPermissions", () => {
       mkdirSync(join(dir, ".claude"), { recursive: true });
       writeFileSync(
         join(dir, ".claude", "settings.json"),
-        JSON.stringify({ permissions: { allow: ["Bash(npm run:*)"] }, enableAllProjectMcpServers: true }),
+        JSON.stringify({
+          permissions: { allow: ["Bash(npm run:*)"] },
+          enableAllProjectMcpServers: true,
+        }),
       );
       await installKitPermissions(dir);
       const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));

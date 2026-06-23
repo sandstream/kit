@@ -1,11 +1,10 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "sandstream-kit-adapter-sdk";
 import { exec } from "../utils/exec.js";
 
-
 async function runFly(
   args: string[],
   cwd: string,
-  env?: Record<string, string>
+  env?: Record<string, string>,
 ): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   try {
     const { stdout, stderr } = await exec("fly", args, {
@@ -89,7 +88,10 @@ export const flyioHostingAdapter: ServiceAdapter = {
     if (!appName) {
       // Generate app name from project name or use a default
       const projectName = context.projectName || "kit-app";
-      appName = projectName.toLowerCase().replace(/[^a-z0-9-]/g, "-").substring(0, 30);
+      appName = projectName
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, "-")
+        .substring(0, 30);
 
       // Create the app
       const createResult = await runFly(["apps", "create", appName], context.projectPath);
@@ -125,7 +127,7 @@ export const flyioHostingAdapter: ServiceAdapter = {
       // Create a deploy token
       const tokenResult = await runFly(
         ["tokens", "create", "deploy", "-x", "720h"],
-        context.projectPath
+        context.projectPath,
       );
       if (tokenResult.ok) {
         // Extract token from output

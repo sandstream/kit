@@ -21,9 +21,7 @@ describe("Plugin Registry", () => {
     it("should find plugins by description", () => {
       const results = searchPlugins("payment");
       assert(results.length > 0);
-      assert(
-        results.some((p) => p.description.toLowerCase().includes("payment"))
-      );
+      assert(results.some((p) => p.description.toLowerCase().includes("payment")));
     });
 
     it("should find plugins by tag", () => {
@@ -40,10 +38,7 @@ describe("Plugin Registry", () => {
     it("should rank results by relevance", () => {
       const results = searchPlugins("stripe");
       // Exact name match should come first
-      assert(
-        results[0].name === "stripe/payments" ||
-          results[0].name.includes("stripe")
-      );
+      assert(results[0].name === "stripe/payments" || results[0].name.includes("stripe"));
     });
 
     it("should be case-insensitive", () => {
@@ -223,18 +218,12 @@ describe("Plugin Registry", () => {
     });
 
     it("should have at least 5 plugins", () => {
-      assert(
-        DEFAULT_REGISTRY.plugins.length >= 5,
-        "registry should have at least 5 plugins"
-      );
+      assert(DEFAULT_REGISTRY.plugins.length >= 5, "registry should have at least 5 plugins");
     });
 
     it("should have 'official' tag for all built-in plugins", () => {
       for (const plugin of DEFAULT_REGISTRY.plugins) {
-        assert(
-          plugin.tags.includes("official"),
-          `${plugin.name} should have 'official' tag`
-        );
+        assert(plugin.tags.includes("official"), `${plugin.name} should have 'official' tag`);
       }
     });
 

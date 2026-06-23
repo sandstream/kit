@@ -46,7 +46,7 @@ export interface ProjectContext {
  */
 export async function gatherProjectContext(
   config: kitConfig,
-  cwd: string
+  cwd: string,
 ): Promise<ProjectContext> {
   const kitVersion = getkitVersion(cwd);
   const activeEnv = resolveActiveEnvironment();

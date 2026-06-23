@@ -132,10 +132,11 @@ describe("checkSecretExpiration - env var hints", () => {
     process.env.EXPIRED_KEY_EXPIRES_AT = daysAgo(3);
     process.env.WARNING_KEY_EXPIRES_AT = daysFromNow(5);
 
-    const result = await checkSecretExpiration(
-      enabledConfig,
-      ["EXPIRED_KEY", "WARNING_KEY", "FINE_KEY"],
-    );
+    const result = await checkSecretExpiration(enabledConfig, [
+      "EXPIRED_KEY",
+      "WARNING_KEY",
+      "FINE_KEY",
+    ]);
 
     // FINE_KEY has no hint, so only 2 entries
     assert.equal(result.length, 2);
@@ -160,11 +161,7 @@ describe("checkSecretExpiration - store dispatch", () => {
       store: "infisical",
       keys: { INFISICAL_KEY: { source: "infisical" } },
     };
-    const result = await checkSecretExpiration(
-      enabledConfig,
-      ["INFISICAL_KEY"],
-      secretsConfig,
-    );
+    const result = await checkSecretExpiration(enabledConfig, ["INFISICAL_KEY"], secretsConfig);
 
     assert.equal(result.length, 1);
     assert.equal(result[0].expired, true);
@@ -177,11 +174,7 @@ describe("checkSecretExpiration - store dispatch", () => {
       store: "doppler",
       keys: { DOPPLER_KEY: { source: "doppler" } },
     };
-    const result = await checkSecretExpiration(
-      enabledConfig,
-      ["DOPPLER_KEY"],
-      secretsConfig,
-    );
+    const result = await checkSecretExpiration(enabledConfig, ["DOPPLER_KEY"], secretsConfig);
 
     assert.equal(result.length, 1);
     assert.equal(result[0].expired, true);
@@ -193,11 +186,7 @@ describe("checkSecretExpiration - store dispatch", () => {
     const secretsConfig: SecretsConfig = {
       keys: { BW_KEY: { source: "bitwarden", name: "My Password" } },
     };
-    const result = await checkSecretExpiration(
-      enabledConfig,
-      ["BW_KEY"],
-      secretsConfig,
-    );
+    const result = await checkSecretExpiration(enabledConfig, ["BW_KEY"], secretsConfig);
 
     assert.equal(result.length, 1);
     assert.equal(result[0].warning, true);
@@ -209,11 +198,7 @@ describe("checkSecretExpiration - store dispatch", () => {
     const secretsConfig: SecretsConfig = {
       keys: { OP_KEY: { source: "1password" } }, // no ref
     };
-    const result = await checkSecretExpiration(
-      enabledConfig,
-      ["OP_KEY"],
-      secretsConfig,
-    );
+    const result = await checkSecretExpiration(enabledConfig, ["OP_KEY"], secretsConfig);
 
     assert.equal(result.length, 1);
     assert.equal(result[0].expired, true);
@@ -282,8 +267,20 @@ describe("formatSecretExpirationWarnings", () => {
 
   it("shows both expired and warning sections when both present", () => {
     const expirations: SecretExpiration[] = [
-      { key: "DEAD", expiry_date: daysAgo(1), days_until_expiry: -1, expired: true, warning: false },
-      { key: "SOON", expiry_date: daysFromNow(5), days_until_expiry: 5, expired: false, warning: true },
+      {
+        key: "DEAD",
+        expiry_date: daysAgo(1),
+        days_until_expiry: -1,
+        expired: true,
+        warning: false,
+      },
+      {
+        key: "SOON",
+        expiry_date: daysFromNow(5),
+        days_until_expiry: 5,
+        expired: false,
+        warning: true,
+      },
     ];
     const output = formatSecretExpirationWarnings(expirations);
     assert.ok(output.includes("EXPIRED"));
@@ -294,31 +291,19 @@ describe("formatSecretExpirationWarnings", () => {
 describe("hasExpiredSecrets / hasSecretWarnings", () => {
   it("hasExpiredSecrets returns false when none expired", () => {
     assert.equal(hasExpiredSecrets([]), false);
-    assert.equal(
-      hasExpiredSecrets([{ key: "k", expired: false, warning: true }]),
-      false,
-    );
+    assert.equal(hasExpiredSecrets([{ key: "k", expired: false, warning: true }]), false);
   });
 
   it("hasExpiredSecrets returns true when any expired", () => {
-    assert.equal(
-      hasExpiredSecrets([{ key: "k", expired: true, warning: false }]),
-      true,
-    );
+    assert.equal(hasExpiredSecrets([{ key: "k", expired: true, warning: false }]), true);
   });
 
   it("hasSecretWarnings returns false when none warning", () => {
     assert.equal(hasSecretWarnings([]), false);
-    assert.equal(
-      hasSecretWarnings([{ key: "k", expired: true, warning: false }]),
-      false,
-    );
+    assert.equal(hasSecretWarnings([{ key: "k", expired: true, warning: false }]), false);
   });
 
   it("hasSecretWarnings returns true when any warning", () => {
-    assert.equal(
-      hasSecretWarnings([{ key: "k", expired: false, warning: true }]),
-      true,
-    );
+    assert.equal(hasSecretWarnings([{ key: "k", expired: false, warning: true }]), true);
   });
 });

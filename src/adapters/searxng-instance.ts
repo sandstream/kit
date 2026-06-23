@@ -1,14 +1,10 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
 import { exec } from "../utils/exec.js";
 
-
 /**
  * Helper to fetch with timeout using AbortController
  */
-async function fetchWithTimeout(
-  url: string,
-  timeoutMs: number = 5000,
-): Promise<Response> {
+async function fetchWithTimeout(url: string, timeoutMs: number = 5000): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -47,15 +43,13 @@ export const searxngInstanceAdapter: ServiceAdapter = {
 
       // Check if SearXNG is running in Docker on localhost:8080
       try {
-        const { stdout } = await exec("docker", [
-          "ps",
-          "--filter",
-          "name=searxng",
-          "--format",
-          "{{.Status}}",
-        ], {
-          timeout: 10_000,
-        });
+        const { stdout } = await exec(
+          "docker",
+          ["ps", "--filter", "name=searxng", "--format", "{{.Status}}"],
+          {
+            timeout: 10_000,
+          },
+        );
 
         if (stdout.includes("Up")) {
           // Try to verify it's responding
@@ -91,28 +85,23 @@ export const searxngInstanceAdapter: ServiceAdapter = {
 
       // Check if SearXNG container already exists and is running
       try {
-        const { stdout } = await exec("docker", [
-          "ps",
-          "-a",
-          "--filter",
-          "name=searxng",
-          "--format",
-          "{{.Names}}",
-        ], {
-          timeout: 10_000,
-        });
+        const { stdout } = await exec(
+          "docker",
+          ["ps", "-a", "--filter", "name=searxng", "--format", "{{.Names}}"],
+          {
+            timeout: 10_000,
+          },
+        );
 
         if (stdout.includes("searxng")) {
           // Container exists, check if it's running
-          const { stdout: statusOutput } = await exec("docker", [
-            "ps",
-            "--filter",
-            "name=searxng",
-            "--format",
-            "{{.Status}}",
-          ], {
-            timeout: 10_000,
-          });
+          const { stdout: statusOutput } = await exec(
+            "docker",
+            ["ps", "--filter", "name=searxng", "--format", "{{.Status}}"],
+            {
+              timeout: 10_000,
+            },
+          );
 
           if (statusOutput.includes("Up")) {
             // Already running, verify it's healthy
@@ -184,19 +173,23 @@ export const searxngInstanceAdapter: ServiceAdapter = {
 
       // Create and start SearXNG container
       try {
-        await exec("docker", [
-          "run",
-          "-d",
-          "--name",
-          "searxng",
-          "-p",
-          "8080:8080",
-          "-e",
-          "SEARXNG_PORT=8080",
-          "searxng/searxng:latest",
-        ], {
-          timeout: 120_000, // 2 minutes for image pull and container creation
-        });
+        await exec(
+          "docker",
+          [
+            "run",
+            "-d",
+            "--name",
+            "searxng",
+            "-p",
+            "8080:8080",
+            "-e",
+            "SEARXNG_PORT=8080",
+            "searxng/searxng:latest",
+          ],
+          {
+            timeout: 120_000, // 2 minutes for image pull and container creation
+          },
+        );
 
         // Wait for container to be healthy
         let attempts = 0;

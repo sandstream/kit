@@ -1,7 +1,6 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
 import { exec } from "../utils/exec.js";
 
-
 /**
  * Cloudflare R2 Object Storage Adapter
  * Provisions an R2 bucket and writes S3-compatible credentials
@@ -48,10 +47,7 @@ export const cloudflareR2Adapter: ServiceAdapter = {
     }
 
     // Return existing if already configured
-    if (
-      context.existingEnv.R2_ACCESS_KEY_ID &&
-      context.existingEnv.R2_SECRET_ACCESS_KEY
-    ) {
+    if (context.existingEnv.R2_ACCESS_KEY_ID && context.existingEnv.R2_SECRET_ACCESS_KEY) {
       return {
         success: true,
         message: "Cloudflare R2 already configured — keys present in environment",
@@ -59,16 +55,15 @@ export const cloudflareR2Adapter: ServiceAdapter = {
           R2_ACCESS_KEY_ID: context.existingEnv.R2_ACCESS_KEY_ID,
           R2_SECRET_ACCESS_KEY: context.existingEnv.R2_SECRET_ACCESS_KEY,
           R2_BUCKET_NAME: context.existingEnv.R2_BUCKET_NAME ?? "",
-          R2_ENDPOINT: context.existingEnv.R2_ENDPOINT ?? `https://${accountId}.r2.cloudflarestorage.com`,
+          R2_ENDPOINT:
+            context.existingEnv.R2_ENDPOINT ?? `https://${accountId}.r2.cloudflarestorage.com`,
           CLOUDFLARE_ACCOUNT_ID: accountId,
         },
         config: { service: "cloudflare/r2", existing: true },
       };
     }
 
-    const bucketName = (
-      context.projectName ?? context.projectPath.split("/").pop() ?? "kit-bucket"
-    )
+    const bucketName = (context.projectName ?? context.projectPath.split("/").pop() ?? "kit-bucket")
       .toLowerCase()
       .replace(/[^a-z0-9-]/g, "-");
 
@@ -111,7 +106,7 @@ export const cloudflareR2Adapter: ServiceAdapter = {
               permissions: ["admin:read", "admin:write"],
               buckets: [bucketName],
             }),
-          }
+          },
         );
 
         if (resp.ok) {

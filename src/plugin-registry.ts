@@ -137,7 +137,7 @@ export function createRegistryFromSkillsLock(skillsLock: SkillsLockFile): Plugin
  */
 export function getValidWebSearchProviders(registry?: PluginRegistry): string[] {
   const builtIn = ["brave", "google", "searxng", "custom"];
-  
+
   if (!registry) {
     return builtIn;
   }

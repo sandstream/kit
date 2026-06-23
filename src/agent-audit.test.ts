@@ -7,11 +7,16 @@ const FAKE_STRIPE = ["sk", "live", "A".repeat(40)].join("_");
 
 describe("auditConfigSecrets", () => {
   it("flags a plaintext secret embedded in a config blob", () => {
-    const cfg = JSON.stringify({ mcpServers: { stripe: { env: { STRIPE_SECRET_KEY: FAKE_STRIPE } } } });
+    const cfg = JSON.stringify({
+      mcpServers: { stripe: { env: { STRIPE_SECRET_KEY: FAKE_STRIPE } } },
+    });
     const hits = auditConfigSecrets(cfg);
     assert.ok(hits.length >= 1, "should find the stripe key");
     assert.ok(hits[0].preview.includes("…"), "preview must be masked (head…tail)");
-    assert.ok(hits[0].preview.length < FAKE_STRIPE.length, "preview must be shorter than the raw key");
+    assert.ok(
+      hits[0].preview.length < FAKE_STRIPE.length,
+      "preview must be shorter than the raw key",
+    );
   });
   it("is clean when no secrets present", () => {
     assert.deepEqual(auditConfigSecrets(JSON.stringify({ mcpServers: {} })), []);
@@ -31,7 +36,10 @@ describe("auditMcpServers", () => {
     assert.match(hits[0], /^bad → http:\/\//);
   });
   it("also reads the `servers` container; [] on garbage", () => {
-    assert.equal(auditMcpServers(JSON.stringify({ servers: { x: { url: "http://h" } } })).length, 1);
+    assert.equal(
+      auditMcpServers(JSON.stringify({ servers: { x: { url: "http://h" } } })).length,
+      1,
+    );
     assert.deepEqual(auditMcpServers("not json"), []);
   });
 });

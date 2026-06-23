@@ -8,7 +8,11 @@ import { checkRevocationStatus, handleRevocation } from "./revocation.js";
 import { checkBudgetLimits, recordUsage } from "./budget.js";
 import { logAuditEvent } from "./audit.js";
 import { requestApproval } from "./approval.js";
-import { checkSecretExpiration, formatSecretExpirationWarnings, hasExpiredSecrets } from "./secret-expiration.js";
+import {
+  checkSecretExpiration,
+  formatSecretExpirationWarnings,
+  hasExpiredSecrets,
+} from "./secret-expiration.js";
 
 export interface OperationContext {
   operation: string;
@@ -60,10 +64,7 @@ export async function withGovernance<T>(
   }
 
   // 2. Check budget limits
-  const budgetCheck = await checkBudgetLimits(
-    config.governance,
-    context.estimatedTokens || 0,
-  );
+  const budgetCheck = await checkBudgetLimits(config.governance, context.estimatedTokens || 0);
   if (!budgetCheck.allowed) {
     await auditDeny(budgetCheck.reason || "Budget limit exceeded");
     throw new Error(budgetCheck.reason || "Budget limit exceeded");
@@ -74,18 +75,14 @@ export async function withGovernance<T>(
   let approvedForOp = false;
 
   // 3. Check operation permissions
-  const permissionCheck = checkOperationAllowed(
-    governanceConfig,
-    context.operationType,
-  );
+  const permissionCheck = checkOperationAllowed(governanceConfig, context.operationType);
   if (!permissionCheck.allowed) {
     // Check if approval can override
     if (permissionCheck.requiresApproval) {
       const approved = await requestApproval(config.governance, {
         operation: context.operation,
         environment: governanceConfig.environment,
-        reason:
-          permissionCheck.reason || "Operation requires approval",
+        reason: permissionCheck.reason || "Operation requires approval",
         metadata: context.metadata,
       });
 
@@ -96,9 +93,7 @@ export async function withGovernance<T>(
       approvedForOp = true;
     } else {
       await auditDeny(permissionCheck.reason || "Operation not allowed");
-      throw new Error(
-        permissionCheck.reason || "Operation not allowed",
-      );
+      throw new Error(permissionCheck.reason || "Operation not allowed");
     }
   }
 
@@ -121,16 +116,12 @@ export async function withGovernance<T>(
   // 5. Check secret expiration — BLOCKS the operation if any secret is expired
   if (governanceConfig.secrets.check_expiration && config.secrets?.keys) {
     const secretKeys = Object.keys(config.secrets.keys);
-    const expirations = await checkSecretExpiration(
-      config.governance,
-      secretKeys,
-      config.secrets,
-    );
+    const expirations = await checkSecretExpiration(config.governance, secretKeys, config.secrets);
 
     if (hasExpiredSecrets(expirations)) {
       const warnings = formatSecretExpirationWarnings(expirations);
       console.warn("\n" + warnings);
-      
+
       // Block operation if secrets are expired
       await auditDeny("Expired secrets detected", {
         expired_secrets: expirations.filter((e) => e.expired).map((e) => e.key),
@@ -147,7 +138,7 @@ export async function withGovernance<T>(
     result = await operation();
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
-    
+
     // Log failure
     await logAuditEvent(governanceConfig, {
       operation: context.operation,
@@ -163,7 +154,7 @@ export async function withGovernance<T>(
 
   // 6. Record usage and log success
   await recordUsage(config.governance, context.estimatedTokens || 0);
-  
+
   await logAuditEvent(governanceConfig, {
     operation: context.operation,
     environment: governanceConfig.environment,
@@ -200,10 +191,7 @@ export async function checkGovernance(
   }
 
   // 2. Check budget limits
-  const budgetCheck = await checkBudgetLimits(
-    config.governance,
-    context.estimatedTokens || 0,
-  );
+  const budgetCheck = await checkBudgetLimits(config.governance, context.estimatedTokens || 0);
   if (!budgetCheck.allowed) {
     return {
       allowed: false,
@@ -212,10 +200,7 @@ export async function checkGovernance(
   }
 
   // 3. Check operation permissions
-  const permissionCheck = checkOperationAllowed(
-    governanceConfig,
-    context.operationType,
-  );
+  const permissionCheck = checkOperationAllowed(governanceConfig, context.operationType);
   if (!permissionCheck.allowed && !permissionCheck.requiresApproval) {
     return {
       allowed: false,
@@ -230,11 +215,7 @@ export async function checkGovernance(
   // 4. Check secret expiration
   if (governanceConfig.secrets.check_expiration && config.secrets?.keys) {
     const secretKeys = Object.keys(config.secrets.keys);
-    const expirations = await checkSecretExpiration(
-      config.governance,
-      secretKeys,
-      config.secrets,
-    );
+    const expirations = await checkSecretExpiration(config.governance, secretKeys, config.secrets);
 
     if (hasExpiredSecrets(expirations)) {
       return {

@@ -96,12 +96,7 @@ export async function clearMcpToken(name: string): Promise<void> {
   await writeTokenStore(store);
 }
 
-export type McpAuthStatus =
-  | "ok"
-  | "expired"
-  | "missing"
-  | "scope-mismatch"
-  | "unconfigured";
+export type McpAuthStatus = "ok" | "expired" | "missing" | "scope-mismatch" | "unconfigured";
 
 export interface McpStatusEntry {
   name: string;
@@ -177,16 +172,12 @@ export async function statusAll(config: McpConfig | undefined): Promise<McpStatu
 export async function resolveMcpToken(name: string): Promise<string> {
   const token = await getMcpToken(name);
   if (!token) {
-    throw new Error(
-      `No MCP token for "${name}". Run 'kit mcp auth ${name}' first.`,
-    );
+    throw new Error(`No MCP token for "${name}". Run 'kit mcp auth ${name}' first.`);
   }
   if (token.expiresAt) {
     const exp = Date.parse(token.expiresAt);
     if (Number.isFinite(exp) && exp < Date.now()) {
-      throw new Error(
-        `MCP token for "${name}" expired ${token.expiresAt}. Re-authorize.`,
-      );
+      throw new Error(`MCP token for "${name}" expired ${token.expiresAt}. Re-authorize.`);
     }
   }
   return token.accessToken;

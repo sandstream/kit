@@ -12,10 +12,7 @@ export interface ToolStatus {
   ok: boolean;
 }
 
-async function getToolVersion(
-  tool: string,
-  resolve: ToolResolver,
-): Promise<string | null> {
+async function getToolVersion(tool: string, resolve: ToolResolver): Promise<string | null> {
   // Fast path: `mise current` gives the project-pinned version directly when the
   // tool is declared in the project's mise config.
   try {

@@ -14,7 +14,6 @@ function tmpGitRepo(): string {
   return dir;
 }
 
-
 describe("scanStagedFiles", () => {
   it("returns empty when no files are staged", async () => {
     const dir = tmpGitRepo();
@@ -43,7 +42,7 @@ describe("scanStagedFiles", () => {
     try {
       writeFileSync(
         join(dir, ".env"),
-        "STRIPE_SECRET_KEY=sk_te"+"st_51T2AMtJLRlXeUG4dKBwX2nsve3BLEzy\n",
+        "STRIPE_SECRET_KEY=sk_te" + "st_51T2AMtJLRlXeUG4dKBwX2nsve3BLEzy\n",
       );
       execSync("git add .env", { cwd: dir });
       const hits = await scanStagedFiles(dir);
@@ -58,8 +57,7 @@ describe("scanStagedFiles", () => {
   it("flags a staged Supabase service-role JWT", async () => {
     const dir = tmpGitRepo();
     try {
-      const jwt =
-        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.SflKxwRJSMeKKF2QT4fwpMeJf36";
+      const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.SflKxwRJSMeKKF2QT4fwpMeJf36";
       writeFileSync(join(dir, ".env.local"), `SERVICE_ROLE=${jwt}\n`);
       execSync("git add .env.local", { cwd: dir });
       const hits = await scanStagedFiles(dir);
@@ -73,7 +71,7 @@ describe("scanStagedFiles", () => {
   it("flags multiple files in one scan", async () => {
     const dir = tmpGitRepo();
     try {
-      writeFileSync(join(dir, "a.env"), "STRIPE_KEY=sk_te"+"st_AAAAAAAAAAAAAAAAAAAA\n");
+      writeFileSync(join(dir, "a.env"), "STRIPE_KEY=sk_te" + "st_AAAAAAAAAAAAAAAAAAAA\n");
       writeFileSync(join(dir, "b.txt"), "AKIA01234567890ABCDE\n");
       execSync("git add a.env b.txt", { cwd: dir });
       const hits = await scanStagedFiles(dir);

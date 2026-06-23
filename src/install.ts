@@ -3,7 +3,6 @@ import { checkTools, type ToolStatus } from "./check-tools.js";
 import { gateInstall, type GateVerdict } from "./triage-gate.js";
 import { exec } from "./utils/exec.js";
 
-
 export interface InstallResult {
   name: string;
   /** `blocked` = triage gate refused this install (watertight, fail-closed). */

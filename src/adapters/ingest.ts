@@ -92,8 +92,9 @@ export function parseSarif(json: string): SecurityCheckResult[] {
       const ruleId = res.ruleId ?? "(rule)";
       const rule = rulesById.get(ruleId);
       const severity =
-        cvssToSeverity(res.properties?.["security-severity"] ?? rule?.properties?.["security-severity"]) ??
-        levelToSeverity(res.level);
+        cvssToSeverity(
+          res.properties?.["security-severity"] ?? rule?.properties?.["security-severity"],
+        ) ?? levelToSeverity(res.level);
       const loc = res.locations?.[0]?.physicalLocation;
       const uri = loc?.artifactLocation?.uri;
       const line = loc?.region?.startLine;

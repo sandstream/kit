@@ -1,10 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  resolveOneCliConfig,
-  generatePlaceholder,
-  checkOneCliStatus,
-} from "./secrets-onecli.js";
+import { resolveOneCliConfig, generatePlaceholder, checkOneCliStatus } from "./secrets-onecli.js";
 
 describe("resolveOneCliConfig", () => {
   it("defaults to localhost when no env vars are set", () => {

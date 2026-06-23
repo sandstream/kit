@@ -18,7 +18,7 @@ function makeRepoWithLeak(): { dir: string; leakValue: string } {
   writeFileSync(join(dir, "README.md"), "# repo\n");
   git(dir, "add", "README.md");
   git(dir, "commit", "-q", "-m", "init");
-  const leakValue = "sk_"+"test_AAAAAAAAAAAAAAAAAAAA1234";
+  const leakValue = "sk_" + "test_AAAAAAAAAAAAAAAAAAAA1234";
   writeFileSync(join(dir, "config.txt"), `STRIPE=${leakValue}\n`);
   git(dir, "add", "config.txt");
   git(dir, "commit", "-q", "-m", "oops");

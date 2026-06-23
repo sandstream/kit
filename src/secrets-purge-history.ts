@@ -23,7 +23,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exec } from "./utils/exec.js";
 
-
 export type Tool = "git-filter-repo" | "bfg";
 
 export interface ToolStatus {
@@ -64,11 +63,11 @@ export async function previewMatches(
   pattern: string,
   cwd: string = process.cwd(),
 ): Promise<PurgePreview> {
-  const { stdout: hashesOut } = await exec(
-    "git",
-    ["log", "--pretty=%H", "-S", pattern, "--all"],
-    { cwd, timeout: 30_000, maxBuffer: 10 * 1024 * 1024 },
-  ).catch(() => ({ stdout: "" }));
+  const { stdout: hashesOut } = await exec("git", ["log", "--pretty=%H", "-S", pattern, "--all"], {
+    cwd,
+    timeout: 30_000,
+    maxBuffer: 10 * 1024 * 1024,
+  }).catch(() => ({ stdout: "" }));
   const hashes = hashesOut.split("\n").filter(Boolean);
 
   const fileSet = new Set<string>();
@@ -161,11 +160,11 @@ export async function purgeHistory(
 
     if (tools.bfgAvailable) {
       try {
-        const { stdout } = await exec(
-          "bfg",
-          ["--replace-text", replacementFile, cwd],
-          { cwd, timeout: 600_000, maxBuffer: 50 * 1024 * 1024 },
-        );
+        const { stdout } = await exec("bfg", ["--replace-text", replacementFile, cwd], {
+          cwd,
+          timeout: 600_000,
+          maxBuffer: 50 * 1024 * 1024,
+        });
         // bfg leaves dangling refs; user must run `git reflog expire --expire=now --all && git gc --prune=now --aggressive`.
         return {
           toolUsed: "bfg",

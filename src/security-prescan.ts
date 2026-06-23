@@ -32,7 +32,6 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { exec } from "./utils/exec.js";
 
-
 const PRESCAN_DIR = join(homedir(), ".kit", "prescans");
 
 export type Severity = "info" | "low" | "medium" | "high" | "critical";
@@ -126,8 +125,18 @@ async function pathExists(p: string): Promise<boolean> {
 async function findRepos(root: string, maxDepth: number): Promise<string[]> {
   const repos: string[] = [];
   const SKIP_DIRS = new Set([
-    "node_modules", ".git", "dist", "build", ".next", ".turbo",
-    "out", "coverage", ".cache", ".venv", "venv", "__pycache__",
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    ".next",
+    ".turbo",
+    "out",
+    "coverage",
+    ".cache",
+    ".venv",
+    "venv",
+    "__pycache__",
   ]);
   async function walk(dir: string, depth: number): Promise<void> {
     if (depth > maxDepth) return;
@@ -138,7 +147,10 @@ async function findRepos(root: string, maxDepth: number): Promise<string[]> {
     }
     let entries: Array<{ name: string; isDirectory(): boolean }>;
     try {
-      entries = (await readdir(dir, { withFileTypes: true, encoding: "utf-8" })) as unknown as Array<{ name: string; isDirectory(): boolean }>;
+      entries = (await readdir(dir, {
+        withFileTypes: true,
+        encoding: "utf-8",
+      })) as unknown as Array<{ name: string; isDirectory(): boolean }>;
     } catch {
       return;
     }
@@ -206,17 +218,26 @@ async function checkGitignoreHoles(repo: string): Promise<PrescanFinding[]> {
     text = await readFile(path, "utf-8");
   } catch {
     return [
-      finding(repo, "gitignore-missing", "high", "no .gitignore in repo root",
-        "add .gitignore with at least: .env*, *.pem, id_rsa"),
+      finding(
+        repo,
+        "gitignore-missing",
+        "high",
+        "no .gitignore in repo root",
+        "add .gitignore with at least: .env*, *.pem, id_rsa",
+      ),
     ];
   }
   const lines = text.split("\n").map((l) => l.trim());
   const missing = REQUIRED_GITIGNORE.filter((p) => !lines.includes(p));
   if (missing.length === 0) return [];
   return [
-    finding(repo, "gitignore-holes", "medium",
+    finding(
+      repo,
+      "gitignore-holes",
+      "medium",
       `missing ${missing.length} secret-leak patterns: ${missing.join(", ")}`,
-      `append to .gitignore: ${missing.join(" ")}`),
+      `append to .gitignore: ${missing.join(" ")}`,
+    ),
   ];
 }
 
@@ -225,22 +246,30 @@ async function checkGitignoreHoles(repo: string): Promise<PrescanFinding[]> {
 async function checkTrackedSecretFiles(repo: string): Promise<PrescanFinding[]> {
   try {
     const { stdout } = await exec("git", ["-C", repo, "ls-files"], {
-      timeout: 15000, maxBuffer: 20_000_000,
+      timeout: 15000,
+      maxBuffer: 20_000_000,
     });
     const tracked = stdout.split("\n");
-    const matches = tracked.filter((f) =>
-      /(?:^|\/)\.env(?:\.|$)|\.pem$|\.key$|id_rsa$|\.prod-backup$|\.bak$/.test(f),
-    ).filter((f) =>
-      // Allowlist anything that looks like a template / example / sample / patch / dist,
-      // and node-modules / vendor / fixtures / third-party demo folders.
-      !/\.(template|example|sample|dist|tmpl|patch|stub|mock|spec)$/.test(f) &&
-      !/(?:^|\/)(node_modules|vendor|__tests__|tests?|fixtures?|demos?|private-demos?|examples?|samples?)\//.test(f),
-    );
+    const matches = tracked
+      .filter((f) => /(?:^|\/)\.env(?:\.|$)|\.pem$|\.key$|id_rsa$|\.prod-backup$|\.bak$/.test(f))
+      .filter(
+        (f) =>
+          // Allowlist anything that looks like a template / example / sample / patch / dist,
+          // and node-modules / vendor / fixtures / third-party demo folders.
+          !/\.(template|example|sample|dist|tmpl|patch|stub|mock|spec)$/.test(f) &&
+          !/(?:^|\/)(node_modules|vendor|__tests__|tests?|fixtures?|demos?|private-demos?|examples?|samples?)\//.test(
+            f,
+          ),
+      );
     if (matches.length === 0) return [];
     return [
-      finding(repo, "tracked-secret-files", "critical",
+      finding(
+        repo,
+        "tracked-secret-files",
+        "critical",
         `${matches.length} tracked file(s) match secret-file pattern: ${matches.join(", ")}`,
-        `git rm --cached <file> ; add to .gitignore ; rotate any leaked credential`),
+        `git rm --cached <file> ; add to .gitignore ; rotate any leaked credential`,
+      ),
     ];
   } catch {
     return [];
@@ -253,21 +282,37 @@ async function checkSecretLeakage(repo: string): Promise<PrescanFinding[]> {
   try {
     await exec("gitleaks", ["--version"], { timeout: 3000 });
   } catch {
-    return [finding(repo, "secret-leak-skipped", "info", "gitleaks not installed — skipping", "install: https://github.com/gitleaks/gitleaks")];
+    return [
+      finding(
+        repo,
+        "secret-leak-skipped",
+        "info",
+        "gitleaks not installed — skipping",
+        "install: https://github.com/gitleaks/gitleaks",
+      ),
+    ];
   }
   try {
-    await exec("gitleaks", ["detect", "--source", repo, "--redact", "--no-banner", "--exit-code", "1"], {
-      timeout: 60_000,
-    });
+    await exec(
+      "gitleaks",
+      ["detect", "--source", repo, "--redact", "--no-banner", "--exit-code", "1"],
+      {
+        timeout: 60_000,
+      },
+    );
     return [];
   } catch (err) {
     const e = err as { stdout?: string; stderr?: string };
     const out = (e.stdout ?? "") + (e.stderr ?? "");
     const leakMatch = out.match(/\d+ leaks? found/i);
     return [
-      finding(repo, "secret-leak", "critical",
+      finding(
+        repo,
+        "secret-leak",
+        "critical",
         leakMatch ? leakMatch[0] : "gitleaks reported leaks (see report)",
-        "review leaks; rotate; allowlist via .gitleaks.toml only AFTER revoking"),
+        "review leaks; rotate; allowlist via .gitleaks.toml only AFTER revoking",
+      ),
     ];
   }
 }
@@ -279,34 +324,60 @@ async function checkGitHubMeta(repo: string): Promise<PrescanFinding[]> {
   if (!remote) return [];
   const findings: PrescanFinding[] = [];
   try {
-    const { stdout } = await exec("gh", ["api", `repos/${remote.owner}/${remote.name}`, "--jq", ".private,.default_branch"], {
-      timeout: 10_000,
-    });
+    const { stdout } = await exec(
+      "gh",
+      ["api", `repos/${remote.owner}/${remote.name}`, "--jq", ".private,.default_branch"],
+      {
+        timeout: 10_000,
+      },
+    );
     const [isPrivateStr, defaultBranch] = stdout.trim().split("\n");
     const isPrivate = isPrivateStr === "true";
     const branch = defaultBranch || "main";
     if (!isPrivate) {
-      findings.push(finding(repo, "repo-public", "high",
-        `repository is PUBLIC (${remote.owner}/${remote.name}) — any leaked credential in history is world-visible`,
-        "consider whether truly intended; for private code, switch via Settings → Visibility"));
+      findings.push(
+        finding(
+          repo,
+          "repo-public",
+          "high",
+          `repository is PUBLIC (${remote.owner}/${remote.name}) — any leaked credential in history is world-visible`,
+          "consider whether truly intended; for private code, switch via Settings → Visibility",
+        ),
+      );
     }
     // Branch protection
     try {
-      await exec("gh", ["api", `repos/${remote.owner}/${remote.name}/branches/${branch}/protection`], {
-        timeout: 10_000,
-      });
+      await exec(
+        "gh",
+        ["api", `repos/${remote.owner}/${remote.name}/branches/${branch}/protection`],
+        {
+          timeout: 10_000,
+        },
+      );
     } catch (err) {
       const e = err as { stderr?: string };
       if ((e.stderr ?? "").includes("404")) {
-        findings.push(finding(repo, "branch-unprotected", "medium",
-          `branch '${branch}' has no protection rules`,
-          `Settings → Branches → Add protection rule for ${branch}`));
+        findings.push(
+          finding(
+            repo,
+            "branch-unprotected",
+            "medium",
+            `branch '${branch}' has no protection rules`,
+            `Settings → Branches → Add protection rule for ${branch}`,
+          ),
+        );
       }
     }
   } catch {
-    findings.push(finding(repo, "gh-skipped", "info",
-      `gh CLI not authed or repo not on github.com — skipping repo meta`,
-      "run: gh auth login"));
+    findings.push(
+      finding(
+        repo,
+        "gh-skipped",
+        "info",
+        `gh CLI not authed or repo not on github.com — skipping repo meta`,
+        "run: gh auth login",
+      ),
+    );
   }
   return findings;
 }
@@ -319,7 +390,8 @@ async function checkGitHubMeta(repo: string): Promise<PrescanFinding[]> {
  * without forcing them to re-run `npm audit` interactively.
  */
 function topAuditPackages(data: unknown): string[] {
-  const vulns = (data as { vulnerabilities?: Record<string, { severity?: string }> })?.vulnerabilities;
+  const vulns = (data as { vulnerabilities?: Record<string, { severity?: string }> })
+    ?.vulnerabilities;
   if (!vulns) return [];
   const top: string[] = [];
   for (const [name, info] of Object.entries(vulns)) {
@@ -333,10 +405,18 @@ function topAuditPackages(data: unknown): string[] {
 async function checkNpmAudit(repo: string): Promise<PrescanFinding[]> {
   if (!(await pathExists(join(repo, "package.json")))) return [];
   if (!(await pathExists(join(repo, "package-lock.json")))) {
-    return [finding(repo, "npm-audit-skipped", "info", "no package-lock.json — skipping npm audit", "run: npm install to generate lockfile")];
+    return [
+      finding(
+        repo,
+        "npm-audit-skipped",
+        "info",
+        "no package-lock.json — skipping npm audit",
+        "run: npm install to generate lockfile",
+      ),
+    ];
   }
-  const NPM_AUDIT_TIMEOUT_MS = 120_000;        // 2 min — large lockfiles can be slow
-  const NPM_AUDIT_BUFFER = 64 * 1024 * 1024;   // 64 MB — monorepos emit large json
+  const NPM_AUDIT_TIMEOUT_MS = 120_000; // 2 min — large lockfiles can be slow
+  const NPM_AUDIT_BUFFER = 64 * 1024 * 1024; // 64 MB — monorepos emit large json
   const parseAndFormat = (stdout: string): PrescanFinding[] => {
     const data = JSON.parse(stdout);
     const high = data?.metadata?.vulnerabilities?.high ?? 0;
@@ -344,22 +424,36 @@ async function checkNpmAudit(repo: string): Promise<PrescanFinding[]> {
     if (high + critical === 0) return [];
     const top = topAuditPackages(data);
     const where = top.length ? ` — top: ${top.join(", ")}` : "";
-    return [finding(repo, "npm-audit", critical > 0 ? "critical" : "high",
-      `${critical} critical + ${high} high vulnerabilities${where}`,
-      "npm audit fix; review individual reports")];
+    return [
+      finding(
+        repo,
+        "npm-audit",
+        critical > 0 ? "critical" : "high",
+        `${critical} critical + ${high} high vulnerabilities${where}`,
+        "npm audit fix; review individual reports",
+      ),
+    ];
   };
   try {
     const { stdout } = await exec("npm", ["audit", "--audit-level=high", "--json"], {
-      cwd: repo, timeout: NPM_AUDIT_TIMEOUT_MS, maxBuffer: NPM_AUDIT_BUFFER,
+      cwd: repo,
+      timeout: NPM_AUDIT_TIMEOUT_MS,
+      maxBuffer: NPM_AUDIT_BUFFER,
     });
     return parseAndFormat(stdout);
   } catch (err) {
     // npm audit exits non-zero when findings exist
     const e = err as { stdout?: string };
     if (e.stdout) {
-      try { return parseAndFormat(e.stdout); } catch { /* fallthrough */ }
+      try {
+        return parseAndFormat(e.stdout);
+      } catch {
+        /* fallthrough */
+      }
     }
-    return [finding(repo, "npm-audit-error", "info", "npm audit failed to parse", "manual investigation")];
+    return [
+      finding(repo, "npm-audit-error", "info", "npm audit failed to parse", "manual investigation"),
+    ];
   }
 }
 
@@ -371,9 +465,15 @@ async function checkWorkflowDrift(repo: string): Promise<PrescanFinding[]> {
   for (const f of expectedFiles) {
     if (await pathExists(join(repo, ".github", "workflows", f))) return [];
   }
-  return [finding(repo, "workflow-drift", "low",
-    "no kit-security workflow in .github/workflows/",
-    "copy templates/github/kit-security.yml from kit")];
+  return [
+    finding(
+      repo,
+      "workflow-drift",
+      "low",
+      "no kit-security workflow in .github/workflows/",
+      "copy templates/github/kit-security.yml from kit",
+    ),
+  ];
 }
 
 // ── Deep check: bumblebee supply-chain exposure ────────────────────────────
@@ -393,15 +493,27 @@ async function checkBumblebeeCatalogStale(
       await import("./bumblebee.js");
     const mtime = await newestCatalogMtime(install.catalogDir);
     if (mtime === null) {
-      return [finding(root, "bumblebee-catalog-missing", "medium",
-        `bumblebee threat_intel catalog directory empty: ${install.catalogDir}`,
-        `clear ~/.kit/tools/bumblebee and run any deep scan to re-download`)];
+      return [
+        finding(
+          root,
+          "bumblebee-catalog-missing",
+          "medium",
+          `bumblebee threat_intel catalog directory empty: ${install.catalogDir}`,
+          `clear ~/.kit/tools/bumblebee and run any deep scan to re-download`,
+        ),
+      ];
     }
     const { stale, ageDays } = isCatalogStale(mtime, Date.now());
     if (stale) {
-      return [finding(root, "bumblebee-catalog-stale", "medium",
-        `bumblebee threat_intel catalog is ${ageDays} days old (threshold: ${CATALOG_STALE_AFTER_DAYS}d) — new supply-chain compromises may not be detected`,
-        `clear ~/.kit/tools/bumblebee to force a fresh download next deep scan`)];
+      return [
+        finding(
+          root,
+          "bumblebee-catalog-stale",
+          "medium",
+          `bumblebee threat_intel catalog is ${ageDays} days old (threshold: ${CATALOG_STALE_AFTER_DAYS}d) — new supply-chain compromises may not be detected`,
+          `clear ~/.kit/tools/bumblebee to force a fresh download next deep scan`,
+        ),
+      ];
     }
     return [];
   } catch {
@@ -450,9 +562,15 @@ async function checkAuditGap(repo: string): Promise<PrescanFinding[]> {
   if (!kitToml) return [];
   const auditFile = join(repo, ".kit-audit.jsonl");
   if (!(await pathExists(auditFile))) {
-    return [finding(repo, "audit-gap", "info",
-      "kit governance configured but .kit-audit.jsonl missing",
-      "run any kit sensitive op to bootstrap; verify [governance.audit].enabled = true")];
+    return [
+      finding(
+        repo,
+        "audit-gap",
+        "info",
+        "kit governance configured but .kit-audit.jsonl missing",
+        "run any kit sensitive op to bootstrap; verify [governance.audit].enabled = true",
+      ),
+    ];
   }
   return [];
 }
@@ -464,28 +582,46 @@ async function checkAuditGap(repo: string): Promise<PrescanFinding[]> {
  * pass additional checks via `PrescanOptions.extraChecks`.
  */
 export const BUILTIN_CHECKS: PrescanCheck[] = [
-  { name: "gitignore-holes",       tier: "default", scope: "per-repo", run: (repo) => checkGitignoreHoles(repo) },
-  { name: "tracked-secret-files",  tier: "default", scope: "per-repo", run: (repo) => checkTrackedSecretFiles(repo) },
-  { name: "secret-leak",           tier: "default", scope: "per-repo", run: (repo) => checkSecretLeakage(repo) },
-  { name: "github-meta",           tier: "default", scope: "per-repo", run: (repo) => checkGitHubMeta(repo) },
-  { name: "npm-audit",             tier: "deep",    scope: "per-repo", run: (repo) => checkNpmAudit(repo) },
-  { name: "workflow-drift",        tier: "deep",    scope: "per-repo", run: (repo) => checkWorkflowDrift(repo) },
-  { name: "audit-gap",             tier: "deep",    scope: "per-repo", run: (repo) => checkAuditGap(repo) },
+  {
+    name: "gitignore-holes",
+    tier: "default",
+    scope: "per-repo",
+    run: (repo) => checkGitignoreHoles(repo),
+  },
+  {
+    name: "tracked-secret-files",
+    tier: "default",
+    scope: "per-repo",
+    run: (repo) => checkTrackedSecretFiles(repo),
+  },
+  {
+    name: "secret-leak",
+    tier: "default",
+    scope: "per-repo",
+    run: (repo) => checkSecretLeakage(repo),
+  },
+  { name: "github-meta", tier: "default", scope: "per-repo", run: (repo) => checkGitHubMeta(repo) },
+  { name: "npm-audit", tier: "deep", scope: "per-repo", run: (repo) => checkNpmAudit(repo) },
+  {
+    name: "workflow-drift",
+    tier: "deep",
+    scope: "per-repo",
+    run: (repo) => checkWorkflowDrift(repo),
+  },
+  { name: "audit-gap", tier: "deep", scope: "per-repo", run: (repo) => checkAuditGap(repo) },
   {
     name: "bumblebee-catalog-stale",
     tier: "deep",
     scope: "global",
-    run: async (root, ctx) => ctx.bumblebeeInstall
-      ? await checkBumblebeeCatalogStale(ctx.bumblebeeInstall, root)
-      : [],
+    run: async (root, ctx) =>
+      ctx.bumblebeeInstall ? await checkBumblebeeCatalogStale(ctx.bumblebeeInstall, root) : [],
   },
   {
     name: "bumblebee",
     tier: "deep",
     scope: "per-repo",
-    run: async (repo, ctx) => ctx.bumblebeeInstall
-      ? await checkBumblebee(repo, ctx.bumblebeeInstall)
-      : [],
+    run: async (repo, ctx) =>
+      ctx.bumblebeeInstall ? await checkBumblebee(repo, ctx.bumblebeeInstall) : [],
   },
 ];
 
@@ -501,9 +637,7 @@ function selectChecks(
   const inTier = all.filter((c) => deep || c.tier !== "deep");
   const onlySet = only && only.length > 0 ? new Set(only) : null;
   const skipSet = skip && skip.length > 0 ? new Set(skip) : new Set<string>();
-  return inTier.filter((c) =>
-    (onlySet === null || onlySet.has(c.name)) && !skipSet.has(c.name)
-  );
+  return inTier.filter((c) => (onlySet === null || onlySet.has(c.name)) && !skipSet.has(c.name));
 }
 
 // ── Main entry point ───────────────────────────────────────────────────────
@@ -512,9 +646,8 @@ export async function runPrescan(opts: PrescanOptions): Promise<PrescanReport> {
   const startedAt = new Date().toISOString();
   const allRepos = await findRepos(opts.root, opts.maxDepth ?? 4);
   const excludes = opts.exclude ?? [];
-  const repos = excludes.length === 0
-    ? allRepos
-    : allRepos.filter((r) => !excludes.some((p) => r.includes(p)));
+  const repos =
+    excludes.length === 0 ? allRepos : allRepos.filter((r) => !excludes.some((p) => r.includes(p)));
   const findings: PrescanFinding[] = [];
 
   // Hoist bumblebee install once for the whole run (deep mode only).
@@ -544,12 +677,12 @@ export async function runPrescan(opts: PrescanOptions): Promise<PrescanReport> {
   // Globals first (e.g. bumblebee-catalog-stale): they may influence later
   // per-repo decisions, and they're typically O(1) rather than O(repos).
   for (const check of globalChecks) {
-    findings.push(...await check.run(opts.root, ctx));
+    findings.push(...(await check.run(opts.root, ctx)));
   }
 
   for (const repo of repos) {
     for (const check of perRepoChecks) {
-      findings.push(...await check.run(repo, ctx));
+      findings.push(...(await check.run(repo, ctx)));
     }
   }
 
@@ -706,7 +839,9 @@ export function renderDiff(diff: PrescanDiff): string {
   if (diff.added.length === 0 && diff.removed.length === 0) {
     lines.push(`## No drift`);
     lines.push("");
-    lines.push(`${diff.unchanged.length} finding(s) carried over unchanged. No regressions, no fixes.`);
+    lines.push(
+      `${diff.unchanged.length} finding(s) carried over unchanged. No regressions, no fixes.`,
+    );
   }
 
   return lines.join("\n");

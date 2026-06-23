@@ -5,7 +5,7 @@
  * to optimize CloudFront caching behavior.
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from "next/server";
 
 // ─── Public API Endpoints (Cacheable) ───────────────────────────────────
 
@@ -14,9 +14,9 @@ export async function getPublicPlugins(req: NextRequest) {
 
   return NextResponse.json(data, {
     headers: {
-      'Cache-Control': 'public, max-age=300, s-maxage=600, stale-while-revalidate=3600',
-      'Content-Type': 'application/json',
-      'ETag': generateETag(data),
+      "Cache-Control": "public, max-age=300, s-maxage=600, stale-while-revalidate=3600",
+      "Content-Type": "application/json",
+      ETag: generateETag(data),
     },
   });
 }
@@ -27,24 +27,24 @@ export async function getPluginDetails(req: NextRequest, { slug }: { slug: strin
   return NextResponse.json(plugin, {
     headers: {
       // Cache for 1 hour, allow stale content for up to 1 day
-      'Cache-Control': 'public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400',
-      'Content-Type': 'application/json',
-      'ETag': generateETag(plugin),
-      'Last-Modified': new Date(plugin.updatedAt).toUTCString(),
+      "Cache-Control": "public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400",
+      "Content-Type": "application/json",
+      ETag: generateETag(plugin),
+      "Last-Modified": new Date(plugin.updatedAt).toUTCString(),
     },
   });
 }
 
 export async function searchPlugins(req: NextRequest) {
-  const query = req.nextUrl.searchParams.get('q');
+  const query = req.nextUrl.searchParams.get("q");
   const results = await searchPluginsByQuery(query!);
 
   return NextResponse.json(results, {
     headers: {
       // Search results cached, but include query string in cache key
-      'Cache-Control': 'public, max-age=300, s-maxage=600, stale-while-revalidate=3600',
-      'Content-Type': 'application/json',
-      'Vary': 'Accept-Encoding, Accept-Language',
+      "Cache-Control": "public, max-age=300, s-maxage=600, stale-while-revalidate=3600",
+      "Content-Type": "application/json",
+      Vary: "Accept-Encoding, Accept-Language",
     },
   });
 }
@@ -55,15 +55,15 @@ export async function getUserProfile(req: NextRequest) {
   const user = await getCurrentUser(req);
 
   if (!user) {
-    return new NextResponse('Unauthorized', { status: 401 });
+    return new NextResponse("Unauthorized", { status: 401 });
   }
 
   return NextResponse.json(user, {
     headers: {
       // Cache user data briefly (1 minute)
-      'Cache-Control': 'private, max-age=60, s-maxage=300',
-      'Content-Type': 'application/json',
-      'Vary': 'Authorization, Cookie',
+      "Cache-Control": "private, max-age=60, s-maxage=300",
+      "Content-Type": "application/json",
+      Vary: "Authorization, Cookie",
     },
   });
 }
@@ -72,7 +72,7 @@ export async function getUserPlugins(req: NextRequest) {
   const user = await getCurrentUser(req);
 
   if (!user) {
-    return new NextResponse('Unauthorized', { status: 401 });
+    return new NextResponse("Unauthorized", { status: 401 });
   }
 
   const plugins = await fetchUserPlugins(user.id);
@@ -80,9 +80,9 @@ export async function getUserPlugins(req: NextRequest) {
   return NextResponse.json(plugins, {
     headers: {
       // User's plugins cached briefly with authorization context
-      'Cache-Control': 'private, max-age=60, s-maxage=300',
-      'Content-Type': 'application/json',
-      'Vary': 'Authorization, Cookie, X-User-ID',
+      "Cache-Control": "private, max-age=60, s-maxage=300",
+      "Content-Type": "application/json",
+      Vary: "Authorization, Cookie, X-User-ID",
     },
   });
 }
@@ -91,7 +91,7 @@ export async function getUserSettings(req: NextRequest) {
   const user = await getCurrentUser(req);
 
   if (!user) {
-    return new NextResponse('Unauthorized', { status: 401 });
+    return new NextResponse("Unauthorized", { status: 401 });
   }
 
   const settings = await fetchUserSettings(user.id);
@@ -99,9 +99,9 @@ export async function getUserSettings(req: NextRequest) {
   return NextResponse.json(settings, {
     headers: {
       // Settings cached very briefly
-      'Cache-Control': 'private, max-age=30, s-maxage=60',
-      'Content-Type': 'application/json',
-      'Vary': 'Authorization, Cookie',
+      "Cache-Control": "private, max-age=30, s-maxage=60",
+      "Content-Type": "application/json",
+      Vary: "Authorization, Cookie",
     },
   });
 }
@@ -112,7 +112,7 @@ export async function createPlugin(req: NextRequest) {
   const user = await getCurrentUser(req);
 
   if (!user) {
-    return new NextResponse('Unauthorized', { status: 401 });
+    return new NextResponse("Unauthorized", { status: 401 });
   }
 
   const body = await req.json();
@@ -122,22 +122,19 @@ export async function createPlugin(req: NextRequest) {
     status: 201,
     headers: {
       // Never cache write operations
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-      'Content-Type': 'application/json',
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+      "Content-Type": "application/json",
     },
   });
 }
 
-export async function updatePluginSettings(
-  req: NextRequest,
-  { id }: { id: string }
-) {
+export async function updatePluginSettings(req: NextRequest, { id }: { id: string }) {
   const user = await getCurrentUser(req);
 
   if (!user) {
-    return new NextResponse('Unauthorized', { status: 401 });
+    return new NextResponse("Unauthorized", { status: 401 });
   }
 
   const body = await req.json();
@@ -146,10 +143,10 @@ export async function updatePluginSettings(
   return NextResponse.json(plugin, {
     headers: {
       // Never cache write operations
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-      'Content-Type': 'application/json',
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+      "Content-Type": "application/json",
     },
   });
 }
@@ -158,7 +155,7 @@ export async function deletePlugin(req: NextRequest, { id }: { id: string }) {
   const user = await getCurrentUser(req);
 
   if (!user) {
-    return new NextResponse('Unauthorized', { status: 401 });
+    return new NextResponse("Unauthorized", { status: 401 });
   }
 
   await deletePluginById(id);
@@ -167,9 +164,9 @@ export async function deletePlugin(req: NextRequest, { id }: { id: string }) {
     status: 204,
     headers: {
       // Never cache delete operations
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
     },
   });
 }
@@ -180,17 +177,20 @@ export async function login(req: NextRequest) {
   const body = await req.json();
   const { token, user } = await authenticateUser(body.email, body.password);
 
-  return NextResponse.json({ token, user }, {
-    status: 200,
-    headers: {
-      // Never cache auth responses
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-      'Set-Cookie': `authToken=${token}; Path=/; HttpOnly; Secure; SameSite=Strict`,
-      'Content-Type': 'application/json',
+  return NextResponse.json(
+    { token, user },
+    {
+      status: 200,
+      headers: {
+        // Never cache auth responses
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        Pragma: "no-cache",
+        Expires: "0",
+        "Set-Cookie": `authToken=${token}; Path=/; HttpOnly; Secure; SameSite=Strict`,
+        "Content-Type": "application/json",
+      },
     },
-  });
+  );
 }
 
 export async function logout(req: NextRequest) {
@@ -198,10 +198,10 @@ export async function logout(req: NextRequest) {
     status: 200,
     headers: {
       // Never cache logout
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-      'Set-Cookie': 'authToken=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0',
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+      "Set-Cookie": "authToken=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
     },
   });
 }
@@ -210,34 +210,34 @@ export async function refreshToken(req: NextRequest) {
   const user = await getCurrentUser(req);
 
   if (!user) {
-    return new NextResponse('Unauthorized', { status: 401 });
+    return new NextResponse("Unauthorized", { status: 401 });
   }
 
   const newToken = await generateNewToken(user.id);
 
-  return NextResponse.json({ token: newToken }, {
-    headers: {
-      // Never cache token refresh
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-      'Content-Type': 'application/json',
+  return NextResponse.json(
+    { token: newToken },
+    {
+      headers: {
+        // Never cache token refresh
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        Pragma: "no-cache",
+        Expires: "0",
+        "Content-Type": "application/json",
+      },
     },
-  });
+  );
 }
 
 // ─── Utility Functions ────────────────────────────────────────────────
 
 function generateETag(data: any): string {
-  const hash = require('crypto')
-    .createHash('md5')
-    .update(JSON.stringify(data))
-    .digest('hex');
+  const hash = require("crypto").createHash("md5").update(JSON.stringify(data)).digest("hex");
   return `"${hash}"`;
 }
 
 async function getCurrentUser(req: NextRequest) {
-  const token = req.headers.get('authorization')?.split(' ')[1];
+  const token = req.headers.get("authorization")?.split(" ")[1];
 
   if (!token) {
     return null;
@@ -280,11 +280,11 @@ async function deletePluginById(id: string) {
 }
 
 async function authenticateUser(email: string, password: string) {
-  return { token: '', user: {} };
+  return { token: "", user: {} };
 }
 
 async function generateNewToken(userId: string) {
-  return '';
+  return "";
 }
 
 async function verifyToken(token: string) {

@@ -22,8 +22,7 @@ export const upstashRedisAdapter: ServiceAdapter = {
 
   async check(context: AdapterContext): Promise<boolean> {
     return !!(
-      context.existingEnv.UPSTASH_REDIS_REST_URL &&
-      context.existingEnv.UPSTASH_REDIS_REST_TOKEN
+      context.existingEnv.UPSTASH_REDIS_REST_URL && context.existingEnv.UPSTASH_REDIS_REST_TOKEN
     );
   },
 
@@ -59,8 +58,7 @@ export const upstashRedisAdapter: ServiceAdapter = {
       };
     }
 
-    const dbName =
-      context.projectName ?? context.projectPath.split("/").pop() ?? "kit-redis";
+    const dbName = context.projectName ?? context.projectPath.split("/").pop() ?? "kit-redis";
 
     const auth = Buffer.from(`${email}:${apiKey}`).toString("base64");
 

@@ -40,7 +40,7 @@ export async function checkLockFiles(config: kitConfig): Promise<LockCheckResult
     } else {
       const missing: string[] = [];
       const authRequired: string[] = [];
-      
+
       for (const skillName of configSkillNames) {
         if (!skillsLock.skills[skillName]) {
           missing.push(skillName);
@@ -49,9 +49,13 @@ export async function checkLockFiles(config: kitConfig): Promise<LockCheckResult
         }
       }
 
-      const authDetails = authRequired.length > 0
-        ? ` (${authRequired.length} require auth: ${authRequired.map(s => skillsLock.skills[s].auth).filter((v, i, a) => a.indexOf(v) === i).join(", ")})`
-        : "";
+      const authDetails =
+        authRequired.length > 0
+          ? ` (${authRequired.length} require auth: ${authRequired
+              .map((s) => skillsLock.skills[s].auth)
+              .filter((v, i, a) => a.indexOf(v) === i)
+              .join(", ")})`
+          : "";
 
       results.push({
         category: "skills-lock",
@@ -83,7 +87,7 @@ export async function checkLockFiles(config: kitConfig): Promise<LockCheckResult
     } else {
       const missing: string[] = [];
       const authRequired: string[] = [];
-      
+
       for (const toolName of configToolNames) {
         if (!cliLock.tools[toolName]) {
           missing.push(toolName);
@@ -92,9 +96,13 @@ export async function checkLockFiles(config: kitConfig): Promise<LockCheckResult
         }
       }
 
-      const authDetails = authRequired.length > 0
-        ? ` (${authRequired.length} require auth: ${authRequired.map(t => cliLock.tools[t].auth).filter((v, i, a) => a.indexOf(v) === i).join(", ")})`
-        : "";
+      const authDetails =
+        authRequired.length > 0
+          ? ` (${authRequired.length} require auth: ${authRequired
+              .map((t) => cliLock.tools[t].auth)
+              .filter((v, i, a) => a.indexOf(v) === i)
+              .join(", ")})`
+          : "";
 
       results.push({
         category: "cli-lock",

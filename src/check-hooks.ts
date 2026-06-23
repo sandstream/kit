@@ -13,10 +13,7 @@ export interface HookCheckResult {
 /**
  * Check if git hooks are installed and up-to-date
  */
-export async function checkHooks(
-  config: HooksConfig,
-  gitDir = ".git",
-): Promise<HookCheckResult[]> {
+export async function checkHooks(config: HooksConfig, gitDir = ".git"): Promise<HookCheckResult[]> {
   const results: HookCheckResult[] = [];
   const hooksDir = resolve(process.cwd(), gitDir, "hooks");
 
@@ -73,9 +70,7 @@ async function checkHook(
       hookName,
       installed: true,
       upToDate,
-      detail: upToDate
-        ? `${commands.length} command(s)`
-        : "outdated (run kit hooks install)",
+      detail: upToDate ? `${commands.length} command(s)` : "outdated (run kit hooks install)",
     };
   } catch (error) {
     return {

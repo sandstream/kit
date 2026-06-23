@@ -58,17 +58,18 @@ export function collectEscalations(
         category: "secret",
         name: s.name,
         issue: s.detail,
-        action: s.source === "1password"
-          ? "Retrieve from 1Password"
-          : s.source === "eas"
-            ? "Set via eas secret:push"
-            : s.source === "infisical"
-              ? "Add to Infisical project (infisical secrets set)"
-              : s.source === "bitwarden"
-                ? "Add to Bitwarden vault"
-                : s.source === "doppler"
-                  ? "Add to Doppler project"
-                  : `Set ${s.name} in environment`,
+        action:
+          s.source === "1password"
+            ? "Retrieve from 1Password"
+            : s.source === "eas"
+              ? "Set via eas secret:push"
+              : s.source === "infisical"
+                ? "Add to Infisical project (infisical secrets set)"
+                : s.source === "bitwarden"
+                  ? "Add to Bitwarden vault"
+                  : s.source === "doppler"
+                    ? "Add to Doppler project"
+                    : `Set ${s.name} in environment`,
       });
     }
   }
@@ -76,10 +77,7 @@ export function collectEscalations(
   return items;
 }
 
-export function formatEscalationMessage(
-  items: EscalationItem[],
-  projectDir: string,
-): string {
+export function formatEscalationMessage(items: EscalationItem[], projectDir: string): string {
   if (items.length === 0) {
     return "All checks passed — no manual action needed.";
   }

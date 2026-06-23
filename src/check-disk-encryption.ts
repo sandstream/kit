@@ -76,7 +76,12 @@ export async function checkDiskEncryption(): Promise<SecurityCheckResult> {
       const { stdout } = await exec("fdesetup", ["status"], { timeout: 5_000 });
       const on = interpretFileVault(stdout);
       if (on === true) {
-        return { category: "exposure", name: "disk encryption", status: "pass", detail: "FileVault is enabled" };
+        return {
+          category: "exposure",
+          name: "disk encryption",
+          status: "pass",
+          detail: "FileVault is enabled",
+        };
       }
       if (on === false) {
         return {
@@ -84,7 +89,8 @@ export async function checkDiskEncryption(): Promise<SecurityCheckResult> {
           name: "disk encryption",
           status: "warn",
           severity: "high",
-          detail: "FileVault is OFF — kit's local secret-dense store (~/.kit/memory.db) is unencrypted at rest",
+          detail:
+            "FileVault is OFF — kit's local secret-dense store (~/.kit/memory.db) is unencrypted at rest",
           suggestion: "Enable FileVault: System Settings → Privacy & Security → FileVault",
         };
       }
@@ -95,7 +101,12 @@ export async function checkDiskEncryption(): Promise<SecurityCheckResult> {
       const { stdout } = await exec("manage-bde", ["-status", "C:"], { timeout: 8_000 });
       const on = interpretBitLocker(stdout);
       if (on === true) {
-        return { category: "exposure", name: "disk encryption", status: "pass", detail: "BitLocker protection is on" };
+        return {
+          category: "exposure",
+          name: "disk encryption",
+          status: "pass",
+          detail: "BitLocker protection is on",
+        };
       }
       if (on === false) {
         return {
@@ -113,7 +124,12 @@ export async function checkDiskEncryption(): Promise<SecurityCheckResult> {
     if (process.platform === "linux") {
       const { stdout } = await exec("lsblk", ["-o", "TYPE"], { timeout: 5_000 });
       if (interpretLsblk(stdout) === true) {
-        return { category: "exposure", name: "disk encryption", status: "pass", detail: "LUKS-encrypted volume detected" };
+        return {
+          category: "exposure",
+          name: "disk encryption",
+          status: "pass",
+          detail: "LUKS-encrypted volume detected",
+        };
       }
       // No crypt device found. Per this module's fail-open contract, absence is
       // NOT proof FDE is off (encrypted host VM, LVM-on-LUKS not surfaced, etc.),
@@ -121,8 +137,10 @@ export async function checkDiskEncryption(): Promise<SecurityCheckResult> {
       // rather than cry wolf with a warn that would flip kit check's exit code.
       return {
         ...SKIP,
-        detail: "could not confirm full-disk encryption on Linux (no LUKS device found) — verify your disk is encrypted",
-        suggestion: "Confirm with: lsblk (look for type 'crypt'), or your distro's disk-encryption settings",
+        detail:
+          "could not confirm full-disk encryption on Linux (no LUKS device found) — verify your disk is encrypted",
+        suggestion:
+          "Confirm with: lsblk (look for type 'crypt'), or your distro's disk-encryption settings",
       };
     }
 
@@ -147,7 +165,8 @@ export function checkMemoryDirSafety(): SecurityCheckResult {
         status: "warn",
         severity: "high",
         detail: `kit memory store (${memDir}) is inside the repo working tree — the secret-dense DB could be committed`,
-        suggestion: "Unset KIT_MEMORY_DIR (defaults to ~/.kit, outside any repo) or point it outside the working tree",
+        suggestion:
+          "Unset KIT_MEMORY_DIR (defaults to ~/.kit, outside any repo) or point it outside the working tree",
       };
     }
     return {
@@ -157,6 +176,11 @@ export function checkMemoryDirSafety(): SecurityCheckResult {
       detail: "memory store lives outside the repo working tree",
     };
   } catch {
-    return { category: "exposure", name: "memory store location", status: "skip", detail: "could not resolve memory store / repo root" };
+    return {
+      category: "exposure",
+      name: "memory store location",
+      status: "skip",
+      detail: "could not resolve memory store / repo root",
+    };
   }
 }

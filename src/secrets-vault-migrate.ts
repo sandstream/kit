@@ -34,7 +34,6 @@ import { redactSecrets } from "./utils/redactSecrets.js";
 import { appendAuditEventDirect } from "./audit.js";
 import { exec } from "./utils/exec.js";
 
-
 type BackendSource = SecretKeyConfig["source"];
 
 export interface VaultMigrateOptions {
@@ -115,21 +114,17 @@ export async function readSecretFromBackend(
       }
       case "doppler": {
         if (!config.name) return { ok: false, detail: "no Doppler name" };
-        const { stdout } = await exec(
-          "doppler",
-          ["secrets", "get", config.name, "--plain"],
-          { timeout: 15_000 },
-        );
+        const { stdout } = await exec("doppler", ["secrets", "get", config.name, "--plain"], {
+          timeout: 15_000,
+        });
         return { ok: true, value: stdout.trim(), detail: "read from Doppler" };
       }
       case "vault": {
         const path = config.vault_path || "secret/data/kit";
         const field = config.name || "value";
-        const { stdout } = await exec(
-          "vault",
-          ["kv", "get", "-field", field, path],
-          { timeout: 15_000 },
-        );
+        const { stdout } = await exec("vault", ["kv", "get", "-field", field, path], {
+          timeout: 15_000,
+        });
         return { ok: true, value: stdout.trim(), detail: `read from Vault ${path}` };
       }
       case "aws-sm": {
@@ -150,7 +145,19 @@ export async function readSecretFromBackend(
         if (!vault) return { ok: false, detail: "no Azure vault" };
         const { stdout } = await exec(
           "az",
-          ["keyvault", "secret", "show", "--vault-name", vault, "--name", config.name || "", "--query", "value", "-o", "tsv"],
+          [
+            "keyvault",
+            "secret",
+            "show",
+            "--vault-name",
+            vault,
+            "--name",
+            config.name || "",
+            "--query",
+            "value",
+            "-o",
+            "tsv",
+          ],
           { timeout: 15_000 },
         );
         return { ok: true, value: stdout.trim(), detail: "read from Azure Key Vault" };
@@ -235,13 +242,16 @@ export async function vaultMigrate(
     );
     if (!read.ok || !read.value) {
       items.push({ name, ok: false, detail: `read: ${read.detail}` });
-      await appendAuditEventDirect({
-        operation: "vault-migrate",
-        environment: process.env.KIT_ENV ?? "unknown",
-        success: false,
-        error: read.detail,
-        metadata: { key: name, from: opts.from, to: opts.to, stage: "read" },
-      }, { cwd });
+      await appendAuditEventDirect(
+        {
+          operation: "vault-migrate",
+          environment: process.env.KIT_ENV ?? "unknown",
+          success: false,
+          error: read.detail,
+          metadata: { key: name, from: opts.from, to: opts.to, stage: "read" },
+        },
+        { cwd },
+      );
       continue;
     }
 
@@ -266,23 +276,23 @@ export async function vaultMigrate(
     });
     if (!write.ok) {
       items.push({ name, ok: false, detail: `write: ${write.detail}` });
-      await appendAuditEventDirect({
-        operation: "vault-migrate",
-        environment: process.env.KIT_ENV ?? "unknown",
-        success: false,
-        error: write.detail,
-        metadata: { key: name, from: opts.from, to: opts.to, stage: "write" },
-      }, { cwd });
+      await appendAuditEventDirect(
+        {
+          operation: "vault-migrate",
+          environment: process.env.KIT_ENV ?? "unknown",
+          success: false,
+          error: write.detail,
+          metadata: { key: name, from: opts.from, to: opts.to, stage: "write" },
+        },
+        { cwd },
+      );
       continue;
     }
 
     // Determine the new ref the target backend uses. 1password gives us
     // `op://...`; others store under name = "<KEY>" or vault-path.
     const newRef =
-      write.ref ??
-      (opts.to === "vault"
-        ? keyConfig.vault_path || `secret/data/kit#${name}`
-        : name);
+      write.ref ?? (opts.to === "vault" ? keyConfig.vault_path || `secret/data/kit#${name}` : name);
     const rewrite = await rewriteConfigRef(cwd, name, opts.to, newRef);
     if (!rewrite.ok) {
       items.push({
@@ -291,23 +301,29 @@ export async function vaultMigrate(
         detail: `write OK but config rewrite failed: ${rewrite.detail}`,
         newRef,
       });
-      await appendAuditEventDirect({
-        operation: "vault-migrate",
-        environment: process.env.KIT_ENV ?? "unknown",
-        success: false,
-        error: rewrite.detail,
-        metadata: { key: name, from: opts.from, to: opts.to, stage: "rewrite", newRef },
-      }, { cwd });
+      await appendAuditEventDirect(
+        {
+          operation: "vault-migrate",
+          environment: process.env.KIT_ENV ?? "unknown",
+          success: false,
+          error: rewrite.detail,
+          metadata: { key: name, from: opts.from, to: opts.to, stage: "rewrite", newRef },
+        },
+        { cwd },
+      );
       continue;
     }
 
     items.push({ name, ok: true, detail: `migrated to ${opts.to}`, newRef });
-    await appendAuditEventDirect({
-      operation: "vault-migrate",
-      environment: process.env.KIT_ENV ?? "unknown",
-      success: true,
-      metadata: { key: name, from: opts.from, to: opts.to, newRef },
-    }, { cwd });
+    await appendAuditEventDirect(
+      {
+        operation: "vault-migrate",
+        environment: process.env.KIT_ENV ?? "unknown",
+        success: true,
+        metadata: { key: name, from: opts.from, to: opts.to, newRef },
+      },
+      { cwd },
+    );
   }
 
   return {

@@ -60,7 +60,9 @@ export async function listProjects(client: MgmtClient): Promise<ProjectSummary[]
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
-    throw new Error(`Supabase Management API /v1/projects returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(
+      `Supabase Management API /v1/projects returned ${res.status}: ${await safeText(res)}`,
+    );
   }
   return (await res.json()) as ProjectSummary[];
 }
@@ -74,16 +76,15 @@ export interface ApiKey {
   type?: string;
 }
 
-export async function listApiKeys(
-  client: MgmtClient,
-  projectRef: string,
-): Promise<ApiKey[]> {
+export async function listApiKeys(client: MgmtClient, projectRef: string): Promise<ApiKey[]> {
   const res = await fetch(`${client.baseUrl}/v1/projects/${projectRef}/api-keys`, {
     headers: client.headers,
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
-    throw new Error(`/v1/projects/${projectRef}/api-keys returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(
+      `/v1/projects/${projectRef}/api-keys returned ${res.status}: ${await safeText(res)}`,
+    );
   }
   return (await res.json()) as ApiKey[];
 }
@@ -151,24 +152,16 @@ export interface RotateResult {
  * (anon, service_role, signed URLs, session JWTs) atomically. Use only
  * when the leak severity warrants a hard cutover.
  */
-export async function rollJwtSecret(
-  client: MgmtClient,
-  projectRef: string,
-): Promise<RotateResult> {
+export async function rollJwtSecret(client: MgmtClient, projectRef: string): Promise<RotateResult> {
   // Endpoint path used by Supabase Dashboard internally (mirrors
   // "Generate new JWT secret" button in Project Settings → API).
-  const res = await fetch(
-    `${client.baseUrl}/v1/projects/${projectRef}/config/jwt-secret/roll`,
-    {
-      method: "POST",
-      headers: client.headers,
-      signal: AbortSignal.timeout(30_000),
-    },
-  );
+  const res = await fetch(`${client.baseUrl}/v1/projects/${projectRef}/config/jwt-secret/roll`, {
+    method: "POST",
+    headers: client.headers,
+    signal: AbortSignal.timeout(30_000),
+  });
   if (!res.ok) {
-    throw new Error(
-      `JWT-secret roll returned ${res.status}: ${await safeText(res)}`,
-    );
+    throw new Error(`JWT-secret roll returned ${res.status}: ${await safeText(res)}`);
   }
   const body = (await res.json()) as { jwt_secret?: string; api_keys?: ApiKey[] };
   return {

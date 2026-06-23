@@ -23,7 +23,9 @@ const SERVICES: ServiceDashboard[] = [
     docUrl: "https://supabase.com/docs",
     dashboardUrl: (env) => {
       const ref = env.SUPABASE_PROJECT_REF;
-      return ref ? `https://supabase.com/dashboard/project/${ref}` : "https://supabase.com/dashboard";
+      return ref
+        ? `https://supabase.com/dashboard/project/${ref}`
+        : "https://supabase.com/dashboard";
     },
   },
   {
@@ -164,7 +166,7 @@ export async function openInBrowser(url: string): Promise<{ success: boolean; me
 export async function openService(
   serviceName: string,
   env: Record<string, string>,
-  preferDocs = false
+  preferDocs = false,
 ): Promise<{ success: boolean; message: string; url: string }> {
   const service = findService(serviceName);
 

@@ -4,17 +4,13 @@ import { redactSecrets, safeStatusLine } from "./redactSecrets.js";
 
 describe("redactSecrets", () => {
   it("redacts stripe test secret keys", () => {
-    const out = redactSecrets(
-      "test_mode_api_key = 'sk_test_51T2AMtJLRlXeUG4dKBwX2nsve3BLEzy'",
-    );
+    const out = redactSecrets("test_mode_api_key = 'sk_test_51T2AMtJLRlXeUG4dKBwX2nsve3BLEzy'");
     assert.ok(out.includes("[REDACTED]"));
     assert.ok(!out.includes("sk_test_51T2AM"));
   });
 
   it("redacts stripe live keys + webhook secrets", () => {
-    const out = redactSecrets(
-      "sk_live_AbCdEfGhIjKlMnOpQrSt whsec_aaaaaaaaaaaaaaaaaaaaaa",
-    );
+    const out = redactSecrets("sk_live_AbCdEfGhIjKlMnOpQrSt whsec_aaaaaaaaaaaaaaaaaaaaaa");
     const matches = out.match(/\[REDACTED\]/g) || [];
     assert.equal(matches.length, 2);
   });

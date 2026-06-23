@@ -36,10 +36,7 @@ function configPath(cwd?: string): string {
 }
 
 export function createMcpServer(): McpServer {
-  const server = new McpServer(
-    { name: "kit", version: "0.1.0" },
-    { capabilities: { tools: {} } },
-  );
+  const server = new McpServer({ name: "kit", version: "0.1.0" }, { capabilities: { tools: {} } });
 
   // One registrar per tool — keeps this composition flat (was a 774-line
   // function). Each register_* attaches its tool to the server.
@@ -86,8 +83,7 @@ function register_kit_check(server: McpServer): void {
           ? await checkSecrets(config.secrets)
           : { templateExists: null, keys: [] };
         const skillResults = config.skills ? await checkSkills(config.skills) : [];
-        const hookResults =
-          config.hooks && isGitRepository() ? await checkHooks(config.hooks) : [];
+        const hookResults = config.hooks && isGitRepository() ? await checkHooks(config.hooks) : [];
         const webSearchResult = config.web?.search ? await checkWebSearch(config.web.search) : null;
         const securityResults = await checkSecurity();
         const lockResults = await checkLockFiles(config);
@@ -132,7 +128,6 @@ function register_kit_check(server: McpServer): void {
       }
     },
   );
-
 }
 
 function register_kit_install(server: McpServer): void {
@@ -146,7 +141,12 @@ function register_kit_install(server: McpServer): void {
         const config = await loadConfig(configPath(cwd));
         if (!config.tools || Object.keys(config.tools).length === 0) {
           return {
-            content: [{ type: "text" as const, text: JSON.stringify({ installed: [], message: "No tools configured" }) }],
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ installed: [], message: "No tools configured" }),
+              },
+            ],
           };
         }
 
@@ -168,7 +168,6 @@ function register_kit_install(server: McpServer): void {
       }
     },
   );
-
 }
 
 function register_kit_login(server: McpServer): void {
@@ -184,7 +183,12 @@ function register_kit_login(server: McpServer): void {
         const config = await loadConfig(configPath(cwd));
         if (!config.services || Object.keys(config.services).length === 0) {
           return {
-            content: [{ type: "text" as const, text: JSON.stringify({ results: [], message: "No services configured" }) }],
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ results: [], message: "No services configured" }),
+              },
+            ],
           };
         }
 
@@ -206,7 +210,6 @@ function register_kit_login(server: McpServer): void {
       }
     },
   );
-
 }
 
 function register_kit_secrets(server: McpServer): void {
@@ -220,7 +223,12 @@ function register_kit_secrets(server: McpServer): void {
         const config = await loadConfig(configPath(cwd));
         if (!config.secrets) {
           return {
-            content: [{ type: "text" as const, text: JSON.stringify({ written: [], message: "No secrets configured" }) }],
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({ written: [], message: "No secrets configured" }),
+              },
+            ],
           };
         }
 
@@ -246,7 +254,6 @@ function register_kit_secrets(server: McpServer): void {
       }
     },
   );
-
 }
 
 function register_kit_fix(server: McpServer): void {
@@ -284,18 +291,29 @@ function register_kit_fix(server: McpServer): void {
           };
           const meta = await readkitMeta();
           await updateSkillsLock(skills, meta?.name ? `${meta.name}@${meta.version}` : undefined);
-          actions.push({ name: "skills-lock.json", action: "generated", detail: "Created skills-lock.json" });
+          actions.push({
+            name: "skills-lock.json",
+            action: "generated",
+            detail: "Created skills-lock.json",
+          });
         }
 
         if (!cliLock) {
-          const tools: Record<string, { version: string; source: "mise" | "npm" | "pip" | "manual" }> = {};
+          const tools: Record<
+            string,
+            { version: string; source: "mise" | "npm" | "pip" | "manual" }
+          > = {};
           if (config.tools) {
             for (const [name, version] of Object.entries(config.tools)) {
               tools[name] = { version, source: "mise" };
             }
           }
           await updateCliLock(tools);
-          actions.push({ name: "cli-lock.json", action: "generated", detail: "Created cli-lock.json" });
+          actions.push({
+            name: "cli-lock.json",
+            action: "generated",
+            detail: "Created cli-lock.json",
+          });
         }
 
         const ok = actions.every((a) => a.action !== "failed");
@@ -315,7 +333,6 @@ function register_kit_fix(server: McpServer): void {
       }
     },
   );
-
 }
 
 function register_kit_add(server: McpServer): void {
@@ -324,8 +341,13 @@ function register_kit_add(server: McpServer): void {
     "kit_add",
     `Provision a service integration for the project. Available services: ${listAvailableServices().join(", ")}. Writes generated secrets to .env.local and returns provisioning result.`,
     {
-      service: z.string().describe(`Service adapter name (e.g. ${listAvailableServices().slice(0, 3).join(", ")})`),
-      project_name: z.string().optional().describe("Project name (used by some adapters for resource naming)"),
+      service: z
+        .string()
+        .describe(`Service adapter name (e.g. ${listAvailableServices().slice(0, 3).join(", ")})`),
+      project_name: z
+        .string()
+        .optional()
+        .describe("Project name (used by some adapters for resource naming)"),
       cwd: z.string().optional().describe("Working directory"),
     },
     async ({ service, project_name, cwd }) => {
@@ -364,7 +386,6 @@ function register_kit_add(server: McpServer): void {
       }
     },
   );
-
 }
 
 function register_kit_env(server: McpServer): void {
@@ -373,8 +394,14 @@ function register_kit_env(server: McpServer): void {
     "kit_env",
     "Inspect environment variables from .env.local. Returns each key's set/missing status. Values are redacted by default.",
     {
-      show_values: z.boolean().optional().describe("Return actual values (default: false, values are redacted)"),
-      missing_only: z.boolean().optional().describe("Return only keys that are not set in .env.local"),
+      show_values: z
+        .boolean()
+        .optional()
+        .describe("Return actual values (default: false, values are redacted)"),
+      missing_only: z
+        .boolean()
+        .optional()
+        .describe("Return only keys that are not set in .env.local"),
       cwd: z.string().optional().describe("Working directory"),
     },
     async ({ show_values, missing_only, cwd }) => {
@@ -409,7 +436,6 @@ function register_kit_env(server: McpServer): void {
       }
     },
   );
-
 }
 
 function register_kit_init(server: McpServer): void {
@@ -465,7 +491,7 @@ function register_kit_init(server: McpServer): void {
                       : ".kit.toml generated successfully",
                 },
                 null,
-                2
+                2,
               ),
             },
           ],
@@ -478,7 +504,6 @@ function register_kit_init(server: McpServer): void {
       }
     },
   );
-
 }
 
 function register_kit_ci(server: McpServer): void {
@@ -565,7 +590,7 @@ function register_kit_ci(server: McpServer): void {
             else acc.skipped++;
             return acc;
           },
-          { passed: 0, failed: 0, warnings: 0, skipped: 0 }
+          { passed: 0, failed: 0, warnings: 0, skipped: 0 },
         );
 
         const ok = summary.failed === 0 && (!fail_on_warning || summary.warnings === 0);
@@ -576,17 +601,30 @@ function register_kit_ci(server: McpServer): void {
           const lines: string[] = [];
           for (const c of checks) {
             if (c.status === "fail") lines.push(`::error::${c.category}/${c.name}: ${c.detail}`);
-            else if (c.status === "warn") lines.push(`::warning::${c.category}/${c.name}: ${c.detail}`);
+            else if (c.status === "warn")
+              lines.push(`::warning::${c.category}/${c.name}: ${c.detail}`);
           }
-          lines.push(`kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`);
+          lines.push(
+            `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`,
+          );
           text = lines.join("\n");
         } else if (format === "text") {
           const failures = checks.filter((c) => c.status === "fail");
           const warnings = checks.filter((c) => c.status === "warn");
           const lines: string[] = [];
-          if (failures.length) lines.push("FAILURES:", ...failures.map((f) => `  ✗ [${f.category}] ${f.name}: ${f.detail}`));
-          if (warnings.length) lines.push("WARNINGS:", ...warnings.map((w) => `  ! [${w.category}] ${w.name}: ${w.detail}`));
-          lines.push(`kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`);
+          if (failures.length)
+            lines.push(
+              "FAILURES:",
+              ...failures.map((f) => `  ✗ [${f.category}] ${f.name}: ${f.detail}`),
+            );
+          if (warnings.length)
+            lines.push(
+              "WARNINGS:",
+              ...warnings.map((w) => `  ! [${w.category}] ${w.name}: ${w.detail}`),
+            );
+          lines.push(
+            `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`,
+          );
           text = lines.join("\n");
         } else {
           text = JSON.stringify(result, null, 2);
@@ -602,9 +640,8 @@ function register_kit_ci(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    },
   );
-
 }
 
 function register_kit_run(server: McpServer): void {
@@ -613,7 +650,9 @@ function register_kit_run(server: McpServer): void {
     "kit_run",
     "Execute a command with project environment variables loaded from .env.local. Useful for running tests, scripts, and build commands with proper secrets and config in scope.",
     {
-      command: z.string().describe("Command to execute (with arguments, e.g., 'pnpm test --watch')"),
+      command: z
+        .string()
+        .describe("Command to execute (with arguments, e.g., 'pnpm test --watch')"),
       cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
     },
     async ({ command, cwd }) => {
@@ -649,9 +688,8 @@ function register_kit_run(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    },
   );
-
 }
 
 function register_kit_context(server: McpServer): void {
@@ -682,9 +720,8 @@ function register_kit_context(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    },
   );
-
 }
 
 function register_kit_configure(server: McpServer): void {
@@ -729,9 +766,8 @@ function register_kit_configure(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    },
   );
-
 }
 
 function register_kit_adapter_check(server: McpServer): void {
@@ -740,12 +776,14 @@ function register_kit_adapter_check(server: McpServer): void {
     "kit_adapter_check",
     "Check status and compatibility of installed adapters. Returns adapter health and compatibility information.",
     {
-      adapter: z.string().optional().describe("Specific adapter to check (checks all if not specified)"),
+      adapter: z
+        .string()
+        .optional()
+        .describe("Specific adapter to check (checks all if not specified)"),
       cwd: z.string().optional().describe("Project directory"),
     },
     async ({ adapter, cwd }) => {
       try {
-
         return {
           content: [
             {
@@ -755,7 +793,9 @@ function register_kit_adapter_check(server: McpServer): void {
                   adapters_checked: adapter ? [adapter] : ["all"],
                   status: "healthy",
                   compatibility: "latest",
-                  message: adapter ? `Adapter ${adapter} is compatible` : "All adapters are compatible",
+                  message: adapter
+                    ? `Adapter ${adapter} is compatible`
+                    : "All adapters are compatible",
                 },
                 null,
                 2,
@@ -769,9 +809,8 @@ function register_kit_adapter_check(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    },
   );
-
 }
 
 function register_kit_adapter_install(server: McpServer): void {
@@ -812,9 +851,8 @@ function register_kit_adapter_install(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    },
   );
-
 }
 
 function register_kit_workflow_execute(server: McpServer): void {
@@ -830,7 +868,6 @@ function register_kit_workflow_execute(server: McpServer): void {
     },
     async ({ workflow, params, dryRun = false, cwd }) => {
       try {
-
         return {
           content: [
             {
@@ -861,9 +898,8 @@ function register_kit_workflow_execute(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    },
   );
-
 }
 
 function register_kit_skill_marketplace(server: McpServer): void {
@@ -872,14 +908,16 @@ function register_kit_skill_marketplace(server: McpServer): void {
     "kit_skill_marketplace",
     "Browse, search, and install skills from kit skill marketplace. Discover community skills and integrations.",
     {
-      action: z.enum(["list", "search", "install", "info", "ratings"]).optional().describe("Marketplace action"),
+      action: z
+        .enum(["list", "search", "install", "info", "ratings"])
+        .optional()
+        .describe("Marketplace action"),
       query: z.string().optional().describe("Search query or skill name"),
       category: z.string().optional().describe("Filter by category"),
       cwd: z.string().optional().describe("Project directory"),
     },
     async ({ action = "list", query, category, cwd }) => {
       try {
-
         return {
           content: [
             {
@@ -908,9 +946,8 @@ function register_kit_skill_marketplace(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    },
   );
-
 }
 
 function register_kit_agent_governance(server: McpServer): void {
@@ -919,14 +956,16 @@ function register_kit_agent_governance(server: McpServer): void {
     "kit_agent_governance",
     "Configure governance policies, permissions, and access controls for agents. Define agent capabilities and restrictions.",
     {
-      action: z.enum(["list", "create", "update", "delete", "assign"]).optional().describe("Governance action"),
+      action: z
+        .enum(["list", "create", "update", "delete", "assign"])
+        .optional()
+        .describe("Governance action"),
       policy: z.string().optional().describe("Policy name or ID"),
       rules: z.record(z.string(), z.any()).optional().describe("Policy rules and constraints"),
       cwd: z.string().optional().describe("Project directory"),
     },
     async ({ action = "list", policy, rules, cwd }) => {
       try {
-
         return {
           content: [
             {
@@ -961,7 +1000,6 @@ function register_kit_agent_governance(server: McpServer): void {
           isError: true,
         };
       }
-    }
+    },
   );
-
 }

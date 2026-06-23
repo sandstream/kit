@@ -10,14 +10,7 @@ export interface SkillCheckResult {
   installed: boolean;
 }
 
-const SKILLS_BASE = join(
-  homedir(),
-  ".npm-global",
-  "lib",
-  "node_modules",
-  "openclaw",
-  "skills",
-);
+const SKILLS_BASE = join(homedir(), ".npm-global", "lib", "node_modules", "openclaw", "skills");
 
 async function isSkillInstalled(name: string): Promise<boolean> {
   try {
@@ -28,9 +21,7 @@ async function isSkillInstalled(name: string): Promise<boolean> {
   }
 }
 
-export async function checkSkills(
-  config: SkillsConfig,
-): Promise<SkillCheckResult[]> {
+export async function checkSkills(config: SkillsConfig): Promise<SkillCheckResult[]> {
   const results: SkillCheckResult[] = [];
 
   for (const [name, versionSpec] of Object.entries(config.required ?? {})) {

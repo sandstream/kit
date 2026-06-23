@@ -52,7 +52,7 @@ export async function cmdPlugin(): Promise<boolean> {
         }
 
         console.log(
-          `${c.bold}Available Plugins${tag ? ` (${tag})` : ""}${c.reset} — ${plugins.length} found\n`
+          `${c.bold}Available Plugins${tag ? ` (${tag})` : ""}${c.reset} — ${plugins.length} found\n`,
         );
 
         for (const plugin of plugins) {
@@ -74,9 +74,7 @@ export async function cmdPlugin(): Promise<boolean> {
           return true;
         }
 
-        console.log(
-          `${c.bold}Search Results${c.reset} for "${query}" — ${results.length} found\n`
-        );
+        console.log(`${c.bold}Search Results${c.reset} for "${query}" — ${results.length} found\n`);
 
         for (const plugin of results) {
           console.log(formatPluginForDisplay(plugin));
@@ -142,11 +140,7 @@ export async function cmdPlugin(): Promise<boolean> {
 
         for (let i = 0; i < tags.length; i += columns) {
           const row = tags.slice(i, i + columns);
-          console.log(
-            row
-              .map((tag) => tag.padEnd(maxLen + 1))
-              .join("  ")
-          );
+          console.log(row.map((tag) => tag.padEnd(maxLen + 1)).join("  "));
         }
         return true;
       }
@@ -181,12 +175,8 @@ export async function cmdPlugin(): Promise<boolean> {
       }
 
       default:
-        console.error(
-          `${c.red}Unknown subcommand: ${subcommand}${c.reset}`
-        );
-        console.error(
-          `Run 'kit plugin --help' for usage information.`
-        );
+        console.error(`${c.red}Unknown subcommand: ${subcommand}${c.reset}`);
+        console.error(`Run 'kit plugin --help' for usage information.`);
         return false;
     }
   } catch (err: unknown) {

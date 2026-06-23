@@ -102,7 +102,10 @@ describe("gatherProjectContext", () => {
     const context = await gatherProjectContext(config, process.cwd());
 
     assert.ok(context.secrets, "Should have secrets");
-    assert.ok(context.secrets.templateExists === null || typeof context.secrets.templateExists === "boolean");
+    assert.ok(
+      context.secrets.templateExists === null ||
+        typeof context.secrets.templateExists === "boolean",
+    );
     assert.ok(Array.isArray(context.secrets.keys), "Should have secrets.keys");
   });
 

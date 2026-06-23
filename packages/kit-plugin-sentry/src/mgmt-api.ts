@@ -108,7 +108,9 @@ export async function listProjects(
     { headers: client.headers, signal: AbortSignal.timeout(15_000) },
   );
   if (!res.ok) {
-    throw new Error(`GET /api/0/organizations/${org}/projects/ returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(
+      `GET /api/0/organizations/${org}/projects/ returned ${res.status}: ${await safeText(res)}`,
+    );
   }
   return (await res.json()) as SentryProject[];
 }
@@ -162,11 +164,7 @@ export async function searchIssues(
   return (await res.json()) as SentryIssue[];
 }
 
-export type UpdateIssueStatus =
-  | "resolved"
-  | "resolvedInNextRelease"
-  | "unresolved"
-  | "ignored";
+export type UpdateIssueStatus = "resolved" | "resolvedInNextRelease" | "unresolved" | "ignored";
 
 export interface UpdateIssueOptions {
   status?: UpdateIssueStatus;
@@ -190,15 +188,12 @@ export async function updateIssue(
   const body: Record<string, unknown> = {};
   if (opts.status) body.status = opts.status;
   if (opts.assignedTo) body.assignedTo = opts.assignedTo;
-  const res = await fetch(
-    `${client.host}/api/0/issues/${encodeURIComponent(issueId)}/`,
-    {
-      method: "PUT",
-      headers: client.headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15_000),
-    },
-  );
+  const res = await fetch(`${client.host}/api/0/issues/${encodeURIComponent(issueId)}/`, {
+    method: "PUT",
+    headers: client.headers,
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000),
+  });
   if (!res.ok) {
     throw new Error(`PUT /api/0/issues/${issueId}/ returned ${res.status}: ${await safeText(res)}`);
   }
@@ -216,21 +211,16 @@ async function postIssueComment(
   issueId: string,
   comment: string,
 ): Promise<void> {
-  const res = await fetch(
-    `${client.host}/api/0/issues/${encodeURIComponent(issueId)}/comments/`,
-    {
-      method: "POST",
-      headers: client.headers,
-      body: JSON.stringify({ text: comment }),
-      signal: AbortSignal.timeout(15_000),
-    },
-  );
+  const res = await fetch(`${client.host}/api/0/issues/${encodeURIComponent(issueId)}/comments/`, {
+    method: "POST",
+    headers: client.headers,
+    body: JSON.stringify({ text: comment }),
+    signal: AbortSignal.timeout(15_000),
+  });
   if (!res.ok && res.status !== 404) {
     // 404 happens for issues without the comments-yet endpoint on some
     // self-hosted versions — treat as soft fail (status was already updated).
-    console.error(
-      `Sentry comment POST returned ${res.status}; issue status updated regardless.`,
-    );
+    console.error(`Sentry comment POST returned ${res.status}; issue status updated regardless.`);
   }
 }
 
@@ -255,7 +245,9 @@ export async function getIssueEvents(
     { headers: client.headers, signal: AbortSignal.timeout(15_000) },
   );
   if (!res.ok) {
-    throw new Error(`GET /api/0/issues/${issueId}/events/ returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(
+      `GET /api/0/issues/${issueId}/events/ returned ${res.status}: ${await safeText(res)}`,
+    );
   }
   return (await res.json()) as SentryEvent[];
 }

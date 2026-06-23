@@ -29,11 +29,7 @@ before(async () => {
   testDir = join(tmpdir(), `kit-ci-test-${Date.now()}`);
   await mkdir(testDir, { recursive: true });
   // Minimal .kit.toml with no required tools/services/secrets
-  await writeFile(
-    join(testDir, ".kit.toml"),
-    `[tools]\n`,
-    "utf8"
-  );
+  await writeFile(join(testDir, ".kit.toml"), `[tools]\n`, "utf8");
 });
 
 after(async () => {
@@ -44,7 +40,12 @@ describe("kit ci", () => {
   it("runs without crashing (empty config)", async () => {
     const { stdout, stderr } = await runCi(["--format=text"]);
     // Should produce a summary line regardless of pass/fail
-    assert(stdout.includes("kit ci:") || stderr.includes("kit ci:") || stdout.length > 0 || stderr.length > 0);
+    assert(
+      stdout.includes("kit ci:") ||
+        stderr.includes("kit ci:") ||
+        stdout.length > 0 ||
+        stderr.length > 0,
+    );
   });
 
   it("--json outputs valid JSON with ok/checks/summary fields", async () => {
@@ -76,7 +77,7 @@ describe("kit ci", () => {
     await writeFile(
       join(testDir, ".kit.toml"),
       `[secrets]\ntemplate = ".env.template"\n[secrets.keys]\nMY_KEY = { source = "env" }\n`,
-      "utf8"
+      "utf8",
     );
     const { stdout } = await runCi(["--format=github"], {});
     // MY_KEY won't be in env, so should emit ::error::
@@ -93,11 +94,7 @@ describe("kit ci", () => {
 
   it("exit code is 1 when there are failures", async () => {
     // Config with a required tool that doesn't exist
-    await writeFile(
-      join(testDir, ".kit.toml"),
-      `[tools]\nnonexistent-tool-xyz = "1.0"\n`,
-      "utf8"
-    );
+    await writeFile(join(testDir, ".kit.toml"), `[tools]\nnonexistent-tool-xyz = "1.0"\n`, "utf8");
     const { exitCode } = await runCi(["--format=text"]);
     assert.equal(exitCode, 1);
     // Restore

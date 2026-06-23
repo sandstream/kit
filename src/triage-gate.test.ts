@@ -30,8 +30,16 @@ describe("triage-gate — ref → triage target mapping", () => {
   });
 
   it("pipx/pip ref → pip triage", () => {
-    assert.deepEqual(triageTargetFor("pipx:semgrep"), { kind: "triage", type: "pip", target: "semgrep" });
-    assert.deepEqual(triageTargetFor("pip:semgrep"), { kind: "triage", type: "pip", target: "semgrep" });
+    assert.deepEqual(triageTargetFor("pipx:semgrep"), {
+      kind: "triage",
+      type: "pip",
+      target: "semgrep",
+    });
+    assert.deepEqual(triageTargetFor("pip:semgrep"), {
+      kind: "triage",
+      type: "pip",
+      target: "semgrep",
+    });
   });
 
   it("ubi/go refs carrying owner/repo → repo triage", () => {
@@ -54,7 +62,10 @@ describe("triage-gate — ref → triage target mapping", () => {
   });
 
   it("unknown bare name → untriageable (no triage path)", () => {
-    assert.deepEqual(triageTargetFor("some-random-tool"), { kind: "untriageable", ref: "some-random-tool" });
+    assert.deepEqual(triageTargetFor("some-random-tool"), {
+      kind: "untriageable",
+      ref: "some-random-tool",
+    });
   });
 
   it("scheme without a derivable repo → untriageable", () => {
@@ -75,7 +86,10 @@ describe("triage-gate — watertight gate (fail-closed)", () => {
   });
 
   it("triage non-pass (WARN/FAIL/offline) → blocked", async () => {
-    const v = await gateInstall("aqua:aquasecurity/trivy", triageStub(false, "TRIAGE WARNING: typosquat risk"));
+    const v = await gateInstall(
+      "aqua:aquasecurity/trivy",
+      triageStub(false, "TRIAGE WARNING: typosquat risk"),
+    );
     assert.equal(v.decision, "blocked");
     assert.match(v.reason, /did not pass/);
     assert.match(v.reason, /typosquat/);

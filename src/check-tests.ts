@@ -28,13 +28,7 @@ export interface TestCheckResult {
 }
 
 const DEFAULT_SRC_DIRS = ["src"];
-const DEFAULT_EXCLUDE_SUFFIXES = [
-  ".test.ts",
-  ".test.js",
-  ".spec.ts",
-  ".spec.js",
-  ".d.ts",
-];
+const DEFAULT_EXCLUDE_SUFFIXES = [".test.ts", ".test.js", ".spec.ts", ".spec.js", ".d.ts"];
 const DEFAULT_EXCLUDE_NAMES = ["index.ts", "index.js", "types.ts"];
 
 async function pathExists(p: string): Promise<boolean> {
@@ -125,13 +119,15 @@ export async function hasSmokeTests(
  * Loads baseline (if present) and only counts net-new untested files
  * against the gate.
  */
-export async function checkTests(opts: {
-  cwd?: string;
-  enforce?: boolean;
-  requireSmoke?: boolean;
-  srcDirs?: string[];
-  baseline?: string[];
-} = {}): Promise<TestCheckResult[]> {
+export async function checkTests(
+  opts: {
+    cwd?: string;
+    enforce?: boolean;
+    requireSmoke?: boolean;
+    srcDirs?: string[];
+    baseline?: string[];
+  } = {},
+): Promise<TestCheckResult[]> {
   const cwd = opts.cwd ?? process.cwd();
   const enforce = opts.enforce ?? false;
   const results: TestCheckResult[] = [];

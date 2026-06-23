@@ -2,7 +2,6 @@ import { access, constants } from "node:fs/promises";
 import { resolve, basename } from "node:path";
 import { exec } from "./utils/exec.js";
 
-
 export interface CloneOptions {
   /** Git repository URL */
   repoUrl: string;

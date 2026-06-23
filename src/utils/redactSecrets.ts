@@ -30,7 +30,10 @@ export const SECRET_PATTERNS: RedactPattern[] = [
   { re: /\b(AKIA|ASIA)[A-Z0-9]{16}\b/g, label: "aws-access-key" },
   { re: /aws_secret_access_key\s*=\s*[A-Za-z0-9/+]{40}/gi, label: "aws-secret-key" },
   // Google / GCP service-account JSON fragments
-  { re: /"private_key":\s*"-----BEGIN [^"]+-----[\s\S]+?-----END [^"]+-----\\n"/g, label: "gcp-private-key" },
+  {
+    re: /"private_key":\s*"-----BEGIN [^"]+-----[\s\S]+?-----END [^"]+-----\\n"/g,
+    label: "gcp-private-key",
+  },
   { re: /\bAIza[0-9A-Za-z\-_]{35}\b/g, label: "google-api-key" },
   // Slack
   { re: /\bxox[abprs]-[A-Za-z0-9-]{10,}/g, label: "slack-token" },

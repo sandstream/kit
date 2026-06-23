@@ -16,13 +16,7 @@ import { DatabaseSync } from "node:sqlite";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { existsSync, mkdirSync, chmodSync, statSync } from "node:fs";
-import type {
-  MemoryStats,
-  MessageInput,
-  SearchHit,
-  SessionInput,
-  ToolUseInput,
-} from "./types.js";
+import type { MemoryStats, MessageInput, SearchHit, SessionInput, ToolUseInput } from "./types.js";
 
 export const SCHEMA_VERSION = 3;
 
@@ -132,12 +126,7 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
 END;
 `;
 
-function ensureColumn(
-  db: DatabaseSync,
-  table: string,
-  column: string,
-  decl: string,
-): void {
+function ensureColumn(db: DatabaseSync, table: string, column: string, decl: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
   if (!cols.some((col) => col.name === column)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
@@ -256,9 +245,9 @@ export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
       m.version ?? null,
     );
   if (Number(res.changes) > 0) {
-    db.prepare(
-      "UPDATE sessions SET message_count = message_count + 1 WHERE session_id = ?",
-    ).run(m.sessionId);
+    db.prepare("UPDATE sessions SET message_count = message_count + 1 WHERE session_id = ?").run(
+      m.sessionId,
+    );
     return true;
   }
   return false;
@@ -382,9 +371,7 @@ export function getStats(db: DatabaseSync): MemoryStats {
     sessions: count("SELECT COUNT(*) AS n FROM sessions"),
     messages: count("SELECT COUNT(*) AS n FROM messages"),
     toolUses: count("SELECT COUNT(*) AS n FROM tool_uses"),
-    pendingOpen: count(
-      "SELECT COUNT(*) AS n FROM pending_actions WHERE status = 'open'",
-    ),
+    pendingOpen: count("SELECT COUNT(*) AS n FROM pending_actions WHERE status = 'open'"),
     dbPath,
     sizeBytes,
     byHarness,

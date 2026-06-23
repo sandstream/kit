@@ -16,9 +16,7 @@ export interface EnvironmentInfo {
  * 2. Git branch name (main→prod, staging→staging, feature/*→dev)
  * 3. Default to 'dev'
  */
-export function detectEnvironment(
-  governance?: GovernanceConfig
-): EnvironmentInfo {
+export function detectEnvironment(governance?: GovernanceConfig): EnvironmentInfo {
   // 1. Check NODE_ENV
   const nodeEnv = process.env.NODE_ENV?.toLowerCase();
   if (nodeEnv === "production") {
@@ -87,7 +85,7 @@ export function detectEnvironment(
  */
 export function isOperationAllowed(
   operation: "read" | "write" | "delete",
-  envInfo: EnvironmentInfo
+  envInfo: EnvironmentInfo,
 ): boolean {
   if (!envInfo.access) {
     // No access config means allow everything (for backwards compatibility)

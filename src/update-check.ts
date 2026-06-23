@@ -72,7 +72,11 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateInfo
     // Write cache
     try {
       await mkdir(CACHE_DIR, { recursive: true });
-      await writeFile(CACHE_FILE, JSON.stringify({ checkedAt: now, latestVersion: latest }), "utf8");
+      await writeFile(
+        CACHE_FILE,
+        JSON.stringify({ checkedAt: now, latestVersion: latest }),
+        "utf8",
+      );
     } catch {
       // Cache write failure is non-fatal
     }
@@ -140,6 +144,6 @@ export function printUpdateNotice(info: UpdateInfo): void {
   const cyan = "\x1b[36m";
   console.log(
     `\n  ${dim}╰─${reset} ${yellow}Update available${reset}: ${dim}${info.current}${reset} → ${cyan}${info.latest}${reset}  ` +
-    `${dim}run ${reset}${cyan}kit upgrade --self${reset}${dim} (triages before installing)${reset}`
+      `${dim}run ${reset}${cyan}kit upgrade --self${reset}${dim} (triages before installing)${reset}`,
   );
 }

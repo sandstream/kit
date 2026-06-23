@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { formatHealth, type HealthFinding } from "./health.js";
 
 const findings: HealthFinding[] = [
-  { sensor: "github-actions", source: "acme/webapp", status: "red", severity: "high", title: "workflow failing: CI" },
+  {
+    sensor: "github-actions",
+    source: "acme/webapp",
+    status: "red",
+    severity: "high",
+    title: "workflow failing: CI",
+  },
   { sensor: "github-actions", source: "acme/webapp", status: "green", title: "all green" },
   { sensor: "x", source: "y", status: "unknown", title: "probe errored" },
 ];

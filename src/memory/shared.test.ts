@@ -24,7 +24,13 @@ describe("shared project memory (Track D)", () => {
     const r = root();
     const e = shareEntry(
       r,
-      { area: "stripe", kind: "decision", title: "use Connect", body: "platform model", refs: ["PR #12"] },
+      {
+        area: "stripe",
+        kind: "decision",
+        title: "use Connect",
+        body: "platform model",
+        refs: ["PR #12"],
+      },
       "2026-06-16T00:00:00Z",
     );
     assert.match(e.id, /^[0-9a-f]{6}$/);
@@ -43,7 +49,12 @@ describe("shared project memory (Track D)", () => {
     const r = root();
     const fake = "sk_live_" + "B".repeat(24);
     assert.throws(
-      () => shareEntry(r, { area: "stripe", kind: "note", title: "key", body: `the key is ${fake}` }, "t"),
+      () =>
+        shareEntry(
+          r,
+          { area: "stripe", kind: "note", title: "key", body: `the key is ${fake}` },
+          "t",
+        ),
       /secret/,
     );
     assert.equal(readShared(r).length, 0);
@@ -65,7 +76,11 @@ describe("shared project memory (Track D)", () => {
 
   it("searches across entries", () => {
     const r = root();
-    shareEntry(r, { area: "whatsapp", kind: "how-built", title: "scheduling bot", body: "runs on cron" }, "t1");
+    shareEntry(
+      r,
+      { area: "whatsapp", kind: "how-built", title: "scheduling bot", body: "runs on cron" },
+      "t1",
+    );
     assert.equal(searchShared(r, "cron").length, 1);
     assert.equal(searchShared(r, "stripe").length, 0);
     rmSync(r, { recursive: true, force: true });

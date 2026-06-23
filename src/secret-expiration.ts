@@ -2,7 +2,6 @@ import type { GovernanceConfig, SecretsConfig, SecretKeyConfig } from "./config.
 import { mergeGovernanceConfig } from "./governance.js";
 import { exec } from "./utils/exec.js";
 
-
 export interface SecretExpiration {
   key: string;
   expiry_date?: string;
@@ -37,9 +36,7 @@ export async function checkSecretExpiration(
       const daysUntilExpiry = calculateDaysUntilExpiry(expiration);
       const expired = daysUntilExpiry !== null && daysUntilExpiry < 0;
       const warning =
-        daysUntilExpiry !== null &&
-        daysUntilExpiry >= 0 &&
-        daysUntilExpiry <= warnDays;
+        daysUntilExpiry !== null && daysUntilExpiry >= 0 && daysUntilExpiry <= warnDays;
 
       expirations.push({
         key,
@@ -172,9 +169,7 @@ function calculateDaysUntilExpiry(expiryDate: string): number | null {
 /**
  * Format secret expiration warnings for display
  */
-export function formatSecretExpirationWarnings(
-  expirations: SecretExpiration[],
-): string {
+export function formatSecretExpirationWarnings(expirations: SecretExpiration[]): string {
   const expired = expirations.filter((e) => e.expired);
   const warning = expirations.filter((e) => e.warning);
 

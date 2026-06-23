@@ -69,7 +69,7 @@ async function ensurekitDir(): Promise<void> {
  */
 export async function readSkillsLock(): Promise<SkillsLock | null> {
   const lockPath = resolve(getkitDir(), SKILLS_LOCK_FILE);
-  
+
   if (!existsSync(lockPath)) {
     return null;
   }
@@ -89,7 +89,7 @@ export async function readSkillsLock(): Promise<SkillsLock | null> {
 export async function writeSkillsLock(lock: SkillsLock): Promise<void> {
   await ensurekitDir();
   const lockPath = resolve(getkitDir(), SKILLS_LOCK_FILE);
-  
+
   try {
     const content = JSON.stringify(lock, null, 2) + "\n";
     await writeFile(lockPath, content, "utf-8");
@@ -104,7 +104,7 @@ export async function writeSkillsLock(lock: SkillsLock): Promise<void> {
  */
 export async function readCliLock(): Promise<CliLock | null> {
   const lockPath = resolve(getkitDir(), CLI_LOCK_FILE);
-  
+
   if (!existsSync(lockPath)) {
     return null;
   }
@@ -124,7 +124,7 @@ export async function readCliLock(): Promise<CliLock | null> {
 export async function writeCliLock(lock: CliLock): Promise<void> {
   await ensurekitDir();
   const lockPath = resolve(getkitDir(), CLI_LOCK_FILE);
-  
+
   try {
     const content = JSON.stringify(lock, null, 2) + "\n";
     await writeFile(lockPath, content, "utf-8");
@@ -139,7 +139,7 @@ export async function writeCliLock(lock: CliLock): Promise<void> {
  */
 export async function readkitMeta(): Promise<kitMeta | null> {
   const metaPath = resolve(getkitDir(), KIT_META_FILE);
-  
+
   if (!existsSync(metaPath)) {
     return null;
   }
@@ -159,7 +159,7 @@ export async function readkitMeta(): Promise<kitMeta | null> {
 export async function writekitMeta(meta: kitMeta): Promise<void> {
   await ensurekitDir();
   const metaPath = resolve(getkitDir(), KIT_META_FILE);
-  
+
   try {
     const content = JSON.stringify(meta, null, 2) + "\n";
     await writeFile(metaPath, content, "utf-8");
@@ -189,7 +189,10 @@ function computeSkillHash(source: string, version: string): string {
  * - "get-convex/agent-skills" → github
  * - "./local/path" → local
  */
-function parseSkillVersion(skillName: string, version: string): {
+function parseSkillVersion(
+  skillName: string,
+  version: string,
+): {
   source: string;
   sourceType: SkillLockEntry["sourceType"];
   auth?: string;
@@ -234,10 +237,10 @@ function parseSkillVersion(skillName: string, version: string): {
  */
 export async function updateSkillsLock(
   skills: Record<string, string>,
-  kit?: string
+  kit?: string,
 ): Promise<void> {
   const existing = await readSkillsLock();
-  
+
   const lock: SkillsLock = {
     version: 1,
     kit: kit || existing?.kit,
@@ -253,7 +256,7 @@ export async function updateSkillsLock(
   for (const [name, version] of Object.entries(skills)) {
     const parsed = parseSkillVersion(name, version);
     const existingEntry = lock.skills[name];
-    
+
     lock.skills[name] = {
       source: parsed.source,
       sourceType: parsed.sourceType,
@@ -270,10 +273,10 @@ export async function updateSkillsLock(
  * Update CLI lock with installed tools
  */
 export async function updateCliLock(
-  tools: Record<string, { version: string; source: CliLockEntry["source"]; auth?: string }>
+  tools: Record<string, { version: string; source: CliLockEntry["source"]; auth?: string }>,
 ): Promise<void> {
   const existing = await readCliLock();
-  
+
   const lock: CliLock = {
     version: 1,
     tools: {},
@@ -311,7 +314,7 @@ export interface LockStatus {
 
 export async function checkLockStatus(
   configSkills: Record<string, string>,
-  configTools: Record<string, string>
+  configTools: Record<string, string>,
 ): Promise<LockStatus> {
   const skillsLock = await readSkillsLock();
   const cliLock = await readCliLock();

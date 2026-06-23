@@ -30,7 +30,12 @@ export const SCANNERS: ScannerDef[] = [
   { id: "snyk", bin: "snyk", args: ["test", "--sarif"], format: "sarif", needsToken: "SNYK_TOKEN" },
   { id: "trivy", bin: "trivy", args: ["fs", "--format", "sarif", "--quiet", "."], format: "sarif" },
   { id: "grype", bin: "grype", args: ["dir:.", "-o", "sarif", "-q"], format: "sarif" },
-  { id: "semgrep", bin: "semgrep", args: ["scan", "--sarif", "--quiet", "--config", "auto", "."], format: "sarif" },
+  {
+    id: "semgrep",
+    bin: "semgrep",
+    args: ["scan", "--sarif", "--quiet", "--config", "auto", "."],
+    format: "sarif",
+  },
   { id: "osv-scanner", bin: "osv-scanner", args: ["--format", "json", "-r", "."], format: "osv" },
 ];
 
@@ -38,7 +43,9 @@ const RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 }
 
 /** Cross-scanner dedup key: a CVE/GHSA id if present in the finding, else its name. */
 export function dedupKey(f: SecurityCheckResult): string {
-  const m = /(CVE-\d{4}-\d{1,7}|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})/i.exec(`${f.name} ${f.detail ?? ""}`);
+  const m = /(CVE-\d{4}-\d{1,7}|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})/i.exec(
+    `${f.name} ${f.detail ?? ""}`,
+  );
   return m ? m[1].toUpperCase() : f.name;
 }
 
@@ -48,7 +55,9 @@ export interface MergedFinding extends SecurityCheckResult {
 }
 
 /** Collapse findings from many scanners by dedupKey — max severity, union of scanners. */
-export function mergeFindings(perScanner: { id: string; findings: SecurityCheckResult[] }[]): MergedFinding[] {
+export function mergeFindings(
+  perScanner: { id: string; findings: SecurityCheckResult[] }[],
+): MergedFinding[] {
   const byKey = new Map<string, MergedFinding>();
   for (const { id, findings } of perScanner) {
     for (const f of findings) {
@@ -64,7 +73,9 @@ export function mergeFindings(perScanner: { id: string; findings: SecurityCheckR
       }
     }
   }
-  return [...byKey.values()].sort((a, b) => (RANK[b.severity ?? "low"] ?? 0) - (RANK[a.severity ?? "low"] ?? 0));
+  return [...byKey.values()].sort(
+    (a, b) => (RANK[b.severity ?? "low"] ?? 0) - (RANK[a.severity ?? "low"] ?? 0),
+  );
 }
 
 /** Drop merged findings whose key is in the accepted baseline (#59 noise-reduction). */

@@ -21,20 +21,17 @@ async function writePackageJson(kitPlugins: string[]) {
   await writeFile(
     join(tmpProject, "package.json"),
     JSON.stringify({ name: "test-project", kitPlugins }),
-    "utf-8"
+    "utf-8",
   );
 }
 
-async function createMockPlugin(
-  pluginName: string,
-  exportContent: string
-): Promise<void> {
+async function createMockPlugin(pluginName: string, exportContent: string): Promise<void> {
   const pluginDir = join(tmpProject, "node_modules", pluginName);
   await mkdir(pluginDir, { recursive: true });
   await writeFile(
     join(pluginDir, "package.json"),
     JSON.stringify({ name: pluginName, version: "1.0.0", main: "index.js" }),
-    "utf-8"
+    "utf-8",
   );
   await writeFile(join(pluginDir, "index.js"), exportContent, "utf-8");
 }
@@ -107,7 +104,9 @@ describe("loadPluginAdapters", () => {
   });
 
   it("loads multiple plugins at once", async () => {
-    await createMockPlugin("sandstream-kit-plugin-single2", `
+    await createMockPlugin(
+      "sandstream-kit-plugin-single2",
+      `
       export const adapter = {
         name: "mock/single2",
         description: "Single2",
@@ -115,8 +114,11 @@ describe("loadPluginAdapters", () => {
         check: async () => false,
         provision: async () => ({ success: true, message: "ok" }),
       };
-    `);
-    await createMockPlugin("sandstream-kit-plugin-multi2", `
+    `,
+    );
+    await createMockPlugin(
+      "sandstream-kit-plugin-multi2",
+      `
       export const adapters = [{
         name: "mock/multi2",
         description: "Multi2",
@@ -124,7 +126,8 @@ describe("loadPluginAdapters", () => {
         check: async () => false,
         provision: async () => ({ success: true, message: "ok" }),
       }];
-    `);
+    `,
+    );
     await writePackageJson(["sandstream-kit-plugin-single2", "sandstream-kit-plugin-multi2"]);
 
     const result = await loadPluginAdapters(tmpProject);
@@ -144,7 +147,7 @@ describe("loadPluginAdapters", () => {
       assert.deepEqual(result, {});
       assert.ok(
         warnings.some((w) => w.includes("sandstream-kit-plugin-does-not-exist")),
-        `expected warning about missing plugin, got: ${warnings}`
+        `expected warning about missing plugin, got: ${warnings}`,
       );
     } finally {
       console.warn = orig;
@@ -152,9 +155,12 @@ describe("loadPluginAdapters", () => {
   });
 
   it("skips a plugin with invalid exports and does not throw", async () => {
-    await createMockPlugin("sandstream-kit-plugin-invalid", `
+    await createMockPlugin(
+      "sandstream-kit-plugin-invalid",
+      `
       export const notAnAdapter = "this is not an adapter";
-    `);
+    `,
+    );
     await writePackageJson(["sandstream-kit-plugin-invalid"]);
 
     const warnings: string[] = [];
@@ -165,7 +171,7 @@ describe("loadPluginAdapters", () => {
       assert.deepEqual(result, {});
       assert.ok(
         warnings.some((w) => w.includes("sandstream-kit-plugin-invalid")),
-        `expected warning about invalid plugin, got: ${warnings}`
+        `expected warning about invalid plugin, got: ${warnings}`,
       );
     } finally {
       console.warn = orig;
@@ -176,7 +182,7 @@ describe("loadPluginAdapters", () => {
     await writeFile(
       join(tmpProject, "package.json"),
       JSON.stringify({ name: "test", kitPlugins: [42, null, "not-installed"] }),
-      "utf-8"
+      "utf-8",
     );
     // Should not crash; just warn about "not-installed" (which doesn't exist)
     const result = await loadPluginAdapters(tmpProject);

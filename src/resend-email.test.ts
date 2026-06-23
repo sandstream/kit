@@ -22,7 +22,7 @@ describe("resendEmailAdapter", () => {
 
   it("check returns true when RESEND_API_KEY is present and starts with re_", async () => {
     const result = await resendEmailAdapter.check(
-      mockContext({ RESEND_API_KEY: "re_abc123_validkey" })
+      mockContext({ RESEND_API_KEY: "re_abc123_validkey" }),
     );
     assert.equal(result, true);
   });
@@ -33,7 +33,7 @@ describe("resendEmailAdapter", () => {
 
   it("check returns false when RESEND_API_KEY does not start with re_", async () => {
     const result = await resendEmailAdapter.check(
-      mockContext({ RESEND_API_KEY: "sk_live_not_a_resend_key" })
+      mockContext({ RESEND_API_KEY: "sk_live_not_a_resend_key" }),
     );
     assert.equal(result, false);
   });
@@ -45,7 +45,7 @@ describe("resendEmailAdapter", () => {
       mockContext({
         RESEND_API_KEY: "re_existing_abc123",
         RESEND_FROM_EMAIL: "hello@example.com",
-      })
+      }),
     );
     assert.equal(result.success, true);
     assert.equal(result.secrets?.RESEND_API_KEY, "re_existing_abc123");
@@ -55,7 +55,7 @@ describe("resendEmailAdapter", () => {
 
   it("provision uses default from email when RESEND_FROM_EMAIL is absent", async () => {
     const result = await resendEmailAdapter.provision(
-      mockContext({ RESEND_API_KEY: "re_existing_abc123" })
+      mockContext({ RESEND_API_KEY: "re_existing_abc123" }),
     );
     assert.equal(result.success, true);
     assert.equal(result.secrets?.RESEND_FROM_EMAIL, "onboarding@resend.dev");
@@ -66,20 +66,26 @@ describe("resendEmailAdapter", () => {
   it("provision returns error with setup instructions when RESEND_API_KEY is missing", async () => {
     const result = await resendEmailAdapter.provision(mockContext());
     assert.equal(result.success, false);
-    assert.ok(result.message.includes("resend.com/api-keys"), `expected dashboard URL in message: ${result.message}`);
-    assert.ok(result.message.includes("RESEND_API_KEY"), `expected RESEND_API_KEY in message: ${result.message}`);
+    assert.ok(
+      result.message.includes("resend.com/api-keys"),
+      `expected dashboard URL in message: ${result.message}`,
+    );
+    assert.ok(
+      result.message.includes("RESEND_API_KEY"),
+      `expected RESEND_API_KEY in message: ${result.message}`,
+    );
   });
 
   // ─── provision() — invalid key format ───────────────────────────────────────
 
   it("provision returns error when key does not start with re_", async () => {
     const result = await resendEmailAdapter.provision(
-      mockContext({ RESEND_API_KEY: "not_a_resend_key_12345" })
+      mockContext({ RESEND_API_KEY: "not_a_resend_key_12345" }),
     );
     assert.equal(result.success, false);
     assert.ok(
       result.error?.includes("does not look valid") || result.message.includes("re_"),
-      `expected validation error, got: ${result.error} / ${result.message}`
+      `expected validation error, got: ${result.error} / ${result.message}`,
     );
   });
 });

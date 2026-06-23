@@ -72,8 +72,7 @@ export const planetscaleDbAdapter: ServiceAdapter = {
       };
     }
 
-    const dbName =
-      context.projectName ?? context.projectPath.split("/").pop() ?? "kit-db";
+    const dbName = context.projectName ?? context.projectPath.split("/").pop() ?? "kit-db";
 
     const headers = {
       Authorization: `${tokenId}:${token}`,
@@ -117,7 +116,7 @@ export const planetscaleDbAdapter: ServiceAdapter = {
           method: "POST",
           headers,
           body: JSON.stringify({ name: `${dbName}-kit`, role: "readwriter" }),
-        }
+        },
       );
 
       if (!resp.ok) {

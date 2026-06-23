@@ -1,10 +1,25 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { dedupKey, mergeFindings, suppressBaselined, runScanners, type ScanDeps, type ScannerDef } from "./scanners.js";
+import {
+  dedupKey,
+  mergeFindings,
+  suppressBaselined,
+  runScanners,
+  type ScanDeps,
+  type ScannerDef,
+} from "./scanners.js";
 import type { SecurityCheckResult } from "./check-security.js";
 
-const f = (name: string, severity: SecurityCheckResult["severity"], detail = ""): SecurityCheckResult => ({
-  category: "dependency", name, status: "fail", detail, severity,
+const f = (
+  name: string,
+  severity: SecurityCheckResult["severity"],
+  detail = "",
+): SecurityCheckResult => ({
+  category: "dependency",
+  name,
+  status: "fail",
+  detail,
+  severity,
 });
 
 describe("dedupKey", () => {
@@ -37,7 +52,14 @@ describe("mergeFindings", () => {
 
 describe("runScanners (injected deps)", () => {
   const SARIF = JSON.stringify({
-    runs: [{ tool: { driver: { name: "trivy" } }, results: [{ ruleId: "CVE-2021-23337", level: "error", message: { text: "lodash CVE-2021-23337" } }] }],
+    runs: [
+      {
+        tool: { driver: { name: "trivy" } },
+        results: [
+          { ruleId: "CVE-2021-23337", level: "error", message: { text: "lodash CVE-2021-23337" } },
+        ],
+      },
+    ],
   });
   const defs: ScannerDef[] = [
     { id: "snyk", bin: "snyk", args: [], format: "sarif", needsToken: "SNYK_TOKEN" },
@@ -63,7 +85,10 @@ describe("runScanners (injected deps)", () => {
 
 describe("suppressBaselined", () => {
   const merged = mergeFindings([
-    { id: "trivy", findings: [f("x: CVE-2021-23337", "high"), f("verify-suite: stripe-token", "critical")] },
+    {
+      id: "trivy",
+      findings: [f("x: CVE-2021-23337", "high"), f("verify-suite: stripe-token", "critical")],
+    },
   ]);
   it("drops findings whose key is in the baseline, keeps the rest", () => {
     const accepted = new Set(["verify-suite: stripe-token"]); // the FP, baselined (dedupKey = name)

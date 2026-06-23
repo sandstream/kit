@@ -76,14 +76,8 @@ export async function scanPlaintextSecrets(
   const hits: PlaintextHit[] = [];
   const seenRealPaths = new Set<string>();
 
-  const fileTargets = opts.overrideFiles ?? [
-    ...DEFAULT_FILE_NAMES,
-    ...(opts.extraFiles ?? []),
-  ];
-  const dirTargets = opts.overrideDirs ?? [
-    ...DEFAULT_RECURSIVE_DIRS,
-    ...(opts.extraDirs ?? []),
-  ];
+  const fileTargets = opts.overrideFiles ?? [...DEFAULT_FILE_NAMES, ...(opts.extraFiles ?? [])];
+  const dirTargets = opts.overrideDirs ?? [...DEFAULT_RECURSIVE_DIRS, ...(opts.extraDirs ?? [])];
   const maxDepth = opts.maxDepth ?? 3;
 
   const scanFile = async (relativePath: string, absolutePath: string) => {

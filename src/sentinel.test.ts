@@ -23,15 +23,30 @@ describe("artifactForClass", () => {
 
 describe("healthToRedFindings", () => {
   const findings: HealthFinding[] = [
-    { sensor: "vercel", source: "team/p", status: "red", title: "prod deploy failed", suggestedClass: "code" },
-    { sensor: "resend", source: "resend", status: "red", title: "domain unverified", suggestedClass: "human" },
+    {
+      sensor: "vercel",
+      source: "team/p",
+      status: "red",
+      title: "prod deploy failed",
+      suggestedClass: "code",
+    },
+    {
+      sensor: "resend",
+      source: "resend",
+      status: "red",
+      title: "domain unverified",
+      suggestedClass: "human",
+    },
     { sensor: "sentry", source: "o/p", status: "green", title: "ok" },
     { sensor: "gitlab", source: "g/r", status: "red", title: "pipeline failed" }, // no class → human
   ];
   it("keeps only red, maps class (default human), stable id per sensor", () => {
     const red = healthToRedFindings(findings);
     assert.equal(red.length, 3);
-    assert.deepEqual(red.map((r) => r.id), ["health:vercel", "health:resend", "health:gitlab"]);
+    assert.deepEqual(
+      red.map((r) => r.id),
+      ["health:vercel", "health:resend", "health:gitlab"],
+    );
     assert.equal(red.find((r) => r.id === "health:vercel")!.class, "code");
     assert.equal(red.find((r) => r.id === "health:gitlab")!.class, "human");
   });
@@ -39,7 +54,12 @@ describe("healthToRedFindings", () => {
 
 describe("buildProposal", () => {
   it("code → draft-pr with a branch and the dedup marker in the body", () => {
-    const p = buildProposal({ id: "health:vercel", class: "code", title: "deploy failed", detail: "ERROR state" });
+    const p = buildProposal({
+      id: "health:vercel",
+      class: "code",
+      title: "deploy failed",
+      detail: "ERROR state",
+    });
     assert.equal(p.artifact, "draft-pr");
     assert.equal(p.branch, "kit/sentinel/health-vercel");
     assert.ok(p.body.includes(findingMarker("health:vercel")));

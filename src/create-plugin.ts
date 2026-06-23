@@ -2,7 +2,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { exec } from "./utils/exec.js";
 
-
 export interface CreatePluginOptions {
   /** Plugin short name, e.g. "aws-s3" → package "sandstream-kit-plugin-aws-s3" */
   name: string;
@@ -59,17 +58,17 @@ export async function createPlugin(opts: CreatePluginOptions): Promise<CreatePlu
   await writeFile(
     join(pluginDir, "src", `${shortName}.ts`),
     adapterTemplate(adapterName, serviceName),
-    "utf-8"
+    "utf-8",
   );
   await writeFile(
     join(pluginDir, "src", `${shortName}.test.ts`),
     testTemplate(adapterName, serviceName),
-    "utf-8"
+    "utf-8",
   );
   await writeFile(
     join(pluginDir, "src", "index.ts"),
     indexTemplate(adapterName, shortName),
-    "utf-8"
+    "utf-8",
   );
 
   if (!opts.skipInstall) {
@@ -138,62 +137,66 @@ export interface AdapterRegistry {
 }
 
 function packageJsonTemplate(packageName: string): string {
-  return JSON.stringify(
-    {
-      name: packageName,
-      version: "0.1.0",
-      description: `kit adapter plugin for ${packageName}`,
-      type: "module",
-      exports: {
-        ".": {
-          types: "./dist/index.d.ts",
-          default: "./dist/index.js",
+  return (
+    JSON.stringify(
+      {
+        name: packageName,
+        version: "0.1.0",
+        description: `kit adapter plugin for ${packageName}`,
+        type: "module",
+        exports: {
+          ".": {
+            types: "./dist/index.d.ts",
+            default: "./dist/index.js",
+          },
+        },
+        files: ["dist", "!dist/**/*.test.*", "README.md"],
+        scripts: {
+          build: "tsc",
+          test: "node --test dist/*.test.js",
+        },
+        // sandstream-kit-adapter-sdk types are bundled in src/types/adapter-sdk.d.ts so this
+        // plugin builds without any registry dependencies. Once sandstream-kit-adapter-sdk is
+        // published, add it here:  peerDependencies: { "sandstream-kit-adapter-sdk": ">=0.1.0" }
+        devDependencies: {
+          "@types/node": "^22.0.0",
+          typescript: "^5.9.3",
         },
       },
-      files: ["dist", "!dist/**/*.test.*", "README.md"],
-      scripts: {
-        build: "tsc",
-        test: "node --test dist/*.test.js",
-      },
-      // sandstream-kit-adapter-sdk types are bundled in src/types/adapter-sdk.d.ts so this
-      // plugin builds without any registry dependencies. Once sandstream-kit-adapter-sdk is
-      // published, add it here:  peerDependencies: { "sandstream-kit-adapter-sdk": ">=0.1.0" }
-      devDependencies: {
-        "@types/node": "^22.0.0",
-        typescript: "^5.9.3",
-      },
-    },
-    null,
-    2
-  ) + "\n";
+      null,
+      2,
+    ) + "\n"
+  );
 }
 
 function tsconfigTemplate(): string {
-  return JSON.stringify(
-    {
-      compilerOptions: {
-        target: "ES2022",
-        module: "Node16",
-        moduleResolution: "Node16",
-        outDir: "dist",
-        rootDir: "src",
-        strict: true,
-        declaration: true,
-        declarationMap: true,
-        sourceMap: true,
-        // baseUrl + paths: maps sandstream-kit-adapter-sdk to the bundled type stub so the
-        // plugin builds without installing the SDK package. Once sandstream-kit-adapter-sdk is
-        // published to npm, remove these two entries and install the real package.
-        baseUrl: "src",
-        paths: {
-          "sandstream-kit-adapter-sdk": ["types/adapter-sdk.d.ts"],
+  return (
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: "ES2022",
+          module: "Node16",
+          moduleResolution: "Node16",
+          outDir: "dist",
+          rootDir: "src",
+          strict: true,
+          declaration: true,
+          declarationMap: true,
+          sourceMap: true,
+          // baseUrl + paths: maps sandstream-kit-adapter-sdk to the bundled type stub so the
+          // plugin builds without installing the SDK package. Once sandstream-kit-adapter-sdk is
+          // published to npm, remove these two entries and install the real package.
+          baseUrl: "src",
+          paths: {
+            "sandstream-kit-adapter-sdk": ["types/adapter-sdk.d.ts"],
+          },
         },
+        include: ["src"],
       },
-      include: ["src"],
-    },
-    null,
-    2
-  ) + "\n";
+      null,
+      2,
+    ) + "\n"
+  );
 }
 
 function adapterTemplate(adapterName: string, serviceName: string): string {

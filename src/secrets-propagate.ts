@@ -20,13 +20,7 @@
 
 import { spawn } from "node:child_process";
 
-export type PropagationTarget =
-  | "vercel"
-  | "github"
-  | "fly"
-  | "cloudflare"
-  | "railway"
-  | "aws-ssm";
+export type PropagationTarget = "vercel" | "github" | "fly" | "cloudflare" | "railway" | "aws-ssm";
 
 export const ALL_TARGETS: PropagationTarget[] = [
   "vercel",
@@ -101,12 +95,17 @@ async function propagateVercel(
   const args = ["env", "add", name, env];
   if (opts.vercelScope) args.push("--scope", opts.vercelScope);
   // Remove existing first so add doesn't error on duplicate.
-  await spawnWithStdin("vercel", ["env", "rm", name, env, "--yes", ...(opts.vercelScope ? ["--scope", opts.vercelScope] : [])], "");
+  await spawnWithStdin(
+    "vercel",
+    ["env", "rm", name, env, "--yes", ...(opts.vercelScope ? ["--scope", opts.vercelScope] : [])],
+    "",
+  );
   const { code, stderr } = await spawnWithStdin("vercel", args, value);
   return {
     target: "vercel",
     ok: code === 0,
-    detail: code === 0 ? `pushed to vercel env=${env}` : `vercel exit ${code}: ${stderr.split("\n")[0]}`,
+    detail:
+      code === 0 ? `pushed to vercel env=${env}` : `vercel exit ${code}: ${stderr.split("\n")[0]}`,
     valueInArgv: false,
   };
 }
@@ -153,7 +152,10 @@ async function propagateFly(
   return {
     target: "fly",
     ok: code === 0,
-    detail: code === 0 ? `pushed to fly app=${opts.flyApp}` : `fly exit ${code}: ${stderr.split("\n")[0]}`,
+    detail:
+      code === 0
+        ? `pushed to fly app=${opts.flyApp}`
+        : `fly exit ${code}: ${stderr.split("\n")[0]}`,
     valueInArgv: true,
   };
 }
@@ -179,7 +181,10 @@ async function propagateCloudflare(
   return {
     target: "cloudflare",
     ok: code === 0,
-    detail: code === 0 ? `pushed to cloudflare worker=${opts.cfWorker}` : `wrangler exit ${code}: ${stderr.split("\n")[0]}`,
+    detail:
+      code === 0
+        ? `pushed to cloudflare worker=${opts.cfWorker}`
+        : `wrangler exit ${code}: ${stderr.split("\n")[0]}`,
     valueInArgv: false,
   };
 }
@@ -226,7 +231,10 @@ async function propagateAwsSsm(
   return {
     target: "aws-ssm",
     ok: code === 0,
-    detail: code === 0 ? `pushed to aws-ssm path=${paramName}` : `aws exit ${code}: ${stderr.split("\n")[0]}`,
+    detail:
+      code === 0
+        ? `pushed to aws-ssm path=${paramName}`
+        : `aws exit ${code}: ${stderr.split("\n")[0]}`,
     valueInArgv: false,
   };
 }

@@ -85,10 +85,11 @@ export function sessionStartRecovery(opts: { limit?: number } = {}): string {
       if (text) lines.push(`  · ${who}: ${text}`);
     }
     if (openItems.length > 0) {
-      const titles = openItems.slice(0, 3).map((p) => `${p.id} ${p.title}`).join("; ");
-      lines.push(
-        `Open action items blocked on you: ${titles}${openItems.length > 3 ? " …" : ""}.`,
-      );
+      const titles = openItems
+        .slice(0, 3)
+        .map((p) => `${p.id} ${p.title}`)
+        .join("; ");
+      lines.push(`Open action items blocked on you: ${titles}${openItems.length > 3 ? " …" : ""}.`);
     }
     if (recent.length > 0 || openItems.length > 0) {
       lines.push("Run `kit memory search <terms>` to pull more of what was actually said.");

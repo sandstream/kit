@@ -35,10 +35,7 @@ async function createTestClient(): Promise<{ client: Client; cleanup: () => Prom
   const server = createMcpServer();
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
-  const client = new Client(
-    { name: "test-client", version: "1.0.0" },
-    { capabilities: {} },
-  );
+  const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
 
   await server.connect(serverTransport);
   await client.connect(clientTransport);
@@ -138,7 +135,10 @@ describe("kit_check", () => {
     const { client, cleanup } = await createTestClient();
     try {
       const result = await client.callTool({ name: "kit_check", arguments: { cwd: tempDir } });
-      const data = parseResult(result) as { ok: boolean; secrets: Array<{ name: string; available: boolean }> };
+      const data = parseResult(result) as {
+        ok: boolean;
+        secrets: Array<{ name: string; available: boolean }>;
+      };
       assert.equal(data.ok, false);
       assert.equal(data.secrets[0].name, "MISSING_VAR");
       assert.equal(data.secrets[0].available, false);
@@ -188,7 +188,10 @@ describe("kit_fix", () => {
     const { client, cleanup } = await createTestClient();
     try {
       const result = await client.callTool({ name: "kit_fix", arguments: {} });
-      const data = parseResult(result) as { ok: boolean; actions: Array<{ name: string; action: string }> };
+      const data = parseResult(result) as {
+        ok: boolean;
+        actions: Array<{ name: string; action: string }>;
+      };
       assert.equal(data.ok, true);
       const names = data.actions.map((a) => a.name);
       assert.ok(names.includes("skills-lock.json"), "skills-lock.json not generated");
@@ -242,7 +245,10 @@ describe("kit_add", () => {
       });
       const data = parseResult(result) as { success: boolean; error?: string };
       assert.equal(data.success, false);
-      assert.ok(data.error?.includes("Unknown service"), `Expected unknown service error, got: ${data.error}`);
+      assert.ok(
+        data.error?.includes("Unknown service"),
+        `Expected unknown service error, got: ${data.error}`,
+      );
     } finally {
       await cleanup();
     }
@@ -359,7 +365,10 @@ describe("kit_install", () => {
     const { client, cleanup } = await createTestClient();
     try {
       const result = await client.callTool({ name: "kit_install", arguments: { cwd: tempDir } });
-      const data = parseResult(result) as { ok: boolean; results: Array<{ name: string; action: string }> };
+      const data = parseResult(result) as {
+        ok: boolean;
+        results: Array<{ name: string; action: string }>;
+      };
       assert.equal(data.ok, true);
       const node = data.results.find((r) => r.name === "node");
       assert.ok(node, "node not in results");
@@ -453,15 +462,15 @@ MISSING_KEY = { source = "env" }
       };
       assert.ok(
         data.keys.every((k) => !k.set),
-        "missing_only should only return unset keys"
+        "missing_only should only return unset keys",
       );
       assert.ok(
         data.keys.some((k) => k.name === "MISSING_KEY"),
-        "MISSING_KEY should be in result"
+        "MISSING_KEY should be in result",
       );
       assert.ok(
         !data.keys.some((k) => k.name === "SECRET"),
-        "SECRET is set — should not appear with missing_only"
+        "SECRET is set — should not appear with missing_only",
       );
     } finally {
       await writeFile(join(tempDir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
@@ -492,7 +501,7 @@ describe("kit_init", () => {
     await writeFile(
       join(projectDir, "package.json"),
       JSON.stringify({ dependencies: { next: "14.0.0" } }),
-      "utf-8"
+      "utf-8",
     );
 
     const { client, cleanup } = await createTestClient();
@@ -509,7 +518,10 @@ describe("kit_init", () => {
       };
       assert.equal(data.detectedStack.language, "typescript");
       assert.equal(data.detectedStack.framework, "nextjs");
-      assert.ok(data.generatedConfig.includes("[tools]"), `expected [tools]: ${data.generatedConfig}`);
+      assert.ok(
+        data.generatedConfig.includes("[tools]"),
+        `expected [tools]: ${data.generatedConfig}`,
+      );
       assert.equal(data.written, false, "dry_run=true should not write");
     } finally {
       await cleanup();
@@ -522,7 +534,7 @@ describe("kit_init", () => {
     await writeFile(
       join(projectDir, "package.json"),
       JSON.stringify({ dependencies: { next: "14.0.0" } }),
-      "utf-8"
+      "utf-8",
     );
 
     const { client, cleanup } = await createTestClient();
@@ -552,7 +564,7 @@ describe("kit_init", () => {
     await writeFile(
       join(projectDir, "package.json"),
       JSON.stringify({ dependencies: { next: "14.0.0" } }),
-      "utf-8"
+      "utf-8",
     );
 
     const { client, cleanup } = await createTestClient();
@@ -575,12 +587,12 @@ describe("kit_init", () => {
   it("does not overwrite existing .kit.toml", async () => {
     const projectDir = join(tempDir, "existing-proj");
     await mkdir(projectDir, { recursive: true });
-    const original = "# existing\n[tools]\nnode = \"18\"\n";
+    const original = '# existing\n[tools]\nnode = "18"\n';
     await writeFile(join(projectDir, ".kit.toml"), original, "utf-8");
     await writeFile(
       join(projectDir, "package.json"),
       JSON.stringify({ dependencies: { next: "14.0.0" } }),
-      "utf-8"
+      "utf-8",
     );
 
     const { client, cleanup } = await createTestClient();

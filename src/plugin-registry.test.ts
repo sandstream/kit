@@ -28,15 +28,9 @@ describe("PluginRegistry", () => {
 
   it("getCapabilitiesByType filters across plugins", () => {
     const r = new PluginRegistry();
-    r.registerPlugin(
-      manifest("a", [{ name: "x", type: "secret_store", version: "1.0.0" }]),
-    );
-    r.registerPlugin(
-      manifest("b", [{ name: "y", type: "secret_store", version: "1.0.0" }]),
-    );
-    r.registerPlugin(
-      manifest("c", [{ name: "z", type: "tool", version: "1.0.0" }]),
-    );
+    r.registerPlugin(manifest("a", [{ name: "x", type: "secret_store", version: "1.0.0" }]));
+    r.registerPlugin(manifest("b", [{ name: "y", type: "secret_store", version: "1.0.0" }]));
+    r.registerPlugin(manifest("c", [{ name: "z", type: "tool", version: "1.0.0" }]));
     const stores = r.getCapabilitiesByType("secret_store");
     assert.equal(stores.size, 2);
     assert.ok(stores.has("x"));
@@ -47,9 +41,7 @@ describe("PluginRegistry", () => {
   it("hasProvider + getProvider return correct values", () => {
     const r = new PluginRegistry();
     r.registerPlugin(
-      manifest("p", [
-        { name: "searxng", type: "web_search_provider", version: "1.0.0" },
-      ]),
+      manifest("p", [{ name: "searxng", type: "web_search_provider", version: "1.0.0" }]),
     );
     assert.equal(r.hasProvider("searxng"), true);
     assert.equal(r.hasProvider("brave"), false);

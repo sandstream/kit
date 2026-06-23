@@ -20,13 +20,19 @@ describe("service auth resolver", () => {
   });
 
   it("honors an explicit auth override over inference", () => {
-    const r = resolveServiceAuth("github", svc({ login: "gh auth login", check: "gh auth status", auth: "vault" }));
+    const r = resolveServiceAuth(
+      "github",
+      svc({ login: "gh auth login", check: "gh auth status", auth: "vault" }),
+    );
     assert.equal(r.strategy, "vault"); // explicit wins despite a login command
     assert.equal(r.passkey, false); // vault is never a passkey flow
   });
 
   it("flags passkey for known browser-login services", () => {
-    const gh = resolveServiceAuth("github", svc({ login: "gh auth login", check: "gh auth status" }));
+    const gh = resolveServiceAuth(
+      "github",
+      svc({ login: "gh auth login", check: "gh auth status" }),
+    );
     assert.equal(gh.strategy, "interactive");
     assert.equal(gh.passkey, true);
     assert.match(gh.instruction, /passkey/);
@@ -47,6 +53,9 @@ describe("service auth resolver", () => {
       vercel: svc({ login: "vercel login", check: "x" }),
       github: svc({ login: "gh auth login", check: "x" }),
     });
-    assert.deepEqual(plans.map((p) => p.name), ["github", "vercel"]);
+    assert.deepEqual(
+      plans.map((p) => p.name),
+      ["github", "vercel"],
+    );
   });
 });

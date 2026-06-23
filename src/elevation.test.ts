@@ -250,9 +250,7 @@ describe("requireElevation audit emission", () => {
     try {
       const result = await requireElevation("rotate", dir);
       assert.equal(result.ok, false);
-      const lines = readFileSync(join(dir, ".kit-audit.jsonl"), "utf-8")
-        .trim()
-        .split("\n");
+      const lines = readFileSync(join(dir, ".kit-audit.jsonl"), "utf-8").trim().split("\n");
       const last = JSON.parse(lines[lines.length - 1]!);
       assert.equal(last.operation, "elevation-check");
       assert.equal(last.success, false);

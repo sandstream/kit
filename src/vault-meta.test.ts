@@ -4,7 +4,10 @@ import { detectSecretStore, vaultMeta, VAULT_META } from "./vault-meta.js";
 
 describe("vault-meta", () => {
   describe("detectSecretStore", () => {
-    const has = (...present: string[]) => async (p: string) => present.includes(p);
+    const has =
+      (...present: string[]) =>
+      async (p: string) =>
+        present.includes(p);
 
     it("detects infisical from .infisical.json", async () => {
       assert.equal(await detectSecretStore(has(".infisical.json")), "infisical");

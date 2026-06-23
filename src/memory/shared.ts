@@ -20,13 +20,7 @@ import { existsSync, readFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { findSecrets } from "../utils/redactSecrets.js";
 
-export type SharedKind =
-  | "decision"
-  | "convention"
-  | "how-built"
-  | "status"
-  | "security"
-  | "note";
+export type SharedKind = "decision" | "convention" | "how-built" | "status" | "security" | "note";
 
 export interface SharedEntry {
   id: string;

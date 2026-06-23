@@ -108,12 +108,26 @@ describe("auditPull", () => {
     try {
       writeFileSync(
         join(dir, ".kit-allowlist.json"),
-        JSON.stringify({ policy: { enforce_runtime: true, enforce_dev: false, allow_wildcards: false }, packages: [] }, null, 2),
+        JSON.stringify(
+          {
+            policy: { enforce_runtime: true, enforce_dev: false, allow_wildcards: false },
+            packages: [],
+          },
+          null,
+          2,
+        ),
       );
       commit(dir, "initial");
       writeFileSync(
         join(dir, ".kit-allowlist.json"),
-        JSON.stringify({ policy: { enforce_runtime: false, enforce_dev: false, allow_wildcards: true }, packages: [] }, null, 2),
+        JSON.stringify(
+          {
+            policy: { enforce_runtime: false, enforce_dev: false, allow_wildcards: true },
+            packages: [],
+          },
+          null,
+          2,
+        ),
       );
       commit(dir, "relax allowlist");
       const r = await auditPull(dir);

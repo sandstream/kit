@@ -5,7 +5,6 @@ import { scanPlaintextSecrets, type PlaintextHit } from "./scan-plaintext.js";
 import { redactSecrets } from "./utils/redactSecrets.js";
 import { writeViaBackend, type WriteResult } from "./secret-backends.js";
 
-
 /**
  * Conservative env-var-style identifier check.
  *
@@ -45,10 +44,10 @@ function safeErrorMessage(err: unknown, knownSecrets: string[] = []): string {
 
 export interface MigrationRecord {
   key: string;
-  source: string;        // file the key was read from
-  vault: string;         // backend store
+  source: string; // file the key was read from
+  vault: string; // backend store
   written: boolean;
-  cleaned: boolean;      // plaintext removed from source
+  cleaned: boolean; // plaintext removed from source
   detail: string;
 }
 

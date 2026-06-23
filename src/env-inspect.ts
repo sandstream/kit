@@ -62,7 +62,7 @@ export function redactValue(value: string): string {
 
 export async function inspectEnv(
   config: kitConfig,
-  options: InspectOptions = {}
+  options: InspectOptions = {},
 ): Promise<EnvInspectResult> {
   const cwd = options.cwd ?? process.cwd();
   const envPath = join(cwd, ".env.local");

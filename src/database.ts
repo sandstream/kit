@@ -131,9 +131,7 @@ export class DatabaseManager {
   /**
    * Execute a query with transaction.
    */
-  async transaction<T>(
-    callback: (db: DatabaseManager) => Promise<T>,
-  ): Promise<T> {
+  async transaction<T>(callback: (db: DatabaseManager) => Promise<T>): Promise<T> {
     if (!this.isInitialized) {
       throw new Error("Database not initialized");
     }
@@ -313,9 +311,7 @@ export class DatabaseManager {
 
     const totalTime = this.queryLog.reduce((sum, q) => sum + q.duration, 0);
     const averageTime = totalTime / this.queryLog.length;
-    const slowestQuery = this.queryLog.reduce((max, q) =>
-      q.duration > max.duration ? q : max,
-    );
+    const slowestQuery = this.queryLog.reduce((max, q) => (q.duration > max.duration ? q : max));
 
     return {
       totalQueries: this.queryLog.length,

@@ -6,7 +6,9 @@ describe("parseTrivyMisconfigCount", () => {
   it("counts only HIGH/CRITICAL misconfigurations", () => {
     const json = JSON.stringify({
       Results: [
-        { Misconfigurations: [{ Severity: "HIGH" }, { Severity: "LOW" }, { Severity: "CRITICAL" }] },
+        {
+          Misconfigurations: [{ Severity: "HIGH" }, { Severity: "LOW" }, { Severity: "CRITICAL" }],
+        },
         { Misconfigurations: [{ Severity: "MEDIUM" }] },
       ],
     });
@@ -64,26 +66,44 @@ describe("checkSecurity", () => {
       assert.ok(result.detail, "should have a detail");
       assert.ok(
         ["pass", "fail", "warn", "skip"].includes(result.status),
-        `status should be valid: ${result.status}`
+        `status should be valid: ${result.status}`,
       );
     }
   });
 
   it("includes npm audit check", () => {
-    assert.ok(cached.find((r) => r.name === "npm audit"), "should include npm audit check");
+    assert.ok(
+      cached.find((r) => r.name === "npm audit"),
+      "should include npm audit check",
+    );
   });
 
   it("includes service exposure checks", () => {
-    assert.ok(cached.find((r) => r.name === "Ollama"), "should include Ollama exposure check");
-    assert.ok(cached.find((r) => r.name === "Remote API"), "should include Remote API exposure check");
+    assert.ok(
+      cached.find((r) => r.name === "Ollama"),
+      "should include Ollama exposure check",
+    );
+    assert.ok(
+      cached.find((r) => r.name === "Remote API"),
+      "should include Remote API exposure check",
+    );
   });
 
   it("includes supply chain checks", () => {
-    assert.ok(cached.find((r) => r.name === "pinned versions"), "should include pinned versions check");
+    assert.ok(
+      cached.find((r) => r.name === "pinned versions"),
+      "should include pinned versions check",
+    );
   });
 
   it("includes secrets checks", () => {
-    assert.ok(cached.find((r) => r.name === ".env gitignored"), "should include .env gitignored check");
-    assert.ok(cached.find((r) => r.name === "secrets scan"), "should include secrets scan check");
+    assert.ok(
+      cached.find((r) => r.name === ".env gitignored"),
+      "should include .env gitignored check",
+    );
+    assert.ok(
+      cached.find((r) => r.name === "secrets scan"),
+      "should include secrets scan check",
+    );
   });
 });

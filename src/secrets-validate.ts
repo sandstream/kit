@@ -65,7 +65,11 @@ async function loadEnvTemplate(cwd: string, templatePath: string): Promise<Map<s
 export async function validateSecrets(
   config: kitConfig,
   opts: ValidateOptions = {},
-  checkAvailability: (key: string, source: SecretKeyConfig["source"], cfg: SecretKeyConfig) => Promise<boolean> = async (key, source, _cfg) => {
+  checkAvailability: (
+    key: string,
+    source: SecretKeyConfig["source"],
+    cfg: SecretKeyConfig,
+  ) => Promise<boolean> = async (key, source, _cfg) => {
     if (source === "env") return Boolean(process.env[key]);
     // For all other sources we can't easily check without invoking the
     // backend CLI here — callers in CLI surface should pass the real
@@ -146,7 +150,14 @@ export function summarizeValidation(results: ValidateResult[]): {
   unfixable: number;
   ok: boolean;
 } {
-  const counts = { total: results.length, present: 0, missing: 0, fixed: 0, unfixable: 0, ok: true };
+  const counts = {
+    total: results.length,
+    present: 0,
+    missing: 0,
+    fixed: 0,
+    unfixable: 0,
+    ok: true,
+  };
   for (const r of results) {
     counts[r.status]++;
   }

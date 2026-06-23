@@ -70,10 +70,7 @@ export async function readAllowlist(cwd: string = process.cwd()): Promise<Allowl
   }
 }
 
-export async function writeAllowlist(
-  list: Allowlist,
-  cwd: string = process.cwd(),
-): Promise<void> {
+export async function writeAllowlist(list: Allowlist, cwd: string = process.cwd()): Promise<void> {
   const path = resolve(cwd, ALLOWLIST_FILE);
   await writeFile(path, JSON.stringify(list, null, 2) + "\n", "utf-8");
 }
@@ -122,11 +119,7 @@ export interface PolicyViolation {
 
 export interface SecretPolicyViolation {
   key: string;
-  reason:
-    | "no-policy-entry"
-    | "no-spend-cap"
-    | "no-scope"
-    | "ttl-too-long";
+  reason: "no-policy-entry" | "no-spend-cap" | "no-scope" | "ttl-too-long";
   detail: string;
 }
 
@@ -160,10 +153,7 @@ export async function checkAllowlist(
         violations.push({ name, range, reason: "not-on-allowlist", kind });
         continue;
       }
-      if (
-        !list.policy.allow_wildcards &&
-        (entry.range === "*" || range === "*")
-      ) {
+      if (!list.policy.allow_wildcards && (entry.range === "*" || range === "*")) {
         violations.push({ name, range, reason: "wildcard-blocked", kind });
       }
     }
@@ -188,13 +178,7 @@ export async function checkAllowlist(
 export function checkSecretPolicy(
   list: Allowlist,
   configKeys: string[],
-  paidServices: Set<string> = new Set([
-    "STRIPE",
-    "OPENAI",
-    "ANTHROPIC",
-    "RESEND",
-    "VERCEL",
-  ]),
+  paidServices: Set<string> = new Set(["STRIPE", "OPENAI", "ANTHROPIC", "RESEND", "VERCEL"]),
 ): SecretPolicyViolation[] {
   const violations: SecretPolicyViolation[] = [];
   const policyBlock = list.secrets ?? {};
@@ -266,8 +250,7 @@ export async function addToAllowlist(
   }
   const pkg = await readPackageJson(cwd);
   if (!pkg) return { added: false, entry: null };
-  const range =
-    pkg.dependencies?.[pkgName] ?? pkg.devDependencies?.[pkgName] ?? "*";
+  const range = pkg.dependencies?.[pkgName] ?? pkg.devDependencies?.[pkgName] ?? "*";
   const kind = pkg.dependencies?.[pkgName] ? "runtime" : "dev";
   const entry: AllowlistEntry = { name: pkgName, range, reason: kind };
   list.packages.push(entry);

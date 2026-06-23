@@ -23,12 +23,20 @@ describe("memory codex parser", () => {
       JSON.stringify({
         timestamp: "2026-03-31T11:05:00Z",
         type: "response_item",
-        payload: { type: "message", role: "developer", content: [{ type: "input_text", text: "system permissions noise" }] },
+        payload: {
+          type: "message",
+          role: "developer",
+          content: [{ type: "input_text", text: "system permissions noise" }],
+        },
       }),
       JSON.stringify({
         timestamp: "2026-03-31T11:05:10Z",
         type: "response_item",
-        payload: { type: "message", role: "user", content: [{ type: "input_text", text: "october pricing question" }] },
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "october pricing question" }],
+        },
       }),
       JSON.stringify({
         timestamp: "2026-03-31T11:05:20Z",
@@ -38,7 +46,11 @@ describe("memory codex parser", () => {
       JSON.stringify({
         timestamp: "2026-03-31T11:05:21Z",
         type: "response_item",
-        payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "here is the answer" }] },
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "here is the answer" }],
+        },
       }),
     ].join("\n");
     writeFileSync(join(dir, "rollout-2026-03-31T11-04-40-sess-xyz.jsonl"), lines);

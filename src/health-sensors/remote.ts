@@ -26,5 +26,8 @@ export function parseGitRemote(url: string): RemoteSlug | null {
 }
 
 function stripGit(p: string): string {
-  return p.replace(/\.git$/, "").replace(/^\/+/, "").replace(/\/+$/, "");
+  return p
+    .replace(/\.git$/, "")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
 }

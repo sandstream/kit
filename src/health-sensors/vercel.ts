@@ -40,48 +40,63 @@ export const vercelSensor: HealthSensor = {
   async probe(ctx, deps): Promise<HealthFinding[]> {
     const projectId = ctx.vercel?.projectId;
     if (!projectId) {
-      return [{
-        sensor: "vercel",
-        source: "(not linked)",
-        status: "unknown",
-        title: "Vercel probe skipped: project not linked",
-        detail: "no .vercel/project.json — run `vercel link`",
-      }];
+      return [
+        {
+          sensor: "vercel",
+          source: "(not linked)",
+          status: "unknown",
+          title: "Vercel probe skipped: project not linked",
+          detail: "no .vercel/project.json — run `vercel link`",
+        },
+      ];
     }
     const token = process.env.VERCEL_TOKEN;
     if (!token) {
-      return [{
-        sensor: "vercel",
-        source: projectId,
-        status: "unknown",
-        title: "Vercel probe skipped: VERCEL_TOKEN not set",
-        detail: "set VERCEL_TOKEN to enable the Vercel sensor",
-      }];
+      return [
+        {
+          sensor: "vercel",
+          source: projectId,
+          status: "unknown",
+          title: "Vercel probe skipped: VERCEL_TOKEN not set",
+          detail: "set VERCEL_TOKEN to enable the Vercel sensor",
+        },
+      ];
     }
     const team = ctx.vercel?.orgId ? `&teamId=${encodeURIComponent(ctx.vercel.orgId)}` : "";
     const url = `https://api.vercel.com/v6/deployments?projectId=${encodeURIComponent(projectId)}&target=production&limit=10${team}`;
     const res = await deps.httpGet(url, { Authorization: `Bearer ${token}` });
     if (!res.ok) {
-      return [{
-        sensor: "vercel",
-        source: projectId,
-        status: "unknown",
-        title: `Vercel API returned HTTP ${res.status}`,
-        detail: "check VERCEL_TOKEN scope / project + team access",
-      }];
+      return [
+        {
+          sensor: "vercel",
+          source: projectId,
+          status: "unknown",
+          title: `Vercel API returned HTTP ${res.status}`,
+          detail: "check VERCEL_TOKEN scope / project + team access",
+        },
+      ];
     }
     const failed = latestFailedVercel(parseVercelDeployments(res.body));
     if (!failed) {
-      return [{ sensor: "vercel", source: projectId, status: "green", title: "Vercel: latest production deploy green" }];
+      return [
+        {
+          sensor: "vercel",
+          source: projectId,
+          status: "green",
+          title: "Vercel: latest production deploy green",
+        },
+      ];
     }
-    return [{
-      sensor: "vercel",
-      source: projectId,
-      status: "red",
-      severity: "high",
-      title: "Vercel production deploy failed",
-      detail: `deployment ${failed.uid ?? "?"} state=ERROR`,
-      suggestedClass: "code",
-    }];
+    return [
+      {
+        sensor: "vercel",
+        source: projectId,
+        status: "red",
+        severity: "high",
+        title: "Vercel production deploy failed",
+        detail: `deployment ${failed.uid ?? "?"} state=ERROR`,
+        suggestedClass: "code",
+      },
+    ];
   },
 };

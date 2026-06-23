@@ -101,11 +101,7 @@ describe("checkPolicy", () => {
   });
 
   it("denies with empty allow-list (vendor declared but no ops)", async () => {
-    const r = await checkPolicy(
-      { agent_writes: { stripe: [] } },
-      "stripe",
-      "webhook_create",
-    );
+    const r = await checkPolicy({ agent_writes: { stripe: [] } }, "stripe", "webhook_create");
     assert.equal(r.approved, false);
     assert.match(r.reason, /not in \[policy\.agent_writes\.stripe\]/);
   });

@@ -24,14 +24,8 @@ describe("wouldRequireApproval", () => {
       enabled: true,
       approval: { destructive_operations: ["delete", "drop"] },
     };
-    assert.equal(
-      wouldRequireApproval(config, "db:delete:users", "dev"),
-      true,
-    );
-    assert.equal(
-      wouldRequireApproval(config, "DROP TABLE orders", "dev"),
-      true,
-    );
+    assert.equal(wouldRequireApproval(config, "db:delete:users", "dev"), true);
+    assert.equal(wouldRequireApproval(config, "DROP TABLE orders", "dev"), true);
   });
 
   it("returns true for production writes when configured", () => {
@@ -99,11 +93,14 @@ describe("requestApproval - Remote API flow", () => {
   });
 
   it("returns true when Remote API approves immediately", async () => {
-    mock.method(globalThis, "fetch", async () =>
-      new Response(JSON.stringify({ status: "approved" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+    mock.method(
+      globalThis,
+      "fetch",
+      async () =>
+        new Response(JSON.stringify({ status: "approved" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
     );
 
     const config: GovernanceConfig = {
@@ -124,11 +121,14 @@ describe("requestApproval - Remote API flow", () => {
   });
 
   it("returns false when Remote API denies the request", async () => {
-    mock.method(globalThis, "fetch", async () =>
-      new Response(
-        JSON.stringify({ status: "denied", reason: "Not authorized" }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
+    mock.method(
+      globalThis,
+      "fetch",
+      async () =>
+        new Response(JSON.stringify({ status: "denied", reason: "Not authorized" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
     );
 
     const config: GovernanceConfig = {
@@ -151,11 +151,14 @@ describe("requestApproval - Remote API flow", () => {
   it("returns false on approval timeout when API keeps returning pending", async () => {
     // approval_timeout: 0 is falsy so code uses 3600 default — use 1s instead
     // The polling sleep is 2s, so the loop exits after one pending response (~2s)
-    mock.method(globalThis, "fetch", async () =>
-      new Response(JSON.stringify({ status: "pending" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+    mock.method(
+      globalThis,
+      "fetch",
+      async () =>
+        new Response(JSON.stringify({ status: "pending" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
     );
 
     const config: GovernanceConfig = {
@@ -206,10 +209,7 @@ describe("requestApproval - Remote API flow", () => {
       "test-company-id",
     );
 
-    assert.ok(
-      fetchedUrls.includes(webhookUrl),
-      "webhook URL should have been called",
-    );
+    assert.ok(fetchedUrls.includes(webhookUrl), "webhook URL should have been called");
   });
 
   it("continues when webhook call fails", async () => {

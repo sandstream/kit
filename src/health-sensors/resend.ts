@@ -25,37 +25,52 @@ export const resendSensor: HealthSensor = {
   async probe(_ctx, deps): Promise<HealthFinding[]> {
     const key = process.env.RESEND_API_KEY;
     if (!key) {
-      return [{
-        sensor: "resend",
-        source: "resend",
-        status: "unknown",
-        title: "Resend probe skipped: RESEND_API_KEY not set",
-        detail: "set RESEND_API_KEY to enable the Resend sensor",
-      }];
+      return [
+        {
+          sensor: "resend",
+          source: "resend",
+          status: "unknown",
+          title: "Resend probe skipped: RESEND_API_KEY not set",
+          detail: "set RESEND_API_KEY to enable the Resend sensor",
+        },
+      ];
     }
-    const res = await deps.httpGet("https://api.resend.com/domains", { Authorization: `Bearer ${key}` });
+    const res = await deps.httpGet("https://api.resend.com/domains", {
+      Authorization: `Bearer ${key}`,
+    });
     if (!res.ok) {
-      return [{
-        sensor: "resend",
-        source: "resend",
-        status: "unknown",
-        title: `Resend API returned HTTP ${res.status}`,
-        detail: "check RESEND_API_KEY",
-      }];
+      return [
+        {
+          sensor: "resend",
+          source: "resend",
+          status: "unknown",
+          title: `Resend API returned HTTP ${res.status}`,
+          detail: "check RESEND_API_KEY",
+        },
+      ];
     }
     const bad = unverifiedDomains(parseResendDomains(res.body));
     if (bad.length === 0) {
-      return [{ sensor: "resend", source: "resend", status: "green", title: "Resend: all sending domains verified" }];
+      return [
+        {
+          sensor: "resend",
+          source: "resend",
+          status: "green",
+          title: "Resend: all sending domains verified",
+        },
+      ];
     }
     const names = bad.map((d) => `${d.name ?? "?"}=${d.status ?? "?"}`).join(", ");
-    return [{
-      sensor: "resend",
-      source: "resend",
-      status: "red",
-      severity: "high",
-      title: `Resend: ${bad.length} domain(s) not verified`,
-      detail: `${names} — re-check DNS (SPF/DKIM/DMARC); customer/DNS action, not a code fix`,
-      suggestedClass: "human",
-    }];
+    return [
+      {
+        sensor: "resend",
+        source: "resend",
+        status: "red",
+        severity: "high",
+        title: `Resend: ${bad.length} domain(s) not verified`,
+        detail: `${names} — re-check DNS (SPF/DKIM/DMARC); customer/DNS action, not a code fix`,
+        suggestedClass: "human",
+      },
+    ];
   },
 };

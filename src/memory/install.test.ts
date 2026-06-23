@@ -63,7 +63,11 @@ describe("memory hook installer", () => {
     installMemoryHooks();
     const res2 = installMemoryHooks();
     assert.deepEqual(res2.added, []);
-    assert.deepEqual(res2.alreadyPresent.sort(), ["SessionEnd", "SessionStart", "UserPromptSubmit"]);
+    assert.deepEqual(res2.alreadyPresent.sort(), [
+      "SessionEnd",
+      "SessionStart",
+      "UserPromptSubmit",
+    ]);
     const s = JSON.parse(readFileSync(settingsPath, "utf8"));
     const ours = s.hooks.UserPromptSubmit.filter((g: { hooks: { command: string }[] }) =>
       g.hooks.some((h) => h.command.endsWith("memory hook user-prompt-submit")),
@@ -77,7 +81,9 @@ describe("memory hook installer", () => {
       settingsPath,
       JSON.stringify({
         hooks: {
-          UserPromptSubmit: [{ hooks: [{ type: "command", command: "kit memory hook user-prompt-submit" }] }],
+          UserPromptSubmit: [
+            { hooks: [{ type: "command", command: "kit memory hook user-prompt-submit" }] },
+          ],
         },
       }),
     );

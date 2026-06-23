@@ -16,9 +16,7 @@ export interface SkillsLockFile {
 
 const LOCK_FILE = "skills-lock.json";
 
-export async function readSkillsLock(
-  dir: string,
-): Promise<SkillsLockFile | null> {
+export async function readSkillsLock(dir: string): Promise<SkillsLockFile | null> {
   try {
     const content = await readFile(resolve(dir, LOCK_FILE), "utf-8");
     return JSON.parse(content) as SkillsLockFile;
@@ -27,10 +25,7 @@ export async function readSkillsLock(
   }
 }
 
-export async function writeSkillsLock(
-  dir: string,
-  lock: SkillsLockFile,
-): Promise<void> {
+export async function writeSkillsLock(dir: string, lock: SkillsLockFile): Promise<void> {
   const path = resolve(dir, LOCK_FILE);
   await writeFile(path, JSON.stringify(lock, null, 2) + "\n", "utf-8");
 }

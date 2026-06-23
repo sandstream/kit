@@ -36,10 +36,7 @@ export function saveThread(db: DatabaseSync, input: SaveThreadInput): void {
   ).run(input.name, input.sessionId, input.summary ?? null, input.projectPath ?? null);
 }
 
-export function listThreads(
-  db: DatabaseSync,
-  opts: { projectPath?: string } = {},
-): SavedThread[] {
+export function listThreads(db: DatabaseSync, opts: { projectPath?: string } = {}): SavedThread[] {
   if (opts.projectPath) {
     return db
       .prepare("SELECT * FROM saved_threads WHERE project_path = ? ORDER BY saved_at DESC")
@@ -75,9 +72,9 @@ export function latestSessionId(
       )
       .get(opts.projectPath, `${opts.projectPath}/%`) as { session_id: string } | undefined;
   } else {
-    row = db
-      .prepare("SELECT session_id FROM messages ORDER BY timestamp DESC LIMIT 1")
-      .get() as { session_id: string } | undefined;
+    row = db.prepare("SELECT session_id FROM messages ORDER BY timestamp DESC LIMIT 1").get() as
+      | { session_id: string }
+      | undefined;
   }
   return row?.session_id;
 }

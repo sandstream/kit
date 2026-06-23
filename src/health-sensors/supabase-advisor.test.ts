@@ -53,7 +53,10 @@ describe("supabaseAdvisorSensor.probe", () => {
   it("emits green when no ERROR-level advisors", async () => {
     setEnv();
     const body = JSON.stringify({ lints: [{ level: "WARN", title: "minor" }] });
-    const out = await supabaseAdvisorSensor.probe(ctx, deps({ http: { ok: true, status: 200, body } }));
+    const out = await supabaseAdvisorSensor.probe(
+      ctx,
+      deps({ http: { ok: true, status: 200, body } }),
+    );
     assert.equal(out[0].status, "green");
   });
 
@@ -64,7 +67,10 @@ describe("supabaseAdvisorSensor.probe", () => {
 
   it("is unknown on a non-OK API response", async () => {
     setEnv();
-    const out = await supabaseAdvisorSensor.probe(ctx, deps({ http: { ok: false, status: 401, body: "" } }));
+    const out = await supabaseAdvisorSensor.probe(
+      ctx,
+      deps({ http: { ok: false, status: 401, body: "" } }),
+    );
     assert.equal(out[0].status, "unknown");
     assert.match(out[0].title, /401/);
   });

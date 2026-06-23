@@ -15,7 +15,12 @@ describe("memory merge", () => {
     // A source brain (e.g. an old laptop)
     const src = openMemoryDb(srcPath);
     upsertSession(src, { sessionId: "s1", harness: "codex" });
-    insertMessage(src, { uuid: "a", sessionId: "s1", type: "user", content: "from the old laptop" });
+    insertMessage(src, {
+      uuid: "a",
+      sessionId: "s1",
+      type: "user",
+      content: "from the old laptop",
+    });
     insertMessage(src, { uuid: "b", sessionId: "s1", type: "assistant", content: "reply" });
     palAdd(src, { title: "old todo", scope: "proj" });
     src.exec("PRAGMA wal_checkpoint(TRUNCATE)"); // flush WAL so readOnly open sees it all

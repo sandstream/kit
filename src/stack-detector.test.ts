@@ -5,10 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { detectStack } from "./stack-detector.js";
 
-async function makeProject(
-  dir: string,
-  files: Record<string, string>
-): Promise<void> {
+async function makeProject(dir: string, files: Record<string, string>): Promise<void> {
   await mkdir(dir, { recursive: true });
   for (const [name, content] of Object.entries(files)) {
     const filePath = join(dir, name);
@@ -31,8 +28,14 @@ describe("detectStack", () => {
       const stack = await detectStack(dir);
       assert.equal(stack.language, "typescript");
       assert.equal(stack.framework, "nextjs");
-      assert.ok(stack.services.includes("supabase"), `expected supabase in services: ${JSON.stringify(stack.services)}`);
-      assert.ok(stack.services.includes("stripe"), `expected stripe in services: ${JSON.stringify(stack.services)}`);
+      assert.ok(
+        stack.services.includes("supabase"),
+        `expected supabase in services: ${JSON.stringify(stack.services)}`,
+      );
+      assert.ok(
+        stack.services.includes("stripe"),
+        `expected stripe in services: ${JSON.stringify(stack.services)}`,
+      );
       assert.ok(stack.tools.pnpm, "expected pnpm in tools");
       assert.ok(stack.confidence >= 0.8);
     } finally {
@@ -81,8 +84,14 @@ describe("detectStack", () => {
     try {
       const stack = await detectStack(dir);
       assert.equal(stack.language, "python");
-      assert.ok(stack.services.includes("stripe"), `expected stripe: ${JSON.stringify(stack.services)}`);
-      assert.ok(stack.services.includes("sentry"), `expected sentry: ${JSON.stringify(stack.services)}`);
+      assert.ok(
+        stack.services.includes("stripe"),
+        `expected stripe: ${JSON.stringify(stack.services)}`,
+      );
+      assert.ok(
+        stack.services.includes("sentry"),
+        `expected sentry: ${JSON.stringify(stack.services)}`,
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -159,9 +168,18 @@ describe("detectStack", () => {
     });
     try {
       const stack = await detectStack(dir);
-      assert.ok(stack.services.includes("resend"), `expected resend: ${JSON.stringify(stack.services)}`);
-      assert.ok(stack.services.includes("clerk"), `expected clerk: ${JSON.stringify(stack.services)}`);
-      assert.ok(stack.services.includes("trigger"), `expected trigger: ${JSON.stringify(stack.services)}`);
+      assert.ok(
+        stack.services.includes("resend"),
+        `expected resend: ${JSON.stringify(stack.services)}`,
+      );
+      assert.ok(
+        stack.services.includes("clerk"),
+        `expected clerk: ${JSON.stringify(stack.services)}`,
+      );
+      assert.ok(
+        stack.services.includes("trigger"),
+        `expected trigger: ${JSON.stringify(stack.services)}`,
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -188,7 +206,10 @@ describe("detectStack", () => {
     });
     try {
       const stack = await detectStack(dir);
-      assert.ok(stack.services.includes("sentry"), `expected sentry in services: ${JSON.stringify(stack.services)}`);
+      assert.ok(
+        stack.services.includes("sentry"),
+        `expected sentry in services: ${JSON.stringify(stack.services)}`,
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -202,7 +223,10 @@ describe("detectStack", () => {
     });
     try {
       const stack = await detectStack(dir);
-      assert.ok(stack.services.includes("netlify"), `expected netlify in services: ${JSON.stringify(stack.services)}`);
+      assert.ok(
+        stack.services.includes("netlify"),
+        `expected netlify in services: ${JSON.stringify(stack.services)}`,
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -218,7 +242,7 @@ describe("detectStack", () => {
       const stack = await detectStack(dir);
       assert.ok(
         stack.services.includes("cloudflare-pages"),
-        `expected cloudflare-pages in services: ${JSON.stringify(stack.services)}`
+        `expected cloudflare-pages in services: ${JSON.stringify(stack.services)}`,
       );
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -239,8 +263,14 @@ describe("detectStack", () => {
     try {
       const stack = await detectStack(dir);
       assert.equal(stack.framework, "nestjs");
-      assert.ok(stack.services.includes("typeorm"), `expected typeorm: ${JSON.stringify(stack.services)}`);
-      assert.ok(stack.services.includes("mongoose"), `expected mongoose: ${JSON.stringify(stack.services)}`);
+      assert.ok(
+        stack.services.includes("typeorm"),
+        `expected typeorm: ${JSON.stringify(stack.services)}`,
+      );
+      assert.ok(
+        stack.services.includes("mongoose"),
+        `expected mongoose: ${JSON.stringify(stack.services)}`,
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -265,7 +295,9 @@ describe("detectStack", () => {
   it("detects React Native (framework wins over plain react)", async () => {
     const dir = join(tmpdir(), `kit-detect-${process.pid}-rn`);
     await makeProject(dir, {
-      "package.json": JSON.stringify({ dependencies: { react: "18.0.0", "react-native": "0.74.0" } }),
+      "package.json": JSON.stringify({
+        dependencies: { react: "18.0.0", "react-native": "0.74.0" },
+      }),
     });
     try {
       const stack = await detectStack(dir);
@@ -320,15 +352,28 @@ describe("detectStack", () => {
     const dir = join(tmpdir(), `kit-detect-${process.pid}-monorepo`);
     await makeProject(dir, {
       // root manifest has only tooling + a workspaces glob
-      "package.json": JSON.stringify({ workspaces: ["apps/*", "packages/*"], devDependencies: { turbo: "2.0.0" } }),
-      "apps/web/package.json": JSON.stringify({ dependencies: { next: "14.0.0", stripe: "14.0.0" } }),
-      "packages/db/package.json": JSON.stringify({ dependencies: { "@supabase/supabase-js": "2.0.0" } }),
+      "package.json": JSON.stringify({
+        workspaces: ["apps/*", "packages/*"],
+        devDependencies: { turbo: "2.0.0" },
+      }),
+      "apps/web/package.json": JSON.stringify({
+        dependencies: { next: "14.0.0", stripe: "14.0.0" },
+      }),
+      "packages/db/package.json": JSON.stringify({
+        dependencies: { "@supabase/supabase-js": "2.0.0" },
+      }),
     });
     try {
       const stack = await detectStack(dir);
       assert.equal(stack.framework, "nextjs", `expected nextjs from apps/web: ${stack.framework}`);
-      assert.ok(stack.services.includes("stripe"), `expected stripe: ${JSON.stringify(stack.services)}`);
-      assert.ok(stack.services.includes("supabase"), `expected supabase: ${JSON.stringify(stack.services)}`);
+      assert.ok(
+        stack.services.includes("stripe"),
+        `expected stripe: ${JSON.stringify(stack.services)}`,
+      );
+      assert.ok(
+        stack.services.includes("supabase"),
+        `expected supabase: ${JSON.stringify(stack.services)}`,
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -350,7 +395,10 @@ describe("detectStack", () => {
   it(".tool-versions nodejs wins over engines.node", async () => {
     const dir = join(tmpdir(), `kit-detect-${process.pid}-toolversions`);
     await makeProject(dir, {
-      "package.json": JSON.stringify({ engines: { node: ">=18.0.0" }, dependencies: { next: "14.0.0" } }),
+      "package.json": JSON.stringify({
+        engines: { node: ">=18.0.0" },
+        dependencies: { next: "14.0.0" },
+      }),
       ".tool-versions": "nodejs 22.11.0\npython 3.11.4\n",
     });
     try {

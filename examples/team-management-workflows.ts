@@ -154,13 +154,7 @@ async function managePermissions(teamId: string) {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   console.log(`\nGranting temporary permission (expires tomorrow)...`);
-  grantPermission(
-    teamId,
-    "user-004",
-    "plugins:install",
-    "user-001",
-    tomorrow.toISOString(),
-  );
+  grantPermission(teamId, "user-004", "plugins:install", "user-001", tomorrow.toISOString());
 }
 
 // ─── Invitations & Onboarding ─────────────────────────────────────────
@@ -253,10 +247,7 @@ async function createOrganization() {
 /**
  * Example 8: Cross-team member with different roles
  */
-async function assignCrossTeamRoles(
-  teamMap: Record<string, string>,
-  userId: string,
-) {
+async function assignCrossTeamRoles(teamMap: Record<string, string>, userId: string) {
   console.log(`\nAssigning cross-team roles for ${userId}...\n`);
 
   // User is dev in Engineering, but admin of shared services
@@ -292,9 +283,7 @@ async function auditTeamActivity(teamId: string) {
   console.log(`Showing latest 20:\n`);
 
   auditLog.logs.forEach((log, i) => {
-    console.log(
-      `${i + 1}. [${log.timestamp}] ${log.actor_name} ${log.action} ${log.resource}`,
-    );
+    console.log(`${i + 1}. [${log.timestamp}] ${log.actor_name} ${log.action} ${log.resource}`);
     console.log(`   Resource ID: ${log.resource_id}`);
     console.log(`   Status: ${log.status}`);
     if (log.details) {
@@ -321,9 +310,7 @@ async function checkTeamHealth(teamId: string) {
     console.log(`  Recent audit events: ${m.recent_audit_events}`);
 
     // Calculate health score
-    const healthPercent = Math.round(
-      (m.active_members_7d / m.total_members) * 100,
-    );
+    const healthPercent = Math.round((m.active_members_7d / m.total_members) * 100);
     const health = healthPercent > 80 ? "✓ Healthy" : "⚠ Needs attention";
     console.log(`\nTeam Health: ${health} (${healthPercent}% active)`);
   }
@@ -385,7 +372,9 @@ async function fullOnboardingWorkflow() {
   console.log("Step 7: Verifying setup...");
   const members = listTeamMembers(teamId);
   const metrics = getTeamMetrics(teamId);
-  console.log(`✓ Team ready: ${members.total} members, ${metrics.metrics?.total_permissions} permissions`);
+  console.log(
+    `✓ Team ready: ${members.total} members, ${metrics.metrics?.total_permissions} permissions`,
+  );
 }
 
 // ─── Export Examples ──────────────────────────────────────────────────

@@ -41,10 +41,7 @@ describe("writeActiveEnv / readActiveEnv", () => {
     try {
       const { writeFileSync, mkdirSync } = await import("node:fs");
       mkdirSync(join(dir, ".kit"), { recursive: true });
-      writeFileSync(
-        join(dir, ".kit", "active-env.json"),
-        JSON.stringify({ env: "bogus" }),
-      );
+      writeFileSync(join(dir, ".kit", "active-env.json"), JSON.stringify({ env: "bogus" }));
       assert.equal(await readActiveEnv(dir), null);
     } finally {
       rmSync(dir, { recursive: true, force: true });

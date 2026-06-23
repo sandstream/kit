@@ -22,9 +22,7 @@ export interface ActiveEnvState {
   switchedBy: string; // user / agent identifier
 }
 
-export async function readActiveEnv(
-  cwd: string = process.cwd(),
-): Promise<ActiveEnvState | null> {
+export async function readActiveEnv(cwd: string = process.cwd()): Promise<ActiveEnvState | null> {
   const path = resolve(cwd, ACTIVE_ENV_FILE);
   try {
     await access(path);
@@ -63,9 +61,7 @@ export async function writeActiveEnv(
  * Returns the active env if set; defaults to "dev" so a project that hasn't
  * opted into env-switching yet behaves safely (no accidental prod-key reads).
  */
-export async function getActiveEnv(
-  cwd: string = process.cwd(),
-): Promise<kitEnv> {
+export async function getActiveEnv(cwd: string = process.cwd()): Promise<kitEnv> {
   const state = await readActiveEnv(cwd);
   return state?.env ?? "dev";
 }

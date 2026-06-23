@@ -123,7 +123,9 @@ export async function runHeal(
     await syncSecurityFindings(lastResults); // track + auto-close (fail-open)
 
     const actionable = actionableFindings(lastResults);
-    log(`  scan ${((Date.now() - t0) / 1000).toFixed(1)}s — ${actionable.length} actionable finding(s)`);
+    log(
+      `  scan ${((Date.now() - t0) / 1000).toFixed(1)}s — ${actionable.length} actionable finding(s)`,
+    );
     failClosed = actionable.filter(isFailClosed);
     gated = actionable.filter((r) => classify(r) === "gated").map(toGated);
 

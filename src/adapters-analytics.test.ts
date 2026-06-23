@@ -21,7 +21,7 @@ describe("tinybirdAnalyticsAdapter", () => {
 
   it("check returns true when TINYBIRD_TOKEN is present", async () => {
     const result = await tinybirdAnalyticsAdapter.check(
-      mockContext({ TINYBIRD_TOKEN: "p.eyJhbGciOiJIUzI1NiJ9.xxx" })
+      mockContext({ TINYBIRD_TOKEN: "p.eyJhbGciOiJIUzI1NiJ9.xxx" }),
     );
     assert.equal(result, true);
   });
@@ -33,9 +33,7 @@ describe("tinybirdAnalyticsAdapter", () => {
 
   it("provision returns existing token when already configured", async () => {
     const token = "p.eyJhbGciOiJIUzI1NiJ9.xxx";
-    const result = await tinybirdAnalyticsAdapter.provision(
-      mockContext({ TINYBIRD_TOKEN: token })
-    );
+    const result = await tinybirdAnalyticsAdapter.provision(mockContext({ TINYBIRD_TOKEN: token }));
     assert.equal(result.success, true);
     assert.equal(result.secrets?.TINYBIRD_TOKEN, token);
     assert.equal(result.secrets?.TINYBIRD_API_URL, "https://api.tinybird.co");
@@ -46,7 +44,7 @@ describe("tinybirdAnalyticsAdapter", () => {
     const token = "p.eyJhbGciOiJIUzI1NiJ9.xxx";
     const apiUrl = "https://api.eu.tinybird.co";
     const result = await tinybirdAnalyticsAdapter.provision(
-      mockContext({ TINYBIRD_TOKEN: token, TINYBIRD_API_URL: apiUrl })
+      mockContext({ TINYBIRD_TOKEN: token, TINYBIRD_API_URL: apiUrl }),
     );
     assert.equal(result.success, true);
     assert.equal(result.secrets?.TINYBIRD_API_URL, apiUrl);
@@ -55,7 +53,10 @@ describe("tinybirdAnalyticsAdapter", () => {
   it("provision returns error with setup instructions when token is missing", async () => {
     const result = await tinybirdAnalyticsAdapter.provision(mockContext());
     assert.equal(result.success, false);
-    assert(result.message?.includes("app.tinybird.co"), `expected dashboard URL: ${result.message}`);
+    assert(
+      result.message?.includes("app.tinybird.co"),
+      `expected dashboard URL: ${result.message}`,
+    );
     assert(result.message?.includes("TINYBIRD_TOKEN"), `expected key name: ${result.message}`);
   });
 });
@@ -72,7 +73,7 @@ describe("posthogAnalyticsAdapter", () => {
 
   it("check returns true when NEXT_PUBLIC_POSTHOG_KEY is present", async () => {
     const result = await posthogAnalyticsAdapter.check(
-      mockContext({ NEXT_PUBLIC_POSTHOG_KEY: "phc_abc123" })
+      mockContext({ NEXT_PUBLIC_POSTHOG_KEY: "phc_abc123" }),
     );
     assert.equal(result, true);
   });
@@ -85,7 +86,7 @@ describe("posthogAnalyticsAdapter", () => {
   it("provision returns existing key when already configured", async () => {
     const apiKey = "phc_abc123";
     const result = await posthogAnalyticsAdapter.provision(
-      mockContext({ NEXT_PUBLIC_POSTHOG_KEY: apiKey })
+      mockContext({ NEXT_PUBLIC_POSTHOG_KEY: apiKey }),
     );
     assert.equal(result.success, true);
     assert.equal(result.secrets?.NEXT_PUBLIC_POSTHOG_KEY, apiKey);
@@ -97,7 +98,7 @@ describe("posthogAnalyticsAdapter", () => {
     const apiKey = "phc_abc123";
     const host = "https://eu.i.posthog.com";
     const result = await posthogAnalyticsAdapter.provision(
-      mockContext({ NEXT_PUBLIC_POSTHOG_KEY: apiKey, NEXT_PUBLIC_POSTHOG_HOST: host })
+      mockContext({ NEXT_PUBLIC_POSTHOG_KEY: apiKey, NEXT_PUBLIC_POSTHOG_HOST: host }),
     );
     assert.equal(result.success, true);
     assert.equal(result.secrets?.NEXT_PUBLIC_POSTHOG_HOST, host);
@@ -106,7 +107,13 @@ describe("posthogAnalyticsAdapter", () => {
   it("provision returns error with setup instructions when key is missing", async () => {
     const result = await posthogAnalyticsAdapter.provision(mockContext());
     assert.equal(result.success, false);
-    assert(result.message?.includes("app.posthog.com"), `expected dashboard URL: ${result.message}`);
-    assert(result.message?.includes("NEXT_PUBLIC_POSTHOG_KEY"), `expected key name: ${result.message}`);
+    assert(
+      result.message?.includes("app.posthog.com"),
+      `expected dashboard URL: ${result.message}`,
+    );
+    assert(
+      result.message?.includes("NEXT_PUBLIC_POSTHOG_KEY"),
+      `expected key name: ${result.message}`,
+    );
   });
 });

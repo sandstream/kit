@@ -94,8 +94,7 @@ export async function autoFix(options: FixOptions): Promise<FixResult[]> {
       const cfg = options.servicesConfig[s.name];
       if (cfg) automatableConfig[s.name] = cfg;
     }
-    const loginResults =
-      automatable.length === 0 ? [] : await loginServices(automatableConfig);
+    const loginResults = automatable.length === 0 ? [] : await loginServices(automatableConfig);
     for (const r of loginResults) {
       if (r.action === "already_authenticated") {
         continue; // Skip already authenticated
@@ -221,7 +220,7 @@ export async function cmdFix(): Promise<boolean> {
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   const config = await loadConfig(resolve(process.cwd(), ".kit.toml"));
-  
+
   let fixedCount = 0;
   let manualCount = 0;
   const manualActions: string[] = [];
@@ -239,19 +238,23 @@ export async function cmdFix(): Promise<boolean> {
         console.log(`${c.bold}[1/6] Tools${c.reset}`);
         const toolResults = await checkTools(config.tools);
         const missingTools = toolResults.filter((t) => !t.ok);
-        
+
         if (missingTools.length > 0) {
           console.log(`${c.dim}Installing ${missingTools.length} missing tool(s)...${c.reset}\n`);
           const installResults = await installTools(config.tools);
-          
+
           for (const r of installResults) {
             if (r.action === "installed") {
               const icon = `${c.green}✓${c.reset}`;
-              console.log(`  ${icon} ${r.name}  ${c.green}installed${c.reset}  ${c.dim}${r.detail}${c.reset}`);
+              console.log(
+                `  ${icon} ${r.name}  ${c.green}installed${c.reset}  ${c.dim}${r.detail}${c.reset}`,
+              );
               fixedCount++;
             } else if (r.action === "failed") {
               const icon = `${c.red}✗${c.reset}`;
-              console.log(`  ${icon} ${r.name}  ${c.red}failed${c.reset}  ${c.dim}${r.detail}${c.reset}`);
+              console.log(
+                `  ${icon} ${r.name}  ${c.red}failed${c.reset}  ${c.dim}${r.detail}${c.reset}`,
+              );
               manualActions.push(`Install ${r.name} manually: ${r.detail}`);
               manualCount++;
             }
@@ -266,10 +269,10 @@ export async function cmdFix(): Promise<boolean> {
       console.log(`${c.bold}[2/6] Lock Files${c.reset}`);
       const skillsLock = await readSkillsLock();
       const cliLock = await readCliLock();
-      
+
       if (!skillsLock || !cliLock) {
         console.log(`${c.dim}Generating missing lock files...${c.reset}\n`);
-        
+
         // Generate skills lock
         if (!skillsLock) {
           const skills: Record<string, string> = {};
@@ -279,22 +282,28 @@ export async function cmdFix(): Promise<boolean> {
           if (config.skills?.optional) {
             Object.assign(skills, config.skills.optional);
           }
-          
+
           const kitMeta = await readkitMeta();
-          await updateSkillsLock(skills, kitMeta?.name ? `${kitMeta.name}@${kitMeta.version}` : undefined);
+          await updateSkillsLock(
+            skills,
+            kitMeta?.name ? `${kitMeta.name}@${kitMeta.version}` : undefined,
+          );
           console.log(`  ${c.green}✓${c.reset} Generated skills-lock.json`);
           fixedCount++;
         }
-        
+
         // Generate CLI lock
         if (!cliLock) {
-          const tools: Record<string, { version: string; source: "mise" | "npm" | "pip" | "manual"; auth?: string }> = {};
+          const tools: Record<
+            string,
+            { version: string; source: "mise" | "npm" | "pip" | "manual"; auth?: string }
+          > = {};
           if (config.tools) {
             for (const [name, version] of Object.entries(config.tools)) {
               tools[name] = { version, source: "mise" };
             }
           }
-          
+
           await updateCliLock(tools);
           console.log(`  ${c.green}✓${c.reset} Generated cli-lock.json`);
           fixedCount++;
@@ -309,21 +318,21 @@ export async function cmdFix(): Promise<boolean> {
       if (config.services && Object.keys(config.services).length > 0) {
         const serviceResults = await checkServices(config.services);
         const unauthenticated = serviceResults.filter((s) => !s.authenticated);
-        
+
         if (unauthenticated.length > 0) {
-          console.log(`${c.yellow}${unauthenticated.length} service(s) require manual authentication${c.reset}\n`);
+          console.log(
+            `${c.yellow}${unauthenticated.length} service(s) require manual authentication${c.reset}\n`,
+          );
           for (const s of unauthenticated) {
-            console.log(`  ${c.yellow}!${c.reset} ${s.name}  ${c.yellow}not authenticated${c.reset}  ${c.dim}${s.output}${c.reset}`);
+            console.log(
+              `  ${c.yellow}!${c.reset} ${s.name}  ${c.yellow}not authenticated${c.reset}  ${c.dim}${s.output}${c.reset}`,
+            );
             const loginCmd = config.services[s.name]?.login ?? "";
             if (loginCmd.trim().startsWith("#")) {
               // Informational ("#"-prefixed) login — no CLI to run, only docs.
-              manualActions.push(
-                `${s.name}: ${loginCmd.trim().replace(/^#\s*/, "")}`,
-              );
+              manualActions.push(`${s.name}: ${loginCmd.trim().replace(/^#\s*/, "")}`);
             } else {
-              manualActions.push(
-                `Login to ${s.name}: run 'kit login' or '${loginCmd}'`,
-              );
+              manualActions.push(`Login to ${s.name}: run 'kit login' or '${loginCmd}'`);
             }
             manualCount++;
           }
@@ -359,7 +368,9 @@ export async function cmdFix(): Promise<boolean> {
           ].join("\n");
           try {
             await writeFile(templatePath, body, { encoding: "utf-8", flag: "wx" });
-            console.log(`  ${c.green}✓${c.reset} Generated ${templatePath}  ${c.dim}(${keyNames.length} keys)${c.reset}`);
+            console.log(
+              `  ${c.green}✓${c.reset} Generated ${templatePath}  ${c.dim}(${keyNames.length} keys)${c.reset}`,
+            );
             fixedCount++;
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -407,9 +418,7 @@ export async function cmdFix(): Promise<boolean> {
             missing.join("\n") +
             "\n";
           await writeFile(gitignorePath, current + appended, "utf-8");
-          console.log(
-            `  ${c.green}✓${c.reset} Added ${missing.length} pattern(s) to .gitignore`,
-          );
+          console.log(`  ${c.green}✓${c.reset} Added ${missing.length} pattern(s) to .gitignore`);
           for (const m of missing) {
             console.log(`     ${c.dim}+ ${m}${c.reset}`);
           }
@@ -429,9 +438,7 @@ export async function cmdFix(): Promise<boolean> {
       if (config.hooks && Object.keys(config.hooks).length > 0) {
         try {
           const hookResults = await installHooks(config.hooks);
-          const installed = hookResults.filter(
-            (r) => r.action === "installed",
-          );
+          const installed = hookResults.filter((r) => r.action === "installed");
           const updated = hookResults.filter((r) => r.action === "updated");
           const failed = hookResults.filter((r) => r.action === "failed");
           if (installed.length > 0) {
@@ -469,24 +476,28 @@ export async function cmdFix(): Promise<boolean> {
       // Summary
       console.log(`${c.bold}${c.cyan}Summary${c.reset}`);
       console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
-      
+
       if (fixedCount > 0) {
         console.log(`  ${c.green}✓${c.reset} Fixed ${fixedCount} issue(s) automatically`);
       }
-      
+
       if (manualCount > 0) {
-        console.log(`  ${c.yellow}!${c.reset} ${manualCount} issue(s) require manual intervention:\n`);
+        console.log(
+          `  ${c.yellow}!${c.reset} ${manualCount} issue(s) require manual intervention:\n`,
+        );
         for (const action of manualActions) {
           console.log(`     ${c.dim}•${c.reset} ${action}`);
         }
         console.log();
-        console.log(`${c.dim}Run ${c.reset}${c.bold}kit check${c.reset}${c.dim} to verify status after manual fixes${c.reset}`);
+        console.log(
+          `${c.dim}Run ${c.reset}${c.bold}kit check${c.reset}${c.dim} to verify status after manual fixes${c.reset}`,
+        );
       } else if (fixedCount === 0) {
         console.log(`  ${c.green}✓${c.reset} Nothing to fix — all checks passing`);
       }
-      
+
       console.log();
       return manualCount === 0;
-    }
+    },
   );
 }

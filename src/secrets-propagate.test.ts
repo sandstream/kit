@@ -40,10 +40,7 @@ describe("propagate", () => {
     // PATH in this test runner, so each adapter exits non-zero with code 127
     // (command not found). What we care about here is the SHAPE: one result
     // per target, no exceptions thrown out.
-    const results = await propagate("TEST_KEY", "test-value", [
-      "vercel",
-      "github",
-    ]);
+    const results = await propagate("TEST_KEY", "test-value", ["vercel", "github"]);
     assert.equal(results.length, 2);
     assert.equal(results[0].target, "vercel");
     assert.equal(results[1].target, "github");

@@ -7,9 +7,7 @@ import type { SecretStatus } from "./check-secrets.js";
 
 describe("collectEscalations", () => {
   it("returns empty array when everything passes", () => {
-    const tools: ToolStatus[] = [
-      { name: "node", required: "22", installed: "22.22.2", ok: true },
-    ];
+    const tools: ToolStatus[] = [{ name: "node", required: "22", installed: "22.22.2", ok: true }];
     const services: ServiceStatus[] = [
       { name: "github", checkCommand: "gh auth status", authenticated: true, output: "ok" },
     ];
@@ -22,9 +20,7 @@ describe("collectEscalations", () => {
   });
 
   it("collects failed tools", () => {
-    const tools: ToolStatus[] = [
-      { name: "node", required: "22", installed: null, ok: false },
-    ];
+    const tools: ToolStatus[] = [{ name: "node", required: "22", installed: null, ok: false }];
 
     const items = collectEscalations(tools, [], []);
     assert.equal(items.length, 1);
@@ -35,7 +31,12 @@ describe("collectEscalations", () => {
 
   it("collects failed services", () => {
     const services: ServiceStatus[] = [
-      { name: "github", checkCommand: "gh auth status", authenticated: false, output: "not logged in" },
+      {
+        name: "github",
+        checkCommand: "gh auth status",
+        authenticated: false,
+        output: "not logged in",
+      },
     ];
 
     const items = collectEscalations([], services, []);
@@ -58,7 +59,10 @@ describe("collectEscalations", () => {
     const items = collectEscalations([], services, []);
     assert.equal(items.length, 1);
     assert.equal(items[0].issue, "Manual setup (no CLI login)");
-    assert.ok(!items[0].action.startsWith("Run:"), `action should not be a Run: command, got: ${items[0].action}`);
+    assert.ok(
+      !items[0].action.startsWith("Run:"),
+      `action should not be a Run: command, got: ${items[0].action}`,
+    );
     assert.ok(items[0].action.includes("RESEND_API_KEY"));
   });
 
@@ -66,7 +70,12 @@ describe("collectEscalations", () => {
     const secrets: SecretStatus[] = [
       { name: "DB_URL", source: "1password", available: false, detail: "op read failed" },
       { name: "TOKEN", source: "env", available: false, detail: "Not set" },
-      { name: "API_SECRET", source: "infisical", available: false, detail: "Not found in Infisical" },
+      {
+        name: "API_SECRET",
+        source: "infisical",
+        available: false,
+        detail: "Not found in Infisical",
+      },
     ];
 
     const items = collectEscalations([], [], secrets);
@@ -78,9 +87,7 @@ describe("collectEscalations", () => {
   });
 
   it("collects version mismatch tools", () => {
-    const tools: ToolStatus[] = [
-      { name: "node", required: "22", installed: "20.10.0", ok: false },
-    ];
+    const tools: ToolStatus[] = [{ name: "node", required: "22", installed: "20.10.0", ok: false }];
 
     const items = collectEscalations(tools, [], []);
     assert.equal(items.length, 1);
@@ -98,7 +105,12 @@ describe("formatEscalationMessage", () => {
   it("formats items grouped by category", () => {
     const items = [
       { category: "tool" as const, name: "node", issue: "Not installed", action: "Install node" },
-      { category: "service" as const, name: "github", issue: "Not authenticated", action: "Run gh auth login" },
+      {
+        category: "service" as const,
+        name: "github",
+        issue: "Not authenticated",
+        action: "Run gh auth login",
+      },
     ];
 
     const msg = formatEscalationMessage(items, "/my/project");

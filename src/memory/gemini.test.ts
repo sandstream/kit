@@ -20,9 +20,27 @@ describe("memory gemini parser", () => {
     writeFileSync(
       join(projDir, "logs.json"),
       JSON.stringify([
-        { sessionId: "sess-1", messageId: 0, timestamp: "2026-04-01T09:00:00Z", type: "user", message: "november roadmap question" },
-        { sessionId: "sess-1", messageId: 1, timestamp: "2026-04-01T09:00:05Z", type: "gemini", message: "logged model reply" },
-        { sessionId: "sess-1", messageId: 2, timestamp: "2026-04-01T09:00:10Z", type: "user", message: "" },
+        {
+          sessionId: "sess-1",
+          messageId: 0,
+          timestamp: "2026-04-01T09:00:00Z",
+          type: "user",
+          message: "november roadmap question",
+        },
+        {
+          sessionId: "sess-1",
+          messageId: 1,
+          timestamp: "2026-04-01T09:00:05Z",
+          type: "gemini",
+          message: "logged model reply",
+        },
+        {
+          sessionId: "sess-1",
+          messageId: 2,
+          timestamp: "2026-04-01T09:00:10Z",
+          type: "user",
+          message: "",
+        },
       ]),
     );
 
@@ -60,9 +78,9 @@ describe("memory gemini parser", () => {
     assert.equal(res.messages, 4);
     assert.equal(getStats(db).messages, 4);
 
-    const harnesses = db
-      .prepare("SELECT DISTINCT harness FROM sessions")
-      .all() as { harness: string }[];
+    const harnesses = db.prepare("SELECT DISTINCT harness FROM sessions").all() as {
+      harness: string;
+    }[];
     assert.ok(harnesses.every((h) => h.harness === "gemini"));
 
     assert.equal(searchMessages(db, "november").length, 1);

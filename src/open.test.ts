@@ -18,8 +18,14 @@ describe("openService", () => {
   it("lists all services", () => {
     const services = listServices();
     assert.ok(services.length > 0, "Should have at least one service");
-    assert.ok(services.some((s) => s.name === "stripe"), "Should include stripe");
-    assert.ok(services.some((s) => s.name === "vercel"), "Should include vercel");
+    assert.ok(
+      services.some((s) => s.name === "stripe"),
+      "Should include stripe",
+    );
+    assert.ok(
+      services.some((s) => s.name === "vercel"),
+      "Should include vercel",
+    );
   });
 
   it("finds service by name (case insensitive)", () => {
@@ -130,7 +136,7 @@ describe("openService", () => {
       assert.ok(service.docUrl, `Service ${service.name} should have docUrl`);
       assert.ok(
         typeof service.dashboardUrl === "function",
-        `Service ${service.name} should have dashboardUrl function`
+        `Service ${service.name} should have dashboardUrl function`,
       );
     }
   });

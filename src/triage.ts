@@ -66,10 +66,7 @@ async function ensureTriageScript(): Promise<boolean> {
 /**
  * Run triage on a target
  */
-export async function runTriage(
-  type: TriageType,
-  target: string
-): Promise<TriageResult> {
+export async function runTriage(type: TriageType, target: string): Promise<TriageResult> {
   const scriptExists = await ensureTriageScript();
   if (!scriptExists) {
     return {
@@ -84,7 +81,7 @@ export async function runTriage(
     const { stdout, stderr } = await exec(
       "python3",
       [TRIAGE_SCRIPT, type, target],
-      { timeout: 300_000 } // 5 min for Docker pulls
+      { timeout: 300_000 }, // 5 min for Docker pulls
     );
 
     const output = stdout + (stderr ? `\n${stderr}` : "");

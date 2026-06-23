@@ -16,9 +16,7 @@ import type { AdapterRegistry, ServiceAdapter } from "./adapters/types.js";
  * { "kitPlugins": ["@acme/kit-railway", "sandstream-kit-plugin-aws-s3"] }
  * ```
  */
-export async function loadPluginAdapters(
-  projectPath: string
-): Promise<AdapterRegistry> {
+export async function loadPluginAdapters(projectPath: string): Promise<AdapterRegistry> {
   const registry: AdapterRegistry = {};
 
   const pluginNames = await readkitPlugins(projectPath);
@@ -61,7 +59,7 @@ async function readkitPlugins(projectPath: string): Promise<string[]> {
  */
 async function loadSinglePlugin(
   pluginName: string,
-  projectPath: string
+  projectPath: string,
 ): Promise<ServiceAdapter[]> {
   // Resolve the plugin from the project's node_modules (not kit's own node_modules)
   const candidates = [
@@ -124,7 +122,7 @@ function extractAdapters(mod: unknown, pluginName: string): ServiceAdapter[] {
   }
 
   throw new Error(
-    `Plugin "${pluginName}" must export { adapter } or { adapters } — got keys: ${Object.keys(exports).join(", ")}`
+    `Plugin "${pluginName}" must export { adapter } or { adapters } — got keys: ${Object.keys(exports).join(", ")}`,
   );
 }
 

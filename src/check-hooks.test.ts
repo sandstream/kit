@@ -68,11 +68,7 @@ describe("checkHooks", () => {
 
   it("reports not managed by kit when hook lacks the marker", async () => {
     await mkdir(join(gitDir, "hooks"), { recursive: true });
-    await writeFile(
-      join(gitDir, "hooks", "pre-commit"),
-      "#!/bin/sh\nnpm test\n",
-      "utf-8",
-    );
+    await writeFile(join(gitDir, "hooks", "pre-commit"), "#!/bin/sh\nnpm test\n", "utf-8");
 
     const config: HooksConfig = { "pre-commit": ["npm test"] };
     const results = await checkHooks(config);

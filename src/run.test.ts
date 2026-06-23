@@ -112,7 +112,7 @@ describe("executeCommand", () => {
     assert.equal(result.exitCode, 127, "Should return exit code 127 for command not found");
     assert(
       result.stderr.includes("Failed to execute") || result.stderr !== "",
-      "Should have error message"
+      "Should have error message",
     );
   });
 
@@ -121,7 +121,7 @@ describe("executeCommand", () => {
     await writeFile(
       envPath,
       "# This is a comment\nVAR_WITH_COMMENT=value-1\n# Another comment\nVAR2=value-2\n",
-      "utf-8"
+      "utf-8",
     );
 
     const result = await executeCommand({
@@ -140,7 +140,11 @@ describe("executeCommand", () => {
     // Use process.execPath (absolute path to node) — with inheritEnv:false
     // the child gets an empty PATH and can't resolve bare "node".
     const result = await executeCommand({
-      commandArgs: [process.execPath, "-e", "console.log(process.env.ISOLATED_TEST_VAR || 'undefined')"],
+      commandArgs: [
+        process.execPath,
+        "-e",
+        "console.log(process.env.ISOLATED_TEST_VAR || 'undefined')",
+      ],
       cwd: tmpDir,
       inheritEnv: false,
       envOverrides: { ISOLATED_TEST_VAR: "should-appear" },
@@ -164,7 +168,11 @@ describe("executeCommand", () => {
 
   it("handles multiline output correctly", async () => {
     const result = await executeCommand({
-      commandArgs: ["node", "-e", "console.log('line1'); console.log('line2'); console.log('line3')"],
+      commandArgs: [
+        "node",
+        "-e",
+        "console.log('line1'); console.log('line2'); console.log('line3')",
+      ],
       cwd: tmpDir,
     });
 

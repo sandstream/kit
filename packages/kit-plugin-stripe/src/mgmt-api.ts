@@ -43,9 +43,7 @@ export interface MgmtClient {
 export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
   const secretKey = cfg.secretKey ?? process.env.STRIPE_SECRET_KEY;
   if (!secretKey) {
-    throw new Error(
-      "STRIPE_SECRET_KEY not set — fetch from https://dashboard.stripe.com/apikeys",
-    );
+    throw new Error("STRIPE_SECRET_KEY not set — fetch from https://dashboard.stripe.com/apikeys");
   }
   return {
     baseUrl: cfg.baseUrl ?? DEFAULT_BASE_URL,

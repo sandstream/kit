@@ -41,7 +41,10 @@ describe("scanTranscripts", () => {
       mkdirSync(join(dir, ".claude", "projects"), { recursive: true });
       writeFileSync(
         join(dir, ".claude", "projects", "session-1.jsonl"),
-        '{"type":"user","content":"My Stripe key is ' + "sk_li" + "ve_AbCdEfGhIjKlMnOpQrStUv" + '"}\n',
+        '{"type":"user","content":"My Stripe key is ' +
+          "sk_li" +
+          "ve_AbCdEfGhIjKlMnOpQrStUv" +
+          '"}\n',
       );
       const hits = await scanTranscripts(dir);
       assert.equal(hits.length, 1);
@@ -55,10 +58,7 @@ describe("scanTranscripts", () => {
     const dir = makeRepo();
     try {
       mkdirSync(join(dir, ".opencode"), { recursive: true });
-      writeFileSync(
-        join(dir, ".opencode", "history.jsonl"),
-        '{"text":"AKIA0123456789ABCDEF"}\n',
-      );
+      writeFileSync(join(dir, ".opencode", "history.jsonl"), '{"text":"AKIA0123456789ABCDEF"}\n');
       const hits = await scanTranscripts(dir);
       assert.equal(hits.length, 1);
       assert.ok(hits[0].file.includes(".opencode"));

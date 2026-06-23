@@ -1,6 +1,5 @@
 import { exec } from "./utils/exec.js";
 
-
 export interface OnePasswordStatus {
   installed: boolean;
   authenticated: boolean;
@@ -164,15 +163,11 @@ export async function list1PasswordVaults(): Promise<OnePasswordVault[]> {
 /**
  * List items in a specific vault
  */
-export async function list1PasswordItems(
-  vaultId: string,
-): Promise<OnePasswordItem[]> {
+export async function list1PasswordItems(vaultId: string): Promise<OnePasswordItem[]> {
   try {
-    const { stdout } = await exec(
-      "op",
-      ["item", "list", "--vault", vaultId, "--format=json"],
-      { timeout: 10000 },
-    );
+    const { stdout } = await exec("op", ["item", "list", "--vault", vaultId, "--format=json"], {
+      timeout: 10000,
+    });
     const items = JSON.parse(stdout) as OnePasswordItem[];
     return items;
   } catch {
@@ -184,11 +179,7 @@ export async function list1PasswordItems(
  * Generate a reference string for a 1Password item
  * Helps users construct proper ref strings for config
  */
-export function generate1PasswordRef(
-  vault: string,
-  item: string,
-  field?: string,
-): string {
+export function generate1PasswordRef(vault: string, item: string, field?: string): string {
   if (field) {
     return `op://${vault}/${item}/${field}`;
   }

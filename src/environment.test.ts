@@ -1,10 +1,6 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import {
-  detectEnvironment,
-  isOperationAllowed,
-  formatEnvironment,
-} from "./environment.js";
+import { detectEnvironment, isOperationAllowed, formatEnvironment } from "./environment.js";
 import type { GovernanceConfig } from "./config.js";
 
 describe("detectEnvironment", () => {
@@ -136,18 +132,9 @@ describe("isOperationAllowed", () => {
       source: "env" as const,
       access: { read: undefined, write: undefined, delete: undefined },
     };
-    assert.equal(
-      isOperationAllowed("read", envInfoPartial as any),
-      false
-    );
-    assert.equal(
-      isOperationAllowed("write", envInfoPartial as any),
-      false
-    );
-    assert.equal(
-      isOperationAllowed("delete", envInfoPartial as any),
-      false
-    );
+    assert.equal(isOperationAllowed("read", envInfoPartial as any), false);
+    assert.equal(isOperationAllowed("write", envInfoPartial as any), false);
+    assert.equal(isOperationAllowed("delete", envInfoPartial as any), false);
   });
 });
 

@@ -73,9 +73,10 @@ export async function readSecretAuditEvents(
  * Extracts secret-related event details, attempting to attribute each event
  * to one or more specific keys via the metadata payload.
  */
-export function groupBySecret(
-  events: AuditEvent[],
-): { reports: SecretAuditReport[]; unattributed: SecretAccessEntry[] } {
+export function groupBySecret(events: AuditEvent[]): {
+  reports: SecretAuditReport[];
+  unattributed: SecretAccessEntry[];
+} {
   const byKey = new Map<string, SecretAccessEntry[]>();
   const unattributed: SecretAccessEntry[] = [];
 
@@ -138,10 +139,7 @@ export interface AuditSummary {
   windowDays: number;
 }
 
-export function summarize(
-  reports: SecretAuditReport[],
-  windowDays: number,
-): AuditSummary {
+export function summarize(reports: SecretAuditReport[], windowDays: number): AuditSummary {
   const totalEvents = reports.reduce((sum, r) => sum + r.events.length, 0);
   const top = reports[0];
   return {

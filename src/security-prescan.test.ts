@@ -5,7 +5,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { runPrescan, renderSummary, diffReports, loadReport, renderDiff, BUILTIN_CHECKS, type PrescanReport, type PrescanCheck } from "./security-prescan.js";
+import {
+  runPrescan,
+  renderSummary,
+  diffReports,
+  loadReport,
+  renderDiff,
+  BUILTIN_CHECKS,
+  type PrescanReport,
+  type PrescanCheck,
+} from "./security-prescan.js";
 
 const exec = promisify(execFile);
 
@@ -22,10 +31,19 @@ describe("runPrescan", () => {
     try {
       const repo = join(root, "clean");
       await makeRepoDir(repo);
-      writeFileSync(join(repo, ".gitignore"), [
-        ".env", ".env.local", ".env.*.local", ".env.*.backup",
-        "*.prod-backup", "*.pem", "id_rsa", ".kit/elevation.json",
-      ].join("\n"));
+      writeFileSync(
+        join(repo, ".gitignore"),
+        [
+          ".env",
+          ".env.local",
+          ".env.*.local",
+          ".env.*.backup",
+          "*.prod-backup",
+          "*.pem",
+          "id_rsa",
+          ".kit/elevation.json",
+        ].join("\n"),
+      );
       writeFileSync(join(repo, "README.md"), "ok");
       await exec("git", ["-C", repo, "add", "."]);
       await exec("git", ["-C", repo, "commit", "-q", "-m", "init"]);
@@ -33,10 +51,11 @@ describe("runPrescan", () => {
       const report = await runPrescan({ root, persist: false, maxDepth: 3 });
       assert.equal(report.repoCount, 1);
       // gitignore-holes + tracked-secret-files should be silent.
-      const offenders = report.findings.filter((f) =>
-        f.category === "gitignore-holes" ||
-        f.category === "tracked-secret-files" ||
-        f.category === "gitignore-missing",
+      const offenders = report.findings.filter(
+        (f) =>
+          f.category === "gitignore-holes" ||
+          f.category === "tracked-secret-files" ||
+          f.category === "gitignore-missing",
       );
       assert.equal(offenders.length, 0, JSON.stringify(offenders));
     } finally {
@@ -145,8 +164,20 @@ describe("runPrescan", () => {
       root: "/tmp/x",
       repoCount: 2,
       findings: [
-        { timestamp: "x", repo: "/tmp/x/a", category: "tracked-secret-files", severity: "critical", detail: ".env.local tracked" },
-        { timestamp: "x", repo: "/tmp/x/b", category: "gitignore-holes", severity: "medium", detail: "missing patterns" },
+        {
+          timestamp: "x",
+          repo: "/tmp/x/a",
+          category: "tracked-secret-files",
+          severity: "critical",
+          detail: ".env.local tracked",
+        },
+        {
+          timestamp: "x",
+          repo: "/tmp/x/b",
+          category: "gitignore-holes",
+          severity: "medium",
+          detail: "missing patterns",
+        },
       ],
     });
     assert.match(md, /# kit prescan report/);
@@ -157,14 +188,20 @@ describe("runPrescan", () => {
 
   it("renderSummary handles zero-finding case", () => {
     const md = renderSummary({
-      startedAt: "x", finishedAt: "y", root: "/r", repoCount: 1, findings: [],
+      startedAt: "x",
+      finishedAt: "y",
+      root: "/r",
+      repoCount: 1,
+      findings: [],
     });
     assert.match(md, /All clean/);
   });
 });
 
 describe("diffReports", () => {
-  function mkReport(findings: Array<Partial<{ repo: string; category: string; severity: string; detail: string }>>): PrescanReport {
+  function mkReport(
+    findings: Array<Partial<{ repo: string; category: string; severity: string; detail: string }>>,
+  ): PrescanReport {
     return {
       startedAt: "2026-06-09T00:00:00Z",
       finishedAt: "2026-06-09T00:01:00Z",
@@ -279,13 +316,17 @@ describe("plugin-pattern checks", () => {
       await exec("git", ["-C", repo, "commit", "-q", "-m", "init"]);
 
       const report = await runPrescan({
-        root, persist: false, maxDepth: 3,
+        root,
+        persist: false,
+        maxDepth: 3,
         onlyChecks: ["tracked-secret-files"], // skip gitignore-holes etc
       });
       // Should only see tracked-secret-files findings.
       assert.ok(report.findings.length >= 1);
-      assert.ok(report.findings.every((f) => f.category === "tracked-secret-files"),
-        `expected only tracked-secret-files, got: ${JSON.stringify(report.findings.map((f) => f.category))}`);
+      assert.ok(
+        report.findings.every((f) => f.category === "tracked-secret-files"),
+        `expected only tracked-secret-files, got: ${JSON.stringify(report.findings.map((f) => f.category))}`,
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -302,11 +343,15 @@ describe("plugin-pattern checks", () => {
       await exec("git", ["-C", repo, "commit", "-q", "-m", "init"]);
 
       const report = await runPrescan({
-        root, persist: false, maxDepth: 3,
+        root,
+        persist: false,
+        maxDepth: 3,
         skipChecks: ["gitignore-holes"],
       });
-      assert.ok(report.findings.every((f) => f.category !== "gitignore-holes"),
-        `expected no gitignore-holes, got: ${JSON.stringify(report.findings.map((f) => f.category))}`);
+      assert.ok(
+        report.findings.every((f) => f.category !== "gitignore-holes"),
+        `expected no gitignore-holes, got: ${JSON.stringify(report.findings.map((f) => f.category))}`,
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -317,10 +362,19 @@ describe("plugin-pattern checks", () => {
     try {
       const repo = join(root, "clean");
       await makeRepoDir(repo);
-      writeFileSync(join(repo, ".gitignore"), [
-        ".env", ".env.local", ".env.*.local", ".env.*.backup",
-        "*.prod-backup", "*.pem", "id_rsa", ".kit/elevation.json",
-      ].join("\n"));
+      writeFileSync(
+        join(repo, ".gitignore"),
+        [
+          ".env",
+          ".env.local",
+          ".env.*.local",
+          ".env.*.backup",
+          "*.prod-backup",
+          "*.pem",
+          "id_rsa",
+          ".kit/elevation.json",
+        ].join("\n"),
+      );
       writeFileSync(join(repo, "README.md"), "x");
       await exec("git", ["-C", repo, "add", "."]);
       await exec("git", ["-C", repo, "commit", "-q", "-m", "init"]);
@@ -329,16 +383,20 @@ describe("plugin-pattern checks", () => {
         name: "test-marker",
         tier: "default",
         scope: "per-repo",
-        run: async (repoPath) => [{
-          timestamp: "t",
-          repo: repoPath,
-          category: "custom-test-marker",
-          severity: "low",
-          detail: "custom check ran",
-        }],
+        run: async (repoPath) => [
+          {
+            timestamp: "t",
+            repo: repoPath,
+            category: "custom-test-marker",
+            severity: "low",
+            detail: "custom check ran",
+          },
+        ],
       };
       const report = await runPrescan({
-        root, persist: false, maxDepth: 3,
+        root,
+        persist: false,
+        maxDepth: 3,
         extraChecks: [custom],
       });
       const marker = report.findings.find((f) => f.category === "custom-test-marker");
@@ -354,8 +412,23 @@ describe("plugin-pattern checks", () => {
       const repo = join(root, "with-deps");
       await makeRepoDir(repo);
       writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "x", version: "1.0.0" }));
-      writeFileSync(join(repo, "package-lock.json"), JSON.stringify({ name: "x", lockfileVersion: 3 }));
-      writeFileSync(join(repo, ".gitignore"), [".env", ".env.local", "*.pem", "id_rsa", ".kit/elevation.json", ".env.*.backup", "*.prod-backup", ".env.*.local"].join("\n"));
+      writeFileSync(
+        join(repo, "package-lock.json"),
+        JSON.stringify({ name: "x", lockfileVersion: 3 }),
+      );
+      writeFileSync(
+        join(repo, ".gitignore"),
+        [
+          ".env",
+          ".env.local",
+          "*.pem",
+          "id_rsa",
+          ".kit/elevation.json",
+          ".env.*.backup",
+          "*.prod-backup",
+          ".env.*.local",
+        ].join("\n"),
+      );
       await exec("git", ["-C", repo, "add", "."]);
       await exec("git", ["-C", repo, "commit", "-q", "-m", "init"]);
 

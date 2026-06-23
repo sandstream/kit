@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { detectStack, type DetectedStack } from "./stack-detector.js";
 import { exec } from "./utils/exec.js";
 
-
 export interface AnalysisReport {
   stack: DetectedStack;
   commitPrefixes: Array<{ prefix: string; count: number }>;
@@ -31,11 +30,10 @@ async function gitCommitPrefixes(
   limit = 200,
 ): Promise<Array<{ prefix: string; count: number }>> {
   try {
-    const { stdout } = await exec(
-      "git",
-      ["log", `--max-count=${limit}`, "--pretty=%s"],
-      { cwd, timeout: 5000 },
-    );
+    const { stdout } = await exec("git", ["log", `--max-count=${limit}`, "--pretty=%s"], {
+      cwd,
+      timeout: 5000,
+    });
     const counts = new Map<string, number>();
     for (const line of stdout.split("\n")) {
       // Conventional-commit prefix: word, optional scope, then `:`
@@ -105,8 +103,7 @@ async function detectCiFiles(cwd: string): Promise<string[]> {
   }
   if (await fileExists(join(cwd, ".gitlab-ci.yml"))) ci.push(".gitlab-ci.yml");
   if (await fileExists(join(cwd, "bitbucket-pipelines.yml"))) ci.push("bitbucket-pipelines.yml");
-  if (await fileExists(join(cwd, "circleci", "config.yml")))
-    ci.push("circleci/config.yml");
+  if (await fileExists(join(cwd, "circleci", "config.yml"))) ci.push("circleci/config.yml");
   return ci;
 }
 
@@ -118,11 +115,17 @@ async function detectDeployTargets(cwd: string): Promise<string[]> {
   if (await fileExists(join(cwd, "fly.toml"))) targets.push("fly");
   if (await fileExists(join(cwd, "railway.toml"))) targets.push("railway");
   if (await fileExists(join(cwd, "render.yaml"))) targets.push("render");
-  if (await fileExists(join(cwd, "wrangler.toml")) || await fileExists(join(cwd, "wrangler.jsonc")))
+  if (
+    (await fileExists(join(cwd, "wrangler.toml"))) ||
+    (await fileExists(join(cwd, "wrangler.jsonc")))
+  )
     targets.push("cloudflare-workers");
   if (await fileExists(join(cwd, "Dockerfile"))) targets.push("docker");
   if (await fileExists(join(cwd, "amplify.yml"))) targets.push("aws-amplify");
-  if (await fileExists(join(cwd, "sst.config.ts")) || await fileExists(join(cwd, "sst.config.js")))
+  if (
+    (await fileExists(join(cwd, "sst.config.ts"))) ||
+    (await fileExists(join(cwd, "sst.config.js")))
+  )
     targets.push("sst");
   return [...new Set(targets)];
 }
@@ -153,11 +156,7 @@ async function detectDatabaseClients(cwd: string): Promise<string[]> {
 
 async function countFiles(cwd: string): Promise<number> {
   try {
-    const { stdout } = await exec(
-      "git",
-      ["ls-files"],
-      { cwd, timeout: 5000 },
-    );
+    const { stdout } = await exec("git", ["ls-files"], { cwd, timeout: 5000 });
     return stdout.split("\n").filter(Boolean).length;
   } catch {
     return 0;
@@ -233,17 +232,21 @@ export function renderClaudeMd(report: AnalysisReport): string {
   const stackBits: string[] = [];
   if (stack.language !== "unknown") stackBits.push(`- **Language**: ${stack.language}`);
   if (stack.framework) stackBits.push(`- **Framework**: ${stack.framework}`);
-  if (databaseClients.length) stackBits.push(`- **Database clients**: ${databaseClients.join(", ")}`);
+  if (databaseClients.length)
+    stackBits.push(`- **Database clients**: ${databaseClients.join(", ")}`);
   if (stack.services.length) stackBits.push(`- **Services**: ${stack.services.join(", ")}`);
   if (testRunners.length) stackBits.push(`- **Tests**: ${testRunners.join(", ")}`);
   if (deployTargets.length) stackBits.push(`- **Deploy**: ${deployTargets.join(", ")}`);
   lines.push(...stackBits);
 
   lines.push("", "## Development", "");
-  const pkgManager = stack.tools["pnpm"] ? "pnpm"
-    : stack.tools["yarn"] ? "yarn"
-    : stack.tools["bun"] ? "bun"
-    : "npm";
+  const pkgManager = stack.tools["pnpm"]
+    ? "pnpm"
+    : stack.tools["yarn"]
+      ? "yarn"
+      : stack.tools["bun"]
+        ? "bun"
+        : "npm";
   lines.push(`- Install deps: \`${pkgManager} install\``);
   if (testRunners.length) {
     lines.push(`- Run tests: \`${pkgManager} test\``);
@@ -264,13 +267,9 @@ export function renderClaudeMd(report: AnalysisReport): string {
       lines.push(`- \`${prefix}\` (${count}×)`);
     }
     lines.push("");
-    lines.push(
-      "Match the existing pattern when writing commit messages.",
-    );
+    lines.push("Match the existing pattern when writing commit messages.");
   } else {
-    lines.push(
-      "No conventional-commit prefixes detected. Pick a style and document it here.",
-    );
+    lines.push("No conventional-commit prefixes detected. Pick a style and document it here.");
   }
 
   lines.push("", "## Secrets & env", "");
@@ -315,7 +314,9 @@ export function renderRulesMd(report: AnalysisReport): string {
     lines.push("- Production env vars live in Vercel; never hard-code keys in code.");
   }
   if (deployTargets.includes("fly") || deployTargets.includes("railway")) {
-    lines.push("- Deployment platform secrets are the source of truth — sync via `kit secrets sync`.");
+    lines.push(
+      "- Deployment platform secrets are the source of truth — sync via `kit secrets sync`.",
+    );
   }
   if (stack.framework === "nextjs") {
     lines.push("- Server-only env vars must NOT have a `NEXT_PUBLIC_` prefix.");
@@ -348,11 +349,6 @@ export function renderRulesMd(report: AnalysisReport): string {
     "- Open an issue rather than committing speculative work.",
   );
 
-  lines.push(
-    "",
-    "---",
-    "_Generated by `kit analyze` — edit to match team policy._",
-    "",
-  );
+  lines.push("", "---", "_Generated by `kit analyze` — edit to match team policy._", "");
   return lines.join("\n");
 }

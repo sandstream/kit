@@ -3,7 +3,6 @@ import type { SecretsConfig, SecretKeyConfig, InfisicalConfig } from "./config.j
 import { check1PasswordStatus } from "./onepassword.js";
 import { exec } from "./utils/exec.js";
 
-
 export interface SecretStatus {
   name: string;
   source: string;
@@ -125,7 +124,9 @@ async function checkEasSecret(name: string): Promise<{ available: boolean; detai
   }
 }
 
-async function checkBitwardenSecret(fieldName: string): Promise<{ available: boolean; detail: string }> {
+async function checkBitwardenSecret(
+  fieldName: string,
+): Promise<{ available: boolean; detail: string }> {
   try {
     const { stdout } = await exec("bw", ["get", fieldName], {
       timeout: 10_000,
@@ -140,7 +141,9 @@ async function checkBitwardenSecret(fieldName: string): Promise<{ available: boo
   }
 }
 
-async function checkDopplerSecret(secretName: string): Promise<{ available: boolean; detail: string }> {
+async function checkDopplerSecret(
+  secretName: string,
+): Promise<{ available: boolean; detail: string }> {
   try {
     const { stdout } = await exec("doppler", ["secrets", "get", secretName, "--plain"], {
       timeout: 10_000,
@@ -191,7 +194,16 @@ async function checkAwsSecret(
   config: SecretKeyConfig,
 ): Promise<{ available: boolean; detail: string }> {
   const secretId = config.name || config.ref || name;
-  const args = ["secretsmanager", "get-secret-value", "--secret-id", secretId, "--query", "SecretString", "--output", "text"];
+  const args = [
+    "secretsmanager",
+    "get-secret-value",
+    "--secret-id",
+    secretId,
+    "--query",
+    "SecretString",
+    "--output",
+    "text",
+  ];
   if (config.aws_region) {
     args.push("--region", config.aws_region);
   }
@@ -199,9 +211,10 @@ async function checkAwsSecret(
     const { stdout } = await exec("aws", args, { timeout: 15_000 });
     return {
       available: !!stdout.trim() && stdout.trim() !== "None",
-      detail: stdout.trim() && stdout.trim() !== "None"
-        ? "Found in AWS Secrets Manager"
-        : "Empty in AWS Secrets Manager",
+      detail:
+        stdout.trim() && stdout.trim() !== "None"
+          ? "Found in AWS Secrets Manager"
+          : "Empty in AWS Secrets Manager",
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -209,7 +222,10 @@ async function checkAwsSecret(
       return { available: false, detail: "AWS: secret not found" };
     }
     if (msg.includes("ExpiredToken") || msg.includes("InvalidClientTokenId")) {
-      return { available: false, detail: "AWS: credentials expired or invalid (run 'aws sso login')" };
+      return {
+        available: false,
+        detail: "AWS: credentials expired or invalid (run 'aws sso login')",
+      };
     }
     if (msg.includes("ENOENT")) {
       return { available: false, detail: "AWS CLI not installed" };
@@ -262,7 +278,19 @@ async function checkAzureSecret(
       detail: "Azure: azure_vault or AZURE_KEYVAULT_NAME required",
     };
   }
-  const args = ["keyvault", "secret", "show", "--vault-name", vault, "--name", secretName, "--query", "value", "-o", "tsv"];
+  const args = [
+    "keyvault",
+    "secret",
+    "show",
+    "--vault-name",
+    vault,
+    "--name",
+    secretName,
+    "--query",
+    "value",
+    "-o",
+    "tsv",
+  ];
   try {
     const { stdout } = await exec("az", args, { timeout: 15_000 });
     return {
@@ -304,49 +332,50 @@ export async function checkSecrets(
     for (const [name, config] of Object.entries(secrets.keys)) {
       let result: { available: boolean; detail: string };
 
-       switch (config.source) {
-         case "env":
-           result = await checkEnvSecret(name);
-           break;
-         case "1password":
-           result = config.ref
-             ? await check1PasswordSecret(config.ref, opCache)
-             : { available: false, detail: "No 1Password ref configured" };
-           break;
-         case "config":
-           result = await checkConfigSecret(config.value || "");
-           break;
-         case "eas":
-           result = await checkEasSecret(config.name || name);
-           break;
-         case "infisical":
-           result = await checkInfisicalSecret(config.name || name, secrets.infisical);
-           break;
-         case "bitwarden":
-           result = config.name || config.ref
-             ? await checkBitwardenSecret(config.name || config.ref || name)
-             : { available: false, detail: "No Bitwarden field name configured" };
-           break;
-         case "doppler":
-           result = config.name
-             ? await checkDopplerSecret(config.name)
-             : { available: false, detail: "No Doppler secret name configured" };
-           break;
-         case "vault":
-           result = await checkVaultSecret(config);
-           break;
-         case "aws-sm":
-           result = await checkAwsSecret(name, config);
-           break;
-         case "gcp-sm":
-           result = await checkGcpSecret(name, config);
-           break;
-         case "azure-kv":
-           result = await checkAzureSecret(name, config);
-           break;
-         default:
-           result = { available: false, detail: `Unknown source: ${config.source}` };
-       }
+      switch (config.source) {
+        case "env":
+          result = await checkEnvSecret(name);
+          break;
+        case "1password":
+          result = config.ref
+            ? await check1PasswordSecret(config.ref, opCache)
+            : { available: false, detail: "No 1Password ref configured" };
+          break;
+        case "config":
+          result = await checkConfigSecret(config.value || "");
+          break;
+        case "eas":
+          result = await checkEasSecret(config.name || name);
+          break;
+        case "infisical":
+          result = await checkInfisicalSecret(config.name || name, secrets.infisical);
+          break;
+        case "bitwarden":
+          result =
+            config.name || config.ref
+              ? await checkBitwardenSecret(config.name || config.ref || name)
+              : { available: false, detail: "No Bitwarden field name configured" };
+          break;
+        case "doppler":
+          result = config.name
+            ? await checkDopplerSecret(config.name)
+            : { available: false, detail: "No Doppler secret name configured" };
+          break;
+        case "vault":
+          result = await checkVaultSecret(config);
+          break;
+        case "aws-sm":
+          result = await checkAwsSecret(name, config);
+          break;
+        case "gcp-sm":
+          result = await checkGcpSecret(name, config);
+          break;
+        case "azure-kv":
+          result = await checkAzureSecret(name, config);
+          break;
+        default:
+          result = { available: false, detail: `Unknown source: ${config.source}` };
+      }
 
       keys.push({
         name,

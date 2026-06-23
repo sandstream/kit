@@ -4,7 +4,6 @@ import { redactSecrets } from "./utils/redactSecrets.js";
 import { exec } from "./utils/exec.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 
-
 export interface ServiceStatus {
   name: string;
   checkCommand: string;
@@ -32,8 +31,7 @@ async function runCheck(
     });
     return { ok: true, output: redactSecrets((stdout || stderr).trim()) };
   } catch (err: unknown) {
-    const message =
-      err instanceof Error ? err.message : String(err);
+    const message = err instanceof Error ? err.message : String(err);
     return { ok: false, output: redactSecrets(message.split("\n")[0]) };
   }
 }

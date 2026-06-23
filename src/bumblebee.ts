@@ -54,8 +54,7 @@ export interface EnsureResult {
  */
 export const BUMBLEBEE_VERSION = "0.1.1";
 
-const RELEASE_BASE_URL =
-  "https://github.com/perplexityai/bumblebee/releases/download";
+const RELEASE_BASE_URL = "https://github.com/perplexityai/bumblebee/releases/download";
 
 /**
  * SHA-256 of each release tarball, copied from the pinned release's
@@ -91,8 +90,7 @@ export function resolveTarget(
   arch: string = process.arch,
   version: string = BUMBLEBEE_VERSION,
 ): PlatformTarget | null {
-  const os =
-    platform === "linux" ? "linux" : platform === "darwin" ? "darwin" : null;
+  const os = platform === "linux" ? "linux" : platform === "darwin" ? "darwin" : null;
   const a = arch === "x64" ? "amd64" : arch === "arm64" ? "arm64" : null;
   if (!os || !a) return null;
 
@@ -177,9 +175,7 @@ export interface EnsureOptions {
  * a freshly downloaded-and-verified release. Returns the install on success,
  * or a human-readable `reason` when unavailable (never throws).
  */
-export async function ensureBumblebee(
-  opts: EnsureOptions = {},
-): Promise<EnsureResult> {
+export async function ensureBumblebee(opts: EnsureOptions = {}): Promise<EnsureResult> {
   // Explicit override for users who manage their own binary/catalog.
   const envBin = process.env.KIT_BUMBLEBEE_BIN;
   if (envBin) {
@@ -189,8 +185,7 @@ export async function ensureBumblebee(
         reason: `KIT_BUMBLEBEE_BIN points to a missing file: ${envBin}`,
       };
     }
-    const catalogDir =
-      process.env.KIT_BUMBLEBEE_CATALOG || join(cacheRoot(), "threat_intel");
+    const catalogDir = process.env.KIT_BUMBLEBEE_CATALOG || join(cacheRoot(), "threat_intel");
     return { install: { binPath: envBin, catalogDir } };
   }
 
@@ -207,7 +202,11 @@ export async function ensureBumblebee(
   const catalogDir = join(root, "threat_intel");
 
   const sidecarPath = join(root, "bumblebee.sha256");
-  if ((await pathExists(binPath)) && (await pathExists(catalogDir)) && (await pathExists(sidecarPath))) {
+  if (
+    (await pathExists(binPath)) &&
+    (await pathExists(catalogDir)) &&
+    (await pathExists(sidecarPath))
+  ) {
     // F3 — re-verify the cached binary against the hash recorded at trusted
     // INSTALL time (the sidecar), NOT the tarball checksum. The pinned
     // TARBALL_CHECKSUMS gate the DOWNLOAD (authoritative supply-chain anchor);
@@ -238,16 +237,13 @@ export async function ensureBumblebee(
   if (opts.allowDownload === false) {
     return {
       kind: "network",
-      reason:
-        "scanner not cached and downloads are disabled (KIT_NO_DOWNLOAD)",
+      reason: "scanner not cached and downloads are disabled (KIT_NO_DOWNLOAD)",
     };
   }
 
   try {
     const notice = opts.notice ?? ((m: string) => process.stderr.write(m + "\n"));
-    notice(
-      `kit: downloading supply-chain scanner bumblebee v${BUMBLEBEE_VERSION} (one-time)…`,
-    );
+    notice(`kit: downloading supply-chain scanner bumblebee v${BUMBLEBEE_VERSION} (one-time)…`);
     await downloadAndInstall(target, root, opts.timeoutMs ?? 120_000);
     return { install: { binPath, catalogDir } };
   } catch (err) {
@@ -402,8 +398,7 @@ export function parseScanOutput(stdout: string): ScanOutcome {
       const emitted = num(rec.package_records_emitted);
       const suppressed = num(rec.package_records_suppressed);
       const counts = rec.counts as Record<string, unknown> | undefined;
-      outcome.packagesScanned =
-        emitted + suppressed || num(counts?.package);
+      outcome.packagesScanned = emitted + suppressed || num(counts?.package);
     }
   }
 

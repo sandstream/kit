@@ -27,9 +27,7 @@ function envFlagEnabled(value: string | undefined): boolean {
 }
 
 /** Map a bumblebee severity label to the SecurityCheckResult severity scale. */
-function toResultSeverity(
-  label: string | null,
-): SecurityCheckResult["severity"] {
+function toResultSeverity(label: string | null): SecurityCheckResult["severity"] {
   switch ((label ?? "").toLowerCase()) {
     case "critical":
       return "critical";
@@ -89,7 +87,7 @@ async function checkNpmAudit(): Promise<SecurityCheckResult> {
         const vulnerabilities = auditResult.metadata?.vulnerabilities || {};
         const high = vulnerabilities.high || 0;
         const critical = vulnerabilities.critical || 0;
-        
+
         if (high > 0 || critical > 0) {
           return {
             category: "dependency",
@@ -103,7 +101,7 @@ async function checkNpmAudit(): Promise<SecurityCheckResult> {
         // JSON parse failed, treat as fail
       }
     }
-    
+
     return {
       category: "dependency",
       name: "npm audit",
@@ -150,10 +148,10 @@ async function checkPipAudit(): Promise<SecurityCheckResult> {
     const { stdout } = await exec(pipAuditBin, ["--format=json"], {
       timeout: 30_000,
     });
-    
+
     const result = JSON.parse(stdout);
     const vulns = result.dependencies || [];
-    
+
     if (vulns.length === 0) {
       return {
         category: "dependency",
@@ -162,11 +160,11 @@ async function checkPipAudit(): Promise<SecurityCheckResult> {
         detail: "no vulnerabilities found",
       };
     }
-    
-    const highSeverity = vulns.filter((v: { vulnerabilities?: Array<{ severity?: string }> }) => 
-      v.vulnerabilities?.some(vuln => vuln.severity === "high" || vuln.severity === "critical")
+
+    const highSeverity = vulns.filter((v: { vulnerabilities?: Array<{ severity?: string }> }) =>
+      v.vulnerabilities?.some((vuln) => vuln.severity === "high" || vuln.severity === "critical"),
     ).length;
-    
+
     return {
       category: "dependency",
       name: "pip-audit",
@@ -190,16 +188,11 @@ async function checkPipAudit(): Promise<SecurityCheckResult> {
  */
 async function checkEnvGitignored(): Promise<SecurityCheckResult> {
   try {
-    const gitignoreContent = await readFile(
-      resolve(process.cwd(), ".gitignore"),
-      "utf-8"
-    );
-    
+    const gitignoreContent = await readFile(resolve(process.cwd(), ".gitignore"), "utf-8");
+
     const envPatterns = [".env", ".env.local", ".env.*.local"];
-    const missingPatterns = envPatterns.filter(
-      pattern => !gitignoreContent.includes(pattern)
-    );
-    
+    const missingPatterns = envPatterns.filter((pattern) => !gitignoreContent.includes(pattern));
+
     if (missingPatterns.length === 0) {
       return {
         category: "secrets",
@@ -208,7 +201,7 @@ async function checkEnvGitignored(): Promise<SecurityCheckResult> {
         detail: "all .env patterns in .gitignore",
       };
     }
-    
+
     return {
       category: "secrets",
       name: ".env gitignored",
@@ -232,16 +225,16 @@ async function checkEnvGitignored(): Promise<SecurityCheckResult> {
  */
 async function checkLockfilesCommitted(): Promise<SecurityCheckResult[]> {
   const results: SecurityCheckResult[] = [];
-  
+
   // Check package-lock.json
   try {
     await access(resolve(process.cwd(), "package.json"));
-    
+
     try {
       const { stdout } = await exec("git", ["ls-files", "package-lock.json"], {
         timeout: 5_000,
       });
-      
+
       if (stdout.trim()) {
         results.push({
           category: "supply-chain",
@@ -270,16 +263,16 @@ async function checkLockfilesCommitted(): Promise<SecurityCheckResult[]> {
   } catch {
     // No package.json, skip
   }
-  
+
   // Check requirements.txt
   try {
     await access(resolve(process.cwd(), "requirements.txt"));
-    
+
     try {
       const { stdout } = await exec("git", ["ls-files", "requirements.txt"], {
         timeout: 5_000,
       });
-      
+
       if (stdout.trim()) {
         results.push({
           category: "supply-chain",
@@ -308,7 +301,7 @@ async function checkLockfilesCommitted(): Promise<SecurityCheckResult[]> {
   } catch {
     // No requirements.txt, skip
   }
-  
+
   return results;
 }
 
@@ -317,15 +310,15 @@ async function checkLockfilesCommitted(): Promise<SecurityCheckResult[]> {
  */
 async function checkServiceExposure(): Promise<SecurityCheckResult[]> {
   const results: SecurityCheckResult[] = [];
-  
+
   // Check Ollama (common port 11434)
   try {
     const { stdout: ollamaCheck } = await exec(
       "sh",
       ["-c", "command -v ollama && ollama ps 2>/dev/null || echo 'not running'"],
-      { timeout: 5_000 }
+      { timeout: 5_000 },
     );
-    
+
     if (ollamaCheck.includes("not running")) {
       results.push({
         category: "exposure",
@@ -338,10 +331,13 @@ async function checkServiceExposure(): Promise<SecurityCheckResult[]> {
       try {
         const { stdout: netstat } = await exec(
           "sh",
-          ["-c", "ss -tlnp 2>/dev/null | grep :11434 || netstat -tlnp 2>/dev/null | grep :11434 || echo 'no listener'"],
-          { timeout: 5_000 }
+          [
+            "-c",
+            "ss -tlnp 2>/dev/null | grep :11434 || netstat -tlnp 2>/dev/null | grep :11434 || echo 'no listener'",
+          ],
+          { timeout: 5_000 },
         );
-        
+
         if (netstat.includes("0.0.0.0:11434") || netstat.includes(":::11434")) {
           results.push({
             category: "exposure",
@@ -382,15 +378,18 @@ async function checkServiceExposure(): Promise<SecurityCheckResult[]> {
       detail: "not installed",
     });
   }
-  
+
   // Check Remote API (common port 3199)
   try {
     const { stdout: netstat } = await exec(
       "sh",
-      ["-c", "ss -tlnp 2>/dev/null | grep :3199 || netstat -tlnp 2>/dev/null | grep :3199 || echo 'no listener'"],
-      { timeout: 5_000 }
+      [
+        "-c",
+        "ss -tlnp 2>/dev/null | grep :3199 || netstat -tlnp 2>/dev/null | grep :3199 || echo 'no listener'",
+      ],
+      { timeout: 5_000 },
     );
-    
+
     if (netstat.includes("no listener")) {
       results.push({
         category: "exposure",
@@ -422,7 +421,7 @@ async function checkServiceExposure(): Promise<SecurityCheckResult[]> {
       detail: "could not check network exposure",
     });
   }
-  
+
   return results;
 }
 
@@ -431,15 +430,12 @@ async function checkServiceExposure(): Promise<SecurityCheckResult[]> {
  */
 async function checkPinnedVersions(): Promise<SecurityCheckResult> {
   const unpinned: string[] = [];
-  
+
   // Check package.json
   try {
-    const packageJsonContent = await readFile(
-      resolve(process.cwd(), "package.json"),
-      "utf-8"
-    );
+    const packageJsonContent = await readFile(resolve(process.cwd(), "package.json"), "utf-8");
     const packageJson = JSON.parse(packageJsonContent);
-    
+
     const checkDeps = (deps: Record<string, string> | undefined) => {
       if (!deps) return;
       for (const [name, version] of Object.entries(deps)) {
@@ -449,24 +445,21 @@ async function checkPinnedVersions(): Promise<SecurityCheckResult> {
         }
       }
     };
-    
+
     checkDeps(packageJson.dependencies);
     checkDeps(packageJson.devDependencies);
   } catch {
     // No package.json or parse error
   }
-  
+
   // Check requirements.txt
   try {
-    const requirementsContent = await readFile(
-      resolve(process.cwd(), "requirements.txt"),
-      "utf-8"
-    );
-    
+    const requirementsContent = await readFile(resolve(process.cwd(), "requirements.txt"), "utf-8");
+
     for (const line of requirementsContent.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) continue;
-      
+
       // Check for range specifiers: >=, >, ~=, !=
       if (/[>~!]=?/.test(trimmed)) {
         unpinned.push(trimmed.split(/\s+/)[0]);
@@ -475,7 +468,7 @@ async function checkPinnedVersions(): Promise<SecurityCheckResult> {
   } catch {
     // No requirements.txt or read error
   }
-  
+
   if (unpinned.length > 0) {
     return {
       category: "supply-chain",
@@ -485,7 +478,7 @@ async function checkPinnedVersions(): Promise<SecurityCheckResult> {
       severity: "medium",
     };
   }
-  
+
   return {
     category: "supply-chain",
     name: "pinned versions",
@@ -509,7 +502,7 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
       detail: "not a git repository",
     };
   }
-  
+
   // Deep scan with trufflehog — resolve mise-first so a mise-installed one is
   // used (kit provisions it as a default), not just a bare-PATH one. Throwing
   // when it's absent falls through to the basic pattern-matching below.
@@ -525,7 +518,7 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
       const { stdout } = await exec(
         trufflehogBin,
         ["git", `file://${process.cwd()}`, "--json", "--no-update"],
-        { timeout: 90_000 }
+        { timeout: 90_000 },
       );
 
       // trufflehog --json prefixes an info LOG line ({"level":...}); only count
@@ -571,13 +564,13 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
           "-iE",
           "(api[_-]?key|secret[_-]?key|password|token|credential)[\"']?\\s*[:=]\\s*[\"'][^\"']{20,}",
         ],
-        { timeout: 10_000 }
+        { timeout: 10_000 },
       );
-      
+
       if (stdout.trim()) {
         const lines = stdout.trim().split("\n");
         const matches = lines.length;
-        
+
         // Extract unique filenames
         const files = new Set<string>();
         for (const line of lines) {
@@ -586,7 +579,7 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
             files.add(match[1]);
           }
         }
-        
+
         const fileArray = Array.from(files);
 
         return {
@@ -596,18 +589,20 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
           detail: `${matches} potential secret(s) in ${files.size} file(s)`,
           severity: "high",
           files: fileArray,
-          suggestion: "Install trufflehog for better detection:\n  • macOS/Linux: brew install trufflehog\n  • Go: go install github.com/trufflesecurity/trufflehog/v3@latest\n  • Or download from: https://github.com/trufflesecurity/trufflehog/releases",
+          suggestion:
+            "Install trufflehog for better detection:\n  • macOS/Linux: brew install trufflehog\n  • Go: go install github.com/trufflesecurity/trufflehog/v3@latest\n  • Or download from: https://github.com/trufflesecurity/trufflehog/releases",
         };
       }
     } catch {
       // No matches or git grep failed
     }
-    
+
     return {
       category: "secrets",
       name: "secrets scan",
       status: "pass",
-      detail: "basic scan passed (install trufflehog for better detection: brew install trufflehog)",
+      detail:
+        "basic scan passed (install trufflehog for better detection: brew install trufflehog)",
     };
   }
 }
@@ -621,7 +616,12 @@ async function checkSocket(): Promise<SecurityCheckResult> {
   try {
     await access(resolve(process.cwd(), "package.json"));
   } catch {
-    return { category: "supply-chain", name: "socket scan", status: "skip", detail: "no package.json found" };
+    return {
+      category: "supply-chain",
+      name: "socket scan",
+      status: "skip",
+      detail: "no package.json found",
+    };
   }
 
   // Resolve mise-first: kit installs scanners via mise, whose shims aren't on
@@ -679,7 +679,12 @@ async function checkSocket(): Promise<SecurityCheckResult> {
     };
   }
 
-  return { category: "supply-chain", name: "socket scan", status: "pass", detail: "no supply chain issues detected" };
+  return {
+    category: "supply-chain",
+    name: "socket scan",
+    status: "pass",
+    detail: "no supply chain issues detected",
+  };
 }
 
 /**
@@ -687,9 +692,16 @@ async function checkSocket(): Promise<SecurityCheckResult> {
  * Catches OS-level vulnerabilities that npm audit misses.
  */
 async function checkTrivy(): Promise<SecurityCheckResult> {
-  const hasDockerfile = await access(resolve(process.cwd(), "Dockerfile")).then(() => true).catch(() => false);
+  const hasDockerfile = await access(resolve(process.cwd(), "Dockerfile"))
+    .then(() => true)
+    .catch(() => false);
   if (!hasDockerfile) {
-    return { category: "supply-chain", name: "trivy container scan", status: "skip", detail: "no Dockerfile found" };
+    return {
+      category: "supply-chain",
+      name: "trivy container scan",
+      status: "skip",
+      detail: "no Dockerfile found",
+    };
   }
 
   // Resolve mise-first (like socket/semgrep): a mise-installed trivy isn't on kit's PATH.
@@ -712,7 +724,13 @@ async function checkTrivy(): Promise<SecurityCheckResult> {
   );
 
   if (!result.ok && !result.stdout) {
-    return { category: "supply-chain", name: "trivy container scan", status: "warn", detail: "trivy scan failed", severity: "medium" };
+    return {
+      category: "supply-chain",
+      name: "trivy container scan",
+      status: "warn",
+      detail: "trivy scan failed",
+      severity: "medium",
+    };
   }
 
   try {
@@ -722,7 +740,12 @@ async function checkTrivy(): Promise<SecurityCheckResult> {
     );
 
     if (vulns.length === 0) {
-      return { category: "supply-chain", name: "trivy container scan", status: "pass", detail: "no high/critical container vulnerabilities" };
+      return {
+        category: "supply-chain",
+        name: "trivy container scan",
+        status: "pass",
+        detail: "no high/critical container vulnerabilities",
+      };
     }
     return {
       category: "supply-chain",
@@ -732,7 +755,13 @@ async function checkTrivy(): Promise<SecurityCheckResult> {
       severity: "high",
     };
   } catch {
-    return { category: "supply-chain", name: "trivy container scan", status: "warn", detail: "trivy scan failed", severity: "medium" };
+    return {
+      category: "supply-chain",
+      name: "trivy container scan",
+      status: "warn",
+      detail: "trivy scan failed",
+      severity: "medium",
+    };
   }
 }
 
@@ -770,7 +799,11 @@ async function checkTrivyConfig(): Promise<SecurityCheckResult> {
   ];
   let hasIaC = false;
   for (const m of fileMarkers) {
-    if (await access(resolve(cwd, m)).then(() => true).catch(() => false)) {
+    if (
+      await access(resolve(cwd, m))
+        .then(() => true)
+        .catch(() => false)
+    ) {
       hasIaC = true;
       break;
     }
@@ -785,7 +818,12 @@ async function checkTrivyConfig(): Promise<SecurityCheckResult> {
     }
   }
   if (!hasIaC) {
-    return { category: "supply-chain", name, status: "skip", detail: "no Dockerfile/Compose/Terraform found" };
+    return {
+      category: "supply-chain",
+      name,
+      status: "skip",
+      detail: "no Dockerfile/Compose/Terraform found",
+    };
   }
 
   const trivyBin = await resolveToolBin("trivy");
@@ -807,10 +845,21 @@ async function checkTrivyConfig(): Promise<SecurityCheckResult> {
   );
   const count = parseTrivyMisconfigCount(result.stdout);
   if (count < 0) {
-    return { category: "supply-chain", name, status: "warn", detail: "trivy config scan failed", severity: "medium" };
+    return {
+      category: "supply-chain",
+      name,
+      status: "warn",
+      detail: "trivy config scan failed",
+      severity: "medium",
+    };
   }
   if (count === 0) {
-    return { category: "supply-chain", name, status: "pass", detail: "no high/critical IaC misconfigurations" };
+    return {
+      category: "supply-chain",
+      name,
+      status: "pass",
+      detail: "no high/critical IaC misconfigurations",
+    };
   }
   return {
     category: "supply-chain",
@@ -853,14 +902,21 @@ async function checkOsvScanner(): Promise<SecurityCheckResult> {
       detail: "osv-scanner not installed (mise use aqua:google/osv-scanner)",
     };
   }
-  const result = await execFileNoThrow(osvBin, ["--format", "json", "-r", "."], { timeout: 120_000 });
+  const result = await execFileNoThrow(osvBin, ["--format", "json", "-r", "."], {
+    timeout: 120_000,
+  });
   const count = parseOsvVulnCount(result.stdout);
   if (count < 0) {
     // osv exits non-zero with no JSON when there are no lockfiles to scan.
     return { category: "supply-chain", name, status: "skip", detail: "no lockfiles to scan" };
   }
   if (count === 0) {
-    return { category: "supply-chain", name, status: "pass", detail: "no known dependency vulnerabilities" };
+    return {
+      category: "supply-chain",
+      name,
+      status: "pass",
+      detail: "no known dependency vulnerabilities",
+    };
   }
   return {
     category: "supply-chain",
@@ -878,7 +934,12 @@ async function checkLicenses(): Promise<SecurityCheckResult> {
   try {
     await access(resolve(process.cwd(), "package.json"));
   } catch {
-    return { category: "supply-chain", name: "license check", status: "skip", detail: "no package.json found" };
+    return {
+      category: "supply-chain",
+      name: "license check",
+      status: "skip",
+      detail: "no package.json found",
+    };
   }
 
   // Try direct binary first (fast). If absent, fall back to `npx --yes
@@ -910,14 +971,18 @@ async function checkLicenses(): Promise<SecurityCheckResult> {
   }
 
   const PROBLEMATIC = ["GPL", "AGPL", "LGPL", "CPAL", "OSL", "EUPL"];
-  const result = await execFileNoThrow(
-    runner.cmd,
-    [...runner.baseArgs, "--json", "--production"],
-    { timeout: 120_000 },
-  );
+  const result = await execFileNoThrow(runner.cmd, [...runner.baseArgs, "--json", "--production"], {
+    timeout: 120_000,
+  });
 
   if (!result.ok && !result.stdout) {
-    return { category: "supply-chain", name: "license check", status: "warn", detail: "license check failed", severity: "low" };
+    return {
+      category: "supply-chain",
+      name: "license check",
+      status: "warn",
+      detail: "license check failed",
+      severity: "low",
+    };
   }
 
   try {
@@ -940,9 +1005,20 @@ async function checkLicenses(): Promise<SecurityCheckResult> {
         severity: "medium",
       };
     }
-    return { category: "supply-chain", name: "license check", status: "pass", detail: "no problematic licenses found" };
+    return {
+      category: "supply-chain",
+      name: "license check",
+      status: "pass",
+      detail: "no problematic licenses found",
+    };
   } catch {
-    return { category: "supply-chain", name: "license check", status: "warn", detail: "license check failed", severity: "low" };
+    return {
+      category: "supply-chain",
+      name: "license check",
+      status: "warn",
+      detail: "license check failed",
+      severity: "low",
+    };
   }
 }
 
@@ -971,10 +1047,17 @@ async function checkSemgrep(): Promise<SecurityCheckResult> {
   try {
     const parsed = JSON.parse(raw);
     const findings: Array<{ extra?: { severity?: string } }> = parsed.results ?? [];
-    const high = findings.filter((f) => f.extra?.severity === "ERROR" || f.extra?.severity === "WARNING");
+    const high = findings.filter(
+      (f) => f.extra?.severity === "ERROR" || f.extra?.severity === "WARNING",
+    );
 
     if (high.length === 0) {
-      return { category: "supply-chain", name: "semgrep SAST", status: "pass", detail: "no security issues found" };
+      return {
+        category: "supply-chain",
+        name: "semgrep SAST",
+        status: "pass",
+        detail: "no security issues found",
+      };
     }
     return {
       category: "supply-chain",
@@ -984,7 +1067,13 @@ async function checkSemgrep(): Promise<SecurityCheckResult> {
       severity: high.some((f) => f.extra?.severity === "ERROR") ? "high" : "medium",
     };
   } catch {
-    return { category: "supply-chain", name: "semgrep SAST", status: "warn", detail: "semgrep scan failed", severity: "low" };
+    return {
+      category: "supply-chain",
+      name: "semgrep SAST",
+      status: "warn",
+      detail: "semgrep scan failed",
+      severity: "low",
+    };
   }
 }
 
@@ -1149,7 +1238,7 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
     checkBumblebee(),
     checkTrivyConfig(),
     checkOsvScanner(),
-    ...await checkLockfilesCommitted(),
+    ...(await checkLockfilesCommitted()),
   ]);
 
   results.push(

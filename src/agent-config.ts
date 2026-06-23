@@ -16,7 +16,8 @@ import { resolve, dirname } from "node:path";
  * block in place and never touches anything outside the markers.
  */
 
-export const KIT_BLOCK_BEGIN = "<!-- BEGIN kit (managed block — edit outside the markers, not inside) -->";
+export const KIT_BLOCK_BEGIN =
+  "<!-- BEGIN kit (managed block — edit outside the markers, not inside) -->";
 export const KIT_BLOCK_END = "<!-- END kit -->";
 
 /** The canonical "use kit" instruction. Kept short on purpose — agents read it
@@ -79,7 +80,10 @@ export function detectAgentTargets(cwd: string = process.cwd()): AgentTarget[] {
  * - No existing block → append (with a blank-line separator if the file is non-empty).
  * - Existing block → replace just the marker-delimited region, preserving everything else.
  */
-export function upsertKitBlock(content: string): { next: string; action: "created" | "updated" | "unchanged" } {
+export function upsertKitBlock(content: string): {
+  next: string;
+  action: "created" | "updated" | "unchanged";
+} {
   const block = `${KIT_BLOCK_BEGIN}\n\n${KIT_INSTRUCTION}\n\n${KIT_BLOCK_END}`;
   const begin = content.indexOf(KIT_BLOCK_BEGIN);
   const end = content.indexOf(KIT_BLOCK_END);
@@ -91,7 +95,14 @@ export function upsertKitBlock(content: string): { next: string; action: "create
     return { next, action: next === content ? "unchanged" : "updated" };
   }
 
-  const sep = content.length === 0 ? "" : content.endsWith("\n\n") ? "" : content.endsWith("\n") ? "\n" : "\n\n";
+  const sep =
+    content.length === 0
+      ? ""
+      : content.endsWith("\n\n")
+        ? ""
+        : content.endsWith("\n")
+          ? "\n"
+          : "\n\n";
   return { next: content + sep + block + "\n", action: "created" };
 }
 
@@ -138,7 +149,8 @@ export async function writeAgentConfig(
         agent: t.agent,
         file: t.file,
         action,
-        detail: action === "created" ? `wrote kit block to ${t.file}` : `updated kit block in ${t.file}`,
+        detail:
+          action === "created" ? `wrote kit block to ${t.file}` : `updated kit block in ${t.file}`,
       });
     } catch (err) {
       results.push({
@@ -190,7 +202,9 @@ export interface PermissionResult {
  * `deny`, never sets a permission mode. Only wired for Claude Code (the agent
  * whose settings schema we know).
  */
-export async function installKitPermissions(cwd: string = process.cwd()): Promise<PermissionResult> {
+export async function installKitPermissions(
+  cwd: string = process.cwd(),
+): Promise<PermissionResult> {
   const file = ".claude/settings.json";
   const path = resolve(cwd, file);
 
@@ -200,7 +214,13 @@ export async function installKitPermissions(cwd: string = process.cwd()): Promis
   }
   // Only meaningful in a Claude Code project.
   if (!existsSync(resolve(cwd, ".claude")) && !existsSync(resolve(cwd, "CLAUDE.md"))) {
-    return { file, added: [], alreadyPresent: 0, action: "skipped", detail: "no Claude Code project detected" };
+    return {
+      file,
+      added: [],
+      alreadyPresent: 0,
+      action: "skipped",
+      detail: "no Claude Code project detected",
+    };
   }
 
   let settings: { permissions?: { allow?: string[] }; [k: string]: unknown } = {};
@@ -233,6 +253,12 @@ export async function installKitPermissions(cwd: string = process.cwd()): Promis
     await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
     return { file, added, alreadyPresent, action: existed ? "updated" : "created" };
   } catch (err) {
-    return { file, added: [], alreadyPresent, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+    return {
+      file,
+      added: [],
+      alreadyPresent,
+      action: "failed",
+      detail: err instanceof Error ? err.message : String(err),
+    };
   }
 }

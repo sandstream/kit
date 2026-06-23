@@ -70,11 +70,7 @@ interface ConversationState {
   history?: HistoryEntry[];
 }
 
-function indexConversation(
-  db: DatabaseSync,
-  key: string,
-  value: string,
-): { messages: number } {
+function indexConversation(db: DatabaseSync, key: string, value: string): { messages: number } {
   let state: ConversationState;
   try {
     state = JSON.parse(value) as ConversationState;
@@ -146,9 +142,10 @@ export function indexAmazonQSessions(db: DatabaseSync): IndexResult {
   try {
     let rows: { key: string; value: string }[];
     try {
-      rows = src
-        .prepare("SELECT key, value FROM conversations")
-        .all() as unknown as { key: string; value: string }[];
+      rows = src.prepare("SELECT key, value FROM conversations").all() as unknown as {
+        key: string;
+        value: string;
+      }[];
     } catch {
       markFileIndexed(db, dbPath, mtimeMs, st.size); // table absent / differs → fail-safe
       return result;

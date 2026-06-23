@@ -88,7 +88,8 @@ const A11Y_RULES: Array<{ id: string; pattern: RegExp; description: string }> = 
     id: "input-no-label",
     // <input> with no aria-label/aria-labelledby (label-association is harder
     // to verify statically, so we only flag the obvious missing-aria case)
-    pattern: /<input\s+(?![^>]*\baria-label(?:ledby)?\s*=)(?![^>]*\btype\s*=\s*['"](?:hidden|submit|button)['"])[^>]*\/?>/,
+    pattern:
+      /<input\s+(?![^>]*\baria-label(?:ledby)?\s*=)(?![^>]*\btype\s*=\s*['"](?:hidden|submit|button)['"])[^>]*\/?>/,
     description: "<input> without aria-label (and not type=hidden/submit/button)",
   },
 ];
@@ -131,10 +132,7 @@ interface TokenBypass {
   match: string;
 }
 
-async function scanTokenBypass(
-  srcRoots: string[],
-  tokenFiles: string[],
-): Promise<TokenBypass[]> {
+async function scanTokenBypass(srcRoots: string[], tokenFiles: string[]): Promise<TokenBypass[]> {
   const findings: TokenBypass[] = [];
   for (const root of srcRoots) {
     if (!(await pathExists(root))) continue;
@@ -175,12 +173,14 @@ async function scanTokenBypass(
   return findings;
 }
 
-export async function checkDesign(opts: {
-  srcRoots?: string[];
-  tokenFiles?: string[];
-  enforce?: boolean;
-  baseline?: { a11y?: string[]; tokens?: string[] };
-} = {}): Promise<DesignCheckResult[]> {
+export async function checkDesign(
+  opts: {
+    srcRoots?: string[];
+    tokenFiles?: string[];
+    enforce?: boolean;
+    baseline?: { a11y?: string[]; tokens?: string[] };
+  } = {},
+): Promise<DesignCheckResult[]> {
   const srcRoots = (opts.srcRoots ?? ["src", "app", "components"]).map((d) =>
     resolve(process.cwd(), d),
   );

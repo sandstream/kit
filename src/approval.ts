@@ -22,10 +22,7 @@ export interface ApprovalResponse {
 /**
  * Send approval request to webhook
  */
-async function sendApprovalWebhook(
-  request: ApprovalRequest,
-  webhookUrl: string,
-): Promise<void> {
+async function sendApprovalWebhook(request: ApprovalRequest, webhookUrl: string): Promise<void> {
   try {
     const response = await fetch(webhookUrl, {
       method: "POST",
@@ -43,9 +40,7 @@ async function sendApprovalWebhook(
     });
 
     if (!response.ok) {
-      console.error(
-        `Failed to send approval webhook: ${response.status} ${response.statusText}`,
-      );
+      console.error(`Failed to send approval webhook: ${response.status} ${response.statusText}`);
     }
   } catch (error) {
     console.error("Failed to send approval webhook:", error);
@@ -140,16 +135,10 @@ export async function requestApproval(
     const approvalId = IdGenerators.approval();
     const timeout = fullConfig.approval.approval_timeout || 3600;
 
-    console.log(
-      `\nWaiting for approval via Remote API (timeout: ${timeout}s)...`,
-    );
+    console.log(`\nWaiting for approval via Remote API (timeout: ${timeout}s)...`);
     console.log(`Approval ID: ${approvalId}`);
 
-    const result = await waitForRemoteApproval(
-      approvalId,
-      companyId,
-      timeout * 1000,
-    );
+    const result = await waitForRemoteApproval(approvalId, companyId, timeout * 1000);
 
     if (result.approved) {
       console.log("✓ Operation approved");
@@ -179,9 +168,7 @@ export async function requestApproval(
   });
 
   try {
-    const answer = await rl.question(
-      "\nDo you approve this operation? (yes/no): ",
-    );
+    const answer = await rl.question("\nDo you approve this operation? (yes/no): ");
     rl.close();
 
     return answer.toLowerCase().trim() === "yes";

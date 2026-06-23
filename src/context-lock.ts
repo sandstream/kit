@@ -63,24 +63,104 @@ const FIELD_SPECS: {
   declared: (d: ContextConfig) => string | undefined;
   live: (l: LiveContext) => string | null;
 }[] = [
-  { tool: "gcloud", field: "account", declared: (d) => d.gcloud?.account, live: (l) => l.gcloud?.account ?? null },
-  { tool: "gcloud", field: "project", declared: (d) => d.gcloud?.project, live: (l) => l.gcloud?.project ?? null },
+  {
+    tool: "gcloud",
+    field: "account",
+    declared: (d) => d.gcloud?.account,
+    live: (l) => l.gcloud?.account ?? null,
+  },
+  {
+    tool: "gcloud",
+    field: "project",
+    declared: (d) => d.gcloud?.project,
+    live: (l) => l.gcloud?.project ?? null,
+  },
   { tool: "git", field: "email", declared: (d) => d.git?.email, live: (l) => l.git?.email ?? null },
-  { tool: "github", field: "org", declared: (d) => d.github?.org, live: (l) => l.github?.org ?? null },
-  { tool: "github", field: "remote", declared: (d) => d.github?.remote, live: (l) => l.github?.remote ?? null },
-  { tool: "gitlab", field: "group", declared: (d) => d.gitlab?.group, live: (l) => l.gitlab?.group ?? null },
-  { tool: "gitlab", field: "remote", declared: (d) => d.gitlab?.remote, live: (l) => l.gitlab?.remote ?? null },
-  { tool: "bitbucket", field: "workspace", declared: (d) => d.bitbucket?.workspace, live: (l) => l.bitbucket?.workspace ?? null },
-  { tool: "bitbucket", field: "remote", declared: (d) => d.bitbucket?.remote, live: (l) => l.bitbucket?.remote ?? null },
-  { tool: "ssh", field: "identity", declared: (d) => d.ssh?.identity, live: (l) => l.ssh?.identity ?? null },
-  { tool: "ssh", field: "fingerprint", declared: (d) => d.ssh?.fingerprint, live: (l) => l.ssh?.fingerprint ?? null },
-  { tool: "ssh", field: "host_alias", declared: (d) => d.ssh?.host_alias, live: (l) => l.ssh?.host_alias ?? null },
-  { tool: "npm", field: "registry", declared: (d) => d.npm?.registry, live: (l) => l.npm?.registry ?? null },
-  { tool: "vercel", field: "team(orgId)", declared: (d) => d.vercel?.team, live: (l) => l.vercel?.orgId ?? null },
-  { tool: "vercel", field: "project(projectId)", declared: (d) => d.vercel?.project, live: (l) => l.vercel?.projectId ?? null },
+  {
+    tool: "github",
+    field: "org",
+    declared: (d) => d.github?.org,
+    live: (l) => l.github?.org ?? null,
+  },
+  {
+    tool: "github",
+    field: "remote",
+    declared: (d) => d.github?.remote,
+    live: (l) => l.github?.remote ?? null,
+  },
+  {
+    tool: "gitlab",
+    field: "group",
+    declared: (d) => d.gitlab?.group,
+    live: (l) => l.gitlab?.group ?? null,
+  },
+  {
+    tool: "gitlab",
+    field: "remote",
+    declared: (d) => d.gitlab?.remote,
+    live: (l) => l.gitlab?.remote ?? null,
+  },
+  {
+    tool: "bitbucket",
+    field: "workspace",
+    declared: (d) => d.bitbucket?.workspace,
+    live: (l) => l.bitbucket?.workspace ?? null,
+  },
+  {
+    tool: "bitbucket",
+    field: "remote",
+    declared: (d) => d.bitbucket?.remote,
+    live: (l) => l.bitbucket?.remote ?? null,
+  },
+  {
+    tool: "ssh",
+    field: "identity",
+    declared: (d) => d.ssh?.identity,
+    live: (l) => l.ssh?.identity ?? null,
+  },
+  {
+    tool: "ssh",
+    field: "fingerprint",
+    declared: (d) => d.ssh?.fingerprint,
+    live: (l) => l.ssh?.fingerprint ?? null,
+  },
+  {
+    tool: "ssh",
+    field: "host_alias",
+    declared: (d) => d.ssh?.host_alias,
+    live: (l) => l.ssh?.host_alias ?? null,
+  },
+  {
+    tool: "npm",
+    field: "registry",
+    declared: (d) => d.npm?.registry,
+    live: (l) => l.npm?.registry ?? null,
+  },
+  {
+    tool: "vercel",
+    field: "team(orgId)",
+    declared: (d) => d.vercel?.team,
+    live: (l) => l.vercel?.orgId ?? null,
+  },
+  {
+    tool: "vercel",
+    field: "project(projectId)",
+    declared: (d) => d.vercel?.project,
+    live: (l) => l.vercel?.projectId ?? null,
+  },
   // App-service auth identity — "dev pointed at prod" guard.
-  { tool: "keycloak", field: "realm", declared: (d) => d.keycloak?.realm, live: (l) => l.keycloak?.realm ?? null },
-  { tool: "auth0", field: "tenant", declared: (d) => d.auth0?.tenant, live: (l) => l.auth0?.tenant ?? null },
+  {
+    tool: "keycloak",
+    field: "realm",
+    declared: (d) => d.keycloak?.realm,
+    live: (l) => l.keycloak?.realm ?? null,
+  },
+  {
+    tool: "auth0",
+    field: "tenant",
+    declared: (d) => d.auth0?.tenant,
+    live: (l) => l.auth0?.tenant ?? null,
+  },
   { tool: "clerk", field: "env", declared: (d) => d.clerk?.env, live: (l) => l.clerk?.env ?? null },
 ];
 
@@ -132,7 +212,11 @@ export function suggestContextToml(live: LiveContext): string {
     ["project", live.vercel?.projectId, "projectId"],
   ]);
   emit("[context.gcloud]", [
-    ["account", live.gcloud?.account, "⚠ currently-active gcloud — VERIFY it is right for THIS repo"],
+    [
+      "account",
+      live.gcloud?.account,
+      "⚠ currently-active gcloud — VERIFY it is right for THIS repo",
+    ],
     ["project", live.gcloud?.project, "⚠ verify"],
   ]);
   emit("[context.npm]", [["registry", live.npm?.registry, "global npm registry"]]);
@@ -149,10 +233,10 @@ export function suggestContextToml(live: LiveContext): string {
 export function hasLockableContext(live: LiveContext): boolean {
   return Boolean(
     live.gcloud?.account ||
-      live.vercel?.projectId ||
-      live.github?.org ||
-      live.gitlab?.group ||
-      live.bitbucket?.workspace,
+    live.vercel?.projectId ||
+    live.github?.org ||
+    live.gitlab?.group ||
+    live.bitbucket?.workspace,
   );
 }
 
@@ -166,7 +250,10 @@ async function run(cmd: string, args: string[]): Promise<string | null> {
 }
 
 /** github.com[:/]org/repo(.git) -> { org, "github.com/org/repo" }. */
-export function parseGithubRemote(url: string | null): { org: string | null; remote: string | null } {
+export function parseGithubRemote(url: string | null): {
+  org: string | null;
+  remote: string | null;
+} {
   if (!url) return { org: null, remote: null };
   const m = url.match(/github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/);
   if (!m) return { org: null, remote: null };
@@ -174,7 +261,10 @@ export function parseGithubRemote(url: string | null): { org: string | null; rem
 }
 
 /** gitlab.com[:/]group(/subgroups)/repo(.git) -> { group (top-level), "gitlab.com/<path>" }. */
-export function parseGitlabRemote(url: string | null): { group: string | null; remote: string | null } {
+export function parseGitlabRemote(url: string | null): {
+  group: string | null;
+  remote: string | null;
+} {
   if (!url) return { group: null, remote: null };
   const m = url.match(/gitlab\.com[:/](.+?)(?:\.git)?$/);
   if (!m) return { group: null, remote: null };
@@ -184,7 +274,10 @@ export function parseGitlabRemote(url: string | null): { group: string | null; r
 }
 
 /** bitbucket.org[:/]workspace/repo(.git) -> { workspace, "bitbucket.org/workspace/repo" }. */
-export function parseBitbucketRemote(url: string | null): { workspace: string | null; remote: string | null } {
+export function parseBitbucketRemote(url: string | null): {
+  workspace: string | null;
+  remote: string | null;
+} {
   if (!url) return { workspace: null, remote: null };
   const m = url.match(/bitbucket\.org[:/]([^/]+)\/(.+?)(?:\.git)?$/);
   if (!m) return { workspace: null, remote: null };
@@ -312,10 +405,19 @@ export async function checkContext(
   // npm registry trailing slash, and ssh identity `~` expansion (compared as paths).
   let declared: ContextConfig = ctx;
   if (ctx.npm?.registry) {
-    declared = { ...declared, npm: { ...declared.npm, registry: ctx.npm.registry.replace(/\/+$/, "") } };
+    declared = {
+      ...declared,
+      npm: { ...declared.npm, registry: ctx.npm.registry.replace(/\/+$/, "") },
+    };
   }
   if (declared.ssh?.identity) {
-    declared = { ...declared, ssh: { ...declared.ssh, identity: expandHome(declared.ssh.identity) ?? declared.ssh.identity } };
+    declared = {
+      ...declared,
+      ssh: {
+        ...declared.ssh,
+        identity: expandHome(declared.ssh.identity) ?? declared.ssh.identity,
+      },
+    };
   }
   return compareContext(declared, await gatherLive(cwd));
 }
@@ -340,15 +442,36 @@ export function planContext(ctx: ContextConfig): ContextStep[] {
   const steps: ContextStep[] = [];
   const g = ctx.gcloud;
   if (g?.config)
-    steps.push({ tool: "gcloud", argv: ["config", "configurations", "activate", g.config], describe: `activate config ${g.config}` });
+    steps.push({
+      tool: "gcloud",
+      argv: ["config", "configurations", "activate", g.config],
+      describe: `activate config ${g.config}`,
+    });
   if (g?.account)
-    steps.push({ tool: "gcloud", argv: ["config", "set", "account", g.account], describe: `account=${g.account}` });
+    steps.push({
+      tool: "gcloud",
+      argv: ["config", "set", "account", g.account],
+      describe: `account=${g.account}`,
+    });
   if (g?.project)
-    steps.push({ tool: "gcloud", argv: ["config", "set", "project", g.project], describe: `project=${g.project}` });
+    steps.push({
+      tool: "gcloud",
+      argv: ["config", "set", "project", g.project],
+      describe: `project=${g.project}`,
+    });
   if (g?.region)
-    steps.push({ tool: "gcloud", argv: ["config", "set", "run/region", g.region], describe: `run/region=${g.region}` });
+    steps.push({
+      tool: "gcloud",
+      argv: ["config", "set", "run/region", g.region],
+      describe: `run/region=${g.region}`,
+    });
   if (ctx.git?.email)
-    steps.push({ tool: "git", argv: ["config", "user.email", ctx.git.email], local: true, describe: `git user.email=${ctx.git.email}` });
+    steps.push({
+      tool: "git",
+      argv: ["config", "user.email", ctx.git.email],
+      local: true,
+      describe: `git user.email=${ctx.git.email}`,
+    });
   return steps;
 }
 

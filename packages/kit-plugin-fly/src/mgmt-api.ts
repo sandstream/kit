@@ -34,9 +34,7 @@ export interface MgmtClient {
 export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
   const token = cfg.token ?? process.env.FLY_API_TOKEN;
   if (!token) {
-    throw new Error(
-      "FLY_API_TOKEN not set — run `fly auth token` to fetch one",
-    );
+    throw new Error("FLY_API_TOKEN not set — run `fly auth token` to fetch one");
   }
   return {
     graphqlUrl: cfg.graphqlUrl ?? DEFAULT_GRAPHQL_URL,
@@ -49,7 +47,11 @@ export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
   };
 }
 
-async function gql<T>(client: MgmtClient, query: string, variables: Record<string, unknown>): Promise<T> {
+async function gql<T>(
+  client: MgmtClient,
+  query: string,
+  variables: Record<string, unknown>,
+): Promise<T> {
   const res = await fetch(client.graphqlUrl, {
     method: "POST",
     headers: client.headers,
@@ -139,10 +141,7 @@ export interface MachineSummary {
   region: string;
 }
 
-export async function listMachines(
-  client: MgmtClient,
-  appName: string,
-): Promise<MachineSummary[]> {
+export async function listMachines(client: MgmtClient, appName: string): Promise<MachineSummary[]> {
   const res = await fetch(`${client.machinesUrl}/apps/${encodeURIComponent(appName)}/machines`, {
     headers: client.headers,
     signal: AbortSignal.timeout(10_000),

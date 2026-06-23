@@ -1,11 +1,10 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "sandstream-kit-adapter-sdk";
 import { exec } from "../utils/exec.js";
 
-
 async function runRailway(
   args: string[],
   cwd: string,
-  env?: Record<string, string>
+  env?: Record<string, string>,
 ): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   try {
     const { stdout, stderr } = await exec("railway", args, {

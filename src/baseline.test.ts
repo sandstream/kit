@@ -55,10 +55,7 @@ describe("loadBaseline", () => {
         join(dir, BASELINE_FILE),
         JSON.stringify({ version: 2, generated: "x", categories: {} }),
       );
-      await assert.rejects(
-        () => loadBaseline(dir),
-        /unsupported baseline version: 2/,
-      );
+      await assert.rejects(() => loadBaseline(dir), /unsupported baseline version: 2/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -153,10 +150,7 @@ describe("saveBaseline", () => {
       };
       await saveBaseline(b, dir);
       const reloaded = await loadBaseline(dir);
-      assert.deepEqual(
-        reloaded.categories.tests.untested_files,
-        ["a", "b"],
-      );
+      assert.deepEqual(reloaded.categories.tests.untested_files, ["a", "b"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

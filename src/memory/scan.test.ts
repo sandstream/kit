@@ -9,14 +9,22 @@ describe("memory secret-scan", () => {
     upsertSession(db, { sessionId: "s1", harness: "claude-code" });
     const fake = "sk_live_" + "A".repeat(24); // synthetic, non-real
     insertMessage(db, { uuid: "u1", sessionId: "s1", type: "user", content: `the key is ${fake}` });
-    insertMessage(db, { uuid: "u2", sessionId: "s1", type: "user", content: "totally clean message" });
+    insertMessage(db, {
+      uuid: "u2",
+      sessionId: "s1",
+      type: "user",
+      content: "totally clean message",
+    });
     const findings = scanDbForSecrets(db);
     assert.equal(findings.length, 1);
     assert.equal(findings[0]?.label, "stripe-key");
     assert.equal(findings[0]?.confidence, "high");
     assert.equal(findings[0]?.count, 1);
     assert.match(findings[0]?.sample ?? "", /^messages#\d+\.content$/);
-    assert.ok(!findings[0]?.preview.includes("A".repeat(24)), "preview is masked, not the raw secret");
+    assert.ok(
+      !findings[0]?.preview.includes("A".repeat(24)),
+      "preview is masked, not the raw secret",
+    );
     db.close();
   });
 

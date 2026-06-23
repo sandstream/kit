@@ -75,10 +75,7 @@ describe("checkTools", () => {
   });
 
   it("reports not installed when the resolver finds nothing", async () => {
-    const results = await checkTools(
-      { "ghost-tool": "1.0" },
-      async () => null,
-    );
+    const results = await checkTools({ "ghost-tool": "1.0" }, async () => null);
     assert.equal(results[0].ok, false);
     assert.equal(results[0].installed, null);
   });
