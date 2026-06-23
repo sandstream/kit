@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-06-23
+
+### Added
+- **Sentinel layer 3 — scheduling + surfacing (#53).** L2 produces proposals on demand; L3 makes them _recur_ and _visible_, staying zero-LLM + agent-agnostic. `kit sentinel install` scaffolds a GitHub Actions scheduler (`.github/workflows/kit-sentinel.yml`, weekly by default, `--schedule "<cron>"`, refuses to clobber without `--force`) that recurs `kit sentinel run --json` — an agent (or a downstream job step) acts on the JSON. `kit sentinel run` now caches a compact summary to `.kit/sentinel.json` (best-effort; never fails the run), and `kit sentinel status` prints a one-line SessionStart surface (`[sentinel · N fresh, M need you]`) — silent when nothing is fresh, `--json` for the raw digest. Pure `proposalSummary` / `sentinelStatusLine` / `sentinelWorkflow` fixture-tested.
+
+### Changed
+- **`kit scan` resolves scanner tokens from a tooling vault — no `infisical run` wrapper (#65).** New optional `[scan.tooling]` config (`project_id`, `env`) points at a shared Infisical project (e.g. `sandstream-common`); `kit scan` resolves each scanner's `needsToken` (e.g. `SNYK_TOKEN`) from there and injects it into the scanner subprocess env. The value flows vault→subprocess and is never logged. New uncached `fetchInfisicalProjectSecrets` (distinct from the cached per-app `fetchInfisicalSecrets`); a token already in `process.env` always wins.
+
 ## [1.21.0] - 2026-06-23
 
 ### Added

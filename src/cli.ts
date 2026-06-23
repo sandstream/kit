@@ -12,6 +12,7 @@ import { checkServices } from "./check-services.js";
 import { checkSecrets } from "./check-secrets.js";
 import { checkSecurity } from "./check-security.js";
 import type { HealthCtx } from "./health.js";
+import type { SentinelSummary } from "./sentinel.js";
 import { syncSecurityFindings } from "./findings-track.js";
 import { checkWebSearch } from "./check-web-search.js";
 import { installTools } from "./install.js";
@@ -4355,14 +4356,18 @@ async function cmdAgentAudit(): Promise<boolean> {
 }
 
 async function cmdSentinel(): Promise<boolean> {
-  if (process.argv[3] !== "run") {
-    console.error(`${c.red}usage: kit sentinel run [--json]${c.reset}`);
+  const sub = process.argv[3];
+  if (sub === "install") return cmdSentinelInstall();
+  if (sub === "status") return cmdSentinelStatus();
+  if (sub !== "run") {
+    console.error(`${c.red}usage: kit sentinel <run|install|status> [--json]${c.reset}`);
     process.exitCode = 1;
     return false;
   }
   const jsonMode = hasFlag(process.argv, "--json");
   const config = await loadConfig(resolveConfigPath());
-  const { runSentinel, healthToRedFindings } = await import("./sentinel.js");
+  const { runSentinel, healthToRedFindings, proposalSummary, SENTINEL_CACHE } =
+    await import("./sentinel.js");
   const { runHealth, selectSensors, defaultHealthDeps } = await import("./health.js");
   const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
 
@@ -4407,6 +4412,16 @@ async function cmdSentinel(): Promise<boolean> {
     },
   });
 
+  // L3: cache a compact summary for the SessionStart surface (#53). Best-effort —
+  // a cache-write failure must never fail the run itself.
+  try {
+    const cachePath = resolve(process.cwd(), SENTINEL_CACHE);
+    await mkdir(dirname(cachePath), { recursive: true });
+    writeFileSync(cachePath, JSON.stringify(proposalSummary(proposals), null, 2) + "\n");
+  } catch {
+    // no cache → status surface simply stays quiet
+  }
+
   if (jsonMode) {
     console.log(JSON.stringify({ proposals }, null, 2));
     return true;
@@ -4426,6 +4441,48 @@ async function cmdSentinel(): Promise<boolean> {
   }
   if (proposals.length > 0)
     console.log(`${c.dim}run with --json and have any agent act on the fresh proposals${c.reset}`);
+  return true;
+}
+
+/** `kit sentinel install` — scaffold the L3 scheduler (GitHub Actions) (#53). */
+async function cmdSentinelInstall(): Promise<boolean> {
+  const { sentinelWorkflow } = await import("./sentinel.js");
+  const dest = resolve(process.cwd(), ".github/workflows/kit-sentinel.yml");
+  if (existsSync(dest) && !hasFlag(process.argv, "--force")) {
+    console.error(
+      `${c.yellow}.github/workflows/kit-sentinel.yml exists — re-run with --force to overwrite${c.reset}`,
+    );
+    process.exitCode = 1;
+    return false;
+  }
+  const si = process.argv.indexOf("--schedule");
+  const schedule = si >= 0 ? process.argv[si + 1] : undefined;
+  await mkdir(dirname(dest), { recursive: true });
+  writeFileSync(dest, schedule ? sentinelWorkflow(schedule) : sentinelWorkflow());
+  console.log(`${c.green}✓${c.reset} wrote .github/workflows/kit-sentinel.yml`);
+  console.log(
+    `  ${c.dim}recurs \`kit sentinel run --json\`; an agent (or a downstream step) acts on the JSON${c.reset}`,
+  );
+  return true;
+}
+
+/** `kit sentinel status` — print the cached one-line surface for a SessionStart hook (#53). */
+async function cmdSentinelStatus(): Promise<boolean> {
+  const { SENTINEL_CACHE, sentinelStatusLine } = await import("./sentinel.js");
+  let summary: SentinelSummary | null = null;
+  try {
+    summary = JSON.parse(readFileSync(resolve(process.cwd(), SENTINEL_CACHE), "utf8"));
+  } catch {
+    // no cache yet (sentinel never run) → nothing to surface
+  }
+  if (hasFlag(process.argv, "--json")) {
+    console.log(
+      JSON.stringify(summary ?? { total: 0, fresh: 0, byClass: { code: 0, human: 0, noise: 0 } }),
+    );
+    return true;
+  }
+  const line = sentinelStatusLine(summary);
+  if (line) console.log(line); // silent when nothing fresh → clean SessionStart surface
   return true;
 }
 
