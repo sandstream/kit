@@ -4193,6 +4193,29 @@ async function cmdSupplyChain(): Promise<boolean> {
   return fails === 0;
 }
 
+async function cmdAgentAudit(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  const { runAgentAudit } = await import("./agent-audit.js");
+  const results = runAgentAudit(process.cwd());
+  const fails = results.filter((r) => r.status === "fail").length;
+
+  if (jsonMode) {
+    console.log(JSON.stringify({ ok: fails === 0, results }, null, 2));
+    return fails === 0;
+  }
+
+  console.log(`${c.bold}kit agent-audit${c.reset}  ${c.dim}agent/MCP configs + git hooks${c.reset}`);
+  for (const r of results) {
+    const mark =
+      r.status === "fail" ? `${c.red}✗${c.reset}` :
+      r.status === "warn" ? `${c.yellow}!${c.reset}` : `${c.green}✓${c.reset}`;
+    console.log(`  ${mark} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
+    if (r.suggestion) console.log(`      ${c.dim}${r.suggestion}${c.reset}`);
+  }
+  if (fails > 0) console.log(`${c.red}${fails} fail${c.reset}`);
+  return fails === 0;
+}
+
 async function cmdWhoami(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
 
@@ -4933,6 +4956,7 @@ async function main(): Promise<void> {
         health: cmdHealth,
         ingest: cmdIngest,
         "supply-chain": cmdSupplyChain,
+        "agent-audit": cmdAgentAudit,
         init: cmdInit,
         upgrade: cmdUpgrade,
         install: cmdInstall,
