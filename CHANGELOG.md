@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-06-23
+
+### Added
+- **Agent / MCP / hook auditing (`kit agent-audit`).** A kit-native baseline over the coding-agent supply-chain surface: scans agent/MCP configs (`.claude.json`, `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `.claude/settings*.json`) for **plaintext secrets** (reuses `findSecrets` — the `.claude.json` `sk_live` leak class) and **cleartext `http://` MCP servers**, and git hooks (`.git/hooks`, `.githooks`, `.husky`) for **malware-shaped lines** (pipe-to-shell, base64-decode-to-shell, `/dev/tcp` reverse shell, `eval` of a command substitution). Pure analyzers fixture-tested; read-only, fail-open per file. (#47)
+
 ## [1.17.0] - 2026-06-23
 
 ### Added
