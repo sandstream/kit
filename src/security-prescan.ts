@@ -539,7 +539,20 @@ async function checkBumblebee(
       maxDuration: "60s",
       timeoutMs: 90_000,
     });
-    if (error || !outcome) return [];
+    if (error || !outcome) {
+      // Don't fail OPEN silently: a scan that errored/timed out is NOT the same
+      // as "no compromised packages found". Surface it so "we couldn't scan" is
+      // visible in the verdict rather than indistinguishable from a clean run.
+      return [
+        finding(
+          repo,
+          "supply-chain",
+          "info",
+          "bumblebee known-compromise scan did not complete (timeout or error) — supply-chain results may be incomplete",
+          "re-run `kit check`; if it persists, clear the bumblebee cache or scan manually",
+        ),
+      ];
+    }
     if (!outcome.findings.length) return [];
     return outcome.findings.map((f) =>
       finding(
@@ -551,7 +564,15 @@ async function checkBumblebee(
       ),
     );
   } catch {
-    return [];
+    return [
+      finding(
+        repo,
+        "supply-chain",
+        "info",
+        "bumblebee known-compromise scan errored — supply-chain results may be incomplete",
+        "re-run `kit check`; verify the bumblebee binary and catalog are intact",
+      ),
+    ];
   }
 }
 
