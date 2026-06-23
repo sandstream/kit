@@ -4282,9 +4282,10 @@ async function cmdSentinel(): Promise<boolean> {
 
 async function cmdScan(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
-  const { runScanners } = await import("./scanners.js");
+  const { runScanners, suppressBaselined, dedupKey } = await import("./scanners.js");
   const { resolveToolBin } = await import("./utils/resolveTool.js");
   const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
+  const { loadBaseline, baselineGet, baselineSet, saveBaseline } = await import("./baseline.js");
   const cwd = process.cwd();
 
   const { merged, runs } = await runScanners({
@@ -4297,24 +4298,42 @@ async function cmdScan(): Promise<boolean> {
     detect: (markers) => markers.some((m) => existsSync(resolve(cwd, m))),
   });
 
-  const bad = merged.filter((m) => m.severity === "critical" || m.severity === "high").length;
+  // --update-baseline: freeze the current findings as accepted (#59 noise-reduction),
+  // reusing the shared .kit-baseline.json under a "scan" category.
+  if (hasFlag(process.argv, "--update-baseline")) {
+    const bl = await loadBaseline(cwd);
+    baselineSet(bl, "scan", "findings", merged.map(dedupKey));
+    await saveBaseline(bl, cwd);
+    console.log(`${c.green}baseline updated${c.reset}  ${c.dim}${merged.length} scan finding(s) accepted into .kit-baseline.json${c.reset}`);
+    return true;
+  }
 
+  const accepted = new Set(baselineGet(await loadBaseline(cwd), "scan", "findings"));
+  const { kept: findings, suppressed } = suppressBaselined(merged, accepted);
+  const bad = findings.filter((m) => m.severity === "critical" || m.severity === "high").length;
+
+  if (hasFlag(process.argv, "--sarif")) {
+    const { toSarif } = await import("./sbom.js");
+    console.log(JSON.stringify(toSarif(findings), null, 2));
+    return bad === 0;
+  }
   if (jsonMode) {
-    console.log(JSON.stringify({ runs, findings: merged }, null, 2));
+    console.log(JSON.stringify({ runs, findings, suppressed }, null, 2));
     return bad === 0;
   }
 
-  console.log(`${c.bold}kit scan${c.reset}  ${c.dim}external scanners → one merged verdict${c.reset}`);
+  const suppressNote = suppressed > 0 ? `  ${c.dim}(${suppressed} baselined)${c.reset}` : "";
+  console.log(`${c.bold}kit scan${c.reset}  ${c.dim}external scanners → one merged verdict${c.reset}${suppressNote}`);
   for (const r of runs) {
     const mark = r.status === "ran" ? `${c.green}✓${c.reset}` : r.status === "error" ? `${c.red}✗${c.reset}` : `${c.dim}−${c.reset}`;
     const note = r.status === "ran" ? `${r.findings} finding(s)` : r.status;
     console.log(`  ${mark} ${r.id}  ${c.dim}${note}${c.reset}`);
   }
   console.log("");
-  if (merged.length === 0) {
-    console.log(`  ${c.green}no findings from the scanners that ran${c.reset}`);
+  if (findings.length === 0) {
+    console.log(`  ${c.green}no findings${suppressed > 0 ? " (after baseline)" : " from the scanners that ran"}${c.reset}`);
   } else {
-    for (const m of merged) {
+    for (const m of findings) {
       const sev = m.severity ?? "low";
       const color = sev === "critical" || sev === "high" ? c.red : sev === "medium" ? c.yellow : c.dim;
       console.log(`  ${color}${sev.toUpperCase().padEnd(8)}${c.reset} ${m.name}  ${c.dim}[${m.scanners.join("+")}]${c.reset}`);
@@ -4322,6 +4341,52 @@ async function cmdScan(): Promise<boolean> {
   }
   if (bad > 0) console.log(`${c.red}${bad} high/critical${c.reset}`);
   return bad === 0;
+}
+
+async function cmdGhaAudit(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  const { runGhaAudit } = await import("./gha-audit.js");
+  const results = runGhaAudit(process.cwd());
+  const fails = results.filter((r) => r.status === "fail").length;
+
+  if (jsonMode) {
+    console.log(JSON.stringify({ ok: fails === 0, results }, null, 2));
+    return fails === 0;
+  }
+
+  console.log(`${c.bold}kit gha-audit${c.reset}  ${c.dim}.github/workflows hardening${c.reset}`);
+  for (const r of results) {
+    const mark =
+      r.status === "fail" ? `${c.red}✗${c.reset}` :
+      r.status === "warn" ? `${c.yellow}!${c.reset}` :
+      r.status === "skip" ? `${c.dim}−${c.reset}` : `${c.green}✓${c.reset}`;
+    console.log(`  ${mark} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
+    if (r.suggestion) console.log(`      ${c.dim}${r.suggestion}${c.reset}`);
+  }
+  return fails === 0;
+}
+
+async function cmdSbom(): Promise<boolean> {
+  const fmt = (flagValue(process.argv, "--format") ?? "cyclonedx").toLowerCase();
+  if (fmt !== "cyclonedx" && fmt !== "spdx") {
+    console.error(`${c.red}usage: kit sbom [--format cyclonedx|spdx]${c.reset}`);
+    process.exitCode = 1;
+    return false;
+  }
+  const { lockComponents, toCycloneDX, toSpdx } = await import("./sbom.js");
+  const { parseLockPkgs } = await import("./supply-chain.js");
+  const cwd = process.cwd();
+  let lock: Parameters<typeof parseLockPkgs>[0];
+  try {
+    lock = JSON.parse(readFileSync(resolve(cwd, "package-lock.json"), "utf8"));
+  } catch {
+    console.error(`${c.red}no package-lock.json found — SBOM needs a committed lockfile${c.reset}`);
+    process.exitCode = 1;
+    return false;
+  }
+  const components = lockComponents(parseLockPkgs(lock));
+  console.log(JSON.stringify(fmt === "spdx" ? toSpdx(components) : toCycloneDX(components), null, 2));
+  return true;
 }
 
 async function cmdWhoami(): Promise<boolean> {
@@ -5067,6 +5132,8 @@ async function main(): Promise<void> {
         "agent-audit": cmdAgentAudit,
         sentinel: cmdSentinel,
         scan: cmdScan,
+        "gha-audit": cmdGhaAudit,
+        sbom: cmdSbom,
         init: cmdInit,
         upgrade: cmdUpgrade,
         install: cmdInstall,

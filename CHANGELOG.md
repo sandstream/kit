@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-06-23
+
+### Added
+- **Baseline suppression for `kit scan` (#59).** Reuses kit's `.kit-baseline.json` (new `scan` category): `kit scan` suppresses findings whose key is baselined; `kit scan --update-baseline` freezes the current set. Noise reduction is the #1 adoption blocker — accept a finding once (e.g. a false positive) and it stays quiet. Pure `suppressBaselined` fixture-tested.
+- **GitHub Actions hardening lint — `kit gha-audit` (#60).** Static, local-first, no-YAML-dep scan of `.github/workflows`: unpinned action refs (tag/branch instead of a full commit SHA — the tj-actions/changed-files CVE-2025-30066 class) and "pwn request" (`pull_request_target` + `actions/checkout`). Findings carry CWE-1357 / OWASP-A08 citations.
+- **SBOM + SARIF emit — `kit sbom`, `kit scan --sarif` (#61).** The emit side of the #48 ingest adapter: `kit sbom --format cyclonedx|spdx` generates an SBOM from `package-lock.json` (with purls; EU-CRA-ready), and `kit scan --sarif` emits the merged scan verdict as SARIF 2.1.0 (kit as the tool, citations on rules). Pure emitters fixture-tested.
+- **`kit doctor` detects mise tools not on PATH (#64).** Warns when mise's shims dir exists but isn't on `PATH` (bare `snyk`/`trivy`/`infisical` won't resolve) and prints the exact fix line. New `mise-path.ts` pure helpers + idempotent `ensureMiseActivation`; prefers shims-dir-on-PATH over the fragile `mise activate`.
+
 ## [1.20.0] - 2026-06-23
 
 ### Added

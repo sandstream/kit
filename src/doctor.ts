@@ -74,6 +74,25 @@ async function checkMise(): Promise<DoctorCheck> {
   }
 }
 
+async function checkMisePath(): Promise<DoctorCheck | null> {
+  const { miseShimsDir, isDirOnPath, activationLine } = await import("./mise-path.js");
+  const shims = miseShimsDir();
+  try {
+    await access(shims);
+  } catch {
+    return null; // no mise shims here → nothing to check
+  }
+  if (isDirOnPath(process.env.PATH, shims)) {
+    return { name: "mise tools on PATH", status: "pass", detail: shims, category: "tools" };
+  }
+  return {
+    name: "mise tools on PATH",
+    status: "warn",
+    detail: `mise shims not on PATH — bare commands (snyk/trivy/infisical/…) won't resolve. Add to your shell profile: ${activationLine(shims)}`,
+    category: "tools",
+  };
+}
+
 async function checkEnvLocal(config: kitConfig, cwd: string): Promise<DoctorCheck | null> {
   if (!config.secrets) return null;
 
@@ -152,6 +171,9 @@ export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorR
 
   allChecks.push(await checkNodeVersion(cwd));
   allChecks.push(await checkMise());
+
+  const misePathCheck = await checkMisePath();
+  if (misePathCheck) allChecks.push(misePathCheck);
 
   const envLocalCheck = await checkEnvLocal(config, cwd);
   if (envLocalCheck) allChecks.push(envLocalCheck);
