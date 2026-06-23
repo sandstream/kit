@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { dedupKey, mergeFindings, runScanners, type ScanDeps, type ScannerDef } from "./scanners.js";
+import { dedupKey, mergeFindings, suppressBaselined, runScanners, type ScanDeps, type ScannerDef } from "./scanners.js";
 import type { SecurityCheckResult } from "./check-security.js";
 
 const f = (name: string, severity: SecurityCheckResult["severity"], detail = ""): SecurityCheckResult => ({
@@ -58,5 +58,21 @@ describe("runScanners (injected deps)", () => {
     assert.equal(byId.grype, "not-installed");
     assert.equal(byId.trivy, "ran");
     assert.equal(merged.length, 1); // trivy's one CVE
+  });
+});
+
+describe("suppressBaselined", () => {
+  const merged = mergeFindings([
+    { id: "trivy", findings: [f("x: CVE-2021-23337", "high"), f("verify-suite: stripe-token", "critical")] },
+  ]);
+  it("drops findings whose key is in the baseline, keeps the rest", () => {
+    const accepted = new Set(["verify-suite: stripe-token"]); // the FP, baselined (dedupKey = name)
+    const { kept, suppressed } = suppressBaselined(merged, accepted);
+    assert.equal(suppressed, 1);
+    assert.equal(kept.length, 1);
+    assert.equal(dedupKey(kept[0]), "CVE-2021-23337");
+  });
+  it("no-ops on an empty baseline", () => {
+    assert.equal(suppressBaselined(merged, new Set()).suppressed, 0);
   });
 });

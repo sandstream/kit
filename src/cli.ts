@@ -4282,9 +4282,10 @@ async function cmdSentinel(): Promise<boolean> {
 
 async function cmdScan(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
-  const { runScanners } = await import("./scanners.js");
+  const { runScanners, suppressBaselined, dedupKey } = await import("./scanners.js");
   const { resolveToolBin } = await import("./utils/resolveTool.js");
   const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
+  const { loadBaseline, baselineGet, baselineSet, saveBaseline } = await import("./baseline.js");
   const cwd = process.cwd();
 
   const { merged, runs } = await runScanners({
@@ -4297,24 +4298,37 @@ async function cmdScan(): Promise<boolean> {
     detect: (markers) => markers.some((m) => existsSync(resolve(cwd, m))),
   });
 
-  const bad = merged.filter((m) => m.severity === "critical" || m.severity === "high").length;
+  // --update-baseline: freeze the current findings as accepted (#59 noise-reduction),
+  // reusing the shared .kit-baseline.json under a "scan" category.
+  if (hasFlag(process.argv, "--update-baseline")) {
+    const bl = await loadBaseline(cwd);
+    baselineSet(bl, "scan", "findings", merged.map(dedupKey));
+    await saveBaseline(bl, cwd);
+    console.log(`${c.green}baseline updated${c.reset}  ${c.dim}${merged.length} scan finding(s) accepted into .kit-baseline.json${c.reset}`);
+    return true;
+  }
+
+  const accepted = new Set(baselineGet(await loadBaseline(cwd), "scan", "findings"));
+  const { kept: findings, suppressed } = suppressBaselined(merged, accepted);
+  const bad = findings.filter((m) => m.severity === "critical" || m.severity === "high").length;
 
   if (jsonMode) {
-    console.log(JSON.stringify({ runs, findings: merged }, null, 2));
+    console.log(JSON.stringify({ runs, findings, suppressed }, null, 2));
     return bad === 0;
   }
 
-  console.log(`${c.bold}kit scan${c.reset}  ${c.dim}external scanners → one merged verdict${c.reset}`);
+  const suppressNote = suppressed > 0 ? `  ${c.dim}(${suppressed} baselined)${c.reset}` : "";
+  console.log(`${c.bold}kit scan${c.reset}  ${c.dim}external scanners → one merged verdict${c.reset}${suppressNote}`);
   for (const r of runs) {
     const mark = r.status === "ran" ? `${c.green}✓${c.reset}` : r.status === "error" ? `${c.red}✗${c.reset}` : `${c.dim}−${c.reset}`;
     const note = r.status === "ran" ? `${r.findings} finding(s)` : r.status;
     console.log(`  ${mark} ${r.id}  ${c.dim}${note}${c.reset}`);
   }
   console.log("");
-  if (merged.length === 0) {
-    console.log(`  ${c.green}no findings from the scanners that ran${c.reset}`);
+  if (findings.length === 0) {
+    console.log(`  ${c.green}no findings${suppressed > 0 ? " (after baseline)" : " from the scanners that ran"}${c.reset}`);
   } else {
-    for (const m of merged) {
+    for (const m of findings) {
       const sev = m.severity ?? "low";
       const color = sev === "critical" || sev === "high" ? c.red : sev === "medium" ? c.yellow : c.dim;
       console.log(`  ${color}${sev.toUpperCase().padEnd(8)}${c.reset} ${m.name}  ${c.dim}[${m.scanners.join("+")}]${c.reset}`);

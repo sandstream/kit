@@ -67,6 +67,16 @@ export function mergeFindings(perScanner: { id: string; findings: SecurityCheckR
   return [...byKey.values()].sort((a, b) => (RANK[b.severity ?? "low"] ?? 0) - (RANK[a.severity ?? "low"] ?? 0));
 }
 
+/** Drop merged findings whose key is in the accepted baseline (#59 noise-reduction). */
+export function suppressBaselined(
+  merged: MergedFinding[],
+  accepted: ReadonlySet<string>,
+): { kept: MergedFinding[]; suppressed: number } {
+  if (accepted.size === 0) return { kept: merged, suppressed: 0 };
+  const kept = merged.filter((m) => !accepted.has(dedupKey(m)));
+  return { kept, suppressed: merged.length - kept.length };
+}
+
 export type ScannerStatus = "ran" | "not-installed" | "no-token" | "not-applicable" | "error";
 export interface ScannerRun {
   id: string;
