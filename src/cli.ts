@@ -4501,6 +4501,37 @@ async function cmdScan(): Promise<boolean> {
     console.log(
       `${c.dim}air-gap mode: offline scanners only${airgap.dropped.length ? ` (skipping cloud-only: ${airgap.dropped.join(", ")})` : ""}${c.reset}`,
     );
+    // Verified offline threat-data bundle (optional): point scanners at a
+    // signed, integrity-checked local DB set. Fail-closed — never scan against
+    // unverified threat data. See docs/AIR_GAP.md.
+    const tdDir = process.env.KIT_THREAT_DATA_DIR;
+    if (tdDir) {
+      const { verifyThreatData } = await import("./airgap/threat-data.js");
+      const pubRef = process.env.KIT_THREAT_DATA_PUBKEY ?? "";
+      const pubPem = existsSync(pubRef) ? readFileSync(pubRef, "utf8") : pubRef;
+      if (!pubPem) {
+        console.error(
+          `${c.red}✗ KIT_THREAT_DATA_DIR set but KIT_THREAT_DATA_PUBKEY missing — cannot verify the bundle (fail-closed)${c.reset}`,
+        );
+        return false;
+      }
+      const res = verifyThreatData({
+        dir: tdDir,
+        publicKeyPem: pubPem,
+        readFile: (rel) => readFileSync(resolve(tdDir, rel)),
+        resolvePath: (rel) => resolve(tdDir, rel),
+      });
+      if (!res.ok) {
+        console.error(
+          `${c.red}✗ threat-data bundle rejected: ${res.reason} (fail-closed)${c.reset}`,
+        );
+        return false;
+      }
+      Object.assign(airgap.env, res.env);
+      console.log(
+        `${c.dim}verified threat-data bundle: ${res.artifacts} artifact(s) signed + checksummed${c.reset}`,
+      );
+    }
   }
   const config = await loadConfig(resolveConfigPath());
 
