@@ -23,21 +23,10 @@ import { appendAuditEventDirect } from "./audit.js";
 const ELEVATION_FILE = ".kit/elevation.json";
 const DEFAULT_TTL_MINUTES = 15;
 
-/**
- * Scopes that, when granted, MUST be consumed (atomically deleted) on use.
- * One elevation = one destructive operation. Rotation modes that need a
- * follow-up rollback path (scoped-key-mint) are intentionally absent — they
- * retain the standard 15-min TTL because the rollback re-uses the marker.
- */
-const ONE_SHOT_SCOPES: ReadonlySet<string> = new Set([
-  "jwt-secret-roll",
-  "purge-history",
-  "onecli-register",
-]);
-
-export function isOneShotScope(scope: string): boolean {
-  return ONE_SHOT_SCOPES.has(scope);
-}
+// (Removed dead `ONE_SHOT_SCOPES` / `isOneShotScope`: never called in
+// production, and its scope strings had drifted from the real ones. The
+// authoritative one-shot decision lives in elevation-scopes.ts →
+// `scopeFor(...).oneShot`.)
 
 /**
  * Loud one-time stderr warning for the CI escape hatch. Emitted once per

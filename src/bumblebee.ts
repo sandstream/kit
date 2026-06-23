@@ -298,7 +298,15 @@ async function downloadAndInstall(
     const tarPath = join(staging, target.assetName);
     await writeFile(tarPath, buf);
     // bumblebee tarballs extract flat: ./bumblebee, ./threat_intel/, LICENSE, README.md
-    await exec("tar", ["-xzf", tarPath, "-C", staging], { timeout: 60_000 });
+    // --no-same-owner/--no-same-permissions: don't let archived ownership/mode
+    // bits carry over (defense-in-depth; the tarball is checksum-pinned).
+    await exec(
+      "tar",
+      ["--no-same-owner", "--no-same-permissions", "-xzf", tarPath, "-C", staging],
+      {
+        timeout: 60_000,
+      },
+    );
 
     const stagedBin = join(staging, "bumblebee");
     const stagedCatalog = join(staging, "threat_intel");
