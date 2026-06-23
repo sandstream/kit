@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-06-23
+
+### Added
+- **SARIF + OSV ingestion adapter — one parser per format, not per tool (`kit ingest <sarif|osv> <file>`).** SARIF 2.1.0 (semgrep/CodeQL/Trivy/Grype/…) and OSV-scanner JSON normalize into kit's `SecurityCheckResult` shape: SARIF maps `security-severity` (CVSS) → severity with a `level` fallback and lifts `CWE-NNN` rule tags into a citation; OSV maps package vulnerabilities to `dependency` findings with an OWASP-A06 citation. Pure (string → findings), fixture-tested; `kit ingest` prints them severity-sorted (`--json` for the raw list). Ingesting the *format* means any SARIF/OSV-emitting scanner feeds kit's finding ledger uniformly. (#48)
+
 ## [1.15.0] - 2026-06-23
 
 ### Added
