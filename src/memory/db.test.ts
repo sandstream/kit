@@ -165,3 +165,35 @@ describe("memory db", () => {
     db.close();
   });
 });
+
+describe("redaction-at-capture (KIT_MEMORY_REDACT)", () => {
+  const SECRET = ["sk", "live", "Z".repeat(40)].join("_");
+  function insertAndRead(redact: boolean): string {
+    const prev = process.env.KIT_MEMORY_REDACT;
+    if (redact) process.env.KIT_MEMORY_REDACT = "1";
+    else delete process.env.KIT_MEMORY_REDACT;
+    try {
+      const db = openMemoryDb(":memory:");
+      upsertSession(db, { sessionId: "s", harness: "claude-code" });
+      insertMessage(db, { uuid: "u", sessionId: "s", type: "user", content: `key ${SECRET}` });
+      const row = db.prepare("SELECT content FROM messages WHERE uuid = ?").get("u") as {
+        content: string;
+      };
+      db.close();
+      return row.content;
+    } finally {
+      if (prev === undefined) delete process.env.KIT_MEMORY_REDACT;
+      else process.env.KIT_MEMORY_REDACT = prev;
+    }
+  }
+
+  it("stores raw content by default (opt-in off)", () => {
+    assert.ok(insertAndRead(false).includes(SECRET));
+  });
+
+  it("masks secrets at capture when KIT_MEMORY_REDACT=1", () => {
+    const c = insertAndRead(true);
+    assert.ok(!c.includes(SECRET), "secret must not be persisted");
+    assert.match(c, /\[REDACTED\]/);
+  });
+});
