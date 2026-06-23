@@ -6,6 +6,8 @@ import { bitbucketSensor } from "./health-sensors/bitbucket-pipelines.js";
 import { vercelSensor } from "./health-sensors/vercel.js";
 import { sentrySensor } from "./health-sensors/sentry.js";
 import { resendSensor } from "./health-sensors/resend.js";
+import { supabaseAdvisorSensor } from "./health-sensors/supabase-advisor.js";
+import { tlsCertSensor } from "./health-sensors/tls-cert.js";
 
 export type HealthStatus = "green" | "red" | "unknown";
 export type HealthClass = "code" | "human" | "noise";
@@ -86,6 +88,8 @@ export const HEALTH_SENSORS: HealthSensor[] = [
   vercelSensor,
   sentrySensor,
   resendSensor,
+  supabaseAdvisorSensor,
+  tlsCertSensor,
 ];
 
 /** Returns the sensors whose underlying CI platform the project actually uses. */
@@ -104,6 +108,11 @@ export function selectSensors(ctx: HealthCtx): HealthSensor[] {
         return ctx.services?.includes("sentry") === true;
       case "resend":
         return ctx.services?.includes("resend") === true;
+      case "supabase-advisor":
+        return ctx.services?.includes("supabase") === true;
+      case "tls-cert":
+        // Opt-in: only when the user names host(s) to check.
+        return Boolean(process.env.KIT_TLS_HOST);
       default:
         return false;
     }
