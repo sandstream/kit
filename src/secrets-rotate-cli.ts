@@ -134,6 +134,7 @@ import { isNonInteractive } from "./environment.js";
 import { writeSecretToBackend } from "./secrets-migrate.js";
 import { planRotation } from "./secrets-rotate.js";
 import { requireElevation, consumeElevation } from "./elevation.js";
+import { scopeFor } from "./elevation-scopes.js";
 import {
   propagate,
   parseTargets,
@@ -311,10 +312,15 @@ async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Pr
   // S12 elevation required for rotation. jwt-secret-roll is a hard cutover
   // — one elevation = one rotation. Other modes (scoped-key-mint with
   // rollback) keep the standard 15-min TTL.
+  // Derive the scope from the mode so the irreversible cutover requires its own
+  // distinct elevation ("rotate-jwt-cutover") and can't be satisfied by a marker
+  // minted for the reversible scoped-key-mint (scope "rotate"). Single source of
+  // truth = elevation-scopes.ts; never hard-code the scope string here.
+  const rotateScope = scopeFor("rotate", mode).scope;
   const elev =
     mode === "jwt-secret-roll"
-      ? await consumeElevation("rotate")
-      : await requireElevation("rotate");
+      ? await consumeElevation(rotateScope)
+      : await requireElevation(rotateScope);
   if (!elev.ok) {
     console.error(`${c.red}✗ ${elev.reason}${c.reset}`);
     return false;

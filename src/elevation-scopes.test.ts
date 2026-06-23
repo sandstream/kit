@@ -5,13 +5,23 @@ import { scopeFor, isOneShot, listScopes } from "./elevation-scopes.js";
 describe("scopeFor", () => {
   it("matches composite operation:mode keys", () => {
     const m = scopeFor("rotate", "jwt-secret-roll");
-    assert.equal(m.scope, "rotate");
+    assert.equal(m.scope, "rotate-jwt-cutover");
     assert.equal(m.oneShot, true);
   });
 
   it("scoped-key-mint is NOT one-shot (reversible)", () => {
     const m = scopeFor("rotate", "scoped-key-mint");
     assert.equal(m.oneShot, false);
+  });
+
+  it("irreversible jwt cutover uses a DISTINCT scope from the reversible mint", () => {
+    // Regression: sharing scope "rotate" let an elevation minted for the benign
+    // scoped-key-mint authorize the irreversible jwt-secret-roll within its TTL.
+    const cutover = scopeFor("rotate", "jwt-secret-roll");
+    const mint = scopeFor("rotate", "scoped-key-mint");
+    assert.notEqual(cutover.scope, mint.scope);
+    assert.equal(mint.scope, "rotate");
+    assert.equal(cutover.scope, "rotate-jwt-cutover");
   });
 
   it("falls back to bare operation when no mode given", () => {

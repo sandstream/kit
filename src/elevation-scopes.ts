@@ -33,7 +33,11 @@ export interface ElevationScopeMapping {
 const SCOPE_MAP: Record<string, ElevationScopeMapping> = {
   // Rotation modes
   "rotate:jwt-secret-roll": {
-    scope: "rotate",
+    // Distinct scope (not "rotate"): the irreversible HARD CUTOVER must NOT be
+    // authorizable by an elevation minted for the reversible scoped-key-mint.
+    // Sharing "rotate" let a benign `--scope rotate` marker fire the cutover
+    // within its TTL.
+    scope: "rotate-jwt-cutover",
     oneShot: true,
     description: "Supabase JWT-secret reset — invalidates anon + service_role + all sessions",
   },
