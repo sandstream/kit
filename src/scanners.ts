@@ -11,7 +11,7 @@
  * injectable deps so the orchestration is testable without real scanners.
  */
 import type { SecurityCheckResult } from "./check-security.js";
-import { ingest, type IngestFormat } from "./adapters/ingest.js";
+import { ingestStrict, type IngestFormat } from "./adapters/ingest.js";
 
 export interface ScannerDef {
   id: string;
@@ -124,15 +124,22 @@ export async function runScanners(
       continue;
     }
     const res = await deps.run(bin, s.args);
-    // Most scanners exit non-zero WHEN findings exist — parse stdout regardless;
-    // only a truly empty + failed run is an error.
-    if (!res.stdout && !res.ok) {
+    // Most scanners exit non-zero WHEN findings exist, so a non-zero exit alone
+    // is not an error — parse the output regardless. But a non-empty output we
+    // CANNOT parse (junk, an error blob, the wrong format) must NOT be silently
+    // treated as "ran clean": that lets a broken scanner hide behind a green
+    // verdict. Empty output is "ran/0" only if the process also succeeded.
+    if (!res.stdout) {
+      runs.push({ id: s.id, status: res.ok ? "ran" : "error", findings: 0 });
+      continue;
+    }
+    const outcome = ingestStrict(s.format, res.stdout);
+    if (!outcome.ok) {
       runs.push({ id: s.id, status: "error", findings: 0 });
       continue;
     }
-    const findings = res.stdout ? ingest(s.format, res.stdout) : [];
-    perScanner.push({ id: s.id, findings });
-    runs.push({ id: s.id, status: "ran", findings: findings.length });
+    perScanner.push({ id: s.id, findings: outcome.findings });
+    runs.push({ id: s.id, status: "ran", findings: outcome.findings.length });
   }
   return { merged: mergeFindings(perScanner), runs };
 }

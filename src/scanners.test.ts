@@ -81,6 +81,33 @@ describe("runScanners (injected deps)", () => {
     assert.equal(byId.trivy, "ran");
     assert.equal(merged.length, 1); // trivy's one CVE
   });
+
+  it("marks a scanner whose output we cannot parse as error, NOT ran-clean", async () => {
+    const only: ScannerDef[] = [{ id: "trivy", bin: "trivy", args: [], format: "sarif" }];
+    const deps: ScanDeps = {
+      resolve: async (bin) => `/usr/bin/${bin}`,
+      // scanner printed a junk error blob to stdout (e.g. a stack trace / wrong format)
+      run: async () => ({ ok: false, stdout: "panic: could not open db\n" }),
+      hasEnv: () => true,
+      detect: () => true,
+    };
+    const { merged, runs } = await runScanners(deps, only);
+    assert.equal(runs[0].status, "error", "unparseable output must surface as error");
+    assert.equal(merged.length, 0);
+  });
+
+  it("treats a valid but empty SARIF as ran/0 (not error)", async () => {
+    const only: ScannerDef[] = [{ id: "trivy", bin: "trivy", args: [], format: "sarif" }];
+    const deps: ScanDeps = {
+      resolve: async (bin) => `/usr/bin/${bin}`,
+      run: async () => ({ ok: true, stdout: JSON.stringify({ runs: [] }) }),
+      hasEnv: () => true,
+      detect: () => true,
+    };
+    const { runs } = await runScanners(deps, only);
+    assert.equal(runs[0].status, "ran");
+    assert.equal(runs[0].findings, 0);
+  });
 });
 
 describe("suppressBaselined", () => {

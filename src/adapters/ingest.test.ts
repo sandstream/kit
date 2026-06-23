@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseSarif, parseOsv, ingest } from "./ingest.js";
+import { parseSarif, parseOsv, ingest, ingestStrict } from "./ingest.js";
 
 const sarif = JSON.stringify({
   runs: [
@@ -102,5 +102,33 @@ describe("ingest dispatch", () => {
     assert.equal(ingest("osv", osv).length, 1);
     // @ts-expect-error unknown format
     assert.deepEqual(ingest("nope", sarif), []);
+  });
+});
+
+describe("ingestStrict", () => {
+  it("parses valid input into findings (ok:true)", () => {
+    const a = ingestStrict("sarif", sarif);
+    assert.equal(a.ok, true);
+    assert.ok(a.ok && a.findings.length === 2);
+    const b = ingestStrict("osv", osv);
+    assert.ok(b.ok && b.findings.length === 1);
+  });
+
+  it("accepts a valid but EMPTY report as ok:true with no findings", () => {
+    const a = ingestStrict("sarif", JSON.stringify({ runs: [] }));
+    assert.ok(a.ok && a.findings.length === 0);
+    const b = ingestStrict("osv", JSON.stringify({ results: [] }));
+    assert.ok(b.ok && b.findings.length === 0);
+  });
+
+  it("rejects malformed JSON (ok:false) — the masked-failure case", () => {
+    assert.equal(ingestStrict("sarif", "panic: boom").ok, false);
+    assert.equal(ingestStrict("osv", "not json").ok, false);
+  });
+
+  it("rejects valid JSON of the wrong shape (ok:false)", () => {
+    // parses fine, but it's an error blob, not a SARIF/OSV report
+    assert.equal(ingestStrict("sarif", JSON.stringify({ error: "no db" })).ok, false);
+    assert.equal(ingestStrict("osv", JSON.stringify({ runs: [] })).ok, false);
   });
 });
