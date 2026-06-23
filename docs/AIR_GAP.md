@@ -62,6 +62,36 @@ What the mode does per scanner:
 Install the scanners through your internal package mirror or an approved binary
 cache; kit never downloads them itself.
 
+### Verified offline threat-data bundle (signed)
+
+Stale or tampered threat data silently degrades every verdict. To give the
+sync-in a trust chain that is **fully offline-verifiable** (no Fulcio/Rekor),
+ship the DBs as a _signed bundle_ and point kit at it:
+
+```bash
+export KIT_AIRGAP=1
+export KIT_THREAT_DATA_DIR=/opt/kit/threat-data
+export KIT_THREAT_DATA_PUBKEY=/etc/kit/threat-data.pub   # PEM (path or inline)
+kit scan
+```
+
+The bundle dir contains:
+
+- `manifest.json` — `{ version, artifacts: [{ path, sha256, env? }] }`
+- `manifest.json.sig` — a base64 **Ed25519** signature over `manifest.json`, made
+  on the connected host with the key whose public half is `KIT_THREAT_DATA_PUBKEY`
+- the artifacts themselves (e.g. `grype.db`, `osv.db`, a bumblebee catalog)
+
+kit verifies the manifest **signature**, then the **SHA-256** of every artifact,
+then sets each artifact's declared `env` var to its absolute path (e.g.
+`GRYPE_DB_CACHE_DIR`) so the scanner uses the verified local DB. **Any failure —
+bad signature, checksum mismatch, missing/extra-path artifact — rejects the whole
+bundle and `kit scan` refuses to run (fail-closed).** The bundle author declares
+the `env` wiring per artifact, so kit hard-codes no scanner-version specifics.
+
+Build the bundle on a connected host (sync DBs → write manifest with SHA-256 →
+`openssl pkeyutl -sign` / equivalent Ed25519 signing), then transfer it in.
+
 ## 3. Bumblebee (known-compromise scan) offline
 
 - `KIT_BUMBLEBEE_BIN` — use a pre-installed, internally-vetted bumblebee binary
