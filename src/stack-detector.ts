@@ -71,7 +71,8 @@ async function collectWorkspaceDeps(cwd: string, pkg: PackageJson): Promise<stri
     for (const dir of await expandWorkspaceGlob(cwd, g)) {
       const member = await readJson<PackageJson>(join(cwd, dir, "package.json"));
       if (member) {
-        for (const k of Object.keys({ ...member.dependencies, ...member.devDependencies })) deps.add(k);
+        for (const k of Object.keys({ ...member.dependencies, ...member.devDependencies }))
+          deps.add(k);
       }
     }
   }
@@ -266,9 +267,7 @@ async function detectFromRust(cwd: string): Promise<DetectedStack | null> {
 }
 
 async function detectFromPhp(cwd: string): Promise<DetectedStack | null> {
-  const composer = await readJson<{ require?: Record<string, string> }>(
-    join(cwd, "composer.json")
-  );
+  const composer = await readJson<{ require?: Record<string, string> }>(join(cwd, "composer.json"));
   if (!composer) return null;
 
   let framework: string | undefined;
@@ -328,12 +327,14 @@ async function detectFromAndroid(cwd: string): Promise<DetectedStack | null> {
     (await readFile(join(cwd, "build.gradle.kts"), "utf-8").catch(() => null)) ??
     (await readFile(join(cwd, "build.gradle"), "utf-8").catch(() => null));
   const hasSettings =
-    (await fileExists(join(cwd, "settings.gradle.kts"))) || (await fileExists(join(cwd, "settings.gradle")));
+    (await fileExists(join(cwd, "settings.gradle.kts"))) ||
+    (await fileExists(join(cwd, "settings.gradle")));
   if (gradle === null && !hasSettings) return null;
 
   // Only call it Android when the Android Gradle plugin is applied; otherwise
   // it's a generic JVM/Gradle project (label the language, not a mobile framework).
-  const framework = gradle && /com\.android\.(application|library)/.test(gradle) ? "android" : undefined;
+  const framework =
+    gradle && /com\.android\.(application|library)/.test(gradle) ? "android" : undefined;
   const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
 
   return {

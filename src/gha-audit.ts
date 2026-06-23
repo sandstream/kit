@@ -15,12 +15,14 @@ import { resolve, join } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 
 const UNPINNED_RULE = {
-  id: "CWE-1357", source: "cwe" as const,
+  id: "CWE-1357",
+  source: "cwe" as const,
   ref: "https://cwe.mitre.org/data/definitions/1357.html",
   title: "Reliance on Insufficiently Trustworthy Component",
 };
 const PWN_RULE = {
-  id: "OWASP-A08", source: "owasp" as const,
+  id: "OWASP-A08",
+  source: "owasp" as const,
   ref: "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/",
   title: "Software and Data Integrity Failures",
 };
@@ -62,7 +64,8 @@ export function auditWorkflow(content: string, file: string): SecurityCheckResul
       status: "warn",
       detail: "pull_request_target + actions/checkout can run untrusted PR code with repo secrets",
       severity: "high",
-      suggestion: "avoid checking out PR head under pull_request_target, or gate on a label/permission",
+      suggestion:
+        "avoid checking out PR head under pull_request_target, or gate on a label/permission",
       rule: PWN_RULE,
     });
   }
@@ -74,13 +77,27 @@ export function auditWorkflow(content: string, file: string): SecurityCheckResul
 export function runGhaAudit(cwd: string): SecurityCheckResult[] {
   const dir = resolve(cwd, ".github", "workflows");
   if (!existsSync(dir)) {
-    return [{ category: "supply-chain", name: "gha-audit", status: "skip", detail: "no .github/workflows directory" }];
+    return [
+      {
+        category: "supply-chain",
+        name: "gha-audit",
+        status: "skip",
+        detail: "no .github/workflows directory",
+      },
+    ];
   }
   let files: string[];
   try {
     files = readdirSync(dir).filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"));
   } catch {
-    return [{ category: "supply-chain", name: "gha-audit", status: "skip", detail: "could not read .github/workflows" }];
+    return [
+      {
+        category: "supply-chain",
+        name: "gha-audit",
+        status: "skip",
+        detail: "could not read .github/workflows",
+      },
+    ];
   }
   const out: SecurityCheckResult[] = [];
   for (const f of files) {
@@ -91,7 +108,12 @@ export function runGhaAudit(cwd: string): SecurityCheckResult[] {
     }
   }
   if (out.length === 0) {
-    out.push({ category: "supply-chain", name: "gha-audit", status: "pass", detail: `${files.length} workflow(s): all actions pinned, no pwn-request` });
+    out.push({
+      category: "supply-chain",
+      name: "gha-audit",
+      status: "pass",
+      detail: `${files.length} workflow(s): all actions pinned, no pwn-request`,
+    });
   }
   return out;
 }

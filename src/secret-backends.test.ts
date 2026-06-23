@@ -55,7 +55,9 @@ describe("secret backend registry", () => {
     it("reads from process.env for source=env", async () => {
       process.env.KIT_BACKEND_TEST_VAR = "hello-env";
       try {
-        const r = await resolveViaBackend("KIT_BACKEND_TEST_VAR", { source: "env" } as SecretKeyConfig);
+        const r = await resolveViaBackend("KIT_BACKEND_TEST_VAR", {
+          source: "env",
+        } as SecretKeyConfig);
         assert.equal(r.resolved, true);
         assert.equal(r.value, "hello-env");
         assert.equal(r.detail, "From environment");
@@ -66,19 +68,18 @@ describe("secret backend registry", () => {
 
     it("reports not-set for an absent env var", async () => {
       delete process.env.KIT_BACKEND_DEFINITELY_ABSENT;
-      const r = await resolveViaBackend(
-        "KIT_BACKEND_DEFINITELY_ABSENT",
-        { source: "env" } as SecretKeyConfig,
-      );
+      const r = await resolveViaBackend("KIT_BACKEND_DEFINITELY_ABSENT", {
+        source: "env",
+      } as SecretKeyConfig);
       assert.equal(r.resolved, false);
       assert.equal(r.detail, "Not set in environment");
     });
 
     it("reads inline value for source=config", async () => {
-      const r = await resolveViaBackend(
-        "X",
-        { source: "config", value: "inline-secret" } as SecretKeyConfig,
-      );
+      const r = await resolveViaBackend("X", {
+        source: "config",
+        value: "inline-secret",
+      } as SecretKeyConfig);
       assert.equal(r.resolved, true);
       assert.equal(r.value, "inline-secret");
       assert.equal(r.detail, "From config");

@@ -28,7 +28,7 @@ describe("railwayDeployAdapter", () => {
       mockContext({
         RAILWAY_PROJECT_ID: "proj_abc123",
         RAILWAY_ENVIRONMENT: "staging",
-      })
+      }),
     );
     assert.equal(result.success, true);
     assert.equal(result.secrets?.["RAILWAY_PROJECT_ID"], "proj_abc123");
@@ -38,7 +38,7 @@ describe("railwayDeployAdapter", () => {
 
   it("provision uses production as default environment", async () => {
     const result = await railwayDeployAdapter.provision(
-      mockContext({ RAILWAY_PROJECT_ID: "proj_abc123" })
+      mockContext({ RAILWAY_PROJECT_ID: "proj_abc123" }),
     );
     assert.equal(result.success, true);
     assert.equal(result.secrets?.["RAILWAY_ENVIRONMENT"], "production");
@@ -47,9 +47,7 @@ describe("railwayDeployAdapter", () => {
   it("provision returns error when railway login fails", async () => {
     // railway CLI is not installed in test environment — expect provision to
     // attempt login and fail gracefully
-    const result = await railwayDeployAdapter.provision(
-      mockContext()
-    );
+    const result = await railwayDeployAdapter.provision(mockContext());
     // Either login fails (CLI not installed) or init fails — either way, success=false
     // because we have no project ID and CLI isn't available
     assert.equal(result.success, false);

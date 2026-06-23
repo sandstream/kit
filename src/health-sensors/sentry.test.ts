@@ -46,7 +46,10 @@ describe("sentrySensor.probe", () => {
 
   it("emits green when none", async () => {
     setEnv();
-    const out = await sentrySensor.probe(ctx, deps({ http: { ok: true, status: 200, body: "[]" } }));
+    const out = await sentrySensor.probe(
+      ctx,
+      deps({ http: { ok: true, status: 200, body: "[]" } }),
+    );
     assert.equal(out[0].status, "green");
   });
 

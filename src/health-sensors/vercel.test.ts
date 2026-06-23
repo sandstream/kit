@@ -17,7 +17,11 @@ function deps(over: { http?: HttpResponse } = {}): HealthDeps {
     httpGet: async () => over.http ?? { ok: true, status: 200, body },
   };
 }
-const linked: HealthCtx = { cwd: "/tmp/repo", config: {}, vercel: { orgId: "team_1", projectId: "prj_abc" } };
+const linked: HealthCtx = {
+  cwd: "/tmp/repo",
+  config: {},
+  vercel: { orgId: "team_1", projectId: "prj_abc" },
+};
 
 describe("parseVercelDeployments / latestFailedVercel", () => {
   it("flags the latest TERMINAL deploy when it errored (ignores in-progress BUILDING)", () => {
@@ -25,15 +29,21 @@ describe("parseVercelDeployments / latestFailedVercel", () => {
     assert.equal(f?.uid, "dpl_3");
   });
   it("returns null when the latest terminal deploy is READY", () => {
-    const ok = JSON.stringify({ deployments: [{ uid: "x", state: "READY", target: "production", created: 9 }] });
+    const ok = JSON.stringify({
+      deployments: [{ uid: "x", state: "READY", target: "production", created: 9 }],
+    });
     assert.equal(latestFailedVercel(parseVercelDeployments(ok)), null);
   });
   it("treats CANCELED as not-red", () => {
-    const c = JSON.stringify({ deployments: [{ uid: "x", state: "CANCELED", target: "production", created: 9 }] });
+    const c = JSON.stringify({
+      deployments: [{ uid: "x", state: "CANCELED", target: "production", created: 9 }],
+    });
     assert.equal(latestFailedVercel(parseVercelDeployments(c)), null);
   });
   it("supports readyState as the state field alias", () => {
-    const r = JSON.stringify({ deployments: [{ uid: "x", readyState: "ERROR", target: "production", created: 9 }] });
+    const r = JSON.stringify({
+      deployments: [{ uid: "x", readyState: "ERROR", target: "production", created: 9 }],
+    });
     assert.equal(latestFailedVercel(parseVercelDeployments(r))?.uid, "x");
   });
 });
@@ -66,7 +76,10 @@ describe("vercelSensor.probe", () => {
 
   it("is unknown on a non-OK API response", async () => {
     process.env.VERCEL_TOKEN = "vt";
-    const out = await vercelSensor.probe(linked, deps({ http: { ok: false, status: 403, body: "" } }));
+    const out = await vercelSensor.probe(
+      linked,
+      deps({ http: { ok: false, status: 403, body: "" } }),
+    );
     assert.equal(out[0].status, "unknown");
     assert.match(out[0].title, /403/);
   });

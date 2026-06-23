@@ -4,11 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, getStats, searchMessages } from "./db.js";
-import {
-  extractText,
-  extractToolUses,
-  indexClaudeTranscripts,
-} from "./parser.js";
+import { extractText, extractToolUses, indexClaudeTranscripts } from "./parser.js";
 
 describe("memory parser — content extraction", () => {
   it("returns strings unchanged", () => {

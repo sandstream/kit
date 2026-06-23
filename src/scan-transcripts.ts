@@ -38,12 +38,7 @@ async function dirExists(path: string): Promise<boolean> {
   }
 }
 
-async function walk(
-  dir: string,
-  out: string[],
-  depth = 0,
-  maxDepth = 6,
-): Promise<void> {
+async function walk(dir: string, out: string[], depth = 0, maxDepth = 6): Promise<void> {
   if (depth > maxDepth) return;
   let entries;
   try {
@@ -57,9 +52,7 @@ async function walk(
     if (ent.isDirectory()) {
       await walk(full, out, depth + 1, maxDepth);
     } else if (ent.isFile()) {
-      const ext = ent.name.includes(".")
-        ? ent.name.slice(ent.name.lastIndexOf("."))
-        : "";
+      const ext = ent.name.includes(".") ? ent.name.slice(ent.name.lastIndexOf(".")) : "";
       if (!SCANNABLE_EXTS.has(ext)) continue;
       out.push(full);
     }
@@ -75,9 +68,7 @@ function repoSlug(cwd: string): string {
   return cwd.replace(/^\//, "-").replace(/\//g, "-");
 }
 
-export async function scanTranscripts(
-  cwd: string = process.cwd(),
-): Promise<TranscriptHit[]> {
+export async function scanTranscripts(cwd: string = process.cwd()): Promise<TranscriptHit[]> {
   const candidates: string[] = [];
 
   // Project-local agent dirs

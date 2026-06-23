@@ -4,11 +4,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
-import {
-  checkGitignore,
-  patchGitignore,
-  findCommittedSensitive,
-} from "./check-gitignore.js";
+import { checkGitignore, patchGitignore, findCommittedSensitive } from "./check-gitignore.js";
 
 function tmpRepo(): string {
   return mkdtempSync(join(tmpdir(), "kit-gi-"));
@@ -57,10 +53,7 @@ describe("checkGitignore", () => {
   it("ignores comments and blank lines", async () => {
     const dir = tmpRepo();
     try {
-      writeFileSync(
-        join(dir, ".gitignore"),
-        "\n# comment\n.env\n  # indented comment\n\n",
-      );
+      writeFileSync(join(dir, ".gitignore"), "\n# comment\n.env\n  # indented comment\n\n");
       const r = await checkGitignore(dir);
       // .env is present, .env.local is not (no alias for bare `.env`)
       const stillMissing = r.missingPatterns.map((m) => m.pattern);
@@ -108,8 +101,7 @@ describe("patchGitignore", () => {
       await patchGitignore(dir);
       const second = readFileSync(join(dir, ".gitignore"), "utf-8");
       // Same number of marker-start tokens (exactly 1) both times
-      const count = (s: string) =>
-        (s.match(/kit security check-gitignore/g) || []).length;
+      const count = (s: string) => (s.match(/kit security check-gitignore/g) || []).length;
       assert.equal(count(first), 1);
       assert.equal(count(second), 1);
     } finally {

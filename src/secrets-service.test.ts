@@ -123,7 +123,13 @@ describe("secrets-service", () => {
       initializeVault(retrieveTeamId);
 
       const secretValue = "sk-prod-1234567890";
-      const { secret } = storeSecret(retrieveTeamId, "api_key_prod", secretValue, "api_key", userId);
+      const { secret } = storeSecret(
+        retrieveTeamId,
+        "api_key_prod",
+        secretValue,
+        "api_key",
+        userId,
+      );
 
       const { value, error } = retrieveSecret(retrieveTeamId, secret.id, userId);
 
@@ -195,7 +201,13 @@ describe("secrets-service", () => {
     it("rotates secret to new encryption key", () => {
       initializeVault(rotateTeamId);
 
-      const { secret: original } = storeSecret(rotateTeamId, "rotate_me", "secret123", "api_key", userId);
+      const { secret: original } = storeSecret(
+        rotateTeamId,
+        "rotate_me",
+        "secret123",
+        "api_key",
+        userId,
+      );
       const originalKeyId = original.encryption_key_id;
       const { secret: rotated, error } = rotateSecret(rotateTeamId, original.id, adminId, "manual");
 
@@ -248,13 +260,7 @@ describe("secrets-service", () => {
       initializeVault(teamId);
 
       const { secret } = storeSecret(teamId, "team_secret", "value", "api_key", userId);
-      const { share, error } = shareSecret(
-        teamId,
-        secret.id,
-        userId,
-        undefined,
-        "team-devops-123",
-      );
+      const { share, error } = shareSecret(teamId, secret.id, userId, undefined, "team-devops-123");
 
       assert.ok(!error);
       assert.equal(share.shared_with_team_id, "team-devops-123");

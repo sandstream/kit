@@ -29,22 +29,25 @@ export interface PkgResult {
   output: string;
 }
 
-const ECOSYSTEM_MAP: Record<string, { triageType: TriageType; installCmd: (name: string, version?: string) => string }> = {
+const ECOSYSTEM_MAP: Record<
+  string,
+  { triageType: TriageType; installCmd: (name: string, version?: string) => string }
+> = {
   npm: {
     triageType: "npm",
-    installCmd: (name, ver) => ver ? `npm install ${name}@${ver}` : `npm install ${name}`,
+    installCmd: (name, ver) => (ver ? `npm install ${name}@${ver}` : `npm install ${name}`),
   },
   "npm-g": {
     triageType: "npm",
-    installCmd: (name, ver) => ver ? `npm install -g ${name}@${ver}` : `npm install -g ${name}`,
+    installCmd: (name, ver) => (ver ? `npm install -g ${name}@${ver}` : `npm install -g ${name}`),
   },
   pnpm: {
     triageType: "npm",
-    installCmd: (name, ver) => ver ? `pnpm add ${name}@${ver}` : `pnpm add ${name}`,
+    installCmd: (name, ver) => (ver ? `pnpm add ${name}@${ver}` : `pnpm add ${name}`),
   },
   pip: {
     triageType: "pip",
-    installCmd: (name, ver) => ver ? `pip install ${name}==${ver}` : `pip install ${name}`,
+    installCmd: (name, ver) => (ver ? `pip install ${name}==${ver}` : `pip install ${name}`),
   },
   brew: {
     triageType: "repo",
@@ -52,7 +55,7 @@ const ECOSYSTEM_MAP: Record<string, { triageType: TriageType; installCmd: (name:
   },
   docker: {
     triageType: "docker",
-    installCmd: (name, ver) => ver ? `docker pull ${name}:${ver}` : `docker pull ${name}:latest`,
+    installCmd: (name, ver) => (ver ? `docker pull ${name}:${ver}` : `docker pull ${name}:latest`),
   },
   go: {
     triageType: "repo",

@@ -12,10 +12,31 @@ import {
 } from "./supply-chain.js";
 
 const lockPkgs: LockPkg[] = [
-  { path: "node_modules/lodash", name: "lodash", version: "4.17.21", resolved: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz" },
-  { path: "node_modules/esbuild", name: "esbuild", version: "0.20.0", resolved: "https://registry.npmjs.org/esbuild/-/esbuild-0.20.0.tgz", hasInstallScript: true },
-  { path: "node_modules/sketchy", name: "sketchy", version: "1.0.0", resolved: "https://evil.example/sketchy.tgz" },
-  { path: "node_modules/@acme/core", name: "@acme/core", version: "2.0.0", resolved: "https://registry.npmjs.org/@acme/core/-/core-2.0.0.tgz" },
+  {
+    path: "node_modules/lodash",
+    name: "lodash",
+    version: "4.17.21",
+    resolved: "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+  },
+  {
+    path: "node_modules/esbuild",
+    name: "esbuild",
+    version: "0.20.0",
+    resolved: "https://registry.npmjs.org/esbuild/-/esbuild-0.20.0.tgz",
+    hasInstallScript: true,
+  },
+  {
+    path: "node_modules/sketchy",
+    name: "sketchy",
+    version: "1.0.0",
+    resolved: "https://evil.example/sketchy.tgz",
+  },
+  {
+    path: "node_modules/@acme/core",
+    name: "@acme/core",
+    version: "2.0.0",
+    resolved: "https://registry.npmjs.org/@acme/core/-/core-2.0.0.tgz",
+  },
 ];
 
 describe("findInstallScripts", () => {
@@ -76,7 +97,9 @@ describe("findSlopsquat", () => {
 
 describe("parseLockPkgs", () => {
   it("skips the root entry and flattens packages", () => {
-    const pkgs = parseLockPkgs({ packages: { "": { name: "root" }, "node_modules/x": { version: "1.0.0", resolved: "r" } } });
+    const pkgs = parseLockPkgs({
+      packages: { "": { name: "root" }, "node_modules/x": { version: "1.0.0", resolved: "r" } },
+    });
     assert.equal(pkgs.length, 1);
     assert.equal(pkgs[0].name, "x");
   });

@@ -151,9 +151,7 @@ export interface FetchSnykIssuesOptions {
  * Read-only Snyk API fetch. Uses `GET /rest/orgs/{org}/issues`. Throws on
  * unauthorized — caller surfaces to the user instead of silently failing.
  */
-export async function fetchSnykIssues(
-  opts: FetchSnykIssuesOptions,
-): Promise<SnykVulnerability[]> {
+export async function fetchSnykIssues(opts: FetchSnykIssuesOptions): Promise<SnykVulnerability[]> {
   const token = opts.token ?? process.env.SNYK_TOKEN;
   if (!token) throw new Error("SNYK_TOKEN not set");
   const base = opts.apiBase ?? DEFAULT_API_BASE;
@@ -189,7 +187,8 @@ export async function fetchSnykIssues(
     return {
       id: iss.id ?? "",
       title: iss.attributes?.title ?? "(no title)",
-      severity: (iss.attributes?.effective_severity_level as SnykVulnerability["severity"]) ?? "low",
+      severity:
+        (iss.attributes?.effective_severity_level as SnykVulnerability["severity"]) ?? "low",
       packageName: dep?.package_name,
       packageVersion: dep?.package_version,
     };

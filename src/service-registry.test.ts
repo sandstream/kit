@@ -22,7 +22,10 @@ describe("service-registry", () => {
     });
 
     it("returns services in registry order regardless of input order (stripe precedes supabase)", async () => {
-      const s = await detectServices({ deps: ["@supabase/supabase-js", "stripe"], fileExists: noFiles });
+      const s = await detectServices({
+        deps: ["@supabase/supabase-js", "stripe"],
+        fileExists: noFiles,
+      });
       assert.deepEqual(s, ["stripe", "supabase"]);
     });
   });
@@ -39,7 +42,10 @@ describe("service-registry", () => {
     });
 
     it("matches atlassian by bitbucket-pipelines.yml", async () => {
-      const s = await detectServices({ deps: [], fileExists: async (p) => p === "bitbucket-pipelines.yml" });
+      const s = await detectServices({
+        deps: [],
+        fileExists: async (p) => p === "bitbucket-pipelines.yml",
+      });
       assert.deepEqual(s, ["atlassian"]);
     });
   });
@@ -111,8 +117,17 @@ describe("service-registry", () => {
 
     it("the new DB/BaaS services are present", () => {
       for (const id of [
-        "convex", "firebase", "mysql", "planetscale", "neon", "turso", "bigquery", "snowflake",
-        "redshift", "redis", "auth0",
+        "convex",
+        "firebase",
+        "mysql",
+        "planetscale",
+        "neon",
+        "turso",
+        "bigquery",
+        "snowflake",
+        "redshift",
+        "redis",
+        "auth0",
       ]) {
         assert.ok(SERVICE_BY_ID[id], `missing new service: ${id}`);
       }

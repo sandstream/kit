@@ -7,24 +7,25 @@ import { isNonInteractive } from "../environment.js";
 import { promptConfirm } from "../utils/prompt.js";
 import { c } from "../utils/colors.js";
 
-const BUILTIN_HOOKS: Record<string, { hookName: string; commands: string[]; description: string }> = {
-  "secret-scan": {
-    hookName: "pre-commit",
-    commands: ["kit security scan-staged"],
-    description: "Block commits that stage known credential patterns (Stripe, AWS, JWT, etc).",
-  },
-  "post-pull-audit": {
-    hookName: "post-merge",
-    commands: ["kit security verify-pull"],
-    description: "After git pull/merge, audit new deps, gitignore drops, and introduced secrets.",
-  },
-  "context-check": {
-    hookName: "pre-push",
-    commands: ["kit context check"],
-    description:
-      "Block a push when the live CLI context (account/project) does not match .kit.toml [context]. Stops pushes to the wrong org/project.",
-  },
-};
+const BUILTIN_HOOKS: Record<string, { hookName: string; commands: string[]; description: string }> =
+  {
+    "secret-scan": {
+      hookName: "pre-commit",
+      commands: ["kit security scan-staged"],
+      description: "Block commits that stage known credential patterns (Stripe, AWS, JWT, etc).",
+    },
+    "post-pull-audit": {
+      hookName: "post-merge",
+      commands: ["kit security verify-pull"],
+      description: "After git pull/merge, audit new deps, gitignore drops, and introduced secrets.",
+    },
+    "context-check": {
+      hookName: "pre-push",
+      commands: ["kit context check"],
+      description:
+        "Block a push when the live CLI context (account/project) does not match .kit.toml [context]. Stops pushes to the wrong org/project.",
+    },
+  };
 
 export async function cmdHooks(): Promise<boolean> {
   const subcommand = process.argv[3];
@@ -54,10 +55,7 @@ export async function cmdHooks(): Promise<boolean> {
     let allOk = true;
 
     for (const r of results) {
-      const icon =
-        r.action === "failed"
-          ? `${c.red}✗${c.reset}`
-          : `${c.green}✓${c.reset}`;
+      const icon = r.action === "failed" ? `${c.red}✗${c.reset}` : `${c.green}✓${c.reset}`;
       const label =
         r.action === "installed"
           ? `${c.green}installed${c.reset}`
@@ -79,24 +77,24 @@ export async function cmdHooks(): Promise<boolean> {
     let allOk = true;
 
     for (const r of results) {
-      const icon =
-        !r.installed
-          ? `${c.red}✗${c.reset}`
-          : !r.upToDate
-            ? `${c.yellow}!${c.reset}`
-            : `${c.green}✓${c.reset}`;
-      const status =
-        !r.installed
-          ? `${c.red}not installed${c.reset}`
-          : !r.upToDate
-            ? `${c.yellow}outdated${c.reset}`
-            : `${c.green}up-to-date${c.reset}`;
+      const icon = !r.installed
+        ? `${c.red}✗${c.reset}`
+        : !r.upToDate
+          ? `${c.yellow}!${c.reset}`
+          : `${c.green}✓${c.reset}`;
+      const status = !r.installed
+        ? `${c.red}not installed${c.reset}`
+        : !r.upToDate
+          ? `${c.yellow}outdated${c.reset}`
+          : `${c.green}up-to-date${c.reset}`;
       console.log(`  ${icon} ${r.hookName}  ${status}  ${c.dim}${r.detail}${c.reset}`);
       if (!r.installed || !r.upToDate) allOk = false;
     }
 
     if (!allOk) {
-      console.log(`\n${c.dim}Run ${c.reset}${c.bold}kit hooks install${c.reset}${c.dim} to install/update hooks${c.reset}`);
+      console.log(
+        `\n${c.dim}Run ${c.reset}${c.bold}kit hooks install${c.reset}${c.dim} to install/update hooks${c.reset}`,
+      );
     }
 
     console.log();
@@ -152,9 +150,7 @@ async function cmdHooksAdd(): Promise<boolean> {
       );
       return true;
     }
-    console.log(
-      `${c.yellow}⚠ ${builtin.hookName} already exists at ${hookPath}.${c.reset}`,
-    );
+    console.log(`${c.yellow}⚠ ${builtin.hookName} already exists at ${hookPath}.${c.reset}`);
     console.log(
       `${c.dim}kit will overwrite it with a managed version that calls back into kit.${c.reset}\n`,
     );

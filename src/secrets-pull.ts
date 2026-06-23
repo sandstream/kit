@@ -45,9 +45,7 @@ async function fetchFromSource(
   env?: string,
 ): Promise<Array<{ key: string; value: string; target?: string[] }>> {
   if (source === "vercel") {
-    const { makeClient, listEnvVars } = await import(
-      "sandstream-kit-plugin-vercel" as string
-    );
+    const { makeClient, listEnvVars } = await import("sandstream-kit-plugin-vercel" as string);
     const client = makeClient();
     const all = await listEnvVars(client, projectId);
     return all
@@ -65,9 +63,7 @@ async function fetchFromSource(
     // GitHub Actions secrets are write-only via the API (you can list names
     // but never read values back). We surface name-only so the operator
     // knows what's defined upstream.
-    const { makeClient, listRepoSecrets } = await import(
-      "sandstream-kit-plugin-github" as string
-    );
+    const { makeClient, listRepoSecrets } = await import("sandstream-kit-plugin-github" as string);
     const [owner, repo] = projectId.split("/");
     if (!owner || !repo) {
       throw new Error("github source requires projectId in 'owner/repo' format");
@@ -80,9 +76,7 @@ async function fetchFromSource(
   if (source === "fly") {
     // Fly secret VALUES are not retrievable via API (digest-only). Same
     // name-only path as GitHub.
-    const { makeClient, listAppSecrets } = await import(
-      "sandstream-kit-plugin-fly" as string
-    );
+    const { makeClient, listAppSecrets } = await import("sandstream-kit-plugin-fly" as string);
     const client = makeClient();
     const secrets = await listAppSecrets(client, projectId);
     return secrets.map((s: { name: string }) => ({ key: s.name, value: "" }));

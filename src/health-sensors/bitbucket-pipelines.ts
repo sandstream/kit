@@ -34,7 +34,9 @@ export function latestFailedBitbucket(pipelines: BbPipeline[]): BbPipeline | nul
 export function bitbucketAuthHeader(env: NodeJS.ProcessEnv): string | null {
   if (env.BITBUCKET_TOKEN) return `Bearer ${env.BITBUCKET_TOKEN}`;
   if (env.BITBUCKET_USERNAME && env.BITBUCKET_APP_PASSWORD) {
-    const basic = Buffer.from(`${env.BITBUCKET_USERNAME}:${env.BITBUCKET_APP_PASSWORD}`).toString("base64");
+    const basic = Buffer.from(`${env.BITBUCKET_USERNAME}:${env.BITBUCKET_APP_PASSWORD}`).toString(
+      "base64",
+    );
     return `Basic ${basic}`;
   }
   return null;
@@ -46,50 +48,64 @@ export const bitbucketSensor: HealthSensor = {
     const remoteRes = await deps.runCli("git", ["remote", "get-url", "origin"]);
     const slug = remoteRes.ok ? parseGitRemote(remoteRes.stdout) : null;
     if (!slug) {
-      return [{
-        sensor: "bitbucket-pipelines",
-        source: "(no git remote)",
-        status: "unknown",
-        title: "Bitbucket Pipelines probe could not resolve the remote",
-        detail: "git remote get-url origin failed",
-      }];
+      return [
+        {
+          sensor: "bitbucket-pipelines",
+          source: "(no git remote)",
+          status: "unknown",
+          title: "Bitbucket Pipelines probe could not resolve the remote",
+          detail: "git remote get-url origin failed",
+        },
+      ];
     }
     const source = `${slug.host}/${slug.path}`;
     const auth = bitbucketAuthHeader(process.env);
     if (!auth) {
-      return [{
-        sensor: "bitbucket-pipelines",
-        source,
-        status: "unknown",
-        title: "Bitbucket Pipelines probe skipped: no credentials",
-        detail: "set BITBUCKET_TOKEN, or BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD",
-      }];
+      return [
+        {
+          sensor: "bitbucket-pipelines",
+          source,
+          status: "unknown",
+          title: "Bitbucket Pipelines probe skipped: no credentials",
+          detail: "set BITBUCKET_TOKEN, or BITBUCKET_USERNAME + BITBUCKET_APP_PASSWORD",
+        },
+      ];
     }
-    const url =
-      `https://api.bitbucket.org/2.0/repositories/${slug.path}/pipelines/?sort=-created_on&pagelen=20`;
+    const url = `https://api.bitbucket.org/2.0/repositories/${slug.path}/pipelines/?sort=-created_on&pagelen=20`;
     const res = await deps.httpGet(url, { Authorization: auth });
     if (!res.ok) {
-      return [{
-        sensor: "bitbucket-pipelines",
-        source,
-        status: "unknown",
-        title: `Bitbucket Pipelines API returned HTTP ${res.status}`,
-        detail: "check the token scope (pipeline:read) / repo access",
-      }];
+      return [
+        {
+          sensor: "bitbucket-pipelines",
+          source,
+          status: "unknown",
+          title: `Bitbucket Pipelines API returned HTTP ${res.status}`,
+          detail: "check the token scope (pipeline:read) / repo access",
+        },
+      ];
     }
     const failed = latestFailedBitbucket(parseBitbucketPipelines(res.body));
     if (!failed) {
-      return [{ sensor: "bitbucket-pipelines", source, status: "green", title: "Bitbucket Pipelines: latest run green" }];
+      return [
+        {
+          sensor: "bitbucket-pipelines",
+          source,
+          status: "green",
+          title: "Bitbucket Pipelines: latest run green",
+        },
+      ];
     }
     const ref = failed.target?.ref_name ?? "?";
-    return [{
-      sensor: "bitbucket-pipelines",
-      source,
-      status: "red",
-      severity: "high",
-      title: `Bitbucket Pipelines failing on ${ref}`,
-      detail: `pipeline #${failed.build_number ?? "?"} ${failed.state?.result?.name} (${failed.created_on})`,
-      suggestedClass: "code",
-    }];
+    return [
+      {
+        sensor: "bitbucket-pipelines",
+        source,
+        status: "red",
+        severity: "high",
+        title: `Bitbucket Pipelines failing on ${ref}`,
+        detail: `pipeline #${failed.build_number ?? "?"} ${failed.state?.result?.name} (${failed.created_on})`,
+        suggestedClass: "code",
+      },
+    ];
   },
 };

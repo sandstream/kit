@@ -42,7 +42,12 @@ export const VAULT_META: Record<Exclude<SecretsStore, "env">, VaultMeta> = {
     loginCmd: "infisical login",
     initCmd: "infisical init",
   },
-  doppler: { label: "Doppler", miseTool: "doppler", loginCmd: "doppler login", initCmd: "doppler setup" },
+  doppler: {
+    label: "Doppler",
+    miseTool: "doppler",
+    loginCmd: "doppler login",
+    initCmd: "doppler setup",
+  },
   bitwarden: { label: "Bitwarden", miseTool: "bitwarden", loginCmd: "bw login && bw unlock" },
   vault: { label: "HashiCorp Vault", miseTool: "vault", loginCmd: "vault login" },
   "aws-sm": { label: "AWS Secrets Manager", loginCmd: "aws configure  (or assume an IAM role)" },

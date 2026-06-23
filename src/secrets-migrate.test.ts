@@ -39,11 +39,7 @@ describe("isValidKeyName", () => {
 
 describe("writeSecretToBackend - invalid keys", () => {
   it("refuses to call the sink CLI when key is invalid", async () => {
-    const result = await writeSecretToBackend(
-      "1password",
-      "--malicious-flag",
-      "any-value",
-    );
+    const result = await writeSecretToBackend("1password", "--malicious-flag", "any-value");
     assert.equal(result.ok, false);
     assert.ok(result.detail.includes("invalid key name"));
   });
@@ -110,7 +106,7 @@ describe("planMigration", () => {
       [
         "NEXT_PUBLIC_SUPABASE_URL=https://abc.supabase.co",
         "RESEND_FROM_EMAIL=noreply@example.com",
-        "STRIPE_SECRET_KEY=sk_te"+"st_AAAAAAAAAAAAAAAAAAAAAA",
+        "STRIPE_SECRET_KEY=sk_te" + "st_AAAAAAAAAAAAAAAAAAAAAA",
         "# comment line",
         "",
       ].join("\n"),
@@ -128,7 +124,7 @@ describe("planMigration", () => {
       join(dir, ".env.production"),
       [
         "NEXT_PUBLIC_SUPABASE_URL=https://abc.supabase.co",
-        "STRIPE_SECRET_KEY=sk_te"+"st_AAAAAAAAAAAAAAAAAAAAAA",
+        "STRIPE_SECRET_KEY=sk_te" + "st_AAAAAAAAAAAAAAAAAAAAAA",
       ].join("\n"),
     );
     const plan = await planMigration(dir, { secretsOnly: true });
@@ -139,10 +135,7 @@ describe("planMigration", () => {
 
   it("strips simple quotes from values", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-plan-"));
-    writeFileSync(
-      join(dir, ".env"),
-      `URL="https://a.example.com"\nALT='single-quoted'\n`,
-    );
+    writeFileSync(join(dir, ".env"), `URL="https://a.example.com"\nALT='single-quoted'\n`);
     const plan = await planMigration(dir);
     assert.equal(plan.keyValues.get("URL")?.value, "https://a.example.com");
     assert.equal(plan.keyValues.get("ALT")?.value, "single-quoted");

@@ -11,18 +11,18 @@ async function loadExistingEnv(projectPath: string): Promise<Record<string, stri
   try {
     const envPath = resolve(projectPath, ".env.local");
     const content = await readFile(envPath, "utf-8");
-    
+
     const env: Record<string, string> = {};
     for (const line of content.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) continue;
-      
+
       const [key, ...valueParts] = trimmed.split("=");
       if (key && valueParts.length > 0) {
         env[key.trim()] = valueParts.join("=").trim();
       }
     }
-    
+
     return env;
   } catch {
     return {};
@@ -32,22 +32,19 @@ async function loadExistingEnv(projectPath: string): Promise<Record<string, stri
 /**
  * Update .env.local with new secrets
  */
-async function updateEnvFile(
-  projectPath: string,
-  secrets: Record<string, string>
-): Promise<void> {
+async function updateEnvFile(projectPath: string, secrets: Record<string, string>): Promise<void> {
   const envPath = resolve(projectPath, ".env.local");
   const existing = await loadExistingEnv(projectPath);
-  
+
   // Merge with existing
   const merged = { ...existing, ...secrets };
-  
+
   // Write back
   const lines: string[] = [];
   for (const [key, value] of Object.entries(merged)) {
     lines.push(`${key}=${value}`);
   }
-  
+
   await writeFile(envPath, lines.join("\n") + "\n", "utf-8");
 }
 
@@ -57,10 +54,10 @@ async function updateEnvFile(
 async function updateSkillsLock(
   projectPath: string,
   serviceName: string,
-  config: Record<string, unknown>
+  config: Record<string, unknown>,
 ): Promise<void> {
   const lockPath = resolve(projectPath, "skills-lock.json");
-  
+
   let lockData: any = { provisioned: {} };
   try {
     const content = await readFile(lockPath, "utf-8");
@@ -68,16 +65,16 @@ async function updateSkillsLock(
   } catch {
     // File doesn't exist or parse error
   }
-  
+
   if (!lockData.provisioned) {
     lockData.provisioned = {};
   }
-  
+
   lockData.provisioned[serviceName] = {
     ...config,
     provisionedAt: new Date().toISOString(),
   };
-  
+
   await writeFile(lockPath, JSON.stringify(lockData, null, 2) + "\n", "utf-8");
 }
 
@@ -87,7 +84,7 @@ async function updateSkillsLock(
 export async function provisionService(
   serviceName: string,
   projectPath: string,
-  projectName?: string
+  projectName?: string,
 ): Promise<ProvisionResult> {
   // Merge built-in adapters with any plugin adapters from kitPlugins in package.json
   const pluginAdapters = await loadPluginAdapters(projectPath);
@@ -103,7 +100,7 @@ export async function provisionService(
       message: `Available services: ${available}`,
     };
   }
-  
+
   // Check required tools
   const requiredTools = adapter.getRequiredTools();
   for (const tool of requiredTools) {
@@ -120,7 +117,7 @@ export async function provisionService(
       };
     }
   }
-  
+
   // Load context
   const existingEnv = await loadExistingEnv(projectPath);
   const context: AdapterContext = {
@@ -128,7 +125,7 @@ export async function provisionService(
     projectName,
     existingEnv,
   };
-  
+
   // Check if already provisioned
   const alreadyProvisioned = await adapter.check(context);
   if (alreadyProvisioned) {
@@ -138,22 +135,22 @@ export async function provisionService(
       config: { alreadyProvisioned: true },
     };
   }
-  
+
   // Provision the service
   const result = await adapter.provision(context);
-  
+
   if (result.success) {
     // Update .env.local with secrets
     if (result.secrets && Object.keys(result.secrets).length > 0) {
       await updateEnvFile(projectPath, result.secrets);
     }
-    
+
     // Update skills-lock.json with config
     if (result.config) {
       await updateSkillsLock(projectPath, serviceName, result.config);
     }
   }
-  
+
   return result;
 }
 
@@ -167,10 +164,12 @@ export function listAvailableServices(): string[] {
 /**
  * Get adapter info
  */
-export function getServiceInfo(serviceName: string): { name: string; description: string; tools: string[] } | null {
+export function getServiceInfo(
+  serviceName: string,
+): { name: string; description: string; tools: string[] } | null {
   const adapter = adapters[serviceName];
   if (!adapter) return null;
-  
+
   return {
     name: adapter.name,
     description: adapter.description,

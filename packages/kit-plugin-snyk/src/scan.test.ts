@@ -3,11 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  parseSnykJson,
-  recordSnykFindings,
-  fetchSnykIssues,
-} from "./scan.js";
+import { parseSnykJson, recordSnykFindings, fetchSnykIssues } from "./scan.js";
 
 const SINGLE_PROJECT = JSON.stringify({
   ok: false,
@@ -31,9 +27,7 @@ const MULTI_PROJECT = JSON.stringify([
   {
     ok: false,
     projectName: "service-b",
-    vulnerabilities: [
-      { id: "SNYK-PY-DJANGO-9999", title: "SQLi", severity: "critical" },
-    ],
+    vulnerabilities: [{ id: "SNYK-PY-DJANGO-9999", title: "SQLi", severity: "critical" }],
   },
 ]);
 
@@ -97,10 +91,7 @@ describe("fetchSnykIssues", () => {
     const prev = process.env.SNYK_TOKEN;
     delete process.env.SNYK_TOKEN;
     try {
-      await assert.rejects(
-        () => fetchSnykIssues({ orgSlug: "demo" }),
-        /SNYK_TOKEN not set/,
-      );
+      await assert.rejects(() => fetchSnykIssues({ orgSlug: "demo" }), /SNYK_TOKEN not set/);
     } finally {
       if (prev !== undefined) process.env.SNYK_TOKEN = prev;
     }

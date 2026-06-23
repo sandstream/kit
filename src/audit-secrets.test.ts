@@ -3,11 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  readSecretAuditEvents,
-  groupBySecret,
-  summarize,
-} from "./audit-secrets.js";
+import { readSecretAuditEvents, groupBySecret, summarize } from "./audit-secrets.js";
 
 function makeRepo(events: object[]): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-audit-"));
@@ -29,9 +25,24 @@ describe("readSecretAuditEvents", () => {
 
   it("filters to secret-related operations only", async () => {
     const dir = makeRepo([
-      { timestamp: new Date().toISOString(), operation: "secrets.generate", environment: "dev", success: true },
-      { timestamp: new Date().toISOString(), operation: "non.secret.op", environment: "dev", success: true },
-      { timestamp: new Date().toISOString(), operation: "secrets.rotate", environment: "dev", success: true },
+      {
+        timestamp: new Date().toISOString(),
+        operation: "secrets.generate",
+        environment: "dev",
+        success: true,
+      },
+      {
+        timestamp: new Date().toISOString(),
+        operation: "non.secret.op",
+        environment: "dev",
+        success: true,
+      },
+      {
+        timestamp: new Date().toISOString(),
+        operation: "secrets.rotate",
+        environment: "dev",
+        success: true,
+      },
     ]);
     try {
       const events = await readSecretAuditEvents(dir);

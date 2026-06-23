@@ -36,48 +36,58 @@ export const gitlabSensor: HealthSensor = {
     const remoteRes = await deps.runCli("git", ["remote", "get-url", "origin"]);
     const slug = remoteRes.ok ? parseGitRemote(remoteRes.stdout) : null;
     if (!slug) {
-      return [{
-        sensor: "gitlab-ci",
-        source: "(no git remote)",
-        status: "unknown",
-        title: "GitLab CI probe could not resolve the remote",
-        detail: "git remote get-url origin failed",
-      }];
+      return [
+        {
+          sensor: "gitlab-ci",
+          source: "(no git remote)",
+          status: "unknown",
+          title: "GitLab CI probe could not resolve the remote",
+          detail: "git remote get-url origin failed",
+        },
+      ];
     }
     const source = `${slug.host}/${slug.path}`;
     const token = process.env.GITLAB_TOKEN;
     if (!token) {
-      return [{
-        sensor: "gitlab-ci",
-        source,
-        status: "unknown",
-        title: "GitLab CI probe skipped: GITLAB_TOKEN not set",
-        detail: "set GITLAB_TOKEN (read_api) to enable the GitLab CI sensor",
-      }];
+      return [
+        {
+          sensor: "gitlab-ci",
+          source,
+          status: "unknown",
+          title: "GitLab CI probe skipped: GITLAB_TOKEN not set",
+          detail: "set GITLAB_TOKEN (read_api) to enable the GitLab CI sensor",
+        },
+      ];
     }
     const url = `https://${slug.host}/api/v4/projects/${encodeURIComponent(slug.path)}/pipelines?per_page=20`;
     const res = await deps.httpGet(url, { "PRIVATE-TOKEN": token });
     if (!res.ok) {
-      return [{
-        sensor: "gitlab-ci",
-        source,
-        status: "unknown",
-        title: `GitLab CI API returned HTTP ${res.status}`,
-        detail: "check GITLAB_TOKEN scope / project access",
-      }];
+      return [
+        {
+          sensor: "gitlab-ci",
+          source,
+          status: "unknown",
+          title: `GitLab CI API returned HTTP ${res.status}`,
+          detail: "check GITLAB_TOKEN scope / project access",
+        },
+      ];
     }
     const failed = latestFailedPipeline(parseGitlabPipelines(res.body));
     if (!failed) {
-      return [{ sensor: "gitlab-ci", source, status: "green", title: "GitLab CI: latest pipeline green" }];
+      return [
+        { sensor: "gitlab-ci", source, status: "green", title: "GitLab CI: latest pipeline green" },
+      ];
     }
-    return [{
-      sensor: "gitlab-ci",
-      source,
-      status: "red",
-      severity: "high",
-      title: `GitLab CI pipeline failing on ${failed.ref}`,
-      detail: `pipeline #${failed.id} failed (${failed.created_at})`,
-      suggestedClass: "code",
-    }];
+    return [
+      {
+        sensor: "gitlab-ci",
+        source,
+        status: "red",
+        severity: "high",
+        title: `GitLab CI pipeline failing on ${failed.ref}`,
+        detail: `pipeline #${failed.id} failed (${failed.created_at})`,
+        suggestedClass: "code",
+      },
+    ];
   },
 };

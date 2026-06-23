@@ -3,12 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  makeClient,
-  recordWizIssues,
-  fetchIssues,
-  type WizIssue,
-} from "./scan.js";
+import { makeClient, recordWizIssues, fetchIssues, type WizIssue } from "./scan.js";
 
 const SAMPLE_ISSUE: WizIssue = {
   id: "wiz-issue-1",
@@ -34,10 +29,7 @@ describe("makeClient", () => {
     delete process.env.WIZ_CLIENT_ID;
     delete process.env.WIZ_CLIENT_SECRET;
     try {
-      await assert.rejects(
-        () => makeClient({}),
-        /WIZ_CLIENT_ID \+ WIZ_CLIENT_SECRET required/,
-      );
+      await assert.rejects(() => makeClient({}), /WIZ_CLIENT_ID \+ WIZ_CLIENT_SECRET required/);
     } finally {
       if (prevId !== undefined) process.env.WIZ_CLIENT_ID = prevId;
       if (prevSecret !== undefined) process.env.WIZ_CLIENT_SECRET = prevSecret;
@@ -46,8 +38,7 @@ describe("makeClient", () => {
 
   it("refuses without WIZ_API_URL", async () => {
     await assert.rejects(
-      () =>
-        makeClient({ clientId: "x", clientSecret: "y" }),
+      () => makeClient({ clientId: "x", clientSecret: "y" }),
       /WIZ_API_URL required/,
     );
   });
@@ -67,10 +58,7 @@ describe("makeClient", () => {
 describe("fetchIssues", () => {
   it("throws on unreachable API", async () => {
     await assert.rejects(() =>
-      fetchIssues(
-        { apiUrl: "https://127.0.0.1:1/graphql", accessToken: "x" },
-        { limit: 5 },
-      ),
+      fetchIssues({ apiUrl: "https://127.0.0.1:1/graphql", accessToken: "x" }, { limit: 5 }),
     );
   });
 });

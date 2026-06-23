@@ -11,15 +11,28 @@ const deps: HealthDeps = {
 
 describe("runHealth", () => {
   it("aggregates findings from all sensors", async () => {
-    const a: HealthSensor = { id: "a", probe: async () => [{ sensor: "a", source: "x", status: "green", title: "ok" }] };
-    const b: HealthSensor = { id: "b", probe: async () => [{ sensor: "b", source: "y", status: "red", severity: "high", title: "bad" }] };
+    const a: HealthSensor = {
+      id: "a",
+      probe: async () => [{ sensor: "a", source: "x", status: "green", title: "ok" }],
+    };
+    const b: HealthSensor = {
+      id: "b",
+      probe: async () => [
+        { sensor: "b", source: "y", status: "red", severity: "high", title: "bad" },
+      ],
+    };
     const out = await runHealth(ctx, [a, b], deps);
     assert.equal(out.length, 2);
     assert.deepEqual(out.map((f) => f.status).sort(), ["green", "red"]);
   });
 
   it("converts a throwing sensor into an unknown finding, never drops it", async () => {
-    const boom: HealthSensor = { id: "boom", probe: async () => { throw new Error("network down"); } };
+    const boom: HealthSensor = {
+      id: "boom",
+      probe: async () => {
+        throw new Error("network down");
+      },
+    };
     const out = await runHealth(ctx, [boom], deps);
     assert.equal(out.length, 1);
     assert.equal(out[0].status, "unknown");
@@ -36,17 +49,32 @@ describe("selectSensors", () => {
 
   it("excludes github-actions with no git remote and no github context", () => {
     const sel = selectSensors({ cwd: "/tmp/repo", config: {}, gitRemote: false });
-    assert.equal(sel.some((s) => s.id === "github-actions"), false);
+    assert.equal(
+      sel.some((s) => s.id === "github-actions"),
+      false,
+    );
   });
 
   it("includes gitlab-ci only when a .gitlab-ci.yml is present", () => {
-    assert.ok(selectSensors({ cwd: "/r", config: {}, gitlabCi: true }).some((s) => s.id === "gitlab-ci"));
-    assert.equal(selectSensors({ cwd: "/r", config: {} }).some((s) => s.id === "gitlab-ci"), false);
+    assert.ok(
+      selectSensors({ cwd: "/r", config: {}, gitlabCi: true }).some((s) => s.id === "gitlab-ci"),
+    );
+    assert.equal(
+      selectSensors({ cwd: "/r", config: {} }).some((s) => s.id === "gitlab-ci"),
+      false,
+    );
   });
 
   it("includes bitbucket-pipelines only when a bitbucket-pipelines.yml is present", () => {
-    assert.ok(selectSensors({ cwd: "/r", config: {}, bitbucketPipelines: true }).some((s) => s.id === "bitbucket-pipelines"));
-    assert.equal(selectSensors({ cwd: "/r", config: {} }).some((s) => s.id === "bitbucket-pipelines"), false);
+    assert.ok(
+      selectSensors({ cwd: "/r", config: {}, bitbucketPipelines: true }).some(
+        (s) => s.id === "bitbucket-pipelines",
+      ),
+    );
+    assert.equal(
+      selectSensors({ cwd: "/r", config: {} }).some((s) => s.id === "bitbucket-pipelines"),
+      false,
+    );
   });
 
   it("registry has all three CI sensors and defaultHealthDeps exposes runCli + httpGet", () => {

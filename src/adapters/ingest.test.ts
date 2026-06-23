@@ -9,7 +9,10 @@ const sarif = JSON.stringify({
         driver: {
           name: "semgrep",
           rules: [
-            { id: "sql-injection", properties: { tags: ["security", "external/cwe/cwe-89"], "security-severity": "9.1" } },
+            {
+              id: "sql-injection",
+              properties: { tags: ["security", "external/cwe/cwe-89"], "security-severity": "9.1" },
+            },
             { id: "weak-hash", properties: { tags: ["CWE-328"] } },
           ],
         },
@@ -19,7 +22,14 @@ const sarif = JSON.stringify({
           ruleId: "sql-injection",
           level: "error",
           message: { text: "Possible SQL injection" },
-          locations: [{ physicalLocation: { artifactLocation: { uri: "src/db.ts" }, region: { startLine: 42 } } }],
+          locations: [
+            {
+              physicalLocation: {
+                artifactLocation: { uri: "src/db.ts" },
+                region: { startLine: 42 },
+              },
+            },
+          ],
         },
         { ruleId: "weak-hash", level: "warning", message: { text: "MD5 used" } },
       ],
@@ -34,7 +44,11 @@ const osv = JSON.stringify({
         {
           package: { name: "lodash", ecosystem: "npm", version: "4.17.11" },
           vulnerabilities: [
-            { id: "GHSA-jf85-cpcp-j695", summary: "Prototype pollution in lodash", database_specific: { severity: "HIGH" } },
+            {
+              id: "GHSA-jf85-cpcp-j695",
+              summary: "Prototype pollution in lodash",
+              database_specific: { severity: "HIGH" },
+            },
           ],
         },
       ],

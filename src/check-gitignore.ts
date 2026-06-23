@@ -31,7 +31,11 @@ interface RequiredEntry {
 
 const REQUIRED_PATTERNS: RequiredEntry[] = [
   { pattern: ".env", reason: "default dotenv file", aliases: [".env*", "**/.env"] },
-  { pattern: ".env.local", reason: "local secrets materialized by kit secrets", aliases: [".env*"] },
+  {
+    pattern: ".env.local",
+    reason: "local secrets materialized by kit secrets",
+    aliases: [".env*"],
+  },
   { pattern: ".env.*.local", reason: "per-env local secrets", aliases: [".env*"] },
   { pattern: "node_modules", reason: "dependency tree", aliases: ["node_modules/"] },
   // Ignore kit's local-state CONTENTS via `.kit/*` (not the wholesale `.kit/`):
@@ -39,8 +43,16 @@ const REQUIRED_PATTERNS: RequiredEntry[] = [
   // negation cannot re-include the curated, committed-by-design shared tier
   // (.kit/shared/memory.jsonl). `.kit/*` ignores the contents while leaving the
   // dir descendable, so the negation below works.
-  { pattern: ".kit/*", reason: "kit local state (elevation, env, runtime)", aliases: [".kit", ".kit/", ".kit/*"] },
-  { pattern: "!.kit/shared/", reason: "keep curated shared memory tracked (committed by design)", aliases: ["!.kit/shared", "!.kit/shared/**"] },
+  {
+    pattern: ".kit/*",
+    reason: "kit local state (elevation, env, runtime)",
+    aliases: [".kit", ".kit/", ".kit/*"],
+  },
+  {
+    pattern: "!.kit/shared/",
+    reason: "keep curated shared memory tracked (committed by design)",
+    aliases: ["!.kit/shared", "!.kit/shared/**"],
+  },
   { pattern: ".kit-audit.jsonl", reason: "audit log can contain secret labels + paths" },
   { pattern: "*.pem", reason: "PEM keys / certs" },
   { pattern: "*.key", reason: "private keys" },
@@ -63,9 +75,7 @@ function parseGitignore(text: string): string[] {
     .filter((l) => l.length > 0);
 }
 
-export async function checkGitignore(
-  cwd: string = process.cwd(),
-): Promise<IgnoreCheckResult> {
+export async function checkGitignore(cwd: string = process.cwd()): Promise<IgnoreCheckResult> {
   const path = resolve(cwd, ".gitignore");
   let exists = false;
   let lines: string[] = [];
@@ -150,18 +160,12 @@ export async function patchGitignore(
  * filenames. Useful for the "already committed before .gitignore was set
  * up" case where adding the pattern doesn't help.
  */
-export async function findCommittedSensitive(
-  cwd: string = process.cwd(),
-): Promise<string[]> {
+export async function findCommittedSensitive(cwd: string = process.cwd()): Promise<string[]> {
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const exec = promisify(execFile);
   try {
-    const { stdout } = await exec(
-      "git",
-      ["ls-files"],
-      { cwd, timeout: 5_000 },
-    );
+    const { stdout } = await exec("git", ["ls-files"], { cwd, timeout: 5_000 });
     const tracked = stdout.split("\n").filter(Boolean);
     const offenders: string[] = [];
     for (const path of tracked) {
@@ -169,11 +173,10 @@ export async function findCommittedSensitive(
       // `.env`, `.env.local`, `.env.local.prod-backup`, etc.
       // Excluded as harmless: any path that ends in `.template`,
       // `.example`, `.sample` (covers `.env.staging.example` too).
-      if (
-        /^\.env(\..+)?$/.test(base) &&
-        !/\.(template|example|sample)$/.test(base)
-      ) offenders.push(path);
-      if (base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12")) offenders.push(path);
+      if (/^\.env(\..+)?$/.test(base) && !/\.(template|example|sample)$/.test(base))
+        offenders.push(path);
+      if (base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12"))
+        offenders.push(path);
       if (base === "id_rsa" || base.startsWith("id_rsa.")) offenders.push(path);
       if (base === "id_ed25519" || base.startsWith("id_ed25519.")) offenders.push(path);
       if (/-service-account.*\.json$/.test(base)) offenders.push(path);

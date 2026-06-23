@@ -54,11 +54,7 @@ import { scanBuildArtifacts } from "./scan-build.js";
 import { scanTranscripts } from "./scan-transcripts.js";
 import { sampleCosts } from "./cost-monitor.js";
 import { requireElevation, consumeElevation } from "./elevation.js";
-import {
-  checkGitignore,
-  patchGitignore,
-  findCommittedSensitive,
-} from "./check-gitignore.js";
+import { checkGitignore, patchGitignore, findCommittedSensitive } from "./check-gitignore.js";
 import { auditPull, reportSeverity } from "./post-pull-audit.js";
 import {
   checkOneCliStatus,
@@ -75,17 +71,17 @@ import { checkSkills } from "./check-skills.js";
 import { checkLockFiles } from "./check-lock.js";
 import { collectEscalations, formatEscalationMessage } from "./escalate.js";
 import {
-   printToolsTable,
-   printServicesTable,
-   printSecretsTable,
-   printSkillsTable,
-   printWebSearchStatus,
-   printSecurityTable,
-   printLockTable,
-   printSummary,
-   runStep,
-   stepHeader,
- } from "./output.js";
+  printToolsTable,
+  printServicesTable,
+  printSecretsTable,
+  printSkillsTable,
+  printWebSearchStatus,
+  printSecurityTable,
+  printLockTable,
+  printSummary,
+  runStep,
+  stepHeader,
+} from "./output.js";
 import { checkRevocationStatus } from "./revocation.js";
 import { getBudgetStatus, formatBudgetStatus } from "./budget.js";
 import { formatGovernanceStatus, mergeGovernanceConfigAsync } from "./governance.js";
@@ -107,7 +103,14 @@ import { promptConfirm } from "./utils/prompt.js";
 import { c } from "./utils/colors.js";
 import { gatherStatus } from "./status.js";
 import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
-import { checkContext, applyContext, contextPrompt, gatherLive, suggestContextToml, hasLockableContext } from "./context-lock.js";
+import {
+  checkContext,
+  applyContext,
+  contextPrompt,
+  gatherLive,
+  suggestContextToml,
+  hasLockableContext,
+} from "./context-lock.js";
 import { cmdEnv } from "./commands/env.js";
 import { cmdAuth } from "./commands/auth.js";
 import { cmdAudit } from "./commands/audit.js";
@@ -151,7 +154,9 @@ interface JsonCheckOutput {
 async function cmdHeal(): Promise<boolean> {
   const dryRun = hasFlag(process.argv, "--dry-run");
   const agent = hasFlag(process.argv, "--agent");
-  console.log(`${c.bold}${c.cyan}kit heal${c.reset}${dryRun ? `${c.dim} (dry-run)${c.reset}` : ""}`);
+  console.log(
+    `${c.bold}${c.cyan}kit heal${c.reset}${dryRun ? `${c.dim} (dry-run)${c.reset}` : ""}`,
+  );
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   const { runHeal } = await import("./heal.js");
@@ -174,7 +179,9 @@ async function cmdHeal(): Promise<boolean> {
 
   // FAIL-CLOSED — loud, never auto-healed.
   if (res.failClosed.length > 0) {
-    console.log(`\n${c.red}${c.bold}⚠ FAIL-CLOSED — not auto-healed (possible tampering):${c.reset}`);
+    console.log(
+      `\n${c.red}${c.bold}⚠ FAIL-CLOSED — not auto-healed (possible tampering):${c.reset}`,
+    );
     for (const r of res.failClosed) {
       console.log(`  ${c.red}✗${c.reset} ${r.name}: ${r.detail}`);
       if (r.suggestion) console.log(`    ${c.dim}${r.suggestion}${c.reset}`);
@@ -226,9 +233,7 @@ async function cmdCheck(): Promise<boolean> {
       const step = <T>(label: string, fn: () => Promise<T>): Promise<T> =>
         live ? runStep(label, fn) : fn();
 
-      const toolResults = config.tools
-        ? await step("tools", () => checkTools(config.tools!))
-        : [];
+      const toolResults = config.tools ? await step("tools", () => checkTools(config.tools!)) : [];
       const serviceResults = config.services
         ? await step("services", () => checkServices(config.services!))
         : [];
@@ -238,14 +243,14 @@ async function cmdCheck(): Promise<boolean> {
       const skillResults = config.skills
         ? await step("skills", () => checkSkills(config.skills!))
         : [];
-       const hookResults =
-         config.hooks && isGitRepository()
-           ? await step("git hooks", () => checkHooks(config.hooks!))
-           : [];
-       const webSearchResult = config.web?.search
-         ? await step("web search", () => checkWebSearch(config.web!.search!))
-         : null;
-       const securityResults = await step("security scan", () => checkSecurity());
+      const hookResults =
+        config.hooks && isGitRepository()
+          ? await step("git hooks", () => checkHooks(config.hooks!))
+          : [];
+      const webSearchResult = config.web?.search
+        ? await step("web search", () => checkWebSearch(config.web!.search!))
+        : null;
+      const securityResults = await step("security scan", () => checkSecurity());
       const lockResults = await step("lock files", () => checkLockFiles(config));
 
       // Test-coverage enforcement (--enforce-tests CLI flag overrides config).
@@ -297,9 +302,13 @@ async function cmdCheck(): Promise<boolean> {
           })),
           ...serviceResults.map((s) => ({
             name: s.name,
-            status: (s.authenticated ? "pass" : s.informational ? "warn" : "fail") as JsonCheck["status"],
+            status: (s.authenticated
+              ? "pass"
+              : s.informational
+                ? "warn"
+                : "fail") as JsonCheck["status"],
             detail: s.informational
-              ? (s.output || "manual setup (no CLI login)")
+              ? s.output || "manual setup (no CLI login)"
               : (s.output ?? (s.authenticated ? "authenticated" : "not authenticated")),
             category: "services",
           })),
@@ -326,7 +335,8 @@ async function cmdCheck(): Promise<boolean> {
                 {
                   name: webSearchResult.provider,
                   status: (webSearchResult.healthy ? "pass" : "fail") as JsonCheck["status"],
-                  detail: webSearchResult.error ?? (webSearchResult.healthy ? "healthy" : "unhealthy"),
+                  detail:
+                    webSearchResult.error ?? (webSearchResult.healthy ? "healthy" : "unhealthy"),
                   category: "web-search",
                 },
               ]
@@ -367,29 +377,27 @@ async function cmdCheck(): Promise<boolean> {
         return allOk;
       }
 
-       printToolsTable(toolResults);
-       printServicesTable(serviceResults);
-       printSecretsTable(secretResults.templateExists, secretResults.keys);
-       printSkillsTable(skillResults);
-       printWebSearchStatus(webSearchResult);
-       printLockTable(lockResults);
+      printToolsTable(toolResults);
+      printServicesTable(serviceResults);
+      printSecretsTable(secretResults.templateExists, secretResults.keys);
+      printSkillsTable(skillResults);
+      printWebSearchStatus(webSearchResult);
+      printLockTable(lockResults);
 
-       // Print hooks status if configured
+      // Print hooks status if configured
       if (hookResults.length > 0) {
         console.log(`${c.cyan}Git Hooks${c.reset}`);
         for (const r of hookResults) {
-          const icon =
-            !r.installed
-              ? `${c.red}✗${c.reset}`
-              : !r.upToDate
-                ? `${c.yellow}!${c.reset}`
-                : `${c.green}✓${c.reset}`;
-          const status =
-            !r.installed
-              ? `${c.red}not installed${c.reset}`
-              : !r.upToDate
-                ? `${c.yellow}outdated${c.reset}`
-                : `${c.green}up-to-date${c.reset}`;
+          const icon = !r.installed
+            ? `${c.red}✗${c.reset}`
+            : !r.upToDate
+              ? `${c.yellow}!${c.reset}`
+              : `${c.green}✓${c.reset}`;
+          const status = !r.installed
+            ? `${c.red}not installed${c.reset}`
+            : !r.upToDate
+              ? `${c.yellow}outdated${c.reset}`
+              : `${c.green}up-to-date${c.reset}`;
           console.log(`  ${icon} ${r.hookName}  ${status}  ${c.dim}${r.detail}${c.reset}`);
         }
         console.log();
@@ -402,10 +410,13 @@ async function cmdCheck(): Promise<boolean> {
         console.log(`\n${c.bold}Tests${c.reset}`);
         for (const r of testResults) {
           const icon =
-            r.status === "pass" ? `${c.green}✓${c.reset}` :
-            r.status === "fail" ? `${c.red}✗${c.reset}` :
-            r.status === "warn" ? `${c.yellow}!${c.reset}` :
-            `${c.dim}-${c.reset}`;
+            r.status === "pass"
+              ? `${c.green}✓${c.reset}`
+              : r.status === "fail"
+                ? `${c.red}✗${c.reset}`
+                : r.status === "warn"
+                  ? `${c.yellow}!${c.reset}`
+                  : `${c.dim}-${c.reset}`;
           console.log(`  ${icon} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
           if (r.files && r.files.length > 0) {
             for (const f of r.files) console.log(`      ${c.dim}- ${f}${c.reset}`);
@@ -440,7 +451,7 @@ async function cmdCheck(): Promise<boolean> {
       }
 
       return allOk;
-    }
+    },
   );
 }
 
@@ -461,16 +472,21 @@ async function cmdDesign(): Promise<boolean> {
     },
   });
   if (jsonMode) {
-    console.log(JSON.stringify({ ok: results.every((r) => r.status !== "fail"), checks: results }, null, 2));
+    console.log(
+      JSON.stringify({ ok: results.every((r) => r.status !== "fail"), checks: results }, null, 2),
+    );
     return results.every((r) => r.status !== "fail");
   }
   console.log(`${c.bold}Design${c.reset}`);
   for (const r of results) {
     const icon =
-      r.status === "pass" ? `${c.green}✓${c.reset}` :
-      r.status === "fail" ? `${c.red}✗${c.reset}` :
-      r.status === "warn" ? `${c.yellow}!${c.reset}` :
-      `${c.dim}-${c.reset}`;
+      r.status === "pass"
+        ? `${c.green}✓${c.reset}`
+        : r.status === "fail"
+          ? `${c.red}✗${c.reset}`
+          : r.status === "warn"
+            ? `${c.yellow}!${c.reset}`
+            : `${c.dim}-${c.reset}`;
     console.log(`  ${icon} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
     if (r.files) for (const f of r.files) console.log(`      ${c.dim}- ${f}${c.reset}`);
   }
@@ -495,7 +511,9 @@ async function cmdReview(): Promise<boolean> {
   if (!designOk) allOk = false;
 
   if (!jsonMode) {
-    console.log(`\n${c.bold}${allOk ? `${c.green}✓ review passed` : `${c.red}✗ review failed`}${c.reset}`);
+    console.log(
+      `\n${c.bold}${allOk ? `${c.green}✓ review passed` : `${c.red}✗ review failed`}${c.reset}`,
+    );
   }
   return allOk;
 }
@@ -567,7 +585,9 @@ async function cmdInstall(): Promise<boolean> {
       return false;
     }
     skipTriage = true;
-    console.log(`${c.yellow}⚠ --no-triage: triage gate bypassed (elevation consumed, audit-logged)${c.reset}`);
+    console.log(
+      `${c.yellow}⚠ --no-triage: triage gate bypassed (elevation consumed, audit-logged)${c.reset}`,
+    );
   }
 
   console.log(`${c.bold}${c.cyan}Installing tools via mise...${c.reset}\n`);
@@ -607,7 +627,7 @@ async function cmdInstall(): Promise<boolean> {
 
       console.log();
       return allOk;
-    }
+    },
   );
 }
 
@@ -673,9 +693,7 @@ async function ensureSecretsBackend(config: kitConfig): Promise<boolean> {
 
   const verify = await check1PasswordStatus();
   if (!verify.authenticated) {
-    console.log(
-      `${c.yellow}Still not authenticated — see hint above.${c.reset}\n`,
-    );
+    console.log(`${c.yellow}Still not authenticated — see hint above.${c.reset}\n`);
     return false;
   }
   console.log(`${c.green}✓ 1Password authenticated${c.reset}\n`);
@@ -695,7 +713,8 @@ async function cmdLogin(): Promise<boolean> {
   const args = process.argv.slice(3);
   const serviceFilter = flagValue(args, "--service");
   const retryIdx = args.indexOf("--retry-count");
-  const retryCount = retryIdx >= 0 && args[retryIdx + 1] ? Math.max(0, parseInt(args[retryIdx + 1]!, 10) || 0) : 0;
+  const retryCount =
+    retryIdx >= 0 && args[retryIdx + 1] ? Math.max(0, parseInt(args[retryIdx + 1]!, 10) || 0) : 0;
 
   const backendOk = await ensureSecretsBackend(config);
 
@@ -801,7 +820,7 @@ async function cmdLogin(): Promise<boolean> {
 
       console.log();
       return allOk && backendOk;
-    }
+    },
   );
 }
 
@@ -835,7 +854,9 @@ async function cmdSecretsValidate(): Promise<boolean> {
   const rl = fix ? createInterface({ input: process.stdin, output: process.stdout }) : null;
   const prompt = rl
     ? async (key: string): Promise<string | null> => {
-        const answer = (await rl.question(`  ${c.cyan}${key}${c.reset} value (blank to skip): `)).trim();
+        const answer = (
+          await rl.question(`  ${c.cyan}${key}${c.reset} value (blank to skip): `)
+        ).trim();
         return answer.length > 0 ? answer : null;
       }
     : undefined;
@@ -850,7 +871,9 @@ async function cmdSecretsValidate(): Promise<boolean> {
           : r.status === "missing"
             ? `${c.red}✗${c.reset}`
             : `${c.yellow}⚠${c.reset}`;
-      console.log(`  ${icon} ${r.key} ${c.dim}(${r.source})${c.reset}${r.detail ? ` — ${r.detail}` : ""}`);
+      console.log(
+        `  ${icon} ${r.key} ${c.dim}(${r.source})${c.reset}${r.detail ? ` — ${r.detail}` : ""}`,
+      );
     }
     const s = summarizeValidation(results);
     const tail = [
@@ -918,11 +941,7 @@ async function cmdSecrets(): Promise<boolean> {
   const { looksLikeProdKey, getActiveEnv, prodReadAllowed } = await import("./env-switch.js");
   const activeEnv = await getActiveEnv(process.cwd());
   const prodKeys = Object.entries(secretsConfig.keys ?? {}).filter(([, v]) => {
-    return (
-      looksLikeProdKey(v.ref) ||
-      looksLikeProdKey(v.name) ||
-      looksLikeProdKey(v.vault_path)
-    );
+    return looksLikeProdKey(v.ref) || looksLikeProdKey(v.name) || looksLikeProdKey(v.vault_path);
   });
   if (prodKeys.length > 0 && !prodReadAllowed(activeEnv)) {
     console.error(
@@ -941,7 +960,9 @@ async function cmdSecrets(): Promise<boolean> {
     return false;
   }
 
-  console.log(`${c.bold}${c.cyan}Generating secrets...${c.reset}  ${c.dim}(env=${activeEnv})${c.reset}\n`);
+  console.log(
+    `${c.bold}${c.cyan}Generating secrets...${c.reset}  ${c.dim}(env=${activeEnv})${c.reset}\n`,
+  );
 
   return await withGovernance(
     config,
@@ -958,20 +979,14 @@ async function cmdSecrets(): Promise<boolean> {
       let allOk = true;
 
       for (const r of results) {
-        const icon = r.resolved
-          ? `${c.green}✓${c.reset}`
-          : `${c.red}✗${c.reset}`;
-        const status = r.resolved
-          ? `${c.green}resolved${c.reset}`
-          : `${c.red}missing${c.reset}`;
+        const icon = r.resolved ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
+        const status = r.resolved ? `${c.green}resolved${c.reset}` : `${c.red}missing${c.reset}`;
         console.log(`  ${icon} ${r.name}  ${status}  ${c.dim}${r.detail}${c.reset}`);
         if (!r.resolved) allOk = false;
       }
 
       if (written) {
-        const source = fromTemplate
-          ? `from ${secretsConfig.template}`
-          : "from keys";
+        const source = fromTemplate ? `from ${secretsConfig.template}` : "from keys";
         console.log(`\n  ${c.green}✓${c.reset} Wrote .env.local ${c.dim}(${source})${c.reset}`);
       } else if (skipped === "nothing-resolved") {
         console.log(
@@ -1000,15 +1015,19 @@ async function cmdSecrets(): Promise<boolean> {
           );
           console.log(`      ${c.bold}${meta.loginCmd}${c.reset}`);
           if (meta.initCmd) {
-            console.log(`  ${c.dim}then bind this repo:${c.reset}  ${c.bold}${meta.initCmd}${c.reset}`);
+            console.log(
+              `  ${c.dim}then bind this repo:${c.reset}  ${c.bold}${meta.initCmd}${c.reset}`,
+            );
           }
-          console.log(`  ${c.dim}then re-run ${c.reset}${c.bold}kit secrets${c.reset}${c.dim}.${c.reset}`);
+          console.log(
+            `  ${c.dim}then re-run ${c.reset}${c.bold}kit secrets${c.reset}${c.dim}.${c.reset}`,
+          );
         }
       }
 
       console.log();
       return allOk;
-    }
+    },
   );
 }
 
@@ -1021,9 +1040,7 @@ async function cmdSkills(): Promise<boolean> {
   }
 
   const registry = config.skills.registry ?? "clawhub";
-  console.log(
-    `${c.bold}${c.cyan}Skills${c.reset}  ${c.dim}(registry: ${registry})${c.reset}\n`,
-  );
+  console.log(`${c.bold}${c.cyan}Skills${c.reset}  ${c.dim}(registry: ${registry})${c.reset}\n`);
 
   const results = await checkSkills(config.skills);
 
@@ -1041,12 +1058,8 @@ async function cmdSkills(): Promise<boolean> {
         ? `${c.red}✗${c.reset}`
         : `${c.yellow}!${c.reset}`;
     const name = r.name + " ".repeat(Math.max(0, nameWidth - r.name.length));
-    const tag = r.required
-      ? `${c.dim}[required]${c.reset}`
-      : `${c.dim}[optional]${c.reset}`;
-    const status = r.installed
-      ? `${c.green}installed${c.reset}`
-      : `${c.red}missing${c.reset}`;
+    const tag = r.required ? `${c.dim}[required]${c.reset}` : `${c.dim}[optional]${c.reset}`;
+    const status = r.installed ? `${c.green}installed${c.reset}` : `${c.red}missing${c.reset}`;
     console.log(`  ${icon} ${name} ${tag} ${status}  ${c.dim}${r.versionSpec}${c.reset}`);
   }
 
@@ -1055,9 +1068,7 @@ async function cmdSkills(): Promise<boolean> {
     console.log();
     console.log(`${c.bold}To install missing skills:${c.reset}`);
     for (const m of missing) {
-      console.log(
-        `  ${c.cyan}openclaw install ${registry}/${m.name}${c.reset}`,
-      );
+      console.log(`  ${c.cyan}openclaw install ${registry}/${m.name}${c.reset}`);
     }
   }
 
@@ -1078,9 +1089,7 @@ async function cmdEscalate(): Promise<boolean> {
     },
     async () => {
       const toolResults = config.tools ? await checkTools(config.tools) : [];
-      const serviceResults = config.services
-        ? await checkServices(config.services)
-        : [];
+      const serviceResults = config.services ? await checkServices(config.services) : [];
       const secretResults = config.secrets
         ? await checkSecrets(config.secrets)
         : { templateExists: null, keys: [] };
@@ -1104,7 +1113,7 @@ async function cmdEscalate(): Promise<boolean> {
       console.log(`${c.dim}Send this to the project owner for manual resolution.${c.reset}\n`);
 
       return false;
-    }
+    },
   );
 }
 
@@ -1159,7 +1168,9 @@ async function cmdSetup(): Promise<boolean> {
   }
 
   if (recommended) {
-    console.log(`${c.dim}Recommended profile on — memory + git hooks wired after the core steps.${c.reset}\n`);
+    console.log(
+      `${c.dim}Recommended profile on — memory + git hooks wired after the core steps.${c.reset}\n`,
+    );
   }
 
   // Step 1: Install
@@ -1168,7 +1179,9 @@ async function cmdSetup(): Promise<boolean> {
 
   if (!installOk) {
     console.log(`${c.red}Install failed — stopping setup.${c.reset}`);
-    console.log(`${c.dim}Fix the issues above and run ${c.reset}${c.bold}kit setup${c.reset}${c.dim} again.${c.reset}`);
+    console.log(
+      `${c.dim}Fix the issues above and run ${c.reset}${c.bold}kit setup${c.reset}${c.dim} again.${c.reset}`,
+    );
     return false;
   }
 
@@ -1208,7 +1221,10 @@ async function cmdSetup(): Promise<boolean> {
     const gi = await checkGitignore(process.cwd());
     if (gi.missingPatterns.length > 0) {
       const patched = await patchGitignore(process.cwd());
-      const names = gi.missingPatterns.slice(0, 3).map((m) => m.pattern).join(", ");
+      const names = gi.missingPatterns
+        .slice(0, 3)
+        .map((m) => m.pattern)
+        .join(", ");
       console.log(
         `  ${c.green}✓${c.reset} hardened .gitignore ${c.dim}(+${patched.added}: ${names}${gi.missingPatterns.length > 3 ? ", …" : ""}) — review + commit it${c.reset}`,
       );
@@ -1251,7 +1267,9 @@ async function cmdSetup(): Promise<boolean> {
   // `kit agent-config`). Without this the agent hits the permission wall.
   const perms = await installKitPermissions();
   if (perms.action === "created" || perms.action === "updated") {
-    console.log(`  ${c.green}✓${c.reset} allowed ${perms.added.length} read-only kit command(s) ${c.dim}→ ${perms.file}${c.reset}`);
+    console.log(
+      `  ${c.green}✓${c.reset} allowed ${perms.added.length} read-only kit command(s) ${c.dim}→ ${perms.file}${c.reset}`,
+    );
   }
   console.log();
 
@@ -1263,13 +1281,22 @@ async function cmdSetup(): Promise<boolean> {
   if (recommended) {
     console.log(`\n${c.bold}[+] Recommended hardening${c.reset}`);
     const h = await applyRecommendedHardening(config);
-    for (const e of h.memory.added) console.log(`  ${c.green}✓${c.reset} memory hook ${c.dim}${e}${c.reset}`);
-    if (h.memory.added.length === 0) console.log(`  ${c.dim}= memory hooks already wired${c.reset}`);
+    for (const e of h.memory.added)
+      console.log(`  ${c.green}✓${c.reset} memory hook ${c.dim}${e}${c.reset}`);
+    if (h.memory.added.length === 0)
+      console.log(`  ${c.dim}= memory hooks already wired${c.reset}`);
     if (!h.memory.resolved) {
-      console.log(`  ${c.yellow}!${c.reset} ${c.dim}memory hooks use a bare \`kit\` (kit not resolvable to an absolute path)${c.reset}`);
+      console.log(
+        `  ${c.yellow}!${c.reset} ${c.dim}memory hooks use a bare \`kit\` (kit not resolvable to an absolute path)${c.reset}`,
+      );
     }
     for (const r of h.hooks) {
-      const icon = r.action === "failed" ? `${c.red}✗` : r.action === "skipped" ? `${c.yellow}!` : `${c.green}✓`;
+      const icon =
+        r.action === "failed"
+          ? `${c.red}✗`
+          : r.action === "skipped"
+            ? `${c.yellow}!`
+            : `${c.green}✓`;
       console.log(`  ${icon}${c.reset} git ${r.hookName} ${c.dim}(${r.action})${c.reset}`);
     }
     console.log();
@@ -1290,7 +1317,9 @@ async function cmdSetup(): Promise<boolean> {
   if (allOk) {
     console.log(`${c.bold}${c.green}Setup complete — you're ready to go! ✓${c.reset}\n`);
   } else {
-    console.log(`${c.bold}${c.yellow}Setup finished with issues. Run ${c.reset}${c.bold}kit check${c.reset}${c.yellow} to see what's left.${c.reset}\n`);
+    console.log(
+      `${c.bold}${c.yellow}Setup finished with issues. Run ${c.reset}${c.bold}kit check${c.reset}${c.yellow} to see what's left.${c.reset}\n`,
+    );
   }
 
   return allOk;
@@ -1403,7 +1432,9 @@ async function selfUpgrade(): Promise<boolean> {
       timeout: 180_000,
       env: { ...process.env },
     });
-    console.log(`\n${c.green}${c.bold}✓ kit upgraded${c.reset} — run ${c.bold}kit --version${c.reset} to confirm.`);
+    console.log(
+      `\n${c.green}${c.bold}✓ kit upgraded${c.reset} — run ${c.bold}kit --version${c.reset} to confirm.`,
+    );
     return true;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -1435,7 +1466,10 @@ async function cmdUpgrade(): Promise<boolean> {
   await updateSkillsLock(skills, kitMeta?.name ? `${kitMeta.name}@${kitMeta.version}` : undefined);
 
   // Update CLI lock
-  const tools: Record<string, { version: string; source: "mise" | "npm" | "pip" | "manual"; auth?: string }> = {};
+  const tools: Record<
+    string,
+    { version: string; source: "mise" | "npm" | "pip" | "manual"; auth?: string }
+  > = {};
   if (config.tools) {
     for (const [name, version] of Object.entries(config.tools)) {
       tools[name] = { version, source: "mise" };
@@ -1445,9 +1479,13 @@ async function cmdUpgrade(): Promise<boolean> {
   await updateCliLock(tools);
 
   console.log(`${c.green}✓${c.reset} Updated lock files from .kit.toml\n`);
-  
-  console.log(`${c.dim}Run ${c.reset}${c.bold}kit install${c.reset}${c.dim} to install updated tools${c.reset}`);
-  console.log(`${c.dim}Run ${c.reset}${c.bold}kit skills${c.reset}${c.dim} to check skill status${c.reset}\n`);
+
+  console.log(
+    `${c.dim}Run ${c.reset}${c.bold}kit install${c.reset}${c.dim} to install updated tools${c.reset}`,
+  );
+  console.log(
+    `${c.dim}Run ${c.reset}${c.bold}kit skills${c.reset}${c.dim} to check skill status${c.reset}\n`,
+  );
 
   return true;
 }
@@ -1468,7 +1506,7 @@ async function generateConfigFile(
 
   if (stack.confidence < 0.3 && nonInteractive) {
     console.error(
-      `${c.red}✗ Stack detection confidence too low (${(stack.confidence * 100).toFixed(0)}%) — cannot auto-generate config in non-interactive mode.${c.reset}`
+      `${c.red}✗ Stack detection confidence too low (${(stack.confidence * 100).toFixed(0)}%) — cannot auto-generate config in non-interactive mode.${c.reset}`,
     );
     console.error(`${c.dim}Create a .kit.toml manually or run 'kit init' interactively.${c.reset}`);
     return "abort-error";
@@ -1486,7 +1524,7 @@ async function generateConfigFile(
     console.log(`${c.dim}Could not detect project type — generating minimal config.${c.reset}\n`);
   } else {
     console.log(
-      `  ${c.green}✓${c.reset} Detected: ${c.bold}${detectedLabel}${c.reset}  ${c.dim}(confidence: ${(stack.confidence * 100).toFixed(0)}%)${c.reset}\n`
+      `  ${c.green}✓${c.reset} Detected: ${c.bold}${detectedLabel}${c.reset}  ${c.dim}(confidence: ${(stack.confidence * 100).toFixed(0)}%)${c.reset}\n`,
     );
   }
 
@@ -1495,10 +1533,7 @@ async function generateConfigFile(
   // BEFORE wiring up the vault, so the choice of backend is informed.
   const plaintextHits = await scanPlaintextSecrets(process.cwd());
   if (plaintextHits.length > 0) {
-    const totalFindings = plaintextHits.reduce(
-      (sum, h) => sum + h.findings.length,
-      0,
-    );
+    const totalFindings = plaintextHits.reduce((sum, h) => sum + h.findings.length, 0);
     console.log(
       `${c.red}⚠ Found ${totalFindings} plaintext secret(s) across ${plaintextHits.length} file(s):${c.reset}`,
     );
@@ -1519,7 +1554,9 @@ async function generateConfigFile(
   const detectedStore = await detectSecretStore(async (p) => existsSync(resolve(process.cwd(), p)));
   let chosenStore: SecretsStore = detectedStore ?? "1password";
   if (detectedStore) {
-    console.log(`  ${c.green}✓${c.reset} Detected ${c.bold}${detectedStore}${c.reset} config in repo — using it as the secret backend.\n`);
+    console.log(
+      `  ${c.green}✓${c.reset} Detected ${c.bold}${detectedStore}${c.reset} config in repo — using it as the secret backend.\n`,
+    );
   }
   if (!nonInteractive) {
     const opts = [
@@ -1552,13 +1589,19 @@ async function generateConfigFile(
     if (existsSync(p)) {
       extraSecretKeys = parseEnvTemplateKeys(readFileSync(p, "utf-8"));
       if (extraSecretKeys.length > 0) {
-        console.log(`  ${c.green}✓${c.reset} Seeded ${extraSecretKeys.length} key(s) from ${c.bold}${f}${c.reset}\n`);
+        console.log(
+          `  ${c.green}✓${c.reset} Seeded ${extraSecretKeys.length} key(s) from ${c.bold}${f}${c.reset}\n`,
+        );
       }
       break;
     }
   }
 
-  const tomlContent = generateToml(stack, { secretsStore: chosenStore, hasDockerfile, extraSecretKeys });
+  const tomlContent = generateToml(stack, {
+    secretsStore: chosenStore,
+    hasDockerfile,
+    extraSecretKeys,
+  });
 
   // Show diff preview
   console.log(`${c.bold}Preview — .kit.toml${c.reset}\n`);
@@ -1590,11 +1633,15 @@ async function generateConfigFile(
   if (meta) {
     console.log(`  ${c.dim}Secret backend: ${c.reset}${c.bold}${meta.label}${c.reset}`);
     if (meta.miseTool) {
-      console.log(`    ${c.green}✓${c.reset} ${c.dim}${c.reset}${c.bold}kit setup${c.reset}${c.dim} will install its CLI via mise${c.reset}`);
+      console.log(
+        `    ${c.green}✓${c.reset} ${c.dim}${c.reset}${c.bold}kit setup${c.reset}${c.dim} will install its CLI via mise${c.reset}`,
+      );
     }
     if (meta.loginCmd) {
       const steps = meta.initCmd ? `${meta.loginCmd} && ${meta.initCmd}` : meta.loginCmd;
-      console.log(`    ${c.yellow}!${c.reset} ${c.dim}then authenticate (your account): ${c.reset}${c.bold}${steps}${c.reset}`);
+      console.log(
+        `    ${c.yellow}!${c.reset} ${c.dim}then authenticate (your account): ${c.reset}${c.bold}${steps}${c.reset}`,
+      );
     }
     console.log();
   }
@@ -1636,12 +1683,16 @@ async function offerContextLock(configPath: string, nonInteractive: boolean): Pr
 
   const ok = await promptConfirm("Add this [context] lock to .kit.toml? [y/N] ", 10000, false);
   if (!ok) {
-    console.log(`${c.dim}Skipped — run ${c.reset}${c.bold}kit context check${c.reset}${c.dim} later to add it.${c.reset}\n`);
+    console.log(
+      `${c.dim}Skipped — run ${c.reset}${c.bold}kit context check${c.reset}${c.dim} later to add it.${c.reset}\n`,
+    );
     return;
   }
   const existing = readFileSync(configPath, "utf-8");
   await writeFile(configPath, existing.trimEnd() + "\n\n" + block + "\n", "utf-8");
-  console.log(`  ${c.green}✓${c.reset} Locked ${c.bold}[context]${c.reset} ${c.dim}→ verify with ${c.reset}${c.bold}kit context check${c.reset}\n`);
+  console.log(
+    `  ${c.green}✓${c.reset} Locked ${c.bold}[context]${c.reset} ${c.dim}→ verify with ${c.reset}${c.bold}kit context check${c.reset}\n`,
+  );
 }
 
 async function cmdInit(): Promise<boolean> {
@@ -1649,7 +1700,9 @@ async function cmdInit(): Promise<boolean> {
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   const nonInteractive =
-    hasFlag(process.argv, "--non-interactive") || hasFlag(process.argv, "--yes") || hasFlag(process.argv, "-y");
+    hasFlag(process.argv, "--non-interactive") ||
+    hasFlag(process.argv, "--yes") ||
+    hasFlag(process.argv, "-y");
 
   const configPath = resolveConfigPath();
 
@@ -1698,9 +1751,15 @@ async function cmdInit(): Promise<boolean> {
         Object.assign(skills, config.skills.optional);
       }
 
-      await updateSkillsLock(skills, kitMeta?.name ? `${kitMeta.name}@${kitMeta.version}` : undefined);
+      await updateSkillsLock(
+        skills,
+        kitMeta?.name ? `${kitMeta.name}@${kitMeta.version}` : undefined,
+      );
 
-      const tools: Record<string, { version: string; source: "mise" | "npm" | "pip" | "manual"; auth?: string }> = {};
+      const tools: Record<
+        string,
+        { version: string; source: "mise" | "npm" | "pip" | "manual"; auth?: string }
+      > = {};
       if (config.tools) {
         for (const [name, version] of Object.entries(config.tools)) {
           tools[name] = { version, source: "mise" };
@@ -1741,7 +1800,9 @@ async function offerFirstInstallPrescan(): Promise<void> {
   console.log(`${c.bold}${c.cyan}First-install: multi-repo prescan${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}`);
   console.log(`${c.dim}kit can scan every git repo under a directory for leaked secrets,`);
-  console.log(`${c.dim}.gitignore holes, public-repo + credential combos, and CVE-deps.${c.reset}\n`);
+  console.log(
+    `${c.dim}.gitignore holes, public-repo + credential combos, and CVE-deps.${c.reset}\n`,
+  );
 
   const readline = await import("node:readline/promises");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -1762,7 +1823,9 @@ async function offerFirstInstallPrescan(): Promise<void> {
   await writeFile(markerPath, new Date().toISOString() + "\n", { encoding: "utf-8", mode: 0o600 });
 
   if (answer !== "y" && answer !== "yes") {
-    console.log(`${c.dim}Skipped. Run later with ${c.bold}kit security prescan <path>${c.reset}${c.dim}.${c.reset}\n`);
+    console.log(
+      `${c.dim}Skipped. Run later with ${c.bold}kit security prescan <path>${c.reset}${c.dim}.${c.reset}\n`,
+    );
     return;
   }
 
@@ -1771,11 +1834,13 @@ async function offerFirstInstallPrescan(): Promise<void> {
   const report = await runPrescan({ root: resolve(scanPath), deep: false });
   const bySev: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
   for (const f of report.findings) bySev[f.severity] = (bySev[f.severity] ?? 0) + 1;
-  console.log(`${c.bold}Scanned${c.reset} ${report.repoCount} repo(s), ${report.findings.length} finding(s):`);
+  console.log(
+    `${c.bold}Scanned${c.reset} ${report.repoCount} repo(s), ${report.findings.length} finding(s):`,
+  );
   if (bySev.critical) console.log(`  ${c.red}critical${c.reset}: ${bySev.critical}`);
-  if (bySev.high)     console.log(`  ${c.red}high    ${c.reset}: ${bySev.high}`);
-  if (bySev.medium)   console.log(`  ${c.yellow}medium  ${c.reset}: ${bySev.medium}`);
-  if (bySev.low)      console.log(`  ${c.dim}low     ${c.reset}: ${bySev.low}`);
+  if (bySev.high) console.log(`  ${c.red}high    ${c.reset}: ${bySev.high}`);
+  if (bySev.medium) console.log(`  ${c.yellow}medium  ${c.reset}: ${bySev.medium}`);
+  if (bySev.low) console.log(`  ${c.dim}low     ${c.reset}: ${bySev.low}`);
   if (report.summaryPath) {
     console.log(`\n${c.dim}Full report:${c.reset} ${report.summaryPath}`);
   }
@@ -1814,7 +1879,7 @@ async function cmdDoctor(): Promise<boolean> {
   if (result.passed > 0) summaryParts.push(`${c.green}${result.passed} passed${c.reset}`);
   if (result.warnings > 0)
     summaryParts.push(
-      `${c.yellow}${result.warnings} warning${result.warnings === 1 ? "" : "s"}${c.reset}`
+      `${c.yellow}${result.warnings} warning${result.warnings === 1 ? "" : "s"}${c.reset}`,
     );
   if (result.failed > 0) summaryParts.push(`${c.red}${result.failed} failed${c.reset}`);
   if (summaryParts.length === 0) summaryParts.push(`${c.dim}no checks ran${c.reset}`);
@@ -1826,10 +1891,10 @@ async function cmdDoctor(): Promise<boolean> {
 
 async function cmdAdd(): Promise<boolean> {
   const serviceName = process.argv[3];
-  
+
   if (!serviceName) {
     console.log(`${c.bold}${c.cyan}Available services:${c.reset}\n`);
-    
+
     const services = listAvailableServices();
     for (const svc of services) {
       const info = getServiceInfo(svc);
@@ -1838,24 +1903,24 @@ async function cmdAdd(): Promise<boolean> {
         console.log(`    ${c.dim}Requires: ${info.tools.join(", ")}${c.reset}`);
       }
     }
-    
+
     console.log();
     console.log(`${c.dim}Usage: kit add <service>${c.reset}`);
     console.log(`${c.dim}Example: kit add stripe/payments${c.reset}`);
     console.log();
     return false;
   }
-  
+
   console.log(`${c.bold}${c.cyan}Provisioning ${serviceName}...${c.reset}\n`);
-  
+
   const projectPath = process.cwd();
   const projectName = process.cwd().split("/").pop();
-  
+
   const result = await provisionService(serviceName, projectPath, projectName);
-  
+
   if (result.success) {
     console.log(`  ${c.green}✓${c.reset} ${result.message}`);
-    
+
     if (result.secrets && Object.keys(result.secrets).length > 0) {
       console.log();
       console.log(`  ${c.dim}Added secrets to .env.local:${c.reset}`);
@@ -1863,12 +1928,12 @@ async function cmdAdd(): Promise<boolean> {
         console.log(`    ${c.cyan}${key}${c.reset}`);
       }
     }
-    
+
     if (result.config) {
       console.log();
       console.log(`  ${c.dim}Updated skills-lock.json${c.reset}`);
     }
-    
+
     console.log();
     return true;
   } else {
@@ -1896,7 +1961,9 @@ async function cmdSecretsOneCli(): Promise<boolean> {
       ? `${c.green}authenticated${c.reset}`
       : `${c.red}not authenticated${c.reset}`;
     console.log(`  Gateway API:    ${status.apiUrl}  ${reach}`);
-    console.log(`  Gateway proxy:  ${status.gatewayUrl}  ${c.dim}(set HTTPS_PROXY here for agent processes)${c.reset}`);
+    console.log(
+      `  Gateway proxy:  ${status.gatewayUrl}  ${c.dim}(set HTTPS_PROXY here for agent processes)${c.reset}`,
+    );
     console.log(`  Auth:           ${auth}`);
     if (status.version) {
       console.log(`  Version:        ${c.dim}${status.version}${c.reset}`);
@@ -1934,9 +2001,7 @@ async function cmdSecretsOneCli(): Promise<boolean> {
   const pathPattern = pathIdx >= 0 ? args[pathIdx + 1] : undefined;
 
   if (!hostPattern) {
-    console.error(
-      `${c.red}--host required (e.g. api.stripe.com, api.openai.com).${c.reset}`,
-    );
+    console.error(`${c.red}--host required (e.g. api.stripe.com, api.openai.com).${c.reset}`);
     return false;
   }
 
@@ -1955,9 +2020,7 @@ async function cmdSecretsOneCli(): Promise<boolean> {
   // 1. Verify OneCLI is reachable + authed before reading the secret.
   const status = await checkOneCliStatus();
   if (!status.reachable || !status.authenticated) {
-    console.error(
-      `${c.red}OneCLI not ready: ${status.error ?? "unreachable"}${c.reset}`,
-    );
+    console.error(`${c.red}OneCLI not ready: ${status.error ?? "unreachable"}${c.reset}`);
     console.error(
       `${c.dim}Run ${c.bold}kit secrets onecli status${c.reset}${c.dim} for details.${c.reset}`,
     );
@@ -1967,9 +2030,7 @@ async function cmdSecretsOneCli(): Promise<boolean> {
   // 2. Read the real value from the configured upstream vault.
   const config = await loadConfig(resolveConfigPath());
   if (!config.secrets?.store || config.secrets.store === "env") {
-    console.error(
-      `${c.red}No upstream vault configured in .kit.toml.${c.reset}`,
-    );
+    console.error(`${c.red}No upstream vault configured in .kit.toml.${c.reset}`);
     console.error(
       `${c.dim}Set ${c.bold}[secrets].store${c.reset}${c.dim} (run ${c.bold}kit init${c.reset}${c.dim}) first so kit knows where to read the real value from.${c.reset}`,
     );
@@ -1996,9 +2057,7 @@ async function cmdSecretsOneCli(): Promise<boolean> {
   );
   const realValue = await readSecretValueFromVault(keyName, config);
   if (!realValue) {
-    console.error(
-      `${c.red}Could not resolve "${keyName}" from upstream vault.${c.reset}`,
-    );
+    console.error(`${c.red}Could not resolve "${keyName}" from upstream vault.${c.reset}`);
     console.error(
       `${c.dim}Check auth with ${c.bold}kit check${c.reset}${c.dim} and retry.${c.reset}`,
     );
@@ -2112,8 +2171,7 @@ async function cmdSecretsRevokeOld(): Promise<boolean> {
     return false;
   }
   const projectIdx = args.indexOf("--project");
-  const projectRef =
-    projectIdx >= 0 ? args[projectIdx + 1] : process.env.SUPABASE_PROJECT_REF;
+  const projectRef = projectIdx >= 0 ? args[projectIdx + 1] : process.env.SUPABASE_PROJECT_REF;
   const keyIdIdx = args.indexOf("--key-id");
   const keyId = keyIdIdx >= 0 ? args[keyIdIdx + 1] : undefined;
 
@@ -2221,9 +2279,7 @@ async function cmdSecretsPropagateStandalone(): Promise<boolean> {
     console.error(
       `${c.red}Usage: kit secrets propagate <KEY> [--value <v> | --stdin] --to <targets> [opts]${c.reset}`,
     );
-    console.error(
-      `${c.dim}targets: ${ALL_TARGETS.join(",")}${c.reset}`,
-    );
+    console.error(`${c.dim}targets: ${ALL_TARGETS.join(",")}${c.reset}`);
     return false;
   }
 
@@ -2335,7 +2391,9 @@ async function cmdSecretsPurgeHistory(): Promise<boolean> {
     const pv = await previewMatches(p, process.cwd());
     totalCommits += pv.matchedCommits;
     if (pv.matchedCommits === 0) {
-      console.log(`  ${c.dim}•${c.reset} ${pv.pattern.slice(0, 14)}…  ${c.dim}no matches${c.reset}`);
+      console.log(
+        `  ${c.dim}•${c.reset} ${pv.pattern.slice(0, 14)}…  ${c.dim}no matches${c.reset}`,
+      );
     } else {
       console.log(
         `  ${c.yellow}•${c.reset} ${pv.pattern.slice(0, 14)}…  ${c.yellow}${pv.matchedCommits} commit(s) touched${c.reset}`,
@@ -2348,7 +2406,9 @@ async function cmdSecretsPurgeHistory(): Promise<boolean> {
   console.log();
 
   if (totalCommits === 0) {
-    console.log(`${c.green}✓ No commits reference the supplied pattern(s). Nothing to do.${c.reset}\n`);
+    console.log(
+      `${c.green}✓ No commits reference the supplied pattern(s). Nothing to do.${c.reset}\n`,
+    );
     return true;
   }
 
@@ -2362,9 +2422,7 @@ async function cmdSecretsPurgeHistory(): Promise<boolean> {
   );
 
   if (!force) {
-    console.error(
-      `${c.red}✗ Refusing to proceed without --force-history.${c.reset}`,
-    );
+    console.error(`${c.red}✗ Refusing to proceed without --force-history.${c.reset}`);
     console.error(
       `${c.dim}Re-run with ${c.bold}--force-history${c.reset}${c.dim} after confirming the impact list above.${c.reset}\n`,
     );
@@ -2441,7 +2499,9 @@ async function cmdSecretsMigrate(): Promise<boolean> {
   const dryRun = hasFlag(process.argv, "--dry-run");
   const noClean = hasFlag(process.argv, "--no-clean");
 
-  console.log(`${c.dim}Target vault: ${c.bold}${store}${c.reset}${c.dim} (dry-run: ${dryRun})${c.reset}\n`);
+  console.log(
+    `${c.dim}Target vault: ${c.bold}${store}${c.reset}${c.dim} (dry-run: ${dryRun})${c.reset}\n`,
+  );
 
   const secretsOnly = hasFlag(process.argv, "--secrets-only");
   const plan = await planMigration(process.cwd(), { secretsOnly });
@@ -2454,9 +2514,7 @@ async function cmdSecretsMigrate(): Promise<boolean> {
         const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
         console.log(`  ${c.dim}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
       }
-      console.log(
-        `${c.dim}Embedded secrets in scripts / JSON need manual extraction.${c.reset}\n`,
-      );
+      console.log(`${c.dim}Embedded secrets in scripts / JSON need manual extraction.${c.reset}\n`);
       return false;
     }
     console.log(`${c.green}✓ No plaintext secrets found — nothing to migrate.${c.reset}\n`);
@@ -2535,15 +2593,9 @@ async function cmdSecretsMigrate(): Promise<boolean> {
     console.log(`${c.bold}Cleanup${c.reset}  ${c.dim}(mode=${mode})${c.reset}`);
     console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
     for (const [file, keys] of cleaned) {
-      const { changed } = await commentOutInFile(
-        `${process.cwd()}/${file}`,
-        keys,
-        mode,
-      );
+      const { changed } = await commentOutInFile(`${process.cwd()}/${file}`, keys, mode);
       const verb = mode === "delete" ? "deleted" : mode === "comment" ? "commented out" : "blanked";
-      console.log(
-        `  ${c.green}✓${c.reset} ${file}  ${c.dim}${changed} line(s) ${verb}${c.reset}`,
-      );
+      console.log(`  ${c.green}✓${c.reset} ${file}  ${c.dim}${changed} line(s) ${verb}${c.reset}`);
     }
     const explain =
       mode === "blank"
@@ -2571,18 +2623,24 @@ async function cmdSecretsMigrate(): Promise<boolean> {
  */
 async function cmdSecretsVaultMigrate(): Promise<boolean> {
   const args = process.argv.slice(4);
-  const fromArg = args.find((a) => a.startsWith("--from="))?.split("=")[1] ??
-    (args[args.indexOf("--from") + 1] ?? "");
-  const toArg = args.find((a) => a.startsWith("--to="))?.split("=")[1] ??
-    (args[args.indexOf("--to") + 1] ?? "");
+  const fromArg =
+    args.find((a) => a.startsWith("--from="))?.split("=")[1] ??
+    args[args.indexOf("--from") + 1] ??
+    "";
+  const toArg =
+    args.find((a) => a.startsWith("--to="))?.split("=")[1] ?? args[args.indexOf("--to") + 1] ?? "";
   const dryRun = hasFlag(args, "--dry-run");
 
   if (hasFlag(args, "--help") || hasFlag(args, "-h") || !fromArg || !toArg) {
-    console.log(`${c.bold}kit secrets vault-migrate${c.reset} — move keys between vault backends\n`);
+    console.log(
+      `${c.bold}kit secrets vault-migrate${c.reset} — move keys between vault backends\n`,
+    );
     console.log("Usage:");
     console.log("  kit secrets vault-migrate --from <source> --to <target> [--dry-run]");
     console.log("");
-    console.log("Supported backends: 1password, infisical, bitwarden, doppler, vault, aws-sm, gcp-sm, azure-kv");
+    console.log(
+      "Supported backends: 1password, infisical, bitwarden, doppler, vault, aws-sm, gcp-sm, azure-kv",
+    );
     console.log("");
     console.log("Migration is gated by elevation (one-shot — consumed on use):");
     console.log("  kit auth elevate --scope vault-migrate");
@@ -2591,7 +2649,9 @@ async function cmdSecretsVaultMigrate(): Promise<boolean> {
 
   console.log(`${c.bold}${c.cyan}kit secrets vault-migrate${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
-  console.log(`${c.dim}From: ${c.bold}${fromArg}${c.reset}${c.dim} → To: ${c.bold}${toArg}${c.reset}${c.dim} (dry-run: ${dryRun})${c.reset}\n`);
+  console.log(
+    `${c.dim}From: ${c.bold}${fromArg}${c.reset}${c.dim} → To: ${c.bold}${toArg}${c.reset}${c.dim} (dry-run: ${dryRun})${c.reset}\n`,
+  );
 
   const config = await loadConfig(resolveConfigPath());
   if (!config.secrets) {
@@ -2615,7 +2675,9 @@ async function cmdSecretsVaultMigrate(): Promise<boolean> {
   console.log();
 
   if (dryRun) {
-    console.log(`${c.dim}--dry-run set; not reading values. Remove flag + elevate to perform.${c.reset}\n`);
+    console.log(
+      `${c.dim}--dry-run set; not reading values. Remove flag + elevate to perform.${c.reset}\n`,
+    );
     return true;
   }
 
@@ -2672,7 +2734,9 @@ async function cmdSecretsSync(): Promise<boolean> {
     return true;
   }
 
-  console.log(`${c.bold}${c.cyan}kit secrets sync${c.reset} → ${c.bold}${target}${c.reset}${dryRun ? ` ${c.yellow}(dry run)${c.reset}` : ""}\n`);
+  console.log(
+    `${c.bold}${c.cyan}kit secrets sync${c.reset} → ${c.bold}${target}${c.reset}${dryRun ? ` ${c.yellow}(dry run)${c.reset}` : ""}\n`,
+  );
 
   const result = await syncSecrets(config.secrets, {
     target,
@@ -2739,13 +2803,17 @@ function emitGitlabJunit(checks: JsonCheck[], allOk: boolean): void {
   // guaranteed flushed before this (sync) function returns.
   writeFileSync("kit-report.xml", xml, "utf8");
   if (!allOk || warnings.length > 0) {
-    console.log(`CI report written to kit-report.xml (${failures.length} failures, ${warnings.length} warnings)`);
+    console.log(
+      `CI report written to kit-report.xml (${failures.length} failures, ${warnings.length} warnings)`,
+    );
   }
 }
 
 async function cmdCi(): Promise<boolean> {
   const args = process.argv.slice(2);
-  const formatArg = args.find((a) => a.startsWith("--format="))?.split("=")[1] as CiFormat | undefined;
+  const formatArg = args.find((a) => a.startsWith("--format="))?.split("=")[1] as
+    | CiFormat
+    | undefined;
   const failOnWarning = hasFlag(args, "--fail-on-warning");
   const jsonMode = hasFlag(args, "--json");
   const format: CiFormat = formatArg ?? (jsonMode ? "json" : detectCiFormat());
@@ -2761,9 +2829,7 @@ async function cmdCi(): Promise<boolean> {
       const step = <T>(label: string, fn: () => Promise<T>): Promise<T> =>
         live ? runStep(label, fn) : fn();
 
-      const toolResults = config.tools
-        ? await step("tools", () => checkTools(config.tools!))
-        : [];
+      const toolResults = config.tools ? await step("tools", () => checkTools(config.tools!)) : [];
       const serviceResults = config.services
         ? await step("services", () => checkServices(config.services!))
         : [];
@@ -2787,9 +2853,13 @@ async function cmdCi(): Promise<boolean> {
           name: s.name,
           // Informational services (no CLI login) are a manual-setup warning,
           // not a CI failure.
-          status: (s.authenticated ? "pass" : s.informational ? "warn" : "fail") as JsonCheck["status"],
+          status: (s.authenticated
+            ? "pass"
+            : s.informational
+              ? "warn"
+              : "fail") as JsonCheck["status"],
           detail: s.informational
-            ? (s.output || "manual setup (no CLI login)")
+            ? s.output || "manual setup (no CLI login)"
             : (s.output ?? (s.authenticated ? "authenticated" : "not authenticated")),
           category: "services",
         })),
@@ -2827,11 +2897,10 @@ async function cmdCi(): Promise<boolean> {
           else acc.skipped++;
           return acc;
         },
-        { passed: 0, failed: 0, warnings: 0, skipped: 0 }
+        { passed: 0, failed: 0, warnings: 0, skipped: 0 },
       );
 
-      const allOk =
-        summary.failed === 0 && (!failOnWarning || summary.warnings === 0);
+      const allOk = summary.failed === 0 && (!failOnWarning || summary.warnings === 0);
 
       if (format === "github") {
         if (process.env.GITHUB_STEP_SUMMARY) {
@@ -2842,23 +2911,23 @@ async function cmdCi(): Promise<boolean> {
             `|--------|-------|--------|`,
             ...checks.map(
               (c) =>
-                `| ${c.status === "pass" ? "✅" : c.status === "warn" ? "⚠️" : "❌"} | \`${c.category}/${c.name}\` | ${c.detail} |`
+                `| ${c.status === "pass" ? "✅" : c.status === "warn" ? "⚠️" : "❌"} | \`${c.category}/${c.name}\` | ${c.detail} |`,
             ),
             ``,
             `**${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings**`,
           ];
           await import("node:fs/promises").then(({ appendFile }) =>
-            appendFile(process.env.GITHUB_STEP_SUMMARY!, lines.join("\n") + "\n")
+            appendFile(process.env.GITHUB_STEP_SUMMARY!, lines.join("\n") + "\n"),
           );
         }
         emitGithubAnnotations(checks);
         console.log(
-          `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`
+          `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`,
         );
       } else if (format === "gitlab") {
         emitGitlabJunit(checks, allOk);
         console.log(
-          `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`
+          `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`,
         );
       } else if (format === "json") {
         const output: JsonCheckOutput = { ok: allOk, checks, summary };
@@ -2876,12 +2945,12 @@ async function cmdCi(): Promise<boolean> {
           warnings.forEach((w) => console.log(`  ! [${w.category}] ${w.name}: ${w.detail}`));
         }
         console.log(
-          `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`
+          `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`,
         );
       }
 
       return allOk;
-    }
+    },
   );
 }
 
@@ -2890,10 +2959,12 @@ async function cmdAnalyze(): Promise<boolean> {
   // --write <dir> persists the drafts (suffix .draft.md so the user reviews
   // before committing).
   const args = process.argv.slice(3);
-  const wantClaude = hasFlag(args, "--claude") || (!hasFlag(args, "--rules") && !hasFlag(args, "--claude"));
-  const wantRules = hasFlag(args, "--rules") || (!hasFlag(args, "--rules") && !hasFlag(args, "--claude"));
+  const wantClaude =
+    hasFlag(args, "--claude") || (!hasFlag(args, "--rules") && !hasFlag(args, "--claude"));
+  const wantRules =
+    hasFlag(args, "--rules") || (!hasFlag(args, "--rules") && !hasFlag(args, "--claude"));
   const writeFlagIdx = args.indexOf("--write");
-  const writeDir = writeFlagIdx >= 0 ? args[writeFlagIdx + 1] ?? process.cwd() : null;
+  const writeDir = writeFlagIdx >= 0 ? (args[writeFlagIdx + 1] ?? process.cwd()) : null;
 
   console.log(`${c.bold}${c.cyan}kit analyze${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
@@ -2931,7 +3002,9 @@ async function cmdAnalyze(): Promise<boolean> {
       await writeFile(path, renderClaudeMd(report), "utf-8");
       console.log(`  ${c.green}✓${c.reset} wrote ${path}`);
       if (report.hasClaudeMd) {
-        console.log(`    ${c.dim}(existing CLAUDE.md found — review draft before merging)${c.reset}`);
+        console.log(
+          `    ${c.dim}(existing CLAUDE.md found — review draft before merging)${c.reset}`,
+        );
       }
     }
     if (wantRules) {
@@ -2939,7 +3012,9 @@ async function cmdAnalyze(): Promise<boolean> {
       await writeFile(path, renderRulesMd(report), "utf-8");
       console.log(`  ${c.green}✓${c.reset} wrote ${path}`);
       if (report.hasRulesMd) {
-        console.log(`    ${c.dim}(existing RULES.md found — review draft before merging)${c.reset}`);
+        console.log(
+          `    ${c.dim}(existing RULES.md found — review draft before merging)${c.reset}`,
+        );
       }
     }
     console.log();
@@ -2991,15 +3066,27 @@ async function cmdSecurityPrescan(): Promise<boolean> {
   const deep = hasFlag(process.argv, "--deep");
   const excludeArg = process.argv.find((a) => a.startsWith("--exclude="));
   const exclude = excludeArg
-    ? excludeArg.slice("--exclude=".length).split(",").map((s) => s.trim()).filter(Boolean)
+    ? excludeArg
+        .slice("--exclude=".length)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
     : [];
   const onlyArg = process.argv.find((a) => a.startsWith("--only="));
   const onlyChecks = onlyArg
-    ? onlyArg.slice("--only=".length).split(",").map((s) => s.trim()).filter(Boolean)
+    ? onlyArg
+        .slice("--only=".length)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
     : undefined;
   const skipArg = process.argv.find((a) => a.startsWith("--skip="));
   const skipChecks = skipArg
-    ? skipArg.slice("--skip=".length).split(",").map((s) => s.trim()).filter(Boolean)
+    ? skipArg
+        .slice("--skip=".length)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
     : undefined;
   const formatArg = process.argv.find((a) => a.startsWith("--format="))?.split("=")[1];
   const format: "text" | "json" = formatArg === "json" ? "json" : "text";
@@ -3014,7 +3101,9 @@ async function cmdSecurityPrescan(): Promise<boolean> {
     console.log(`${c.bold}${c.cyan}kit security prescan${c.reset}`);
     console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
     console.log(`  ${c.dim}root:${c.reset} ${root}`);
-    console.log(`  ${c.dim}mode:${c.reset} ${deep ? "deep (default + CVE + workflow-drift + audit-gap + bumblebee)" : "default-bundle"}`);
+    console.log(
+      `  ${c.dim}mode:${c.reset} ${deep ? "deep (default + CVE + workflow-drift + audit-gap + bumblebee)" : "default-bundle"}`,
+    );
     if (exclude.length) console.log(`  ${c.dim}exclude:${c.reset} ${exclude.join(", ")}`);
     console.log();
   }
@@ -3036,23 +3125,34 @@ async function cmdSecurityPrescan(): Promise<boolean> {
     const baseline = await loadReport(vsBaseline);
     const diff = diffReports(baseline, report);
     if (format === "json") {
-      process.stdout.write(JSON.stringify({
-        baseline: vsBaseline,
-        addedCount: diff.added.length,
-        removedCount: diff.removed.length,
-        unchangedCount: diff.unchanged.length,
-        added: diff.added,
-      }, null, 2) + "\n");
+      process.stdout.write(
+        JSON.stringify(
+          {
+            baseline: vsBaseline,
+            addedCount: diff.added.length,
+            removedCount: diff.removed.length,
+            unchangedCount: diff.unchanged.length,
+            added: diff.added,
+          },
+          null,
+          2,
+        ) + "\n",
+      );
     } else {
-      console.log(`${c.bold}${c.cyan}drift report${c.reset}: ${diff.added.length} new finding(s) since baseline`);
+      console.log(
+        `${c.bold}${c.cyan}drift report${c.reset}: ${diff.added.length} new finding(s) since baseline`,
+      );
       if (diff.added.length === 0) {
         console.log(`${c.green}✓ no regressions${c.reset}`);
       } else {
         for (const f of diff.added.slice(0, 30)) {
           const sevColor = f.severity === "critical" || f.severity === "high" ? c.red : c.yellow;
-          console.log(`  ${sevColor}•${c.reset} ${f.repo} — ${f.category} (${f.severity}): ${f.detail.slice(0, 80)}`);
+          console.log(
+            `  ${sevColor}•${c.reset} ${f.repo} — ${f.category} (${f.severity}): ${f.detail.slice(0, 80)}`,
+          );
         }
-        if (diff.added.length > 30) console.log(`  ${c.dim}…and ${diff.added.length - 30} more${c.reset}`);
+        if (diff.added.length > 30)
+          console.log(`  ${c.dim}…and ${diff.added.length - 30} more${c.reset}`);
       }
     }
     return diff.added.length === 0;
@@ -3063,30 +3163,36 @@ async function cmdSecurityPrescan(): Promise<boolean> {
 
   if (format === "json") {
     // Emit machine-readable summary; raw findings live in report.reportPath.
-    process.stdout.write(JSON.stringify({
-      startedAt: report.startedAt,
-      finishedAt: report.finishedAt,
-      durationSec: durSec,
-      root: report.root,
-      mode: deep ? "deep" : "default",
-      exclude,
-      repoCount: report.repoCount,
-      findingCount: report.findings.length,
-      bySeverity: bySev,
-      reportPath: report.reportPath,
-      summaryPath: report.summaryPath,
-      findings: report.findings,
-    }, null, 2) + "\n");
+    process.stdout.write(
+      JSON.stringify(
+        {
+          startedAt: report.startedAt,
+          finishedAt: report.finishedAt,
+          durationSec: durSec,
+          root: report.root,
+          mode: deep ? "deep" : "default",
+          exclude,
+          repoCount: report.repoCount,
+          findingCount: report.findings.length,
+          bySeverity: bySev,
+          reportPath: report.reportPath,
+          summaryPath: report.summaryPath,
+          findings: report.findings,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
     return bySev.critical === 0 && bySev.high === 0;
   }
 
   console.log(`${c.bold}Scanned${c.reset} ${report.repoCount} repo(s) in ${durSec}s`);
   console.log(`${c.bold}Findings${c.reset}: ${report.findings.length} total`);
   if (bySev.critical) console.log(`  ${c.red}critical${c.reset}: ${bySev.critical}`);
-  if (bySev.high)     console.log(`  ${c.red}high    ${c.reset}: ${bySev.high}`);
-  if (bySev.medium)   console.log(`  ${c.yellow}medium  ${c.reset}: ${bySev.medium}`);
-  if (bySev.low)      console.log(`  ${c.dim}low     ${c.reset}: ${bySev.low}`);
-  if (bySev.info)     console.log(`  ${c.dim}info    ${c.reset}: ${bySev.info}`);
+  if (bySev.high) console.log(`  ${c.red}high    ${c.reset}: ${bySev.high}`);
+  if (bySev.medium) console.log(`  ${c.yellow}medium  ${c.reset}: ${bySev.medium}`);
+  if (bySev.low) console.log(`  ${c.dim}low     ${c.reset}: ${bySev.low}`);
+  if (bySev.info) console.log(`  ${c.dim}info    ${c.reset}: ${bySev.info}`);
   console.log();
   if (report.reportPath) console.log(`${c.dim}  raw:${c.reset}     ${report.reportPath}`);
   if (report.summaryPath) console.log(`${c.dim}  summary:${c.reset} ${report.summaryPath}`);
@@ -3126,15 +3232,21 @@ async function cmdSecurityPrescanDiff(): Promise<boolean> {
   const diff = diffReports(a, b);
 
   if (format === "json") {
-    process.stdout.write(JSON.stringify({
-      baseline,
-      latest,
-      addedCount: diff.added.length,
-      removedCount: diff.removed.length,
-      unchangedCount: diff.unchanged.length,
-      added: diff.added,
-      removed: diff.removed,
-    }, null, 2) + "\n");
+    process.stdout.write(
+      JSON.stringify(
+        {
+          baseline,
+          latest,
+          addedCount: diff.added.length,
+          removedCount: diff.removed.length,
+          unchangedCount: diff.unchanged.length,
+          added: diff.added,
+          removed: diff.removed,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
     return diff.added.length === 0;
   }
 
@@ -3142,9 +3254,13 @@ async function cmdSecurityPrescanDiff(): Promise<boolean> {
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
   console.log(`  ${c.dim}baseline:${c.reset} ${baseline}`);
   console.log(`  ${c.dim}latest:  ${c.reset} ${latest}\n`);
-  console.log(`${c.bold}Added (regressions)${c.reset}: ${diff.added.length > 0 ? c.red : c.green}${diff.added.length}${c.reset}`);
+  console.log(
+    `${c.bold}Added (regressions)${c.reset}: ${diff.added.length > 0 ? c.red : c.green}${diff.added.length}${c.reset}`,
+  );
   console.log(`${c.bold}Removed (fixed)${c.reset}:     ${c.green}${diff.removed.length}${c.reset}`);
-  console.log(`${c.bold}Unchanged${c.reset}:           ${c.dim}${diff.unchanged.length}${c.reset}\n`);
+  console.log(
+    `${c.bold}Unchanged${c.reset}:           ${c.dim}${diff.unchanged.length}${c.reset}\n`,
+  );
   if (diff.added.length) {
     console.log(`${c.red}New findings since baseline:${c.reset}`);
     for (const f of diff.added.slice(0, 20)) {
@@ -3249,9 +3365,7 @@ async function cmdSecurity(): Promise<boolean> {
         `  ${c.green}✓${c.reset} added ${c.bold}${entry.name}${c.reset} @ ${entry.range}  ${c.dim}(${entry.reason})${c.reset}`,
       );
     } else {
-      console.log(
-        `  ${c.dim}${entry.name}${c.reset} already on the allowlist @ ${entry.range}`,
-      );
+      console.log(`  ${c.dim}${entry.name}${c.reset} already on the allowlist @ ${entry.range}`);
     }
     return true;
   }
@@ -3288,14 +3402,9 @@ async function cmdSecurity(): Promise<boolean> {
     kind === "runtime" ? `${c.red}runtime${c.reset}` : `${c.yellow}dev${c.reset}`;
 
   if (violations.length > 0) {
-    console.log(
-      `${c.red}✗ ${violations.length} dependency violation(s):${c.reset}\n`,
-    );
+    console.log(`${c.red}✗ ${violations.length} dependency violation(s):${c.reset}\n`);
     for (const v of violations) {
-      const why =
-        v.reason === "not-on-allowlist"
-          ? "not on allowlist"
-          : "wildcard range blocked";
+      const why = v.reason === "not-on-allowlist" ? "not on allowlist" : "wildcard range blocked";
       console.log(
         `  ${c.red}•${c.reset} ${v.name} @ ${v.range}  ${c.dim}[${fmt(v.kind)}]${c.reset}  ${c.dim}${why}${c.reset}`,
       );
@@ -3304,9 +3413,7 @@ async function cmdSecurity(): Promise<boolean> {
   }
 
   if (secretViolations.length > 0) {
-    console.log(
-      `${c.red}✗ ${secretViolations.length} secrets policy violation(s):${c.reset}\n`,
-    );
+    console.log(`${c.red}✗ ${secretViolations.length} secrets policy violation(s):${c.reset}\n`);
     for (const sv of secretViolations) {
       console.log(
         `  ${c.red}•${c.reset} ${sv.key}  ${c.dim}[${sv.reason}]${c.reset}  ${c.dim}${sv.detail}${c.reset}`,
@@ -3330,16 +3437,12 @@ async function cmdSecurityScanStaged(): Promise<boolean> {
   if (hits.length === 0) return true;
 
   const total = hits.reduce((sum, h) => sum + h.findings.length, 0);
-  console.error(
-    `${c.red}✗ kit secret-scan blocked the commit${c.reset}`,
-  );
+  console.error(`${c.red}✗ kit secret-scan blocked the commit${c.reset}`);
   console.error(
     `${c.dim}Found ${total} potential secret(s) in ${hits.length} staged file(s):${c.reset}`,
   );
   for (const hit of hits) {
-    const labels = hit.findings
-      .map((f) => `${f.label}:${f.preview}`)
-      .join(", ");
+    const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
     console.error(`  ${c.red}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
   }
   console.error(
@@ -3357,7 +3460,9 @@ async function cmdSecurityScanBuild(): Promise<boolean> {
     return true;
   }
   const total = hits.reduce((sum, h) => sum + h.findings.length, 0);
-  console.error(`${c.red}✗ scan-build: ${total} potential secret(s) in ${hits.length} build file(s):${c.reset}`);
+  console.error(
+    `${c.red}✗ scan-build: ${total} potential secret(s) in ${hits.length} build file(s):${c.reset}`,
+  );
   for (const hit of hits.slice(0, 20)) {
     const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
     console.error(`  ${c.red}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
@@ -3430,9 +3535,7 @@ async function cmdSecurityCosts(): Promise<boolean> {
             ? `${c.red}✗${c.reset}`
             : `${c.dim}-${c.reset}`;
     const capLabel =
-      s.capUsd !== undefined
-        ? `cap=${s.capUsd.toFixed(2)} USD`
-        : `${c.yellow}no cap${c.reset}`;
+      s.capUsd !== undefined ? `cap=${s.capUsd.toFixed(2)} USD` : `${c.yellow}no cap${c.reset}`;
     console.log(
       `  ${icon} ${s.provider.padEnd(10)}  current=${s.current.toFixed(2)} ${s.unit}  ${capLabel}  ${c.dim}${s.detail}${c.reset}`,
     );
@@ -3465,7 +3568,9 @@ async function cmdSecurityVerifyPull(): Promise<boolean> {
     return severity !== "fail";
   }
 
-  console.log(`${c.bold}${c.cyan}kit security verify-pull${c.reset}  ${c.dim}(${base} → ${head})${c.reset}`);
+  console.log(
+    `${c.bold}${c.cyan}kit security verify-pull${c.reset}  ${c.dim}(${base} → ${head})${c.reset}`,
+  );
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   if (report.changedFiles.length === 0) {
@@ -3476,9 +3581,7 @@ async function cmdSecurityVerifyPull(): Promise<boolean> {
   console.log(`${c.dim}${report.changedFiles.length} file(s) changed${c.reset}\n`);
 
   if (report.newDependencies.length > 0) {
-    console.log(
-      `${c.yellow}⚠ ${report.newDependencies.length} new dependency/-ies:${c.reset}`,
-    );
+    console.log(`${c.yellow}⚠ ${report.newDependencies.length} new dependency/-ies:${c.reset}`);
     for (const dep of report.newDependencies) {
       console.log(
         `  ${c.yellow}•${c.reset} ${dep}  ${c.dim}→ run ${c.bold}kit triage npm ${dep}${c.reset}${c.dim} before installing${c.reset}`,
@@ -3491,8 +3594,7 @@ async function cmdSecurityVerifyPull(): Promise<boolean> {
     const sensitive = report.removedGitignoreEntries.filter((l) =>
       /\.env|\.pem|\.key|id_rsa/.test(l),
     );
-    const severityIcon =
-      sensitive.length > 0 ? `${c.red}✗` : `${c.yellow}⚠`;
+    const severityIcon = sensitive.length > 0 ? `${c.red}✗` : `${c.yellow}⚠`;
     console.log(
       `${severityIcon}${c.reset} ${report.removedGitignoreEntries.length} .gitignore entry/-ies removed:`,
     );
@@ -3505,25 +3607,16 @@ async function cmdSecurityVerifyPull(): Promise<boolean> {
   }
 
   if (report.plaintextHits.length > 0) {
-    const total = report.plaintextHits.reduce(
-      (sum, h) => sum + h.findings.length,
-      0,
-    );
+    const total = report.plaintextHits.reduce((sum, h) => sum + h.findings.length, 0);
     console.log(
       `${c.red}✗ ${total} plaintext secret(s) introduced in ${report.plaintextHits.length} file(s):${c.reset}`,
     );
     for (const hit of report.plaintextHits.slice(0, 20)) {
-      const labels = hit.findings
-        .map((f) => `${f.label}:${f.preview}`)
-        .join(", ");
-      console.log(
-        `  ${c.red}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`,
-      );
+      const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
+      console.log(`  ${c.red}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
     }
     if (report.plaintextHits.length > 20) {
-      console.log(
-        `  ${c.dim}… ${report.plaintextHits.length - 20} more${c.reset}`,
-      );
+      console.log(`  ${c.dim}… ${report.plaintextHits.length - 20} more${c.reset}`);
     }
     console.log();
   }
@@ -3603,9 +3696,7 @@ async function cmdSecurityCheckGitignore(): Promise<boolean> {
 
   if (fix && result.missingPatterns.length > 0) {
     const patch = await patchGitignore(process.cwd());
-    console.log(
-      `${c.green}✓${c.reset} appended ${patch.added} pattern(s) to .gitignore`,
-    );
+    console.log(`${c.green}✓${c.reset} appended ${patch.added} pattern(s) to .gitignore`);
     console.log(
       `${c.dim}Review the new block, then ${c.bold}git add .gitignore && git commit${c.reset}${c.dim}.${c.reset}\n`,
     );
@@ -3630,9 +3721,7 @@ async function cmdSecurityClearCache(): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit security clear-cache${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
-  console.log(
-    `${c.yellow}⚠ This will delete the cached ${target} binary.${c.reset}`,
-  );
+  console.log(`${c.yellow}⚠ This will delete the cached ${target} binary.${c.reset}`);
   console.log(
     `${c.dim}Use when you have intentionally rebuilt the scanner locally (e.g. a feature branch) and the pinned checksum no longer matches.${c.reset}`,
   );
@@ -3642,10 +3731,7 @@ async function cmdSecurityClearCache(): Promise<boolean> {
 
   const nonInteractive = isNonInteractive();
   if (!nonInteractive) {
-    const ok = await promptConfirm(
-      `Continue? [Y/n] (auto-yes in 8s): `,
-      8000,
-    );
+    const ok = await promptConfirm(`Continue? [Y/n] (auto-yes in 8s): `, 8000);
     if (!ok) {
       console.log(`${c.dim}Aborted.${c.reset}`);
       return false;
@@ -3653,7 +3739,9 @@ async function cmdSecurityClearCache(): Promise<boolean> {
   }
 
   if (target !== "bumblebee") {
-    console.error(`${c.red}Unknown cache target: ${target} (only 'bumblebee' is supported)${c.reset}`);
+    console.error(
+      `${c.red}Unknown cache target: ${target} (only 'bumblebee' is supported)${c.reset}`,
+    );
     return false;
   }
 
@@ -3675,7 +3763,9 @@ async function cmdCreatePlugin(): Promise<boolean> {
   if (!pluginName) {
     console.error(`${c.red}Usage: kit create-plugin <name>${c.reset}`);
     console.error(`${c.dim}Example: kit create-plugin aws-s3${c.reset}`);
-    console.error(`${c.dim}Creates ./kit-plugin-aws-s3/ with a working TypeScript adapter.${c.reset}`);
+    console.error(
+      `${c.dim}Creates ./kit-plugin-aws-s3/ with a working TypeScript adapter.${c.reset}`,
+    );
     return false;
   }
 
@@ -3716,12 +3806,18 @@ async function cmdClone(): Promise<boolean> {
     console.error();
     console.error(`${c.dim}Options:${c.reset}`);
     console.error(`${c.dim}  --no-setup           Skip running kit setup after cloning${c.reset}`);
-    console.error(`${c.dim}  --env <name>         Environment to use for setup (default: "default")${c.reset}`);
+    console.error(
+      `${c.dim}  --env <name>         Environment to use for setup (default: "default")${c.reset}`,
+    );
     console.error();
     console.error(`${c.dim}Example:${c.reset}`);
     console.error(`${c.dim}  kit clone https://github.com/sandstream/example my-project${c.reset}`);
-    console.error(`${c.dim}  kit clone https://github.com/sandstream/example my-project --env production${c.reset}`);
-    console.error(`${c.dim}  kit clone https://github.com/sandstream/example my-project --no-setup${c.reset}`);
+    console.error(
+      `${c.dim}  kit clone https://github.com/sandstream/example my-project --env production${c.reset}`,
+    );
+    console.error(
+      `${c.dim}  kit clone https://github.com/sandstream/example my-project --no-setup${c.reset}`,
+    );
     return false;
   }
 
@@ -3746,7 +3842,9 @@ async function cmdClone(): Promise<boolean> {
 
   if (!cloneResult.haskitToml) {
     console.log(`${c.yellow}⚠ No .kit.toml found in repository.${c.reset}`);
-    console.log(`${c.dim}Create one with 'cd ${cloneResult.clonedPath} && kit init' to set up kit.${c.reset}`);
+    console.log(
+      `${c.dim}Create one with 'cd ${cloneResult.clonedPath} && kit init' to set up kit.${c.reset}`,
+    );
     console.log();
     return true;
   }
@@ -3773,7 +3871,9 @@ async function cmdClone(): Promise<boolean> {
     return setupOk;
   } catch (err) {
     process.chdir(originalCwd);
-    console.error(`${c.red}Error during setup: ${err instanceof Error ? err.message : String(err)}${c.reset}`);
+    console.error(
+      `${c.red}Error during setup: ${err instanceof Error ? err.message : String(err)}${c.reset}`,
+    );
     return false;
   }
 }
@@ -3787,7 +3887,9 @@ async function cmdRun(): Promise<boolean> {
     console.error(`${c.red}Usage: kit run -- <command> [args...]${c.reset}`);
     console.error();
     console.error(`${c.dim}Options:${c.reset}`);
-    console.error(`${c.dim}  --env <name>    Environment to use (dev, staging, production, etc.)${c.reset}`);
+    console.error(
+      `${c.dim}  --env <name>    Environment to use (dev, staging, production, etc.)${c.reset}`,
+    );
     console.error();
     console.error(`${c.dim}Example:${c.reset}`);
     console.error(`${c.dim}  kit run -- pnpm test${c.reset}`);
@@ -3885,7 +3987,9 @@ async function cmdContextCheck(): Promise<boolean> {
     );
     const suggestion = suggestContextToml(await gatherLive(process.cwd()));
     if (suggestion) {
-      console.log(`\nDetected here — add a ${c.bold}[context]${c.reset} block to .kit.toml to lock it:\n`);
+      console.log(
+        `\nDetected here — add a ${c.bold}[context]${c.reset} block to .kit.toml to lock it:\n`,
+      );
       console.log(suggestion);
       console.log(
         `\n${c.yellow}Verify each value is correct for THIS repo before trusting it.${c.reset} ${c.dim}kit detected the currently-active CLI state, which is exactly what the lock exists to question. Then re-run kit context check.${c.reset}`,
@@ -3950,7 +4054,9 @@ async function cmdContextUse(): Promise<boolean> {
   }
   const failed = results.filter((r) => !r.ok).length;
   if (failed > 0) {
-    console.log(`\n${c.yellow}${failed} step(s) failed (tool not installed?). Run kit context check to verify.${c.reset}`);
+    console.log(
+      `\n${c.yellow}${failed} step(s) failed (tool not installed?). Run kit context check to verify.${c.reset}`,
+    );
   }
   return failed === 0;
 }
@@ -3990,17 +4096,23 @@ async function cmdContext(): Promise<boolean> {
       }
 
       if (context.tools.length > 0) {
-        console.log(`${c.bold}Tools (${context.tools.filter((t) => t.ok).length}/${context.tools.length}):${c.reset}`);
+        console.log(
+          `${c.bold}Tools (${context.tools.filter((t) => t.ok).length}/${context.tools.length}):${c.reset}`,
+        );
         for (const tool of context.tools) {
           const status = tool.ok ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
-          const version = tool.installed ? ` ${c.dim}(${tool.installed})${c.reset}` : " not installed";
+          const version = tool.installed
+            ? ` ${c.dim}(${tool.installed})${c.reset}`
+            : " not installed";
           console.log(`  ${status} ${tool.name}${version}`);
         }
         console.log();
       }
 
       if (context.services.length > 0) {
-        console.log(`${c.bold}Services (${context.services.filter((s) => s.authenticated).length}/${context.services.length}):${c.reset}`);
+        console.log(
+          `${c.bold}Services (${context.services.filter((s) => s.authenticated).length}/${context.services.length}):${c.reset}`,
+        );
         for (const service of context.services) {
           const status = service.authenticated ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
           console.log(`  ${status} ${service.name}`);
@@ -4009,7 +4121,9 @@ async function cmdContext(): Promise<boolean> {
       }
 
       if (context.secrets.keys.length > 0) {
-        console.log(`${c.bold}Secrets (${context.secrets.keys.filter((s) => s.available).length}/${context.secrets.keys.length}):${c.reset}`);
+        console.log(
+          `${c.bold}Secrets (${context.secrets.keys.filter((s) => s.available).length}/${context.secrets.keys.length}):${c.reset}`,
+        );
         for (const secret of context.secrets.keys) {
           const status = secret.available ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
           console.log(`  ${status} ${secret.name}`);
@@ -4019,7 +4133,9 @@ async function cmdContext(): Promise<boolean> {
 
       if (context.locks.length > 0) {
         const allInSync = context.locks.every((l) => l.inSync);
-        console.log(`${c.bold}Lock Files${allInSync ? ` ${c.green}(in sync)` : ` ${c.yellow}(drift detected)`}:${c.reset}`);
+        console.log(
+          `${c.bold}Lock Files${allInSync ? ` ${c.green}(in sync)` : ` ${c.yellow}(drift detected)`}:${c.reset}`,
+        );
         for (const lock of context.locks) {
           const status = lock.inSync ? `${c.green}✓${c.reset}` : `${c.yellow}⚠${c.reset}`;
           console.log(`  ${status} ${lock.category}: ${lock.detail}`);
@@ -4071,7 +4187,10 @@ async function buildHealthCtx(config: kitConfig): Promise<HealthCtx> {
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
     };
-    const deps = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})];
+    const deps = [
+      ...Object.keys(pkg.dependencies ?? {}),
+      ...Object.keys(pkg.devDependencies ?? {}),
+    ];
     const { detectServices } = await import("./service-registry.js");
     services = await detectServices({ deps, fileExists: async (p) => existsSync(resolve(cwd, p)) });
   } catch {
@@ -4096,7 +4215,8 @@ async function cmdHealth(): Promise<boolean> {
     config,
     { operation: "health", operationType: "read", metadata: {} },
     async () => {
-      const { runHealth, selectSensors, defaultHealthDeps, formatHealth } = await import("./health.js");
+      const { runHealth, selectSensors, defaultHealthDeps, formatHealth } =
+        await import("./health.js");
       const { syncHealthFindings } = await import("./health-track.js");
 
       const ctx = await buildHealthCtx(config);
@@ -4158,12 +4278,17 @@ async function cmdIngest(): Promise<boolean> {
     return true;
   }
 
-  console.log(`${c.bold}kit ingest${c.reset}  ${c.dim}${format} · ${findings.length} finding(s)${c.reset}`);
+  console.log(
+    `${c.bold}kit ingest${c.reset}  ${c.dim}${format} · ${findings.length} finding(s)${c.reset}`,
+  );
   const order: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-  const sorted = [...findings].sort((a, b) => (order[a.severity ?? "low"] ?? 9) - (order[b.severity ?? "low"] ?? 9));
+  const sorted = [...findings].sort(
+    (a, b) => (order[a.severity ?? "low"] ?? 9) - (order[b.severity ?? "low"] ?? 9),
+  );
   for (const f of sorted) {
     const sev = f.severity ?? "low";
-    const color = sev === "critical" || sev === "high" ? c.red : sev === "medium" ? c.yellow : c.dim;
+    const color =
+      sev === "critical" || sev === "high" ? c.red : sev === "medium" ? c.yellow : c.dim;
     const cite = f.rule ? ` ${c.dim}[${f.rule.id}]${c.reset}` : "";
     console.log(`  ${color}${sev.toUpperCase().padEnd(8)}${c.reset} ${f.name}${cite}`);
     console.log(`    ${c.dim}${f.detail}${c.reset}`);
@@ -4187,9 +4312,13 @@ async function cmdSupplyChain(): Promise<boolean> {
   console.log(`${c.bold}kit supply-chain${c.reset}`);
   for (const r of results) {
     const mark =
-      r.status === "fail" ? `${c.red}✗${c.reset}` :
-      r.status === "warn" ? `${c.yellow}!${c.reset}` :
-      r.status === "skip" ? `${c.dim}−${c.reset}` : `${c.green}✓${c.reset}`;
+      r.status === "fail"
+        ? `${c.red}✗${c.reset}`
+        : r.status === "warn"
+          ? `${c.yellow}!${c.reset}`
+          : r.status === "skip"
+            ? `${c.dim}−${c.reset}`
+            : `${c.green}✓${c.reset}`;
     console.log(`  ${mark} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
     if (r.suggestion) console.log(`      ${c.dim}${r.suggestion}${c.reset}`);
   }
@@ -4208,11 +4337,16 @@ async function cmdAgentAudit(): Promise<boolean> {
     return fails === 0;
   }
 
-  console.log(`${c.bold}kit agent-audit${c.reset}  ${c.dim}agent/MCP configs + git hooks${c.reset}`);
+  console.log(
+    `${c.bold}kit agent-audit${c.reset}  ${c.dim}agent/MCP configs + git hooks${c.reset}`,
+  );
   for (const r of results) {
     const mark =
-      r.status === "fail" ? `${c.red}✗${c.reset}` :
-      r.status === "warn" ? `${c.yellow}!${c.reset}` : `${c.green}✓${c.reset}`;
+      r.status === "fail"
+        ? `${c.red}✗${c.reset}`
+        : r.status === "warn"
+          ? `${c.yellow}!${c.reset}`
+          : `${c.green}✓${c.reset}`;
     console.log(`  ${mark} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
     if (r.suggestion) console.log(`      ${c.dim}${r.suggestion}${c.reset}`);
   }
@@ -4246,13 +4380,24 @@ async function cmdSentinel(): Promise<boolean> {
       ]) {
         const res = await execFileNoThrow(
           "gh",
-          [...base, "--label", "kit-sentinel", "--state", "open", "--json", "body", "--limit", "200"],
+          [
+            ...base,
+            "--label",
+            "kit-sentinel",
+            "--state",
+            "open",
+            "--json",
+            "body",
+            "--limit",
+            "200",
+          ],
           { timeout: 15_000 },
         );
         if (!res.ok) return null; // gh absent/unauth → agent dedups (fail-open)
         try {
           for (const it of JSON.parse(res.stdout) as { body?: string }[]) {
-            for (const g of (it.body ?? "").matchAll(/kit-sentinel:([^\s]+?)\s*-->/g)) out.add(g[1]);
+            for (const g of (it.body ?? "").matchAll(/kit-sentinel:([^\s]+?)\s*-->/g))
+              out.add(g[1]);
           }
         } catch {
           return null;
@@ -4268,15 +4413,19 @@ async function cmdSentinel(): Promise<boolean> {
   }
 
   const fresh = proposals.filter((p) => p.alreadyOpen !== true);
-  console.log(`${c.bold}kit sentinel${c.reset}  ${c.dim}${proposals.length} proposal(s), ${fresh.length} fresh${c.reset}`);
-  if (proposals.length === 0) console.log(`  ${c.dim}no red findings — nothing to propose${c.reset}`);
+  console.log(
+    `${c.bold}kit sentinel${c.reset}  ${c.dim}${proposals.length} proposal(s), ${fresh.length} fresh${c.reset}`,
+  );
+  if (proposals.length === 0)
+    console.log(`  ${c.dim}no red findings — nothing to propose${c.reset}`);
   for (const p of proposals) {
     const tag = p.alreadyOpen === true ? ` ${c.dim}(already open)${c.reset}` : "";
     const color = p.class === "human" ? c.red : p.class === "code" ? c.yellow : c.dim;
     console.log(`  ${color}${p.artifact}${c.reset} ${p.title}${tag}`);
     console.log(`    ${c.dim}${p.findingId} — your agent opens this with its own creds${c.reset}`);
   }
-  if (proposals.length > 0) console.log(`${c.dim}run with --json and have any agent act on the fresh proposals${c.reset}`);
+  if (proposals.length > 0)
+    console.log(`${c.dim}run with --json and have any agent act on the fresh proposals${c.reset}`);
   return true;
 }
 
@@ -4286,15 +4435,38 @@ async function cmdScan(): Promise<boolean> {
   const { resolveToolBin } = await import("./utils/resolveTool.js");
   const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
   const { loadBaseline, baselineGet, baselineSet, saveBaseline } = await import("./baseline.js");
+  const { SCANNERS } = await import("./scanners.js");
   const cwd = process.cwd();
+  const config = await loadConfig(resolveConfigPath());
+
+  // Resolve scanner tokens (SNYK_TOKEN, …) from a configured tooling Infisical
+  // project so `kit scan` works without an `infisical run` wrapper (#65). The
+  // value flows vault→subprocess env; it is never logged.
+  const toolingTokens: Record<string, string> = {};
+  const tooling = config.scan?.tooling;
+  if (tooling?.project_id) {
+    const { fetchInfisicalProjectSecrets } = await import("./secret-backends.js");
+    const map = await fetchInfisicalProjectSecrets({
+      project_id: tooling.project_id,
+      environment: tooling.env,
+    });
+    for (const s of SCANNERS) {
+      if (s.needsToken && !process.env[s.needsToken] && map.has(s.needsToken)) {
+        toolingTokens[s.needsToken] = map.get(s.needsToken)!;
+      }
+    }
+  }
 
   const { merged, runs } = await runScanners({
     resolve: (bin) => resolveToolBin(bin),
     run: async (bin, args) => {
-      const r = await execFileNoThrow(bin, args, { timeout: 180_000 });
+      const r = await execFileNoThrow(bin, args, {
+        timeout: 180_000,
+        env: { ...process.env, ...toolingTokens },
+      });
       return { ok: r.ok, stdout: r.stdout };
     },
-    hasEnv: (name) => Boolean(process.env[name]),
+    hasEnv: (name) => Boolean(process.env[name] || toolingTokens[name]),
     detect: (markers) => markers.some((m) => existsSync(resolve(cwd, m))),
   });
 
@@ -4304,7 +4476,9 @@ async function cmdScan(): Promise<boolean> {
     const bl = await loadBaseline(cwd);
     baselineSet(bl, "scan", "findings", merged.map(dedupKey));
     await saveBaseline(bl, cwd);
-    console.log(`${c.green}baseline updated${c.reset}  ${c.dim}${merged.length} scan finding(s) accepted into .kit-baseline.json${c.reset}`);
+    console.log(
+      `${c.green}baseline updated${c.reset}  ${c.dim}${merged.length} scan finding(s) accepted into .kit-baseline.json${c.reset}`,
+    );
     return true;
   }
 
@@ -4323,20 +4497,32 @@ async function cmdScan(): Promise<boolean> {
   }
 
   const suppressNote = suppressed > 0 ? `  ${c.dim}(${suppressed} baselined)${c.reset}` : "";
-  console.log(`${c.bold}kit scan${c.reset}  ${c.dim}external scanners → one merged verdict${c.reset}${suppressNote}`);
+  console.log(
+    `${c.bold}kit scan${c.reset}  ${c.dim}external scanners → one merged verdict${c.reset}${suppressNote}`,
+  );
   for (const r of runs) {
-    const mark = r.status === "ran" ? `${c.green}✓${c.reset}` : r.status === "error" ? `${c.red}✗${c.reset}` : `${c.dim}−${c.reset}`;
+    const mark =
+      r.status === "ran"
+        ? `${c.green}✓${c.reset}`
+        : r.status === "error"
+          ? `${c.red}✗${c.reset}`
+          : `${c.dim}−${c.reset}`;
     const note = r.status === "ran" ? `${r.findings} finding(s)` : r.status;
     console.log(`  ${mark} ${r.id}  ${c.dim}${note}${c.reset}`);
   }
   console.log("");
   if (findings.length === 0) {
-    console.log(`  ${c.green}no findings${suppressed > 0 ? " (after baseline)" : " from the scanners that ran"}${c.reset}`);
+    console.log(
+      `  ${c.green}no findings${suppressed > 0 ? " (after baseline)" : " from the scanners that ran"}${c.reset}`,
+    );
   } else {
     for (const m of findings) {
       const sev = m.severity ?? "low";
-      const color = sev === "critical" || sev === "high" ? c.red : sev === "medium" ? c.yellow : c.dim;
-      console.log(`  ${color}${sev.toUpperCase().padEnd(8)}${c.reset} ${m.name}  ${c.dim}[${m.scanners.join("+")}]${c.reset}`);
+      const color =
+        sev === "critical" || sev === "high" ? c.red : sev === "medium" ? c.yellow : c.dim;
+      console.log(
+        `  ${color}${sev.toUpperCase().padEnd(8)}${c.reset} ${m.name}  ${c.dim}[${m.scanners.join("+")}]${c.reset}`,
+      );
     }
   }
   if (bad > 0) console.log(`${c.red}${bad} high/critical${c.reset}`);
@@ -4357,9 +4543,13 @@ async function cmdGhaAudit(): Promise<boolean> {
   console.log(`${c.bold}kit gha-audit${c.reset}  ${c.dim}.github/workflows hardening${c.reset}`);
   for (const r of results) {
     const mark =
-      r.status === "fail" ? `${c.red}✗${c.reset}` :
-      r.status === "warn" ? `${c.yellow}!${c.reset}` :
-      r.status === "skip" ? `${c.dim}−${c.reset}` : `${c.green}✓${c.reset}`;
+      r.status === "fail"
+        ? `${c.red}✗${c.reset}`
+        : r.status === "warn"
+          ? `${c.yellow}!${c.reset}`
+          : r.status === "skip"
+            ? `${c.dim}−${c.reset}`
+            : `${c.green}✓${c.reset}`;
     console.log(`  ${mark} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
     if (r.suggestion) console.log(`      ${c.dim}${r.suggestion}${c.reset}`);
   }
@@ -4385,7 +4575,9 @@ async function cmdSbom(): Promise<boolean> {
     return false;
   }
   const components = lockComponents(parseLockPkgs(lock));
-  console.log(JSON.stringify(fmt === "spdx" ? toSpdx(components) : toCycloneDX(components), null, 2));
+  console.log(
+    JSON.stringify(fmt === "spdx" ? toSpdx(components) : toCycloneDX(components), null, 2),
+  );
   return true;
 }
 
@@ -4403,9 +4595,8 @@ async function cmdWhoami(): Promise<boolean> {
   const envInfo = detectEnvironment(config.governance);
 
   const agent = config.governance?.agent;
-  const budgetEnabled = config.governance?.enabled && (
-    agent?.max_tokens_per_day || agent?.max_operations_per_hour
-  );
+  const budgetEnabled =
+    config.governance?.enabled && (agent?.max_tokens_per_day || agent?.max_operations_per_hour);
 
   let budget: Awaited<ReturnType<typeof getBudgetStatus>> | null = null;
   if (budgetEnabled) {
@@ -4416,9 +4607,7 @@ async function cmdWhoami(): Promise<boolean> {
     console.log(
       JSON.stringify(
         {
-          agent: agent
-            ? { id: agent.id, name: agent.name }
-            : null,
+          agent: agent ? { id: agent.id, name: agent.name } : null,
           environment: envInfo.environment,
           environment_source: envInfo.source,
           budget: budget
@@ -4431,8 +4620,8 @@ async function cmdWhoami(): Promise<boolean> {
             : null,
         },
         null,
-        2
-      )
+        2,
+      ),
     );
     return true;
   }
@@ -4448,13 +4637,9 @@ async function cmdWhoami(): Promise<boolean> {
   }
 
   const envColor =
-    envInfo.environment === "prod"
-      ? c.red
-      : envInfo.environment === "staging"
-        ? c.yellow
-        : c.green;
+    envInfo.environment === "prod" ? c.red : envInfo.environment === "staging" ? c.yellow : c.green;
   console.log(
-    `  ${c.bold}Env:${c.reset}    ${envColor}${envInfo.environment}${c.reset}  ${c.dim}(via ${envInfo.source})${c.reset}`
+    `  ${c.bold}Env:${c.reset}    ${envColor}${envInfo.environment}${c.reset}  ${c.dim}(via ${envInfo.source})${c.reset}`,
   );
 
   if (budget) {
@@ -4479,18 +4664,21 @@ function cmdVersion(): boolean {
 }
 
 const COMMAND_HELP: Record<string, string> = {
-  status:         "Adoption checklist — what's set up across kit + the next step for each gap",
-  check:          "Check status of all tools, services, secrets, and lock files",
-  review:         "Full repo audit — runs check + design in one gate (for agents / PR checks)",
-  design:         "Check design quality (a11y, design tokens) against the baseline",
-  baseline:       "Freeze current warnings into .kit-baseline.json so future runs gate only net-new findings",
-  memory:         "Local conversation memory — index transcripts + show stats",
+  status: "Adoption checklist — what's set up across kit + the next step for each gap",
+  check: "Check status of all tools, services, secrets, and lock files",
+  review: "Full repo audit — runs check + design in one gate (for agents / PR checks)",
+  design: "Check design quality (a11y, design tokens) against the baseline",
+  baseline:
+    "Freeze current warnings into .kit-baseline.json so future runs gate only net-new findings",
+  memory: "Local conversation memory — index transcripts + show stats",
   "memory index": "Index ~/.claude transcripts into the SQLite memory store",
   "memory search": "Full-text search memory (current project; --global for all)",
   "memory stats": "Show what the local memory store contains",
-  "memory suggest": "Emit a BYO-LLM review prompt (recent activity + open items) — pipe to your own model",
+  "memory suggest":
+    "Emit a BYO-LLM review prompt (recent activity + open items) — pipe to your own model",
   "memory merge": "Merge another machine's memory.db into this one (dedup by uuid)",
-  "memory install": "Wire UserPromptSubmit + SessionEnd + SessionStart (recovery) hooks into ~/.claude/settings.json",
+  "memory install":
+    "Wire UserPromptSubmit + SessionEnd + SessionStart (recovery) hooks into ~/.claude/settings.json",
   "memory scan": "Scan the memory store for stored secrets (exit 1 if any found)",
   "memory backup": "Encrypted backup of the memory store (AES-256-GCM; KIT_MEMORY_PASSPHRASE)",
   "memory restore": "Restore an encrypted memory backup (e.g. on a new machine)",
@@ -4501,24 +4689,29 @@ const COMMAND_HELP: Record<string, string> = {
   "memory save": "Bookmark the current session as a named copilot",
   "memory threads": "List saved copilots (current project; --global for all)",
   "memory resume": "Print the resume command for a saved copilot (by name or number)",
-  init:           "Detect stack, generate .kit.toml, and run full setup",
-  upgrade:        "Update lock files from .kit.toml",
-  install:        "Install missing tools via mise",
-  login:          "Guided login to all configured services",
-  "login --plan": "Show the resolved auth strategy per service (vault/interactive/capture + passkey) without logging in",
-  secrets:        "Generate .env.local from template + secret store",
+  init: "Detect stack, generate .kit.toml, and run full setup",
+  upgrade: "Update lock files from .kit.toml",
+  install: "Install missing tools via mise",
+  login: "Guided login to all configured services",
+  "login --plan":
+    "Show the resolved auth strategy per service (vault/interactive/capture + passkey) without logging in",
+  secrets: "Generate .env.local from template + secret store",
   "secrets sync": "Push resolved secrets to GitHub Actions / .env.ci / stdout",
   "secrets migrate": "Migrate plaintext secrets in .env* → configured vault",
-  "secrets set": "Capture a value to the vault: kit secrets set <KEY> --stdin (safer) | --value <v>",
+  "secrets set":
+    "Capture a value to the vault: kit secrets set <KEY> --stdin (safer) | --value <v>",
   "secrets rotate": "Rotate a key: write new value to vault (explicit / random)",
   "secrets onecli": "Register a key with OneCLI gateway so agent never sees the real value",
-  "secrets purge-history": "Destructive: rewrite git history to remove a leaked value (--force-history)",
-  "secrets propagate":     "Push a value to deploy targets only (skips vault-write). --stdin safer than --value",
-  "secrets revoke-old":    "Revoke a previously-minted scoped key (Supabase Mgmt API)",
-  "env switch":     "Switch active environment (dev/staging/prod). Gates prod-key reads.",
-  "env current":    "Show active environment marker",
-  analyze:        "Analyze repo + emit draft CLAUDE.md / RULES.md",
-  "agent-config": "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules",
+  "secrets purge-history":
+    "Destructive: rewrite git history to remove a leaked value (--force-history)",
+  "secrets propagate":
+    "Push a value to deploy targets only (skips vault-write). --stdin safer than --value",
+  "secrets revoke-old": "Revoke a previously-minted scoped key (Supabase Mgmt API)",
+  "env switch": "Switch active environment (dev/staging/prod). Gates prod-key reads.",
+  "env current": "Show active environment marker",
+  analyze: "Analyze repo + emit draft CLAUDE.md / RULES.md",
+  "agent-config":
+    "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules",
   "security policy": "Dependency allowlist enforcement (init|add|check)",
   "security clear-cache": "Clear cached scanner binary (after intentional rebuild)",
   "security scan-staged": "Pre-commit: scan staged files for credential patterns",
@@ -4527,44 +4720,48 @@ const COMMAND_HELP: Record<string, string> = {
   "security costs": "Snapshot per-key spend vs policy cap (Stripe live; others stubbed)",
   "security check-gitignore": "Verify .gitignore covers sensitive paths (--fix to auto-patch)",
   "security verify-pull": "After git pull: audit new deps, gitignore drops, introduced secrets",
-  "security prescan": "Multi-repo baseline sweep (secrets, gitignore, branch-protect; --deep adds CVE/workflow-drift/bumblebee; --format=json + --vs-baseline=<path> for CI drift)",
-  "security prescan-diff": "Diff two prescan reports — surface new regressions + fixed findings since baseline",
-  "audit secrets":  "Forensics: who/what touched each key + when (reads audit log)",
-  "auth elevate":   "Mint elevation marker for destructive secret ops (TOTP/yes-prompt)",
-  "auth status":    "Show active elevation",
-  "auth revoke":    "Drop the elevation marker",
+  "security prescan":
+    "Multi-repo baseline sweep (secrets, gitignore, branch-protect; --deep adds CVE/workflow-drift/bumblebee; --format=json + --vs-baseline=<path> for CI drift)",
+  "security prescan-diff":
+    "Diff two prescan reports — surface new regressions + fixed findings since baseline",
+  "audit secrets": "Forensics: who/what touched each key + when (reads audit log)",
+  "auth elevate": "Mint elevation marker for destructive secret ops (TOTP/yes-prompt)",
+  "auth status": "Show active elevation",
+  "auth revoke": "Drop the elevation marker",
   "auth setup-totp": "Enroll TOTP secret (writes ~/.kit/totp-secret 0600)",
   "hooks add": "Install a built-in hook (e.g. secret-scan)",
-  setup:          "Full pipeline: install → login → secrets → agent config → verify",
-  "setup --recommended": "Opinionated profile: setup + memory hooks + git secret-scan/context-check gates",
-  fix:            "Auto-fix what is possible",
-  heal:           "Loop: auto-fix safe findings, re-scan until green; gate destructive, fail-closed on tamper (--dry-run, --agent)",
-  escalate:       "List what needs human action",
-  governance:     "View governance status and agent access controls",
-  skills:         "Check status of agent skills",
-  hooks:          "Manage git hooks",
-  add:            "Provision a service (kit add --list to see all adapters)",
-  audit:          "View audit log of kit operations",
-  doctor:         "Deep diagnostics — checks environment health in detail",
-  env:            "Show current environment info",
-  ci:             "CI-native check: GitHub Actions annotations, GitLab JUnit, JSON",
-  clone:          "Clone a Git repository and run kit setup",
-  run:            "Execute a command with project env vars loaded",
-  open:           "Open service dashboard in browser (stripe, vercel, railway, etc.)",
-  context:        "Show project context: tools, services, secrets, environment",
-  "context check": "Verify each CLI's live account+project matches .kit.toml [context] (exits non-zero on mismatch)",
-  "context use":   "Activate the declared context: gcloud config + repo git identity",
+  setup: "Full pipeline: install → login → secrets → agent config → verify",
+  "setup --recommended":
+    "Opinionated profile: setup + memory hooks + git secret-scan/context-check gates",
+  fix: "Auto-fix what is possible",
+  heal: "Loop: auto-fix safe findings, re-scan until green; gate destructive, fail-closed on tamper (--dry-run, --agent)",
+  escalate: "List what needs human action",
+  governance: "View governance status and agent access controls",
+  skills: "Check status of agent skills",
+  hooks: "Manage git hooks",
+  add: "Provision a service (kit add --list to see all adapters)",
+  audit: "View audit log of kit operations",
+  doctor: "Deep diagnostics — checks environment health in detail",
+  env: "Show current environment info",
+  ci: "CI-native check: GitHub Actions annotations, GitLab JUnit, JSON",
+  clone: "Clone a Git repository and run kit setup",
+  run: "Execute a command with project env vars loaded",
+  open: "Open service dashboard in browser (stripe, vercel, railway, etc.)",
+  context: "Show project context: tools, services, secrets, environment",
+  "context check":
+    "Verify each CLI's live account+project matches .kit.toml [context] (exits non-zero on mismatch)",
+  "context use": "Activate the declared context: gcloud config + repo git identity",
   "context --prompt": "Print a compact active-gcloud indicator for your shell prompt (PS1)",
-  mcp:            "MCP server over stdio (Claude Code/Cursor/Codex); 'kit mcp list|auth|set-token|clear' manages declared servers",
-  whoami:         "Show current agent / user identity",
-  version:        "Print kit version",
-  "create-plugin":"Scaffold a new kit plugin package",
-  plugin:         "Discover and manage kit plugins (search, list, scaffold, install)",
-  triage:         "Security evaluation before installing packages, images, or skills",
-  pkg:            "Install package with mandatory triage (kit pkg npm:express)",
-  team:           "Manage team members, roles, and permissions (RBAC, invitations, audit logs)",
-  completions:    "Output shell completion script (bash, zsh, fish)",
-  help:           "Show this help",
+  mcp: "MCP server over stdio (Claude Code/Cursor/Codex); 'kit mcp list|auth|set-token|clear' manages declared servers",
+  whoami: "Show current agent / user identity",
+  version: "Print kit version",
+  "create-plugin": "Scaffold a new kit plugin package",
+  plugin: "Discover and manage kit plugins (search, list, scaffold, install)",
+  triage: "Security evaluation before installing packages, images, or skills",
+  pkg: "Install package with mandatory triage (kit pkg npm:express)",
+  team: "Manage team members, roles, and permissions (RBAC, invitations, audit logs)",
+  completions: "Output shell completion script (bash, zsh, fish)",
+  help: "Show this help",
 };
 
 async function cmdPkg(): Promise<boolean> {
@@ -4599,7 +4796,9 @@ async function cmdPkg(): Promise<boolean> {
     return false;
   }
 
-  console.log(`${c.bold}Installing ${spec.ecosystem}:${spec.name}${spec.version ? `@${spec.version}` : ""}${c.reset}\n`);
+  console.log(
+    `${c.bold}Installing ${spec.ecosystem}:${spec.name}${spec.version ? `@${spec.version}` : ""}${c.reset}\n`,
+  );
   console.log(`${c.cyan}Step 1: Triage...${c.reset}`);
 
   const result = await installPkg(spec);
@@ -4626,13 +4825,17 @@ async function cmdTriage(): Promise<boolean> {
     console.log("Usage:");
     console.log("  kit triage docker <image>           Evaluate Docker image (CVE + sandbox)");
     console.log("  kit triage npm <package>             Evaluate npm package (registry + GitHub)");
-    console.log("  kit triage npm <package> --sandbox   + offline tarball inspection (install-script + path-traversal scan, no code executed)");
+    console.log(
+      "  kit triage npm <package> --sandbox   + offline tarball inspection (install-script + path-traversal scan, no code executed)",
+    );
     console.log("  kit triage pip <package>             Evaluate PyPI package");
     console.log("  kit triage repo <github-url>         Evaluate GitHub repository");
     console.log("  kit triage skill <path|name>         Evaluate Claude Code / agent skill");
     console.log("  kit triage all <target>              Auto-detect and run all checks");
     console.log("  kit triage tools                     Show installed security tools");
-    console.log("  kit triage check-deps                Pre-commit gate: fail if staged deps lack triage entries");
+    console.log(
+      "  kit triage check-deps                Pre-commit gate: fail if staged deps lack triage entries",
+    );
     console.log("");
     console.log("Examples:");
     console.log("  kit triage npm express");
@@ -4691,11 +4894,15 @@ async function cmdTriage(): Promise<boolean> {
         }
       }
     } catch (err) {
-      console.error(`  ${c.red}sandbox failed: ${err instanceof Error ? err.message : String(err)}${c.reset}`);
+      console.error(
+        `  ${c.red}sandbox failed: ${err instanceof Error ? err.message : String(err)}${c.reset}`,
+      );
       sandboxClean = false;
     }
   } else if (sandbox && type !== "npm") {
-    console.log(`\n${c.dim}(--sandbox currently only applies to npm; ignored for ${type})${c.reset}`);
+    console.log(
+      `\n${c.dim}(--sandbox currently only applies to npm; ignored for ${type})${c.reset}`,
+    );
   }
 
   const overall = result.passed && sandboxClean;
@@ -4725,11 +4932,7 @@ interface TriageLogEntry {
   granter: string;
 }
 
-async function recordTriageRun(
-  type: string,
-  target: string,
-  sandbox: boolean,
-): Promise<void> {
+async function recordTriageRun(type: string, target: string, sandbox: boolean): Promise<void> {
   const { appendFile } = await import("node:fs/promises");
   const { resolve } = await import("node:path");
   const entry: TriageLogEntry = {
@@ -4746,7 +4949,9 @@ async function recordTriageRun(
       "utf-8",
     );
   } catch (err) {
-    console.error(`${c.dim}(triage-log append failed: ${err instanceof Error ? err.message : err})${c.reset}`);
+    console.error(
+      `${c.dim}(triage-log append failed: ${err instanceof Error ? err.message : err})${c.reset}`,
+    );
   }
 }
 
@@ -4784,29 +4989,38 @@ async function cmdTriageCheckDeps(): Promise<boolean> {
   if (stagedPkg) {
     try {
       const headPkgRaw = gitShow("HEAD:package.json");
-      const staged = JSON.parse(stagedPkg) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+      const staged = JSON.parse(stagedPkg) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
       const head = headPkgRaw
-        ? (JSON.parse(headPkgRaw) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> })
+        ? (JSON.parse(headPkgRaw) as {
+            dependencies?: Record<string, string>;
+            devDependencies?: Record<string, string>;
+          })
         : {};
       const stagedDeps = { ...staged.dependencies, ...staged.devDependencies };
       const headDeps = { ...head.dependencies, ...head.devDependencies };
       for (const name of Object.keys(stagedDeps)) {
         if (!(name in headDeps)) newDeps.push({ ecosystem: "npm", name });
       }
-    } catch { /* malformed package.json — skip */ }
+    } catch {
+      /* malformed package.json — skip */
+    }
   }
 
   // requirements.txt — line-oriented diff.
   const stagedReq = gitShow(":requirements.txt");
   if (stagedReq) {
     const headReq = gitShow("HEAD:requirements.txt") ?? "";
-    const parseLines = (text: string) => new Set(
-      text
-        .split("\n")
-        .map((l) => l.trim())
-        .filter((l) => l && !l.startsWith("#"))
-        .map((l) => l.split(/[<>=!~]/)[0]!.trim()),
-    );
+    const parseLines = (text: string) =>
+      new Set(
+        text
+          .split("\n")
+          .map((l) => l.trim())
+          .filter((l) => l && !l.startsWith("#"))
+          .map((l) => l.split(/[<>=!~]/)[0]!.trim()),
+      );
     const stagedSet = parseLines(stagedReq);
     const headSet = parseLines(headReq);
     for (const name of stagedSet) {
@@ -4827,7 +5041,9 @@ async function cmdTriageCheckDeps(): Promise<boolean> {
         const key = `${entry.type}:${entry.target}`;
         const prev = latest[key];
         if (!prev || entry.timestamp > prev) latest[key] = entry.timestamp;
-      } catch { /* skip malformed line */ }
+      } catch {
+        /* skip malformed line */
+      }
     }
   } catch {
     /* no triage log yet */
@@ -4839,7 +5055,9 @@ async function cmdTriageCheckDeps(): Promise<boolean> {
     const key = `${dep.ecosystem}:${dep.name}`;
     const ts = latest[key];
     if (!ts || Date.parse(ts) < cutoff) {
-      missing.push(`  - ${dep.ecosystem}:${dep.name}  (run: kit triage ${dep.ecosystem} ${dep.name})`);
+      missing.push(
+        `  - ${dep.ecosystem}:${dep.name}  (run: kit triage ${dep.ecosystem} ${dep.name})`,
+      );
     }
   }
 
@@ -4848,8 +5066,12 @@ async function cmdTriageCheckDeps(): Promise<boolean> {
   console.error(`${c.red}✗ Triage missing for ${missing.length} newly-added dep(s):${c.reset}`);
   for (const line of missing) console.error(line);
   console.error("");
-  console.error(`${c.dim}Triage policy lives in CLAUDE.md. Run the suggested triage commands above,`);
-  console.error(`then re-stage and commit. Bypass with --no-verify is recorded to ${SKIPPED_COMMITS_LOG}.${c.reset}`);
+  console.error(
+    `${c.dim}Triage policy lives in CLAUDE.md. Run the suggested triage commands above,`,
+  );
+  console.error(
+    `then re-stage and commit. Bypass with --no-verify is recorded to ${SKIPPED_COMMITS_LOG}.${c.reset}`,
+  );
   return false;
 }
 
@@ -4859,11 +5081,19 @@ function cmdHelp(subcommand?: string): boolean {
     return true;
   }
 
-  const bold = c.bold, cyan = c.cyan, dim = c.dim, reset = c.reset, green = c.green;
+  const bold = c.bold,
+    cyan = c.cyan,
+    dim = c.dim,
+    reset = c.reset,
+    green = c.green;
 
   console.log(`${bold}kit${reset} ${dim}v${KIT_VERSION}${reset} — developer environment manager\n`);
-  console.log(`${bold}Get going:${reset}  ${dim}npx sandstream-kit setup${reset}  ${dim}or${reset}  ${green}kit init${reset} ${dim}→${reset} ${green}kit check${reset} ${dim}→${reset} ${green}kit setup${reset}`);
-  console.log(`${dim}Prereqs: Node 22+, git, and mise (brew install mise) for installing tools.${reset}\n`);
+  console.log(
+    `${bold}Get going:${reset}  ${dim}npx sandstream-kit setup${reset}  ${dim}or${reset}  ${green}kit init${reset} ${dim}→${reset} ${green}kit check${reset} ${dim}→${reset} ${green}kit setup${reset}`,
+  );
+  console.log(
+    `${dim}Prereqs: Node 22+, git, and mise (brew install mise) for installing tools.${reset}\n`,
+  );
   console.log(`${bold}Usage:${reset}  kit ${cyan}<command>${reset} ${dim}[options]${reset}\n`);
   console.log(`${bold}Commands:${reset}`);
 
@@ -4876,8 +5106,12 @@ function cmdHelp(subcommand?: string): boolean {
   console.log(`\n${bold}Options:${reset}`);
   console.log(`  ${green}--non-interactive${reset}  ${dim}No prompts (for CI / agent use)${reset}`);
   console.log(`  ${green}--json${reset}             ${dim}Machine-readable output${reset}`);
-  console.log(`  ${green}--env=<name>${reset}       ${dim}Environment override (dev/staging/production)${reset}`);
-  console.log(`  ${green}--dry-run${reset}          ${dim}Preview without writing (where supported)${reset}`);
+  console.log(
+    `  ${green}--env=<name>${reset}       ${dim}Environment override (dev/staging/production)${reset}`,
+  );
+  console.log(
+    `  ${green}--dry-run${reset}          ${dim}Preview without writing (where supported)${reset}`,
+  );
   console.log(`  ${green}--help, -h${reset}         ${dim}Show this help${reset}`);
   console.log(`  ${green}--version, -v${reset}      ${dim}Print version${reset}`);
 
@@ -4933,9 +5167,7 @@ async function cmdTeam(): Promise<boolean> {
           return false;
         }
 
-        console.log(
-          `${c.yellow}Invitation sent to ${email} as ${role}${c.reset}`,
-        );
+        console.log(`${c.yellow}Invitation sent to ${email} as ${role}${c.reset}`);
         console.log(`${c.dim}Check your email for the invitation link${c.reset}`);
         return true;
       }
@@ -4947,9 +5179,7 @@ async function cmdTeam(): Promise<boolean> {
         }
 
         console.log(`${c.bold}Team Members${c.reset}\n`);
-        console.log(
-          `${c.dim}(Requires team context — run from project with .kit.toml)${c.reset}`,
-        );
+        console.log(`${c.dim}(Requires team context — run from project with .kit.toml)${c.reset}`);
         return false;
       }
 
@@ -5021,16 +5251,13 @@ async function showSkippedCommitBanner(): Promise<void> {
     for (const line of recent) {
       try {
         const entry = JSON.parse(line) as { timestamp: string; sha: string; reason: string };
-        process.stderr.write(
-          `  ${entry.timestamp}  ${entry.sha.slice(0, 8)}  (${entry.reason})\n`,
-        );
+        process.stderr.write(`  ${entry.timestamp}  ${entry.sha.slice(0, 8)}  (${entry.reason})\n`);
       } catch {
         /* malformed line — ignore */
       }
     }
     process.stderr.write(
-      `  Review: cat ${SKIPPED_COMMITS_LOG} | jq .\n` +
-        `  Suppress: KIT_HIDE_HOOK_SKIP_BANNER=1\n`,
+      `  Review: cat ${SKIPPED_COMMITS_LOG} | jq .\n` + `  Suppress: KIT_HIDE_HOOK_SKIP_BANNER=1\n`,
     );
   } catch {
     /* banner is best-effort — never break the CLI */
@@ -5045,8 +5272,10 @@ async function showSkippedCommitBanner(): Promise<void> {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];
-  const nonInteractive = hasFlag(args, "--non-interactive") ||
-    process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
+  const nonInteractive =
+    hasFlag(args, "--non-interactive") ||
+    process.env.CI === "true" ||
+    process.env.GITHUB_ACTIONS === "true";
 
   // Activate read-only mode early so subsequent code paths see the env var.
   // Honored gates: writeSecretToBackend, grantElevation, installHooks, and
@@ -5179,7 +5408,9 @@ async function main(): Promise<void> {
         const { didYouMean } = await import("./utils/didYouMean.js");
         const knownCommands = [
           ...new Set(Object.keys(COMMAND_HELP).map((k) => k.split(" ")[0])),
-          "help", "version", "completions",
+          "help",
+          "version",
+          "completions",
         ];
         const suggestions = didYouMean(command, knownCommands);
         if (suggestions.length > 0) {
@@ -5195,19 +5426,15 @@ async function main(): Promise<void> {
 
     // Non-interactive / CI: skip update check
     if (!nonInteractive) {
-      checkForUpdate(KIT_VERSION).then((info) => {
-        if (info) printUpdateNotice(info);
-      }).catch(() => {}); // never fail
+      checkForUpdate(KIT_VERSION)
+        .then((info) => {
+          if (info) printUpdateNotice(info);
+        })
+        .catch(() => {}); // never fail
     }
   } catch (err: unknown) {
-    if (
-      err instanceof Error &&
-      "code" in err &&
-      (err as NodeJS.ErrnoException).code === "ENOENT"
-    ) {
-      console.error(
-        `${c.red}Error: ${KIT_FILE} not found in ${process.cwd()}${c.reset}`,
-      );
+    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+      console.error(`${c.red}Error: ${KIT_FILE} not found in ${process.cwd()}${c.reset}`);
       console.error(
         `${c.dim}Create a .kit.toml to define your project's tools, services, and secrets.${c.reset}`,
       );

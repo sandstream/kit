@@ -27,9 +27,7 @@ describe("checkWebSearch - searxng", () => {
   });
 
   it("returns healthy when server responds with 200", async () => {
-    mock.method(globalThis, "fetch", async () =>
-      new Response("", { status: 200 }),
-    );
+    mock.method(globalThis, "fetch", async () => new Response("", { status: 200 }));
 
     const result = await checkWebSearch({
       provider: "searxng",
@@ -42,9 +40,7 @@ describe("checkWebSearch - searxng", () => {
   });
 
   it("returns unhealthy when server returns non-ok status", async () => {
-    mock.method(globalThis, "fetch", async () =>
-      new Response("", { status: 503 }),
-    );
+    mock.method(globalThis, "fetch", async () => new Response("", { status: 503 }));
 
     const result = await checkWebSearch({
       provider: "searxng",
@@ -82,8 +78,10 @@ describe("checkWebSearch - brave", () => {
   });
 
   it("returns healthy when API key is valid (200 response)", async () => {
-    mock.method(globalThis, "fetch", async () =>
-      new Response(JSON.stringify({ results: [] }), { status: 200 }),
+    mock.method(
+      globalThis,
+      "fetch",
+      async () => new Response(JSON.stringify({ results: [] }), { status: 200 }),
     );
 
     const result = await checkWebSearch({
@@ -96,9 +94,7 @@ describe("checkWebSearch - brave", () => {
   });
 
   it("returns unhealthy on 401 (invalid key)", async () => {
-    mock.method(globalThis, "fetch", async () =>
-      new Response("Unauthorized", { status: 401 }),
-    );
+    mock.method(globalThis, "fetch", async () => new Response("Unauthorized", { status: 401 }));
 
     const result = await checkWebSearch({
       provider: "brave",
@@ -111,9 +107,7 @@ describe("checkWebSearch - brave", () => {
   });
 
   it("returns unhealthy on 403 (forbidden)", async () => {
-    mock.method(globalThis, "fetch", async () =>
-      new Response("Forbidden", { status: 403 }),
-    );
+    mock.method(globalThis, "fetch", async () => new Response("Forbidden", { status: 403 }));
 
     const result = await checkWebSearch({
       provider: "brave",
@@ -136,8 +130,10 @@ describe("checkWebSearch - google", () => {
   });
 
   it("returns healthy with valid apiKey + cx (200 response)", async () => {
-    mock.method(globalThis, "fetch", async () =>
-      new Response(JSON.stringify({ items: [] }), { status: 200 }),
+    mock.method(
+      globalThis,
+      "fetch",
+      async () => new Response(JSON.stringify({ items: [] }), { status: 200 }),
     );
     const result = await checkWebSearch({ provider: "google", apiKey: "k", cx: "engine-id" });
     assert.equal(result.configured, true);
@@ -162,9 +158,7 @@ describe("checkWebSearch - custom", () => {
   });
 
   it("returns healthy on 200", async () => {
-    mock.method(globalThis, "fetch", async () =>
-      new Response("", { status: 200 }),
-    );
+    mock.method(globalThis, "fetch", async () => new Response("", { status: 200 }));
 
     const result = await checkWebSearch({
       provider: "custom",
@@ -175,9 +169,7 @@ describe("checkWebSearch - custom", () => {
   });
 
   it("returns healthy on 404 (custom endpoints may lack health endpoint)", async () => {
-    mock.method(globalThis, "fetch", async () =>
-      new Response("Not Found", { status: 404 }),
-    );
+    mock.method(globalThis, "fetch", async () => new Response("Not Found", { status: 404 }));
 
     const result = await checkWebSearch({
       provider: "custom",
@@ -189,9 +181,7 @@ describe("checkWebSearch - custom", () => {
   });
 
   it("returns unhealthy on 500", async () => {
-    mock.method(globalThis, "fetch", async () =>
-      new Response("Error", { status: 500 }),
-    );
+    mock.method(globalThis, "fetch", async () => new Response("Error", { status: 500 }));
 
     const result = await checkWebSearch({
       provider: "custom",

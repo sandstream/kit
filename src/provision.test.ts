@@ -23,7 +23,7 @@ afterEach(async () => {
 describe("provisionService", () => {
   it("returns error for unknown service", async () => {
     const result = await provisionService("unknown/service", testProjectPath);
-    
+
     assert.equal(result.success, false);
     assert(result.error?.includes("Unknown service"));
     assert(result.message?.includes("Available services"));
@@ -33,7 +33,7 @@ describe("provisionService", () => {
     // This test will only work if we mock the tool check
     // For now, we just verify the response structure
     const result = await provisionService("stripe/payments", testProjectPath);
-    
+
     // Either success or error, but structure should be consistent
     assert(result.success !== undefined);
     assert(result.message !== undefined);
@@ -43,11 +43,11 @@ describe("provisionService", () => {
     // Create a mock adapter that doesn't require external tools
     // This is more of an integration test structure
     const result = await provisionService("stripe/payments", testProjectPath, "test-project");
-    
+
     // Verify result structure
     assert(typeof result.success === "boolean");
     assert(typeof result.message === "string");
-    
+
     if (result.success && result.secrets) {
       // If successful, verify secrets structure
       assert(typeof result.secrets === "object");
@@ -57,10 +57,10 @@ describe("provisionService", () => {
   it("updates skills-lock.json with provisioning info", async () => {
     // Similar structure verification test
     const result = await provisionService("supabase/db", testProjectPath, "test-project");
-    
+
     assert(typeof result.success === "boolean");
     assert(typeof result.message === "string");
-    
+
     if (result.success && result.config) {
       assert(typeof result.config === "object");
     }
@@ -70,7 +70,7 @@ describe("provisionService", () => {
 describe("listAvailableServices", () => {
   it("returns list of available services", () => {
     const services = listAvailableServices();
-    
+
     assert(Array.isArray(services));
     assert(services.length > 0);
     assert(services.includes("stripe/payments"));
@@ -83,7 +83,7 @@ describe("listAvailableServices", () => {
 describe("getServiceInfo", () => {
   it("returns service information for known service", () => {
     const info = getServiceInfo("stripe/payments");
-    
+
     assert(info !== null);
     assert.equal(info?.name, "stripe/payments");
     assert(typeof info?.description === "string");
@@ -92,13 +92,13 @@ describe("getServiceInfo", () => {
 
   it("returns null for unknown service", () => {
     const info = getServiceInfo("unknown/service");
-    
+
     assert.equal(info, null);
   });
 
   it("includes required tools in service info", () => {
     const info = getServiceInfo("stripe/payments");
-    
+
     assert(info !== null);
     assert(info.tools.length > 0);
     assert(info.tools.includes("stripe"));

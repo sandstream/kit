@@ -67,9 +67,7 @@ async function postToRemoteOnce(event: AuditEvent, companyId: string): Promise<b
       if (response.ok) return true;
       // 4xx is a permanent failure — no point retrying a malformed event.
       if (response.status >= 400 && response.status < 500) {
-        console.error(
-          `Remote audit-log rejected (${response.status}); not retrying.`,
-        );
+        console.error(`Remote audit-log rejected (${response.status}); not retrying.`);
         return false;
       }
     } catch (error) {
@@ -247,9 +245,7 @@ export function _resetRemotePushWarningForTests(): void {
 /**
  * Sanitize metadata to remove potential secrets
  */
-function sanitizeMetadata(
-  metadata: Record<string, unknown>,
-): Record<string, unknown> {
+function sanitizeMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
   const secretKeys = [
     "password",
@@ -264,9 +260,7 @@ function sanitizeMetadata(
 
   for (const [key, value] of Object.entries(metadata)) {
     const lowerKey = key.toLowerCase();
-    const isSecret = secretKeys.some((secretKey) =>
-      lowerKey.includes(secretKey),
-    );
+    const isSecret = secretKeys.some((secretKey) => lowerKey.includes(secretKey));
 
     if (isSecret) {
       sanitized[key] = "[REDACTED]";
@@ -283,16 +277,16 @@ function sanitizeMetadata(
 /**
  * Read recent audit log entries
  */
-export async function readAuditLog(
-  logFile: string,
-  limit = 100,
-): Promise<AuditEvent[]> {
+export async function readAuditLog(logFile: string, limit = 100): Promise<AuditEvent[]> {
   const { readFile } = await import("node:fs/promises");
   const logPath = resolve(process.cwd(), logFile);
 
   try {
     const content = await readFile(logPath, "utf-8");
-    const lines = content.trim().split("\n").filter((line) => line.length > 0);
+    const lines = content
+      .trim()
+      .split("\n")
+      .filter((line) => line.length > 0);
 
     // Get last N lines
     const recentLines = lines.slice(-limit);

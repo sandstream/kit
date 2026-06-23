@@ -21,7 +21,12 @@ describe("loginServices", () => {
   it("skips already authenticated services", async () => {
     const deps = makeDeps({
       checkServices: async () => [
-        { name: "github", checkCommand: "gh auth status", authenticated: true, output: "Logged in as octocat" },
+        {
+          name: "github",
+          checkCommand: "gh auth status",
+          authenticated: true,
+          output: "Logged in as octocat",
+        },
       ],
     });
 
@@ -38,7 +43,12 @@ describe("loginServices", () => {
     };
     const deps = makeDeps({
       checkServices: async () => [
-        { name: "custom", checkCommand: "custom check", authenticated: false, output: "Not logged in" },
+        {
+          name: "custom",
+          checkCommand: "custom check",
+          authenticated: false,
+          output: "Not logged in",
+        },
       ],
     });
 
@@ -114,7 +124,12 @@ describe("loginServices", () => {
 
     const deps = makeDeps({
       checkServices: async () => [
-        { name: "supabase", checkCommand: "supabase projects list", authenticated: false, output: "" },
+        {
+          name: "supabase",
+          checkCommand: "supabase projects list",
+          authenticated: false,
+          output: "",
+        },
       ],
       runLink: async (cmd) => {
         linkCalls.push(cmd);
@@ -140,7 +155,12 @@ describe("loginServices", () => {
 
     const deps = makeDeps({
       checkServices: async () => [
-        { name: "supabase", checkCommand: "supabase projects list", authenticated: false, output: "" },
+        {
+          name: "supabase",
+          checkCommand: "supabase projects list",
+          authenticated: false,
+          output: "",
+        },
       ],
       runLink: async () => ({ ok: false, detail: "Project not found" }),
     });
@@ -161,7 +181,12 @@ describe("loginServices", () => {
 
     const deps = makeDeps({
       checkServices: async () => [
-        { name: "github", checkCommand: "gh auth status", authenticated: true, output: "Logged in" },
+        {
+          name: "github",
+          checkCommand: "gh auth status",
+          authenticated: true,
+          output: "Logged in",
+        },
         { name: "vercel", checkCommand: "vercel whoami", authenticated: false, output: "" },
         { name: "stripe", checkCommand: "stripe config --list", authenticated: false, output: "" },
       ],
@@ -194,7 +219,12 @@ describe("loginServices", () => {
     ].join("\n");
     const deps = makeDeps({
       checkServices: async () => [
-        { name: "stripe", checkCommand: "stripe config --list", authenticated: true, output: stripeDump },
+        {
+          name: "stripe",
+          checkCommand: "stripe config --list",
+          authenticated: true,
+          output: stripeDump,
+        },
       ],
     });
 

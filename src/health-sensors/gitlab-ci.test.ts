@@ -14,7 +14,12 @@ function deps(over: { remoteOk?: boolean; remote?: string; http?: HttpResponse }
     runCli: async (cmd, args) => {
       if (cmd === "git" && args[0] === "remote") {
         const ok = over.remoteOk ?? true;
-        return { stdout: over.remote ?? "git@gitlab.com:acme/web.git", stderr: "", exitCode: ok ? 0 : 1, ok };
+        return {
+          stdout: over.remote ?? "git@gitlab.com:acme/web.git",
+          stderr: "",
+          exitCode: ok ? 0 : 1,
+          ok,
+        };
       }
       return { stdout: "", stderr: "", exitCode: 0, ok: true };
     },
@@ -29,7 +34,9 @@ describe("parseGitlabPipelines / latestFailedPipeline", () => {
     assert.equal(f?.id, 9);
   });
   it("returns null when the latest terminal pipeline succeeded", () => {
-    const json = JSON.stringify([{ id: 8, status: "success", ref: "main", created_at: "2026-06-21T08:00:00Z" }]);
+    const json = JSON.stringify([
+      { id: 8, status: "success", ref: "main", created_at: "2026-06-21T08:00:00Z" },
+    ]);
     assert.equal(latestFailedPipeline(parseGitlabPipelines(json)), null);
   });
   it("returns [] on garbage", () => {
@@ -53,7 +60,9 @@ describe("gitlabSensor.probe", () => {
 
   it("emits green when the latest terminal pipeline passed", async () => {
     process.env.GITLAB_TOKEN = "glpat-xxx";
-    const ok = JSON.stringify([{ id: 8, status: "success", ref: "main", created_at: "2026-06-21T08:00:00Z" }]);
+    const ok = JSON.stringify([
+      { id: 8, status: "success", ref: "main", created_at: "2026-06-21T08:00:00Z" },
+    ]);
     const out = await gitlabSensor.probe(ctx, deps({ http: { ok: true, status: 200, body: ok } }));
     assert.equal(out[0].status, "green");
   });

@@ -11,12 +11,7 @@ const exec = promisify(execFile);
 
 export interface LoginResult {
   name: string;
-  action:
-    | "already_authenticated"
-    | "logged_in"
-    | "login_unverified"
-    | "manual"
-    | "failed";
+  action: "already_authenticated" | "logged_in" | "login_unverified" | "manual" | "failed";
   detail: string;
 }
 

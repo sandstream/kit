@@ -50,8 +50,14 @@ export function auditMcpServers(json: string): string[] {
 }
 
 const SUSPICIOUS_HOOK_PATTERNS: { re: RegExp; why: string }[] = [
-  { re: /(curl|wget)\b[^\n|]*\|\s*(sh|bash|zsh)\b/i, why: "pipes a download straight into a shell" },
-  { re: /base64\s+(-d|--decode|-D)\b[^\n|]*\|\s*(sh|bash|zsh)\b/i, why: "base64-decodes into a shell" },
+  {
+    re: /(curl|wget)\b[^\n|]*\|\s*(sh|bash|zsh)\b/i,
+    why: "pipes a download straight into a shell",
+  },
+  {
+    re: /base64\s+(-d|--decode|-D)\b[^\n|]*\|\s*(sh|bash|zsh)\b/i,
+    why: "base64-decodes into a shell",
+  },
   { re: /\/dev\/tcp\//, why: "opens a raw TCP socket (reverse-shell shape)" },
   { re: /eval\s+"?\$\(/, why: "evals a command substitution" },
 ];
@@ -102,25 +108,29 @@ export function runAgentAudit(cwd: string): SecurityCheckResult[] {
     const secrets = auditConfigSecrets(content);
     if (secrets.length > 0) {
       const kinds = [...new Set(secrets.map((s) => s.label))].join(", ");
-      out.push(result(
-        `secret in ${rel}`,
-        "fail",
-        `${secrets.length} plaintext secret(s) (${kinds}) in an agent config — e.g. ${secrets[0].preview}`,
-        "secrets",
-        "critical",
-        `move it to a vault/env and gitignore ${rel}`,
-      ));
+      out.push(
+        result(
+          `secret in ${rel}`,
+          "fail",
+          `${secrets.length} plaintext secret(s) (${kinds}) in an agent config — e.g. ${secrets[0].preview}`,
+          "secrets",
+          "critical",
+          `move it to a vault/env and gitignore ${rel}`,
+        ),
+      );
     }
     const cleartext = auditMcpServers(content);
     if (cleartext.length > 0) {
-      out.push(result(
-        `cleartext MCP in ${rel}`,
-        "warn",
-        `${cleartext.length} MCP server(s) on http://: ${cleartext.slice(0, 3).join("; ")}`,
-        "exposure",
-        "medium",
-        "use https:// MCP endpoints",
-      ));
+      out.push(
+        result(
+          `cleartext MCP in ${rel}`,
+          "warn",
+          `${cleartext.length} MCP server(s) on http://: ${cleartext.slice(0, 3).join("; ")}`,
+          "exposure",
+          "medium",
+          "use https:// MCP endpoints",
+        ),
+      );
     }
   }
 
@@ -142,14 +152,16 @@ export function runAgentAudit(cwd: string): SecurityCheckResult[] {
         scannedHooks++;
         const reasons = auditHookBody(body);
         if (reasons.length > 0) {
-          out.push(result(
-            `suspicious hook ${dir}/${entry}`,
-            "fail",
-            `hook ${reasons.join("; ")}`,
-            "exposure",
-            "high",
-            "review the hook; a compromised hook runs on every git operation",
-          ));
+          out.push(
+            result(
+              `suspicious hook ${dir}/${entry}`,
+              "fail",
+              `hook ${reasons.join("; ")}`,
+              "exposure",
+              "high",
+              "review the hook; a compromised hook runs on every git operation",
+            ),
+          );
         }
       } catch {
         continue;
@@ -158,12 +170,14 @@ export function runAgentAudit(cwd: string): SecurityCheckResult[] {
   }
 
   if (out.length === 0) {
-    out.push(result(
-      "agent-audit",
-      "pass",
-      `no issues in ${scannedConfigs} agent config(s) + ${scannedHooks} hook(s)`,
-      "exposure",
-    ));
+    out.push(
+      result(
+        "agent-audit",
+        "pass",
+        `no issues in ${scannedConfigs} agent config(s) + ${scannedHooks} hook(s)`,
+        "exposure",
+      ),
+    );
   }
   return out;
 }

@@ -31,8 +31,14 @@ export interface RotationPlaybook {
 export function identifyProvider(keyName: string): RotationPlaybook["provider"] {
   const upper = keyName.toUpperCase();
   if (upper.startsWith("STRIPE_")) return "stripe";
-  if (upper.startsWith("AWS_") || upper === "AWS_ACCESS_KEY_ID" || upper === "AWS_SECRET_ACCESS_KEY") return "aws-iam";
-  if (upper.startsWith("GCP_") || upper.endsWith("_GOOGLE_APPLICATION_CREDENTIALS")) return "gcp-iam";
+  if (
+    upper.startsWith("AWS_") ||
+    upper === "AWS_ACCESS_KEY_ID" ||
+    upper === "AWS_SECRET_ACCESS_KEY"
+  )
+    return "aws-iam";
+  if (upper.startsWith("GCP_") || upper.endsWith("_GOOGLE_APPLICATION_CREDENTIALS"))
+    return "gcp-iam";
   if (upper.startsWith("GITHUB_") || upper === "GH_TOKEN") return "github-pat";
   if (upper.startsWith("OPENAI_")) return "openai";
   return "unknown";
@@ -80,8 +86,7 @@ export function buildPlaybook(keyName: string): RotationPlaybook {
           "# Capture the contents of new-key.json (or just the private_key field).",
         ],
         newValueSource: "contents of new-key.json",
-        revokeStep:
-          "gcloud iam service-accounts keys delete <old-key-id> --iam-account=<sa-email>",
+        revokeStep: "gcloud iam service-accounts keys delete <old-key-id> --iam-account=<sa-email>",
         docsUrl: "https://cloud.google.com/iam/docs/keys-create-delete",
       };
     case "github-pat":
@@ -94,8 +99,7 @@ export function buildPlaybook(keyName: string): RotationPlaybook {
           "# one you're replacing.",
         ],
         newValueSource: "GitHub settings UI",
-        revokeStep:
-          "Revoke the old PAT in the same UI (Delete button beside the entry).",
+        revokeStep: "Revoke the old PAT in the same UI (Delete button beside the entry).",
         docsUrl:
           "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens",
       };
@@ -130,7 +134,12 @@ import { isNonInteractive } from "./environment.js";
 import { writeSecretToBackend } from "./secrets-migrate.js";
 import { planRotation } from "./secrets-rotate.js";
 import { requireElevation, consumeElevation } from "./elevation.js";
-import { propagate, parseTargets, ALL_TARGETS, type PropagationOptions } from "./secrets-propagate.js";
+import {
+  propagate,
+  parseTargets,
+  ALL_TARGETS,
+  type PropagationOptions,
+} from "./secrets-propagate.js";
 import { promptConfirm } from "./utils/prompt.js";
 import { c } from "./utils/colors.js";
 
@@ -146,7 +155,18 @@ function resolveConfigPath(): string {
  * backend-write options.
  */
 export function pickBackendOpts(
-  secrets: { keys?: Record<string, { ref?: string; azure_vault?: string; gcp_project?: string; aws_region?: string; vault_path?: string }> },
+  secrets: {
+    keys?: Record<
+      string,
+      {
+        ref?: string;
+        azure_vault?: string;
+        gcp_project?: string;
+        aws_region?: string;
+        vault_path?: string;
+      }
+    >;
+  },
   keyName: string,
   { envFallback = false }: { envFallback?: boolean } = {},
 ): { vault?: string; project?: string; region?: string; vaultPath?: string } {
@@ -163,9 +183,14 @@ export function pickBackendOpts(
   // vars when the .kit.toml key doesn't pin a value. Never clobber a value
   // already derived from the 1Password ref above.
   if (key?.azure_vault) opts.vault = key.azure_vault;
-  else if (envFallback && !opts.vault && process.env.AZURE_KEYVAULT_NAME) opts.vault = process.env.AZURE_KEYVAULT_NAME;
+  else if (envFallback && !opts.vault && process.env.AZURE_KEYVAULT_NAME)
+    opts.vault = process.env.AZURE_KEYVAULT_NAME;
   if (key?.gcp_project) opts.project = key.gcp_project;
-  else if (envFallback && !opts.project && (process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT))
+  else if (
+    envFallback &&
+    !opts.project &&
+    (process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT)
+  )
     opts.project = process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
   if (key?.aws_region) opts.region = key.aws_region;
   else if (envFallback && process.env.AWS_REGION) opts.region = process.env.AWS_REGION;
@@ -173,21 +198,15 @@ export function pickBackendOpts(
   return opts;
 }
 
-async function cmdSecretsRotateSupabaseMgmt(
-  keyName: string,
-  args: string[],
-): Promise<boolean> {
+async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit secrets rotate --via supabase-mgmt-api${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   // Project ref: --project <ref> flag or SUPABASE_PROJECT_REF env var.
   const projectIdx = args.indexOf("--project");
-  const projectRef =
-    projectIdx >= 0 ? args[projectIdx + 1] : process.env.SUPABASE_PROJECT_REF;
+  const projectRef = projectIdx >= 0 ? args[projectIdx + 1] : process.env.SUPABASE_PROJECT_REF;
   if (!projectRef) {
-    console.error(
-      `${c.red}--project <ref> required (or set SUPABASE_PROJECT_REF).${c.reset}`,
-    );
+    console.error(`${c.red}--project <ref> required (or set SUPABASE_PROJECT_REF).${c.reset}`);
     console.error(
       `${c.dim}Find your project ref at https://supabase.com/dashboard/project/_/settings/general (URL contains the ref).${c.reset}`,
     );
@@ -237,11 +256,11 @@ async function cmdSecretsRotateSupabaseMgmt(
 
   // Default to the recommended mode when the user didn't pin one.
   if (!mode) {
-    mode = (preview.recommendedMode ?? "scoped-key-mint") as
-      | "scoped-key-mint"
-      | "jwt-secret-roll";
+    mode = (preview.recommendedMode ?? "scoped-key-mint") as "scoped-key-mint" | "jwt-secret-roll";
   }
-  console.log(`${c.dim}Mode: ${c.bold}${mode}${c.reset}${c.dim}${explicitMode ? "" : " (auto)"}${c.reset}`);
+  console.log(
+    `${c.dim}Mode: ${c.bold}${mode}${c.reset}${c.dim}${explicitMode ? "" : " (auto)"}${c.reset}`,
+  );
 
   // If the explicit mode conflicts with what the project supports, warn
   // loudly and require --force. This is the gate that would have prevented
@@ -285,18 +304,17 @@ async function cmdSecretsRotateSupabaseMgmt(
   console.log();
 
   if (dryRun) {
-    console.log(
-      `${c.dim}--dry-run: not rotating. Remove flag to proceed.${c.reset}\n`,
-    );
+    console.log(`${c.dim}--dry-run: not rotating. Remove flag to proceed.${c.reset}\n`);
     return true;
   }
 
   // S12 elevation required for rotation. jwt-secret-roll is a hard cutover
   // — one elevation = one rotation. Other modes (scoped-key-mint with
   // rollback) keep the standard 15-min TTL.
-  const elev = mode === "jwt-secret-roll"
-    ? await consumeElevation("rotate")
-    : await requireElevation("rotate");
+  const elev =
+    mode === "jwt-secret-roll"
+      ? await consumeElevation("rotate")
+      : await requireElevation("rotate");
   if (!elev.ok) {
     console.error(`${c.red}✗ ${elev.reason}${c.reset}`);
     return false;
@@ -423,11 +441,7 @@ export async function cmdSecretsRotate(): Promise<boolean> {
     console.log(`${c.bold}Steps to mint the new credential:${c.reset}`);
     for (const step of playbook.steps) {
       const isComment = step.startsWith("#");
-      console.log(
-        isComment
-          ? `  ${c.dim}${step}${c.reset}`
-          : `  ${c.green}$${c.reset} ${step}`,
-      );
+      console.log(isComment ? `  ${c.dim}${step}${c.reset}` : `  ${c.green}$${c.reset} ${step}`);
     }
     console.log();
     console.log(
@@ -473,9 +487,7 @@ export async function cmdSecretsRotate(): Promise<boolean> {
   );
 
   if (dryRun) {
-    console.log(
-      `${c.dim}--dry-run: not writing. Remove flag to perform rotation.${c.reset}\n`,
-    );
+    console.log(`${c.dim}--dry-run: not writing. Remove flag to perform rotation.${c.reset}\n`);
     return true;
   }
 
@@ -490,12 +502,7 @@ export async function cmdSecretsRotate(): Promise<boolean> {
   // right vault / region / project / Azure vault.
   const backendOpts = pickBackendOpts(config.secrets, keyName, { envFallback: true });
 
-  const writeResult = await writeSecretToBackend(
-    plan.store,
-    plan.key,
-    value,
-    backendOpts,
-  );
+  const writeResult = await writeSecretToBackend(plan.store, plan.key, value, backendOpts);
 
   if (!writeResult.ok) {
     console.error(`${c.red}✗ ${writeResult.detail}${c.reset}`);

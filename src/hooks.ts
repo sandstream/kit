@@ -108,9 +108,7 @@ export async function installHooks(
  * — but we can guarantee a forensic trail and a stderr banner on the next
  * `kit` command in the repo.
  */
-async function installBypassDetector(
-  hooksDir: string,
-): Promise<HookInstallResult[]> {
+async function installBypassDetector(hooksDir: string): Promise<HookInstallResult[]> {
   const results: HookInstallResult[] = [];
 
   const preCommitDetectorPath = resolve(hooksDir, "pre-commit");
@@ -132,11 +130,7 @@ async function installBypassDetector(
         await chmod(preCommitDetectorPath, 0o755);
       }
     } else {
-      await writeFile(
-        preCommitDetectorPath,
-        `#!/bin/sh\n${sentinelWriter}\nexit 0\n`,
-        "utf-8",
-      );
+      await writeFile(preCommitDetectorPath, `#!/bin/sh\n${sentinelWriter}\nexit 0\n`, "utf-8");
       await chmod(preCommitDetectorPath, 0o755);
     }
     results.push({
@@ -164,11 +158,7 @@ async function installBypassDetector(
         await chmod(postCommitDetectorPath, 0o755);
       }
     } else {
-      await writeFile(
-        postCommitDetectorPath,
-        `#!/bin/sh\n${detectorScript}\nexit 0\n`,
-        "utf-8",
-      );
+      await writeFile(postCommitDetectorPath, `#!/bin/sh\n${detectorScript}\nexit 0\n`, "utf-8");
       await chmod(postCommitDetectorPath, 0o755);
     }
     results.push({

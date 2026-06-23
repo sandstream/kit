@@ -28,7 +28,12 @@ function vscodeGlobalStorage(): string {
     case "darwin":
       return join(home, "Library", "Application Support", "Code", "User", "globalStorage");
     case "win32":
-      return join(process.env.APPDATA ?? join(home, "AppData", "Roaming"), "Code", "User", "globalStorage");
+      return join(
+        process.env.APPDATA ?? join(home, "AppData", "Roaming"),
+        "Code",
+        "User",
+        "globalStorage",
+      );
     default:
       return join(home, ".config", "Code", "User", "globalStorage");
   }

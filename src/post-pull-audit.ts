@@ -22,7 +22,6 @@
 import { findSecrets, type SecretFinding } from "./utils/redactSecrets.js";
 import { exec } from "./utils/exec.js";
 
-
 export interface PullAuditReport {
   baseRef: string;
   headRef: string;
@@ -42,11 +41,7 @@ interface PackageJson {
   devDependencies?: Record<string, string>;
 }
 
-async function tryGitShow(
-  ref: string,
-  path: string,
-  cwd: string,
-): Promise<string | null> {
+async function tryGitShow(ref: string, path: string, cwd: string): Promise<string | null> {
   try {
     const { stdout } = await exec("git", ["show", `${ref}:${path}`], {
       cwd,
@@ -59,11 +54,7 @@ async function tryGitShow(
   }
 }
 
-async function listChangedFiles(
-  baseRef: string,
-  headRef: string,
-  cwd: string,
-): Promise<string[]> {
+async function listChangedFiles(baseRef: string, headRef: string, cwd: string): Promise<string[]> {
   try {
     const { stdout } = await exec(
       "git",
@@ -94,7 +85,10 @@ function diffDeps(
   };
 }
 
-function diffLines(before: string | null, after: string | null): {
+function diffLines(
+  before: string | null,
+  after: string | null,
+): {
   added: string[];
   removed: string[];
 } {
@@ -191,11 +185,7 @@ export function reportSeverity(report: PullAuditReport): "ok" | "warn" | "fail" 
   if (report.removedGitignoreEntries.some((l) => /\.env|\.pem|\.key|id_rsa/.test(l))) {
     return "fail";
   }
-  if (
-    report.newDependencies.length > 0 ||
-    report.allowlistChanged ||
-    report.policyChanged
-  ) {
+  if (report.newDependencies.length > 0 || report.allowlistChanged || report.policyChanged) {
     return "warn";
   }
   return "ok";

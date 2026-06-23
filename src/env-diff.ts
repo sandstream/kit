@@ -86,11 +86,7 @@ export async function diffEnvFiles(
   return { onlyInA, onlyInB, changed, identicalCount };
 }
 
-export function formatEnvDiff(
-  diff: EnvDiffResult,
-  labelA: string,
-  labelB: string,
-): string {
+export function formatEnvDiff(diff: EnvDiffResult, labelA: string, labelB: string): string {
   const lines: string[] = [];
   lines.push(`env-diff ${labelA} vs ${labelB}`);
   lines.push("─".repeat(50));

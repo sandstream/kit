@@ -120,7 +120,11 @@ async function getElevationSigningKey(): Promise<Buffer> {
   const key = randomBytes(32);
   await mkdir(dirname(keyPath), { recursive: true });
   try {
-    await writeFile(keyPath, key.toString("hex") + "\n", { encoding: "utf-8", mode: 0o600, flag: "wx" });
+    await writeFile(keyPath, key.toString("hex") + "\n", {
+      encoding: "utf-8",
+      mode: 0o600,
+      flag: "wx",
+    });
     return key;
   } catch {
     const hex = (await readFile(keyPath, "utf-8")).trim();
@@ -155,9 +159,7 @@ async function verifyElevationSig(state: ElevationState, sig: string): Promise<b
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
-export async function readElevation(
-  cwd: string = process.cwd(),
-): Promise<ElevationState | null> {
+export async function readElevation(cwd: string = process.cwd()): Promise<ElevationState | null> {
   const path = resolve(cwd, ELEVATION_FILE);
   try {
     await access(path);
@@ -189,9 +191,7 @@ export async function writeElevation(
   await writeFile(path, JSON.stringify({ ...state, sig }, null, 2) + "\n", "utf-8");
 }
 
-export async function clearElevation(
-  cwd: string = process.cwd(),
-): Promise<void> {
+export async function clearElevation(cwd: string = process.cwd()): Promise<void> {
   const path = resolve(cwd, ELEVATION_FILE);
   try {
     const { rm } = await import("node:fs/promises");
@@ -205,10 +205,7 @@ export async function clearElevation(
  * Returns true if an unexpired elevation marker exists that covers the
  * requested operation scope.
  */
-export async function isElevated(
-  operation: string,
-  cwd: string = process.cwd(),
-): Promise<boolean> {
+export async function isElevated(operation: string, cwd: string = process.cwd()): Promise<boolean> {
   const state = await readElevation(cwd);
   if (!state) return false;
   const expires = Date.parse(state.expiresAt);
@@ -417,11 +414,7 @@ export function generateTotp(
  * clock skew, ±30s window). Uses timingSafeEqual for the digit comparison —
  * both sides are fixed 6-ASCII-digit strings, so lengths always match.
  */
-export function verifyTotp(
-  code: string,
-  secretBase32: string,
-  windowSteps: number = 1,
-): boolean {
+export function verifyTotp(code: string, secretBase32: string, windowSteps: number = 1): boolean {
   if (!/^\d{6}$/.test(code)) return false;
   const codeBuf = Buffer.from(code, "ascii");
   const now = Math.floor(Date.now() / 1000 / 30);
@@ -469,11 +462,7 @@ export async function requireElevation(
 
   if (process.env.KIT_ELEVATED === "1") {
     warnCiBypassOnce(operation);
-    return decide(
-      true,
-      "KIT_ELEVATED=1 (CI escape hatch)",
-      "ci-env",
-    );
+    return decide(true, "KIT_ELEVATED=1 (CI escape hatch)", "ci-env");
   }
   const state = await readElevation(cwd);
   if (!state) {
@@ -485,11 +474,7 @@ export async function requireElevation(
   }
   const expires = Date.parse(state.expiresAt);
   if (!Number.isFinite(expires) || expires < Date.now()) {
-    return decide(
-      false,
-      "Elevation marker expired. Run 'kit auth elevate' again.",
-      state.method,
-    );
+    return decide(false, "Elevation marker expired. Run 'kit auth elevate' again.", state.method);
   }
   if (state.scope !== "all" && state.scope !== operation) {
     return decide(

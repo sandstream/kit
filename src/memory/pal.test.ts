@@ -58,8 +58,14 @@ describe("PAL — pending actions", () => {
     const present = join(tmp, "present");
     writeFileSync(present, "x");
     const missing = join(tmp, "missing");
-    const passes = palAdd(db, { title: "passing check", check: { type: "file-exists", path: present } });
-    const fails = palAdd(db, { title: "failing check", check: { type: "file-exists", path: missing } });
+    const passes = palAdd(db, {
+      title: "passing check",
+      check: { type: "file-exists", path: present },
+    });
+    const fails = palAdd(db, {
+      title: "failing check",
+      check: { type: "file-exists", path: missing },
+    });
     let r = await palAutoVerify(db);
     assert.deepEqual(r.closed, []); // first pass: streak = 1
     assert.equal(palList(db).length, 2);
@@ -77,7 +83,10 @@ describe("PAL — pending actions", () => {
     const tmp = mkdtempSync(join(tmpdir(), "kit-pal-"));
     const artifact = join(tmp, "artifact");
     writeFileSync(artifact, "x");
-    const id = palAdd(db, { title: "regressing check", check: { type: "file-exists", path: artifact } });
+    const id = palAdd(db, {
+      title: "regressing check",
+      check: { type: "file-exists", path: artifact },
+    });
     palDone(db, id); // force-close
     assert.equal(palList(db, { status: "closed" }).length, 1);
     rmSync(artifact); // artifact gone -> the check now fails
@@ -105,7 +114,13 @@ describe("PAL — pending actions", () => {
           verify: "false",
           pass_streak: 1,
         }),
-        JSON.stringify({ id: "bbbb", ts: "2026-06-02", status: "done", repo: "app-b", title: "cert fixed" }),
+        JSON.stringify({
+          id: "bbbb",
+          ts: "2026-06-02",
+          status: "done",
+          repo: "app-b",
+          title: "cert fixed",
+        }),
       ].join("\n"),
     );
     const r = importLegacyLedger(db, led);

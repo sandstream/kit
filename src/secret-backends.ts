@@ -84,13 +84,15 @@ export function resetInfisicalCache(): void {
   infisicalCache = null;
 }
 
-async function fetchInfisicalSecrets(
+/**
+ * Bulk-fetch one Infisical project/env's secrets via `infisical export` (NO cache).
+ * Use for an explicit project (e.g. a shared tooling project) distinct from the
+ * repo's app-secrets binding. Empty map on any failure (fail-open).
+ */
+export async function fetchInfisicalProjectSecrets(
   infisicalConfig?: InfisicalConfig,
 ): Promise<Map<string, string>> {
-  if (infisicalCache) return infisicalCache;
-
   const env = infisicalConfig?.environment ?? "dev";
-
   try {
     const exportArgs = ["export", "--format=json", "--env", env];
     if (infisicalConfig?.project_id) {
@@ -99,7 +101,6 @@ async function fetchInfisicalSecrets(
     if (infisicalConfig?.path) {
       exportArgs.push("--path", infisicalConfig.path);
     }
-
     const { stdout } = await execCli("infisical", exportArgs, {
       timeout: 15_000,
       env: { ...process.env },
@@ -115,12 +116,18 @@ async function fetchInfisicalSecrets(
         if (typeof v === "string") cache.set(k, v);
       }
     }
-    infisicalCache = cache;
     return cache;
   } catch {
-    infisicalCache = new Map();
-    return infisicalCache;
+    return new Map();
   }
+}
+
+async function fetchInfisicalSecrets(
+  infisicalConfig?: InfisicalConfig,
+): Promise<Map<string, string>> {
+  if (infisicalCache) return infisicalCache;
+  infisicalCache = await fetchInfisicalProjectSecrets(infisicalConfig);
+  return infisicalCache;
 }
 
 // ─── Backend registry ─────────────────────────────────────────────────────────
@@ -211,14 +218,18 @@ export const BACKENDS: Record<string, SecretBackend> = {
           timeout: 15_000,
         });
       } catch {
-        await execCli("op", [
-          "item",
-          "create",
-          `--category=Login`,
-          `--title=${project}`,
-          `--vault=${vault}`,
-          `${key}=${value}`,
-        ], { timeout: 15_000 });
+        await execCli(
+          "op",
+          [
+            "item",
+            "create",
+            `--category=Login`,
+            `--title=${project}`,
+            `--vault=${vault}`,
+            `${key}=${value}`,
+          ],
+          { timeout: 15_000 },
+        );
       }
       return { ok: true, ref: `op://${vault}/${project}/${key}`, detail: "wrote to 1Password" };
     },
@@ -553,19 +564,16 @@ export const BACKENDS: Record<string, SecretBackend> = {
     },
     async write(key, value, opts) {
       if (!opts.vault) {
-        return { ok: false, detail: "Azure: --vault required (azure_vault or AZURE_KEYVAULT_NAME)" };
+        return {
+          ok: false,
+          detail: "Azure: --vault required (azure_vault or AZURE_KEYVAULT_NAME)",
+        };
       }
-      await exec("az", [
-        "keyvault",
-        "secret",
-        "set",
-        "--vault-name",
-        opts.vault,
-        "--name",
-        key,
-        "--value",
-        value,
-      ], { timeout: 15_000 });
+      await exec(
+        "az",
+        ["keyvault", "secret", "set", "--vault-name", opts.vault, "--name", key, "--value", value],
+        { timeout: 15_000 },
+      );
       return { ok: true, detail: `wrote to Azure Key Vault ${opts.vault}` };
     },
   },

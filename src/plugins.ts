@@ -10,7 +10,6 @@
 
 import { exec } from "./utils/exec.js";
 
-
 /**
  * Plugin metadata as it appears in the registry
  */
@@ -147,7 +146,7 @@ export const DEFAULT_REGISTRY: PluginRegistry = {
  */
 export function searchPlugins(
   query: string,
-  registry: PluginRegistry = DEFAULT_REGISTRY
+  registry: PluginRegistry = DEFAULT_REGISTRY,
 ): PluginMetadata[] {
   const q = query.toLowerCase();
 
@@ -185,12 +184,10 @@ export function searchPlugins(
  */
 export function listPlugins(
   tag?: string,
-  registry: PluginRegistry = DEFAULT_REGISTRY
+  registry: PluginRegistry = DEFAULT_REGISTRY,
 ): PluginMetadata[] {
   if (!tag) {
-    return registry.plugins.sort(
-      (a, b) => (b.downloads ?? 0) - (a.downloads ?? 0)
-    );
+    return registry.plugins.sort((a, b) => (b.downloads ?? 0) - (a.downloads ?? 0));
   }
 
   return registry.plugins
@@ -203,12 +200,10 @@ export function listPlugins(
  */
 export function getPluginInfo(
   name: string,
-  registry: PluginRegistry = DEFAULT_REGISTRY
+  registry: PluginRegistry = DEFAULT_REGISTRY,
 ): PluginMetadata | null {
   const normalized = name.toLowerCase();
-  return (
-    registry.plugins.find((p) => p.name.toLowerCase() === normalized) || null
-  );
+  return registry.plugins.find((p) => p.name.toLowerCase() === normalized) || null;
 }
 
 /**
@@ -227,19 +222,12 @@ export function getAllTags(registry: PluginRegistry = DEFAULT_REGISTRY): string[
 /**
  * Format a plugin for display in CLI output
  */
-export function formatPluginForDisplay(
-  plugin: PluginMetadata,
-  detailed: boolean = false
-): string {
+export function formatPluginForDisplay(plugin: PluginMetadata, detailed: boolean = false): string {
   const lines: string[] = [];
 
   // Header line: name, version, rating
-  const ratingStr = plugin.rating
-    ? ` ${formatStars(plugin.rating)}`
-    : "";
-  lines.push(
-    `  ${plugin.name} ${plugin.version}${ratingStr}`
-  );
+  const ratingStr = plugin.rating ? ` ${formatStars(plugin.rating)}` : "";
+  lines.push(`  ${plugin.name} ${plugin.version}${ratingStr}`);
 
   // Description
   lines.push(`    ${plugin.description}`);
@@ -298,7 +286,7 @@ export async function isPluginInstalled(packageName: string): Promise<boolean> {
  */
 export async function installPlugin(
   pluginName: string,
-  metadata: PluginMetadata
+  metadata: PluginMetadata,
 ): Promise<{ success: boolean; message: string }> {
   try {
     // Use npm to install the package

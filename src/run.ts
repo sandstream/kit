@@ -32,7 +32,9 @@ export async function executeCommand(opts: RunOptions): Promise<RunResult> {
   }
 
   // Build environment
-  const env: Record<string, string> = inheritEnv ? { ...process.env as Record<string, string> } : {};
+  const env: Record<string, string> = inheritEnv
+    ? { ...(process.env as Record<string, string>) }
+    : {};
 
   // Load .env.local if it exists
   const envPath = resolve(cwd, ".env.local");

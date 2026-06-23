@@ -9,7 +9,11 @@ import type { SecretsConfig } from "./config.js";
 const tmpOut = join(tmpdir(), `.kit-test-${process.pid}.env`);
 
 afterEach(async () => {
-  try { await unlink(tmpOut); } catch { /* ignore */ }
+  try {
+    await unlink(tmpOut);
+  } catch {
+    /* ignore */
+  }
 });
 
 describe("generateSecrets", () => {
@@ -137,7 +141,11 @@ describe("generateSecrets", () => {
   });
 
   it("writes a scaffold when nothing resolved and no file exists yet", async () => {
-    try { await unlink(tmpOut); } catch { /* ignore */ }
+    try {
+      await unlink(tmpOut);
+    } catch {
+      /* ignore */
+    }
     delete process.env._KIT_NONE2;
     const config: SecretsConfig = { keys: { _KIT_NONE2: { source: "env" } } };
 

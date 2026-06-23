@@ -10,11 +10,7 @@ export const sentryMonitoringAdapter = apiKeyAdapter({
   name: "sentry/monitoring",
   description: "Sentry error tracking and performance monitoring",
   required: [{ env: "SENTRY_DSN", prefix: "https://" }],
-  optional: [
-    { env: "SENTRY_ORG" },
-    { env: "SENTRY_PROJECT" },
-    { env: "SENTRY_AUTH_TOKEN" },
-  ],
+  optional: [{ env: "SENTRY_ORG" }, { env: "SENTRY_PROJECT" }, { env: "SENTRY_AUTH_TOKEN" }],
   steps: [
     "Set SENTRY_DSN before running kit add sentry/monitoring:",
     "  1. Go to https://sentry.io and create a project",

@@ -42,10 +42,7 @@ export async function checkBudgetLimits(
 
   // Check operation limit
   const operationLimit = fullConfig.agent.max_operations_per_hour;
-  if (
-    operationLimit &&
-    resetState.operations_this_hour >= operationLimit
-  ) {
+  if (operationLimit && resetState.operations_this_hour >= operationLimit) {
     return {
       allowed: false,
       reason: `Operation budget exceeded: ${resetState.operations_this_hour}/${operationLimit} operations this hour`,
@@ -117,10 +114,7 @@ async function saveBudgetState(state: BudgetState): Promise<void> {
 /**
  * Reset counters if time periods have elapsed
  */
-function resetCountersIfNeeded(
-  state: BudgetState,
-  now: Date,
-): BudgetState {
+function resetCountersIfNeeded(state: BudgetState, now: Date): BudgetState {
   const newState = { ...state };
 
   // Reset token counter at midnight
@@ -134,8 +128,7 @@ function resetCountersIfNeeded(
 
   // Reset operation counter every hour
   const lastOperationReset = new Date(state.last_operation_reset);
-  const elapsedHours =
-    (now.getTime() - lastOperationReset.getTime()) / (1000 * 60 * 60);
+  const elapsedHours = (now.getTime() - lastOperationReset.getTime()) / (1000 * 60 * 60);
 
   if (elapsedHours >= 1) {
     newState.operations_this_hour = 0;
@@ -148,9 +141,7 @@ function resetCountersIfNeeded(
 /**
  * Get current budget status for display
  */
-export async function getBudgetStatus(
-  config: GovernanceConfig | undefined,
-): Promise<{
+export async function getBudgetStatus(config: GovernanceConfig | undefined): Promise<{
   tokens_used: number;
   tokens_limit: number | undefined;
   operations_used: number;
@@ -184,10 +175,7 @@ export function formatBudgetStatus(status: {
   lines.push("─".repeat(50));
 
   if (status.tokens_limit) {
-    const tokenPercent = (
-      (status.tokens_used / status.tokens_limit) *
-      100
-    ).toFixed(1);
+    const tokenPercent = ((status.tokens_used / status.tokens_limit) * 100).toFixed(1);
     lines.push(
       `Tokens: ${status.tokens_used.toLocaleString()}/${status.tokens_limit.toLocaleString()} (${tokenPercent}%)`,
     );
@@ -196,13 +184,8 @@ export function formatBudgetStatus(status: {
   }
 
   if (status.operations_limit) {
-    const opPercent = (
-      (status.operations_used / status.operations_limit) *
-      100
-    ).toFixed(1);
-    lines.push(
-      `Operations: ${status.operations_used}/${status.operations_limit} (${opPercent}%)`,
-    );
+    const opPercent = ((status.operations_used / status.operations_limit) * 100).toFixed(1);
+    lines.push(`Operations: ${status.operations_used}/${status.operations_limit} (${opPercent}%)`);
   } else {
     lines.push(`Operations: ${status.operations_used} (no limit)`);
   }

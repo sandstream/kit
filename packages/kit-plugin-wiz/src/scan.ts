@@ -69,7 +69,9 @@ export async function makeClient(opts: MakeClientOptions = {}): Promise<WizClien
     throw new Error("WIZ_CLIENT_ID + WIZ_CLIENT_SECRET required");
   }
   if (!apiUrl) {
-    throw new Error("WIZ_API_URL required (tenant-specific, e.g. https://api.us17.app.wiz.io/graphql)");
+    throw new Error(
+      "WIZ_API_URL required (tenant-specific, e.g. https://api.us17.app.wiz.io/graphql)",
+    );
   }
   const body = new URLSearchParams({
     grant_type: "client_credentials",

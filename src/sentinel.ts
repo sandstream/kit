@@ -48,7 +48,11 @@ export function artifactForClass(c: FindingClass): Artifact {
 }
 
 function slug(id: string): string {
-  return id.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
+  return id
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 50);
 }
 
 /** Map a layer-1 health finding to the normalized responder shape (red only). */
@@ -92,13 +96,22 @@ export function buildProposal(f: RedFinding): Proposal {
 }
 
 /** Findings (minus suppressed) → proposals. Pure. */
-export function buildProposals(findings: RedFinding[], suppressed: ReadonlySet<string> = new Set()): Proposal[] {
+export function buildProposals(
+  findings: RedFinding[],
+  suppressed: ReadonlySet<string> = new Set(),
+): Proposal[] {
   return findings.filter((f) => !suppressed.has(f.id)).map(buildProposal);
 }
 
 /** Mark proposals whose finding already has an open artifact (null openMarkers = not checked). */
-export function applyDedup(proposals: Proposal[], openMarkers: ReadonlySet<string> | null): Proposal[] {
-  return proposals.map((p) => ({ ...p, alreadyOpen: openMarkers ? openMarkers.has(p.findingId) : null }));
+export function applyDedup(
+  proposals: Proposal[],
+  openMarkers: ReadonlySet<string> | null,
+): Proposal[] {
+  return proposals.map((p) => ({
+    ...p,
+    alreadyOpen: openMarkers ? openMarkers.has(p.findingId) : null,
+  }));
 }
 
 /** Parse `.kit/sentinel-suppress.toml` — `suppress = ["id-a", "id-b"]`. */
@@ -120,7 +133,9 @@ export interface SentinelDeps {
 export async function runSentinel(cwd: string, deps: SentinelDeps): Promise<Proposal[]> {
   let suppressed = new Set<string>();
   try {
-    suppressed = parseSuppressions(readFileSync(resolve(cwd, ".kit", "sentinel-suppress.toml"), "utf8"));
+    suppressed = parseSuppressions(
+      readFileSync(resolve(cwd, ".kit", "sentinel-suppress.toml"), "utf8"),
+    );
   } catch {
     // no suppress file → nothing suppressed
   }

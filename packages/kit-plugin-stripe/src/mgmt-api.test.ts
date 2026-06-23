@@ -41,18 +41,12 @@ describe("assertModeForUrl", () => {
 
   it("refuses live key against 127.0.0.1 URL", () => {
     const client = makeClient({ secretKey: "sk_live_x" });
-    assert.throws(
-      () => assertModeForUrl(client, "http://127.0.0.1:8080/cb"),
-      /LIVE-mode/,
-    );
+    assert.throws(() => assertModeForUrl(client, "http://127.0.0.1:8080/cb"), /LIVE-mode/);
   });
 
   it("refuses test key against http:// URL (signature downgrade)", () => {
     const client = makeClient({ secretKey: "sk_test_x" });
-    assert.throws(
-      () => assertModeForUrl(client, "http://example.com/webhook"),
-      /non-HTTPS URL/,
-    );
+    assert.throws(() => assertModeForUrl(client, "http://example.com/webhook"), /non-HTTPS URL/);
   });
 
   it("allows live key against https://example.com", () => {

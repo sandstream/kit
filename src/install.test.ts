@@ -14,9 +14,7 @@ function makeDeps(overrides: Partial<InstallDeps> = {}): InstallDeps {
 describe("installTools", () => {
   it("returns already_ok for tools that pass checkTools", async () => {
     const deps = makeDeps({
-      checkTools: async () => [
-        { name: "node", required: "22", installed: "22.22.2", ok: true },
-      ],
+      checkTools: async () => [{ name: "node", required: "22", installed: "22.22.2", ok: true }],
     });
 
     const results = await installTools({ node: "22" }, deps);
@@ -55,9 +53,7 @@ describe("installTools", () => {
 
   it("returns failed when mise install throws", async () => {
     const deps = makeDeps({
-      checkTools: async () => [
-        { name: "bun", required: "1", installed: null, ok: false },
-      ],
+      checkTools: async () => [{ name: "bun", required: "1", installed: null, ok: false }],
       miseInstall: async () => ({
         ok: false,
         detail: "mise: plugin not found",
@@ -120,8 +116,14 @@ describe("installTools", () => {
   it("triage-blocked tool is NOT installed (watertight gate)", async () => {
     let miseCalled = false;
     const deps = makeDeps({
-      checkTools: async () => [{ name: "aqua:aquasecurity/trivy", required: "latest", installed: null, ok: false }],
-      gateInstall: async (tool) => ({ tool, decision: "blocked", reason: "triage did not pass (repo ...): typosquat" }),
+      checkTools: async () => [
+        { name: "aqua:aquasecurity/trivy", required: "latest", installed: null, ok: false },
+      ],
+      gateInstall: async (tool) => ({
+        tool,
+        decision: "blocked",
+        reason: "triage did not pass (repo ...): typosquat",
+      }),
       miseInstall: async () => {
         miseCalled = true;
         return { ok: true, detail: "installed" };
@@ -139,7 +141,12 @@ describe("installTools", () => {
     let gateCalled = false;
     const deps = makeDeps({
       checkTools: async (tools) =>
-        Object.keys(tools).map((name) => ({ name, required: "latest", installed: null, ok: false })),
+        Object.keys(tools).map((name) => ({
+          name,
+          required: "latest",
+          installed: null,
+          ok: false,
+        })),
       gateInstall: async (tool) => {
         gateCalled = true;
         return { tool, decision: "blocked", reason: "would block" };
@@ -175,7 +182,8 @@ describe("miseErrorDetail", () => {
   });
 
   it("surfaces the real mise ERROR line instead of the generic Command failed", () => {
-    const stderr = "mise ERROR error parsing config file: ~/repo/.mise.toml\nmise ERROR Version: 2026.6.11";
+    const stderr =
+      "mise ERROR error parsing config file: ~/repo/.mise.toml\nmise ERROR Version: 2026.6.11";
     const detail = miseErrorDetail("Command failed: mise install node@24", stderr);
     assert.equal(detail, "error parsing config file: ~/repo/.mise.toml");
   });

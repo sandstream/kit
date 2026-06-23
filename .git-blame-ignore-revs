@@ -1,0 +1,6 @@
+# Revisions to skip in `git blame` (mechanical, no-logic-change commits).
+# Enable locally with:  git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub honours this file automatically.
+
+# style: format codebase with prettier
+49f28e900a6a6c1bdf8893d699e9ee1cd574c787

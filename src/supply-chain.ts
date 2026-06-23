@@ -47,7 +47,10 @@ export function findLockDrift(declaredDeps: string[], lockNames: Set<string>): s
 /** Packages resolved from a non-registry source (http/git tarball) — supply-chain risk. */
 export function findNonRegistryResolved(lockPkgs: LockPkg[]): { name: string; resolved: string }[] {
   return lockPkgs
-    .filter((p) => p.resolved && !REGISTRY.test(p.resolved) && /^(https?:|git\+|github:)/.test(p.resolved))
+    .filter(
+      (p) =>
+        p.resolved && !REGISTRY.test(p.resolved) && /^(https?:|git\+|github:)/.test(p.resolved),
+    )
     .map((p) => ({ name: p.name, resolved: p.resolved! }));
 }
 
@@ -59,7 +62,8 @@ export function findDepConfusion(
 ): string[] {
   if (internalScopes.length === 0) return [];
   return declaredDeps.filter(
-    (d) => internalScopes.some((s) => d === s || d.startsWith(s.endsWith("/") ? s : `${s}/`)) &&
+    (d) =>
+      internalScopes.some((s) => d === s || d.startsWith(s.endsWith("/") ? s : `${s}/`)) &&
       REGISTRY.test(resolvedByName.get(d) ?? ""),
   );
 }
@@ -95,7 +99,10 @@ export function editDistance(a: string, b: string, cap = 2): number {
 }
 
 /** Deps that look like a near-miss (≤1 edit, incl. transposition) of a popular package. */
-export function findSlopsquat(declaredDeps: string[], corpus: ReadonlySet<string> = TOP_NPM_SET): { name: string; near: string }[] {
+export function findSlopsquat(
+  declaredDeps: string[],
+  corpus: ReadonlySet<string> = TOP_NPM_SET,
+): { name: string; near: string }[] {
   const out: { name: string; near: string }[] = [];
   for (const d of declaredDeps) {
     if (corpus.has(d)) continue; // exact popular package = fine
@@ -115,7 +122,10 @@ interface PackageJson {
   devDependencies?: Record<string, string>;
 }
 interface LockfileV3 {
-  packages?: Record<string, { name?: string; version?: string; resolved?: string; hasInstallScript?: boolean }>;
+  packages?: Record<
+    string,
+    { name?: string; version?: string; resolved?: string; hasInstallScript?: boolean }
+  >;
 }
 
 /** Parse an npm lockfile (v3 `packages` map) into a flat LockPkg list. */
@@ -124,7 +134,13 @@ export function parseLockPkgs(lock: LockfileV3): LockPkg[] {
   for (const [path, meta] of Object.entries(lock.packages ?? {})) {
     if (path === "") continue; // the root project entry
     const name = meta.name ?? path.split("node_modules/").pop() ?? path;
-    out.push({ path, name, version: meta.version, resolved: meta.resolved, hasInstallScript: meta.hasInstallScript });
+    out.push({
+      path,
+      name,
+      version: meta.version,
+      resolved: meta.resolved,
+      hasInstallScript: meta.hasInstallScript,
+    });
   }
   return out;
 }
@@ -151,10 +167,20 @@ export function runSupplyChain(cwd: string, internalScopes: string[] = []): Secu
   try {
     lock = JSON.parse(readFileSync(resolve(cwd, "package-lock.json"), "utf8")) as LockfileV3;
   } catch {
-    return [result("lockfile", "warn", "no package-lock.json — install-time checks need a committed lockfile", "medium")];
+    return [
+      result(
+        "lockfile",
+        "warn",
+        "no package-lock.json — install-time checks need a committed lockfile",
+        "medium",
+      ),
+    ];
   }
 
-  const declared = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})];
+  const declared = [
+    ...Object.keys(pkg.dependencies ?? {}),
+    ...Object.keys(pkg.devDependencies ?? {}),
+  ];
   const lockPkgs = parseLockPkgs(lock);
   const lockNames = new Set(lockPkgs.map((p) => p.name));
   const resolvedByName = new Map(lockPkgs.map((p) => [p.name, p.resolved] as const));
@@ -177,30 +203,80 @@ export function runSupplyChain(cwd: string, internalScopes: string[] = []): Secu
   const drift = findLockDrift(declared, lockNames);
   const nonReg = findNonRegistryResolved(lockPkgs);
   if (drift.length === 0 && nonReg.length === 0) {
-    out.push(result("lockfile-drift", "pass", "lockfile covers all declared deps; all resolved from the registry"));
+    out.push(
+      result(
+        "lockfile-drift",
+        "pass",
+        "lockfile covers all declared deps; all resolved from the registry",
+      ),
+    );
   } else {
     if (drift.length > 0) {
-      out.push(result("lockfile-drift", "warn", `${drift.length} declared dep(s) missing from the lockfile: ${drift.slice(0, 8).join(", ")}`, "medium", "run `npm install` and commit the lockfile"));
+      out.push(
+        result(
+          "lockfile-drift",
+          "warn",
+          `${drift.length} declared dep(s) missing from the lockfile: ${drift.slice(0, 8).join(", ")}`,
+          "medium",
+          "run `npm install` and commit the lockfile",
+        ),
+      );
     }
     if (nonReg.length > 0) {
-      out.push(result("lockfile-source", "warn", `${nonReg.length} package(s) resolved from a non-registry source (${nonReg.slice(0, 3).map((n) => n.name).join(", ")})`, "high", "verify these http/git tarball sources are trusted"));
+      out.push(
+        result(
+          "lockfile-source",
+          "warn",
+          `${nonReg.length} package(s) resolved from a non-registry source (${nonReg
+            .slice(0, 3)
+            .map((n) => n.name)
+            .join(", ")})`,
+          "high",
+          "verify these http/git tarball sources are trusted",
+        ),
+      );
     }
   }
 
   const confusion = findDepConfusion(declared, resolvedByName, internalScopes);
   if (internalScopes.length === 0) {
-    out.push(result("dep-confusion", "skip", "no internal scopes declared ([supply_chain] internal_scopes)"));
+    out.push(
+      result(
+        "dep-confusion",
+        "skip",
+        "no internal scopes declared ([supply_chain] internal_scopes)",
+      ),
+    );
   } else if (confusion.length === 0) {
-    out.push(result("dep-confusion", "pass", "no internal-scoped dep resolves from the public registry"));
+    out.push(
+      result("dep-confusion", "pass", "no internal-scoped dep resolves from the public registry"),
+    );
   } else {
-    out.push(result("dep-confusion", "fail", `${confusion.length} internal-scoped dep(s) resolved from the PUBLIC registry: ${confusion.join(", ")}`, "high", "a public package shares your internal name — pin to your private registry"));
+    out.push(
+      result(
+        "dep-confusion",
+        "fail",
+        `${confusion.length} internal-scoped dep(s) resolved from the PUBLIC registry: ${confusion.join(", ")}`,
+        "high",
+        "a public package shares your internal name — pin to your private registry",
+      ),
+    );
   }
 
   const slop = findSlopsquat(declared);
   out.push(
     slop.length === 0
       ? result("slopsquat", "pass", "no dependency name looks like a popular-package look-alike")
-      : result("slopsquat", "warn", `${slop.length} possible look-alike(s): ${slop.slice(0, 5).map((s) => `${s.name}≈${s.near}`).join(", ")}`, "high", "confirm these are the intended packages, not typosquats"),
+      : result(
+          "slopsquat",
+          "warn",
+          `${slop.length} possible look-alike(s): ${slop
+            .slice(0, 5)
+            .map((s) => `${s.name}≈${s.near}`)
+            .join(", ")}`,
+          "high",
+          "confirm these are the intended packages, not typosquats",
+        ),
   );
 
   return out;

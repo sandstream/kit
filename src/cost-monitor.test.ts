@@ -3,11 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  sampleCosts,
-  detectCostAnomalies,
-  type CostSample,
-} from "./cost-monitor.js";
+import { sampleCosts, detectCostAnomalies, type CostSample } from "./cost-monitor.js";
 
 function tmpDir(): string {
   return mkdtempSync(join(tmpdir(), "kit-cost-"));
@@ -151,10 +147,9 @@ describe("detectCostAnomalies", () => {
           },
         }),
       );
-      const alerts = await detectCostAnomalies(
-        [sample({ current: 100, capUsd: 50 })],
-        { cwd: dir },
-      );
+      const alerts = await detectCostAnomalies([sample({ current: 100, capUsd: 50 })], {
+        cwd: dir,
+      });
       assert.equal(alerts.length, 1);
       assert.equal(alerts[0]!.severity, "critical");
     } finally {

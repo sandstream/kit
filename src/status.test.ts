@@ -52,7 +52,10 @@ describe("kit status", () => {
   it("configured project: every signal on", async () => {
     const proj = join(tmp, "ready");
     mkdirSync(proj, { recursive: true });
-    writeFileSync(join(proj, ".kit.toml"), `[tools]\nnode = "22"\n\n[secrets]\nstore = "1password"\n`);
+    writeFileSync(
+      join(proj, ".kit.toml"),
+      `[tools]\nnode = "22"\n\n[secrets]\nstore = "1password"\n`,
+    );
     writeFileSync(join(proj, "CLAUDE.md"), `# Project\n\n${KIT_BLOCK_BEGIN}\nuse kit\n`);
     writeFileSync(
       join(proj, ".gitignore"),
@@ -75,14 +78,22 @@ describe("kit status", () => {
 
     const dbPath = join(proj, "memory.db");
     const seed = openMemoryDb(dbPath);
-    insertMessage(seed, { uuid: "u1", sessionId: "s1", type: "user", role: "user", content: "hello" });
+    insertMessage(seed, {
+      uuid: "u1",
+      sessionId: "s1",
+      type: "user",
+      role: "user",
+      content: "hello",
+    });
     seed.close();
     process.env.KIT_MEMORY_DB = dbPath;
 
     const settings = join(proj, "settings.json");
     writeFileSync(
       settings,
-      JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ command: "kit memory hook" }] }] } }),
+      JSON.stringify({
+        hooks: { UserPromptSubmit: [{ hooks: [{ command: "kit memory hook" }] }] },
+      }),
     );
     process.env.KIT_CLAUDE_SETTINGS = settings;
 

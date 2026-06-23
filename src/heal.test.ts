@@ -24,7 +24,12 @@ describe("kit heal — classification (safe / gated / fail-closed boundary)", ()
   });
 
   it("missing .gitignore pattern → safe", () => {
-    const f = r({ name: ".env gitignored", category: "exposure", status: "warn", detail: ".gitignore not found" });
+    const f = r({
+      name: ".env gitignored",
+      category: "exposure",
+      status: "warn",
+      detail: ".gitignore not found",
+    });
     assert.equal(classify(f), "safe");
     assert.ok(safeRecipe(f));
   });

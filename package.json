@@ -31,7 +31,9 @@
     "prepublishOnly": "npm run build:prod",
     "dev": "tsx src/cli.ts",
     "test": "KIT_NON_INTERACTIVE=1 KIT_BUMBLEBEE=0 KIT_NO_FAILURE_SIM=1 KIT_NO_UPDATE_CHECK=1 node --test --test-timeout=180000 --test-concurrency=2 dist/*.test.js dist/**/*.test.js",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "format": "prettier --write \"**/*.ts\"",
+    "format:check": "prettier --check \"**/*.ts\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
@@ -44,6 +46,7 @@
     "@types/node": "22.19.15",
     "eslint": "^9.39.4",
     "globals": "^17.6.0",
+    "prettier": "^3.8.4",
     "tsx": "^4.22.4",
     "typescript": "5.9.3",
     "typescript-eslint": "^8.61.1"

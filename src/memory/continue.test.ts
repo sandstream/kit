@@ -67,7 +67,10 @@ describe("memory continue parser", () => {
 
     assert.equal(searchMessages(db, "december").length, 1);
     // project-scoped recall works because cwd was set from workspaceDirectory
-    assert.equal(searchMessages(db, "assistant", { projectPath: "/Users/me/dev/widget" }).length, 1);
+    assert.equal(
+      searchMessages(db, "assistant", { projectPath: "/Users/me/dev/widget" }).length,
+      1,
+    );
     db.close();
   });
 

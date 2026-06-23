@@ -5,9 +5,7 @@ import type { PluginRegistry } from "../plugin-registry.js";
  * Create a dynamic Zod schema for web_search provider validation
  * that includes both built-in and plugin-registered providers
  */
-export function createWebSearchProviderSchema(
-  registry?: PluginRegistry,
-): z.ZodType<string> {
+export function createWebSearchProviderSchema(registry?: PluginRegistry): z.ZodType<string> {
   const builtInProviders = ["brave", "google", "searxng", "custom"];
 
   let providers = builtInProviders;
@@ -56,8 +54,7 @@ export function createWebSearchConfigSchema(
         return true;
       },
       {
-        message:
-          "SearXNG requires 'url' and Brave requires 'apiKey' configuration",
+        message: "SearXNG requires 'url' and Brave requires 'apiKey' configuration",
       },
     );
 }
@@ -84,9 +81,7 @@ export function validateWebSearchConfig(
     if (err instanceof z.ZodError) {
       return {
         valid: false,
-        errors: err.issues.map(
-          (issue) => `${issue.path.join(".")}: ${issue.message}`,
-        ),
+        errors: err.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`),
       };
     }
     return {

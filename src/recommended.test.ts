@@ -13,7 +13,10 @@ describe("applyRecommendedHardening", () => {
     tmp = mkdtempSync(join(tmpdir(), "kit-recommended-"));
   });
   beforeEach(() => {
-    process.env.KIT_CLAUDE_SETTINGS = join(tmp, `claude-${Math.random().toString(36).slice(2)}.json`);
+    process.env.KIT_CLAUDE_SETTINGS = join(
+      tmp,
+      `claude-${Math.random().toString(36).slice(2)}.json`,
+    );
   });
   after(() => {
     if (prev === undefined) delete process.env.KIT_CLAUDE_SETTINGS;
@@ -45,7 +48,10 @@ describe("applyRecommendedHardening", () => {
   it("omits the pre-push context-check gate when no context is declared", async () => {
     const g = gitDir();
     const r = await applyRecommendedHardening({}, g);
-    assert.ok(r.hooks.some((h) => h.hookName === "pre-commit"), "still installs pre-commit");
+    assert.ok(
+      r.hooks.some((h) => h.hookName === "pre-commit"),
+      "still installs pre-commit",
+    );
     assert.equal(existsSync(join(g, "hooks", "pre-push")), false, "no pre-push without context");
   });
 });

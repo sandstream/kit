@@ -26,10 +26,7 @@ export async function checkRevocationStatus(
   const now = Date.now();
   const checkInterval = (fullConfig.revocation.check_interval || 300) * 1000;
 
-  if (
-    cachedRevocationStatus &&
-    now - lastRevocationCheck < checkInterval
-  ) {
+  if (cachedRevocationStatus && now - lastRevocationCheck < checkInterval) {
     return cachedRevocationStatus.revoked;
   }
 
@@ -53,10 +50,7 @@ async function fetchRevocationStatus(
   }
 
   try {
-    const endpoint = config.revocation.revocation_endpoint.replace(
-      "{agent_id}",
-      config.agent.id,
-    );
+    const endpoint = config.revocation.revocation_endpoint.replace("{agent_id}", config.agent.id);
 
     const response = await fetch(endpoint, {
       method: "GET",
@@ -103,9 +97,7 @@ export async function forceRevocationCheck(
 /**
  * Clear local secrets and caches (called when revocation detected)
  */
-export async function handleRevocation(
-  config: GovernanceConfig | undefined,
-): Promise<void> {
+export async function handleRevocation(config: GovernanceConfig | undefined): Promise<void> {
   console.error("\n" + "=".repeat(80));
   console.error("ACCESS REVOKED");
   console.error("=".repeat(80));

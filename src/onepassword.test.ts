@@ -1,10 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  check1PasswordStatus,
-  validate1PasswordRef,
-  generate1PasswordRef,
-} from "./onepassword.js";
+import { check1PasswordStatus, validate1PasswordRef, generate1PasswordRef } from "./onepassword.js";
 
 describe("onepassword", () => {
   describe("validate1PasswordRef", () => {

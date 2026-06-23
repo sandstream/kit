@@ -298,6 +298,8 @@ export interface kitConfig {
   context?: ContextConfig;
   /** Install-time supply-chain triage settings (`kit supply-chain`). */
   supply_chain?: { internal_scopes?: string[] };
+  /** `kit scan` settings — a tooling Infisical project to resolve scanner tokens (SNYK_TOKEN, …) from. */
+  scan?: { tooling?: { project_id?: string; env?: string } };
   web?: {
     search?: WebSearchConfig;
   };
@@ -486,7 +488,18 @@ const WebConfigSchema = z
 
 // Known top-level section names — used to detect typos
 const KNOWN_SECTIONS = new Set([
-  "tools", "services", "secrets", "skills", "governance", "hooks", "web", "setup", "env", "context", "memory", "update",
+  "tools",
+  "services",
+  "secrets",
+  "skills",
+  "governance",
+  "hooks",
+  "web",
+  "setup",
+  "env",
+  "context",
+  "memory",
+  "update",
 ]);
 
 const kitConfigSchema = z
@@ -542,6 +555,15 @@ const kitConfigSchema = z
       .optional(),
     supply_chain: z
       .object({ internal_scopes: z.array(z.string()).optional() })
+      .passthrough()
+      .optional(),
+    scan: z
+      .object({
+        tooling: z
+          .object({ project_id: z.string().optional(), env: z.string().optional() })
+          .passthrough()
+          .optional(),
+      })
       .passthrough()
       .optional(),
     web: WebConfigSchema,
@@ -636,7 +658,9 @@ export async function loadConfig(path: string, envName?: string): Promise<kitCon
   // Warn about unknown top-level sections (likely typos like [tolls] vs [tools])
   for (const key of Object.keys(raw)) {
     if (!KNOWN_SECTIONS.has(key)) {
-      console.warn(`Warning: unknown section [${key}] in .kit.toml (known: ${[...KNOWN_SECTIONS].join(", ")})`);
+      console.warn(
+        `Warning: unknown section [${key}] in .kit.toml (known: ${[...KNOWN_SECTIONS].join(", ")})`,
+      );
     }
   }
 

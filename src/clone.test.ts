@@ -16,11 +16,7 @@ before(async () => {
   // Initialize a minimal git repo for testing
   await mkdir(testRepoDir, { recursive: true });
   await writeFile(join(testRepoDir, "README.md"), "# Test Repo\n", "utf-8");
-  await writeFile(
-    join(testRepoDir, ".kit.toml"),
-    "[tools]\nnode = \"22\"\n",
-    "utf-8"
-  );
+  await writeFile(join(testRepoDir, ".kit.toml"), '[tools]\nnode = "22"\n', "utf-8");
 
   // Initialize git
   const { execSync } = await import("node:child_process");
@@ -57,11 +53,7 @@ describe("cloneRepository", () => {
     const result = await cloneRepository(opts);
 
     // Should derive "my-awesome-repo" from the URL
-    assert.match(
-      result.clonedPath,
-      /my-awesome-repo$/,
-      "Should derive directory name from URL"
-    );
+    assert.match(result.clonedPath, /my-awesome-repo$/, "Should derive directory name from URL");
   });
 
   it("uses provided target directory", async () => {
@@ -82,15 +74,8 @@ describe("cloneRepository", () => {
     };
     const result = await cloneRepository(opts);
 
-    assert(
-      !result.clonedPath.endsWith(".git"),
-      "Should strip .git from directory name"
-    );
-    assert.match(
-      result.clonedPath,
-      /my-repo$/,
-      "Should end with my-repo not my-repo.git"
-    );
+    assert(!result.clonedPath.endsWith(".git"), "Should strip .git from directory name");
+    assert.match(result.clonedPath, /my-repo$/, "Should end with my-repo not my-repo.git");
   });
 
   it("detects .kit.toml presence", async () => {
@@ -201,10 +186,7 @@ describe("cloneRepository", () => {
     const result = await cloneRepository(opts);
 
     if (result.success) {
-      const readmeContent = await readFile(
-        join(result.clonedPath, "README.md"),
-        "utf-8"
-      );
+      const readmeContent = await readFile(join(result.clonedPath, "README.md"), "utf-8");
       assert(readmeContent.includes("Test Repo"), "Should be able to read cloned files");
     }
   });

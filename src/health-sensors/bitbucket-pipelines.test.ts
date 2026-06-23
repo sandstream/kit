@@ -10,9 +10,24 @@ import type { HealthCtx, HealthDeps, HttpResponse } from "../health.js";
 
 const body = JSON.stringify({
   values: [
-    { build_number: 42, state: { name: "COMPLETED", result: { name: "FAILED" } }, target: { ref_name: "main" }, created_on: "2026-06-22T08:00:00Z" },
-    { build_number: 41, state: { name: "COMPLETED", result: { name: "SUCCESSFUL" } }, target: { ref_name: "main" }, created_on: "2026-06-21T08:00:00Z" },
-    { build_number: 43, state: { name: "IN_PROGRESS" }, target: { ref_name: "feat" }, created_on: "2026-06-22T09:00:00Z" },
+    {
+      build_number: 42,
+      state: { name: "COMPLETED", result: { name: "FAILED" } },
+      target: { ref_name: "main" },
+      created_on: "2026-06-22T08:00:00Z",
+    },
+    {
+      build_number: 41,
+      state: { name: "COMPLETED", result: { name: "SUCCESSFUL" } },
+      target: { ref_name: "main" },
+      created_on: "2026-06-21T08:00:00Z",
+    },
+    {
+      build_number: 43,
+      state: { name: "IN_PROGRESS" },
+      target: { ref_name: "feat" },
+      created_on: "2026-06-22T09:00:00Z",
+    },
   ],
 });
 
@@ -21,7 +36,12 @@ function deps(over: { remoteOk?: boolean; remote?: string; http?: HttpResponse }
     runCli: async (cmd, args) => {
       if (cmd === "git" && args[0] === "remote") {
         const ok = over.remoteOk ?? true;
-        return { stdout: over.remote ?? "git@bitbucket.org:acme/web.git", stderr: "", exitCode: ok ? 0 : 1, ok };
+        return {
+          stdout: over.remote ?? "git@bitbucket.org:acme/web.git",
+          stderr: "",
+          exitCode: ok ? 0 : 1,
+          ok,
+        };
       }
       return { stdout: "", stderr: "", exitCode: 0, ok: true };
     },
@@ -36,11 +56,27 @@ describe("parseBitbucketPipelines / latestFailedBitbucket", () => {
     assert.equal(f?.build_number, 42);
   });
   it("returns null when the latest completed pipeline succeeded", () => {
-    const ok = JSON.stringify({ values: [{ build_number: 41, state: { name: "COMPLETED", result: { name: "SUCCESSFUL" } }, created_on: "2026-06-21T08:00:00Z" }] });
+    const ok = JSON.stringify({
+      values: [
+        {
+          build_number: 41,
+          state: { name: "COMPLETED", result: { name: "SUCCESSFUL" } },
+          created_on: "2026-06-21T08:00:00Z",
+        },
+      ],
+    });
     assert.equal(latestFailedBitbucket(parseBitbucketPipelines(ok)), null);
   });
   it("treats STOPPED (cancelled) as not-red", () => {
-    const stopped = JSON.stringify({ values: [{ build_number: 40, state: { name: "COMPLETED", result: { name: "STOPPED" } }, created_on: "2026-06-22T08:00:00Z" }] });
+    const stopped = JSON.stringify({
+      values: [
+        {
+          build_number: 40,
+          state: { name: "COMPLETED", result: { name: "STOPPED" } },
+          created_on: "2026-06-22T08:00:00Z",
+        },
+      ],
+    });
     assert.equal(latestFailedBitbucket(parseBitbucketPipelines(stopped)), null);
   });
 });
@@ -50,7 +86,10 @@ describe("bitbucketAuthHeader", () => {
     assert.equal(bitbucketAuthHeader({ BITBUCKET_TOKEN: "t" } as NodeJS.ProcessEnv), "Bearer t");
   });
   it("falls back to basic from username + app password", () => {
-    const h = bitbucketAuthHeader({ BITBUCKET_USERNAME: "u", BITBUCKET_APP_PASSWORD: "p" } as NodeJS.ProcessEnv);
+    const h = bitbucketAuthHeader({
+      BITBUCKET_USERNAME: "u",
+      BITBUCKET_APP_PASSWORD: "p",
+    } as NodeJS.ProcessEnv);
     assert.equal(h, `Basic ${Buffer.from("u:p").toString("base64")}`);
   });
   it("returns null with no creds", () => {
@@ -81,7 +120,10 @@ describe("bitbucketSensor.probe", () => {
 
   it("is unknown on a non-OK API response", async () => {
     process.env.BITBUCKET_TOKEN = "bbt";
-    const out = await bitbucketSensor.probe(ctx, deps({ http: { ok: false, status: 403, body: "" } }));
+    const out = await bitbucketSensor.probe(
+      ctx,
+      deps({ http: { ok: false, status: 403, body: "" } }),
+    );
     assert.equal(out[0].status, "unknown");
     assert.match(out[0].title, /403/);
   });

@@ -83,7 +83,10 @@ describe("context lock", () => {
       group: "acme",
       remote: "gitlab.com/acme/web",
     });
-    assert.deepEqual(parseGitlabRemote("git@github.com:acme/web.git"), { group: null, remote: null });
+    assert.deepEqual(parseGitlabRemote("git@github.com:acme/web.git"), {
+      group: null,
+      remote: null,
+    });
   });
 
   it("parses bitbucket workspace + remote, and ignores non-bitbucket hosts", () => {
@@ -95,28 +98,60 @@ describe("context lock", () => {
       workspace: "acme",
       remote: "bitbucket.org/acme/web",
     });
-    assert.deepEqual(parseBitbucketRemote("https://github.com/acme/web"), { workspace: null, remote: null });
+    assert.deepEqual(parseBitbucketRemote("https://github.com/acme/web"), {
+      workspace: null,
+      remote: null,
+    });
   });
 
   it("locks a gitlab group: only the declared group passes (wrong group = mismatch)", () => {
     const declared = { gitlab: { group: "acme" } };
-    assert.equal(compareContext(declared, { gitlab: { group: "acme", remote: null } })[0]?.status, "ok");
-    assert.equal(compareContext(declared, { gitlab: { group: "evil", remote: null } })[0]?.status, "mismatch");
-    assert.equal(compareContext(declared, { gitlab: { group: null, remote: null } })[0]?.status, "unknown");
+    assert.equal(
+      compareContext(declared, { gitlab: { group: "acme", remote: null } })[0]?.status,
+      "ok",
+    );
+    assert.equal(
+      compareContext(declared, { gitlab: { group: "evil", remote: null } })[0]?.status,
+      "mismatch",
+    );
+    assert.equal(
+      compareContext(declared, { gitlab: { group: null, remote: null } })[0]?.status,
+      "unknown",
+    );
   });
 
   it("locks a bitbucket workspace: only the declared workspace passes", () => {
     const declared = { bitbucket: { workspace: "acme" } };
-    assert.equal(compareContext(declared, { bitbucket: { workspace: "acme", remote: null } })[0]?.status, "ok");
-    assert.equal(compareContext(declared, { bitbucket: { workspace: "other", remote: null } })[0]?.status, "mismatch");
+    assert.equal(
+      compareContext(declared, { bitbucket: { workspace: "acme", remote: null } })[0]?.status,
+      "ok",
+    );
+    assert.equal(
+      compareContext(declared, { bitbucket: { workspace: "other", remote: null } })[0]?.status,
+      "mismatch",
+    );
   });
 
   it("parses the SSH identity from core.sshCommand, ssh -G output, and a keygen fingerprint", () => {
-    assert.equal(parseSshCommandIdentity('ssh -i ~/.ssh/id_work -o IdentitiesOnly=yes'), "~/.ssh/id_work");
-    assert.equal(parseSshCommandIdentity('ssh -i "/home/me/.ssh/id work"'), "/home/me/.ssh/id work");
+    assert.equal(
+      parseSshCommandIdentity("ssh -i ~/.ssh/id_work -o IdentitiesOnly=yes"),
+      "~/.ssh/id_work",
+    );
+    assert.equal(
+      parseSshCommandIdentity('ssh -i "/home/me/.ssh/id work"'),
+      "/home/me/.ssh/id work",
+    );
     assert.equal(parseSshCommandIdentity("ssh"), null);
-    assert.equal(parseSshConfigIdentity("user me\nidentityfile /home/me/.ssh/id_work\nidentityfile ~/.ssh/id_rsa"), "/home/me/.ssh/id_work");
-    assert.equal(parseKeygenFingerprint("256 SHA256:abc123DEF+/ me@host (ED25519)"), "SHA256:abc123DEF+/");
+    assert.equal(
+      parseSshConfigIdentity(
+        "user me\nidentityfile /home/me/.ssh/id_work\nidentityfile ~/.ssh/id_rsa",
+      ),
+      "/home/me/.ssh/id_work",
+    );
+    assert.equal(
+      parseKeygenFingerprint("256 SHA256:abc123DEF+/ me@host (ED25519)"),
+      "SHA256:abc123DEF+/",
+    );
     assert.equal(parseKeygenFingerprint("not a fingerprint"), null);
   });
 
@@ -129,27 +164,39 @@ describe("context lock", () => {
   it("locks the SSH identity: wrong key/fingerprint/host-alias is a mismatch, missing is unknown", () => {
     const byFp = { ssh: { fingerprint: "SHA256:GOOD" } };
     assert.equal(
-      compareContext(byFp, { ssh: { identity: null, fingerprint: "SHA256:GOOD", host_alias: null } })[0]?.status,
+      compareContext(byFp, {
+        ssh: { identity: null, fingerprint: "SHA256:GOOD", host_alias: null },
+      })[0]?.status,
       "ok",
     );
     assert.equal(
-      compareContext(byFp, { ssh: { identity: null, fingerprint: "SHA256:EVIL", host_alias: null } })[0]?.status,
+      compareContext(byFp, {
+        ssh: { identity: null, fingerprint: "SHA256:EVIL", host_alias: null },
+      })[0]?.status,
       "mismatch",
     );
     assert.equal(
-      compareContext(byFp, { ssh: { identity: null, fingerprint: null, host_alias: null } })[0]?.status,
+      compareContext(byFp, { ssh: { identity: null, fingerprint: null, host_alias: null } })[0]
+        ?.status,
       "unknown",
     );
     const byAlias = { ssh: { host_alias: "github.com-work" } };
     assert.equal(
-      compareContext(byAlias, { ssh: { identity: null, fingerprint: null, host_alias: "github.com-personal" } })[0]?.status,
+      compareContext(byAlias, {
+        ssh: { identity: null, fingerprint: null, host_alias: "github.com-personal" },
+      })[0]?.status,
       "mismatch",
     );
   });
 
   it("plans gcloud + git activation from the declared context (local config only)", () => {
     const steps = planContext({
-      gcloud: { config: "prod-cfg", account: "ops@example.com", project: "prod-project", region: "europe-west4" },
+      gcloud: {
+        config: "prod-cfg",
+        account: "ops@example.com",
+        project: "prod-project",
+        region: "europe-west4",
+      },
       git: { email: "dev@example.com" },
     });
     const describes = steps.map((s) => s.describe);
@@ -161,7 +208,10 @@ describe("context lock", () => {
     assert.equal(gitStep?.local, true);
     assert.deepEqual(gitStep?.argv, ["config", "user.email", "dev@example.com"]);
     // nothing planned for vercel/npm (no clean per-repo activation)
-    assert.equal(steps.some((s) => s.tool === "vercel" || s.tool === "npm"), false);
+    assert.equal(
+      steps.some((s) => s.tool === "vercel" || s.tool === "npm"),
+      false,
+    );
   });
 
   it("plans nothing when no activatable context is declared", () => {
@@ -169,7 +219,10 @@ describe("context lock", () => {
   });
 
   it("parses the gcloud project from a config INI", () => {
-    assert.equal(parseGcloudProject("[core]\naccount = a@b.com\nproject = prod-project\n"), "prod-project");
+    assert.equal(
+      parseGcloudProject("[core]\naccount = a@b.com\nproject = prod-project\n"),
+      "prod-project",
+    );
     assert.equal(parseGcloudProject("[core]\naccount = a@b.com\n"), null);
   });
 
@@ -181,7 +234,10 @@ describe("context lock", () => {
     });
     it("is false for git-email / npm-registry only (low contamination risk, too noisy to prompt)", () => {
       assert.equal(
-        hasLockableContext({ git: { email: "a@b.com" }, npm: { registry: "https://registry.npmjs.org" } }),
+        hasLockableContext({
+          git: { email: "a@b.com" },
+          npm: { registry: "https://registry.npmjs.org" },
+        }),
         false,
       );
       assert.equal(hasLockableContext({}), false);
@@ -199,7 +255,7 @@ describe("context lock", () => {
         npm: { registry: "https://registry.npmjs.org" },
       };
       const toml = suggestContextToml(live);
-      assert.ok(toml.includes('[context.git]'));
+      assert.ok(toml.includes("[context.git]"));
       assert.ok(toml.includes('email = "dev@example.com"'));
       assert.ok(toml.includes('team = "team_123"'));
       assert.ok(toml.includes('project = "prj_456"'));
@@ -224,10 +280,7 @@ describe("context lock", () => {
 describe("app-service auth realm/tenant lock (#38)", () => {
   it("keycloak realm: ok on match, mismatch on the wrong realm (dev→prod guard)", () => {
     const declared = { keycloak: { realm: "myapp-dev" } };
-    assert.equal(
-      compareContext(declared, { keycloak: { realm: "myapp-dev" } })[0]?.status,
-      "ok",
-    );
+    assert.equal(compareContext(declared, { keycloak: { realm: "myapp-dev" } })[0]?.status, "ok");
     assert.equal(
       compareContext(declared, { keycloak: { realm: "myapp-prod" } })[0]?.status,
       "mismatch",

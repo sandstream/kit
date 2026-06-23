@@ -14,7 +14,10 @@ describe("runDoctor", () => {
       const nodeCheck = result.checks.find((c) => c.name === "Node.js version");
       assert.ok(nodeCheck, "Node.js version check should exist");
       assert.equal(nodeCheck.status, "skip");
-      assert.ok(nodeCheck.detail.includes("No package.json"), `unexpected detail: ${nodeCheck.detail}`);
+      assert.ok(
+        nodeCheck.detail.includes("No package.json"),
+        `unexpected detail: ${nodeCheck.detail}`,
+      );
     } finally {
       await rm(tmpDir, { recursive: true });
     }
@@ -30,7 +33,10 @@ describe("runDoctor", () => {
       const nodeCheck = result.checks.find((c) => c.name === "Node.js version");
       assert.ok(nodeCheck, "Node.js version check should exist");
       assert.equal(nodeCheck.status, "pass");
-      assert.ok(nodeCheck.detail.includes("requires"), `detail should mention requirement: ${nodeCheck.detail}`);
+      assert.ok(
+        nodeCheck.detail.includes("requires"),
+        `detail should mention requirement: ${nodeCheck.detail}`,
+      );
     } finally {
       await unlink(join(tmpDir, "package.json"));
       await rmdir(tmpDir);
@@ -47,7 +53,10 @@ describe("runDoctor", () => {
       const nodeCheck = result.checks.find((c) => c.name === "Node.js version");
       assert.ok(nodeCheck, "Node.js version check should exist");
       assert.equal(nodeCheck.status, "fail");
-      assert.ok(nodeCheck.detail.includes("does not satisfy"), `unexpected detail: ${nodeCheck.detail}`);
+      assert.ok(
+        nodeCheck.detail.includes("does not satisfy"),
+        `unexpected detail: ${nodeCheck.detail}`,
+      );
     } finally {
       await unlink(join(tmpDir, "package.json"));
       await rmdir(tmpDir);
@@ -62,7 +71,10 @@ describe("runDoctor", () => {
       const envCheck = result.checks.find((c) => c.name === ".env.local");
       assert.ok(envCheck, ".env.local check should exist when secrets configured");
       assert.equal(envCheck.status, "warn");
-      assert.ok(envCheck.detail.includes("kit secrets"), `detail should suggest fix: ${envCheck.detail}`);
+      assert.ok(
+        envCheck.detail.includes("kit secrets"),
+        `detail should suggest fix: ${envCheck.detail}`,
+      );
     } finally {
       await rmdir(tmpDir);
     }
@@ -105,7 +117,7 @@ describe("runDoctor", () => {
       assert.ok(miseCheck, "mise check should always be present");
       assert.ok(
         miseCheck.status === "pass" || miseCheck.status === "warn",
-        `mise check should be pass or warn, got: ${miseCheck.status}`
+        `mise check should be pass or warn, got: ${miseCheck.status}`,
       );
     } finally {
       await rmdir(tmpDir);

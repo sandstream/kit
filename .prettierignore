@@ -1,0 +1,15 @@
+# Build output / deps
+dist/
+**/dist/
+node_modules/
+**/node_modules/
+coverage/
+
+# Cloud-sync conflict copies (also gitignored / ignored by eslint)
+**/* 2.ts
+* 2.*
+
+# Generated / data files — not source, formatting adds churn without value
+*.jsonl
+package-lock.json
+.kit/

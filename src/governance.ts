@@ -58,9 +58,7 @@ export const DEFAULT_GOVERNANCE: Required<GovernanceConfig> = {
 /**
  * Merge user config with defaults (synchronous version)
  */
-export function mergeGovernanceConfig(
-  userConfig?: GovernanceConfig,
-): Required<GovernanceConfig> {
+export function mergeGovernanceConfig(userConfig?: GovernanceConfig): Required<GovernanceConfig> {
   if (!userConfig) {
     return DEFAULT_GOVERNANCE;
   }
@@ -144,8 +142,7 @@ export function checkOperationAllowed(
 
     case "write":
       if (!access.write) {
-        const requiresApproval =
-          env === "prod" && config.approval.production_writes;
+        const requiresApproval = env === "prod" && config.approval.production_writes;
         if (requiresApproval) {
           return {
             allowed: false,
@@ -206,9 +203,7 @@ export async function getCurrentGitBranch(): Promise<string | null> {
 /**
  * Detect environment from git branch
  */
-export function detectEnvironmentFromBranch(
-  branch: string,
-): "dev" | "staging" | "prod" | null {
+export function detectEnvironmentFromBranch(branch: string): "dev" | "staging" | "prod" | null {
   const lowerBranch = branch.toLowerCase();
 
   // Production branches
@@ -222,11 +217,7 @@ export function detectEnvironmentFromBranch(
   }
 
   // Staging branches
-  if (
-    lowerBranch === "staging" ||
-    lowerBranch === "stage" ||
-    lowerBranch.startsWith("release/")
-  ) {
+  if (lowerBranch === "staging" || lowerBranch === "stage" || lowerBranch.startsWith("release/")) {
     return "staging";
   }
 
@@ -268,9 +259,7 @@ export async function getCurrentEnvironment(
 /**
  * Format governance status for display
  */
-export function formatGovernanceStatus(
-  config: Required<GovernanceConfig>,
-): string {
+export function formatGovernanceStatus(config: Required<GovernanceConfig>): string {
   if (!config.enabled) {
     return "Governance: disabled";
   }

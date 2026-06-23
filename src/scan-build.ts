@@ -47,12 +47,7 @@ const SCANNABLE_EXTS = new Set([
   ".env.production",
 ]);
 
-const SKIP_DIRS = new Set([
-  "node_modules",
-  ".git",
-  ".pnpm-store",
-  "cache",
-]);
+const SKIP_DIRS = new Set(["node_modules", ".git", ".pnpm-store", "cache"]);
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MiB
 
@@ -63,12 +58,7 @@ const MAX_BYTES = 5 * 1024 * 1024; // 5 MiB
 // state construct, so these labels are filtered out here.
 const BUILD_IRRELEVANT_LABELS = new Set(["tfstate-value", "terraform-sensitive"]);
 
-async function walk(
-  dir: string,
-  out: string[],
-  depth = 0,
-  maxDepth = 8,
-): Promise<void> {
+async function walk(dir: string, out: string[], depth = 0, maxDepth = 8): Promise<void> {
   if (depth > maxDepth) return;
   let entries;
   try {
@@ -82,9 +72,7 @@ async function walk(
     if (ent.isDirectory()) {
       await walk(full, out, depth + 1, maxDepth);
     } else if (ent.isFile()) {
-      const ext = ent.name.includes(".")
-        ? ent.name.slice(ent.name.lastIndexOf("."))
-        : "";
+      const ext = ent.name.includes(".") ? ent.name.slice(ent.name.lastIndexOf(".")) : "";
       if (!SCANNABLE_EXTS.has(ext) && !ent.name.startsWith(".env")) continue;
       out.push(full);
     }
@@ -119,9 +107,7 @@ export async function scanBuildArtifacts(
     } catch {
       continue;
     }
-    const findings = findSecrets(content).filter(
-      (f) => !BUILD_IRRELEVANT_LABELS.has(f.label),
-    );
+    const findings = findSecrets(content).filter((f) => !BUILD_IRRELEVANT_LABELS.has(f.label));
     if (findings.length > 0) {
       // Strip leading cwd from path for readable reporting.
       const rel = path.startsWith(cwd) ? path.slice(cwd.length + 1) : path;

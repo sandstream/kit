@@ -76,7 +76,9 @@ async function cfFetch<T>(client: MgmtClient, path: string, init: RequestInit = 
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok && res.status !== 404) {
-    throw new Error(`${init.method ?? "GET"} ${path} returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(
+      `${init.method ?? "GET"} ${path} returned ${res.status}: ${await safeText(res)}`,
+    );
   }
   const envelope = (await res.json()) as CfEnvelope<T>;
   if (!envelope.success) {

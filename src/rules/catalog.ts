@@ -43,14 +43,37 @@ const owasp = (num: string, slug: string, title: string): RuleRef => ({
  * citations), "requirements.txt" (presence, not a weakness).
  */
 export const SECURITY_RULES: Record<string, RuleRef> = {
-  ".env gitignored": cwe(538, "Insertion of Sensitive Information into Externally-Accessible File or Directory"),
+  ".env gitignored": cwe(
+    538,
+    "Insertion of Sensitive Information into Externally-Accessible File or Directory",
+  ),
   "secrets scan": cwe(798, "Use of Hard-coded Credentials"),
-  "npm audit": owasp("A06", "A06_2021-Vulnerable_and_Outdated_Components", "A06:2021 Vulnerable and Outdated Components"),
-  "pip-audit": owasp("A06", "A06_2021-Vulnerable_and_Outdated_Components", "A06:2021 Vulnerable and Outdated Components"),
-  "trivy container scan": owasp("A06", "A06_2021-Vulnerable_and_Outdated_Components", "A06:2021 Vulnerable and Outdated Components"),
+  "npm audit": owasp(
+    "A06",
+    "A06_2021-Vulnerable_and_Outdated_Components",
+    "A06:2021 Vulnerable and Outdated Components",
+  ),
+  "pip-audit": owasp(
+    "A06",
+    "A06_2021-Vulnerable_and_Outdated_Components",
+    "A06:2021 Vulnerable and Outdated Components",
+  ),
+  "trivy container scan": owasp(
+    "A06",
+    "A06_2021-Vulnerable_and_Outdated_Components",
+    "A06:2021 Vulnerable and Outdated Components",
+  ),
   "pinned versions": cwe(1104, "Use of Unmaintained Third Party Components"),
-  "package-lock.json": owasp("A08", "A08_2021-Software_and_Data_Integrity_Failures", "A08:2021 Software and Data Integrity Failures"),
-  "socket scan": owasp("A08", "A08_2021-Software_and_Data_Integrity_Failures", "A08:2021 Software and Data Integrity Failures"),
+  "package-lock.json": owasp(
+    "A08",
+    "A08_2021-Software_and_Data_Integrity_Failures",
+    "A08:2021 Software and Data Integrity Failures",
+  ),
+  "socket scan": owasp(
+    "A08",
+    "A08_2021-Software_and_Data_Integrity_Failures",
+    "A08:2021 Software and Data Integrity Failures",
+  ),
   Ollama: cwe(668, "Exposure of Resource to Wrong Sphere"),
   "Remote API": cwe(668, "Exposure of Resource to Wrong Sphere"),
 };

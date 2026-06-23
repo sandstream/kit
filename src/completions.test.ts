@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { generateBashCompletion, generateZshCompletion, generateFishCompletion, generateCompletions } from "./completions.js";
+import {
+  generateBashCompletion,
+  generateZshCompletion,
+  generateFishCompletion,
+  generateCompletions,
+} from "./completions.js";
 
 describe("generateBashCompletion", () => {
   it("outputs non-empty bash script", () => {

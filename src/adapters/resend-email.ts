@@ -41,8 +41,7 @@ export const resendEmailAdapter: ServiceAdapter = {
 
     // If a valid key is already set, re-use it
     if (masterKey && masterKey.startsWith("re_")) {
-      const fromEmail =
-        context.existingEnv.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+      const fromEmail = context.existingEnv.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
       return {
         success: true,
         message: "Resend already configured — API key present in environment",
@@ -87,7 +86,7 @@ export const resendEmailAdapter: ServiceAdapter = {
  */
 export async function provisionResendApiKey(
   masterKey: string,
-  keyName: string
+  keyName: string,
 ): Promise<{ success: true; key: ResendApiKey } | { success: false; error: string }> {
   try {
     const resp = await fetch("https://api.resend.com/api-keys", {
@@ -121,9 +120,7 @@ export async function provisionResendApiKey(
  * Fetch the first verified sending domain for the account.
  * Returns null if none exist (use onboarding@resend.dev as fallback).
  */
-export async function fetchFirstVerifiedDomain(
-  apiKey: string
-): Promise<string | null> {
+export async function fetchFirstVerifiedDomain(apiKey: string): Promise<string | null> {
   try {
     const resp = await fetch("https://api.resend.com/domains", {
       headers: { Authorization: `Bearer ${apiKey}` },

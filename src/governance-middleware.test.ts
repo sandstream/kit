@@ -3,10 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import {
-  withGovernance,
-  checkGovernance,
-} from "./governance-middleware.js";
+import { withGovernance, checkGovernance } from "./governance-middleware.js";
 import { clearBudgetState, getBudgetStatus, recordUsage } from "./budget.js";
 import type { kitConfig, GovernanceConfig } from "./config.js";
 
@@ -21,9 +18,7 @@ const disabledConfig: kitConfig = {
 // - revocation disabled (no network calls)
 // - secret expiry disabled (no network calls)
 // - approval that auto-approves everything (no readline / API calls)
-function makeConfig(
-  govOverrides: Partial<GovernanceConfig> = {},
-): kitConfig {
+function makeConfig(govOverrides: Partial<GovernanceConfig> = {}): kitConfig {
   return {
     governance: {
       enabled: true,
@@ -252,13 +247,9 @@ describe("withGovernance", () => {
     const config = makeConfig();
     await assert.rejects(
       () =>
-        withGovernance(
-          config,
-          { operation: "failing-op", operationType: "read" },
-          async () => {
-            throw new Error("Something went wrong");
-          },
-        ),
+        withGovernance(config, { operation: "failing-op", operationType: "read" }, async () => {
+          throw new Error("Something went wrong");
+        }),
       /Something went wrong/,
     );
   });

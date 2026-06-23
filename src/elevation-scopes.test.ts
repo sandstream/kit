@@ -56,7 +56,10 @@ describe("isOneShot", () => {
 describe("listScopes", () => {
   it("returns every declared mapping with the key + description", () => {
     const all = listScopes();
-    assert.ok(all.length >= 7, "covers all rotate modes + migrate + propagate + purge-history + onecli-register + revoke-old");
+    assert.ok(
+      all.length >= 7,
+      "covers all rotate modes + migrate + propagate + purge-history + onecli-register + revoke-old",
+    );
     const keys = all.map((m) => m.key);
     assert.ok(keys.includes("rotate:jwt-secret-roll"));
     assert.ok(keys.includes("purge-history"));

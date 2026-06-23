@@ -46,11 +46,7 @@ describe("validateSecrets", () => {
       const cfg = configFor({
         MISSING_KEY: { source: "infisical", name: "MISSING_KEY" },
       });
-      const results = await validateSecrets(
-        cfg,
-        { auto: true, cwd: dir },
-        async () => false,
-      );
+      const results = await validateSecrets(cfg, { auto: true, cwd: dir }, async () => false);
       // Will attempt to write to infisical — that fails in unit tests because
       // the CLI isn't installed/auth'd. Status will be "unfixable" with the
       // backend-error detail, NOT "no value in template" — that path is what
@@ -76,11 +72,7 @@ describe("validateSecrets", () => {
       const cfg = configFor({
         MISSING_KEY: { source: "infisical", name: "MISSING_KEY" },
       });
-      const results = await validateSecrets(
-        cfg,
-        { auto: true, cwd: dir },
-        async () => false,
-      );
+      const results = await validateSecrets(cfg, { auto: true, cwd: dir }, async () => false);
       assert.equal(results[0]!.status, "unfixable");
       assert.match(results[0]!.detail, /no value in/);
     } finally {

@@ -235,10 +235,7 @@ describe("checkLockStatus", () => {
   });
 
   it("reports out-of-sync when lock files are missing", async () => {
-    const status = await checkLockStatus(
-      { "skill-a": "1.0.0" },
-      { node: "22" },
-    );
+    const status = await checkLockStatus({ "skill-a": "1.0.0" }, { node: "22" });
 
     assert.equal(status.skillsLockExists, false);
     assert.equal(status.cliLockExists, false);
@@ -252,10 +249,7 @@ describe("checkLockStatus", () => {
     await updateSkillsLock({ "skill-a": "1.0.0" });
     await updateCliLock({ node: { version: "22.0.0", source: "mise" } });
 
-    const status = await checkLockStatus(
-      { "skill-a": "1.0.0" },
-      { node: "22" },
-    );
+    const status = await checkLockStatus({ "skill-a": "1.0.0" }, { node: "22" });
 
     assert.equal(status.skillsLockExists, true);
     assert.equal(status.cliLockExists, true);
@@ -268,10 +262,7 @@ describe("checkLockStatus", () => {
   it("identifies missing skills when only some are in the lock", async () => {
     await updateSkillsLock({ "skill-a": "1.0.0" });
 
-    const status = await checkLockStatus(
-      { "skill-a": "1.0.0", "skill-b": "2.0.0" },
-      {},
-    );
+    const status = await checkLockStatus({ "skill-a": "1.0.0", "skill-b": "2.0.0" }, {});
 
     assert.equal(status.skillsInSync, false);
     assert.deepEqual(status.missingSkills, ["skill-b"]);

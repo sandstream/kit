@@ -113,10 +113,7 @@ export class EventStream {
   /**
    * Query events within time window
    */
-  query(
-    windowMs: number,
-    filter?: (event: StreamEvent) => boolean,
-  ): StreamEvent[] {
+  query(windowMs: number, filter?: (event: StreamEvent) => boolean): StreamEvent[] {
     const cutoff = Date.now() - windowMs;
     return this.queue.filter((event) => {
       if (event.timestamp < cutoff) return false;
@@ -161,9 +158,7 @@ export class EventStream {
    */
   private startDrainTimer(): void {
     this.drainTimer = setInterval(() => {
-      this.drain().catch((err) =>
-        console.error("EventStream drain failed:", err),
-      );
+      this.drain().catch((err) => console.error("EventStream drain failed:", err));
     }, this.drainIntervalMs);
     // Best-effort background drain — must not keep the process alive (else
     // `node --test` never exits and the suite "hangs").

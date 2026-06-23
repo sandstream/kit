@@ -3,7 +3,14 @@
  * Encrypted storage, key rotation, secret sharing, audit trails
  */
 
-export type SecretType = "api_key" | "password" | "oauth_token" | "database_url" | "ssh_key" | "certificate" | "custom";
+export type SecretType =
+  | "api_key"
+  | "password"
+  | "oauth_token"
+  | "database_url"
+  | "ssh_key"
+  | "certificate"
+  | "custom";
 export type RotationPolicy = "never" | "30d" | "60d" | "90d" | "manual";
 export type AccessLevel = "owner" | "admin" | "team" | "shared";
 

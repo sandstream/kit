@@ -44,7 +44,8 @@ export const liveblocksRealtimeAdapter: ServiceAdapter = {
       const derivedPublicKey = secretKey.replace(/^sk_/, "pk_");
       return {
         success: true,
-        message: "Liveblocks secret key found — set NEXT_PUBLIC_LIVEBLOCKS_PUBLIC_KEY manually if needed",
+        message:
+          "Liveblocks secret key found — set NEXT_PUBLIC_LIVEBLOCKS_PUBLIC_KEY manually if needed",
         secrets: {
           LIVEBLOCKS_SECRET_KEY: secretKey,
           NEXT_PUBLIC_LIVEBLOCKS_PUBLIC_KEY: publicKey ?? derivedPublicKey,

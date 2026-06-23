@@ -34,19 +34,15 @@ async function runCli(
   env: Record<string, string> = {},
 ): Promise<CliResult> {
   try {
-    const { stdout, stderr } = await exec(
-      process.execPath,
-      [CLI_PATH, ...args],
-      {
-        cwd,
-        env: {
-          ...process.env,
-          // Disable governance to avoid budget state side-effects
-          ...env,
-        },
-        timeout: 30_000,
+    const { stdout, stderr } = await exec(process.execPath, [CLI_PATH, ...args], {
+      cwd,
+      env: {
+        ...process.env,
+        // Disable governance to avoid budget state side-effects
+        ...env,
       },
-    );
+      timeout: 30_000,
+    });
     return { exitCode: 0, stdout: stdout ?? "", stderr: stderr ?? "" };
   } catch (err: unknown) {
     const e = err as { code?: number; stdout?: string; stderr?: string };
@@ -161,7 +157,11 @@ describe("kit <command> --help", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  const exists = (p: string) => access(p).then(() => true, () => false);
+  const exists = (p: string) =>
+    access(p).then(
+      () => true,
+      () => false,
+    );
 
   it("agent-config --help prints help and does NOT inject a rules block", async () => {
     const result = await runCli(["agent-config", "--help"], tempDir);
@@ -234,10 +234,7 @@ describe("kit check", () => {
     await writeFile(join(tempDir, ".kit.toml"), FIXTURE_CONFIG_SECRET, "utf-8");
     const result = await runCli(["check"], tempDir);
     // Should show some output (tables, status indicators)
-    assert.ok(
-      result.stdout.length > 0,
-      "should produce non-empty output",
-    );
+    assert.ok(result.stdout.length > 0, "should produce non-empty output");
   });
 
   it("exits 0 with node at latest (always installed)", async () => {
@@ -281,7 +278,9 @@ describe("kit fix", () => {
     try {
       await access(join(lockDir, "skills-lock.json"));
       lockExisted = true;
-    } catch { /* expected */ }
+    } catch {
+      /* expected */
+    }
     assert.equal(lockExisted, false, "lock file should not exist before fix");
 
     const result = await runCli(["fix"], tempDir);
@@ -290,12 +289,8 @@ describe("kit fix", () => {
     assert.equal(result.exitCode, 0, `stdout: ${result.stdout}\nstderr: ${result.stderr}`);
 
     // Lock files should now exist
-    const skillsLock = JSON.parse(
-      await readFile(join(lockDir, "skills-lock.json"), "utf-8"),
-    );
-    const cliLock = JSON.parse(
-      await readFile(join(lockDir, "cli-lock.json"), "utf-8"),
-    );
+    const skillsLock = JSON.parse(await readFile(join(lockDir, "skills-lock.json"), "utf-8"));
+    const cliLock = JSON.parse(await readFile(join(lockDir, "cli-lock.json"), "utf-8"));
     assert.equal(skillsLock.version, 1);
     assert.equal(cliLock.version, 1);
     // node should be in the CLI lock
@@ -352,20 +347,11 @@ describe("kit setup", () => {
     const result = await runCli(["setup"], tempDir);
 
     // node is already installed so install step should pass
-    assert.ok(
-      result.stdout.includes("[1/6]"),
-      "should show step 1",
-    );
+    assert.ok(result.stdout.includes("[1/6]"), "should show step 1");
     // Verify final step ran
-    assert.ok(
-      result.stdout.includes("[6/6]"),
-      "should show step 6",
-    );
+    assert.ok(result.stdout.includes("[6/6]"), "should show step 6");
     // Agent-config step should have wired a CLAUDE.md / AGENTS.md block
-    assert.ok(
-      result.stdout.includes("Agent config"),
-      "should run the agent-config step",
-    );
+    assert.ok(result.stdout.includes("Agent config"), "should run the agent-config step");
   });
 });
 
@@ -410,7 +396,7 @@ describe("kit version", () => {
   it("kit version prints the version from package.json", async () => {
     const pkgJson = await readFile(
       resolve(dirname(fileURLToPath(import.meta.url)), "..", "package.json"),
-      "utf-8"
+      "utf-8",
     );
     const expectedVersion = (JSON.parse(pkgJson) as { version: string }).version;
 
@@ -422,7 +408,7 @@ describe("kit version", () => {
   it("kit --version prints the version from package.json", async () => {
     const pkgJson = await readFile(
       resolve(dirname(fileURLToPath(import.meta.url)), "..", "package.json"),
-      "utf-8"
+      "utf-8",
     );
     const expectedVersion = (JSON.parse(pkgJson) as { version: string }).version;
 
@@ -452,7 +438,10 @@ describe("kit whoami", () => {
     await writeFile(join(tempDir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
     const result = await runCli(["whoami"], tempDir);
     assert.equal(result.exitCode, 0);
-    assert.ok(result.stdout.includes("No agent configured"), `expected 'No agent configured' in: ${result.stdout}`);
+    assert.ok(
+      result.stdout.includes("No agent configured"),
+      `expected 'No agent configured' in: ${result.stdout}`,
+    );
   });
 
   it("shows agent name and id when governance.agent configured", async () => {
@@ -516,7 +505,7 @@ describe("kit init — auto-generate", () => {
     await writeFile(
       join(projectDir, "package.json"),
       JSON.stringify({ dependencies: { next: "14.0.0" } }),
-      "utf-8"
+      "utf-8",
     );
 
     const result = await runCli(["init", "--non-interactive"], projectDir);
@@ -535,7 +524,7 @@ describe("kit init — auto-generate", () => {
     await writeFile(
       join(projectDir, "package.json"),
       JSON.stringify({ dependencies: { next: "14.0.0" } }),
-      "utf-8"
+      "utf-8",
     );
 
     const result = await runCli(["init", "--non-interactive"], projectDir);
@@ -550,7 +539,7 @@ describe("kit init — auto-generate", () => {
     await writeFile(
       join(projectDir, "package.json"),
       JSON.stringify({ dependencies: { next: "14.0.0" } }),
-      "utf-8"
+      "utf-8",
     );
 
     await runCli(["init", "--yes"], projectDir);

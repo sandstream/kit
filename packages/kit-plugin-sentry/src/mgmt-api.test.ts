@@ -66,10 +66,7 @@ describe("listOrganizations (network error path)", () => {
 describe("searchIssues", () => {
   it("refuses without an organizationSlug", async () => {
     const client = makeClient({ token: "x" });
-    await assert.rejects(
-      () => searchIssues(client, {}),
-      /organizationSlug required/,
-    );
+    await assert.rejects(() => searchIssues(client, {}), /organizationSlug required/);
   });
 
   it("throws structured error when unreachable", async () => {

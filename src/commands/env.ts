@@ -23,7 +23,9 @@ async function cmdEnvList(): Promise<boolean> {
   const envSections = config.env ?? {};
   const envNames = ["dev", ...Object.keys(envSections).filter((k) => k !== "dev")];
 
-  console.log(`${c.bold}${c.cyan}Environments${c.reset}  ${c.dim}(active: ${activeEnv})${c.reset}\n`);
+  console.log(
+    `${c.bold}${c.cyan}Environments${c.reset}  ${c.dim}(active: ${activeEnv})${c.reset}\n`,
+  );
 
   for (const name of envNames) {
     const isActive = name === activeEnv;
@@ -39,7 +41,8 @@ async function cmdEnvList(): Promise<boolean> {
     const overrideKeys: string[] = [];
     if (override.tools) overrideKeys.push(`tools(${Object.keys(override.tools).join(",")})`);
     if (override.secrets) overrideKeys.push(`secrets.store=${override.secrets.store ?? "?"}`);
-    if (override.services) overrideKeys.push(`services(${Object.keys(override.services).join(",")})`);
+    if (override.services)
+      overrideKeys.push(`services(${Object.keys(override.services).join(",")})`);
     if (override.governance) overrideKeys.push("governance");
     if (override.skills) overrideKeys.push("skills");
 
@@ -49,7 +52,9 @@ async function cmdEnvList(): Promise<boolean> {
 
   if (Object.keys(envSections).length === 0) {
     console.log(`${c.dim}\nNo [env.*] sections defined in .kit.toml.${c.reset}`);
-    console.log(`${c.dim}Add [env.staging.*] or [env.production.*] to configure per-environment overrides.${c.reset}`);
+    console.log(
+      `${c.dim}Add [env.staging.*] or [env.production.*] to configure per-environment overrides.${c.reset}`,
+    );
   }
 
   console.log();
@@ -60,9 +65,7 @@ async function cmdEnvSwitch(): Promise<boolean> {
   // argv layout: [node, cli.js, "env", "switch", "<target>"]
   const target = process.argv[4];
   if (!target || !KNOWN_ENVS.includes(target as kitEnv)) {
-    console.error(
-      `${c.red}Usage: kit env switch <${KNOWN_ENVS.join("|")}>${c.reset}`,
-    );
+    console.error(`${c.red}Usage: kit env switch <${KNOWN_ENVS.join("|")}>${c.reset}`);
     return false;
   }
   const env = target as kitEnv;
@@ -114,8 +117,7 @@ async function cmdEnvCurrent(): Promise<boolean> {
     console.log(`dev`);
     return true;
   }
-  const color =
-    state.env === "prod" ? c.red : state.env === "staging" ? c.yellow : c.green;
+  const color = state.env === "prod" ? c.red : state.env === "staging" ? c.yellow : c.green;
   console.log(
     `${color}${state.env}${c.reset}  ${c.dim}(set ${state.switchedAt} by ${state.switchedBy})${c.reset}`,
   );
@@ -138,8 +140,10 @@ async function cmdEnvDiff(): Promise<boolean> {
   const b = `.env.${target}`;
   const res = await diffEnvFiles(a, b);
   console.log(`${c.bold}${c.cyan}kit env diff${c.reset} ${c.dim}(${a} vs ${b})${c.reset}`);
-  for (const k of res.onlyInA) console.log(`  ${c.yellow}- ${k}${c.reset} ${c.dim}only in ${a}${c.reset}`);
-  for (const k of res.onlyInB) console.log(`  ${c.green}+ ${k}${c.reset} ${c.dim}only in ${b}${c.reset}`);
+  for (const k of res.onlyInA)
+    console.log(`  ${c.yellow}- ${k}${c.reset} ${c.dim}only in ${a}${c.reset}`);
+  for (const k of res.onlyInB)
+    console.log(`  ${c.green}+ ${k}${c.reset} ${c.dim}only in ${b}${c.reset}`);
   for (const ch of res.changed)
     console.log(`  ${c.yellow}~ ${ch.key}${c.reset} ${c.dim}(${ch.aHash} → ${ch.bHash})${c.reset}`);
   const drift = res.onlyInA.length + res.onlyInB.length + res.changed.length;
@@ -182,7 +186,7 @@ export async function cmdEnv(): Promise<boolean> {
 
   if (!result.envLocalExists) {
     console.log(
-      `${c.yellow}⚠${c.reset}  .env.local not found — run ${c.bold}kit secrets${c.reset} to generate it\n`
+      `${c.yellow}⚠${c.reset}  .env.local not found — run ${c.bold}kit secrets${c.reset} to generate it\n`,
     );
   }
 
@@ -210,10 +214,10 @@ export async function cmdEnv(): Promise<boolean> {
 
   if (!result.ok && !missingOnly) {
     console.log(
-      `${c.dim}Run ${c.reset}${c.bold}kit env --missing${c.reset}${c.dim} to see only unset keys${c.reset}`
+      `${c.dim}Run ${c.reset}${c.bold}kit env --missing${c.reset}${c.dim} to see only unset keys${c.reset}`,
     );
     console.log(
-      `${c.dim}Run ${c.reset}${c.bold}kit secrets${c.reset}${c.dim} to generate .env.local${c.reset}\n`
+      `${c.dim}Run ${c.reset}${c.bold}kit secrets${c.reset}${c.dim} to generate .env.local${c.reset}\n`,
     );
   }
 

@@ -14,12 +14,8 @@ export interface PromptOption {
  * (or the first option) when stdin is not a TTY — the same convention
  * promptConfirm uses, so CI / piped invocations remain deterministic.
  */
-export async function promptSelect(
-  question: string,
-  options: PromptOption[],
-): Promise<string> {
-  const fallback =
-    options.find((o) => o.recommended)?.value ?? options[0]?.value ?? "";
+export async function promptSelect(question: string, options: PromptOption[]): Promise<string> {
+  const fallback = options.find((o) => o.recommended)?.value ?? options[0]?.value ?? "";
 
   if (!process.stdin.isTTY) return fallback;
   if (options.length === 0) return "";
@@ -34,9 +30,7 @@ export async function promptSelect(
     options.forEach((opt, idx) => {
       const star = opt.recommended ? " *" : "  ";
       const hint = opt.hint ? `  — ${opt.hint}` : "";
-      process.stdout.write(
-        `  [${idx + 1}]${star} ${opt.label}${hint}\n`,
-      );
+      process.stdout.write(`  [${idx + 1}]${star} ${opt.label}${hint}\n`);
     });
 
     const defaultLabel = options.findIndex((o) => o.recommended) + 1 || 1;
@@ -52,9 +46,7 @@ export async function promptSelect(
     }
 
     // Accept value-string match as well (e.g. user types "1password")
-    const direct = options.find(
-      (o) => o.value.toLowerCase() === answer.toLowerCase(),
-    );
+    const direct = options.find((o) => o.value.toLowerCase() === answer.toLowerCase());
     if (direct) return direct.value;
 
     process.stdout.write(`Invalid choice "${answer}" — using default.\n`);
@@ -86,32 +78,27 @@ export async function promptMultiSelect(
     options.forEach((opt, idx) => {
       const star = opt.recommended ? " *" : "  ";
       const hint = opt.hint ? `  — ${opt.hint}` : "";
-      process.stdout.write(
-        `  [${idx + 1}]${star} ${opt.label}${hint}\n`,
-      );
+      process.stdout.write(`  [${idx + 1}]${star} ${opt.label}${hint}\n`);
     });
 
     const defaultStr = defaults.length
-      ? defaults
-          .map((v) => options.findIndex((o) => o.value === v) + 1)
-          .join(",")
+      ? defaults.map((v) => options.findIndex((o) => o.value === v) + 1).join(",")
       : "1";
-    const answer = (
-      await rl.question(`Choose comma-separated (default ${defaultStr}): `)
-    ).trim();
+    const answer = (await rl.question(`Choose comma-separated (default ${defaultStr}): `)).trim();
 
     if (!answer) return defaults;
 
     const picked = new Set<string>();
-    for (const token of answer.split(",").map((s) => s.trim()).filter(Boolean)) {
+    for (const token of answer
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)) {
       const num = Number.parseInt(token, 10);
       if (Number.isFinite(num) && num >= 1 && num <= options.length) {
         picked.add(options[num - 1].value);
         continue;
       }
-      const direct = options.find(
-        (o) => o.value.toLowerCase() === token.toLowerCase(),
-      );
+      const direct = options.find((o) => o.value.toLowerCase() === token.toLowerCase());
       if (direct) picked.add(direct.value);
     }
     return [...picked];

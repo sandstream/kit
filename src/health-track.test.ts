@@ -4,7 +4,14 @@ import { actionableHealth, healthFindingToSync } from "./health-track.js";
 import type { HealthFinding } from "./health.js";
 
 const findings: HealthFinding[] = [
-  { sensor: "github-actions", source: "acme/webapp", status: "red", severity: "high", title: "workflow failing: CI", detail: "latest CI failed" },
+  {
+    sensor: "github-actions",
+    source: "acme/webapp",
+    status: "red",
+    severity: "high",
+    title: "workflow failing: CI",
+    detail: "latest CI failed",
+  },
   { sensor: "github-actions", source: "acme/webapp", status: "green", title: "all green" },
   { sensor: "github-actions", source: "acme/webapp", status: "unknown", title: "probe errored" },
 ];

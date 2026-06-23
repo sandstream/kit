@@ -26,23 +26,13 @@ export interface CostSample {
   /** Spend cap from policy, if declared */
   capUsd?: number;
   /** Plain-text status string suitable for table display */
-  status:
-    | "ok"
-    | "warn"
-    | "over-cap"
-    | "no-cap"
-    | "no-api"
-    | "auth-failed"
-    | "skipped";
+  status: "ok" | "warn" | "over-cap" | "no-cap" | "no-api" | "auth-failed" | "skipped";
   detail: string;
 }
 
 type ProviderAdapter = (key: string, opts: { capUsd?: number }) => Promise<CostSample>;
 
-async function stripeAdapter(
-  key: string,
-  opts: { capUsd?: number },
-): Promise<CostSample> {
+async function stripeAdapter(key: string, opts: { capUsd?: number }): Promise<CostSample> {
   // `https://api.stripe.com/v1/balance` returns `{ available: [{amount, currency}], pending: [...] }`.
   // Amounts are in the currency's smallest unit (cents). We sum availability
   // across currencies and surface it as the dominant currency for clarity.
@@ -77,20 +67,11 @@ async function stripeAdapter(
       available: { amount: number; currency: string }[];
       pending: { amount: number; currency: string }[];
     };
-    const sumCents = [...data.available, ...data.pending].reduce(
-      (sum, b) => sum + b.amount,
-      0,
-    );
+    const sumCents = [...data.available, ...data.pending].reduce((sum, b) => sum + b.amount, 0);
     const usd = sumCents / 100;
     const cap = opts.capUsd;
     const status =
-      cap === undefined
-        ? "no-cap"
-        : usd > cap
-          ? "over-cap"
-          : usd > cap * 0.8
-            ? "warn"
-            : "ok";
+      cap === undefined ? "no-cap" : usd > cap ? "over-cap" : usd > cap * 0.8 ? "warn" : "ok";
     return {
       provider: "stripe",
       policyKey: "STRIPE_SECRET_KEY",
@@ -212,15 +193,8 @@ async function loadBaselines(cwd: string): Promise<Record<string, CostBaseline>>
   }
 }
 
-async function saveBaselines(
-  cwd: string,
-  baselines: Record<string, CostBaseline>,
-): Promise<void> {
-  await writeFile(
-    resolve(cwd, BASELINE_FILE),
-    JSON.stringify(baselines, null, 2) + "\n",
-    "utf-8",
-  );
+async function saveBaselines(cwd: string, baselines: Record<string, CostBaseline>): Promise<void> {
+  await writeFile(resolve(cwd, BASELINE_FILE), JSON.stringify(baselines, null, 2) + "\n", "utf-8");
 }
 
 /**

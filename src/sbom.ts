@@ -39,7 +39,12 @@ export function toCycloneDX(components: Component[]): unknown {
     bomFormat: "CycloneDX",
     specVersion: "1.5",
     version: 1,
-    components: components.map((c) => ({ type: "library", name: c.name, version: c.version, purl: purl(c) })),
+    components: components.map((c) => ({
+      type: "library",
+      name: c.name,
+      version: c.version,
+      purl: purl(c),
+    })),
   };
 }
 
@@ -71,7 +76,13 @@ export function toSarif(findings: SecurityCheckResult[]): unknown {
     id: f.name,
     name: f.name,
     properties: {
-      ...(f.severity ? { "security-severity": { critical: "9.5", high: "8.0", medium: "5.0", low: "2.0" }[f.severity] } : {}),
+      ...(f.severity
+        ? {
+            "security-severity": { critical: "9.5", high: "8.0", medium: "5.0", low: "2.0" }[
+              f.severity
+            ],
+          }
+        : {}),
       ...(f.rule ? { tags: [f.rule.id], helpUri: f.rule.ref } : {}),
     },
   }));
@@ -80,7 +91,9 @@ export function toSarif(findings: SecurityCheckResult[]): unknown {
     $schema: "https://json.schemastore.org/sarif-2.1.0.json",
     runs: [
       {
-        tool: { driver: { name: "kit", informationUri: "https://github.com/sandstream/kit", rules } },
+        tool: {
+          driver: { name: "kit", informationUri: "https://github.com/sandstream/kit", rules },
+        },
         results: findings.map((f) => ({
           ruleId: f.name,
           level: sarifLevel(f.severity),

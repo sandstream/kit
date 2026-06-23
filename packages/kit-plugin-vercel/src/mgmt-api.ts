@@ -43,9 +43,7 @@ export interface MgmtClient {
 export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
   const token = cfg.token ?? process.env.VERCEL_TOKEN;
   if (!token) {
-    throw new Error(
-      "VERCEL_TOKEN not set — generate one at https://vercel.com/account/tokens",
-    );
+    throw new Error("VERCEL_TOKEN not set — generate one at https://vercel.com/account/tokens");
   }
   const teamId = cfg.teamId ?? process.env.VERCEL_TEAM_ID;
   return {
@@ -89,17 +87,16 @@ export interface EnvVar {
   type?: "plain" | "secret" | "encrypted" | "system";
 }
 
-export async function listEnvVars(
-  client: MgmtClient,
-  projectIdOrName: string,
-): Promise<EnvVar[]> {
+export async function listEnvVars(client: MgmtClient, projectIdOrName: string): Promise<EnvVar[]> {
   const sep = client.teamQuery ? "&" : "?";
   const res = await fetch(
     `${client.baseUrl}/v9/projects/${encodeURIComponent(projectIdOrName)}/env${client.teamQuery}${sep}decrypt=false`,
     { headers: client.headers, signal: AbortSignal.timeout(10_000) },
   );
   if (!res.ok) {
-    throw new Error(`/v9/projects/${projectIdOrName}/env returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(
+      `/v9/projects/${projectIdOrName}/env returned ${res.status}: ${await safeText(res)}`,
+    );
   }
   const body = (await res.json()) as { envs: EnvVar[] };
   return body.envs ?? [];
@@ -212,9 +209,7 @@ export async function upsertEnvVar(
   }
 
   // Identify conflicting entries (same key + overlapping target).
-  const conflicts = sameKey.filter((e) =>
-    e.target.some((t) => entry.target.includes(t)),
-  );
+  const conflicts = sameKey.filter((e) => e.target.some((t) => entry.target.includes(t)));
 
   if (conflicts.length === 0) {
     // Pure create — no conflict, no race window.

@@ -86,7 +86,8 @@ export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusI
       ignore.missingPatterns.length === 0
         ? "sensitive paths covered"
         : `${ignore.missingPatterns.length} sensitive path(s) unignored`,
-    hint: ignore.missingPatterns.length === 0 ? undefined : "run `kit security check-gitignore --fix`",
+    hint:
+      ignore.missingPatterns.length === 0 ? undefined : "run `kit security check-gitignore --fix`",
   });
 
   // Supply chain — is there a dependency allowlist to enforce on install?

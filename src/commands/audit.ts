@@ -10,32 +10,27 @@ import { hasFlag, flagValue } from "../utils/flags.js";
 async function cmdAuditSecrets(): Promise<boolean> {
   const args = process.argv.slice(4); // after "audit secrets"
   const sinceIdx = args.indexOf("--since-days");
-  const sinceDays =
-    sinceIdx >= 0 && args[sinceIdx + 1] ? parseInt(args[sinceIdx + 1], 10) : 30;
+  const sinceDays = sinceIdx >= 0 && args[sinceIdx + 1] ? parseInt(args[sinceIdx + 1], 10) : 30;
   const keyFilter = flagValue(args, "--key");
   const jsonMode = hasFlag(args, "--json");
 
   const events = await readSecretAuditEvents(process.cwd(), sinceDays);
   const { reports, unattributed } = groupBySecret(events);
-  const filteredReports = keyFilter
-    ? reports.filter((r) => r.key === keyFilter)
-    : reports;
+  const filteredReports = keyFilter ? reports.filter((r) => r.key === keyFilter) : reports;
   const summary = summarize(filteredReports, sinceDays);
 
   if (jsonMode) {
-    console.log(
-      JSON.stringify({ summary, reports: filteredReports, unattributed }, null, 2),
-    );
+    console.log(JSON.stringify({ summary, reports: filteredReports, unattributed }, null, 2));
     return true;
   }
 
-  console.log(`${c.bold}${c.cyan}kit audit secrets${c.reset}  ${c.dim}(last ${sinceDays}d)${c.reset}`);
+  console.log(
+    `${c.bold}${c.cyan}kit audit secrets${c.reset}  ${c.dim}(last ${sinceDays}d)${c.reset}`,
+  );
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   if (events.length === 0) {
-    console.log(
-      `${c.dim}No secret-related events in audit log (.kit-audit.jsonl).${c.reset}\n`,
-    );
+    console.log(`${c.dim}No secret-related events in audit log (.kit-audit.jsonl).${c.reset}\n`);
     return true;
   }
 

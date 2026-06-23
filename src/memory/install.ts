@@ -71,9 +71,11 @@ function groupsHaveHook(groups: HookGroup[], sub: string): boolean {
   return groups.some((g) => g.hooks?.some((h) => h.command.endsWith(suffix)));
 }
 
-export function installMemoryHooks(
-  path: string = getClaudeSettingsPath(),
-): { added: string[]; alreadyPresent: string[]; resolved: boolean } {
+export function installMemoryHooks(path: string = getClaudeSettingsPath()): {
+  added: string[];
+  alreadyPresent: string[];
+  resolved: boolean;
+} {
   const s = readSettings(path);
   const hooks = (s.hooks ??= {});
   const prefix = kitHookInvocation();
@@ -93,9 +95,9 @@ export function installMemoryHooks(
   return { added, alreadyPresent, resolved };
 }
 
-export function uninstallMemoryHooks(
-  path: string = getClaudeSettingsPath(),
-): { removed: string[] } {
+export function uninstallMemoryHooks(path: string = getClaudeSettingsPath()): {
+  removed: string[];
+} {
   const s = readSettings(path);
   if (!s.hooks) return { removed: [] };
   const removed: string[] = [];

@@ -39,7 +39,10 @@ export const neonDbAdapter: ServiceAdapter = {
     const databaseUrl = context.existingEnv.DATABASE_URL;
 
     // Already configured — re-use
-    if (databaseUrl && (databaseUrl.startsWith("postgres://") || databaseUrl.startsWith("postgresql://"))) {
+    if (
+      databaseUrl &&
+      (databaseUrl.startsWith("postgres://") || databaseUrl.startsWith("postgresql://"))
+    ) {
       return {
         success: true,
         message: "Neon (or Postgres) already configured — DATABASE_URL present in environment",
@@ -66,8 +69,7 @@ export const neonDbAdapter: ServiceAdapter = {
       };
     }
 
-    const projectName =
-      context.projectName ?? context.projectPath.split("/").pop() ?? "kit-db";
+    const projectName = context.projectName ?? context.projectPath.split("/").pop() ?? "kit-db";
 
     let project: NeonProjectResponse;
     try {

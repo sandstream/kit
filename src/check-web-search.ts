@@ -97,7 +97,7 @@ export async function checkWebSearch(config?: WebSearchConfig): Promise<WebSearc
           "https://api.search.brave.com/res/v1/web/search?q=test",
           {
             headers: {
-              "Accept": "application/json",
+              Accept: "application/json",
               "X-Subscription-Token": config.apiKey,
             },
           } as RequestInit,
@@ -139,7 +139,8 @@ export async function checkWebSearch(config?: WebSearchConfig): Promise<WebSearc
           provider,
           configured: false,
           healthy: false,
-          error: "Google Custom Search needs web.search.apiKey + web.search.cx (Programmable Search engine id)",
+          error:
+            "Google Custom Search needs web.search.apiKey + web.search.cx (Programmable Search engine id)",
         };
       }
       try {

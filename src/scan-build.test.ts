@@ -54,10 +54,7 @@ describe("scanBuildArtifacts", () => {
     try {
       mkdirSync(join(dir, "dist"), { recursive: true });
       mkdirSync(join(dir, "out"), { recursive: true });
-      writeFileSync(
-        join(dir, "dist", "bundle.js"),
-        'AKIA0123456789ABCDEF\n',
-      );
+      writeFileSync(join(dir, "dist", "bundle.js"), "AKIA0123456789ABCDEF\n");
       writeFileSync(
         join(dir, "out", "index.html"),
         '<meta data-token="eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.SflKxwRJSMeKKF2QT4fwpMeJf36">\n',
@@ -79,7 +76,10 @@ describe("scanBuildArtifacts", () => {
         join(dir, ".next", "routes-manifest.json"),
         JSON.stringify({
           headers: [
-            { source: "/", headers: [{ key: "x-mw", value: "twenty-plus-character-route-value-login" }] },
+            {
+              source: "/",
+              headers: [{ key: "x-mw", value: "twenty-plus-character-route-value-login" }],
+            },
           ],
         }),
       );
@@ -112,14 +112,8 @@ describe("scanBuildArtifacts", () => {
     try {
       mkdirSync(join(dir, ".next"), { recursive: true });
       mkdirSync(join(dir, "my-bundle"), { recursive: true });
-      writeFileSync(
-        join(dir, ".next", "a.js"),
-        "sk_"+"live_NotInTheCustomScannedDirsAtAll\n",
-      );
-      writeFileSync(
-        join(dir, "my-bundle", "b.js"),
-        "sk_"+"live_AaBbCcDdEeFfGgHhIiJjKkLl\n",
-      );
+      writeFileSync(join(dir, ".next", "a.js"), "sk_" + "live_NotInTheCustomScannedDirsAtAll\n");
+      writeFileSync(join(dir, "my-bundle", "b.js"), "sk_" + "live_AaBbCcDdEeFfGgHhIiJjKkLl\n");
       const hits = await scanBuildArtifacts(dir, ["my-bundle"]);
       assert.equal(hits.length, 1);
       assert.ok(hits[0].file.includes("my-bundle"));

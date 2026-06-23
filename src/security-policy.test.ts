@@ -75,10 +75,7 @@ describe("checkAllowlist", () => {
     // remove rogue from allowlist to simulate the unlisted case
     const list = await readAllowlist(dir);
     list!.packages = list!.packages.filter((p) => p.name !== "rogue");
-    writeFileSync(
-      join(dir, ".kit-allowlist.json"),
-      JSON.stringify(list, null, 2),
-    );
+    writeFileSync(join(dir, ".kit-allowlist.json"), JSON.stringify(list, null, 2));
     const { violations } = await checkAllowlist(dir);
     assert.equal(violations.length, 0);
   });

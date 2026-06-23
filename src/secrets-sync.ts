@@ -4,7 +4,6 @@ import type { SecretsConfig } from "./config.js";
 import { generateSecrets } from "./secrets.js";
 import { exec } from "./utils/exec.js";
 
-
 export interface SyncResult {
   target: string;
   synced: string[];
@@ -28,7 +27,7 @@ export interface SecretsSyncOptions {
  */
 export async function syncSecrets(
   secrets: SecretsConfig,
-  options: SecretsSyncOptions
+  options: SecretsSyncOptions,
 ): Promise<SyncResult> {
   const { target, dryRun = false, projectPath = process.cwd() } = options;
 
@@ -72,7 +71,9 @@ export async function syncSecrets(
     }
 
     case "stdout": {
-      const lines = Object.entries(resolved).map(([k, v]) => `export ${k}='${v.replace(/'/g, "'\\''")}'`);
+      const lines = Object.entries(resolved).map(
+        ([k, v]) => `export ${k}='${v.replace(/'/g, "'\\''")}'`,
+      );
       if (!dryRun) {
         process.stdout.write(lines.join("\n") + "\n");
         synced.push(...Object.keys(resolved));
@@ -108,7 +109,7 @@ async function syncToGitHub(
   dryRun: boolean,
   synced: string[],
   skipped: string[],
-  failed: string[]
+  failed: string[],
 ): Promise<SyncResult> {
   const token = process.env.GITHUB_TOKEN;
   if (!token) {
@@ -118,8 +119,7 @@ async function syncToGitHub(
       skipped: [],
       failed: ["GITHUB_TOKEN not set"],
       dryRun,
-      message:
-        "Set GITHUB_TOKEN with repo scope to sync secrets to GitHub Actions",
+      message: "Set GITHUB_TOKEN with repo scope to sync secrets to GitHub Actions",
     };
   }
 
@@ -149,7 +149,7 @@ async function syncToGitHub(
   // Fetch repo public key for encryption
   const keyResp = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/actions/secrets/public-key`,
-    { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" } }
+    { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" } },
   );
 
   if (!keyResp.ok) {
@@ -193,10 +193,7 @@ async function syncToGitHub(
 
   for (const [name, value] of Object.entries(secrets)) {
     try {
-      const encrypted = sodium.crypto_box_seal(
-        new TextEncoder().encode(value),
-        repoKey
-      );
+      const encrypted = sodium.crypto_box_seal(new TextEncoder().encode(value), repoKey);
       const encryptedB64 = sodium.to_base64(encrypted, sodium.base64_variants.ORIGINAL);
 
       const putResp = await fetch(
@@ -209,7 +206,7 @@ async function syncToGitHub(
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ encrypted_value: encryptedB64, key_id }),
-        }
+        },
       );
 
       if (putResp.ok || putResp.status === 201 || putResp.status === 204) {
@@ -239,7 +236,7 @@ async function syncToGitHubViaCli(
   synced: string[],
   skipped: string[],
   failed: string[],
-  dryRun: boolean
+  dryRun: boolean,
 ): Promise<SyncResult> {
   // Fall back to `gh secret set` CLI if libsodium is unavailable
   try {
@@ -257,11 +254,9 @@ async function syncToGitHubViaCli(
 
   for (const [name, value] of Object.entries(secrets)) {
     try {
-      await exec(
-        "gh",
-        ["secret", "set", name, "--repo", `${owner}/${repo}`, "--body", value],
-        { timeout: 15_000 }
-      );
+      await exec("gh", ["secret", "set", name, "--repo", `${owner}/${repo}`, "--body", value], {
+        timeout: 15_000,
+      });
       synced.push(name);
     } catch (err) {
       failed.push(`${name}: ${(err as Error).message}`);

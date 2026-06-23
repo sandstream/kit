@@ -46,28 +46,45 @@ describe("generateToml", () => {
   it("provisions trivy only when a Dockerfile is present", () => {
     const without = parseTOML(generateToml(stack())) as { tools: Record<string, string> };
     assert.ok(!without.tools["aqua:aquasecurity/trivy"], "no trivy without a Dockerfile");
-    const withDocker = parseTOML(generateToml(stack(), { hasDockerfile: true })) as { tools: Record<string, string> };
-    assert.equal(withDocker.tools["aqua:aquasecurity/trivy"], "latest", "trivy provisioned with a Dockerfile");
+    const withDocker = parseTOML(generateToml(stack(), { hasDockerfile: true })) as {
+      tools: Record<string, string>;
+    };
+    assert.equal(
+      withDocker.tools["aqua:aquasecurity/trivy"],
+      "latest",
+      "trivy provisioned with a Dockerfile",
+    );
   });
 
   it("provisions pip-audit for Python and osv-scanner for non-node ecosystems (not for node)", () => {
-    const node = parseTOML(generateToml(stack({ language: "typescript" }))) as { tools: Record<string, string> };
+    const node = parseTOML(generateToml(stack({ language: "typescript" }))) as {
+      tools: Record<string, string>;
+    };
     assert.ok(!node.tools["aqua:google/osv-scanner"], "no osv for node (npm audit covers it)");
     assert.ok(!node.tools["pipx:pip-audit"], "no pip-audit for node");
 
-    const python = parseTOML(generateToml(stack({ language: "python", tools: {} }))) as { tools: Record<string, string> };
+    const python = parseTOML(generateToml(stack({ language: "python", tools: {} }))) as {
+      tools: Record<string, string>;
+    };
     assert.equal(python.tools["pipx:pip-audit"], "latest", "pip-audit for python");
     assert.ok(!python.tools["aqua:google/osv-scanner"], "no osv for python (pip-audit covers it)");
 
-    const go = parseTOML(generateToml(stack({ language: "go", tools: {} }))) as { tools: Record<string, string> };
-    assert.equal(go.tools["aqua:google/osv-scanner"], "latest", "osv-scanner for go (no dedicated scanner)");
+    const go = parseTOML(generateToml(stack({ language: "go", tools: {} }))) as {
+      tools: Record<string, string>;
+    };
+    assert.equal(
+      go.tools["aqua:google/osv-scanner"],
+      "latest",
+      "osv-scanner for go (no dedicated scanner)",
+    );
   });
 
   it("parseEnvTemplateKeys extracts KEY= names, ignoring comments / blanks / lowercase", () => {
-    assert.deepEqual(
-      parseEnvTemplateKeys("# comment\nFOO=1\nexport BAR=2\n\nbaz=3\nQUX_1=\n"),
-      ["FOO", "BAR", "QUX_1"],
-    );
+    assert.deepEqual(parseEnvTemplateKeys("# comment\nFOO=1\nexport BAR=2\n\nbaz=3\nQUX_1=\n"), [
+      "FOO",
+      "BAR",
+      "QUX_1",
+    ]);
   });
 
   it("seeds extra secret keys from an env template, deduped against service keys", () => {
@@ -118,13 +135,22 @@ describe("generateToml", () => {
   });
 
   it("scaffolds a [secrets.infisical] binding block when infisical is chosen", () => {
-    const toml = generateToml(stack({ services: ["supabase", "stripe"] }), { secretsStore: "infisical" });
+    const toml = generateToml(stack({ services: ["supabase", "stripe"] }), {
+      secretsStore: "infisical",
+    });
     assert.ok(toml.includes("[secrets.infisical]"), `missing binding block: ${toml}`);
     const parsed = parseTOML(toml) as { secrets: { infisical?: { environment?: string } } };
-    assert.equal(parsed.secrets.infisical?.environment, "dev", "binding should default environment to dev");
+    assert.equal(
+      parsed.secrets.infisical?.environment,
+      "dev",
+      "binding should default environment to dev",
+    );
     // No binding block for a non-infisical store.
     const op = generateToml(stack({ services: ["supabase"] }), { secretsStore: "1password" });
-    assert.ok(!op.includes("[secrets.infisical]"), "1password config must not carry an infisical block");
+    assert.ok(
+      !op.includes("[secrets.infisical]"),
+      "1password config must not carry an infisical block",
+    );
   });
 
   it("generates Next.js + Supabase + Stripe config", () => {

@@ -6,7 +6,7 @@ const exec = promisify(execFile);
 
 async function runRailway(
   args: string[],
-  cwd: string
+  cwd: string,
 ): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   try {
     const { stdout, stderr } = await exec("railway", args, {

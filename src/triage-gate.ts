@@ -19,9 +19,27 @@ import { runTriage, type TriageType, type TriageResult } from "./triage.js";
 
 /** Core language runtimes managed by mise core — the trusted base, not triaged. */
 export const CORE_RUNTIMES = new Set([
-  "node", "nodejs", "pnpm", "npm", "yarn", "bun", "deno",
-  "python", "python3", "go", "golang", "ruby", "java", "openjdk",
-  "rust", "cargo", "dotnet", "php", "zig", "elixir", "erlang",
+  "node",
+  "nodejs",
+  "pnpm",
+  "npm",
+  "yarn",
+  "bun",
+  "deno",
+  "python",
+  "python3",
+  "go",
+  "golang",
+  "ruby",
+  "java",
+  "openjdk",
+  "rust",
+  "cargo",
+  "dotnet",
+  "php",
+  "zig",
+  "elixir",
+  "erlang",
 ]);
 
 export type TriageMapping =
@@ -46,7 +64,9 @@ function extractOwnerRepo(rest: string): string | null {
 export function triageTargetFor(tool: string): TriageMapping {
   const ref = tool.trim();
   if (!ref.includes(":")) {
-    return CORE_RUNTIMES.has(ref.toLowerCase()) ? { kind: "runtime" } : { kind: "untriageable", ref };
+    return CORE_RUNTIMES.has(ref.toLowerCase())
+      ? { kind: "runtime" }
+      : { kind: "untriageable", ref };
   }
   const idx = ref.indexOf(":");
   const scheme = ref.slice(0, idx).toLowerCase();
@@ -75,7 +95,12 @@ const defaultDeps: GateDeps = { runTriage };
 
 /** First non-empty line of triage output, for a compact block reason. */
 function firstLine(output: string): string {
-  return output.split("\n").map((l) => l.trim()).find(Boolean) ?? "no triage output";
+  return (
+    output
+      .split("\n")
+      .map((l) => l.trim())
+      .find(Boolean) ?? "no triage output"
+  );
 }
 
 /**
@@ -83,7 +108,10 @@ function firstLine(output: string): string {
  * triage PASS. WARN / FAIL / offline / missing-script / unmappable-ref all return
  * `blocked` (fail-closed).
  */
-export async function gateInstall(tool: string, deps: GateDeps = defaultDeps): Promise<GateVerdict> {
+export async function gateInstall(
+  tool: string,
+  deps: GateDeps = defaultDeps,
+): Promise<GateVerdict> {
   const t = triageTargetFor(tool);
   if (t.kind === "runtime") {
     return { tool, decision: "pass", reason: "core language runtime (trusted base)" };

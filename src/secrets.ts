@@ -2,7 +2,6 @@ import { readFile, writeFile, access } from "node:fs/promises";
 import type { SecretsConfig } from "./config.js";
 import { resolveViaBackend, resetInfisicalCache } from "./secret-backends.js";
 
-
 export interface SecretResolveResult {
   name: string;
   resolved: boolean;
@@ -15,10 +14,7 @@ export interface SecretResolveResult {
 }
 
 /** Interpolate {{KEY}} placeholders in a template string with resolved values. */
-function interpolateTemplate(
-  template: string,
-  resolved: Map<string, string>,
-): string {
+function interpolateTemplate(template: string, resolved: Map<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
     return resolved.get(key) ?? `{{${key}}}`;
   });

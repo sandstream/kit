@@ -24,7 +24,7 @@ describe("upstashRedisAdapter", () => {
       mockContext({
         UPSTASH_REDIS_REST_URL: "https://xxx.upstash.io",
         UPSTASH_REDIS_REST_TOKEN: "token",
-      })
+      }),
     );
     assert.equal(result, true);
   });
@@ -35,7 +35,7 @@ describe("upstashRedisAdapter", () => {
 
   it("check returns false when only URL is present", async () => {
     const result = await upstashRedisAdapter.check(
-      mockContext({ UPSTASH_REDIS_REST_URL: "https://xxx.upstash.io" })
+      mockContext({ UPSTASH_REDIS_REST_URL: "https://xxx.upstash.io" }),
     );
     assert.equal(result, false);
   });
@@ -54,7 +54,7 @@ describe("upstashRedisAdapter", () => {
         UPSTASH_API_KEY: "key",
         UPSTASH_REDIS_REST_URL: "https://xxx.upstash.io",
         UPSTASH_REDIS_REST_TOKEN: "token",
-      })
+      }),
     );
     assert.equal(result.success, true);
     assert.equal(result.secrets?.UPSTASH_REDIS_REST_URL, "https://xxx.upstash.io");
@@ -68,7 +68,7 @@ describe("upstashRedisAdapter", () => {
         UPSTASH_API_KEY: "key",
         UPSTASH_REDIS_REST_URL: "https://xxx.upstash.io",
         UPSTASH_REDIS_REST_TOKEN: "token",
-      })
+      }),
     );
     // When returning existing, KV aliases not included — that's fine
     // Just verify structure
@@ -92,7 +92,7 @@ describe("cloudflareR2Adapter", () => {
         R2_ACCESS_KEY_ID: "key",
         R2_SECRET_ACCESS_KEY: "secret",
         R2_BUCKET_NAME: "my-bucket",
-      })
+      }),
     );
     assert.equal(result, true);
   });
@@ -102,9 +102,7 @@ describe("cloudflareR2Adapter", () => {
   });
 
   it("check returns false when only access key is present", async () => {
-    const result = await cloudflareR2Adapter.check(
-      mockContext({ R2_ACCESS_KEY_ID: "key" })
-    );
+    const result = await cloudflareR2Adapter.check(mockContext({ R2_ACCESS_KEY_ID: "key" }));
     assert.equal(result, false);
   });
 

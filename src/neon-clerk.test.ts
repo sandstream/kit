@@ -21,14 +21,14 @@ describe("neonDbAdapter", () => {
 
   it("check returns true when DATABASE_URL starts with postgresql://", async () => {
     const result = await neonDbAdapter.check(
-      mockContext({ DATABASE_URL: "postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb" })
+      mockContext({ DATABASE_URL: "postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb" }),
     );
     assert.equal(result, true);
   });
 
   it("check returns true when DATABASE_URL starts with postgres://", async () => {
     const result = await neonDbAdapter.check(
-      mockContext({ DATABASE_URL: "postgres://user:pass@host/db" })
+      mockContext({ DATABASE_URL: "postgres://user:pass@host/db" }),
     );
     assert.equal(result, true);
   });
@@ -40,7 +40,7 @@ describe("neonDbAdapter", () => {
 
   it("check returns false when DATABASE_URL is not postgres", async () => {
     const result = await neonDbAdapter.check(
-      mockContext({ DATABASE_URL: "mysql://user:pass@host/db" })
+      mockContext({ DATABASE_URL: "mysql://user:pass@host/db" }),
     );
     assert.equal(result, false);
   });
@@ -57,7 +57,10 @@ describe("neonDbAdapter", () => {
   it("provision returns error with setup instructions when NEON_API_KEY is missing", async () => {
     const result = await neonDbAdapter.provision(mockContext());
     assert.equal(result.success, false);
-    assert(result.message?.includes("console.neon.tech"), `expected dashboard URL: ${result.message}`);
+    assert(
+      result.message?.includes("console.neon.tech"),
+      `expected dashboard URL: ${result.message}`,
+    );
     assert(result.message?.includes("NEON_API_KEY"), `expected key name: ${result.message}`);
   });
 });
@@ -77,7 +80,7 @@ describe("clerkAuthAdapter", () => {
       mockContext({
         CLERK_SECRET_KEY: "sk_test_xxx",
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_xxx",
-      })
+      }),
     );
     assert.equal(result, true);
   });
@@ -88,9 +91,7 @@ describe("clerkAuthAdapter", () => {
   });
 
   it("check returns false when only one key is present", async () => {
-    const result = await clerkAuthAdapter.check(
-      mockContext({ CLERK_SECRET_KEY: "sk_test_xxx" })
-    );
+    const result = await clerkAuthAdapter.check(mockContext({ CLERK_SECRET_KEY: "sk_test_xxx" }));
     assert.equal(result, false);
   });
 
@@ -99,7 +100,7 @@ describe("clerkAuthAdapter", () => {
       mockContext({
         CLERK_SECRET_KEY: "sk_test_xxx",
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_xxx",
-      })
+      }),
     );
     assert.equal(result.success, true);
     assert.equal(result.secrets?.CLERK_SECRET_KEY, "sk_test_xxx");

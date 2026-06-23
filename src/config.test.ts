@@ -19,7 +19,7 @@ pnpm = "latest"
 login = "gh auth login"
 check = "gh auth status"
 `,
-      "utf-8"
+      "utf-8",
     );
 
     try {
@@ -88,7 +88,7 @@ enabled = true
 check_interval = 600
 revocation_endpoint = "https://api.example.com/agents/{agent_id}/status"
 `,
-      "utf-8"
+      "utf-8",
     );
 
     try {
@@ -127,9 +127,7 @@ revocation_endpoint = "https://api.example.com/agents/{agent_id}/status"
       assert.ok(config.governance.approval);
       assert.ok(Array.isArray(config.governance.approval.destructive_operations));
       assert.equal(config.governance.approval.destructive_operations?.length, 3);
-      assert.ok(
-        config.governance.approval.destructive_operations?.includes("delete")
-      );
+      assert.ok(config.governance.approval.destructive_operations?.includes("delete"));
       assert.equal(config.governance.approval.production_writes, true);
       assert.equal(config.governance.approval.secret_rotations, false);
       assert.equal(config.governance.approval.approval_timeout, 1800);
@@ -147,7 +145,7 @@ revocation_endpoint = "https://api.example.com/agents/{agent_id}/status"
       assert.equal(config.governance.revocation.check_interval, 600);
       assert.equal(
         config.governance.revocation.revocation_endpoint,
-        "https://api.example.com/agents/{agent_id}/status"
+        "https://api.example.com/agents/{agent_id}/status",
       );
     } finally {
       await unlink(tmpFile);
@@ -162,7 +160,7 @@ revocation_endpoint = "https://api.example.com/agents/{agent_id}/status"
 [governance]
 enabled = true
 `,
-      "utf-8"
+      "utf-8",
     );
 
     try {
@@ -185,7 +183,7 @@ enabled = true
 [tools]
 node = "22"
 `,
-      "utf-8"
+      "utf-8",
     );
 
     try {
@@ -203,10 +201,13 @@ node = "22"
       await assert.rejects(
         () => loadConfig(tmpFile),
         (err: Error) => {
-          assert.ok(err.message.includes("Invalid .kit.toml"), `expected 'Invalid .kit.toml' in: ${err.message}`);
+          assert.ok(
+            err.message.includes("Invalid .kit.toml"),
+            `expected 'Invalid .kit.toml' in: ${err.message}`,
+          );
           assert.ok(err.message.includes("tools.node"), `expected 'tools.node' in: ${err.message}`);
           return true;
-        }
+        },
       );
     } finally {
       await unlink(tmpFile);
@@ -218,15 +219,18 @@ node = "22"
     await writeFile(
       tmpFile,
       `[secrets.keys]\nMY_KEY = { source = "nonexistent-store", ref = "x" }\n`,
-      "utf-8"
+      "utf-8",
     );
     try {
       await assert.rejects(
         () => loadConfig(tmpFile),
         (err: Error) => {
-          assert.ok(err.message.includes("Invalid .kit.toml"), `expected 'Invalid .kit.toml' in: ${err.message}`);
+          assert.ok(
+            err.message.includes("Invalid .kit.toml"),
+            `expected 'Invalid .kit.toml' in: ${err.message}`,
+          );
           return true;
-        }
+        },
       );
     } finally {
       await unlink(tmpFile);
@@ -235,20 +239,18 @@ node = "22"
 
   it("succeeds but warns when an unknown top-level section is present", async () => {
     const tmpFile = join(tmpdir(), `.kit-test-${process.pid}-val3.toml`);
-    await writeFile(
-      tmpFile,
-      `[tolls]\nnode = "22"\n`,
-      "utf-8"
-    );
+    await writeFile(tmpFile, `[tolls]\nnode = "22"\n`, "utf-8");
     const warnMessages: string[] = [];
     const originalWarn = console.warn;
-    console.warn = (...args: unknown[]) => { warnMessages.push(String(args[0])); };
+    console.warn = (...args: unknown[]) => {
+      warnMessages.push(String(args[0]));
+    };
     try {
       const config = await loadConfig(tmpFile);
       assert.ok(config, "config should be returned without throwing");
       assert.ok(
         warnMessages.some((m) => m.includes("tolls")),
-        `expected warning about 'tolls', got: ${JSON.stringify(warnMessages)}`
+        `expected warning about 'tolls', got: ${JSON.stringify(warnMessages)}`,
       );
     } finally {
       console.warn = originalWarn;
@@ -281,7 +283,7 @@ read = true
 write = false
 delete = false
 `,
-      "utf-8"
+      "utf-8",
     );
     try {
       const config = await loadConfig(tmpFile);

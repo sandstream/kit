@@ -4,18 +4,51 @@
  */
 
 const COMMANDS = [
-  "check", "init", "upgrade", "install", "login", "secrets", "setup",
-  "fix", "escalate", "governance", "skills", "hooks", "add", "audit",
-  "doctor", "env", "ci", "mcp", "whoami", "version", "create-plugin",
-  "completions", "help",
+  "check",
+  "init",
+  "upgrade",
+  "install",
+  "login",
+  "secrets",
+  "setup",
+  "fix",
+  "escalate",
+  "governance",
+  "skills",
+  "hooks",
+  "add",
+  "audit",
+  "doctor",
+  "env",
+  "ci",
+  "mcp",
+  "whoami",
+  "version",
+  "create-plugin",
+  "completions",
+  "help",
 ];
 
 const ADAPTERS = [
-  "stripe/payments", "supabase/db", "vercel/hosting", "expo/eas",
-  "searxng/instance", "neon/db", "clerk/auth", "upstash/redis",
-  "cloudflare/r2", "resend/email", "planetscale/db", "loops/email",
-  "liveblocks/realtime", "trigger/background", "inngest/background",
-  "flagsmith/flags", "sentry/monitoring", "tinybird/analytics", "posthog/analytics",
+  "stripe/payments",
+  "supabase/db",
+  "vercel/hosting",
+  "expo/eas",
+  "searxng/instance",
+  "neon/db",
+  "clerk/auth",
+  "upstash/redis",
+  "cloudflare/r2",
+  "resend/email",
+  "planetscale/db",
+  "loops/email",
+  "liveblocks/realtime",
+  "trigger/background",
+  "inngest/background",
+  "flagsmith/flags",
+  "sentry/monitoring",
+  "tinybird/analytics",
+  "posthog/analytics",
 ];
 
 const CI_FORMATS = ["github", "gitlab", "json", "text"];
@@ -177,11 +210,11 @@ _kit
 
 export function generateFishCompletion(): string {
   const cmdCompletions = COMMANDS.map(
-    (cmd) => `complete -c kit -n "__fish_use_subcommand" -a "${cmd}" -d "${getCommandDesc(cmd)}"`
+    (cmd) => `complete -c kit -n "__fish_use_subcommand" -a "${cmd}" -d "${getCommandDesc(cmd)}"`,
   ).join("\n");
 
   const adapterCompletions = ADAPTERS.map(
-    (a) => `complete -c kit -n "__fish_seen_subcommand_from add" -a "${a}"`
+    (a) => `complete -c kit -n "__fish_seen_subcommand_from add" -a "${a}"`,
   ).join("\n");
 
   return `# kit fish completion
@@ -257,9 +290,13 @@ function getCommandDesc(cmd: string): string {
 
 export function generateCompletions(shell: string): string | null {
   switch (shell) {
-    case "bash": return generateBashCompletion();
-    case "zsh": return generateZshCompletion();
-    case "fish": return generateFishCompletion();
-    default: return null;
+    case "bash":
+      return generateBashCompletion();
+    case "zsh":
+      return generateZshCompletion();
+    case "fish":
+      return generateFishCompletion();
+    default:
+      return null;
   }
 }
