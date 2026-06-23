@@ -9,6 +9,10 @@ import {
   applyDedup,
   parseSuppressions,
   runSentinel,
+  proposalSummary,
+  sentinelStatusLine,
+  sentinelWorkflow,
+  SENTINEL_CACHE,
   type RedFinding,
 } from "./sentinel.js";
 import type { HealthFinding } from "./health.js";
@@ -117,5 +121,65 @@ describe("runSentinel (gather → build → dedup)", () => {
     });
     assert.equal(out.length, 1);
     assert.equal(out[0].alreadyOpen, true);
+  });
+});
+
+describe("proposalSummary (#53 L3)", () => {
+  const red: RedFinding[] = [
+    { id: "health:vercel", class: "code", title: "deploy failed" },
+    { id: "health:resend", class: "human", title: "domain unverified" },
+    { id: "x:y", class: "noise", title: "benign" },
+  ];
+  it("counts total, fresh (not already open), and per-class", () => {
+    // only the code finding already has an open artifact
+    const proposals = applyDedup(buildProposals(red), new Set(["health:vercel"]));
+    const s = proposalSummary(proposals);
+    assert.equal(s.total, 3);
+    assert.equal(s.fresh, 2); // resend + x:y fresh; vercel already open
+    assert.deepEqual(s.byClass, { code: 1, human: 1, noise: 1 });
+  });
+  it("treats unchecked dedup (null) as fresh", () => {
+    const s = proposalSummary(applyDedup(buildProposals(red), null));
+    assert.equal(s.fresh, 3);
+  });
+});
+
+describe("sentinelStatusLine (#53 surface)", () => {
+  it("is null when nothing fresh (or no cache)", () => {
+    assert.equal(sentinelStatusLine(null), null);
+    assert.equal(
+      sentinelStatusLine({ total: 2, fresh: 0, byClass: { code: 0, human: 0, noise: 0 } }),
+      null,
+    );
+  });
+  it("renders fresh count, and flags human items needing the user", () => {
+    assert.equal(
+      sentinelStatusLine({ total: 3, fresh: 3, byClass: { code: 2, human: 1, noise: 0 } }),
+      "[sentinel · 3 fresh, 1 need you]",
+    );
+    assert.equal(
+      sentinelStatusLine({ total: 1, fresh: 1, byClass: { code: 1, human: 0, noise: 0 } }),
+      "[sentinel · 1 fresh]",
+    );
+  });
+});
+
+describe("sentinelWorkflow (#53 scheduler)", () => {
+  it("emits a runnable GHA workflow with the default weekly cron", () => {
+    const wf = sentinelWorkflow();
+    assert.match(wf, /cron: "0 7 \* \* 1"/);
+    assert.match(wf, /kit sentinel run --json/);
+    assert.match(wf, /name: kit-sentinel/);
+    // GHA expression survived the template literal (not interpolated to empty)
+    assert.ok(wf.includes("${{ github.token }}"));
+  });
+  it("honours a custom schedule", () => {
+    assert.match(sentinelWorkflow("0 0 * * *"), /cron: "0 0 \* \* \*"/);
+  });
+});
+
+describe("SENTINEL_CACHE", () => {
+  it("points under the .kit dir", () => {
+    assert.equal(SENTINEL_CACHE, ".kit/sentinel.json");
   });
 });
