@@ -4280,6 +4280,50 @@ async function cmdSentinel(): Promise<boolean> {
   return true;
 }
 
+async function cmdScan(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  const { runScanners } = await import("./scanners.js");
+  const { resolveToolBin } = await import("./utils/resolveTool.js");
+  const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
+  const cwd = process.cwd();
+
+  const { merged, runs } = await runScanners({
+    resolve: (bin) => resolveToolBin(bin),
+    run: async (bin, args) => {
+      const r = await execFileNoThrow(bin, args, { timeout: 180_000 });
+      return { ok: r.ok, stdout: r.stdout };
+    },
+    hasEnv: (name) => Boolean(process.env[name]),
+    detect: (markers) => markers.some((m) => existsSync(resolve(cwd, m))),
+  });
+
+  const bad = merged.filter((m) => m.severity === "critical" || m.severity === "high").length;
+
+  if (jsonMode) {
+    console.log(JSON.stringify({ runs, findings: merged }, null, 2));
+    return bad === 0;
+  }
+
+  console.log(`${c.bold}kit scan${c.reset}  ${c.dim}external scanners → one merged verdict${c.reset}`);
+  for (const r of runs) {
+    const mark = r.status === "ran" ? `${c.green}✓${c.reset}` : r.status === "error" ? `${c.red}✗${c.reset}` : `${c.dim}−${c.reset}`;
+    const note = r.status === "ran" ? `${r.findings} finding(s)` : r.status;
+    console.log(`  ${mark} ${r.id}  ${c.dim}${note}${c.reset}`);
+  }
+  console.log("");
+  if (merged.length === 0) {
+    console.log(`  ${c.green}no findings from the scanners that ran${c.reset}`);
+  } else {
+    for (const m of merged) {
+      const sev = m.severity ?? "low";
+      const color = sev === "critical" || sev === "high" ? c.red : sev === "medium" ? c.yellow : c.dim;
+      console.log(`  ${color}${sev.toUpperCase().padEnd(8)}${c.reset} ${m.name}  ${c.dim}[${m.scanners.join("+")}]${c.reset}`);
+    }
+  }
+  if (bad > 0) console.log(`${c.red}${bad} high/critical${c.reset}`);
+  return bad === 0;
+}
+
 async function cmdWhoami(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
 
@@ -5022,6 +5066,7 @@ async function main(): Promise<void> {
         "supply-chain": cmdSupplyChain,
         "agent-audit": cmdAgentAudit,
         sentinel: cmdSentinel,
+        scan: cmdScan,
         init: cmdInit,
         upgrade: cmdUpgrade,
         install: cmdInstall,

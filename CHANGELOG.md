@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-06-23
+
+### Added
+- **Scanner-runner registry (`kit scan`) — runs external scanners and merges them into one local verdict.** kit's consolidation play: a data-driven registry (Snyk, Trivy, Grype, Semgrep, OSV-scanner) runs each applicable+installed scanner (resolved mise-first; cleanly skipped when not installed / its token is missing / not applicable), pipes the SARIF/OSV output through the #48 ingest adapter, and **merges + dedups** the results — the same CVE/GHSA reported by multiple scanners collapses to one row with max severity and the union of which scanners flagged it. Local-first, zero-server, deterministic. Pure registry/merge/dedup fixture-tested; orchestration is dependency-injected. Complements `kit check`'s native scanners (socket/semgrep/trivy/osv/trufflehog/bumblebee). (#62)
+
 ## [1.19.0] - 2026-06-23
 
 ### Added
