@@ -24,20 +24,91 @@ export interface ScannerDef {
   needsToken?: string;
   /** marker files that make the scanner applicable; undefined = always */
   detect?: string[];
+  /** Cannot run with no network (needs a hosted backend) — dropped in air-gap mode. */
+  cloudOnly?: boolean;
+  /** Extra args/env applied in air-gap mode so the scanner runs against a local DB. */
+  offline?: { args?: string[]; env?: Record<string, string> };
 }
 
 export const SCANNERS: ScannerDef[] = [
-  { id: "snyk", bin: "snyk", args: ["test", "--sarif"], format: "sarif", needsToken: "SNYK_TOKEN" },
-  { id: "trivy", bin: "trivy", args: ["fs", "--format", "sarif", "--quiet", "."], format: "sarif" },
-  { id: "grype", bin: "grype", args: ["dir:.", "-o", "sarif", "-q"], format: "sarif" },
+  // snyk talks to the Snyk cloud → not usable in a no-egress enclave.
   {
+    id: "snyk",
+    bin: "snyk",
+    args: ["test", "--sarif"],
+    format: "sarif",
+    needsToken: "SNYK_TOKEN",
+    cloudOnly: true,
+  },
+  {
+    id: "trivy",
+    bin: "trivy",
+    args: ["fs", "--format", "sarif", "--quiet", "."],
+    format: "sarif",
+    // run against the pre-synced local DB; never reach out to update it
+    offline: { args: ["--offline-scan", "--skip-db-update"] },
+  },
+  {
+    id: "grype",
+    bin: "grype",
+    args: ["dir:.", "-o", "sarif", "-q"],
+    format: "sarif",
+    offline: { env: { GRYPE_DB_AUTO_UPDATE: "false" } },
+  },
+  {
+    // `--config auto` fetches the semgrep registry; without a local ruleset it
+    // can't run offline, so it's dropped in air-gap mode (point it at a local
+    // ruleset via a future KIT_SEMGREP_CONFIG to re-enable — tracked).
     id: "semgrep",
     bin: "semgrep",
     args: ["scan", "--sarif", "--quiet", "--config", "auto", "."],
     format: "sarif",
+    cloudOnly: true,
   },
-  { id: "osv-scanner", bin: "osv-scanner", args: ["--format", "json", "-r", "."], format: "osv" },
+  {
+    id: "osv-scanner",
+    bin: "osv-scanner",
+    args: ["--format", "json", "-r", "."],
+    format: "osv",
+    offline: { args: ["--offline"] },
+  },
 ];
+
+/** True when air-gap mode is requested via env (KIT_AIRGAP=1/true/yes). */
+export function isAirGap(env: NodeJS.ProcessEnv = process.env): boolean {
+  return ["1", "true", "yes"].includes((env.KIT_AIRGAP ?? "").trim().toLowerCase());
+}
+
+export interface AirGapPlan {
+  /** Scanners that can run offline, with their offline args folded in. */
+  scanners: ScannerDef[];
+  /** Env to inject into every scanner run (e.g. disable DB auto-update). */
+  env: Record<string, string>;
+  /** ids of cloud-only scanners excluded because they need network. */
+  dropped: string[];
+}
+
+/**
+ * Transform the registry for air-gap mode: drop `cloudOnly` scanners and fold
+ * each remaining scanner's `offline` args/env in so it runs against a local DB
+ * with no network. A no-op (returns the input) when `enabled` is false.
+ */
+export function airGapScanners(defs: ScannerDef[], enabled: boolean): AirGapPlan {
+  if (!enabled) return { scanners: defs, env: {}, dropped: [] };
+  const scanners: ScannerDef[] = [];
+  const env: Record<string, string> = {};
+  const dropped: string[] = [];
+  for (const d of defs) {
+    if (d.cloudOnly) {
+      dropped.push(d.id);
+      continue;
+    }
+    if (d.offline?.env) Object.assign(env, d.offline.env);
+    const extra = d.offline?.args ?? [];
+    scanners.push(extra.length ? { ...d, args: [...d.args, ...extra] } : d);
+  }
+  return { scanners, env, dropped };
+}
 
 const RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
 

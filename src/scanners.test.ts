@@ -5,6 +5,9 @@ import {
   mergeFindings,
   suppressBaselined,
   runScanners,
+  airGapScanners,
+  isAirGap,
+  SCANNERS,
   type ScanDeps,
   type ScannerDef,
 } from "./scanners.js";
@@ -80,6 +83,45 @@ describe("runScanners (injected deps)", () => {
     assert.equal(byId.grype, "not-installed");
     assert.equal(byId.trivy, "ran");
     assert.equal(merged.length, 1); // trivy's one CVE
+  });
+});
+
+describe("isAirGap", () => {
+  it("is true for 1/true/yes, false otherwise", () => {
+    assert.equal(isAirGap({ KIT_AIRGAP: "1" }), true);
+    assert.equal(isAirGap({ KIT_AIRGAP: "true" }), true);
+    assert.equal(isAirGap({ KIT_AIRGAP: "YES" }), true);
+    assert.equal(isAirGap({ KIT_AIRGAP: "0" }), false);
+    assert.equal(isAirGap({}), false);
+  });
+});
+
+describe("airGapScanners", () => {
+  it("is a no-op when disabled", () => {
+    const plan = airGapScanners(SCANNERS, false);
+    assert.equal(plan.scanners, SCANNERS);
+    assert.deepEqual(plan.dropped, []);
+    assert.deepEqual(plan.env, {});
+  });
+
+  it("drops cloud-only scanners and folds offline args/env for the rest", () => {
+    const plan = airGapScanners(SCANNERS, true);
+    // cloud-only (snyk, semgrep) are excluded
+    assert.deepEqual(plan.dropped.sort(), ["semgrep", "snyk"]);
+    assert.ok(!plan.scanners.some((s) => s.id === "snyk" || s.id === "semgrep"));
+    // trivy gets its offline flags appended
+    const trivy = plan.scanners.find((s) => s.id === "trivy")!;
+    assert.ok(trivy.args.includes("--offline-scan") && trivy.args.includes("--skip-db-update"));
+    // osv-scanner gets --offline
+    assert.ok(plan.scanners.find((s) => s.id === "osv-scanner")!.args.includes("--offline"));
+    // grype contributes offline env, not args
+    assert.equal(plan.env.GRYPE_DB_AUTO_UPDATE, "false");
+  });
+
+  it("does not mutate the original registry", () => {
+    const before = JSON.stringify(SCANNERS);
+    airGapScanners(SCANNERS, true);
+    assert.equal(JSON.stringify(SCANNERS), before);
   });
 });
 

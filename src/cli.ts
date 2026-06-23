@@ -4492,8 +4492,16 @@ async function cmdScan(): Promise<boolean> {
   const { resolveToolBin } = await import("./utils/resolveTool.js");
   const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
   const { loadBaseline, baselineGet, baselineSet, saveBaseline } = await import("./baseline.js");
-  const { SCANNERS } = await import("./scanners.js");
+  const { SCANNERS, airGapScanners, isAirGap } = await import("./scanners.js");
   const cwd = process.cwd();
+  // Air-gap mode (KIT_AIRGAP=1): drop cloud-only scanners and run the rest
+  // against local DBs with no network. See docs/AIR_GAP.md.
+  const airgap = airGapScanners(SCANNERS, isAirGap());
+  if (isAirGap()) {
+    console.log(
+      `${c.dim}air-gap mode: offline scanners only${airgap.dropped.length ? ` (skipping cloud-only: ${airgap.dropped.join(", ")})` : ""}${c.reset}`,
+    );
+  }
   const config = await loadConfig(resolveConfigPath());
 
   // Resolve scanner tokens (SNYK_TOKEN, …) from a configured tooling Infisical
@@ -4514,18 +4522,21 @@ async function cmdScan(): Promise<boolean> {
     }
   }
 
-  const { merged, runs } = await runScanners({
-    resolve: (bin) => resolveToolBin(bin),
-    run: async (bin, args) => {
-      const r = await execFileNoThrow(bin, args, {
-        timeout: 180_000,
-        env: { ...process.env, ...toolingTokens },
-      });
-      return { ok: r.ok, stdout: r.stdout };
+  const { merged, runs } = await runScanners(
+    {
+      resolve: (bin) => resolveToolBin(bin),
+      run: async (bin, args) => {
+        const r = await execFileNoThrow(bin, args, {
+          timeout: 180_000,
+          env: { ...process.env, ...airgap.env, ...toolingTokens },
+        });
+        return { ok: r.ok, stdout: r.stdout };
+      },
+      hasEnv: (name) => Boolean(process.env[name] || toolingTokens[name]),
+      detect: (markers) => markers.some((m) => existsSync(resolve(cwd, m))),
     },
-    hasEnv: (name) => Boolean(process.env[name] || toolingTokens[name]),
-    detect: (markers) => markers.some((m) => existsSync(resolve(cwd, m))),
-  });
+    airgap.scanners,
+  );
 
   // --update-baseline: freeze the current findings as accepted (#59 noise-reduction),
   // reusing the shared .kit-baseline.json under a "scan" category.
