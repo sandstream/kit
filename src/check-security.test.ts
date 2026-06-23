@@ -1,6 +1,11 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
-import { checkSecurity, parseTrivyMisconfigCount, parseOsvVulnCount } from "./check-security.js";
+import {
+  checkSecurity,
+  parseTrivyMisconfigCount,
+  parseOsvVulnCount,
+  parseTrivyVulnCount,
+} from "./check-security.js";
 
 describe("parseTrivyMisconfigCount", () => {
   it("counts only HIGH/CRITICAL misconfigurations", () => {
@@ -18,6 +23,24 @@ describe("parseTrivyMisconfigCount", () => {
   it("returns 0 for a clean scan and -1 for unparseable output", () => {
     assert.strictEqual(parseTrivyMisconfigCount(JSON.stringify({ Results: [] })), 0);
     assert.strictEqual(parseTrivyMisconfigCount("not json"), -1);
+  });
+});
+
+describe("parseTrivyVulnCount", () => {
+  it("sums vulnerabilities across trivy fs results", () => {
+    const json = JSON.stringify({
+      Results: [
+        { Target: "pom.xml", Vulnerabilities: [{ Severity: "HIGH" }, { Severity: "CRITICAL" }] },
+        { Target: "pom.xml", Vulnerabilities: [{ Severity: "HIGH" }] },
+        { Target: "novulns", Vulnerabilities: [] },
+      ],
+    });
+    assert.strictEqual(parseTrivyVulnCount(json), 3);
+  });
+
+  it("returns 0 for a clean scan and -1 for unparseable output", () => {
+    assert.strictEqual(parseTrivyVulnCount(JSON.stringify({ Results: [] })), 0);
+    assert.strictEqual(parseTrivyVulnCount("not json"), -1);
   });
 });
 
