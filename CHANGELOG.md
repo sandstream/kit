@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-06-23
+
+### Added
+- **Install-time supply-chain triage (`kit supply-chain`).** Four deterministic, local-first checks over `package.json` + `package-lock.json` (no network, no node_modules walk): **install-scripts** (deps that run pre/post/install — the malware-execution vector, from the lockfile's `hasInstallScript`), **lockfile-drift** (declared deps missing from the lockfile + packages resolved from a non-registry http/git source), **dep-confusion** (a dep under a declared `[supply_chain] internal_scopes` entry that the lockfile resolves from the PUBLIC registry), and **slopsquat** (a dep name ≤1 Damerau-Levenshtein edit — incl. transposition, e.g. `lodahs`→`lodash` — from a bundled high-traffic-package corpus). Pure check functions are fixture-tested; the typosquat corpus is local and curated. (#49)
+
 ## [1.16.0] - 2026-06-23
 
 ### Added
