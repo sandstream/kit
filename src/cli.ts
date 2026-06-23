@@ -4492,26 +4492,31 @@ async function cmdScan(): Promise<boolean> {
   const { resolveToolBin } = await import("./utils/resolveTool.js");
   const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
   const { loadBaseline, baselineGet, baselineSet, saveBaseline } = await import("./baseline.js");
-  const { SCANNERS, airGapScanners, isAirGap } = await import("./scanners.js");
+  const { SCANNERS, airGapScanners } = await import("./scanners.js");
   const cwd = process.cwd();
-  // Air-gap mode (KIT_AIRGAP=1): drop cloud-only scanners and run the rest
-  // against local DBs with no network. See docs/AIR_GAP.md.
-  const airgap = airGapScanners(SCANNERS, isAirGap());
-  if (isAirGap()) {
+  const config = await loadConfig(resolveConfigPath());
+
+  // Air-gap posture from `.kit.toml [air_gap]` + env (env overrides). When
+  // enabled, drop cloud-only scanners and run the rest against local DBs with no
+  // network. See docs/AIR_GAP.md.
+  const { resolveAirGap } = await import("./airgap/config.js");
+  const ag = resolveAirGap(config.air_gap, process.env);
+  const airgap = airGapScanners(SCANNERS, ag.enabled);
+  if (ag.enabled) {
     console.log(
       `${c.dim}air-gap mode: offline scanners only${airgap.dropped.length ? ` (skipping cloud-only: ${airgap.dropped.join(", ")})` : ""}${c.reset}`,
     );
     // Verified offline threat-data bundle (optional): point scanners at a
     // signed, integrity-checked local DB set. Fail-closed — never scan against
-    // unverified threat data. See docs/AIR_GAP.md.
-    const tdDir = process.env.KIT_THREAT_DATA_DIR;
-    if (tdDir) {
+    // unverified threat data.
+    if (ag.threatDataDir) {
+      const tdDir = ag.threatDataDir;
       const { verifyThreatData } = await import("./airgap/threat-data.js");
-      const pubRef = process.env.KIT_THREAT_DATA_PUBKEY ?? "";
-      const pubPem = existsSync(pubRef) ? readFileSync(pubRef, "utf8") : pubRef;
+      const pubRef = ag.threatDataPubkey ?? "";
+      const pubPem = pubRef && existsSync(pubRef) ? readFileSync(pubRef, "utf8") : pubRef;
       if (!pubPem) {
         console.error(
-          `${c.red}✗ KIT_THREAT_DATA_DIR set but KIT_THREAT_DATA_PUBKEY missing — cannot verify the bundle (fail-closed)${c.reset}`,
+          `${c.red}✗ air-gap threat-data dir set but no public key (threat_data_pubkey / KIT_THREAT_DATA_PUBKEY) — cannot verify (fail-closed)${c.reset}`,
         );
         return false;
       }
@@ -4533,7 +4538,6 @@ async function cmdScan(): Promise<boolean> {
       );
     }
   }
-  const config = await loadConfig(resolveConfigPath());
 
   // Resolve scanner tokens (SNYK_TOKEN, …) from a configured tooling Infisical
   // project so `kit scan` works without an `infisical run` wrapper (#65). The
