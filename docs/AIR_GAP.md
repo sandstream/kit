@@ -144,6 +144,42 @@ periodically refreshing `trusted_root.json` (a TUF mirror snapshot or pinned
 roots) from a connected host — that is the trust anchor for offline
 verification.
 
+## 5. Memory in a classified enclave
+
+kit's memory store inherits the **classification of the machine it runs on**.
+There is intentionally **no per-row classification column**, for two reasons:
+
+1. **Under system-high it is redundant.** A workstation accredited at one level
+   (e.g. SECRET) treats everything on it at that level — every captured row is
+   already SECRET, so a column adds no information.
+2. **kit cannot enforce it.** Multi-level separation is the job of a trusted
+   reference monitor in the OS (SELinux MLS, labeled IPC/filesystems), not a CLI
+   reading and writing its own SQLite file. A classification field that kit
+   manages itself would be advisory metadata dressed up as a control — it would
+   imply a separation guarantee kit cannot keep. kit does not claim to separate
+   classification levels internally.
+
+The operational posture instead:
+
+- **The whole `memory.db` carries the enclave's level.** Run kit at system-high;
+  treat the database, its WAL, and any backups at the accredited level.
+- **File handling is already conservative.** Encrypted backups and restores are
+  written `0o600` (owner-only); store `memory.db` on the same labeled volume as
+  the rest of the enclave's data at that level.
+- **Purge = delete the database.** On a system-high machine there is no lower
+  level to preserve, so spill or decommission response is to destroy `memory.db`
+  (and backups) per your media-handling procedure, not to filter a column.
+- **Capture-time redaction still applies.** `KIT_MEMORY_REDACT` strips secrets
+  before they ever reach the store (see redaction docs); that is orthogonal to
+  classification and worth enabling regardless of level.
+- **Spill (wrong-level content pasted into a higher machine) is a procedural
+  matter**, handled by your incident process — not something an application-level
+  tag can prevent or remediate.
+
+If you genuinely need a single install to span multiple levels, that is an
+OS/MLS platform requirement: accredit the platform for multi-level operation and
+run kit on top of it. It is not, and should not be, a kit feature.
+
 ## What still never leaves the enclave
 
 Secret resolution, the memory store, the audit log, `kit check`/`review`
