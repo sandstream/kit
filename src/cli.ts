@@ -4122,6 +4122,51 @@ async function cmdHealth(): Promise<boolean> {
   );
 }
 
+async function cmdIngest(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  const args = process.argv.slice(3).filter((a) => !a.startsWith("-"));
+  const format = args[0];
+  const file = args[1];
+  if (format !== "sarif" && format !== "osv") {
+    console.error(`${c.red}usage: kit ingest <sarif|osv> <file>${c.reset}`);
+    process.exitCode = 1;
+    return false;
+  }
+  if (!file) {
+    console.error(`${c.red}usage: kit ingest ${format} <file>${c.reset}`);
+    process.exitCode = 1;
+    return false;
+  }
+  let json: string;
+  try {
+    json = readFileSync(resolve(process.cwd(), file), "utf8");
+  } catch {
+    console.error(`${c.red}could not read ${file}${c.reset}`);
+    process.exitCode = 1;
+    return false;
+  }
+
+  const { ingest } = await import("./adapters/ingest.js");
+  const findings = ingest(format, json);
+
+  if (jsonMode) {
+    console.log(JSON.stringify({ count: findings.length, findings }, null, 2));
+    return true;
+  }
+
+  console.log(`${c.bold}kit ingest${c.reset}  ${c.dim}${format} · ${findings.length} finding(s)${c.reset}`);
+  const order: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+  const sorted = [...findings].sort((a, b) => (order[a.severity ?? "low"] ?? 9) - (order[b.severity ?? "low"] ?? 9));
+  for (const f of sorted) {
+    const sev = f.severity ?? "low";
+    const color = sev === "critical" || sev === "high" ? c.red : sev === "medium" ? c.yellow : c.dim;
+    const cite = f.rule ? ` ${c.dim}[${f.rule.id}]${c.reset}` : "";
+    console.log(`  ${color}${sev.toUpperCase().padEnd(8)}${c.reset} ${f.name}${cite}`);
+    console.log(`    ${c.dim}${f.detail}${c.reset}`);
+  }
+  return true;
+}
+
 async function cmdWhoami(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
 
@@ -4860,6 +4905,7 @@ async function main(): Promise<void> {
         whoami: cmdWhoami,
         check: cmdCheck,
         health: cmdHealth,
+        ingest: cmdIngest,
         init: cmdInit,
         upgrade: cmdUpgrade,
         install: cmdInstall,
