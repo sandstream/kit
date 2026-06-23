@@ -9,18 +9,33 @@
  * the transport for the future opt-in live sync.
  *
  * Blob layout: MAGIC(8) | salt(16) | iv(12) | authTag(16) | ciphertext
+ * The MAGIC byte is versioned so the scrypt KDF cost can be raised without
+ * breaking older backups: V1 used scrypt defaults; V2 uses a hardened cost.
  */
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  scryptSync,
+  type ScryptOptions,
+} from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { openMemoryDb, getMemoryDbPath } from "./db.js";
 
-const MAGIC = Buffer.from("KITMEM01");
+const MAGIC_V1 = Buffer.from("KITMEM01"); // legacy: scrypt defaults (N=16384, ~16 MB)
+const MAGIC_V2 = Buffer.from("KITMEM02"); // hardened: N=2^17 (~134 MB) — write path
+const MAGIC_LEN = 8;
 const SALT_LEN = 16;
 const IV_LEN = 12;
 const TAG_LEN = 16;
 
-function deriveKey(passphrase: string, salt: Buffer): Buffer {
-  return scryptSync(passphrase, salt, 32);
+// Hardened scrypt cost for new backups. The blob is the ONLY thing a passphrase
+// protects and is designed to sit on a USB stick / in the cloud, so make offline
+// cracking expensive. maxmem must be raised to fit N=2^17.
+const SCRYPT_V2: ScryptOptions = { N: 1 << 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };
+
+function deriveKey(passphrase: string, salt: Buffer, opts?: ScryptOptions): Buffer {
+  return scryptSync(passphrase, salt, 32, opts);
 }
 
 const MIN_PASSPHRASE_LEN = 12;
@@ -69,29 +84,39 @@ export function backupEncrypted(
   const data = readFileSync(srcPath);
   const salt = randomBytes(SALT_LEN);
   const iv = randomBytes(IV_LEN);
-  const cipher = createCipheriv("aes-256-gcm", deriveKey(passphrase, salt), iv, {
+  const cipher = createCipheriv("aes-256-gcm", deriveKey(passphrase, salt, SCRYPT_V2), iv, {
     authTagLength: TAG_LEN,
   });
   const ciphertext = Buffer.concat([cipher.update(data), cipher.final()]);
   const tag = cipher.getAuthTag();
-  writeFileSync(outPath, Buffer.concat([MAGIC, salt, iv, tag, ciphertext]));
+  // 0600: the blob is encrypted, but there is no reason to leave your whole
+  // (encrypted) brain world-readable on a shared host.
+  writeFileSync(outPath, Buffer.concat([MAGIC_V2, salt, iv, tag, ciphertext]), { mode: 0o600 });
 }
 
 /** Decrypt a backup blob into `destPath`. Throws on a wrong passphrase or tampered blob (GCM auth). */
 export function restoreEncrypted(passphrase: string, inPath: string, destPath: string): void {
   const blob = readFileSync(inPath);
-  if (!blob.subarray(0, MAGIC.length).equals(MAGIC)) {
-    throw new Error("not a kit memory backup (bad magic)");
-  }
-  let off = MAGIC.length;
+  const magic = blob.subarray(0, MAGIC_LEN);
+  // Pick the KDF cost from the version tag so older (V1) backups still restore.
+  let scrypt: ScryptOptions | undefined;
+  if (magic.equals(MAGIC_V2)) scrypt = SCRYPT_V2;
+  else if (magic.equals(MAGIC_V1))
+    scrypt = undefined; // legacy scrypt defaults
+  else throw new Error("not a kit memory backup (bad magic)");
+
+  let off = MAGIC_LEN;
   const salt = blob.subarray(off, (off += SALT_LEN));
   const iv = blob.subarray(off, (off += IV_LEN));
   const tag = blob.subarray(off, (off += TAG_LEN));
   const ciphertext = blob.subarray(off);
-  const decipher = createDecipheriv("aes-256-gcm", deriveKey(passphrase, salt), iv, {
+  const decipher = createDecipheriv("aes-256-gcm", deriveKey(passphrase, salt, scrypt), iv, {
     authTagLength: TAG_LEN,
   });
   decipher.setAuthTag(tag);
   const data = Buffer.concat([decipher.update(ciphertext), decipher.final()]); // throws if wrong key
-  writeFileSync(destPath, data);
+  // 0600: never leave the decrypted plaintext brain world-readable, even when
+  // restoring to a custom path outside ~/.kit. (openMemoryDb chmods the live DB;
+  // this is the restore-time equivalent.)
+  writeFileSync(destPath, data, { mode: 0o600 });
 }
