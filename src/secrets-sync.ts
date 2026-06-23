@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type { SecretsConfig } from "./config.js";
 import { generateSecrets } from "./secrets.js";
 import { exec } from "./utils/exec.js";
+import { safeErrorMessage } from "./secrets-migrate.js";
 
 export interface SyncResult {
   target: string;
@@ -215,7 +216,8 @@ async function syncToGitHub(
         failed.push(`${name}: ${putResp.status}`);
       }
     } catch (err) {
-      failed.push(`${name}: ${(err as Error).message}`);
+      // Redact: an error here can carry the secret value in its message.
+      failed.push(`${name}: ${safeErrorMessage(err, [value])}`);
     }
   }
 
@@ -259,7 +261,9 @@ async function syncToGitHubViaCli(
       });
       synced.push(name);
     } catch (err) {
-      failed.push(`${name}: ${(err as Error).message}`);
+      // execFile errors embed the full argv (including `--body <value>`) in the
+      // message — redact the secret before it reaches `failed[]`/stdout/CI logs.
+      failed.push(`${name}: ${safeErrorMessage(err, [value])}`);
     }
   }
 
