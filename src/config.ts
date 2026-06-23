@@ -296,6 +296,8 @@ export interface kitConfig {
   hooks?: HooksConfig;
   /** Per-project CLI context lock (account+project per tool). */
   context?: ContextConfig;
+  /** Install-time supply-chain triage settings (`kit supply-chain`). */
+  supply_chain?: { internal_scopes?: string[] };
   web?: {
     search?: WebSearchConfig;
   };
@@ -536,6 +538,10 @@ const kitConfigSchema = z
         auth0: z.object({ tenant: z.string().optional() }).passthrough().optional(),
         clerk: z.object({ env: z.string().optional() }).passthrough().optional(),
       })
+      .passthrough()
+      .optional(),
+    supply_chain: z
+      .object({ internal_scopes: z.array(z.string()).optional() })
       .passthrough()
       .optional(),
     web: WebConfigSchema,

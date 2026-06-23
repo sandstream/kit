@@ -4167,6 +4167,32 @@ async function cmdIngest(): Promise<boolean> {
   return true;
 }
 
+async function cmdSupplyChain(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  const config = await loadConfig(resolveConfigPath());
+  const scopes = config.supply_chain?.internal_scopes ?? [];
+  const { runSupplyChain } = await import("./supply-chain.js");
+  const results = runSupplyChain(process.cwd(), scopes);
+  const fails = results.filter((r) => r.status === "fail").length;
+
+  if (jsonMode) {
+    console.log(JSON.stringify({ ok: fails === 0, results }, null, 2));
+    return fails === 0;
+  }
+
+  console.log(`${c.bold}kit supply-chain${c.reset}`);
+  for (const r of results) {
+    const mark =
+      r.status === "fail" ? `${c.red}✗${c.reset}` :
+      r.status === "warn" ? `${c.yellow}!${c.reset}` :
+      r.status === "skip" ? `${c.dim}−${c.reset}` : `${c.green}✓${c.reset}`;
+    console.log(`  ${mark} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
+    if (r.suggestion) console.log(`      ${c.dim}${r.suggestion}${c.reset}`);
+  }
+  if (fails > 0) console.log(`${c.red}${fails} fail${c.reset}`);
+  return fails === 0;
+}
+
 async function cmdWhoami(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
 
@@ -4906,6 +4932,7 @@ async function main(): Promise<void> {
         check: cmdCheck,
         health: cmdHealth,
         ingest: cmdIngest,
+        "supply-chain": cmdSupplyChain,
         init: cmdInit,
         upgrade: cmdUpgrade,
         install: cmdInstall,

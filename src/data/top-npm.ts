@@ -1,0 +1,24 @@
+/**
+ * A curated set of high-traffic npm package names, used as the typosquat/slopsquat
+ * reference corpus: a dependency that is edit-distance ≤1 from one of these but not
+ * an exact match is a likely look-alike. Kept deliberately small and local (no
+ * network) — it covers the names attackers most often imitate, not all of npm.
+ */
+export const TOP_NPM: readonly string[] = [
+  "react", "react-dom", "lodash", "express", "axios", "chalk", "commander",
+  "debug", "moment", "request", "async", "bluebird", "underscore", "yargs",
+  "uuid", "glob", "minimist", "semver", "rimraf", "mkdirp", "dotenv", "cors",
+  "body-parser", "webpack", "babel-core", "typescript", "eslint", "prettier",
+  "jest", "mocha", "chai", "vue", "angular", "next", "vite", "rollup", "ws",
+  "node-fetch", "cross-env", "nodemon", "ts-node", "tslib", "zod", "prisma",
+  "redux", "react-redux", "styled-components", "tailwindcss", "postcss",
+  "classnames", "immer", "rxjs", "graphql", "apollo-server", "mongoose",
+  "sequelize", "pg", "mysql2", "redis", "ioredis", "socket.io", "passport",
+  "jsonwebtoken", "bcrypt", "bcryptjs", "helmet", "morgan", "winston", "pino",
+  "nanoid", "date-fns", "dayjs", "ramda", "fastify", "koa", "ejs", "handlebars",
+  "sharp", "puppeteer", "playwright", "cheerio", "form-data", "qs", "ini",
+  "colors", "inquirer", "ora", "execa", "fs-extra", "globby", "chokidar",
+  "esbuild", "terser", "core-js", "regenerator-runtime", "left-pad",
+];
+
+export const TOP_NPM_SET: ReadonlySet<string> = new Set(TOP_NPM);
