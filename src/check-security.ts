@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, access, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
+import { homedir } from "node:os";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
@@ -870,6 +871,151 @@ async function checkTrivyConfig(): Promise<SecurityCheckResult> {
   };
 }
 
+/** Locate a Maven project: a `pom.xml` at cwd, or in an immediate child dir
+ *  (the common monorepo layout, e.g. `backend/pom.xml`). Returns the directory
+ *  to scan, or null when there's no Maven project. Skips build/vendor dirs. */
+async function findMavenDir(cwd: string): Promise<string | null> {
+  if (
+    await access(resolve(cwd, "pom.xml"))
+      .then(() => true)
+      .catch(() => false)
+  ) {
+    return cwd;
+  }
+  try {
+    const ignore = new Set(["node_modules", ".git", "target", "dist", "build", ".kit"]);
+    const entries = await readdir(cwd, { withFileTypes: true });
+    for (const e of entries) {
+      if (!e.isDirectory() || ignore.has(e.name)) continue;
+      if (
+        await access(resolve(cwd, e.name, "pom.xml"))
+          .then(() => true)
+          .catch(() => false)
+      ) {
+        return resolve(cwd, e.name);
+      }
+    }
+  } catch {
+    /* unreadable cwd — treat as no Maven project */
+  }
+  return null;
+}
+
+/** Count vulnerabilities in a `trivy fs --format json` payload. PURE so it can
+ *  be unit-tested without running trivy. -1 = unparseable. The caller passes
+ *  `--severity HIGH,CRITICAL`, so every counted vuln is already high/critical. */
+export function parseTrivyVulnCount(stdout: string): number {
+  try {
+    const parsed = JSON.parse(stdout) as {
+      Results?: { Vulnerabilities?: unknown[] }[];
+    };
+    return (parsed.Results ?? []).flatMap((r) => r.Vulnerabilities ?? []).length;
+  } catch {
+    return -1;
+  }
+}
+
+/**
+ * Maven/Java dependency CVE scan via `trivy fs --offline-scan`. Fills the gap
+ * left by npm audit / pip-audit / osv-scanner, none of which resolve a Maven
+ * project's transitive dependency tree.
+ *
+ * Always OFFLINE: trivy's online Java resolver fetches every transitive POM from
+ * Maven Central and trips its anonymous 429 rate-limit on each run, blocking the
+ * host for ~30 min. `--offline-scan` reads the transitive tree from the local
+ * `~/.m2` cache instead — so the cache must be populated (a real `mvn` build
+ * locally, or a CI step that caches `~/.m2`). Without it trivy sees only direct
+ * deps and silently under-reports, so we warn rather than pass.
+ */
+async function checkMavenAudit(): Promise<SecurityCheckResult> {
+  const name = "trivy fs (maven)";
+  const mavenDir = await findMavenDir(process.cwd());
+  if (!mavenDir) {
+    return { category: "dependency", name, status: "skip", detail: "no pom.xml found" };
+  }
+
+  const trivyBin = await resolveToolBin("trivy");
+  if (!trivyBin) {
+    return {
+      category: "dependency",
+      name,
+      status: "warn",
+      detail: "trivy not installed -maven CVEs undetected",
+      severity: "medium",
+      suggestion: "mise use aqua:aquasecurity/trivy  (or: brew install trivy)",
+    };
+  }
+
+  // Transitive resolution comes from ~/.m2; an empty cache means trivy reports
+  // only direct deps. Warn (don't pass) so a green check never hides that gap.
+  const m2 = resolve(homedir(), ".m2", "repository");
+  const hasM2 = await access(m2)
+    .then(() => true)
+    .catch(() => false);
+  if (!hasM2) {
+    return {
+      category: "dependency",
+      name,
+      status: "warn",
+      detail: "no ~/.m2 cache -maven transitive CVEs undetected",
+      severity: "medium",
+      suggestion:
+        "populate the Maven cache: mvn dependency:go-offline (cache ~/.m2 in CI), then re-run",
+    };
+  }
+
+  const result = await execFileNoThrow(
+    trivyBin,
+    [
+      "fs",
+      mavenDir,
+      "--offline-scan",
+      "--scanners",
+      "vuln",
+      "--format",
+      "json",
+      "--severity",
+      "HIGH,CRITICAL",
+      "--quiet",
+    ],
+    { timeout: 180_000 },
+  );
+  if (!result.ok && !result.stdout) {
+    return {
+      category: "dependency",
+      name,
+      status: "warn",
+      detail: "trivy maven scan failed",
+      severity: "medium",
+    };
+  }
+  const count = parseTrivyVulnCount(result.stdout);
+  if (count < 0) {
+    return {
+      category: "dependency",
+      name,
+      status: "warn",
+      detail: "trivy maven scan failed",
+      severity: "medium",
+    };
+  }
+  if (count === 0) {
+    return {
+      category: "dependency",
+      name,
+      status: "pass",
+      detail: "no high/critical Maven dependency CVEs",
+    };
+  }
+  return {
+    category: "dependency",
+    name,
+    status: "fail",
+    detail: `${count} high/critical Maven dependency CVE(s) -run: trivy fs --offline-scan ${mavenDir}`,
+    severity: "high",
+  };
+}
+
 /** Count vulnerabilities in an `osv-scanner --format json` payload. PURE so it
  *  can be unit-tested without running osv-scanner. -1 = unparseable. */
 export function parseOsvVulnCount(stdout: string): number {
@@ -1224,6 +1370,7 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
     bumblebeeResult,
     trivyConfigResult,
     osvResult,
+    mavenResult,
     ...lockfileResults
   ] = await Promise.all([
     checkNpmAudit(),
@@ -1238,6 +1385,7 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
     checkBumblebee(),
     checkTrivyConfig(),
     checkOsvScanner(),
+    checkMavenAudit(),
     ...(await checkLockfilesCommitted()),
   ]);
 
@@ -1254,6 +1402,7 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
     bumblebeeResult,
     trivyConfigResult,
     osvResult,
+    mavenResult,
   );
   results.push(...lockfileResults);
 
