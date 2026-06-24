@@ -6,7 +6,33 @@ import {
   parseOsvVulnCount,
   parseTrivyVulnCount,
   classifySocketResult,
+  classifyTrufflehogFindings,
 } from "./check-security.js";
+
+describe("classifyTrufflehogFindings (verified vs unverified)", () => {
+  const line = (det: string, verified: boolean) =>
+    JSON.stringify({ DetectorName: det, Verified: verified });
+
+  it("ignores the trufflehog info log line (no DetectorName)", () => {
+    const out = classifyTrufflehogFindings('{"level":"info","msg":"starting"}\n');
+    assert.deepStrictEqual(out, { verified: 0, unverified: 0 });
+  });
+
+  it("splits verified-live from unverified findings", () => {
+    const stdout = [
+      '{"level":"info"}',
+      line("Postgres", false),
+      line("Postgres", false),
+      line("AWS", true),
+    ].join("\n");
+    assert.deepStrictEqual(classifyTrufflehogFindings(stdout), { verified: 1, unverified: 2 });
+  });
+
+  it("counts an unparseable DetectorName line conservatively as unverified", () => {
+    const out = classifyTrufflehogFindings('{"DetectorName":"X" broken json');
+    assert.deepStrictEqual(out, { verified: 0, unverified: 1 });
+  });
+});
 
 describe("classifySocketResult (fail-closed)", () => {
   it("never passes when Socket is not logged in (the false-green guard)", () => {

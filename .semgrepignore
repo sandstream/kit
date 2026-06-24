@@ -9,3 +9,14 @@ node_modules/
 coverage/
 .next/
 .turbo/
+
+# Test fixtures contain INTENTIONAL fake secrets (AWS/JWT/Postgres/etc.) to
+# exercise kit's own secret-scanner + redactor — they are not real credentials,
+# and they trip semgrep's secret-detection rules as false positives. Tests are
+# not shipped (dist/ is), so SAST coverage of them has low value + high noise.
+*.test.ts
+
+# Workflow YAML is covered by the dedicated `kit gha-audit` (#60: unpinned
+# actions, pwn-requests). semgrep's secret rules only false-positive here on
+# `${{ secrets.* }}` references (which are NOT literal tokens).
+.github/
