@@ -18,17 +18,17 @@ The triage script reads its registry hosts from the environment, defaulting to
 the public registries. Set these (in the shell, CI job, or the environment kit
 runs under) to your internal mirrors:
 
-| Env var               | Default                        | Used for                                  |
-| :-------------------- | :----------------------------- | :---------------------------------------- |
-| `KIT_NPM_REGISTRY`    | `https://registry.npmjs.org`   | npm package metadata (`kit triage npm:…`) |
-| `KIT_PYPI_INDEX`      | `https://pypi.org`             | PyPI metadata (`pip:…`); expects `/pypi/<name>/json` |
-| `KIT_GITHUB_API`      | `https://api.github.com`       | repo metadata (`repo:…`, `skill` fallback) — GitHub Enterprise API base |
-| `KIT_DOCKER_REGISTRY` | `https://hub.docker.com`       | image metadata (`docker:…`); expects the `/v2/repositories/<repo>` shape |
+| Env var               | Default                      | Used for                                                                 |
+| :-------------------- | :--------------------------- | :----------------------------------------------------------------------- |
+| `KIT_NPM_REGISTRY`    | `https://registry.npmjs.org` | npm package metadata (`kit triage npm:…`)                                |
+| `KIT_PYPI_INDEX`      | `https://pypi.org`           | PyPI metadata (`pip:…`); expects `/pypi/<name>/json`                     |
+| `KIT_GITHUB_API`      | `https://api.github.com`     | repo metadata (`repo:…`, `skill` fallback) — GitHub Enterprise API base  |
+| `KIT_DOCKER_REGISTRY` | `https://hub.docker.com`     | image metadata (`docker:…`); expects the `/v2/repositories/<repo>` shape |
 
 The mirror must expose the same JSON shapes as the upstream it mirrors (most
 internal npm/PyPI proxies and GitHub Enterprise do). The package/repo name is
 the only attacker-influenceable part and is only ever interpolated into the URL
-*path* — the host comes from these operator-set vars, never from the target.
+_path_ — the host comes from these operator-set vars, never from the target.
 
 ```bash
 export KIT_NPM_REGISTRY="https://npm.corp.internal"
@@ -40,21 +40,27 @@ kit triage npm:left-pad      # now evaluated against the internal mirror
 
 ## 2. Run the scanners locally / offline
 
-`kit scan` orchestrates external scanners that you install locally (resolved
-mise-first). Each supports an offline mode against a pre-synced database:
+Set **`KIT_AIRGAP=1`** and `kit scan` switches to offline mode: it drops
+cloud-only scanners and folds each remaining scanner's offline flags/env in so it
+runs against a **pre-synced local DB with no network**.
 
-- **trivy** — `trivy fs --offline-scan` with a DB pulled on a connected host via
-  `trivy --download-db-only` and shipped in (`TRIVY_DB_REPOSITORY` for an OCI
-  mirror).
-- **grype** — set `GRYPE_DB_AUTO_UPDATE=false` and provide a cached DB via
-  `GRYPE_DB_CACHE_DIR` (sync with `grype db update` on a connected host).
-- **osv-scanner** — use a local/offline vulnerability database (`--offline` with
-  a synced OSV DB) so no calls leave the enclave.
-- **semgrep** — ship rule packs locally and run `--config <local-dir>` instead of
-  `--config auto`.
+```bash
+export KIT_AIRGAP=1
+kit scan      # → "air-gap mode: offline scanners only (skipping cloud-only: snyk, semgrep)"
+```
 
-Install these through your internal package mirror or an approved binary cache;
-kit never downloads them itself.
+What the mode does per scanner:
+
+| Scanner         | Air-gap behavior                                                                                                                                              |
+| :-------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **trivy**       | adds `--offline-scan --skip-db-update` (pre-sync the DB on a connected host with `trivy --download-db-only`, or point `TRIVY_DB_REPOSITORY` at an OCI mirror) |
+| **grype**       | sets `GRYPE_DB_AUTO_UPDATE=false` (provide a cached DB via `GRYPE_DB_CACHE_DIR`, synced with `grype db update` on a connected host)                           |
+| **osv-scanner** | adds `--offline` (point at a synced local OSV DB)                                                                                                             |
+| **snyk**        | **skipped** — talks to the Snyk cloud                                                                                                                         |
+| **semgrep**     | **skipped** — `--config auto` fetches the registry (local-ruleset support is a tracked follow-up)                                                             |
+
+Install the scanners through your internal package mirror or an approved binary
+cache; kit never downloads them itself.
 
 ## 3. Bumblebee (known-compromise scan) offline
 
