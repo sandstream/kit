@@ -30,7 +30,7 @@ export function escapeRegex(literal: string): string {
  * leaks the secret unless we redact. We keep the first line for diagnostic
  * value but strip anything matching a known secret pattern.
  */
-function safeErrorMessage(err: unknown, knownSecrets: string[] = []): string {
+export function safeErrorMessage(err: unknown, knownSecrets: string[] = []): string {
   let raw = err instanceof Error ? err.message.split("\n")[0] : String(err);
   // Exact-substring redaction for values we hold — deterministic and
   // shape-independent. Pattern redaction alone fails open for lowercase-keyed

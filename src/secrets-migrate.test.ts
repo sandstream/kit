@@ -8,7 +8,30 @@ import {
   commentOutInFile,
   writeSecretToBackend,
   planMigration,
+  safeErrorMessage,
 } from "./secrets-migrate.js";
+
+describe("safeErrorMessage", () => {
+  it("redacts a known secret embedded in an execFile-style error (the argv leak)", () => {
+    const secret = ["sk", "live", "A".repeat(40)].join("_");
+    // execFile failures interpolate the full argv into err.message
+    const err = new Error(
+      `Command failed: gh secret set FOO --repo o/r --body ${secret}\nHTTP 403`,
+    );
+    const msg = safeErrorMessage(err, [secret]);
+    assert.ok(!msg.includes(secret), "raw secret must not survive");
+    assert.match(msg, /\[REDACTED\]/);
+  });
+
+  it("keeps only the first diagnostic line (drops trailing lines that may carry data)", () => {
+    const secret = "supersecretvalue123456789";
+    const msg = safeErrorMessage(new Error(`write failed for FOO\n  value was ${secret}`), [
+      secret,
+    ]);
+    assert.ok(!msg.includes(secret), "secret on a later line must not survive");
+    assert.match(msg, /write failed for FOO/);
+  });
+});
 
 describe("isValidKeyName", () => {
   it("accepts env-var-shaped identifiers", () => {
