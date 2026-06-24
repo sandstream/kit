@@ -6,6 +6,12 @@ pnpm = "latest"
 pre-commit = ["kit security scan-staged", "npm run build", "npm test"]
 pre-push = ["npm audit --audit-level=high"]
 
+# Scanner tokens (SNYK_TOKEN, …) resolve from the shared sandstream-common
+# Infisical project (#65) so `kit scan` works without an `infisical run` wrapper.
+[scan.tooling]
+project_id = "1c8d0dbc-14b4-487e-85af-add204fc9a6a"
+env = "dev"
+
 [services.github]
 login = "gh auth login"
 check = "gh auth status"
