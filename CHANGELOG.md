@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.23.0] - 2026-06-24
+
+### Added
+- **`kit memory stats` becomes a real instrument — recall count + token economy.** Beyond sessions/messages/tool-uses, `kit memory stats` now reports: **tokens** (input/output totals from the indexed transcripts — already captured per message; `--tokens` adds tokens/message, tokens/session, a by-model breakdown, and a **cache-hit ratio**), **recalls** (how often the store is actually searched — net-new `query_log` records each `kit memory search` with its hit count; surfaces total/last-7d/distinct/top-terms), a **logical-vs-sidechain session split** + transcript-files-indexed (exposes the "N files → M logical sessions" collapse), and `--heatmap` (a per-day activity sparkline over the last 90 days). All local-first, zero-LLM, sourced from the same SQLite DB + transcripts kit already owns. Pure `summarizeTokens`/`sparkline` fixture-tested; schema migrated to v4 (cache-token columns on `messages`, new `query_log`). Cache-hit ratio is `n/a` until cache data accumulates (forward-only; older rows predate the columns).
+
+### Fixed
+- **`kit memory search` no longer leaks a space-form flag value into the query.** `--limit 3` / `--project /p` (space form) previously kept the value token (`3`) as a search term, polluting both the FTS query and (now) the recall log; the value is now consumed. The `--flag=value` form was unaffected.
+
 ## [1.22.0] - 2026-06-23
 
 ### Added

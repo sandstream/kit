@@ -4,7 +4,15 @@ import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
-import { openMemoryDb, getStats, getMemoryDbPath, searchMessages } from "../memory/db.js";
+import {
+  openMemoryDb,
+  getStats,
+  getMemoryDbPath,
+  searchMessages,
+  recordQuery,
+  dailyActivity,
+} from "../memory/db.js";
+import { sparkline, fmtTokens } from "../memory/stats.js";
 import { indexAllHarnesses } from "../memory/parser.js";
 import { mergeDb } from "../memory/merge.js";
 import { buildSuggestPrompt } from "../memory/suggest.js";
@@ -274,23 +282,73 @@ async function memMerge(): Promise<boolean> {
 
 async function memStats(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
+  const tokensMode = hasFlag(process.argv, "--tokens");
+  const heatmapMode = hasFlag(process.argv, "--heatmap");
   const db = openMemoryDb();
   const s = getStats(db);
+  const activity = heatmapMode ? dailyActivity(db, 90) : [];
   db.close();
   if (jsonMode) {
-    console.log(JSON.stringify(s));
+    console.log(JSON.stringify(heatmapMode ? { ...s, activity } : s));
     return true;
   }
+
+  const pct = (r: number | null): string => (r === null ? "n/a" : `${(r * 100).toFixed(0)}%`);
+
   console.log(`${c.bold}kit memory${c.reset}  ${c.dim}${s.dbPath}${c.reset}`);
   console.log(`  sessions   ${s.sessions}`);
   if (s.byHarness.length > 1) {
     const breakdown = s.byHarness.map((h) => `${h.harness} ${h.sessions}`).join(", ");
     console.log(`             ${c.dim}${breakdown}${c.reset}`);
   }
+  console.log(
+    `             ${c.dim}${s.sessionsBreakdown.logical} logical, ${s.sessionsBreakdown.sidechain} sidechain · ${s.sessionsBreakdown.filesIndexed} transcript files indexed${c.reset}`,
+  );
   console.log(`  messages   ${s.messages}`);
   console.log(`  tool-uses  ${s.toolUses}`);
+  console.log(
+    `  tokens     ${fmtTokens(s.tokens.totalTokens)} ${c.dim}(${fmtTokens(s.tokens.inputTokens)} in / ${fmtTokens(s.tokens.outputTokens)} out · cache-hit ${pct(s.tokens.cacheHitRatio)})${c.reset}`,
+  );
+  console.log(
+    `  recalls    ${s.recalls.total} ${c.dim}(${s.recalls.last7d} last 7d · ${s.recalls.distinctQueries} distinct queries)${c.reset}`,
+  );
   console.log(`  pending    ${s.pendingOpen} ${c.dim}(open action items)${c.reset}`);
   console.log(`  size       ${Math.round(s.sizeBytes / 1024)} KB`);
+  console.log(
+    `             ${c.dim}account-wide /stats may exceed this — sessions on other machines aren't in this DB${c.reset}`,
+  );
+
+  if (tokensMode) {
+    console.log(`\n${c.bold}token economy${c.reset}`);
+    console.log(
+      `  ${fmtTokens(s.tokens.perMessage)}/message · ${fmtTokens(s.tokens.perSession)}/session`,
+    );
+    console.log(
+      `  cache: ${fmtTokens(s.tokens.cacheReadTokens)} read / ${fmtTokens(s.tokens.cacheCreationTokens)} created${c.reset}`,
+    );
+    if (s.tokens.byModel.length) {
+      console.log(`  ${c.dim}by model:${c.reset}`);
+      for (const m of s.tokens.byModel) {
+        console.log(
+          `    ${m.model}  ${c.dim}${m.messages} msgs · ${fmtTokens(m.inputTokens)} in / ${fmtTokens(m.outputTokens)} out${c.reset}`,
+        );
+      }
+    }
+    if (s.recalls.topTerms.length) {
+      console.log(`  ${c.dim}top recalls:${c.reset}`);
+      for (const term of s.recalls.topTerms) {
+        console.log(`    ${term.count}×  ${c.dim}${term.query}${c.reset}`);
+      }
+    }
+  }
+
+  if (heatmapMode) {
+    console.log(`\n${c.bold}activity${c.reset} ${c.dim}(last 90 days, messages/day)${c.reset}`);
+    console.log(`  ${sparkline(activity.map((a) => a.count))}`);
+    if (activity.length) {
+      console.log(`  ${c.dim}${activity[0].day} → ${activity[activity.length - 1].day}${c.reset}`);
+    }
+  }
   return true;
 }
 
@@ -313,7 +371,19 @@ async function memSuggest(): Promise<boolean> {
 
 async function memSearch(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
-  const terms = process.argv.slice(4).filter((a) => !a.startsWith("--"));
+  // Extract positional query terms, skipping flags AND the value of space-form
+  // value-flags (`--limit 3` / `--project /p`) so "3" doesn't leak into the query.
+  const VALUE_FLAGS = new Set(["--limit", "--project"]);
+  const rawArgs = process.argv.slice(4);
+  const terms: string[] = [];
+  for (let i = 0; i < rawArgs.length; i++) {
+    const a = rawArgs[i];
+    if (a.startsWith("--")) {
+      if (VALUE_FLAGS.has(a)) i++; // consume the following value token
+      continue;
+    }
+    terms.push(a);
+  }
   const query = terms.join(" ").trim();
   if (!query) {
     console.error(
@@ -327,6 +397,12 @@ async function memSearch(): Promise<boolean> {
     : (flagValue(process.argv, "--project") ?? getCurrentProjectRoot());
   const db = openMemoryDb();
   const hits = searchMessages(db, query, { limit, projectPath });
+  // Record the recall (query_log) — best-effort; never let logging break search.
+  try {
+    recordQuery(db, { query, hitCount: hits.length, projectPath });
+  } catch {
+    // logging is non-critical
+  }
   db.close();
   if (jsonMode) {
     console.log(JSON.stringify(hits));

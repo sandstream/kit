@@ -17,8 +17,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { existsSync, mkdirSync, chmodSync, statSync } from "node:fs";
 import type { MemoryStats, MessageInput, SearchHit, SessionInput, ToolUseInput } from "./types.js";
+import { summarizeTokens } from "./stats.js";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export function getMemoryDir(): string {
   return process.env.KIT_MEMORY_DIR ?? join(homedir(), ".kit");
@@ -56,6 +57,8 @@ CREATE TABLE IF NOT EXISTS messages (
   model TEXT,
   input_tokens INTEGER,
   output_tokens INTEGER,
+  cache_read_input_tokens INTEGER,
+  cache_creation_input_tokens INTEGER,
   timestamp TEXT,
   cwd TEXT,
   git_branch TEXT,
@@ -102,11 +105,21 @@ CREATE TABLE IF NOT EXISTS file_index (
   indexed_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS query_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  query TEXT NOT NULL,
+  hit_count INTEGER NOT NULL DEFAULT 0,
+  project_path TEXT,
+  harness TEXT,
+  executed_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_type ON messages(type);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 CREATE INDEX IF NOT EXISTS idx_tool_uses_tool ON tool_uses(tool_name);
 CREATE INDEX IF NOT EXISTS idx_pending_status ON pending_actions(status);
+CREATE INDEX IF NOT EXISTS idx_query_log_executed ON query_log(executed_at);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
   content,
@@ -143,6 +156,11 @@ function migrate(db: DatabaseSync): void {
   // shell verify_cmd). Legacy verify_cmd rows have a NULL verify_check and are
   // never auto-executed.
   ensureColumn(db, "pending_actions", "verify_check", "TEXT");
+  // v4: prompt-cache token columns on messages (cache-hit economy). Older rows
+  // stay NULL — cache stats populate going forward (input/output were always
+  // captured); query_log is created by SCHEMA_SQL above.
+  ensureColumn(db, "messages", "cache_read_input_tokens", "INTEGER");
+  ensureColumn(db, "messages", "cache_creation_input_tokens", "INTEGER");
   const row = db.prepare("SELECT version FROM schema_meta LIMIT 1").get() as
     | { version: number }
     | undefined;
@@ -226,8 +244,8 @@ export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
   const res = db
     .prepare(
       `INSERT OR IGNORE INTO messages
-       (uuid, session_id, parent_uuid, type, role, content, model, input_tokens, output_tokens, timestamp, cwd, git_branch, version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (uuid, session_id, parent_uuid, type, role, content, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, timestamp, cwd, git_branch, version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       m.uuid,
@@ -239,6 +257,8 @@ export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
       m.model ?? null,
       m.inputTokens ?? null,
       m.outputTokens ?? null,
+      m.cacheReadTokens ?? null,
+      m.cacheCreationTokens ?? null,
       m.timestamp ?? null,
       m.cwd ?? null,
       m.gitBranch ?? null,
@@ -319,6 +339,25 @@ export function searchMessages(
     .all(...params) as unknown as SearchHit[];
 }
 
+export interface QueryLogInput {
+  query: string;
+  hitCount: number;
+  projectPath?: string;
+  harness?: string;
+}
+
+/**
+ * Record one recall (a `kit memory search`) into query_log — the basis for the
+ * "how often is the store actually used" stat. Append-only, best-effort: a
+ * logging failure must never break the search itself (callers wrap in try/catch).
+ */
+export function recordQuery(db: DatabaseSync, q: QueryLogInput): void {
+  db.prepare(
+    `INSERT INTO query_log (query, hit_count, project_path, harness, executed_at)
+     VALUES (?, ?, ?, ?, datetime('now'))`,
+  ).run(q.query, q.hitCount, q.projectPath ?? null, q.harness ?? null);
+}
+
 /**
  * Most-recent messages by wall-clock time (newest first) — the basis for session
  * recovery (re-injecting "where you left off" after a compaction/resume). Unlike
@@ -367,13 +406,92 @@ export function getStats(db: DatabaseSync): MemoryStats {
       .all() as { harness: string; n: number }[]
   ).map((r) => ({ harness: r.harness, sessions: Number(r.n) }));
 
+  const sessions = count("SELECT COUNT(*) AS n FROM sessions");
+  const messages = count("SELECT COUNT(*) AS n FROM messages");
+
+  // Token economy — SUM the raw columns, then derive ratios via the pure helper.
+  const t = db
+    .prepare(
+      `SELECT COALESCE(SUM(input_tokens), 0) AS i,
+              COALESCE(SUM(output_tokens), 0) AS o,
+              COALESCE(SUM(cache_read_input_tokens), 0) AS cr,
+              COALESCE(SUM(cache_creation_input_tokens), 0) AS cc
+       FROM messages`,
+    )
+    .get() as { i: number; o: number; cr: number; cc: number };
+  const summary = summarizeTokens({
+    inputTokens: Number(t.i),
+    outputTokens: Number(t.o),
+    cacheReadTokens: Number(t.cr),
+    cacheCreationTokens: Number(t.cc),
+  });
+  const byModel = (
+    db
+      .prepare(
+        `SELECT COALESCE(model, '(unknown)') AS model, COUNT(*) AS n,
+                COALESCE(SUM(input_tokens), 0) AS i, COALESCE(SUM(output_tokens), 0) AS o
+         FROM messages WHERE input_tokens IS NOT NULL OR output_tokens IS NOT NULL
+         GROUP BY model ORDER BY (i + o) DESC LIMIT 5`,
+      )
+      .all() as { model: string; n: number; i: number; o: number }[]
+  ).map((r) => ({
+    model: r.model,
+    messages: Number(r.n),
+    inputTokens: Number(r.i),
+    outputTokens: Number(r.o),
+  }));
+
+  // Recall usage from query_log.
+  const recallTotal = count("SELECT COUNT(*) AS n FROM query_log");
+  const recall7d = count(
+    "SELECT COUNT(*) AS n FROM query_log WHERE executed_at >= datetime('now', '-7 days')",
+  );
+  const distinctQueries = count("SELECT COUNT(DISTINCT query) AS n FROM query_log");
+  const topTerms = (
+    db
+      .prepare(
+        `SELECT query, COUNT(*) AS n FROM query_log
+         GROUP BY query ORDER BY n DESC, query ASC LIMIT 5`,
+      )
+      .all() as { query: string; n: number }[]
+  ).map((r) => ({ query: r.query, count: Number(r.n) }));
+
   return {
-    sessions: count("SELECT COUNT(*) AS n FROM sessions"),
-    messages: count("SELECT COUNT(*) AS n FROM messages"),
+    sessions,
+    messages,
     toolUses: count("SELECT COUNT(*) AS n FROM tool_uses"),
     pendingOpen: count("SELECT COUNT(*) AS n FROM pending_actions WHERE status = 'open'"),
     dbPath,
     sizeBytes,
     byHarness,
+    tokens: {
+      ...summary,
+      perSession: sessions > 0 ? Math.round(summary.totalTokens / sessions) : 0,
+      perMessage: messages > 0 ? Math.round(summary.totalTokens / messages) : 0,
+      byModel,
+    },
+    recalls: {
+      total: recallTotal,
+      last7d: recall7d,
+      distinctQueries,
+      topTerms,
+    },
+    sessionsBreakdown: {
+      logical: count("SELECT COUNT(*) AS n FROM sessions WHERE is_agent_sidechain = 0"),
+      sidechain: count("SELECT COUNT(*) AS n FROM sessions WHERE is_agent_sidechain = 1"),
+      filesIndexed: count("SELECT COUNT(*) AS n FROM file_index"),
+    },
   };
+}
+
+/** Per-day message counts (oldest→newest) over the last `days` days — sparkline feed. */
+export function dailyActivity(db: DatabaseSync, days = 90): { day: string; count: number }[] {
+  return db
+    .prepare(
+      `SELECT DATE(timestamp) AS day, COUNT(*) AS count
+       FROM messages
+       WHERE timestamp IS NOT NULL AND DATE(timestamp) >= DATE('now', ?)
+       GROUP BY day ORDER BY day ASC`,
+    )
+    .all(`-${days} days`) as { day: string; count: number }[];
 }

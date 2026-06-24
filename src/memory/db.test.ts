@@ -7,6 +7,8 @@ import {
   insertMessage,
   searchMessages,
   getStats,
+  recordQuery,
+  dailyActivity,
   toFtsMatchQuery,
 } from "./db.js";
 
@@ -162,6 +164,85 @@ describe("memory db", () => {
     const scoped = searchMessages(db, "october", { projectPath: "/repo/app-a" });
     assert.equal(scoped.length, 2); // exact root + subdir, not /repo/app-b
     assert.deepEqual(scoped.map((h) => h.uuid).sort(), ["a", "c"]);
+    db.close();
+  });
+
+  it("getStats aggregates tokens (incl cache-hit) from message rows", () => {
+    const db = fresh();
+    upsertSession(db, { sessionId: "s1", harness: "claude-code" });
+    insertMessage(db, {
+      uuid: "a",
+      sessionId: "s1",
+      type: "assistant",
+      model: "claude-opus-4-8",
+      content: "hi",
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 300,
+      cacheCreationTokens: 100,
+    });
+    const s = getStats(db);
+    assert.equal(s.tokens.totalTokens, 150);
+    assert.equal(s.tokens.cacheReadTokens, 300);
+    assert.equal(s.tokens.cacheHitRatio, 0.6); // 300/(100+300+100)
+    assert.equal(s.tokens.perMessage, 150); // 150 tokens / 1 message
+    assert.equal(s.tokens.byModel[0].model, "claude-opus-4-8");
+    db.close();
+  });
+
+  it("recordQuery feeds getStats recall counts + top terms", () => {
+    const db = fresh();
+    recordQuery(db, { query: "stripe webhook", hitCount: 3, projectPath: "/repo" });
+    recordQuery(db, { query: "stripe webhook", hitCount: 1 });
+    recordQuery(db, { query: "rls policy", hitCount: 0 });
+    const s = getStats(db);
+    assert.equal(s.recalls.total, 3);
+    assert.equal(s.recalls.last7d, 3); // all just inserted
+    assert.equal(s.recalls.distinctQueries, 2);
+    assert.equal(s.recalls.topTerms[0].query, "stripe webhook");
+    assert.equal(s.recalls.topTerms[0].count, 2);
+    db.close();
+  });
+
+  it("getStats splits logical vs sidechain sessions", () => {
+    const db = fresh();
+    upsertSession(db, { sessionId: "main", harness: "claude-code", isAgentSidechain: false });
+    upsertSession(db, { sessionId: "sub", harness: "claude-code", isAgentSidechain: true });
+    const s = getStats(db);
+    assert.equal(s.sessions, 2);
+    assert.equal(s.sessionsBreakdown.logical, 1);
+    assert.equal(s.sessionsBreakdown.sidechain, 1);
+    db.close();
+  });
+
+  it("dailyActivity groups messages by day", () => {
+    const db = fresh();
+    upsertSession(db, { sessionId: "s1", harness: "claude-code" });
+    insertMessage(db, {
+      uuid: "a",
+      sessionId: "s1",
+      type: "user",
+      content: "x",
+      timestamp: "2026-06-20T10:00:00.000Z",
+    });
+    insertMessage(db, {
+      uuid: "b",
+      sessionId: "s1",
+      type: "user",
+      content: "y",
+      timestamp: "2026-06-20T11:00:00.000Z",
+    });
+    // far-past row is outside the default 90-day window
+    insertMessage(db, {
+      uuid: "old",
+      sessionId: "s1",
+      type: "user",
+      content: "z",
+      timestamp: "2000-01-01T00:00:00.000Z",
+    });
+    const days = dailyActivity(db, 100_000); // wide window to capture both buckets
+    const jun20 = days.find((d) => d.day === "2026-06-20");
+    assert.equal(jun20?.count, 2);
     db.close();
   });
 });
