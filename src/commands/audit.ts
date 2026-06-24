@@ -108,6 +108,30 @@ export async function cmdAudit(): Promise<boolean> {
     return false;
   }
 
+  // Sub-sub: kit audit export [--format cef|syslog|json] — emit for a SIEM
+  if (args[0] === "export") {
+    const fmt = (flagValue(args, "--format") ?? "cef") as "cef" | "syslog" | "json";
+    if (!["cef", "syslog", "json"].includes(fmt)) {
+      console.error(`${c.red}unknown --format "${fmt}" (use cef | syslog | json)${c.reset}`);
+      return false;
+    }
+    let exportLog = ".kit-audit.jsonl";
+    try {
+      const config = await loadConfig(resolveConfigPath());
+      if (config.governance?.audit?.log_file) exportLog = config.governance.audit.log_file;
+    } catch {
+      /* default */
+    }
+    const { exportAudit } = await import("../audit-export.js");
+    const events = await readAuditLog(exportLog, 1_000_000);
+    if (events.length === 0) {
+      console.error(`${c.dim}no audit log at ${exportLog}${c.reset}`);
+      return true;
+    }
+    process.stdout.write(exportAudit(events, fmt) + "\n");
+    return true;
+  }
+
   // Parse --limit N
   let limit = 20;
   const limitIdx = args.indexOf("--limit");
