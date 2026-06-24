@@ -19,6 +19,7 @@ import { readFile, writeFile, mkdir, access } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { appendAuditEventDirect } from "./audit.js";
+import { secureFile } from "./utils/secure-perms.js";
 
 const ELEVATION_FILE = ".kit/elevation.json";
 const DEFAULT_TTL_MINUTES = 15;
@@ -114,6 +115,7 @@ async function getElevationSigningKey(): Promise<Buffer> {
       mode: 0o600,
       flag: "wx",
     });
+    secureFile(keyPath); // owner-only on Windows (NTFS ignores mode) — #43
     return key;
   } catch {
     const hex = (await readFile(keyPath, "utf-8")).trim();
@@ -329,6 +331,7 @@ export async function enrollTotp(opts: {
 
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, secret + "\n", { encoding: "utf-8", mode: 0o600 });
+  secureFile(filePath); // owner-only on Windows (NTFS ignores mode) — #43
 
   return {
     secret,

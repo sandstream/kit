@@ -1,6 +1,6 @@
 {
   "name": "sandstream-kit",
-  "version": "1.29.1",
+  "version": "1.30.0",
   "description": "developer kit. zero LLM, local-first, multi-vault. one command from git clone to working dev environment.",
   "license": "MIT",
   "funding": "https://buymeacoffee.com/sandstream",

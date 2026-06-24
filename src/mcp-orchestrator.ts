@@ -28,6 +28,7 @@ import { readFile, writeFile, mkdir, rename, access, unlink } from "node:fs/prom
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import type { McpConfig, McpServerConfig } from "./config.js";
+import { secureFile, secureDir } from "./utils/secure-perms.js";
 
 const TOKEN_FILE = `${homedir()}/.kit/mcp-tokens.json`;
 
@@ -62,6 +63,7 @@ async function writeTokenStore(store: TokenStore): Promise<void> {
   // owner-only too — defense in depth for the token store.
   const dir = dirname(TOKEN_FILE);
   await mkdir(dir, { recursive: true, mode: 0o700 });
+  secureDir(dir); // Windows: NTFS ignores mode bits — enforce owner-only via ACL (#43)
   const tmp = `${TOKEN_FILE}.${process.pid}.tmp`;
   try {
     // wx flag = fail if exists (no clobber); mode passed to open() so the
@@ -72,6 +74,7 @@ async function writeTokenStore(store: TokenStore): Promise<void> {
       flag: "wx",
     });
     await rename(tmp, TOKEN_FILE);
+    secureFile(TOKEN_FILE); // owner-only on Windows too (#43)
   } catch (err) {
     // Cleanup tmp if rename failed.
     await unlink(tmp).catch(() => {});

@@ -15,10 +15,11 @@
 import { DatabaseSync } from "node:sqlite";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { existsSync, mkdirSync, chmodSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import type { MemoryStats, MessageInput, SearchHit, SessionInput, ToolUseInput } from "./types.js";
 import { summarizeTokens } from "./stats.js";
 import { redactSecrets } from "../utils/redactSecrets.js";
+import { secureFile, secureDir } from "../utils/secure-perms.js";
 
 export const SCHEMA_VERSION = 4;
 
@@ -48,7 +49,10 @@ export function getMemoryDbPath(): string {
 
 function ensureMemoryDir(): void {
   const dir = getMemoryDir();
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    secureDir(dir); // enforce owner-only on Windows too (NTFS ignores mode bits) — #43
+  }
 }
 
 const SCHEMA_SQL = `
@@ -202,7 +206,7 @@ export function openMemoryDb(path?: string): DatabaseSync {
   migrate(db);
   if (dbPath !== ":memory:" && existsSync(dbPath)) {
     try {
-      chmodSync(dbPath, 0o600);
+      secureFile(dbPath); // 0o600 on POSIX, icacls owner-only on Windows — #43
     } catch {
       // best-effort: non-POSIX filesystems may not support chmod
     }
