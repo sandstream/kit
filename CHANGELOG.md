@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
-- **Cross-platform build script (#43).** The `build`/`build:prod` scripts used POSIX `rm -rf dist` + `chmod +x dist/cli.js`, which fail on native Windows. Now use `rimraf` (already a dep) + a tiny `scripts/chmod-cli.mjs` that no-ops on `win32` — same output on POSIX (verified: `dist/cli.js` stays `0755`). Lets kit build on Windows; another #43 blocker cleared.
+- **Cross-platform build script (#43).** The `build`/`build:prod` scripts used POSIX `rm -rf dist` + `chmod +x dist/cli.js`, which fail on native Windows. Now use two tiny no-dep node scripts — `scripts/clean-dist.mjs` (`fs.rmSync`) + `scripts/chmod-cli.mjs` (no-ops on `win32`) — same output on POSIX (verified: `dist/cli.js` stays `0755`). Lets kit build on Windows; another #43 blocker cleared.
 
 ### Added
 
