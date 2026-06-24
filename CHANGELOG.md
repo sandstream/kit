@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.26.1] - 2026-06-24
+
+### Changed
+
+- **Dropped the Socket scan from `kit check` (#103) — it's cloud-only and can't be local-first or air-gapped.** `checkSocket` ran `socket check`, a command **removed in Socket CLI v1.x** (so it never actually scanned), and Socket's v1.x model (`socket scan create`) uploads your dependency manifest to socket.dev — server-side analysis that breaks kit's zero-network promise and has no offline/self-host path (verified: neither Socket nor Snyk offer an air-gappable analysis engine; their "self-hosted" = your _source_, not their scanner). Socket now surfaces as an informative `skip` ("cloud-only … excluded from kit's local-first check. Local cover: bumblebee + osv-scanner + kit supply-chain") rather than a broken/false-green warn. Removed the now-unused `classifySocketResult`. Run Socket via its own CLI / in CI if you have egress; a local behavioral-malware scanner (GuardDog) is tracked as the local-first replacement.
+
 ## [1.26.0] - 2026-06-24
 
 ### Changed
