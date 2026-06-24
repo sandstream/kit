@@ -21,6 +21,7 @@ RUN npm ci
 COPY src ./src
 COPY tsconfig*.json ./
 COPY .kit ./.kit
+COPY scripts ./scripts
 
 # Build TypeScript → JavaScript
 RUN npm run build
