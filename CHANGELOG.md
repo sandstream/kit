@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.31.0] - 2026-06-24
+
+### Fixed
+
+- **JVM dependency CVE scan now covers Gradle + nested projects (#110, follow-up to #67).** `checkMavenAudit` only detected `pom.xml` at depth ≤1, so **Gradle** projects (`build.gradle`/`build.gradle.kts`) and Maven/Gradle projects in monorepo subdirs (`services/backend/pom.xml`) passed the gate green — the exact false-green #67 set out to close, for the other half of the JVM ecosystem. Now: detects Maven **and** Gradle via a depth-≤3 BFS (skipping vendor/build dirs); a Gradle project **without** a `gradle.lockfile` `warn`s (trivy sees only direct deps) instead of `skip`ping green, mirroring the `~/.m2` handling. Pure `jvmProjectKind` + `findJvmProject` fixture-tested.
+
 ## [1.30.0] - 2026-06-24
 
 ### Added

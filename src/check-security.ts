@@ -922,32 +922,55 @@ async function checkTrivyConfig(): Promise<SecurityCheckResult> {
   };
 }
 
-/** Locate a Maven project: a `pom.xml` at cwd, or in an immediate child dir
- *  (the common monorepo layout, e.g. `backend/pom.xml`). Returns the directory
- *  to scan, or null when there's no Maven project. Skips build/vendor dirs. */
-async function findMavenDir(cwd: string): Promise<string | null> {
-  if (
-    await access(resolve(cwd, "pom.xml"))
-      .then(() => true)
-      .catch(() => false)
-  ) {
-    return cwd;
-  }
-  try {
-    const ignore = new Set(["node_modules", ".git", "target", "dist", "build", ".kit"]);
-    const entries = await readdir(cwd, { withFileTypes: true });
-    for (const e of entries) {
-      if (!e.isDirectory() || ignore.has(e.name)) continue;
-      if (
-        await access(resolve(cwd, e.name, "pom.xml"))
-          .then(() => true)
-          .catch(() => false)
-      ) {
-        return resolve(cwd, e.name);
+export type JvmKind = "maven" | "gradle";
+
+/** Classify a directory's filenames as a JVM project root (pure, testable). #110 */
+export function jvmProjectKind(files: string[]): JvmKind | null {
+  if (files.includes("pom.xml")) return "maven";
+  if (files.includes("build.gradle") || files.includes("build.gradle.kts")) return "gradle";
+  return null;
+}
+
+const JVM_IGNORE = new Set([
+  "node_modules",
+  ".git",
+  "target",
+  "dist",
+  "build",
+  ".kit",
+  ".gradle",
+  ".next",
+]);
+
+/** Locate the nearest JVM project — Maven (`pom.xml`) or Gradle (`build.gradle[.kts]`)
+ *  — within `maxDepth` directories of cwd (BFS, shallowest wins), skipping
+ *  build/vendor dirs. Returns `{dir, kind}` or null. Depth ≤3 covers monorepo
+ *  layouts like `services/backend/pom.xml` that the old depth-1 scan missed (#110). */
+export async function findJvmProject(
+  cwd: string,
+  maxDepth = 3,
+): Promise<{ dir: string; kind: JvmKind } | null> {
+  let frontier: { dir: string; depth: number }[] = [{ dir: cwd, depth: 0 }];
+  while (frontier.length > 0) {
+    const next: { dir: string; depth: number }[] = [];
+    for (const { dir, depth } of frontier) {
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        continue; // unreadable dir — skip
+      }
+      const kind = jvmProjectKind(entries.filter((e) => e.isFile()).map((e) => e.name));
+      if (kind) return { dir, kind };
+      if (depth < maxDepth) {
+        for (const e of entries) {
+          if (e.isDirectory() && !JVM_IGNORE.has(e.name)) {
+            next.push({ dir: resolve(dir, e.name), depth: depth + 1 });
+          }
+        }
       }
     }
-  } catch {
-    /* unreadable cwd — treat as no Maven project */
+    frontier = next;
   }
   return null;
 }
@@ -979,11 +1002,17 @@ export function parseTrivyVulnCount(stdout: string): number {
  * deps and silently under-reports, so we warn rather than pass.
  */
 async function checkMavenAudit(): Promise<SecurityCheckResult> {
-  const name = "trivy fs (maven)";
-  const mavenDir = await findMavenDir(process.cwd());
-  if (!mavenDir) {
-    return { category: "dependency", name, status: "skip", detail: "no pom.xml found" };
+  const found = await findJvmProject(process.cwd());
+  const name = `trivy fs (${found?.kind ?? "jvm"})`;
+  if (!found) {
+    return {
+      category: "dependency",
+      name: "trivy fs (jvm)",
+      status: "skip",
+      detail: "no Maven/Gradle project found",
+    };
   }
+  const { dir: mavenDir, kind } = found;
 
   const trivyBin = await resolveToolBin("trivy");
   if (!trivyBin) {
@@ -997,22 +1026,40 @@ async function checkMavenAudit(): Promise<SecurityCheckResult> {
     };
   }
 
-  // Transitive resolution comes from ~/.m2; an empty cache means trivy reports
-  // only direct deps. Warn (don't pass) so a green check never hides that gap.
-  const m2 = resolve(homedir(), ".m2", "repository");
-  const hasM2 = await access(m2)
-    .then(() => true)
-    .catch(() => false);
-  if (!hasM2) {
-    return {
-      category: "dependency",
-      name,
-      status: "warn",
-      detail: "no ~/.m2 cache -maven transitive CVEs undetected",
-      severity: "medium",
-      suggestion:
-        "populate the Maven cache: mvn dependency:go-offline (cache ~/.m2 in CI), then re-run",
-    };
+  // Transitive resolution source: Maven reads ~/.m2; Gradle reads gradle.lockfile.
+  // Without it trivy sees only direct deps, so warn (don't pass) — a green check
+  // must never hide the transitive gap (#110).
+  if (kind === "maven") {
+    const m2 = resolve(homedir(), ".m2", "repository");
+    const hasM2 = await access(m2)
+      .then(() => true)
+      .catch(() => false);
+    if (!hasM2) {
+      return {
+        category: "dependency",
+        name,
+        status: "warn",
+        detail: "no ~/.m2 cache -maven transitive CVEs undetected",
+        severity: "medium",
+        suggestion:
+          "populate the Maven cache: mvn dependency:go-offline (cache ~/.m2 in CI), then re-run",
+      };
+    }
+  } else {
+    const hasLock = await access(resolve(mavenDir, "gradle.lockfile"))
+      .then(() => true)
+      .catch(() => false);
+    if (!hasLock) {
+      return {
+        category: "dependency",
+        name,
+        status: "warn",
+        detail: "no gradle.lockfile -gradle transitive CVEs undetected (only direct deps scanned)",
+        severity: "medium",
+        suggestion:
+          "generate a lockfile: gradle dependencies --write-locks (commit gradle.lockfile), then re-run",
+      };
+    }
   }
 
   const result = await execFileNoThrow(
@@ -1036,7 +1083,7 @@ async function checkMavenAudit(): Promise<SecurityCheckResult> {
       category: "dependency",
       name,
       status: "warn",
-      detail: "trivy maven scan failed",
+      detail: "trivy JVM scan failed",
       severity: "medium",
     };
   }
@@ -1046,7 +1093,7 @@ async function checkMavenAudit(): Promise<SecurityCheckResult> {
       category: "dependency",
       name,
       status: "warn",
-      detail: "trivy maven scan failed",
+      detail: "trivy JVM scan failed",
       severity: "medium",
     };
   }
@@ -1055,14 +1102,14 @@ async function checkMavenAudit(): Promise<SecurityCheckResult> {
       category: "dependency",
       name,
       status: "pass",
-      detail: "no high/critical Maven dependency CVEs",
+      detail: "no high/critical JVM dependency CVEs",
     };
   }
   return {
     category: "dependency",
     name,
     status: "fail",
-    detail: `${count} high/critical Maven dependency CVE(s) -run: trivy fs --offline-scan ${mavenDir}`,
+    detail: `${count} high/critical JVM dependency CVE(s) -run: trivy fs --offline-scan ${mavenDir}`,
     severity: "high",
   };
 }

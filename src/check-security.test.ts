@@ -6,7 +6,59 @@ import {
   parseOsvVulnCount,
   parseTrivyVulnCount,
   classifyTrufflehogFindings,
+  jvmProjectKind,
+  findJvmProject,
 } from "./check-security.js";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+describe("jvmProjectKind (#110)", () => {
+  it("detects Maven and Gradle (incl. .kts), null otherwise", () => {
+    assert.strictEqual(jvmProjectKind(["pom.xml"]), "maven");
+    assert.strictEqual(jvmProjectKind(["build.gradle"]), "gradle");
+    assert.strictEqual(jvmProjectKind(["build.gradle.kts"]), "gradle");
+    assert.strictEqual(jvmProjectKind(["package.json", "README.md"]), null);
+    // pom.xml wins when both present
+    assert.strictEqual(jvmProjectKind(["pom.xml", "build.gradle"]), "maven");
+  });
+});
+
+describe("findJvmProject (#110 — Gradle + nested depth)", () => {
+  it("finds a Gradle project nested at depth 2", async () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-jvm-"));
+    const deep = join(root, "services", "backend");
+    mkdirSync(deep, { recursive: true });
+    writeFileSync(join(deep, "build.gradle.kts"), "plugins {}\n");
+    const found = await findJvmProject(root);
+    assert.ok(found);
+    assert.strictEqual(found!.kind, "gradle");
+    assert.strictEqual(found!.dir, deep);
+  });
+
+  it("finds a Maven pom.xml at depth 2 (the monorepo layout #67 missed)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-jvm-"));
+    const deep = join(root, "apps", "api");
+    mkdirSync(deep, { recursive: true });
+    writeFileSync(join(deep, "pom.xml"), "<project/>\n");
+    const found = await findJvmProject(root);
+    assert.strictEqual(found?.kind, "maven");
+  });
+
+  it("returns null when there is no JVM project", async () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-jvm-"));
+    writeFileSync(join(root, "package.json"), "{}\n");
+    assert.strictEqual(await findJvmProject(root), null);
+  });
+
+  it("skips vendor dirs (node_modules) when searching", async () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-jvm-"));
+    const buried = join(root, "node_modules", "x");
+    mkdirSync(buried, { recursive: true });
+    writeFileSync(join(buried, "pom.xml"), "<project/>\n");
+    assert.strictEqual(await findJvmProject(root), null);
+  });
+});
 
 describe("classifyTrufflehogFindings (verified vs unverified)", () => {
   const line = (det: string, verified: boolean) =>
