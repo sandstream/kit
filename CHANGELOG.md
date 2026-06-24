@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.28.2] - 2026-06-24
+
+### Changed
+
+- **Cross-platform build script (#43).** The `build`/`build:prod` scripts used POSIX `rm -rf dist` + `chmod +x dist/cli.js`, which fail on native Windows. Now use `rimraf` (already a dep) + a tiny `scripts/chmod-cli.mjs` that no-ops on `win32` — same output on POSIX (verified: `dist/cli.js` stays `0755`). Lets kit build on Windows; another #43 blocker cleared.
+
+### Added
+
+- **`windows-latest` compatibility probe CI (#43).** A non-required workflow (`workflow_dispatch` + `windows-ci/**` branches) that builds + unit-tests on a real Windows runner and smoke-runs `kit check` (non-blocking) — so the remaining native-Windows blockers (POSIX git hooks, `tar`, secret-file ACLs) get surfaced + fixed against a genuine Windows env instead of guessed at on macOS. Actions are SHA-pinned (passes `kit gha-audit`).
+
 ## [1.28.1] - 2026-06-24
 
 ### Fixed

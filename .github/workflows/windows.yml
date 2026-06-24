@@ -1,0 +1,35 @@
+# Native Windows compatibility probe (#43). NOT a required gate — it runs on
+# demand (and on windows-ci/** branches) to surface the real PowerShell/cmd
+# blockers against a genuine windows-latest runner, instead of guessing on macOS.
+# Build + unit tests must pass; the kit-command smoke is allowed to fail so it
+# reports the remaining operational gaps (POSIX git hooks, tar, ACLs) as it goes.
+name: Windows (native, probe)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - "windows-ci/**"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-native:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 22
+      - name: Install
+        run: npm ci
+      - name: Build (cross-platform: rimraf + node chmod, no POSIX rm/chmod)
+        run: npm run build
+      - name: Unit tests
+        run: npm test
+      - name: kit smoke (init / check) — gaps surface here, non-blocking
+        continue-on-error: true
+        run: |
+          node dist/cli.js --version
+          node dist/cli.js check --category security
