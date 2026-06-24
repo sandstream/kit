@@ -5,7 +5,51 @@ import {
   parseTrivyMisconfigCount,
   parseOsvVulnCount,
   parseTrivyVulnCount,
+  classifySocketResult,
 } from "./check-security.js";
+
+describe("classifySocketResult (fail-closed)", () => {
+  it("never passes when Socket is not logged in (the false-green guard)", () => {
+    for (const raw of [
+      "Please run `socket login` first",
+      "Error: unauthenticated",
+      "401 Unauthorized",
+      "Set SOCKET_API_TOKEN to continue",
+    ]) {
+      const r = classifySocketResult(raw, false);
+      assert.strictEqual(r.status, "warn", `expected warn for: ${raw}`);
+      assert.match(r.detail, /UNVERIFIED|not logged in/);
+      assert.strictEqual(r.suggestion, "socket login");
+    }
+  });
+
+  it("passes ONLY on a valid scan result with zero issues", () => {
+    const r = classifySocketResult(JSON.stringify({ issues: [] }), true);
+    assert.strictEqual(r.status, "pass");
+  });
+
+  it("fails on critical/high issues, warns on lower issues", () => {
+    assert.strictEqual(
+      classifySocketResult(JSON.stringify({ issues: [{ severity: "critical" }] }), false).status,
+      "fail",
+    );
+    assert.strictEqual(
+      classifySocketResult(JSON.stringify({ issues: [{ severity: "low" }] }), true).status,
+      "warn",
+    );
+  });
+
+  it("does NOT pass on unparseable output, even with exit 0 (no proof of scan)", () => {
+    const r = classifySocketResult("some human-readable banner, not JSON", true);
+    assert.strictEqual(r.status, "warn");
+    assert.match(r.detail, /UNVERIFIED/);
+  });
+
+  it("warns (not pass) on non-zero exit with no parseable output", () => {
+    const r = classifySocketResult("", false);
+    assert.strictEqual(r.status, "warn");
+  });
+});
 
 describe("parseTrivyMisconfigCount", () => {
   it("counts only HIGH/CRITICAL misconfigurations", () => {

@@ -609,6 +609,75 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
 }
 
 /**
+ * Classify `socket check --json` output into a result (pure — fixture-tested).
+ *
+ * FAIL CLOSED: a `pass` requires POSITIVE proof the scan ran (valid result JSON).
+ * The dangerous case is a Socket that's installed but NOT authenticated — it can
+ * appear to "run" yet check nothing, and a fail-open `pass` would give false
+ * assurance the supply chain is covered. So not-logged-in / unparseable output /
+ * non-zero exit all surface LOUDLY as "not scanning — UNVERIFIED", never as pass.
+ * (Same principle as #74 for `kit scan`.)
+ */
+export function classifySocketResult(raw: string, ok: boolean): SecurityCheckResult {
+  const base = { category: "supply-chain", name: "socket scan" } as const;
+  if (
+    /(socket login|log[\s-]?in|unauthenticat|not authenticated|api[\s_-]*token|forbidden|\b401\b|\b403\b)/i.test(
+      raw,
+    )
+  ) {
+    return {
+      ...base,
+      status: "warn",
+      detail: "socket NOT scanning — not logged in; supply chain UNVERIFIED",
+      severity: "medium",
+      suggestion: "socket login",
+    };
+  }
+
+  let parsed: { issues?: { severity?: string }[]; alerts?: { severity?: string }[] } | null = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+
+  if (parsed) {
+    const issues = parsed.issues ?? parsed.alerts ?? [];
+    const critical = issues.filter((i) => i.severity === "critical" || i.severity === "high");
+    if (critical.length > 0) {
+      return {
+        ...base,
+        status: "fail",
+        detail: `${critical.length} critical/high supply chain issue(s) -run: socket check`,
+        severity: "critical",
+      };
+    }
+    if (issues.length > 0) {
+      return {
+        ...base,
+        status: "warn",
+        detail: `${issues.length} supply chain warning(s) -run: socket check`,
+        severity: "medium",
+      };
+    }
+    // Valid scan result with zero issues — the ONLY path that earns a pass.
+    return { ...base, status: "pass", detail: "no supply chain issues detected" };
+  }
+
+  // No parseable result (and no recognized auth error): cannot confirm a scan
+  // happened — never pass on that assumption.
+  return {
+    ...base,
+    status: "warn",
+    detail: ok
+      ? "socket check returned no parseable result — supply chain UNVERIFIED"
+      : "socket check failed -verify installation or run: socket login",
+    severity: "medium",
+    suggestion: "socket login",
+  };
+}
+
+/**
  * Check for supply chain attacks using Socket CLI.
  * Detects behavioral anomalies (obfuscated files, unexpected network calls, install scripts)
  * that npm audit misses -catches intentional malware like node-ipc and compromised packages.
@@ -640,52 +709,7 @@ async function checkSocket(): Promise<SecurityCheckResult> {
   }
 
   const result = await execFileNoThrow(socketBin, ["check", "--json"], { timeout: 60_000 });
-  const raw = result.stdout || result.stderr;
-
-  try {
-    const parsed = JSON.parse(raw);
-    const issues: Array<{ severity?: string }> = parsed.issues ?? parsed.alerts ?? [];
-    const critical = issues.filter((i) => i.severity === "critical" || i.severity === "high");
-
-    if (critical.length > 0) {
-      return {
-        category: "supply-chain",
-        name: "socket scan",
-        status: "fail",
-        detail: `${critical.length} critical/high supply chain issue(s) -run: socket check`,
-        severity: "critical",
-      };
-    }
-    if (issues.length > 0) {
-      return {
-        category: "supply-chain",
-        name: "socket scan",
-        status: "warn",
-        detail: `${issues.length} supply chain warning(s) -run: socket check`,
-        severity: "medium",
-      };
-    }
-  } catch {
-    // Non-JSON output: socket check passed (exit 0, human-readable)
-  }
-
-  if (!result.ok) {
-    return {
-      category: "supply-chain",
-      name: "socket scan",
-      status: "warn",
-      detail: "socket check failed -verify installation or run: socket login",
-      severity: "medium",
-      suggestion: "socket login",
-    };
-  }
-
-  return {
-    category: "supply-chain",
-    name: "socket scan",
-    status: "pass",
-    detail: "no supply chain issues detected",
-  };
+  return classifySocketResult(result.stdout || result.stderr, result.ok);
 }
 
 /**

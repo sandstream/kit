@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.25.1] - 2026-06-24
+
+### Fixed
+
+- **`kit check` Socket scan no longer fails open — a not-logged-in Socket can't masquerade as "passed".** `checkSocket` previously treated any non-JSON `socket check` output as "passed" (`catch { /* passed */ }` + a bare exit-0 → `pass`), so an installed-but-unauthenticated Socket — which appears to run while checking nothing — could report a green "no supply chain issues detected" and give false assurance. Now a `pass` requires POSITIVE proof the scan ran (valid result JSON); not-logged-in / unparseable output / non-zero exit all surface loudly as **"socket NOT scanning — supply chain UNVERIFIED"** with a `socket login` hint, never as pass. Decision logic extracted to a pure, fixture-tested `classifySocketResult`. (Same fail-closed principle as #74 for `kit scan`; `checkSemgrep` was already fail-closed.)
+
 ## [1.25.0] - 2026-06-24
 
 ### Added
