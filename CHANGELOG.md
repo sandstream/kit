@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.26.0] - 2026-06-24
+
+### Changed
+
+- **Secrets scan distinguishes verified-live from unverified — no more critical-failing a clean repo on its own test fixtures.** `kit check`'s trufflehog git-history scan previously failed `critical` on _any_ finding, counting secret-SHAPED strings the same as confirmed leaks — so a repo's own test fixtures / example connection strings / docs blocked the gate. Now only a **verified-live** secret (one trufflehog confirmed still works) is a `critical` fail ("rotate now"); unverified secret-shaped strings are a `warn` to review ("0 verified-live — review for test/example data"). New pure, fixture-tested `classifyTrufflehogFindings`. This is the #1 false-positive class for any security tool whose own suite contains fake secrets.
+- **semgrep `.semgrepignore` excludes test fixtures + `.github/` (noise reduction).** Test files carry intentional fake secrets to exercise kit's scanner/redactor (semgrep secret-rule false positives; tests aren't shipped), and workflow YAML is covered by the dedicated `kit gha-audit` (#60) — semgrep only false-positived there on `${{ secrets.* }}` references. Drops kit's own semgrep result from a `fail` (16 fixture/noise findings) to a `warn` (genuine low-severity items only).
+
 ## [1.25.1] - 2026-06-24
 
 ### Fixed

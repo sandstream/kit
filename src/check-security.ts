@@ -489,6 +489,34 @@ async function checkPinnedVersions(): Promise<SecurityCheckResult> {
 }
 
 /**
+ * Count trufflehog `--json` findings split by Verified (live) vs unverified. Pure.
+ *
+ * trufflehog prefixes an info LOG line ({"level":...}); only DetectorName lines are
+ * findings. `Verified: true` = trufflehog reached the provider and the credential
+ * WORKS (a real, live leak). Unverified = secret-SHAPED but unconfirmed — very often
+ * test fixtures / example connection strings / docs. A DetectorName line that won't
+ * parse is counted conservatively as unverified (surfaced, just not as critical).
+ */
+export function classifyTrufflehogFindings(stdout: string): {
+  verified: number;
+  unverified: number;
+} {
+  let verified = 0;
+  let unverified = 0;
+  for (const line of stdout.trim().split("\n")) {
+    if (!line.includes('"DetectorName"')) continue;
+    try {
+      const j = JSON.parse(line) as { Verified?: boolean };
+      if (j.Verified === true) verified++;
+      else unverified++;
+    } catch {
+      unverified++;
+    }
+  }
+  return { verified, unverified };
+}
+
+/**
  * Scan for secrets in code using trufflehog or basic pattern matching
  */
 async function checkSecretsInCode(): Promise<SecurityCheckResult> {
@@ -522,20 +550,29 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
         { timeout: 90_000 },
       );
 
-      // trufflehog --json prefixes an info LOG line ({"level":...}); only count
-      // lines that are real findings (they carry a DetectorName).
-      const findings = stdout
-        .trim()
-        .split("\n")
-        .filter((l) => l.includes('"DetectorName"'));
+      // Split verified-live from unverified (#noise-reduction). Only a VERIFIED
+      // secret — one trufflehog confirmed still works — is a critical fail (rotate
+      // now). Unverified secret-shaped strings (overwhelmingly test fixtures /
+      // example connection strings) are a warn to review, not a release-blocking
+      // critical. Avoids failing a clean repo on its own test data.
+      const { verified, unverified } = classifyTrufflehogFindings(stdout);
 
-      if (findings.length > 0) {
+      if (verified > 0) {
         return {
           category: "secrets",
           name: "secrets scan",
           status: "fail",
-          detail: `${findings.length} secret(s) committed in git history -run: trufflehog git file://.`,
+          detail: `${verified} VERIFIED-LIVE secret(s) in git history -rotate now; run: trufflehog git file://.`,
           severity: "critical",
+        };
+      }
+      if (unverified > 0) {
+        return {
+          category: "secrets",
+          name: "secrets scan",
+          status: "warn",
+          detail: `${unverified} unverified secret-shaped string(s) in git history (0 verified-live) — review for test/example data: trufflehog git file://.`,
+          severity: "medium",
         };
       }
 
