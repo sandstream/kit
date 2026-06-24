@@ -90,7 +90,11 @@ export async function triageNpmSandbox(
   }
 
   // 2. Extract into the same tmpdir for inspection.
-  await exec("tar", ["xzf", tarballPath, "-C", work], { timeout: 30_000 });
+  // --no-same-owner/--no-same-permissions: archived ownership/mode bits must not
+  // carry over to the inspecting host (defense-in-depth).
+  await exec("tar", ["--no-same-owner", "--no-same-permissions", "xzf", tarballPath, "-C", work], {
+    timeout: 30_000,
+  });
   const pkgRoot = join(work, "package");
 
   // 3. Path traversal check — npm packs everything under "package/", anything

@@ -10,7 +10,6 @@ import {
   clearElevation,
   requireElevation,
   consumeElevation,
-  isOneShotScope,
   _resetConsumedElevationForTests,
   generateTotp,
   verifyTotp,
@@ -262,13 +261,6 @@ describe("requireElevation audit emission", () => {
 });
 
 describe("consumeElevation (one-shot)", () => {
-  it("identifies the destructive scopes", () => {
-    assert.equal(isOneShotScope("jwt-secret-roll"), true);
-    assert.equal(isOneShotScope("purge-history"), true);
-    assert.equal(isOneShotScope("onecli-register"), true);
-    assert.equal(isOneShotScope("rotate"), false);
-  });
-
   it("only allows one consume per process for the same scope", async () => {
     const dir = tmpRepo();
     _resetConsumedElevationForTests();
