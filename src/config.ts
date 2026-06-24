@@ -298,8 +298,10 @@ export interface kitConfig {
   context?: ContextConfig;
   /** Install-time supply-chain triage settings (`kit supply-chain`). */
   supply_chain?: { internal_scopes?: string[] };
-  /** `kit scan` settings — a tooling Infisical project to resolve scanner tokens (SNYK_TOKEN, …) from. */
-  scan?: { tooling?: { project_id?: string; env?: string } };
+  /** `kit scan` / `kit check` scanner settings. `tooling` = an Infisical project to
+   *  resolve scanner tokens (SNYK_TOKEN, …) from; `guarddog` = enable the local
+   *  behavioral-malware scan in `kit check` (persistent alt to KIT_GUARDDOG=1). */
+  scan?: { tooling?: { project_id?: string; env?: string }; guarddog?: boolean };
   /**
    * No-egress / air-gapped posture (declarative; see docs/AIR_GAP.md). Equivalent
    * to the `KIT_*` env vars, but checked in so the enclave config is reproducible.
@@ -583,6 +585,7 @@ const kitConfigSchema = z
           .object({ project_id: z.string().optional(), env: z.string().optional() })
           .passthrough()
           .optional(),
+        guarddog: z.boolean().optional(),
       })
       .passthrough()
       .optional(),
