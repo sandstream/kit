@@ -24,7 +24,7 @@ jobs:
           node-version: 22
       - name: Install
         run: npm ci
-      - name: Build (cross-platform: rimraf + node chmod, no POSIX rm/chmod)
+      - name: Build (cross-platform — no POSIX rm/chmod)
         run: npm run build
       - name: Unit tests
         run: npm test
