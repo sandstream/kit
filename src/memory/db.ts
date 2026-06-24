@@ -46,7 +46,7 @@ export function getMemoryDbPath(): string {
   return process.env.KIT_MEMORY_DB ?? join(getMemoryDir(), "memory.db");
 }
 
-function ensureMemoryDir(): void {
+export function ensureMemoryDir(): void {
   const dir = getMemoryDir();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 }
