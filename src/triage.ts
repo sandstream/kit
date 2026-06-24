@@ -64,6 +64,27 @@ async function ensureTriageScript(): Promise<boolean> {
 }
 
 /**
+ * Decide PASS strictly from the triage script's verdict lines.
+ *
+ * SECURITY: the script echoes the (attacker-influenceable) target into its
+ * output header, so a naive `output.includes("TRIAGE PASSED")` is FORGEABLE — a
+ * target containing the literal `TRIAGE PASSED` (or an embedded newline that
+ * starts such a line) would forge a pass and defeat "installs nothing
+ * untriaged". We therefore:
+ *   1. require an EXACT, standalone `TRIAGE PASSED` line (not a substring), and
+ *   2. treat any `TRIAGE FAILED` line as authoritative — a genuine failure
+ *      always prints it, so even an injected PASS line cannot override a real
+ *      failure (fail-closed). Neither line present → fail-closed.
+ * (The script also sanitizes the echoed target as defense-in-depth, but kit
+ * must stay safe against an older, un-updated installed script too.)
+ */
+export function verdictPassed(output: string): boolean {
+  const lines = output.split(/\r?\n/).map((l) => l.trim());
+  if (lines.includes("TRIAGE FAILED")) return false;
+  return lines.includes("TRIAGE PASSED");
+}
+
+/**
  * Run triage on a target
  */
 export async function runTriage(type: TriageType, target: string): Promise<TriageResult> {
@@ -85,7 +106,7 @@ export async function runTriage(type: TriageType, target: string): Promise<Triag
     );
 
     const output = stdout + (stderr ? `\n${stderr}` : "");
-    const passed = output.includes("TRIAGE PASSED");
+    const passed = verdictPassed(output);
 
     return { target, type, passed, output };
   } catch (error: unknown) {

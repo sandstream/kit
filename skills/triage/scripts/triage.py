@@ -83,7 +83,10 @@ class Report:
 
     def emit(self):
         score = max(0, 100 - 45 * len(self.criticals) - 12 * len(self.warnings))
-        print(f"Triage: {self.ttype} {self.target}")
+        # Sanitize the echoed target: it is attacker-influenceable, and a newline
+        # in it could otherwise forge a standalone "TRIAGE PASSED" verdict line.
+        safe_target = str(self.target).replace("\n", " ").replace("\r", " ")
+        print(f"Triage: {self.ttype} {safe_target}")
         print("-" * 50)
         for f in self.facts:
             print(f"  . {f}")
