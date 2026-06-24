@@ -14,6 +14,7 @@ import { findSecrets, type SecretFinding } from "./utils/redactSecrets.js";
  * Scans:
  *   - `<repo>/.claude/`           — project-local Claude Code state
  *   - `<repo>/.opencode/`         — OpenCode local state
+ *   - `<repo>/.codex/`            — Codex CLI local state
  *   - `~/.claude/projects/<repo>/` — global Claude Code project cache
  *   - `~/.claude/projects/-<repo-path>/` — same, with normalized slashes
  *
@@ -72,17 +73,18 @@ export async function scanTranscripts(cwd: string = process.cwd()): Promise<Tran
   const candidates: string[] = [];
 
   // Project-local agent dirs
-  for (const local of [".claude", ".opencode", ".cursor", ".aider"]) {
+  for (const local of [".claude", ".opencode", ".cursor", ".aider", ".codex"]) {
     const full = resolve(cwd, local);
     if (await dirExists(full)) candidates.push(full);
   }
 
-  // Global Claude Code project cache (best-effort slug match)
+  // Global agent project caches (best-effort slug match)
   const home = homedir();
   const slug = repoSlug(cwd);
   for (const global of [
     join(home, ".claude", "projects", slug),
     join(home, ".opencode", "projects", slug),
+    join(home, ".codex", "projects", slug),
   ]) {
     if (await dirExists(global)) candidates.push(global);
   }
