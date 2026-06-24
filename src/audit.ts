@@ -1,6 +1,89 @@
 import { appendFile, readFile, writeFile, rename } from "node:fs/promises";
 import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 import type { GovernanceConfig } from "./config.js";
+
+// ── Tamper-evident hash chain ───────────────────────────────────────────────
+// Each appended line carries `prev` (the previous line's hash) and `hash`
+// (sha256 over the line's canonical pre-hash JSON). Any edit, insertion,
+// deletion, or reorder breaks the chain and is caught by verifyAuditChain —
+// the integrity property a regulated/air-gapped enclave needs from its audit
+// trail. (Note: cross-process concurrent appends can fork the chain; external
+// tampering is still detected.)
+const GENESIS_HASH = "0".repeat(64);
+
+function hashLine(preHashJson: string): string {
+  return createHash("sha256").update(preHashJson).digest("hex");
+}
+
+/** Read the last entry's hash to chain onto, or GENESIS for a fresh/legacy log. */
+async function lastChainHash(logPath: string): Promise<string> {
+  try {
+    const content = await readFile(logPath, "utf-8");
+    const lines = content.split("\n").filter((l) => l.trim().length > 0);
+    if (lines.length === 0) return GENESIS_HASH;
+    const last = JSON.parse(lines[lines.length - 1]) as { hash?: unknown };
+    return typeof last.hash === "string" ? last.hash : GENESIS_HASH;
+  } catch {
+    return GENESIS_HASH;
+  }
+}
+
+/** Append an event as a hash-chained line. Throws on write failure. */
+async function appendChained(logPath: string, event: AuditEvent): Promise<void> {
+  const prev = await lastChainHash(logPath);
+  const preHash = JSON.stringify({ ...event, prev });
+  const hash = hashLine(preHash);
+  await appendFile(logPath, JSON.stringify({ ...event, prev, hash }) + "\n", "utf-8");
+}
+
+export interface ChainVerifyResult {
+  ok: boolean;
+  entries: number;
+  /** 0-based index of the first broken entry, when !ok. */
+  brokenAt?: number;
+  reason?: string;
+}
+
+/**
+ * Re-walk a `.kit-audit.jsonl` body and verify the hash chain end to end.
+ * Detects content tampering (hash mismatch) and insertion/deletion/reorder
+ * (prev-link mismatch). Pure — fully testable.
+ */
+export function verifyAuditChain(content: string): ChainVerifyResult {
+  const lines = content.split("\n").filter((l) => l.trim().length > 0);
+  let prev = GENESIS_HASH;
+  for (let i = 0; i < lines.length; i++) {
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(lines[i]) as Record<string, unknown>;
+    } catch {
+      return { ok: false, entries: i, brokenAt: i, reason: "unparseable line" };
+    }
+    const { hash, ...rest } = obj;
+    if (typeof hash !== "string") {
+      return { ok: false, entries: i, brokenAt: i, reason: "missing hash (unchained entry)" };
+    }
+    if (rest.prev !== prev) {
+      return {
+        ok: false,
+        entries: i,
+        brokenAt: i,
+        reason: "broken link — an entry was inserted, removed, or reordered",
+      };
+    }
+    if (hashLine(JSON.stringify(rest)) !== hash) {
+      return {
+        ok: false,
+        entries: i,
+        brokenAt: i,
+        reason: "hash mismatch — entry content tampered",
+      };
+    }
+    prev = hash;
+  }
+  return { ok: true, entries: lines.length };
+}
 
 const PENDING_QUEUE_FILE = ".kit-audit.pending";
 const MAX_PENDING_ENTRIES = 500;
@@ -40,7 +123,7 @@ export async function appendAuditEventDirect(
   const logFile = opts.logFile ?? ".kit-audit.jsonl";
   const logPath = resolve(opts.cwd ?? process.cwd(), logFile);
   try {
-    await appendFile(logPath, JSON.stringify(auditEvent) + "\n", "utf-8");
+    await appendChained(logPath, auditEvent);
     return true;
   } catch (error) {
     console.error(`[kit] audit-log append failed: ${error}`);
@@ -181,9 +264,10 @@ export async function logAuditEvent(
   config: Required<GovernanceConfig>,
   event: Omit<AuditEvent, "timestamp" | "agent_id" | "agent_name">,
   companyId?: string,
-): Promise<void> {
+): Promise<boolean> {
+  // Audit disabled by config → nothing to write, nothing to gate on.
   if (!config.audit.enabled) {
-    return;
+    return true;
   }
 
   const auditEvent: AuditEvent = {
@@ -198,13 +282,16 @@ export async function logAuditEvent(
     auditEvent.metadata = sanitizeMetadata(auditEvent.metadata);
   }
 
-  // Write to local JSONL file
-  const logLine = JSON.stringify(auditEvent) + "\n";
+  // Write to local JSONL file (hash-chained for tamper-evidence). The boolean
+  // return lets fail-closed callers (e.g. destructive ops in withGovernance)
+  // refuse to proceed when the local audit append fails.
   const logFile = config.audit.log_file || ".kit-audit.jsonl";
   const logPath = resolve(process.cwd(), logFile);
 
+  let wroteLocal = false;
   try {
-    await appendFile(logPath, logLine, "utf-8");
+    await appendChained(logPath, auditEvent);
+    wroteLocal = true;
   } catch (error) {
     console.error(`Failed to write audit log: ${error}`);
   }
@@ -217,6 +304,9 @@ export async function logAuditEvent(
     warnFirstRemotePush(companyId);
     await sendToRemoteAPI(auditEvent, companyId);
   }
+
+  // Auditability is the local append; remote is best-effort and does not gate.
+  return wroteLocal;
 }
 
 /**

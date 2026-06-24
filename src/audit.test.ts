@@ -1,9 +1,16 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFile, unlink } from "node:fs/promises";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { logAuditEvent, readAuditLog, formatAuditLog } from "./audit.js";
+import {
+  logAuditEvent,
+  readAuditLog,
+  formatAuditLog,
+  appendAuditEventDirect,
+  verifyAuditChain,
+} from "./audit.js";
 import type { GovernanceConfig } from "./config.js";
 
 describe("logAuditEvent", () => {
@@ -327,5 +334,123 @@ describe("formatAuditLog", () => {
     assert.ok(formatted.includes("secrets"));
     assert.ok(formatted.includes("[prod]"));
     assert.ok(formatted.includes("Error: Missing API key"));
+  });
+});
+
+describe("verifyAuditChain (tamper-evidence)", () => {
+  async function writeEvents(dir: string, n: number): Promise<void> {
+    for (let i = 0; i < n; i++) {
+      const ok = await appendAuditEventDirect(
+        { operation: `op-${i}`, environment: "dev", success: true },
+        { cwd: dir },
+      );
+      assert.equal(ok, true);
+    }
+  }
+
+  it("accepts an empty log", () => {
+    assert.deepEqual(verifyAuditChain(""), { ok: true, entries: 0 });
+  });
+
+  it("verifies a chain produced by appendAuditEventDirect", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-audit-c-"));
+    try {
+      await writeEvents(dir, 4);
+      const r = verifyAuditChain(readFileSync(join(dir, ".kit-audit.jsonl"), "utf8"));
+      assert.equal(r.ok, true);
+      assert.equal(r.entries, 4);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects tampered content (hash mismatch)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-audit-t-"));
+    try {
+      await writeEvents(dir, 3);
+      const lines = readFileSync(join(dir, ".kit-audit.jsonl"), "utf8").trim().split("\n");
+      const mid = JSON.parse(lines[1]);
+      mid.operation = "tampered-after-the-fact";
+      lines[1] = JSON.stringify(mid);
+      const r = verifyAuditChain(lines.join("\n") + "\n");
+      assert.equal(r.ok, false);
+      assert.equal(r.brokenAt, 1);
+      assert.match(r.reason!, /tampered/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects a deleted entry (broken prev-link)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-audit-d-"));
+    try {
+      await writeEvents(dir, 4);
+      const lines = readFileSync(join(dir, ".kit-audit.jsonl"), "utf8").trim().split("\n");
+      lines.splice(1, 1);
+      const r = verifyAuditChain(lines.join("\n") + "\n");
+      assert.equal(r.ok, false);
+      assert.equal(r.brokenAt, 1);
+      assert.match(r.reason!, /inserted, removed, or reordered/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("flags an unchained (legacy) entry", () => {
+    const legacy = JSON.stringify({
+      timestamp: "t",
+      operation: "x",
+      environment: "dev",
+      success: true,
+    });
+    const r = verifyAuditChain(legacy + "\n");
+    assert.equal(r.ok, false);
+    assert.match(r.reason!, /missing hash/);
+  });
+});
+
+describe("logAuditEvent return value (fail-closed signal)", () => {
+  function cfg(logFile: string): any {
+    return {
+      enabled: true,
+      environment: "dev",
+      access: {},
+      agent: { id: "a", name: "A" },
+      audit: { enabled: true, log_file: logFile, include_secrets: false },
+      approval: {},
+      secrets: {},
+      revocation: {},
+    };
+  }
+
+  it("returns true when the local append succeeds", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-audit-ok-"));
+    try {
+      const ok = await logAuditEvent(cfg(join(dir, ".kit-audit.jsonl")), {
+        operation: "x",
+        environment: "dev",
+        success: true,
+      });
+      assert.equal(ok, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false when the local append fails (unwritable path)", async () => {
+    const bad = join(tmpdir(), `kit-audit-nope-${process.pid}`, "deep", ".kit-audit.jsonl");
+    const ok = await logAuditEvent(cfg(bad), {
+      operation: "x",
+      environment: "dev",
+      success: true,
+    });
+    assert.equal(ok, false);
+  });
+
+  it("returns true when audit is disabled (nothing to gate)", async () => {
+    const c = cfg("/whatever");
+    c.audit.enabled = false;
+    const ok = await logAuditEvent(c, { operation: "x", environment: "dev", success: true });
+    assert.equal(ok, true);
   });
 });

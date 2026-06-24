@@ -1,6 +1,7 @@
 // `kit audit` commands — extracted from cli.ts (split step 4).
 import { readSecretAuditEvents, groupBySecret, summarize } from "../audit-secrets.js";
 import { readAuditLog } from "../audit.js";
+import { resolve } from "node:path";
 import { printAuditTable } from "../output.js";
 import { loadConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
@@ -74,6 +75,37 @@ export async function cmdAudit(): Promise<boolean> {
   // Sub-sub: kit audit secrets [--since-days N] [--key NAME] [--json]
   if (args[0] === "secrets") {
     return cmdAuditSecrets();
+  }
+
+  // Sub-sub: kit audit verify — check the tamper-evident hash chain
+  if (args[0] === "verify") {
+    let logFile = ".kit-audit.jsonl";
+    try {
+      const config = await loadConfig(resolveConfigPath());
+      if (config.governance?.audit?.log_file) logFile = config.governance.audit.log_file;
+    } catch {
+      /* default */
+    }
+    const { verifyAuditChain } = await import("../audit.js");
+    const { readFile } = await import("node:fs/promises");
+    let content = "";
+    try {
+      content = await readFile(resolve(process.cwd(), logFile), "utf-8");
+    } catch {
+      console.log(`${c.dim}no audit log at ${logFile}${c.reset}`);
+      return true;
+    }
+    const r = verifyAuditChain(content);
+    if (r.ok) {
+      console.log(
+        `${c.green}✓ audit chain intact${c.reset}  ${c.dim}${r.entries} entries${c.reset}`,
+      );
+      return true;
+    }
+    console.error(
+      `${c.red}✗ audit chain BROKEN at entry ${r.brokenAt}: ${r.reason}${c.reset}  ${c.dim}(verified ${r.entries} entries before the break)${c.reset}`,
+    );
+    return false;
   }
 
   // Parse --limit N
