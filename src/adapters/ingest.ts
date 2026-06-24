@@ -182,7 +182,42 @@ export function parseOsv(json: string): SecurityCheckResult[] {
 
 export type IngestFormat = "sarif" | "osv";
 
-/** Dispatch to the right parser. Unknown format → []. */
+/** Dispatch to the right parser. Unknown format → []. Lenient: malformed input → []. */
 export function ingest(format: IngestFormat, json: string): SecurityCheckResult[] {
   return format === "sarif" ? parseSarif(json) : format === "osv" ? parseOsv(json) : [];
+}
+
+export type IngestOutcome =
+  | { ok: true; findings: SecurityCheckResult[] }
+  | { ok: false; reason: string };
+
+/**
+ * Strict ingest: distinguishes a *valid but empty* report (scanner ran, found
+ * nothing) from *malformed/unexpected* output (scanner errored, printed junk, or
+ * emitted a different format). The lenient `ingest()` collapses both to `[]`,
+ * which lets a broken scanner masquerade as "ran clean" — dangerous in a
+ * consolidated security verdict. Callers that gate on scanner health (e.g.
+ * `kit scan`) must use this and treat `ok:false` as an error, not a pass.
+ */
+export function ingestStrict(format: IngestFormat, json: string): IngestOutcome {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return { ok: false, reason: "output is not valid JSON" };
+  }
+  const isObj = !!parsed && typeof parsed === "object";
+  if (format === "sarif") {
+    if (!isObj || !Array.isArray((parsed as SarifLog).runs)) {
+      return { ok: false, reason: "not a SARIF log (no `runs` array)" };
+    }
+    return { ok: true, findings: parseSarif(json) };
+  }
+  if (format === "osv") {
+    if (!isObj || !Array.isArray((parsed as OsvLog).results)) {
+      return { ok: false, reason: "not an OSV report (no `results` array)" };
+    }
+    return { ok: true, findings: parseOsv(json) };
+  }
+  return { ok: false, reason: `unknown format: ${format as string}` };
 }
