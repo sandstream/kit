@@ -130,6 +130,22 @@ export async function withGovernance<T>(
     }
   }
 
+  // Fail-closed auditability for DESTRUCTIVE ops: persist an authorization entry
+  // BEFORE executing and refuse if it can't be written. The post-execution
+  // success log alone is fail-open (the op would run unlogged if the audit
+  // append failed) — this closes that gap for the operations that matter most.
+  if (context.destructive) {
+    const logged = await logAuditEvent(governanceConfig, {
+      operation: context.operation,
+      environment: governanceConfig.environment,
+      success: true,
+      metadata: { ...context.metadata, phase: "authorized" },
+    });
+    if (!logged) {
+      throw new Error("audit-log unavailable; refusing destructive operation (fail-closed)");
+    }
+  }
+
   // Execute the operation
   let error: string | undefined;
   let result: T;
