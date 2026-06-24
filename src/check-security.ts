@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
+import { classifyGuardDog } from "./guarddog.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
 import {
   ensureBumblebee,
@@ -667,6 +668,64 @@ async function checkSocket(): Promise<SecurityCheckResult> {
     detail:
       "Socket is cloud-only (uploads manifest; no offline/air-gap) — excluded from kit's local-first check. Local cover: bumblebee + osv-scanner + kit supply-chain",
   };
+}
+
+/**
+ * GuardDog (DataDog, OSS) — LOCAL behavioral-malware heuristics, the local-first
+ * replacement for Socket (#105). OPT-IN (KIT_GUARDDOG=1): GuardDog needs semgrep
+ * and `verify` fetches/scans each dependency, so it's too heavy for the default
+ * check. Classification (incl. fail-closed on incomplete scans) is in guarddog.ts.
+ */
+async function checkGuardDog(): Promise<SecurityCheckResult> {
+  const base = { category: "supply-chain", name: "guarddog (malware)" } as const;
+  const enabled = ["1", "true", "yes", "on"].includes(
+    (process.env.KIT_GUARDDOG ?? "").trim().toLowerCase(),
+  );
+  if (!enabled) {
+    return {
+      ...base,
+      status: "skip",
+      detail: "opt-in — set KIT_GUARDDOG=1 to run local malware heuristics (needs semgrep)",
+    };
+  }
+
+  // Pick the ecosystem from the lockfile/manifest present.
+  const candidates: { ecosystem: string; file: string }[] = [
+    { ecosystem: "npm", file: "package-lock.json" },
+    { ecosystem: "npm", file: "package.json" },
+    { ecosystem: "pypi", file: "requirements.txt" },
+  ];
+  let target: { ecosystem: string; file: string } | undefined;
+  for (const c of candidates) {
+    try {
+      await access(resolve(process.cwd(), c.file));
+      target = c;
+      break;
+    } catch {
+      // not present — try the next
+    }
+  }
+  if (!target) {
+    return { ...base, status: "skip", detail: "no package-lock.json / requirements.txt to scan" };
+  }
+
+  const bin = await resolveToolBin("guarddog");
+  if (!bin) {
+    return {
+      ...base,
+      status: "warn",
+      detail: "guarddog not installed — malware heuristics unavailable",
+      severity: "medium",
+      suggestion: "mise use pipx:guarddog",
+    };
+  }
+
+  const result = await execFileNoThrow(
+    bin,
+    [target.ecosystem, "verify", target.file, "--output-format=json"],
+    { timeout: 300_000 },
+  );
+  return classifyGuardDog(result.stdout || result.stderr);
 }
 
 /**
@@ -1352,6 +1411,7 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
     trivyConfigResult,
     osvResult,
     mavenResult,
+    guarddogResult,
     ...lockfileResults
   ] = await Promise.all([
     checkNpmAudit(),
@@ -1367,6 +1427,7 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
     checkTrivyConfig(),
     checkOsvScanner(),
     checkMavenAudit(),
+    checkGuardDog(),
     ...(await checkLockfilesCommitted()),
   ]);
 
@@ -1384,6 +1445,7 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
     trivyConfigResult,
     osvResult,
     mavenResult,
+    guarddogResult,
   );
   results.push(...lockfileResults);
 
