@@ -10,11 +10,8 @@
  *   kit pkg cargo:ripgrep
  */
 
-import { exec as execCb } from "node:child_process";
-import { promisify } from "node:util";
 import { runTriage, type TriageType } from "./triage.js";
-
-const execAsync = promisify(execCb);
+import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 
 export interface PkgSpec {
   ecosystem: string;
@@ -29,43 +26,67 @@ export interface PkgResult {
   output: string;
 }
 
+/**
+ * Each ecosystem maps to a `(bin, args[])` builder — NEVER a shell string.
+ * The package name/version are user-supplied (`kit pkg npm:<name>@<ver>`), so
+ * they must reach the package manager as discrete argv elements: passed through
+ * `execFile` they cannot break out into a second command, even if they contain
+ * `;`, `|`, `$(…)`, backticks, or spaces. (This is the no-shell discipline the
+ * rest of kit already follows via `execFileNoThrow`.)
+ */
+type InstallSpec = { bin: string; args: string[] };
 const ECOSYSTEM_MAP: Record<
   string,
-  { triageType: TriageType; installCmd: (name: string, version?: string) => string }
+  { triageType: TriageType; install: (name: string, version?: string) => InstallSpec }
 > = {
   npm: {
     triageType: "npm",
-    installCmd: (name, ver) => (ver ? `npm install ${name}@${ver}` : `npm install ${name}`),
+    install: (name, ver) => ({ bin: "npm", args: ["install", ver ? `${name}@${ver}` : name] }),
   },
   "npm-g": {
     triageType: "npm",
-    installCmd: (name, ver) => (ver ? `npm install -g ${name}@${ver}` : `npm install -g ${name}`),
+    install: (name, ver) => ({
+      bin: "npm",
+      args: ["install", "-g", ver ? `${name}@${ver}` : name],
+    }),
   },
   pnpm: {
     triageType: "npm",
-    installCmd: (name, ver) => (ver ? `pnpm add ${name}@${ver}` : `pnpm add ${name}`),
+    install: (name, ver) => ({ bin: "pnpm", args: ["add", ver ? `${name}@${ver}` : name] }),
   },
   pip: {
     triageType: "pip",
-    installCmd: (name, ver) => (ver ? `pip install ${name}==${ver}` : `pip install ${name}`),
+    install: (name, ver) => ({ bin: "pip", args: ["install", ver ? `${name}==${ver}` : name] }),
   },
   brew: {
     triageType: "repo",
-    installCmd: (name) => `brew install ${name}`,
+    install: (name) => ({ bin: "brew", args: ["install", name] }),
   },
   docker: {
     triageType: "docker",
-    installCmd: (name, ver) => (ver ? `docker pull ${name}:${ver}` : `docker pull ${name}:latest`),
+    install: (name, ver) => ({
+      bin: "docker",
+      args: ["pull", ver ? `${name}:${ver}` : `${name}:latest`],
+    }),
   },
   go: {
     triageType: "repo",
-    installCmd: (name) => `go install ${name}`,
+    install: (name) => ({ bin: "go", args: ["install", name] }),
   },
   cargo: {
     triageType: "repo",
-    installCmd: (name) => `cargo install ${name}`,
+    install: (name) => ({ bin: "cargo", args: ["install", name] }),
   },
 };
+
+/**
+ * Build the `(bin, args[])` for a parsed spec, or null for an unknown ecosystem.
+ * Pure — exported so the no-shell argv contract is regression-tested.
+ */
+export function buildInstallSpec(spec: PkgSpec): InstallSpec | null {
+  const eco = ECOSYSTEM_MAP[spec.ecosystem];
+  return eco ? eco.install(spec.name, spec.version) : null;
+}
 
 /**
  * Parse "npm:express@4.18.0" → { ecosystem: "npm", name: "express", version: "4.18.0" }
@@ -107,16 +128,19 @@ export function parsePkgSpec(input: string): PkgSpec | null {
  * Get GitHub repo URL for brew formulas
  */
 async function getBrewRepoUrl(name: string): Promise<string | null> {
+  const res = await execFileNoThrow("brew", ["info", "--json=v2", name], { timeout: 15_000 });
+  if (!res.ok) {
+    // brew not available or formula not found — try GitHub search
+    return `https://github.com/search?q=${encodeURIComponent(name)}`;
+  }
   try {
-    const { stdout } = await execAsync(`brew info --json=v2 ${name} 2>/dev/null`);
-    const data = JSON.parse(stdout);
+    const data = JSON.parse(res.stdout);
     const formula = data.formulae?.[0] || data.casks?.[0];
     const homepage = formula?.homepage || "";
     if (homepage.includes("github.com")) return homepage;
     return null;
   } catch {
-    // brew not available or formula not found — try GitHub search
-    return `https://github.com/search?q=${name}`;
+    return `https://github.com/search?q=${encodeURIComponent(name)}`;
   }
 }
 
@@ -162,22 +186,21 @@ export async function installPkg(spec: PkgSpec): Promise<PkgResult> {
   }
 
   // Step 2: Install
-  const cmd = eco.installCmd(spec.name, spec.version);
-  try {
-    const { stdout, stderr } = await execAsync(cmd, { timeout: 300_000 });
+  const { bin, args } = eco.install(spec.name, spec.version);
+  const display = `${bin} ${args.join(" ")}`;
+  const res = await execFileNoThrow(bin, args, { timeout: 300_000 });
+  if (res.ok) {
     return {
       spec,
       triagePassed: true,
       installed: true,
-      output: `✅ Triage passed\n✅ Installed: ${cmd}\n${stdout}${stderr ? "\n" + stderr : ""}`,
-    };
-  } catch (error: unknown) {
-    const err = error as { stdout?: string; stderr?: string; message?: string };
-    return {
-      spec,
-      triagePassed: true,
-      installed: false,
-      output: `✅ Triage passed\n❌ Install failed: ${cmd}\n${err.stderr || err.message || ""}`,
+      output: `✅ Triage passed\n✅ Installed: ${display}\n${res.stdout}${res.stderr ? "\n" + res.stderr : ""}`,
     };
   }
+  return {
+    spec,
+    triagePassed: true,
+    installed: false,
+    output: `✅ Triage passed\n❌ Install failed: ${display}\n${res.stderr || res.stdout || ""}`,
+  };
 }
