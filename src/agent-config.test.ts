@@ -85,6 +85,28 @@ describe("detectAgentTargets", () => {
     }
   });
 
+  it("wires AGENTS.md for an OpenCode-only project (opencode.json, no .codex)", () => {
+    const dir = tmpRepo();
+    try {
+      writeFileSync(join(dir, "opencode.json"), "{}\n");
+      const files = detectAgentTargets(dir).map((t) => t.file);
+      assert.deepEqual(files, ["AGENTS.md"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects an OpenCode project via a .opencode/ dir too", () => {
+    const dir = tmpRepo();
+    try {
+      mkdirSync(join(dir, ".opencode"));
+      const files = detectAgentTargets(dir).map((t) => t.file);
+      assert.deepEqual(files, ["AGENTS.md"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("detects Cursor + Cline via their rules files", () => {
     const dir = tmpRepo();
     try {

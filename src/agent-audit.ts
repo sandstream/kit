@@ -122,12 +122,23 @@ export function auditMcpStdio(json: string): StdioMcpFinding[] {
   const out: StdioMcpFinding[] = [];
   for (const servers of containers) {
     for (const [name, def] of Object.entries(servers)) {
-      const command = (def as { command?: unknown })?.command;
-      if (typeof command !== "string" || !command) continue; // url-based: handled by auditMcpServers
-      const rawArgs = (def as { args?: unknown }).args;
-      const argv = Array.isArray(rawArgs)
-        ? rawArgs.filter((a): a is string => typeof a === "string")
-        : [];
+      const rawCommand = (def as { command?: unknown })?.command;
+      let command: string;
+      let argv: string[];
+      if (typeof rawCommand === "string" && rawCommand) {
+        command = rawCommand;
+        const rawArgs = (def as { args?: unknown }).args;
+        argv = Array.isArray(rawArgs)
+          ? rawArgs.filter((a): a is string => typeof a === "string")
+          : [];
+      } else if (Array.isArray(rawCommand) && typeof rawCommand[0] === "string") {
+        // OpenCode array-form: `command: ["node", "-e", "…"]` (bin + args in one array).
+        const parts = rawCommand.filter((a): a is string => typeof a === "string");
+        command = parts[0];
+        argv = parts.slice(1);
+      } else {
+        continue; // url-based (handled by auditMcpServers) or malformed
+      }
       const full = [command, ...argv].join(" ");
       const malware = SUSPICIOUS_HOOK_PATTERNS.find((p) => p.re.test(full));
       if (malware) {
