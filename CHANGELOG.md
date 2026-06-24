@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.29.0] - 2026-06-24
+
+### Added
+
+- **`[scan] guarddog = true` — persistent project opt-in for the local malware scan.** GuardDog (#105) was enabled only via the ephemeral `KIT_GUARDDOG=1` env var. `kit check` now also honors a `guarddog = true` flag under `[scan]` in `.kit.toml` (best-effort config read; env var still works and takes precedence in spirit — either enables it). So the choice lives in committed project config, not a per-shell env var. The skip message points at both. (Foundation for an interactive `kit setup` prompt to write the flag — a follow-up.)
+
 ## [1.28.2] - 2026-06-24
 
 ### Changed

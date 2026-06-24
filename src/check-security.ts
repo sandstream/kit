@@ -678,14 +678,25 @@ async function checkSocket(): Promise<SecurityCheckResult> {
  */
 async function checkGuardDog(): Promise<SecurityCheckResult> {
   const base = { category: "supply-chain", name: "guarddog (malware)" } as const;
-  const enabled = ["1", "true", "yes", "on"].includes(
+  const envEnabled = ["1", "true", "yes", "on"].includes(
     (process.env.KIT_GUARDDOG ?? "").trim().toLowerCase(),
   );
-  if (!enabled) {
+  // Persistent project opt-in via `.kit.toml [scan] guarddog = true` (best-effort
+  // config read) — so the choice lives in config, not just an ephemeral env var.
+  let cfgEnabled = false;
+  try {
+    const { loadConfig } = await import("./config.js");
+    const cfg = await loadConfig(resolve(process.cwd(), ".kit.toml"));
+    cfgEnabled = cfg.scan?.guarddog === true;
+  } catch {
+    // no/invalid config → env var is the only switch
+  }
+  if (!envEnabled && !cfgEnabled) {
     return {
       ...base,
       status: "skip",
-      detail: "opt-in — set KIT_GUARDDOG=1 to run local malware heuristics (needs semgrep)",
+      detail:
+        "opt-in — set `guarddog = true` under [scan] in .kit.toml (or KIT_GUARDDOG=1) to run local malware heuristics (needs semgrep)",
     };
   }
 
