@@ -12,6 +12,23 @@ queries at your **internal mirrors** instead, and run the heavy scanners against
 > install rather than waving it through. Point the endpoints at reachable
 > internal mirrors so triage can actually evaluate targets.
 
+## Declarative config (recommended)
+
+Everything below can be set with `KIT_*` env vars **or** checked into
+`.kit.toml` so the enclave posture is reproducible and versioned. Env vars
+override the file when both are set.
+
+```toml
+[air_gap]
+enabled = true                                   # turns on offline scan mode
+npm_registry = "https://npm.corp.internal"
+pypi_index = "https://pypi.corp.internal"
+github_api = "https://ghe.corp.internal/api/v3"
+docker_registry = "https://registry.corp.internal"
+threat_data_dir = "/opt/kit/threat-data"
+threat_data_pubkey = "/etc/kit/threat-data.pub"
+```
+
 ## 1. Point the triage gate at internal mirrors
 
 The triage script reads its registry hosts from the environment, defaulting to
