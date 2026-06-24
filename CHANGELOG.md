@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.30.0] - 2026-06-24
+
+### Added
+
+- **Windows ACLs for secret files (#43).** POSIX mode bits (`0o600`/`0o700`) are no-ops on NTFS, so kit's secret stores were unprotected on native Windows. New cross-platform `secure-perms` helper: `chmod` on POSIX; on Windows, `icacls /inheritance:r /grant:r <user>:F` (strip inherited ACLs, grant only the current user). Wired into the secret stores: `~/.kit/memory.db` (+ dir), `mcp-tokens.json` (+ dir), `elevation.key`, `totp-secret`. POSIX behavior is byte-identical (63 perm tests still pass on macOS; new helper unit-tested); the Windows branch is exercised by the `windows-latest` probe. Closes the perms half of #43; the remaining Windows test-suite gaps (build ✓, 1526/1542 pass) are mapped on #43.
+
 ## [1.29.1] - 2026-06-24
 
 ### Fixed
