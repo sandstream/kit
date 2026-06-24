@@ -518,6 +518,8 @@ const KNOWN_SECTIONS = new Set([
   "context",
   "memory",
   "update",
+  "scan", // [scan.tooling] — vault-backed scanner tokens (#65)
+  "air_gap", // [air_gap] — no-egress / offline config (#85)
 ]);
 
 const kitConfigSchema = z

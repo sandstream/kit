@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.28.0] - 2026-06-24
+
+### Added
+
+- **GuardDog — local behavioral-malware heuristics for `kit check` (#105, opt-in).** The local-first replacement for the dropped cloud Socket scanner (#103): GuardDog (DataDog, OSS) flags malicious npm/PyPI packages via Semgrep-rules-on-source + metadata heuristics, runs locally, and doesn't upload your manifest. **Opt-in** (`KIT_GUARDDOG=1`) — it needs Semgrep and `verify` fetches/scans each dep, too heavy for the default check; otherwise it surfaces as a `skip` with the enable hint. Resolved mise-first (`pipx:guarddog`). Pure, fixture-tested `classifyGuardDog` is **fail-closed**: a `pass` requires a COMPLETE scan — zero indicators _with rule-errors_ (e.g. missing Semgrep) is a `warn` ("INCOMPLETE/UNVERIFIED"), never a false pass; real indicators always fail. (Triaged before adding: `kit triage pip guarddog` → 100/100.)
+
+### Fixed
+
+- **`scan` and `air_gap` no longer warn as "unknown section" in `.kit.toml`.** Both are valid config sections (added to the zod schema in #65 / #85) but were missing from the `KNOWN_SECTIONS` allowlist, so `[scan.tooling]` (#102) and `[air_gap]` (#85) triggered a spurious "unknown section" warning on every command.
+
 ## [1.27.0] - 2026-06-24
 
 ### Added
