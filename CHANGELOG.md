@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.25.0] - 2026-06-24
+
+### Added
+
+- **Opt-in redaction-at-capture — `KIT_MEMORY_REDACT=1` (#91).** The memory store is raw by default (a key in any transcript is persisted to `memory.db` in cleartext — a stolen-laptop / backup-spillage risk). With `KIT_MEMORY_REDACT=1`, secret-shaped substrings in a message's `content` and a tool's `tool_input` are masked (via the same `redactSecrets` patterns) **before** they are written, so the secret never lands in the DB. Off by default → no behavior change; FTS still works over the redacted text for non-secret terms.
+
+### Removed
+
+- **Dead `Redacted<T>` wrapper (#92).** The `src/utils/redacted.ts` wrapper (added in 1.15.0) had no importers; removed it and its test. (Secret masking is done by `redactSecrets`, which stays.)
+
 ## [1.24.0] - 2026-06-24
 
 Consolidated security-hardening batch (merged PRs #70–#94) + two recovered features.

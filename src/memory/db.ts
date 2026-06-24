@@ -18,8 +18,25 @@ import { join } from "node:path";
 import { existsSync, mkdirSync, chmodSync, statSync } from "node:fs";
 import type { MemoryStats, MessageInput, SearchHit, SessionInput, ToolUseInput } from "./types.js";
 import { summarizeTokens } from "./stats.js";
+import { redactSecrets } from "../utils/redactSecrets.js";
 
 export const SCHEMA_VERSION = 4;
+
+/**
+ * Opt-in redaction-at-capture (KIT_MEMORY_REDACT=1). The memory store is raw by
+ * default; a regulated/air-gapped deployment can have secret-shaped substrings
+ * masked BEFORE they ever land in memory.db, so a leaked key in a transcript is
+ * never persisted (spillage prevention). Off by default — no behavior change.
+ */
+function captureRedactEnabled(): boolean {
+  return ["1", "true", "yes"].includes((process.env.KIT_MEMORY_REDACT ?? "").trim().toLowerCase());
+}
+
+/** Apply capture-time redaction to a stored text field when enabled. */
+function captureText(text: string | null | undefined): string | null {
+  if (text == null) return null;
+  return captureRedactEnabled() ? redactSecrets(text) : text;
+}
 
 export function getMemoryDir(): string {
   return process.env.KIT_MEMORY_DIR ?? join(homedir(), ".kit");
@@ -253,7 +270,7 @@ export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
       m.parentUuid ?? null,
       m.type,
       m.role ?? null,
-      m.content ?? null,
+      captureText(m.content),
       m.model ?? null,
       m.inputTokens ?? null,
       m.outputTokens ?? null,
@@ -281,7 +298,7 @@ export function insertToolUse(db: DatabaseSync, t: ToolUseInput): void {
     t.messageUuid ?? null,
     t.sessionId ?? null,
     t.toolName,
-    t.toolInput ?? null,
+    captureText(t.toolInput),
     t.timestamp ?? null,
   );
 }
