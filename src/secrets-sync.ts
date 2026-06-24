@@ -1,5 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { devNull } from "node:os";
 import type { SecretsConfig } from "./config.js";
 import { generateSecrets } from "./secrets.js";
 import { exec } from "./utils/exec.js";
@@ -32,8 +33,10 @@ export async function syncSecrets(
 ): Promise<SyncResult> {
   const { target, dryRun = false, projectPath = process.cwd() } = options;
 
-  // Resolve all secrets using the existing generate logic (reads from stores)
-  const { results } = await generateSecrets(secrets, "/dev/null");
+  // Resolve all secrets using the existing generate logic (reads from stores).
+  // Discard the written output to the platform null device (os.devNull): a literal
+  // "/dev/null" becomes "D:\dev\null" on Windows → ENOENT (#43).
+  const { results } = await generateSecrets(secrets, devNull);
 
   const resolved: Record<string, string> = {};
   for (const r of results) {

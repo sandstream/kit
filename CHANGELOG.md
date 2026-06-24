@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.29.1] - 2026-06-24
+
+### Fixed
+
+- **Tests run on native Windows (#43).** The `test` script set env via POSIX inline vars (`KIT_NON_INTERACTIVE=1 … node`), which Windows cmd/pwsh can't parse → the suite never started. Replaced with a no-dep `scripts/test.mjs` (sets env in-process, collects `dist/**/*.test.js` itself — no shell-glob — runs `node --test`). Also: `secrets-sync` used a literal `/dev/null` (→ `D:\dev\null` ENOENT on Windows) → now `os.devNull`.
+- **Windows probe is diagnosable.** The `windows-latest` workflow now tees the test output to a downloadable artifact (gh's CI logs truncate it), with `pipefail` + `continue-on-error`.
+
+### Notes
+
+- Real `windows-latest` status after this: builds ✓, **1526/1542 unit tests pass** (was: tests couldn't start). The remaining 15 are characterized on #43 — POSIX-path/`startsWith("/")` test assumptions + chmod/`0o600` permission semantics (the latter needs a Windows-ACL decision).
+
 ## [1.29.0] - 2026-06-24
 
 ### Added
