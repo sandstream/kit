@@ -14,6 +14,12 @@ interface RedactPattern {
   re: RegExp;
   /** Optional label for the redaction (e.g. "stripe-key") for debugging. */
   label: string;
+  /**
+   * Replacement applied by `redactSecrets`. Defaults to `"[REDACTED]"` (whole
+   * match). Set this to keep diagnostic context while masking only the secret
+   * sub-part, e.g. `"$1[REDACTED]@"` to redact a URL password but keep the host.
+   */
+  replacement?: string;
 }
 
 export const SECRET_PATTERNS: RedactPattern[] = [
@@ -40,8 +46,9 @@ export const SECRET_PATTERNS: RedactPattern[] = [
   // Generic JWT (3 dot-separated base64url segments)
   { re: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, label: "jwt" },
   // Supabase service-role JWT pattern (anon/service keys are JWTs; caught above)
-  // OpenAI / Anthropic API keys
-  { re: /\bsk-(proj-|ant-)[A-Za-z0-9_-]{30,}/g, label: "ai-api-key" },
+  // OpenAI / Anthropic API keys. `svcacct-`/`admin-` have an internal hyphen
+  // that breaks the bare `sk-[alnum]{40,}` run below, so list the prefixes.
+  { re: /\bsk-(proj|ant|svcacct|admin)-[A-Za-z0-9_-]{20,}/g, label: "ai-api-key" },
   { re: /\bsk-[A-Za-z0-9]{40,}/g, label: "openai-key" },
   // Resend
   { re: /\bre_[A-Za-z0-9_]{20,}/g, label: "resend-key" },
@@ -77,6 +84,15 @@ export const SECRET_PATTERNS: RedactPattern[] = [
     re: /"(sensitive_value|value)"\s*:\s*"([A-Za-z0-9_\-+/]{20,})"/g,
     label: "tfstate-value",
   },
+  // Credentials embedded in a connection-string URL, e.g.
+  // `postgres://user:supersecret@host/db`, `redis://:pw@host`, `mongodb+srv://…`.
+  // The `kv-secret` class stops at the `:`/`@`, so these slipped through. Redact
+  // ONLY the password and keep the scheme/user/host as diagnostic context.
+  {
+    re: /\b([a-z][a-z0-9+.-]*:\/\/[^\s:@/]*:)[^\s@/]{3,}@/gi,
+    label: "url-credentials",
+    replacement: "$1[REDACTED]@",
+  },
   // Generic high-entropy hex tokens (32+ hex chars) — last resort
   // Skipped intentionally: too many false-positives against commit hashes.
 ];
@@ -84,8 +100,8 @@ export const SECRET_PATTERNS: RedactPattern[] = [
 export function redactSecrets(input: string): string {
   if (!input) return input;
   let out = input;
-  for (const { re } of SECRET_PATTERNS) {
-    out = out.replace(re, "[REDACTED]");
+  for (const { re, replacement } of SECRET_PATTERNS) {
+    out = out.replace(re, replacement ?? "[REDACTED]");
   }
   return out;
 }

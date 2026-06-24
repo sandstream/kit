@@ -2,6 +2,31 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { redactSecrets, safeStatusLine } from "./redactSecrets.js";
 
+describe("redactSecrets — connection-string + sk-svcacct (regression)", () => {
+  it("redacts the password in a DB URL but keeps scheme/user/host as context", () => {
+    const out = redactSecrets("DATABASE_URL=postgres://app:S3cr3tPassw0rd@db.internal:5432/prod");
+    assert.ok(!out.includes("S3cr3tPassw0rd"), "password must be gone");
+    assert.match(out, /postgres:\/\/app:\[REDACTED\]@db\.internal/);
+  });
+
+  it("redacts a userless redis URL password", () => {
+    const out = redactSecrets("redis://:topsecretvalue@cache.internal:6379");
+    assert.ok(!out.includes("topsecretvalue"));
+    assert.match(out, /\[REDACTED\]@cache\.internal/);
+  });
+
+  it("does not touch a plain URL with a port but no credentials", () => {
+    const url = "https://api.example.com:8443/v1/health";
+    assert.equal(redactSecrets(url), url);
+  });
+
+  it("redacts modern OpenAI sk-svcacct- / sk-admin- keys", () => {
+    const out = redactSecrets("OPENAI_API_KEY=sk-svcacct-" + "A".repeat(24));
+    assert.ok(!out.includes("AAAA"), "service-account key must be redacted");
+    assert.ok(out.includes("[REDACTED]"));
+  });
+});
+
 describe("redactSecrets", () => {
   it("redacts stripe test secret keys", () => {
     const out = redactSecrets("test_mode_api_key = 'sk_test_51T2AMtJLRlXeUG4dKBwX2nsve3BLEzy'");
