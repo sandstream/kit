@@ -94,7 +94,12 @@ interface TranscriptRecord {
     role?: string;
     content?: Content;
     model?: string;
-    usage?: { input_tokens?: number; output_tokens?: number };
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_read_input_tokens?: number;
+      cache_creation_input_tokens?: number;
+    };
   };
 }
 
@@ -151,6 +156,8 @@ function indexFile(
       model: msg?.model,
       inputTokens: msg?.usage?.input_tokens,
       outputTokens: msg?.usage?.output_tokens,
+      cacheReadTokens: msg?.usage?.cache_read_input_tokens,
+      cacheCreationTokens: msg?.usage?.cache_creation_input_tokens,
       timestamp: ts,
       cwd: rec.cwd,
       gitBranch: rec.gitBranch,
