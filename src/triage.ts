@@ -85,6 +85,23 @@ export function verdictPassed(output: string): boolean {
 }
 
 /**
+ * Mirror env vars (KIT_NPM_REGISTRY, …) derived from `.kit.toml [air_gap]`, so a
+ * config-declared internal mirror is honored by the triage subprocess even when
+ * the operator didn't export the env var. Best-effort: never breaks triage if
+ * the config can't be read. Env vars already in `process.env` still win.
+ */
+async function airGapMirrorEnv(): Promise<Record<string, string>> {
+  try {
+    const { loadConfig } = await import("./config.js");
+    const { resolveAirGap, airGapTriageEnv } = await import("./airgap/config.js");
+    const cfg = await loadConfig(resolve(process.cwd(), ".kit.toml"));
+    return airGapTriageEnv(resolveAirGap(cfg.air_gap, process.env));
+  } catch {
+    return {};
+  }
+}
+
+/**
  * Run triage on a target
  */
 export async function runTriage(type: TriageType, target: string): Promise<TriageResult> {
@@ -99,11 +116,11 @@ export async function runTriage(type: TriageType, target: string): Promise<Triag
   }
 
   try {
-    const { stdout, stderr } = await exec(
-      "python3",
-      [TRIAGE_SCRIPT, type, target],
-      { timeout: 300_000 }, // 5 min for Docker pulls
-    );
+    const { stdout, stderr } = await exec("python3", [TRIAGE_SCRIPT, type, target], {
+      timeout: 300_000, // 5 min for Docker pulls
+      // config-declared mirrors, with real env taking precedence
+      env: { ...(await airGapMirrorEnv()), ...process.env },
+    });
 
     const output = stdout + (stderr ? `\n${stderr}` : "");
     const passed = verdictPassed(output);

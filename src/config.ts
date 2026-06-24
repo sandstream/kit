@@ -300,6 +300,24 @@ export interface kitConfig {
   supply_chain?: { internal_scopes?: string[] };
   /** `kit scan` settings — a tooling Infisical project to resolve scanner tokens (SNYK_TOKEN, …) from. */
   scan?: { tooling?: { project_id?: string; env?: string } };
+  /**
+   * No-egress / air-gapped posture (declarative; see docs/AIR_GAP.md). Equivalent
+   * to the `KIT_*` env vars, but checked in so the enclave config is reproducible.
+   * Env vars, when set, override these. `enabled` turns on offline scan mode.
+   */
+  air_gap?: {
+    enabled?: boolean;
+    npm_registry?: string;
+    pypi_index?: string;
+    github_api?: string;
+    docker_registry?: string;
+    threat_data_dir?: string;
+    threat_data_pubkey?: string;
+    /** Offline provenance (`kit verify-provenance`): shipped-in Sigstore trust + identity constraints. */
+    provenance_trusted_root?: string;
+    provenance_cert_identity?: string;
+    provenance_cert_issuer?: string;
+  };
   web?: {
     search?: WebSearchConfig;
   };
@@ -563,6 +581,21 @@ const kitConfigSchema = z
           .object({ project_id: z.string().optional(), env: z.string().optional() })
           .passthrough()
           .optional(),
+      })
+      .passthrough()
+      .optional(),
+    air_gap: z
+      .object({
+        enabled: z.boolean().optional(),
+        npm_registry: z.string().optional(),
+        pypi_index: z.string().optional(),
+        github_api: z.string().optional(),
+        docker_registry: z.string().optional(),
+        threat_data_dir: z.string().optional(),
+        threat_data_pubkey: z.string().optional(),
+        provenance_trusted_root: z.string().optional(),
+        provenance_cert_identity: z.string().optional(),
+        provenance_cert_issuer: z.string().optional(),
       })
       .passthrough()
       .optional(),

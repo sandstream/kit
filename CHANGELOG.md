@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.27.0] - 2026-06-24
+
+### Added
+
+- **No-egress / air-gap support — the offline-enclave stack lands for real (#98, #80).** A 4-deep stacked-PR chain (#83/#84/#85/#93) had squash-merged out of order, leaving it incompletely on main (`[air_gap]` config absent despite "#85 merged"; #84/#93 auto-closed). Reconstructed by rebasing the full stack tip onto current main:
+  - **`KIT_AIRGAP=1` offline scan mode (#83)** — runs only offline-capable scanners; no network.
+  - **Signed offline threat-data bundle (#84)** — Ed25519 + SHA-256 verified local threat data; fail-closed on a bad signature.
+  - **Declarative `[air_gap]` config in `.kit.toml` (#85)** — internal mirror endpoints honored by the triage subprocess even when the env var isn't exported (`process.env` still wins); `air_gap` added to the config schema.
+  - **Offline provenance verification — `kit verify-provenance` (#93)** — cosign `--offline` against a shipped-in trusted root; fail-closed.
+
+  Net: link triage at internal mirrors (#73), scan against signed local DBs, verify artifact provenance offline, with a tamper-evident + SIEM-exportable audit trail (1.24.0) — nothing reaches the public internet. Pure helpers fixture-tested (33 airgap+triage tests). The cloud scanners (Socket/Snyk) are deliberately out of this path — neither is air-gappable (#103).
+
 ## [1.26.1] - 2026-06-24
 
 ### Changed

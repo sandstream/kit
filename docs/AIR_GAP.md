@@ -12,6 +12,23 @@ queries at your **internal mirrors** instead, and run the heavy scanners against
 > install rather than waving it through. Point the endpoints at reachable
 > internal mirrors so triage can actually evaluate targets.
 
+## Declarative config (recommended)
+
+Everything below can be set with `KIT_*` env vars **or** checked into
+`.kit.toml` so the enclave posture is reproducible and versioned. Env vars
+override the file when both are set.
+
+```toml
+[air_gap]
+enabled = true                                   # turns on offline scan mode
+npm_registry = "https://npm.corp.internal"
+pypi_index = "https://pypi.corp.internal"
+github_api = "https://ghe.corp.internal/api/v3"
+docker_registry = "https://registry.corp.internal"
+threat_data_dir = "/opt/kit/threat-data"
+threat_data_pubkey = "/etc/kit/threat-data.pub"
+```
+
 ## 1. Point the triage gate at internal mirrors
 
 The triage script reads its registry hosts from the environment, defaulting to
@@ -62,6 +79,36 @@ What the mode does per scanner:
 Install the scanners through your internal package mirror or an approved binary
 cache; kit never downloads them itself.
 
+### Verified offline threat-data bundle (signed)
+
+Stale or tampered threat data silently degrades every verdict. To give the
+sync-in a trust chain that is **fully offline-verifiable** (no Fulcio/Rekor),
+ship the DBs as a _signed bundle_ and point kit at it:
+
+```bash
+export KIT_AIRGAP=1
+export KIT_THREAT_DATA_DIR=/opt/kit/threat-data
+export KIT_THREAT_DATA_PUBKEY=/etc/kit/threat-data.pub   # PEM (path or inline)
+kit scan
+```
+
+The bundle dir contains:
+
+- `manifest.json` — `{ version, artifacts: [{ path, sha256, env? }] }`
+- `manifest.json.sig` — a base64 **Ed25519** signature over `manifest.json`, made
+  on the connected host with the key whose public half is `KIT_THREAT_DATA_PUBKEY`
+- the artifacts themselves (e.g. `grype.db`, `osv.db`, a bumblebee catalog)
+
+kit verifies the manifest **signature**, then the **SHA-256** of every artifact,
+then sets each artifact's declared `env` var to its absolute path (e.g.
+`GRYPE_DB_CACHE_DIR`) so the scanner uses the verified local DB. **Any failure —
+bad signature, checksum mismatch, missing/extra-path artifact — rejects the whole
+bundle and `kit scan` refuses to run (fail-closed).** The bundle author declares
+the `env` wiring per artifact, so kit hard-codes no scanner-version specifics.
+
+Build the bundle on a connected host (sync DBs → write manifest with SHA-256 →
+`openssl pkeyutl -sign` / equivalent Ed25519 signing), then transfer it in.
+
 ## 3. Bumblebee (known-compromise scan) offline
 
 - `KIT_BUMBLEBEE_BIN` — use a pre-installed, internally-vetted bumblebee binary
@@ -69,13 +116,69 @@ cache; kit never downloads them itself.
 - `KIT_BUMBLEBEE_CATALOG` — point at an internally-mirrored exposure catalog.
 - `KIT_BUMBLEBEE=0` — disable the download/scan entirely where policy forbids it.
 
-## 4. Known limitation: provenance verification
+## 4. Offline provenance verification
 
-cosign/SLSA provenance verification depends on Sigstore's Fulcio CA + Rekor
-transparency log, which are public services. Full online verification is not
-possible in a no-egress enclave today; use offline-bundle verification where
-your toolchain supports it, or treat provenance as an out-of-band, connected-host
-check. (Tracked as an air-gap follow-up.)
+cosign/SLSA verification normally reaches Sigstore's Fulcio CA + Rekor log
+(public). `kit verify-provenance` runs cosign **fully offline** instead: it uses
+the bundle's inclusion proof (`--offline`) and a **shipped-in** Sigstore
+`trusted_root.json` (`--trusted-root`) that you distribute and refresh into the
+enclave — no Fulcio/Rekor egress. kit does not reimplement the crypto; it
+orchestrates cosign and is **fail-closed** (missing cosign, missing trust root,
+missing identity constraints, or any non-zero cosign exit ⇒ NOT verified).
+
+```bash
+kit verify-provenance dist/app.tar.gz \
+  --bundle dist/app.sigstore \
+  --trusted-root /etc/kit/trusted_root.json \
+  --identity "https://github.com/org/repo/.github/workflows/release.yml@refs/tags/v1" \
+  --issuer  "https://token.actions.githubusercontent.com"
+```
+
+Defaults for `--trusted-root` / `--identity` / `--issuer` can live in
+`.kit.toml [air_gap]` (`provenance_trusted_root` / `provenance_cert_identity` /
+`provenance_cert_issuer`) or the matching `KIT_PROVENANCE_*` env vars, so the
+command is just `kit verify-provenance <artifact> --bundle <file>`.
+
+**Operational note:** the enclave owner is responsible for distributing and
+periodically refreshing `trusted_root.json` (a TUF mirror snapshot or pinned
+roots) from a connected host — that is the trust anchor for offline
+verification.
+
+## 5. Memory in a classified enclave
+
+kit's memory store inherits the **classification of the machine it runs on**.
+There is intentionally **no per-row classification column**, for two reasons:
+
+1. **Under system-high it is redundant.** A workstation accredited at one level
+   (e.g. SECRET) treats everything on it at that level — every captured row is
+   already SECRET, so a column adds no information.
+2. **kit cannot enforce it.** Multi-level separation is the job of a trusted
+   reference monitor in the OS (SELinux MLS, labeled IPC/filesystems), not a CLI
+   reading and writing its own SQLite file. A classification field that kit
+   manages itself would be advisory metadata dressed up as a control — it would
+   imply a separation guarantee kit cannot keep. kit does not claim to separate
+   classification levels internally.
+
+The operational posture instead:
+
+- **The whole `memory.db` carries the enclave's level.** Run kit at system-high;
+  treat the database, its WAL, and any backups at the accredited level.
+- **File handling is already conservative.** Encrypted backups and restores are
+  written `0o600` (owner-only); store `memory.db` on the same labeled volume as
+  the rest of the enclave's data at that level.
+- **Purge = delete the database.** On a system-high machine there is no lower
+  level to preserve, so spill or decommission response is to destroy `memory.db`
+  (and backups) per your media-handling procedure, not to filter a column.
+- **Capture-time redaction still applies.** `KIT_MEMORY_REDACT` strips secrets
+  before they ever reach the store (see redaction docs); that is orthogonal to
+  classification and worth enabling regardless of level.
+- **Spill (wrong-level content pasted into a higher machine) is a procedural
+  matter**, handled by your incident process — not something an application-level
+  tag can prevent or remediate.
+
+If you genuinely need a single install to span multiple levels, that is an
+OS/MLS platform requirement: accredit the platform for multi-level operation and
+run kit on top of it. It is not, and should not be, a kit feature.
 
 ## What still never leaves the enclave
 

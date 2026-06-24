@@ -4486,23 +4486,109 @@ async function cmdSentinelStatus(): Promise<boolean> {
   return true;
 }
 
+async function cmdVerifyProvenance(): Promise<boolean> {
+  const args = process.argv.slice(3);
+  // First positional that isn't a value-flag's argument = the artifact.
+  const VALUE_FLAGS = new Set(["--bundle", "--trusted-root", "--identity", "--issuer"]);
+  let artifact: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (VALUE_FLAGS.has(args[i])) {
+      i++;
+      continue;
+    }
+    if (!args[i].startsWith("-")) {
+      artifact = args[i];
+      break;
+    }
+  }
+  if (!artifact) {
+    console.error(
+      "usage: kit verify-provenance <artifact> --bundle <file> [--trusted-root <f>] [--identity <id>] [--issuer <iss>]",
+    );
+    return false;
+  }
+  const { resolveAirGap } = await import("./airgap/config.js");
+  const { verifyProvenance } = await import("./airgap/provenance.js");
+  const { resolveToolBin } = await import("./utils/resolveTool.js");
+  const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
+  const config = await loadConfig(resolveConfigPath());
+  const ag = resolveAirGap(config.air_gap, process.env);
+  const res = await verifyProvenance(
+    {
+      artifact,
+      bundle: flagValue(args, "--bundle"),
+      trustedRoot: flagValue(args, "--trusted-root") ?? ag.provenanceTrustedRoot,
+      certIdentity: flagValue(args, "--identity") ?? ag.provenanceCertIdentity,
+      certIssuer: flagValue(args, "--issuer") ?? ag.provenanceCertIssuer,
+    },
+    {
+      resolveBin: (b) => resolveToolBin(b),
+      run: async (b, a) => {
+        const r = await execFileNoThrow(b, a, { timeout: 60_000 });
+        return { ok: r.ok, stdout: r.stdout, stderr: r.stderr };
+      },
+    },
+  );
+  if (res.ok) {
+    console.log(`${c.green}✓ provenance verified${c.reset}  ${c.dim}${artifact}${c.reset}`);
+    return true;
+  }
+  console.error(`${c.red}✗ ${res.reason}${c.reset}`);
+  return false;
+}
+
 async function cmdScan(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
   const { runScanners, suppressBaselined, dedupKey } = await import("./scanners.js");
   const { resolveToolBin } = await import("./utils/resolveTool.js");
   const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
   const { loadBaseline, baselineGet, baselineSet, saveBaseline } = await import("./baseline.js");
-  const { SCANNERS, airGapScanners, isAirGap } = await import("./scanners.js");
+  const { SCANNERS, airGapScanners } = await import("./scanners.js");
   const cwd = process.cwd();
-  // Air-gap mode (KIT_AIRGAP=1): drop cloud-only scanners and run the rest
-  // against local DBs with no network. See docs/AIR_GAP.md.
-  const airgap = airGapScanners(SCANNERS, isAirGap());
-  if (isAirGap()) {
+  const config = await loadConfig(resolveConfigPath());
+
+  // Air-gap posture from `.kit.toml [air_gap]` + env (env overrides). When
+  // enabled, drop cloud-only scanners and run the rest against local DBs with no
+  // network. See docs/AIR_GAP.md.
+  const { resolveAirGap } = await import("./airgap/config.js");
+  const ag = resolveAirGap(config.air_gap, process.env);
+  const airgap = airGapScanners(SCANNERS, ag.enabled);
+  if (ag.enabled) {
     console.log(
       `${c.dim}air-gap mode: offline scanners only${airgap.dropped.length ? ` (skipping cloud-only: ${airgap.dropped.join(", ")})` : ""}${c.reset}`,
     );
+    // Verified offline threat-data bundle (optional): point scanners at a
+    // signed, integrity-checked local DB set. Fail-closed — never scan against
+    // unverified threat data.
+    if (ag.threatDataDir) {
+      const tdDir = ag.threatDataDir;
+      const { verifyThreatData } = await import("./airgap/threat-data.js");
+      const pubRef = ag.threatDataPubkey ?? "";
+      const pubPem = pubRef && existsSync(pubRef) ? readFileSync(pubRef, "utf8") : pubRef;
+      if (!pubPem) {
+        console.error(
+          `${c.red}✗ air-gap threat-data dir set but no public key (threat_data_pubkey / KIT_THREAT_DATA_PUBKEY) — cannot verify (fail-closed)${c.reset}`,
+        );
+        return false;
+      }
+      const res = verifyThreatData({
+        dir: tdDir,
+        publicKeyPem: pubPem,
+        readFile: (rel) => readFileSync(resolve(tdDir, rel)),
+        resolvePath: (rel) => resolve(tdDir, rel),
+      });
+      if (!res.ok) {
+        console.error(
+          `${c.red}✗ threat-data bundle rejected: ${res.reason} (fail-closed)${c.reset}`,
+        );
+        return false;
+      }
+      Object.assign(airgap.env, res.env);
+      console.log(
+        `${c.dim}verified threat-data bundle: ${res.artifacts} artifact(s) signed + checksummed${c.reset}`,
+      );
+    }
   }
-  const config = await loadConfig(resolveConfigPath());
 
   // Resolve scanner tokens (SNYK_TOKEN, …) from a configured tooling Infisical
   // project so `kit scan` works without an `infisical run` wrapper (#65). The
@@ -5429,6 +5515,7 @@ async function main(): Promise<void> {
         "agent-audit": cmdAgentAudit,
         sentinel: cmdSentinel,
         scan: cmdScan,
+        "verify-provenance": cmdVerifyProvenance,
         "gha-audit": cmdGhaAudit,
         sbom: cmdSbom,
         init: cmdInit,
