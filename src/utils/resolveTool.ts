@@ -20,7 +20,9 @@ export async function resolveToolBin(tool: string): Promise<string | null> {
     const p = viaMise.stdout.trim().split("\n")[0]?.trim();
     if (p) return p;
   }
-  const viaPath = await execFileNoThrow("which", [tool], { timeout: 5_000 });
+  // POSIX `which`, Windows `where` (no POSIX shell on native Windows) — #43.
+  const finder = process.platform === "win32" ? "where" : "which";
+  const viaPath = await execFileNoThrow(finder, [tool], { timeout: 5_000 });
   if (viaPath.ok) {
     const p = viaPath.stdout.trim().split("\n")[0]?.trim();
     if (p) return p;

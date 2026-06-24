@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.28.1] - 2026-06-24
+
+### Fixed
+
+- **Tool resolution works on native Windows (#43, incremental).** `resolveToolBin` shelled out to `which`, which doesn't exist on native Windows (PowerShell/cmd). It now uses `where` on `win32` and `which` elsewhere — same first-line path parsing. POSIX behavior is byte-identical (verified); checks off one of #43's hard blockers. (Remaining #43 blockers — POSIX git hooks, `tar` extraction, secret-file ACLs, the build script's `rm`/`chmod`, and a `windows-latest` CI job to verify it all — need a Windows runner and stay open.)
+
 ## [1.28.0] - 2026-06-24
 
 ### Added
