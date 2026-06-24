@@ -66,4 +66,17 @@ describe("scanTranscripts", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("scans the Codex CLI .codex dir", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, ".codex"), { recursive: true });
+      writeFileSync(join(dir, ".codex", "session.jsonl"), '{"text":"AKIA0123456789ABCDEF"}\n');
+      const hits = await scanTranscripts(dir);
+      assert.equal(hits.length, 1);
+      assert.ok(hits[0].file.includes(".codex"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

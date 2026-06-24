@@ -39,6 +39,7 @@ export function auditMcpServers(json: string): string[] {
   const containers = [
     (obj as { mcpServers?: Record<string, unknown> })?.mcpServers,
     (obj as { servers?: Record<string, unknown> })?.servers,
+    (obj as { mcp?: Record<string, unknown> })?.mcp, // OpenCode nests servers under `mcp`
   ].filter((c): c is Record<string, unknown> => !!c && typeof c === "object");
   for (const servers of containers) {
     for (const [name, def] of Object.entries(servers)) {
@@ -67,6 +68,76 @@ export function auditHookBody(content: string): string[] {
   return SUSPICIOUS_HOOK_PATTERNS.filter((p) => p.re.test(content)).map((p) => p.why);
 }
 
+/** Lowercased basename of a command path (handles /usr/bin/node, node.exe). */
+function baseCmd(command: string): string {
+  return (command.split(/[\\/]/).pop() ?? command).replace(/\.exe$/i, "").toLowerCase();
+}
+
+/** Interpreters that execute INLINE code via a flag — abnormal for a persistent MCP server. */
+const INLINE_EVAL: Record<string, RegExp> = {
+  node: /^(-e|--eval)$/,
+  bun: /^(-e|--eval)$/,
+  deno: /^eval$/,
+  python: /^-c$/,
+  python3: /^-c$/,
+  ruby: /^-e$/,
+  perl: /^-e$/,
+  sh: /^-c$/,
+  bash: /^-c$/,
+  zsh: /^-c$/,
+};
+
+export interface StdioMcpFinding {
+  server: string;
+  severity: "high";
+  why: string;
+}
+
+/**
+ * A *stdio* MCP server runs a local `command` (+ args) on every agent startup.
+ * We do NOT flag the common-and-legitimate `npx <pkg>` shape (that would warn on
+ * almost every config — noise is the #1 reason security tooling gets ignored).
+ * We flag only the unambiguous abuse shapes: a malware-pattern command line, or
+ * an interpreter running INLINE code (a real MCP server is a program, not a
+ * `node -e "…"` / `sh -c "…"` one-liner).
+ */
+export function auditMcpStdio(json: string): StdioMcpFinding[] {
+  let obj: unknown;
+  try {
+    obj = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  const containers = [
+    (obj as { mcpServers?: Record<string, unknown> })?.mcpServers,
+    (obj as { servers?: Record<string, unknown> })?.servers,
+    (obj as { mcp?: Record<string, unknown> })?.mcp, // OpenCode nests servers under `mcp`
+  ].filter((c): c is Record<string, unknown> => !!c && typeof c === "object");
+  const out: StdioMcpFinding[] = [];
+  for (const servers of containers) {
+    for (const [name, def] of Object.entries(servers)) {
+      const command = (def as { command?: unknown })?.command;
+      if (typeof command !== "string" || !command) continue; // url-based: handled by auditMcpServers
+      const rawArgs = (def as { args?: unknown }).args;
+      const argv = Array.isArray(rawArgs)
+        ? rawArgs.filter((a): a is string => typeof a === "string")
+        : [];
+      const full = [command, ...argv].join(" ");
+      const malware = SUSPICIOUS_HOOK_PATTERNS.find((p) => p.re.test(full));
+      if (malware) {
+        out.push({ server: name, severity: "high", why: malware.why });
+        continue;
+      }
+      const cmd = baseCmd(command);
+      const evalRe = INLINE_EVAL[cmd];
+      if (evalRe && argv.some((a) => evalRe.test(a))) {
+        out.push({ server: name, severity: "high", why: `runs inline code via \`${cmd}\`` });
+      }
+    }
+  }
+  return out;
+}
+
 function result(
   name: string,
   status: SecurityCheckResult["status"],
@@ -85,6 +156,13 @@ const CONFIG_FILES = [
   ".vscode/mcp.json",
   ".claude/settings.json",
   ".claude/settings.local.json",
+  // OpenCode (project config carries an `mcp` block) + Codex CLI. secrets-in-config
+  // is format-agnostic (findSecrets reads raw text); the JSON-shaped MCP checks
+  // simply no-op on the TOML files.
+  "opencode.json",
+  "opencode.jsonc",
+  ".codex/config.toml",
+  ".codex/config.json",
 ];
 
 const HOOK_DIRS = [".git/hooks", ".githooks", ".husky"];
@@ -129,6 +207,18 @@ export function runAgentAudit(cwd: string): SecurityCheckResult[] {
           "exposure",
           "medium",
           "use https:// MCP endpoints",
+        ),
+      );
+    }
+    for (const s of auditMcpStdio(content)) {
+      out.push(
+        result(
+          `risky MCP server "${s.server}" in ${rel}`,
+          "fail",
+          `stdio MCP server ${s.why} — it executes on every agent startup`,
+          "exposure",
+          s.severity,
+          "verify this MCP server's command; an inline/obfuscated command is a backdoor shape",
         ),
       );
     }
