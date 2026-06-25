@@ -154,6 +154,13 @@ export async function readElevation(cwd: string = process.cwd()): Promise<Elevat
   const path = resolve(cwd, ELEVATION_FILE);
   try {
     await access(path);
+  } catch {
+    return null; // no marker file → not elevated (the normal, expected case)
+  }
+  // The file EXISTS — from here a failure is an anomaly (corruption / tampering),
+  // not "not elevated". Stay fail-closed (return null) but never SILENTLY: a
+  // tampered marker must not look identical to an expired one.
+  try {
     const text = await readFile(path, "utf-8");
     const parsed = JSON.parse(text) as Partial<ElevationState> & { sig?: string };
     if (!parsed.expiresAt || !parsed.scope) return null;
@@ -165,9 +172,15 @@ export async function readElevation(cwd: string = process.cwd()): Promise<Elevat
     };
     // Reject unsigned / tampered / forged markers — only an HMAC signed with the
     // machine-local key is honored. This is what makes the gate unforgeable.
-    if (!(await verifyElevationSig(state, parsed.sig ?? ""))) return null;
+    if (!(await verifyElevationSig(state, parsed.sig ?? ""))) {
+      console.warn(
+        "[kit] elevation marker present but signature invalid — ignoring (tampered/forged?)",
+      );
+      return null;
+    }
     return state;
   } catch {
+    console.warn("[kit] elevation marker present but unreadable/corrupt — ignoring");
     return null;
   }
 }

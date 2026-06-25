@@ -2226,7 +2226,9 @@ async function readSecretValueFromVault(
   const { mkdtempSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
+  const { secureDir, secureFile } = await import("./utils/secure-perms.js");
   const dir = mkdtempSync(join(tmpdir(), "kit-onecli-"));
+  secureDir(dir); // mkdtemp is 0o777-masked; the .env below holds a materialized secret
   const tmpEnv = join(dir, ".env");
   try {
     // We need generateSecrets to write to a path of our choosing; the current
@@ -2239,6 +2241,7 @@ async function readSecretValueFromVault(
     };
     void writeFileSync; // keep import for future expansion
     await generateSecrets(isolated, tmpEnv);
+    secureFile(tmpEnv); // materialized plaintext secret → owner-only
     const content = readFileSync(tmpEnv, "utf-8");
     const match = content.match(new RegExp(`^${keyName}=(.*)$`, "m"));
     return match ? match[1] : null;

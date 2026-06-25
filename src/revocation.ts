@@ -60,17 +60,21 @@ async function fetchRevocationStatus(
     });
 
     if (!response.ok) {
-      // If endpoint is unreachable, assume not revoked
-      console.warn(`Revocation check failed: ${response.statusText}`);
-      return { revoked: false };
+      // Fail CLOSED: a revocation endpoint that is configured but errors must NOT
+      // be read as "not revoked" — that lets a possibly-revoked agent keep running
+      // and lets anyone who can disrupt the endpoint disable the kill-switch.
+      console.warn(
+        `Revocation check failed (${response.statusText}) — failing closed (assume revoked)`,
+      );
+      return { revoked: true };
     }
 
     const data = (await response.json()) as RevocationStatus;
     return data;
   } catch (error) {
-    // If endpoint is unreachable, assume not revoked
-    console.warn(`Revocation check failed: ${error}`);
-    return { revoked: false };
+    // Network/parse failure — fail CLOSED (see above).
+    console.warn(`Revocation check failed (${error}) — failing closed (assume revoked)`);
+    return { revoked: true };
   }
 }
 
