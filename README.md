@@ -95,11 +95,11 @@ with them. It runs them, folds in their results, and adds the layer they do not 
   `git clone` to a working, secret-safe environment.
 - **kit orchestrates, it does not replace.** `kit check` runs the local scanners it
   finds (Semgrep, Trivy, osv-scanner, GuardDog); `kit scan` drives the wider registry
-  (snyk/trivy/grype/semgrep/osv) and merges it into one verdict; the `snyk` and `wiz`
-  plugins ingest their findings; everything lands in one consolidated report next to
-  kit's own checks, each with a remediation step. Cloud-only tools like Socket can't
-  run air-gapped, so kit surfaces them as an honest `skip` (local cover: GuardDog +
-  osv-scanner + `kit supply-chain`) — never a false green.
+  (snyk/trivy/grype/semgrep/osv/socket) and merges it into one verdict; the `snyk` and
+  `wiz` plugins ingest their findings; everything lands in one consolidated report next
+  to kit's own checks, each with a remediation step. The cloud scanners (Snyk, Socket)
+  run when their token is present and are dropped in air-gap mode — `kit setup` asks the
+  network posture and points at where the tokens live (it never captures or stores them).
 - **The one gate your agent runs.** Before an AI agent acts it runs `kit review` once
   and gets a single deterministic verdict across every source. No agent, no socket,
   no telemetry, zero LLM calls. Your code never leaves the machine.
@@ -184,7 +184,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit check`: Status of tools, services, secrets, hooks, security, tests
 - `kit fix`: Auto-remediate gaps (tools, gitignore, hooks, .env.template)
 - `kit review` / `kit heal`: One-gate repo audit (check + design); bounded self-heal loop
-- `kit scan`: Run external scanners (snyk/trivy/grype/semgrep/osv) → one merged, air-gap-aware verdict
+- `kit scan`: Run external scanners (snyk/trivy/grype/semgrep/osv/socket) → one merged, air-gap-aware verdict
 - `kit supply-chain` / `kit sbom` / `kit gha-audit` / `kit agent-audit`: Install-time triage, SBOM, Actions hardening, agent/MCP/hook audit
 - `kit sentinel {run,install,status}`: Autonomous redline watcher (propose/apply guarded fixes)
 - `kit verify-provenance` / `kit ingest`: Verify SLSA provenance offline; ingest external SARIF/OSV
@@ -405,7 +405,7 @@ Context pointers are non-secret and live in config; the credentials they authent
 - **Bumblebee**: Built-in supply-chain scanner. Verifies every dependency against pinned SHA-256 checksums in `bumblebee.lock.json`. Re-verifies the cache before reuse so a tampered local file is caught (kind `integrity`). Runs in CI on every PR
 - `kit triage npm|pip|docker|repo|skill <target>`: Pre-install security evaluation via triage skill
 - `kit triage npm <pkg> --sandbox`: Offline behavioral inspection: `npm pack` → extract → scan for install scripts, eval/base64/network patterns, unexpected scripts, oversized files. No code executes
-- `kit scan`: Run the installed external scanners (Snyk, Trivy, Grype, Semgrep, osv-scanner) and merge them into one local, air-gap-aware verdict. **GuardDog** (opt-in via `KIT_GUARDDOG=1` or `[scan] guarddog`) adds local malware detection. Cloud-only **Socket** can't run air-gapped, so it surfaces as an honest `skip` (local cover: GuardDog + osv-scanner + `kit supply-chain`), never a false green
+- `kit scan`: Run the installed external scanners (Snyk, Trivy, Grype, Semgrep, osv-scanner, Socket) and merge them into one local, air-gap-aware verdict. **GuardDog** (opt-in via `KIT_GUARDDOG=1` or `[scan] guarddog`) adds local malware detection. The **cloud** scanners (Snyk, Socket) run when their token is set (`SNYK_TOKEN` / `SOCKET_SECURITY_API_TOKEN`, resolved from `[scan.tooling]` vault or env — kit never stores them) and are **dropped in air-gap** mode; `kit setup` asks the network posture (connected vs enclave) and writes `[air_gap]`. Socket has no stable findings-JSON, so kit gates on `socket ci`'s exit code (never false-green). Token absent → the scanner is skipped, not failed
 - Supply-chain findings auto-append to `.kit-audit.jsonl` (one JSON line per finding) for SIEM ingest
 - Releases ship with SLSA provenance (`npm publish --provenance`), CycloneDX + SPDX SBOMs on every GitHub release, cosign-signed Docker images, and weekly OpenSSF Scorecard
 

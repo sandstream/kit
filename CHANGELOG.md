@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Docs
+
+- Docs sweep — README + `docs/COMMANDS.md` now match shipped reality: **Socket** documented as a real cloud scanner (runs with `SOCKET_SECURITY_API_TOKEN`, dropped in air-gap, gated on `socket ci`'s exit code) instead of a permanent skip; `socket` added to the scanner-registry lists; `kit setup` documented as 6-step + the network-posture prompt; added the missing `kit security prescan` / `prescan-diff` / `scan-transcripts` and `kit audit secrets` / `verify` / `export` reference rows.
+
 ## [1.33.2] - 2026-06-25
 
 ### Fixed
