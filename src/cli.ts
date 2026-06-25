@@ -5267,12 +5267,73 @@ function cmdHelp(subcommand?: string): boolean {
     `${dim}Prereqs: Node 22+, git, and mise (brew install mise) for installing tools.${reset}\n`,
   );
   console.log(`${bold}Usage:${reset}  kit ${cyan}<command>${reset} ${dim}[options]${reset}\n`);
-  console.log(`${bold}Commands:${reset}`);
+  // Grouped command surface — far more scannable than a flat 75-line dump. Categories
+  // cover every top-level command; any command not listed still prints under "Other",
+  // so help can never silently drop one. Subcommands are reached via `kit <cmd> --help`
+  // (or `kit help <cmd>`) rather than firehosed here.
+  const CATEGORIES: [string, string[]][] = [
+    [
+      "Setup & lifecycle",
+      [
+        "init",
+        "setup",
+        "install",
+        "upgrade",
+        "clone",
+        "fix",
+        "heal",
+        "doctor",
+        "status",
+        "check",
+        "health",
+      ],
+    ],
+    ["Review & quality", ["review", "design", "baseline", "analyze"]],
+    ["Secrets & environments", ["secrets", "env", "login"]],
+    [
+      "Security & supply chain",
+      [
+        "scan",
+        "security",
+        "triage",
+        "supply-chain",
+        "sbom",
+        "gha-audit",
+        "agent-audit",
+        "verify-provenance",
+        "ingest",
+        "sentinel",
+      ],
+    ],
+    ["Agents & memory", ["memory", "agent-config", "mcp", "skills", "context", "hooks"]],
+    ["Governance & access", ["governance", "audit", "auth", "team", "escalate"]],
+    ["Packages & services", ["pkg", "add", "plugin", "create-plugin", "run", "open", "ci"]],
+    ["Meta", ["whoami", "version", "completions", "help"]],
+  ];
 
-  const maxLen = Math.max(...Object.keys(COMMAND_HELP).map((k) => k.length));
-  for (const [cmd, desc] of Object.entries(COMMAND_HELP)) {
-    const pad = " ".repeat(maxLen - cmd.length + 2);
-    console.log(`  ${green}${cmd}${reset}${pad}${dim}${desc}${reset}`);
+  // top-level keys have no space; subcommand keys ("memory index") do.
+  const topLevel = Object.keys(COMMAND_HELP).filter((k) => !k.includes(" "));
+  const categorized = new Set(CATEGORIES.flatMap(([, cmds]) => cmds));
+  const uncategorized = topLevel.filter((k) => !categorized.has(k));
+  const groups: [string, string[]][] = uncategorized.length
+    ? [...CATEGORIES, ["Other", uncategorized]]
+    : CATEGORIES;
+
+  const hasSub = (cmd: string) => Object.keys(COMMAND_HELP).some((k) => k.startsWith(`${cmd} `));
+  const maxLen = Math.max(...topLevel.map((k) => k.length)) + 2; // room for the " +" marker
+
+  console.log(
+    `${bold}Commands:${reset}  ${dim}(+ = has subcommands; run \`kit <command> --help\`)${reset}`,
+  );
+  for (const [title, cmds] of groups) {
+    const present = cmds.filter((cmd) => COMMAND_HELP[cmd]);
+    if (!present.length) continue;
+    console.log(`\n  ${dim}${title}${reset}`);
+    for (const cmd of present) {
+      const label = hasSub(cmd) ? `${cmd} +` : cmd;
+      const pad = " ".repeat(maxLen - label.length + 2);
+      console.log(`  ${green}${label}${reset}${pad}${dim}${COMMAND_HELP[cmd]}${reset}`);
+    }
   }
 
   console.log(`\n${bold}Options:${reset}`);

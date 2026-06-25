@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.31.2] - 2026-06-25
+
+### Changed
+
+- **`kit help` is now grouped by category.** The flat ~75-line dump (every command + every subcommand interleaved) is reorganized into eight scannable sections: Setup & lifecycle, Review & quality, Secrets & environments, Security & supply chain, Agents & memory, Governance & access, Packages & services, Meta. Only top-level commands are listed; a `+` marks those with subcommands (reach them via `kit <command> --help` or `kit help <command>`). Categories are completeness-checked at render time — any uncategorized command still prints under "Other", so help can't silently drop one.
+
 ## [1.31.1] - 2026-06-25
 
 ### Fixed
