@@ -1772,6 +1772,16 @@ async function cmdInit(): Promise<boolean> {
     console.log();
   }
 
+  // --no-setup: stop after .kit.toml + lock files; skip install / login / secrets.
+  // (Mirrors `kit clone --no-setup`; previously `kit init` silently ignored this flag
+  // and ran full setup anyway.)
+  if (hasFlag(process.argv, "--no-setup")) {
+    console.log(
+      `${c.yellow}Setup skipped (--no-setup): .kit.toml + lock files generated; install / login / secrets not run.${c.reset}`,
+    );
+    return true;
+  }
+
   // Now run the setup process
   const setupOk = await cmdSetup();
 
@@ -4545,7 +4555,11 @@ async function cmdScan(): Promise<boolean> {
   const { loadBaseline, baselineGet, baselineSet, saveBaseline } = await import("./baseline.js");
   const { SCANNERS, airGapScanners } = await import("./scanners.js");
   const cwd = process.cwd();
-  const config = await loadConfig(resolveConfigPath());
+  // Config-free by design: scanning is project-agnostic, so a missing .kit.toml is
+  // NOT an error — fall back to an empty config (air-gap + tooling tokens then come
+  // from env). This is what lets `kit scan` run in any repo without `kit init` first.
+  const configPath = resolveConfigPath();
+  const config = existsSync(configPath) ? await loadConfig(configPath) : ({} as kitConfig);
 
   // Air-gap posture from `.kit.toml [air_gap]` + env (env overrides). When
   // enabled, drop cloud-only scanners and run the rest against local DBs with no
@@ -4856,7 +4870,7 @@ export const COMMAND_HELP: Record<string, string> = {
   "memory save": "Bookmark the current session as a named copilot",
   "memory threads": "List saved copilots (current project; --global for all)",
   "memory resume": "Print the resume command for a saved copilot (by name or number)",
-  init: "Detect stack, generate .kit.toml, and run full setup",
+  init: "Detect stack, generate .kit.toml, and run full setup (--no-setup: config + lock files only)",
   upgrade: "Update lock files from .kit.toml",
   install: "Install missing tools via mise",
   login: "Guided login to all configured services",
