@@ -63,6 +63,7 @@ kit context check  # lock each CLI to the declared account + project (no wrong-o
 ## Problem
 
 Every time you (or an agent) starts on a new project:
+
 - Missing CLI tools (supabase, vercel, eas, gcloud...)
 - Not logged in to services
 - Missing API keys and secrets
@@ -92,10 +93,13 @@ with them. It runs them, folds in their results, and adds the layer they do not 
   goes **broad across the whole setup lifecycle**: tools, auth, secrets and vaults,
   git hooks, supply-chain triage, env routing, memory, governance. One command from
   `git clone` to a working, secret-safe environment.
-- **kit orchestrates, it does not replace.** `kit check` runs Semgrep, Trivy and
-  Socket when present; the `snyk` and `wiz` plugins ingest their findings; everything
-  lands in one consolidated report next to kit's own checks, each with a remediation
-  step.
+- **kit orchestrates, it does not replace.** `kit check` runs the local scanners it
+  finds (Semgrep, Trivy, osv-scanner, GuardDog); `kit scan` drives the wider registry
+  (snyk/trivy/grype/semgrep/osv) and merges it into one verdict; the `snyk` and `wiz`
+  plugins ingest their findings; everything lands in one consolidated report next to
+  kit's own checks, each with a remediation step. Cloud-only tools like Socket can't
+  run air-gapped, so kit surfaces them as an honest `skip` (local cover: GuardDog +
+  osv-scanner + `kit supply-chain`) — never a false green.
 - **The one gate your agent runs.** Before an AI agent acts it runs `kit review` once
   and gets a single deterministic verdict across every source. No agent, no socket,
   no telemetry, zero LLM calls. Your code never leaves the machine.
@@ -116,7 +120,7 @@ kit is a security tool, so it holds itself to the bar it sets. The receipts:
   incident-response plan with severity SLAs.
 - **Secrets never live in the repo.** kit keeps credentials in a vault, materializes
   `.env.local` locally (gitignored), and scans code, staged diffs, git history and its own
-  memory store for leaked keys. A stolen *repo* should contain no live secrets.
+  memory store for leaked keys. A stolen _repo_ should contain no live secrets.
 - **Supply chain is gated, not trusted.** `kit triage` runs before any install — fail-closed,
   "installs nothing untriaged" (aligns with OpenSSF S2C2F).
 - **Local-first, zero LLM, no telemetry.** Your code never leaves the machine.
@@ -179,6 +183,11 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit setup`: Full pipeline: install → hooks → login → secrets → check
 - `kit check`: Status of tools, services, secrets, hooks, security, tests
 - `kit fix`: Auto-remediate gaps (tools, gitignore, hooks, .env.template)
+- `kit review` / `kit heal`: One-gate repo audit (check + design); bounded self-heal loop
+- `kit scan`: Run external scanners (snyk/trivy/grype/semgrep/osv) → one merged, air-gap-aware verdict
+- `kit supply-chain` / `kit sbom` / `kit gha-audit` / `kit agent-audit`: Install-time triage, SBOM, Actions hardening, agent/MCP/hook audit
+- `kit sentinel {run,install,status}`: Autonomous redline watcher (propose/apply guarded fixes)
+- `kit verify-provenance` / `kit ingest`: Verify SLSA provenance offline; ingest external SARIF/OSV
 - `kit login --plan`: Show the resolved auth strategy (vault/capture/interactive) per service without logging in
 - `kit secrets {set,migrate,rotate,propagate,onecli,validate}`: Secret lifecycle
 - `kit memory {index,search,stats,suggest,merge,save,threads,share,backup}`: Local-first, cross-harness second brain (per-harness `stats`, project recall, saved copilots) + `kit memory pal` pending-action ledger
@@ -224,7 +233,7 @@ Setup complete, you're ready to go! ✓
 ```
 
 Step 5 teaches the agent in the repo (Claude Code, Codex, Cursor, Cline) to
-*use* kit, it writes a small managed "run kit check / triage before install /
+_use_ kit, it writes a small managed "run kit check / triage before install /
 vault your secrets" block into the agent's rules file (`CLAUDE.md`, `AGENTS.md`,
 `.cursorrules`, `.clinerules`). Run it standalone any time with `kit agent-config`.
 The block is regenerated in place on re-run; edit outside its markers freely.
@@ -287,6 +296,7 @@ TRIAGE PASSED
 Trust model documented in [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md);
 data flow per command in [`docs/DATA_FLOW.md`](./docs/DATA_FLOW.md);
 release-verification in [`docs/VERIFY.md`](./docs/VERIFY.md).
+
 - `kit doctor`: Deep diagnostics: Node.js version, mise, .env.local, tools in PATH, git hooks
 - `kit env`: Inspect environment variables from .env.local (`--show-values`, `--missing`, `--json`)
 - `kit mcp`: Run the MCP server over stdio for AI assistants (auto-detected: no sub-command + non-TTY). Interactively, `kit mcp list|auth|set-token|clear` manages declared servers
@@ -313,16 +323,16 @@ provisions its CLI like any other tool — it adds the CLI to `[tools]`, so `kit
 installs it via mise, resolves it mise-first at read time, and prints the login step.
 This covers the dedicated vault CLIs:
 
-| Backend | CLI installed by `kit setup`? | Authenticate with |
-|---|---|---|
-| 1Password | yes (`op` via mise) | `op signin` |
-| Infisical | yes (`infisical` via mise) | `infisical login` + `infisical init` |
-| Doppler | yes (`doppler` via mise) | `doppler login` + `doppler setup` |
-| Bitwarden | yes (`bw` via mise) | `bw login` + `bw unlock` |
-| HashiCorp Vault | yes (`vault` via mise) | `vault login` |
-| AWS Secrets Manager | **no** — uses your existing `aws` CLI | `aws configure` / IAM role |
-| GCP Secret Manager | **no** — uses your existing `gcloud` CLI | `gcloud auth login` |
-| Azure Key Vault | **no** — uses your existing `az` CLI | `az login` |
+| Backend             | CLI installed by `kit setup`?            | Authenticate with                    |
+| ------------------- | ---------------------------------------- | ------------------------------------ |
+| 1Password           | yes (`op` via mise)                      | `op signin`                          |
+| Infisical           | yes (`infisical` via mise)               | `infisical login` + `infisical init` |
+| Doppler             | yes (`doppler` via mise)                 | `doppler login` + `doppler setup`    |
+| Bitwarden           | yes (`bw` via mise)                      | `bw login` + `bw unlock`             |
+| HashiCorp Vault     | yes (`vault` via mise)                   | `vault login`                        |
+| AWS Secrets Manager | **no** — uses your existing `aws` CLI    | `aws configure` / IAM role           |
+| GCP Secret Manager  | **no** — uses your existing `gcloud` CLI | `gcloud auth login`                  |
+| Azure Key Vault     | **no** — uses your existing `az` CLI     | `az login`                           |
 
 The three cloud secret managers are a deliberate exception: their CLIs are normally
 already present (cloud installer, CI image, IAM environment), authenticate through
@@ -395,13 +405,14 @@ Context pointers are non-secret and live in config; the credentials they authent
 - **Bumblebee**: Built-in supply-chain scanner. Verifies every dependency against pinned SHA-256 checksums in `bumblebee.lock.json`. Re-verifies the cache before reuse so a tampered local file is caught (kind `integrity`). Runs in CI on every PR
 - `kit triage npm|pip|docker|repo|skill <target>`: Pre-install security evaluation via triage skill
 - `kit triage npm <pkg> --sandbox`: Offline behavioral inspection: `npm pack` → extract → scan for install scripts, eval/base64/network patterns, unexpected scripts, oversized files. No code executes
+- `kit scan`: Run the installed external scanners (Snyk, Trivy, Grype, Semgrep, osv-scanner) and merge them into one local, air-gap-aware verdict. **GuardDog** (opt-in via `KIT_GUARDDOG=1` or `[scan] guarddog`) adds local malware detection. Cloud-only **Socket** can't run air-gapped, so it surfaces as an honest `skip` (local cover: GuardDog + osv-scanner + `kit supply-chain`), never a false green
 - Supply-chain findings auto-append to `.kit-audit.jsonl` (one JSON line per finding) for SIEM ingest
 - Releases ship with SLSA provenance (`npm publish --provenance`), CycloneDX + SPDX SBOMs on every GitHub release, cosign-signed Docker images, and weekly OpenSSF Scorecard
 
 ## Memory
 
 `kit memory` gives an agent a local-first, deterministic second brain, it stores
-your raw conversation history and searches it *before answering*, so it pulls
+your raw conversation history and searches it _before answering_, so it pulls
 receipts instead of guessing. SQLite + FTS5, two hooks, no vectors, no model calls.
 It indexes transcripts from **seven** coding agents (Claude Code, Codex, Gemini,
 Continue, Cursor, Amazon Q, and Cline), each parsed against the agent's own
@@ -510,35 +521,36 @@ kit add vercel/hosting     # Link repository to Vercel
 
 The full adapter set (each provisions/reuses the relevant keys; run `kit add <id>`):
 
-| Service | Purpose |
-|---|---|
-| `stripe/payments` | Stripe payment processing (products + price IDs) |
-| `supabase/db` | Supabase database + authentication |
-| `vercel/hosting` | Vercel hosting + deployment |
-| `flyio/hosting` | Fly.io container deployment |
-| `railway/hosting` | Railway (Heroku-style) deployment |
-| `neon/db` | Neon serverless Postgres |
-| `planetscale/db` | PlanetScale serverless MySQL |
-| `upstash/redis` | Upstash serverless Redis |
-| `cloudflare/r2` | Cloudflare R2 object storage (S3-compatible) |
-| `clerk/auth` | Clerk authentication + user management |
-| `resend/email` | Resend transactional email |
-| `loops/email` | Loops marketing + transactional email |
-| `sentry/monitoring` | Sentry error tracking + performance monitoring |
-| `posthog/analytics` | PostHog product analytics + session recording |
-| `tinybird/analytics` | Tinybird real-time analytics on ClickHouse |
+| Service               | Purpose                                               |
+| --------------------- | ----------------------------------------------------- |
+| `stripe/payments`     | Stripe payment processing (products + price IDs)      |
+| `supabase/db`         | Supabase database + authentication                    |
+| `vercel/hosting`      | Vercel hosting + deployment                           |
+| `flyio/hosting`       | Fly.io container deployment                           |
+| `railway/hosting`     | Railway (Heroku-style) deployment                     |
+| `neon/db`             | Neon serverless Postgres                              |
+| `planetscale/db`      | PlanetScale serverless MySQL                          |
+| `upstash/redis`       | Upstash serverless Redis                              |
+| `cloudflare/r2`       | Cloudflare R2 object storage (S3-compatible)          |
+| `clerk/auth`          | Clerk authentication + user management                |
+| `resend/email`        | Resend transactional email                            |
+| `loops/email`         | Loops marketing + transactional email                 |
+| `sentry/monitoring`   | Sentry error tracking + performance monitoring        |
+| `posthog/analytics`   | PostHog product analytics + session recording         |
+| `tinybird/analytics`  | Tinybird real-time analytics on ClickHouse            |
 | `liveblocks/realtime` | Liveblocks collaborative realtime (presence, cursors) |
-| `trigger/background` | Trigger.dev background jobs |
-| `inngest/background` | Inngest event-driven background jobs |
-| `flagsmith/flags` | Flagsmith feature flags + remote config |
-| `expo/eas` | Expo Application Services (mobile builds) |
-| `searxng/instance` | Self-hosted SearXNG search engine |
+| `trigger/background`  | Trigger.dev background jobs                           |
+| `inngest/background`  | Inngest event-driven background jobs                  |
+| `flagsmith/flags`     | Flagsmith feature flags + remote config               |
+| `expo/eas`            | Expo Application Services (mobile builds)             |
+| `searxng/instance`    | Self-hosted SearXNG search engine                     |
 
 Add your own with `kit create-plugin <name>` (see [docs/PLUGIN_DEVELOPMENT.md](./docs/PLUGIN_DEVELOPMENT.md)).
 
 ### Example Workflows
 
 **New project setup:**
+
 ```bash
 # Clone project
 git clone https://github.com/user/my-app
@@ -557,6 +569,7 @@ kit check
 ```
 
 **Agent-driven provisioning:**
+
 ```bash
 # Agent provisions services automatically
 kit add stripe/payments
@@ -578,6 +591,7 @@ See [docs/CUSTOM_ADAPTERS.md](./docs/CUSTOM_ADAPTERS.md) for a complete guide on
 **Troubleshooting:**
 
 Common issues and solutions:
+
 - **"Required tool not installed"**: Install the service's CLI tool (see examples above)
 - **"Not authenticated"**: Run the service's login command (e.g., `stripe login`)
 - **"Provisioning failed"**: Check CLI is in your PATH: `which stripe`
@@ -586,6 +600,7 @@ Common issues and solutions:
 ## Agent Integration
 
 Agents run `kit check` at start. If anything fails:
+
 1. Auto-fix what's possible (`kit fix`)
 2. Escalate to human what requires browser auth (`kit escalate`)
 3. Continue working on what's available
@@ -635,11 +650,13 @@ revocation_endpoint = "https://audit.example.com/agents/{agent_id}/status"
 ### Environment Detection
 
 kit automatically detects the current environment using:
+
 1. **NODE_ENV** environment variable (highest priority)
 2. **Git branch** name (fallback: main/master→prod, staging→staging, others→dev)
 3. **Default** to dev if neither is available
 
 Set NODE_ENV in your `.env.local`:
+
 ```bash
 # Options: development, staging, production
 NODE_ENV=development
@@ -720,33 +737,47 @@ For Cline, add the same config to your `cline_mcp_settings.json`.
 
 ### Available MCP Tools
 
-| Tool | Description |
-|------|-------------|
-| `kit_check` | Run all checks, return structured status JSON |
-| `kit_install` | Install missing tools via mise |
-| `kit_login` | Attempt service logins (non-interactive) |
-| `kit_secrets` | Generate `.env.local` from configured sources |
-| `kit_fix` | Auto-fix issues (install tools, generate lock files) |
-| `kit_add` | Provision a service integration (stripe, supabase, etc.) |
-| `kit_env` | Inspect `.env.local`, list keys with set/missing status and redacted values |
+| Tool          | Description                                                                 |
+| ------------- | --------------------------------------------------------------------------- |
+| `kit_check`   | Run all checks, return structured status JSON                               |
+| `kit_install` | Install missing tools via mise                                              |
+| `kit_login`   | Attempt service logins (non-interactive)                                    |
+| `kit_secrets` | Generate `.env.local` from configured sources                               |
+| `kit_fix`     | Auto-fix issues (install tools, generate lock files)                        |
+| `kit_add`     | Provision a service integration (stripe, supabase, etc.)                    |
+| `kit_env`     | Inspect `.env.local`, list keys with set/missing status and redacted values |
 
 ### Example: kit_check response
 
 ```json
 {
   "ok": true,
-  "tools": [
-    { "name": "node", "required": "latest", "installed": "22.22.2", "ok": true }
-  ],
+  "tools": [{ "name": "node", "required": "latest", "installed": "22.22.2", "ok": true }],
   "secrets": [
     { "name": "APP_NAME", "source": "config", "available": true, "detail": "Derived from config" }
   ],
   "security": [
-    { "category": "secrets", "name": ".env gitignored", "status": "pass", "detail": "all .env patterns in .gitignore" },
-    { "category": "supply-chain", "name": "pinned versions", "status": "pass", "detail": "all dependencies pinned" }
+    {
+      "category": "secrets",
+      "name": ".env gitignored",
+      "status": "pass",
+      "detail": "all .env patterns in .gitignore"
+    },
+    {
+      "category": "supply-chain",
+      "name": "pinned versions",
+      "status": "pass",
+      "detail": "all dependencies pinned"
+    }
   ],
   "locks": [
-    { "category": "cli-lock", "exists": true, "inSync": true, "missing": [], "detail": "all tools locked" }
+    {
+      "category": "cli-lock",
+      "exists": true,
+      "inSync": true,
+      "missing": [],
+      "detail": "all tools locked"
+    }
   ]
 }
 ```

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, realpathSync } from "node:fs";
 import { writeFile, access, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "node:path";
@@ -4817,9 +4817,22 @@ function cmdVersion(): boolean {
   return true;
 }
 
-const COMMAND_HELP: Record<string, string> = {
+export const COMMAND_HELP: Record<string, string> = {
   status: "Adoption checklist — what's set up across kit + the next step for each gap",
   check: "Check status of all tools, services, secrets, and lock files",
+  health: "Deep environment health diagnostics — granular pass/fail across tools, services, config",
+  scan: "Run external scanners (snyk/trivy/grype/semgrep/osv) and merge them into one local verdict",
+  sentinel: "Autonomous redline watcher — propose/apply guarded remediations (run|install|status)",
+  "supply-chain":
+    "Install-time supply-chain triage: install-scripts, lockfile-drift, dep-confusion, slopsquat",
+  "agent-audit": "Audit agent / MCP / hook configs for plaintext secrets + malware-shaped hooks",
+  "gha-audit":
+    "GitHub Actions hardening lint — unpinned actions + pwn-request patterns in .github/workflows",
+  sbom: "Generate a CycloneDX / SPDX SBOM from the lockfile (SARIF emit via kit scan --sarif)",
+  ingest:
+    "Ingest external SARIF / OSV reports into kit's consolidated verdict (kit ingest <sarif|osv> <file>)",
+  "verify-provenance":
+    "Verify a release's SLSA provenance bundle offline (Ed25519 + SHA256 / cosign)",
   review: "Full repo audit — runs check + design in one gate (for agents / PR checks)",
   design: "Check design quality (a11y, design tokens) against the baseline",
   baseline:
@@ -4866,6 +4879,8 @@ const COMMAND_HELP: Record<string, string> = {
   analyze: "Analyze repo + emit draft CLAUDE.md / RULES.md",
   "agent-config":
     "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules",
+  security:
+    "Security policy + scanners (policy | scan-staged | scan-build | verify-pull | prescan | …)",
   "security policy": "Dependency allowlist enforcement (init|add|check)",
   "security clear-cache": "Clear cached scanner binary (after intentional rebuild)",
   "security scan-staged": "Pre-commit: scan staged files for credential patterns",
@@ -4879,6 +4894,9 @@ const COMMAND_HELP: Record<string, string> = {
   "security prescan-diff":
     "Diff two prescan reports — surface new regressions + fixed findings since baseline",
   "audit secrets": "Forensics: who/what touched each key + when (reads audit log)",
+  "audit verify": "Verify the audit log's tamper-evident hash chain (exit 1 on break)",
+  "audit export": "Emit the audit log for a SIEM (--format cef|syslog|json)",
+  auth: "TOTP-gated elevation for destructive secret ops (elevate|status|revoke|setup-totp)",
   "auth elevate": "Mint elevation marker for destructive secret ops (TOTP/yes-prompt)",
   "auth status": "Show active elevation",
   "auth revoke": "Drop the elevation marker",
@@ -5505,56 +5523,9 @@ async function main(): Promise<void> {
       process.stdout.write(script);
       ok = true;
     } else {
-      const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
-        status: cmdStatus,
-        whoami: cmdWhoami,
-        check: cmdCheck,
-        health: cmdHealth,
-        ingest: cmdIngest,
-        "supply-chain": cmdSupplyChain,
-        "agent-audit": cmdAgentAudit,
-        sentinel: cmdSentinel,
-        scan: cmdScan,
-        "verify-provenance": cmdVerifyProvenance,
-        "gha-audit": cmdGhaAudit,
-        sbom: cmdSbom,
-        init: cmdInit,
-        upgrade: cmdUpgrade,
-        install: cmdInstall,
-        login: cmdLogin,
-        secrets: cmdSecrets,
-        setup: cmdSetup,
-        skills: cmdSkills,
-        fix: cmdFix,
-        heal: cmdHeal,
-        escalate: cmdEscalate,
-        governance: cmdGovernance,
-        "agent-config": cmdAgentConfig,
-        hooks: cmdHooks,
-        add: cmdAdd,
-        audit: cmdAudit,
-        auth: cmdAuth,
-        mcp: cmdMcp,
-        env: cmdEnv,
-        doctor: cmdDoctor,
-        analyze: cmdAnalyze,
-        security: cmdSecurity,
-        "create-plugin": cmdCreatePlugin,
-        plugin: cmdPlugin,
-        ci: cmdCi,
-        clone: cmdClone,
-        run: cmdRun,
-        open: cmdOpen,
-        context: cmdContext,
-        triage: cmdTriage,
-        baseline: cmdBaseline,
-        design: cmdDesign,
-        review: cmdReview,
-        pkg: cmdPkg,
-        team: cmdTeam,
-        memory: cmdMemory,
-      };
       // no command → `check` (the prior `case undefined` behaviour).
+      // COMMANDS is the module-scope dispatch table (single source of truth for the
+      // command surface; help coverage is verified against it in command-surface.test.ts).
       const handler = COMMANDS[command ?? "check"];
       if (handler) {
         ok = await handler();
@@ -5600,6 +5571,72 @@ async function main(): Promise<void> {
   }
 }
 
-// Entrypoint — fire-and-forget by design; main() handles its own errors and sets
-// process.exitCode. `void` marks the intentional non-await for no-floating-promises.
-void main();
+// Single source of truth for kit's top-level command surface. Every key here MUST
+// have a COMMAND_HELP entry — command-surface.test.ts fails the build otherwise, so
+// `kit help` and the did-you-mean suggestions can never silently drift from dispatch.
+// Declared at module scope (after every cmd* handler) so the coverage test can import
+// it without running the CLI; referenced by main() above, which only runs as the entry.
+export const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
+  status: cmdStatus,
+  whoami: cmdWhoami,
+  check: cmdCheck,
+  health: cmdHealth,
+  ingest: cmdIngest,
+  "supply-chain": cmdSupplyChain,
+  "agent-audit": cmdAgentAudit,
+  sentinel: cmdSentinel,
+  scan: cmdScan,
+  "verify-provenance": cmdVerifyProvenance,
+  "gha-audit": cmdGhaAudit,
+  sbom: cmdSbom,
+  init: cmdInit,
+  upgrade: cmdUpgrade,
+  install: cmdInstall,
+  login: cmdLogin,
+  secrets: cmdSecrets,
+  setup: cmdSetup,
+  skills: cmdSkills,
+  fix: cmdFix,
+  heal: cmdHeal,
+  escalate: cmdEscalate,
+  governance: cmdGovernance,
+  "agent-config": cmdAgentConfig,
+  hooks: cmdHooks,
+  add: cmdAdd,
+  audit: cmdAudit,
+  auth: cmdAuth,
+  mcp: cmdMcp,
+  env: cmdEnv,
+  doctor: cmdDoctor,
+  analyze: cmdAnalyze,
+  security: cmdSecurity,
+  "create-plugin": cmdCreatePlugin,
+  plugin: cmdPlugin,
+  ci: cmdCi,
+  clone: cmdClone,
+  run: cmdRun,
+  open: cmdOpen,
+  context: cmdContext,
+  triage: cmdTriage,
+  baseline: cmdBaseline,
+  design: cmdDesign,
+  review: cmdReview,
+  pkg: cmdPkg,
+  team: cmdTeam,
+  memory: cmdMemory,
+};
+
+// Run only when invoked as the real CLI entry — NOT when imported by a test
+// (command-surface.test.ts imports COMMANDS/COMMAND_HELP). main() handles its own
+// errors and sets process.exitCode; `void` marks the intentional non-await.
+function isCliEntry(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isCliEntry()) void main();
