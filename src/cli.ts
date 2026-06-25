@@ -4395,7 +4395,11 @@ async function cmdIngest(): Promise<boolean> {
 
 async function cmdSupplyChain(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
-  const config = await loadConfig(resolveConfigPath());
+  // Config-free: supply-chain triage is project-agnostic (it reads the lockfile,
+  // not .kit.toml), so a missing config is not an error — mirror `kit scan`.
+  const config = existsSync(resolveConfigPath())
+    ? await loadConfig(resolveConfigPath())
+    : ({} as kitConfig);
   const scopes = config.supply_chain?.internal_scopes ?? [];
   const { runSupplyChain } = await import("./supply-chain.js");
   const results = runSupplyChain(process.cwd(), scopes);
@@ -4461,7 +4465,11 @@ async function cmdSentinel(): Promise<boolean> {
     return false;
   }
   const jsonMode = hasFlag(process.argv, "--json");
-  const config = await loadConfig(resolveConfigPath());
+  // Config-free: sentinel proposes fixes from codebase analysis; the optional
+  // [sentinel] block only adds integrations. Missing .kit.toml is not an error.
+  const config = existsSync(resolveConfigPath())
+    ? await loadConfig(resolveConfigPath())
+    : ({} as kitConfig);
   const { runSentinel, healthToRedFindings, proposalSummary, SENTINEL_CACHE } =
     await import("./sentinel.js");
   const { runHealth, selectSensors, defaultHealthDeps } = await import("./health.js");
@@ -4607,7 +4615,12 @@ async function cmdVerifyProvenance(): Promise<boolean> {
   const { verifyProvenance } = await import("./airgap/provenance.js");
   const { resolveToolBin } = await import("./utils/resolveTool.js");
   const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
-  const config = await loadConfig(resolveConfigPath());
+  // Config-free: verifying a provenance bundle needs the artifact + bundle, not
+  // .kit.toml. Missing config is not an error — only [air_gap] trust settings are
+  // read (optional). Mirrors `kit scan`.
+  const config = existsSync(resolveConfigPath())
+    ? await loadConfig(resolveConfigPath())
+    : ({} as kitConfig);
   const ag = resolveAirGap(config.air_gap, process.env);
   const res = await verifyProvenance(
     {

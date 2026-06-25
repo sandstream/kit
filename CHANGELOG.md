@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.33.2] - 2026-06-25
+
+### Fixed
+
+- **`kit verify-provenance`, `kit sentinel`, and `kit supply-chain` are now config-free** — like `kit scan` (1.32.0). All three aborted with "Create a .kit.toml" when no config was present, even though they're project-agnostic (verify a bundle, propose health fixes from codebase analysis, read the lockfile). A missing `.kit.toml` now falls back to an empty config and none of them writes one. Covered by the `vendor-repo safety` integration tests.
+
 ## [1.33.1] - 2026-06-25
 
 ### Security
