@@ -279,6 +279,8 @@ export interface ContextConfig {
 /** [setup] — project bootstrap commands run by `kit setup`. install/verify run
  *  by default; migrate/seed are opt-in (may mutate a real DB). */
 export interface SetupConfig {
+  /** Default setup mode preset: full | local | airgap | ci | agent | review | minimal. */
+  mode?: string;
   install?: string;
   migrate?: string;
   seed?: string;
@@ -607,6 +609,7 @@ const kitConfigSchema = z
     web: WebConfigSchema,
     setup: z
       .object({
+        mode: z.string().optional(),
         install: z.string().optional(),
         migrate: z.string().optional(),
         seed: z.string().optional(),

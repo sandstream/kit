@@ -67,7 +67,14 @@ import type { SecretsStore } from "./toml-generator.js";
 import { generateSecrets } from "./secrets.js";
 import { syncSecrets } from "./secrets-sync.js";
 import { generateCompletions } from "./completions.js";
-import { checkForUpdate, printUpdateNotice } from "./update-check.js";
+import {
+  checkForUpdate,
+  printUpdateNotice,
+  readCachedUpdateSync,
+  getKitVersionSync,
+} from "./update-check.js";
+import { resolveMode, MODE_NAMES, modeScore, type SubsystemStatus } from "./setup-modes.js";
+import { formatStatusline } from "./statusline.js";
 import { checkSkills } from "./check-skills.js";
 import { checkLockFiles } from "./check-lock.js";
 import { collectEscalations, formatEscalationMessage } from "./escalate.js";
@@ -1148,10 +1155,29 @@ async function cmdSetup(): Promise<boolean> {
 
   const config = await loadConfig(resolveConfigPath());
 
-  // Network posture (connected vs air-gapped enclave): writes [air_gap], and for
-  // connected points at where the cloud-scanner tokens live (kit never captures
-  // them). Idempotent — reports + skips if a posture is already declared.
-  await offerPosture(resolveConfigPath(), config, isNonInteractive());
+  // Setup MODE — a named preset over the knobs below (flag > [setup].mode > full).
+  // full ≡ the historical behavior; other modes gate which steps run + the posture.
+  const { profile, requested, recognized } = resolveMode(
+    flagValue(process.argv, "--mode"),
+    config.setup?.mode,
+  );
+  if (requested && !recognized) {
+    console.log(
+      `${c.yellow}!${c.reset} unknown mode "${requested}" — using "full". Modes: ${MODE_NAMES.join(", ")}\n`,
+    );
+  }
+  console.log(
+    `${c.dim}mode:${c.reset} ${c.bold}${profile.mode}${c.reset} ${c.dim}— ${profile.blurb}${c.reset}`,
+  );
+  if (profile.readOnly) {
+    process.env.KIT_READ_ONLY = "1"; // review: refuse writes; only config + verify run
+    console.log(`${c.dim}read-only review — no installs / logins / secrets / hooks.${c.reset}`);
+  }
+  console.log();
+
+  // Network posture (connected vs air-gapped enclave): the mode can force it,
+  // otherwise prompt. Writes [air_gap]; idempotent — skips if already declared.
+  await offerPosture(resolveConfigPath(), config, isNonInteractive(), profile.posture);
 
   // Recommended profile: an explicit flag always wins; otherwise ASK
   // interactively (the flag is just the scriptable answer to this question).
@@ -1163,12 +1189,12 @@ async function cmdSetup(): Promise<boolean> {
   } else if (hasFlag(process.argv, "--minimal") || hasFlag(process.argv, "--no-recommended")) {
     recommended = false;
   } else if (isNonInteractive()) {
-    recommended = false;
+    recommended = profile.recommended;
   } else {
     recommended = await promptConfirm(
       `Use the recommended profile? Wires cross-harness memory hooks (in ~/.claude) + git secret-scan${config.context ? " + context-check" : ""} gates after the core steps. [Y/n] `,
       10000,
-      true,
+      profile.recommended,
     );
     console.log();
   }
@@ -1179,65 +1205,74 @@ async function cmdSetup(): Promise<boolean> {
     );
   }
 
-  // Step 1: Install
-  console.log(`${c.bold}[1/6] Install${c.reset}`);
-  const installOk = await cmdInstall();
+  // Step 1: Install (skipped by modes that don't install tools — agent/review/minimal)
+  let installOk = true;
+  if (profile.install) {
+    console.log(`${c.bold}[1/6] Install${c.reset}`);
+    installOk = await cmdInstall();
 
-  if (!installOk) {
-    console.log(`${c.red}Install failed — stopping setup.${c.reset}`);
-    console.log(
-      `${c.dim}Fix the issues above and run ${c.reset}${c.bold}kit setup${c.reset}${c.dim} again.${c.reset}`,
-    );
-    return false;
-  }
+    if (!installOk) {
+      console.log(`${c.red}Install failed — stopping setup.${c.reset}`);
+      console.log(
+        `${c.dim}Fix the issues above and run ${c.reset}${c.bold}kit setup${c.reset}${c.dim} again.${c.reset}`,
+      );
+      return false;
+    }
 
-  // Project dependencies. cmdInstall above provisions the TOOLCHAIN (node, pnpm,
-  // … via mise); now install the project's own deps so the repo actually works
-  // after setup. The generated [setup].install was never executed before — kit
-  // installed the toolchain but left node_modules absent.
-  if (config.setup?.install) {
-    await runConfiguredCommand("deps installed", config.setup.install);
+    // Project dependencies. cmdInstall above provisions the TOOLCHAIN (node, pnpm,
+    // … via mise); now install the project's own deps so the repo actually works
+    // after setup. The generated [setup].install was never executed before — kit
+    // installed the toolchain but left node_modules absent.
+    if (config.setup?.install) {
+      await runConfiguredCommand("deps installed", config.setup.install);
+    }
   }
 
   // Step 2: Git Hooks
-  if (config.hooks && Object.keys(config.hooks).length > 0 && isGitRepository()) {
+  if (profile.hooks && config.hooks && Object.keys(config.hooks).length > 0 && isGitRepository()) {
     console.log(`${c.bold}[2/6] Git Hooks${c.reset}`);
     await cmdHooks();
     console.log();
   }
 
-  // Step 3: Login
-  console.log(`${c.bold}[3/6] Login${c.reset}`);
-  const loginOk = await cmdLogin();
+  // Step 3: Login (skipped in airgap/ci/agent/review/minimal — those resolve from a vault)
+  let loginOk = true;
+  if (profile.login) {
+    console.log(`${c.bold}[3/6] Login${c.reset}`);
+    loginOk = await cmdLogin();
 
-  if (!loginOk) {
-    console.log(`${c.yellow}Some logins failed — continuing with secrets + verify.${c.reset}\n`);
-  }
-
-  // Step 4: Secrets
-  console.log(`${c.bold}[4/6] Secrets${c.reset}`);
-
-  // Harden .gitignore BEFORE secrets are materialized. kit's headline is
-  // "secret-safe", but cmdSecrets writes .env.local below — if the repo's
-  // .gitignore doesn't already cover it, the next `git add .` stages real
-  // secrets. Patching is a non-destructive, repo-local append, so we do it by
-  // default and announce it (standalone `kit security check-gitignore --fix`
-  // remains for the manual path).
-  if (isGitRepository()) {
-    const gi = await checkGitignore(process.cwd());
-    if (gi.missingPatterns.length > 0) {
-      const patched = await patchGitignore(process.cwd());
-      const names = gi.missingPatterns
-        .slice(0, 3)
-        .map((m) => m.pattern)
-        .join(", ");
-      console.log(
-        `  ${c.green}✓${c.reset} hardened .gitignore ${c.dim}(+${patched.added}: ${names}${gi.missingPatterns.length > 3 ? ", …" : ""}) — review + commit it${c.reset}`,
-      );
+    if (!loginOk) {
+      console.log(`${c.yellow}Some logins failed — continuing with secrets + verify.${c.reset}\n`);
     }
   }
 
-  const secretsOk = await cmdSecrets();
+  // Step 4: Secrets (skipped only by review — read-only)
+  let secretsOk = true;
+  if (profile.secrets) {
+    console.log(`${c.bold}[4/6] Secrets${c.reset}`);
+
+    // Harden .gitignore BEFORE secrets are materialized. kit's headline is
+    // "secret-safe", but cmdSecrets writes .env.local below — if the repo's
+    // .gitignore doesn't already cover it, the next `git add .` stages real
+    // secrets. Patching is a non-destructive, repo-local append, so we do it by
+    // default and announce it (standalone `kit security check-gitignore --fix`
+    // remains for the manual path).
+    if (isGitRepository()) {
+      const gi = await checkGitignore(process.cwd());
+      if (gi.missingPatterns.length > 0) {
+        const patched = await patchGitignore(process.cwd());
+        const names = gi.missingPatterns
+          .slice(0, 3)
+          .map((m) => m.pattern)
+          .join(", ");
+        console.log(
+          `  ${c.green}✓${c.reset} hardened .gitignore ${c.dim}(+${patched.added}: ${names}${gi.missingPatterns.length > 3 ? ", …" : ""}) — review + commit it${c.reset}`,
+        );
+      }
+    }
+
+    secretsOk = await cmdSecrets();
+  }
 
   // [setup].migrate / .seed are intentionally NOT auto-run: a configured migrate
   // (`supabase db push`, `prisma migrate deploy`) can mutate a linked — possibly
@@ -1710,11 +1745,23 @@ async function offerPosture(
   configPath: string,
   config: kitConfig,
   nonInteractive: boolean,
+  forced: "connected" | "airgap" | null = null,
 ): Promise<void> {
   if (config.air_gap?.enabled !== undefined) {
     const mode = config.air_gap.enabled ? "air-gapped enclave" : "connected";
     console.log(
       `${c.dim}Network posture: ${c.reset}${c.bold}${mode}${c.reset} ${c.dim}(from .kit.toml [air_gap]).${c.reset}\n`,
+    );
+    return;
+  }
+  // A mode (airgap/local/ci/agent) forces the posture — write it without prompting.
+  if (forced) {
+    const { airGapTomlBlock } = await import("./airgap/config.js");
+    const block = airGapTomlBlock(forced === "airgap");
+    const existing = readFileSync(configPath, "utf-8");
+    await writeFile(configPath, `${existing.trimEnd()}\n\n${block}\n`, "utf-8");
+    console.log(
+      `  ${c.green}✓${c.reset} posture ${c.bold}${forced}${c.reset} ${c.dim}→ wrote [air_gap] to .kit.toml${c.reset}\n`,
     );
     return;
   }
@@ -1777,6 +1824,91 @@ async function offerPosture(
   console.log(
     `\n  ${c.green}✓${c.reset} Wrote ${c.bold}[air_gap]${c.reset} ${c.dim}(${choice === "airgap" ? "enabled" : "disabled"}) to .kit.toml${c.reset}\n`,
   );
+}
+
+/** Cheap, read-only subsystem presence (file-existence only — no shell/network), for
+ *  the statusline + `kit status` score. Safe to run on every prompt render. */
+function quickSubsystems(cwd: string): SubsystemStatus[] {
+  const has = (p: string) => existsSync(resolve(cwd, p));
+  const tomlHas = (needle: string) => {
+    try {
+      return readFileSync(resolve(cwd, ".kit.toml"), "utf-8").includes(needle);
+    } catch {
+      return false;
+    }
+  };
+  // Default memory-db location (avoid importing the sqlite module on the hot path).
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+  const memoryOk = home ? existsSync(join(home, ".kit", "memory.db")) : false;
+  return [
+    { key: "config", label: ".kit.toml", ok: has(".kit.toml"), next: "kit init" },
+    { key: "tools", label: "tools locked", ok: has(".kit/cli-lock.json"), next: "kit install" },
+    { key: "secrets", label: ".env.local", ok: has(".env.local"), next: "kit secrets" },
+    {
+      key: "hooks",
+      label: "git hooks",
+      ok: has(".githooks/pre-commit") || has(".git/hooks/pre-commit"),
+      next: "kit hooks install",
+    },
+    {
+      key: "agent-config",
+      label: "agent config",
+      ok: ["CLAUDE.md", "AGENTS.md", ".cursorrules", ".clinerules", "GEMINI.md"].some(has),
+      next: "kit agent-config",
+    },
+    { key: "memory", label: "memory", ok: memoryOk, next: "kit memory install" },
+    {
+      key: "posture",
+      label: "[air_gap]",
+      ok: tomlHas("[air_gap]"),
+      next: "kit setup --mode airgap",
+    },
+  ];
+}
+
+/** Open-PAL ("blocked on you") count — cheap, 0 on any error. Memory modules are
+ *  dynamically imported so the sqlite dependency stays off other commands' startup. */
+async function quickPalCount(): Promise<number> {
+  try {
+    const { openMemoryDb } = await import("./memory/db.js");
+    const { palList } = await import("./memory/pal.js");
+    const db = openMemoryDb();
+    try {
+      return palList(db).length;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * `kit statusline` — one compact, fast, read-only line for ANY harness's info bar
+ * (Claude Code statusLine, a shell PS1, …): setup score for the active mode + an
+ * "update available" mark + the open PAL count. Agent-agnostic; never blocks
+ * (cached update only, file-presence subsystem checks).
+ */
+async function cmdStatusline(): Promise<boolean> {
+  process.env.KIT_NO_UPDATE_CHECK = "1"; // never let the post-command notice pollute the single line
+  let config: kitConfig = {} as kitConfig;
+  try {
+    config = await loadConfig(resolveConfigPath());
+  } catch {
+    /* no/invalid .kit.toml — statusline still works (mode=full default) */
+  }
+  const { profile } = resolveMode(flagValue(process.argv, "--mode"), config.setup?.mode);
+  const { done, total } = modeScore(profile, quickSubsystems(process.cwd()));
+  const update = readCachedUpdateSync(getKitVersionSync());
+  console.log(
+    formatStatusline({
+      mode: profile.mode,
+      score: { done, total },
+      update: update?.latest ?? null,
+      pal: await quickPalCount(),
+    }),
+  );
+  return true;
 }
 
 async function cmdInit(): Promise<boolean> {
@@ -4255,6 +4387,23 @@ async function cmdStatus(): Promise<boolean> {
   }
   const done = items.filter((i) => i.ok).length;
   console.log(`${c.bold}kit status${c.reset}  ${c.dim}${done}/${items.length} set up${c.reset}`);
+  // Mode-aware score: how many of the active mode's expected subsystems are in place.
+  let cfgMode: string | undefined;
+  try {
+    cfgMode = (await loadConfig(resolveConfigPath())).setup?.mode;
+  } catch {
+    /* no/invalid .kit.toml */
+  }
+  const { profile } = resolveMode(flagValue(process.argv, "--mode"), cfgMode);
+  const ms = modeScore(profile, quickSubsystems(process.cwd()));
+  const nextGaps = ms.gaps
+    .map((g) => g.next)
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(", ");
+  console.log(
+    `${c.dim}mode ${c.reset}${c.bold}${profile.mode}${c.reset}${c.dim}: ${ms.done}/${ms.total} subsystems${ms.gaps.length ? ` — next: ${nextGaps}` : " ✓"}${c.reset}\n`,
+  );
   for (const item of items) {
     const mark = item.ok ? `${c.green}✓${c.reset}` : `${c.yellow}○${c.reset}`;
     const hint = !item.ok && item.hint ? `  ${c.dim}→ ${item.hint}${c.reset}` : "";
@@ -4932,6 +5081,8 @@ function cmdVersion(): boolean {
 
 export const COMMAND_HELP: Record<string, string> = {
   status: "Adoption checklist — what's set up across kit + the next step for each gap",
+  statusline:
+    "Compact one-line status (mode score · update · open PAL) for any agent's info bar — wire into Claude Code statusLine / a shell PS1",
   check: "Check status of all tools, services, secrets, and lock files",
   health: "Deep environment health diagnostics — granular pass/fail across tools, services, config",
   scan: "Run external scanners (snyk/trivy/grype/semgrep/osv) and merge them into one local verdict",
@@ -5752,6 +5903,7 @@ async function main(): Promise<void> {
 // it without running the CLI; referenced by main() above, which only runs as the entry.
 export const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
   status: cmdStatus,
+  statusline: cmdStatusline,
   whoami: cmdWhoami,
   check: cmdCheck,
   health: cmdHealth,
