@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.31.1] - 2026-06-25
+
+### Fixed
+
+- **`kit help` was hiding 11 of 47 commands.** `COMMAND_HELP` was hand-maintained separately from the dispatch table, so 11 dispatched commands had no help entry and were absent from both `kit help` and the did-you-mean suggestions: `health`, `scan`, `sentinel`, `supply-chain`, `agent-audit`, `gha-audit`, `sbom`, `ingest`, `verify-provenance`, plus bare `auth` and `security`. Added all 11. The dispatch table (`COMMANDS`) is now the single source of truth — exported, with `main()` guarded to the real CLI entry — and a new `command-surface.test.ts` fails the build if help ever drifts from dispatch again.
+
+### Docs
+
+- **README no longer claims `kit check` runs Socket.** Socket is cloud-only (dropped #103); the README now describes it as an honest `skip` (local cover: GuardDog + osv-scanner + `kit supply-chain`), documents GuardDog, and surfaces `kit scan`/`supply-chain`/`sbom`/`gha-audit`/`sentinel`/`verify-provenance` in the command shortlist + Supply-chain section. `docs/COMMANDS.md` gains a "Supply chain + scanners" section + `health`/`heal` rows; the stale "Generated 2026-06-08" header is refreshed to 1.31.0.
+
 ## [1.31.0] - 2026-06-24
 
 ### Fixed
