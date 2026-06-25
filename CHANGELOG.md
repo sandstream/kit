@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.34.0] - 2026-06-26
+
+### Added
+
+- **Setup modes — `kit setup --mode <name>` / `[setup].mode`.** Named presets over kit's setup knobs (install / login / secrets / hooks / recommended hardening / network posture / read-only): `full` (everything, ≡ prior behavior), `local`, `airgap` (forces the air-gapped posture, cloud scanners dropped), `ci`, `agent` (for gastown/ruflo-style runners), `review` (read-only audit of an untrusted repo — zero writes/installs/logins), `minimal`. The mode gates which setup steps run and forces the `[air_gap]` posture; unknown names warn and fall back to `full`. Agent-agnostic — modes mean the same thing under any harness.
+- **`kit statusline` — agent-agnostic info-bar emitter.** One compact, fast, read-only line — setup score for the active mode + an "update available" mark + the open PAL ("blocked on you") count, e.g. `kit:full 6/6 · ⬆1.34.0 · ⚠2`. Cached-only (never blocks/fetches); wire it into Claude Code's `statusLine`, a shell PS1, or any harness's bar. `kit agent-config` now also tells the agent to run it at session start, so harnesses without a native bar still surface it.
+- **`kit status` is mode-aware** — adds a `mode <name>: M/N subsystems — next: …` line scoring progress against the active mode's expected subsystems.
+
 ## [1.33.3] - 2026-06-25
 
 ### Security
