@@ -1148,6 +1148,11 @@ async function cmdSetup(): Promise<boolean> {
 
   const config = await loadConfig(resolveConfigPath());
 
+  // Network posture (connected vs air-gapped enclave): writes [air_gap], and for
+  // connected points at where the cloud-scanner tokens live (kit never captures
+  // them). Idempotent — reports + skips if a posture is already declared.
+  await offerPosture(resolveConfigPath(), config, isNonInteractive());
+
   // Recommended profile: an explicit flag always wins; otherwise ASK
   // interactively (the flag is just the scriptable answer to this question).
   // CI/agents without a flag get the core setup — we never silently wire global
@@ -1693,6 +1698,84 @@ async function offerContextLock(configPath: string, nonInteractive: boolean): Pr
   await writeFile(configPath, existing.trimEnd() + "\n\n" + block + "\n", "utf-8");
   console.log(
     `  ${c.green}✓${c.reset} Locked ${c.bold}[context]${c.reset} ${c.dim}→ verify with ${c.reset}${c.bold}kit context check${c.reset}\n`,
+  );
+}
+
+// Network-posture setup step: connected (cloud scanners allowed) vs air-gapped
+// enclave (cloud-only scanners dropped, internal mirrors). Writes [air_gap].
+// Security: kit NEVER captures/echoes/stores scanner tokens here — connected mode
+// only points at where they live (vault [scan.tooling] or env); kit reads them at
+// scan time. Idempotent: if a posture is already declared, report it and return.
+async function offerPosture(
+  configPath: string,
+  config: kitConfig,
+  nonInteractive: boolean,
+): Promise<void> {
+  if (config.air_gap?.enabled !== undefined) {
+    const mode = config.air_gap.enabled ? "air-gapped enclave" : "connected";
+    console.log(
+      `${c.dim}Network posture: ${c.reset}${c.bold}${mode}${c.reset} ${c.dim}(from .kit.toml [air_gap]).${c.reset}\n`,
+    );
+    return;
+  }
+  if (nonInteractive) {
+    console.log(
+      `${c.dim}Network posture: connected (default). Set ${c.reset}${c.bold}[air_gap] enabled = true${c.reset}${c.dim} for an air-gapped enclave.${c.reset}\n`,
+    );
+    return;
+  }
+
+  const { airGapTomlBlock } = await import("./airgap/config.js");
+  const choice = await promptSelect("Network posture for this project?", [
+    {
+      value: "connected",
+      label: "Connected",
+      hint: "cloud scanners (Snyk, Socket) available",
+      recommended: true,
+    },
+    {
+      value: "airgap",
+      label: "Air-gapped enclave",
+      hint: "no egress — cloud-only scanners dropped, offline DBs + internal mirrors",
+    },
+  ]);
+
+  let block: string;
+  if (choice === "airgap") {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      const ask = async (q: string) => (await rl.question(`  ${q} `)).trim();
+      console.log(`${c.dim}Internal mirrors (Enter to skip each):${c.reset}`);
+      block = airGapTomlBlock(true, {
+        npmRegistry: await ask("npm registry URL:"),
+        pypiIndex: await ask("PyPI index URL:"),
+        githubApi: await ask("GitHub API base URL:"),
+        dockerRegistry: await ask("Docker registry URL:"),
+        threatDataDir: await ask("Signed threat-data dir (path):"),
+      });
+    } finally {
+      rl.close();
+    }
+    console.log(
+      `\n  ${c.yellow}⚠${c.reset} ${c.dim}Air-gapped: ${c.reset}${c.bold}kit scan${c.reset}${c.dim} drops cloud-only scanners (Snyk, Socket, semgrep) and runs trivy/grype/osv against local DBs. See docs/AIR_GAP.md.${c.reset}`,
+    );
+  } else {
+    block = airGapTomlBlock(false);
+    console.log(
+      `\n  ${c.dim}Connected: cloud scanners are available. Provide their tokens via your vault ${c.reset}${c.bold}[scan.tooling]${c.reset}${c.dim} or env — kit reads them at scan time and ${c.reset}${c.bold}never stores them${c.reset}${c.dim}:${c.reset}`,
+    );
+    console.log(
+      `    ${c.green}SNYK_TOKEN${c.reset}                 ${c.dim}→ kit scan runs Snyk${c.reset}`,
+    );
+    console.log(
+      `    ${c.green}SOCKET_SECURITY_API_TOKEN${c.reset}  ${c.dim}→ kit scan runs Socket (socket ci)${c.reset}`,
+    );
+  }
+
+  const existing = readFileSync(configPath, "utf-8");
+  await writeFile(configPath, `${existing.trimEnd()}\n\n${block}\n`, "utf-8");
+  console.log(
+    `\n  ${c.green}✓${c.reset} Wrote ${c.bold}[air_gap]${c.reset} ${c.dim}(${choice === "airgap" ? "enabled" : "disabled"}) to .kit.toml${c.reset}\n`,
   );
 }
 

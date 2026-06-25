@@ -111,6 +111,39 @@ describe("runScanners (injected deps)", () => {
     assert.equal(runs[0].status, "ran");
     assert.equal(runs[0].findings, 0);
   });
+
+  it("exitGate scanner: clean exit → ran/0, no finding (stdout ignored)", async () => {
+    const only: ScannerDef[] = [
+      { id: "socket", bin: "socket", args: ["ci"], format: "sarif", exitGate: true },
+    ];
+    const deps: ScanDeps = {
+      resolve: async (bin) => `/usr/bin/${bin}`,
+      run: async () => ({ ok: true, stdout: "ok\n" }),
+      hasEnv: () => true,
+      detect: () => true,
+    };
+    const { merged, runs } = await runScanners(deps, only);
+    assert.equal(runs[0].status, "ran");
+    assert.equal(runs[0].findings, 0);
+    assert.equal(merged.length, 0);
+  });
+
+  it("exitGate scanner: non-zero exit → one high-severity policy violation (never false-green)", async () => {
+    const only: ScannerDef[] = [
+      { id: "socket", bin: "socket", args: ["ci"], format: "sarif", exitGate: true },
+    ];
+    const deps: ScanDeps = {
+      resolve: async (bin) => `/usr/bin/${bin}`,
+      run: async () => ({ ok: false, stdout: "" }),
+      hasEnv: () => true,
+      detect: () => true,
+    };
+    const { merged, runs } = await runScanners(deps, only);
+    assert.equal(runs[0].status, "ran");
+    assert.equal(runs[0].findings, 1);
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0].severity, "high");
+  });
 });
 
 describe("isAirGap", () => {
@@ -133,9 +166,11 @@ describe("airGapScanners", () => {
 
   it("drops cloud-only scanners and folds offline args/env for the rest", () => {
     const plan = airGapScanners(SCANNERS, true);
-    // cloud-only (snyk, semgrep) are excluded
-    assert.deepEqual(plan.dropped.sort(), ["semgrep", "snyk"]);
-    assert.ok(!plan.scanners.some((s) => s.id === "snyk" || s.id === "semgrep"));
+    // cloud-only (snyk, semgrep, socket) are excluded
+    assert.deepEqual(plan.dropped.sort(), ["semgrep", "snyk", "socket"]);
+    assert.ok(
+      !plan.scanners.some((s) => s.id === "snyk" || s.id === "semgrep" || s.id === "socket"),
+    );
     // trivy gets its offline flags appended
     const trivy = plan.scanners.find((s) => s.id === "trivy")!;
     assert.ok(trivy.args.includes("--offline-scan") && trivy.args.includes("--skip-db-update"));
@@ -172,9 +207,11 @@ describe("airGapScanners", () => {
 
   it("drops cloud-only scanners and folds offline args/env for the rest", () => {
     const plan = airGapScanners(SCANNERS, true);
-    // cloud-only (snyk, semgrep) are excluded
-    assert.deepEqual(plan.dropped.sort(), ["semgrep", "snyk"]);
-    assert.ok(!plan.scanners.some((s) => s.id === "snyk" || s.id === "semgrep"));
+    // cloud-only (snyk, semgrep, socket) are excluded
+    assert.deepEqual(plan.dropped.sort(), ["semgrep", "snyk", "socket"]);
+    assert.ok(
+      !plan.scanners.some((s) => s.id === "snyk" || s.id === "semgrep" || s.id === "socket"),
+    );
     // trivy gets its offline flags appended
     const trivy = plan.scanners.find((s) => s.id === "trivy")!;
     assert.ok(trivy.args.includes("--offline-scan") && trivy.args.includes("--skip-db-update"));

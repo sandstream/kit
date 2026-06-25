@@ -28,6 +28,13 @@ export interface ScannerDef {
   cloudOnly?: boolean;
   /** Extra args/env applied in air-gap mode so the scanner runs against a local DB. */
   offline?: { args?: string[]; env?: Record<string, string> };
+  /**
+   * Exit-code gate: the tool has no stable findings-JSON to parse, so its own exit
+   * status IS the verdict — exit 0 = clean, non-zero = one high-severity policy
+   * violation. (Socket: `socket ci` uploads manifests + fails on policy; `format`
+   * is unused because the exitGate branch short-circuits before ingest.)
+   */
+  exitGate?: boolean;
 }
 
 export const SCANNERS: ScannerDef[] = [
@@ -71,6 +78,19 @@ export const SCANNERS: ScannerDef[] = [
     args: ["--format", "json", "-r", "."],
     format: "osv",
     offline: { args: ["--offline"] },
+  },
+  {
+    // Socket uploads manifests to socket.dev (cloud) → not air-gappable. The CLI
+    // has no stable findings-JSON, so kit gates on `socket ci`'s exit code rather
+    // than parsing output. Opt-in: needs SOCKET_SECURITY_API_TOKEN (wired by
+    // `kit setup` in connected/non-air-gap posture).
+    id: "socket",
+    bin: "socket",
+    args: ["ci"],
+    format: "sarif", // unused — exitGate short-circuits before ingest
+    needsToken: "SOCKET_SECURITY_API_TOKEN",
+    cloudOnly: true,
+    exitGate: true,
   },
 ];
 
@@ -195,6 +215,29 @@ export async function runScanners(
       continue;
     }
     const res = await deps.run(bin, s.args);
+    // Exit-code-gated scanners (e.g. Socket): no parseable findings — the tool's
+    // own exit status IS the verdict. Never false-green on a crash: any non-zero
+    // exit becomes one high-severity policy-violation finding.
+    if (s.exitGate) {
+      if (res.ok) {
+        runs.push({ id: s.id, status: "ran", findings: 0 });
+      } else {
+        perScanner.push({
+          id: s.id,
+          findings: [
+            {
+              category: "supply-chain",
+              name: `${s.id}: policy violation`,
+              status: "fail",
+              detail: `${s.id} ci exited non-zero — dependency security/license policy issues found (see the ${s.id} dashboard)`,
+              severity: "high",
+            },
+          ],
+        });
+        runs.push({ id: s.id, status: "ran", findings: 1 });
+      }
+      continue;
+    }
     // Most scanners exit non-zero WHEN findings exist, so a non-zero exit alone
     // is not an error — parse the output regardless. But a non-empty output we
     // CANNOT parse (junk, an error blob, the wrong format) must NOT be silently

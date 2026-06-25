@@ -67,3 +67,35 @@ export function airGapTriageEnv(s: AirGapSettings): Record<string, string> {
   if (s.dockerRegistry) e.KIT_DOCKER_REGISTRY = s.dockerRegistry;
   return e;
 }
+
+export interface PostureMirrors {
+  npmRegistry?: string;
+  pypiIndex?: string;
+  githubApi?: string;
+  dockerRegistry?: string;
+  threatDataDir?: string;
+}
+
+/**
+ * Render the `[air_gap]` block for `.kit.toml` from a setup posture choice.
+ * `enabled = false` = connected (cloud scanners allowed); `enabled = true` =
+ * enclave (cloud-only scanners dropped) with optional internal mirrors — only
+ * non-empty mirror values are emitted. Pure — fixture-tested.
+ */
+export function airGapTomlBlock(enabled: boolean, mirrors: PostureMirrors = {}): string {
+  const lines = ["[air_gap]", `enabled = ${enabled}`];
+  if (enabled) {
+    const map: [keyof PostureMirrors, string][] = [
+      ["npmRegistry", "npm_registry"],
+      ["pypiIndex", "pypi_index"],
+      ["githubApi", "github_api"],
+      ["dockerRegistry", "docker_registry"],
+      ["threatDataDir", "threat_data_dir"],
+    ];
+    for (const [field, key] of map) {
+      const v = mirrors[field]?.trim();
+      if (v) lines.push(`${key} = "${v}"`);
+    }
+  }
+  return lines.join("\n");
+}

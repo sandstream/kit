@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.33.0] - 2026-06-25
+
+### Added
+
+- **Network-posture choice in `kit setup` / `kit init`.** Setup now asks **Connected** vs **Air-gapped enclave** and writes `[air_gap] enabled` to `.kit.toml` (idempotent — reports + skips if already set; non-interactive defaults to connected without writing). Air-gapped prompts for internal mirrors (npm/pypi/github/docker) + signed threat-data dir. Connected points at _where_ the cloud-scanner tokens live — kit **never captures, echoes, or stores** them; it only references the source (vault `[scan.tooling]` or env) and reads them at scan time.
+- **Socket wired as a real cloud scanner.** `kit scan` runs `socket ci` when `SOCKET_SECURITY_API_TOKEN` is present (cloud-only → dropped in air-gap). Because Socket has no stable findings-JSON, kit gates on the exit code via a new `exitGate` scanner mode — exit 0 = clean, non-zero = one high-severity policy-violation finding (never false-green). Pure helpers (`airGapTomlBlock`, the exitGate path) fixture-tested.
+
 ### Security
 
 - **CI: every GitHub Action pinned to a node24 commit SHA.** Cleared the Node 20 deprecation warning by SHA-pinning the first-party actions to current node24 releases (`checkout` v7, `setup-node` v6, `setup-python` v6, `github-script` v9, `upload-artifact` v7, `attest-build-provenance` v4, `codeql-action`) and froze the remaining mutable tags (`anchore/sbom-action`, `aquasecurity/tfsec-action`, `gitleaks-action`) to commit SHAs. This is `kit gha-audit`'s own advice (no unpinned/`@vN` action refs), applied to kit's own pipeline.
