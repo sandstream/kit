@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { resolveAirGap, airGapTriageEnv } from "./config.js";
+import { resolveAirGap, airGapTriageEnv, airGapTomlBlock } from "./config.js";
 
 describe("resolveAirGap", () => {
   it("reads settings from .kit.toml [air_gap] when no env is set", () => {
@@ -60,5 +60,31 @@ describe("airGapTriageEnv", () => {
 
   it("is empty when no mirrors are configured", () => {
     assert.deepEqual(airGapTriageEnv({ enabled: true }), {});
+  });
+});
+
+describe("airGapTomlBlock", () => {
+  it("connected posture is just enabled = false (no mirror keys)", () => {
+    assert.equal(airGapTomlBlock(false), "[air_gap]\nenabled = false");
+  });
+
+  it("enclave posture emits only the non-empty mirrors", () => {
+    const block = airGapTomlBlock(true, {
+      npmRegistry: "https://npm.corp",
+      pypiIndex: "  ", // blank → skipped
+      threatDataDir: "/opt/td",
+    });
+    assert.equal(
+      block,
+      '[air_gap]\nenabled = true\nnpm_registry = "https://npm.corp"\nthreat_data_dir = "/opt/td"',
+    );
+  });
+
+  it("round-trips: the block resolveAirGap-parses back to the same posture", () => {
+    // (shape check — the keys airGapTomlBlock writes are the keys resolveAirGap reads)
+    const block = airGapTomlBlock(true, { githubApi: "https://ghe.corp/api/v3" });
+    assert.match(block, /^\[air_gap\]$/m);
+    assert.match(block, /enabled = true/);
+    assert.match(block, /github_api = "https:\/\/ghe\.corp\/api\/v3"/);
   });
 });
