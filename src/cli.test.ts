@@ -665,4 +665,17 @@ describe("vendor-repo safety: config-free scan + honored --no-setup", () => {
       `expected 'Setup skipped'; got: ${result.stdout}`,
     );
   });
+
+  // Project-agnostic commands must not require (or create) a .kit.toml either.
+  for (const args of [["supply-chain"], ["sentinel", "status"], ["verify-provenance"]]) {
+    it(`kit ${args.join(" ")} runs without a .kit.toml`, async () => {
+      const result = await runCli(args, dir);
+      assert.ok(
+        !result.stdout.includes("Create a .kit.toml") &&
+          !result.stderr.includes("Create a .kit.toml"),
+        `${args[0]} must not demand config; got: ${result.stdout}\n${result.stderr}`,
+      );
+      await assert.rejects(access(join(dir, ".kit.toml")), `${args[0]} must not write a .kit.toml`);
+    });
+  }
 });
