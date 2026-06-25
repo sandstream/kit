@@ -315,7 +315,7 @@ async function cmdCheck(): Promise<boolean> {
           })),
           ...secretResults.keys.map((s) => ({
             name: s.name,
-            status: (s.available ? "pass" : "fail") as JsonCheck["status"],
+            status: (s.unverified ? "warn" : s.available ? "pass" : "fail") as JsonCheck["status"],
             detail: s.detail ?? (s.available ? "available" : "missing"),
             category: "secrets",
           })),
@@ -2962,7 +2962,7 @@ async function cmdCi(): Promise<boolean> {
         })),
         ...secretResults.keys.map((s) => ({
           name: s.name,
-          status: (s.available ? "pass" : "fail") as JsonCheck["status"],
+          status: (s.unverified ? "warn" : s.available ? "pass" : "fail") as JsonCheck["status"],
           detail: s.detail ?? (s.available ? "available" : "missing"),
           category: "secrets",
         })),

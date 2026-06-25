@@ -8,6 +8,9 @@ export interface SecretStatus {
   source: string;
   available: boolean;
   detail: string;
+  /** Couldn't actually confirm the key (e.g. auth verified but presence not) →
+   *  render as warn, not a green pass. Avoids a false-green in degraded paths. */
+  unverified?: boolean;
 }
 
 async function checkEnvSecret(name: string): Promise<{ available: boolean; detail: string }> {
@@ -64,7 +67,7 @@ async function checkConfigSecret(value: string): Promise<{ available: boolean; d
 async function checkInfisicalSecret(
   name: string,
   infisicalConfig?: InfisicalConfig,
-): Promise<{ available: boolean; detail: string }> {
+): Promise<{ available: boolean; detail: string; unverified?: boolean }> {
   // Check for machine identity token first
   if (process.env.INFISICAL_TOKEN) {
     // Token exists, try to fetch the secret
@@ -99,10 +102,15 @@ async function checkInfisicalSecret(
     }
   }
 
-  // Fallback: check if infisical CLI is logged in
+  // Fallback: we could only confirm the CLI is authenticated, NOT that the key
+  // exists. Mark it unverified → renders as warn, not a green pass (no false-green).
   try {
     await exec("infisical", ["user", "get"], { timeout: 10_000 });
-    return { available: true, detail: "Infisical CLI authenticated (unchecked)" };
+    return {
+      available: true,
+      detail: "Infisical CLI authenticated — key presence not verified",
+      unverified: true,
+    };
   } catch {
     return { available: false, detail: "Infisical CLI not available or not logged in" };
   }
@@ -330,7 +338,7 @@ export async function checkSecrets(
 
   if (secrets.keys) {
     for (const [name, config] of Object.entries(secrets.keys)) {
-      let result: { available: boolean; detail: string };
+      let result: { available: boolean; detail: string; unverified?: boolean };
 
       switch (config.source) {
         case "env":
@@ -382,6 +390,7 @@ export async function checkSecrets(
         source: config.source,
         available: result.available,
         detail: result.detail,
+        unverified: result.unverified,
       });
     }
   }
