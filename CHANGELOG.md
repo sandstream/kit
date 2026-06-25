@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.33.1] - 2026-06-25
+
+### Security
+
+- **Revocation now fails CLOSED.** `fetchRevocationStatus` returned `{revoked: false}` when the revocation endpoint was unreachable or errored — so anyone who could disrupt the endpoint could disable the kill-switch. It now returns `{revoked: true}` on any endpoint error. (The "no endpoint configured / disabled" case stays not-revoked — the feature is simply off.) Caught while it's still latent, before anything gates on it. New `revocation.test.ts` locks the behavior.
+- **Secret temp files locked to the owner.** `mkdtemp` is 0o777-masked, so the plaintext-secret temp files written by `kit secrets purge-history` (the scrub-pattern file) and the OneCLI key-materialization path were briefly world-readable on multi-user systems. Both now go through `secureDir`/`secureFile` (0o700/0o600; icacls on Windows).
+- **Elevation-marker tampering is no longer silent.** `readElevation` caught every error and returned null, so a corrupted/forged marker looked identical to "expired". A missing file is still silently "not elevated", but a present-but-unparseable or bad-signature marker now warns (still fail-closed).
+
 ## [1.33.0] - 2026-06-25
 
 ### Added

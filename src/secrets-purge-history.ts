@@ -22,6 +22,7 @@ import { writeFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exec } from "./utils/exec.js";
+import { secureDir, secureFile } from "./utils/secure-perms.js";
 
 export type Tool = "git-filter-repo" | "bfg";
 
@@ -127,6 +128,7 @@ export async function purgeHistory(
 
   const tools = await detectTools();
   const dir = await mkdtemp(join(tmpdir(), "kit-purge-"));
+  secureDir(dir); // mkdtemp is 0o777-masked; the replacement file holds secret patterns → owner-only
   try {
     const replacementFile = join(dir, "replacements.txt");
     // git filter-repo replace-text format: `literal==>REPLACEMENT` or
@@ -136,6 +138,7 @@ export async function purgeHistory(
       patterns.map((p) => `${p}==>***REMOVED***`).join("\n") + "\n",
       "utf-8",
     );
+    secureFile(replacementFile); // contains the secret values being scrubbed
 
     if (tools.filterRepoAvailable) {
       try {
