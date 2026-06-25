@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security
+
+- **CI: every GitHub Action pinned to a node24 commit SHA.** Cleared the Node 20 deprecation warning by SHA-pinning the first-party actions to current node24 releases (`checkout` v7, `setup-node` v6, `setup-python` v6, `github-script` v9, `upload-artifact` v7, `attest-build-provenance` v4, `codeql-action`) and froze the remaining mutable tags (`anchore/sbom-action`, `aquasecurity/tfsec-action`, `gitleaks-action`) to commit SHAs. This is `kit gha-audit`'s own advice (no unpinned/`@vN` action refs), applied to kit's own pipeline.
+
 ## [1.32.0] - 2026-06-25
 
 ### Fixed
