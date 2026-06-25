@@ -73,9 +73,21 @@ async function checkNpmAudit(): Promise<SecurityCheckResult> {
   }
 
   try {
-    await exec("npm", ["audit", "--audit-level=high", "--json"], {
+    const { stdout } = await exec("npm", ["audit", "--audit-level=high", "--json"], {
       timeout: 30_000,
     });
+    // Exit 0 = npm found nothing >= high. But a broken / odd npm that exits 0
+    // with no report must NOT be read as a clean pass — be honest (warn), don't
+    // false-green.
+    if (!stdout || !stdout.trim()) {
+      return {
+        category: "dependency",
+        name: "npm audit",
+        status: "warn",
+        detail: "npm audit exited 0 but produced no report — could not confirm (unverified)",
+        severity: "low",
+      };
+    }
     return {
       category: "dependency",
       name: "npm audit",
