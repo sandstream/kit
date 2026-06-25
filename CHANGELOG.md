@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.32.0] - 2026-06-25
+
+### Fixed
+
+- **`kit scan` is now config-free.** Scanning is project-agnostic, yet `kit scan` aborted with "Create a .kit.toml" when no config was present — forcing a `kit init` (which writes a `.kit.toml` and runs setup) just to scan a repo. Now a missing config falls back to an empty one: scan runs in any directory and never writes a config file. Air-gap posture + scanner tokens still come from `.kit.toml` when present, otherwise from env.
+- **`kit init --no-setup` is honored.** `--no-setup` was only parsed by `kit clone`; `kit init --no-setup` silently ignored it and ran the full install/login/secrets pipeline anyway. It now stops after generating `.kit.toml` + lock files.
+
+Both surfaced by running kit against third-party / vendor repos, where the old behavior wrote a config and ran partial setup into a repo you only wanted to scan. Covered by new integration tests (`vendor-repo safety`).
+
 ## [1.31.2] - 2026-06-25
 
 ### Changed

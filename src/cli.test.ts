@@ -631,3 +631,38 @@ describe("kit secrets validate", () => {
     assert.ok(result.stdout.includes("_KIT_VAL_ABSENT"), "names the missing key");
   });
 });
+
+// Regressions from running kit on third-party / vendor repos: `kit scan` must not
+// require (or create) a .kit.toml, and `kit init --no-setup` must actually stop
+// after config instead of running the full setup pipeline.
+describe("vendor-repo safety: config-free scan + honored --no-setup", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "kit-cfgfree-"));
+    await writeFile(join(dir, "package.json"), '{"name":"t","dependencies":{}}', "utf-8");
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("kit scan runs without a .kit.toml and never creates one", async () => {
+    const result = await runCli(["scan"], dir);
+    // The regression: a missing config used to ENOENT into "Create a .kit.toml".
+    // (Assertion is timeout-safe: that error fires at config-load, before scanners.)
+    assert.ok(
+      !result.stdout.includes("Create a .kit.toml") &&
+        !result.stderr.includes("Create a .kit.toml"),
+      `scan must not demand config; got: ${result.stdout}\n${result.stderr}`,
+    );
+    await assert.rejects(access(join(dir, ".kit.toml")), "scan must not write a .kit.toml");
+  });
+
+  it("kit init --no-setup generates config then stops (no install/login/secrets)", async () => {
+    const result = await runCli(["init", "--no-setup", "--non-interactive"], dir);
+    await access(join(dir, ".kit.toml")); // init's job: the config IS created
+    assert.ok(
+      /Setup skipped/.test(result.stdout),
+      `expected 'Setup skipped'; got: ${result.stdout}`,
+    );
+  });
+});
