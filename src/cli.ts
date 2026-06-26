@@ -21,7 +21,7 @@ import { check1PasswordStatus, detect1PasswordMode } from "./onepassword.js";
 import { isNonInteractive } from "./environment.js";
 import { spawn as spawnChild } from "node:child_process";
 import { promptSelect } from "./utils/promptSelect.js";
-import { hasFlag, flagValue } from "./utils/flags.js";
+import { hasFlag, flagValue, envTruthy } from "./utils/flags.js";
 import { scanPlaintextSecrets } from "./scan-plaintext.js";
 import {
   planMigration,
@@ -3106,7 +3106,12 @@ async function cmdCi(): Promise<boolean> {
   const formatArg = args.find((a) => a.startsWith("--format="))?.split("=")[1] as
     | CiFormat
     | undefined;
-  const failOnWarning = hasFlag(args, "--fail-on-warning");
+  // Strict CI: a scanner that could not run (not installed / no token / crashed)
+  // surfaces as a WARN in the security checks, so strict promotes warnings to
+  // failures — a non-running critical scanner can no longer exit 0. Opt-in via
+  // --strict or KIT_CI_STRICT so existing green CIs are unaffected.
+  const strict = hasFlag(args, "--strict") || envTruthy(process.env.KIT_CI_STRICT);
+  const failOnWarning = hasFlag(args, "--fail-on-warning") || strict;
   const jsonMode = hasFlag(args, "--json");
   const format: CiFormat = formatArg ?? (jsonMode ? "json" : detectCiFormat());
 
@@ -5035,7 +5040,8 @@ async function cmdVerifyProvenance(): Promise<boolean> {
 
 async function cmdScan(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
-  const { runScanners, suppressBaselined, dedupKey } = await import("./scanners.js");
+  const { runScanners, suppressBaselined, dedupKey, scanHealthGate, isLocalSemgrepConfig } =
+    await import("./scanners.js");
   const { resolveToolBin } = await import("./utils/resolveTool.js");
   const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
   const { loadBaseline, baselineGet, baselineSet, saveBaseline } = await import("./baseline.js");
@@ -5057,6 +5063,15 @@ async function cmdScan(): Promise<boolean> {
     console.log(
       `${c.dim}air-gap mode: offline scanners only${airgap.dropped.length ? ` (skipping cloud-only: ${airgap.dropped.join(", ")})` : ""}${c.reset}`,
     );
+    // Loud rejection: a registry KIT_SEMGREP_CONFIG (p/<pack>, r/<rule>, auto)
+    // would fetch rules from semgrep.dev = egress, so semgrep is NOT run
+    // air-gapped. Only a LOCAL ruleset path enables semgrep offline.
+    const semCfg = process.env.KIT_SEMGREP_CONFIG?.trim();
+    if (semCfg && !isLocalSemgrepConfig(semCfg)) {
+      console.error(
+        `${c.yellow}! air-gap: KIT_SEMGREP_CONFIG='${semCfg}' is a registry config (would fetch from the semgrep registry = egress) — semgrep is NOT run air-gapped. Point KIT_SEMGREP_CONFIG at a local ruleset path to enable it offline.${c.reset}`,
+      );
+    }
     // Verified offline threat-data bundle (optional): point scanners at a
     // signed, integrity-checked local DB set. Fail-closed — never scan against
     // unverified threat data.
@@ -5140,14 +5155,29 @@ async function cmdScan(): Promise<boolean> {
   const { kept: findings, suppressed } = suppressBaselined(merged, accepted);
   const bad = findings.filter((m) => m.severity === "critical" || m.severity === "high").length;
 
+  // Scanner-HEALTH gate (separate from findings): a scanner that did not actually
+  // run (crashed/absent/no-token) must be able to force a non-zero exit so a green
+  // verdict never hides a broken scanner. Backward-compatible — a non-running
+  // scanner stays a loud WARN unless strict or a required scanner missed.
+  const strict = hasFlag(process.argv, "--strict") || envTruthy(process.env.KIT_CI_STRICT);
+  const requiredScanners = config.governance?.scan?.required_scanners ?? [];
+  const gate = scanHealthGate(runs, { strict, requiredScanners });
+  const overallOk = bad === 0 && gate.ok;
+
   if (hasFlag(process.argv, "--sarif")) {
     const { toSarif } = await import("./sbom.js");
     console.log(JSON.stringify(toSarif(findings), null, 2));
-    return bad === 0;
+    return overallOk;
   }
   if (jsonMode) {
-    console.log(JSON.stringify({ runs, findings, suppressed }, null, 2));
-    return bad === 0;
+    console.log(
+      JSON.stringify(
+        { runs, findings, suppressed, ok: overallOk, scannerGate: gate, strict },
+        null,
+        2,
+      ),
+    );
+    return overallOk;
   }
 
   const suppressNote = suppressed > 0 ? `  ${c.dim}(${suppressed} baselined)${c.reset}` : "";
@@ -5180,7 +5210,89 @@ async function cmdScan(): Promise<boolean> {
     }
   }
   if (bad > 0) console.log(`${c.red}${bad} high/critical${c.reset}`);
-  return bad === 0;
+  // Honest scanner-health reporting: name WHICH scanner did not run and why.
+  for (const w of gate.warnings) {
+    console.log(`  ${c.yellow}! ${w}${c.reset}`);
+  }
+  for (const fmsg of gate.failures) {
+    console.log(`  ${c.red}✗ ${fmsg}${c.reset}`);
+  }
+  if (gate.warnings.length > 0 && gate.ok) {
+    console.log(
+      `${c.dim}  (a non-running scanner is a warn; use --strict or [governance.scan] required_scanners to hard-fail)${c.reset}`,
+    );
+  }
+  return overallOk;
+}
+
+/**
+ * `kit airgap verify` — prove the air-gap posture is egress-free: assert that
+ * every scanner that WOULD run in air-gap mode resolves to a local artifact (no
+ * cloud-only scanner, no registry/`auto` semgrep config). Read-only + deterministic.
+ */
+async function cmdAirgap(): Promise<boolean> {
+  const sub = process.argv[3];
+  const jsonMode = hasFlag(process.argv, "--json");
+  if (sub !== "verify") {
+    console.error(`${c.red}usage: kit airgap verify${c.reset}`);
+    process.exitCode = 1;
+    return false;
+  }
+
+  const { SCANNERS, airGapScanners, verifyAirGapScanners, semgrepConfig } =
+    await import("./scanners.js");
+  const { resolveAirGap } = await import("./airgap/config.js");
+  const configPath = resolveConfigPath();
+  const config = existsSync(configPath) ? await loadConfig(configPath) : ({} as kitConfig);
+  const ag = resolveAirGap(config.air_gap, process.env);
+
+  // Evaluate the air-gap plan (what WOULD run with no egress), regardless of
+  // whether air-gap is currently enabled — the point is to PROVE the posture.
+  const plan = airGapScanners(SCANNERS, true, process.env);
+  const cfg = semgrepConfig(process.env);
+  const report = verifyAirGapScanners(plan.scanners, { semgrepConfig: cfg });
+
+  if (jsonMode) {
+    console.log(
+      JSON.stringify(
+        { ok: report.ok, enabled: ag.enabled, rows: report.rows, dropped: plan.dropped },
+        null,
+        2,
+      ),
+    );
+    return report.ok;
+  }
+
+  console.log(
+    `${c.bold}kit airgap verify${c.reset}  ${c.dim}every runnable scanner must be local (no egress)${c.reset}`,
+  );
+  if (!ag.enabled) {
+    console.log(
+      `${c.dim}  air-gap not enabled in .kit.toml / env — verifying what air-gap mode WOULD run${c.reset}`,
+    );
+  }
+  for (const row of report.rows) {
+    const mark = row.ok ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`;
+    console.log(`  ${mark} ${row.id}  ${c.dim}${row.detail}${c.reset}`);
+  }
+  for (const id of plan.dropped) {
+    console.log(
+      `  ${c.dim}− ${id}  dropped (cloud-only / registry — excluded from air-gap)${c.reset}`,
+    );
+  }
+  console.log("");
+  if (report.ok) {
+    console.log(
+      `  ${c.green}air-gap clean: all runnable scanners resolve to local artifacts${c.reset}`,
+    );
+  } else {
+    const bad = report.rows
+      .filter((r) => !r.ok)
+      .map((r) => r.id)
+      .join(", ");
+    console.log(`  ${c.red}air-gap NOT provable: ${bad} would egress${c.reset}`);
+  }
+  return report.ok;
 }
 
 async function cmdGhaAudit(): Promise<boolean> {
@@ -5323,7 +5435,10 @@ export const COMMAND_HELP: Record<string, string> = {
     "Compact one-line status (mode score · update · open PAL) for any agent's info bar — wire into Claude Code statusLine / a shell PS1",
   check: "Check status of all tools, services, secrets, and lock files",
   health: "Deep environment health diagnostics — granular pass/fail across tools, services, config",
-  scan: "Run external scanners (snyk/trivy/grype/semgrep/osv) and merge them into one local verdict",
+  scan: "Run external scanners (snyk/trivy/grype/semgrep/osv) and merge them into one local verdict (--strict / [governance.scan] required_scanners gate non-running scanners)",
+  airgap: "Air-gap posture tools (verify)",
+  "airgap verify":
+    "Prove zero-egress: assert every scanner that would run air-gapped resolves to a local artifact (no cloud-only, no registry semgrep config)",
   sentinel: "Autonomous redline watcher — propose/apply guarded remediations (run|install|status)",
   "supply-chain":
     "Install-time supply-chain triage: install-scripts, lockfile-drift, dep-confusion, slopsquat",
@@ -6159,6 +6274,7 @@ export const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
   "agent-audit": cmdAgentAudit,
   sentinel: cmdSentinel,
   scan: cmdScan,
+  airgap: cmdAirgap,
   "verify-provenance": cmdVerifyProvenance,
   "gha-audit": cmdGhaAudit,
   sbom: cmdSbom,

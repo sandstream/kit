@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.38.0] - 2026-06-26
+
+First step toward kit 2.0 ("the floor you can prove and build on"): close two fail-open holes in the "green = honest" promise. Both default to backward-compatible behavior; the stricter posture is opt-in.
+
+### Security
+
+- **Scanner-health gate — a crashed or missing scanner can no longer pass silently.** `kit scan`'s exit verdict was findings-only (`bad === 0`), so a scanner that errored / wasn't installed / lacked its token still exited 0 (a false green). A new pure `scanHealthGate(runs, {requiredScanners, strict})` now also accounts for scanner _health_. Default stays a loud warn (no existing green CI breaks); opt in to hard-fail via `[governance.scan].required_scanners` (a scanner in this list that didn't run fails) or `kit ci --strict` / `KIT_CI_STRICT=1` (any non-running scanner fails). `kit ci` gains the same `--strict` lever. New `[governance.scan].required_scanners` config key.
+- **Provable air-gap — no silent egress, and local rulesets can finally run offline.** Added `kit airgap verify`: asserts every scanner that would run in air-gap mode resolves to a local artifact (no cloud-only, no registry config) and prints a pass/fail table. In air-gap mode a registry (`p/…`) `KIT_SEMGREP_CONFIG` is now refused with a loud message in **both** scan paths (`kit scan` and `kit ci`'s `checkSemgrep`) because it would egress to the semgrep registry — while a **local** ruleset path is now correctly _kept_ (previously semgrep was dropped wholesale in air-gap, so it could never run even fully offline). New pure helpers `isLocalSemgrepConfig` + `verifyAirGapScanners`.
+
 ## [1.37.0] - 2026-06-26
 
 ### Added

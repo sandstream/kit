@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { classifyGuardDog } from "./guarddog.js";
-import { buildSemgrepArgs, semgrepConfig } from "./scanners.js";
+import { buildSemgrepArgs, semgrepConfig, isAirGap, isLocalSemgrepConfig } from "./scanners.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
 import {
   ensureBumblebee,
@@ -1308,6 +1308,20 @@ async function checkSemgrep(): Promise<SecurityCheckResult> {
   }
 
   const semgrepCfg = semgrepConfig(process.env);
+
+  // Provable air-gap: a registry ('p/...') ruleset egresses to the semgrep
+  // registry on first run. In air-gap mode refuse it (only a LOCAL ruleset path
+  // may run) — an honest skip, never a silent egress. Mirrors the scanner-runner
+  // air-gap path so `kit ci` cannot leak where `kit scan` would not.
+  if (isAirGap(process.env) && !isLocalSemgrepConfig(semgrepCfg)) {
+    return {
+      category: "supply-chain",
+      name: "semgrep SAST",
+      status: "skip",
+      detail: `air-gap: refusing registry semgrep config '${semgrepCfg}' (would egress) — set KIT_SEMGREP_CONFIG to a local ruleset path`,
+    };
+  }
+
   const result = await execFileNoThrow(
     semgrepBin,
     buildSemgrepArgs({ mode: "json", config: semgrepCfg }),
