@@ -238,8 +238,41 @@ async function cmdHeal(): Promise<boolean> {
   return green;
 }
 
+/**
+ * Emit a signed `.kit-check-attestation.json` receipt after a check/ci run, but
+ * only when the operator opts in (`--attest` flag or `KIT_ATTEST=1`). Writing a
+ * new file into the repo on every run would surprise scripted users, so it is
+ * gated. The signing step is fail-soft inside emitAttestation: a signing failure
+ * never alters the check verdict; at worst the receipt is unsigned.
+ */
+async function maybeEmitCheckAttestation(
+  command: "check" | "ci",
+  overallOk: boolean,
+  summary: { passed: number; failed: number; warnings: number; skipped: number },
+  scannersRan: { id: string; status: string }[],
+  quiet: boolean,
+): Promise<void> {
+  if (!hasFlag(process.argv, "--attest") && !envTruthy(process.env.KIT_ATTEST)) return;
+  const { emitAttestation } = await import("./check-attestation.js");
+  const res = await emitAttestation(
+    { command, kitVersion: KIT_VERSION, overallOk, results: summary, scannersRan },
+    process.cwd(),
+  );
+  if (res && !quiet) {
+    const signedNote =
+      res.att.sig_alg === "none"
+        ? `${c.yellow}unsigned (${res.att.unsigned_reason})${c.reset}`
+        : `${c.dim}signed ${res.att.sig_alg}${c.reset}`;
+    console.log(`${c.dim}attestation: ${res.path}${c.reset} ${signedNote}`);
+  }
+}
+
 async function cmdCheck(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
+  // kit check verify-attestation <file> verifies a signed check receipt.
+  if (process.argv[3] === "verify-attestation") {
+    return cmdVerifyAttestation();
+  }
   const enforceTests = hasFlag(process.argv, "--enforce-tests");
   const config = await loadConfig(resolveConfigPath());
 
@@ -396,6 +429,13 @@ async function cmdCheck(): Promise<boolean> {
         );
 
         const output: JsonCheckOutput = { ok: allOk, checks, summary };
+        await maybeEmitCheckAttestation(
+          "check",
+          allOk,
+          summary,
+          securityResults.map((s) => ({ id: s.name, status: s.status })),
+          true, // quiet: never print to stdout in --json mode
+        );
         console.log(JSON.stringify(output, null, 2));
         return allOk;
       }
@@ -449,6 +489,29 @@ async function cmdCheck(): Promise<boolean> {
       }
 
       printSummary(toolResults, serviceResults, secretResults.keys, securityResults);
+
+      // Opt-in signed attestation receipt (text mode). Summary is over the
+      // security gates, consistent with scanners_ran; overall_ok is the whole
+      // check verdict. Emission is fail-soft and never changes the verdict.
+      {
+        const attSummary = securityResults.reduce(
+          (acc, s) => {
+            if (s.status === "pass") acc.passed++;
+            else if (s.status === "fail") acc.failed++;
+            else if (s.status === "warn") acc.warnings++;
+            else acc.skipped++;
+            return acc;
+          },
+          { passed: 0, failed: 0, warnings: 0, skipped: 0 },
+        );
+        await maybeEmitCheckAttestation(
+          "check",
+          allOk,
+          attSummary,
+          securityResults.map((s) => ({ id: s.name, status: s.status })),
+          false,
+        );
+      }
 
       // Surface a stale kit (a newer published version) as a warn — a stale CLI
       // can carry already-fixed bugs. Gated by [update].check; checkForUpdate
@@ -3252,9 +3315,92 @@ async function cmdCi(): Promise<boolean> {
         );
       }
 
+      // Opt-in signed attestation receipt. scanners_ran reflects the security
+      // gates (which ran vs were skipped/errored). Quiet in json/non-text so it
+      // never corrupts machine-readable output.
+      await maybeEmitCheckAttestation(
+        "ci",
+        allOk,
+        summary,
+        securityResults.map((s) => ({ id: s.name, status: s.status })),
+        format !== "text",
+      );
+
       return allOk;
     },
   );
+}
+
+async function cmdVerifyAttestation(): Promise<boolean> {
+  // kit check verify-attestation [file] [--key <spki|fingerprint>] [--pin]
+  const args = process.argv.slice(4);
+  const file = args.find((a) => !a.startsWith("-")) ?? ".kit-check-attestation.json";
+  const expectedKey = flagValue(args, "--key");
+  const doPin = hasFlag(args, "--pin");
+  const { readFile } = await import("node:fs/promises");
+  const { verifyAttestation, pinEd25519Fingerprint, ATTESTATION_FILE } =
+    await import("./check-attestation.js");
+  const path = resolve(process.cwd(), file);
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf-8");
+  } catch {
+    console.error(
+      `${c.red}✗ no attestation at ${file}${c.reset}  ${c.dim}(default: ${ATTESTATION_FILE})${c.reset}`,
+    );
+    return false;
+  }
+  let att;
+  try {
+    att = JSON.parse(raw);
+  } catch {
+    console.error(`${c.red}✗ attestation is not valid JSON: ${file}${c.reset}`);
+    return false;
+  }
+  const r = await verifyAttestation(att, { expectedKey });
+  const fpNote = r.fingerprint
+    ? `  ${c.dim}ed25519 key sha256:${r.fingerprint.slice(0, 16)}…${c.reset}`
+    : "";
+
+  if (r.status === "ok") {
+    console.log(
+      `${c.green}✓ attestation verified${c.reset}  ${c.dim}${r.sig_alg}: ${att.command} on kit ${att.kit_version}, overall_ok=${att.overall_ok}${c.reset}${fpNote}`,
+    );
+    if (r.sig_alg === "hmac-sha256") {
+      console.log(
+        `${c.dim}HMAC verified against the machine-local anchor key (a valid MAC binds the receipt to a key-holder). Does NOT prove the host was untampered - a same-UID key reader can forge.${c.reset}`,
+      );
+    } else {
+      console.log(
+        `${c.dim}Ed25519 signature matches the pinned/expected key. Does NOT prove the host was untampered - a same-UID key reader can forge.${c.reset}`,
+      );
+    }
+    return true;
+  }
+
+  if (r.status === "unverified-authenticity") {
+    // Honest, non-green outcome: valid math, unauthenticated signer.
+    if (doPin && r.fingerprint) {
+      try {
+        await pinEd25519Fingerprint(r.fingerprint);
+        console.warn(
+          `${c.yellow}! pinned Ed25519 key sha256:${r.fingerprint.slice(0, 16)}… as trusted (TOFU).${c.reset} ${c.dim}Re-run verify to authenticate against the pin. NOTE: pinning a forged receipt's key trusts the forger - only pin a key you know is genuine.${c.reset}`,
+        );
+        return false; // still not authenticated on THIS run
+      } catch (err) {
+        console.error(`${c.red}✗ could not pin key: ${(err as Error).message}${c.reset}`);
+        return false;
+      }
+    }
+    console.error(
+      `${c.yellow}! attestation UNVERIFIED-AUTHENTICITY${c.reset} ${c.dim}(${r.sig_alg})${c.reset}${fpNote}`,
+    );
+    console.error(`${c.dim}${r.reason}${c.reset}`);
+    return false;
+  }
+
+  console.error(`${c.red}✗ attestation FAILED: ${r.reason}${c.reset}${fpNote}`);
+  return false;
 }
 
 async function cmdSelfAudit(): Promise<boolean> {
@@ -5434,6 +5580,7 @@ export const COMMAND_HELP: Record<string, string> = {
   statusline:
     "Compact one-line status (mode score · update · open PAL) for any agent's info bar — wire into Claude Code statusLine / a shell PS1",
   check: "Check status of all tools, services, secrets, and lock files",
+  "check verify-attestation": "Verify a signed .kit-check-attestation.json receipt",
   health: "Deep environment health diagnostics — granular pass/fail across tools, services, config",
   scan: "Run external scanners (snyk/trivy/grype/semgrep/osv) and merge them into one local verdict (--strict / [governance.scan] required_scanners gate non-running scanners)",
   airgap: "Air-gap posture tools (verify)",
@@ -5513,7 +5660,10 @@ export const COMMAND_HELP: Record<string, string> = {
   "security prescan-diff":
     "Diff two prescan reports — surface new regressions + fixed findings since baseline",
   "audit secrets": "Forensics: who/what touched each key + when (reads audit log)",
-  "audit verify": "Verify the audit log's tamper-evident hash chain (exit 1 on break)",
+  "audit verify":
+    "Verify the audit log's keyless hash chain + the external HMAC anchor (exit 1 on break/forge/truncation)",
+  "audit anchor":
+    "Seal the audit log with the machine-local HMAC key so a key-less rewrite or truncation is detectable",
   "audit export": "Emit the audit log for a SIEM (--format cef|syslog|json)",
   auth: "TOTP-gated elevation for destructive secret ops (elevate|status|revoke|setup-totp)",
   "auth elevate": "Mint elevation marker for destructive secret ops (TOTP/yes-prompt)",

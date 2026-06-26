@@ -69,6 +69,124 @@ async function cmdAuditSecrets(): Promise<boolean> {
   return true;
 }
 
+/** Resolve the configured audit log file (absolute path), defaulting to ./.kit-audit.jsonl. */
+async function resolveAuditLogPath(): Promise<string> {
+  let logFile = ".kit-audit.jsonl";
+  try {
+    const config = await loadConfig(resolveConfigPath());
+    if (config.governance?.audit?.log_file) logFile = config.governance.audit.log_file;
+  } catch {
+    /* default */
+  }
+  return resolve(process.cwd(), logFile);
+}
+
+/**
+ * `kit audit verify` - verify the keyless hash chain, then the external HMAC
+ * anchor (key + sealed count) when one exists. See audit-anchor.ts for the
+ * threat boundary (only a reader of the 0600 key can forge; a same-UID attacker
+ * is NOT covered, which needs the external TSA anchor).
+ *
+ * Fail-closed mode (`--strict` or `[governance.audit].require_anchor = true`,
+ * and implicitly once this machine has anchored ANY log) turns an unanchored
+ * log, an unreadable key, an unsealed tail, and a rotated key into hard
+ * failures, so a project-writable `log_file` cannot silently point verify at a
+ * forged, never-anchored file and pass. #fix2 #fix3 #fix4
+ */
+async function cmdAuditVerify(): Promise<boolean> {
+  const { verifyAuditChain } = await import("../audit.js");
+  const { readFile } = await import("node:fs/promises");
+  const args = process.argv.slice(3);
+  const strictFlag = hasFlag(args, "--strict");
+  let requireAnchor = false;
+  try {
+    const config = await loadConfig(resolveConfigPath());
+    requireAnchor = config.governance?.audit?.require_anchor === true;
+  } catch {
+    /* default: not required */
+  }
+  const logPath = await resolveAuditLogPath();
+  let content = "";
+  try {
+    content = await readFile(logPath, "utf-8");
+  } catch {
+    console.log(`${c.dim}no audit log at ${logPath}${c.reset}`);
+    return true;
+  }
+  const r = verifyAuditChain(content);
+  if (!r.ok) {
+    console.error(
+      `${c.red}✗ audit chain BROKEN at entry ${r.brokenAt}: ${r.reason}${c.reset}  ${c.dim}(verified ${r.entries} entries before the break)${c.reset}`,
+    );
+    return false;
+  }
+  console.log(`${c.green}✓ audit chain intact${c.reset}  ${c.dim}${r.entries} entries${c.reset}`);
+
+  const {
+    readAnchorRecord,
+    tryReadAuditAnchorKey,
+    verifyAgainstAnchor,
+    hasAnyAnchoredLogs,
+    decideAnchorVerdict,
+  } = await import("../audit-anchor.js");
+  const anchor = await readAnchorRecord(logPath);
+  const key = await tryReadAuditAnchorKey();
+  const a = verifyAgainstAnchor(content, anchor, key);
+  const machineHasAnchors = await hasAnyAnchoredLogs();
+  const verdict = decideAnchorVerdict({
+    result: a,
+    strict: strictFlag || requireAnchor,
+    machineHasAnchors,
+  });
+  if (verdict.level === "ok") {
+    console.log(`${c.green}✓ ${verdict.message}${c.reset}`);
+  } else if (verdict.level === "warn") {
+    console.warn(`${c.yellow}! ${verdict.message}${c.reset}`);
+  } else {
+    console.error(`${c.red}✗ HMAC anchor FAILED: ${verdict.message}${c.reset}`);
+  }
+  return verdict.ok;
+}
+
+/**
+ * `kit audit anchor` - seal the current log with the machine-local HMAC key so
+ * a later key-less rewrite or truncation is detectable by `kit audit verify`.
+ */
+async function cmdAuditAnchor(): Promise<boolean> {
+  const { verifyAuditChain } = await import("../audit.js");
+  const { anchorAuditLog } = await import("../audit-anchor.js");
+  const { readFile } = await import("node:fs/promises");
+  const logPath = await resolveAuditLogPath();
+  let content = "";
+  try {
+    content = await readFile(logPath, "utf-8");
+  } catch {
+    console.error(`${c.dim}no audit log at ${logPath}; nothing to anchor${c.reset}`);
+    return true;
+  }
+  // Refuse to seal a broken chain: the anchor must vouch for a sound log.
+  const chain = verifyAuditChain(content);
+  if (!chain.ok) {
+    console.error(
+      `${c.red}✗ refusing to anchor: chain broken at entry ${chain.brokenAt} (${chain.reason})${c.reset}`,
+    );
+    return false;
+  }
+  try {
+    const rec = await anchorAuditLog(logPath, content);
+    console.log(
+      `${c.green}✓ audit log anchored${c.reset}  ${c.dim}${rec.count} entries sealed (${rec.algo})${c.reset}`,
+    );
+    console.log(
+      `${c.dim}Note: the anchor resists a tamperer who cannot read the 0600 anchor key. A same-UID attacker who can read ~/.kit can still forge; close that with an external TSA anchor.${c.reset}`,
+    );
+    return true;
+  } catch (err) {
+    console.error(`${c.red}✗ could not anchor: ${(err as Error).message}${c.reset}`);
+    return false;
+  }
+}
+
 export async function cmdAudit(): Promise<boolean> {
   const args = process.argv.slice(3);
 
@@ -77,35 +195,14 @@ export async function cmdAudit(): Promise<boolean> {
     return cmdAuditSecrets();
   }
 
-  // Sub-sub: kit audit verify — check the tamper-evident hash chain
+  // Sub-sub: kit audit verify - keyless chain + external HMAC anchor.
   if (args[0] === "verify") {
-    let logFile = ".kit-audit.jsonl";
-    try {
-      const config = await loadConfig(resolveConfigPath());
-      if (config.governance?.audit?.log_file) logFile = config.governance.audit.log_file;
-    } catch {
-      /* default */
-    }
-    const { verifyAuditChain } = await import("../audit.js");
-    const { readFile } = await import("node:fs/promises");
-    let content = "";
-    try {
-      content = await readFile(resolve(process.cwd(), logFile), "utf-8");
-    } catch {
-      console.log(`${c.dim}no audit log at ${logFile}${c.reset}`);
-      return true;
-    }
-    const r = verifyAuditChain(content);
-    if (r.ok) {
-      console.log(
-        `${c.green}✓ audit chain intact${c.reset}  ${c.dim}${r.entries} entries${c.reset}`,
-      );
-      return true;
-    }
-    console.error(
-      `${c.red}✗ audit chain BROKEN at entry ${r.brokenAt}: ${r.reason}${c.reset}  ${c.dim}(verified ${r.entries} entries before the break)${c.reset}`,
-    );
-    return false;
+    return cmdAuditVerify();
+  }
+
+  // Sub-sub: kit audit anchor - seal the log with the machine-local HMAC key.
+  if (args[0] === "anchor") {
+    return cmdAuditAnchor();
   }
 
   // Sub-sub: kit audit export [--format cef|syslog|json] — emit for a SIEM

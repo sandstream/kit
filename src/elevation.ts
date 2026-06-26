@@ -20,6 +20,7 @@ import { resolve, dirname } from "node:path";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { appendAuditEventDirect } from "./audit.js";
 import { secureFile } from "./utils/secure-perms.js";
+import { reReadHexKey } from "./utils/key-file.js";
 
 const ELEVATION_FILE = ".kit/elevation.json";
 const DEFAULT_TTL_MINUTES = 15;
@@ -118,8 +119,10 @@ async function getElevationSigningKey(): Promise<Buffer> {
     secureFile(keyPath); // owner-only on Windows (NTFS ignores mode) — #43
     return key;
   } catch {
-    const hex = (await readFile(keyPath, "utf-8")).trim();
-    return Buffer.from(hex, "hex");
+    // Lost the create race. Re-read with the same >=64 hex guard as the happy
+    // path (+ retry) so a mid-write read never returns a short/empty signing
+    // key (which would later refuse a valid elevation marker). #fix5
+    return reReadHexKey(keyPath);
   }
 }
 

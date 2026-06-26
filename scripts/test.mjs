@@ -12,6 +12,9 @@ const env = {
   KIT_BUMBLEBEE: "0",
   KIT_NO_FAILURE_SIM: "1",
   KIT_NO_UPDATE_CHECK: "1",
+  // Keep incidental audit appends from touching the real ~/.kit anchor. Tests
+  // that exercise anchoring opt back in with an explicit KIT_AUDIT_ANCHOR_DIR.
+  KIT_AUDIT_ANCHOR: "0",
 };
 
 if (!existsSync("dist")) {
