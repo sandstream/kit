@@ -186,6 +186,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit review` / `kit heal`: One-gate repo audit (check + design); bounded self-heal loop
 - `kit scan`: Run external scanners (snyk/trivy/grype/semgrep/osv/socket) → one merged, air-gap-aware verdict
 - `kit supply-chain` / `kit sbom` / `kit gha-audit` / `kit agent-audit`: Install-time triage, SBOM, Actions hardening, agent/MCP/hook audit
+- `kit self-audit`: Deterministic self-check of kit's own source against the audit's bug-classes (also asserts CI-referenced scripts exist)
 - `kit sentinel {run,install,status}`: Autonomous redline watcher (propose/apply guarded fixes)
 - `kit verify-provenance` / `kit ingest`: Verify SLSA provenance offline; ingest external SARIF/OSV
 - `kit login --plan`: Show the resolved auth strategy (vault/capture/interactive) per service without logging in
@@ -351,6 +352,17 @@ in to any vault is always your own account action; kit never does it for you.
 - `kit security policy [init|add <pkg>|check]`: Dependency allowlist enforcement + per-key spend caps/TTL/scope
 - `kit security costs`: Snapshot per-key spend vs policy cap (Stripe live; OpenAI/Anthropic/Resend/Vercel stubbed)
 - `kit security clear-cache`: Reset the cached supply-chain scanner binary (use after an intentional rebuild)
+
+### Self-audit
+
+`kit self-audit` runs kit against its own source. It is zero-LLM and deterministic (walks `src/*.ts`, no network), so it can gate in CI. Two jobs in one: it scans for the same bug-classes the wider audit catches (reintroduced `|| true`, unguarded dynamic imports, and the rest of the rule set), and it asserts that every script referenced from `.github/workflows/*.{yml,yaml}` (node/python files, `npm run` targets) actually exists, so a workflow can never point at a missing script.
+
+- `kit self-audit`: Run every enabled rule; print findings (text by default; `--format=github` / `--format=gitlab` / `--format=json` for CI)
+- `kit self-audit --list-rules`: Print the rule list (id, detection-class, severity) without running
+- `kit self-audit --only <rule-id,...>`: Run a subset of rules
+- `kit self-audit --fail-on-warning`: Treat warnings as failures (errors fail by default; warnings do not)
+
+Error-severity findings (missing CI script, reintroduced `|| true`, unguarded import) exit non-zero. It runs in kit's own CI (the `self-audit` job feeds the security gate), warn-only for the first rollout so only error-severity findings block.
 
 ### Built-in git hooks
 

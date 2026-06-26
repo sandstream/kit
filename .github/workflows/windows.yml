@@ -27,7 +27,7 @@ jobs:
       - name: Build (cross-platform — no POSIX rm/chmod)
         run: npm run build
       - name: Unit tests
-        continue-on-error: true
+        continue-on-error: true # kit-self-audit: allow-continue-on-error
         shell: bash
         run: |
           set -o pipefail
@@ -39,7 +39,7 @@ jobs:
           name: windows-test-log
           path: win-tests.log
       - name: kit smoke (init / check) — gaps surface here, non-blocking
-        continue-on-error: true
+        continue-on-error: true # kit-self-audit: allow-continue-on-error
         run: |
           node dist/cli.js --version
           node dist/cli.js check --category security

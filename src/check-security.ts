@@ -46,7 +46,7 @@ function toResultSeverity(label: string | null): SecurityCheckResult["severity"]
 }
 
 export interface SecurityCheckResult {
-  category: "dependency" | "exposure" | "supply-chain" | "secrets";
+  category: "dependency" | "exposure" | "supply-chain" | "secrets" | `self-audit/${string}`;
   name: string;
   status: "pass" | "fail" | "warn" | "skip";
   detail: string;

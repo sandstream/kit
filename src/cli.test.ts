@@ -679,3 +679,47 @@ describe("vendor-repo safety: config-free scan + honored --no-setup", () => {
     });
   }
 });
+
+describe("kit self-audit (clean tree, machine output)", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "kit-selfaudit-"));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("--json: ok=true, failed=0, advisories separate from warnings, files carried", async () => {
+    const result = await runCli(["self-audit", "--json"], dir);
+    assert.equal(result.exitCode, 0, `expected exit 0; stderr: ${result.stderr}`);
+    const out = JSON.parse(result.stdout) as {
+      ok: boolean;
+      checks: { status: string; category: string; files?: string[]; severity?: string }[];
+      summary: { failed: number; warnings: number; advisories?: number };
+    };
+    assert.equal(out.ok, true);
+    assert.equal(out.summary.failed, 0);
+    // Advisories (R5/R10 info) are tallied apart from warnings.
+    assert.ok((out.summary.advisories ?? 0) > 0, "expected aggregated advisories on kit's tree");
+    // Every non-pass check carries a files path:line (advisory rows are aggregated
+    // and carry only a category, so restrict to gating fail/warn rows).
+    const gating = out.checks.filter(
+      (ch) => (ch.status === "fail" || ch.status === "warn") && ch.severity !== "low",
+    );
+    for (const ch of gating) {
+      assert.ok(
+        ch.files && ch.files.length > 0 && /:\d+$/.test(ch.files[0]),
+        `non-pass check ${ch.category} must carry a file:line; got ${JSON.stringify(ch.files)}`,
+      );
+    }
+  });
+
+  it("--fail-on-warning exits 0 on the clean tree (advisories never gate)", async () => {
+    const result = await runCli(["self-audit", "--fail-on-warning"], dir);
+    assert.equal(
+      result.exitCode,
+      0,
+      `--fail-on-warning must pass on kit's clean tree; stdout: ${result.stdout}\nstderr: ${result.stderr}`,
+    );
+  });
+});
