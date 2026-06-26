@@ -5505,6 +5505,9 @@ async function cmdTriage(): Promise<boolean> {
       "  kit triage npm <package> --sandbox   + offline tarball inspection (install-script + path-traversal scan, no code executed)",
     );
     console.log("  kit triage pip <package>             Evaluate PyPI package");
+    console.log(
+      "  kit triage brew <formula>            Evaluate Homebrew formula (resolves upstream repo, then repo-scores)",
+    );
     console.log("  kit triage repo <github-url>         Evaluate GitHub repository");
     console.log("  kit triage skill <path|name>         Evaluate Claude Code / agent skill");
     console.log("  kit triage all <target>              Auto-detect and run all checks");
@@ -5521,7 +5524,7 @@ async function cmdTriage(): Promise<boolean> {
     return true;
   }
 
-  const validTypes = ["docker", "npm", "pip", "repo", "skill", "all", "tools"];
+  const validTypes = ["docker", "npm", "pip", "brew", "repo", "skill", "all", "tools"];
   if (!validTypes.includes(type)) {
     console.error(`${c.red}Unknown triage type: ${type}${c.reset}`);
     console.error(`Valid types: ${validTypes.join(", ")}`);

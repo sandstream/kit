@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { classifyGuardDog } from "./guarddog.js";
+import { buildSemgrepArgs, semgrepConfig } from "./scanners.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
 import {
   ensureBumblebee,
@@ -1293,9 +1294,23 @@ async function checkSemgrep(): Promise<SecurityCheckResult> {
     };
   }
 
+  // Opt-in: a networked, multi-second SAST scan does not run by default. Enable
+  // it by setting KIT_SEMGREP_CONFIG to a ruleset (e.g. p/default, or a local
+  // ruleset path for air-gap). Skipping is honest — green stays "0 unreviewed".
+  if (!process.env.KIT_SEMGREP_CONFIG?.trim()) {
+    return {
+      category: "supply-chain",
+      name: "semgrep SAST",
+      status: "skip",
+      detail:
+        "SAST opt-in: set KIT_SEMGREP_CONFIG (e.g. p/default, or a local ruleset path) to enable",
+    };
+  }
+
+  const semgrepCfg = semgrepConfig(process.env);
   const result = await execFileNoThrow(
     semgrepBin,
-    ["scan", "--config", "auto", "--json", "--quiet", "--no-rewrite-rule-ids"],
+    buildSemgrepArgs({ mode: "json", config: semgrepCfg }),
     { timeout: 120_000 },
   );
 
@@ -1319,7 +1334,7 @@ async function checkSemgrep(): Promise<SecurityCheckResult> {
       category: "supply-chain",
       name: "semgrep SAST",
       status: high.some((f) => f.extra?.severity === "ERROR") ? "fail" : "warn",
-      detail: `${high.length} security finding(s) -run: semgrep scan --config auto`,
+      detail: `${high.length} security finding(s) -run: semgrep scan --config ${semgrepCfg}`,
       severity: high.some((f) => f.extra?.severity === "ERROR") ? "high" : "medium",
     };
   } catch {
