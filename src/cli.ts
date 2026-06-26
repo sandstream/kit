@@ -5547,8 +5547,10 @@ async function main(): Promise<void> {
       // no command → `check` (the prior `case undefined` behaviour).
       // COMMANDS is the module-scope dispatch table (single source of truth for the
       // command surface; help coverage is verified against it in command-surface.test.ts).
-      const handler = COMMANDS[command ?? "check"];
+      const resolved = command ?? "check";
+      const handler = COMMANDS[resolved];
       if (handler) {
+        emitDeprecationWarning(resolved);
         ok = await handler();
       } else {
         console.error(`Unknown command: ${command}`);
@@ -5650,6 +5652,93 @@ export const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
   team: cmdTeam,
   memory: cmdMemory,
 };
+
+/**
+ * Stability tier for a top-level command. Part of kit's frozen command surface
+ * (kit 2.x). See docs/CLI_STABILITY.md.
+ *   stable       Covered by the 2.x compatibility promise; will not break.
+ *   experimental Shipped but may change shape across minor versions.
+ *   deprecated   Slated for removal in a future major; prints a runtime warning.
+ */
+export type CommandTier = "stable" | "experimental" | "deprecated";
+
+// Stability tier for every top-level command. Keyed by the SAME names as COMMANDS
+// and COMMAND_HELP. command-surface.test.ts enforces 3-way parity: every COMMANDS
+// key has both a tier here and a help entry, so the surface can never drift.
+// Default is "stable" (shipped commands honor the 2.x promise); "team" is the
+// placeholder RBAC command (backend not wired) so it ships as "experimental".
+export const COMMAND_TIERS: Record<string, CommandTier> = {
+  status: "stable",
+  statusline: "stable",
+  whoami: "stable",
+  check: "stable",
+  health: "stable",
+  ingest: "stable",
+  "supply-chain": "stable",
+  "agent-audit": "stable",
+  sentinel: "stable",
+  scan: "stable",
+  airgap: "stable",
+  "verify-provenance": "stable",
+  "gha-audit": "stable",
+  sbom: "stable",
+  init: "stable",
+  upgrade: "stable",
+  install: "stable",
+  login: "stable",
+  secrets: "stable",
+  setup: "stable",
+  skills: "stable",
+  fix: "stable",
+  heal: "stable",
+  escalate: "stable",
+  governance: "stable",
+  "agent-config": "stable",
+  hooks: "stable",
+  add: "stable",
+  audit: "stable",
+  auth: "stable",
+  mcp: "stable",
+  env: "stable",
+  doctor: "stable",
+  analyze: "stable",
+  security: "stable",
+  "create-plugin": "stable",
+  plugin: "stable",
+  ci: "stable",
+  "self-audit": "stable",
+  clone: "stable",
+  run: "stable",
+  open: "stable",
+  context: "stable",
+  config: "stable",
+  triage: "stable",
+  baseline: "stable",
+  design: "stable",
+  review: "stable",
+  pkg: "stable",
+  team: "experimental",
+  memory: "stable",
+};
+
+/**
+ * Emit a deprecation warning to stderr when a command's tier is "deprecated".
+ * Returns true when a warning was emitted. Pure + parameterized so the mechanism
+ * is unit-testable with a fixture tiers map and a spy writer; main() calls it
+ * with the real COMMAND_TIERS and console.error. Warnings go to stderr so they
+ * never pollute machine-readable stdout (e.g. --json).
+ */
+export function emitDeprecationWarning(
+  command: string,
+  tiers: Record<string, CommandTier> = COMMAND_TIERS,
+  write: (msg: string) => void = (m) => process.stderr.write(`${m}\n`),
+): boolean {
+  if (tiers[command] !== "deprecated") return false;
+  write(
+    `warning: 'kit ${command}' is deprecated and will be removed in a future major version. See docs/CLI_STABILITY.md.`,
+  );
+  return true;
+}
 
 // Run only when invoked as the real CLI entry — NOT when imported by a test
 // (command-surface.test.ts imports COMMANDS/COMMAND_HELP). main() handles its own

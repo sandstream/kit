@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createMcpServer } from "./mcp-server.js";
+import { createMcpServer, KIT_MCP_TOOLS } from "./mcp-server.js";
 
 // Standard .gitignore so security check passes in temp dirs
 const GITIGNORE = ".env\n.env.local\n.env.*.local\n";
@@ -82,6 +82,21 @@ describe("MCP server tool registration", () => {
       assert.ok(names.includes("kit_skill_marketplace"), "kit_skill_marketplace missing");
       assert.ok(names.includes("kit_workflow_execute"), "kit_workflow_execute missing");
       assert.equal(tools.length, 17);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // Drift guard for the frozen public surface: the canonical KIT_MCP_TOOLS list
+  // (snapshotted in contracts/public-surface.json) must match the tools actually
+  // registered on the server. Adding/removing a register_kit_* call without
+  // updating KIT_MCP_TOOLS fails here.
+  it("KIT_MCP_TOOLS matches the actually-registered tool names", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const { tools } = await client.listTools();
+      const registered = tools.map((t) => t.name).sort();
+      assert.deepEqual(registered, [...KIT_MCP_TOOLS].sort());
     } finally {
       await cleanup();
     }
