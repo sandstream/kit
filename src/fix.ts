@@ -233,6 +233,16 @@ export async function cmdFix(): Promise<boolean> {
       metadata: {},
     },
     async () => {
+      // Read-only mode: fix installs tools and writes .env.template / .gitignore.
+      // Refuse the whole pipeline up front + audit, so no sink runs (matches
+      // installHooks). withGovernance never consults read-only, so guard here.
+      const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
+      if (isReadOnlyMode()) {
+        const refusal = await refuseWrite("fix");
+        console.log(`  ${c.yellow}!${c.reset} ${refusal.reason}`);
+        return false;
+      }
+
       // 1. Check and fix missing tools
       if (config.tools && Object.keys(config.tools).length > 0) {
         console.log(`${c.bold}[1/6] Tools${c.reset}`);

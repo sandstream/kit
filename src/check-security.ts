@@ -1351,6 +1351,13 @@ async function checkBumblebee(): Promise<SecurityCheckResult> {
   const name = "bumblebee (supply-chain)";
   const category = "supply-chain" as const;
 
+  // Publish gate: when set, an UNSCANNED release must not ship. Scanner-
+  // unavailable / scan-failed / scan-incomplete are "warn" (advisory) in normal
+  // runs but become a hard "fail" here so the gate can fail-closed (#supply).
+  const required = envFlagEnabled(process.env.KIT_BUMBLEBEE_REQUIRED);
+  // "could not scan" status under the required gate: fail-closed instead of warn.
+  const unscanned = required ? ("fail" as const) : ("warn" as const);
+
   if (envFlagDisabled(process.env.KIT_BUMBLEBEE)) {
     return { category, name, status: "skip", detail: "disabled via KIT_BUMBLEBEE" };
   }
@@ -1375,9 +1382,9 @@ async function checkBumblebee(): Promise<SecurityCheckResult> {
     return {
       category,
       name,
-      status: "warn",
-      detail: `scanner unavailable: ${reason}`,
-      severity: "low",
+      status: unscanned,
+      detail: `scanner unavailable: ${reason}${required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
+      severity: required ? "high" : "low",
       suggestion:
         "Provide a binary with KIT_BUMBLEBEE_BIN, or allow downloads (unset KIT_NO_DOWNLOAD). Manual install: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest",
     };
@@ -1394,9 +1401,9 @@ async function checkBumblebee(): Promise<SecurityCheckResult> {
     return {
       category,
       name,
-      status: "warn",
-      detail: `scan failed: ${error ?? "no output"}`,
-      severity: "medium",
+      status: unscanned,
+      detail: `scan failed: ${error ?? "no output"}${required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
+      severity: required ? "high" : "medium",
     };
   }
 
@@ -1421,9 +1428,9 @@ async function checkBumblebee(): Promise<SecurityCheckResult> {
     return {
       category,
       name,
-      status: "warn",
-      detail: `scan incomplete (status=${outcome.status}${outcome.timedOut ? ", timed out" : ""})`,
-      severity: "low",
+      status: unscanned,
+      detail: `scan incomplete (status=${outcome.status}${outcome.timedOut ? ", timed out" : ""})${required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
+      severity: required ? "high" : "low",
     };
   }
 
@@ -1537,21 +1544,19 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
   });
 }
 
-/**
- * F9 — append bumblebee supply-chain findings to the local audit JSONL.
- * Bypasses the governance config so the trail is captured even when
- * `kit check` is run without `.kit.toml`. One JSON line per finding.
- */
-async function logSupplyChainFindings(
+/** Separate findings sink — deliberately NOT the chained audit log. */
+export const SUPPLY_CHAIN_FINDINGS_FILE = ".kit-findings.jsonl";
+
+/** Build the JSONL lines for a batch of supply-chain findings. PURE/testable. */
+export function buildSupplyChainFindingLines(
   findings: BumblebeeFinding[],
   profile: string,
-): Promise<void> {
-  const { appendFile } = await import("node:fs/promises");
-  const path = resolve(process.cwd(), ".kit-audit.jsonl");
-  const lines = findings
+  now: Date = new Date(),
+): string {
+  return findings
     .map((f) =>
       JSON.stringify({
-        timestamp: new Date().toISOString(),
+        timestamp: now.toISOString(),
         event_type: "supply_chain_finding",
         source: "bumblebee",
         profile,
@@ -1566,6 +1571,23 @@ async function logSupplyChainFindings(
       }),
     )
     .join("\n");
+}
+
+/**
+ * F9 — append bumblebee supply-chain findings to a SEPARATE local JSONL sink
+ * (`.kit-findings.jsonl`), NOT the chained `.kit-audit.jsonl`. These are raw,
+ * unchained lines; appending them to the tamper-evident audit log would break
+ * its hash chain and make `kit audit verify` falsely report BROKEN. Bypasses
+ * governance config so the trail is captured even without `.kit.toml`.
+ */
+async function logSupplyChainFindings(
+  findings: BumblebeeFinding[],
+  profile: string,
+  cwd: string = process.cwd(),
+): Promise<void> {
+  const { appendFile } = await import("node:fs/promises");
+  const path = resolve(cwd, SUPPLY_CHAIN_FINDINGS_FILE);
+  const lines = buildSupplyChainFindingLines(findings, profile);
   if (lines) {
     await appendFile(path, lines + "\n", "utf-8");
   }

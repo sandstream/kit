@@ -188,3 +188,29 @@ describe("miseErrorDetail", () => {
     assert.equal(detail, "error parsing config file: ~/repo/.mise.toml");
   });
 });
+
+describe("installTools read-only mode", () => {
+  it("refuses without touching any dep when KIT_READ_ONLY=1", async () => {
+    let touched = false;
+    const deps = makeDeps({
+      checkTools: async () => {
+        touched = true;
+        return [{ name: "deno", required: "2", installed: null, ok: false }];
+      },
+      miseInstall: async () => {
+        touched = true;
+        return { ok: true, detail: "" };
+      },
+    });
+    process.env.KIT_READ_ONLY = "1";
+    try {
+      const results = await installTools({ deno: "2" }, deps);
+      assert.equal(results.length, 1);
+      assert.equal(results[0].action, "blocked");
+      assert.match(results[0].detail, /read-only mode active/);
+      assert.equal(touched, false); // no check / no install ran
+    } finally {
+      delete process.env.KIT_READ_ONLY;
+    }
+  });
+});

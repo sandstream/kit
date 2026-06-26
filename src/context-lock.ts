@@ -485,6 +485,14 @@ export async function applyContext(
   ctx: ContextConfig,
   cwd: string = process.cwd(),
 ): Promise<ApplyResult[]> {
+  // Read-only mode: activating a context mutates gcloud config / repo git
+  // identity. Refuse + audit; apply nothing (no-op, no steps run).
+  const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) {
+    await refuseWrite("context-use", { step_count: planContext(ctx).length });
+    return [];
+  }
+
   const results: ApplyResult[] = [];
   for (const step of planContext(ctx)) {
     let ok = false;

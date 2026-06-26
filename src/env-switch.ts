@@ -51,6 +51,15 @@ export async function writeActiveEnv(
     switchedAt: new Date().toISOString(),
     switchedBy,
   };
+  // Read-only mode: switching the active env writes .kit/active-env.json. Refuse
+  // + audit; persist nothing. Returns the would-be state (the marker is unchanged
+  // on disk, so a later read still sees the prior env).
+  const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) {
+    await refuseWrite("env-switch", { env });
+    console.error(`[kit] read-only mode active — not switching active env to "${env}".`);
+    return state;
+  }
   const path = resolve(cwd, ACTIVE_ENV_FILE);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(state, null, 2) + "\n", "utf-8");

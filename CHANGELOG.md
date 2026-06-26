@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.35.0] - 2026-06-26
+
+### Security
+
+Paranoid line-by-line audit hardening pass — a batch of fail-closed and least-privilege fixes found by an exhaustive review. None were known-exploited; all close latent gaps before anything gates on them.
+
+- **CI dependency-triage gate now fails CLOSED.** `.github/workflows/triage-deps.yml` ran the triage script from a stale path with `|| true`, so a moved/missing script or a non-zero exit silently passed the gate. It now verifies the script is present (hard-fails if not), drops `|| true`, captures the real exit code, and treats a non-zero exit **or** a missing `PASSED`/`WARNING` verdict as a hard `FAILED`.
+- **Publish supply-chain gate can be forced fail-closed.** `KIT_BUMBLEBEE_REQUIRED=1` promotes a "scanner unavailable" `warn` to a `fail`, so the release pipeline cannot green-light a publish when the supply-chain scanners never actually ran.
+- **Supply-chain findings no longer corrupt the audit hash-chain.** `logSupplyChainFindings` appended to `.kit-audit.jsonl`, breaking the tamper-evident chain; findings now go to a separate `.kit-findings.jsonl`. Extracted a pure `buildSupplyChainFindingLines()` (fixture-tested).
+- **MCP `kit_secrets` never returns plaintext.** The tool stripped to a sanitized projection — secret `value`s are no longer included in the MCP response. All mutating MCP tools are gated behind read-only mode and refuse to write when it's on.
+- **MCP `kit_run` is bounded.** Added an execution timeout and a bounded output buffer so a hung or chatty child can't wedge or balloon the server.
+- **Triage sandbox hardened against malicious packages.** Fetch runs with `--ignore-scripts`; non-registry specs are rejected; archive entries are listed and any `..`, leading-`/`, or symlink entry is rejected **before** extraction; tarball extraction uses the dash form (`tar -xzf`) to fix a silent macOS bsdtar failure.
+- **Plugin loader validates before import.** Plugin names are regex-validated and a path-containment assertion (resolved path must not escape the plugins dir) runs before `import()`.
+- **Revocation fails closed on malformed responses.** `fetchRevocationStatus` now requires `typeof revoked === "boolean"` and treats anything else as revoked; an enabled-but-misconfigured revocation (blank endpoint or agent id) also fails closed.
+- **Secret/state files locked to the owner.** `.env.local`, `.env.ci`, provisioned tokens, and the memory DB (`memory.db` + `-wal`/`-shm`) are written via `secureFile`/`secureDir` (0o600/0o700; icacls on Windows).
+- **CI annotation output is escaped.** GitHub annotations, the GitLab JUnit report, and the step-summary now escape their data (`escData`/`xmlEscape`), so a crafted finding string can't inject annotation/markup. `cmdTriageCheckDeps` treats a NaN/invalid cache timestamp as expired (fail-closed).
+- **Read-only mode is enforced on more write paths** — `kit install` (mise), `kit context use`, `kit env` switch, and `kit fix` now refuse and audit instead of writing when read-only mode is active.
+
+### Fixed
+
+- **`kit upgrade --self` gives actionable guidance on EACCES.** A failed global `npm install -g sandstream-kit@latest` (the common permission error on system Node) now prints the remediation — `npm config set prefix ~/.npm-global` (or a Node version manager) — instead of a bare "command failed".
+
 ## [1.34.0] - 2026-06-26
 
 ### Added

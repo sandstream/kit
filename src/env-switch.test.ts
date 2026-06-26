@@ -36,6 +36,20 @@ describe("writeActiveEnv / readActiveEnv", () => {
     }
   });
 
+  it("refuses to write the marker in read-only mode", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-env-"));
+    process.env.KIT_READ_ONLY = "1";
+    try {
+      const state = await writeActiveEnv("prod", dir, "tester");
+      assert.equal(state.env, "prod"); // returns the would-be state
+      assert.equal(existsSync(join(dir, ".kit", "active-env.json")), false); // but never wrote
+      assert.equal(await readActiveEnv(dir), null); // disk marker unchanged
+    } finally {
+      delete process.env.KIT_READ_ONLY;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("ignores invalid env values in the marker", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-env-"));
     try {

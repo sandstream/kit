@@ -1,6 +1,8 @@
 import { readFile, writeFile, access } from "node:fs/promises";
+import { devNull } from "node:os";
 import type { SecretsConfig } from "./config.js";
 import { resolveViaBackend, resetInfisicalCache } from "./secret-backends.js";
+import { secureFile } from "./utils/secure-perms.js";
 
 export interface SecretResolveResult {
   name: string;
@@ -110,6 +112,12 @@ export async function generateSecrets(
     }
   }
 
-  await writeFile(outputPath, content, "utf-8");
+  // Create owner-only from the start (mode applies only on creation), then
+  // enforce 0o600 / icacls on the existing file too (handles pre-existing files
+  // and the umask race) — plaintext secrets must never be world-readable.
+  // Skip the platform null device (secrets-sync discards output there): chmod on
+  // the root-owned /dev/null throws EPERM and there's nothing to secure anyway.
+  await writeFile(outputPath, content, { encoding: "utf-8", mode: 0o600 });
+  if (outputPath !== devNull) secureFile(outputPath);
   return { results, written: true, fromTemplate };
 }

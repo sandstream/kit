@@ -1,6 +1,22 @@
 import { readFile } from "node:fs/promises";
-import { resolve, join } from "node:path";
+import { resolve, join, relative } from "node:path";
 import type { AdapterRegistry, ServiceAdapter } from "./adapters/types.js";
+
+// npm package-name grammar: optional single @scope/ prefix, then name.
+// Rejects path-traversal payloads (`..`, `/`, `\`, leading `.`) because none of
+// those bytes are in the allowed character class (only one scope slash permitted).
+const PLUGIN_NAME_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
+
+/**
+ * Validate a plugin name as a safe npm package specifier. Rejects anything that
+ * could escape node_modules via path traversal (RCE vector).
+ */
+function isValidPluginName(name: string): boolean {
+  if (typeof name !== "string" || name.length === 0 || name.length > 214) return false;
+  if (name.includes("..") || name.includes("\\")) return false;
+  if (name.startsWith(".") || name.startsWith("/")) return false;
+  return PLUGIN_NAME_RE.test(name);
+}
 
 /**
  * Load plugin adapters from kitPlugins listed in the project's package.json.
@@ -61,20 +77,33 @@ async function loadSinglePlugin(
   pluginName: string,
   projectPath: string,
 ): Promise<ServiceAdapter[]> {
+  // Reject path-traversal / non-package names before they reach import() (RCE guard)
+  if (!isValidPluginName(pluginName)) {
+    throw new Error(`Invalid plugin name "${pluginName}" — not a valid npm package name`);
+  }
+
   // Resolve the plugin from the project's node_modules (not kit's own node_modules)
+  const nodeModules = resolve(projectPath, "node_modules");
   const candidates = [
-    join(projectPath, "node_modules", pluginName, "kit-adapter.js"),
-    join(projectPath, "node_modules", pluginName, "kit-adapter.cjs"),
-    join(projectPath, "node_modules", pluginName, "index.js"),
-    join(projectPath, "node_modules", pluginName),
+    join(nodeModules, pluginName, "kit-adapter.js"),
+    join(nodeModules, pluginName, "kit-adapter.cjs"),
+    join(nodeModules, pluginName, "index.js"),
+    join(nodeModules, pluginName),
   ];
 
   let mod: unknown;
   let lastError: unknown;
 
   for (const candidate of candidates) {
+    // Defense in depth: never import anything that resolves outside node_modules
+    const resolved = resolve(candidate);
+    const rel = relative(nodeModules, resolved);
+    if (rel.startsWith("..") || rel === "") {
+      lastError = new Error(`Refusing to import "${candidate}" outside node_modules`);
+      continue;
+    }
     try {
-      mod = await import(candidate);
+      mod = await import(resolved);
       break;
     } catch (err) {
       lastError = err;

@@ -51,8 +51,11 @@ function ensureMemoryDir(): void {
   const dir = getMemoryDir();
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    secureDir(dir); // enforce owner-only on Windows too (NTFS ignores mode bits) — #43
   }
+  // Enforce owner-only unconditionally: a pre-existing dir (created before this
+  // hardening, or with a looser umask) would otherwise stay world-readable. Also
+  // covers Windows, where NTFS ignores the mkdir mode bits — #43.
+  secureDir(dir);
 }
 
 const SCHEMA_SQL = `
@@ -207,6 +210,11 @@ export function openMemoryDb(path?: string): DatabaseSync {
   if (dbPath !== ":memory:" && existsSync(dbPath)) {
     try {
       secureFile(dbPath); // 0o600 on POSIX, icacls owner-only on Windows — #43
+      // WAL mode spills the secret-dense content into -wal/-shm sidecars; secure
+      // those too or the data leaks through a world-readable side channel.
+      for (const sidecar of [`${dbPath}-wal`, `${dbPath}-shm`]) {
+        if (existsSync(sidecar)) secureFile(sidecar);
+      }
     } catch {
       // best-effort: non-POSIX filesystems may not support chmod
     }

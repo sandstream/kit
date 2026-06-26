@@ -39,6 +39,50 @@ export interface SandboxResult {
   tarballSize: number;
 }
 
+/**
+ * Registry spec allow-list: `name` or `name@version`, optionally scoped
+ * (`@scope/name`). Anything else — git/http/file URLs, local dirs, .tgz paths —
+ * is rejected before `npm pack` so a non-registry spec can't trigger arbitrary
+ * code execution via prepare/prepack lifecycle scripts.
+ */
+const REGISTRY_SPEC = /^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(@[\w.\-+]+)?$/i;
+
+/** Reject any spec npm would resolve to a non-registry source. */
+export function isRegistrySpec(spec: string): boolean {
+  if (!spec || spec.length > 214) return false;
+  // No protocol (git+, http(s):, file:, git@host:), no leading path or dot.
+  if (spec.includes(":") || spec.startsWith("/") || spec.startsWith(".")) return false;
+  // No local tarball / git url / explicit protocol words.
+  if (/\.tgz$|\.tar$|^git\b|^https?\b|^file\b/i.test(spec)) return false;
+  return REGISTRY_SPEC.test(spec);
+}
+
+/**
+ * Reject a tarball entry that would escape the package root or is a link.
+ * Input is a single line from a verbose `tar -tvzf` listing, e.g.
+ *   -rw-r--r--  0 u g  123 2020-01-01 00:00 package/index.js
+ *   lrwxr-xr-x  0 u g    0 2020-01-01 00:00 package/evil -> /etc/passwd
+ * The mode column's first char gives the entry type (l = symlink); the path is
+ * the trailing field (before ` -> ` for links).
+ */
+export function isUnsafeEntry(line: string): boolean {
+  const e = line.trim();
+  if (!e) return false;
+
+  // Symlink / hardlink: GNU and bsdtar both put the type flag first ('l' for
+  // symlink, 'h' for hardlink). A link can repoint outside the package root.
+  const typeFlag = e[0];
+  if (typeFlag === "l" || typeFlag === "h") return true;
+
+  // The archived path is the last field; for links, strip the ` -> target`.
+  const path = (e.split(" -> ")[0].trim().split(/\s+/).pop() ?? "").trim();
+  if (!path) return false;
+  if (path.startsWith("/")) return true; // absolute
+  if (path.split("/").some((seg) => seg === "..")) return true; // traversal
+  if (/^[a-zA-Z]:[\\/]/.test(path)) return true; // windows drive-absolute
+  return false;
+}
+
 /** Patterns that frequently appear in malicious lifecycle scripts. */
 const SUSPICIOUS_SCRIPT_PATTERNS: Array<[RegExp, string]> = [
   [/curl|wget|https?:\/\//i, "network call in install script"],
@@ -58,59 +102,90 @@ export async function triageNpmSandbox(
   const findings: SandboxFinding[] = [];
   const spec = version ? `${packageName}@${version}` : packageName;
 
+  // Build a terminating result that surfaces accumulated findings (used by the
+  // early-exit guards below) so the main flow stays flat.
+  const stop = (extra: SandboxFinding, size = 0): SandboxResult => ({
+    package: packageName,
+    version: version ?? null,
+    findings: [...findings, extra],
+    hasInstallScripts: false,
+    tarballSize: size,
+  });
+
+  // 0. Only registry specs are safe to pack. Git/dir/url/.tgz specs make
+  //    `npm pack` run prepare/prepack lifecycle scripts = arbitrary code exec
+  //    during the supposedly read-only inspection. Reject them outright.
+  if (!isRegistrySpec(spec)) {
+    return stop({
+      severity: "critical",
+      signal: "non-registry spec rejected",
+      detail: `refusing to pack non-registry spec (only name[@version] allowed): ${spec}`,
+    });
+  }
+
   // 1. Pull the tarball offline. npm pack writes to cwd; use a tmpdir so we
-  //    can clean up cleanly.
+  //    can clean up cleanly. --ignore-scripts (+ env var) prevents any
+  //    lifecycle script from running while npm resolves/packs the spec.
   const work = await mkdtemp(join(tmpdir(), "kit-triage-"));
   let tarballPath = "";
   let tarballSize = 0;
 
   try {
-    const { stdout } = await exec("npm", ["pack", spec, "--json", "--silent"], {
+    const { stdout } = await exec("npm", ["pack", spec, "--ignore-scripts", "--json", "--silent"], {
       cwd: work,
       timeout: 60_000,
+      env: { ...process.env, npm_config_ignore_scripts: "true" },
     });
     const meta = JSON.parse(stdout)[0] as { filename: string; size: number; version?: string };
     tarballPath = join(work, meta.filename);
     tarballSize = meta.size;
     if (meta.version) version = meta.version;
   } catch (err) {
+    return stop({
+      severity: "warn",
+      signal: "pack failed",
+      detail: `npm pack ${spec}: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+
+  // 2. List entries BEFORE extracting. npm packs everything under "package/";
+  //    any entry that escapes that root (absolute, "..", symlink/link) is
+  //    malicious and must never be written to the inspecting host's fs.
+  const listing = await listTarballEntries(tarballPath);
+  findings.push(...listing.findings);
+  if (!listing.ok) {
+    // Listing failed or an entry escapes the root: never extract.
     return {
       package: packageName,
       version: version ?? null,
-      findings: [
-        {
-          severity: "warn",
-          signal: "pack failed",
-          detail: `npm pack ${spec}: ${err instanceof Error ? err.message : String(err)}`,
-        },
-      ],
+      findings,
       hasInstallScripts: false,
-      tarballSize: 0,
+      tarballSize,
     };
   }
 
-  // 2. Extract into the same tmpdir for inspection.
-  // --no-same-owner/--no-same-permissions: archived ownership/mode bits must not
-  // carry over to the inspecting host (defense-in-depth).
-  await exec("tar", ["--no-same-owner", "--no-same-permissions", "xzf", tarballPath, "-C", work], {
-    timeout: 30_000,
-  });
-  const pkgRoot = join(work, "package");
-
-  // 3. Path traversal check — npm packs everything under "package/", anything
-  //    above is malicious.
-  const entries = (await exec("tar", ["tzf", tarballPath], { timeout: 10_000 })).stdout
-    .split("\n")
-    .filter(Boolean);
-  for (const entry of entries) {
-    if (entry.includes("..") || entry.startsWith("/")) {
-      findings.push({
-        severity: "critical",
-        signal: "path traversal",
-        detail: `tarball entry escapes package root: ${entry}`,
-      });
-    }
+  // 3. Only now extract into the same tmpdir for inspection. Use the dash form
+  //    `-xzf` (bsdtar on macOS rejects the bare `xzf` after long opts, which
+  //    silently disabled the sandbox there).
+  //    --no-same-owner/--no-same-permissions: archived ownership/mode bits must
+  //    not carry over to the inspecting host (defense-in-depth).
+  try {
+    await exec(
+      "tar",
+      ["--no-same-owner", "--no-same-permissions", "-xzf", tarballPath, "-C", work],
+      { timeout: 30_000 },
+    );
+  } catch (err) {
+    return stop(
+      {
+        severity: "warn",
+        signal: "extract failed",
+        detail: `tar -xzf ${tarballPath}: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      tarballSize,
+    );
   }
+  const pkgRoot = join(work, "package");
 
   // 4. Parse package.json for install scripts.
   let hasInstallScripts = false;
@@ -158,6 +233,47 @@ export async function triageNpmSandbox(
     hasInstallScripts,
     tarballSize,
   };
+}
+
+/**
+ * List a tarball's entries (verbose, so the symlink/hardlink type flag is
+ * visible) and flag any that escape the package root. Returns ok=false — with a
+ * structured finding instead of throwing — when listing fails or an entry is
+ * unsafe, so the caller can refuse to extract.
+ */
+async function listTarballEntries(
+  tarballPath: string,
+): Promise<{ ok: boolean; findings: SandboxFinding[] }> {
+  const findings: SandboxFinding[] = [];
+  let entries: string[];
+  try {
+    entries = (await exec("tar", ["-tvzf", tarballPath], { timeout: 10_000 })).stdout
+      .split("\n")
+      .filter(Boolean);
+  } catch (err) {
+    return {
+      ok: false,
+      findings: [
+        {
+          severity: "warn",
+          signal: "tar list failed",
+          detail: `tar -tvzf ${tarballPath}: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      ],
+    };
+  }
+  let ok = true;
+  for (const entry of entries) {
+    if (isUnsafeEntry(entry)) {
+      ok = false;
+      findings.push({
+        severity: "critical",
+        signal: "path traversal",
+        detail: `tarball entry escapes package root: ${entry}`,
+      });
+    }
+  }
+  return { ok, findings };
 }
 
 async function walkAndCheck(dir: string, findings: SandboxFinding[]): Promise<void> {
