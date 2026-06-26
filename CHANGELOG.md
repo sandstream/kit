@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.40.0] - 2026-06-26
+
+kit 2.0 Phase 0 (auditable core) — internal hygiene that lets the public surface be frozen in Phase 1. No behavior change.
+
+### Added
+
+- **`self-audit` rule R12-dup-source** — flags cloud-sync conflict copies (the iCloud/Dropbox `' 2'`/`' 3'` footgun: files like `foo 2.ts`, stray `dist 2/` mirror dirs). Severity `warn` (these are local-env junk, gitignored, never shipped; the rule turns a silent footgun into a surfaced advisory). Pure `isConflictCopyFile`/`isConflictCopyDir` analyzers.
+
+### Changed
+
+- **Began breaking up the `cli.ts` god-file.** Extracted 7 command families (`context`, `airgap`, `triage`, `scan`, `verify-provenance`, `gha-audit`, `sbom`) into focused `src/commands/*` modules; `cli.ts` shrinks from 6482 to 5662 lines and stays a dispatcher referencing them. Behavior-preserving — the `command-surface` parity test gates every move. Extraction continues incrementally (the `ci`/`check`/`self-audit` cluster needs the shared CI-format helpers lifted into a module first; secrets/security/setup clusters next).
+
 ## [1.39.0] - 2026-06-26
 
 kit 2.0 Pillar 1 (Provable Green), part 2: make the audit trail attestable, and be honest about exactly how far that goes.

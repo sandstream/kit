@@ -891,6 +891,96 @@ const R11: SelfAuditRule = {
 };
 
 // ---------------------------------------------------------------------------
+// R12 — cloud-sync duplicate-source conflict copies (the iCloud ' 2'/' 3' footgun)
+// ---------------------------------------------------------------------------
+
+// File-sync clients (iCloud Drive, Dropbox, OneDrive) resolve a same-name write
+// conflict by appending " 2"/" 3" before the extension: `cli.ts` becomes
+// `cli 2.ts`, and a whole `dist/` mirror reappears as a stray `dist 2/`. These
+// copies are gitignored so they never ship, but they pollute the working tree
+// and can false-trip file-walking tooling (a duplicated source module gets
+// scanned twice). WARN only: local-environment junk, not a code defect, so this
+// is advisory cleanup and must never gate.
+
+/**
+ * A basename that is a cloud-sync conflict copy: a space, then digits, then a
+ * source extension at end-of-string. Fires on `foo 2.ts` / `bar 3.js`; silent
+ * on `cloudflare-r2.ts` (no space before the digit) and normal names.
+ */
+export function isConflictCopyFile(basename: string): boolean {
+  return / \d+\.(?:ts|js|mjs|cjs|md)$/.test(basename);
+}
+
+/** A top-level mirror dir a sync client left behind: `dist 2`, `src 3`. */
+export function isConflictCopyDir(name: string): boolean {
+  return /^(?:dist|src) \d+$/.test(name);
+}
+
+// Big/irrelevant subtrees the conflict-copy walk never needs to enter.
+const DUP_SKIP_DIRS = new Set(["node_modules", ".git", ".next", "coverage"]);
+
+/**
+ * Walk `repoRoot` collecting conflict copies. A top-level `dist N`/`src N` mirror
+ * dir is reported as a single directory finding (its whole subtree is the
+ * duplicate — we do not descend it). Loose ` N.ext` files are reported wherever
+ * they appear (e.g. `dist/cli 2.js`). node_modules/.git/.next/coverage and other
+ * dotdirs are skipped to keep the scan bounded.
+ */
+function findConflictCopies(repoRoot: string): { path: string; isDir: boolean }[] {
+  const out: { path: string; isDir: boolean }[] = [];
+  function visit(dir: string, rel: string): void {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        // Only a TOP-LEVEL `dist N`/`src N` is treated as a mirror dir.
+        if (rel === "" && isConflictCopyDir(e.name)) {
+          out.push({ path: childRel, isDir: true });
+          continue;
+        }
+        if (DUP_SKIP_DIRS.has(e.name) || e.name.startsWith(".")) continue;
+        visit(join(dir, e.name), childRel);
+        continue;
+      }
+      if (e.isFile() && isConflictCopyFile(e.name)) {
+        out.push({ path: childRel, isDir: false });
+      }
+    }
+  }
+  visit(repoRoot, "");
+  return out;
+}
+
+const R12: SelfAuditRule = {
+  id: "R12-dup-source",
+  name: "cloud-sync duplicate-source conflict copy",
+  detectionClass: "dup-source",
+  severity: "warn",
+  enabled: true,
+  run(ctx) {
+    const findings: Finding[] = [];
+    for (const hit of findConflictCopies(ctx.repoRoot)) {
+      // Synthetic SourceFile: these paths are not in ctx.sources (the copy may be
+      // a .js/.md or a whole dir), so we only carry the path for the annotation.
+      const file: SourceFile = { path: hit.path, text: "", lines: [] };
+      findings.push({
+        file,
+        line: 1,
+        detail: hit.isDir
+          ? `cloud-sync conflict-copy directory '${hit.path}' (a ' 2'/' 3' mirror left by iCloud/Dropbox/OneDrive) — gitignored junk, remove it`
+          : `cloud-sync conflict-copy file '${hit.path}' (a ' 2'/' 3' duplicate left by iCloud/Dropbox/OneDrive) — gitignored junk, remove it`,
+      });
+    }
+    return shape(R12, findings);
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -907,6 +997,7 @@ export const SELF_AUDIT_RULES: SelfAuditRule[] = [
   R9,
   R10,
   R11,
+  R12,
 ];
 
 // ---------------------------------------------------------------------------
