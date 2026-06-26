@@ -116,6 +116,7 @@ export const SELF_AUDIT_RULES: Record<string, RuleRef> = {
   "R9-unkeyed-anchor": cwe(345, "Insufficient Verification of Data Authenticity"),
   "R10-toolchain-pin": cwe(426, "Untrusted Search Path"),
   "R11-script-paths": kit("R11-script-paths", "CI references a missing/renamed script"),
+  "R12-dup-source": kit("R12-dup-source", "Cloud-sync duplicate-source conflict copy in tree"),
 };
 
 /** Look up the citation for a self-audit rule id, or undefined if unmapped. */

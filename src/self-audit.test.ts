@@ -10,6 +10,8 @@ import {
   resolveKitRoot,
   extractKitTools,
   READ_ONLY_SAFE,
+  isConflictCopyFile,
+  isConflictCopyDir,
   type SelfAuditRule,
   type SelfAuditCtx,
   type SourceFile,
@@ -466,6 +468,63 @@ describe("R11-script-paths", () => {
       const res = ruleById("R11-script-paths").run({ repoRoot: dir, sources: [], pkgJson: {} });
       assert.equal(countStatus(res, "fail"), 1);
       assert.equal(res[0].category, "self-audit/ci-script-paths");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("R12-dup-source", () => {
+  it("predicate: fires on ' N.ext' conflict copies, silent on normal names", () => {
+    // Positive: a space, digits, then a source extension at end-of-string.
+    assert.equal(isConflictCopyFile("foo 2.ts"), true);
+    assert.equal(isConflictCopyFile("bar 3.js"), true);
+    assert.equal(isConflictCopyFile("notes 10.md"), true);
+    assert.equal(isConflictCopyFile("esm 2.mjs"), true);
+    assert.equal(isConflictCopyFile("legacy 2.cjs"), true);
+    // Negative: no space before the digit, or a non-source extension.
+    assert.equal(isConflictCopyFile("cloudflare-r2.ts"), false);
+    assert.equal(isConflictCopyFile("cli.ts"), false);
+    assert.equal(isConflictCopyFile("base64.ts"), false);
+    assert.equal(isConflictCopyFile("data 2.json"), false);
+    assert.equal(isConflictCopyFile("cli 2.d.ts"), false);
+  });
+
+  it("predicate: fires on top-level dist/src mirror dirs only", () => {
+    assert.equal(isConflictCopyDir("dist 2"), true);
+    assert.equal(isConflictCopyDir("src 3"), true);
+    assert.equal(isConflictCopyDir("dist"), false);
+    assert.equal(isConflictCopyDir("src"), false);
+    assert.equal(isConflictCopyDir("distribution 2"), false);
+  });
+
+  it("WARNS (never fails) on conflict copies in the tree; silent on clean names", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-r12-"));
+    try {
+      // Conflict copies (should fire).
+      writeFileSync(join(dir, "foo 2.ts"), "export const x = 1;\n");
+      writeFileSync(join(dir, "bar 3.js"), "module.exports = {};\n");
+      mkdirSync(join(dir, "dist 2"));
+      writeFileSync(join(dir, "dist 2", "cli.js"), "// mirror\n");
+      // Clean names (should stay silent).
+      writeFileSync(join(dir, "cloudflare-r2.ts"), "export const r2 = 1;\n");
+      writeFileSync(join(dir, "cli.ts"), "export const cli = 1;\n");
+      mkdirSync(join(dir, "src"));
+      writeFileSync(join(dir, "src", "index.ts"), "export {};\n");
+
+      const res = ruleById("R12-dup-source").run({ repoRoot: dir, sources: [], pkgJson: {} });
+      // It must never gate: zero fails, severity is advisory.
+      assert.equal(countStatus(res, "fail"), 0);
+      // foo 2.ts, bar 3.js, and the dist 2/ mirror dir = 3 warns; the dir is NOT
+      // descended, so dist 2/cli.js does not produce a second finding.
+      assert.equal(countStatus(res, "warn"), 3);
+      for (const r of res) assert.equal(r.status, "warn");
+      const flagged = res.flatMap((r) => r.files ?? []);
+      assert.ok(flagged.some((f) => f.startsWith("foo 2.ts")));
+      assert.ok(flagged.some((f) => f.startsWith("bar 3.js")));
+      assert.ok(flagged.some((f) => f.startsWith("dist 2")));
+      assert.ok(!flagged.some((f) => f.includes("cloudflare-r2.ts")));
+      assert.ok(!flagged.some((f) => f.startsWith("cli.ts")));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
