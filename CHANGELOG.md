@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.36.0] - 2026-06-26
+
+### Added
+
+- **`kit self-audit` — kit checks its own source for the bug-classes the paranoid audit found.** A deterministic, zero-LLM, local-first self-check that runs 12 rules over kit's own tree and asserts every CI-referenced script path actually exists on disk. It self-targets kit (resolves the package by `name === "sandstream-kit"`, anchored to the module dir, never the cwd), so it audits kit even when invoked from a consumer project, and skips gracefully if kit's source isn't found.
+  - **Gating (error) rules:** R11 every `.github/workflows/*` `run:` script (`node`/`python`/`npm run`) resolves to a real file/script (the exact `triage.py` false-green class), R1 unannotated `|| true` in a CI step, R3 secret/state file written world-readable (octal mode is value-checked: `0o644`/`0o777` fail, `0o600`/`0o400` pass), R6 `import()`/`require()` of a non-literal spec without name-validation **and** path-containment (window-scanned, so a Prettier line-wrap can't hide it), R7 attacker-controlled data interpolated into `::error::`/JUnit XML/step-summary without escaping, R9 a write to the hash-chained `.kit-audit.jsonl` outside the chaining writer.
+  - **Warn rules:** R1 `continue-on-error: true`, R1b NaN/invalid timestamp treated as fresh, R2 secret value reaching argv/error text, R4 untrusted spec used before its validator, R8 a mutating MCP tool missing its read-only guard (fail-closed: every `kit_*` tool is enumerated, not a hardcoded subset).
+  - **Advisories (info):** R10 third-party CLI invoked by bare name (PATH-hijack surface), R5 env var that relaxes a check to skip. These are aggregated to one line per class and never counted as warnings or gated on.
+  - Flags: `--format=text|github|gitlab`, `--json`, `--fail-on-warning`, `--only=<ids>`, `--list-rules`. Output reuses kit's existing CI-annotation/JUnit emit and exit-code convention. A new **warn-only `self-audit` job** runs in kit's own CI (gated so a reintroduced gating-class regression blocks the security gate).
+
+### Security
+
+- **Live GitHub-annotation injection fixed in the MCP server.** `kit_ci`'s `--format=github` emitter interpolated config-controlled check `category`/`name`/`detail` raw into `::error::`/`::warning::` lines; it now escapes them via the shared `escapeWorkflowCmd` (the annotation-forgery class `self-audit` R7 exists to catch — found by dogfooding the new rule).
+- **Dead, fail-open SAST step removed.** `security.yml` ran `npx eslint --plugin security … || true` where the plugin was never installed (the command crashed and `|| true` masked it, so the step ran zero rules and always passed). Removed; Semgrep remains the real SAST gate.
+- **`kit_login` now honors read-only mode.** It performs outward auth + mutates `process.env` but lacked an `isReadOnlyMode()` guard (surfaced by the fail-closed R8 rule); it now refuses under read-only mode like the other mutating MCP tools.
+
+### Changed
+
+- `SecurityCheckResult.category` widened to admit `self-audit/<class>` values (drops two unsafe `as` casts). The duplicated source-file walkers in `check-tests.ts` and `check-design.ts` are consolidated into a shared `src/source-walk.ts` (behavior-preserving). The CI-output escapers (`escapeWorkflowCmd`/`xmlEscape`) moved to `src/utils/ci-escape.ts` so the MCP server can reuse them without importing the CLI entrypoint.
+
 ## [1.35.0] - 2026-06-26
 
 ### Security

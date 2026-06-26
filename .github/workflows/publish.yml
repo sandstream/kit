@@ -3,16 +3,16 @@ name: Publish to npm
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read       # checkout
-      id-token: write      # npm provenance via OIDC (SLSA attestation)
+      contents: read # checkout
+      id-token: write # npm provenance via OIDC (SLSA attestation)
       packages: write
-      attestations: write  # GitHub artifact attestations
+      attestations: write # GitHub artifact attestations
 
     steps:
       # SHA-pinned actions — protects against tag-rewrite supply-chain attacks.
@@ -27,8 +27,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
         # npm ci uses package-lock.json exactly — no version drift.
@@ -89,7 +89,7 @@ jobs:
         # Uses the deep profile against the checked-out repo.
         env:
           KIT_BUMBLEBEE_PROFILE: deep
-          KIT_BUMBLEBEE_ROOTS: '.'
+          KIT_BUMBLEBEE_ROOTS: "."
         run: |
           npm run build
           node scripts/run-supply-chain-check.mjs
@@ -124,9 +124,9 @@ jobs:
         if: always()
         timeout-minutes: 5
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
-        continue-on-error: true
+        continue-on-error: true # kit-self-audit: allow-continue-on-error
         with:
-          subject-path: 'dist/**/*'
+          subject-path: "dist/**/*"
 
       - name: Generate SBOM (CycloneDX)
         # CycloneDX SBOM is required by EU CRA and US EO 14028 for shipped
@@ -154,4 +154,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release upload "$TAG" sbom.cyclonedx.json sbom.spdx.json --clobber || true
+          # Best-effort SBOM attach; the release may not exist yet (created in a
+          # later step / via the UI), so a missing-release failure must not fail
+          # publish. Opt-out annotation must sit on the same line as `|| true`.
+          gh release upload "$TAG" sbom.cyclonedx.json sbom.spdx.json --clobber || true  # kit-self-audit: allow-continue-on-error

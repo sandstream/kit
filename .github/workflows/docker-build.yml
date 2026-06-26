@@ -5,7 +5,7 @@ on:
     branches:
       - main
     tags:
-      - 'v*'
+      - "v*"
   pull_request:
     branches:
       - main
@@ -21,8 +21,8 @@ jobs:
       contents: read
       packages: write
       pull-requests: write
-      id-token: write          # cosign keyless signing via Sigstore OIDC
-      security-events: write   # upload Trivy SARIF to Code Scanning
+      id-token: write # cosign keyless signing via Sigstore OIDC
+      security-events: write # upload Trivy SARIF to Code Scanning
 
     steps:
       - name: Checkout repository
@@ -98,14 +98,14 @@ jobs:
         if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true'
         uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
         with:
-          cosign-release: 'v2.4.1'
+          cosign-release: "v2.4.1"
 
       - name: Sign CLI image (keyless)
         if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true' && steps.build-cli.outputs.digest != ''
         env:
           DIGEST: ${{ steps.build-cli.outputs.digest }}
           TAGS: ${{ steps.meta-cli.outputs.tags }}
-          COSIGN_EXPERIMENTAL: '1'
+          COSIGN_EXPERIMENTAL: "1"
         run: |
           for tag in $TAGS; do
             cosign sign --yes "${tag}@${DIGEST}"
@@ -127,7 +127,7 @@ jobs:
         env:
           DIGEST: ${{ steps.build-cli.outputs.digest }}
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          COSIGN_EXPERIMENTAL: '1'
+          COSIGN_EXPERIMENTAL: "1"
         run: |
           cosign attest --yes --predicate cli-sbom.cyclonedx.json --type cyclonedx \
             "${IMAGE}@${DIGEST}"
@@ -154,17 +154,17 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          format: 'sarif'
-          output: 'trivy-results.json'
+          format: "sarif"
+          output: "trivy-results.json"
 
       - name: Upload Trivy scan results
         # continue-on-error: SARIF upload needs Code Scanning enabled on the repo;
         # the scan result above is the gate, so a failed upload must not fail the publish.
         if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true'
-        continue-on-error: true
+        continue-on-error: true # kit-self-audit: allow-continue-on-error
         uses: github/codeql-action/upload-sarif@c35d1b164463ee62a100735382aaaa525c5d3496 # codeql-bundle-v2.25.6
         with:
-          sarif_file: 'trivy-results.json'
+          sarif_file: "trivy-results.json"
 
       - name: Comment PR with image details
         if: github.event_name == 'pull_request'

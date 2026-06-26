@@ -15,8 +15,9 @@
  * `.kit-baseline.json` (see baseline.ts) — only new gaps then fail.
  */
 
-import { readFile, readdir, access } from "node:fs/promises";
-import { join, resolve, relative } from "node:path";
+import { readFile, access } from "node:fs/promises";
+import { resolve, relative, basename } from "node:path";
+import { walkSourceFiles } from "./source-walk.js";
 
 export interface TestCheckResult {
   category: "tests";
@@ -40,31 +41,24 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
-async function walkSourceFiles(root: string): Promise<string[]> {
-  const out: string[] = [];
-  async function visit(dir: string): Promise<void> {
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const full = join(dir, e.name);
-      if (e.isDirectory()) {
-        if (e.name === "node_modules" || e.name.startsWith(".")) continue;
-        await visit(full);
-        continue;
-      }
-      if (!e.isFile()) continue;
-      if (!e.name.endsWith(".ts") && !e.name.endsWith(".js")) continue;
-      if (DEFAULT_EXCLUDE_SUFFIXES.some((s) => e.name.endsWith(s))) continue;
-      if (DEFAULT_EXCLUDE_NAMES.includes(e.name)) continue;
-      out.push(full);
-    }
-  }
-  await visit(root);
-  return out;
+/**
+ * Source files under `root` that should carry a sibling test, applying this
+ * check's own exclusions (.test/.spec/.d.ts suffixes + index/types names) on
+ * top of the shared walker. We pass includeTests so the shared walker doesn't
+ * drop `.test.ts` itself — the suffix filter below handles all exclusions, so
+ * behavior is identical to the previous bespoke walker.
+ */
+function collectSourceFiles(root: string): string[] {
+  return walkSourceFiles(root, {
+    exts: [".ts", ".js"],
+    includeTests: true,
+    skipDirs: ["node_modules"],
+  }).filter((full) => {
+    const name = basename(full);
+    if (DEFAULT_EXCLUDE_SUFFIXES.some((s) => name.endsWith(s))) return false;
+    if (DEFAULT_EXCLUDE_NAMES.includes(name)) return false;
+    return true;
+  });
 }
 
 function siblingTestPath(srcPath: string): string {
@@ -83,7 +77,7 @@ export async function findUntestedSources(
   for (const dir of srcDirs) {
     const root = resolve(cwd, dir);
     if (!(await pathExists(root))) continue;
-    const files = await walkSourceFiles(root);
+    const files = collectSourceFiles(root);
     for (const file of files) {
       if (!(await pathExists(siblingTestPath(file)))) {
         untested.push(relative(cwd, file));
@@ -101,7 +95,7 @@ export async function hasSmokeTests(
   for (const dir of smokeDirs) {
     const root = resolve(cwd, dir);
     if (!(await pathExists(root))) continue;
-    const files = await walkSourceFiles(root);
+    const files = collectSourceFiles(root);
     for (const file of files) {
       try {
         const content = await readFile(file, "utf-8");

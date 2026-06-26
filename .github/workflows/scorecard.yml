@@ -3,7 +3,7 @@ name: OpenSSF Scorecard
 on:
   branch_protection_rule:
   schedule:
-    - cron: '17 4 * * 1'  # weekly Mon 04:17 UTC
+    - cron: "17 4 * * 1" # weekly Mon 04:17 UTC
   push:
     branches: [main]
   workflow_dispatch:
@@ -15,8 +15,8 @@ jobs:
     name: OpenSSF Scorecard
     runs-on: ubuntu-latest
     permissions:
-      security-events: write   # upload to code-scanning dashboard
-      id-token: write          # OIDC for publishing results
+      security-events: write # upload to code-scanning dashboard
+      id-token: write # OIDC for publishing results
       contents: read
 
     steps:
@@ -28,7 +28,7 @@ jobs:
       - name: Run analysis
         # Informational metric; Code Scanning is not enabled on this repo, so
         # SARIF upload errors should not fail master CI.
-        continue-on-error: true
+        continue-on-error: true # kit-self-audit: allow-continue-on-error
         uses: ossf/scorecard-action@62b2cac7ed8198b15735ed49ab1e5cf35480ba46 # v2.4.0
         with:
           results_file: scorecard-results.sarif
@@ -46,7 +46,7 @@ jobs:
       - name: Upload SARIF
         # Lands in repo's Security → Code scanning tab.
         if: always()
-        continue-on-error: true
+        continue-on-error: true # kit-self-audit: allow-continue-on-error
         uses: github/codeql-action/upload-sarif@c35d1b164463ee62a100735382aaaa525c5d3496 # codeql-bundle-v2.25.6
         with:
           sarif_file: scorecard-results.sarif

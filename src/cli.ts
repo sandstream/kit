@@ -139,6 +139,13 @@ import { gatherProjectContext } from "./context.js";
 import { runTriage, listTriageTools, type TriageType } from "./triage.js";
 import { parsePkgSpec, installPkg } from "./pkg.js";
 import { cmdMemory } from "./commands/memory.js";
+import { resolveKitRoot, runSelfAudit, SELF_AUDIT_RULES } from "./self-audit.js";
+import { escapeWorkflowCmd, xmlEscape } from "./utils/ci-escape.js";
+
+// Re-exported for tests + downstream emitters (ci-escaping.test.ts imports these
+// from "./cli.js"). The implementations live in utils/ci-escape.ts so the MCP
+// server can reuse them without importing the whole CLI module.
+export { escapeWorkflowCmd, xmlEscape };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const KIT_VERSION = (
@@ -150,12 +157,20 @@ interface JsonCheck {
   status: "pass" | "fail" | "warn" | "skip";
   detail: string;
   category: string;
+  files?: string[];
+  severity?: "critical" | "high" | "medium" | "low";
 }
 
 interface JsonCheckOutput {
   ok: boolean;
   checks: JsonCheck[];
-  summary: { passed: number; failed: number; warnings: number; skipped: number };
+  summary: {
+    passed: number;
+    failed: number;
+    warnings: number;
+    skipped: number;
+    advisories?: number;
+  };
 }
 
 /** Map a security finding to a short, actionable PAL title/detail. */
@@ -3044,33 +3059,17 @@ function detectCiFormat(): CiFormat {
   return "text";
 }
 
-// Escape data interpolated into GitHub Actions workflow commands (`::error::` etc).
-// CR/LF would otherwise let attacker-controlled detail strings forge or hide
-// additional annotation lines. Order matters: `%` must be escaped first.
-export function escapeWorkflowCmd(s: string): string {
-  return String(s).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
-}
-
 function emitGithubAnnotations(checks: JsonCheck[]): void {
   for (const ch of checks) {
-    const msg = escapeWorkflowCmd(`${ch.category}/${ch.name}: ${ch.detail}`);
+    // Carry the offending file:line into the annotation when the finding has one.
+    const where = ch.files && ch.files.length > 0 ? ` [${ch.files[0]}]` : "";
+    const msg = escapeWorkflowCmd(`${ch.category}/${ch.name}: ${ch.detail}${where}`);
     if (ch.status === "fail") {
       console.log(`::error::${msg}`);
     } else if (ch.status === "warn") {
       console.log(`::warning::${msg}`);
     }
   }
-}
-
-// Escape data interpolated into the JUnit XML. Without this, attacker-controlled
-// name/category/detail strings could close attributes/elements and forge or delete
-// testcases. `&` must be replaced first; `"` is only needed inside attributes.
-export function xmlEscape(s: string): string {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function emitGitlabJunit(checks: JsonCheck[], allOk: boolean): void {
@@ -3251,6 +3250,175 @@ async function cmdCi(): Promise<boolean> {
       return allOk;
     },
   );
+}
+
+async function cmdSelfAudit(): Promise<boolean> {
+  const args = process.argv.slice(2);
+
+  // --list-rules: print the registry and exit (no audit run).
+  if (hasFlag(args, "--list-rules")) {
+    for (const r of SELF_AUDIT_RULES) {
+      console.log(
+        `${r.id}\t${r.name}\t${r.detectionClass}\t${r.severity}\t${r.enabled ? "enabled" : "disabled"}`,
+      );
+    }
+    return true;
+  }
+
+  const formatArg = args.find((a) => a.startsWith("--format="))?.split("=")[1] as
+    | CiFormat
+    | undefined;
+  const failOnWarning = hasFlag(args, "--fail-on-warning");
+  const jsonMode = hasFlag(args, "--json");
+  const format: CiFormat = formatArg ?? (jsonMode ? "json" : detectCiFormat());
+  const onlyArg = args.find((a) => a.startsWith("--only="))?.split("=")[1];
+  const only = onlyArg
+    ? onlyArg
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : undefined;
+
+  // self-audit targets kit's OWN source tree — not the user's project. Locate it
+  // by walking up to the sandstream-kit package.json; if kit is installed in a way
+  // that hides its sources, skip cleanly (not a failure).
+  const root = resolveKitRoot();
+  if (root === null) {
+    console.log(
+      `${c.yellow}kit source tree not found; self-audit targets kit itself and has nothing to scan here (skipped).${c.reset}`,
+    );
+    return true;
+  }
+
+  const results = runSelfAudit(root, only ? { only } : undefined);
+
+  // Map SecurityCheckResult[] -> the CI JsonCheck shape, carrying file:line and
+  // severity through. `info` (severity 'low') marks advisory findings: inventory,
+  // not gating signal. Advisories are counted separately (NOT as warnings) so they
+  // never trip --fail-on-warning, and annotation emitters exclude them.
+  const checks: (JsonCheck & { info: boolean })[] = results.map((r) => ({
+    name: r.name,
+    status: r.status,
+    detail: r.detail,
+    category: r.category,
+    files: r.files,
+    severity: r.severity,
+    info: r.severity === "low",
+  }));
+
+  const summary = checks.reduce(
+    (acc, ch) => {
+      if (ch.status === "pass") acc.passed++;
+      else if (ch.status === "fail") acc.failed++;
+      // Advisory (info) findings are tallied apart from real warnings.
+      else if (ch.status === "warn") {
+        if (ch.info) acc.advisories++;
+        else acc.warnings++;
+      } else acc.skipped++;
+      return acc;
+    },
+    { passed: 0, failed: 0, warnings: 0, skipped: 0, advisories: 0 },
+  );
+
+  // Advisories never gate (not even under --fail-on-warning): only real warnings do.
+  const allOk = summary.failed === 0 && (!failOnWarning || summary.warnings === 0);
+
+  // One aggregated line per advisory class (e.g. "toolchain-pin: 72 ... (advisory)").
+  const advisoryLines = aggregateAdvisories(checks.filter((ch) => ch.info));
+
+  if (format === "github") {
+    // Advisory (info-severity) findings are excluded from CI annotations — they are
+    // inventory, not gating signal — but remain in text/json output.
+    emitGithubAnnotations(checks.filter((ch) => !ch.info));
+    console.log(
+      `kit self-audit: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings, ${summary.advisories} advisories`,
+    );
+  } else if (format === "gitlab") {
+    emitGitlabJunit(
+      checks.filter((ch) => !ch.info),
+      allOk,
+    );
+    console.log(
+      `kit self-audit: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings, ${summary.advisories} advisories`,
+    );
+  } else if (format === "json") {
+    const output: JsonCheckOutput = {
+      ok: allOk,
+      // Drop the internal `info` marker; keep advisories compact (one row per class).
+      checks: [
+        ...checks.filter((ch) => !ch.info).map(({ info: _info, ...ch }) => ch),
+        ...advisoryLines.map((a) => ({
+          name: a.cls,
+          status: "warn" as const,
+          detail: `${a.count} ${a.label} (advisory)`,
+          category: a.cls,
+          severity: "low" as const,
+        })),
+      ],
+      summary,
+    };
+    console.log(JSON.stringify(output, null, 2));
+  } else {
+    // text — grouped by detection class, PASS/WARN/FAIL per finding; advisories
+    // collapsed to one line per class at the end.
+    console.log(`${c.bold}${c.cyan}kit self-audit${c.reset}`);
+    console.log(`${c.dim}${"─".repeat(50)}${c.reset}`);
+    const gating = checks.filter((ch) => !ch.info);
+    const byClass = new Map<string, typeof checks>();
+    for (const ch of gating) {
+      const cls = ch.category;
+      const bucket = byClass.get(cls);
+      if (bucket) bucket.push(ch);
+      else byClass.set(cls, [ch]);
+    }
+    for (const [cls, group] of byClass) {
+      console.log(`\n${c.bold}${cls}${c.reset}`);
+      for (const ch of group) {
+        const tag =
+          ch.status === "pass"
+            ? `${c.green}PASS${c.reset}`
+            : ch.status === "warn"
+              ? `${c.yellow}WARN${c.reset}`
+              : ch.status === "fail"
+                ? `${c.red}FAIL${c.reset}`
+                : `${c.dim}SKIP${c.reset}`;
+        const where = ch.files && ch.files.length > 0 ? ` ${c.dim}(${ch.files[0]})${c.reset}` : "";
+        console.log(`  ${tag} ${ch.name}: ${ch.detail}${where}`);
+      }
+    }
+    if (advisoryLines.length > 0) {
+      console.log(`\n${c.bold}advisories${c.reset}`);
+      for (const a of advisoryLines) {
+        console.log(`  ${c.dim}${a.cls}: ${a.count} ${a.label}${c.reset}`);
+      }
+    }
+    console.log(
+      `\n${SELF_AUDIT_RULES.length} rules, ${summary.failed} fail, ${summary.warnings} warn, ${summary.advisories} advisory`,
+    );
+  }
+
+  return allOk;
+}
+
+/**
+ * Collapse advisory (info) checks into one aggregated row per detection class.
+ * Label is derived from the class slug so the line reads e.g.
+ * "self-audit/toolchain-pin: 72 third-party CLI execs (advisory)".
+ */
+function aggregateAdvisories(
+  advisories: { category: string }[],
+): { cls: string; count: number; label: string }[] {
+  const ADVISORY_LABELS: Record<string, string> = {
+    "self-audit/toolchain-pin": "third-party CLI execs",
+    "self-audit/env-trust": "env-gated check relaxations",
+  };
+  const byClass = new Map<string, number>();
+  for (const a of advisories) byClass.set(a.category, (byClass.get(a.category) ?? 0) + 1);
+  return [...byClass.entries()].map(([cls, count]) => ({
+    cls,
+    count,
+    label: ADVISORY_LABELS[cls] ?? "advisory findings",
+  }));
 }
 
 async function cmdAnalyze(): Promise<boolean> {
@@ -5168,6 +5336,8 @@ export const COMMAND_HELP: Record<string, string> = {
   "verify-provenance":
     "Verify a release's SLSA provenance bundle offline (Ed25519 + SHA256 / cosign)",
   review: "Full repo audit — runs check + design in one gate (for agents / PR checks)",
+  "self-audit":
+    "Audit kit's own source against its 12 self-hardening rules (--list-rules, --only=<ids>, --format)",
   design: "Check design quality (a11y, design tokens) against the baseline",
   baseline:
     "Freeze current warnings into .kit-baseline.json so future runs gate only net-new findings",
@@ -6013,6 +6183,7 @@ export const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
   "create-plugin": cmdCreatePlugin,
   plugin: cmdPlugin,
   ci: cmdCi,
+  "self-audit": cmdSelfAudit,
   clone: cmdClone,
   run: cmdRun,
   open: cmdOpen,

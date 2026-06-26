@@ -15,8 +15,9 @@
  * the plugin contract — see docs/PLUGIN_CHECKS.md.
  */
 
-import { readdir, readFile, access } from "node:fs/promises";
-import { join, resolve, relative, extname } from "node:path";
+import { readFile, access } from "node:fs/promises";
+import { resolve, relative } from "node:path";
+import { walkSourceFiles } from "./source-walk.js";
 
 export interface DesignCheckResult {
   category: "design";
@@ -36,28 +37,17 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
-async function walkSources(root: string, exts: string[]): Promise<string[]> {
-  const out: string[] = [];
-  async function visit(dir: string): Promise<void> {
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const full = join(dir, e.name);
-      if (e.isDirectory()) {
-        if (e.name === "node_modules" || e.name === "dist" || e.name === ".next") continue;
-        if (e.name.startsWith(".")) continue;
-        await visit(full);
-        continue;
-      }
-      if (e.isFile() && exts.includes(extname(e.name))) out.push(full);
-    }
-  }
-  await visit(root);
-  return out;
+/**
+ * Component-source files under `root` filtered to `exts`. Wraps the shared
+ * walker, preserving this check's original skip set and its (intentional)
+ * inclusion of `*.test.tsx` so a11y/token scans still cover test fixtures.
+ */
+function walkSources(root: string, exts: string[]): string[] {
+  return walkSourceFiles(root, {
+    exts,
+    includeTests: true,
+    skipDirs: ["node_modules", "dist", ".next"],
+  });
 }
 
 interface A11yFinding {
@@ -98,7 +88,7 @@ async function scanA11y(srcRoots: string[]): Promise<A11yFinding[]> {
   const findings: A11yFinding[] = [];
   for (const root of srcRoots) {
     if (!(await pathExists(root))) continue;
-    const files = await walkSources(root, [".tsx", ".jsx", ".astro", ".vue"]);
+    const files = walkSources(root, [".tsx", ".jsx", ".astro", ".vue"]);
     for (const file of files) {
       let content: string;
       try {
@@ -136,7 +126,7 @@ async function scanTokenBypass(srcRoots: string[], tokenFiles: string[]): Promis
   const findings: TokenBypass[] = [];
   for (const root of srcRoots) {
     if (!(await pathExists(root))) continue;
-    const files = await walkSources(root, [".ts", ".tsx", ".css", ".scss", ".module.css"]);
+    const files = walkSources(root, [".ts", ".tsx", ".css", ".scss", ".module.css"]);
     for (const file of files) {
       // Allow token-definition files themselves to use raw values.
       if (tokenFiles.some((t) => file.includes(t))) continue;
@@ -194,7 +184,7 @@ export async function checkDesign(
   let anyComponentRoot = false;
   for (const root of srcRoots) {
     if (await pathExists(root)) {
-      const files = await walkSources(root, [".tsx", ".jsx", ".astro", ".vue"]);
+      const files = walkSources(root, [".tsx", ".jsx", ".astro", ".vue"]);
       if (files.length > 0) {
         anyComponentRoot = true;
         break;

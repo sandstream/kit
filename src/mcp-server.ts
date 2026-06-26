@@ -29,6 +29,7 @@ import { writeFile, access } from "node:fs/promises";
 import { executeCommand } from "./run.js";
 import { gatherProjectContext } from "./context.js";
 import { isReadOnlyMode } from "./read-only-mode.js";
+import { escapeWorkflowCmd } from "./utils/ci-escape.js";
 
 const KIT_FILE = ".kit.toml";
 
@@ -195,6 +196,7 @@ function register_kit_login(server: McpServer): void {
     "Attempt to log in to services defined in .kit.toml. Runs in non-interactive mode — services requiring interactive auth will be skipped.",
     { cwd: z.string().optional().describe("Working directory") },
     async ({ cwd }) => {
+      if (isReadOnlyMode()) return readOnlyRefusal("kit_login");
       try {
         // Force non-interactive for MCP context
         process.env.KIT_NON_INTERACTIVE = "1";
@@ -631,9 +633,12 @@ function register_kit_ci(server: McpServer): void {
         if (format === "github") {
           const lines: string[] = [];
           for (const c of checks) {
-            if (c.status === "fail") lines.push(`::error::${c.category}/${c.name}: ${c.detail}`);
-            else if (c.status === "warn")
-              lines.push(`::warning::${c.category}/${c.name}: ${c.detail}`);
+            // Escape config-controlled category/name/detail before interpolating into
+            // a GitHub workflow command — raw CR/LF would let a crafted detail string
+            // forge or hide annotation lines (same class escapeWorkflowCmd prevents).
+            const msg = escapeWorkflowCmd(`${c.category}/${c.name}: ${c.detail}`);
+            if (c.status === "fail") lines.push(`::error::${msg}`);
+            else if (c.status === "warn") lines.push(`::warning::${msg}`);
           }
           lines.push(
             `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`,
