@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.37.0] - 2026-06-26
+
+### Added
+
+- **`kit triage brew <formula>`** — Homebrew gets a triage channel (npm / pip / docker / repo / skill / brew). kit resolves the formula's upstream repo via `brew info --json=v2` and delegates to the existing `repo` health-score, so a formula is only vouched for via its source. Fail-closed: a disabled formula, or one whose upstream GitHub/GitLab repo cannot be resolved, does NOT pass (the source went unscored). The formula name is validated before it reaches the `brew` arg-array (no shell), blocking flag/arg injection. Pure `parseBrewInfo` so it is fully unit-tested without brew installed.
+
+### Changed
+
+- **semgrep SAST is now privacy-respecting and opt-in.** It previously ran `--config auto`, which forces telemetry on and phones the semgrep registry — and once semgrep was installed it ran a multi-second, networked scan by default that dominated `kit check` / `kit ci` and surfaced registry-ruleset false positives (e.g. local Supabase demo JWTs). Now: semgrep runs only when `KIT_SEMGREP_CONFIG` is set (gated via the same `needsToken` skip mechanism as Snyk/Socket), and when it runs it uses that explicit ruleset with `--metrics off` (no telemetry) plus `--exclude` of common test/build/fixture dirs. Default `kit check` / `kit ci` skip it with a clear "set KIT_SEMGREP_CONFIG (e.g. p/default, or a local ruleset path) to enable" message. Set it to a `p/*` pack for the registry ruleset, or to a local ruleset path to run air-gapped. Shared, unit-tested `buildSemgrepArgs` / `semgrepConfig` helpers back both the scanner registry and the `kit check` SAST step.
+
 ## [1.36.0] - 2026-06-26
 
 ### Added

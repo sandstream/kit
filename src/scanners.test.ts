@@ -8,6 +8,10 @@ import {
   airGapScanners,
   isAirGap,
   SCANNERS,
+  buildSemgrepArgs,
+  semgrepConfig,
+  DEFAULT_SEMGREP_CONFIG,
+  SEMGREP_EXCLUDES,
   type ScanDeps,
   type ScannerDef,
 } from "./scanners.js";
@@ -244,5 +248,50 @@ describe("suppressBaselined", () => {
   });
   it("no-ops on an empty baseline", () => {
     assert.equal(suppressBaselined(merged, new Set()).suppressed, 0);
+  });
+});
+
+describe("semgrep invocation (privacy + config, no `--config auto`)", () => {
+  it("semgrepConfig defaults to p/default and honors KIT_SEMGREP_CONFIG", () => {
+    assert.equal(semgrepConfig({}), DEFAULT_SEMGREP_CONFIG);
+    assert.equal(semgrepConfig({ KIT_SEMGREP_CONFIG: undefined }), DEFAULT_SEMGREP_CONFIG);
+    assert.equal(semgrepConfig({ KIT_SEMGREP_CONFIG: "  " }), DEFAULT_SEMGREP_CONFIG);
+    assert.equal(semgrepConfig({ KIT_SEMGREP_CONFIG: "p/owasp-top-ten" }), "p/owasp-top-ten");
+    assert.equal(semgrepConfig({ KIT_SEMGREP_CONFIG: " ./local-rules.yml " }), "./local-rules.yml");
+  });
+
+  it("buildSemgrepArgs never uses telemetry-forcing `auto` and always sets metrics off", () => {
+    for (const mode of ["sarif", "json"] as const) {
+      const args = buildSemgrepArgs({ mode, config: "p/default" });
+      assert.ok(!args.includes("auto"), `${mode}: must not contain 'auto'`);
+      const m = args.indexOf("--metrics");
+      assert.ok(m >= 0 && args[m + 1] === "off", `${mode}: --metrics off`);
+      const c = args.indexOf("--config");
+      assert.ok(c >= 0 && args[c + 1] === "p/default", `${mode}: --config p/default`);
+      for (const glob of SEMGREP_EXCLUDES) {
+        assert.ok(args.includes(glob), `${mode}: excludes ${glob}`);
+      }
+    }
+  });
+
+  it("sarif mode emits --sarif and scans '.'; json mode emits --json without a positional target", () => {
+    const sarif = buildSemgrepArgs({ mode: "sarif", config: "p/default" });
+    assert.ok(sarif.includes("--sarif"));
+    assert.equal(sarif[sarif.length - 1], ".");
+
+    const json = buildSemgrepArgs({ mode: "json", config: "p/default" });
+    assert.ok(json.includes("--json"));
+    assert.ok(json.includes("--no-rewrite-rule-ids"));
+    assert.ok(!json.includes("--sarif"));
+  });
+
+  it("the registered semgrep scanner uses the built args (no `auto`) and is opt-in", () => {
+    const semgrep = SCANNERS.find((s) => s.id === "semgrep");
+    assert.ok(semgrep, "semgrep scanner registered");
+    assert.ok(!semgrep!.args.includes("auto"), "registered args must not contain 'auto'");
+    assert.ok(semgrep!.args.includes("--metrics"), "registered args set --metrics");
+    // SAST is opt-in: gated on KIT_SEMGREP_CONFIG so it never runs (slow + networked)
+    // by default. The runner skips a needsToken scanner whose env var is unset.
+    assert.equal(semgrep!.needsToken, "KIT_SEMGREP_CONFIG", "semgrep gated on KIT_SEMGREP_CONFIG");
   });
 });

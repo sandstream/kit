@@ -13,6 +13,61 @@
 import type { SecurityCheckResult } from "./check-security.js";
 import { ingestStrict, type IngestFormat } from "./adapters/ingest.js";
 
+/**
+ * Default semgrep ruleset. `p/<pack>` packs are FETCHED from the semgrep registry
+ * on first run (network), so this is NOT an offline config — only a local ruleset
+ * path supplied via KIT_SEMGREP_CONFIG runs air-gapped.
+ */
+export const DEFAULT_SEMGREP_CONFIG = "p/default";
+
+/** Noise dirs/globs excluded from semgrep scans (vendored code, build output, tests). */
+export const SEMGREP_EXCLUDES = [
+  "node_modules",
+  "dist",
+  ".next",
+  ".git",
+  "coverage",
+  "test",
+  "tests",
+  "e2e",
+  "__mocks__",
+  "fixtures",
+  "*.test.*",
+  "*.spec.*",
+];
+
+/**
+ * Resolve the semgrep config: KIT_SEMGREP_CONFIG (trimmed) if set, else p/default.
+ * A local ruleset path here is the only way to run semgrep with no network.
+ */
+export function semgrepConfig(env?: Record<string, string | undefined>): string {
+  return env?.KIT_SEMGREP_CONFIG?.trim() || DEFAULT_SEMGREP_CONFIG;
+}
+
+/**
+ * Build semgrep CLI args with privacy + noise hardening:
+ *   - explicit `--config <config>` (never `auto`, which forces telemetry on),
+ *   - `--metrics off` so nothing is reported to the registry,
+ *   - `--exclude` of common vendored/build/test noise.
+ * sarif mode emits SARIF and scans `.`; json mode emits JSON without rewriting
+ * rule ids and relies on the caller's positional target.
+ */
+export function buildSemgrepArgs(opts: { mode: "sarif" | "json"; config: string }): string[] {
+  const args = ["scan", "--config", opts.config, "--metrics", "off", "--quiet"];
+  if (opts.mode === "sarif") {
+    args.push("--sarif");
+  } else {
+    args.push("--json", "--no-rewrite-rule-ids");
+  }
+  for (const glob of SEMGREP_EXCLUDES) {
+    args.push("--exclude", glob);
+  }
+  if (opts.mode === "sarif") {
+    args.push(".");
+  }
+  return args;
+}
+
 export interface ScannerDef {
   id: string;
   /** executable, resolved mise-first */
@@ -63,14 +118,20 @@ export const SCANNERS: ScannerDef[] = [
     offline: { env: { GRYPE_DB_AUTO_UPDATE: "false" } },
   },
   {
-    // `--config auto` fetches the semgrep registry; without a local ruleset it
-    // can't run offline, so it's dropped in air-gap mode (point it at a local
-    // ruleset via a future KIT_SEMGREP_CONFIG to re-enable — tracked).
+    // Opt-in SAST. A networked, multi-second semgrep scan should NOT run by
+    // default (it surprised users + dominated `kit ci` time), so it is gated on
+    // KIT_SEMGREP_CONFIG via needsToken: set it to a ruleset to enable. When set,
+    // we run that explicit config with `--metrics off` → no telemetry (unlike
+    // `--config auto`, which forces metrics on and phones the registry). `p/`
+    // packs still FETCH rules from the registry on first run, so this stays
+    // cloudOnly (dropped in air-gap); a LOCAL ruleset path in KIT_SEMGREP_CONFIG
+    // is the only way to run semgrep air-gapped.
     id: "semgrep",
     bin: "semgrep",
-    args: ["scan", "--sarif", "--quiet", "--config", "auto", "."],
+    args: buildSemgrepArgs({ mode: "sarif", config: semgrepConfig(process.env) }),
     format: "sarif",
     cloudOnly: true,
+    needsToken: "KIT_SEMGREP_CONFIG",
   },
   {
     id: "osv-scanner",

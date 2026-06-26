@@ -38,7 +38,7 @@ export async function installBundledTriageSkill(
   }
 }
 
-export type TriageType = "docker" | "npm" | "pip" | "repo" | "skill" | "all" | "tools";
+export type TriageType = "docker" | "npm" | "pip" | "repo" | "skill" | "brew" | "all" | "tools";
 
 export { triageNpmSandbox, type SandboxResult };
 
@@ -101,10 +101,133 @@ async function airGapMirrorEnv(): Promise<Record<string, string>> {
   }
 }
 
+/** Relevant fields parsed from `brew info --json=v2 <formula>`. */
+export interface BrewInfo {
+  name?: string;
+  version?: string;
+  homepage?: string;
+  /** Upstream GitHub/GitLab repo, normalized, if one is resolvable. */
+  repoUrl?: string;
+  deprecated: boolean;
+  disabled: boolean;
+}
+
+/** Homebrew formula names (incl. tap `owner/repo/name` and `@version`). Anchored so
+ *  a leading `-` can't smuggle a flag into the `brew info` arg-array. */
+const BREW_FORMULA_RE = /^[a-z0-9][a-z0-9@/+._-]*$/i;
+
+const REPO_URL_RE = /^(https?:\/\/(?:www\.)?(?:github|gitlab)\.com\/[^/\s]+\/[^/\s]+)/i;
+
+/** Return a normalized GitHub/GitLab repo URL, or undefined if `u` isn't one. */
+function asRepoUrl(u?: string): string | undefined {
+  if (!u || typeof u !== "string") return undefined;
+  const m = u.match(REPO_URL_RE);
+  if (!m) return undefined;
+  return m[1].replace(/\.git$/i, "").replace(/\/$/, "");
+}
+
+/**
+ * Pure parse of `brew info --json=v2 <formula>` into the fields triage needs.
+ * Resolves the upstream repo from the homepage first, then the source URLs.
+ */
+export function parseBrewInfo(json: unknown): BrewInfo {
+  const formulae = (json as { formulae?: unknown[] })?.formulae;
+  const f = (Array.isArray(formulae) ? formulae[0] : undefined) as
+    | {
+        name?: string;
+        versions?: { stable?: string };
+        homepage?: string;
+        urls?: { head?: { url?: string }; stable?: { url?: string } };
+        deprecated?: boolean;
+        disabled?: boolean;
+      }
+    | undefined;
+  if (!f || typeof f !== "object") return { deprecated: false, disabled: false };
+  return {
+    name: typeof f.name === "string" ? f.name : undefined,
+    version: typeof f.versions?.stable === "string" ? f.versions.stable : undefined,
+    homepage: typeof f.homepage === "string" ? f.homepage : undefined,
+    repoUrl:
+      asRepoUrl(f.homepage) ?? asRepoUrl(f.urls?.head?.url) ?? asRepoUrl(f.urls?.stable?.url),
+    deprecated: Boolean(f.deprecated),
+    disabled: Boolean(f.disabled),
+  };
+}
+
+/**
+ * Triage a Homebrew formula. kit has no brew-specific scoring; instead we resolve
+ * the formula's upstream repo via `brew info` and delegate to the existing `repo`
+ * channel so the source gets the full health-score. Fail-closed: a disabled
+ * formula, or one with no resolvable upstream repo, does NOT pass (we cannot vouch
+ * for an un-scored source). `brew info` runs as an arg-array (no shell), and the
+ * formula name is validated first to block flag/arg injection.
+ */
+async function triageBrew(formula: string): Promise<TriageResult> {
+  if (!BREW_FORMULA_RE.test(formula)) {
+    return {
+      target: formula,
+      type: "brew",
+      passed: false,
+      output: `Invalid Homebrew formula name '${formula}'.\nTRIAGE FAILED`,
+    };
+  }
+  let info: BrewInfo;
+  try {
+    const { stdout } = await exec("brew", ["info", "--json=v2", formula], { timeout: 60_000 });
+    info = parseBrewInfo(JSON.parse(stdout));
+  } catch (error: unknown) {
+    const err = error as { stderr?: string; message?: string };
+    return {
+      target: formula,
+      type: "brew",
+      passed: false,
+      output: `brew info failed for '${formula}': ${(
+        err.stderr ||
+        err.message ||
+        "is brew installed? https://brew.sh"
+      ).trim()}\nTRIAGE FAILED`,
+    };
+  }
+
+  const label = `${info.name ?? formula}${info.version ? ` ${info.version}` : ""}`;
+  if (info.disabled) {
+    return {
+      target: formula,
+      type: "brew",
+      passed: false,
+      output: `Homebrew formula ${label} is DISABLED.\nTRIAGE FAILED`,
+    };
+  }
+
+  if (info.repoUrl) {
+    const repo = await runTriage("repo", info.repoUrl);
+    const dep = info.deprecated ? " (formula DEPRECATED)" : "";
+    return {
+      target: formula,
+      type: "brew",
+      // a deprecated formula never auto-passes, even if its upstream scores clean
+      passed: repo.passed && !info.deprecated,
+      output: `Homebrew formula ${label} -> upstream ${info.repoUrl}${dep}\n${repo.output}`,
+    };
+  }
+
+  // No GitHub/GitLab upstream resolvable -> source unscored -> fail-closed.
+  return {
+    target: formula,
+    type: "brew",
+    passed: false,
+    output:
+      `Homebrew formula ${label} exists${info.deprecated ? " (DEPRECATED)" : ""}, ` +
+      `but no upstream GitHub/GitLab repo was resolvable (homepage: ${info.homepage ?? "n/a"}). ` +
+      `Source not scored — treat as UNVERIFIED and review manually.\nTRIAGE FAILED`,
+  };
+}
+
 /**
  * Run triage on a target
  */
 export async function runTriage(type: TriageType, target: string): Promise<TriageResult> {
+  if (type === "brew") return triageBrew(target);
   const scriptExists = await ensureTriageScript();
   if (!scriptExists) {
     return {

@@ -9,7 +9,71 @@ import {
   listTriageTools,
   installBundledTriageSkill,
   verdictPassed,
+  parseBrewInfo,
 } from "./triage.js";
+
+describe("parseBrewInfo (brew triage -> upstream repo resolution)", () => {
+  const formula = (over: Record<string, unknown> = {}) => ({
+    formulae: [
+      {
+        name: "ripgrep",
+        versions: { stable: "14.1.0" },
+        homepage: "https://github.com/BurntSushi/ripgrep",
+        urls: { stable: { url: "https://github.com/BurntSushi/ripgrep/archive/14.1.0.tar.gz" } },
+        deprecated: false,
+        disabled: false,
+        ...over,
+      },
+    ],
+  });
+
+  it("extracts name + version + a github homepage as repoUrl", () => {
+    const info = parseBrewInfo(formula());
+    assert.equal(info.name, "ripgrep");
+    assert.equal(info.version, "14.1.0");
+    assert.equal(info.repoUrl, "https://github.com/BurntSushi/ripgrep");
+    assert.equal(info.deprecated, false);
+    assert.equal(info.disabled, false);
+  });
+
+  it("strips a trailing .git and normalizes the repo URL", () => {
+    const info = parseBrewInfo(formula({ homepage: "https://github.com/jqlang/jq.git/" }));
+    assert.equal(info.repoUrl, "https://github.com/jqlang/jq");
+  });
+
+  it("falls back to source URLs when the homepage is not a repo", () => {
+    const info = parseBrewInfo(
+      formula({
+        homepage: "https://example.org/project",
+        urls: { stable: { url: "https://github.com/owner/proj/archive/1.0.tar.gz" } },
+      }),
+    );
+    assert.equal(info.repoUrl, "https://github.com/owner/proj");
+  });
+
+  it("returns repoUrl undefined when nothing resolves to a github/gitlab repo", () => {
+    const info = parseBrewInfo(
+      formula({
+        homepage: "https://example.org/",
+        urls: { stable: { url: "https://dl.example.org/x.tgz" } },
+      }),
+    );
+    assert.equal(info.repoUrl, undefined);
+    assert.equal(info.homepage, "https://example.org/");
+  });
+
+  it("surfaces deprecated + disabled flags", () => {
+    const info = parseBrewInfo(formula({ deprecated: true, disabled: true }));
+    assert.equal(info.deprecated, true);
+    assert.equal(info.disabled, true);
+  });
+
+  it("is robust to malformed/empty input", () => {
+    assert.deepEqual(parseBrewInfo({}), { deprecated: false, disabled: false });
+    assert.deepEqual(parseBrewInfo(null), { deprecated: false, disabled: false });
+    assert.deepEqual(parseBrewInfo({ formulae: [] }), { deprecated: false, disabled: false });
+  });
+});
 
 describe("verdictPassed (forgeable-verdict regression)", () => {
   const FAIL = (target: string) =>
