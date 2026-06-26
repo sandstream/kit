@@ -1,7 +1,7 @@
 {
   "name": "sandstream-kit-adapter-sdk",
-  "version": "0.1.0",
-  "description": "Type definitions for building kit service adapters",
+  "version": "1.0.0",
+  "description": "Frozen, independently-versioned type contract for building kit service adapters",
   "type": "module",
   "exports": {
     ".": {
@@ -11,7 +11,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc",

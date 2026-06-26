@@ -4,6 +4,14 @@
  * Core types for kit service provisioning adapters.
  * Import this package to build custom adapters without depending on the full kit codebase.
  *
+ * FROZEN PUBLIC API (v1.0.0). This package follows its own semantic-versioning
+ * track, independent of the kit CLI version. Every export below is part of the
+ * frozen 1.x contract: shapes will not change in a breaking way within 1.x. See
+ * CHANGELOG.md for the freeze record and the kit-compatibility matrix. Consumers
+ * should pin "sandstream-kit-adapter-sdk": "^1.0.0".
+ *
+ * @packageDocumentation
+ *
  * @example
  * ```typescript
  * import type { ServiceAdapter, AdapterContext, ProvisionResult } from "sandstream-kit-adapter-sdk";
@@ -23,7 +31,9 @@
  */
 
 /**
- * Result of a provisioning operation
+ * Result of a provisioning operation.
+ *
+ * @public Frozen in adapter-sdk 1.0.0.
  */
 export interface ProvisionResult {
   /** Whether provisioning succeeded */
@@ -43,7 +53,9 @@ export interface ProvisionResult {
 }
 
 /**
- * Context provided to adapter methods
+ * Context provided to adapter methods.
+ *
+ * @public Frozen in adapter-sdk 1.0.0.
  */
 export interface AdapterContext {
   /** Project name (if available) */
@@ -61,6 +73,8 @@ export interface AdapterContext {
  *
  * Implement this interface to create a custom service adapter.
  * Adapters should be stateless and idempotent.
+ *
+ * @public Frozen in adapter-sdk 1.0.0.
  */
 export interface ServiceAdapter {
   /** Unique identifier for the service (e.g., "stripe/payments") */
@@ -97,6 +111,8 @@ export interface ServiceAdapter {
  * Registry of available service adapters
  *
  * Keys follow the pattern: "<provider>/<service>" (e.g., "stripe/payments")
+ *
+ * @public Frozen in adapter-sdk 1.0.0.
  */
 export interface AdapterRegistry {
   [key: string]: ServiceAdapter;
@@ -121,6 +137,8 @@ export interface AdapterRegistry {
  *
  * Throws ReadOnlyModeError (catchable) so the calling CLI can convert
  * it to a clean refusal message rather than a stack-trace dump.
+ *
+ * @public Frozen in adapter-sdk 1.0.0.
  */
 export class ReadOnlyModeError extends Error {
   readonly operation: string;
@@ -131,11 +149,21 @@ export class ReadOnlyModeError extends Error {
   }
 }
 
+/**
+ * True when kit is running in read-only mode (KIT_READ_ONLY=1).
+ *
+ * @public Frozen in adapter-sdk 1.0.0.
+ */
 export function isReadOnlyMode(): boolean {
   const v = process.env.KIT_READ_ONLY;
   return v === "1" || v === "true";
 }
 
+/**
+ * Throw {@link ReadOnlyModeError} when in read-only mode; otherwise no-op.
+ *
+ * @public Frozen in adapter-sdk 1.0.0.
+ */
 export function assertNotReadOnly(operation: string): void {
   if (isReadOnlyMode()) {
     throw new ReadOnlyModeError(operation);

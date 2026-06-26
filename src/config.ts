@@ -555,7 +555,10 @@ const WebConfigSchema = z
   .optional();
 
 // Known top-level section names — used to detect typos
-const KNOWN_SECTIONS = new Set([
+// Exported as part of kit's frozen config surface (contracts/public-surface.json).
+// The breaking-change detector snapshots these section names; adding/removing one
+// is a config-schema change that must be reflected in the committed snapshot.
+export const KNOWN_SECTIONS = new Set([
   "version", // top-level schema-version scalar (kit config migrate)
   "tools",
   "services",

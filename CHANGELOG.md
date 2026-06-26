@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.42.0] - 2026-06-27
+
+kit 2.0 Phase 1 (frozen contracts) — the mechanism that earns the major bump: kit's public surfaces become versioned, tiered, and drift-enforced. No behavior change.
+
+### Added
+
+- **Stability tiers on every command.** Each command now carries a `stable | experimental | deprecated` tier (`COMMAND_TIERS`, keyed alongside `COMMANDS`/`COMMAND_HELP`). All shipped commands are `stable` (the 2.x no-break promise) except `team` (`experimental` — placeholder backend). `deprecated` commands print a stderr warning every run. `command-surface` parity is now 3-way (tier + help for every command). New `docs/CLI_STABILITY.md` documents the tiers, the stable-across-2.x promise, and the deprecation policy.
+- **`adapter-sdk` frozen at 1.0.0** on its own semver track (decoupled from kit's version). The public surface (`ServiceAdapter`, `AdapterContext`, `AdapterRegistry`, `ProvisionResult`, `ReadOnlyModeError`, `isReadOnlyMode`, `assertNotReadOnly`) is documented `@public`/frozen with a SDK `CHANGELOG.md`, a kit-compatibility matrix, and caret-pin guidance. (One mild wart — `ProvisionResult` carrying both `message` and `error` — is flagged and frozen as-is, deferred to the SDK's next major.)
+- **Breaking-change detection — a golden public-surface snapshot.** `contracts/public-surface.json` is a committed, deterministically-serialized snapshot of the public contract (command names + tiers, config schema sections + `CONFIG_SCHEMA_VERSION`, adapter-sdk version + exports, MCP tool names, exit codes). A test regenerates the live surface and fails on any drift, instructing the author to review, regenerate + commit the snapshot, and add a `BREAKING` note when a stable contract changes. The stability promise is now enforced, not asserted.
+
 ## [1.41.0] - 2026-06-27
 
 kit 2.0 Phase 1 (frozen contracts), the first move: give `.kit.toml` a versioned schema + deterministic migration, so a future breaking config change can be migrated rather than silently corrupting every existing config.

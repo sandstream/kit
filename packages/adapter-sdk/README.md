@@ -4,11 +4,41 @@ Type definitions for building [kit](https://github.com/sandstream/kit) service a
 
 Install this package to write custom adapters without depending on the full kit codebase.
 
+## Stability
+
+The public API is **frozen at 1.0.0**. This package follows its own
+semantic-versioning track, independent of the kit CLI version: a 2.0.0 here means
+the adapter interface shape changed in a breaking way. Within the 1.x line the
+exports are stable. See [CHANGELOG.md](./CHANGELOG.md) for the freeze record.
+
+### kit compatibility
+
+| adapter-sdk | kit CLI                               |
+| ----------- | ------------------------------------- |
+| 1.x         | kit 1.40+ and the entire kit 2.x line |
+
+The read-only contract is environment-level (`KIT_READ_ONLY=1`) rather than a
+kit-core import, so adapters built against 1.x keep working across the kit 2.0
+major bump without recompilation.
+
 ## Installation
 
 ```bash
 npm install sandstream-kit-adapter-sdk
 ```
+
+Pin a caret range so you pick up additive 1.x growth but never a breaking 2.0:
+
+```json
+{
+  "dependencies": {
+    "sandstream-kit-adapter-sdk": "^1.0.0"
+  }
+}
+```
+
+This package is type-only and has no runtime dependencies, so it declares no peer
+dependency on the kit CLI.
 
 ## Writing your first adapter
 
@@ -81,32 +111,32 @@ export const adapters: ServiceAdapter[] = [myServiceAdapter, anotherAdapter];
 
 The main interface to implement for a custom adapter.
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `name` | `string` | Unique identifier, e.g. `"stripe/payments"` |
-| `description` | `string` | Human-readable description |
-| `getRequiredTools()` | `() => string[]` | CLI tools required (empty for API-based) |
-| `check(ctx)` | `(ctx: AdapterContext) => Promise<boolean>` | Already provisioned? |
-| `provision(ctx)` | `(ctx: AdapterContext) => Promise<ProvisionResult>` | Run provisioning |
+| Property             | Type                                                | Description                                 |
+| -------------------- | --------------------------------------------------- | ------------------------------------------- |
+| `name`               | `string`                                            | Unique identifier, e.g. `"stripe/payments"` |
+| `description`        | `string`                                            | Human-readable description                  |
+| `getRequiredTools()` | `() => string[]`                                    | CLI tools required (empty for API-based)    |
+| `check(ctx)`         | `(ctx: AdapterContext) => Promise<boolean>`         | Already provisioned?                        |
+| `provision(ctx)`     | `(ctx: AdapterContext) => Promise<ProvisionResult>` | Run provisioning                            |
 
 ### `AdapterContext`
 
 Passed to `check()` and `provision()`.
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `projectPath` | `string` | Absolute path to project root |
-| `projectName` | `string?` | Project name from config |
+| Property      | Type                     | Description                   |
+| ------------- | ------------------------ | ----------------------------- |
+| `projectPath` | `string`                 | Absolute path to project root |
+| `projectName` | `string?`                | Project name from config      |
 | `existingEnv` | `Record<string, string>` | Current `.env.local` contents |
 
 ### `ProvisionResult`
 
 Return value from `provision()`.
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `success` | `boolean` | Whether provisioning succeeded |
-| `message` | `string` | Human-readable result message |
-| `secrets` | `Record<string, string>?` | Keys to write to `.env.local` |
-| `config` | `Record<string, unknown>?` | Metadata for `skills-lock.json` |
-| `error` | `string?` | Error message on failure |
+| Property  | Type                       | Description                     |
+| --------- | -------------------------- | ------------------------------- |
+| `success` | `boolean`                  | Whether provisioning succeeded  |
+| `message` | `string`                   | Human-readable result message   |
+| `secrets` | `Record<string, string>?`  | Keys to write to `.env.local`   |
+| `config`  | `Record<string, unknown>?` | Metadata for `skills-lock.json` |
+| `error`   | `string?`                  | Error message on failure        |

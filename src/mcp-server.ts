@@ -33,6 +33,31 @@ import { escapeWorkflowCmd } from "./utils/ci-escape.js";
 
 const KIT_FILE = ".kit.toml";
 
+// Canonical, frozen list of MCP tool names kit exposes over stdio. This is part
+// of kit's public surface (contracts/public-surface.json) and is kept in lockstep
+// with the register_kit_* calls in createMcpServer below. A listTools()-vs-this
+// guard in mcp-server.test.ts fails if a tool is added/removed without updating
+// this list, so the snapshot can never silently drift.
+export const KIT_MCP_TOOLS: readonly string[] = [
+  "kit_check",
+  "kit_install",
+  "kit_login",
+  "kit_secrets",
+  "kit_fix",
+  "kit_add",
+  "kit_env",
+  "kit_init",
+  "kit_ci",
+  "kit_run",
+  "kit_context",
+  "kit_configure",
+  "kit_adapter_check",
+  "kit_adapter_install",
+  "kit_workflow_execute",
+  "kit_skill_marketplace",
+  "kit_agent_governance",
+];
+
 function configPath(cwd?: string): string {
   return resolve(cwd ?? process.cwd(), KIT_FILE);
 }
