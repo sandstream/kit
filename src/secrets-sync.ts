@@ -4,6 +4,7 @@ import { devNull } from "node:os";
 import type { SecretsConfig } from "./config.js";
 import { generateSecrets } from "./secrets.js";
 import { exec } from "./utils/exec.js";
+import { secureFile } from "./utils/secure-perms.js";
 import { safeErrorMessage } from "./secrets-migrate.js";
 
 export interface SyncResult {
@@ -57,7 +58,9 @@ export async function syncSecrets(
       const outPath = resolve(projectPath, ".env.ci");
       const lines = Object.entries(resolved).map(([k, v]) => `${k}=${v}`);
       if (!dryRun) {
-        await writeFile(outPath, lines.join("\n") + "\n", "utf8");
+        // Plaintext secrets — owner-only on create, then enforce (umask race).
+        await writeFile(outPath, lines.join("\n") + "\n", { encoding: "utf8", mode: 0o600 });
+        secureFile(outPath);
         synced.push(...Object.keys(resolved));
       } else {
         skipped.push(...Object.keys(resolved));

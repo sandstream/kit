@@ -2,6 +2,7 @@ import { writeFile, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { adapters } from "./adapters/index.js";
 import { loadPluginAdapters } from "./plugin-loader.js";
+import { secureFile } from "./utils/secure-perms.js";
 import type { AdapterContext, ProvisionResult } from "./adapters/types.js";
 
 /**
@@ -46,6 +47,7 @@ async function updateEnvFile(projectPath: string, secrets: Record<string, string
   }
 
   await writeFile(envPath, lines.join("\n") + "\n", "utf-8");
+  secureFile(envPath); // plaintext secrets — restrict to owner (0o600 / icacls)
 }
 
 /**

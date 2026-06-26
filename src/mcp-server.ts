@@ -28,11 +28,28 @@ import { generateToml } from "./toml-generator.js";
 import { writeFile, access } from "node:fs/promises";
 import { executeCommand } from "./run.js";
 import { gatherProjectContext } from "./context.js";
+import { isReadOnlyMode } from "./read-only-mode.js";
 
 const KIT_FILE = ".kit.toml";
 
 function configPath(cwd?: string): string {
   return resolve(cwd ?? process.cwd(), KIT_FILE);
+}
+
+/** Refusal result for a mutating tool invoked while in read-only mode. */
+function readOnlyRefusal(tool: string): {
+  content: { type: "text"; text: string }[];
+  isError: true;
+} {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: `Error: read-only mode active — refusing "${tool}". This tool performs writes and is disabled while KIT_READ_ONLY is set.`,
+      },
+    ],
+    isError: true,
+  };
 }
 
 export function createMcpServer(): McpServer {
@@ -137,6 +154,7 @@ function register_kit_install(server: McpServer): void {
     "Install missing tools defined in .kit.toml using mise.",
     { cwd: z.string().optional().describe("Working directory") },
     async ({ cwd }) => {
+      if (isReadOnlyMode()) return readOnlyRefusal("kit_install");
       try {
         const config = await loadConfig(configPath(cwd));
         if (!config.tools || Object.keys(config.tools).length === 0) {
@@ -219,6 +237,7 @@ function register_kit_secrets(server: McpServer): void {
     "Generate .env.local by resolving secrets defined in .kit.toml. Returns the list of written keys.",
     { cwd: z.string().optional().describe("Working directory") },
     async ({ cwd }) => {
+      if (isReadOnlyMode()) return readOnlyRefusal("kit_secrets");
       try {
         const config = await loadConfig(configPath(cwd));
         if (!config.secrets) {
@@ -238,11 +257,19 @@ function register_kit_secrets(server: McpServer): void {
         );
         const ok = results.every((r) => r.resolved);
         const writtenKeys = results.filter((r) => r.resolved).map((r) => r.name);
+        // Never serialize `value` — it carries the resolved plaintext secret.
+        // Project to metadata only.
+        const safeResults = results.map((r) => ({
+          name: r.name,
+          resolved: r.resolved,
+          detail: r.detail,
+          ...(r.managed !== undefined && { managed: r.managed }),
+        }));
         return {
           content: [
             {
               type: "text" as const,
-              text: JSON.stringify({ ok, written, writtenKeys, results }, null, 2),
+              text: JSON.stringify({ ok, written, writtenKeys, results: safeResults }, null, 2),
             },
           ],
         };
@@ -263,6 +290,7 @@ function register_kit_fix(server: McpServer): void {
     "Auto-fix issues found by kit check (install missing tools, generate missing lock files). Returns actions taken.",
     { cwd: z.string().optional().describe("Working directory") },
     async ({ cwd }) => {
+      if (isReadOnlyMode()) return readOnlyRefusal("kit_fix");
       try {
         const config = await loadConfig(configPath(cwd));
         const actions: Array<{ name: string; action: string; detail: string }> = [];
@@ -351,6 +379,7 @@ function register_kit_add(server: McpServer): void {
       cwd: z.string().optional().describe("Working directory"),
     },
     async ({ service, project_name, cwd }) => {
+      if (isReadOnlyMode()) return readOnlyRefusal("kit_add");
       try {
         const workDir = cwd ?? process.cwd();
         const result = await provisionService(service, workDir, project_name);
@@ -451,6 +480,8 @@ function register_kit_init(server: McpServer): void {
         .describe("Return generated config without writing to disk (default: false)"),
     },
     async ({ cwd, dry_run }) => {
+      // dry_run is a read-only preview; a real write is refused in read-only mode.
+      if (!dry_run && isReadOnlyMode()) return readOnlyRefusal("kit_init");
       try {
         const workDir = cwd ?? process.cwd();
         const cfgPath = resolve(workDir, KIT_FILE);
@@ -656,6 +687,7 @@ function register_kit_run(server: McpServer): void {
       cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
     },
     async ({ command, cwd }) => {
+      if (isReadOnlyMode()) return readOnlyRefusal("kit_run");
       try {
         const workDir = cwd ?? process.cwd();
         const commandArgs = command.split(/\s+/);
@@ -666,7 +698,13 @@ function register_kit_run(server: McpServer): void {
           inheritEnv: true,
         });
 
-        const status = result.exitCode === 0 ? "success" : "failed";
+        const status = result.timedOut
+          ? "timed_out"
+          : result.truncated
+            ? "truncated"
+            : result.exitCode === 0
+              ? "success"
+              : "failed";
         const output = result.stdout
           ? `stdout:\n${result.stdout}${result.stderr ? `\n\nstderr:\n${result.stderr}` : ""}`
           : result.stderr

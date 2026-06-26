@@ -1450,6 +1450,33 @@ async function cmdGovernance(): Promise<boolean> {
 }
 
 /**
+ * Detect the npm global-install permission failure (EACCES / EPERM writing into
+ * a root-owned prefix). This is the #1 cause of `npm i -g` failures and the raw
+ * "Command failed" message gives no hint, so we sniff the combined message +
+ * stderr for the well-known signatures.
+ */
+export function isNpmPermissionError(text: string): boolean {
+  return /\bEACCES\b|\bEPERM\b|permission denied|operation not permitted|EACCES: permission/i.test(
+    text,
+  );
+}
+
+/**
+ * The documented remediation for an `npm -g` EACCES: switch to a user-owned
+ * prefix instead of `sudo` (sudo-installed globals leave root-owned files that
+ * break every later install). Returns ready-to-print lines.
+ */
+export function npmPermissionRemediation(): string[] {
+  return [
+    `${c.yellow}This is an npm permission error (EACCES) — npm cannot write to its global prefix.${c.reset}`,
+    `${c.dim}Do NOT use sudo. Point npm at a user-owned prefix, then re-run the upgrade:${c.reset}`,
+    `  ${c.bold}npm config set prefix ~/.npm-global${c.reset}`,
+    `  ${c.bold}export PATH=~/.npm-global/bin:$PATH${c.reset}  ${c.dim}# add to your ~/.zshrc or ~/.bashrc${c.reset}`,
+    `  ${c.bold}kit upgrade --self${c.reset}`,
+  ];
+}
+
+/**
  * Governed self-upgrade: kit triages its OWN npm package before installing a new
  * version of itself. WATERTIGHT — an untriaged kit is never installed; offline /
  * triage-unavailable → blocked (fail-closed). The raw `npm i -g sandstream-kit`
@@ -1478,8 +1505,26 @@ async function selfUpgrade(): Promise<boolean> {
     );
     return true;
   } catch (err: unknown) {
+    const { redactSecrets } = await import("./utils/redactSecrets.js");
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`${c.red}✗ npm install failed: ${msg.split("\n")[0]}${c.reset}`);
+    // promisified execFile attaches the child's stderr to the error object
+    const stderr =
+      typeof (err as { stderr?: unknown })?.stderr === "string"
+        ? (err as { stderr: string }).stderr
+        : "";
+    const combined = `${msg}\n${stderr}`;
+    console.error(`${c.red}✗ npm install failed: ${redactSecrets(msg.split("\n")[0])}${c.reset}`);
+    if (stderr.trim()) {
+      console.error(`${c.dim}${redactSecrets(stderr.trim())}${c.reset}`);
+    }
+    if (isNpmPermissionError(combined)) {
+      console.error();
+      for (const line of npmPermissionRemediation()) console.error(line);
+    } else {
+      console.error(
+        `${c.dim}If this persists, install manually: ${c.reset}${c.bold}npm install -g sandstream-kit@latest${c.reset}`,
+      );
+    }
     return false;
   }
 }
@@ -2999,14 +3044,33 @@ function detectCiFormat(): CiFormat {
   return "text";
 }
 
+// Escape data interpolated into GitHub Actions workflow commands (`::error::` etc).
+// CR/LF would otherwise let attacker-controlled detail strings forge or hide
+// additional annotation lines. Order matters: `%` must be escaped first.
+export function escapeWorkflowCmd(s: string): string {
+  return String(s).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+}
+
 function emitGithubAnnotations(checks: JsonCheck[]): void {
   for (const ch of checks) {
+    const msg = escapeWorkflowCmd(`${ch.category}/${ch.name}: ${ch.detail}`);
     if (ch.status === "fail") {
-      console.log(`::error::${ch.category}/${ch.name}: ${ch.detail}`);
+      console.log(`::error::${msg}`);
     } else if (ch.status === "warn") {
-      console.log(`::warning::${ch.category}/${ch.name}: ${ch.detail}`);
+      console.log(`::warning::${msg}`);
     }
   }
+}
+
+// Escape data interpolated into the JUnit XML. Without this, attacker-controlled
+// name/category/detail strings could close attributes/elements and forge or delete
+// testcases. `&` must be replaced first; `"` is only needed inside attributes.
+export function xmlEscape(s: string): string {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function emitGitlabJunit(checks: JsonCheck[], allOk: boolean): void {
@@ -3018,11 +3082,11 @@ function emitGitlabJunit(checks: JsonCheck[], allOk: boolean): void {
     `  <testsuite name="kit" tests="${checks.length}" failures="${failures.length}">`,
   ];
   for (const ch of checks) {
-    lines.push(`    <testcase name="${ch.name}" classname="${ch.category}">`);
+    lines.push(`    <testcase name="${xmlEscape(ch.name)}" classname="${xmlEscape(ch.category)}">`);
     if (ch.status === "fail") {
-      lines.push(`      <failure message="${ch.detail}"/>`);
+      lines.push(`      <failure message="${xmlEscape(ch.detail)}"/>`);
     } else if (ch.status === "warn") {
-      lines.push(`      <system-out>${ch.detail}</system-out>`);
+      lines.push(`      <system-out>${xmlEscape(ch.detail)}</system-out>`);
     }
     lines.push(`    </testcase>`);
   }
@@ -3133,14 +3197,20 @@ async function cmdCi(): Promise<boolean> {
 
       if (format === "github") {
         if (process.env.GITHUB_STEP_SUMMARY) {
-          // Emit markdown summary to GitHub Actions step summary
+          // Emit markdown summary to GitHub Actions step summary. Strip CR/LF so a
+          // crafted detail can't inject new markdown/table rows, and escape `|` so
+          // it can't forge extra table cells.
+          const mdCell = (s: string) =>
+            String(s)
+              .replace(/[\r\n]+/g, " ")
+              .replace(/\|/g, "\\|");
           const lines = [
             "## kit CI Report",
             `| Status | Check | Detail |`,
             `|--------|-------|--------|`,
             ...checks.map(
               (c) =>
-                `| ${c.status === "pass" ? "✅" : c.status === "warn" ? "⚠️" : "❌"} | \`${c.category}/${c.name}\` | ${c.detail} |`,
+                `| ${c.status === "pass" ? "✅" : c.status === "warn" ? "⚠️" : "❌"} | \`${mdCell(`${c.category}/${c.name}`)}\` | ${mdCell(c.detail)} |`,
             ),
             ``,
             `**${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings**`,
@@ -5490,7 +5560,11 @@ async function cmdTriageCheckDeps(): Promise<boolean> {
   for (const dep of newDeps) {
     const key = `${dep.ecosystem}:${dep.name}`;
     const ts = latest[key];
-    if (!ts || Date.parse(ts) < cutoff) {
+    // Parse first and reject non-finite: an unparseable timestamp yields NaN, and
+    // `NaN < cutoff` is false — treating a forged/garbage ts as "fresh triage"
+    // (fail-open). A missing or unparseable ts both count as "no valid triage".
+    const parsed = ts ? Date.parse(ts) : NaN;
+    if (!Number.isFinite(parsed) || parsed < cutoff) {
       missing.push(
         `  - ${dep.ecosystem}:${dep.name}  (run: kit triage ${dep.ecosystem} ${dep.name})`,
       );

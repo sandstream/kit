@@ -10,6 +10,15 @@ export interface RevocationStatus {
 let lastRevocationCheck = 0;
 let cachedRevocationStatus: RevocationStatus | null = null;
 
+// Internal fetch result. `cacheable` is false for fail-closed results derived
+// from ambiguous/erroring responses — those must NOT be cached as a verdict,
+// otherwise a single bad response would pin the agent into a state until the
+// cache TTL expires (and an ambiguous "revoked" would survive a recovery).
+interface FetchResult {
+  status: RevocationStatus;
+  cacheable: boolean;
+}
+
 /**
  * Check if agent access has been revoked
  */
@@ -31,10 +40,12 @@ export async function checkRevocationStatus(
   }
 
   // Check revocation endpoint
-  const status = await fetchRevocationStatus(fullConfig);
+  const { status, cacheable } = await fetchRevocationStatus(fullConfig);
 
-  cachedRevocationStatus = status;
-  lastRevocationCheck = now;
+  if (cacheable) {
+    cachedRevocationStatus = status;
+    lastRevocationCheck = now;
+  }
 
   return status.revoked;
 }
@@ -42,11 +53,15 @@ export async function checkRevocationStatus(
 /**
  * Fetch revocation status from endpoint
  */
-async function fetchRevocationStatus(
-  config: Required<GovernanceConfig>,
-): Promise<RevocationStatus> {
+async function fetchRevocationStatus(config: Required<GovernanceConfig>): Promise<FetchResult> {
   if (!config.revocation.revocation_endpoint || !config.agent.id) {
-    return { revoked: false };
+    // Revocation is enabled (callers gate on revocation.enabled) but the
+    // endpoint or agent id is missing — we cannot prove access is still valid.
+    // Fail CLOSED. Don't cache: this is a misconfiguration, not a verdict.
+    console.warn(
+      "Revocation enabled but revocation_endpoint/agent.id is missing — failing closed (assume revoked)",
+    );
+    return { status: { revoked: true }, cacheable: false };
   }
 
   try {
@@ -66,15 +81,30 @@ async function fetchRevocationStatus(
       console.warn(
         `Revocation check failed (${response.statusText}) — failing closed (assume revoked)`,
       );
-      return { revoked: true };
+      return { status: { revoked: true }, cacheable: false };
     }
 
-    const data = (await response.json()) as RevocationStatus;
-    return data;
+    const data = (await response.json()) as unknown;
+
+    // Validate shape: a 200 with no boolean `revoked` ({}, {revoked:"no"}, …) is
+    // ambiguous. Treating it as not-revoked is fail-OPEN and would be cached as a
+    // verdict. Fail CLOSED and don't cache the ambiguous result.
+    if (
+      typeof data !== "object" ||
+      data === null ||
+      typeof (data as Record<string, unknown>).revoked !== "boolean"
+    ) {
+      console.warn(
+        "Revocation response missing boolean `revoked` field — failing closed (assume revoked)",
+      );
+      return { status: { revoked: true }, cacheable: false };
+    }
+
+    return { status: data as RevocationStatus, cacheable: true };
   } catch (error) {
     // Network/parse failure — fail CLOSED (see above).
     console.warn(`Revocation check failed (${error}) — failing closed (assume revoked)`);
-    return { revoked: true };
+    return { status: { revoked: true }, cacheable: false };
   }
 }
 
@@ -90,10 +120,12 @@ export async function forceRevocationCheck(
     return { revoked: false };
   }
 
-  const status = await fetchRevocationStatus(fullConfig);
+  const { status, cacheable } = await fetchRevocationStatus(fullConfig);
 
-  cachedRevocationStatus = status;
-  lastRevocationCheck = Date.now();
+  if (cacheable) {
+    cachedRevocationStatus = status;
+    lastRevocationCheck = Date.now();
+  }
 
   return status;
 }

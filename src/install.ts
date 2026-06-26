@@ -43,6 +43,12 @@ async function miseInstall(
   tool: string,
   version: string,
 ): Promise<{ ok: boolean; detail: string }> {
+  // Read-only mode: `mise install`/`mise use` mutate the toolchain. Refuse + audit.
+  const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) {
+    const refusal = await refuseWrite("mise-install", { tool, version });
+    return { ok: false, detail: refusal.reason };
+  }
   const versionArg = version === "latest" ? "latest" : version;
   try {
     await exec("mise", ["install", `${tool}@${versionArg}`], {
@@ -86,6 +92,16 @@ export async function installTools(
   deps: InstallDeps = defaultDeps,
   opts: { skipTriage?: boolean } = {},
 ): Promise<InstallResult[]> {
+  // Read-only mode: installing tools is a write. Refuse before any check/install
+  // so the guard matches installHooks (no mutating sink bypasses --read-only).
+  const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) {
+    const refusal = await refuseWrite("install-tools", {
+      tool_count: Object.keys(tools).length,
+    });
+    return [{ name: "read-only-refusal", action: "blocked", detail: refusal.reason }];
+  }
+
   const statuses = await deps.checkTools(tools);
   const results: InstallResult[] = [];
 

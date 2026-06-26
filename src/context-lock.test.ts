@@ -10,6 +10,7 @@ import {
   parseSshConfigIdentity,
   parseKeygenFingerprint,
   planContext,
+  applyContext,
   parseGcloudProject,
   suggestContextToml,
   hasLockableContext,
@@ -312,5 +313,21 @@ describe("clerkEnvFromKey", () => {
     assert.equal(clerkEnvFromKey("sk_live_nope"), null);
     assert.equal(clerkEnvFromKey(null), null);
     assert.equal(clerkEnvFromKey(""), null);
+  });
+});
+
+describe("applyContext read-only mode", () => {
+  it("applies nothing (no steps) when KIT_READ_ONLY=1", async () => {
+    // A context that plans a git step — proves the refusal short-circuits
+    // before any step runs (empty result), not just that there's nothing to do.
+    const ctx = { git: { email: "dev@example.com" } };
+    assert.ok(planContext(ctx).length > 0); // sanity: there is work to refuse
+    process.env.KIT_READ_ONLY = "1";
+    try {
+      const results = await applyContext(ctx, process.cwd());
+      assert.deepEqual(results, []);
+    } finally {
+      delete process.env.KIT_READ_ONLY;
+    }
   });
 });
