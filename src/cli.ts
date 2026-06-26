@@ -114,6 +114,7 @@ import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
 import { gatherLive, suggestContextToml, hasLockableContext } from "./context-lock.js";
 import { cmdEnv } from "./commands/env.js";
 import { cmdContext } from "./commands/context.js";
+import { cmdConfig } from "./commands/config.js";
 import { cmdAirgap } from "./commands/airgap.js";
 import { cmdScan } from "./commands/scan.js";
 import { cmdVerifyProvenance } from "./commands/verify-provenance.js";
@@ -5148,6 +5149,9 @@ export const COMMAND_HELP: Record<string, string> = {
     "Verify each CLI's live account+project matches .kit.toml [context] (exits non-zero on mismatch)",
   "context use": "Activate the declared context: gcloud config + repo git identity",
   "context --prompt": "Print a compact active-gcloud indicator for your shell prompt (PS1)",
+  config: "Inspect + migrate the .kit.toml schema version",
+  "config migrate":
+    "Migrate .kit.toml to the current schema version (--dry-run inspect, --check CI gate, --force overwrite backup)",
   mcp: "MCP server over stdio (Claude Code/Cursor/Codex); 'kit mcp list|auth|set-token|clear' manages declared servers",
   whoami: "Show current agent / user identity",
   version: "Print kit version",
@@ -5637,6 +5641,7 @@ export const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
   run: cmdRun,
   open: cmdOpen,
   context: cmdContext,
+  config: cmdConfig,
   triage: cmdTriage,
   baseline: cmdBaseline,
   design: cmdDesign,

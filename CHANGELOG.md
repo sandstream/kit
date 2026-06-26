@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.41.0] - 2026-06-27
+
+kit 2.0 Phase 1 (frozen contracts), the first move: give `.kit.toml` a versioned schema + deterministic migration, so a future breaking config change can be migrated rather than silently corrupting every existing config.
+
+### Added
+
+- **`.kit.toml` schema version + `kit config migrate`.** A new optional top-level `version` field (`CONFIG_SCHEMA_VERSION = 1`; an absent field is treated as legacy v0). `kit config migrate` runs an ordered, pure, fixture-tested migration registry from the detected version to the current one: `--dry-run` (prints the plan + a value-level diff, writes nothing), a real run writes `.kit.toml.backup` first (refuses to clobber an existing backup without `--force`) then re-parses + Zod-validates the result and **restores the original on any failure** (never leaves a corrupt config), and `--check` exits non-zero on a stale config for CI. The v0→v1 migration only stamps the version (v1 is the baseline), but the framework is real and extensible — a future field rename is a single data row. `kit config` is a new top-level command.
+
 ## [1.40.0] - 2026-06-26
 
 kit 2.0 Phase 0 (auditable core) — internal hygiene that lets the public surface be frozen in Phase 1. No behavior change.
