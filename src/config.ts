@@ -177,6 +177,14 @@ export interface GovernanceAuditConfig {
    * data is leaving the machine.
    */
   remote?: boolean;
+  /**
+   * Fail-closed anchoring for `kit audit verify`. When true, an unanchored log,
+   * an unreadable anchor key, an unsealed tail, or a rotated key are treated as
+   * verification FAILURES (non-zero exit) instead of warnings. Defaults to
+   * false for backward compatibility (and is implicitly active once this
+   * machine has anchored any log). See docs/AUDIT_ATTESTATION.md.
+   */
+  require_anchor?: boolean;
 }
 
 /**
@@ -474,6 +482,7 @@ const GovernanceConfigSchema = z
         log_file: z.string().optional(),
         log_level: z.enum(["debug", "info", "warn", "error"]).optional(),
         include_secrets: z.boolean().optional(),
+        require_anchor: z.boolean().optional(),
       })
       .passthrough()
       .optional(),

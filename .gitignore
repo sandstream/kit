@@ -12,6 +12,7 @@ sandstream-kit-*.tgz
 # Internal runtime state — never publish
 .kit/elevation.json
 .kit-audit.jsonl
+.kit-check-attestation.json
 .kit-baseline.json
 .kit-budget.json
 .kit-escalation.txt
@@ -23,3 +24,12 @@ opencode.json
 *\ 2.ts
 *\ 2.js
 *\ 2.md
+
+# ── kit security check-gitignore ── do not edit ──
+.kit/*  # kit local state (elevation, env, runtime)
+!.kit/shared/  # keep curated shared memory tracked (committed by design)
+*.key  # private keys
+id_ed25519  # SSH ed25519 private key
+*.p12  # PKCS#12 bundle (TLS certs + keys)
+*-service-account*.json  # GCP service-account JSON keys
+# ── /kit ──

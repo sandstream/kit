@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.39.0] - 2026-06-26
+
+kit 2.0 Pillar 1 (Provable Green), part 2: make the audit trail attestable, and be honest about exactly how far that goes.
+
+### Security
+
+- **Audit chain gains an external HMAC anchor.** The `.kit-audit.jsonl` chain was tamper-_evident_ but fully recomputable by any writer (keyless SHA-256 from a public genesis). A machine-local anchor key (`~/.kit/audit-anchor.key`, 0600, reusing the `elevation.ts` pattern) now seals the chain into a separate 0600 anchor record (HMAC tip + sealed entry count). `kit audit verify` detects a keyless prefix rewrite (tip mismatch) and truncation/rollback (count), and `kit audit anchor` seals a log. The append path stays keyless (so a sandboxed agent with no key access keeps logging); the key is only needed to seal/verify. **Honest by design:** this raises forgery from "anyone who can write the log" to "someone who can read the 0600 key" — it is **not** tamper-proof against a same-UID local principal (that needs the documented, stubbed external TSA anchor). Key rotation reports as a distinct `anchor-key-changed` status (not a false tamper alarm), and a tampered/rotated prefix is never silently re-sealed.
+- **`kit audit verify --strict` / `[governance.audit].require_anchor` — fail-closed.** By default an unanchored log / unreadable key / unsealed tail is a warn (backward-compatible). Strict mode (or once the machine has anchored any log) makes them hard failures, so a project-writable `[governance.audit].log_file` cannot repoint verification at a forged, never-anchored file and pass. An unsealed tail past the seal is unauthenticated and surfaced loudly.
+- **Signed check-attestation receipt** (`kit check --attest` / `kit ci --attest` / `KIT_ATTEST=1`) — opt-in, fail-soft (never blocks or alters the verdict). Writes `.kit-check-attestation.json` recording which scanners actually ran + the verdict, signed with the machine-local HMAC anchor key (authoritative — the verifier needs that key). An Ed25519 receipt is a portable fallback whose **embedded public key is untrusted**: `kit check verify-attestation` reports `unverified-authenticity` (not green) unless the key is pinned (TOFU in `~/.kit`, refuses silent overwrite) or passed via `--key`; a non-matching key fails. No "forgery requires the key" overclaim for the Ed25519 path.
+
+### Fixed
+
+- Hardened a key-file create race (a lost `wx` race could re-read a partial/empty key) — `reReadHexKey` now enforces the length guard with bounded backoff and never returns a short key; applied to both the audit anchor and `elevation.ts`.
+
 ## [1.38.0] - 2026-06-26
 
 First step toward kit 2.0 ("the floor you can prove and build on"): close two fail-open holes in the "green = honest" promise. Both default to backward-compatible behavior; the stricter posture is opt-in.

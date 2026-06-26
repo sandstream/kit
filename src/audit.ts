@@ -124,6 +124,11 @@ export async function appendAuditEventDirect(
   const logPath = resolve(opts.cwd ?? process.cwd(), logFile);
   try {
     await appendChained(logPath, auditEvent);
+    // Best-effort external HMAC anchor advance. Fail-soft by contract: never
+    // blocks the (keyless) append, so a sandboxed agent still logs even when it
+    // cannot reach ~/.kit. See audit-anchor.ts for the threat boundary.
+    const { tryAdvanceAnchorOnAppend } = await import("./audit-anchor.js");
+    await tryAdvanceAnchorOnAppend(logPath);
     return true;
   } catch (error) {
     console.error(`[kit] audit-log append failed: ${error}`);
@@ -292,6 +297,14 @@ export async function logAuditEvent(
   try {
     await appendChained(logPath, auditEvent);
     wroteLocal = true;
+    // Best-effort external HMAC anchor advance (see audit-anchor.ts). Fail-soft
+    // so it never converts a successful append into a failure.
+    try {
+      const { tryAdvanceAnchorOnAppend } = await import("./audit-anchor.js");
+      await tryAdvanceAnchorOnAppend(logPath);
+    } catch (anchorErr) {
+      console.error(`[kit] audit anchor advance skipped: ${anchorErr}`);
+    }
   } catch (error) {
     console.error(`Failed to write audit log: ${error}`);
   }
