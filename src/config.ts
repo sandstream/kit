@@ -310,7 +310,23 @@ export interface SetupConfig {
   verify?: string;
 }
 
+/**
+ * The current/baseline .kit.toml schema version. A config with no [version]
+ * field is treated as legacy "v0" (every config written before versioning
+ * existed). `kit config migrate` walks a config from its detected version up to
+ * this value. Bump this (and add a migration row in config-migrate.ts) whenever a
+ * breaking config-shape change lands — never silently re-interpret old configs.
+ */
+export const CONFIG_SCHEMA_VERSION = 1;
+
 export interface kitConfig {
+  /**
+   * Schema version of this .kit.toml. Absent => legacy v0 (migrate stamps it).
+   * Single integer (not a [meta] table): .kit.toml is entirely kit's namespace,
+   * so a top-level scalar is unambiguous and is the smallest possible addition
+   * needed to freeze the config contract.
+   */
+  version?: number;
   tools?: ToolConfig;
   services?: Record<string, ServiceConfig>;
   /** Project bootstrap commands (deps install, migrate, verify). */
@@ -540,6 +556,7 @@ const WebConfigSchema = z
 
 // Known top-level section names — used to detect typos
 const KNOWN_SECTIONS = new Set([
+  "version", // top-level schema-version scalar (kit config migrate)
   "tools",
   "services",
   "secrets",
@@ -556,8 +573,9 @@ const KNOWN_SECTIONS = new Set([
   "air_gap", // [air_gap] — no-egress / offline config (#85)
 ]);
 
-const kitConfigSchema = z
+export const kitConfigSchema = z
   .object({
+    version: z.number().int().nonnegative().optional(),
     tools: z.record(z.string(), z.string()).optional(),
     services: z.record(z.string(), ServiceConfigSchema).optional(),
     secrets: SecretsConfigSchema.optional(),
