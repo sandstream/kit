@@ -10,10 +10,14 @@ import {
   SCANNERS,
   buildSemgrepArgs,
   semgrepConfig,
+  isLocalSemgrepConfig,
+  scanHealthGate,
+  verifyAirGapScanners,
   DEFAULT_SEMGREP_CONFIG,
   SEMGREP_EXCLUDES,
   type ScanDeps,
   type ScannerDef,
+  type ScannerRun,
 } from "./scanners.js";
 import type { SecurityCheckResult } from "./check-security.js";
 
@@ -293,5 +297,104 @@ describe("semgrep invocation (privacy + config, no `--config auto`)", () => {
     // SAST is opt-in: gated on KIT_SEMGREP_CONFIG so it never runs (slow + networked)
     // by default. The runner skips a needsToken scanner whose env var is unset.
     assert.equal(semgrep!.needsToken, "KIT_SEMGREP_CONFIG", "semgrep gated on KIT_SEMGREP_CONFIG");
+  });
+});
+
+describe("isLocalSemgrepConfig (air-gap egress gate)", () => {
+  it("registry/auto configs are NOT local (would egress)", () => {
+    assert.equal(isLocalSemgrepConfig("p/default"), false);
+    assert.equal(isLocalSemgrepConfig("auto"), false);
+    assert.equal(isLocalSemgrepConfig("r/x"), false);
+    assert.equal(isLocalSemgrepConfig(""), false);
+    assert.equal(isLocalSemgrepConfig("  "), false);
+  });
+  it("filesystem ruleset paths are local (run air-gapped)", () => {
+    assert.equal(isLocalSemgrepConfig("./rules.yml"), true);
+    assert.equal(isLocalSemgrepConfig("/abs/rules"), true);
+    assert.equal(isLocalSemgrepConfig(" ./local-rules.yml "), true);
+  });
+});
+
+describe("airGapScanners — local semgrep is allowed offline, registry dropped", () => {
+  it("keeps semgrep when KIT_SEMGREP_CONFIG is a local ruleset path", () => {
+    const plan = airGapScanners(SCANNERS, true, { KIT_SEMGREP_CONFIG: "./rules.yml" });
+    assert.ok(!plan.dropped.includes("semgrep"), "local-config semgrep must not be dropped");
+    const semgrep = plan.scanners.find((s) => s.id === "semgrep");
+    assert.ok(semgrep, "semgrep present in air-gap plan");
+    const i = semgrep!.args.indexOf("--config");
+    assert.equal(semgrep!.args[i + 1], "./rules.yml", "args rebuilt against the local ruleset");
+  });
+  it("drops semgrep when the config is a registry pack (egress)", () => {
+    const plan = airGapScanners(SCANNERS, true, { KIT_SEMGREP_CONFIG: "p/default" });
+    assert.ok(plan.dropped.includes("semgrep"));
+    assert.ok(!plan.scanners.some((s) => s.id === "semgrep"));
+  });
+});
+
+describe("scanHealthGate (reduce scanner health to exit)", () => {
+  const runs = (entries: [string, ScannerRun["status"]][]): ScannerRun[] =>
+    entries.map(([id, status]) => ({ id, status, findings: 0 }));
+
+  it("required scanner that ran => ok", () => {
+    const gate = scanHealthGate(runs([["trivy", "ran"]]), { requiredScanners: ["trivy"] });
+    assert.equal(gate.ok, true);
+    assert.deepEqual(gate.failures, []);
+  });
+  it("required scanner that errored => not ok, names the scanner", () => {
+    const gate = scanHealthGate(runs([["trivy", "error"]]), { requiredScanners: ["trivy"] });
+    assert.equal(gate.ok, false);
+    assert.ok(gate.failures.some((f) => f.includes("trivy")));
+  });
+  it("required scanner absent from the run set => not ok", () => {
+    const gate = scanHealthGate(runs([["grype", "ran"]]), { requiredScanners: ["trivy"] });
+    assert.equal(gate.ok, false);
+    assert.ok(gate.failures.some((f) => f.includes("trivy") && f.includes("not in scan plan")));
+  });
+  it("strict + any non-running scanner => not ok", () => {
+    const gate = scanHealthGate(runs([["trivy", "not-installed"]]), { strict: true });
+    assert.equal(gate.ok, false);
+    assert.ok(gate.failures.some((f) => f.includes("trivy")));
+  });
+  it("default (no strict, no required) + non-running scanner => ok but warns", () => {
+    const gate = scanHealthGate(runs([["trivy", "error"]]));
+    assert.equal(gate.ok, true);
+    assert.equal(gate.failures.length, 0);
+    assert.ok(gate.warnings.some((w) => w.includes("trivy")));
+  });
+  it("not-applicable is a legitimate skip — never a failure even when strict", () => {
+    const gate = scanHealthGate(runs([["snyk", "not-applicable"]]), { strict: true });
+    assert.equal(gate.ok, true);
+    assert.equal(gate.warnings.length, 0);
+  });
+});
+
+describe("verifyAirGapScanners (provable zero-egress reducer)", () => {
+  it("all-local plan => pass", () => {
+    const local: ScannerDef[] = [
+      { id: "trivy", bin: "trivy", args: [], format: "sarif" },
+      { id: "osv-scanner", bin: "osv-scanner", args: [], format: "osv" },
+      { id: "semgrep", bin: "semgrep", args: [], format: "sarif", cloudOnly: true },
+    ];
+    const report = verifyAirGapScanners(local, { semgrepConfig: "./rules.yml" });
+    assert.equal(report.ok, true);
+    assert.ok(report.rows.every((r) => r.ok));
+  });
+  it("a cloud-only scanner present => fail, names that id", () => {
+    const leaked: ScannerDef[] = [
+      { id: "trivy", bin: "trivy", args: [], format: "sarif" },
+      { id: "snyk", bin: "snyk", args: [], format: "sarif", cloudOnly: true },
+    ];
+    const report = verifyAirGapScanners(leaked);
+    assert.equal(report.ok, false);
+    const snyk = report.rows.find((r) => r.id === "snyk")!;
+    assert.equal(snyk.ok, false);
+  });
+  it("a registry semgrep config => fail, names semgrep", () => {
+    const withSemgrep: ScannerDef[] = [
+      { id: "semgrep", bin: "semgrep", args: [], format: "sarif", cloudOnly: true },
+    ];
+    const report = verifyAirGapScanners(withSemgrep, { semgrepConfig: "p/default" });
+    assert.equal(report.ok, false);
+    assert.ok(report.rows.find((r) => r.id === "semgrep" && !r.ok));
   });
 });

@@ -225,6 +225,21 @@ export interface GovernanceConfig {
   approval?: GovernanceApprovalConfig;
   secrets?: GovernanceSecretsConfig;
   revocation?: GovernanceRevocationConfig;
+  /**
+   * Scan-gate policy. `required_scanners` lists scanner ids (snyk/trivy/grype/
+   * semgrep/osv-scanner/socket) that MUST actually run — if a required scanner
+   * crashed, is absent, or is missing its token, the scan exits non-zero instead
+   * of false-greening on findings alone. Parsed from [governance.scan].
+   */
+  scan?: GovernanceScanConfig;
+}
+
+/**
+ * Scan-gate policy.
+ * Parsed from [governance.scan]
+ */
+export interface GovernanceScanConfig {
+  required_scanners?: string[];
 }
 
 /**
@@ -485,6 +500,12 @@ const GovernanceConfigSchema = z
         enabled: z.boolean().optional(),
         check_interval: z.number().optional(),
         revocation_endpoint: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+    scan: z
+      .object({
+        required_scanners: z.array(z.string()).optional(),
       })
       .passthrough()
       .optional(),

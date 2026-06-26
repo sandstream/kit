@@ -45,6 +45,21 @@ export function semgrepConfig(env?: Record<string, string | undefined>): string 
 }
 
 /**
+ * True when a semgrep config points at a LOCAL filesystem ruleset (runs with no
+ * network). The registry forms FETCH rules from semgrep.dev (egress) and are NOT
+ * local: `p/<pack>` (rule packs), `r/<rule>` (single registry rules), and `auto`
+ * (which also forces telemetry). Anything else (a relative or absolute path) is a
+ * local ruleset. This is the air-gap gate for semgrep — only a local config may
+ * run air-gapped. Pure.
+ */
+export function isLocalSemgrepConfig(config: string): boolean {
+  const c = config.trim();
+  if (!c || c === "auto") return false;
+  if (/^[pr]\//.test(c)) return false; // p/<pack>, r/<rule> — registry fetch = egress
+  return true;
+}
+
+/**
  * Build semgrep CLI args with privacy + noise hardening:
  *   - explicit `--config <config>` (never `auto`, which forces telemetry on),
  *   - `--metrics off` so nothing is reported to the registry,
@@ -173,22 +188,92 @@ export interface AirGapPlan {
  * Transform the registry for air-gap mode: drop `cloudOnly` scanners and fold
  * each remaining scanner's `offline` args/env in so it runs against a local DB
  * with no network. A no-op (returns the input) when `enabled` is false.
+ *
+ * semgrep is the one exception to the blanket `cloudOnly` drop: it is cloudOnly
+ * because `p/<pack>`, `r/<rule>` and `auto` configs FETCH rules from the registry
+ * (egress), but a LOCAL ruleset path runs fully offline. So when air-gapped, kept
+ * ONLY if KIT_SEMGREP_CONFIG (via `env`) is a local path; a registry config gets
+ * dropped (it would egress).
  */
-export function airGapScanners(defs: ScannerDef[], enabled: boolean): AirGapPlan {
+export function airGapScanners(
+  defs: ScannerDef[],
+  enabled: boolean,
+  env: Record<string, string | undefined> = process.env,
+): AirGapPlan {
   if (!enabled) return { scanners: defs, env: {}, dropped: [] };
   const scanners: ScannerDef[] = [];
-  const env: Record<string, string> = {};
+  const injectEnv: Record<string, string> = {};
   const dropped: string[] = [];
   for (const d of defs) {
+    if (d.id === "semgrep") {
+      const cfg = semgrepConfig(env);
+      if (isLocalSemgrepConfig(cfg)) {
+        // Local ruleset → safe to run air-gapped; rebuild args against that config.
+        scanners.push({ ...d, args: buildSemgrepArgs({ mode: "sarif", config: cfg }) });
+      } else {
+        dropped.push(d.id);
+      }
+      continue;
+    }
     if (d.cloudOnly) {
       dropped.push(d.id);
       continue;
     }
-    if (d.offline?.env) Object.assign(env, d.offline.env);
+    if (d.offline?.env) Object.assign(injectEnv, d.offline.env);
     const extra = d.offline?.args ?? [];
     scanners.push(extra.length ? { ...d, args: [...d.args, ...extra] } : d);
   }
-  return { scanners, env, dropped };
+  return { scanners, env: injectEnv, dropped };
+}
+
+export interface AirGapVerifyRow {
+  id: string;
+  ok: boolean;
+  detail: string;
+}
+export interface AirGapVerifyReport {
+  ok: boolean;
+  rows: AirGapVerifyRow[];
+}
+
+/**
+ * Prove that every scanner that WOULD run in air-gap mode resolves to a LOCAL
+ * artifact — no `cloudOnly` scanner and no registry/`auto` semgrep config (both
+ * would egress). The caller passes the post-`airGapScanners` plan plus the
+ * resolved semgrep config; this RE-CHECKS each remaining scanner rather than
+ * trusting the drop, so a cloud/registry scanner that slipped through is named +
+ * fails. Read-only, pure + deterministic.
+ */
+export function verifyAirGapScanners(
+  scanners: ScannerDef[],
+  opts: { semgrepConfig?: string } = {},
+): AirGapVerifyReport {
+  const rows: AirGapVerifyRow[] = [];
+  for (const s of scanners) {
+    if (s.id === "semgrep") {
+      const cfg = (opts.semgrepConfig ?? "").trim();
+      rows.push(
+        isLocalSemgrepConfig(cfg)
+          ? { id: s.id, ok: true, detail: `local ruleset ${cfg} (no registry fetch)` }
+          : {
+              id: s.id,
+              ok: false,
+              detail: `registry config '${cfg || DEFAULT_SEMGREP_CONFIG}' would fetch rules from the registry (egress)`,
+            },
+      );
+      continue;
+    }
+    if (s.cloudOnly) {
+      rows.push({
+        id: s.id,
+        ok: false,
+        detail: "cloud-only scanner (needs a hosted backend) — must be dropped in air-gap",
+      });
+      continue;
+    }
+    rows.push({ id: s.id, ok: true, detail: "local scanner (offline DB)" });
+  }
+  return { ok: rows.every((r) => r.ok), rows };
 }
 
 const RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
@@ -245,6 +330,57 @@ export interface ScannerRun {
   id: string;
   status: ScannerStatus;
   findings: number;
+}
+
+/**
+ * Statuses that mean the scanner did NOT actually execute a scan, so its verdict
+ * is unknown (a green result hides the gap). `ran` succeeded; `not-applicable` is
+ * a legitimate skip (the scanner does not apply to this project) and is NOT a gap.
+ */
+export const NON_RUNNING_STATUSES: ScannerStatus[] = ["not-installed", "no-token", "error"];
+
+export interface ScanGateOptions {
+  /** Scanner ids that MUST run; if one did not, the gate fails (even without strict). */
+  requiredScanners?: string[];
+  /** Strict: ANY non-running scanner fails the gate (opt-in via --strict / KIT_CI_STRICT). */
+  strict?: boolean;
+}
+
+export interface ScanGate {
+  ok: boolean;
+  /** Hard-fail reasons — each names WHICH scanner did not run and why. */
+  failures: string[];
+  /** Non-fatal: a scanner did not run but is not required and strict is off. */
+  warnings: string[];
+}
+
+/**
+ * Reduce scanner-run HEALTH (did each scanner actually run?) to an exit verdict —
+ * separate from, and combined with, the findings gate. The honest default is
+ * fail-open-but-loud: a scanner that did not run is a WARN, so existing green CIs
+ * keep passing (backward-compatible). Opt in to a hard fail two ways: list the
+ * scanner under `requiredScanners` (that one must run), or set `strict` (ANY
+ * non-running scanner fails). A required scanner that is absent from the run set
+ * entirely (e.g. dropped in air-gap, not in the registry) also fails. Pure +
+ * deterministic.
+ */
+export function scanHealthGate(runs: ScannerRun[], opts: ScanGateOptions = {}): ScanGate {
+  const required = new Set(opts.requiredScanners ?? []);
+  const failures: string[] = [];
+  const warnings: string[] = [];
+  const seen = new Set<string>();
+  for (const r of runs) {
+    seen.add(r.id);
+    if (!NON_RUNNING_STATUSES.includes(r.status)) continue; // ran or not-applicable
+    const why = `${r.id} did not run (${r.status})`;
+    if (required.has(r.id)) failures.push(`required scanner ${why}`);
+    else if (opts.strict) failures.push(`${why} [strict]`);
+    else warnings.push(why);
+  }
+  for (const id of required) {
+    if (!seen.has(id)) failures.push(`required scanner ${id} did not run (not in scan plan)`);
+  }
+  return { ok: failures.length === 0, failures, warnings };
 }
 
 export interface ScanDeps {

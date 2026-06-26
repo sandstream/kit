@@ -23,6 +23,11 @@ export function flagValue(argv: readonly string[], name: string): string | undef
   return argv[i + 1];
 }
 
+/** True for the usual truthy env-flag spellings (1/true/yes/on); false otherwise. */
+export function envTruthy(value: string | undefined): boolean {
+  return ["1", "true", "yes", "on"].includes((value ?? "").trim().toLowerCase());
+}
+
 /**
  * Integer value for a flag, or `fallback` when absent / non-numeric.
  * Mirrors the common `const n = idx >= 0 ? parseInt(args[idx+1]) : default` idiom.

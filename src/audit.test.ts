@@ -34,6 +34,7 @@ describe("logAuditEvent", () => {
       approval: {},
       secrets: {},
       revocation: {},
+      scan: {},
     };
 
     await logAuditEvent(config, {
@@ -65,6 +66,7 @@ describe("logAuditEvent", () => {
       approval: {},
       secrets: {},
       revocation: {},
+      scan: {},
     };
 
     await logAuditEvent(config, {
@@ -102,6 +104,7 @@ describe("logAuditEvent", () => {
       approval: {},
       secrets: {},
       revocation: {},
+      scan: {},
     };
 
     await logAuditEvent(config, {
@@ -139,6 +142,7 @@ describe("logAuditEvent", () => {
       approval: {},
       secrets: {},
       revocation: {},
+      scan: {},
     };
 
     await logAuditEvent(config, {
@@ -172,6 +176,7 @@ describe("logAuditEvent", () => {
       approval: {},
       secrets: {},
       revocation: {},
+      scan: {},
     };
 
     await logAuditEvent(config, {
@@ -236,6 +241,7 @@ describe("readAuditLog", () => {
       approval: {},
       secrets: {},
       revocation: {},
+      scan: {},
     };
 
     // Write some events
@@ -270,6 +276,7 @@ describe("readAuditLog", () => {
       approval: {},
       secrets: {},
       revocation: {},
+      scan: {},
     };
 
     // Write multiple events
@@ -420,6 +427,7 @@ describe("logAuditEvent return value (fail-closed signal)", () => {
       approval: {},
       secrets: {},
       revocation: {},
+      scan: {},
     };
   }
 

@@ -53,6 +53,9 @@ export const DEFAULT_GOVERNANCE: Required<GovernanceConfig> = {
     check_interval: 300,
     revocation_endpoint: undefined,
   },
+  scan: {
+    required_scanners: [],
+  },
 };
 
 /**
@@ -89,6 +92,10 @@ export function mergeGovernanceConfig(userConfig?: GovernanceConfig): Required<G
     revocation: {
       ...DEFAULT_GOVERNANCE.revocation,
       ...userConfig.revocation,
+    },
+    scan: {
+      ...DEFAULT_GOVERNANCE.scan,
+      ...userConfig.scan,
     },
   };
 }
