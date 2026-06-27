@@ -54,10 +54,16 @@ export function auditCiYaml(content: string, file: string): SecurityCheckResult[
   const out: SecurityCheckResult[] = [];
   const seenImages = new Set<string>();
 
-  // image: <ref>  and  - name: <ref>  (services / Bitbucket image.name)
-  const imageRe = /(?:^|\n)\s*(?:image|[-\s]name):\s*['"]?([A-Za-z0-9][\w./:@-]+)/g;
+  // image: <ref>  and  name: <ref>  (services / Bitbucket image.name). Capture the
+  // key so a bare `name:` label (a Bitbucket step name, a job/stage name) isn't
+  // mistaken for an image — only treat a `name:` value as an image when it is
+  // image-shaped (has a registry path `/`, a tag `:`, or a digest `@`). `image:`
+  // is unambiguous, so an untagged `image: node` is still flagged.
+  const imageRe = /(?:^|\n)\s*(image|[-\s]?name):\s*['"]?([A-Za-z0-9][\w./:@-]+)/g;
   for (const m of content.matchAll(imageRe)) {
-    const ref = m[1];
+    const isNameKey = m[1].trim().endsWith("name");
+    const ref = m[2];
+    if (isNameKey && !/[:/@]/.test(ref)) continue; // bare `name:` label, not an image
     if (isDigestPinned(ref)) continue;
     const tag = imageTag(ref);
     if (tag && tag !== "latest") continue; // a concrete version tag is acceptable

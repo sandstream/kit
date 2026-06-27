@@ -32,6 +32,23 @@ describe("auditCiYaml — image pinning", () => {
     assert.equal(latest?.severity, "medium");
   });
 
+  it("does NOT flag a bare `name:` label (Bitbucket step / job name, not an image)", () => {
+    const yml = [
+      "image: node:20.11.1",
+      "pipelines:",
+      "  default:",
+      "    - step:",
+      "        name: kit ci", // a step label — not an image
+      "        script:",
+      "          - npx --yes sandstream-kit ci",
+    ].join("\n");
+    const findings = auditCiYaml(yml, "bitbucket-pipelines.yml");
+    assert.ok(
+      !findings.some((f) => f.name.includes("kit")),
+      "a step `name:` label must not be reported as an unpinned image",
+    );
+  });
+
   it("does not double-report the same unpinned image", () => {
     const yml = "image: node:latest\nother:\n  image: node:latest\n";
     const findings = auditCiYaml(yml, ".gitlab-ci.yml").filter((f) => f.name.includes("node"));
