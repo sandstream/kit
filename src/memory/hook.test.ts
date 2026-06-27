@@ -4,7 +4,12 @@ import { mkdtempSync, rmSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, upsertSession, insertMessage } from "./db.js";
-import { userPromptSubmitReminder, sessionStartRecovery, dueForHarnessSweep } from "./hook.js";
+import {
+  userPromptSubmitReminder,
+  sessionStartRecovery,
+  dueForHarnessSweep,
+  dueForMidSessionIndex,
+} from "./hook.js";
 import { getCurrentProjectRoot } from "./project.js";
 
 describe("memory hook — UserPromptSubmit reminder", () => {
@@ -113,5 +118,33 @@ describe("memory hook — harness sweep debounce", () => {
     const mtime = statSync(marker).mtimeMs;
     assert.equal(dueForHarnessSweep(mtime + 60_000), false, "1 min later → not due");
     assert.equal(dueForHarnessSweep(mtime + 7 * 60 * 60 * 1000), true, "7h later → due");
+  });
+});
+
+describe("memory hook — mid-session index debounce", () => {
+  let tmp: string;
+  const prevDir = process.env.KIT_MEMORY_DIR;
+
+  before(() => {
+    tmp = mkdtempSync(join(tmpdir(), "kit-midsession-"));
+    process.env.KIT_MEMORY_DIR = tmp;
+  });
+
+  after(() => {
+    if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
+    else process.env.KIT_MEMORY_DIR = prevDir;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("is due when no marker exists yet", () => {
+    assert.equal(dueForMidSessionIndex(), true);
+  });
+
+  it("is not due right after an index, but due once the 10-min interval elapses", () => {
+    const marker = join(tmp, ".mid-session-index");
+    writeFileSync(marker, new Date().toISOString());
+    const mtime = statSync(marker).mtimeMs;
+    assert.equal(dueForMidSessionIndex(mtime + 60_000), false, "1 min later → not due");
+    assert.equal(dueForMidSessionIndex(mtime + 11 * 60 * 1000), true, "11 min later → due");
   });
 });

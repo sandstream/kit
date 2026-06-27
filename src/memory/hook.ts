@@ -8,8 +8,9 @@
  * Both are FAIL-OPEN: any error yields an empty/no-op result so a hook can never
  * block a prompt or break a session. Deterministic, zero model calls.
  */
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { existsSync, statSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { openMemoryDb, getStats, recentMessages, getMemoryDir, ensureMemoryDir } from "./db.js";
 import { indexClaudeTranscripts, indexAllHarnesses } from "./parser.js";
 import { palList } from "./pal.js";
@@ -132,6 +133,65 @@ function markHarnessSwept(): void {
     writeFileSync(harnessSweepMarker(), new Date().toISOString(), { mode: 0o600 });
   } catch {
     /* best-effort: a missed marker just means we sweep again next time */
+  }
+}
+
+/**
+ * Mid-session recall freshness. SessionEnd indexes the session when it ends, but
+ * a long session — or one whose (ephemeral / remote) container is reclaimed before
+ * a clean SessionEnd ever fires — would leave its recent turns unsearchable. So on
+ * every prompt we cheaply check a debounce marker and, at most once per interval,
+ * kick a DETACHED `kit memory index` so recall stays fresh WITHOUT adding latency
+ * to the prompt (a full index parse is seconds; we never block on it). Shorter
+ * interval than the harness sweep because it tracks the live session.
+ */
+const MID_SESSION_INDEX_INTERVAL_MS = 10 * 60 * 1000; // 10 min
+
+function midSessionIndexMarker(): string {
+  return join(getMemoryDir(), ".mid-session-index");
+}
+
+/** True if a mid-session index is due (marker missing or older than the interval). */
+export function dueForMidSessionIndex(now: number = Date.now()): boolean {
+  try {
+    const marker = midSessionIndexMarker();
+    if (!existsSync(marker)) return true;
+    return now - statSync(marker).mtimeMs >= MID_SESSION_INDEX_INTERVAL_MS;
+  } catch {
+    return false; // can't tell → don't add work
+  }
+}
+
+function markMidSessionIndexed(): void {
+  try {
+    ensureMemoryDir();
+    writeFileSync(midSessionIndexMarker(), new Date().toISOString(), { mode: 0o600 });
+  } catch {
+    /* best-effort: a missed marker just means we index again next time */
+  }
+}
+
+/**
+ * If due, stamp the debounce marker and launch a DETACHED `kit memory index`
+ * (fire-and-forget, stdio ignored, unref'd) so the live session's recent turns
+ * become searchable without waiting for SessionEnd. Stamps BEFORE spawning so
+ * concurrent prompts don't stampede. Fail-open: any error is swallowed so a
+ * prompt is never blocked. Returns true iff it launched an index.
+ */
+export function maybeStartMidSessionIndex(): boolean {
+  try {
+    if (!dueForMidSessionIndex()) return false;
+    markMidSessionIndexed(); // stamp first → debounce holds even if the spawn races
+    const entry = process.argv[1];
+    if (!entry) return false;
+    const child = spawn(process.execPath, [resolve(entry), "memory", "index"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    return true;
+  } catch {
+    return false; // fail-open: never block a prompt
   }
 }
 
