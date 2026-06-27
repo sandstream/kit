@@ -110,9 +110,12 @@ export function generateKitCmdWrapper(spec: WrapperSpec): string {
     ? `set "PATH=${dirs.join(";")};%PATH%"`
     : "rem no mise shims or npm global bin detected at install time";
   // CRLF line endings: cmd.exe is the consumer, and a bare-LF .cmd can misparse.
+  // The marker line carries the FULL WRAPPER_MARKER verbatim (the leading "# " is
+  // harmless after `rem`) so the managed-check `includes(WRAPPER_MARKER)` matches
+  // the .cmd shim exactly as it matches the POSIX wrapper. #43.
   return [
     "@echo off",
-    `rem ${WRAPPER_MARKER.replace(/^# /, "")}`,
+    `rem ${WRAPPER_MARKER}`,
     "rem Restores the tool PATH a non-login hook shell drops, then runs the real",
     "rem kit by absolute node + cli.js. Edit kit, not this file.",
     pathLine,

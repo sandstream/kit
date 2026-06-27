@@ -18,20 +18,24 @@ before(async () => {
   await writeFile(join(testRepoDir, "README.md"), "# Test Repo\n", "utf-8");
   await writeFile(join(testRepoDir, ".kit.toml"), '[tools]\nnode = "22"\n', "utf-8");
 
-  // Initialize git
-  const { execSync } = await import("node:child_process");
+  // Initialize git. Use execFileSync with an argv array (NOT a shell string):
+  // on Windows execSync runs through cmd.exe, which does not treat single quotes
+  // as quoting, so "git commit -m 'Initial commit'" tokenizes into a broken
+  // message plus a stray pathspec and the commit fails. An argv array bypasses
+  // the shell entirely, so the same calls behave identically on POSIX and win32.
+  const { execFileSync } = await import("node:child_process");
   try {
-    execSync("git init", { cwd: testRepoDir, stdio: "pipe" });
-    execSync("git config user.email 'test@test.com'", {
+    execFileSync("git", ["init"], { cwd: testRepoDir, stdio: "pipe" });
+    execFileSync("git", ["config", "user.email", "test@test.com"], {
       cwd: testRepoDir,
       stdio: "pipe",
     });
-    execSync("git config user.name 'Test'", {
+    execFileSync("git", ["config", "user.name", "Test"], {
       cwd: testRepoDir,
       stdio: "pipe",
     });
-    execSync("git add .", { cwd: testRepoDir, stdio: "pipe" });
-    execSync("git commit -m 'Initial commit'", {
+    execFileSync("git", ["add", "."], { cwd: testRepoDir, stdio: "pipe" });
+    execFileSync("git", ["commit", "-m", "Initial commit"], {
       cwd: testRepoDir,
       stdio: "pipe",
     });
@@ -96,20 +100,21 @@ describe("cloneRepository", () => {
     await mkdir(noTomlRepoDir, { recursive: true });
     await writeFile(join(noTomlRepoDir, "README.md"), "# Test\n", "utf-8");
 
-    // Initialize git repo without .kit.toml
-    const { execSync } = await import("node:child_process");
+    // Initialize git repo without .kit.toml. execFileSync (argv array, no shell)
+    // so the commit succeeds on Windows cmd.exe as well as POSIX sh.
+    const { execFileSync } = await import("node:child_process");
     try {
-      execSync("git init", { cwd: noTomlRepoDir, stdio: "pipe" });
-      execSync("git config user.email 'test@test.com'", {
+      execFileSync("git", ["init"], { cwd: noTomlRepoDir, stdio: "pipe" });
+      execFileSync("git", ["config", "user.email", "test@test.com"], {
         cwd: noTomlRepoDir,
         stdio: "pipe",
       });
-      execSync("git config user.name 'Test'", {
+      execFileSync("git", ["config", "user.name", "Test"], {
         cwd: noTomlRepoDir,
         stdio: "pipe",
       });
-      execSync("git add .", { cwd: noTomlRepoDir, stdio: "pipe" });
-      execSync("git commit -m 'Initial'", {
+      execFileSync("git", ["add", "."], { cwd: noTomlRepoDir, stdio: "pipe" });
+      execFileSync("git", ["commit", "-m", "Initial"], {
         cwd: noTomlRepoDir,
         stdio: "pipe",
       });
