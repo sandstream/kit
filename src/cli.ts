@@ -5106,6 +5106,8 @@ export const COMMAND_HELP: Record<string, string> = {
   "memory suggest":
     "Emit a BYO-LLM review prompt (recent activity + open items) — pipe to your own model",
   "memory merge": "Merge another machine's memory.db into this one (dedup by uuid)",
+  "memory sync":
+    "Sync from a memory export or encrypted backup (mergeDb; last-write-wins, file_index excluded)",
   "memory install":
     "Wire UserPromptSubmit + SessionEnd + SessionStart (recovery) hooks into ~/.claude/settings.json",
   "memory scan": "Scan the memory store for stored secrets (exit 1 if any found)",

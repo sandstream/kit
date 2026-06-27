@@ -19,6 +19,8 @@ import { buildSuggestPrompt } from "../memory/suggest.js";
 import { getCurrentProjectRoot } from "../memory/project.js";
 import { scanDbForSecrets } from "../memory/scan.js";
 import { backupEncrypted, restoreEncrypted } from "../memory/backup.js";
+import { ensureKitWrapper } from "../kit-wrapper.js";
+import { syncFromExport } from "../memory/sync.js";
 import {
   shareEntry,
   listAreas,
@@ -65,6 +67,7 @@ export async function cmdMemory(): Promise<boolean> {
   const handlers: Record<string, () => Promise<boolean>> = {
     index: memIndex,
     merge: memMerge,
+    sync: memSync,
     stats: memStats,
     status: memStats, // common typo/alias for `stats`
     suggest: memSuggest,
@@ -209,6 +212,9 @@ async function memHelp(): Promise<boolean> {
   console.log("  kit memory search <query>   Search memory (current project; --global for all)");
   console.log("  kit memory stats            Show what the memory store contains");
   console.log("  kit memory merge <file>     Merge another machine's memory.db into this one");
+  console.log(
+    "  kit memory sync <file>      Sync from a memory export/backup (decrypts encrypted blobs)",
+  );
   console.log("  kit memory install          Wire the 2 hooks into ~/.claude/settings.json");
   console.log("  kit memory uninstall        Remove the hooks");
   console.log("  kit memory pal [list|add|done|snooze|verify|import]   Pending action ledger");
@@ -277,6 +283,37 @@ async function memMerge(): Promise<boolean> {
     return false;
   }
   db.close();
+  return true;
+}
+
+async function memSync(): Promise<boolean> {
+  const src = process.argv[4];
+  if (!src) {
+    console.error(
+      `${c.red}usage: kit memory sync <export.db|backup-file>  (encrypted blob needs KIT_MEMORY_PASSPHRASE)${c.reset}`,
+    );
+    return false;
+  }
+  if (!existsSync(src)) {
+    console.error(`${c.red}export not found: ${src}${c.reset}`);
+    return false;
+  }
+  const pass = process.env.KIT_MEMORY_PASSPHRASE ?? flagValue(process.argv, "--passphrase");
+  const db = openMemoryDb();
+  try {
+    const r = syncFromExport(db, src, { passphrase: pass });
+    console.log(
+      `${c.green}✓${c.reset} synced ${c.bold}${r.messages}${c.reset} messages + ${r.toolUses} tool-uses · ${r.sessions} sessions · ${r.pending} pending · ${r.threads} copilots ${c.dim}from ${src}${c.reset}`,
+    );
+    console.log(
+      `${c.dim}last-write-wins on sessions; file_index (this machine's index state) left untouched${c.reset}`,
+    );
+  } catch (err) {
+    console.error(`${c.red}${(err as Error).message}${c.reset}`);
+    return false;
+  } finally {
+    db.close();
+  }
   return true;
 }
 
@@ -445,6 +482,19 @@ async function memHook(): Promise<boolean> {
 }
 
 async function memInstall(): Promise<boolean> {
+  // Create the self-healing wrapper FIRST so installMemoryHooks embeds its path.
+  // The wrapper restores the tool PATH a non-login hook shell drops, then exec's
+  // the real kit — so memory capture fires even in containers/CI/agent runners.
+  const w = ensureKitWrapper();
+  if (w.action === "written" || w.action === "updated") {
+    console.log(
+      `${c.green}✓${c.reset} ${w.action} self-healing wrapper ${c.dim}${w.path}${c.reset}`,
+    );
+  } else if (w.action === "unmanaged") {
+    console.log(`${c.yellow}!${c.reset} ${w.detail}`);
+  } else if (w.action === "skipped") {
+    console.log(`${c.yellow}!${c.reset} ${w.detail}`);
+  }
   const { added, alreadyPresent, resolved } = installMemoryHooks();
   for (const e of added) console.log(`${c.green}✓${c.reset} installed ${e} hook`);
   for (const e of alreadyPresent) console.log(`${c.dim}• ${e} hook already present${c.reset}`);

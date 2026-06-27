@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-06-27
+
+kit 2.1 (Reach), part 1 — make kit's governance fire everywhere a fleet actually runs.
+
+### Added
+
+- **Headless bootstrap self-heal.** Git hooks and the memory-capture hook invoke kit, but in a non-login shell (containers, CI, some agent runners) `PATH` lacks the mise shims and `~/.npm-global/bin`, so the hook silently dies and memory/audit capture never fires. kit now generates a managed `~/.kit/bin/kit` wrapper (prepends the mise shim dir + `~/.npm-global/bin`, then exec's the absolute `node dist/cli.js`) and wires hooks to call it by absolute path. Created idempotently by `kit hooks add` / `kit memory install` (marker-guarded — never clobbers an unmanaged `~/.kit/bin/kit`), and `kit doctor` now checks for it. Capture works by default in agent containers.
+- **`kit memory sync` — local-first cross-machine memory.** `~/.kit/memory.db` is per-machine; the tested `mergeDb` was wired to nothing. `kit memory sync <export.db | encrypted-backup>` merges another machine's memory into the local store (last-write-wins on session conflicts; machine-local `file_index` excluded). Transport is your own git repo or an encrypted backup file — no cloud ledger. Pairs with `kit memory backup` (machine A backs up + commits/copies the encrypted file; machine B syncs it), so agent B recalls agent A's decisions.
+
+### Still tracked for 2.1.x
+
+Windows native completion (driven via the `windows.yml` CI loop) and the structured `Result<T, ErrorCode>` exit contract.
+
 ## [2.0.0] - 2026-06-27
 
 **kit 2.0 — the floor you can prove and build on.** This major release does not chase scope; it makes kit's two core promises real: `green = honest` becomes externally _provable_, and kit's public surfaces become _frozen, versioned contracts_. The 1.38–1.42 increments below built it; 2.0.0 declares it.

@@ -68,6 +68,19 @@ export function validatePassphrase(passphrase: string): void {
   }
 }
 
+/** True if `inPath` begins with a kit memory backup MAGIC header (V1 or V2).
+ *  Lets `kit memory sync` tell an encrypted backup from a raw .db export. */
+export function isEncryptedBackup(inPath: string): boolean {
+  let head: Buffer;
+  try {
+    const fd = readFileSync(inPath);
+    head = fd.subarray(0, MAGIC_LEN);
+  } catch {
+    return false; // unreadable/missing — let the caller surface a clean error
+  }
+  return head.equals(MAGIC_V1) || head.equals(MAGIC_V2);
+}
+
 /** Encrypt the memory DB file into `outPath`. WAL is checkpointed first so the file is complete. */
 export function backupEncrypted(
   passphrase: string,
