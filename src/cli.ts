@@ -3199,6 +3199,34 @@ function emitGitlabJunit(checks: JsonCheck[], allOk: boolean): void {
 
 async function cmdCi(): Promise<boolean> {
   const args = process.argv.slice(2);
+
+  // `kit ci --init <gitlab|bitbucket>` — emit the pipeline snippet that runs
+  // `kit ci` on a non-GitHub host. Prints to stdout (copy-paste); `--write`
+  // writes the file only when absent (never clobbers an existing pipeline).
+  const initIdx = args.indexOf("--init");
+  if (initIdx !== -1) {
+    const { pipelineSnippet, isCiHost, CI_HOSTS } = await import("./ci-init.js");
+    const host = args[initIdx + 1] ?? "";
+    if (!isCiHost(host)) {
+      console.error(`kit ci --init: host must be one of ${CI_HOSTS.join(", ")}`);
+      return false;
+    }
+    const { file, content } = pipelineSnippet(host);
+    if (hasFlag(args, "--write")) {
+      const path = resolve(process.cwd(), file);
+      if (existsSync(path)) {
+        console.error(`${file} already exists — not overwriting. Snippet to merge in:\n`);
+        console.log(content);
+        return false;
+      }
+      writeFileSync(path, content, "utf8");
+      console.log(`${c.green}✓${c.reset} wrote ${file}`);
+      return true;
+    }
+    console.log(content);
+    return true;
+  }
+
   const formatArg = args.find((a) => a.startsWith("--format="))?.split("=")[1] as
     | CiFormat
     | undefined;
@@ -5217,7 +5245,7 @@ export const COMMAND_HELP: Record<string, string> = {
   audit: "View audit log of kit operations",
   doctor: "Deep diagnostics — checks environment health in detail",
   env: "Show current environment info",
-  ci: "CI-native check: GitHub Actions annotations, GitLab JUnit, JSON",
+  ci: "CI-native check: GitHub Actions annotations, GitLab JUnit, JSON (--init gitlab|bitbucket scaffolds a pipeline)",
   clone: "Clone a Git repository and run kit setup",
   run: "Execute a command with project env vars loaded",
   open: "Open service dashboard in browser (stripe, vercel, railway, etc.)",
