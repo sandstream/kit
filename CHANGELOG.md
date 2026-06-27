@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-06-27
+
+**kit 2.0 — the floor you can prove and build on.** This major release does not chase scope; it makes kit's two core promises real: `green = honest` becomes externally _provable_, and kit's public surfaces become _frozen, versioned contracts_. The 1.38–1.42 increments below built it; 2.0.0 declares it.
+
+> kit runs every gate and can emit a signed receipt — anchored to a key its own process cannot recompute — proving which scanners actually ran and that none failed open, verifiable offline; and its CLI, config schema, and plugin SDK are now frozen contracts that will not break across all of 2.x.
+
+### Why a major bump
+
+- **The CLI is a contract now.** Every command carries a stability tier; `stable` commands will not be removed, renamed, or have their exit-code / `--json` semantics broken across 2.x (additive-only in minors). A committed `contracts/public-surface.json` golden snapshot + drift test enforces this — a surface change fails CI until it is reviewed, regenerated, and labeled `BREAKING`.
+- **The config schema is versioned.** `.kit.toml` now carries a `version`, and `kit config migrate` deterministically migrates older configs (dry-run default, auto-backup, re-validate-or-restore). Migration tooling cannot ship under a 1.x tag, so the major number _is_ the contract. **Upgrade note:** run `kit config migrate` once; v1 is the baseline (a no-op stamp), so nothing breaks today, but the path is now in place.
+- **`adapter-sdk@1.0`** is frozen on its own semver track.
+
+### Added (in 2.0.0)
+
+- **`kit coverage`** — deterministic OWASP ASVS 4.0.3 L2 _evidence_ emit. Maps kit's checks/rules to a vendored, pinned, curated control subset and buckets each as auto-verified / gap / manual / n-a. It is explicitly **an evidence map, not a compliance attestation** (never claims "compliant"); be the deterministic evidence source a GRC tool consumes, not a worse one. `experimental` tier.
+
+### The 2.0 pillars (shipped across 1.38–1.42)
+
+- **Provable Green** — scanner-health gate (a crashed/missing scanner can no longer exit 0) + `--strict`/`required_scanners` (1.38.0); provable air-gap (`kit airgap verify`, registry egress refused in both scan paths) (1.38.0); external HMAC-anchored audit chain + signed `kit check` attestation, honest about the same-UID limit (1.39.0); `kit coverage` (2.0.0).
+- **Frozen Contracts** — versioned `.kit.toml` + `kit config migrate` (1.41.0); tiered command surface + deprecation policy + `adapter-sdk@1.0` + the golden-snapshot drift CI (1.42.0).
+- **Auditable Core** — `self-audit` rule R12 (cloud-sync conflict-copy guard) + began breaking up the `cli.ts` god-file into `src/commands/*` (1.40.0).
+
+### Deliberately NOT in 2.0 (kept out to keep the floor defensible)
+
+No cryptographic fleet-identity control plane, no cloud team-RBAC, no LLM provider in core, no plugin marketplace, no FIPS/regulated edition, no GRC-framework reimplementation. Cross-platform reach (Windows native completion, headless-bootstrap self-heal, local cross-machine memory sync) and the structured `ErrorCode` exit contract are tracked for 2.1.
+
 ## [1.42.0] - 2026-06-27
 
 kit 2.0 Phase 1 (frozen contracts) — the mechanism that earns the major bump: kit's public surfaces become versioned, tiered, and drift-enforced. No behavior change.
