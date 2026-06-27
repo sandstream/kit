@@ -12,6 +12,7 @@ sandstream-kit-*.tgz
 # Internal runtime state — never publish
 .kit/elevation.json
 .kit-audit.jsonl
+.kit-triage.jsonl
 .kit-check-attestation.json
 .kit-baseline.json
 .kit-budget.json
