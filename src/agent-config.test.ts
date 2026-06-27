@@ -11,6 +11,8 @@ import {
   writeAgentConfig,
   installKitPermissions,
   installInstallGate,
+  installInstallGateCodex,
+  installInstallGateAmazonQ,
   READONLY_KIT_PERMISSIONS,
 } from "./agent-config.js";
 
@@ -290,6 +292,73 @@ describe("installInstallGate", () => {
     try {
       const r = await installInstallGate(dir);
       assert.equal(r.action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installInstallGateCodex", () => {
+  it("appends a valid [[hooks.PreToolUse]] block to .codex/config.toml, preserving content, idempotent", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-codexgate-"));
+    try {
+      mkdirSync(join(dir, ".codex"), { recursive: true });
+      writeFileSync(join(dir, ".codex", "config.toml"), '# my codex config\nmodel = "gpt-5"\n');
+      const r1 = await installInstallGateCodex(dir);
+      assert.equal(r1.action, "updated");
+      const txt = readFileSync(join(dir, ".codex", "config.toml"), "utf-8");
+      assert.ok(txt.includes("# my codex config"), "preserves existing content/comments");
+      assert.ok(txt.includes("[[hooks.PreToolUse]]"));
+      assert.ok(txt.includes("gate-bash"));
+      const { parse } = await import("smol-toml");
+      const cfg = parse(txt) as { hooks: { PreToolUse: { matcher: string }[] } };
+      assert.ok(Array.isArray(cfg.hooks.PreToolUse), "valid TOML, array-of-tables");
+      assert.equal(cfg.hooks.PreToolUse[0].matcher, "^Bash$");
+      const r2 = await installInstallGateCodex(dir);
+      assert.equal(r2.action, "unchanged");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when no Codex project is present", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-codexgate2-"));
+    try {
+      assert.equal((await installInstallGateCodex(dir)).action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installInstallGateAmazonQ", () => {
+  it("adds hooks.preToolUse to existing agent JSONs, idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-qgate-"));
+    try {
+      mkdirSync(join(dir, ".amazonq", "cli-agents"), { recursive: true });
+      writeFileSync(
+        join(dir, ".amazonq", "cli-agents", "default.json"),
+        JSON.stringify({ name: "default", tools: ["execute_bash"] }),
+      );
+      const r1 = await installInstallGateAmazonQ(dir);
+      assert.equal(r1.action, "updated");
+      const a = JSON.parse(
+        readFileSync(join(dir, ".amazonq", "cli-agents", "default.json"), "utf-8"),
+      );
+      assert.equal(a.name, "default", "preserves existing agent fields");
+      assert.equal(a.hooks.preToolUse[0].matcher, "execute_bash");
+      assert.ok(a.hooks.preToolUse[0].command.endsWith("gate-bash"));
+      const r2 = await installInstallGateAmazonQ(dir);
+      assert.equal(r2.action, "unchanged");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when no Amazon Q agent config is present", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-qgate2-"));
+    try {
+      assert.equal((await installInstallGateAmazonQ(dir)).action, "skipped");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

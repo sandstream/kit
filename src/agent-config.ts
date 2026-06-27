@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
+import { resolve, dirname, join } from "node:path";
 
 /**
  * Teach the coding agent to use kit.
@@ -334,4 +334,121 @@ export async function installInstallGate(cwd: string = process.cwd()): Promise<H
   } catch (err) {
     return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * Codex install-gate: a `[[hooks.PreToolUse]]` block in `.codex/config.toml`
+ * (matcher `^Bash$`) that runs `kit gate-bash` and exits 2 to block. We APPEND
+ * the TOML block as text rather than parse→stringify, so the user's existing
+ * config + comments are preserved; idempotent via a `gate-bash` text check.
+ */
+export async function installInstallGateCodex(
+  cwd: string = process.cwd(),
+): Promise<HookInstallResult> {
+  const file = ".codex/config.toml";
+  const path = resolve(cwd, file);
+  const { isReadOnlyMode } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) return { file, action: "skipped", detail: "read-only mode" };
+  if (!existsSync(resolve(cwd, ".codex")) && !existsSync(resolve(cwd, "AGENTS.md"))) {
+    return { file, action: "skipped", detail: "no Codex project detected" };
+  }
+
+  let existing = "";
+  let existed = false;
+  try {
+    existing = await readFile(path, "utf-8");
+    existed = true;
+  } catch {
+    existing = "";
+  }
+  if (existing.includes("gate-bash")) {
+    return { file, action: "unchanged", detail: "install-gate already wired" };
+  }
+  // Single-quoted TOML literal — the invocation is an absolute node+path, no single quotes.
+  const block = `\n[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = '${kitGateInvocation()}'\n`;
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, existing + block, "utf-8");
+    return { file, action: existed ? "updated" : "created" };
+  } catch (err) {
+    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Amazon Q install-gate: add a `hooks.preToolUse` entry (matcher `execute_bash`)
+ * to each agent config under `.amazonq/cli-agents/*.json`. Amazon Q keeps hooks
+ * per-agent, so we wire every existing agent file; if none are present we skip
+ * (honest about the per-agent layout rather than guessing a path). Idempotent.
+ */
+export async function installInstallGateAmazonQ(
+  cwd: string = process.cwd(),
+): Promise<HookInstallResult> {
+  const dir = ".amazonq/cli-agents";
+  const dirPath = resolve(cwd, dir);
+  const { isReadOnlyMode } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) return { file: dir, action: "skipped", detail: "read-only mode" };
+  let agentFiles: string[] = [];
+  try {
+    agentFiles = readdirSync(dirPath)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => join(dirPath, f));
+  } catch {
+    agentFiles = [];
+  }
+  if (agentFiles.length === 0) {
+    return { file: dir, action: "skipped", detail: "no Amazon Q agent config found" };
+  }
+
+  let wired = 0;
+  let already = 0;
+  for (const p of agentFiles) {
+    let agent: {
+      hooks?: Record<string, { matcher?: string; command: string }[]>;
+      [k: string]: unknown;
+    };
+    try {
+      agent = JSON.parse(await readFile(p, "utf-8"));
+    } catch {
+      continue; // skip unparseable agent file
+    }
+    const hooks = (agent.hooks ??= {});
+    const pre = (hooks.preToolUse ??= []);
+    if (pre.some((h) => typeof h?.command === "string" && h.command.endsWith("gate-bash"))) {
+      already++;
+      continue;
+    }
+    pre.push({ matcher: "execute_bash", command: kitGateInvocation() });
+    try {
+      await writeFile(p, JSON.stringify(agent, null, 2) + "\n", "utf-8");
+      wired++;
+    } catch {
+      /* best-effort per file */
+    }
+  }
+  if (wired === 0) {
+    return {
+      file: dir,
+      action: "unchanged",
+      detail: `install-gate already wired (${already} agent[s])`,
+    };
+  }
+  return { file: dir, action: "updated", detail: `wired ${wired} Amazon Q agent config(s)` };
+}
+
+/** Per-agent install-gate result. */
+export interface GateInstallEntry {
+  agent: "Claude Code" | "Codex" | "Amazon Q";
+  result: HookInstallResult;
+}
+
+/** Wire the PreToolUse install-gate for every supported agent present in the project. */
+export async function installAllInstallGates(
+  cwd: string = process.cwd(),
+): Promise<GateInstallEntry[]> {
+  return [
+    { agent: "Claude Code", result: await installInstallGate(cwd) },
+    { agent: "Codex", result: await installInstallGateCodex(cwd) },
+    { agent: "Amazon Q", result: await installInstallGateAmazonQ(cwd) },
+  ];
 }

@@ -99,7 +99,7 @@ import {
   writeAgentConfig,
   detectAgentTargets,
   installKitPermissions,
-  installInstallGate,
+  installAllInstallGates,
 } from "./agent-config.js";
 import { applyRecommendedHardening } from "./recommended.js";
 import { checkHooks, isGitRepository } from "./check-hooks.js";
@@ -1486,17 +1486,19 @@ async function cmdAgentConfig(): Promise<boolean> {
   // auto-mode can't run an un-triaged `npm install` past kit. The rules block
   // above only advises; this enforces (blocks the install before it runs).
   if (hasFlag(process.argv, "--install-gate")) {
-    const gate = await installInstallGate();
-    if (gate.action === "created" || gate.action === "updated") {
-      console.log(
-        `\n  ${c.green}✓${c.reset} installed the ${c.bold}PreToolUse install-gate${c.reset} in ${c.dim}${gate.file}${c.reset} ${c.dim}(blocks un-triaged installs before they run)${c.reset}`,
-      );
-    } else if (gate.action === "unchanged") {
-      console.log(`\n  ${c.dim}= install-gate already wired in ${gate.file}${c.reset}`);
-    } else {
-      console.log(
-        `\n  ${c.yellow}!${c.reset} ${c.dim}install-gate not wired: ${gate.detail ?? gate.action}${c.reset}`,
-      );
+    console.log(
+      `\n  ${c.bold}PreToolUse install-gate${c.reset} ${c.dim}(blocks un-triaged installs before they run):${c.reset}`,
+    );
+    for (const { agent, result } of await installAllInstallGates()) {
+      if (result.action === "created" || result.action === "updated") {
+        console.log(
+          `    ${c.green}✓${c.reset} ${agent} ${c.dim}→ ${result.file}${result.detail ? ` (${result.detail})` : ""}${c.reset}`,
+        );
+      } else if (result.action === "unchanged") {
+        console.log(`    ${c.dim}= ${agent} already wired (${result.file})${c.reset}`);
+      } else {
+        console.log(`    ${c.dim}· ${agent} skipped: ${result.detail ?? result.action}${c.reset}`);
+      }
     }
   }
   console.log(
@@ -5693,9 +5695,18 @@ export async function cmdGateBash(): Promise<boolean> {
   } catch {
     return true; // unparseable hook payload → do not block (avoid breaking the agent)
   }
-  const command = payload?.tool_input?.command;
-  if (payload?.tool_name !== "Bash" || typeof command !== "string" || !command) {
-    return true; // not a Bash command → allow
+  // Agent-agnostic: Claude Code, Codex, and Amazon Q all pass the shell command in
+  // tool_input.command (only the tool_name differs — "Bash" vs "execute_bash"), so
+  // extract it regardless of tool_name. Tolerate array-form (bin + args).
+  const rawCmd = payload?.tool_input?.command;
+  const command =
+    typeof rawCmd === "string"
+      ? rawCmd
+      : Array.isArray(rawCmd)
+        ? rawCmd.filter((x): x is string => typeof x === "string").join(" ")
+        : "";
+  if (!command) {
+    return true; // no shell command in this tool call → allow
   }
   const { decideBashGate } = await import("./install-gate.js");
   const verdict = await decideBashGate(command);
