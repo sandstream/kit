@@ -15,7 +15,7 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { resolve } from "node:path";
+import { resolve, relative, isAbsolute } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { getMemoryDir } from "./memory/db.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
@@ -48,9 +48,11 @@ export function interpretLsblk(out: string): boolean | null {
 
 /** Is the memory dir inside the repo working tree (committable foot-gun)? */
 export function memoryDirInsideRepo(memDir: string, repoRoot: string): boolean {
-  const m = resolve(memDir);
-  const r = resolve(repoRoot);
-  return m === r || m.startsWith(r + "/");
+  // Containment via path.relative (mirrors plugin-loader): if memDir is the repo
+  // root or below it, the relative path is "" or doesn't escape with "..". This is
+  // cross-platform — `r + "/"` would miss Windows "\\" separators (#43).
+  const rel = relative(resolve(repoRoot), resolve(memDir));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 // ─── Checks ─────────────────────────────────────────────────────────────────

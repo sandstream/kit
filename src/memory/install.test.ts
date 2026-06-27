@@ -44,9 +44,10 @@ describe("memory hook installer", () => {
     assert.ok(ups.includes("some-other-tool"), "preserves the pre-existing hook");
     const upsHook = ups.find((c: string) => c.endsWith("memory hook user-prompt-submit"));
     assert.ok(upsHook, "wires the user-prompt-submit hook");
-    // Must be an ABSOLUTE invocation (node + cli.js), not a bare `kit` that the
-    // hook shell's PATH can't resolve.
-    assert.ok(upsHook.includes("/"), `hook command must be absolute, got: ${upsHook}`);
+    // Must be an ABSOLUTE invocation (node + cli.js or the ~/.kit/bin wrapper),
+    // not a bare `kit` that the hook shell's PATH can't resolve. The path carries
+    // a separator — "/" on POSIX, "\\" on Windows — so accept either. #43.
+    assert.ok(/[/\\]/.test(upsHook), `hook command must be absolute, got: ${upsHook}`);
     assert.ok(
       s.hooks.SessionEnd.some((g: { hooks: { command: string }[] }) =>
         g.hooks.some((h) => h.command.endsWith("memory hook session-end")),

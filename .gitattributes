@@ -1,0 +1,13 @@
+# Normalize line endings to LF on checkout for every OS (#43).
+#
+# kit is POSIX-first and every committed file uses LF. Pinning eol=lf keeps a
+# Windows checkout byte-identical to macOS/Linux, which matters for golden
+# snapshot tests (e.g. contracts/public-surface.json) that compare a freshly
+# serialized LF string against the committed file: with git's default
+# autocrlf=true on Windows the file would arrive as CRLF and the byte-for-byte
+# compare would fail.
+* text=auto eol=lf
+
+# The shipped public-surface snapshot is compared byte-for-byte — pin it
+# explicitly so the contract never depends on a contributor's git config.
+contracts/public-surface.json text eol=lf

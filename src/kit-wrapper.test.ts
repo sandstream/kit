@@ -1,13 +1,23 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, statSync, mkdirSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  statSync,
+  mkdirSync,
+  existsSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   generateKitWrapper,
+  generateKitCmdWrapper,
   wrapperPathDirs,
   ensureKitWrapper,
   kitWrapperPath,
+  kitCmdWrapperPath,
   WRAPPER_MARKER,
   type WrapperSpec,
 } from "./kit-wrapper.js";
@@ -42,6 +52,22 @@ describe("generateKitWrapper", () => {
     assert.ok(script.includes('export PATH="/home/agent/.npm-global/bin:$PATH"'));
   });
 
+  it("emits a Windows .cmd shim that sets PATH (;-joined) and runs node + cli.js", () => {
+    const cmd = generateKitCmdWrapper(SPEC);
+    assert.match(cmd, /^@echo off\r\n/, "cmd shim starts with @echo off + CRLF");
+    assert.ok(cmd.includes(WRAPPER_MARKER.replace(/^# /, "")), "carries the managed marker");
+    assert.ok(
+      cmd.includes(
+        'set "PATH=/home/agent/.local/share/mise/shims;/home/agent/.npm-global/bin;%PATH%"',
+      ),
+      "prepends the tool dirs with the Windows ';' separator",
+    );
+    assert.ok(
+      cmd.includes('"/opt/node22/bin/node" "/usr/lib/kit/dist/cli.js" %*'),
+      "runs the real kit via node + cli.js, forwarding %*",
+    );
+  });
+
   it("the assembled PATH resolves kit even from a non-login shell PATH", () => {
     // Simulate the stripped PATH a container/CI hook shell sees: it has neither
     // the mise shims nor the npm global bin, so a bare `kit` would not resolve.
@@ -73,9 +99,19 @@ describe("ensureKitWrapper", () => {
       });
       assert.equal(r1.action, "written");
       assert.equal(r1.path, kitWrapperPath(home));
-      const mode = statSync(r1.path).mode & 0o777;
-      assert.equal(mode, 0o755);
       assert.ok(readFileSync(r1.path, "utf-8").includes(WRAPPER_MARKER));
+      if (process.platform === "win32") {
+        // NTFS ignores POSIX mode bits, so 0o755 is meaningless there. What
+        // makes kit runnable from cmd/PowerShell is the kit.cmd companion. #43.
+        assert.ok(existsSync(kitCmdWrapperPath(home)), "emits a kit.cmd shim on Windows");
+        assert.ok(
+          readFileSync(kitCmdWrapperPath(home), "utf-8").includes(WRAPPER_MARKER),
+          "the .cmd shim is kit-managed",
+        );
+      } else {
+        const mode = statSync(r1.path).mode & 0o777;
+        assert.equal(mode, 0o755);
+      }
 
       const r2 = ensureKitWrapper({
         home,

@@ -47,12 +47,19 @@ describe("mcp-orchestrator token store", () => {
     assert.ok((await getMcpToken("stripe"))?.accessToken === "b");
   });
 
-  it("token file is chmod 0o600", async () => {
+  it("token file is restricted to the owner", async () => {
     await reset();
     await setMcpToken("test", { accessToken: "x" });
-    const { statSync } = await import("node:fs");
-    const mode = statSync(TOKEN_FILE).mode & 0o777;
-    assert.equal(mode, 0o600);
+    if (process.platform === "win32") {
+      // NTFS ignores POSIX mode bits — secure-perms restricts the file via
+      // `icacls` instead, whose ACL we can't read back portably here. Assert the
+      // file was written (the icacls best-effort hardening ran after). #43.
+      assert.ok(existsSync(TOKEN_FILE));
+    } else {
+      const { statSync } = await import("node:fs");
+      const mode = statSync(TOKEN_FILE).mode & 0o777;
+      assert.equal(mode, 0o600);
+    }
   });
 });
 

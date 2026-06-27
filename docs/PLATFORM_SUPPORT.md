@@ -5,13 +5,13 @@ APIs (it uses `execFile` with argument arrays, `os.homedir()`, and
 platform-routed commands), but a handful of operational dependencies at the
 edges assume a POSIX shell and Unix tooling.
 
-| Platform | Status | Notes |
-|----------|--------|-------|
-| **macOS** (Apple Silicon + Intel) | ✅ Supported | Full feature set. FileVault detected via `fdesetup`. |
-| **Linux** (x86_64 + arm64) | ✅ Supported | Full feature set. LUKS detected via `lsblk`. |
-| **Windows via WSL2** | ✅ Supported (recommended) | Run kit inside your WSL2 distro. Treat it as Linux. |
-| **Windows via Git Bash / MSYS2** | ✅ Supported | Provides the POSIX shell + tools kit relies on. |
-| **Native Windows** (PowerShell / cmd) | ⛔ Not supported yet | Hard blockers below. Use WSL2 instead. |
+| Platform                              | Status                            | Notes                                                                                                                                                  |
+| ------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **macOS** (Apple Silicon + Intel)     | ✅ Supported                      | Full feature set. FileVault detected via `fdesetup`.                                                                                                   |
+| **Linux** (x86_64 + arm64)            | ✅ Supported                      | Full feature set. LUKS detected via `lsblk`.                                                                                                           |
+| **Windows via WSL2**                  | ✅ Supported (recommended)        | Run kit inside your WSL2 distro. Treat it as Linux.                                                                                                    |
+| **Windows via Git Bash / MSYS2**      | ✅ Supported                      | Provides the POSIX shell + tools kit relies on.                                                                                                        |
+| **Native Windows** (PowerShell / cmd) | ✅ Supported (build + test green) | Builds and the full test suite pass on `windows-latest` CI. A few features degrade gracefully — see [Residual gaps](#residual-gaps-on-native-windows). |
 
 ## Running on Windows
 
@@ -59,31 +59,49 @@ a `docker` on `PATH` (for `kit pkg docker:` / service adapters); registry triage
 needs neither a daemon nor a CLI. There is intentionally no engine-specific
 detection — pick whichever engine you prefer.
 
-## Why native Windows is not supported yet
+## Native Windows: what was fixed
 
-These are the concrete blockers, not a blanket "we didn't try". Each is
-tracked for a future native-Windows effort:
+The original native-Windows blockers have been resolved cross-platform:
 
-1. **Git hooks are POSIX shell scripts.** kit installs pre-/post-commit hooks
-   written as `#!/bin/sh` with `date`, `stat`, and `rm` (`src/hooks.ts`).
-   cmd/PowerShell ignore the shebang and the syntax.
-2. **Tool resolution uses `which`.** `src/utils/resolveTool.ts` shells out to
-   `which`, which does not exist on native Windows (`where` is the equivalent).
-   The `mise which` fast path works, but bare tools won't resolve.
-3. **Archive extraction assumes `tar`.** The supply-chain scanner download
-   path (`src/bumblebee.ts`, `src/triage-sandbox.ts`) calls `tar`.
-4. **Secret-file permissions rely on POSIX mode bits.** kit writes
-   `~/.kit/memory.db`, `elevation.key`, and materialized `.env.local` with
-   `0600`. `chmod` is a no-op on NTFS, so on a multi-user native-Windows box
-   those files would not get owner-only protection. WSL2 enforces them
-   normally.
-5. **The build script is POSIX** (`rm -rf` + `chmod +x`). Contributors building
-   from source need a POSIX shell.
+1. **Tool resolution.** `src/utils/resolveTool.ts` uses `where` on Windows and
+   `which` on POSIX (the `mise which` fast path runs first on both).
+2. **Secret-file permissions.** `src/utils/secure-perms.ts` restricts secret
+   files/dirs with `icacls` (strip inherited ACLs, grant only the current user)
+   on Windows and `chmod 0o600/0o700` on POSIX, so `~/.kit/memory.db`,
+   `mcp-tokens.json`, `elevation.key`, and materialized env files are owner-only
+   on NTFS too.
+3. **Self-healing hook wrapper.** `kit hooks add` / `kit memory install` emit a
+   POSIX `~/.kit/bin/kit` wrapper AND a `~/.kit/bin/kit.cmd` companion shim so a
+   bare `kit` resolves from cmd/PowerShell as well as from a hook's `sh`.
+4. **The build is cross-platform.** `npm run build` shells out only to node
+   helpers (`scripts/clean-dist.mjs` for `rm -rf dist`, `scripts/chmod-cli.mjs`
+   for the no-op-on-Windows `chmod +x`) plus `tsc` — no POSIX shell required.
+5. **Path + line-ending handling.** Containment checks, plugin dynamic imports
+   (`pathToFileURL`), and the public-surface golden snapshot are
+   separator/line-ending independent; a repo-wide `.gitattributes eol=lf` keeps
+   checkouts byte-identical so snapshot tests match on Windows.
 
-What already works cross-platform: home/config dir resolution (`os.homedir()`,
+What already worked cross-platform: home/config dir resolution (`os.homedir()`,
 `%APPDATA%`), git operations (`execFile`, no shell), browser open
 (`start`/`open`/`xdg-open` routing), and the BitLocker branch of the
 disk-encryption check.
 
-If you want to help bring up native Windows, the remediation checklist lives in
-the tracking issue linked from this repo's issues.
+## Residual gaps on native Windows
+
+These are honest, narrow limitations — kit runs, but a few features degrade:
+
+1. **Supply-chain scanner binary.** bumblebee ships linux/darwin (amd64/arm64)
+   tarballs only; there is no native-Windows build. A previously cached binary
+   is reused and integrity-verified against its sidecar, but a _fresh_ install on
+   native Windows reports `unsupported`. Use WSL2/Docker for `kit scan` there.
+2. **Git hooks need a POSIX `sh`.** The generated hooks are `#!/bin/sh` using
+   `date`/`stat`/`rm`. Git for Windows bundles `sh` (bash) and runs them, so
+   hooks work for anyone with Git for Windows installed; a hypothetical
+   git-without-sh environment would not execute them. The `kit.cmd` shim only
+   covers invoking kit, not the hook body's coreutils.
+3. **`mise`-managed tools.** mise's native-Windows tool support is narrower than
+   on POSIX; the shims-on-PATH activation helpers target a POSIX shell profile.
+
+For the richest experience on Windows, WSL2 (or the signed Docker image) remains
+the recommendation. Native Windows is now a supported, tested target for the
+core workflow.

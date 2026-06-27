@@ -9,19 +9,22 @@
 // change: review the diff, regenerate, commit, and add a BREAKING note to the
 // changelog/PR if the change removes or renames a stable contract.
 import { writeFileSync, existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..");
 
-if (!existsSync(join(repoRoot, "dist", "public-surface.js"))) {
+const distEntry = join(repoRoot, "dist", "public-surface.js");
+if (!existsSync(distEntry)) {
   console.error("dist/public-surface.js not found. Run `npm run build` first.");
   process.exit(1);
 }
 
+// import() needs a file:// URL for an absolute path on Windows (a bare "C:\\…"
+// throws ERR_UNSUPPORTED_ESM_URL_SCHEME); harmless on POSIX. #43.
 const { collectPublicSurface, serializePublicSurface } = await import(
-  join(repoRoot, "dist", "public-surface.js")
+  pathToFileURL(distEntry).href
 );
 
 const out = join(repoRoot, "contracts", "public-surface.json");

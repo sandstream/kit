@@ -94,6 +94,13 @@ export function collectPublicSurface(): PublicSurface {
 
 /** Recursively sort object keys + array members so serialization is order-stable. */
 function canonicalize(value: unknown): unknown {
+  if (typeof value === "string") {
+    // OS-independence: normalize any backslash path separators to "/" so a value
+    // that ever carried a filesystem path serializes identically on Windows and
+    // POSIX. No surface value legitimately contains "\\" today, so this is a safe
+    // no-op for the current set and future-proofs the snapshot. #43.
+    return value.replace(/\\/g, "/");
+  }
   if (Array.isArray(value)) {
     // Sort arrays of primitives so reordering source declarations is not a "diff".
     const mapped = value.map(canonicalize);
@@ -114,9 +121,15 @@ function canonicalize(value: unknown): unknown {
 
 /**
  * Deterministic JSON for the snapshot: keys sorted, primitive arrays sorted,
- * 2-space indent, trailing newline. The gen script and the golden test both go
- * through this, so a byte-for-byte string compare is a faithful drift check.
+ * path separators normalized to "/", 2-space indent, LF newlines, trailing
+ * newline. The gen script and the golden test both go through this, so a
+ * byte-for-byte string compare is a faithful drift check on every OS.
+ *
+ * Line endings are forced to LF and the committed snapshot is pinned to `eol=lf`
+ * in .gitattributes, so the same file matches on macOS, Linux, and Windows
+ * regardless of git's autocrlf setting. #43.
  */
 export function serializePublicSurface(surface: PublicSurface): string {
-  return `${JSON.stringify(canonicalize(surface), null, 2)}\n`;
+  const json = JSON.stringify(canonicalize(surface), null, 2);
+  return `${json.replace(/\r\n/g, "\n")}\n`;
 }

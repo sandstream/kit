@@ -189,14 +189,10 @@ export async function ensureBumblebee(opts: EnsureOptions = {}): Promise<EnsureR
     return { install: { binPath: envBin, catalogDir } };
   }
 
-  const target = resolveTarget();
-  if (!target) {
-    return {
-      kind: "unsupported",
-      reason: `unsupported platform (${process.platform}/${process.arch}); bumblebee ships linux/darwin on amd64/arm64`,
-    };
-  }
-
+  // Cache reuse + verification is platform-independent: the cached binary path
+  // and its sidecar don't depend on the download target, so we check the cache
+  // BEFORE the platform gate. The `resolveTarget` gate only matters when we
+  // actually have to DOWNLOAD (bumblebee ships linux/darwin tarballs only). #43.
   const root = cacheRoot();
   const binPath = join(root, "bumblebee");
   const catalogDir = join(root, "threat_intel");
@@ -238,6 +234,17 @@ export async function ensureBumblebee(opts: EnsureOptions = {}): Promise<EnsureR
     return {
       kind: "network",
       reason: "scanner not cached and downloads are disabled (KIT_NO_DOWNLOAD)",
+    };
+  }
+
+  // Downloading requires a supported release target — bumblebee ships
+  // linux/darwin (amd64/arm64) tarballs only. Native Windows has no binary, so a
+  // fresh (uncached) install is genuinely unsupported there.
+  const target = resolveTarget();
+  if (!target) {
+    return {
+      kind: "unsupported",
+      reason: `unsupported platform (${process.platform}/${process.arch}); bumblebee ships linux/darwin on amd64/arm64`,
     };
   }
 

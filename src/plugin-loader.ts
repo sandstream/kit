@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve, join, relative } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { AdapterRegistry, ServiceAdapter } from "./adapters/types.js";
 
 // npm package-name grammar: optional single @scope/ prefix, then name.
@@ -103,7 +104,10 @@ async function loadSinglePlugin(
       continue;
     }
     try {
-      mod = await import(resolved);
+      // import() needs a file:// URL for an absolute path on Windows — a bare
+      // "C:\\…" path throws ERR_UNSUPPORTED_ESM_URL_SCHEME. pathToFileURL is a
+      // no-op-equivalent on POSIX (still produces a valid file:// URL). #43.
+      mod = await import(pathToFileURL(resolved).href);
       break;
     } catch (err) {
       lastError = err;
