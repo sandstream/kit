@@ -13,6 +13,8 @@ import {
   installInstallGate,
   installInstallGateCodex,
   installInstallGateAmazonQ,
+  installInstallGateGemini,
+  installInstallGateCursor,
   READONLY_KIT_PERMISSIONS,
 } from "./agent-config.js";
 
@@ -359,6 +361,55 @@ describe("installInstallGateAmazonQ", () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-qgate2-"));
     try {
       assert.equal((await installInstallGateAmazonQ(dir)).action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installInstallGateGemini", () => {
+  it("wires a BeforeTool hook into .gemini/settings.json, idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-geminigate-"));
+    try {
+      mkdirSync(join(dir, ".gemini"), { recursive: true });
+      const r1 = await installInstallGateGemini(dir);
+      assert.equal(r1.action, "created");
+      const s = JSON.parse(readFileSync(join(dir, ".gemini", "settings.json"), "utf-8"));
+      assert.ok(s.hooks.BeforeTool[0].hooks[0].command.endsWith("gate-bash"));
+      assert.equal((await installInstallGateGemini(dir)).action, "unchanged");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("skips when no Gemini project is present", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-geminigate2-"));
+    try {
+      assert.equal((await installInstallGateGemini(dir)).action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installInstallGateCursor", () => {
+  it("wires a beforeShellExecution hook into .cursor/hooks.json, idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-cursorgate-"));
+    try {
+      mkdirSync(join(dir, ".cursor"), { recursive: true });
+      const r1 = await installInstallGateCursor(dir);
+      assert.equal(r1.action, "created");
+      const c = JSON.parse(readFileSync(join(dir, ".cursor", "hooks.json"), "utf-8"));
+      assert.equal(c.version, 1);
+      assert.ok(c.hooks.beforeShellExecution[0].command.endsWith("gate-bash"));
+      assert.equal((await installInstallGateCursor(dir)).action, "unchanged");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("skips when no Cursor project is present", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-cursorgate2-"));
+    try {
+      assert.equal((await installInstallGateCursor(dir)).action, "skipped");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
