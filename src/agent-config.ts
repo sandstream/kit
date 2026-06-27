@@ -271,3 +271,67 @@ export async function installKitPermissions(
     };
   }
 }
+
+/** Absolute `<node> <cli.js> gate-bash` for use inside a hook (PATH-less shell). */
+export function kitGateInvocation(): string {
+  const entry = process.argv[1];
+  if (entry) return `${process.execPath} ${resolve(entry)} gate-bash`;
+  return "kit gate-bash"; // last resort — relies on PATH
+}
+
+export interface HookInstallResult {
+  file: string;
+  action: "created" | "updated" | "unchanged" | "skipped" | "failed";
+  detail?: string;
+}
+
+interface SettingsHookCmd {
+  type?: string;
+  command: string;
+}
+interface SettingsHookGroup {
+  matcher?: string;
+  hooks?: SettingsHookCmd[];
+}
+
+/**
+ * Install the PreToolUse install-gate hook into `.claude/settings.json` so an
+ * un-triaged package install is BLOCKED before it runs — the *enforce* layer for
+ * agent auto-mode (the rules-file block only *advises*; an agent can otherwise run
+ * `npm install evil` directly and its postinstall fires before any commit). Opt-in
+ * and idempotent (keyed on a hook command ending in `gate-bash`); preserves any
+ * other hooks. Only wired for Claude Code today (the settings schema we know).
+ */
+export async function installInstallGate(cwd: string = process.cwd()): Promise<HookInstallResult> {
+  const file = ".claude/settings.json";
+  const path = resolve(cwd, file);
+
+  const { isReadOnlyMode } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) return { file, action: "skipped", detail: "read-only mode" };
+  if (!existsSync(resolve(cwd, ".claude")) && !existsSync(resolve(cwd, "CLAUDE.md"))) {
+    return { file, action: "skipped", detail: "no Claude Code project detected" };
+  }
+
+  let settings: { hooks?: Record<string, SettingsHookGroup[]>; [k: string]: unknown } = {};
+  let existed = false;
+  try {
+    settings = JSON.parse(await readFile(path, "utf-8")) as typeof settings;
+    existed = true;
+  } catch {
+    settings = {};
+  }
+
+  const hooks = (settings.hooks ??= {});
+  const pre = (hooks.PreToolUse ??= []);
+  const already = pre.some((g) => g.hooks?.some((h) => h.command?.endsWith("gate-bash")));
+  if (already) return { file, action: "unchanged", detail: "install-gate already wired" };
+
+  pre.push({ matcher: "Bash", hooks: [{ type: "command", command: kitGateInvocation() }] });
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    return { file, action: existed ? "updated" : "created" };
+  } catch (err) {
+    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+  }
+}

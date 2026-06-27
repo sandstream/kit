@@ -10,6 +10,7 @@ import {
   detectAgentTargets,
   writeAgentConfig,
   installKitPermissions,
+  installInstallGate,
   READONLY_KIT_PERMISSIONS,
 } from "./agent-config.js";
 
@@ -235,6 +236,60 @@ describe("installKitPermissions", () => {
       const r = await installKitPermissions(dir);
       assert.equal(r.action, "skipped");
       assert.equal(existsSync(join(dir, ".claude", "settings.json")), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installInstallGate", () => {
+  it("writes a PreToolUse Bash gate to .claude/settings.json, idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-gate-"));
+    try {
+      mkdirSync(join(dir, ".claude"), { recursive: true });
+      const r1 = await installInstallGate(dir);
+      assert.equal(r1.action, "created");
+      const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
+      const groups = s.hooks.PreToolUse;
+      assert.ok(Array.isArray(groups) && groups.length === 1);
+      assert.equal(groups[0].matcher, "Bash");
+      assert.ok(groups[0].hooks[0].command.endsWith("gate-bash"));
+
+      const r2 = await installInstallGate(dir);
+      assert.equal(r2.action, "unchanged");
+      const s2 = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
+      assert.equal(s2.hooks.PreToolUse.length, 1, "no duplicate group on re-run");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves other hooks and settings keys", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-gate2-"));
+    try {
+      mkdirSync(join(dir, ".claude"), { recursive: true });
+      writeFileSync(
+        join(dir, ".claude", "settings.json"),
+        JSON.stringify({
+          hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo hi" }] }] },
+          model: "opus",
+        }),
+      );
+      await installInstallGate(dir);
+      const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
+      assert.equal(s.model, "opus", "keeps other keys");
+      assert.ok(s.hooks.SessionStart, "keeps other hooks");
+      assert.ok(s.hooks.PreToolUse[0].hooks[0].command.endsWith("gate-bash"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when no Claude Code project is present", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-gate3-"));
+    try {
+      const r = await installInstallGate(dir);
+      assert.equal(r.action, "skipped");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
