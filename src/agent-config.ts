@@ -63,7 +63,15 @@ export function detectAgentTargets(cwd: string = process.cwd()): AgentTarget[] {
       case "Claude Code":
         return existsSync(resolve(cwd, ".claude"));
       case "Codex":
-        return existsSync(resolve(cwd, ".codex"));
+        // AGENTS.md is the shared cross-tool rules file: Codex AND OpenCode both
+        // read it, so an OpenCode-only project (opencode.json / .opencode, no
+        // .codex) should still wire its block into AGENTS.md.
+        return (
+          existsSync(resolve(cwd, ".codex")) ||
+          existsSync(resolve(cwd, ".opencode")) ||
+          existsSync(resolve(cwd, "opencode.json")) ||
+          existsSync(resolve(cwd, "opencode.jsonc"))
+        );
       case "Cursor":
         return existsSync(resolve(cwd, ".cursor"));
       default:
