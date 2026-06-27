@@ -3,9 +3,11 @@ node = "22"
 pnpm = "latest"
 # Security scanners kit's own `kit check` resolves mise-first. Declaring them here
 # means `kit install` provisions them so the trivy/secrets scans actually run
-# (otherwise they warn "not installed"). Names resolve via the mise registry.
-trivy = "latest"
-trufflehog = "latest"
+# (otherwise they warn "not installed"). Scheme-qualified `aqua:` refs (matching
+# kit's own toml-generator) so the triage gate maps them to a repo triage and
+# installs on PASS — bare names are untriageable and the gate blocks them.
+"aqua:aquasecurity/trivy" = "latest"
+"aqua:trufflesecurity/trufflehog" = "latest"
 
 [hooks]
 pre-commit = ["kit security scan-staged", "npm run build", "npm test"]
