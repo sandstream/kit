@@ -8,9 +8,10 @@
  * Both are FAIL-OPEN: any error yields an empty/no-op result so a hook can never
  * block a prompt or break a session. Deterministic, zero model calls.
  */
-import { basename } from "node:path";
-import { openMemoryDb, getStats, recentMessages } from "./db.js";
-import { indexClaudeTranscripts } from "./parser.js";
+import { basename, join } from "node:path";
+import { existsSync, statSync, writeFileSync } from "node:fs";
+import { openMemoryDb, getStats, recentMessages, getMemoryDir, ensureMemoryDir } from "./db.js";
+import { indexClaudeTranscripts, indexAllHarnesses } from "./parser.js";
 import { palList } from "./pal.js";
 import { getCurrentProjectRoot } from "./project.js";
 import { readCachedUpdateSync, getKitVersionSync } from "../update-check.js";
@@ -100,13 +101,55 @@ export function sessionStartRecovery(opts: { limit?: number } = {}): string {
   }
 }
 
+/**
+ * The just-ended session is Claude Code, so we always index that (cheap +
+ * incremental). The OTHER harnesses (codex/cursor/gemini/cline/amazon-q/opencode…)
+ * have no kit hook, so they'd only get indexed on a manual `kit memory index`.
+ * To pick them up automatically WITHOUT walking six extra dirs on every single
+ * session end, we sweep all harnesses at most once per interval, debounced by a
+ * marker file's mtime. Keeps SessionEnd cheap on the common path.
+ */
+const HARNESS_SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
+
+function harnessSweepMarker(): string {
+  return join(getMemoryDir(), ".harness-sweep");
+}
+
+/** True if the periodic all-harness sweep is due (marker missing or older than the interval). */
+export function dueForHarnessSweep(now: number = Date.now()): boolean {
+  try {
+    const marker = harnessSweepMarker();
+    if (!existsSync(marker)) return true;
+    return now - statSync(marker).mtimeMs >= HARNESS_SWEEP_INTERVAL_MS;
+  } catch {
+    return false; // can't tell → don't add the sweep's latency
+  }
+}
+
+function markHarnessSwept(): void {
+  try {
+    ensureMemoryDir();
+    writeFileSync(harnessSweepMarker(), new Date().toISOString(), { mode: 0o600 });
+  } catch {
+    /* best-effort: a missed marker just means we sweep again next time */
+  }
+}
+
 /** Index the just-ended session. Returns count of newly indexed messages (fail-open). */
 export function runSessionEndIndex(): { messages: number } {
   try {
     const db = openMemoryDb();
-    const res = indexClaudeTranscripts(db);
+    let messages: number;
+    if (dueForHarnessSweep()) {
+      // includes claude-code, so no separate Claude pass needed
+      const all = indexAllHarnesses(db);
+      messages = Object.values(all).reduce((sum, r) => sum + r.messages, 0);
+      markHarnessSwept();
+    } else {
+      messages = indexClaudeTranscripts(db).messages;
+    }
     db.close();
-    return { messages: res.messages };
+    return { messages };
   } catch {
     return { messages: 0 }; // fail-open
   }
