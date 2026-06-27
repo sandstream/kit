@@ -16,8 +16,10 @@ import {
   installInstallGateGemini,
   installInstallGateCursor,
   installInstallGateOpenCode,
+  installInstallGateCline,
   READONLY_KIT_PERMISSIONS,
 } from "./agent-config.js";
+import { statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 function tmpRepo(): string {
@@ -455,6 +457,46 @@ describe("installInstallGateOpenCode", () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-ocgate3-"));
     try {
       assert.equal((await installInstallGateOpenCode(dir)).action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installInstallGateCline", () => {
+  it("writes an executable .clinerules/hooks/PreToolUse shim, idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-clinegate-"));
+    try {
+      mkdirSync(join(dir, ".clinerules"), { recursive: true });
+      const r1 = await installInstallGateCline(dir);
+      assert.equal(r1.action, "created");
+      const hookPath = join(dir, ".clinerules", "hooks", "PreToolUse");
+      assert.ok(existsSync(hookPath));
+      const body = readFileSync(hookPath, "utf-8");
+      assert.ok(body.startsWith("#!/bin/sh"), "is a shell script");
+      assert.ok(body.includes("gate-bash --format cline"), "invokes the cline-format gate");
+      // Executable bit set (POSIX) — Cline runs the file directly.
+      if (process.platform !== "win32") {
+        assert.ok((statSync(hookPath).mode & 0o111) !== 0, "has the executable bit");
+      }
+      assert.equal((await installInstallGateCline(dir)).action, "unchanged");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("detects a .cline project dir too", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-clinegate2-"));
+    try {
+      mkdirSync(join(dir, ".cline"), { recursive: true });
+      assert.equal((await installInstallGateCline(dir)).action, "created");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("skips when no Cline project is present", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-clinegate3-"));
+    try {
+      assert.equal((await installInstallGateCline(dir)).action, "skipped");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

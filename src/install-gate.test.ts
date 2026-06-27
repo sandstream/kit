@@ -1,8 +1,44 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseInstallCommand, decideBashGate } from "./install-gate.js";
+import {
+  parseInstallCommand,
+  decideBashGate,
+  extractCommandFromHookPayload,
+} from "./install-gate.js";
 import type { GateDeps } from "./triage-gate.js";
 import type { TriageType } from "./triage.js";
+
+describe("extractCommandFromHookPayload — per-agent wire shapes", () => {
+  it("reads tool_input.command (Claude/Codex/Amazon Q/Gemini)", () => {
+    assert.equal(
+      extractCommandFromHookPayload({ tool_name: "Bash", tool_input: { command: "npm i x" } }),
+      "npm i x",
+    );
+  });
+  it("reads top-level command (Cursor beforeShellExecution)", () => {
+    assert.equal(extractCommandFromHookPayload({ command: "pip install y" }), "pip install y");
+  });
+  it("reads preToolUse.parameters.command (Cline PreToolUse)", () => {
+    assert.equal(
+      extractCommandFromHookPayload({
+        hookName: "PreToolUse",
+        preToolUse: { toolName: "execute_command", parameters: { command: "npm install z" } },
+      }),
+      "npm install z",
+    );
+  });
+  it("joins array-form (bin + args)", () => {
+    assert.equal(
+      extractCommandFromHookPayload({ tool_input: { command: ["npm", "install", "z"] } }),
+      "npm install z",
+    );
+  });
+  it("returns '' when no command present (→ gate allows)", () => {
+    assert.equal(extractCommandFromHookPayload({ preToolUse: { toolName: "read_file" } }), "");
+    assert.equal(extractCommandFromHookPayload({}), "");
+    assert.equal(extractCommandFromHookPayload(null), "");
+  });
+});
 
 describe("parseInstallCommand — detection", () => {
   const refs = (cmd: string) => parseInstallCommand(cmd).refs;
