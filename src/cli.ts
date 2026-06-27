@@ -95,7 +95,12 @@ import { getBudgetStatus, formatBudgetStatus } from "./budget.js";
 import { formatGovernanceStatus, mergeGovernanceConfigAsync } from "./governance.js";
 import { withGovernance } from "./governance-middleware.js";
 import { SKIPPED_COMMITS_LOG } from "./hooks.js";
-import { writeAgentConfig, detectAgentTargets, installKitPermissions } from "./agent-config.js";
+import {
+  writeAgentConfig,
+  detectAgentTargets,
+  installKitPermissions,
+  installInstallGate,
+} from "./agent-config.js";
 import { applyRecommendedHardening } from "./recommended.js";
 import { checkHooks, isGitRepository } from "./check-hooks.js";
 import {
@@ -1476,6 +1481,23 @@ async function cmdAgentConfig(): Promise<boolean> {
     console.log(`\n  ${c.dim}= read-only kit commands already allowed in ${perms.file}${c.reset}`);
   } else if (perms.action === "failed") {
     console.log(`\n  ${c.yellow}!${c.reset} could not update ${perms.file}: ${perms.detail}`);
+  }
+  // Opt-in: a true blocking install-gate (PreToolUse hook) so an agent in
+  // auto-mode can't run an un-triaged `npm install` past kit. The rules block
+  // above only advises; this enforces (blocks the install before it runs).
+  if (hasFlag(process.argv, "--install-gate")) {
+    const gate = await installInstallGate();
+    if (gate.action === "created" || gate.action === "updated") {
+      console.log(
+        `\n  ${c.green}✓${c.reset} installed the ${c.bold}PreToolUse install-gate${c.reset} in ${c.dim}${gate.file}${c.reset} ${c.dim}(blocks un-triaged installs before they run)${c.reset}`,
+      );
+    } else if (gate.action === "unchanged") {
+      console.log(`\n  ${c.dim}= install-gate already wired in ${gate.file}${c.reset}`);
+    } else {
+      console.log(
+        `\n  ${c.yellow}!${c.reset} ${c.dim}install-gate not wired: ${gate.detail ?? gate.action}${c.reset}`,
+      );
+    }
   }
   console.log(
     `\n${c.dim}Blocks regenerate in place on re-run; edit outside the markers freely. ` +
@@ -5143,6 +5165,8 @@ export const COMMAND_HELP: Record<string, string> = {
   analyze: "Analyze repo + emit draft CLAUDE.md / RULES.md",
   "agent-config":
     "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules",
+  "gate-bash":
+    "PreToolUse install-gate: read an agent's pending Bash command on stdin, block (exit 2) un-triaged installs",
   security:
     "Security policy + scanners (policy | scan-staged | scan-build | verify-pull | prescan | …)",
   "security policy": "Dependency allowlist enforcement (init|add|check)",
@@ -5636,6 +5660,47 @@ async function main(): Promise<void> {
   }
 }
 
+/**
+ * `kit gate-bash` — PreToolUse install-gate handler. Reads a coding agent's
+ * pending-tool-call JSON on stdin ({ tool_name, tool_input: { command } }), and
+ * if it is a Bash command that adds an un-triaged package, BLOCKS it by exiting 2
+ * (the deny signal for Claude Code / Codex / Amazon Q PreToolUse hooks; exit 1
+ * would be a non-blocking error). Allow → exit 0. This is what makes
+ * "installs nothing untriaged" hold even in agent auto-mode. Wire it with
+ * `kit agent-config --install-gate`. Pure decision lives in install-gate.ts.
+ */
+export async function cmdGateBash(): Promise<boolean> {
+  let raw = "";
+  try {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+    raw = Buffer.concat(chunks).toString("utf8");
+  } catch {
+    return true; // no stdin / read error → do not block
+  }
+  let payload: { tool_name?: string; tool_input?: { command?: unknown } };
+  try {
+    payload = raw ? JSON.parse(raw) : {};
+  } catch {
+    return true; // unparseable hook payload → do not block (avoid breaking the agent)
+  }
+  const command = payload?.tool_input?.command;
+  if (payload?.tool_name !== "Bash" || typeof command !== "string" || !command) {
+    return true; // not a Bash command → allow
+  }
+  const { decideBashGate } = await import("./install-gate.js");
+  const verdict = await decideBashGate(command);
+  if (verdict.block) {
+    const { writeSync } = await import("node:fs");
+    writeSync(
+      2,
+      `kit install-gate: BLOCKED — ${verdict.reason}\nTriage it first: \`kit triage …\`, or install via \`kit pkg <eco>:<name>\`.\n`,
+    );
+    process.exit(2); // PreToolUse deny
+  }
+  return true;
+}
+
 // Single source of truth for kit's top-level command surface. Every key here MUST
 // have a COMMAND_HELP entry — command-surface.test.ts fails the build otherwise, so
 // `kit help` and the did-you-mean suggestions can never silently drift from dispatch.
@@ -5694,6 +5759,7 @@ export const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
   pkg: cmdPkg,
   team: cmdTeam,
   memory: cmdMemory,
+  "gate-bash": cmdGateBash,
 };
 
 /**
@@ -5763,6 +5829,7 @@ export const COMMAND_TIERS: Record<string, CommandTier> = {
   pkg: "stable",
   team: "experimental",
   memory: "stable",
+  "gate-bash": "experimental",
 };
 
 /**
