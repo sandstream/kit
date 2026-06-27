@@ -234,6 +234,10 @@ const AGENT_DIRS: { dir: string; label: string }[] = [
   { dir: ".claude/agents", label: "subagent" },
   { dir: ".claude/skills", label: "skill" },
   { dir: ".claude/plugins", label: "plugin" },
+  // OpenCode plugins are JS/TS that run on load and can hook tool execution
+  // (`tool.execute.before`) — an unwatched code-execution surface, same class as
+  // a Claude plugin. Scanned the same way (malware shapes + secrets).
+  { dir: ".opencode/plugin", label: "OpenCode plugin" },
 ];
 
 const SCAN_EXTS = new Set([
@@ -246,6 +250,7 @@ const SCAN_EXTS = new Set([
   ".js",
   ".mjs",
   ".cjs",
+  ".ts", // OpenCode/TS plugins
   ".py",
   ".rb",
   ".toml",
