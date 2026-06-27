@@ -5118,7 +5118,7 @@ export const COMMAND_HELP: Record<string, string> = {
     "Install-time supply-chain triage: install-scripts, lockfile-drift, dep-confusion, slopsquat",
   "agent-audit": "Audit agent / MCP / hook configs for plaintext secrets + malware-shaped hooks",
   "gha-audit":
-    "GitHub Actions hardening lint — unpinned actions + pwn-request patterns in .github/workflows",
+    "CI hardening lint — unpinned actions/images + pwn-request/remote-include (GitHub Actions, GitLab CI, Bitbucket Pipelines)",
   sbom: "Generate a CycloneDX / SPDX SBOM from the lockfile (SARIF emit via kit scan --sarif)",
   ingest:
     "Ingest external SARIF / OSV reports into kit's consolidated verdict (kit ingest <sarif|osv> <file>)",
