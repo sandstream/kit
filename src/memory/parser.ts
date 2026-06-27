@@ -25,6 +25,7 @@ import { indexContinueSessions } from "./continue.js";
 import { indexCursorSessions } from "./cursor.js";
 import { indexAmazonQSessions } from "./amazonq.js";
 import { indexClineSessions } from "./cline.js";
+import { indexOpenCodeSessions } from "./opencode.js";
 
 export interface IndexResult {
   files: number;
@@ -251,5 +252,6 @@ export function indexAllHarnesses(db: DatabaseSync): HarnessResults {
     cursor: indexCursorSessions(db),
     "amazon-q": indexAmazonQSessions(db),
     cline: indexClineSessions(db),
+    opencode: indexOpenCodeSessions(db),
   };
 }
