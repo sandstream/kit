@@ -6,6 +6,7 @@ import { installHooks } from "../hooks.js";
 import { isNonInteractive } from "../environment.js";
 import { promptConfirm } from "../utils/prompt.js";
 import { c } from "../utils/colors.js";
+import { ensureKitWrapper } from "../kit-wrapper.js";
 
 const BUILTIN_HOOKS: Record<string, { hookName: string; commands: string[]; description: string }> =
   {
@@ -51,6 +52,9 @@ export async function cmdHooks(): Promise<boolean> {
   if (subcommand === "install" || !subcommand) {
     console.log(`${c.bold}${c.cyan}Installing git hooks...${c.reset}\n`);
 
+    // Ensure the self-healing wrapper exists before writing hooks, so the
+    // generated hooks reference ~/.kit/bin/kit (resolves in a non-login shell).
+    ensureKitWrapper();
     const results = await installHooks(config.hooks);
     let allOk = true;
 
@@ -163,6 +167,8 @@ async function cmdHooksAdd(): Promise<boolean> {
     }
   }
 
+  // Wrapper first so the generated hook embeds its absolute path.
+  ensureKitWrapper();
   const results = await installHooks({ [builtin.hookName]: builtin.commands });
   const r = results[0];
   if (r.action === "failed") {

@@ -3,6 +3,7 @@ import { resolve, isAbsolute, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import type { HooksConfig } from "./config.js";
+import { kitWrapperPath } from "./kit-wrapper.js";
 
 /**
  * The directory git ACTUALLY runs hooks from. When `core.hooksPath` is set
@@ -275,10 +276,36 @@ async function installHook(
 }
 
 /**
+ * Rewrite a leading bare `kit` token to the absolute self-healing wrapper path.
+ *
+ * Git hooks run in a non-login shell whose PATH may not resolve a bare `kit`.
+ * Pointing them at ~/.kit/bin/kit (which restores the tool PATH then exec's the
+ * real kit) makes them fire regardless of shell. Because the wrapper is itself
+ * named `kit`, the rewritten command still ENDS in `kit <args>`, so
+ * check-hooks' `content.includes(cmd)` up-to-date detection keeps working.
+ * Non-kit commands (npm, etc.) pass through untouched.
+ */
+export function rewriteKitInvocation(cmd: string, kitBin: string): string {
+  if (kitBin === "kit") return cmd; // nothing to rewrite to
+  if (cmd === "kit") return kitBin;
+  if (cmd.startsWith("kit ")) return `${kitBin}${cmd.slice(3)}`;
+  return cmd;
+}
+
+/** The kit invocation git hooks should embed: the wrapper when it exists, else
+ *  a bare `kit` (the wrapper is created by `kit hooks add` / `kit memory install`). */
+function resolveHookKitBin(): string {
+  const wrapper = kitWrapperPath();
+  return existsSync(wrapper) ? wrapper : "kit";
+}
+
+/**
  * Generate hook script content
  */
 function generateHookScript(hookName: string, commands: string[]): string {
   const total = commands.length;
+  const kitBin = resolveHookKitBin();
+  commands = commands.map((cmd) => rewriteKitInvocation(cmd, kitBin));
 
   // Each command is framed as a numbered step with live ▶ / ✓ / ✗ markers and
   // a per-step duration, mirroring the runStep() util used by the CLI

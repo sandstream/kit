@@ -8,19 +8,28 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname, resolve } from "node:path";
+import { kitWrapperPath } from "../kit-wrapper.js";
 
 /**
  * Absolute invocation of kit for use inside a Claude Code hook. Hooks run in a
  * non-login `/bin/sh` whose PATH usually does NOT include the npm global bin
  * (`~/.npm-global/bin`, nvm/volta/pnpm shims, etc.). A bare `kit` there fails
  * with "command not found" and SILENTLY breaks memory capture — the worst
- * failure mode, because the store looks installed but records nothing. So we
- * pin an absolute `<node> <cli.js>` resolved from the running process.
+ * failure mode, because the store looks installed but records nothing.
+ *
+ * Order of preference:
+ *   1. The self-healing wrapper at ~/.kit/bin/kit (created by `memInstall`
+ *      before this runs). It restores the tool PATH then exec's the real kit,
+ *      so anything kit shells out to (git, etc.) also resolves.
+ *   2. An absolute `<node> <cli.js>` resolved from the running process.
+ *   3. A bare `kit` — last resort, relies on PATH (warns at the call site).
  */
 function kitHookInvocation(): string {
+  const wrapper = kitWrapperPath();
+  if (existsSync(wrapper)) return wrapper;
   const entry = process.argv[1];
   if (entry) return `${process.execPath} ${resolve(entry)}`;
-  return "kit"; // last resort — relies on PATH (and will warn at the call site)
+  return "kit";
 }
 
 /** A kit memory hook is identified by this stable suffix, regardless of how

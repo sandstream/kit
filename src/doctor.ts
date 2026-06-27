@@ -141,6 +141,28 @@ async function checkToolsInPath(config: kitConfig): Promise<DoctorCheck[]> {
   return checks;
 }
 
+async function checkKitWrapper(): Promise<DoctorCheck | null> {
+  const { kitWrapperPath, WRAPPER_MARKER } = await import("./kit-wrapper.js");
+  const path = kitWrapperPath();
+  const name = "hook wrapper";
+  const category = "hooks";
+  try {
+    await access(path);
+  } catch {
+    return {
+      name,
+      status: "warn",
+      detail: `${path} missing — hooks may fail in a non-login shell. Run: kit memory install`,
+      category,
+    };
+  }
+  const content = await readFile(path, "utf-8").catch(() => "");
+  if (!content.includes(WRAPPER_MARKER)) {
+    return { name, status: "warn", detail: `${path} exists but is not kit-managed`, category };
+  }
+  return { name, status: "pass", detail: path, category };
+}
+
 async function checkGitHooks(config: kitConfig): Promise<DoctorCheck[]> {
   if (!config.hooks) return [];
 
@@ -183,6 +205,9 @@ export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorR
 
   const hookChecks = await checkGitHooks(config);
   allChecks.push(...hookChecks);
+
+  const wrapperCheck = await checkKitWrapper();
+  if (wrapperCheck) allChecks.push(wrapperCheck);
 
   const passed = allChecks.filter((c) => c.status === "pass").length;
   const warnings = allChecks.filter((c) => c.status === "warn").length;
