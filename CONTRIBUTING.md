@@ -41,7 +41,9 @@ npm run dev -- test
 
 ### Code Style
 
-- Use TypeScript for all code
+- Use TypeScript for the CLI and library code (the `src/` tree). JavaScript is
+  only for tooling — `eslint.config.js` and the `scripts/` helpers (`.js`/`.mjs`)
+  — and the triage gate's sandboxed checker is Python (`skills/triage/`).
 - Follow the existing patterns in the codebase
 - ESM modules only (no CommonJS)
 - Include tests for new features
