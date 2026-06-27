@@ -26,11 +26,12 @@
 
 import { readFile, writeFile, mkdir, rename, access, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import type { McpConfig, McpServerConfig } from "./config.js";
 import { secureFile, secureDir } from "./utils/secure-perms.js";
 
-const TOKEN_FILE = `${homedir()}/.kit/mcp-tokens.json`;
+// path.join (not a hard-coded "/") so the path is correct on Windows too. #43.
+const TOKEN_FILE = join(homedir(), ".kit", "mcp-tokens.json");
 
 export interface McpToken {
   /** Bearer token issued by the MCP server. */

@@ -105,11 +105,18 @@ describe("installHooks", () => {
     await installHooks(config, testGitDir);
 
     const hookPath = join(testGitDir, "hooks", "pre-commit");
-    const { stat } = await import("node:fs/promises");
-    const stats = await stat(hookPath);
-
-    // Check if file is executable (mode should include 0o100)
-    assert.ok((stats.mode & 0o111) !== 0);
+    // NTFS has no POSIX execute bit, so chmod(0o755) is a no-op on native Windows
+    // and stat().mode never carries 0o111. Git for Windows runs the hook via its
+    // bundled `sh` regardless of the exec bit, so on win32 we assert the hook was
+    // written instead of the (meaningless) mode bits. #43.
+    if (process.platform === "win32") {
+      assert.ok(existsSync(hookPath));
+    } else {
+      const { stat } = await import("node:fs/promises");
+      const stats = await stat(hookPath);
+      // Check if file is executable (mode should include 0o100)
+      assert.ok((stats.mode & 0o111) !== 0);
+    }
   });
 
   it("updates existing hooks", async () => {

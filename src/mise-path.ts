@@ -9,10 +9,14 @@
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { posix } from "node:path";
 
+// These helpers manipulate POSIX shell-profile content (`export PATH="…:$PATH"`,
+// `:`-separated PATH entries). That content is always forward-slash + `:` even on
+// Windows, where it runs under Git Bash / WSL — so we join with `path.posix`, not
+// the platform-default `path.join` (which would emit backslashes on win32). #43.
 export function miseShimsDir(home = homedir()): string {
-  return join(home, ".local", "share", "mise", "shims");
+  return posix.join(home, ".local", "share", "mise", "shims");
 }
 
 /** Is `dir` an exact entry in a `:`-separated PATH string? */

@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-06-27
+
+kit 2.1 (Reach) — native Windows. The build + ~all tests already ran on windows-latest; this closes the remaining cross-platform gaps so kit runs natively on Windows (PowerShell/cmd), not only via WSL2.
+
+### Fixed
+
+- **Native Windows: 17 cross-platform test/runtime gaps closed** (verified on a windows-latest CI runner). Path handling made separator-agnostic (`path.isAbsolute`, `path.relative` containment, `path.posix.join` for shell-profile content, manual `/`+`\\` split for repo-name derivation); bare-tool resolution uses `where` on win32 (the `mise which` fast path already worked); plugin adapters import via `pathToFileURL` (a bare `C:\\...` path is not a valid ESM URL); `~/.kit/bin/kit` now also emits a managed `kit.cmd` shim on Windows; secret-file hardening asserts the platform-appropriate guarantee (icacls on NTFS, `0600` on POSIX); bumblebee cache-reuse + integrity no longer short-circuit on the platform gate. The `public-surface` golden snapshot is canonicalized (forward-slash + LF, pinned via `.gitattributes eol=lf`) so one committed snapshot matches macOS, Linux, and Windows.
+- `docs/PLATFORM_SUPPORT.md` updated to reflect that native Windows now builds + passes the suite (residual gaps documented honestly, e.g. the bumblebee scanner binary ships POSIX-only so it honest-skips on native Windows).
+
 ## [2.1.0] - 2026-06-27
 
 kit 2.1 (Reach), part 1 — make kit's governance fire everywhere a fleet actually runs.

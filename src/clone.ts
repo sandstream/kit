@@ -1,5 +1,5 @@
 import { access, constants } from "node:fs/promises";
-import { resolve, basename } from "node:path";
+import { resolve } from "node:path";
 import { exec } from "./utils/exec.js";
 
 export interface CloneOptions {
@@ -33,10 +33,18 @@ export async function cloneRepository(opts: CloneOptions): Promise<CloneResult> 
 
   // Derive target directory from repo URL if not provided
   // e.g., "https://github.com/user/my-repo.git" → "my-repo"
+  // Split on BOTH separators ourselves rather than path.basename: a repo URL
+  // always uses "/", but path.basename is platform-routed (win32 basename also
+  // splits on "\\"), so deriving the name by hand keeps it identical on every
+  // OS and independent of the local path flavour. #43.
   let targetDir = opts.targetDir;
   if (!targetDir) {
-    const repoName = basename(repoUrl).replace(/\.git$/, "");
-    targetDir = repoName;
+    const lastSegment =
+      repoUrl
+        .replace(/[/\\]+$/, "")
+        .split(/[/\\]/)
+        .pop() ?? repoUrl;
+    targetDir = lastSegment.replace(/\.git$/, "");
   }
 
   const clonedPath = resolve(cwd, targetDir);

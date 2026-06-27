@@ -57,6 +57,16 @@ export function kitWrapperPath(home = homedir()): string {
 }
 
 /**
+ * Absolute path of the Windows companion shim (`kit.cmd`). On native Windows the
+ * POSIX `kit` wrapper is not runnable by cmd/PowerShell (no shebang, no exec
+ * bit), so we additionally emit a `.cmd` batch shim that does the same job:
+ * prepend the tool dirs to PATH, then invoke the real kit via node + cli.js. #43.
+ */
+export function kitCmdWrapperPath(home = homedir()): string {
+  return join(kitBinDir(home), "kit.cmd");
+}
+
+/**
  * The PATH dirs the wrapper prepends, in priority order. Pure: drives both the
  * generated script and the "would this resolve kit in a non-login shell?" test.
  */
@@ -87,6 +97,31 @@ export function generateKitWrapper(spec: WrapperSpec): string {
     `exec "${spec.nodePath}" "${spec.cliPath}" "$@"`,
     "",
   ].join("\n");
+}
+
+/**
+ * Emit the Windows `.cmd` companion shim for a resolved spec. Batch syntax: set
+ * PATH for this process, then run node + cli.js forwarding all args (`%*`). The
+ * marker keeps it self-describing and lets ensureKitWrapper detect its own shim.
+ */
+export function generateKitCmdWrapper(spec: WrapperSpec): string {
+  const dirs = wrapperPathDirs(spec);
+  const pathLine = dirs.length
+    ? `set "PATH=${dirs.join(";")};%PATH%"`
+    : "rem no mise shims or npm global bin detected at install time";
+  // CRLF line endings: cmd.exe is the consumer, and a bare-LF .cmd can misparse.
+  // The marker line carries the FULL WRAPPER_MARKER verbatim (the leading "# " is
+  // harmless after `rem`) so the managed-check `includes(WRAPPER_MARKER)` matches
+  // the .cmd shim exactly as it matches the POSIX wrapper. #43.
+  return [
+    "@echo off",
+    `rem ${WRAPPER_MARKER}`,
+    "rem Restores the tool PATH a non-login hook shell drops, then runs the real",
+    "rem kit by absolute node + cli.js. Edit kit, not this file.",
+    pathLine,
+    `"${spec.nodePath}" "${spec.cliPath}" %*`,
+    "",
+  ].join("\r\n");
 }
 
 export interface EnsureWrapperOpts {
@@ -138,16 +173,38 @@ export function ensureKitWrapper(opts: EnsureWrapperOpts = {}): EnsureWrapperRes
       };
     }
     if (current === desired) {
+      // Even when the POSIX wrapper is current, make sure the Windows companion
+      // shim exists (e.g. a wrapper written by an older kit predates it).
+      ensureCmdShim(home, spec);
       return { path, action: "unchanged", detail: "already up to date" };
     }
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, desired, "utf-8");
     chmodSync(path, 0o755);
+    ensureCmdShim(home, spec);
     return { path, action: "updated", detail: "refreshed node/cli/PATH" };
   }
 
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, desired, "utf-8");
   chmodSync(path, 0o755);
+  ensureCmdShim(home, spec);
   return { path, action: "written", detail: "created self-healing wrapper" };
+}
+
+/**
+ * On native Windows, write the `kit.cmd` companion next to the POSIX wrapper so
+ * cmd/PowerShell can actually run it (the POSIX `kit` file has no shebang/exec
+ * bit there). No-op on POSIX, where the sh wrapper is the only artifact. #43.
+ */
+function ensureCmdShim(home: string, spec: WrapperSpec): void {
+  if (process.platform !== "win32") return;
+  const cmdPath = kitCmdWrapperPath(home);
+  const desired = generateKitCmdWrapper(spec);
+  if (existsSync(cmdPath)) {
+    const current = readFileSync(cmdPath, "utf-8");
+    if (!current.includes(WRAPPER_MARKER) || current === desired) return;
+  }
+  mkdirSync(dirname(cmdPath), { recursive: true });
+  writeFileSync(cmdPath, desired, "utf-8");
 }
