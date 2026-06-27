@@ -1503,6 +1503,15 @@ async function cmdAgentConfig(): Promise<boolean> {
     `\n${c.dim}Blocks regenerate in place on re-run; edit outside the markers freely. ` +
       `Mutating kit commands (secrets/fix/hooks) still prompt by design.${c.reset}`,
   );
+  console.log(
+    `\n${c.bold}Agent support${c.reset} ${c.dim}(what kit wires up per agent):${c.reset}\n` +
+      `  ${c.dim}· Memory index: Claude Code, Codex, Cursor, Cline, Gemini, Continue, Amazon Q, OpenCode${c.reset}\n` +
+      `  ${c.dim}· "use kit" rules block: Claude Code, Codex, Cursor, Cline, OpenCode${c.reset}\n` +
+      `  ${c.dim}· Config/secret audit (kit agent-audit): Claude Code, Codex, Cursor, OpenCode (+ generic .mcp.json)${c.reset}\n` +
+      `  ${c.dim}· Permission allowlist + auto-capture hooks: Claude Code${c.reset}\n` +
+      `  ${c.dim}· Blocking install-gate (PreToolUse): planned — verified for Claude Code/Codex/Amazon Q (see issue #146)${c.reset}\n` +
+      `  ${c.dim}The agent-agnostic enforcement floor is git hooks (${c.reset}${c.bold}kit hooks${c.reset}${c.dim}); the rules block only advises.${c.reset}`,
+  );
   return !failed;
 }
 
