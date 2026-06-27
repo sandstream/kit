@@ -139,6 +139,7 @@ import { cmdTriage } from "./commands/triage.js";
 import { parsePkgSpec, installPkg } from "./pkg.js";
 import { cmdMemory } from "./commands/memory.js";
 import { resolveKitRoot, runSelfAudit, SELF_AUDIT_RULES } from "./self-audit.js";
+import { buildCoverageReport, formatCoverageText, type Bucket } from "./coverage/coverage.js";
 import { escapeWorkflowCmd, xmlEscape } from "./utils/ci-escape.js";
 
 // Re-exported for tests + downstream emitters (ci-escaping.test.ts imports these
@@ -3551,6 +3552,43 @@ async function cmdSelfAudit(): Promise<boolean> {
 }
 
 /**
+ * `kit coverage` — map kit's deterministic checks to the vendored OWASP ASVS L2
+ * subset and report which controls kit auto-verifies vs gap / manual / n/a.
+ *
+ * This is an EVIDENCE map, not a compliance attestation: it never claims kit
+ * makes a project "compliant" or "certified". It is the deterministic evidence
+ * source a GRC tool (Vanta, Drata, ...) consumes — not a replacement for one.
+ * Output is fully deterministic (the report is pure), so it is safe to diff in CI.
+ */
+function cmdCoverage(): boolean {
+  const args = process.argv.slice(2);
+  const formatArg = args.find((a) => a.startsWith("--format="))?.split("=")[1];
+  const jsonMode = hasFlag(args, "--json") || formatArg === "json";
+
+  const report = buildCoverageReport();
+
+  if (jsonMode) {
+    console.log(JSON.stringify(report, null, 2));
+    return true;
+  }
+
+  const colorBucket = (bucket: Bucket, label: string): string => {
+    const tint =
+      bucket === "auto"
+        ? c.green
+        : bucket === "gap"
+          ? c.yellow
+          : bucket === "manual"
+            ? c.cyan
+            : c.dim;
+    return `${tint}${label}${c.reset}`;
+  };
+
+  console.log(formatCoverageText(report, colorBucket));
+  return true;
+}
+
+/**
  * Collapse advisory (info) checks into one aggregated row per detection class.
  * Label is derived from the class slug so the line reads e.g.
  * "self-audit/toolchain-pin: 72 third-party CLI execs (advisory)".
@@ -5056,6 +5094,8 @@ export const COMMAND_HELP: Record<string, string> = {
   review: "Full repo audit — runs check + design in one gate (for agents / PR checks)",
   "self-audit":
     "Audit kit's own source against its 12 self-hardening rules (--list-rules, --only=<ids>, --format)",
+  coverage:
+    "Evidence map: which OWASP ASVS L2 controls kit's deterministic checks auto-verify vs gap/manual/n-a (NOT a compliance attestation; --json for GRC tools)",
   design: "Check design quality (a11y, design tokens) against the baseline",
   baseline:
     "Freeze current warnings into .kit-baseline.json so future runs gate only net-new findings",
@@ -5248,7 +5288,7 @@ function cmdHelp(subcommand?: string): boolean {
         "health",
       ],
     ],
-    ["Review & quality", ["review", "design", "baseline", "analyze"]],
+    ["Review & quality", ["review", "design", "coverage", "baseline", "analyze"]],
     ["Secrets & environments", ["secrets", "env", "login"]],
     [
       "Security & supply chain",
@@ -5639,6 +5679,7 @@ export const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
   plugin: cmdPlugin,
   ci: cmdCi,
   "self-audit": cmdSelfAudit,
+  coverage: cmdCoverage,
   clone: cmdClone,
   run: cmdRun,
   open: cmdOpen,
@@ -5707,6 +5748,7 @@ export const COMMAND_TIERS: Record<string, CommandTier> = {
   plugin: "stable",
   ci: "stable",
   "self-audit": "stable",
+  coverage: "experimental",
   clone: "stable",
   run: "stable",
   open: "stable",
