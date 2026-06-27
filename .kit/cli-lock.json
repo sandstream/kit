@@ -10,6 +10,16 @@
       "version": "latest",
       "source": "mise",
       "installedAt": "2026-03-30T15:48:16.532Z"
+    },
+    "trivy": {
+      "version": "latest",
+      "source": "mise",
+      "installedAt": "2026-06-27T20:56:16.000Z"
+    },
+    "trufflehog": {
+      "version": "latest",
+      "source": "mise",
+      "installedAt": "2026-06-27T20:56:16.000Z"
     }
   }
 }
