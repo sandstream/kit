@@ -112,8 +112,7 @@ function readMessages(storage: string): Map<string, MsgInfo> {
     const role = msg.role;
     if (role !== "user" && role !== "assistant") continue;
     const id = typeof msg.id === "string" ? msg.id : basename(f, ".json").replace(/^msg_/, "");
-    const sessionId =
-      typeof msg.sessionID === "string" ? msg.sessionID : basename(join(f, "..")); // parent dir
+    const sessionId = typeof msg.sessionID === "string" ? msg.sessionID : basename(join(f, "..")); // parent dir
     messages.set(id, { sessionId, role, timestamp: timeOf(msg) });
   }
   return messages;

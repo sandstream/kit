@@ -22,12 +22,23 @@ function writeFixture(root: string): void {
   );
   writeFileSync(
     join(msgDir, "msg_1.json"),
-    JSON.stringify({ id: "msg_1", sessionID: ses, role: "user", time: { created: 1_700_000_000_000 } }),
+    JSON.stringify({
+      id: "msg_1",
+      sessionID: ses,
+      role: "user",
+      time: { created: 1_700_000_000_000 },
+    }),
   );
   // Content lives in a separate part file, grouped via its messageID.
   writeFileSync(
     join(partDir, "prt_1.json"),
-    JSON.stringify({ id: "prt_1", sessionID: ses, messageID: "msg_1", type: "text", text: "deploy the staging cluster" }),
+    JSON.stringify({
+      id: "prt_1",
+      sessionID: ses,
+      messageID: "msg_1",
+      type: "text",
+      text: "deploy the staging cluster",
+    }),
   );
   // An ignored/empty part and a non-text part must NOT contribute content.
   writeFileSync(
@@ -63,7 +74,11 @@ describe("indexOpenCodeSessions", () => {
     assert.equal(res.sessions, 1, "one session recorded");
     const hits = searchMessages(db, "staging cluster");
     assert.equal(hits.length, 1);
-    assert.equal(hits[0].content, "deploy the staging cluster", "only the text part, no tool/ignored parts");
+    assert.equal(
+      hits[0].content,
+      "deploy the staging cluster",
+      "only the text part, no tool/ignored parts",
+    );
   });
 
   it("is idempotent on re-run (stable uuids dedupe)", () => {
