@@ -4,6 +4,8 @@
 
 For AI agents and humans. Manages tools, auth, secrets, and project setup. Zero LLM calls, local-first, multi-vault.
 
+**kit 2.0** makes its two promises concrete: `green = honest` is now externally _provable_ (kit can emit a signed receipt, anchored to a key its own process cannot recompute, proving which scanners actually ran and that none failed open, verifiable offline), and kit's CLI, config schema, and plugin SDK are frozen, versioned contracts that will not break across any 2.x release. See [Stability & contracts](#stability--contracts).
+
 🌐 [sandstre.am/kit](https://sandstre.am/kit)
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/sandstream)
@@ -123,6 +125,13 @@ kit is a security tool, so it holds itself to the bar it sets. The receipts:
   memory store for leaked keys. A stolen _repo_ should contain no live secrets.
 - **Supply chain is gated, not trusted.** `kit triage` runs before any install — fail-closed,
   "installs nothing untriaged" (aligns with OpenSSF S2C2F).
+- **Green you can prove.** `kit scan`'s verdict accounts for scanner _health_, not just findings, so
+  a crashed, missing, or token-less scanner can no longer exit 0 silently (opt in to a hard fail with
+  `kit ci --strict` or `[governance.scan].required_scanners`). `kit check --attest` writes a signed
+  receipt of which scanners actually ran plus the verdict, sealed with a machine-local anchor key; the
+  `.kit-audit.jsonl` chain can be sealed with `kit audit anchor`. Honest scope: the anchor raises
+  forgery from "anyone who can write the log" to "someone who can read the `0600` key", it is **not**
+  tamper-proof against a same-UID local principal (that needs the documented external TSA anchor).
 - **Local-first, zero LLM, no telemetry.** Your code never leaves the machine.
 
 > At-rest note: kit's local memory store (`~/.kit/memory.db`, `0600`) relies on OS full-disk
@@ -187,6 +196,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit scan`: Run external scanners (snyk/trivy/grype/semgrep/osv/socket) → one merged, air-gap-aware verdict
 - `kit supply-chain` / `kit sbom` / `kit gha-audit` / `kit agent-audit`: Install-time triage, SBOM, Actions hardening, agent/MCP/hook audit
 - `kit self-audit`: Deterministic self-check of kit's own source against the audit's bug-classes (also asserts CI-referenced scripts exist)
+- `kit coverage`: OWASP ASVS L2 evidence map showing which controls kit's deterministic checks auto-verify vs gap/manual/n-a (an evidence map, not a compliance attestation; `--json` for GRC tools)
 - `kit sentinel {run,install,status}`: Autonomous redline watcher (propose/apply guarded fixes)
 - `kit verify-provenance` / `kit ingest`: Verify SLSA provenance offline; ingest external SARIF/OSV
 - `kit login --plan`: Show the resolved auth strategy (vault/capture/interactive) per service without logging in
@@ -199,7 +209,10 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit triage {npm,pip,docker,repo,skill}`: Pre-install security check
 - `kit security {scan-build,scan-staged,verify-pull,costs,policy}`: Security ops
 - `kit hooks {install,add,sync}`: Git hooks + bypass detector
-- `kit governance` / `kit audit`: Policy + audit-log inspection
+- `kit governance` / `kit audit {secrets,verify,anchor,export}`: Policy + audit-log inspection; `anchor`/`verify` seal and check the external HMAC anchor
+- `kit check --attest` (also `kit ci --attest` / `KIT_ATTEST=1`): Opt-in signed receipt of which scanners ran + the verdict; `kit check verify-attestation <file>` verifies it
+- `kit config migrate`: Migrate a versioned `.kit.toml` to the current schema (`--dry-run` default, auto-backup, re-validate-or-restore, `--check` for CI)
+- `kit airgap verify`: Prove every scanner that would run in air-gap mode resolves to a local artifact (no egress)
 - `kit --read-only <subcommand>`: Session-wide refusal of all writes
 
 ### What you'll see
@@ -383,6 +396,9 @@ Production credentials are gated behind explicit env-switching and short-lived e
 - `kit auth status`: Show active elevation
 - `kit auth revoke`: Drop the elevation marker early
 - `kit audit secrets [--since-days N] [--key <name>]`: Forensics: who touched which key, when
+- `kit audit verify [--strict]`: Verify the keyless hash chain + the external HMAC anchor (a tip mismatch is a keyless prefix rewrite, a count mismatch is truncation/rollback). `--strict` (or `[governance.audit].require_anchor`, or once the machine has anchored any log) turns an unanchored log / unreadable key / unsealed tail into a hard failure, so a project-writable `log_file` cannot repoint verification at a forged, never-anchored file and pass
+- `kit audit anchor`: Seal the current log with the machine-local anchor key (`~/.kit/audit-anchor.key`, `0600`) so a later keyless rewrite or truncation is detectable. The append path stays keyless (a sandboxed agent with no key keeps logging); the key is only needed to seal/verify. Key rotation reports as a distinct `anchor-key-changed` status, not a false tamper alarm. Honest scope: this is not tamper-proof against a same-UID principal who can read the key
+- `kit check --attest` / `kit ci --attest` / `KIT_ATTEST=1`: opt-in, fail-soft (never blocks or alters the verdict). Writes `.kit-check-attestation.json` recording which scanners actually ran plus the verdict, signed with the machine-local anchor key (authoritative; the verifier needs that key). An Ed25519 receipt is a portable fallback whose embedded public key is **untrusted**: `kit check verify-attestation <file>` reports `unverified-authenticity` (not green) unless the key is pinned (TOFU in `~/.kit`, refuses silent overwrite) or passed via `--key`
 
 ### Context lock
 
@@ -418,8 +434,24 @@ Context pointers are non-secret and live in config; the credentials they authent
 - `kit triage npm|pip|docker|repo|skill <target>`: Pre-install security evaluation via triage skill
 - `kit triage npm <pkg> --sandbox`: Offline behavioral inspection: `npm pack` → extract → scan for install scripts, eval/base64/network patterns, unexpected scripts, oversized files. No code executes
 - `kit scan`: Run the installed external scanners (Snyk, Trivy, Grype, Semgrep, osv-scanner, Socket) and merge them into one local, air-gap-aware verdict. **GuardDog** (opt-in via `KIT_GUARDDOG=1` or `[scan] guarddog`) adds local malware detection. The **cloud** scanners (Snyk, Socket) run when their token is set (`SNYK_TOKEN` / `SOCKET_SECURITY_API_TOKEN`, resolved from `[scan.tooling]` vault or env — kit never stores them) and are **dropped in air-gap** mode; `kit setup` asks the network posture (connected vs enclave) and writes `[air_gap]`. Socket has no stable findings-JSON, so kit gates on `socket ci`'s exit code (never false-green). Token absent → the scanner is skipped, not failed
+- **Scanner-health gate.** The exit verdict accounts for scanner _health_, not just findings: a scanner that errored, isn't installed, or lacked its token can no longer exit 0 (a false green). Default is a loud warn (no existing green CI breaks); opt in to a hard fail via `[governance.scan].required_scanners` (a listed scanner that didn't run fails) or `kit ci --strict` / `KIT_CI_STRICT=1` (any non-running scanner fails)
+- `kit airgap verify`: assert every scanner that would run in air-gap mode resolves to a local artifact (no cloud-only scanner, no registry config) and print a pass/fail table. In air-gap mode a registry (`p/…`) `KIT_SEMGREP_CONFIG` is refused in both scan paths (it would egress to the semgrep registry), while a **local** ruleset path is kept so semgrep can still run fully offline
 - Supply-chain findings auto-append to `.kit-audit.jsonl` (one JSON line per finding) for SIEM ingest
 - Releases ship with SLSA provenance (`npm publish --provenance`), CycloneDX + SPDX SBOMs on every GitHub release, cosign-signed Docker images, and weekly OpenSSF Scorecard
+
+### Compliance evidence
+
+`kit coverage` emits a deterministic OWASP ASVS 4.0.3 L2 _evidence map_: it maps kit's own checks and self-audit rules to a vendored, pinned, curated subset of controls and buckets each as auto-verified, gap, manual, or n-a. `--json` (or `--format=json`) emits the structured report for a GRC tool to consume.
+
+It is explicitly **an evidence map, not a compliance attestation**: it never claims "compliant". The goal is to be the deterministic evidence source a GRC tool ingests, not a worse version of one. (`experimental` tier.)
+
+### Stability & contracts
+
+As of 2.0, kit's public surfaces are versioned contracts, not just code that happens to work today.
+
+- **Command stability tiers.** Every command carries a `stable | experimental | deprecated` tier. `stable` commands will not be removed, renamed, or have their exit-code / `--json` semantics broken across 2.x (additive-only in minor releases). All shipped commands are `stable` except `team` (`experimental`); `deprecated` commands print a stderr warning every run. A committed `contracts/public-surface.json` golden snapshot plus a drift test enforce this: a surface change fails CI until it is reviewed, regenerated, and labeled `BREAKING`. See [docs/CLI_STABILITY.md](docs/CLI_STABILITY.md).
+- **Versioned `.kit.toml`.** The config carries a top-level `version` (`CONFIG_SCHEMA_VERSION = 1`; an absent field is treated as legacy v0). `kit config migrate` runs an ordered, fixture-tested migration from the detected version to the current one: `--dry-run` (the default, which prints the plan and a value-level diff and writes nothing), a real run writes `.kit.toml.backup` first (refuses to clobber an existing backup without `--force`) then re-parses and validates the result and restores the original on any failure, and `--check` exits non-zero on a stale config for CI. **Upgrade note:** run `kit config migrate` once; v1 is the baseline (a no-op version stamp), so nothing breaks today, but the migration path is now in place for any future schema change.
+- **`adapter-sdk@1.0`** is frozen on its own semver track, decoupled from kit's version, with a documented public surface, a kit-compatibility matrix, and caret-pin guidance (see [docs/API_STABILITY_AND_VERSIONING.md](docs/API_STABILITY_AND_VERSIONING.md)).
 
 ## Memory
 
