@@ -30,6 +30,7 @@ import {
 } from "../memory/shared.js";
 import {
   userPromptSubmitReminder,
+  maybeStartMidSessionIndex,
   runSessionEndIndex,
   sessionStartRecovery,
 } from "../memory/hook.js";
@@ -464,6 +465,7 @@ async function memHook(): Promise<boolean> {
   // Internal: invoked by Claude Code hooks. Fail-open — never block.
   const event = process.argv[4];
   if (event === "user-prompt-submit") {
+    maybeStartMidSessionIndex(); // debounced, detached — keeps recall fresh mid-session
     const text = userPromptSubmitReminder();
     if (text) console.log(text);
     return true;
