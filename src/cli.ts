@@ -1511,7 +1511,7 @@ async function cmdAgentConfig(): Promise<boolean> {
       `  ${c.dim}· "use kit" rules block: Claude Code, Codex, Cursor, Cline, OpenCode${c.reset}\n` +
       `  ${c.dim}· Config/secret audit (kit agent-audit): Claude Code, Codex, Cursor, OpenCode (+ generic .mcp.json)${c.reset}\n` +
       `  ${c.dim}· Permission allowlist + auto-capture hooks: Claude Code${c.reset}\n` +
-      `  ${c.dim}· Blocking install-gate: Claude Code, Codex, Amazon Q, Gemini CLI, Cursor (hooks) + OpenCode (plugin); Cline/Continue tracked in #146${c.reset}\n` +
+      `  ${c.dim}· Blocking install-gate: Claude Code, Codex, Amazon Q, Gemini CLI, Cursor (hooks), OpenCode (plugin), Cline (PreToolUse shim); Continue has no gate surface (#146)${c.reset}\n` +
       `  ${c.dim}The agent-agnostic enforcement floor is git hooks (${c.reset}${c.bold}kit hooks${c.reset}${c.dim}); the rules block only advises.${c.reset}`,
   );
   return !failed;
@@ -5689,29 +5689,38 @@ export async function cmdGateBash(): Promise<boolean> {
   } catch {
     return true; // no stdin / read error → do not block
   }
-  let payload: { tool_name?: string; tool_input?: { command?: unknown }; command?: unknown };
+  let payload: {
+    tool_name?: string;
+    tool_input?: { command?: unknown };
+    command?: unknown;
+    preToolUse?: { toolName?: string; parameters?: { command?: unknown } };
+  };
   try {
     payload = raw ? JSON.parse(raw) : {};
   } catch {
     return true; // unparseable hook payload → do not block (avoid breaking the agent)
   }
-  // Agent-agnostic command extraction. Claude Code / Codex / Amazon Q / Gemini put
-  // the shell command in tool_input.command (only tool_name differs — "Bash" vs
-  // "execute_bash"); Cursor's beforeShellExecution puts it at top-level `command`.
-  // Tolerate array-form (bin + args). exit 2 = deny across all of them.
-  const rawCmd = payload?.tool_input?.command ?? payload?.command;
-  const command =
-    typeof rawCmd === "string"
-      ? rawCmd
-      : Array.isArray(rawCmd)
-        ? rawCmd.filter((x): x is string => typeof x === "string").join(" ")
-        : "";
+  // Agent-agnostic command extraction (Claude/Codex/Amazon Q/Gemini tool_input.command,
+  // Cursor top-level command, Cline preToolUse.parameters.command) — shared pure helper.
+  const { decideBashGate, extractCommandFromHookPayload } = await import("./install-gate.js");
+  const command = extractCommandFromHookPayload(payload);
   if (!command) {
     return true; // no shell command in this tool call → allow
   }
-  const { decideBashGate } = await import("./install-gate.js");
   const verdict = await decideBashGate(command);
   if (verdict.block) {
+    // Cline blocks via a stdout JSON {cancel:true} contract (HookOutputSchema),
+    // NOT exit 2 — so `--format cline` emits that and exits 0; every other agent
+    // uses the exit-2 PreToolUse deny.
+    if (gateFormat() === "cline") {
+      console.log(
+        JSON.stringify({
+          cancel: true,
+          errorMessage: `kit install-gate: ${verdict.reason} — triage first (kit triage …) or install via kit pkg <eco>:<name>`,
+        }),
+      );
+      return true;
+    }
     const { writeSync } = await import("node:fs");
     writeSync(
       2,
@@ -5720,6 +5729,15 @@ export async function cmdGateBash(): Promise<boolean> {
     process.exit(2); // PreToolUse deny
   }
   return true;
+}
+
+/** The `--format <fmt>` value for gate-bash (`--format cline` | `--format=cline`). */
+function gateFormat(): string {
+  const argv = process.argv;
+  const eq = argv.find((a) => a.startsWith("--format="));
+  if (eq) return eq.slice("--format=".length);
+  const i = argv.indexOf("--format");
+  return i !== -1 && i + 1 < argv.length ? argv[i + 1] : "";
 }
 
 // Single source of truth for kit's top-level command surface. Every key here MUST

@@ -189,3 +189,25 @@ export async function decideBashGate(command: string, deps?: GateDeps): Promise<
     checked,
   };
 }
+
+/**
+ * Extract the shell command from an agent's PreToolUse-style hook payload,
+ * across every wire shape kit's `gate-bash` handler supports:
+ *   - Claude Code / Codex / Amazon Q / Gemini → `tool_input.command`
+ *   - Cursor `beforeShellExecution`            → top-level `command`
+ *   - Cline `PreToolUse`                       → `preToolUse.parameters.command`
+ *     (verified against @cline/shared `PreToolUseData {toolName, parameters}`)
+ * Tolerates array-form (`[bin, ...args]`) by joining on spaces. Returns "" when
+ * the tool call carries no shell command (→ the gate allows it). Pure.
+ */
+export function extractCommandFromHookPayload(payload: unknown): string {
+  const p = (payload ?? {}) as {
+    tool_input?: { command?: unknown };
+    command?: unknown;
+    preToolUse?: { parameters?: { command?: unknown } };
+  };
+  const raw = p.tool_input?.command ?? p.preToolUse?.parameters?.command ?? p.command;
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === "string").join(" ");
+  return "";
+}
