@@ -80,7 +80,10 @@ const MATCHERS: Matcher[] = [
     argStart: (t) => {
       const bin = t[0];
       if (bin === "npm" && /^(install|i|add)$/.test(t[1] ?? "")) return 2;
-      if ((bin === "pnpm" || bin === "yarn" || bin === "bun") && /^(add|install|i)$/.test(t[1] ?? ""))
+      if (
+        (bin === "pnpm" || bin === "yarn" || bin === "bun") &&
+        /^(add|install|i)$/.test(t[1] ?? "")
+      )
         return 2;
       return -1;
     },
@@ -157,10 +160,7 @@ export interface BashGateVerdict {
  * target via `gateInstall`. Fail-closed — any blocked target, or any
  * unverifiable in-scope arg, blocks the whole command.
  */
-export async function decideBashGate(
-  command: string,
-  deps?: GateDeps,
-): Promise<BashGateVerdict> {
+export async function decideBashGate(command: string, deps?: GateDeps): Promise<BashGateVerdict> {
   const probe = parseInstallCommand(command);
   if (!probe.isInstall) {
     return { block: false, reason: "no in-scope package install detected", checked: [] };
