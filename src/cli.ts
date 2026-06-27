@@ -5689,16 +5689,17 @@ export async function cmdGateBash(): Promise<boolean> {
   } catch {
     return true; // no stdin / read error → do not block
   }
-  let payload: { tool_name?: string; tool_input?: { command?: unknown } };
+  let payload: { tool_name?: string; tool_input?: { command?: unknown }; command?: unknown };
   try {
     payload = raw ? JSON.parse(raw) : {};
   } catch {
     return true; // unparseable hook payload → do not block (avoid breaking the agent)
   }
-  // Agent-agnostic: Claude Code, Codex, and Amazon Q all pass the shell command in
-  // tool_input.command (only the tool_name differs — "Bash" vs "execute_bash"), so
-  // extract it regardless of tool_name. Tolerate array-form (bin + args).
-  const rawCmd = payload?.tool_input?.command;
+  // Agent-agnostic command extraction. Claude Code / Codex / Amazon Q / Gemini put
+  // the shell command in tool_input.command (only tool_name differs — "Bash" vs
+  // "execute_bash"); Cursor's beforeShellExecution puts it at top-level `command`.
+  // Tolerate array-form (bin + args). exit 2 = deny across all of them.
+  const rawCmd = payload?.tool_input?.command ?? payload?.command;
   const command =
     typeof rawCmd === "string"
       ? rawCmd
