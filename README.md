@@ -259,23 +259,23 @@ adapters for the surfaces each agent exposes. Support today, per agent:
 
 | Agent | Memory index¹ | "use kit" rules block² | Agent/MCP config audit³ | Perm allowlist⁴ | Auto-capture hooks⁵ | Blocking gate⁶ |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Claude Code** | ✅ | ✅ `CLAUDE.md` | ✅ + commands/agents/skills/plugins | ✅ | ✅ | 🔜 verified |
-| **OpenAI Codex** | ✅ | ✅ `AGENTS.md` | ✅ `.codex/config` | — | — | 🔜 verified |
-| **OpenCode** | ✅ | ✅ `AGENTS.md` | ✅ `opencode.json` | — | — | 🔎 research |
-| **Cursor** | ✅ | ✅ `.cursorrules` | ✅ `.cursor/mcp.json` | — | — | 🔎 research |
+| **Claude Code** | ✅ | ✅ `CLAUDE.md` | ✅ + commands/agents/skills/plugins | ✅ | ✅ | ✅ hook |
+| **OpenAI Codex** | ✅ | ✅ `AGENTS.md` | ✅ `.codex/config` | — | — | ✅ hook |
+| **OpenCode** | ✅ | ✅ `AGENTS.md` | ✅ `opencode.json` + `.opencode/plugin` | — | — | ✅ plugin |
+| **Cursor** | ✅ | ✅ `.cursorrules` | ✅ `.cursor/mcp.json` | — | — | ✅ hook |
 | **Cline** | ✅ | ✅ `.clinerules` | — | — | — | 🔎 research |
-| **Gemini CLI** | ✅ | — | — | — | — | 🔎 research |
+| **Gemini CLI** | ✅ | — | — | — | — | ✅ hook |
 | **Continue** | ✅ | — | — | — | — | 🔎 research |
-| **Amazon Q** | ✅ | — | — | — | — | 🔜 verified |
+| **Amazon Q** | ✅ | — | — | — | — | ✅ hook |
 
-✅ supported · — not yet · 🔜 planned, agent's blocking-hook capability verified · 🔎 planned, needs research ([#146](https://github.com/sandstream/kit/issues/146))
+✅ supported · — not yet · 🔎 planned, needs research ([#146](https://github.com/sandstream/kit/issues/146))
 
 1. `kit memory index` parses the agent's local transcripts into the shared store.
 2. `kit agent-config` writes the managed "run kit before installs / vault secrets" block into the agent's rules file.
 3. `kit agent-audit` flags plaintext secrets, cleartext/inline-code MCP servers, and malware-shaped hooks in the agent's config. Generic `.mcp.json` / `.claude.json` are scanned for every agent regardless.
 4. kit can pre-authorize its read-only commands so they run without a prompt (Claude Code's `permissions.allow` today).
 5. kit registers lifecycle hooks so memory capture happens automatically (Claude Code `settings.json` hooks today).
-6. A **true blocking gate** (deny an un-triaged install before it runs) requires the agent's `PreToolUse`-style hook. Verified available for Claude Code, Codex, and Amazon Q; the rest need a research pass. Until then, the agent-agnostic enforcement floor is **git hooks** (`kit hooks`, pre-commit/pre-push) — they fire in any agent or none. See [#146](https://github.com/sandstream/kit/issues/146).
+6. A **true blocking gate** (deny an un-triaged install before it runs) uses the agent's `PreToolUse`-style hook — `kit agent-config --install-gate` wires it for Claude Code, Codex, Amazon Q, Gemini CLI, and Cursor (exit-2 hook commands), and for OpenCode via a generated `.opencode/plugin` that hooks `tool.execute.before` and throws to block. Cline (JSON-cancel protocol) and Continue (unverified) still need a research pass. The agent-agnostic enforcement floor is **git hooks** (`kit hooks`, pre-commit/pre-push) — they fire in any agent or none. See [#146](https://github.com/sandstream/kit/issues/146).
 
 > The git-hook layer enforces at the VCS boundary regardless of agent; the rules-file block is **advisory** (it reminds the agent); only the blocking-gate hook **enforces** before an action runs.
 

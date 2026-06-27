@@ -15,8 +15,10 @@ import {
   installInstallGateAmazonQ,
   installInstallGateGemini,
   installInstallGateCursor,
+  installInstallGateOpenCode,
   READONLY_KIT_PERMISSIONS,
 } from "./agent-config.js";
+import { pathToFileURL } from "node:url";
 
 function tmpRepo(): string {
   return mkdtempSync(join(tmpdir(), "kit-agentcfg-"));
@@ -410,6 +412,49 @@ describe("installInstallGateCursor", () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-cursorgate2-"));
     try {
       assert.equal((await installInstallGateCursor(dir)).action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installInstallGateOpenCode", () => {
+  it("writes a tool.execute.before plugin that loads as a module, idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-ocgate-"));
+    try {
+      mkdirSync(join(dir, ".opencode"), { recursive: true });
+      const r1 = await installInstallGateOpenCode(dir);
+      assert.equal(r1.action, "created");
+      const pluginPath = join(dir, ".opencode", "plugin", "kit-install-gate.js");
+      assert.ok(existsSync(pluginPath));
+      const body = readFileSync(pluginPath, "utf-8");
+      assert.ok(body.includes("tool.execute.before"), "hooks the documented block point");
+      assert.ok(body.includes("gate-bash"), "invokes kit gate-bash");
+      // The generated plugin must be a loadable ESM module exporting the hook factory.
+      const mod = await import(pathToFileURL(pluginPath).href);
+      assert.equal(typeof mod.kitInstallGate, "function");
+      const hooks = await mod.kitInstallGate();
+      assert.equal(typeof hooks["tool.execute.before"], "function");
+      // Non-bash tools are ignored (no spawn, no throw).
+      await hooks["tool.execute.before"]({ tool: "read" }, { args: {} });
+      assert.equal((await installInstallGateOpenCode(dir)).action, "unchanged");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("detects an opencode.json project even without a .opencode dir", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-ocgate2-"));
+    try {
+      writeFileSync(join(dir, "opencode.json"), "{}");
+      assert.equal((await installInstallGateOpenCode(dir)).action, "created");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  it("skips when no OpenCode project is present", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-ocgate3-"));
+    try {
+      assert.equal((await installInstallGateOpenCode(dir)).action, "skipped");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

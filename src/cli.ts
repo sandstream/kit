@@ -1511,7 +1511,7 @@ async function cmdAgentConfig(): Promise<boolean> {
       `  ${c.dim}· "use kit" rules block: Claude Code, Codex, Cursor, Cline, OpenCode${c.reset}\n` +
       `  ${c.dim}· Config/secret audit (kit agent-audit): Claude Code, Codex, Cursor, OpenCode (+ generic .mcp.json)${c.reset}\n` +
       `  ${c.dim}· Permission allowlist + auto-capture hooks: Claude Code${c.reset}\n` +
-      `  ${c.dim}· Blocking install-gate (PreToolUse): planned — verified for Claude Code/Codex/Amazon Q (see issue #146)${c.reset}\n` +
+      `  ${c.dim}· Blocking install-gate: Claude Code, Codex, Amazon Q, Gemini CLI, Cursor (hooks) + OpenCode (plugin); Cline/Continue tracked in #146${c.reset}\n` +
       `  ${c.dim}The agent-agnostic enforcement floor is git hooks (${c.reset}${c.bold}kit hooks${c.reset}${c.dim}); the rules block only advises.${c.reset}`,
   );
   return !failed;
