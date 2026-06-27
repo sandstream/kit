@@ -45,6 +45,20 @@ Windows (Docker Desktop), macOS, and Linux — see
 docker run --rm -v "${PWD}:/work" -w /work sandstream/kit:latest check
 ```
 
+## Docker engine
+
+kit is engine-agnostic. Anywhere it touches Docker it either calls the standard
+`docker` CLI (via `execFile`, no shell), queries the Docker Hub **registry HTTP
+API** (`kit triage docker:<image>` — never the local daemon), or reads
+`Dockerfile`/Compose files on disk. It never opens the daemon socket directly or
+hard-codes Docker Desktop paths.
+
+So **any Docker-CLI-compatible engine works** — Docker Desktop, **[OrbStack](https://orbstack.dev)**,
+Colima, Rancher Desktop, or Podman with a `docker` shim. The only requirement is
+a `docker` on `PATH` (for `kit pkg docker:` / service adapters); registry triage
+needs neither a daemon nor a CLI. There is intentionally no engine-specific
+detection — pick whichever engine you prefer.
+
 ## Why native Windows is not supported yet
 
 These are the concrete blockers, not a blanket "we didn't try". Each is
