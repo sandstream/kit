@@ -252,6 +252,33 @@ vault your secrets" block into the agent's rules file (`CLAUDE.md`, `AGENTS.md`,
 `.cursorrules`, `.clinerules`). Run it standalone any time with `kit agent-config`.
 The block is regenerated in place on re-run; edit outside its markers freely.
 
+## Agent support
+
+kit is **agent-agnostic** — it's a CLI that any coding agent can run, plus opt-in
+adapters for the surfaces each agent exposes. Support today, per agent:
+
+| Agent | Memory index¹ | "use kit" rules block² | Agent/MCP config audit³ | Perm allowlist⁴ | Auto-capture hooks⁵ | Blocking gate⁶ |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Claude Code** | ✅ | ✅ `CLAUDE.md` | ✅ + commands/agents/skills/plugins | ✅ | ✅ | 🔜 verified |
+| **OpenAI Codex** | ✅ | ✅ `AGENTS.md` | ✅ `.codex/config` | — | — | 🔜 verified |
+| **OpenCode** | ✅ | ✅ `AGENTS.md` | ✅ `opencode.json` | — | — | 🔎 research |
+| **Cursor** | ✅ | ✅ `.cursorrules` | ✅ `.cursor/mcp.json` | — | — | 🔎 research |
+| **Cline** | ✅ | ✅ `.clinerules` | — | — | — | 🔎 research |
+| **Gemini CLI** | ✅ | — | — | — | — | 🔎 research |
+| **Continue** | ✅ | — | — | — | — | 🔎 research |
+| **Amazon Q** | ✅ | — | — | — | — | 🔜 verified |
+
+✅ supported · — not yet · 🔜 planned, agent's blocking-hook capability verified · 🔎 planned, needs research ([#146](https://github.com/sandstream/kit/issues/146))
+
+1. `kit memory index` parses the agent's local transcripts into the shared store.
+2. `kit agent-config` writes the managed "run kit before installs / vault secrets" block into the agent's rules file.
+3. `kit agent-audit` flags plaintext secrets, cleartext/inline-code MCP servers, and malware-shaped hooks in the agent's config. Generic `.mcp.json` / `.claude.json` are scanned for every agent regardless.
+4. kit can pre-authorize its read-only commands so they run without a prompt (Claude Code's `permissions.allow` today).
+5. kit registers lifecycle hooks so memory capture happens automatically (Claude Code `settings.json` hooks today).
+6. A **true blocking gate** (deny an un-triaged install before it runs) requires the agent's `PreToolUse`-style hook. Verified available for Claude Code, Codex, and Amazon Q; the rest need a research pass. Until then, the agent-agnostic enforcement floor is **git hooks** (`kit hooks`, pre-commit/pre-push) — they fire in any agent or none. See [#146](https://github.com/sandstream/kit/issues/146).
+
+> The git-hook layer enforces at the VCS boundary regardless of agent; the rules-file block is **advisory** (it reminds the agent); only the blocking-gate hook **enforces** before an action runs.
+
 `kit check`, grouped status tables with a pass/fail summary:
 
 ```text
