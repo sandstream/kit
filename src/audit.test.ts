@@ -10,7 +10,9 @@ import {
   formatAuditLog,
   appendAuditEventDirect,
   verifyAuditChain,
+  verifyAuditSignatures,
 } from "./audit.js";
+import { loadOrCreateIdentity, localPublicKeys } from "./identity.js";
 import type { GovernanceConfig } from "./config.js";
 
 describe("logAuditEvent", () => {
@@ -413,6 +415,136 @@ describe("verifyAuditChain (tamper-evidence)", () => {
     const r = verifyAuditChain(legacy + "\n");
     assert.equal(r.ok, false);
     assert.match(r.reason!, /missing hash/);
+  });
+});
+
+describe("verifyAuditSignatures (identity attribution)", () => {
+  async function writeEvents(dir: string, n: number): Promise<void> {
+    for (let i = 0; i < n; i++) {
+      const ok = await appendAuditEventDirect(
+        { operation: `op-${i}`, environment: "dev", success: true },
+        { cwd: dir },
+      );
+      assert.equal(ok, true);
+    }
+  }
+
+  // Run a body with a fresh, isolated identity dir (KIT_IDENTITY_DIR), restoring
+  // the prior env afterward — so signing happens against a temp keypair.
+  async function withIdentity(fn: (idDir: string) => Promise<void>): Promise<void> {
+    const prev = process.env.KIT_IDENTITY_DIR;
+    const idDir = mkdtempSync(join(tmpdir(), "kit-audit-id-"));
+    process.env.KIT_IDENTITY_DIR = idDir;
+    try {
+      await fn(idDir);
+    } finally {
+      if (prev === undefined) delete process.env.KIT_IDENTITY_DIR;
+      else process.env.KIT_IDENTITY_DIR = prev;
+      rmSync(idDir, { recursive: true, force: true });
+    }
+  }
+
+  it("signs appended entries and the chain still verifies (sig/kid excluded from hash)", async () => {
+    await withIdentity(async () => {
+      const { identity } = loadOrCreateIdentity();
+      const dir = mkdtempSync(join(tmpdir(), "kit-audit-s-"));
+      try {
+        await writeEvents(dir, 3);
+        const content = readFileSync(join(dir, ".kit-audit.jsonl"), "utf8");
+        // Each line carries kid + sig...
+        for (const line of content.trim().split("\n")) {
+          const obj = JSON.parse(line);
+          assert.equal(obj.kid, identity.id);
+          assert.equal(typeof obj.sig, "string");
+        }
+        // ...and the hash chain is still intact despite the extra fields.
+        const chain = verifyAuditChain(content);
+        assert.equal(chain.ok, true);
+        assert.equal(chain.entries, 3);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("verifies signatures against the local public key", async () => {
+    await withIdentity(async () => {
+      loadOrCreateIdentity();
+      const dir = mkdtempSync(join(tmpdir(), "kit-audit-sv-"));
+      try {
+        await writeEvents(dir, 3);
+        const content = readFileSync(join(dir, ".kit-audit.jsonl"), "utf8");
+        const trust = localPublicKeys();
+        const s = verifyAuditSignatures(content, (kid) => trust.get(kid) ?? null);
+        assert.equal(s.total, 3);
+        assert.equal(s.signed, 3);
+        assert.equal(s.verified, 3);
+        assert.equal(s.invalid, 0);
+        assert.equal(s.unsigned, 0);
+        assert.equal(s.ok, true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("flags a forged signature (invalid > 0 ⇒ not ok)", async () => {
+    await withIdentity(async () => {
+      loadOrCreateIdentity();
+      const dir = mkdtempSync(join(tmpdir(), "kit-audit-f-"));
+      try {
+        await writeEvents(dir, 2);
+        const lines = readFileSync(join(dir, ".kit-audit.jsonl"), "utf8").trim().split("\n");
+        const obj = JSON.parse(lines[0]);
+        // Swap the signature for a valid-base64 but wrong signature.
+        obj.sig = Buffer.from("not-the-real-signature-bytes-xx").toString("base64");
+        lines[0] = JSON.stringify(obj);
+        const content = lines.join("\n") + "\n";
+        const trust = localPublicKeys();
+        const s = verifyAuditSignatures(content, (kid) => trust.get(kid) ?? null);
+        assert.equal(s.invalid, 1);
+        assert.equal(s.verified, 1);
+        assert.equal(s.ok, false);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("reports tampered content under an unknown key as unverifiable (not a forge)", async () => {
+    await withIdentity(async () => {
+      loadOrCreateIdentity();
+      const dir = mkdtempSync(join(tmpdir(), "kit-audit-u-"));
+      try {
+        await writeEvents(dir, 2);
+        const content = readFileSync(join(dir, ".kit-audit.jsonl"), "utf8");
+        // Resolver that knows no keys → signed entries can't be checked.
+        const s = verifyAuditSignatures(content, () => null);
+        assert.equal(s.signed, 2);
+        assert.equal(s.unverifiable, 2);
+        assert.equal(s.verified, 0);
+        assert.equal(s.invalid, 0);
+        assert.equal(s.ok, true, "unknown key is fail-open, not a forge");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("treats a keyless (legacy) log as unsigned, ok", () => {
+    const legacy =
+      JSON.stringify({
+        timestamp: "t",
+        operation: "x",
+        environment: "dev",
+        success: true,
+        prev: "0".repeat(64),
+        hash: "abc",
+      }) + "\n";
+    const s = verifyAuditSignatures(legacy, () => "irrelevant");
+    assert.equal(s.signed, 0);
+    assert.equal(s.unsigned, 1);
+    assert.equal(s.ok, true);
   });
 });
 

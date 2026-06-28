@@ -27,7 +27,14 @@ import {
   verify as edVerify,
   createHash,
 } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  renameSync,
+  readdirSync,
+} from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { secureFile } from "./utils/secure-perms.js";
@@ -121,6 +128,37 @@ export function loadOrCreateIdentity(
   const { privatePem, identity } = generateIdentity(now);
   writeIdentity(dir, privatePem, identity);
   return { identity, created: true };
+}
+
+/**
+ * Build a kid → public-key (PEM) map from the locally-known identity records:
+ * the current identity plus any archived `identity.json.*.bak` records left by
+ * rotation (so entries signed by a previous, rotated key still verify). This is
+ * the Phase-0 local trust store; a shared/fleet trust store + revocation list
+ * layer on top later. Best-effort: unreadable/malformed records are skipped.
+ */
+export function localPublicKeys(dir?: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const base = identityDir(dir);
+  const add = (rec: Identity | null) => {
+    if (rec && typeof rec.id === "string" && typeof rec.publicKey === "string") {
+      map.set(rec.id, rec.publicKey);
+    }
+  };
+  add(tryLoadIdentity(dir));
+  try {
+    for (const name of readdirSync(base)) {
+      if (!name.startsWith(`${RECORD_FILE}.`) || !name.endsWith(".bak")) continue;
+      try {
+        add(JSON.parse(readFileSync(join(base, name), "utf-8")) as Identity);
+      } catch {
+        /* skip malformed archived record */
+      }
+    }
+  } catch {
+    /* identity dir absent → just the current identity (if any) */
+  }
+  return map;
 }
 
 /** Sign data with the identity's private key (Ed25519). Throws if no identity exists. */

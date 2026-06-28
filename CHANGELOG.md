@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Identity-signed audit entries.** When a local `kit identity` exists, each
+  appended `.kit-audit.jsonl` line is signed: kit attaches `kid` (signer id) +
+  `sig` (Ed25519 signature over the line hash). Best-effort and append-safe — no
+  identity means entries are written as before, and a signing failure never
+  blocks the append. `kid`/`sig` sit outside the hashed remainder, so the hash
+  chain still verifies across mixed signed/unsigned/legacy logs. `kit audit
+verify` now reports the signature tally (verified / unknown-key / unsigned)
+  against the locally-known keys (current + rotated) and FAILS hard on a forged
+  signature, while fail-opening on absent/unknown trust. This is the asymmetric
+  ATTRIBUTION layer (who produced an entry, verifiable with only the public key)
+  orthogonal to the symmetric HMAC INTEGRITY anchor. See `docs/AUDIT_ATTESTATION.md` §2.5.
+
 ## [2.2.0] - 2026-06-28
 
 kit 2.2 — agent gate coverage + the first 3.0 primitive. Additive minor: new
@@ -30,7 +44,7 @@ experimental commands and adapters, no breaking changes to any `stable` surface.
 - **`kit ci --init gitlab|bitbucket`** — generate a pipeline snippet that runs
   `kit ci` (GitLab job → JUnit; Bitbucket step). Prints to stdout; `--write` writes
   the file only when absent. Plus `docs/CI_AND_GIT_HOSTS.md` (the 4-layer gate model
-  + per-host enforcement guidance).
+  - per-host enforcement guidance).
 - **`kit gha-audit` extended to GitLab CI + Bitbucket Pipelines** — lints
   `.gitlab-ci.yml` / `bitbucket-pipelines.yml` for unpinned `:latest`/untagged
   images (CWE-1104), remote `include:` (OWASP-A08), and pipe-to-shell (CWE-494).

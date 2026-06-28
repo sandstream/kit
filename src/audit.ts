@@ -2,6 +2,7 @@ import { appendFile, readFile, writeFile, rename } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 import type { GovernanceConfig } from "./config.js";
+import { tryLoadIdentity, signWithIdentity, verifySignature } from "./identity.js";
 
 // ── Tamper-evident hash chain ───────────────────────────────────────────────
 // Each appended line carries `prev` (the previous line's hash) and `hash`
@@ -34,7 +35,34 @@ async function appendChained(logPath: string, event: AuditEvent): Promise<void> 
   const prev = await lastChainHash(logPath);
   const preHash = JSON.stringify({ ...event, prev });
   const hash = hashLine(preHash);
-  await appendFile(logPath, JSON.stringify({ ...event, prev, hash }) + "\n", "utf-8");
+  // Best-effort identity signing: if a local kit identity exists, sign the
+  // line hash with it and attach non-hashed `kid` + `sig`. This adds
+  // ASYMMETRIC, ATTRIBUTABLE provenance on top of the (symmetric) hash chain —
+  // any verifier with the public key can confirm WHO produced the entry. Both
+  // fields sit OUTSIDE the hashed remainder (verifyAuditChain strips them), so
+  // the chain stays valid whether or not an entry is signed; legacy/keyless
+  // appends are unaffected. Failure to sign never blocks the append.
+  const signed = signLineHash(hash);
+  const line = signed
+    ? { ...event, prev, hash, kid: signed.kid, sig: signed.sig }
+    : { ...event, prev, hash };
+  await appendFile(logPath, JSON.stringify(line) + "\n", "utf-8");
+}
+
+/**
+ * Sign a line hash with the local kit identity, if one is present. Returns the
+ * key id + base64 Ed25519 signature, or null when no identity exists / signing
+ * fails. Pure best-effort: callers never gate on the result.
+ */
+function signLineHash(hash: string): { kid: string; sig: string } | null {
+  const identity = tryLoadIdentity();
+  if (!identity) return null;
+  try {
+    const sig = signWithIdentity(hash).toString("base64");
+    return { kid: identity.id, sig };
+  } catch {
+    return null; // record present but key unreadable → unsigned, not a failure
+  }
 }
 
 export interface ChainVerifyResult {
@@ -60,7 +88,10 @@ export function verifyAuditChain(content: string): ChainVerifyResult {
     } catch {
       return { ok: false, entries: i, brokenAt: i, reason: "unparseable line" };
     }
-    const { hash, ...rest } = obj;
+    // `sig`/`kid` are attached AFTER the hash is computed (see appendChained),
+    // so they must be excluded from the hashed remainder. Lines without them
+    // (legacy/keyless) leave `rest` unchanged → backward-compatible.
+    const { hash, sig: _sig, kid: _kid, ...rest } = obj;
     if (typeof hash !== "string") {
       return { ok: false, entries: i, brokenAt: i, reason: "missing hash (unchained entry)" };
     }
@@ -83,6 +114,88 @@ export function verifyAuditChain(content: string): ChainVerifyResult {
     prev = hash;
   }
   return { ok: true, entries: lines.length };
+}
+
+export interface SignatureVerifyResult {
+  /** Total non-empty lines inspected. */
+  total: number;
+  /** Lines carrying both `kid` and `sig`. */
+  signed: number;
+  /** Signed lines whose signature verified against the resolved public key. */
+  verified: number;
+  /** Signed lines whose signature FAILED to verify (forged/tampered). */
+  invalid: number;
+  /** Signed lines whose `kid` could not be resolved to a public key. */
+  unverifiable: number;
+  /** Lines with no signature (legacy/keyless appends). */
+  unsigned: number;
+  /**
+   * True when no signed entry FAILED verification. Unsigned and unverifiable
+   * entries do not flip this to false — absence of a signature is not tamper
+   * evidence (the hash chain covers that); a *bad* signature is.
+   */
+  ok: boolean;
+}
+
+/**
+ * Verify identity signatures across a `.kit-audit.jsonl` body. Each signed line
+ * carries `kid` (the signer's identity id) and `sig` (base64 Ed25519 signature
+ * over the line `hash`). `resolvePubkey` maps a `kid` to its SPKI-PEM public key
+ * (or null if unknown — e.g. a key not in the trust store / revoked).
+ *
+ * This is the ATTRIBUTION layer, orthogonal to verifyAuditChain (the integrity
+ * layer). The chain proves nothing was edited/reordered; the signatures prove
+ * WHO produced each entry. Pure — no I/O, fully testable. Fail-closed on a bad
+ * signature (`invalid` > 0 ⇒ `ok=false`), fail-open on missing/unknown keys.
+ */
+export function verifyAuditSignatures(
+  content: string,
+  resolvePubkey: (kid: string) => string | null | undefined,
+): SignatureVerifyResult {
+  const lines = content.split("\n").filter((l) => l.trim().length > 0);
+  let signed = 0;
+  let verified = 0;
+  let invalid = 0;
+  let unverifiable = 0;
+  let unsigned = 0;
+  for (const line of lines) {
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      // Unparseable lines are the chain verifier's concern; ignore here.
+      continue;
+    }
+    const { hash, kid, sig } = obj as { hash?: unknown; kid?: unknown; sig?: unknown };
+    if (typeof kid !== "string" || typeof sig !== "string") {
+      unsigned++;
+      continue;
+    }
+    signed++;
+    if (typeof hash !== "string") {
+      invalid++; // signed but no hash to have signed → malformed
+      continue;
+    }
+    const pubkey = resolvePubkey(kid);
+    if (!pubkey) {
+      unverifiable++;
+      continue;
+    }
+    if (verifySignature(hash, Buffer.from(sig, "base64"), pubkey)) {
+      verified++;
+    } else {
+      invalid++;
+    }
+  }
+  return {
+    total: lines.length,
+    signed,
+    verified,
+    invalid,
+    unverifiable,
+    unsigned,
+    ok: invalid === 0,
+  };
 }
 
 const PENDING_QUEUE_FILE = ".kit-audit.pending";
