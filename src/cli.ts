@@ -124,6 +124,7 @@ import { cmdAirgap } from "./commands/airgap.js";
 import { cmdScan } from "./commands/scan.js";
 import { cmdVerifyProvenance } from "./commands/verify-provenance.js";
 import { cmdGhaAudit } from "./commands/gha-audit.js";
+import { cmdIdentity } from "./commands/identity.js";
 import { cmdSbom } from "./commands/sbom.js";
 import { cmdAuth } from "./commands/auth.js";
 import { cmdAudit } from "./commands/audit.js";
@@ -5157,6 +5158,8 @@ export const COMMAND_HELP: Record<string, string> = {
     "Audit kit's own source against its 12 self-hardening rules (--list-rules, --only=<ids>, --format)",
   coverage:
     "Evidence map: which OWASP ASVS L2 controls kit's deterministic checks auto-verify vs gap/manual/n-a (NOT a compliance attestation; --json for GRC tools)",
+  identity:
+    "Manage this machine/agent's Ed25519 identity (init/show/rotate) — asymmetric, attributable signing for audit/policy (experimental)",
   design: "Check design quality (a11y, design tokens) against the baseline",
   baseline:
     "Freeze current warnings into .kit-baseline.json so future runs gate only net-new findings",
@@ -5371,7 +5374,7 @@ function cmdHelp(subcommand?: string): boolean {
       ],
     ],
     ["Agents & memory", ["memory", "agent-config", "mcp", "skills", "context", "hooks"]],
-    ["Governance & access", ["governance", "audit", "auth", "team", "escalate"]],
+    ["Governance & access", ["governance", "audit", "auth", "team", "escalate", "identity"]],
     ["Packages & services", ["pkg", "add", "plugin", "create-plugin", "run", "open", "ci"]],
     ["Meta", ["whoami", "version", "completions", "help"]],
   ];
@@ -5814,6 +5817,7 @@ export const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
   ci: cmdCi,
   "self-audit": cmdSelfAudit,
   coverage: cmdCoverage,
+  identity: cmdIdentity,
   clone: cmdClone,
   run: cmdRun,
   open: cmdOpen,
@@ -5884,6 +5888,7 @@ export const COMMAND_TIERS: Record<string, CommandTier> = {
   ci: "stable",
   "self-audit": "stable",
   coverage: "experimental",
+  identity: "experimental",
   clone: "stable",
   run: "stable",
   open: "stable",
