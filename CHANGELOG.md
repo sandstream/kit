@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-06-28
+
+kit 2.2 — agent gate coverage + the first 3.0 primitive. Additive minor: new
+experimental commands and adapters, no breaking changes to any `stable` surface.
+
+### Added
+
+- **Install-gate now covers 7 agents.** `kit agent-config --install-gate` wires a
+  pre-tool gate that blocks an un-triaged package install before it runs.
+  Deterministic core (`parseInstallCommand` + `decideBashGate`, npm/pnpm/yarn/bun
+  /npx + pip/pip3/pipx/uv; fail-closed; out-of-scope ecosystems pass through) plus
+  per-agent adapters: Claude Code / Codex / Amazon Q / Gemini CLI / Cursor (exit-2
+  hooks), OpenCode (generated `.opencode/plugin` hooking `tool.execute.before`,
+  throws), and Cline (executable `.clinerules/hooks/PreToolUse` shim → `{cancel:true}`
+  stdout contract). Each adapter was built only after verifying the agent's hook +
+  payload schema against primary sources. Continue has no external pre-tool hook
+  surface (declarative permissions only). `gate-bash` (experimental) is the handler.
+- **`kit identity`** (experimental) — a local Ed25519 machine/agent identity
+  (init / show [--public] / rotate). Asymmetric, attributable signing: a verifier
+  needs only the public key, never a forge-capable secret. Private key stored
+  owner-only under `~/.kit`.
+- **`kit ci --init gitlab|bitbucket`** — generate a pipeline snippet that runs
+  `kit ci` (GitLab job → JUnit; Bitbucket step). Prints to stdout; `--write` writes
+  the file only when absent. Plus `docs/CI_AND_GIT_HOSTS.md` (the 4-layer gate model
+  + per-host enforcement guidance).
+- **`kit gha-audit` extended to GitLab CI + Bitbucket Pipelines** — lints
+  `.gitlab-ci.yml` / `bitbucket-pipelines.yml` for unpinned `:latest`/untagged
+  images (CWE-1104), remote `include:` (OWASP-A08), and pipe-to-shell (CWE-494).
+- **OpenCode coverage** — SQLite (`opencode.db`) memory parser (with the legacy
+  flat-JSON path as fallback), and `agent-audit` now scans `.opencode/plugin`.
+- **trivy + trufflehog declared as managed tools** (`.kit.toml [tools]`) so
+  `kit install` provisions them; a non-gating CI job dogfoods the provision+scan path.
+
+### Changed
+
+- **Memory: debounced mid-session indexing** — recall stays fresh within a long or
+  ephemeral session (a detached `kit memory index` at most once per 10 min on the
+  UserPromptSubmit hook), not only at SessionEnd.
+- Pinned the 7 previously range-specced dependencies to exact versions.
+
+### Fixed
+
+- ci-audit no longer mis-reports a bare `name:` label (e.g. a Bitbucket step name)
+  as an unpinned image.
+- gitignore `.kit-triage.jsonl` (kit's local triage audit log).
+
 ## [2.1.1] - 2026-06-27
 
 kit 2.1 (Reach) — native Windows. The build + ~all tests already ran on windows-latest; this closes the remaining cross-platform gaps so kit runs natively on Windows (PowerShell/cmd), not only via WSL2.
