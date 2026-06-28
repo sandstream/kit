@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Berget AI + Grunden.ai as known providers.** Added `berget` and `grunden`
+  (EU-sovereign, OpenAI-compatible inference) to the service registry with their
+  canonical key names (`BERGET_API_KEY`/`BERGET_BASE_URL`,
+  `GRUNDEN_API_KEY`/`GRUNDEN_BASE_URL`) and where to get them, so `kit secrets`
+  treats them as known, vault-resolved keys (never plaintext). Catalog-only by
+  design: both are used via the `openai` SDK with a custom base URL, so there is
+  no unique package signal to auto-detect on (keying on the `openai` dep would
+  misattribute every OpenAI user). Agent-backend wiring + a Berget Code gate
+  adapter are deferred.
+
 - **Identity-signed audit entries.** When a local `kit identity` exists, each
   appended `.kit-audit.jsonl` line is signed: kit attaches `kid` (signer id) +
   `sig` (Ed25519 signature over the line hash). Best-effort and append-safe — no

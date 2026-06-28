@@ -132,5 +132,29 @@ describe("service-registry", () => {
         assert.ok(SERVICE_BY_ID[id], `missing new service: ${id}`);
       }
     });
+
+    it("berget/grunden are catalog-only EU inference providers (keys, no auto-detect)", () => {
+      const berget = SERVICE_BY_ID["berget"];
+      const grunden = SERVICE_BY_ID["grunden"];
+      assert.ok(berget, "missing berget");
+      assert.ok(grunden, "missing grunden");
+      // Canonical key names are declared for the generator / secrets layer.
+      assert.ok(berget.secrets?.includes("BERGET_API_KEY"));
+      assert.ok(grunden.secrets?.includes("GRUNDEN_API_KEY"));
+      // OpenAI-compatible ⇒ no unique package/file signal, so no auto-detection
+      // (keying on the `openai` dep would misattribute every OpenAI user).
+      for (const def of [berget, grunden]) {
+        assert.equal(def.deps, undefined);
+        assert.equal(def.pyDeps, undefined);
+        assert.equal(def.files, undefined);
+        assert.equal(def.tool, undefined);
+      }
+    });
+
+    it("a plain OpenAI-SDK repo does NOT auto-detect berget/grunden", async () => {
+      const s = await detectServices({ deps: ["openai"], fileExists: noFiles });
+      assert.ok(!s.includes("berget"), "openai dep must not imply berget");
+      assert.ok(!s.includes("grunden"), "openai dep must not imply grunden");
+    });
   });
 });
