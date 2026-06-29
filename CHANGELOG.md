@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Path→cluster push-surfacing for shared decisions** (`kit memory context`).
+  Pull recall can't _guarantee_ you see a settled decision (a bad query misses
+  it); the guardrail is now PUSH — touch files under an area and kit
+  deterministically surfaces that area's ACTIVE decisions. A committed
+  `.kit/shared/clusters.json` maps `area → globs` (zero-dep glob→regex matcher).
+  `kit memory context [paths…|--changed]` prints the active decisions for the
+  touched areas, and the UserPromptSubmit reminder now appends a bounded notice
+  for the area(s) your working-tree changes fall into. Superseded/reversed
+  decisions never resurface (uses `activeShared`). Fail-open (no map ⇒ nothing).
 - **`kit panic`** (experimental) — one-command compromise response (the control
   plane's kill-switch). Rotates the local identity (old key archived but its past
   signatures stay verifiable), emits a SIGNED, append-only revocation of the old

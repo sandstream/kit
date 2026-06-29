@@ -5183,6 +5183,8 @@ export const COMMAND_HELP: Record<string, string> = {
   "memory share": "Promote a curated, secret-scanned entry to the shared (team) memory",
   "memory areas": "List shared responsibility areas (stripe, whatsapp, …)",
   "memory area": "Show shared entries for one area (decisions, how-built, status, security)",
+  "memory context":
+    "Push-surface active decisions for the area(s) whose files you're touching (deterministic, path→cluster)",
   "memory pal": "Pending action ledger — list/add/done/snooze/verify/import 'blocked-on-you' items",
   "memory save": "Bookmark the current session as a named copilot",
   "memory threads": "List saved copilots (current project; --global for all)",
