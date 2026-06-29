@@ -25,8 +25,10 @@ import {
   shareEntry,
   listAreas,
   queryArea,
+  searchShared,
   getSharedPath,
   type SharedKind,
+  type SharedEntry,
 } from "../memory/shared.js";
 import {
   userPromptSubmitReminder,
@@ -210,7 +212,9 @@ async function memHelp(): Promise<boolean> {
   console.log(
     "  kit memory index            Index all agent transcripts (Claude Code, Codex, Gemini, Cursor, …) into the store",
   );
-  console.log("  kit memory search <query>   Search memory (current project; --global for all)");
+  console.log(
+    "  kit memory search <query>   Search memory + curated shared decisions (current project; --global for all)",
+  );
   console.log("  kit memory stats            Show what the memory store contains");
   console.log("  kit memory merge <file>     Merge another machine's memory.db into this one");
   console.log(
@@ -442,12 +446,39 @@ async function memSearch(): Promise<boolean> {
     // logging is non-critical
   }
   db.close();
+
+  // Curated shared tier (.kit/shared/memory.jsonl) — high-signal, team-reviewed
+  // decisions/conventions that travel with the repo. Always project-local (so
+  // `--global`, which widens the raw-recall scope across projects, still reads
+  // THIS repo's shared store). Fail-open: a missing/broken file never breaks search.
+  const sharedRoot = flagValue(process.argv, "--project") ?? getCurrentProjectRoot();
+  let shared: SharedEntry[] = [];
+  try {
+    shared = searchShared(sharedRoot, query);
+  } catch {
+    // shared tier is best-effort context, never gates raw recall
+  }
+
   if (jsonMode) {
-    console.log(JSON.stringify(hits));
+    console.log(JSON.stringify({ messages: hits, shared }));
     return true;
   }
+
+  // Curated decisions first — they're the durable context, not a raw transcript line.
+  if (shared.length) {
+    console.log(
+      `${c.bold}${shared.length}${c.reset} curated (shared) match(es) ${c.dim}— team decisions${c.reset}`,
+    );
+    for (const e of shared) {
+      const prov = `${e.area} · ${e.author}${e.source_ref ? ` @${e.source_ref}` : ""}`;
+      console.log(`  ${c.bold}[${e.kind}]${c.reset} ${e.title} ${c.dim}— ${prov}${c.reset}`);
+      if (e.body) console.log(`    ${c.dim}${e.body.replace(/\s+/g, " ").slice(0, 160)}${c.reset}`);
+    }
+  }
+
   const scope = projectPath ? `${c.dim}in ${projectPath}${c.reset}` : `${c.dim}(global)${c.reset}`;
   if (!hits.length) {
+    if (shared.length) return true; // curated results already shown; raw recall empty
     console.log(`${c.dim}no matches for "${query}" ${projectPath ?? "(global)"}${c.reset}`);
     return true;
   }
