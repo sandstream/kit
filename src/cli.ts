@@ -126,6 +126,7 @@ import { cmdVerifyProvenance } from "./commands/verify-provenance.js";
 import { cmdGhaAudit } from "./commands/gha-audit.js";
 import { cmdIdentity } from "./commands/identity.js";
 import { cmdPanic } from "./commands/panic.js";
+import { cmdPolicy } from "./commands/policy.js";
 import { cmdSbom } from "./commands/sbom.js";
 import { cmdAuth } from "./commands/auth.js";
 import { cmdAudit } from "./commands/audit.js";
@@ -5163,6 +5164,8 @@ export const COMMAND_HELP: Record<string, string> = {
     "Manage this machine/agent's Ed25519 identity (init/show/rotate) — asymmetric, attributable signing for audit/policy (experimental)",
   panic:
     "Compromise response: rotate identity + emit a signed revocation + audit it + print the platform-revocation checklist (experimental)",
+  policy:
+    "Signable org policy-as-code in .kit-policy.toml (init/show/validate/sign/verify) — identity-signed standard, verifiable offline (experimental)",
   design: "Check design quality (a11y, design tokens) against the baseline",
   baseline:
     "Freeze current warnings into .kit-baseline.json so future runs gate only net-new findings",
@@ -5381,7 +5384,7 @@ function cmdHelp(subcommand?: string): boolean {
     ["Agents & memory", ["memory", "agent-config", "mcp", "skills", "context", "hooks"]],
     [
       "Governance & access",
-      ["governance", "audit", "auth", "team", "escalate", "identity", "panic"],
+      ["governance", "audit", "auth", "team", "escalate", "identity", "panic", "policy"],
     ],
     ["Packages & services", ["pkg", "add", "plugin", "create-plugin", "run", "open", "ci"]],
     ["Meta", ["whoami", "version", "completions", "help"]],
@@ -5827,6 +5830,7 @@ export const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
   coverage: cmdCoverage,
   identity: cmdIdentity,
   panic: cmdPanic,
+  policy: cmdPolicy,
   clone: cmdClone,
   run: cmdRun,
   open: cmdOpen,
@@ -5899,6 +5903,7 @@ export const COMMAND_TIERS: Record<string, CommandTier> = {
   coverage: "experimental",
   identity: "experimental",
   panic: "experimental",
+  policy: "experimental",
   clone: "stable",
   run: "stable",
   open: "stable",
