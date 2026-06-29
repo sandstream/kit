@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit policy check`** (experimental) — enforce the signed `.kit-policy.toml`
+  against this machine's deterministic state (3.0 Phase 1, part 2). Verifies the
+  signature (the trust anchor: warn on unsigned/unknown signer, **fail** on
+  tamper or a revoked signer), then evaluates `min_kit_version` (current ≥
+  required), `required_scanners` (resolvable mise-first; warn, or **fail** under
+  `--strict`), and `prod_writes_need_approval` (`.kit.toml [governance.approval]`).
+  `require_triage`/`thresholds` are surfaced (enforced by the install-gate /
+  data-source plugins, not duplicated). Opt-in: no policy ⇒ no-op. `--json` +
+  exit code for CI. New `evaluatePolicy`/`versionGte` and a shared `verifyPolicy`
+  core (reused by `kit policy verify`). See `docs/POLICY.md`.
 - **`kit policy`** (experimental) — signable, distributable policy-as-code (3.0
   Phase 1). A separate `.kit-policy.toml` document holds the org **standard**
   (`require_triage`, `required_scanners`, `prod_writes_need_approval`,

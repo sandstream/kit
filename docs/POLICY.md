@@ -56,8 +56,32 @@ agent-write pre-approval** — which vendor operations the operator pre-authoriz
 versioned and signed independently of project config. They are complementary
 layers.
 
+## Enforcement: `kit policy check`
+
+```
+kit policy check            # evaluate the signed policy against this machine's state
+kit policy check --strict   # a missing required scanner also fails
+kit policy check --json     # machine-readable report + exit code (for CI)
+```
+
+`kit policy check` verifies the signature first (the trust anchor), then evaluates
+the machine-checkable requirements and prints a per-requirement verdict:
+
+| Requirement                 | How it's checked                                                              |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| signature                   | authentic? (warn if unsigned/unknown signer; **fail** if tampered or revoked) |
+| `min_kit_version`           | current kit version ≥ required (deterministic)                                |
+| `required_scanners`         | each resolvable mise-first (warn if missing; **fail** under `--strict`)       |
+| `prod_writes_need_approval` | `.kit.toml [governance.approval].production_writes` is set                    |
+| `require_triage`            | reported — enforced at runtime by the install-gate (not duplicated)           |
+| `thresholds`                | reported — enforced by the relevant data-source plugin (e.g. CodeScene)       |
+
+It is **opt-in**: with no `.kit-policy.toml` it is a no-op (exit 0). A hard failure
+(non-zero exit) is a tampered/revoked signature, an invalid schema, an unmet
+`min_kit_version`, or — under `--strict` — a missing required scanner. Run it as a
+CI step (`kit policy check --strict`) to gate on the signed org standard.
+
 ## What's next
 
-This slice ships the signable document + sign/verify. The enforcement glue —
-`kit check` / `kit ci` reading the policy and reporting/gating against it — is the
-follow-up (3.0 Phase 1, part 2), then signed org **bundles** + RBAC (Phase 2).
+Folding the policy verdict into `kit check` / `kit ci`'s aggregate gate, then signed
+org **bundles** + RBAC (Phase 2).

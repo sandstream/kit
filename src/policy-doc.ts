@@ -23,10 +23,11 @@
  * so a signature survives TOML reformatting / comments / key reorder and breaks
  * only on a real policy change. Local-first, deterministic, zero-LLM.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse } from "smol-toml";
+import { localPublicKeys, verifySignature, isRevoked } from "./identity.js";
 
 export const POLICY_FILE = ".kit-policy.toml";
 export const POLICY_SIG_FILE = ".kit-policy.sig";
@@ -151,6 +152,70 @@ export interface PolicySignature {
   sig: string;
   ts: string;
   fingerprint: string;
+}
+
+export type PolicyVerifyStatus = "valid" | "invalid" | "unsigned" | "unverifiable" | "revoked";
+
+export interface PolicyVerifyResult {
+  status: PolicyVerifyStatus;
+  detail: string;
+  kid?: string;
+  fingerprint?: string;
+}
+
+/**
+ * Verify the signature on the policy at `root`. Pure-ish (file reads, no writes).
+ * Shared by `kit policy verify` and `kit policy check` so they cannot diverge.
+ *   - valid: fingerprint matches + signature verifies + signer not revoked.
+ *   - invalid: doc changed since signing, or a bad signature (a forge).
+ *   - unsigned: no .kit-policy.sig.
+ *   - unverifiable: signer key unknown locally (pin with `key`) — trust-absence, not a forge.
+ *   - revoked: signature verifies but the signer key was revoked (kit panic).
+ */
+export function verifyPolicy(root: string, opts: { key?: string } = {}): PolicyVerifyResult {
+  const doc = loadPolicy(root);
+  if (!doc) return { status: "unsigned", detail: "no policy document" };
+  let record: PolicySignature;
+  try {
+    record = JSON.parse(readFileSync(getPolicySigPath(root), "utf-8")) as PolicySignature;
+  } catch {
+    return { status: "unsigned", detail: "no .kit-policy.sig (run kit policy sign)" };
+  }
+  const fingerprint = policyFingerprint(doc);
+  const pubkey = opts.key
+    ? existsSync(opts.key)
+      ? readFileSync(opts.key, "utf-8")
+      : opts.key
+    : (localPublicKeys().get(record.kid) ?? null);
+  if (!pubkey) {
+    return {
+      status: "unverifiable",
+      detail: `signer ${record.kid} unknown (pin it with --key <spki-pem|file>)`,
+      kid: record.kid,
+      fingerprint,
+    };
+  }
+  const fpMatches = record.fingerprint === fingerprint;
+  const sigOk =
+    fpMatches &&
+    verifySignature(canonicalPolicyBytes(doc), Buffer.from(record.sig, "base64"), pubkey);
+  if (!sigOk) {
+    return {
+      status: "invalid",
+      detail: fpMatches ? "signature mismatch" : "policy changed since signing — re-sign",
+      kid: record.kid,
+      fingerprint,
+    };
+  }
+  if (isRevoked(record.kid)) {
+    return {
+      status: "revoked",
+      detail: `signer ${record.kid} is revoked`,
+      kid: record.kid,
+      fingerprint,
+    };
+  }
+  return { status: "valid", detail: `signed by ${record.kid}`, kid: record.kid, fingerprint };
 }
 
 /** A ready-to-edit starter policy (written by `kit policy init`). */
