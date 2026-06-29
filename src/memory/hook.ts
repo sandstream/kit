@@ -14,7 +14,7 @@ import { spawn } from "node:child_process";
 import { openMemoryDb, getStats, recentMessages, getMemoryDir, ensureMemoryDir } from "./db.js";
 import { indexClaudeTranscripts, indexAllHarnesses } from "./parser.js";
 import { palList } from "./pal.js";
-import { readShared, type SharedEntry } from "./shared.js";
+import { activeShared, formatAge, type SharedEntry } from "./shared.js";
 import { getCurrentProjectRoot } from "./project.js";
 import { readCachedUpdateSync, getKitVersionSync } from "../update-check.js";
 
@@ -62,15 +62,17 @@ export function userPromptSubmitReminder(): string {
 }
 
 /**
- * The most recent durable shared decisions for a project, newest first. "Durable"
- * = the curated kinds worth re-surfacing on resume (decision / convention /
- * security / status); notes/how-built are excluded as lower-signal. Fail-open:
- * readShared returns [] on a missing/broken store. Deterministic, no model.
+ * The most recent ACTIVE durable shared decisions for a project, newest first.
+ * "Durable" = the curated kinds worth re-surfacing on resume (decision /
+ * convention / security / status); notes/how-built are excluded as lower-signal.
+ * Superseded/reversed entries are filtered out (activeShared) — a resumed session
+ * sees the current HEAD of the decision tree, not a graveyard. Fail-open:
+ * activeShared returns [] on a missing/broken store. Deterministic, no model.
  */
 export function recentDecisions(root: string, limit: number): SharedEntry[] {
   const DURABLE = new Set<SharedEntry["kind"]>(["decision", "convention", "security", "status"]);
   try {
-    return readShared(root)
+    return activeShared(root)
       .filter((e) => DURABLE.has(e.kind))
       .sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0))
       .slice(0, limit);
@@ -111,9 +113,10 @@ export function sessionStartRecovery(opts: { limit?: number } = {}): string {
       if (text) lines.push(`  · ${who}: ${text}`);
     }
     if (decisions.length > 0) {
-      lines.push("Curated team decisions (shared memory):");
+      lines.push("Curated team decisions (shared memory, active):");
       for (const d of decisions) {
-        lines.push(`  · [${d.kind}] ${d.area}: ${d.title}`);
+        const age = formatAge(d.ts);
+        lines.push(`  · [${d.kind}] ${d.area}: ${d.title}${age ? ` (${age})` : ""}`);
       }
     }
     if (openItems.length > 0) {

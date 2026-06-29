@@ -142,6 +142,26 @@ describe("memory hook — recentDecisions (shared curated tier)", () => {
     assert.equal(recentDecisions(root, 1).length, 1);
   });
 
+  it("excludes superseded decisions (shows the HEAD, not the graveyard)", () => {
+    const r = mkdtempSync(join(tmpdir(), "kit-super-"));
+    try {
+      const old = shareEntry(
+        r,
+        { area: "auth", kind: "decision", title: "use RSA", body: "" },
+        "2026-01-01T00:00:00Z",
+      );
+      shareEntry(
+        r,
+        { area: "auth", kind: "decision", title: "use Ed25519", body: "", supersedes: old.id },
+        "2026-02-01T00:00:00Z",
+      );
+      const titles = recentDecisions(r, 5).map((e) => e.title);
+      assert.deepEqual(titles, ["use Ed25519"], "superseded RSA decision is not surfaced");
+    } finally {
+      rmSync(r, { recursive: true, force: true });
+    }
+  });
+
   it("fail-open on a project with no shared store", () => {
     const empty = mkdtempSync(join(tmpdir(), "kit-noshared-"));
     try {

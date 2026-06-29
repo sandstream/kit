@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Living shared decisions — lifecycle (status / supersedes / reverses).**
+  Shared memory entries are now versioned: a change is a NEW append-only entry
+  that `--supersedes <id>` or `--reverses <id>` an old one (or carries an explicit
+  `--status`). `kit memory share` validates the referenced id exists. Surfacing
+  shows only ACTIVE decisions with their age (e.g. `2y ago`) so an aging decision
+  is flagged for review, never blind obedience; `kit memory area`/`search` badge
+  superseded/reversed entries (and show the chain) so "this was tried + reversed"
+  still surfaces. `active` stays implicit (absent field) so pre-lifecycle entries
+  are byte-identical. New `effectiveStatus`, `activeShared`, `formatAge`.
 - **Shared (curated) memory folded into recall.** `kit memory search` now also
   searches the committed `.kit/shared/memory.jsonl` tier and surfaces matching
   team decisions/conventions _above_ raw transcript hits (`--json` now returns
