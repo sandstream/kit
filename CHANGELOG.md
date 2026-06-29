@@ -54,7 +54,7 @@ experimental commands and adapters, no breaking changes to any `stable` surface.
 - **`kit ci --init gitlab|bitbucket`** — generate a pipeline snippet that runs
   `kit ci` (GitLab job → JUnit; Bitbucket step). Prints to stdout; `--write` writes
   the file only when absent. Plus `docs/CI_AND_GIT_HOSTS.md` (the 4-layer gate model
-  - per-host enforcement guidance).
+  + per-host enforcement guidance).
 - **`kit gha-audit` extended to GitLab CI + Bitbucket Pipelines** — lints
   `.gitlab-ci.yml` / `bitbucket-pipelines.yml` for unpinned `:latest`/untagged
   images (CWE-1104), remote `include:` (OWASP-A08), and pipe-to-shell (CWE-494).
