@@ -4,7 +4,7 @@
 // a `kit identity` (Phase 0) so an org's standard is cryptographically attributable
 // and offline-verifiable. Distinct from `.kit.toml [policy.agent_writes]` (the 2.x
 // per-repo agent-write pre-approval) — this is the org-level standard.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { getCurrentProjectRoot } from "../memory/project.js";
@@ -15,17 +15,13 @@ import {
   validatePolicy,
   canonicalPolicyBytes,
   policyFingerprint,
+  verifyPolicy,
   POLICY_TEMPLATE,
   type PolicyDoc,
   type PolicySignature,
 } from "../policy-doc.js";
-import {
-  tryLoadIdentity,
-  signWithIdentity,
-  verifySignature,
-  localPublicKeys,
-  isRevoked,
-} from "../identity.js";
+import { evaluatePolicy, formatPolicyEval } from "../policy-check.js";
+import { tryLoadIdentity, signWithIdentity } from "../identity.js";
 
 export async function cmdPolicy(): Promise<boolean> {
   const sub = process.argv[3] ?? "show";
@@ -41,8 +37,10 @@ export async function cmdPolicy(): Promise<boolean> {
       return policySign(root);
     case "verify":
       return policyVerify(root);
+    case "check":
+      return policyCheck(root);
     default:
-      console.error(`${c.red}usage: kit policy <init|show|validate|sign|verify>${c.reset}`);
+      console.error(`${c.red}usage: kit policy <init|show|validate|sign|verify|check>${c.reset}`);
       return false;
   }
 }
@@ -135,51 +133,44 @@ function policySign(root: string): boolean {
 function policyVerify(root: string): boolean {
   const doc = loadOrReport(root);
   if (!doc) return false;
-  const sigPath = getPolicySigPath(root);
-  let record: PolicySignature;
-  try {
-    record = JSON.parse(readFileSync(sigPath, "utf-8")) as PolicySignature;
-  } catch {
-    console.error(
-      `${c.red}no signature at ${sigPath}${c.reset} — run ${c.bold}kit policy sign${c.reset}`,
-    );
-    return false;
+  const r = verifyPolicy(root, { key: flagValue(process.argv, "--key") ?? undefined });
+  switch (r.status) {
+    case "valid":
+      console.log(
+        `${c.green}✓ policy signature valid${c.reset}  ${c.dim}${r.fingerprint} ${r.detail}${c.reset}`,
+      );
+      return true;
+    case "unverifiable":
+      console.warn(`${c.yellow}! ${r.detail}${c.reset}`);
+      return true; // trust-absence ≠ a forge; fail-open like audit verify
+    case "unsigned":
+      console.error(`${c.red}${r.detail}${c.reset}`);
+      return false;
+    case "invalid":
+      console.error(`${c.red}✗ policy signature INVALID${c.reset} ${c.dim}(${r.detail})${c.reset}`);
+      return false;
+    case "revoked":
+      console.error(
+        `${c.red}✗ policy signed by a REVOKED key${c.reset} ${c.dim}(${r.detail}) — re-sign with the current identity${c.reset}`,
+      );
+      return false;
   }
+}
 
-  // Resolve the signer's public key: an explicit --key (pin), else locally-known keys.
-  const keyArg = flagValue(process.argv, "--key");
-  let pubkey: string | null = null;
-  if (keyArg) {
-    pubkey = existsSync(keyArg) ? readFileSync(keyArg, "utf-8") : keyArg;
-  } else {
-    pubkey = localPublicKeys().get(record.kid) ?? null;
-  }
-
-  const bytes = canonicalPolicyBytes(doc);
-  // The fingerprint in the sig must match the current doc (catches a doc edited
-  // after signing without re-signing), AND the signature must verify.
-  const fpMatches = record.fingerprint === policyFingerprint(doc);
-  if (!pubkey) {
-    console.warn(
-      `${c.yellow}! signature present but signer key ${record.kid} is unknown${c.reset} ${c.dim}(pin it with --key <spki-pem|file>)${c.reset}`,
+async function policyCheck(root: string): Promise<boolean> {
+  const doc = loadPolicy(root);
+  if (!doc) {
+    console.log(
+      `${c.dim}no policy at ${getPolicyPath(root)} — nothing to enforce (run ${c.reset}${c.bold}kit policy init${c.reset}${c.dim})${c.reset}`,
     );
-    return true; // unverifiable trust ≠ a forge; fail-open like audit verify
+    return true; // policy is opt-in; absent = no-op
   }
-  const ok = fpMatches && verifySignature(bytes, Buffer.from(record.sig, "base64"), pubkey);
-  if (!ok) {
-    console.error(
-      `${c.red}✗ policy signature INVALID${c.reset} ${c.dim}(${fpMatches ? "signature mismatch" : "policy changed since signing — re-sign"})${c.reset}`,
-    );
-    return false;
+  const strict = hasFlag(process.argv, "--strict");
+  const report = await evaluatePolicy(root, { strict });
+  if (hasFlag(process.argv, "--json")) {
+    console.log(JSON.stringify(report));
+    return report.ok;
   }
-  if (isRevoked(record.kid)) {
-    console.error(
-      `${c.red}✗ policy signed by a REVOKED key (${record.kid})${c.reset} ${c.dim}— re-sign with the current identity (kit panic rotated it)${c.reset}`,
-    );
-    return false;
-  }
-  console.log(
-    `${c.green}✓ policy signature valid${c.reset}  ${c.dim}${record.fingerprint} by ${record.kid}${c.reset}`,
-  );
-  return true;
+  console.log(formatPolicyEval(report));
+  return report.ok;
 }
