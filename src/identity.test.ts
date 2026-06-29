@@ -12,6 +12,10 @@ import {
   verifySignature,
   identityId,
   localPublicKeys,
+  recordRevocation,
+  loadRevocations,
+  isRevoked,
+  revocationStatement,
 } from "./identity.js";
 
 describe("identity", () => {
@@ -99,6 +103,45 @@ describe("identity", () => {
     } finally {
       process.env.KIT_IDENTITY_DIR = dir;
       rmSync(own, { recursive: true, force: true });
+    }
+  });
+
+  it("records a signed revocation that verifies against the signer's public key", () => {
+    const own = mkdtempSync(join(tmpdir(), "kit-revoke-"));
+    try {
+      process.env.KIT_IDENTITY_DIR = own;
+      const victim = loadOrCreateIdentity().identity; // the key we'll revoke
+      const { identity: signer } = rotateIdentity(); // new key signs the revocation
+      assert.equal(isRevoked(victim.id), false);
+      const rec = recordRevocation(victim.id, "device lost", undefined, "2026-06-29T00:00:00Z");
+      assert.equal(rec.kid, victim.id);
+      assert.equal(rec.by, signer.id);
+      // the revocation signature verifies with the SIGNER's public key (asymmetric)
+      assert.equal(
+        verifySignature(
+          revocationStatement(victim.id, "2026-06-29T00:00:00Z", "device lost"),
+          Buffer.from(rec.sig, "base64"),
+          signer.publicKey,
+        ),
+        true,
+      );
+      assert.equal(isRevoked(victim.id), true);
+      assert.equal(loadRevocations().length, 1);
+    } finally {
+      process.env.KIT_IDENTITY_DIR = dir;
+      rmSync(own, { recursive: true, force: true });
+    }
+  });
+
+  it("isRevoked is false for unknown keys and loadRevocations is [] with no store", () => {
+    const empty = mkdtempSync(join(tmpdir(), "kit-norevoke-"));
+    try {
+      process.env.KIT_IDENTITY_DIR = empty;
+      assert.equal(isRevoked("kid_whatever"), false);
+      assert.deepEqual(loadRevocations(), []);
+    } finally {
+      process.env.KIT_IDENTITY_DIR = dir;
+      rmSync(empty, { recursive: true, force: true });
     }
   });
 

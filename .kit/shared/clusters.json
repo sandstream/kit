@@ -1,0 +1,14 @@
+{
+  "memory": ["src/memory/**", "src/commands/memory.ts"],
+  "identity": [
+    "src/identity.ts",
+    "src/commands/identity.ts",
+    "src/commands/panic.ts",
+    "src/audit.ts",
+    "src/audit-anchor.ts",
+    "src/commands/audit.ts"
+  ],
+  "install-gate": ["src/install-gate.ts", "src/agent-config.ts"],
+  "ci-audit": ["src/ci-audit.ts", "src/ci-init.ts"],
+  "secrets": ["src/secrets*.ts", "src/utils/redactSecrets.ts", "src/check-security.ts"]
+}

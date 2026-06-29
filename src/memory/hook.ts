@@ -15,6 +15,7 @@ import { openMemoryDb, getStats, recentMessages, getMemoryDir, ensureMemoryDir }
 import { indexClaudeTranscripts, indexAllHarnesses } from "./parser.js";
 import { palList } from "./pal.js";
 import { activeShared, formatAge, type SharedEntry } from "./shared.js";
+import { decisionsForPaths, changedPaths } from "./clusters.js";
 import { getCurrentProjectRoot } from "./project.js";
 import { readCachedUpdateSync, getKitVersionSync } from "../update-check.js";
 
@@ -50,14 +51,42 @@ export function userPromptSubmitReminder(): string {
       pending = ` ${openItems.length} open action item(s) blocked on you: ${titles}${more}.`;
     }
     const stale = staleKitNotice();
+    // Deterministic PUSH (gap #3): if the working-tree changes fall into an area
+    // that has active decisions, surface them — touch area X ⇒ see X's decisions,
+    // not a query lottery. Bounded + fail-open (no clusters.json ⇒ nothing).
+    const push = touchedDecisionsNotice();
     return (
       (stale ? `${stale}\n` : "") +
       `You have local conversation memory: ${s.messages} messages indexed. ` +
       "Before answering anything project-specific, run `kit memory search <terms>` " +
-      `to retrieve what was actually said instead of reconstructing it.${pending}`
+      `to retrieve what was actually said instead of reconstructing it.${pending}` +
+      (push ? `\n${push}` : "")
     );
   } catch {
     return ""; // fail-open: never block a prompt
+  }
+}
+
+/**
+ * One-line notice of the active shared decisions for the area(s) whose files are
+ * currently changed in the working tree — the deterministic push-surfacing
+ * guardrail. "" when there's no cluster map, no changes, or no active decisions.
+ * Bounded (≤2 areas, ≤2 decisions each) so it never floods the prompt. Fail-open.
+ */
+function touchedDecisionsNotice(root: string = getCurrentProjectRoot()): string {
+  try {
+    const groups = decisionsForPaths(root, changedPaths(root));
+    if (!groups.length) return "";
+    const parts = groups.slice(0, 2).map((g) => {
+      const titles = g.decisions
+        .slice(0, 2)
+        .map((d) => `[${d.kind}] ${d.title}`)
+        .join("; ");
+      return `${g.area}: ${titles}`;
+    });
+    return `Active decisions for the area(s) you're touching — ${parts.join(" · ")}. (kit memory context for the full set.)`;
+  } catch {
+    return "";
   }
 }
 

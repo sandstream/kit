@@ -39,6 +39,7 @@ import {
   runSessionEndIndex,
   sessionStartRecovery,
 } from "../memory/hook.js";
+import { decisionsForPaths, changedPaths } from "../memory/clusters.js";
 import {
   installMemoryHooks,
   uninstallMemoryHooks,
@@ -84,6 +85,7 @@ export async function cmdMemory(): Promise<boolean> {
     share: memShare,
     areas: memAreas,
     area: memArea,
+    context: memContext,
     scan: memScan,
     backup: memBackup,
     restore: memRestore,
@@ -236,6 +238,9 @@ async function memHelp(): Promise<boolean> {
   console.log("  kit memory share …          Promote a curated entry to shared (team) memory");
   console.log("  kit memory areas            List shared responsibility areas");
   console.log("  kit memory area <name>      Show shared entries for one area");
+  console.log(
+    "  kit memory context [paths]  Surface active decisions for the area(s) you're touching (--changed = working tree)",
+  );
   return true;
 }
 
@@ -677,6 +682,39 @@ async function memArea(): Promise<boolean> {
     );
     if (e.body) console.log(`    ${e.body}`);
     if (e.refs.length) console.log(`    ${c.dim}refs: ${e.refs.join(", ")}${c.reset}`);
+  }
+  return true;
+}
+
+async function memContext(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  const root = getCurrentProjectRoot();
+  // Explicit paths win; otherwise (or with --changed) use the working-tree changes.
+  const explicit = process.argv.slice(4).filter((a) => !a.startsWith("--"));
+  const paths =
+    explicit.length > 0 && !hasFlag(process.argv, "--changed") ? explicit : changedPaths(root);
+  const groups = decisionsForPaths(root, paths);
+  if (jsonMode) {
+    console.log(JSON.stringify({ paths, groups }));
+    return true;
+  }
+  if (!groups.length) {
+    console.log(
+      `${c.dim}no active shared decisions for the area(s) you're touching (${paths.length} path(s) checked)${c.reset}`,
+    );
+    return true;
+  }
+  console.log(
+    `${c.bold}Active decisions for the area(s) you're touching${c.reset} ${c.dim}— surfaced by path${c.reset}`,
+  );
+  for (const g of groups) {
+    console.log(`  ${c.bold}${g.area}${c.reset}`);
+    for (const e of g.decisions) {
+      const age = formatAge(e.ts);
+      console.log(
+        `    ${c.bold}[${e.kind}]${c.reset} ${e.title}${age ? ` ${c.dim}(${age})${c.reset}` : ""}`,
+      );
+    }
   }
   return true;
 }

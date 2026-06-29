@@ -128,7 +128,7 @@ async function cmdAuditVerify(): Promise<boolean> {
   // signed by an unknown key are reported but do not fail verify. A FORGED
   // signature (invalid > 0) is a hard failure.
   const { verifyAuditSignatures } = await import("../audit.js");
-  const { localPublicKeys } = await import("../identity.js");
+  const { localPublicKeys, loadRevocations } = await import("../identity.js");
   const trust = localPublicKeys();
   const s = verifyAuditSignatures(content, (kid) => trust.get(kid) ?? null);
   if (s.signed > 0) {
@@ -142,6 +142,27 @@ async function cmdAuditVerify(): Promise<boolean> {
     if (s.unsigned > 0) parts.push(`${s.unsigned} unsigned`);
     const icon = s.ok ? `${c.green}✓` : `${c.red}✗`;
     console.log(`${icon} identity signatures${c.reset}  ${c.dim}${parts.join(", ")}${c.reset}`);
+    // Revocation note (kit panic): entries signed by a now-revoked key are still
+    // valid HISTORICAL evidence (the signature was good when made), but that key
+    // is no longer trusted for NEW signatures. Surface it; don't fail on it.
+    const revoked = new Set(loadRevocations().map((r) => r.kid));
+    if (revoked.size > 0) {
+      let revokedSigs = 0;
+      for (const line of content.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const o = JSON.parse(line) as { kid?: unknown };
+          if (typeof o.kid === "string" && revoked.has(o.kid)) revokedSigs++;
+        } catch {
+          /* chain verifier already covers unparseable lines */
+        }
+      }
+      if (revokedSigs > 0) {
+        console.warn(
+          `${c.yellow}! ${revokedSigs} entr${revokedSigs === 1 ? "y" : "ies"} signed by a REVOKED key${c.reset} ${c.dim}(valid as history; key no longer trusted for new signatures — kit panic)${c.reset}`,
+        );
+      }
+    }
     if (!s.ok) return false;
   } else if (s.unsigned > 0) {
     console.log(

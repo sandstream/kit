@@ -8,6 +8,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Path→cluster push-surfacing for shared decisions** (`kit memory context`).
+  Pull recall can't _guarantee_ you see a settled decision (a bad query misses
+  it); the guardrail is now PUSH — touch files under an area and kit
+  deterministically surfaces that area's ACTIVE decisions. A committed
+  `.kit/shared/clusters.json` maps `area → globs` (zero-dep glob→regex matcher).
+  `kit memory context [paths…|--changed]` prints the active decisions for the
+  touched areas, and the UserPromptSubmit reminder now appends a bounded notice
+  for the area(s) your working-tree changes fall into. Superseded/reversed
+  decisions never resurface (uses `activeShared`). Fail-open (no map ⇒ nothing).
+- **`kit panic`** (experimental) — one-command compromise response (the control
+  plane's kill-switch). Rotates the local identity (old key archived but its past
+  signatures stay verifiable), emits a SIGNED, append-only revocation of the old
+  key (`~/.kit/revocations.jsonl`, signed by the new key — asymmetric, so it
+  propagates as public data with no shared secret), records an `identity.panic`
+  event in the tamper-evident audit log, and prints the platform-revocation
+  checklist for the accounts kit does NOT own (GitHub / Anthropic / Apple / vault)
+  with links. `kit audit verify` now surfaces entries signed by a revoked key
+  (valid as history; the key is no longer trusted for new signatures). New
+  identity primitives: `recordRevocation`, `loadRevocations`, `isRevoked`,
+  `revocationStatement`. Honest boundary documented: kit owns its keys + the
+  revocation list + the audit; it only orchestrates platform-account revocation.
 - **Living shared decisions — lifecycle (status / supersedes / reverses).**
   Shared memory entries are now versioned: a change is a NEW append-only entry
   that `--supersedes <id>` or `--reverses <id>` an old one (or carries an explicit
@@ -46,6 +67,18 @@ verify` now reports the signature tally (verified / unknown-key / unsigned)
   signature, while fail-opening on absent/unknown trust. This is the asymmetric
   ATTRIBUTION layer (who produced an entry, verifiable with only the public key)
   orthogonal to the symmetric HMAC INTEGRITY anchor. See `docs/AUDIT_ATTESTATION.md` §2.5.
+
+### Fixed
+
+- **`kit check` secrets scan: degraded (no-trufflehog) fallback no longer cries
+  high-severity on its own noise.** The basic `git grep` path now mirrors the
+  trufflehog branch's philosophy — it's UNVERIFIED, so it's a `medium` warn, not
+  `high`, and it filters its two dominant false-positive classes: test/fixture/mock
+  files (fake credentials live there by design; the authoritative trufflehog + CI
+  gitleaks scanners still cover them and verify live) and all-caps identifier
+  VALUES (an env-var name like `SOCKET_SECURITY_API_TOKEN` is a config key, never a
+  secret). Removes a self-inflicted false positive on kit's own source and the
+  test fixtures; the authoritative scanners are unchanged.
 
 ## [2.2.0] - 2026-06-28
 
