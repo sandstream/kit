@@ -125,6 +125,7 @@ import { cmdScan } from "./commands/scan.js";
 import { cmdVerifyProvenance } from "./commands/verify-provenance.js";
 import { cmdGhaAudit } from "./commands/gha-audit.js";
 import { cmdIdentity } from "./commands/identity.js";
+import { cmdPanic } from "./commands/panic.js";
 import { cmdSbom } from "./commands/sbom.js";
 import { cmdAuth } from "./commands/auth.js";
 import { cmdAudit } from "./commands/audit.js";
@@ -5160,6 +5161,8 @@ export const COMMAND_HELP: Record<string, string> = {
     "Evidence map: which OWASP ASVS L2 controls kit's deterministic checks auto-verify vs gap/manual/n-a (NOT a compliance attestation; --json for GRC tools)",
   identity:
     "Manage this machine/agent's Ed25519 identity (init/show/rotate) — asymmetric, attributable signing for audit/policy (experimental)",
+  panic:
+    "Compromise response: rotate identity + emit a signed revocation + audit it + print the platform-revocation checklist (experimental)",
   design: "Check design quality (a11y, design tokens) against the baseline",
   baseline:
     "Freeze current warnings into .kit-baseline.json so future runs gate only net-new findings",
@@ -5374,7 +5377,10 @@ function cmdHelp(subcommand?: string): boolean {
       ],
     ],
     ["Agents & memory", ["memory", "agent-config", "mcp", "skills", "context", "hooks"]],
-    ["Governance & access", ["governance", "audit", "auth", "team", "escalate", "identity"]],
+    [
+      "Governance & access",
+      ["governance", "audit", "auth", "team", "escalate", "identity", "panic"],
+    ],
     ["Packages & services", ["pkg", "add", "plugin", "create-plugin", "run", "open", "ci"]],
     ["Meta", ["whoami", "version", "completions", "help"]],
   ];
@@ -5818,6 +5824,7 @@ export const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
   "self-audit": cmdSelfAudit,
   coverage: cmdCoverage,
   identity: cmdIdentity,
+  panic: cmdPanic,
   clone: cmdClone,
   run: cmdRun,
   open: cmdOpen,
@@ -5889,6 +5896,7 @@ export const COMMAND_TIERS: Record<string, CommandTier> = {
   "self-audit": "stable",
   coverage: "experimental",
   identity: "experimental",
+  panic: "experimental",
   clone: "stable",
   run: "stable",
   open: "stable",

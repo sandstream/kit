@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit panic`** (experimental) — one-command compromise response (the control
+  plane's kill-switch). Rotates the local identity (old key archived but its past
+  signatures stay verifiable), emits a SIGNED, append-only revocation of the old
+  key (`~/.kit/revocations.jsonl`, signed by the new key — asymmetric, so it
+  propagates as public data with no shared secret), records an `identity.panic`
+  event in the tamper-evident audit log, and prints the platform-revocation
+  checklist for the accounts kit does NOT own (GitHub / Anthropic / Apple / vault)
+  with links. `kit audit verify` now surfaces entries signed by a revoked key
+  (valid as history; the key is no longer trusted for new signatures). New
+  identity primitives: `recordRevocation`, `loadRevocations`, `isRevoked`,
+  `revocationStatement`. Honest boundary documented: kit owns its keys + the
+  revocation list + the audit; it only orchestrates platform-account revocation.
 - **Living shared decisions — lifecycle (status / supersedes / reverses).**
   Shared memory entries are now versioned: a change is a NEW append-only entry
   that `--supersedes <id>` or `--reverses <id>` an old one (or carries an explicit

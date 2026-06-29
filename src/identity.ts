@@ -30,6 +30,7 @@ import {
 import {
   readFileSync,
   writeFileSync,
+  appendFileSync,
   existsSync,
   mkdirSync,
   renameSync,
@@ -41,6 +42,7 @@ import { secureFile } from "./utils/secure-perms.js";
 
 const KEY_FILE = "identity.key"; // PKCS8 PEM private key (0600)
 const RECORD_FILE = "identity.json"; // public identity record (0600)
+const REVOCATIONS_FILE = "revocations.jsonl"; // append-only signed revocation records (0600)
 
 export interface Identity {
   /** Stable, non-secret id derived from the public key. */
@@ -166,6 +168,69 @@ export function signWithIdentity(data: Buffer | string, dir?: string): Buffer {
   const pem = readFileSync(keyPath(dir), "utf-8");
   const msg = Buffer.isBuffer(data) ? data : Buffer.from(data);
   return edSign(null, msg, createPrivateKey(pem));
+}
+
+/**
+ * A signed revocation record. `kid` is the revoked identity; `by` is the
+ * identity that signed the revocation (normally the freshly-rotated one); `sig`
+ * is its Ed25519 signature over the canonical statement (see revocationStatement).
+ * Asymmetric payoff: a revocation propagates as PUBLIC data — anyone with the
+ * signer's public key can verify it, no shared secret required.
+ */
+export interface RevocationRecord {
+  kid: string;
+  reason: string;
+  ts: string;
+  by: string;
+  sig: string;
+}
+
+/** Canonical bytes signed for a revocation — stable across machines for verify. */
+export function revocationStatement(kid: string, ts: string, reason: string): string {
+  return `kit-revoke\nkid=${kid}\nts=${ts}\nreason=${reason}`;
+}
+
+function revocationsPath(dir?: string): string {
+  return join(identityDir(dir), REVOCATIONS_FILE);
+}
+
+/**
+ * Append a signed revocation of `kid`, signed by the CURRENT identity (after a
+ * rotate, that's the new key vouching "I revoke my old key"). Append-only +
+ * 0600. Returns the record. Throws if there is no current identity to sign with.
+ */
+export function recordRevocation(
+  kid: string,
+  reason: string,
+  dir?: string,
+  now: string = new Date().toISOString(),
+): RevocationRecord {
+  const signer = tryLoadIdentity(dir);
+  if (!signer) throw new Error("no current identity to sign the revocation");
+  const sig = signWithIdentity(revocationStatement(kid, now, reason), dir).toString("base64");
+  const rec: RevocationRecord = { kid, reason, ts: now, by: signer.id, sig };
+  const path = revocationsPath(dir);
+  mkdirSync(identityDir(dir), { recursive: true });
+  appendFileSync(path, JSON.stringify(rec) + "\n", { encoding: "utf-8", mode: 0o600 });
+  secureFile(path);
+  return rec;
+}
+
+/** All revocation records on this machine (append-only log). Best-effort: [] if absent. */
+export function loadRevocations(dir?: string): RevocationRecord[] {
+  try {
+    return readFileSync(revocationsPath(dir), "utf-8")
+      .split("\n")
+      .filter((l) => l.trim().length > 0)
+      .map((l) => JSON.parse(l) as RevocationRecord);
+  } catch {
+    return [];
+  }
+}
+
+/** True if `kid` has a revocation record. Pure read. */
+export function isRevoked(kid: string, dir?: string): boolean {
+  return loadRevocations(dir).some((r) => r.kid === kid);
 }
 
 /**
