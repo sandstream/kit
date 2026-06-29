@@ -122,6 +122,33 @@ async function cmdAuditVerify(): Promise<boolean> {
   }
   console.log(`${c.green}✓ audit chain intact${c.reset}  ${c.dim}${r.entries} entries${c.reset}`);
 
+  // Identity-signature layer (orthogonal to the chain): proves WHO produced each
+  // entry, not just that nothing was edited. Best-effort attribution — entries
+  // signed by a locally-known key verify; unsigned (legacy/keyless) and entries
+  // signed by an unknown key are reported but do not fail verify. A FORGED
+  // signature (invalid > 0) is a hard failure.
+  const { verifyAuditSignatures } = await import("../audit.js");
+  const { localPublicKeys } = await import("../identity.js");
+  const trust = localPublicKeys();
+  const s = verifyAuditSignatures(content, (kid) => trust.get(kid) ?? null);
+  if (s.signed > 0) {
+    if (s.invalid > 0) {
+      console.error(
+        `${c.red}✗ ${s.invalid} signed entr${s.invalid === 1 ? "y has" : "ies have"} an INVALID signature (forged/tampered)${c.reset}`,
+      );
+    }
+    const parts = [`${s.verified}/${s.signed} signatures verified`];
+    if (s.unverifiable > 0) parts.push(`${s.unverifiable} from unknown key(s)`);
+    if (s.unsigned > 0) parts.push(`${s.unsigned} unsigned`);
+    const icon = s.ok ? `${c.green}✓` : `${c.red}✗`;
+    console.log(`${icon} identity signatures${c.reset}  ${c.dim}${parts.join(", ")}${c.reset}`);
+    if (!s.ok) return false;
+  } else if (s.unsigned > 0) {
+    console.log(
+      `${c.dim}· no identity signatures (${s.unsigned} keyless entries — run \`kit identity\` to start signing)${c.reset}`,
+    );
+  }
+
   const {
     readAnchorRecord,
     tryReadAuditAnchorKey,

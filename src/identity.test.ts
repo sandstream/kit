@@ -11,6 +11,7 @@ import {
   signWithIdentity,
   verifySignature,
   identityId,
+  localPublicKeys,
 } from "./identity.js";
 
 describe("identity", () => {
@@ -81,6 +82,24 @@ describe("identity", () => {
     assert.equal(previousId, before.id);
     // The live record is now the rotated identity.
     assert.equal(tryLoadIdentity()?.id, after.id);
+  });
+
+  it("localPublicKeys returns the current key plus archived (rotated) keys", () => {
+    const own = mkdtempSync(join(tmpdir(), "kit-identity-keys-"));
+    try {
+      process.env.KIT_IDENTITY_DIR = own;
+      const first = loadOrCreateIdentity().identity;
+      const { identity: second } = rotateIdentity();
+      const keys = localPublicKeys();
+      // Current identity resolves...
+      assert.equal(keys.get(second.id), second.publicKey);
+      // ...and so does the rotated-away predecessor (archived .bak record).
+      assert.equal(keys.get(first.id), first.publicKey);
+      assert.equal(keys.size, 2);
+    } finally {
+      process.env.KIT_IDENTITY_DIR = dir;
+      rmSync(own, { recursive: true, force: true });
+    }
   });
 
   it("tryLoadIdentity returns null when no identity exists", () => {

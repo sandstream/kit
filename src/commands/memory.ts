@@ -24,9 +24,14 @@ import { syncFromExport } from "../memory/sync.js";
 import {
   shareEntry,
   listAreas,
-  queryArea,
+  searchShared,
+  readShared,
+  effectiveStatus,
+  formatAge,
   getSharedPath,
   type SharedKind,
+  type SharedStatus,
+  type SharedEntry,
 } from "../memory/shared.js";
 import {
   userPromptSubmitReminder,
@@ -210,7 +215,9 @@ async function memHelp(): Promise<boolean> {
   console.log(
     "  kit memory index            Index all agent transcripts (Claude Code, Codex, Gemini, Cursor, …) into the store",
   );
-  console.log("  kit memory search <query>   Search memory (current project; --global for all)");
+  console.log(
+    "  kit memory search <query>   Search memory + curated shared decisions (current project; --global for all)",
+  );
   console.log("  kit memory stats            Show what the memory store contains");
   console.log("  kit memory merge <file>     Merge another machine's memory.db into this one");
   console.log(
@@ -442,12 +449,48 @@ async function memSearch(): Promise<boolean> {
     // logging is non-critical
   }
   db.close();
+
+  // Curated shared tier (.kit/shared/memory.jsonl) — high-signal, team-reviewed
+  // decisions/conventions that travel with the repo. Always project-local (so
+  // `--global`, which widens the raw-recall scope across projects, still reads
+  // THIS repo's shared store). Fail-open: a missing/broken file never breaks search.
+  const sharedRoot = flagValue(process.argv, "--project") ?? getCurrentProjectRoot();
+  let shared: SharedEntry[] = [];
+  try {
+    shared = searchShared(sharedRoot, query);
+  } catch {
+    // shared tier is best-effort context, never gates raw recall
+  }
+
   if (jsonMode) {
-    console.log(JSON.stringify(hits));
+    console.log(JSON.stringify({ messages: hits, shared }));
     return true;
   }
+
+  // Curated decisions first — they're the durable context, not a raw transcript
+  // line. Superseded/reversed matches are still shown (so "this was tried + undone"
+  // surfaces) but badged, with age — relevance stays the reader's call.
+  if (shared.length) {
+    const allShared = readShared(sharedRoot);
+    console.log(
+      `${c.bold}${shared.length}${c.reset} curated (shared) match(es) ${c.dim}— team decisions${c.reset}`,
+    );
+    for (const e of shared) {
+      const st = effectiveStatus(e, allShared);
+      const badge =
+        st === "active" ? "" : ` ${st === "reversed" ? c.red : c.yellow}[${st}]${c.reset}`;
+      const age = formatAge(e.ts);
+      const prov = `${e.area} · ${e.author}${e.source_ref ? ` @${e.source_ref}` : ""}${age ? ` · ${age}` : ""}`;
+      console.log(
+        `  ${c.bold}[${e.kind}]${c.reset} ${e.title}${badge} ${c.dim}— ${prov}${c.reset}`,
+      );
+      if (e.body) console.log(`    ${c.dim}${e.body.replace(/\s+/g, " ").slice(0, 160)}${c.reset}`);
+    }
+  }
+
   const scope = projectPath ? `${c.dim}in ${projectPath}${c.reset}` : `${c.dim}(global)${c.reset}`;
   if (!hits.length) {
+    if (shared.length) return true; // curated results already shown; raw recall empty
     console.log(`${c.dim}no matches for "${query}" ${projectPath ?? "(global)"}${c.reset}`);
     return true;
   }
@@ -527,21 +570,43 @@ async function memShare(): Promise<boolean> {
   const kind = (flagValue(process.argv, "--kind") ?? "note") as SharedKind;
   const body = flagValue(process.argv, "--body") ?? "";
   const ref = flagValue(process.argv, "--ref");
+  // Lifecycle: a change is a NEW entry that supersedes/reverses an old id (append-only).
+  const supersedes = flagValue(process.argv, "--supersedes");
+  const reverses = flagValue(process.argv, "--reverses");
+  const status = flagValue(process.argv, "--status") as SharedStatus | undefined;
   if (!area || !title) {
     console.error(
-      `${c.red}usage: kit memory share --area <a> --title <t> [--kind decision|convention|how-built|status|security|note] [--body <b>] [--ref <r>]${c.reset}`,
+      `${c.red}usage: kit memory share --area <a> --title <t> [--kind decision|convention|how-built|status|security|note] [--body <b>] [--ref <r>] [--supersedes <id>] [--reverses <id>]${c.reset}`,
     );
     return false;
   }
   const root = getCurrentProjectRoot();
+  // Validate any referenced id exists, so a typo'd --supersedes/--reverses can't
+  // silently leave the old decision active (it would never be marked superseded).
+  if (supersedes || reverses) {
+    const ids = new Set(readShared(root).map((e) => e.id));
+    for (const [flag, id] of [
+      ["--supersedes", supersedes],
+      ["--reverses", reverses],
+    ] as const) {
+      if (id && !ids.has(id)) {
+        console.error(`${c.red}${flag} ${id}: no shared entry with that id${c.reset}`);
+        return false;
+      }
+    }
+  }
   try {
     const e = shareEntry(
       root,
-      { area, kind, title, body, refs: ref ? [ref] : [] },
+      { area, kind, title, body, refs: ref ? [ref] : [], status, supersedes, reverses },
       new Date().toISOString(),
     );
+    const rel =
+      e.reverses || e.supersedes
+        ? ` ${c.dim}(${e.reverses ? "reverses" : "supersedes"} ${e.reverses ?? e.supersedes})${c.reset}`
+        : "";
     console.log(
-      `${c.green}✓${c.reset} shared ${c.bold}${e.id}${c.reset} to area ${c.bold}${area}${c.reset} ${c.dim}(${getSharedPath(root)})${c.reset}`,
+      `${c.green}✓${c.reset} shared ${c.bold}${e.id}${c.reset} to area ${c.bold}${area}${c.reset}${rel} ${c.dim}(${getSharedPath(root)})${c.reset}`,
     );
     console.log(
       `${c.dim}commit .kit/shared/memory.jsonl + open a PR — shared memory is reviewed like code${c.reset}`,
@@ -580,9 +645,12 @@ async function memArea(): Promise<boolean> {
     console.error(`${c.red}usage: kit memory area <name>${c.reset}`);
     return false;
   }
-  const entries = queryArea(getCurrentProjectRoot(), name);
+  const root = getCurrentProjectRoot();
+  const all = readShared(root);
+  const entries = all.filter((e) => e.area === name);
   if (jsonMode) {
-    console.log(JSON.stringify(entries));
+    // Enrich with the EFFECTIVE lifecycle status (computed against the full set).
+    console.log(JSON.stringify(entries.map((e) => ({ ...e, status: effectiveStatus(e, all) }))));
     return true;
   }
   if (!entries.length) {
@@ -593,8 +661,20 @@ async function memArea(): Promise<boolean> {
     `${c.bold}${name}${c.reset} ${c.dim}· ${entries.length} entr${entries.length === 1 ? "y" : "ies"}${c.reset}`,
   );
   for (const e of entries) {
-    const prov = `${e.author}${e.source_ref ? ` @${e.source_ref}` : ""}`;
-    console.log(`  ${c.bold}[${e.kind}]${c.reset} ${e.title} ${c.dim}— ${prov}${c.reset}`);
+    const st = effectiveStatus(e, all);
+    // Active entries read clean; superseded/reversed are badged + dimmed (history, not HEAD).
+    const badge =
+      st === "active" ? "" : ` ${st === "reversed" ? c.red : c.yellow}[${st}]${c.reset}`;
+    const rel = e.reverses
+      ? ` ${c.dim}↩ ${e.reverses}${c.reset}`
+      : e.supersedes
+        ? ` ${c.dim}→ ${e.supersedes}${c.reset}`
+        : "";
+    const age = formatAge(e.ts);
+    const prov = `${e.author}${e.source_ref ? ` @${e.source_ref}` : ""}${age ? ` · ${age}` : ""}`;
+    console.log(
+      `  ${c.bold}[${e.kind}]${c.reset} ${e.title}${badge}${rel} ${c.dim}— ${prov}${c.reset}`,
+    );
     if (e.body) console.log(`    ${e.body}`);
     if (e.refs.length) console.log(`    ${c.dim}refs: ${e.refs.join(", ")}${c.reset}`);
   }

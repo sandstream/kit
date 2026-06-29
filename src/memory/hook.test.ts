@@ -7,10 +7,12 @@ import { openMemoryDb, upsertSession, insertMessage } from "./db.js";
 import {
   userPromptSubmitReminder,
   sessionStartRecovery,
+  recentDecisions,
   dueForHarnessSweep,
   dueForMidSessionIndex,
 } from "./hook.js";
 import { getCurrentProjectRoot } from "./project.js";
+import { shareEntry } from "./shared.js";
 
 describe("memory hook — UserPromptSubmit reminder", () => {
   let tmp: string;
@@ -90,6 +92,83 @@ describe("memory hook — SessionStart recovery", () => {
     assert.match(text, /kit memory search/);
     // newest-first ordering: the latest message precedes the older one
     assert.ok(text.indexOf("latest decision") < text.indexOf("older note"));
+  });
+});
+
+describe("memory hook — recentDecisions (shared curated tier)", () => {
+  let root: string;
+
+  before(() => {
+    root = mkdtempSync(join(tmpdir(), "kit-shared-"));
+    // Durable kinds (newest last so we can assert newest-first ordering)
+    shareEntry(
+      root,
+      { area: "auth", kind: "decision", title: "use Ed25519", body: "" },
+      "2026-01-01T00:00:00Z",
+    );
+    shareEntry(
+      root,
+      { area: "ci", kind: "convention", title: "pin actions by sha", body: "" },
+      "2026-02-01T00:00:00Z",
+    );
+    // Lower-signal kinds that must be excluded
+    shareEntry(
+      root,
+      { area: "misc", kind: "note", title: "a passing note", body: "" },
+      "2026-03-01T00:00:00Z",
+    );
+    shareEntry(
+      root,
+      { area: "misc", kind: "how-built", title: "wired the gate", body: "" },
+      "2026-03-02T00:00:00Z",
+    );
+  });
+
+  after(() => rmSync(root, { recursive: true, force: true }));
+
+  it("returns only durable kinds, newest-first, capped at the limit", () => {
+    const d = recentDecisions(root, 3);
+    const kinds = d.map((e) => e.kind);
+    assert.ok(!kinds.includes("note"), "notes excluded");
+    assert.ok(!kinds.includes("how-built"), "how-built excluded");
+    assert.deepEqual(
+      d.map((e) => e.title),
+      ["pin actions by sha", "use Ed25519"],
+      "newest durable first",
+    );
+  });
+
+  it("respects the limit", () => {
+    assert.equal(recentDecisions(root, 1).length, 1);
+  });
+
+  it("excludes superseded decisions (shows the HEAD, not the graveyard)", () => {
+    const r = mkdtempSync(join(tmpdir(), "kit-super-"));
+    try {
+      const old = shareEntry(
+        r,
+        { area: "auth", kind: "decision", title: "use RSA", body: "" },
+        "2026-01-01T00:00:00Z",
+      );
+      shareEntry(
+        r,
+        { area: "auth", kind: "decision", title: "use Ed25519", body: "", supersedes: old.id },
+        "2026-02-01T00:00:00Z",
+      );
+      const titles = recentDecisions(r, 5).map((e) => e.title);
+      assert.deepEqual(titles, ["use Ed25519"], "superseded RSA decision is not surfaced");
+    } finally {
+      rmSync(r, { recursive: true, force: true });
+    }
+  });
+
+  it("fail-open on a project with no shared store", () => {
+    const empty = mkdtempSync(join(tmpdir(), "kit-noshared-"));
+    try {
+      assert.deepEqual(recentDecisions(empty, 3), []);
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
   });
 });
 

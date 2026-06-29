@@ -22,6 +22,13 @@ import { findSecrets } from "../utils/redactSecrets.js";
 
 export type SharedKind = "decision" | "convention" | "how-built" | "status" | "security" | "note";
 
+/**
+ * Lifecycle of a decision. Append-only: we never edit an old entry, a change is a
+ * NEW entry that `supersedes`/`reverses` the old id. "active" is the default and
+ * is left IMPLICIT (absent field) so existing/committed entries stay byte-identical.
+ */
+export type SharedStatus = "active" | "superseded" | "reversed";
+
 export interface SharedEntry {
   id: string;
   area: string;
@@ -32,6 +39,12 @@ export interface SharedEntry {
   author: string;
   ts: string;
   source_ref?: string;
+  /** Explicit lifecycle marker; absent ⇒ active (unless a later entry supersedes/reverses it). */
+  status?: SharedStatus;
+  /** Id of the entry this one replaces (its successor). */
+  supersedes?: string;
+  /** Id of the entry this one reverses (tried + undone — re-introducing it should warn). */
+  reverses?: string;
 }
 
 export interface ShareInput {
@@ -40,6 +53,9 @@ export interface ShareInput {
   title: string;
   body: string;
   refs?: string[];
+  status?: SharedStatus;
+  supersedes?: string;
+  reverses?: string;
 }
 
 export function getSharedPath(root: string): string {
@@ -120,6 +136,11 @@ export function shareEntry(root: string, input: ShareInput, now: string): Shared
     ts: now,
     source_ref: gitHead(root),
   };
+  // Lifecycle fields are written only when meaningful, so a plain `active` entry
+  // stays byte-identical to pre-lifecycle entries (clean diffs, backward-compat).
+  if (input.status && input.status !== "active") entry.status = input.status;
+  if (input.supersedes) entry.supersedes = input.supersedes;
+  if (input.reverses) entry.reverses = input.reverses;
   const path = getSharedPath(root);
   mkdirSync(dirname(path), { recursive: true });
   appendFileSync(path, JSON.stringify(entry) + "\n");
@@ -143,4 +164,43 @@ export function searchShared(root: string, query: string): SharedEntry[] {
   return readShared(root).filter(
     (e) => e.title.toLowerCase().includes(q) || e.body.toLowerCase().includes(q),
   );
+}
+
+/**
+ * Effective lifecycle status of an entry given the full set. An explicit
+ * `status` field wins; otherwise an entry is `superseded`/`reversed` if a LATER
+ * entry points at it (deny-by-default toward "active": only an unreferenced,
+ * unmarked entry is active). `reverses` outranks `supersedes` if both reference it.
+ * Pure — the surfacing layer decides what to show; kit never auto-decides relevance.
+ */
+export function effectiveStatus(entry: SharedEntry, all: SharedEntry[]): SharedStatus {
+  if (entry.status === "superseded" || entry.status === "reversed") return entry.status;
+  let result: SharedStatus = "active";
+  for (const e of all) {
+    if (e.id === entry.id) continue;
+    if (e.reverses === entry.id) return "reversed";
+    if (e.supersedes === entry.id) result = "superseded";
+  }
+  return result;
+}
+
+/** The currently-active shared entries (effectiveStatus === "active"). */
+export function activeShared(root: string): SharedEntry[] {
+  const all = readShared(root);
+  return all.filter((e) => effectiveStatus(e, all) === "active");
+}
+
+/**
+ * Coarse human age of a timestamp ("today" / "5d ago" / "3mo ago" / "2y ago"),
+ * or "" if unparseable. Display-only — surfacing shows age so an old decision is
+ * flagged for REVIEW, never blind obedience (the relevance call stays human).
+ */
+export function formatAge(ts: string, now: Date = new Date()): string {
+  const then = new Date(ts).getTime();
+  if (!Number.isFinite(then)) return "";
+  const days = Math.floor((now.getTime() - then) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days < 30) return `${days}d ago`;
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
 }

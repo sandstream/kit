@@ -14,6 +14,7 @@ import { spawn } from "node:child_process";
 import { openMemoryDb, getStats, recentMessages, getMemoryDir, ensureMemoryDir } from "./db.js";
 import { indexClaudeTranscripts, indexAllHarnesses } from "./parser.js";
 import { palList } from "./pal.js";
+import { activeShared, formatAge, type SharedEntry } from "./shared.js";
 import { getCurrentProjectRoot } from "./project.js";
 import { readCachedUpdateSync, getKitVersionSync } from "../update-check.js";
 
@@ -61,6 +62,26 @@ export function userPromptSubmitReminder(): string {
 }
 
 /**
+ * The most recent ACTIVE durable shared decisions for a project, newest first.
+ * "Durable" = the curated kinds worth re-surfacing on resume (decision /
+ * convention / security / status); notes/how-built are excluded as lower-signal.
+ * Superseded/reversed entries are filtered out (activeShared) — a resumed session
+ * sees the current HEAD of the decision tree, not a graveyard. Fail-open:
+ * activeShared returns [] on a missing/broken store. Deterministic, no model.
+ */
+export function recentDecisions(root: string, limit: number): SharedEntry[] {
+  const DURABLE = new Set<SharedEntry["kind"]>(["decision", "convention", "security", "status"]);
+  try {
+    return activeShared(root)
+      .filter((e) => DURABLE.has(e.kind))
+      .sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0))
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * SessionStart recovery — re-inject "where you left off" for THIS project after a
  * resume/compact, so the agent regains continuity instead of starting blank. Pulls
  * the most recent messages + open action items from the store. FAIL-OPEN and
@@ -73,8 +94,13 @@ export function sessionStartRecovery(opts: { limit?: number } = {}): string {
     const recent = recentMessages(db, { projectPath: root, limit: opts.limit ?? 6 });
     const openItems = palList(db, { scope: basename(root) });
     db.close();
+    // Curated shared tier — re-inject the team's durable decisions on resume so
+    // the agent regains the SETTLED context, not just the last few raw turns.
+    // Fail-open (readShared swallows a missing/broken file → []).
+    const decisions = recentDecisions(root, 3);
     const stale = staleKitNotice();
-    if (recent.length === 0 && openItems.length === 0 && !stale) return "";
+    if (recent.length === 0 && openItems.length === 0 && decisions.length === 0 && !stale)
+      return "";
 
     const lines: string[] = [];
     if (stale) lines.push(stale);
@@ -86,6 +112,13 @@ export function sessionStartRecovery(opts: { limit?: number } = {}): string {
       const text = (m.content ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
       if (text) lines.push(`  · ${who}: ${text}`);
     }
+    if (decisions.length > 0) {
+      lines.push("Curated team decisions (shared memory, active):");
+      for (const d of decisions) {
+        const age = formatAge(d.ts);
+        lines.push(`  · [${d.kind}] ${d.area}: ${d.title}${age ? ` (${age})` : ""}`);
+      }
+    }
     if (openItems.length > 0) {
       const titles = openItems
         .slice(0, 3)
@@ -93,7 +126,7 @@ export function sessionStartRecovery(opts: { limit?: number } = {}): string {
         .join("; ");
       lines.push(`Open action items blocked on you: ${titles}${openItems.length > 3 ? " …" : ""}.`);
     }
-    if (recent.length > 0 || openItems.length > 0) {
+    if (recent.length > 0 || openItems.length > 0 || decisions.length > 0) {
       lines.push("Run `kit memory search <terms>` to pull more of what was actually said.");
     }
     return lines.join("\n");

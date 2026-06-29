@@ -6,6 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Living shared decisions — lifecycle (status / supersedes / reverses).**
+  Shared memory entries are now versioned: a change is a NEW append-only entry
+  that `--supersedes <id>` or `--reverses <id>` an old one (or carries an explicit
+  `--status`). `kit memory share` validates the referenced id exists. Surfacing
+  shows only ACTIVE decisions with their age (e.g. `2y ago`) so an aging decision
+  is flagged for review, never blind obedience; `kit memory area`/`search` badge
+  superseded/reversed entries (and show the chain) so "this was tried + reversed"
+  still surfaces. `active` stays implicit (absent field) so pre-lifecycle entries
+  are byte-identical. New `effectiveStatus`, `activeShared`, `formatAge`.
+- **Shared (curated) memory folded into recall.** `kit memory search` now also
+  searches the committed `.kit/shared/memory.jsonl` tier and surfaces matching
+  team decisions/conventions _above_ raw transcript hits (`--json` now returns
+  `{ messages, shared }`). SessionStart recovery re-injects the project's most
+  recent durable shared decisions (kinds: decision/convention/security/status),
+  so a resumed session regains the settled context, not just the last few raw
+  turns. Both paths are project-local and fail-open (a missing/broken shared
+  store never breaks recall).
+- **Berget AI + Grunden.ai as known providers.** Added `berget` and `grunden`
+  (EU-sovereign, OpenAI-compatible inference) to the service registry with their
+  canonical key names (`BERGET_API_KEY`/`BERGET_BASE_URL`,
+  `GRUNDEN_API_KEY`/`GRUNDEN_BASE_URL`) and where to get them, so `kit secrets`
+  treats them as known, vault-resolved keys (never plaintext). Catalog-only by
+  design: both are used via the `openai` SDK with a custom base URL, so there is
+  no unique package signal to auto-detect on (keying on the `openai` dep would
+  misattribute every OpenAI user). Agent-backend wiring + a Berget Code gate
+  adapter are deferred.
+
+- **Identity-signed audit entries.** When a local `kit identity` exists, each
+  appended `.kit-audit.jsonl` line is signed: kit attaches `kid` (signer id) +
+  `sig` (Ed25519 signature over the line hash). Best-effort and append-safe — no
+  identity means entries are written as before, and a signing failure never
+  blocks the append. `kid`/`sig` sit outside the hashed remainder, so the hash
+  chain still verifies across mixed signed/unsigned/legacy logs. `kit audit
+verify` now reports the signature tally (verified / unknown-key / unsigned)
+  against the locally-known keys (current + rotated) and FAILS hard on a forged
+  signature, while fail-opening on absent/unknown trust. This is the asymmetric
+  ATTRIBUTION layer (who produced an entry, verifiable with only the public key)
+  orthogonal to the symmetric HMAC INTEGRITY anchor. See `docs/AUDIT_ATTESTATION.md` §2.5.
+
 ## [2.2.0] - 2026-06-28
 
 kit 2.2 — agent gate coverage + the first 3.0 primitive. Additive minor: new
@@ -30,7 +71,7 @@ experimental commands and adapters, no breaking changes to any `stable` surface.
 - **`kit ci --init gitlab|bitbucket`** — generate a pipeline snippet that runs
   `kit ci` (GitLab job → JUnit; Bitbucket step). Prints to stdout; `--write` writes
   the file only when absent. Plus `docs/CI_AND_GIT_HOSTS.md` (the 4-layer gate model
-  + per-host enforcement guidance).
+  - per-host enforcement guidance).
 - **`kit gha-audit` extended to GitLab CI + Bitbucket Pipelines** — lints
   `.gitlab-ci.yml` / `bitbucket-pipelines.yml` for unpinned `:latest`/untagged
   images (CWE-1104), remote `include:` (OWASP-A08), and pipe-to-shell (CWE-494).

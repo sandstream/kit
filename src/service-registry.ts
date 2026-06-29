@@ -309,6 +309,31 @@ export const SERVICE_REGISTRY: ServiceDef[] = [
     secrets: ["ATLASSIAN_API_TOKEN", "ATLASSIAN_SITE_URL"],
     tool: "acli",
   },
+
+  // ── EU-sovereign, OpenAI-compatible LLM inference providers. Deliberately NOT
+  //    auto-detected: both are consumed through the standard `openai` SDK with a
+  //    custom base URL, so there is no unique package/file signal (keying on the
+  //    `openai` dep would misattribute every OpenAI user as Berget/Grunden).
+  //    These are catalog entries — canonical key names + where to get them — so
+  //    `kit secrets` knows the keys (vault-resolved, never plaintext) and a
+  //    future agent-backend wiring can point an agent's base URL here. In
+  //    practice a project's `.env.example` keys are what surface them today.
+  {
+    id: "berget",
+    // https://api.berget.ai/v1 — OpenAI-compatible, GPUs in Swedish datacentres.
+    login:
+      "# berget - OpenAI-compatible EU-sovereign inference (SE); get key at https://berget.ai, base URL https://api.berget.ai/v1",
+    check: "# berget - check BERGET_API_KEY is set",
+    secrets: ["BERGET_API_KEY", "BERGET_BASE_URL"],
+  },
+  {
+    id: "grunden",
+    // GLM on own hardware in Sweden; OpenAI-compatible, SEK billing.
+    login:
+      "# grunden - OpenAI-compatible EU-sovereign inference (SE); get key at https://grunden.ai",
+    check: "# grunden - check GRUNDEN_API_KEY is set",
+    secrets: ["GRUNDEN_API_KEY", "GRUNDEN_BASE_URL"],
+  },
 ];
 
 /** Lookup by service id, for the generator. */

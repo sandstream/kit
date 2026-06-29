@@ -79,6 +79,45 @@ tamper-proof against a same-UID local principal: an attacker running as the same
 user can read `~/.kit/audit-anchor.key` AND the anchor record, recompute the tip,
 and re-seal a forged log. Do not describe this as tamper-proof.
 
+## 2.5. Identity signatures on audit entries (`kit identity` + `kit audit verify`)
+
+The HMAC anchor is the INTEGRITY layer (was anything edited / rolled back). It is
+symmetric, so it answers "was this tampered" but not "who wrote it" — a verifier
+holding the anchor key could itself have produced any entry. The identity layer
+is the orthogonal ATTRIBUTION layer.
+
+When a local `kit identity` exists (an Ed25519 keypair under `~/.kit`, see
+`kit identity`), each appended audit line is additionally signed: kit signs the
+line's `hash` and attaches two fields the chain does NOT cover, `kid` (the
+signer's identity id) and `sig` (base64 Ed25519 signature over `hash`).
+
+- **Signing is best-effort and append-safe.** No identity → entries are written
+  exactly as before (no `kid`/`sig`). A signing failure never blocks the append.
+- **`kid`/`sig` sit OUTSIDE the hashed remainder.** `verifyAuditChain` strips
+  them before recomputing the hash, so a log mixes signed and unsigned lines and
+  the chain still verifies end to end. Existing/legacy logs are unaffected.
+- **`kit audit verify` reports the signature tally** after the chain + anchor
+  checks: `verified / signed` against the locally-known keys (the current
+  identity plus archived rotated keys), how many were signed by an unknown key
+  (`unverifiable`), and how many were keyless (`unsigned`).
+
+Verdict rules (`verifyAuditSignatures`):
+
+| Condition                                  | Effect on verify                                        |
+| ------------------------------------------ | ------------------------------------------------------- |
+| Signature valid for a known `kid`          | counted `verified`                                      |
+| Signature INVALID (forged / hash tampered) | hard FAIL (`invalid > 0`)                               |
+| `kid` not resolvable to a public key       | `unverifiable` — fail-OPEN (absence of trust ≠ forgery) |
+| No `kid`/`sig` (legacy/keyless)            | `unsigned` — fail-OPEN                                  |
+
+Asymmetric payoff: a remote / CI / teammate verifies WHO produced an entry with
+only the PUBLIC key — never a forge-capable secret, unlike the HMAC anchor. Same
+same-UID boundary applies for _production_: a same-UID principal can read the
+0600 private key and sign as this identity (closed later by non-exportable key
+storage — TPM/keychain/HSM, the 3.0 regulated tier). What it buys today is
+offline, third-party-verifiable attribution that the symmetric anchor cannot
+express.
+
 ## 3. Signed check-attestation receipt (`kit check --attest`)
 
 With `--attest` (or `KIT_ATTEST=1`), `kit check` / `kit ci` writes

@@ -3,7 +3,16 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { shareEntry, readShared, listAreas, queryArea, searchShared } from "./shared.js";
+import {
+  shareEntry,
+  readShared,
+  listAreas,
+  queryArea,
+  searchShared,
+  effectiveStatus,
+  activeShared,
+  formatAge,
+} from "./shared.js";
 
 const ALLOWED = new Set([
   "id",
@@ -15,6 +24,9 @@ const ALLOWED = new Set([
   "author",
   "ts",
   "source_ref",
+  "status",
+  "supersedes",
+  "reverses",
 ]);
 
 describe("shared project memory (Track D)", () => {
@@ -84,5 +96,70 @@ describe("shared project memory (Track D)", () => {
     assert.equal(searchShared(r, "cron").length, 1);
     assert.equal(searchShared(r, "stripe").length, 0);
     rmSync(r, { recursive: true, force: true });
+  });
+});
+
+describe("shared memory — decision lifecycle (gap #2)", () => {
+  const root = () => mkdtempSync(join(tmpdir(), "kit-life-"));
+
+  it("a plain entry omits status (byte-identical to pre-lifecycle) and is active", () => {
+    const r = root();
+    const e = shareEntry(r, { area: "a", kind: "decision", title: "x", body: "" }, "t1");
+    assert.equal(Object.prototype.hasOwnProperty.call(e, "status"), false, "no status field");
+    assert.equal(effectiveStatus(e, [e]), "active");
+    rmSync(r, { recursive: true, force: true });
+  });
+
+  it("supersedes marks the old entry superseded; reverses marks it reversed", () => {
+    const r = root();
+    const old = shareEntry(
+      r,
+      { area: "auth", kind: "decision", title: "use RSA", body: "" },
+      "2026-01-01T00:00:00Z",
+    );
+    shareEntry(
+      r,
+      { area: "auth", kind: "decision", title: "use Ed25519", body: "", supersedes: old.id },
+      "2026-02-01T00:00:00Z",
+    );
+    const all = readShared(r);
+    const oldRead = all.find((e) => e.id === old.id)!;
+    assert.equal(effectiveStatus(oldRead, all), "superseded");
+    // activeShared keeps only the successor.
+    const active = activeShared(r);
+    assert.deepEqual(
+      active.map((e) => e.title),
+      ["use Ed25519"],
+    );
+    rmSync(r, { recursive: true, force: true });
+  });
+
+  it("reverses outranks supersedes and an explicit status wins", () => {
+    const r = root();
+    const a = shareEntry(r, { area: "x", kind: "decision", title: "A", body: "" }, "t1");
+    shareEntry(
+      r,
+      { area: "x", kind: "decision", title: "B", body: "", reverses: a.id, supersedes: a.id },
+      "t2",
+    );
+    const all = readShared(r);
+    assert.equal(effectiveStatus(all.find((e) => e.id === a.id)!, all), "reversed");
+    // explicit status on an unreferenced entry wins
+    const c = shareEntry(
+      r,
+      { area: "x", kind: "decision", title: "C", body: "", status: "superseded" },
+      "t3",
+    );
+    assert.equal(effectiveStatus(c, readShared(r)), "superseded");
+    rmSync(r, { recursive: true, force: true });
+  });
+
+  it("formatAge buckets into today / days / months / years", () => {
+    const now = new Date("2026-06-29T00:00:00Z");
+    assert.equal(formatAge("2026-06-29T00:00:00Z", now), "today");
+    assert.equal(formatAge("2026-06-24T00:00:00Z", now), "5d ago");
+    assert.equal(formatAge("2026-03-01T00:00:00Z", now), "4mo ago"); // 120d / 30
+    assert.equal(formatAge("2024-01-01T00:00:00Z", now), "2y ago");
+    assert.equal(formatAge("not-a-date", now), "");
   });
 });
