@@ -62,6 +62,11 @@ kit setup          # install tools (via mise), git hooks, logins, secrets
 kit context check  # lock each CLI to the declared account + project (no wrong-org pushes)
 ```
 
+Fresh or ephemeral environment (cloud container, Claude Code on the web, CI, new
+laptop)? Wire `kit setup` + `kit memory sync` into the environment's setup script
+so it fuels itself — config, secrets (vault-backed), agent gates, identity, and
+recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md).
+
 ## Problem
 
 Every time you (or an agent) starts on a new project:
@@ -257,16 +262,16 @@ The block is regenerated in place on re-run; edit outside its markers freely.
 kit is **agent-agnostic** — it's a CLI that any coding agent can run, plus opt-in
 adapters for the surfaces each agent exposes. Support today, per agent:
 
-| Agent | Memory index¹ | "use kit" rules block² | Agent/MCP config audit³ | Perm allowlist⁴ | Auto-capture hooks⁵ | Blocking gate⁶ |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Claude Code** | ✅ | ✅ `CLAUDE.md` | ✅ + commands/agents/skills/plugins | ✅ | ✅ | ✅ hook |
-| **OpenAI Codex** | ✅ | ✅ `AGENTS.md` | ✅ `.codex/config` | — | — | ✅ hook |
-| **OpenCode** | ✅ | ✅ `AGENTS.md` | ✅ `opencode.json` + `.opencode/plugin` | — | — | ✅ plugin |
-| **Cursor** | ✅ | ✅ `.cursorrules` | ✅ `.cursor/mcp.json` | — | — | ✅ hook |
-| **Cline** | ✅ | ✅ `.clinerules` | — | — | — | ✅ hook |
-| **Gemini CLI** | ✅ | — | — | — | — | ✅ hook |
-| **Continue** | ✅ | — | — | — | — | n/a⁷ |
-| **Amazon Q** | ✅ | — | — | — | — | ✅ hook |
+| Agent            | Memory index¹ | "use kit" rules block² |         Agent/MCP config audit³         | Perm allowlist⁴ | Auto-capture hooks⁵ | Blocking gate⁶ |
+| :--------------- | :-----------: | :--------------------: | :-------------------------------------: | :-------------: | :-----------------: | :------------: |
+| **Claude Code**  |      ✅       |     ✅ `CLAUDE.md`     |   ✅ + commands/agents/skills/plugins   |       ✅        |         ✅          |    ✅ hook     |
+| **OpenAI Codex** |      ✅       |     ✅ `AGENTS.md`     |           ✅ `.codex/config`            |        —        |          —          |    ✅ hook     |
+| **OpenCode**     |      ✅       |     ✅ `AGENTS.md`     | ✅ `opencode.json` + `.opencode/plugin` |        —        |          —          |   ✅ plugin    |
+| **Cursor**       |      ✅       |   ✅ `.cursorrules`    |          ✅ `.cursor/mcp.json`          |        —        |          —          |    ✅ hook     |
+| **Cline**        |      ✅       |    ✅ `.clinerules`    |                    —                    |        —        |          —          |    ✅ hook     |
+| **Gemini CLI**   |      ✅       |           —            |                    —                    |        —        |          —          |    ✅ hook     |
+| **Continue**     |      ✅       |           —            |                    —                    |        —        |          —          |      n/a⁷      |
+| **Amazon Q**     |      ✅       |           —            |                    —                    |        —        |          —          |    ✅ hook     |
 
 ✅ supported · — not yet · n/a not applicable (no surface) ([#146](https://github.com/sandstream/kit/issues/146))
 
