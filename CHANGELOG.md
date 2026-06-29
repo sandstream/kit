@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit policy`** (experimental) — signable, distributable policy-as-code (3.0
+  Phase 1). A separate `.kit-policy.toml` document holds the org **standard**
+  (`require_triage`, `required_scanners`, `prod_writes_need_approval`,
+  `min_kit_version`, `[thresholds]`); `kit policy init/show/validate/sign/verify`.
+  Signing ties the standard to a `kit identity` (Phase 0) over **canonical JSON**
+  (key-sorted), so the signature survives TOML reformatting/comments and breaks
+  only on a real policy change; `verify` checks against locally-known keys (or a
+  pinned `--key`), fail-opens on an unknown signer, and fails on a tampered doc or
+  a revoked signer. Separate from the 2.x `.kit.toml [policy.agent_writes]`
+  pre-approval — this is the org-level standard. Enforcement glue (`kit check`/`ci`
+  consuming it) + signed org bundles + RBAC are the follow-ups. See `docs/POLICY.md`.
 - **Zero-touch environment fueling guide** (`docs/ENV_FUELING.md`). Documents the
   setup-script pattern — `kit setup --recommended` (config: tools, vault-backed
   secrets, agent gates, verify) + `kit memory sync`/`restore` (recall) — so a fresh
