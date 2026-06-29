@@ -47,6 +47,18 @@ verify` now reports the signature tally (verified / unknown-key / unsigned)
   ATTRIBUTION layer (who produced an entry, verifiable with only the public key)
   orthogonal to the symmetric HMAC INTEGRITY anchor. See `docs/AUDIT_ATTESTATION.md` §2.5.
 
+### Fixed
+
+- **`kit check` secrets scan: degraded (no-trufflehog) fallback no longer cries
+  high-severity on its own noise.** The basic `git grep` path now mirrors the
+  trufflehog branch's philosophy — it's UNVERIFIED, so it's a `medium` warn, not
+  `high`, and it filters its two dominant false-positive classes: test/fixture/mock
+  files (fake credentials live there by design; the authoritative trufflehog + CI
+  gitleaks scanners still cover them and verify live) and all-caps identifier
+  VALUES (an env-var name like `SOCKET_SECURITY_API_TOKEN` is a config key, never a
+  secret). Removes a self-inflicted false positive on kit's own source and the
+  test fixtures; the authoritative scanners are unchanged.
+
 ## [2.2.0] - 2026-06-28
 
 kit 2.2 — agent gate coverage + the first 3.0 primitive. Additive minor: new

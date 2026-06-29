@@ -621,29 +621,44 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
 
       if (stdout.trim()) {
         const lines = stdout.trim().split("\n");
-        const matches = lines.length;
 
-        // Extract unique filenames
+        // This is the DEGRADED path (no trufflehog). It's an UNVERIFIED grep, so
+        // — like the trufflehog `unverified` branch above — it's a medium warn,
+        // not a high one, and it filters its two dominant false-positive classes
+        // so it doesn't drown real signal:
+        //   1. test / fixture / mock files — fake credentials live here by design
+        //      (`sk_test_invalid_for_test...`, sample JWTs). The AUTHORITATIVE
+        //      scanners (trufflehog + the CI gitleaks job) still scan these and
+        //      verify live, so suppressing them HERE only de-noises the local
+        //      stopgap, it does not weaken the real gate.
+        //   2. all-caps identifier VALUES — an env-var NAME like
+        //      `SOCKET_SECURITY_API_TOKEN` is a config key, never a secret.
+        const TEST_PATH = /(\.test\.|\.spec\.|__tests__|\/__mocks__\/|\/fixtures?\/|\.fixture\.)/;
+        const VALUE_RE =
+          /(?:api[_-]?key|secret[_-]?key|password|token|credential)["']?\s*[:=]\s*["']([^"']{20,})/i;
         const files = new Set<string>();
         for (const line of lines) {
-          const match = line.match(/^([^:]+):/);
-          if (match) {
-            files.add(match[1]);
-          }
+          const m = line.match(/^([^:]+):\d+:(.*)$/);
+          if (!m) continue;
+          const [, file, content] = m;
+          if (TEST_PATH.test(file)) continue;
+          const value = content.match(VALUE_RE)?.[1] ?? "";
+          if (/^[A-Z][A-Z0-9_]+$/.test(value)) continue; // env-var name, not a secret
+          files.add(file);
         }
 
-        const fileArray = Array.from(files);
-
-        return {
-          category: "secrets",
-          name: "secrets scan",
-          status: "warn",
-          detail: `${matches} potential secret(s) in ${files.size} file(s)`,
-          severity: "high",
-          files: fileArray,
-          suggestion:
-            "Install trufflehog for better detection:\n  • macOS/Linux: brew install trufflehog\n  • Go: go install github.com/trufflesecurity/trufflehog/v3@latest\n  • Or download from: https://github.com/trufflesecurity/trufflehog/releases",
-        };
+        if (files.size > 0) {
+          return {
+            category: "secrets",
+            name: "secrets scan",
+            status: "warn",
+            detail: `${files.size} file(s) with unverified secret-shaped strings (basic scan, trufflehog absent) — review for real credentials`,
+            severity: "medium",
+            files: Array.from(files),
+            suggestion:
+              "Install trufflehog for verified detection (it confirms live secrets, skipping test/example data):\n  • kit install (provisions the declared aqua:trufflesecurity/trufflehog)\n  • macOS/Linux: brew install trufflehog\n  • Go: go install github.com/trufflesecurity/trufflehog/v3@latest",
+          };
+        }
       }
     } catch {
       // No matches or git grep failed
@@ -654,7 +669,7 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
       name: "secrets scan",
       status: "pass",
       detail:
-        "basic scan passed (install trufflehog for better detection: brew install trufflehog)",
+        "basic scan: no secret-shaped strings outside tests/fixtures (install trufflehog for verified detection)",
     };
   }
 }
