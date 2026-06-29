@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Zero-touch environment fueling guide** (`docs/ENV_FUELING.md`). Documents the
+  setup-script pattern — `kit setup --recommended` (config: tools, vault-backed
+  secrets, agent gates, verify) + `kit memory sync`/`restore` (recall) — so a fresh
+  or ephemeral environment (cloud container, Claude Code on the web, CI, new
+  laptop) fuels itself with no manual steps. Covers non-interactive setup, where
+  the script lives (devcontainer/Dockerfile/CI/web), the memory bridge, and the
+  guardrails (secrets never plaintext, private memory never committed, idempotent,
+  zero-LLM). Linked from the README quick start.
 - **Path→cluster push-surfacing for shared decisions** (`kit memory context`).
   Pull recall can't _guarantee_ you see a settled decision (a bad query misses
   it); the guardrail is now PUSH — touch files under an area and kit
