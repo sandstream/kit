@@ -30,6 +30,30 @@ describe("memory clusters — glob matching (gap #3)", () => {
     assert.match("x.ts", globToRegExp("**/x.ts"));
     assert.match("a/b/x.ts", globToRegExp("**/x.ts"));
   });
+
+  // A malicious committed clusters.json (a pulled branch can carry one) of stacked
+  // wildcards compiled to adjacent `.*`/`(?:.*/)?` groups → catastrophic backtracking
+  // on every prompt (the map is matched on each UserPromptSubmit). Runs collapse now.
+  it("does not backtrack catastrophically on stacked wildcards (ReDoS-safe)", () => {
+    const cases = ["*".repeat(80) + "z", "**/".repeat(50) + "z", "**".repeat(60) + "z"];
+    for (const g of cases) {
+      const re = globToRegExp(g);
+      const t0 = process.hrtime.bigint();
+      re.test("a".repeat(100)); // a non-matching path → forces the worst case
+      re.test("a/".repeat(80) + "b");
+      const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+      assert.ok(ms < 50, `glob "${g.slice(0, 12)}…" took ${ms.toFixed(1)}ms — should be <50ms`);
+    }
+    // collapsing keeps semantics: stacked ** still matches across segments
+    assert.match("a/b/c/z", globToRegExp("**/**/z"));
+    assert.match("z", globToRegExp("**/**/z"));
+  });
+
+  it("refuses an over-long glob (matches nothing) rather than compiling it", () => {
+    const re = globToRegExp("a".repeat(2000));
+    assert.doesNotMatch("a".repeat(2000), re);
+    assert.equal(re.source, "(?!)");
+  });
 });
 
 describe("memory clusters — path → area", () => {

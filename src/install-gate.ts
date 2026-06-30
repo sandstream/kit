@@ -38,15 +38,67 @@ function isFlag(tok: string): boolean {
   return tok.startsWith("-");
 }
 
+/** Strip one layer of matching surrounding quotes from a token (`'pkg'` → `pkg`). */
+function stripQuotes(tok: string): string {
+  const m = tok.match(/^(['"])([\s\S]*)\1$/);
+  return m ? m[2] : tok;
+}
+
+/**
+ * Wrapper binaries that prefix a real command without changing what it is
+ * (`env FOO=bar npm i x`, `sudo npm i x`). We strip a leading run of these plus
+ * any `VAR=value` env assignments so the matcher sees the actual package manager.
+ * A bare `VAR=value npm i evil` would otherwise tokenize to t[0]="VAR=value" and
+ * defeat every matcher — a full gate bypass.
+ */
+const PREFIX_BINS = new Set(["env", "sudo", "command", "exec", "nice", "time", "nohup"]);
+
+/** Drop leading wrapper bins + `VAR=value` env assignments, returning the real argv. */
+function stripCommandPrefix(tokens: string[]): string[] {
+  let i = 0;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) {
+      i++; // VAR=value env assignment
+      continue;
+    }
+    if (PREFIX_BINS.has(t)) {
+      i++;
+      while (i < tokens.length && tokens[i].startsWith("-")) i++; // skip the wrapper's own flags
+      continue;
+    }
+    break;
+  }
+  return tokens.slice(i);
+}
+
+/**
+ * Commands hidden inside a subshell (`$(…)`, backticks) or a shell `-c` argument
+ * (`sh -c 'npm i evil'`). The segment splitter doesn't recurse into these, so an
+ * install smuggled through a wrapper would slip past. We extract the inner command
+ * text (bounded, to stay linear-time on hostile input) and gate it like a
+ * top-level one. Fail-closed.
+ */
+function nestedCommands(command: string): string[] {
+  const out: string[] = [];
+  for (const m of command.matchAll(/\$\(([^()]{1,2000})\)/g)) out.push(m[1]);
+  for (const m of command.matchAll(/`([^`]{1,2000})`/g)) out.push(m[1]);
+  for (const m of command.matchAll(/-c\s+(['"])([\s\S]{1,2000}?)\1/g)) out.push(m[2]);
+  return out;
+}
+
 /**
  * A token is a LOCAL target (the user's own code / a file), not a registry
  * package — skip it (there is no reputation to triage). Covers `.`/`..`, relative
- * and absolute paths, home-relative, tarballs/wheels.
+ * and absolute paths, home-relative, tarballs/wheels. A token with a URL scheme
+ * (`https://…/pkg.tgz`, `git+ssh://…`) is REMOTE, never local — it must NOT be
+ * dropped here (it can't be triaged → fail-closed `unverifiable`).
  */
 function isLocalTarget(tok: string): boolean {
   if (tok === "." || tok === "..") return true;
+  if (/:\/\//.test(tok)) return false; // remote URL — not local, gate it
   if (/^[./~]/.test(tok)) return true; // ./x  ../x  /abs  ~/x
-  if (/\.(tgz|tar\.gz|whl)$/i.test(tok)) return true;
+  if (/\.(tgz|tar\.gz|whl)$/i.test(tok)) return true; // a local tarball/wheel path
   return false;
 }
 
@@ -88,11 +140,18 @@ const MATCHERS: Matcher[] = [
       return -1;
     },
   },
-  // npx <pkg> — executes a package immediately (high risk)
+  // package runners that fetch + execute immediately (high risk): npx/bunx <pkg>,
+  // npm exec <pkg>, pnpm dlx|exec <pkg>, yarn dlx|exec <pkg>, bun x <pkg>.
   {
     scheme: "npm",
     toName: npmName,
-    argStart: (t) => (t[0] === "npx" || t[0] === "bunx" ? 1 : -1),
+    argStart: (t) => {
+      if (t[0] === "npx" || t[0] === "bunx") return 1;
+      if (t[0] === "npm" && t[1] === "exec") return 2;
+      if ((t[0] === "pnpm" || t[0] === "yarn") && (t[1] === "dlx" || t[1] === "exec")) return 2;
+      if (t[0] === "bun" && t[1] === "x") return 2;
+      return -1;
+    },
   },
   // pip/pip3 install, pipx install, uv pip install, uv add, python -m pip install
   {
@@ -124,29 +183,44 @@ export function parseInstallCommand(command: string): InstallProbe {
   const probe: InstallProbe = { isInstall: false, refs: [], unverifiable: [] };
   if (!command || typeof command !== "string") return probe;
 
-  for (const segment of command.split(SEGMENT_SPLIT)) {
-    const tokens = segment.trim().split(/\s+/).filter(Boolean);
-    if (tokens.length === 0) continue;
-    for (const m of MATCHERS) {
-      const start = m.argStart(tokens);
-      if (start < 0) continue;
-      const args = tokens.slice(start).filter((t) => !isFlag(t));
-      // No package args → reinstall of already-declared deps (or a runner with no
-      // pkg). Not an "add"; don't gate.
-      if (args.length === 0) break;
-      probe.isInstall = true;
-      for (const arg of args) {
-        if (isLocalTarget(arg)) continue; // user's own code — nothing to triage
-        const name = m.toName(arg);
-        if (name) probe.refs.push(`${m.scheme}:${name}`);
-        else probe.unverifiable.push(arg); // fail-closed: can't reduce to a ref
-      }
-      break; // one matcher per segment
-    }
+  // Scan the command AND any commands hidden in $(…)/backticks/`-c '…'`, bounded
+  // so a wrapper (`sh -c '…'`, `$(…)`) can't smuggle an install past the splitter.
+  const seen = new Set<string>();
+  const queue: string[] = [command];
+  while (queue.length > 0 && seen.size < 64) {
+    const cmd = queue.shift()!;
+    if (seen.has(cmd)) continue;
+    seen.add(cmd);
+    queue.push(...nestedCommands(cmd));
+    for (const segment of cmd.split(SEGMENT_SPLIT)) scanSegment(segment, probe);
   }
-  // De-dup refs (npm i a a, or a && a)
+
+  // De-dup (npm i a a, or a && a).
   probe.refs = [...new Set(probe.refs)];
+  probe.unverifiable = [...new Set(probe.unverifiable)];
   return probe;
+}
+
+/** Match one shell segment against the package-manager matchers, mutating `probe`. */
+function scanSegment(segment: string, probe: InstallProbe): void {
+  const tokens = stripCommandPrefix(segment.trim().split(/\s+/).filter(Boolean).map(stripQuotes));
+  if (tokens.length === 0) return;
+  for (const m of MATCHERS) {
+    const start = m.argStart(tokens);
+    if (start < 0) continue;
+    const args = tokens.slice(start).filter((t) => !isFlag(t));
+    // No package args → reinstall of already-declared deps (or a runner with no
+    // pkg). Not an "add"; don't gate.
+    if (args.length === 0) break;
+    probe.isInstall = true;
+    for (const arg of args) {
+      if (isLocalTarget(arg)) continue; // user's own code — nothing to triage
+      const name = m.toName(arg);
+      if (name) probe.refs.push(`${m.scheme}:${name}`);
+      else probe.unverifiable.push(arg); // fail-closed: can't reduce to a ref
+    }
+    break; // one matcher per segment
+  }
 }
 
 export interface BashGateVerdict {

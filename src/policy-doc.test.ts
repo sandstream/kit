@@ -69,6 +69,39 @@ describe("policy-doc — canonical bytes (stable signing input)", () => {
       policyFingerprint({ version: 1, require_triage: false }),
     );
   });
+
+  // sortDeep used `out[k] = …`, so a `__proto__` key was a prototype write that
+  // silently dropped the key+subtree — an attacker could append a `[__proto__]`
+  // table to a SIGNED policy without changing its signing bytes. The canonical
+  // form must now cover every own key faithfully.
+  it("does not silently drop a `__proto__` key from the signing bytes", () => {
+    const benign = { version: 1, require_triage: true };
+    // JSON.parse yields an OWN enumerable `__proto__` property (like smol-toml does
+    // for a `[__proto__]` table) — distinct from the `{__proto__: …}` literal.
+    const smuggled = JSON.parse(
+      '{"version":1,"require_triage":true,"__proto__":{"require_triage":false}}',
+    );
+    assert.notEqual(
+      canonicalPolicyBytes(benign),
+      canonicalPolicyBytes(smuggled),
+      "a smuggled __proto__ table must change the signing bytes",
+    );
+    assert.match(canonicalPolicyBytes(smuggled), /__proto__/);
+    // and no global prototype pollution as a side effect
+    assert.equal(({} as Record<string, unknown>).require_triage, undefined);
+  });
+
+  it("refuses a date value (no faithful canonical form → Date≡string collision)", () => {
+    assert.throws(
+      () => canonicalPolicyBytes({ version: 1, min_kit_version: new Date("2020-01-01") }),
+      /date/i,
+    );
+  });
+
+  it("validatePolicy rejects prototype-manipulating keys", () => {
+    const doc = JSON.parse('{"version":1,"__proto__":{"x":1}}');
+    assert.match(validatePolicy(doc).errors.join(), /forbidden key/);
+  });
 });
 
 describe("policy-doc — sign/verify roundtrip over canonical bytes", () => {

@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security
+
+- **Install-gate: closed four bypasses that let an untriaged install through.** A
+  deep adversarial pass found the `PreToolUse` install-gate's command parser could
+  be defeated by (1) a leading env-var assignment — `A=1 npm i evil` tokenized so
+  no matcher fired; (2) package runners it didn't know — `npm exec` / `pnpm dlx` /
+  `yarn dlx` / `bun x`; (3) a remote tarball URL — `npm install https://…/x.tgz`
+  was dropped as a "local" target on its extension alone; and (4) an install hidden
+  in a subshell or `-c` arg — `sh -c '…'`, `$(…)`, backticks. The parser now strips
+  leading wrapper bins + `VAR=value` assignments, matches the runners, treats any
+  `scheme://` target as remote (→ fail-closed `unverifiable`), and recursively scans
+  nested commands. A regression test pins each bypass.
+- **ReDoS: the GCP private-key redaction pattern no longer hangs on a small hostile
+  input.** `"private_key"` was matched with two unbounded runs around a literal, so
+  a blob of near-miss `-----END ` tokens backtracked catastrophically (~18 KB hung
+  ~17 s) — a CPU DoS of the gate reachable via `scan-staged`, `kit memory scan`, and
+  status redaction. The body is now a single bounded `[^"]{1,8000}` run ending at the
+  close quote (linear; still matches real keys).
+- **ReDoS: `globToRegExp` (memory clusters) collapses stacked wildcards.** A
+  malicious committed `.kit/shared/clusters.json` glob of many `**`/`**/` compiled to
+  adjacent `.*`/`(?:.*/)?` groups that backtracked catastrophically — and the cluster
+  map is matched on every `UserPromptSubmit`, so a pulled branch could hang the agent
+  on each prompt. Consecutive wildcard runs now coalesce to a single non-stacking
+  group and an over-long glob is refused (matches nothing).
+- **Policy trust anchor: canonical signing bytes now cover every key faithfully.**
+  `sortDeep` rebuilt objects with `out[k] = …`, so a `__proto__` key was a prototype
+  write that silently dropped the key+subtree — letting a `[__proto__]` table be
+  appended to a SIGNED `.kit-policy.toml` without changing its signature/fingerprint
+  ("signed bytes ≠ document"). It now assigns via `defineProperty` (the key is a real
+  own property in the bytes), refuses a TOML **date** value (no faithful canonical
+  form → a Date≡string collision), `validatePolicy` rejects `__proto__`/`constructor`/
+  `prototype` keys, `verifyPolicy` treats an uncanonicalizable doc as `invalid` instead
+  of crashing, and `versionGte` is guarded against a non-string. No global prototype
+  pollution existed (Node `JSON.parse`/`smol-toml` create an own property); this hardens
+  canonicalization soundness.
+
 ### Fixed
 
 - **Air-gap completeness: the update check no longer egresses by default under

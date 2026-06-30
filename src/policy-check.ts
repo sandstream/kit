@@ -34,6 +34,9 @@ export interface PolicyEvalReport {
 
 /** current ≥ required, comparing dotted numeric segments. Pure. */
 export function versionGte(current: string, required: string): boolean {
+  // Guard against a non-string slipping in (a malformed policy where a TOML date
+  // reached here) — never throw inside the gate.
+  if (typeof current !== "string" || typeof required !== "string") return false;
   const a = current.split(/[.+-]/).map((n) => parseInt(n, 10) || 0);
   const b = required.split(/[.+-]/).map((n) => parseInt(n, 10) || 0);
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
