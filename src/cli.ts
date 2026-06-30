@@ -116,6 +116,7 @@ import { promptConfirm } from "./utils/prompt.js";
 import { c } from "./utils/colors.js";
 import { gatherStatus } from "./status.js";
 import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
+import { collectHints } from "./hints.js";
 import { gatherLive, suggestContextToml, hasLockableContext } from "./context-lock.js";
 import { cmdEnv } from "./commands/env.js";
 import { cmdContext } from "./commands/context.js";
@@ -498,6 +499,13 @@ async function cmdCheck(): Promise<boolean> {
       }
 
       printSummary(toolResults, serviceResults, secretResults.keys, securityResults);
+
+      // Deterministic, marker-gated "smart" tip — surfaces a relevant opt-in
+      // capability (unsigned policy, unanchored audit log, missing trivy, …) at
+      // most once. Fail-soft; never affects the verdict. Silence with KIT_NO_HINTS.
+      for (const h of await collectHints(process.cwd())) {
+        console.log(`${c.dim}💡 tip: ${h.tip}${c.reset}`);
+      }
 
       // Opt-in signed attestation receipt (text mode). Summary is over the
       // security gates, consistent with scanners_ran; overall_ok is the whole

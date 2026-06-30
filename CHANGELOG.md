@@ -24,6 +24,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Smart, deterministic hints — kit surfaces the right opt-in capability at the
+  right moment (zero LLM).** A review found many powerful features (signed policy,
+  audit anchoring, container/IaC scanning, malware heuristics) were only
+  discoverable by reading source. A tiny rule engine (`src/hints.ts`) emits one
+  short, actionable tip from plain state checks — e.g. *"your audit log isn't
+  anchored — run `kit audit anchor`"*, *"your `.kit-policy.toml` is unsigned — run
+  `kit policy sign`"*, *"you have a Dockerfile but trivy isn't installed"*,
+  *"malware heuristics are off — enable GuardDog"*, *"you have an identity but no
+  org policy"*. Shown as a `💡 tip:` line after `kit check` and at session start.
+  Each tip shows **at most once** (a `~/.kit/.hint-*` marker suppresses it),
+  detectors are fail-soft (a tip never breaks a check or a session), and
+  `KIT_NO_HINTS=1` silences them all.
 - **Private cross-device memory sync over your own git remote (`kit memory push`
   / `kit memory pull`).** Memory design gap #4: the personal store
   (`~/.kit/memory.db`) is per-machine; this wires the existing encrypted-backup +
