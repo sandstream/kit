@@ -16,21 +16,27 @@
  * no-info aware.
  */
 import { randomBytes, createHash } from "node:crypto";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { homedir, hostname, userInfo } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
-/**
- * A stable identifier for THIS device. Used to device-couple PAL items so an item
- * created in an ephemeral session/container (which gets its own throwaway id)
- * never nags on your durable device. Derived from hostname + user (no network, no
- * identity required); overridable via KIT_DEVICE_ID. An ephemeral container's
- * random hostname yields a different id, which is exactly what we want.
- */
-export function deviceId(): string {
-  const override = (process.env.KIT_DEVICE_ID ?? "").trim();
-  if (override) return override;
+/** A device id is an opaque, filesystem- and SQL-safe token. We validate any
+ *  externally-supplied value against this before trusting it. */
+const DEVICE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Where the persisted per-device id lives. Mirrors `getMemoryDir()` (db.ts) but
+ *  is inlined to avoid a circular import. */
+function deviceIdPath(): string {
+  const dir = process.env.KIT_MEMORY_DIR ?? join(homedir(), ".kit");
+  return join(dir, "device-id");
+}
+
+/** Hostname+user-derived id. Deterministic, but DRIFTS when the hostname changes
+ *  (DHCP lease, machine rename, a sudo/login shell with a different hostname),
+ *  which would silently orphan this device's own items. Used only as a last
+ *  resort when a persisted id can neither be read nor written. */
+function hostnameDeviceId(): string {
   try {
     return createHash("sha256")
       .update(`${hostname()}\x1f${userInfo().username}`)
@@ -38,6 +44,41 @@ export function deviceId(): string {
       .slice(0, 16);
   } catch {
     return "unknown";
+  }
+}
+
+/**
+ * A stable identifier for THIS device. Used to device-couple PAL items so an item
+ * created in an ephemeral session/container (which gets its own throwaway id)
+ * never nags on your durable device.
+ *
+ * Resolution order:
+ *  1. `KIT_DEVICE_ID` IF well-formed (`[A-Za-z0-9_-]{1,64}`). A malformed value is
+ *     ignored, not trusted. SECURITY: on a SHARED store this override is
+ *     trust-bearing — setting it to another device's id lets you surface or
+ *     suppress that device's items. Set it only on trusted hosts.
+ *  2. A random id persisted once to `<memoryDir>/device-id` (0600). Unguessable
+ *     and stable across hostname churn — unlike the host-derived hash, which a
+ *     peer on a shared store can also guess from `sha256(hostname+user)`.
+ *  3. Hostname-derived hash, only if the id file can't be read or written.
+ */
+export function deviceId(): string {
+  const override = (process.env.KIT_DEVICE_ID ?? "").trim();
+  if (override && DEVICE_ID_RE.test(override)) return override;
+  // (a malformed override falls through to the persisted id rather than being trusted)
+  try {
+    const path = deviceIdPath();
+    if (existsSync(path)) {
+      const saved = readFileSync(path, "utf8").trim();
+      if (DEVICE_ID_RE.test(saved)) return saved;
+    }
+    const fresh = randomBytes(8).toString("hex"); // 16 hex chars, unguessable
+    const dir = dirname(path);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(path, fresh + "\n", { mode: 0o600 });
+    return fresh;
+  } catch {
+    return hostnameDeviceId();
   }
 }
 
@@ -209,8 +250,17 @@ export function findingPalId(sourceTag: string, dedupKey: string): string {
  * re-scan is idempotent). An item that had cleared (closed) and now recurs is
  * REOPENED; an open item whose finding the scan no longer reports is auto-CLOSED.
  * Finding-presence IS the verify, so this needs no shell and no stored command —
- * same security posture as the rest of PAL. Reconciliation is per source-tag and
- * per scope, so a partial sync never touches another source's or repo's items.
+ * same security posture as the rest of PAL.
+ *
+ * Reconciliation is fenced three ways so a sync never clears someone else's
+ * blocker: by source-tag, by scope (and the scope is folded INTO the id, so two
+ * repos sharing a finding category never collide on one row), and by
+ * origin_device. The device fence is the important one: on a SHARED store the
+ * finding id is identical across machines, so without it a scan on device B that
+ * doesn't see device A's finding would auto-close A's open security item. A scan
+ * now only auto-closes findings this device owns (or legacy NULL-origin rows); a
+ * genuinely-cleared finding lingers until the OWNING device re-scans — fail-safe
+ * (a stale reminder, never a silently-dropped blocker).
  */
 export function palSyncFindings(
   db: DatabaseSync,
@@ -219,12 +269,16 @@ export function palSyncFindings(
   opts: { scope?: string } = {},
 ): SyncFindingsResult {
   const scope = opts.scope ?? null;
+  // Fold scope into the id so the same finding in two different repos maps to two
+  // distinct ledger rows (findingPalId alone is repo-independent).
+  const idFor = (dedupKey: string) =>
+    findingPalId(sourceTag, scope ? `${scope}\x1f${dedupKey}` : dedupKey);
   const currentIds = new Set<string>();
   let added = 0;
   let reopened = 0;
 
   for (const f of findings) {
-    const id = findingPalId(sourceTag, f.dedupKey);
+    const id = idFor(f.dedupKey);
     currentIds.add(id);
     const existing = db.prepare("SELECT status FROM pending_actions WHERE id = ?").get(id) as
       | { status: string }
@@ -236,9 +290,11 @@ export function palSyncFindings(
       ).run(id, f.title, f.detail ?? null, scope, deviceId(), process.cwd());
       added++;
     } else if (existing.status === "closed") {
+      // Re-attribute on reopen: the device observing the recurrence is the one
+      // that should be reminded (and able to auto-close it once it clears).
       db.prepare(
-        "UPDATE pending_actions SET status='open', closed_at=NULL, title=?, detail=? WHERE id=?",
-      ).run(f.title, f.detail ?? null, id);
+        "UPDATE pending_actions SET status='open', closed_at=NULL, title=?, detail=?, origin_device=?, origin_root=? WHERE id=?",
+      ).run(f.title, f.detail ?? null, deviceId(), process.cwd(), id);
       reopened++;
     } else {
       // already open/snoozed — refresh the text so the reminder stays accurate
@@ -250,12 +306,15 @@ export function palSyncFindings(
     }
   }
 
-  // Auto-close findings of THIS source + scope that the scan no longer reports.
+  // Auto-close findings of THIS source + scope + device that the scan no longer
+  // reports. The origin_device fence stops a scan on one machine from clearing a
+  // finding another machine is blocked on (shared store → identical ids); legacy
+  // NULL-origin rows predate device coupling and are reconcilable by any device.
   const open = db
     .prepare(
-      "SELECT id FROM pending_actions WHERE kind='finding' AND status='open' AND id LIKE ? AND scope IS ?",
+      "SELECT id FROM pending_actions WHERE kind='finding' AND status='open' AND id LIKE ? AND scope IS ? AND (origin_device = ? OR origin_device IS NULL)",
     )
-    .all(`${sourceTag}-%`, scope) as { id: string }[];
+    .all(`${sourceTag}-%`, scope, deviceId()) as { id: string }[];
   const closed: string[] = [];
   for (const row of open) {
     if (!currentIds.has(row.id) && palDone(db, row.id)) closed.push(row.id);
