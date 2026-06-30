@@ -7,6 +7,8 @@ import { appendAuditEventDirect } from "./audit.js";
 import { randomBytes, createHash } from "node:crypto";
 import {
   computeAnchorTip,
+  computeAnchorTipV3,
+  lineSeals,
   anchorKeyFingerprint,
   lineHashes,
   anchorAuditLog,
@@ -19,6 +21,7 @@ import {
   tryAdvanceAnchorOnAppend,
   resolveExternalAnchor,
   type AnchorVerifyResult,
+  type AnchorRecord,
 } from "./audit-anchor.js";
 
 // Build a real hash-chained log without auto-anchoring (KIT_AUDIT_ANCHOR=0 is
@@ -52,6 +55,73 @@ describe("audit anchor - pure helpers", () => {
   it("lineHashes returns null for an unchained (legacy) line", () => {
     const legacy = JSON.stringify({ operation: "x", environment: "dev", success: true });
     assert.equal(lineHashes(legacy + "\n"), null);
+  });
+});
+
+// The deep adversarial pass found that a writer-only attacker could STRIP or
+// rewrite kid/sig on an already-sealed entry and every layer (chain, signatures,
+// hash-only anchor) still reported green — de-attribution of a sealed record. The
+// v3 seal folds attribution INTO the anchor tip so the rewrite is now caught.
+describe("audit anchor - v3 binds attribution (sealed-entry de-attribution)", () => {
+  const key = Buffer.alloc(32, 9);
+  const line = (op: string, kid: string, sig: string) =>
+    JSON.stringify({
+      operation: op,
+      environment: "dev",
+      success: true,
+      prev: "0".repeat(64),
+      hash: createHash("sha256").update(op).digest("hex"),
+      kid,
+      sig,
+    });
+  const signed = line("op-0", "kid-real", "SIG_REAL") + "\n";
+  const stripped = line("op-0", "", "") + "\n"; // kid/sig erased, hash untouched
+
+  it("computeAnchorTipV3 moves when kid/sig change; the legacy hash-only tip does NOT", () => {
+    const a = lineSeals(signed)!;
+    const b = lineSeals(stripped)!;
+    assert.notEqual(computeAnchorTipV3(key, a), computeAnchorTipV3(key, b));
+    // hash-only fold is blind to attribution — exactly the gap v3 closes
+    assert.equal(
+      computeAnchorTip(
+        key,
+        a.map((s) => s.hash),
+      ),
+      computeAnchorTip(
+        key,
+        b.map((s) => s.hash),
+      ),
+    );
+  });
+
+  it("a v3 anchor reports tip-mismatch after a sealed entry's kid is stripped", () => {
+    const rec: AnchorRecord = {
+      tip: computeAnchorTipV3(key, lineSeals(signed)!),
+      count: 1,
+      algo: "hmac-sha256",
+      updatedAt: "2026-01-01T00:00:00Z",
+      keyFingerprint: anchorKeyFingerprint(key),
+      version: 3,
+    };
+    assert.equal(verifyAgainstAnchor(signed, rec, key).status, "anchored-ok");
+    assert.equal(verifyAgainstAnchor(stripped, rec, key).status, "tip-mismatch");
+  });
+
+  it("a legacy v2 anchor still verifies hash-only (back-compat) — and is blind to the strip", () => {
+    const rec: AnchorRecord = {
+      tip: computeAnchorTip(
+        key,
+        lineSeals(signed)!.map((s) => s.hash),
+      ),
+      count: 1,
+      algo: "hmac-sha256",
+      updatedAt: "2026-01-01T00:00:00Z",
+      keyFingerprint: anchorKeyFingerprint(key),
+      version: 2,
+    };
+    assert.equal(verifyAgainstAnchor(signed, rec, key).status, "anchored-ok");
+    // documents the pre-v3 behavior: a hash-only anchor accepts the de-attributed log
+    assert.equal(verifyAgainstAnchor(stripped, rec, key).status, "anchored-ok");
   });
 });
 
@@ -264,13 +334,13 @@ describe("audit anchor - key rotation (FIX 4)", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("anchorAuditLog records the key fingerprint (v2)", async () => {
+  it("anchorAuditLog records the key fingerprint (v3, attribution-bound)", async () => {
     const content = await buildChain(cwd, 3);
     const logPath = join(cwd, ".kit-audit.jsonl");
     const rec = await anchorAuditLog(logPath, content, dir);
     const key = await tryReadAuditAnchorKey(dir);
     assert.equal(rec.keyFingerprint, anchorKeyFingerprint(key!));
-    assert.equal(rec.version, 2);
+    assert.equal(rec.version, 3);
   });
 
   it("a rotated key reports 'anchor-key-changed', NOT content tip-mismatch", async () => {

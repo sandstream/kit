@@ -48,6 +48,13 @@ const ANCHOR_ALGO = "hmac-sha256";
 // Domain-separation seed so the anchor HMAC chain can never collide with any
 // other HMAC use of the same key.
 const ANCHOR_SEED = "kit-audit-anchor/v1";
+// v3 seal folds ATTRIBUTION (kid/sig) into the tip alongside the hash, so
+// stripping or rewriting the signer of a sealed entry changes the tip. Its own
+// seed keeps a v3 tip from ever colliding with a v1/v2 (hash-only) tip.
+const ANCHOR_SEED_V3 = "kit-audit-anchor/v3";
+// Unit separator — cannot appear in a hex hash, an identity id, or base64 — so
+// the (hash, kid, sig) fields can't be ambiguously concatenated.
+const FIELD_SEP = "\x1f";
 
 /** Resolve the directory that holds the anchor key + record (default ~/.kit). */
 export function anchorDir(override?: string): string {
@@ -138,7 +145,7 @@ export function lineHashes(content: string): string[] | null {
  * Fold an HMAC chain over the supplied line hashes and return the final tip
  * (hex). Pure: same key + hashes always yield the same tip. Only a holder of
  * the key can reproduce this value, which is what makes a key-less rewrite
- * detectable.
+ * detectable. (v1/v2 seal — hash only; kept for legacy anchor records.)
  */
 export function computeAnchorTip(key: Buffer, hashes: string[]): string {
   let tip = createHmac("sha256", key).update(ANCHOR_SEED).digest("hex");
@@ -150,6 +157,65 @@ export function computeAnchorTip(key: Buffer, hashes: string[]): string {
   return tip;
 }
 
+/** A line's integrity hash plus its attribution (empty strings when keyless). */
+export interface LineSeal {
+  hash: string;
+  kid: string;
+  sig: string;
+}
+
+/**
+ * Extract per-line hash + attribution from raw `.kit-audit.jsonl`. Returns null
+ * if any non-empty line is unparseable or lacks a string hash. `kid`/`sig` are
+ * "" for keyless (legacy) entries — folding them as empty means a keyless entry
+ * has a stable seal, and ADDING a forged kid/sig to it later changes the tip.
+ */
+export function lineSeals(content: string): LineSeal[] | null {
+  const lines = content.split("\n").filter((l) => l.trim().length > 0);
+  const seals: LineSeal[] = [];
+  for (const line of lines) {
+    let obj: { hash?: unknown; kid?: unknown; sig?: unknown };
+    try {
+      obj = JSON.parse(line) as typeof obj;
+    } catch {
+      return null;
+    }
+    if (typeof obj.hash !== "string") return null;
+    seals.push({
+      hash: obj.hash,
+      kid: typeof obj.kid === "string" ? obj.kid : "",
+      sig: typeof obj.sig === "string" ? obj.sig : "",
+    });
+  }
+  return seals;
+}
+
+/**
+ * v3 seal: fold an HMAC chain over (hash, kid, sig) per line. This binds the
+ * ATTRIBUTION into the external anchor, so a writer-only attacker who strips or
+ * rewrites the signer of a SEALED entry — invisible to the keyless chain and to
+ * the old hash-only anchor — now changes the tip and is caught as a tip-mismatch.
+ * Pure.
+ */
+export function computeAnchorTipV3(key: Buffer, seals: LineSeal[]): string {
+  let tip = createHmac("sha256", key).update(ANCHOR_SEED_V3).digest("hex");
+  for (const s of seals) {
+    tip = createHmac("sha256", key)
+      .update(tip + "\n" + s.hash + FIELD_SEP + s.kid + FIELD_SEP + s.sig)
+      .digest("hex");
+  }
+  return tip;
+}
+
+/** Recompute a record's tip with the algorithm matching its schema version. */
+function tipForRecordVersion(key: Buffer, seals: LineSeal[], version: number | undefined): string {
+  if ((version ?? 0) >= 3) return computeAnchorTipV3(key, seals);
+  return computeAnchorTip(
+    key,
+    seals.map((s) => s.hash),
+  );
+}
+
 // Domain-separated key-id label. The fingerprint is an HMAC of a FIXED label
 // keyed by the anchor key, so it identifies the key (lets verify tell "the key
 // rotated" apart from "the content was tampered") WITHOUT revealing key bytes.
@@ -159,8 +225,8 @@ export function anchorKeyFingerprint(key: Buffer): string {
   return createHmac("sha256", key).update(ANCHOR_KEY_FP_LABEL).digest("hex").slice(0, 32);
 }
 
-/** Current schema version of the anchor record. */
-export const ANCHOR_RECORD_VERSION = 2;
+/** Current schema version of the anchor record. v3 binds attribution (kid/sig). */
+export const ANCHOR_RECORD_VERSION = 3;
 
 export interface AnchorRecord {
   /** HMAC tip over the sealed prefix of `count` entries. */
@@ -247,14 +313,14 @@ export async function anchorAuditLog(
   content: string,
   dir?: string,
 ): Promise<AnchorRecord> {
-  const hashes = lineHashes(content);
-  if (hashes === null) {
+  const seals = lineSeals(content);
+  if (seals === null) {
     throw new Error("audit log is unparseable or unchained - cannot anchor");
   }
   const key = await getAuditAnchorKey(dir);
   const rec: AnchorRecord = {
-    tip: computeAnchorTip(key, hashes),
-    count: hashes.length,
+    tip: computeAnchorTipV3(key, seals),
+    count: seals.length,
     algo: ANCHOR_ALGO,
     updatedAt: new Date().toISOString(),
     keyFingerprint: anchorKeyFingerprint(key),
@@ -304,8 +370,8 @@ export function verifyAgainstAnchor(
   anchor: AnchorRecord | null,
   key: Buffer | null,
 ): AnchorVerifyResult {
-  const hashes = lineHashes(content);
-  const entries = hashes?.length ?? 0;
+  const seals = lineSeals(content);
+  const entries = seals?.length ?? 0;
   if (!anchor) return { status: "no-anchor", entries };
   if (!key) return { status: "key-unavailable", entries, expected: anchor.count };
   // Key-rotation check FIRST so a changed key reports as a rotation, never as a
@@ -320,7 +386,7 @@ export function verifyAgainstAnchor(
         "the current anchor key differs from the one that sealed this log (rotated/replaced key); old anchors are invalid by design - re-run 'kit audit anchor'",
     };
   }
-  if (hashes === null) {
+  if (seals === null) {
     return {
       status: "unparseable",
       entries,
@@ -328,15 +394,18 @@ export function verifyAgainstAnchor(
       reason: "log is unparseable - cannot reconcile with the anchor",
     };
   }
-  if (hashes.length < anchor.count) {
+  if (seals.length < anchor.count) {
     return {
       status: "truncated",
       entries,
       expected: anchor.count,
-      reason: `log has ${hashes.length} entries but the anchor sealed ${anchor.count} (truncated/rolled back)`,
+      reason: `log has ${seals.length} entries but the anchor sealed ${anchor.count} (truncated/rolled back)`,
     };
   }
-  const recomputed = computeAnchorTip(key, hashes.slice(0, anchor.count));
+  // Recompute the sealed prefix with the algorithm that MATCHES the record's
+  // version: a legacy (v≤2) anchor folds hash-only; a v3 anchor folds attribution
+  // too, so a stripped/rewritten kid|sig on a sealed entry now fails to reproduce.
+  const recomputed = tipForRecordVersion(key, seals.slice(0, anchor.count), anchor.version);
   const a = Buffer.from(recomputed, "hex");
   const b = Buffer.from(anchor.tip, "hex");
   const matches = a.length === b.length && timingSafeEqual(a, b);
