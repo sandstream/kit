@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Air-gap completeness: the update check no longer egresses by default under
+  `KIT_AIRGAP`.** `checkForUpdate` (the one outbound call on a normal `kit` run)
+  now short-circuits when air-gap is set, alongside the existing CI/`KIT_NO_UPDATE_CHECK`
+  suppressors — so "no outbound network by default / air-gap mode" is a complete
+  posture, not one with a lone npm-registry beacon. (Surfaced by the 3.0 promise audit.)
+- **Deterministic gate: bumblebee catalog-staleness no longer flips the verdict on
+  wall-clock time.** A clean supply-chain scan whose threat-intel catalogs are >60
+  days old was a `warn` (failing `kit ci --strict`) purely because the calendar
+  advanced — same repo, same scanners, different verdict by date. Staleness is now
+  ADVISORY (`status: pass`, noted in the detail/suggestion); the gate verdict is a
+  function of inputs only. (Surfaced by the 3.0 promise audit.)
+
 ### Added
 
 - **Org-distributed policy verification** (`kit policy trust`) — 3.0 Phase 2

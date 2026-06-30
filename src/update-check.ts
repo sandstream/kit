@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import { isAirGap } from "./scanners.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_NAME = "sandstream-kit";
@@ -28,12 +29,16 @@ export interface UpdateInfo {
  */
 export async function checkForUpdate(currentVersion: string): Promise<UpdateInfo | null> {
   try {
-    // Suppression conditions
+    // Suppression conditions. Air-gap is one of them: the update check is the
+    // only outbound call on a normal `kit` run, so honoring KIT_AIRGAP here is
+    // what makes "no outbound network by default" / air-gap mode a COMPLETE
+    // posture, not one with a lone npm-registry beacon poking through.
     if (
       process.env.KIT_NO_UPDATE_CHECK === "1" ||
       process.env.CI === "true" ||
       process.env.GITHUB_ACTIONS === "true" ||
-      process.env.GITLAB_CI === "true"
+      process.env.GITLAB_CI === "true" ||
+      isAirGap()
     ) {
       return null;
     }

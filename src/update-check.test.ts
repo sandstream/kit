@@ -39,6 +39,36 @@ describe("checkForUpdate", () => {
     }
   });
 
+  it("returns null under air-gap (KIT_AIRGAP) — no outbound npm beacon", async () => {
+    // Clear the other suppressors so this proves the AIR-GAP branch specifically.
+    const saved = {
+      CI: process.env.CI,
+      GH: process.env.GITHUB_ACTIONS,
+      GL: process.env.GITLAB_CI,
+      NO: process.env.KIT_NO_UPDATE_CHECK,
+      AG: process.env.KIT_AIRGAP,
+    };
+    delete process.env.CI;
+    delete process.env.GITHUB_ACTIONS;
+    delete process.env.GITLAB_CI;
+    delete process.env.KIT_NO_UPDATE_CHECK;
+    process.env.KIT_AIRGAP = "1";
+    try {
+      assert.equal(await checkForUpdate("0.1.0"), null);
+    } finally {
+      for (const [k, v] of [
+        ["CI", saved.CI],
+        ["GITHUB_ACTIONS", saved.GH],
+        ["GITLAB_CI", saved.GL],
+        ["KIT_NO_UPDATE_CHECK", saved.NO],
+        ["KIT_AIRGAP", saved.AG],
+      ] as const) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
   it("never throws — handles network errors gracefully", async () => {
     const origCI = process.env.CI;
     const origNo = process.env.KIT_NO_UPDATE_CHECK;
