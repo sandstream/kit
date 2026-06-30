@@ -55,6 +55,8 @@ import { collectHints } from "../hints.js";
 import {
   installMemoryHooks,
   uninstallMemoryHooks,
+  installStatusline,
+  uninstallStatusline,
   getClaudeSettingsPath,
 } from "../memory/install.js";
 import {
@@ -262,7 +264,9 @@ async function memHelp(): Promise<boolean> {
   console.log(
     "  kit memory pull             Pull + merge your store from your private remote (last-write-wins)",
   );
-  console.log("  kit memory install          Wire the 2 hooks into ~/.claude/settings.json");
+  console.log(
+    "  kit memory install          Wire the hooks + status line (score + PAL ⚠) into ~/.claude/settings.json (--no-statusline to skip)",
+  );
   console.log("  kit memory uninstall        Remove the hooks");
   console.log(
     "  kit memory pal [list|add|done|snooze|verify|import|prune]   Pending action ledger (list --all = every device; prune = drop dead-origin items)",
@@ -729,6 +733,21 @@ async function memInstall(): Promise<boolean> {
   const { added, alreadyPresent, resolved } = installMemoryHooks();
   for (const e of added) console.log(`${c.green}✓${c.reset} installed ${e} hook`);
   for (const e of alreadyPresent) console.log(`${c.dim}• ${e} hook already present${c.reset}`);
+
+  // Also wire the status line (the setup score + open-PAL ⚠ count, visible in the
+  // terminal) — unless --no-statusline, and never clobbering a custom statusLine.
+  if (!hasFlag(process.argv, "--no-statusline")) {
+    const sl = installStatusline();
+    if (sl.status === "added")
+      console.log(`${c.green}✓${c.reset} wired status line ${c.dim}(kit statusline)${c.reset}`);
+    else if (sl.status === "already") console.log(`${c.dim}• status line already wired${c.reset}`);
+    else
+      console.log(
+        `${c.yellow}!${c.reset} you already have a custom statusLine — left as-is. ` +
+          `To show kit's score + PAL count, set its command to \`kit statusline\` (or run with --no-statusline to silence this).`,
+      );
+  }
+
   console.log(`${c.dim}settings: ${getClaudeSettingsPath()}${c.reset}`);
   if (!resolved) {
     console.log(
@@ -746,6 +765,9 @@ async function memUninstall(): Promise<boolean> {
     for (const e of removed) console.log(`${c.green}✓${c.reset} removed ${e} hook`);
   } else {
     console.log(`${c.dim}no kit memory hooks were installed${c.reset}`);
+  }
+  if (uninstallStatusline().removed) {
+    console.log(`${c.green}✓${c.reset} removed kit status line`);
   }
   return true;
 }

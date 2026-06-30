@@ -24,6 +24,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit memory install` now wires the Claude Code status line too — the setup
+  score + open-PAL (`⚠`) count become visible in your terminal.** Previously PAL
+  only reached the agent (via the hook); the human never saw it unless they
+  hand-edited `settings.json`. Install now also sets `statusLine` to `kit
+  statusline` — idempotent, and it **never clobbers a custom statusLine** (reports
+  it and leaves it as-is). `--no-statusline` skips it; `kit memory uninstall`
+  removes only kit's own. (Paired with the device-coupled PAL count, so what you
+  see in the bar is this device's real "blocked-on-you".)
 - **PAL is device-coupled — an ephemeral session's action items no longer nag your
   durable device.** Pending-action items are now stamped at creation with an
   `origin_device` (stable per machine; an ephemeral container gets its own

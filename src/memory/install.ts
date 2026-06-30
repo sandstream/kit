@@ -104,6 +104,51 @@ export function installMemoryHooks(path: string = getClaudeSettingsPath()): {
   return { added, alreadyPresent, resolved };
 }
 
+// ── Claude Code status line (the persistent info bar) ────────────────────────
+//
+// Wiring `kit statusline` as Claude Code's `statusLine` is what makes the setup
+// score + the open-PAL ("blocked-on-you") count VISIBLE in the terminal — without
+// it, PAL only reaches the agent via the hook, never the human. We never clobber
+// a user's existing custom statusLine; we only set it when absent (or refresh our
+// own), and report a "foreign" status so the caller can tell the user.
+
+const STATUSLINE_SUFFIX = "statusline";
+
+/** True if `cmd` looks like OUR statusLine wiring (so we can refresh/remove it). */
+function isKitStatusline(cmd: string | undefined): boolean {
+  return !!cmd && cmd.trimEnd().endsWith(STATUSLINE_SUFFIX) && cmd.includes("kit");
+}
+
+export type StatuslineInstall = "added" | "already" | "foreign";
+
+export function installStatusline(path: string = getClaudeSettingsPath()): {
+  status: StatuslineInstall;
+  resolved: boolean;
+} {
+  const s = readSettings(path);
+  const prefix = kitHookInvocation();
+  const resolved = prefix !== "kit";
+  const existing = s.statusLine as { command?: string } | undefined;
+  if (existing && typeof existing === "object") {
+    // Already ours → idempotent no-op; someone else's → never clobber it.
+    return { status: isKitStatusline(existing.command) ? "already" : "foreign", resolved };
+  }
+  s.statusLine = { type: "command", command: `${prefix} ${STATUSLINE_SUFFIX}` };
+  writeSettings(path, s);
+  return { status: "added", resolved };
+}
+
+export function uninstallStatusline(path: string = getClaudeSettingsPath()): { removed: boolean } {
+  const s = readSettings(path);
+  const existing = s.statusLine as { command?: string } | undefined;
+  if (existing && isKitStatusline(existing.command)) {
+    delete s.statusLine;
+    writeSettings(path, s);
+    return { removed: true };
+  }
+  return { removed: false }; // absent, or a user's own statusLine → leave it
+}
+
 export function uninstallMemoryHooks(path: string = getClaudeSettingsPath()): {
   removed: string[];
 } {
