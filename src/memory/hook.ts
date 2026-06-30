@@ -257,6 +257,41 @@ export function maybeStartMidSessionIndex(): boolean {
   }
 }
 
+/**
+ * Run the SessionEnd capture in a DETACHED background process so the exit hook
+ * returns instantly. The foreground SessionEnd hook is on a short leash — Claude
+ * Code cancels it if it doesn't finish promptly ("Hook cancelled") — but the
+ * capture can be slow (the periodic all-harness sweep) or do network I/O (the
+ * opt-in memory push). So, exactly like {@link maybeStartMidSessionIndex}, we
+ * fire-and-forget a `kit memory hook session-end-run` worker (stdio ignored,
+ * unref'd) that does the real work where blocking is harmless. Returns true iff
+ * it launched the worker; on failure it falls back to an inline index so a
+ * session is never lost. The just-ended transcript is already on disk, so the
+ * detached worker captures it the same as a synchronous run would.
+ */
+export function startDetachedSessionEnd(): boolean {
+  try {
+    const entry = process.argv[1];
+    if (!entry) {
+      runSessionEndIndex(); // no entry path to re-exec → at least index inline
+      return false;
+    }
+    const child = spawn(process.execPath, [resolve(entry), "memory", "hook", "session-end-run"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    return true;
+  } catch {
+    try {
+      runSessionEndIndex(); // fail-safe: capture inline rather than not at all
+    } catch {
+      /* fail-open: a SessionEnd hook must never throw */
+    }
+    return false;
+  }
+}
+
 /** Index the just-ended session. Returns count of newly indexed messages (fail-open). */
 export function runSessionEndIndex(): { messages: number } {
   try {
