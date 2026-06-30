@@ -127,6 +127,7 @@ import { cmdGhaAudit } from "./commands/gha-audit.js";
 import { cmdIdentity } from "./commands/identity.js";
 import { cmdPanic } from "./commands/panic.js";
 import { cmdPolicy } from "./commands/policy.js";
+import { evaluatePolicy } from "./policy-check.js";
 import { cmdSbom } from "./commands/sbom.js";
 import { cmdAuth } from "./commands/auth.js";
 import { cmdAudit } from "./commands/audit.js";
@@ -3265,6 +3266,14 @@ async function cmdCi(): Promise<boolean> {
         : [];
       const securityResults = await step("security scan", () => checkSecurity());
       const lockResults = await step("lock files", () => checkLockFiles(config));
+      // Signed org policy (.kit-policy.toml) — opt-in (absent ⇒ present:false ⇒ no
+      // items ⇒ no effect on the verdict). Folds the same evaluatePolicy() the
+      // `kit policy check` command uses into the CI gate, so a tampered/revoked
+      // signature, unmet min_kit_version, or (under --strict) a missing required
+      // scanner fails CI like any other check.
+      const policyReport = await step("policy", () => evaluatePolicy(process.cwd(), { strict }));
+      const policyStatus = (s: "pass" | "warn" | "fail" | "n/a"): JsonCheck["status"] =>
+        s === "n/a" ? "skip" : s;
 
       const checks: JsonCheck[] = [
         ...toolResults.map((t) => ({
@@ -3311,6 +3320,26 @@ async function cmdCi(): Promise<boolean> {
           detail: s.detail,
           category: `security/${s.category}`,
         })),
+        ...(policyReport.present
+          ? [
+              ...(policyReport.signature
+                ? [
+                    {
+                      name: "signature",
+                      status: policyStatus(policyReport.signature.status),
+                      detail: policyReport.signature.detail,
+                      category: "policy",
+                    },
+                  ]
+                : []),
+              ...policyReport.items.map((i) => ({
+                name: i.requirement,
+                status: policyStatus(i.status),
+                detail: i.detail,
+                category: "policy",
+              })),
+            ]
+          : []),
       ];
 
       const summary = checks.reduce(
