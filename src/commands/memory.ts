@@ -26,6 +26,11 @@ import {
   pushMemory,
   pullMemory,
   getSyncConfigPath,
+  initSyncConfig,
+  tryAutoPull,
+  tryAutoPush,
+  maybeSyncNudge,
+  type SyncTransport,
 } from "../memory/remote-sync.js";
 import {
   shareEntry,
@@ -234,6 +239,9 @@ async function memHelp(): Promise<boolean> {
     "  kit memory sync <file>      Sync from a memory export/backup (decrypts encrypted blobs)",
   );
   console.log(
+    "  kit memory sync init        Write ~/.kit/sync.toml (--remote <url> | --command, --auto for hook sync)",
+  );
+  console.log(
     "  kit memory push             Encrypt + push your store to your private remote (~/.kit/sync.toml)",
   );
   console.log(
@@ -314,6 +322,7 @@ async function memMerge(): Promise<boolean> {
 }
 
 async function memSync(): Promise<boolean> {
+  if (process.argv[4] === "init") return memSyncInit();
   const src = process.argv[4];
   if (!src) {
     console.error(
@@ -340,6 +349,47 @@ async function memSync(): Promise<boolean> {
     return false;
   } finally {
     db.close();
+  }
+  return true;
+}
+
+async function memSyncInit(): Promise<boolean> {
+  const transport: SyncTransport = hasFlag(process.argv, "--command") ? "command" : "git";
+  const { path, created } = initSyncConfig({
+    transport,
+    remote: flagValue(process.argv, "--remote"),
+    branch: flagValue(process.argv, "--branch"),
+    pushCmd: flagValue(process.argv, "--push-cmd"),
+    pullCmd: flagValue(process.argv, "--pull-cmd"),
+    auto: hasFlag(process.argv, "--auto"),
+    force: hasFlag(process.argv, "--force"),
+  });
+  if (!created) {
+    console.log(
+      `${c.yellow}!${c.reset} ${path} already exists ${c.dim}(use --force to overwrite)${c.reset}`,
+    );
+    return true;
+  }
+  console.log(
+    `${c.green}✓${c.reset} wrote ${c.bold}${path}${c.reset} ${c.dim}(LOCAL — never committed)${c.reset}`,
+  );
+  console.log(
+    `${c.dim}edit the ${transport === "command" ? "push_cmd/pull_cmd" : "remote"} to your PRIVATE store, then:${c.reset}`,
+  );
+  console.log(
+    `  export KIT_MEMORY_PASSPHRASE="…"   ${c.dim}# never stored; the blob is encrypted with it${c.reset}`,
+  );
+  console.log(`  kit memory push   ${c.dim}# from one machine${c.reset}`);
+  console.log(`  kit memory pull   ${c.dim}# on another${c.reset}`);
+  if (transport === "git") {
+    console.log(
+      `${c.dim}note: create the private repo first — e.g. \`git init --bare /srv/kit-memory.git\` on your server, or an empty private repo on GitHub. kit creates the branch + blob, not the repo.${c.reset}`,
+    );
+  }
+  if (hasFlag(process.argv, "--auto")) {
+    console.log(
+      `${c.dim}auto-sync ON: pull at session start + push at session end (run \`kit memory install\`; KIT_MEMORY_PASSPHRASE must be in the hook env).${c.reset}`,
+    );
   }
   return true;
 }
@@ -613,11 +663,23 @@ async function memHook(): Promise<boolean> {
   }
   if (event === "session-end") {
     runSessionEndIndex();
+    // Opt-in: push this session's memory to your durable store before an
+    // (ephemeral) container is reclaimed. Fail-soft; notes go to stderr.
+    const pushed = tryAutoPush(getCurrentProjectRoot());
+    if (pushed.note) console.error(`${c.dim}${pushed.note}${c.reset}`);
     return true;
   }
   if (event === "session-start") {
+    // Opt-in auto-pull BEFORE recovery so "where you left off" reflects the
+    // freshly-merged store. Fail-soft; the sync note goes to stderr (the recovery
+    // text on stdout is what gets injected as context).
+    const pulled = tryAutoPull(getCurrentProjectRoot());
+    if (pulled.note) console.error(`${c.dim}${pulled.note}${c.reset}`);
     const text = sessionStartRecovery();
     if (text) console.log(text);
+    // One-time upgrade nudge when sync isn't configured yet.
+    const nudge = maybeSyncNudge();
+    if (nudge) console.error(`${c.dim}${nudge}${c.reset}`);
     return true;
   }
   console.error(`${c.red}Unknown hook event: ${event ?? "(none)"}${c.reset}`);

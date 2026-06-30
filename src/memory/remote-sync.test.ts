@@ -11,6 +11,10 @@ import {
   assertRemoteNotProjectOrigin,
   pushMemory,
   pullMemory,
+  initSyncConfig,
+  tryAutoPull,
+  tryAutoPush,
+  maybeSyncNudge,
   type SyncConfig,
 } from "./remote-sync.js";
 import { openMemoryDb, searchMessages, upsertSession, insertMessage } from "./db.js";
@@ -270,5 +274,102 @@ describe("remote-sync — command transport (bring-your-own move: S3/rclone/scp/
       else process.env.KIT_MEMORY_DIR = prevDir;
       for (const d of [machine, proj]) rmSync(d, { recursive: true, force: true });
     }
+  });
+});
+
+describe("remote-sync — init + auto-sync wiring + nudge", () => {
+  const withDir = (fn: (dir: string) => void) => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-init-"));
+    const prev = process.env.KIT_MEMORY_DIR;
+    process.env.KIT_MEMORY_DIR = dir;
+    try {
+      fn(dir);
+    } finally {
+      if (prev === undefined) delete process.env.KIT_MEMORY_DIR;
+      else process.env.KIT_MEMORY_DIR = prev;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it("initSyncConfig writes a template, won't clobber without force, round-trips --auto flags", () => {
+    withDir(() => {
+      const a = initSyncConfig({ remote: "git@h:me/m.git", auto: true });
+      assert.equal(a.created, true);
+      const cfg = loadSyncConfig();
+      assert.equal(cfg?.transport, "git");
+      assert.equal(cfg?.remote, "git@h:me/m.git");
+      assert.equal(cfg?.pullOnStart, true);
+      assert.equal(cfg?.pushOnEnd, true);
+      // no clobber without force
+      assert.equal(initSyncConfig({ remote: "other" }).created, false);
+      // force overwrites — and to a command transport
+      assert.equal(
+        initSyncConfig({ transport: "command", pushCmd: "true", pullCmd: "true", force: true })
+          .created,
+        true,
+      );
+      assert.equal(loadSyncConfig()?.transport, "command");
+    });
+  });
+
+  it("tryAutoPull / tryAutoPush are no-ops without the opt-in flags (and never throw)", () => {
+    withDir(() => {
+      assert.equal(tryAutoPull("/tmp").ran, false); // no config
+      assert.equal(tryAutoPush("/tmp").ran, false);
+      initSyncConfig({ transport: "command", pushCmd: "true", pullCmd: "true" }); // no --auto
+      assert.equal(tryAutoPull("/tmp").ran, false);
+      assert.equal(tryAutoPush("/tmp").ran, false);
+    });
+  });
+
+  it("push_on_end pushes via the command transport (the ephemeral-container path)", () => {
+    const store = mkdtempSync(join(tmpdir(), "kit-store2-"));
+    const storeBlob = join(store, "memory.enc");
+    const machine = mkdtempSync(join(tmpdir(), "kit-em-"));
+    const proj = mkdtempSync(join(tmpdir(), "kit-eproj-"));
+    const prevDir = process.env.KIT_MEMORY_DIR;
+    const prevPass = process.env.KIT_MEMORY_PASSPHRASE;
+    try {
+      process.env.KIT_MEMORY_DIR = machine;
+      process.env.KIT_MEMORY_PASSPHRASE = PASS;
+      const dbA = openMemoryDb();
+      upsertSession(dbA, { sessionId: "s-auto", harness: "claude-code" });
+      insertMessage(dbA, { uuid: "u-auto", sessionId: "s-auto", type: "message", content: "x" });
+      dbA.close();
+      initSyncConfig({
+        transport: "command",
+        pushCmd: `cp "$KIT_MEMORY_BLOB" "${storeBlob}"`,
+        pullCmd: `cp "${storeBlob}" "$KIT_MEMORY_BLOB"`,
+        auto: true,
+        force: true,
+      });
+      const r = tryAutoPush(proj);
+      assert.equal(r.ran, true);
+      assert.ok(existsSync(storeBlob), "blob deposited by push_on_end");
+    } finally {
+      if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
+      else process.env.KIT_MEMORY_DIR = prevDir;
+      if (prevPass === undefined) delete process.env.KIT_MEMORY_PASSPHRASE;
+      else process.env.KIT_MEMORY_PASSPHRASE = prevPass;
+      for (const d of [store, machine, proj]) rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("maybeSyncNudge: null when configured / no store; shows once then suppressed", () => {
+    withDir((dir) => {
+      // no store → no nudge
+      assert.equal(maybeSyncNudge(), null);
+      // a non-trivial store (a >64 KB file at the db path; nudge only stats size)
+      writeFileSync(join(dir, "memory.db"), Buffer.alloc(70 * 1024));
+      const first = maybeSyncNudge();
+      assert.match(first ?? "", /kit memory sync init/);
+      assert.equal(maybeSyncNudge(), null, "suppressed after the first show (marker)");
+    });
+    // and null when sync IS already configured
+    withDir((dir) => {
+      writeFileSync(join(dir, "memory.db"), Buffer.alloc(70 * 1024));
+      initSyncConfig({ remote: "git@h:me/m.git" });
+      assert.equal(maybeSyncNudge(), null);
+    });
   });
 });
