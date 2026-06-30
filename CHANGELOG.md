@@ -24,6 +24,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit config knobs` — a discoverable reference for the power-user env vars +
+  `.kit.toml` fields kit honors.** A review found capabilities like air-gapped
+  SAST (`KIT_SEMGREP_CONFIG`), capture-time secret redaction (`KIT_MEMORY_REDACT`),
+  read-only lockdown (`[policy].default_mode`), monorepo triage whitelisting
+  (`[supply_chain].internal_scopes`) and the CI escape hatches (`KIT_ELEVATED`,
+  `KIT_PROD_OK`, `KIT_NON_INTERACTIVE`) were only findable in source. `kit config
+  knobs` lists them grouped, with `env`/`cfg` tags and a ⚠ on the ones that bypass
+  a safety gate (`--json` for tooling). Listed in `kit config` help + the main
+  command list. (Companion to the deterministic hint engine.)
 - **Smart, deterministic hints — kit surfaces the right opt-in capability at the
   right moment (zero LLM).** A review found many powerful features (signed policy,
   audit anchoring, container/IaC scanning, malware heuristics) were only

@@ -19,6 +19,7 @@ import {
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
 import { resolveConfigPath, KIT_FILE } from "../cli-shared.js";
+import { formatKnobs, knobsAsJson } from "../knobs.js";
 
 async function fileExists(path: string): Promise<boolean> {
   try {
@@ -315,10 +316,20 @@ async function cmdConfigMigrate(): Promise<boolean> {
   return outcome.ok;
 }
 
+function cmdConfigKnobs(): boolean {
+  if (hasFlag(process.argv, "--json")) {
+    console.log(JSON.stringify(knobsAsJson(), null, 2));
+    return true;
+  }
+  console.log(formatKnobs({ color: true }));
+  return true;
+}
+
 export async function cmdConfig(): Promise<boolean> {
   const sub = process.argv[3];
 
   if (sub === "migrate") return cmdConfigMigrate();
+  if (sub === "knobs") return cmdConfigKnobs();
 
   // Default / help: show the current config version + available subcommands.
   if (!sub || sub === "--help" || sub === "-h") {
@@ -346,6 +357,9 @@ export async function cmdConfig(): Promise<boolean> {
     );
     console.log(
       `  ${c.cyan}kit config migrate --force${c.reset}     Overwrite an existing ${KIT_FILE}.backup`,
+    );
+    console.log(
+      `  ${c.cyan}kit config knobs${c.reset}               List power-user env vars + ${KIT_FILE} fields (--json)`,
     );
     return true;
   }
