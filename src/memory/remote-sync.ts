@@ -111,7 +111,32 @@ export function loadSyncConfig(): SyncConfig | null {
   const remote = str(s.remote);
   if (!remote) return null; // git transport with no remote → treat as unconfigured
   const branch = str(s.branch) || DEFAULT_BRANCH;
+  assertSafeGitRef(remote, "remote");
+  assertSafeGitRef(branch, "branch");
   return { transport, file, remote, branch, pullOnStart, pushOnEnd };
+}
+
+/**
+ * Reject a git remote/branch value that git would treat as something other than a
+ * plain operand. These reach git as positional argv (execFileSync — no shell, so
+ * OS metacharacters are already inert), but two git-level vectors remain:
+ *   - a value starting with '-' is parsed as an OPTION, e.g. a "remote" of
+ *     `--upload-pack=<cmd>` turns `git clone` into arbitrary command execution;
+ *   - `ext::`/`fd::` remote helpers run a command by design (`git clone ext::sh -c …`).
+ * Config is operator-owned (~/.kit/sync.toml, never the repo tree), so this is
+ * defense-in-depth — but it also future-proofs any `sync init` that ingests a
+ * remote from a less-trusted source. Call sites additionally pass
+ * `--end-of-options` and disable the ext/fd protocols.
+ */
+function assertSafeGitRef(value: string, what: "remote" | "branch"): void {
+  if (value.startsWith("-")) {
+    throw new Error(`invalid [memory.sync] ${what} "${value}" — must not start with '-'`);
+  }
+  if (what === "remote" && /^(ext|fd)::/i.test(value)) {
+    throw new Error(
+      `invalid [memory.sync] remote "${value}" — ext::/fd:: remote helpers are not allowed`,
+    );
+  }
 }
 
 /**
@@ -161,11 +186,18 @@ export function assertRemoteNotProjectOrigin(remote: string, root: string): void
 }
 
 function git(args: string[], cwd: string): string {
-  return execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  // Disable the command-running remote helpers unconditionally (harmless for the
+  // local ops too) so even a value that slipped past validation can't reach the
+  // ext::/fd:: handlers.
+  return execFileSync(
+    "git",
+    ["-c", "protocol.ext.allow=never", "-c", "protocol.fd.allow=never", ...args],
+    {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
 }
 
 /**
@@ -175,7 +207,9 @@ function git(args: string[], cwd: string): string {
  */
 function cloneOrInit(remote: string, branch: string, dir: string): void {
   try {
-    git(["clone", "--depth", "1", "--branch", branch, remote, "."], dir);
+    // --end-of-options: everything after is a positional operand, so a remote/branch
+    // can never be reinterpreted as a git option (belt-and-suspenders to assertSafeGitRef).
+    git(["clone", "--depth", "1", "--branch", branch, "--end-of-options", remote, "."], dir);
     return;
   } catch {
     // empty remote or missing branch — initialize a fresh repo targeting it
@@ -192,8 +226,18 @@ function cloneOrInit(remote: string, branch: string, dir: string): void {
  * Runs through the default shell so an operator can write `aws s3 cp …` etc.
  */
 function runTransportCmd(cmd: string, blobPath: string): void {
+  // Do NOT hand the transport our secrets. It only moves the already-encrypted
+  // blob, so it never needs KIT_MEMORY_PASSPHRASE — and a command that logs its
+  // environment (`aws --debug`, a shell with `set -x`, an error tracer) would
+  // otherwise spill the passphrase that protects the blob right next to the blob,
+  // collapsing the encryption guarantee. Strip every kit-managed secret from the
+  // child env; the operator's own provider credentials (AWS_*, etc.) pass through.
+  const env: Record<string, string | undefined> = { ...process.env, KIT_MEMORY_BLOB: blobPath };
+  for (const k of Object.keys(env)) {
+    if (/^KIT_.*(PASSPHRASE|SECRET|TOKEN|PASSWORD|KEY)$/.test(k)) delete env[k];
+  }
   execSync(cmd, {
-    env: { ...process.env, KIT_MEMORY_BLOB: blobPath },
+    env: env as NodeJS.ProcessEnv,
     stdio: ["ignore", "inherit", "inherit"],
     timeout: 120_000,
   });
