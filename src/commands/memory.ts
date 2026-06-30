@@ -63,6 +63,7 @@ import {
   palDone,
   palSnooze,
   palAutoVerify,
+  palPrune,
   importLegacyLedger,
   type VerifyCheck,
 } from "../memory/pal.js";
@@ -127,7 +128,9 @@ async function memPal(): Promise<boolean> {
       const scope = hasFlag(process.argv, "--global")
         ? undefined
         : basename(getCurrentProjectRoot());
-      const items = palList(db, { scope });
+      // Device-coupled by default: only THIS device's items (+ legacy rows) show,
+      // so an ephemeral session's items don't nag here. --all opts back in.
+      const items = palList(db, { scope, allDevices: hasFlag(process.argv, "--all") });
       if (jsonMode) {
         console.log(JSON.stringify(items));
         return true;
@@ -217,8 +220,19 @@ async function memPal(): Promise<boolean> {
       console.log(`${c.green}✓${c.reset} imported ${r.imported} item(s) from the legacy ledger`);
       return true;
     }
+    if (action === "prune") {
+      // Close this device's open items whose origin project dir is gone (ephemeral
+      // / deleted scratch) — clears stale "blocked-on-you" nags.
+      const r = palPrune(db);
+      console.log(
+        r.closed.length
+          ? `${c.green}✓${c.reset} pruned ${c.bold}${r.closed.length}${c.reset} dead-origin item(s): ${c.dim}${r.closed.join(", ")}${c.reset}`
+          : `${c.dim}nothing to prune — every open item's origin still exists${c.reset}`,
+      );
+      return true;
+    }
     console.error(`${c.red}Unknown pal action: ${action}${c.reset}`);
-    console.error("Use: kit memory pal [list|add|done|snooze|verify|import]");
+    console.error("Use: kit memory pal [list|add|done|snooze|verify|import|prune]");
     return false;
   } finally {
     db.close();
@@ -250,7 +264,9 @@ async function memHelp(): Promise<boolean> {
   );
   console.log("  kit memory install          Wire the 2 hooks into ~/.claude/settings.json");
   console.log("  kit memory uninstall        Remove the hooks");
-  console.log("  kit memory pal [list|add|done|snooze|verify|import]   Pending action ledger");
+  console.log(
+    "  kit memory pal [list|add|done|snooze|verify|import|prune]   Pending action ledger (list --all = every device; prune = drop dead-origin items)",
+  );
   console.log("  kit memory save <name>      Bookmark the current session as a named copilot");
   console.log("  kit memory threads          List saved copilots (--global for all)");
   console.log("  kit memory resume <name|n>  Print the resume command for a saved copilot");

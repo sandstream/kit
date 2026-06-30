@@ -24,6 +24,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **PAL is device-coupled — an ephemeral session's action items no longer nag your
+  durable device.** Pending-action items are now stamped at creation with an
+  `origin_device` (stable per machine; an ephemeral container gets its own
+  throwaway id) and an `origin_root` (the absolute project path). Reminders, the
+  `kit statusline` count, and `kit memory pal list` surface **only this device's
+  items** by default (legacy NULL-origin rows still show) — so a "blocked-on-you"
+  created in a throwaway container/scratch dir doesn't follow you across the gap-#4
+  memory sync. `kit memory pal list --all` shows every device; **`kit memory pal
+  prune`** closes this device's open items whose origin directory no longer exists
+  (dead ephemeral/scratch dirs). Schema v5; backward-compatible (pre-v5 rows have
+  no origin and are left untouched by prune).
 - **`kit config knobs` — a discoverable reference for the power-user env vars +
   `.kit.toml` fields kit honors.** A review found capabilities like air-gapped
   SAST (`KIT_SEMGREP_CONFIG`), capture-time secret redaction (`KIT_MEMORY_REDACT`),

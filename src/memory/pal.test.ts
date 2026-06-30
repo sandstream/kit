@@ -10,6 +10,8 @@ import {
   palDone,
   palSnooze,
   palAutoVerify,
+  palPrune,
+  deviceId,
   importLegacyLedger,
   palSyncFindings,
   findingPalId,
@@ -251,5 +253,88 @@ describe("palSyncFindings — findings → ledger (track layer)", () => {
     assert.equal(open.length, 1);
     assert.ok(open[0]?.id.startsWith("sec-"));
     db.close();
+  });
+});
+
+describe("PAL — device coupling (don't nag about ephemeral-session items)", () => {
+  const fresh = () => openMemoryDb(":memory:");
+  const withDevice = <T>(id: string, fn: () => T): T => {
+    const prev = process.env.KIT_DEVICE_ID;
+    process.env.KIT_DEVICE_ID = id;
+    try {
+      return fn();
+    } finally {
+      if (prev === undefined) delete process.env.KIT_DEVICE_ID;
+      else process.env.KIT_DEVICE_ID = prev;
+    }
+  };
+
+  it("palAdd stamps origin_device + origin_root", () => {
+    const db = fresh();
+    withDevice("dev-A", () => {
+      const id = palAdd(db, { title: "x" });
+      const row = palList(db).find((p) => p.id === id)!;
+      assert.equal(row.origin_device, "dev-A");
+      assert.equal(row.origin_root, process.cwd());
+    });
+    db.close();
+  });
+
+  it("another device's items don't surface by default; --all shows them", () => {
+    const db = fresh();
+    const a = withDevice("dev-A", () => palAdd(db, { title: "made on A" }));
+    const b = withDevice("dev-B", () => palAdd(db, { title: "made on B" }));
+    withDevice("dev-B", () => {
+      const def = palList(db).map((p) => p.id);
+      assert.deepEqual(def, [b], "only THIS device's item surfaces");
+      assert.ok(!def.includes(a), "device A's item is hidden");
+      const all = palList(db, { allDevices: true })
+        .map((p) => p.id)
+        .sort();
+      assert.deepEqual(all, [a, b].sort(), "--all shows every device");
+    });
+    db.close();
+  });
+
+  it("legacy rows with NULL origin_device always surface (back-compat)", () => {
+    const db = fresh();
+    db.prepare(
+      "INSERT INTO pending_actions (id, status, title, kind, origin_device) VALUES ('leg', 'open', 'legacy', 'manual', NULL)",
+    ).run();
+    withDevice("any-device", () => {
+      assert.ok(palList(db).some((p) => p.id === "leg"));
+    });
+    db.close();
+  });
+
+  it("prune closes this device's dead-origin items, keeps live ones, ignores other devices", () => {
+    const db = fresh();
+    const live = mkdtempSync(join(tmpdir(), "kit-pal-live-"));
+    const dead = join(tmpdir(), "kit-pal-dead-does-not-exist-zzz");
+    assert.ok(!existsSync(dead));
+    const ins = (id: string, dev: string, root: string) =>
+      db
+        .prepare(
+          "INSERT INTO pending_actions (id, status, title, kind, origin_device, origin_root) VALUES (?, 'open', ?, 'manual', ?, ?)",
+        )
+        .run(id, id, dev, root);
+    withDevice("dev-here", () => {
+      ins("dead", "dev-here", dead); // this device, gone dir → pruned
+      ins("live", "dev-here", live); // this device, dir exists → kept
+      ins("other", "other-dev", dead); // another device's gone dir → left alone
+      const r = palPrune(db);
+      assert.deepEqual(r.closed, ["dead"]);
+      const openIds = palList(db, { allDevices: true })
+        .map((p) => p.id)
+        .sort();
+      assert.deepEqual(openIds, ["live", "other"].sort());
+    });
+    rmSync(live, { recursive: true, force: true });
+    db.close();
+  });
+
+  it("deviceId is stable within a process and overridable", () => {
+    assert.equal(deviceId(), deviceId());
+    withDevice("pinned", () => assert.equal(deviceId(), "pinned"));
   });
 });

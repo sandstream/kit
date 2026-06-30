@@ -17,9 +17,29 @@
  */
 import { randomBytes, createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname, userInfo } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+
+/**
+ * A stable identifier for THIS device. Used to device-couple PAL items so an item
+ * created in an ephemeral session/container (which gets its own throwaway id)
+ * never nags on your durable device. Derived from hostname + user (no network, no
+ * identity required); overridable via KIT_DEVICE_ID. An ephemeral container's
+ * random hostname yields a different id, which is exactly what we want.
+ */
+export function deviceId(): string {
+  const override = (process.env.KIT_DEVICE_ID ?? "").trim();
+  if (override) return override;
+  try {
+    return createHash("sha256")
+      .update(`${hostname()}\x1f${userInfo().username}`)
+      .digest("hex")
+      .slice(0, 16);
+  } catch {
+    return "unknown";
+  }
+}
 
 /**
  * A declarative verify check. Fixed shapes only, executed natively by kit (no
@@ -47,6 +67,10 @@ export interface PendingAction {
   snooze_until: string | null;
   closed_at: string | null;
   verify_passes: number;
+  /** Device where this item was created (v5+); NULL on legacy rows. */
+  origin_device: string | null;
+  /** Absolute project path at creation (v5+) — used by `pal prune`. */
+  origin_root: string | null;
 }
 
 export interface PalAddInput {
@@ -70,9 +94,18 @@ export function palAdd(db: DatabaseSync, input: PalAddInput): string {
   const kind = input.kind ?? (input.check ? "auto" : "manual");
   const verifyCheck = input.check ? JSON.stringify(input.check) : null;
   db.prepare(
-    `INSERT INTO pending_actions (id, status, title, detail, scope, kind, verify_check)
-     VALUES (?, 'open', ?, ?, ?, ?, ?)`,
-  ).run(id, input.title, input.detail ?? null, input.scope ?? null, kind, verifyCheck);
+    `INSERT INTO pending_actions (id, status, title, detail, scope, kind, verify_check, origin_device, origin_root)
+     VALUES (?, 'open', ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    input.title,
+    input.detail ?? null,
+    input.scope ?? null,
+    kind,
+    verifyCheck,
+    deviceId(),
+    process.cwd(),
+  );
   return id;
 }
 
@@ -80,20 +113,53 @@ export interface PalListOptions {
   status?: string;
   /** Restrict to this scope plus globally-scoped (NULL) items. Omit = every scope. */
   scope?: string;
+  /**
+   * Include items from OTHER devices. Default false: only this device's items
+   * (plus legacy NULL-origin rows) surface, so an ephemeral session's items never
+   * nag your durable device. `kit memory pal list --all` sets this.
+   */
+  allDevices?: boolean;
 }
 
 export function palList(db: DatabaseSync, opts: PalListOptions = {}): PendingAction[] {
   const status = opts.status ?? "open";
+  const where: string[] = ["status = ?"];
+  const params: unknown[] = [status];
   if (opts.scope !== undefined) {
-    return db
-      .prepare(
-        "SELECT * FROM pending_actions WHERE status = ? AND (scope = ? OR scope IS NULL) ORDER BY created_at, id",
-      )
-      .all(status, opts.scope) as unknown as PendingAction[];
+    where.push("(scope = ? OR scope IS NULL)");
+    params.push(opts.scope);
+  }
+  if (!opts.allDevices) {
+    // NULL origin_device = legacy/pre-v5 row → always shown (backward-compatible).
+    where.push("(origin_device = ? OR origin_device IS NULL)");
+    params.push(deviceId());
   }
   return db
-    .prepare("SELECT * FROM pending_actions WHERE status = ? ORDER BY created_at, id")
-    .all(status) as unknown as PendingAction[];
+    .prepare(`SELECT * FROM pending_actions WHERE ${where.join(" AND ")} ORDER BY created_at, id`)
+    .all(...(params as never[])) as unknown as PendingAction[];
+}
+
+export interface PalPruneResult {
+  closed: string[];
+}
+
+/**
+ * Close open items created on THIS device whose origin project path no longer
+ * exists — i.e. the work lived in an ephemeral / since-deleted directory, so the
+ * reminder is dead. Only this device's items are pruned (we can't judge another
+ * device's paths). Rows with no recorded origin_root are left untouched.
+ */
+export function palPrune(db: DatabaseSync): PalPruneResult {
+  const rows = db
+    .prepare(
+      "SELECT id, origin_root FROM pending_actions WHERE status='open' AND origin_root IS NOT NULL AND origin_device = ?",
+    )
+    .all(deviceId()) as { id: string; origin_root: string }[];
+  const closed: string[] = [];
+  for (const r of rows) {
+    if (!existsSync(r.origin_root) && palDone(db, r.id)) closed.push(r.id);
+  }
+  return { closed };
 }
 
 export function palDone(db: DatabaseSync, id: string): boolean {
@@ -165,9 +231,9 @@ export function palSyncFindings(
       | undefined;
     if (!existing) {
       db.prepare(
-        `INSERT INTO pending_actions (id, status, title, detail, scope, kind)
-         VALUES (?, 'open', ?, ?, ?, 'finding')`,
-      ).run(id, f.title, f.detail ?? null, scope);
+        `INSERT INTO pending_actions (id, status, title, detail, scope, kind, origin_device, origin_root)
+         VALUES (?, 'open', ?, ?, ?, 'finding', ?, ?)`,
+      ).run(id, f.title, f.detail ?? null, scope, deviceId(), process.cwd());
       added++;
     } else if (existing.status === "closed") {
       db.prepare(
