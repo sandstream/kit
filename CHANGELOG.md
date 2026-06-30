@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Org-distributed policy verification** (`kit policy trust`) — 3.0 Phase 2
+  starter. A committed `.kit-policy.signers` trust anchor lists the org public
+  key(s) allowed to sign the policy; `verifyPolicy` resolves the signer in trust
+  order (a pinned `--key` → this machine's identity → the org anchor), so ONE
+  policy signed by a central org key verifies authentically on every clone — no
+  shared secret, only public keys distributed. `kit policy trust <pubkey.pem>
+[--label]` / `--list` / `--remove <id>` manage it. Fail-CLOSED once an anchor
+  exists: a signer that isn't in it fails `kit policy check` / `kit ci` (same
+  discipline as the HMAC audit anchor), not just a warn. New `src/policy-trust.ts`;
+  `PolicyVerifyResult` gains `via` (key|local|org) + `anchored`. This is the model
+  the major bump needs — identity signs the org standard, any repo verifies it.
 - **`kit ci` enforces the signed policy.** `kit ci` now folds `evaluatePolicy`
   into its gate: a present `.kit-policy.toml`'s requirements appear as `policy/*`
   checks in the report (text/GitHub/JSON), so a tampered/revoked signature, unmet

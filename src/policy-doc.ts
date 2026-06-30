@@ -28,6 +28,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse } from "smol-toml";
 import { localPublicKeys, verifySignature, isRevoked } from "./identity.js";
+import { policySignersMap, hasPolicyAnchor } from "./policy-trust.js";
 
 export const POLICY_FILE = ".kit-policy.toml";
 export const POLICY_SIG_FILE = ".kit-policy.sig";
@@ -161,6 +162,10 @@ export interface PolicyVerifyResult {
   detail: string;
   kid?: string;
   fingerprint?: string;
+  /** Where the verifying key came from: a pinned --key, the local identity, or the org trust anchor. */
+  via?: "key" | "local" | "org";
+  /** True when a committed org trust anchor (.kit-policy.signers) is present. */
+  anchored?: boolean;
 }
 
 /**
@@ -182,17 +187,32 @@ export function verifyPolicy(root: string, opts: { key?: string } = {}): PolicyV
     return { status: "unsigned", detail: "no .kit-policy.sig (run kit policy sign)" };
   }
   const fingerprint = policyFingerprint(doc);
-  const pubkey = opts.key
-    ? existsSync(opts.key)
-      ? readFileSync(opts.key, "utf-8")
-      : opts.key
-    : (localPublicKeys().get(record.kid) ?? null);
+  const anchored = hasPolicyAnchor(root);
+  // Resolve the signer key, in trust order: an explicit --key pin, then this
+  // machine's own identity (the author verifying their own policy), then the
+  // committed org trust anchor (.kit-policy.signers) — which is what makes an
+  // ORG-distributed policy verify on a fresh clone.
+  let pubkey: string | null = null;
+  let via: PolicyVerifyResult["via"] = undefined;
+  if (opts.key) {
+    pubkey = existsSync(opts.key) ? readFileSync(opts.key, "utf-8") : opts.key;
+    via = "key";
+  } else if (localPublicKeys().get(record.kid)) {
+    pubkey = localPublicKeys().get(record.kid)!;
+    via = "local";
+  } else if (policySignersMap(root).get(record.kid)) {
+    pubkey = policySignersMap(root).get(record.kid)!;
+    via = "org";
+  }
   if (!pubkey) {
     return {
       status: "unverifiable",
-      detail: `signer ${record.kid} unknown (pin it with --key <spki-pem|file>)`,
+      detail: anchored
+        ? `signer ${record.kid} is not in the org trust anchor (.kit-policy.signers)`
+        : `signer ${record.kid} unknown (pin with --key, or add it to .kit-policy.signers)`,
       kid: record.kid,
       fingerprint,
+      anchored,
     };
   }
   const fpMatches = record.fingerprint === fingerprint;
@@ -205,6 +225,8 @@ export function verifyPolicy(root: string, opts: { key?: string } = {}): PolicyV
       detail: fpMatches ? "signature mismatch" : "policy changed since signing — re-sign",
       kid: record.kid,
       fingerprint,
+      via,
+      anchored,
     };
   }
   if (isRevoked(record.kid)) {
@@ -213,9 +235,18 @@ export function verifyPolicy(root: string, opts: { key?: string } = {}): PolicyV
       detail: `signer ${record.kid} is revoked`,
       kid: record.kid,
       fingerprint,
+      via,
+      anchored,
     };
   }
-  return { status: "valid", detail: `signed by ${record.kid}`, kid: record.kid, fingerprint };
+  return {
+    status: "valid",
+    detail: `signed by ${record.kid}${via === "org" ? " (org trust anchor)" : ""}`,
+    kid: record.kid,
+    fingerprint,
+    via,
+    anchored,
+  };
 }
 
 /** A ready-to-edit starter policy (written by `kit policy init`). */
