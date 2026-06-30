@@ -254,6 +254,57 @@ describe("palSyncFindings — findings → ledger (track layer)", () => {
     assert.ok(open[0]?.id.startsWith("sec-"));
     db.close();
   });
+
+  // Regression: the adversarial pass found that the auto-close was device-blind.
+  // Because the finding id is identical across machines on a shared store, a scan
+  // on device B that doesn't see device A's finding would permanently close A's
+  // open security blocker.
+  const withDevice = <T>(id: string, fn: () => T): T => {
+    const prev = process.env.KIT_DEVICE_ID;
+    process.env.KIT_DEVICE_ID = id;
+    try {
+      return fn();
+    } finally {
+      if (prev === undefined) delete process.env.KIT_DEVICE_ID;
+      else process.env.KIT_DEVICE_ID = prev;
+    }
+  };
+
+  it("a scan on device B does NOT auto-close device A's open finding (shared store)", () => {
+    const db = fresh();
+    withDevice("dev-A", () => palSyncFindings(db, "sec", [f("leak")], { scope: "repo" }));
+    // device B runs a scan of something else (empty for this source+scope)
+    const r = withDevice("dev-B", () => palSyncFindings(db, "sec", [], { scope: "repo" }));
+    assert.equal(r.closed.length, 0, "B must not close A's finding");
+    const all = palList(db, { scope: "repo", allDevices: true });
+    assert.equal(all.length, 1, "A's finding is still open");
+    assert.equal(all[0]?.origin_device, "dev-A");
+    // and A's own re-scan that no longer sees it CAN close it
+    const ra = withDevice("dev-A", () => palSyncFindings(db, "sec", [], { scope: "repo" }));
+    assert.equal(ra.closed.length, 1, "the owning device reconciles its own finding");
+    db.close();
+  });
+
+  it("the same finding in two different repos maps to two distinct rows", () => {
+    const db = fresh();
+    palSyncFindings(db, "sec", [f("leak")], { scope: "/abs/repo-x" });
+    palSyncFindings(db, "sec", [f("leak")], { scope: "/abs/repo-y" });
+    const all = palList(db, { allDevices: true });
+    assert.equal(all.length, 2, "scope is folded into the id — no cross-repo collision");
+    assert.notEqual(all[0]?.id, all[1]?.id);
+  });
+
+  it("legacy NULL-origin findings are reconcilable by any device", () => {
+    const db = fresh();
+    // simulate a pre-v5 open finding row (no origin_device) at this scope+id
+    const legacyId = findingPalId("sec", "repo\x1fold");
+    db.prepare(
+      "INSERT INTO pending_actions (id, status, title, scope, kind, origin_device) VALUES (?, 'open', 'old', 'repo', 'finding', NULL)",
+    ).run(legacyId);
+    const r = withDevice("whoever", () => palSyncFindings(db, "sec", [], { scope: "repo" }));
+    assert.equal(r.closed.length, 1, "a NULL-origin legacy finding can be cleared by any device");
+    db.close();
+  });
 });
 
 describe("PAL — device coupling (don't nag about ephemeral-session items)", () => {

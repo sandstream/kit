@@ -41,8 +41,10 @@ export async function syncSecurityFindings(
     const { openMemoryDb } = await import("./memory/db.js");
     const { palSyncFindings } = await import("./memory/pal.js");
     const { getCurrentProjectRoot } = await import("./memory/project.js");
-    const { basename } = await import("node:path");
-    const scope = basename(getCurrentProjectRoot());
+    // Scope by the ABSOLUTE project root, not its basename: two different repos
+    // that happen to share a directory name (e.g. ~/work/api and ~/scratch/api)
+    // must not reconcile into each other's findings.
+    const scope = getCurrentProjectRoot();
     const db = openMemoryDb();
     try {
       return palSyncFindings(db, "sec", actionableFindings(results).map(securityFindingToSync), {

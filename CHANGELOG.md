@@ -26,6 +26,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   command configured, a non-zero exit, non-JSON output, or a missing `token` all
   hard-error rather than silently degrading to HMAC-only.
 
+### Fixed
+
+- **PAL finding sync no longer device-blind — a real security blocker can't be
+  silently cleared across devices.** The adversarial pass on the 3.0 surface
+  found that `palSyncFindings` auto-closed findings purely by source-tag + scope,
+  with **no `origin_device` predicate** — and because the finding id was derived
+  only from `sourceTag + dedupKey` (repo-independent), the id was *identical*
+  across machines on a shared/synced store. So a `kit check` on device B that
+  didn't see device A's open finding would **permanently close A's blocker** (and
+  two different repos that merely shared a directory *basename* reconciled into
+  each other's findings). The reconcile now (a) folds the scope into the id so
+  different repos get distinct rows, (b) scopes findings by the **absolute**
+  project root rather than its basename, and (c) **device-fences** the auto-close
+  (`origin_device = thisDevice OR NULL`), so a scan only clears findings this
+  device owns (legacy NULL-origin rows stay reconcilable by any device). A
+  genuinely-cleared finding now lingers until the owning device re-scans —
+  fail-safe (a stale reminder, never a dropped blocker).
+
+### Security
+
+- **Device identity is now an unguessable persisted token, not a hostname hash.**
+  `deviceId()` previously derived the per-device id from `sha256(hostname+user)`
+  — guessable by any peer on a shared store (enabling cross-device
+  surface/suppression of PAL items) and unstable across hostname churn (a DHCP
+  lease or machine rename would silently orphan a device's own items). It now
+  prefers a random id persisted once to `<memoryDir>/device-id` (0600), and
+  validates the `KIT_DEVICE_ID` override against `[A-Za-z0-9_-]{1,64}` (a
+  malformed value is ignored rather than trusted). The hostname hash remains only
+  as a last-resort fallback when the id file can't be written.
+
+## [3.0.0] - 2026-06-30
+
 kit 3.0 — from a provable local floor to an org-governed control plane: machine
 **identity** (Ed25519) + **signable, distributable policy-as-code**, **governed
 cross-device memory** (encrypted sync + device-coupled action items),

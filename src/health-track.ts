@@ -21,8 +21,9 @@ export async function syncHealthFindings(
     const { openMemoryDb } = await import("./memory/db.js");
     const { palSyncFindings } = await import("./memory/pal.js");
     const { getCurrentProjectRoot } = await import("./memory/project.js");
-    const { basename } = await import("node:path");
-    const scope = basename(getCurrentProjectRoot());
+    // Absolute root, not basename — same-named repos in different paths must not
+    // reconcile into each other's findings (see findings-track.ts).
+    const scope = getCurrentProjectRoot();
     const db = openMemoryDb();
     try {
       return palSyncFindings(db, "health", actionableHealth(findings).map(healthFindingToSync), {
