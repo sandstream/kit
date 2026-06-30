@@ -19,6 +19,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   advanced — same repo, same scanners, different verdict by date. Staleness is now
   ADVISORY (`status: pass`, noted in the detail/suggestion); the gate verdict is a
   function of inputs only. (Surfaced by the 3.0 promise audit.)
+- **Secrets: entropy backstop closes a fail-closed shared-memory scan hole.** The
+  `kv-secret` heuristic allowlists runtime env prefixes (`KIT_`/`GITHUB_`/…), so a
+  real high-entropy credential stored under such a prefix slipped past the
+  fail-closed `kit memory share` gate. `findSecrets(text, { entropyBackstop })` now
+  also flags an ALL-CAPS `KEY=value` whose value is long + genuinely high-entropy
+  (Shannon ≥ 4.2 bits/char) regardless of prefix; `shareEntry` enables it. Catches
+  base64/base62 secrets while clearing hex hashes (~4.0) and dictionary values; the
+  noisier code/diff scan is unchanged. (Surfaced by the 3.0 promise audit.)
+
+### Changed
+
+- **Frozen contracts: "additive-only" is now test-enforced, not just review
+  discipline.** A new invariant test checks the live surface against the committed
+  `contracts/public-surface.json` baseline and FAILS on a removed stable command, a
+  `stable → experimental/deprecated` downgrade, or a `schemaVersion`/adapter-sdk
+  **major** regression — closing the gap where a breaking change could be hidden by
+  regenerating the byte-for-byte snapshot. (Surfaced by the 3.0 promise audit.)
 
 ### Added
 

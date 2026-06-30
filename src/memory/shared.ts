@@ -117,7 +117,10 @@ export function readShared(root: string): SharedEntry[] {
 export function shareEntry(root: string, input: ShareInput, now: string): SharedEntry {
   const refs = input.refs ?? [];
   const scanned = [input.title, input.body, ...refs].join("\n");
-  const found = findSecrets(scanned);
+  // entropyBackstop: curated shared memory is prose, never an env dump — so unlike
+  // the code/diff scan, here we also refuse a high-entropy `KEY=value` even under
+  // an allowlisted env prefix (KIT_/GITHUB_/…), closing the fail-closed-scan hole.
+  const found = findSecrets(scanned, { entropyBackstop: true });
   if (found.length) {
     throw new Error(
       `refused: entry contains ${found.length} secret(s) (${found

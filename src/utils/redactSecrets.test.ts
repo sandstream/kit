@@ -1,6 +1,36 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { redactSecrets, safeStatusLine } from "./redactSecrets.js";
+import { redactSecrets, safeStatusLine, findSecrets, shannonEntropy } from "./redactSecrets.js";
+
+describe("findSecrets — entropy backstop (fail-closed shared-memory gate)", () => {
+  const has = (text: string, opts?: { entropyBackstop?: boolean }) =>
+    findSecrets(text, opts).some((f) => f.label === "high-entropy-kv");
+
+  it("catches a high-entropy value under an allowlisted env prefix (the gap)", () => {
+    // KIT_/GITHUB_ are allowlisted by the kv-secret regex, so the default scan
+    // misses this — the backstop must catch it.
+    const leak = "KIT_SECRET=xQ9fL2vN8pR4tW6yA1bC3dE5gH7jK0mPzStV";
+    assert.equal(has(leak), false, "default scan honors the prefix allowlist");
+    assert.equal(has(leak, { entropyBackstop: true }), true, "backstop catches it");
+    assert.equal(
+      has("GITHUB_TOKENX=Zk3mP9qR7sT1vW5xY8aB2cD4eF6gH0jL", { entropyBackstop: true }),
+      true,
+    );
+  });
+
+  it("does NOT flag low-entropy or short values (no false positives)", () => {
+    assert.equal(has("KIT_FLAG=development", { entropyBackstop: true }), false);
+    assert.equal(has("KIT_MODE=production_environment_x", { entropyBackstop: true }), false);
+    // a 64-char hex hash (e.g. KIT_POLICY_HASH) is ~4.0 bits/char — below threshold
+    const hexHash = "a3f5c8e1b2d4f6a8c0e2b4d6f8a0c2e4a3f5c8e1b2d4f6a8c0e2b4d6f8a0c2e4";
+    assert.equal(has(`KIT_POLICY_HASH=${hexHash}`, { entropyBackstop: true }), false);
+  });
+
+  it("shannonEntropy: low for repetitive, high for random", () => {
+    assert.ok(shannonEntropy("aaaaaaaa") < 1);
+    assert.ok(shannonEntropy("xQ9fL2vN8pR4tW6yA1bC3dE5") > 4.2);
+  });
+});
 
 describe("redactSecrets — connection-string + sk-svcacct (regression)", () => {
   it("redacts the password in a DB URL but keeps scheme/user/host as context", () => {

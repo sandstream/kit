@@ -50,6 +50,40 @@ describe("public surface snapshot", () => {
     assert.ok(committed.exitCodes.includes(0) && committed.exitCodes.includes(1));
   });
 
+  // The byte-for-byte snapshot above forces a human to ACKNOWLEDGE any drift, but
+  // it treats an additive change and a BREAKING one identically (regenerate → green).
+  // This test makes the "stable = additive-only across 2.x" promise a real invariant,
+  // not just review discipline: a removed stable command, a stable→experimental
+  // downgrade, or a schema/adapter-sdk major REGRESSION fails here regardless of a
+  // regenerated snapshot.
+  describe("additive-only invariant vs the committed baseline", () => {
+    const baseline = JSON.parse(readFileSync(SNAPSHOT_PATH, "utf-8")) as PublicSurface;
+    const live = collectPublicSurface();
+    const major = (v: string) => parseInt(v.split(".")[0]!, 10) || 0;
+
+    it("no command that is STABLE in the baseline is removed or downgraded", () => {
+      const violations: string[] = [];
+      for (const [name, tier] of Object.entries(baseline.commands)) {
+        if (tier !== "stable") continue;
+        const liveTier = live.commands[name];
+        if (liveTier === undefined) violations.push(`removed stable command: ${name}`);
+        else if (liveTier !== "stable") violations.push(`downgraded ${name}: stable → ${liveTier}`);
+      }
+      assert.deepEqual(violations, [], `breaking surface change(s):\n${violations.join("\n")}`);
+    });
+
+    it("config schemaVersion and adapter-sdk major never regress", () => {
+      assert.ok(
+        live.config.schemaVersion >= baseline.config.schemaVersion,
+        `config schemaVersion regressed: ${baseline.config.schemaVersion} → ${live.config.schemaVersion}`,
+      );
+      assert.ok(
+        major(live.adapterSdk.version) >= major(baseline.adapterSdk.version),
+        `adapter-sdk major regressed: ${baseline.adapterSdk.version} → ${live.adapterSdk.version}`,
+      );
+    });
+  });
+
   it("DETECTS a simulated surface change (the diff guard actually bites)", () => {
     const committed = serializePublicSurface(collectPublicSurface());
     // Simulate adding a brand-new command to the surface.
