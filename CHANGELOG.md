@@ -26,6 +26,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   command configured, a non-zero exit, non-JSON output, or a missing `token` all
   hard-error rather than silently degrading to HMAC-only.
 
+## [3.0.0] - 2026-06-30
+
 kit 3.0 — from a provable local floor to an org-governed control plane: machine
 **identity** (Ed25519) + **signable, distributable policy-as-code**, **governed
 cross-device memory** (encrypted sync + device-coupled action items),
