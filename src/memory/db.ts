@@ -21,7 +21,7 @@ import { summarizeTokens } from "./stats.js";
 import { redactSecrets } from "../utils/redactSecrets.js";
 import { secureFile, secureDir } from "../utils/secure-perms.js";
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /**
  * Opt-in redaction-at-capture (KIT_MEMORY_REDACT=1). The memory store is raw by
@@ -185,6 +185,12 @@ function migrate(db: DatabaseSync): void {
   // captured); query_log is created by SCHEMA_SQL above.
   ensureColumn(db, "messages", "cache_read_input_tokens", "INTEGER");
   ensureColumn(db, "messages", "cache_creation_input_tokens", "INTEGER");
+  // v5: device-couple PAL so an item created in an ephemeral session/container
+  // doesn't nag on your durable device. origin_device = where it was created;
+  // origin_root = the absolute project path (for `pal prune` of dead dirs). Older
+  // rows have NULL → treated as "this device" (always shown), backward-compatible.
+  ensureColumn(db, "pending_actions", "origin_device", "TEXT");
+  ensureColumn(db, "pending_actions", "origin_root", "TEXT");
   const row = db.prepare("SELECT version FROM schema_meta LIMIT 1").get() as
     | { version: number }
     | undefined;
