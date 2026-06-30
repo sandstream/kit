@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installMemoryHooks, uninstallMemoryHooks } from "./install.js";
+import {
+  installMemoryHooks,
+  uninstallMemoryHooks,
+  installStatusline,
+  uninstallStatusline,
+} from "./install.js";
 
 describe("memory hook installer", () => {
   let tmp: string;
@@ -115,5 +120,56 @@ describe("memory hook installer", () => {
     );
     assert.ok(ups.includes("some-other-tool"), "unrelated hook survives uninstall");
     assert.ok(!ups.includes("kit memory hook user-prompt-submit"));
+  });
+});
+
+describe("status-line installer", () => {
+  let tmp: string;
+  let settingsPath: string;
+  const prev = process.env.KIT_CLAUDE_SETTINGS;
+
+  before(() => {
+    tmp = mkdtempSync(join(tmpdir(), "kit-sl-"));
+    settingsPath = join(tmp, "settings.json");
+    process.env.KIT_CLAUDE_SETTINGS = settingsPath;
+  });
+  after(() => {
+    if (prev === undefined) delete process.env.KIT_CLAUDE_SETTINGS;
+    else process.env.KIT_CLAUDE_SETTINGS = prev;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("wires kit statusline when absent, idempotently", () => {
+    writeFileSync(settingsPath, "{}");
+    const r1 = installStatusline();
+    assert.equal(r1.status, "added");
+    const s = JSON.parse(readFileSync(settingsPath, "utf8"));
+    assert.equal(s.statusLine.type, "command");
+    assert.ok(s.statusLine.command.endsWith("statusline"));
+    // second run is a no-op
+    assert.equal(installStatusline().status, "already");
+  });
+
+  it("never clobbers a user's existing custom statusLine", () => {
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({ statusLine: { type: "command", command: "my-own-prompt" } }),
+    );
+    assert.equal(installStatusline().status, "foreign");
+    const s = JSON.parse(readFileSync(settingsPath, "utf8"));
+    assert.equal(s.statusLine.command, "my-own-prompt", "left as-is");
+    // and uninstall must NOT remove a foreign statusLine
+    assert.equal(uninstallStatusline().removed, false);
+    assert.equal(
+      JSON.parse(readFileSync(settingsPath, "utf8")).statusLine.command,
+      "my-own-prompt",
+    );
+  });
+
+  it("uninstall removes only our statusLine", () => {
+    writeFileSync(settingsPath, "{}");
+    installStatusline();
+    assert.equal(uninstallStatusline().removed, true);
+    assert.equal(JSON.parse(readFileSync(settingsPath, "utf8")).statusLine, undefined);
   });
 });
