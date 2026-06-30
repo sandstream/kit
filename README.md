@@ -67,6 +67,35 @@ laptop)? Wire `kit setup` + `kit memory sync` into the environment's setup scrip
 so it fuels itself — config, secrets (vault-backed), agent gates, identity, and
 recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md).
 
+## What's new in 3.0
+
+kit 3.0 takes it from a provable local floor to an **org-governed control plane** —
+identity + policy is the contract. All additive over 2.x (no stable command
+removed; enforced by a public-surface invariant). Highlights:
+
+- **Identity + signable policy.** A local Ed25519 `kit identity`, a signable,
+  distributable **`.kit-policy.toml`** (policy-as-code) any kit verifies offline
+  before enforcing, and a committed **org trust anchor** (`.kit-policy.signers`).
+  `kit panic` rotates + emits a signed revocation.
+- **Governed cross-device memory.** `kit memory push`/`pull` sync your private
+  store over **your own** encrypted transport — a private git remote or any
+  `transport = "command"` (S3/rclone/scp/USB). Configurable without a backdoor:
+  local-only config, remote ≠ project origin, AES-256-GCM payload, opt-in.
+  `kit memory sync init` scaffolds it; opt-in auto pull-on-start / push-on-end
+  makes ephemeral containers durable. PAL action items are **device-coupled** so
+  a throwaway session never nags your laptop, and `kit memory install` wires the
+  status-line so the "blocked-on-you" count is visible.
+- **Tamper-evident, attributable audit.** The HMAC anchor now binds attribution
+  (`kid`/`sig`) into the seal — stripping or forging the signer of a sealed entry
+  is caught (anchor v3).
+- **Hardened gate.** Closed install-gate bypasses (env-prefix, `npm exec`/`dlx`,
+  remote tarballs, subshells), two ReDoS, and a policy-canonicalization gap.
+- **Smart, zero-LLM UX.** Deterministic `💡 tip:` hints surface the right
+  capability at the right moment, and **`kit config knobs`** lists the power-user
+  env/config knobs.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full 3.0.0 entry.
+
 ## Problem
 
 Every time you (or an agent) starts on a new project:
