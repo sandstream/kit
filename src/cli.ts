@@ -5194,7 +5194,7 @@ export const COMMAND_HELP: Record<string, string> = {
   panic:
     "Compromise response: rotate identity + emit a signed revocation + audit it + print the platform-revocation checklist (experimental)",
   policy:
-    "Signable org policy-as-code in .kit-policy.toml (init/show/validate/sign/verify/check) — identity-signed standard, enforced + verifiable offline (experimental)",
+    "Signable org policy-as-code in .kit-policy.toml (init/show/validate/sign/verify/check/trust) — identity-signed standard, org-distributable + enforced offline (experimental)",
   design: "Check design quality (a11y, design tokens) against the baseline",
   baseline:
     "Freeze current warnings into .kit-baseline.json so future runs gate only net-new findings",

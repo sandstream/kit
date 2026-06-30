@@ -63,12 +63,18 @@ export async function evaluatePolicy(
   // Signature is the trust anchor — an unsigned/unknown signer is a warn (the
   // policy still reads), a tampered/revoked one is a hard fail.
   const v = verifyPolicy(root);
+  // valid → pass; tamper/revoked → fail; unsigned → warn. An UNVERIFIABLE signer
+  // is normally a warn (trust-absence ≠ forgery), but once a committed org trust
+  // anchor exists, a signer that isn't in it is fail-CLOSED — distribution must
+  // mean enforcement (same discipline as the HMAC audit anchor).
   const sigStatus: PolicyEvalStatus =
     v.status === "valid"
       ? "pass"
       : v.status === "invalid" || v.status === "revoked"
         ? "fail"
-        : "warn";
+        : v.status === "unverifiable" && v.anchored
+          ? "fail"
+          : "warn";
   const signature: PolicyEvalItem = {
     requirement: "signature",
     status: sigStatus,

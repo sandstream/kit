@@ -4,10 +4,16 @@
 // a `kit identity` (Phase 0) so an org's standard is cryptographically attributable
 // and offline-verifiable. Distinct from `.kit.toml [policy.agent_writes]` (the 2.x
 // per-repo agent-write pre-approval) — this is the org-level standard.
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync, readFileSync } from "node:fs";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { getCurrentProjectRoot } from "../memory/project.js";
+import {
+  addPolicySigner,
+  loadPolicySigners,
+  removePolicySigner,
+  getSignersPath,
+} from "../policy-trust.js";
 import {
   getPolicyPath,
   getPolicySigPath,
@@ -39,8 +45,12 @@ export async function cmdPolicy(): Promise<boolean> {
       return policyVerify(root);
     case "check":
       return policyCheck(root);
+    case "trust":
+      return policyTrust(root);
     default:
-      console.error(`${c.red}usage: kit policy <init|show|validate|sign|verify|check>${c.reset}`);
+      console.error(
+        `${c.red}usage: kit policy <init|show|validate|sign|verify|check|trust>${c.reset}`,
+      );
       return false;
   }
 }
@@ -154,6 +164,64 @@ function policyVerify(root: string): boolean {
         `${c.red}✗ policy signed by a REVOKED key${c.reset} ${c.dim}(${r.detail}) — re-sign with the current identity${c.reset}`,
       );
       return false;
+  }
+}
+
+function policyTrust(root: string): boolean {
+  // List the org trust anchor.
+  if (
+    hasFlag(process.argv, "--list") ||
+    (!process.argv[4] && !flagValue(process.argv, "--remove"))
+  ) {
+    const signers = loadPolicySigners(root);
+    if (!signers.length) {
+      console.log(
+        `${c.dim}no org trust anchor — add one with ${c.reset}${c.bold}kit policy trust <pubkey.pem> [--label <name>]${c.reset}`,
+      );
+      return true;
+    }
+    console.log(
+      `${c.bold}${signers.length}${c.reset} trusted policy signer(s) ${c.dim}(${getSignersPath(root)})${c.reset}`,
+    );
+    for (const s of signers) {
+      console.log(`  ${c.bold}${s.id}${c.reset}${s.label ? ` ${c.dim}${s.label}${c.reset}` : ""}`);
+    }
+    return true;
+  }
+  // Remove a signer by id.
+  const removeId = flagValue(process.argv, "--remove");
+  if (removeId) {
+    const ok = removePolicySigner(root, removeId);
+    console.log(
+      ok
+        ? `${c.green}✓${c.reset} removed ${removeId} from the trust anchor`
+        : `${c.dim}${removeId} not in the trust anchor${c.reset}`,
+    );
+    return ok;
+  }
+  // Add a signer from an SPKI-PEM file (e.g. produced by `kit identity show --public`).
+  const file = process.argv[4];
+  if (!existsSync(file)) {
+    console.error(`${c.red}no such public-key file: ${file}${c.reset}`);
+    return false;
+  }
+  try {
+    const pem = readFileSync(file, "utf-8");
+    const r = addPolicySigner(root, pem, flagValue(process.argv, "--label") ?? undefined);
+    if (r.added) {
+      console.log(
+        `${c.green}✓${c.reset} trusted org policy signer ${c.bold}${r.signer.id}${c.reset}${r.signer.label ? ` ${c.dim}(${r.signer.label})${c.reset}` : ""}`,
+      );
+      console.log(
+        `${c.dim}commit .kit-policy.signers — any clone now verifies a policy this org key signed; an untrusted signer fails ${c.reset}${c.bold}kit policy check${c.reset}${c.dim}/${c.reset}${c.bold}kit ci${c.reset}`,
+      );
+    } else {
+      console.log(`${c.dim}${r.signer.id} ${r.reason}${c.reset}`);
+    }
+    return true;
+  } catch (err) {
+    console.error(`${c.red}not a valid public key: ${(err as Error).message}${c.reset}`);
+    return false;
   }
 }
 

@@ -81,7 +81,31 @@ It is **opt-in**: with no `.kit-policy.toml` it is a no-op (exit 0). A hard fail
 `min_kit_version`, or — under `--strict` — a missing required scanner. Run it as a
 CI step (`kit policy check --strict`) to gate on the signed org standard.
 
+## Org distribution: `.kit-policy.signers` (the trust anchor)
+
+A locally-signed policy only verifies on the machine that signed it. To distribute
+ONE org standard across MANY repos, commit a **trust anchor** — `.kit-policy.signers`
+— listing the org public key(s) allowed to sign the policy:
+
+```
+kit identity show --public > org.pub          # on the org's signing machine
+kit policy trust org.pub --label acme-security # in each repo (commit the result)
+kit policy trust --list                        # show trusted signers
+kit policy trust --remove <kid>                # revoke trust in a signer
+```
+
+`verifyPolicy` resolves the signer key in trust order: a pinned `--key` → this
+machine's own identity → the committed org anchor. So a policy signed by the org
+key verifies as `valid (org trust anchor)` on any clone — asymmetric, no shared
+secret, only public keys distributed.
+
+**Fail-closed once anchored.** With a `.kit-policy.signers` present, a policy whose
+signer is NOT in it is a hard **fail** in `kit policy check` / `kit ci` (not a
+warn) — distribution must mean enforcement, the same discipline as the HMAC audit
+anchor. Without an anchor, an unknown signer stays a warn (trust-absence ≠ forgery).
+
 ## What's next
 
-Folding the policy verdict into `kit check` / `kit ci`'s aggregate gate, then signed
-org **bundles** + RBAC (Phase 2).
+Signed org **bundles** (packaging the policy + signer manifest for drop-in) and
+RBAC keyed to identity (which role may read/write/elevate/install/deploy) —
+Phase 2 depth.
