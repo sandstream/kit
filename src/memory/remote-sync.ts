@@ -20,7 +20,15 @@
  * Deterministic, zero-LLM, zero new dependencies (node:child_process + git).
  */
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  statSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "smol-toml";
@@ -46,6 +54,11 @@ export interface SyncConfig {
   pushCmd?: string;
   /** Shell command that DOWNLOADS the blob to $KIT_MEMORY_BLOB from your store. */
   pullCmd?: string;
+  // opt-in automation (off by default) — wired into the SessionStart/SessionEnd hooks.
+  /** Pull + merge the store at the start of each session. */
+  pullOnStart?: boolean;
+  /** Index + push the store at the end of each session (key for ephemeral containers). */
+  pushOnEnd?: boolean;
 }
 
 const DEFAULT_BRANCH = "main";
@@ -81,6 +94,10 @@ export function loadSyncConfig(): SyncConfig | null {
     throw new Error(`invalid [memory.sync] file "${file}" — must be a bare filename`);
   }
 
+  const bool = (v: unknown): boolean => v === true;
+  const pullOnStart = bool(s.pull_on_start);
+  const pushOnEnd = bool(s.push_on_end);
+
   const transport: SyncTransport = s.transport === "command" ? "command" : "git";
   if (transport === "command") {
     const pushCmd = str(s.push_cmd);
@@ -88,13 +105,13 @@ export function loadSyncConfig(): SyncConfig | null {
     if (!pushCmd || !pullCmd) {
       throw new Error('[memory.sync] transport = "command" requires both push_cmd and pull_cmd');
     }
-    return { transport, file, pushCmd, pullCmd };
+    return { transport, file, pushCmd, pullCmd, pullOnStart, pushOnEnd };
   }
 
   const remote = str(s.remote);
   if (!remote) return null; // git transport with no remote → treat as unconfigured
   const branch = str(s.branch) || DEFAULT_BRANCH;
-  return { transport, file, remote, branch };
+  return { transport, file, remote, branch, pullOnStart, pushOnEnd };
 }
 
 /**
@@ -265,6 +282,132 @@ export function pullMemory(
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+export interface InitSyncOptions {
+  transport?: SyncTransport;
+  remote?: string;
+  branch?: string;
+  pushCmd?: string;
+  pullCmd?: string;
+  /** Enable pull-on-start + push-on-end. */
+  auto?: boolean;
+  /** Overwrite an existing sync.toml. */
+  force?: boolean;
+}
+
+/**
+ * Write a starter `~/.kit/sync.toml` (LOCAL, never committed). Returns created:false
+ * (without touching the file) when one already exists and `force` isn't set.
+ */
+export function initSyncConfig(opts: InitSyncOptions = {}): { path: string; created: boolean } {
+  const path = getSyncConfigPath();
+  if (existsSync(path) && !opts.force) return { path, created: false };
+  const transport: SyncTransport = opts.transport ?? "git";
+  const lines = ["[memory.sync]"];
+  if (transport === "command") {
+    lines.push('transport = "command"');
+    lines.push(
+      `push_cmd = ${JSON.stringify(opts.pushCmd ?? 'aws s3 cp "$KIT_MEMORY_BLOB" s3://YOUR-BUCKET/kit-memory.enc')}`,
+    );
+    lines.push(
+      `pull_cmd = ${JSON.stringify(opts.pullCmd ?? 'aws s3 cp s3://YOUR-BUCKET/kit-memory.enc "$KIT_MEMORY_BLOB"')}`,
+    );
+  } else {
+    lines.push(
+      `remote = ${JSON.stringify(opts.remote ?? "git@github.com:YOU/your-private-memory.git")}`,
+    );
+    if (opts.branch) lines.push(`branch = ${JSON.stringify(opts.branch)}`);
+  }
+  if (opts.auto) {
+    lines.push("pull_on_start = true");
+    lines.push("push_on_end = true");
+  }
+  mkdirSync(getMemoryDir(), { recursive: true, mode: 0o700 });
+  writeFileSync(path, lines.join("\n") + "\n", { mode: 0o600 });
+  return { path, created: true };
+}
+
+export interface AutoSyncResult {
+  ran: boolean;
+  /** A short human note for stderr (a sync happened, or why it was skipped). */
+  note?: string;
+}
+
+/**
+ * Pull + merge at session start when `[memory.sync] pull_on_start = true`. Always
+ * fail-soft: a missing config, missing passphrase, or transport error never throws
+ * (a session must never be blocked by sync). No-op unless the flag is set.
+ */
+export function tryAutoPull(projectRoot: string): AutoSyncResult {
+  let cfg: SyncConfig | null;
+  try {
+    cfg = loadSyncConfig();
+  } catch {
+    return { ran: false };
+  }
+  if (!cfg || !cfg.pullOnStart) return { ran: false };
+  try {
+    const r = pullMemory(cfg, process.env.KIT_MEMORY_PASSPHRASE, projectRoot);
+    return { ran: true, note: r.found ? `memory synced from ${r.target}` : undefined };
+  } catch (e) {
+    return { ran: false, note: `memory pull skipped: ${(e as Error).message}` };
+  }
+}
+
+/**
+ * Index-and-push at session end when `[memory.sync] push_on_end = true`. The key
+ * piece for EPHEMERAL containers: the session's memory reaches your durable store
+ * before the container is reclaimed. Fail-soft; needs KIT_MEMORY_PASSPHRASE.
+ */
+export function tryAutoPush(projectRoot: string): AutoSyncResult {
+  let cfg: SyncConfig | null;
+  try {
+    cfg = loadSyncConfig();
+  } catch {
+    return { ran: false };
+  }
+  if (!cfg || !cfg.pushOnEnd) return { ran: false };
+  if (!process.env.KIT_MEMORY_PASSPHRASE) {
+    return { ran: false, note: "memory push skipped: KIT_MEMORY_PASSPHRASE not set" };
+  }
+  try {
+    const r = pushMemory(cfg, process.env.KIT_MEMORY_PASSPHRASE, projectRoot);
+    return { ran: true, note: r.pushed ? `memory pushed to ${r.target}` : undefined };
+  } catch (e) {
+    return { ran: false, note: `memory push skipped: ${(e as Error).message}` };
+  }
+}
+
+const NUDGE_MARKER = ".sync-nudge-shown";
+
+/**
+ * One-time upgrade nudge: if sync is NOT configured but there's a memory store
+ * worth syncing, suggest `kit memory sync init` — once (a marker under ~/.kit
+ * suppresses it thereafter). Returns null when nothing should be shown.
+ */
+export function maybeSyncNudge(): string | null {
+  try {
+    if (loadSyncConfig()) return null; // already configured
+  } catch {
+    return null;
+  }
+  const marker = join(getMemoryDir(), NUDGE_MARKER);
+  if (existsSync(marker)) return null;
+  let worthIt = false;
+  try {
+    const p = getMemoryDbPath();
+    worthIt = existsSync(p) && statSync(p).size > 64 * 1024; // a non-trivial store
+  } catch {
+    worthIt = false;
+  }
+  if (!worthIt) return null;
+  try {
+    writeFileSync(marker, "", { mode: 0o600 });
+  } catch {
+    /* best-effort — if we can't write the marker, worst case we nudge again */
+  }
+  return "tip: sync your memory across machines (and back it up) — run `kit memory sync init`";
 }
 
 /** Give the throwaway clone a commit identity if the environment has none. */

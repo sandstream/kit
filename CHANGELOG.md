@@ -46,6 +46,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   project tree, so a cloned repo can't inject it), the payload is encrypted, and
   it's opt-in. The blob is the real unit; git and command are just two ways to
   move it.
+- **Memory sync onboarding: `kit memory sync init` + opt-in auto-pull/push + a
+  one-time nudge.** Closes the usability gaps in gap #4 (you previously had to
+  hand-write `~/.kit/sync.toml`, and nothing synced automatically):
+  - `kit memory sync init` writes the local `~/.kit/sync.toml` template
+    (`--remote <url>` for git, or `--command` with `--push-cmd`/`--pull-cmd`;
+    `--auto` enables the hooks; `--force` overwrites). It won't clobber an existing
+    config and reminds you to set `KIT_MEMORY_PASSPHRASE` + create the private repo.
+  - `[memory.sync] pull_on_start = true` / `push_on_end = true` wire sync into the
+    SessionStart/SessionEnd hooks: pull+merge before "where you left off", and
+    index+push when the session ends — the missing piece for **ephemeral
+    containers** (memory reaches your durable store before the box is reclaimed).
+    Both are fail-soft: a session is never blocked by sync.
+  - A one-time tip suggests `kit memory sync init` when you have a non-trivial
+    memory store but sync isn't configured yet (suppressed after the first show).
 
 ### Security
 
