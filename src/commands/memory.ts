@@ -51,6 +51,7 @@ import {
   sessionStartRecovery,
 } from "../memory/hook.js";
 import { decisionsForPaths, changedPaths } from "../memory/clusters.js";
+import { collectHints } from "../hints.js";
 import {
   installMemoryHooks,
   uninstallMemoryHooks,
@@ -680,6 +681,15 @@ async function memHook(): Promise<boolean> {
     // One-time upgrade nudge when sync isn't configured yet.
     const nudge = maybeSyncNudge();
     if (nudge) console.error(`${c.dim}${nudge}${c.reset}`);
+    // One deterministic, marker-gated contextual tip (unsigned policy, unanchored
+    // audit log, missing scanner, …). Fail-soft; stderr so it isn't injected as context.
+    try {
+      for (const h of await collectHints(getCurrentProjectRoot())) {
+        console.error(`${c.dim}💡 tip: ${h.tip}${c.reset}`);
+      }
+    } catch {
+      /* a tip must never break session start */
+    }
     return true;
   }
   console.error(`${c.red}Unknown hook event: ${event ?? "(none)"}${c.reset}`);
