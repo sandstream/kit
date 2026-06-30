@@ -6,7 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [3.0.0] - 2026-06-30
+### Added
+
+- **External timestamp anchor (command transport) — closes the same-machine
+  forge gap.** The keyless chain + machine-local HMAC anchor proves *what
+  happened on this machine*, but anyone with that machine's anchor key (UID) can
+  re-seal a rewritten log undetectably. `kit audit anchor --external` now folds
+  an **external authority's receipt** into the seal: the documented
+  `resolveExternalAnchor()` extension point is implemented via a command
+  transport — set `KIT_EXTERNAL_ANCHOR_CMD` to any program (an RFC3161 TSA
+  client, an append-only log writer, a notary) and kit pipes the tip/count/log
+  path to it via `KIT_ANCHOR_TIP`/`KIT_ANCHOR_COUNT`/`KIT_ANCHOR_LOGPATH`,
+  expecting a JSON receipt `{ token, authority?, timestamp? }` on stdout. The
+  receipt is stored on the anchor record (`external`). kit still ships **no
+  network client** (no-egress default) — the operator wires the authority.
+- **`kit audit verify --require-external`** fails any seal that carries only an
+  HMAC anchor (no external receipt), so a policy can demand third-party
+  countersignature on every seal. Fail-closed throughout: `--external` with no
+  command configured, a non-zero exit, non-JSON output, or a missing `token` all
+  hard-error rather than silently degrading to HMAC-only.
 
 kit 3.0 — from a provable local floor to an org-governed control plane: machine
 **identity** (Ed25519) + **signable, distributable policy-as-code**, **governed

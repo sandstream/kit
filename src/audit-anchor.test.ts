@@ -20,6 +20,7 @@ import {
   tryReadAuditAnchorKey,
   tryAdvanceAnchorOnAppend,
   resolveExternalAnchor,
+  commandExternalAnchor,
   type AnchorVerifyResult,
   type AnchorRecord,
 } from "./audit-anchor.js";
@@ -504,8 +505,101 @@ describe("audit anchor - hasAnyAnchoredLogs", () => {
   });
 });
 
-describe("audit anchor - external anchor extension point", () => {
-  it("resolveExternalAnchor returns null until an enclave wires one up", () => {
-    assert.equal(resolveExternalAnchor(), null);
+describe("audit anchor - external anchor (command transport, fail-closed)", () => {
+  const withCmd = async <T>(cmd: string | undefined, fn: () => T | Promise<T>): Promise<T> => {
+    const prev = process.env.KIT_EXTERNAL_ANCHOR_CMD;
+    if (cmd === undefined) delete process.env.KIT_EXTERNAL_ANCHOR_CMD;
+    else process.env.KIT_EXTERNAL_ANCHOR_CMD = cmd;
+    try {
+      return await fn();
+    } finally {
+      if (prev === undefined) delete process.env.KIT_EXTERNAL_ANCHOR_CMD;
+      else process.env.KIT_EXTERNAL_ANCHOR_CMD = prev;
+    }
+  };
+
+  it("resolveExternalAnchor: null without env, command-anchor with it", async () => {
+    await withCmd(undefined, () => assert.equal(resolveExternalAnchor(), null));
+    await withCmd("true", () => assert.ok(resolveExternalAnchor() !== null));
+  });
+
+  it("commandExternalAnchor parses a JSON receipt and passes the tip via env", async () => {
+    // The command echoes a receipt that embeds the tip it received → proves wiring.
+    const a = commandExternalAnchor(
+      `printf '{"token":"tok-%s","authority":"test-tsa"}' "$KIT_ANCHOR_TIP"`,
+    );
+    const r = await a.anchor({ tip: "deadbeef", count: 3, logPath: "/x" });
+    assert.equal(r.token, "tok-deadbeef");
+    assert.equal(r.authority, "test-tsa");
+    assert.ok(r.timestamp); // defaulted when absent
+  });
+
+  it("is FAIL-CLOSED: non-zero exit / non-JSON / missing token all throw", async () => {
+    await assert.rejects(
+      commandExternalAnchor("exit 7").anchor({ tip: "a", count: 1, logPath: "/x" }),
+      /failed/,
+    );
+    await assert.rejects(
+      commandExternalAnchor("echo not-json").anchor({ tip: "a", count: 1, logPath: "/x" }),
+      /valid JSON receipt/,
+    );
+    await assert.rejects(
+      commandExternalAnchor("echo {}").anchor({ tip: "a", count: 1, logPath: "/x" }),
+      /token/,
+    );
+  });
+
+  it("anchorAuditLog --external stores the receipt; requested-but-unconfigured throws", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "kit-ext-log-"));
+    const dir = mkdtempSync(join(tmpdir(), "kit-ext-home-"));
+    try {
+      const content = await buildChain(cwd, 2);
+      const logPath = join(cwd, ".kit-audit.jsonl");
+      // configured → receipt stored on the record
+      await withCmd(`echo '{"token":"abc","authority":"acme-tsa"}'`, async () => {
+        const rec = await anchorAuditLog(logPath, content, dir, { external: true });
+        assert.equal(rec.external?.token, "abc");
+        assert.equal(rec.external?.authority, "acme-tsa");
+      });
+      // requested but no command configured → fail-closed throw
+      await withCmd(undefined, async () => {
+        await assert.rejects(
+          anchorAuditLog(logPath, content, dir, { external: true }),
+          /none configured/,
+        );
+      });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("decideAnchorVerdict --require-external fails an HMAC-only seal, passes one with a receipt", () => {
+    const base: AnchorVerifyResult = {
+      status: "anchored-ok",
+      entries: 2,
+      expected: 2,
+      newSinceAnchor: 0,
+    };
+    const noExt = decideAnchorVerdict({
+      result: base,
+      strict: false,
+      machineHasAnchors: true,
+      requireExternal: true,
+    });
+    assert.equal(noExt.ok, false);
+    assert.match(noExt.message, /external anchor REQUIRED/);
+
+    const withExt = decideAnchorVerdict({
+      result: {
+        ...base,
+        externalReceipt: { token: "t", authority: "tsa", timestamp: "2026-01-01" },
+      },
+      strict: false,
+      machineHasAnchors: true,
+      requireExternal: true,
+    });
+    assert.equal(withExt.ok, true);
+    assert.match(withExt.message, /external anchor \(tsa\)/);
   });
 });

@@ -5270,9 +5270,9 @@ export const COMMAND_HELP: Record<string, string> = {
     "Diff two prescan reports — surface new regressions + fixed findings since baseline",
   "audit secrets": "Forensics: who/what touched each key + when (reads audit log)",
   "audit verify":
-    "Verify the audit log's keyless hash chain + the external HMAC anchor (exit 1 on break/forge/truncation)",
+    "Verify the audit log's keyless hash chain + HMAC anchor (--require-external demands a TSA receipt; exit 1 on break/forge/truncation)",
   "audit anchor":
-    "Seal the audit log with the machine-local HMAC key so a key-less rewrite or truncation is detectable",
+    "Seal the audit log with the machine-local HMAC key (--external also gets a receipt from KIT_EXTERNAL_ANCHOR_CMD — closes the same-UID gap)",
   "audit export": "Emit the audit log for a SIEM (--format cef|syslog|json)",
   auth: "TOTP-gated elevation for destructive secret ops (elevate|status|revoke|setup-totp)",
   "auth elevate": "Mint elevation marker for destructive secret ops (TOTP/yes-prompt)",
