@@ -37,6 +37,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   AES-256-GCM encrypted (the remote sees only ciphertext; passphrase via
   `KIT_MEMORY_PASSPHRASE`, never stored); (4) fully opt-in — no config, no sync.
   Zero new dependencies (git + `node:crypto`).
+- **Memory sync: a `transport = "command"` option for non-git stores
+  (S3/rclone/scp/USB).** You're not locked into a git remote — set
+  `transport = "command"` in `~/.kit/sync.toml` with `push_cmd`/`pull_cmd`, and kit
+  runs your command with the encrypted blob path exposed as `$KIT_MEMORY_BLOB`
+  (e.g. `aws s3 cp "$KIT_MEMORY_BLOB" s3://…`, `scp`, `rclone`). Same guards
+  apply: the command is read only from the LOCAL `~/.kit/sync.toml` (never the
+  project tree, so a cloned repo can't inject it), the payload is encrypted, and
+  it's opt-in. The blob is the real unit; git and command are just two ways to
+  move it.
 
 ### Security
 
