@@ -55,6 +55,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   validates the `KIT_DEVICE_ID` override against `[A-Za-z0-9_-]{1,64}` (a
   malformed value is ignored rather than trusted). The hostname hash remains only
   as a last-resort fallback when the id file can't be written.
+- **Memory-sync git transport hardened against option injection.** The
+  `remote`/`branch` from `~/.kit/sync.toml` are passed to `git` as positional
+  argv (no shell — OS metacharacters were already inert), but a value starting
+  with `-` is parsed as an *option* (a `remote` of `--upload-pack=<cmd>` turns
+  `git clone` into command execution) and `ext::`/`fd::` remote helpers run
+  commands by design. `loadSyncConfig` now rejects both, call sites pass
+  `--end-of-options` before positional operands, and `git` runs with
+  `protocol.ext`/`protocol.fd` disabled. (Config is operator-owned, so this is
+  defense-in-depth — and future-proofs any `sync init` that ingests a remote.)
+- **The `transport = "command"` child no longer inherits kit secrets.** It moves
+  only the already-encrypted blob, so it never needs `KIT_MEMORY_PASSPHRASE` —
+  yet the whole `process.env` (passphrase included) was handed to it, so a
+  transport that logged its environment (`aws --debug`, a `set -x` shell) would
+  spill the passphrase right next to the ciphertext it protects. The child env is
+  now stripped of every kit-managed passphrase/secret/token/key; the operator's
+  own provider credentials still pass through.
 
 ## [3.0.0] - 2026-06-30
 

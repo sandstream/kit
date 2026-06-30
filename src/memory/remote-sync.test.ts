@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -71,6 +71,31 @@ describe("remote-sync — loadSyncConfig (LOCAL, ~/.kit only)", () => {
         '[memory.sync]\nremote = "git@h:me/mem.git"\nfile = "../escape"\n',
       );
       assert.throws(() => loadSyncConfig(), /bare filename/);
+    } finally {
+      if (prev === undefined) delete process.env.KIT_MEMORY_DIR;
+      else process.env.KIT_MEMORY_DIR = prev;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a git-option-injecting remote/branch (leading '-', ext::/fd:: helpers)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-cfg-"));
+    const prev = process.env.KIT_MEMORY_DIR;
+    process.env.KIT_MEMORY_DIR = dir;
+    const write = (toml: string) => writeFileSync(getSyncConfigPath(), toml);
+    try {
+      // a "remote" git would parse as an option → arbitrary command execution
+      write('[memory.sync]\nremote = "--upload-pack=touch /tmp/pwned"\n');
+      assert.throws(() => loadSyncConfig(), /must not start with '-'/);
+      // ext:: / fd:: remote helpers run commands by design
+      write('[memory.sync]\nremote = "ext::sh -c id"\n');
+      assert.throws(() => loadSyncConfig(), /ext::\/fd:: remote helpers/);
+      // a branch starting with '-' is likewise rejected
+      write('[memory.sync]\nremote = "git@h:me/mem.git"\nbranch = "--output=/tmp/x"\n');
+      assert.throws(() => loadSyncConfig(), /must not start with '-'/);
+      // a normal config still loads
+      write('[memory.sync]\nremote = "git@h:me/mem.git"\nbranch = "main"\n');
+      assert.equal(loadSyncConfig()?.remote, "git@h:me/mem.git");
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_DIR;
       else process.env.KIT_MEMORY_DIR = prev;
@@ -254,6 +279,42 @@ describe("remote-sync — command transport (bring-your-own move: S3/rclone/scp/
       for (const d of [store, machineA, machineB, proj]) {
         rmSync(d, { recursive: true, force: true });
       }
+    }
+  });
+
+  it("does NOT leak KIT_MEMORY_PASSPHRASE into the transport command's environment", () => {
+    const store = mkdtempSync(join(tmpdir(), "kit-envstore-"));
+    const envDump = join(store, "child-env.txt");
+    const machine = mkdtempSync(join(tmpdir(), "kit-envM-"));
+    const proj = mkdtempSync(join(tmpdir(), "kit-envproj-"));
+    const prevDir = process.env.KIT_MEMORY_DIR;
+    const prevPass = process.env.KIT_MEMORY_PASSPHRASE;
+    // the push command records its own environment, exactly as a logging/`set -x`
+    // transport would incidentally expose it
+    const cfg: SyncConfig = {
+      transport: "command",
+      file: "memory.enc",
+      pushCmd: `env > "${envDump}"`,
+      pullCmd: "true",
+    };
+    try {
+      process.env.KIT_MEMORY_DIR = machine;
+      process.env.KIT_MEMORY_PASSPHRASE = PASS; // present in the parent env
+      const dbA = openMemoryDb();
+      upsertSession(dbA, { sessionId: "s-env", harness: "claude-code", project: "p" });
+      dbA.close();
+
+      pushMemory(cfg, PASS, proj);
+      const childEnv = readFileSync(envDump, "utf8");
+      assert.ok(!childEnv.includes("KIT_MEMORY_PASSPHRASE"), "passphrase must be stripped");
+      assert.ok(!childEnv.includes(PASS), "passphrase value must not appear in any var");
+      assert.ok(childEnv.includes("KIT_MEMORY_BLOB="), "blob path is still provided");
+    } finally {
+      if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
+      else process.env.KIT_MEMORY_DIR = prevDir;
+      if (prevPass === undefined) delete process.env.KIT_MEMORY_PASSPHRASE;
+      else process.env.KIT_MEMORY_PASSPHRASE = prevPass;
+      for (const d of [store, machine, proj]) rmSync(d, { recursive: true, force: true });
     }
   });
 
