@@ -117,6 +117,7 @@
     "clone",
     "completions",
     "config",
+    "config knobs",
     "config migrate",
     "context",
     "context --prompt",

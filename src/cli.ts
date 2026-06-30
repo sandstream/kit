@@ -5305,6 +5305,7 @@ export const COMMAND_HELP: Record<string, string> = {
   config: "Inspect + migrate the .kit.toml schema version",
   "config migrate":
     "Migrate .kit.toml to the current schema version (--dry-run inspect, --check CI gate, --force overwrite backup)",
+  "config knobs": "List power-user env vars + .kit.toml fields kit honors (--json)",
   mcp: "MCP server over stdio (Claude Code/Cursor/Codex); 'kit mcp list|auth|set-token|clear' manages declared servers",
   whoami: "Show current agent / user identity",
   version: "Print kit version",
