@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-06-30
+
+kit 3.0 — from a provable local floor to an org-governed control plane: machine
+**identity** (Ed25519) + **signable, distributable policy-as-code**, **governed
+cross-device memory** (encrypted sync + device-coupled action items),
+**attribution-bound tamper-evident audit**, a hardened install/scan gate, and a
+deterministic, zero-LLM "smart" UX (contextual hints + a discoverable knobs
+reference). Everything below is **additive over 2.x** — no stable command was
+removed or downgraded (enforced by the public-surface invariant).
+
 ### Security
 
 - **Audit attribution is now bound into the HMAC anchor (de-attribution of a
