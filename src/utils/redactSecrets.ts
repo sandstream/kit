@@ -161,7 +161,45 @@ function isPublicDemoJwt(jwt: string): boolean {
   }
 }
 
-export function findSecrets(text: string): SecretFinding[] {
+/** Shannon entropy in bits/char of a string. Pure. */
+export function shannonEntropy(s: string): number {
+  if (!s) return 0;
+  const freq = new Map<string, number>();
+  for (const ch of s) freq.set(ch, (freq.get(ch) ?? 0) + 1);
+  let h = 0;
+  for (const n of freq.values()) {
+    const p = n / s.length;
+    h -= p * Math.log2(p);
+  }
+  return h;
+}
+
+// The `kv-secret` pattern deliberately allowlists runtime env prefixes
+// (KIT_/GITHUB_/CI_/…) to avoid false positives on CI metadata. That's right for
+// scanning code/diffs, but it leaves a hole in the FAIL-CLOSED shared-memory gate:
+// a real high-entropy credential stored under such a prefix slips through. The
+// entropy backstop closes it WITHOUT widening the noisy code-scan path: when
+// enabled (the `kit memory share` write gate), an ALL-CAPS `KEY=value` whose value
+// is long + genuinely high-entropy is flagged regardless of prefix. The 4.2
+// bits/char threshold catches base64/base62 secrets while clearing hex hashes
+// (~4.0) and dictionary-ish values like `development`/`production_mode`.
+const ENTROPY_KV = /\b([A-Z][A-Z0-9_]{2,})\s*[:=]\s*["']?([A-Za-z0-9_\-+/.]{24,})/g;
+const ENTROPY_MIN_BITS = 4.2;
+
+function findEntropyKvSecrets(text: string): SecretFinding[] {
+  const out: SecretFinding[] = [];
+  for (const m of text.matchAll(ENTROPY_KV)) {
+    const value = m[2];
+    if (shannonEntropy(value) < ENTROPY_MIN_BITS) continue;
+    out.push({ label: "high-entropy-kv", preview: `${value.slice(0, 6)}…${value.slice(-4)}` });
+  }
+  return out;
+}
+
+export function findSecrets(
+  text: string,
+  opts: { entropyBackstop?: boolean } = {},
+): SecretFinding[] {
   if (!text) return [];
   const findings: SecretFinding[] = [];
   for (const { re, label } of SECRET_PATTERNS) {
@@ -178,5 +216,6 @@ export function findSecrets(text: string): SecretFinding[] {
       });
     }
   }
+  if (opts.entropyBackstop) findings.push(...findEntropyKvSecrets(text));
   return findings;
 }

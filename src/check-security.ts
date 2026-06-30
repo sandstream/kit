@@ -1479,6 +1479,12 @@ async function checkBumblebee(): Promise<SecurityCheckResult> {
   }
 
   // Clean scan — but a frozen catalog set silently loses coverage over time.
+  // Catalog age is ADVISORY, not part of the verdict: it's a pure function of the
+  // wall clock, so letting it flip pass→warn would make `kit ci --strict` return
+  // a different verdict for the same repo + same scanners purely because the
+  // calendar advanced (non-deterministic gate). We keep `status: "pass"` and
+  // surface the staleness in the detail/suggestion instead, so the signal stays
+  // visible without the gate depending on the date.
   const newest = await newestCatalogMtime(install.catalogDir);
   if (newest !== null) {
     const { stale, ageDays } = isCatalogStale(newest, Date.now());
@@ -1486,9 +1492,8 @@ async function checkBumblebee(): Promise<SecurityCheckResult> {
       return {
         category,
         name,
-        status: "warn",
-        severity: "low",
-        detail: `no known exposures (${outcome.packagesScanned} packages), but threat-intel catalogs are ${ageDays} days old`,
+        status: "pass",
+        detail: `no known exposures (${outcome.packagesScanned} packages); note: threat-intel catalogs are ${ageDays} days old (advisory — not gated)`,
         suggestion:
           "Bump BUMBLEBEE_VERSION (and TARBALL_CHECKSUMS) in src/bumblebee.ts to refresh the exposure catalogs.",
       };
