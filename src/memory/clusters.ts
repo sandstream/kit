@@ -43,30 +43,52 @@ export function readClusters(root: string): ClusterMap {
 
 const GLOB_SPECIALS = /[.+^${}()|[\]\\]/g;
 
+/** A regex that never matches anything (for a glob we refuse to compile). */
+const NEVER = /(?!)/;
+
 /**
  * Compile a glob to an anchored RegExp. `**` spans path segments (incl. `/`),
  * `*` matches within one segment, `?` one non-slash char. `**\/` matches zero or
  * more leading segments so `**\/x` matches both `x` and `a/b/x`.
+ *
+ * ReDoS-safe: a whole run of consecutive `*` collapses to a SINGLE wildcard and
+ * adjacent cross-segment wildcards are coalesced, so a hostile committed glob
+ * like `**********…x` (this map is a committed file — a pulled branch can carry a
+ * malicious one) can never emit stacked cross-segment wildcard groups, which
+ * backtrack catastrophically. An over-long glob is refused (matches nothing).
  */
 export function globToRegExp(glob: string): RegExp {
+  if (glob.length > 1024) return NEVER; // not a real path pattern — don't compile it
   let re = "^";
   let i = 0;
+  // True right after we emit a cross-segment wildcard, so a following `**`/`**/`
+  // run adds nothing and is coalesced (never stacked → no adjacent `.*`).
+  let pendingStarStar = false;
   while (i < glob.length) {
-    if (glob.startsWith("**/", i)) {
-      re += "(?:.*/)?";
-      i += 3;
-    } else if (glob.startsWith("**", i)) {
-      re += ".*";
-      i += 2;
-    } else if (glob[i] === "*") {
-      re += "[^/]*";
-      i += 1;
-    } else if (glob[i] === "?") {
+    const ch = glob[i];
+    if (ch === "*") {
+      let stars = 0;
+      while (glob[i] === "*") {
+        stars++;
+        i++;
+      }
+      if (stars >= 2) {
+        const slash = glob[i] === "/";
+        if (slash) i++;
+        if (!pendingStarStar) re += slash ? "(?:.*/)?" : ".*";
+        pendingStarStar = true;
+      } else {
+        re += "[^/]*";
+        pendingStarStar = false;
+      }
+    } else if (ch === "?") {
       re += "[^/]";
-      i += 1;
+      i++;
+      pendingStarStar = false;
     } else {
-      re += glob[i].replace(GLOB_SPECIALS, "\\$&");
-      i += 1;
+      re += ch.replace(GLOB_SPECIALS, "\\$&");
+      i++;
+      pendingStarStar = false;
     }
   }
   return new RegExp(re + "$");

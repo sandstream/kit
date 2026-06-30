@@ -84,6 +84,12 @@ export function validatePolicy(doc: unknown): PolicyValidation {
     return { ok: false, errors: ["policy is not a TOML table"] };
   }
   const d = doc as Record<string, unknown>;
+  // Refuse prototype-manipulating keys outright — they have no place in a policy
+  // and a `__proto__` table is exactly what the canonical-bytes hardening guards
+  // against (see sortDeep). Defense-in-depth: reject at the schema layer too.
+  for (const k of ["__proto__", "constructor", "prototype"]) {
+    if (Object.prototype.hasOwnProperty.call(d, k)) errors.push(`forbidden key \`${k}\``);
+  }
   if (d.version === undefined) {
     errors.push("missing required `version`");
   } else if (typeof d.version !== "number" || !Number.isInteger(d.version)) {
@@ -121,10 +127,28 @@ export function validatePolicy(doc: unknown): PolicyValidation {
 
 function sortDeep(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(sortDeep);
+  // A non-plain object (Date, bigint via typeof, etc.) has no faithful canonical
+  // JSON form: a TOML date and the equivalent string would serialize to identical
+  // bytes, so two semantically different policies could share one signature. Refuse
+  // it — the document must be plain string/number/boolean/array/table.
+  if (v instanceof Date) {
+    throw new Error("policy contains a date value; use a quoted string instead");
+  }
   if (v && typeof v === "object") {
     const out: Record<string, unknown> = {};
     for (const k of Object.keys(v as Record<string, unknown>).sort()) {
-      out[k] = sortDeep((v as Record<string, unknown>)[k]);
+      const value = sortDeep((v as Record<string, unknown>)[k]);
+      // Assign via defineProperty so a `__proto__` (or `constructor`) key becomes a
+      // real OWN, enumerable property included in the canonical bytes. A plain
+      // `out[k] = …` would treat `out["__proto__"] = …` as a prototype write and
+      // silently DROP the key+subtree — letting an attacker append a `[__proto__]`
+      // table to a signed policy without changing its signing bytes.
+      Object.defineProperty(out, k, {
+        value,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
     return out;
   }
@@ -134,7 +158,8 @@ function sortDeep(v: unknown): unknown {
 /**
  * Canonical signing bytes: JSON of the recursively key-sorted document. Stable
  * across TOML reformatting / comment edits / key reordering — only a real policy
- * change moves the bytes (and thus invalidates a signature).
+ * change moves the bytes (and thus invalidates a signature). Throws on a document
+ * that has no faithful canonical form (e.g. a TOML date value).
  */
 export function canonicalPolicyBytes(doc: unknown): string {
   return JSON.stringify(sortDeep(doc));
@@ -186,7 +211,17 @@ export function verifyPolicy(root: string, opts: { key?: string } = {}): PolicyV
   } catch {
     return { status: "unsigned", detail: "no .kit-policy.sig (run kit policy sign)" };
   }
-  const fingerprint = policyFingerprint(doc);
+  let fingerprint: string;
+  try {
+    fingerprint = policyFingerprint(doc);
+  } catch (e) {
+    // Document has no faithful canonical form (e.g. a date value) — it can't be
+    // soundly signed or verified. Treat as invalid, never crash the gate.
+    return {
+      status: "invalid",
+      detail: e instanceof Error ? e.message : "uncanonicalizable policy",
+    };
+  }
   const anchored = hasPolicyAnchor(root);
   // Resolve the signer key, in trust order: an explicit --key pin, then this
   // machine's own identity (the author verifying their own policy), then the

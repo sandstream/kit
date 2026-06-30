@@ -35,9 +35,14 @@ export const SECRET_PATTERNS: RedactPattern[] = [
   // AWS — AKIA + 16 uppercase, ASIA + 16 (STS), and 40-char secret keys
   { re: /\b(AKIA|ASIA)[A-Z0-9]{16}\b/g, label: "aws-access-key" },
   { re: /aws_secret_access_key\s*=\s*[A-Za-z0-9/+]{40}/gi, label: "aws-secret-key" },
-  // Google / GCP service-account JSON fragments
+  // Google / GCP service-account JSON fragments. A `"private_key"` value is ONE
+  // double-quoted JSON string, so the body is a single bounded `[^"]` run ending
+  // at the close quote — NOT two variable-length runs (`[^"]+ … [\s\S]+? … [^"]+`)
+  // separated by a literal, which backtracks catastrophically: a ~18 KB blob of
+  // near-miss `-----END ` tokens hung the old pattern for ~17 s (ReDoS / CPU DoS
+  // of the scan). Bounded {1,8000} covers a 4096-bit PEM with escaped newlines.
   {
-    re: /"private_key":\s*"-----BEGIN [^"]+-----[\s\S]+?-----END [^"]+-----\\n"/g,
+    re: /"private_key":\s*"-----BEGIN [^"]{1,8000}-----END [^"]{0,200}-----\\n"/g,
     label: "gcp-private-key",
   },
   { re: /\bAIza[0-9A-Za-z\-_]{35}\b/g, label: "google-api-key" },

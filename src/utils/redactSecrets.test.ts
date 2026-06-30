@@ -55,6 +55,24 @@ describe("redactSecrets — connection-string + sk-svcacct (regression)", () => 
     assert.ok(!out.includes("AAAA"), "service-account key must be redacted");
     assert.ok(out.includes("[REDACTED]"));
   });
+
+  // The GCP private-key pattern had two unbounded runs around a literal, so a blob
+  // of near-miss `-----END ` tokens backtracked catastrophically (~18 KB hung ~17 s)
+  // — a CPU DoS reachable via scan-staged / memory scan / status redaction.
+  it("scans a hostile GCP-key-shaped blob in linear time (ReDoS-safe)", () => {
+    const payload = '"private_key": "-----BEGIN K-----' + "-----END ".repeat(3000); // ~27 KB
+    const t0 = process.hrtime.bigint();
+    redactSecrets(payload);
+    findSecrets(payload);
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    assert.ok(ms < 200, `GCP-shaped blob scanned in ${ms.toFixed(0)}ms — should be <200ms`);
+  });
+
+  it("still redacts a real GCP private_key value", () => {
+    const real =
+      '"private_key": "-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQ\\n-----END PRIVATE KEY-----\\n"';
+    assert.ok(redactSecrets(real).includes("[REDACTED]"));
+  });
 });
 
 describe("redactSecrets", () => {
