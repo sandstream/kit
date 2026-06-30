@@ -10,6 +10,7 @@ import {
   recentDecisions,
   dueForHarnessSweep,
   dueForMidSessionIndex,
+  startDetachedSessionEnd,
 } from "./hook.js";
 import { getCurrentProjectRoot } from "./project.js";
 import { shareEntry } from "./shared.js";
@@ -225,5 +226,43 @@ describe("memory hook — mid-session index debounce", () => {
     const mtime = statSync(marker).mtimeMs;
     assert.equal(dueForMidSessionIndex(mtime + 60_000), false, "1 min later → not due");
     assert.equal(dueForMidSessionIndex(mtime + 11 * 60 * 1000), true, "11 min later → due");
+  });
+});
+
+describe("memory hook — detached SessionEnd", () => {
+  let tmp: string;
+  const prevDir = process.env.KIT_MEMORY_DIR;
+  const prevDb = process.env.KIT_MEMORY_DB;
+
+  before(() => {
+    tmp = mkdtempSync(join(tmpdir(), "kit-sessionend-"));
+    process.env.KIT_MEMORY_DIR = tmp;
+    process.env.KIT_MEMORY_DB = join(tmp, "memory.db");
+  });
+
+  after(() => {
+    if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
+    else process.env.KIT_MEMORY_DIR = prevDir;
+    if (prevDb === undefined) delete process.env.KIT_MEMORY_DB;
+    else process.env.KIT_MEMORY_DB = prevDb;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  // The happy path spawns a detached child, which is environment-dependent and
+  // would fork the test runner; we assert the fail-safe branch instead: with no
+  // re-exec entry path, it must index inline rather than throw, and report that
+  // it did NOT detach. A SessionEnd hook must never throw.
+  it("falls back to an inline index (no throw) when there is no entry to re-exec", () => {
+    const prevEntry = process.argv[1];
+    try {
+      process.argv[1] = "";
+      let detached: boolean | undefined;
+      assert.doesNotThrow(() => {
+        detached = startDetachedSessionEnd();
+      });
+      assert.equal(detached, false, "no entry path → did not detach, ran inline");
+    } finally {
+      process.argv[1] = prevEntry;
+    }
   });
 });

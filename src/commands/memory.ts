@@ -47,6 +47,7 @@ import {
 import {
   userPromptSubmitReminder,
   maybeStartMidSessionIndex,
+  startDetachedSessionEnd,
   runSessionEndIndex,
   sessionStartRecovery,
 } from "../memory/hook.js";
@@ -683,6 +684,15 @@ async function memHook(): Promise<boolean> {
     return true;
   }
   if (event === "session-end") {
+    // Return instantly: a SessionEnd hook that blocks on the index (or the
+    // opt-in network push) gets cancelled by Claude Code on exit ("Hook
+    // cancelled"). The real work runs in a detached worker below.
+    startDetachedSessionEnd();
+    return true;
+  }
+  if (event === "session-end-run") {
+    // Internal: the detached SessionEnd worker. No hook is waiting on it, so the
+    // (potentially slow / networked) capture can run synchronously here.
     runSessionEndIndex();
     // Opt-in: push this session's memory to your durable store before an
     // (ephemeral) container is reclaimed. Fail-soft; notes go to stderr.
