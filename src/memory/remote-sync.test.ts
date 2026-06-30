@@ -106,7 +106,12 @@ describe("remote-sync — push → pull round trip over a git remote", () => {
     const marker = "gap4-roundtrip-marker-xyz";
     try {
       execFileSync("git", ["init", "--bare", "-q", bare]);
-      const cfg: SyncConfig = { remote: bare, branch: "main", file: "memory.enc" };
+      const cfg: SyncConfig = {
+        transport: "git",
+        remote: bare,
+        branch: "main",
+        file: "memory.enc",
+      };
 
       // --- machine A: seed a message, then push ---
       process.env.KIT_MEMORY_DIR = machineA;
@@ -160,7 +165,11 @@ describe("remote-sync — push → pull round trip over a git remote", () => {
     try {
       execFileSync("git", ["init", "--bare", "-q", bare]);
       process.env.KIT_MEMORY_DIR = machine;
-      const r = pullMemory({ remote: bare, branch: "main", file: "memory.enc" }, PASS, proj);
+      const r = pullMemory(
+        { transport: "git", remote: bare, branch: "main", file: "memory.enc" },
+        PASS,
+        proj,
+      );
       assert.equal(r.found, false);
     } finally {
       if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
@@ -168,6 +177,98 @@ describe("remote-sync — push → pull round trip over a git remote", () => {
       for (const d of [bare.replace(/\/mem\.git$/, ""), machine, proj]) {
         rmSync(d, { recursive: true, force: true });
       }
+    }
+  });
+});
+
+describe("remote-sync — command transport (bring-your-own move: S3/rclone/scp/USB)", () => {
+  it("loadSyncConfig requires push_cmd + pull_cmd for transport=command", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-cmdcfg-"));
+    const prev = process.env.KIT_MEMORY_DIR;
+    process.env.KIT_MEMORY_DIR = dir;
+    try {
+      writeFileSync(getSyncConfigPath(), '[memory.sync]\ntransport = "command"\n');
+      assert.throws(() => loadSyncConfig(), /push_cmd and pull_cmd/);
+      writeFileSync(
+        getSyncConfigPath(),
+        '[memory.sync]\ntransport = "command"\npush_cmd = "true"\npull_cmd = "true"\n',
+      );
+      const cfg = loadSyncConfig();
+      assert.equal(cfg?.transport, "command");
+      assert.equal(cfg?.pushCmd, "true");
+      assert.equal(cfg?.pullCmd, "true");
+    } finally {
+      if (prev === undefined) delete process.env.KIT_MEMORY_DIR;
+      else process.env.KIT_MEMORY_DIR = prev;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("push runs push_cmd over the blob; pull runs pull_cmd then merges (round trip via a plain file)", () => {
+    const store = mkdtempSync(join(tmpdir(), "kit-store-"));
+    const storeBlob = join(store, "memory.enc"); // stands in for S3/scp target
+    const machineA = mkdtempSync(join(tmpdir(), "kit-cA-"));
+    const machineB = mkdtempSync(join(tmpdir(), "kit-cB-"));
+    const proj = mkdtempSync(join(tmpdir(), "kit-cproj-"));
+    const prevDir = process.env.KIT_MEMORY_DIR;
+    const marker = "cmd-transport-marker-zzz";
+    // The "transport" is just `cp` to/from a fixed path — the same shape as
+    // `aws s3 cp`, `rclone copyto`, or `scp`, driven by $KIT_MEMORY_BLOB.
+    const cfg: SyncConfig = {
+      transport: "command",
+      file: "memory.enc",
+      pushCmd: `cp "$KIT_MEMORY_BLOB" "${storeBlob}"`,
+      pullCmd: `cp "${storeBlob}" "$KIT_MEMORY_BLOB"`,
+    };
+    try {
+      process.env.KIT_MEMORY_DIR = machineA;
+      const dbA = openMemoryDb();
+      upsertSession(dbA, { sessionId: "s-cmd", harness: "claude-code", project: "p" });
+      insertMessage(dbA, {
+        uuid: "u-cmd",
+        sessionId: "s-cmd",
+        type: "message",
+        role: "user",
+        content: marker,
+      });
+      dbA.close();
+
+      const pushed = pushMemory(cfg, PASS, proj);
+      assert.equal(pushed.pushed, true);
+      assert.ok(existsSync(storeBlob), "push_cmd deposited the encrypted blob in the store");
+
+      process.env.KIT_MEMORY_DIR = machineB;
+      const r = pullMemory(cfg, PASS, proj);
+      assert.equal(r.found, true);
+      const dbB = openMemoryDb();
+      const hits = searchMessages(dbB, "marker");
+      dbB.close();
+      assert.ok(hits.some((h) => (h.content ?? "").includes(marker)));
+    } finally {
+      if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
+      else process.env.KIT_MEMORY_DIR = prevDir;
+      for (const d of [store, machineA, machineB, proj]) {
+        rmSync(d, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("pull reports 'not found' when the pull_cmd produces no blob", () => {
+    const machine = mkdtempSync(join(tmpdir(), "kit-cM-"));
+    const proj = mkdtempSync(join(tmpdir(), "kit-cproj2-"));
+    const prevDir = process.env.KIT_MEMORY_DIR;
+    try {
+      process.env.KIT_MEMORY_DIR = machine;
+      const r = pullMemory(
+        { transport: "command", file: "memory.enc", pushCmd: "true", pullCmd: "true" },
+        PASS,
+        proj,
+      );
+      assert.equal(r.found, false);
+    } finally {
+      if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
+      else process.env.KIT_MEMORY_DIR = prevDir;
+      for (const d of [machine, proj]) rmSync(d, { recursive: true, force: true });
     }
   });
 });

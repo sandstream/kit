@@ -348,9 +348,14 @@ async function memSync(): Promise<boolean> {
 function syncNotConfigured(): boolean {
   console.error(
     `${c.red}private memory sync is not configured${c.reset}\n` +
-      `${c.dim}create ${getSyncConfigPath()} (LOCAL — never committed) with:${c.reset}\n` +
+      `${c.dim}create ${getSyncConfigPath()} (LOCAL — never committed) with EITHER a git remote:${c.reset}\n` +
       `  [memory.sync]\n` +
       `  remote = "git@github.com:you/your-private-memory.git"\n` +
+      `${c.dim}...or your own transport command ($KIT_MEMORY_BLOB is the encrypted blob path):${c.reset}\n` +
+      `  [memory.sync]\n` +
+      `  transport = "command"\n` +
+      `  push_cmd = "scp \\"$KIT_MEMORY_BLOB\\" user@server:/srv/kit-memory.enc"\n` +
+      `  pull_cmd = "scp user@server:/srv/kit-memory.enc \\"$KIT_MEMORY_BLOB\\""\n` +
       `${c.dim}then set KIT_MEMORY_PASSPHRASE and run \`kit memory push\` / \`kit memory pull\`.${c.reset}`,
   );
   return false;
@@ -376,7 +381,7 @@ async function memPush(): Promise<boolean> {
     const r = pushMemory(cfg, pass, getCurrentProjectRoot());
     console.log(
       r.pushed
-        ? `${c.green}✓${c.reset} pushed encrypted memory → ${c.bold}${r.remote}${c.reset} ${c.dim}(${r.file})${c.reset}`
+        ? `${c.green}✓${c.reset} pushed encrypted memory → ${c.bold}${r.target}${c.reset} ${c.dim}(${r.file})${c.reset}`
         : `${c.dim}already up to date — nothing to push${c.reset}`,
     );
     return true;
@@ -400,13 +405,13 @@ async function memPull(): Promise<boolean> {
     const r = pullMemory(cfg, pass, getCurrentProjectRoot());
     if (!r.found) {
       console.log(
-        `${c.dim}no memory blob on ${r.remote} yet — push from another machine first${c.reset}`,
+        `${c.dim}no memory blob at ${r.target} yet — push from another machine first${c.reset}`,
       );
       return true;
     }
     const m = r.merge!;
     console.log(
-      `${c.green}✓${c.reset} pulled ${c.bold}${m.messages}${c.reset} messages + ${m.toolUses} tool-uses · ${m.sessions} sessions · ${m.pending} pending · ${m.threads} copilots ${c.dim}from ${r.remote}${c.reset}`,
+      `${c.green}✓${c.reset} pulled ${c.bold}${m.messages}${c.reset} messages + ${m.toolUses} tool-uses · ${m.sessions} sessions · ${m.pending} pending · ${m.threads} copilots ${c.dim}from ${r.target}${c.reset}`,
     );
     console.log(
       `${c.dim}last-write-wins on sessions; file_index (this machine's index state) left untouched${c.reset}`,
