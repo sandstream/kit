@@ -22,6 +22,12 @@ import { backupEncrypted, restoreEncrypted } from "../memory/backup.js";
 import { ensureKitWrapper } from "../kit-wrapper.js";
 import { syncFromExport } from "../memory/sync.js";
 import {
+  loadSyncConfig,
+  pushMemory,
+  pullMemory,
+  getSyncConfigPath,
+} from "../memory/remote-sync.js";
+import {
   shareEntry,
   listAreas,
   searchShared,
@@ -75,6 +81,8 @@ export async function cmdMemory(): Promise<boolean> {
     index: memIndex,
     merge: memMerge,
     sync: memSync,
+    push: memPush,
+    pull: memPull,
     stats: memStats,
     status: memStats, // common typo/alias for `stats`
     suggest: memSuggest,
@@ -225,6 +233,12 @@ async function memHelp(): Promise<boolean> {
   console.log(
     "  kit memory sync <file>      Sync from a memory export/backup (decrypts encrypted blobs)",
   );
+  console.log(
+    "  kit memory push             Encrypt + push your store to your private remote (~/.kit/sync.toml)",
+  );
+  console.log(
+    "  kit memory pull             Pull + merge your store from your private remote (last-write-wins)",
+  );
   console.log("  kit memory install          Wire the 2 hooks into ~/.claude/settings.json");
   console.log("  kit memory uninstall        Remove the hooks");
   console.log("  kit memory pal [list|add|done|snooze|verify|import]   Pending action ledger");
@@ -328,6 +342,80 @@ async function memSync(): Promise<boolean> {
     db.close();
   }
   return true;
+}
+
+/** Shared setup-missing message for `push`/`pull` (sync is opt-in + local-only). */
+function syncNotConfigured(): boolean {
+  console.error(
+    `${c.red}private memory sync is not configured${c.reset}\n` +
+      `${c.dim}create ${getSyncConfigPath()} (LOCAL — never committed) with:${c.reset}\n` +
+      `  [memory.sync]\n` +
+      `  remote = "git@github.com:you/your-private-memory.git"\n` +
+      `${c.dim}then set KIT_MEMORY_PASSPHRASE and run \`kit memory push\` / \`kit memory pull\`.${c.reset}`,
+  );
+  return false;
+}
+
+async function memPush(): Promise<boolean> {
+  let cfg;
+  try {
+    cfg = loadSyncConfig();
+  } catch (err) {
+    console.error(`${c.red}${(err as Error).message}${c.reset}`);
+    return false;
+  }
+  if (!cfg) return syncNotConfigured();
+  const pass = process.env.KIT_MEMORY_PASSPHRASE ?? flagValue(process.argv, "--passphrase");
+  if (!pass) {
+    console.error(
+      `${c.red}set KIT_MEMORY_PASSPHRASE (or --passphrase) — the blob pushed to ${cfg.remote} is encrypted${c.reset}`,
+    );
+    return false;
+  }
+  try {
+    const r = pushMemory(cfg, pass, getCurrentProjectRoot());
+    console.log(
+      r.pushed
+        ? `${c.green}✓${c.reset} pushed encrypted memory → ${c.bold}${r.remote}${c.reset} ${c.dim}(${r.file})${c.reset}`
+        : `${c.dim}already up to date — nothing to push${c.reset}`,
+    );
+    return true;
+  } catch (err) {
+    console.error(`${c.red}${(err as Error).message}${c.reset}`);
+    return false;
+  }
+}
+
+async function memPull(): Promise<boolean> {
+  let cfg;
+  try {
+    cfg = loadSyncConfig();
+  } catch (err) {
+    console.error(`${c.red}${(err as Error).message}${c.reset}`);
+    return false;
+  }
+  if (!cfg) return syncNotConfigured();
+  const pass = process.env.KIT_MEMORY_PASSPHRASE ?? flagValue(process.argv, "--passphrase");
+  try {
+    const r = pullMemory(cfg, pass, getCurrentProjectRoot());
+    if (!r.found) {
+      console.log(
+        `${c.dim}no memory blob on ${r.remote} yet — push from another machine first${c.reset}`,
+      );
+      return true;
+    }
+    const m = r.merge!;
+    console.log(
+      `${c.green}✓${c.reset} pulled ${c.bold}${m.messages}${c.reset} messages + ${m.toolUses} tool-uses · ${m.sessions} sessions · ${m.pending} pending · ${m.threads} copilots ${c.dim}from ${r.remote}${c.reset}`,
+    );
+    console.log(
+      `${c.dim}last-write-wins on sessions; file_index (this machine's index state) left untouched${c.reset}`,
+    );
+    return true;
+  } catch (err) {
+    console.error(`${c.red}${(err as Error).message}${c.reset}`);
+    return false;
+  }
 }
 
 async function memStats(): Promise<boolean> {

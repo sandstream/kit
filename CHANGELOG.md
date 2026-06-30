@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Private cross-device memory sync over your own git remote (`kit memory push`
+  / `kit memory pull`).** Memory design gap #4: the personal store
+  (`~/.kit/memory.db`) is per-machine; this wires the existing encrypted-backup +
+  `mergeDb` primitives to an opt-in transport — YOUR private git repo — so one
+  machine `push`es and another `pull`s (last-write-wins), no manual file copy.
+  Configurable without being a backdoor, by construction: (1) config is read ONLY
+  from `~/.kit/sync.toml` (a LOCAL file), never the project tree, so a malicious
+  committed `.kit.toml`/`.kit/*` in a cloned repo can't redirect your memory; (2)
+  the sync remote MUST differ from the project's `origin` (anti-exfil guard) — your
+  secret-dense brain can't be pushed into the project repo; (3) the payload is
+  AES-256-GCM encrypted (the remote sees only ciphertext; passphrase via
+  `KIT_MEMORY_PASSPHRASE`, never stored); (4) fully opt-in — no config, no sync.
+  Zero new dependencies (git + `node:crypto`).
+
 ### Security
 
 - **Install-gate: closed four bypasses that let an untriaged install through.** A
