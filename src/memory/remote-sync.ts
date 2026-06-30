@@ -400,6 +400,20 @@ export function tryAutoPull(projectRoot: string): AutoSyncResult {
 }
 
 /**
+ * True iff `[memory.sync] push_on_end = true`. Cheap, fail-safe (false on any
+ * error). The SessionEnd hook uses this to decide whether the index must run
+ * inline — so the push includes this session — or can be detached for a fast,
+ * never-cancelled exit on the common (no-push) path.
+ */
+export function isAutoPushConfigured(): boolean {
+  try {
+    return loadSyncConfig()?.pushOnEnd === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Index-and-push at session end when `[memory.sync] push_on_end = true`. The key
  * piece for EPHEMERAL containers: the session's memory reaches your durable store
  * before the container is reclaimed. Fail-soft; needs KIT_MEMORY_PASSPHRASE.

@@ -28,6 +28,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **SessionEnd memory hook no longer reported as "Hook cancelled".** The
+  `kit memory hook session-end` ran its indexing inline, so a periodic
+  all-harness sweep (or a hung opt-in `push_on_end`) could overrun Claude Code's
+  shutdown window and surface as `SessionEnd hook … failed: Hook cancelled`. On
+  the common path (no `push_on_end`) the index now runs in a detached,
+  fire-and-forget child so the hook returns instantly — the index still completes,
+  and the next SessionStart recovery re-indexes any missed tail. The ephemeral
+  `push_on_end` path still indexes inline (the push must observe this session's
+  rows before the container is reclaimed). Fail-open throughout.
 - **PAL finding sync no longer device-blind — a real security blocker can't be
   silently cleared across devices.** The adversarial pass on the 3.0 surface
   found that `palSyncFindings` auto-closed findings purely by source-tag + scope,

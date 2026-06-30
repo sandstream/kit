@@ -29,6 +29,7 @@ import {
   initSyncConfig,
   tryAutoPull,
   tryAutoPush,
+  isAutoPushConfigured,
   maybeSyncNudge,
   type SyncTransport,
 } from "../memory/remote-sync.js";
@@ -48,6 +49,7 @@ import {
   userPromptSubmitReminder,
   maybeStartMidSessionIndex,
   runSessionEndIndex,
+  startDetachedSessionEndIndex,
   sessionStartRecovery,
 } from "../memory/hook.js";
 import { decisionsForPaths, changedPaths } from "../memory/clusters.js";
@@ -683,11 +685,19 @@ async function memHook(): Promise<boolean> {
     return true;
   }
   if (event === "session-end") {
-    runSessionEndIndex();
-    // Opt-in: push this session's memory to your durable store before an
-    // (ephemeral) container is reclaimed. Fail-soft; notes go to stderr.
-    const pushed = tryAutoPush(getCurrentProjectRoot());
-    if (pushed.note) console.error(`${c.dim}${pushed.note}${c.reset}`);
+    if (isAutoPushConfigured()) {
+      // Ephemeral-container path: the push must include THIS session, so the
+      // index has to finish before it → run inline, then push to the durable
+      // store before the container is reclaimed. Fail-soft; notes go to stderr.
+      runSessionEndIndex();
+      const pushed = tryAutoPush(getCurrentProjectRoot());
+      if (pushed.note) console.error(`${c.dim}${pushed.note}${c.reset}`);
+    } else {
+      // Common path (no push_on_end): detach the index so the hook returns
+      // instantly. Indexing inline lets a periodic all-harness sweep overrun
+      // Claude Code's shutdown window → "SessionEnd hook … Hook cancelled".
+      startDetachedSessionEndIndex();
+    }
     return true;
   }
   if (event === "session-start") {

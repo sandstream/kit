@@ -244,16 +244,43 @@ export function maybeStartMidSessionIndex(): boolean {
   try {
     if (!dueForMidSessionIndex()) return false;
     markMidSessionIndexed(); // stamp first → debounce holds even if the spawn races
-    const entry = process.argv[1];
-    if (!entry) return false;
-    const child = spawn(process.execPath, [resolve(entry), "memory", "index"], {
-      detached: true,
-      stdio: "ignore",
-    });
-    child.unref();
-    return true;
+    return spawnDetachedIndex();
   } catch {
     return false; // fail-open: never block a prompt
+  }
+}
+
+/**
+ * Launch a DETACHED `kit memory index` (fire-and-forget, stdio ignored, unref'd)
+ * and return immediately — the caller never waits on the index. Shared by the
+ * mid-session debounce and the SessionEnd hook. Returns true iff it launched.
+ */
+function spawnDetachedIndex(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  const child = spawn(process.execPath, [resolve(entry), "memory", "index"], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  return true;
+}
+
+/**
+ * SessionEnd indexing for the common path (no `push_on_end`): run the index in a
+ * DETACHED child so the hook returns instantly. Indexing inline lets a periodic
+ * all-harness sweep overrun Claude Code's shutdown window, which surfaces as
+ * "SessionEnd hook … failed: Hook cancelled". The detached index still completes;
+ * and the next SessionStart recovery re-indexes any tail it missed. Fail-open.
+ *
+ * NOTE: callers that push on end (ephemeral containers) must NOT use this — the
+ * push has to observe this session's freshly-indexed rows, so it indexes inline.
+ */
+export function startDetachedSessionEndIndex(): boolean {
+  try {
+    return spawnDetachedIndex();
+  } catch {
+    return false; // fail-open: a session must never be blocked on exit
   }
 }
 

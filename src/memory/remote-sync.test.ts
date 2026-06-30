@@ -14,6 +14,7 @@ import {
   initSyncConfig,
   tryAutoPull,
   tryAutoPush,
+  isAutoPushConfigured,
   maybeSyncNudge,
   type SyncConfig,
 } from "./remote-sync.js";
@@ -101,6 +102,42 @@ describe("remote-sync — loadSyncConfig (LOCAL, ~/.kit only)", () => {
       else process.env.KIT_MEMORY_DIR = prev;
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("remote-sync — isAutoPushConfigured (SessionEnd inline-vs-detached gate)", () => {
+  const withCfg = (toml: string | null, fn: () => void) => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-autopush-"));
+    const prev = process.env.KIT_MEMORY_DIR;
+    process.env.KIT_MEMORY_DIR = dir;
+    try {
+      if (toml !== null) writeFileSync(getSyncConfigPath(), toml);
+      fn();
+    } finally {
+      if (prev === undefined) delete process.env.KIT_MEMORY_DIR;
+      else process.env.KIT_MEMORY_DIR = prev;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it("false when unconfigured, or configured without push_on_end", () => {
+    withCfg(null, () => assert.equal(isAutoPushConfigured(), false));
+    withCfg('[memory.sync]\nremote = "git@h:me/mem.git"\n', () =>
+      assert.equal(isAutoPushConfigured(), false),
+    );
+  });
+
+  it("true only when push_on_end = true", () => {
+    withCfg('[memory.sync]\nremote = "git@h:me/mem.git"\npush_on_end = true\n', () =>
+      assert.equal(isAutoPushConfigured(), true),
+    );
+  });
+
+  it("fail-safe false on a malformed config (never forces an inline push)", () => {
+    // a remote starting with '-' throws in loadSyncConfig → isAutoPushConfigured swallows it
+    withCfg('[memory.sync]\nremote = "--upload-pack=x"\npush_on_end = true\n', () =>
+      assert.equal(isAutoPushConfigured(), false),
+    );
   });
 });
 
