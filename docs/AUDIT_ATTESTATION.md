@@ -110,6 +110,19 @@ Verdict rules (`verifyAuditSignatures`):
 | `kid` not resolvable to a public key       | `unverifiable` — fail-OPEN (absence of trust ≠ forgery) |
 | No `kid`/`sig` (legacy/keyless)            | `unsigned` — fail-OPEN                                  |
 
+**Attribution of a SEALED entry is tamper-evident (anchor v3).** The fail-OPEN
+rows above mean a fresh log's _missing_ attribution is treated as benign. On its
+own that left a gap: a writer-only attacker could **strip or rewrite `kid`/`sig`
+on an entry that was already signed AND anchored** — the keyless chain re-hashes
+without those fields, the signature tally just re-counts it as `unsigned`, and
+the old hash-only anchor tip was byte-identical. The HMAC anchor now folds
+attribution into the seal (record `version: 3`, `computeAnchorTipV3` over
+`hash | kid | sig` per line), so stripping or altering the signer of any
+**anchored** entry changes the tip and is caught as a hard `tip-mismatch`. A
+keyless entry seals with empty attribution, so forging a `kid`/`sig` ONTO a
+sealed keyless entry is caught the same way. Legacy `version ≤ 2` records keep
+verifying hash-only until the next `kit audit anchor` re-seals them as v3.
+
 Asymmetric payoff: a remote / CI / teammate verifies WHO produced an entry with
 only the PUBLIC key — never a forge-capable secret, unlike the HMAC anchor. Same
 same-UID boundary applies for _production_: a same-UID principal can read the

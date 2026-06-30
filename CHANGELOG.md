@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security
+
+- **Audit attribution is now bound into the HMAC anchor (de-attribution of a
+  sealed entry is caught).** The adversarial pass found that a writer-only
+  attacker — no private key, no anchor key — could **strip or rewrite the
+  `kid`/`sig` of an entry that was already signed AND anchored**, and every layer
+  stayed green: the keyless chain re-hashes without those fields, the signature
+  tally just re-counts the entry as `unsigned` (fail-open), and the hash-only
+  anchor tip was byte-identical. The anchor seal now folds attribution
+  (`computeAnchorTipV3` over `hash | kid | sig` per line; anchor record
+  `version: 3`), so altering or removing the signer of any **anchored** entry
+  changes the tip → hard `tip-mismatch`; forging a `kid`/`sig` onto a sealed
+  keyless entry is caught the same way. Backward-compatible: legacy `version ≤ 2`
+  records keep verifying hash-only until the next `kit audit anchor` re-seals them
+  as v3. (Surfaced by the deep adversarial security pass; complements #175.)
+
 ### Added
 
 - **Private cross-device memory sync over your own git remote (`kit memory push`
