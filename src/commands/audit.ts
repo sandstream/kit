@@ -185,6 +185,7 @@ async function cmdAuditVerify(): Promise<boolean> {
     result: a,
     strict: strictFlag || requireAnchor,
     machineHasAnchors,
+    requireExternal: hasFlag(args, "--require-external"),
   });
   if (verdict.level === "ok") {
     console.log(`${c.green}✓ ${verdict.message}${c.reset}`);
@@ -220,14 +221,21 @@ async function cmdAuditAnchor(): Promise<boolean> {
     );
     return false;
   }
+  const external = hasFlag(process.argv.slice(3), "--external");
   try {
-    const rec = await anchorAuditLog(logPath, content);
+    const rec = await anchorAuditLog(logPath, content, undefined, { external });
     console.log(
       `${c.green}✓ audit log anchored${c.reset}  ${c.dim}${rec.count} entries sealed (${rec.algo})${c.reset}`,
     );
-    console.log(
-      `${c.dim}Note: the anchor resists a tamperer who cannot read the 0600 anchor key. A same-UID attacker who can read ~/.kit can still forge; close that with an external TSA anchor.${c.reset}`,
-    );
+    if (rec.external) {
+      console.log(
+        `${c.green}✓ external anchor receipt${c.reset}  ${c.dim}${rec.external.authority} @ ${rec.external.timestamp}${c.reset}`,
+      );
+    } else {
+      console.log(
+        `${c.dim}Note: HMAC-only seal resists a tamperer who cannot read the 0600 anchor key. A same-UID attacker who can read ~/.kit can still forge; close that with \`kit audit anchor --external\` (set KIT_EXTERNAL_ANCHOR_CMD).${c.reset}`,
+      );
+    }
     return true;
   } catch (err) {
     console.error(`${c.red}✗ could not anchor: ${(err as Error).message}${c.reset}`);

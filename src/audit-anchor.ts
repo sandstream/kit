@@ -36,6 +36,7 @@
  * verifies as "legacy (unanchored)" - a warning, not a hard failure.
  */
 import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
+import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
@@ -245,6 +246,13 @@ export interface AnchorRecord {
   keyFingerprint?: string;
   /** Anchor record schema version. */
   version?: number;
+  /**
+   * Receipt from an EXTERNAL timestamp anchor (RFC3161 TSA / append-only log),
+   * present only when sealed with `kit audit anchor --external`. This is what
+   * closes the same-UID gap: a local principal who can read the 0600 key still
+   * cannot forge a fresh external receipt. Absent ⇒ HMAC-only seal.
+   */
+  external?: ExternalAnchorReceipt;
 }
 
 type AnchorStore = Record<string, AnchorRecord>;
@@ -312,6 +320,7 @@ export async function anchorAuditLog(
   logPath: string,
   content: string,
   dir?: string,
+  opts: { external?: boolean } = {},
 ): Promise<AnchorRecord> {
   const seals = lineSeals(content);
   if (seals === null) {
@@ -326,6 +335,19 @@ export async function anchorAuditLog(
     keyFingerprint: anchorKeyFingerprint(key),
     version: ANCHOR_RECORD_VERSION,
   };
+  // Optional EXTERNAL timestamp anchor. Fail-closed by contract: if the operator
+  // asked for `--external` we refuse to write a seal unless a real receipt comes
+  // back — a missing config or a failed/unreachable authority THROWS rather than
+  // silently producing an HMAC-only seal that would later look externally sealed.
+  if (opts.external) {
+    const ext = resolveExternalAnchor();
+    if (!ext) {
+      throw new Error(
+        "external anchoring requested but none configured — set KIT_EXTERNAL_ANCHOR_CMD",
+      );
+    }
+    rec.external = await ext.anchor({ tip: rec.tip, count: rec.count, logPath });
+  }
   const store = await readStore(dir);
   store[logPath] = rec;
   await writeStore(store, dir);
@@ -349,6 +371,8 @@ export interface AnchorVerifyResult {
   expected?: number;
   /** Entries appended since the last anchor (status "anchored-ok"). */
   newSinceAnchor?: number;
+  /** The external-anchor receipt on the record, if any (for require-external checks). */
+  externalReceipt?: ExternalAnchorReceipt;
   reason?: string;
 }
 
@@ -422,6 +446,7 @@ export function verifyAgainstAnchor(
     entries,
     expected: anchor.count,
     newSinceAnchor: entries - anchor.count,
+    externalReceipt: anchor.external,
   };
 }
 
@@ -440,6 +465,12 @@ export interface AnchorVerdictInput {
    * it pass green. #fix2
    */
   machineHasAnchors: boolean;
+  /**
+   * Require an EXTERNAL anchor receipt: `kit audit verify --require-external`. An
+   * HMAC-only seal (no external receipt) then FAILS — for regulated enclaves that
+   * must defeat even a same-UID forger. Independent of `strict`.
+   */
+  requireExternal?: boolean;
 }
 
 export interface AnchorVerdict {
@@ -456,10 +487,21 @@ export interface AnchorVerdict {
  * authoritative decision point. #fix2 #fix3 #fix4
  */
 export function decideAnchorVerdict(input: AnchorVerdictInput): AnchorVerdict {
-  const { result, strict, machineHasAnchors } = input;
+  const { result, strict, machineHasAnchors, requireExternal } = input;
   const failClosed = strict || machineHasAnchors;
   switch (result.status) {
     case "anchored-ok": {
+      // External-anchor requirement: an HMAC-only seal can be forged by a same-UID
+      // principal who reads the 0600 key; require-external refuses it. Checked
+      // before the tail check so the strongest requirement wins.
+      if (requireExternal && !result.externalReceipt) {
+        return {
+          ok: false,
+          level: "error",
+          message:
+            "external anchor REQUIRED but this seal has none (HMAC-only) — re-seal with 'kit audit anchor --external'.",
+        };
+      }
       const tail = result.newSinceAnchor ?? 0;
       if (tail > 0) {
         // Unsealed tail = unauthenticated entries appended past the seal. Loud
@@ -469,10 +511,13 @@ export function decideAnchorVerdict(input: AnchorVerdictInput): AnchorVerdict {
           ? { ok: false, level: "error", message: msg }
           : { ok: true, level: "warn", message: msg };
       }
+      const extNote = result.externalReceipt
+        ? ` + external anchor (${result.externalReceipt.authority})`
+        : "";
       return {
         ok: true,
         level: "ok",
-        message: `HMAC anchor verified (${result.expected} sealed entries).`,
+        message: `HMAC anchor verified (${result.expected} sealed entries)${extNote}.`,
       };
     }
     case "no-anchor": {
@@ -575,10 +620,61 @@ export interface ExternalTimestampAnchor {
 }
 
 /**
- * Resolve a configured external anchor. Returns null until an enclave wires one
- * up - kit ships no default network client by design. Present so call sites and
- * docs can reference a stable extension point.
+ * A command-backed external anchor. kit ships NO network client (that would
+ * break the local-first / no-egress default); instead the operator supplies a
+ * command via `KIT_EXTERNAL_ANCHOR_CMD` that timestamps the tip however they
+ * choose (an RFC3161 TSA submit, a post to a remote append-only log, …). The tip
+ * + count + log path are passed as env (`KIT_ANCHOR_TIP`/`_COUNT`/`_LOGPATH`),
+ * and the command MUST print a JSON receipt `{ token, authority?, timestamp? }`
+ * on stdout. FAIL-CLOSED: a non-zero exit, a missing `token`, or unparseable
+ * output throws — kit never fabricates a receipt.
+ */
+export function commandExternalAnchor(cmd: string): ExternalTimestampAnchor {
+  return {
+    async anchor({ tip, count, logPath }) {
+      let out: string;
+      try {
+        out = execSync(cmd, {
+          env: {
+            ...process.env,
+            KIT_ANCHOR_TIP: tip,
+            KIT_ANCHOR_COUNT: String(count),
+            KIT_ANCHOR_LOGPATH: logPath,
+          },
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 30_000,
+        });
+      } catch (e) {
+        throw new Error(`external anchor command failed: ${(e as Error).message}`);
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(out.trim());
+      } catch {
+        throw new Error("external anchor command did not emit a valid JSON receipt on stdout");
+      }
+      const r = (parsed ?? {}) as Partial<ExternalAnchorReceipt>;
+      if (typeof r.token !== "string" || !r.token) {
+        throw new Error("external anchor receipt is missing a non-empty `token`");
+      }
+      return {
+        token: r.token,
+        authority: typeof r.authority === "string" && r.authority ? r.authority : "command",
+        timestamp:
+          typeof r.timestamp === "string" && r.timestamp ? r.timestamp : new Date().toISOString(),
+      };
+    },
+  };
+}
+
+/**
+ * Resolve a configured external anchor, or null when none is wired (the default —
+ * kit ships no network client by design). Today the only built-in binding is the
+ * command transport (`KIT_EXTERNAL_ANCHOR_CMD`); the interface stays open for an
+ * in-process implementation an enclave links itself.
  */
 export function resolveExternalAnchor(): ExternalTimestampAnchor | null {
-  return null;
+  const cmd = (process.env.KIT_EXTERNAL_ANCHOR_CMD ?? "").trim();
+  return cmd ? commandExternalAnchor(cmd) : null;
 }
