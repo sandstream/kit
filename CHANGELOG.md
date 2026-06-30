@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit ci` enforces the signed policy.** `kit ci` now folds `evaluatePolicy`
+  into its gate: a present `.kit-policy.toml`'s requirements appear as `policy/*`
+  checks in the report (text/GitHub/JSON), so a tampered/revoked signature, unmet
+  `min_kit_version`, or (under `--strict`) a missing required scanner fails CI like
+  any other check. Opt-in and backward-compatible — no policy ⇒ no `policy/*`
+  checks ⇒ the verdict is unchanged. Completes Phase 1's "kit ci consumes the
+  policy".
 - **`kit policy check`** (experimental) — enforce the signed `.kit-policy.toml`
   against this machine's deterministic state (3.0 Phase 1, part 2). Verifies the
   signature (the trust anchor: warn on unsigned/unknown signer, **fail** on
