@@ -25,6 +25,7 @@ import {
   type ScryptOptions,
   type KeyObject,
 } from "node:crypto";
+import { gzipSync, gunzipSync } from "node:zlib";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { openMemoryDb, getMemoryDbPath, getMemoryDir } from "./db.js";
@@ -45,6 +46,22 @@ const SCRYPT_V2: ScryptOptions = { N: 1 << 17, r: 8, p: 1, maxmem: 256 * 1024 * 
 
 function deriveKey(passphrase: string, salt: Buffer, opts?: ScryptOptions): Buffer {
   return scryptSync(passphrase, salt, 32, opts);
+}
+
+// The plaintext DB is gzip-compressed BEFORE encryption (a SQLite file is highly
+// compressible — ~139 MB → ~30 MB — which keeps the blob under a 100 MB git host
+// limit and speeds every transport). Compression is INSIDE the encryption, so the
+// remote still only ever sees ciphertext. Backward-compatible on read: an older
+// (uncompressed) blob decrypts to a raw SQLite file that lacks the gzip header, so
+// `maybeGunzip` passes it through untouched — no new format version needed.
+function readMemoryDbCompressed(srcPath: string): Buffer {
+  return gzipSync(readFileSync(srcPath));
+}
+
+/** Gunzip if the buffer carries the gzip magic (0x1f 0x8b); otherwise return as-is
+ *  (a pre-compression blob, whose plaintext is a raw SQLite file). */
+function maybeGunzip(buf: Buffer): Buffer {
+  return buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b ? gunzipSync(buf) : buf;
 }
 
 const MIN_PASSPHRASE_LEN = 12;
@@ -112,7 +129,7 @@ export function backupEncrypted(
   db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   db.close();
 
-  const data = readFileSync(srcPath);
+  const data = readMemoryDbCompressed(srcPath);
   const salt = randomBytes(SALT_LEN);
   const iv = randomBytes(IV_LEN);
   const cipher = createCipheriv("aes-256-gcm", deriveKey(passphrase, salt, SCRYPT_V2), iv, {
@@ -149,7 +166,7 @@ export function restoreEncrypted(passphrase: string, inPath: string, destPath: s
   // 0600: never leave the decrypted plaintext brain world-readable, even when
   // restoring to a custom path outside ~/.kit. (openMemoryDb chmods the live DB;
   // this is the restore-time equivalent.)
-  writeFileSync(destPath, data, { mode: 0o600 });
+  writeFileSync(destPath, maybeGunzip(data), { mode: 0o600 });
 }
 
 // ── Asymmetric (public-key) mode ──────────────────────────────────────────────
@@ -251,7 +268,7 @@ export function backupToRecipient(
   const db = openMemoryDb(srcPath);
   db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   db.close();
-  const data = readFileSync(srcPath);
+  const data = readMemoryDbCompressed(srcPath);
 
   const { publicKey: ephPub, privateKey: ephPriv } = generateKeyPairSync("x25519");
   const ephRaw = rawFromJwkComponent((ephPub.export({ format: "jwk" }) as { x: string }).x);
@@ -292,5 +309,5 @@ export function restoreWithKey(privateJwk: MemoryKeyJwk, inPath: string, destPat
   const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_LEN });
   decipher.setAuthTag(tag);
   const data = Buffer.concat([decipher.update(ciphertext), decipher.final()]); // throws if wrong key
-  writeFileSync(destPath, data, { mode: 0o600 });
+  writeFileSync(destPath, maybeGunzip(data), { mode: 0o600 });
 }

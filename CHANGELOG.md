@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Memory sync blobs are now gzip-compressed before encryption (~3× smaller).** A
+  SQLite store compresses well (a real store: 6.3 MB → 2.1 MB; large stores
+  ~139 MB → ~30 MB), which keeps the blob under a git host's 100 MB file limit and
+  speeds every transport. Compression happens INSIDE the encryption, so the remote
+  still only ever sees ciphertext. Fully backward-compatible on read: an older,
+  uncompressed blob decrypts to a raw SQLite file (no gzip header) and is passed
+  through untouched — no new format version, works for both the passphrase and
+  public-key modes. This is what makes a private **GitHub** repo viable as the
+  ephemeral-session hub (alongside a self-hosted remote, which has no size cap).
 - **Public-key memory sync — an ephemeral session can push with NO secret.** The
   passphrase mode (AES-256-GCM + scrypt) requires the *same secret on every
   machine that pushes*, which an ephemeral cloud session can't safely hold (no
