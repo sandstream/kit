@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **`kit memory learn` — surface instructions you keep re-typing.** Deterministically
+  mines the local store for user messages repeated 3+ times (verbatim after casing /
+  punctuation normalization), ranked by distinct sessions then count, with a
+  `correction` flag for redirections ("no", "stop", "instead", "nej", "istället").
+  These recurring asks are candidates for a memory rule — record them with
+  `kit memory share` or in a rules file (CLAUDE.md / AGENTS.md) instead of re-typing.
+  Zero-LLM, local, no ML — kit finds the pattern; you decide the rule. `--json`
+  supported. Idea from headroom's `learn` (kit-research), done the kit way.
+
 ## [3.1.0] - 2026-07-01
 
 ### Added
