@@ -54,6 +54,47 @@ describe("memory db", () => {
     it("returns empty string for blank input", () => {
       assert.equal(toFtsMatchQuery("   "), "");
     });
+    it("joins terms with OR when op is OR (graceful-recall fallback)", () => {
+      assert.equal(toFtsMatchQuery("vault secret", "OR"), '"vault"* OR "secret"*');
+    });
+  });
+
+  it("multi-term query falls back to OR + bm25 when strict AND finds nothing (#164)", () => {
+    const db = fresh();
+    // No single message holds every query term, so a strict (implicit-AND) match → 0 hits.
+    insertMessage(db, {
+      uuid: "u1",
+      sessionId: "s1",
+      type: "assistant",
+      role: "assistant",
+      content: "cline pretooluse installgate wiring",
+    });
+    insertMessage(db, {
+      uuid: "u2",
+      sessionId: "s1",
+      type: "assistant",
+      role: "assistant",
+      content: "cline adapter only",
+    });
+    // "cline pretooluse ciinit" matches no single message under AND; the OR fallback must
+    // recall both, ranking the message covering more terms (u1: cline+pretooluse) first.
+    const hits = searchMessages(db, "cline pretooluse ciinit");
+    assert.equal(hits.length, 2);
+    assert.equal(hits[0]?.uuid, "u1");
+    db.close();
+  });
+
+  it("does not OR-widen a single-term miss", () => {
+    const db = fresh();
+    insertMessage(db, {
+      uuid: "u1",
+      sessionId: "s1",
+      type: "user",
+      role: "user",
+      content: "decision about October pricing",
+    });
+    assert.equal(searchMessages(db, "november").length, 0);
+    db.close();
   });
 
   it("does not crash on queries with FTS5 special chars (regression)", () => {
