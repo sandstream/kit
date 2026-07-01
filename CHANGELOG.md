@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`sandstream-kit-plugin-sentrux` — architecture-decay findings.** A read-only
+  scanner plugin (same shape as the Snyk / Wiz plugins) that ingests
+  `sentrux check|gate --json` — an architecture health score (0–10000 from
+  modularity / acyclicity / depth / equality / redundancy), the baseline gate,
+  and rule violations — and appends them to `.kit-scan-results.jsonl` so
+  `kit check --security` can gate on architectural regressions, an axis kit
+  didn't previously cover. Tolerant parser (field-name variants degrade
+  gracefully); a failed gate with no discrete violations still emits one finding
+  so it never passes silently. Deterministic, zero-LLM, nothing leaves; the
+  operator runs Sentrux in their env and opts the plugin in via `kitPlugins`.
 - **`kit memory pal claim` — atomic take for parallel agents.** When several
   agents share a PAL (a durable device + ephemeral cloud sessions), two could
   both start the same open item. `pal claim <id>` flips it to `claimed` via an
