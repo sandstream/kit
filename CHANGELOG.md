@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-07-01
+
 ### Security — no false green (a deterministic self-audit found these in kit itself)
 
 - **`kit audit verify` no longer passes when the audit log is missing.** A deleted
