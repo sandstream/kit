@@ -420,12 +420,23 @@ async function checkServiceExposure(): Promise<SecurityCheckResult[]> {
         detail: "exposed on all interfaces (verify firewall)",
         severity: "medium",
       });
-    } else {
+    } else if (netstat.includes("127.0.0.1:3199") || netstat.includes("[::1]:3199")) {
       results.push({
         category: "exposure",
         name: "Remote API",
         status: "pass",
         detail: "localhost only",
+      });
+    } else {
+      // Listening, but NOT on 0.0.0.0 and NOT on loopback → a routable interface
+      // (a LAN IP / global IPv6). Reporting "localhost only" here would greenlight
+      // an exposed approval/audit API. Gate on a POSITIVE loopback match instead.
+      results.push({
+        category: "exposure",
+        name: "Remote API",
+        status: "warn",
+        detail: "listening on a non-loopback address (verify firewall / bind to 127.0.0.1)",
+        severity: "medium",
       });
     }
   } catch {
