@@ -73,6 +73,8 @@ import {
   palList,
   palDone,
   palSnooze,
+  palClaim,
+  palRelease,
   palAutoVerify,
   palPrune,
   importLegacyLedger,
@@ -220,6 +222,33 @@ async function memPal(): Promise<boolean> {
       );
       return true;
     }
+    if (action === "claim") {
+      const id = process.argv[5];
+      const by = process.argv[6]; // optional; defaults to this device
+      if (!id) {
+        console.error(`${c.red}usage: kit memory pal claim <id> [by]${c.reset}`);
+        return false;
+      }
+      console.log(
+        palClaim(db, id, by)
+          ? `${c.green}✓${c.reset} claimed ${c.bold}${id}${c.reset} — yours to work`
+          : `${c.dim}${id} not open (already claimed, closed, or not found)${c.reset}`,
+      );
+      return true;
+    }
+    if (action === "release") {
+      const id = process.argv[5];
+      if (!id) {
+        console.error(`${c.red}usage: kit memory pal release <id>${c.reset}`);
+        return false;
+      }
+      console.log(
+        palRelease(db, id)
+          ? `${c.green}✓${c.reset} released ${id} back to open`
+          : `${c.dim}${id} not found or not claimed${c.reset}`,
+      );
+      return true;
+    }
     if (action === "verify") {
       const r = await palAutoVerify(db);
       console.log(
@@ -244,7 +273,9 @@ async function memPal(): Promise<boolean> {
       return true;
     }
     console.error(`${c.red}Unknown pal action: ${action}${c.reset}`);
-    console.error("Use: kit memory pal [list|add|done|snooze|verify|import|prune]");
+    console.error(
+      "Use: kit memory pal [list|add|claim|release|done|snooze|verify|import|prune]",
+    );
     return false;
   } finally {
     db.close();
@@ -282,7 +313,7 @@ async function memHelp(): Promise<boolean> {
   );
   console.log("  kit memory uninstall        Remove the hooks");
   console.log(
-    "  kit memory pal [list|add|done|snooze|verify|import|prune]   Pending action ledger (list --all = every device; prune = drop dead-origin items)",
+    "  kit memory pal [list|add|claim|release|done|snooze|verify|import|prune]   Pending action ledger (claim = atomic take for parallel agents; list --all = every device; prune = drop dead-origin items)",
   );
   console.log("  kit memory save <name>      Bookmark the current session as a named copilot");
   console.log("  kit memory threads          List saved copilots (--global for all)");

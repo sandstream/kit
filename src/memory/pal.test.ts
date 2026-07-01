@@ -9,6 +9,8 @@ import {
   palList,
   palDone,
   palSnooze,
+  palClaim,
+  palRelease,
   palAutoVerify,
   palPrune,
   deviceId,
@@ -51,6 +53,47 @@ describe("PAL — pending actions", () => {
     assert.equal(palSnooze(db, id, 7), true);
     assert.equal(palList(db).length, 0);
     assert.equal(palList(db, { status: "snoozed" }).length, 1);
+    db.close();
+  });
+
+  it("claim atomically takes an open item; a concurrent second claim loses", () => {
+    const db = fresh();
+    const id = palAdd(db, { title: "flip the auth setting" });
+    assert.equal(palClaim(db, id, "agent-a"), true); // first caller wins
+    assert.equal(palClaim(db, id, "agent-b"), false); // WHERE status='open' guard: no double-claim
+    assert.equal(palList(db).length, 0); // a claimed item drops out of the open list
+    const claimed = palList(db, { status: "claimed" });
+    assert.equal(claimed.length, 1);
+    assert.equal(claimed[0]?.claimed_by, "agent-a");
+    db.close();
+  });
+
+  it("claim defaults claimed_by to this device", () => {
+    const db = fresh();
+    const id = palAdd(db, { title: "x" });
+    assert.equal(palClaim(db, id), true);
+    assert.equal(palList(db, { status: "claimed" })[0]?.claimed_by, deviceId());
+    db.close();
+  });
+
+  it("release returns a claimed item to open (and only a claimed one)", () => {
+    const db = fresh();
+    const id = palAdd(db, { title: "x" });
+    assert.equal(palRelease(db, id), false); // nothing to release — still open
+    palClaim(db, id, "agent-a");
+    assert.equal(palRelease(db, id), true);
+    const open = palList(db);
+    assert.equal(open.length, 1);
+    assert.equal(open[0]?.claimed_by, null); // claim cleared
+    db.close();
+  });
+
+  it("a claimed item can still be marked done by its claimer", () => {
+    const db = fresh();
+    const id = palAdd(db, { title: "x" });
+    palClaim(db, id, "agent-a");
+    assert.equal(palDone(db, id), true);
+    assert.equal(palList(db, { status: "closed" }).length, 1);
     db.close();
   });
 

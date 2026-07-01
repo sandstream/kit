@@ -112,6 +112,10 @@ export interface PendingAction {
   origin_device: string | null;
   /** Absolute project path at creation (v5+) — used by `pal prune`. */
   origin_root: string | null;
+  /** Agent/session that atomically claimed this open item (v6+); NULL = unclaimed. */
+  claimed_by: string | null;
+  /** When the claim was taken (v6+). */
+  claimed_at: string | null;
 }
 
 export interface PalAddInput {
@@ -219,6 +223,37 @@ export function palSnooze(db: DatabaseSync, id: string, days: number): boolean {
       "UPDATE pending_actions SET status='snoozed', snooze_until=datetime('now', ?) WHERE id=?",
     )
     .run(`+${d} days`, id);
+  return Number(res.changes) > 0;
+}
+
+/**
+ * Atomically claim an OPEN item so two parallel agents don't both work it (from
+ * guild's Quests). The `WHERE status='open'` guard makes this a race-free
+ * compare-and-set: exactly one caller sees `changes === 1` and wins; every other
+ * concurrent caller gets false. The winner flips the item to 'claimed' so it
+ * drops out of the default (open) list. Returns true iff this caller won.
+ */
+export function palClaim(db: DatabaseSync, id: string, claimedBy?: string): boolean {
+  const who = claimedBy ?? deviceId();
+  const res = db
+    .prepare(
+      "UPDATE pending_actions SET status='claimed', claimed_by=?, claimed_at=datetime('now') WHERE id=? AND status='open'",
+    )
+    .run(who, id);
+  return Number(res.changes) > 0;
+}
+
+/**
+ * Release a claimed item back to 'open' (the claimer crashed, gave up, or handed
+ * it off) so another agent can pick it up. Only touches a currently-'claimed'
+ * row. Returns true iff a claimed item was released.
+ */
+export function palRelease(db: DatabaseSync, id: string): boolean {
+  const res = db
+    .prepare(
+      "UPDATE pending_actions SET status='open', claimed_by=NULL, claimed_at=NULL WHERE id=? AND status='claimed'",
+    )
+    .run(id);
   return Number(res.changes) > 0;
 }
 

@@ -21,7 +21,7 @@ import { summarizeTokens } from "./stats.js";
 import { redactSecrets } from "../utils/redactSecrets.js";
 import { secureFile, secureDir } from "../utils/secure-perms.js";
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /**
  * Opt-in redaction-at-capture (KIT_MEMORY_REDACT=1). The memory store is raw by
@@ -191,6 +191,12 @@ function migrate(db: DatabaseSync): void {
   // rows have NULL → treated as "this device" (always shown), backward-compatible.
   ensureColumn(db, "pending_actions", "origin_device", "TEXT");
   ensureColumn(db, "pending_actions", "origin_root", "TEXT");
+  // v6: atomic PAL claiming for parallel agents (from guild's Quests). A claim is
+  // an `UPDATE … WHERE status='open'` guard so exactly one agent wins an open
+  // item; claimed_by = the winner's id, claimed_at = when. Older rows have NULL
+  // (unclaimed) → backward-compatible.
+  ensureColumn(db, "pending_actions", "claimed_by", "TEXT");
+  ensureColumn(db, "pending_actions", "claimed_at", "TEXT");
   const row = db.prepare("SELECT version FROM schema_meta LIMIT 1").get() as
     | { version: number }
     | undefined;
