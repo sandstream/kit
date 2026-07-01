@@ -56,6 +56,9 @@ jobs:
         env:
           KIT_BUMBLEBEE_PROFILE: deep
           KIT_BUMBLEBEE_ROOTS: "."
+          # Fail CLOSED: scanner-unavailable / timeout must fail the gate, not
+          # warn-and-pass an unscanned tree as clean.
+          KIT_BUMBLEBEE_REQUIRED: "1"
         # Run checkSecurity and filter to supply-chain category. Avoids the full
         # `kit ci` pipeline which expects gh auth / 1password / etc.
         run: node scripts/run-supply-chain-check.mjs

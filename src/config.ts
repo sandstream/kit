@@ -574,6 +574,8 @@ export const KNOWN_SECTIONS = new Set([
   "update",
   "scan", // [scan.tooling] — vault-backed scanner tokens (#65)
   "air_gap", // [air_gap] — no-egress / offline config (#85)
+  "policy", // [policy] — governance: default_mode gate + agent_writes pre-approvals
+  "mcp", // [mcp] — MCP server config (consumed by kit mcp)
 ]);
 
 export const kitConfigSchema = z
@@ -657,6 +659,20 @@ export const kitConfigSchema = z
       })
       .passthrough()
       .optional(),
+    // Security-critical governance policy — validated (NOT bare passthrough) so a
+    // typo or wrong type ERRORS at load instead of silently failing the gate.
+    policy: z
+      .object({
+        // enum with no trailing passthrough: "read-onlyy" now throws at load,
+        // instead of silently not matching cli.ts's `=== "read-only"` gate (which
+        // would leave the repo writable while the operator believed it was locked).
+        default_mode: z.enum(["read-write", "read-only"]).optional(),
+        // vendor → array of allowed ops. A bare string would substring-match wrongly.
+        agent_writes: z.record(z.string(), z.array(z.string())).optional(),
+      })
+      .passthrough()
+      .optional(),
+    mcp: z.record(z.string(), z.unknown()).optional(),
     web: WebConfigSchema,
     setup: z
       .object({

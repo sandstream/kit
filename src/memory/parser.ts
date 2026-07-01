@@ -113,7 +113,10 @@ function indexFile(
   let raw: string;
   try {
     raw = readFileSync(filepath, "utf8");
-  } catch {
+  } catch (e) {
+    // A read failure (permissions, I/O, a transcript rotated mid-index) is NOT the
+    // same as an empty file — say so rather than silently reporting 0 indexed.
+    console.error(`kit: could not read transcript ${filepath} — ${(e as Error).message}`);
     return { messages: 0, toolUses: 0 };
   }
 
@@ -123,6 +126,7 @@ function indexFile(
 
   let messages = 0;
   let toolUses = 0;
+  let malformed = 0;
   let firstTs: string | undefined;
   let lastTs: string | undefined;
   let isSidechain = false;
@@ -134,6 +138,7 @@ function indexFile(
     try {
       rec = JSON.parse(trimmed) as TranscriptRecord;
     } catch {
+      malformed++;
       continue; // skip malformed lines, keep indexing the rest
     }
     if (rec.type !== "user" && rec.type !== "assistant") continue;
@@ -189,6 +194,14 @@ function indexFile(
     lastMessageAt: lastTs,
     isAgentSidechain: isSidechain,
   });
+
+  // Parsed nothing usable AND hit parse failures → the file looks corrupt / a new
+  // format. Surface it instead of reporting a clean 0 that reads as "up to date".
+  if (messages === 0 && malformed > 0) {
+    console.error(
+      `kit: ${basename(filepath)} — indexed 0 messages but ${malformed} line(s) failed to parse; transcript may be corrupt or an unrecognised format`,
+    );
+  }
 
   return { messages, toolUses };
 }

@@ -5,7 +5,7 @@
  * settings without touching the user's other hooks. Re-running adds nothing.
  * Honors KIT_CLAUDE_SETTINGS for tests.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { kitWrapperPath } from "../kit-wrapper.js";
@@ -60,16 +60,30 @@ interface Settings {
 }
 
 function readSettings(path: string): Settings {
-  if (!existsSync(path)) return {};
+  if (!existsSync(path)) return {}; // first-time install — a fresh settings object is correct
   try {
     return JSON.parse(readFileSync(path, "utf8")) as Settings;
-  } catch {
-    return {}; // corrupt/unreadable → start fresh rather than crash
+  } catch (e) {
+    // An EXISTING but unparseable settings.json must NOT be treated as empty — that
+    // would let writeSettings overwrite the whole file (permissions, env, other hooks,
+    // statusLine) with only kit's block. Refuse loudly instead of silently clobbering.
+    throw new Error(
+      `${path} is not valid JSON — refusing to overwrite it (that would drop your other Claude Code settings). Fix or move the file aside, then re-run. Parse error: ${(e as Error).message}`,
+    );
   }
 }
 
 function writeSettings(path: string, s: Settings): void {
   mkdirSync(dirname(path), { recursive: true });
+  // Back up an existing file before the first overwrite (mirrors identity.json.*.bak),
+  // so even an unexpected clobber is recoverable.
+  if (existsSync(path)) {
+    try {
+      copyFileSync(path, `${path}.bak`);
+    } catch {
+      /* best-effort backup — the merge below is still non-destructive */
+    }
+  }
   writeFileSync(path, JSON.stringify(s, null, 2) + "\n");
 }
 

@@ -227,8 +227,16 @@ export function openMemoryDb(path?: string): DatabaseSync {
       for (const sidecar of [`${dbPath}-wal`, `${dbPath}-shm`]) {
         if (existsSync(sidecar)) secureFile(sidecar);
       }
-    } catch {
-      // best-effort: non-POSIX filesystems may not support chmod
+    } catch (err) {
+      // ENOTSUP/ENOSYS/EPERM on exotic/non-POSIX filesystems are expected — chmod
+      // simply isn't supported there, so stay quiet. ANY other failure means the
+      // secret-dense store may be world-readable — surface it, don't leak silently.
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "ENOTSUP" && code !== "ENOSYS" && code !== "EPERM") {
+        console.error(
+          `kit: could not restrict permissions on ${dbPath} (${code ?? (err as Error).message}) — the memory store may be readable by other users`,
+        );
+      }
     }
   }
   return db;
