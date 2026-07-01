@@ -18,7 +18,15 @@ import { mergeDb } from "../memory/merge.js";
 import { buildSuggestPrompt } from "../memory/suggest.js";
 import { getCurrentProjectRoot } from "../memory/project.js";
 import { scanDbForSecrets } from "../memory/scan.js";
-import { backupEncrypted, restoreEncrypted } from "../memory/backup.js";
+import {
+  backupEncrypted,
+  restoreEncrypted,
+  generateMemoryKeypair,
+  saveMemoryKey,
+  loadMemoryKey,
+  publicKeyString,
+  getMemoryKeyPath,
+} from "../memory/backup.js";
 import { ensureKitWrapper } from "../kit-wrapper.js";
 import { syncFromExport } from "../memory/sync.js";
 import {
@@ -91,6 +99,7 @@ export async function cmdMemory(): Promise<boolean> {
     index: memIndex,
     merge: memMerge,
     sync: memSync,
+    keygen: memKeygen,
     push: memPush,
     pull: memPull,
     stats: memStats,
@@ -258,6 +267,9 @@ async function memHelp(): Promise<boolean> {
   );
   console.log(
     "  kit memory sync init        Write ~/.kit/sync.toml (--remote <url> | --command, --auto for hook sync)",
+  );
+  console.log(
+    "  kit memory keygen           Generate a public-key recipient (push with NO passphrase — for ephemeral sessions)",
   );
   console.log(
     "  kit memory push             Encrypt + push your store to your private remote (~/.kit/sync.toml)",
@@ -443,9 +455,10 @@ async function memPush(): Promise<boolean> {
   }
   if (!cfg) return syncNotConfigured();
   const pass = process.env.KIT_MEMORY_PASSPHRASE ?? flagValue(process.argv, "--passphrase");
-  if (!pass) {
+  // Public-key mode (recipient set) needs no secret; passphrase mode does.
+  if (!cfg.recipient && !pass) {
     console.error(
-      `${c.red}set KIT_MEMORY_PASSPHRASE (or --passphrase) — the blob pushed to ${cfg.remote} is encrypted${c.reset}`,
+      `${c.red}set KIT_MEMORY_PASSPHRASE (or --passphrase), or add a public-key \`recipient\` to [memory.sync] — the pushed blob is encrypted${c.reset}`,
     );
     return false;
   }
@@ -461,6 +474,35 @@ async function memPush(): Promise<boolean> {
     console.error(`${c.red}${(err as Error).message}${c.reset}`);
     return false;
   }
+}
+
+async function memKeygen(): Promise<boolean> {
+  const force = hasFlag(process.argv, "--force");
+  const existing = loadMemoryKey();
+  if (existing && !force) {
+    // Never silently clobber: a new key makes every blob encrypted to the old key
+    // undecryptable. Show the existing public string so the user can re-share it.
+    console.log(
+      `${c.dim}a memory key already exists at ${getMemoryKeyPath()}${c.reset}\n` +
+        `  recipient: ${c.bold}${publicKeyString(existing.x)}${c.reset}\n` +
+        `${c.dim}pass --force to replace it (old public-key blobs become undecryptable).${c.reset}`,
+    );
+    return true;
+  }
+  const { publicKey, privateJwk } = generateMemoryKeypair();
+  const path = saveMemoryKey(privateJwk);
+  console.log(
+    `${c.green}✓${c.reset} wrote private key → ${c.bold}${path}${c.reset} ${c.dim}(0600)${c.reset}`,
+  );
+  console.log(
+    `\nRecipient (public — safe to share / commit / put in a setup script):\n  ${c.bold}${publicKey}${c.reset}\n`,
+  );
+  console.log(
+    `${c.dim}Next: put this in [memory.sync] on the pushing machines →${c.reset}\n` +
+      `  recipient = "${publicKey}"\n` +
+      `${c.dim}Keep ${path} ONLY on machines that must decrypt (copy it to your other durable machines).${c.reset}`,
+  );
+  return true;
 }
 
 async function memPull(): Promise<boolean> {

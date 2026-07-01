@@ -21,7 +21,13 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mergeDb, type MergeResult } from "./merge.js";
-import { isEncryptedBackup, restoreEncrypted } from "./backup.js";
+import {
+  isEncryptedBackup,
+  isAsymmetricBackup,
+  restoreEncrypted,
+  restoreWithKey,
+  loadMemoryKey,
+} from "./backup.js";
 
 export interface SyncOptions {
   /** Passphrase for an encrypted backup export (KIT_MEMORY_PASSPHRASE). */
@@ -47,7 +53,14 @@ export function syncFromExport(
     return mergeDb(target, exportPath);
   }
 
-  if (!opts.passphrase) {
+  const asymmetric = isAsymmetricBackup(exportPath);
+  const privateKey = asymmetric ? loadMemoryKey() : null;
+  if (asymmetric && !privateKey) {
+    throw new Error(
+      "this is a public-key (V3) backup — no local private key found; run `kit memory keygen` on this machine and restore its key, or copy ~/.kit/memory-key.json from a machine that has it",
+    );
+  }
+  if (!asymmetric && !opts.passphrase) {
     throw new Error(
       "this looks like an encrypted backup — set KIT_MEMORY_PASSPHRASE (or pass --passphrase) to decrypt it",
     );
@@ -57,7 +70,8 @@ export function syncFromExport(
   const dir = mkdtempSync(join(tmpdir(), "kit-sync-"));
   const tmpDb = join(dir, "decrypted.db");
   try {
-    restoreEncrypted(opts.passphrase, exportPath, tmpDb);
+    if (asymmetric) restoreWithKey(privateKey!, exportPath, tmpDb);
+    else restoreEncrypted(opts.passphrase!, exportPath, tmpDb);
     return mergeDb(target, tmpDb);
   } finally {
     rmSync(dir, { recursive: true, force: true });
