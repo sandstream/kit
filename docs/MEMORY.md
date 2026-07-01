@@ -2,23 +2,23 @@
 
 Local-first, deterministic memory for AI agents. `kit memory` gives a (swappable)
 model a **verifiable second brain**: it stores your raw conversation history and
-lets the agent *search it before answering* — so it pulls receipts instead of
+lets the agent _search it before answering_ — so it pulls receipts instead of
 guessing. No vector database, no embeddings, no model calls. Just SQLite + FTS5
 and a few fail-open hooks.
 
 > **Memory is not context.** Context is durable, curated rules (`.kit.toml`,
 > policy, `CLAUDE.md`). Memory is the experiential log of what happened. The bridge
-> is one-way: memory becomes context only when the agent *retrieves it at the time
-> of work*. kit keeps the two as separate shapes with one retrieval pipeline.
+> is one-way: memory becomes context only when the agent _retrieves it at the time
+> of work_. kit keeps the two as separate shapes with one retrieval pipeline.
 
 ## Two tiers, split on the sharing boundary
 
-| | **Personal memory** | **Shared project memory** |
-|---|---|---|
-| Content | RAW transcripts, one row per message | curated, **redacted** entries (decisions, conventions, receipts) |
-| Scope | one `~/.kit/memory.db` (all projects); search defaults to the current project | per-project, organized by responsibility-area |
-| Shared? | **never** — private, `0600` | **yes** — committed text, travels with the repo |
-| Shape (above) | MEMORY (experiential) | CONTEXT (curated, durable) |
+|               | **Personal memory**                                                           | **Shared project memory**                                        |
+| ------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Content       | RAW transcripts, one row per message                                          | curated, **redacted** entries (decisions, conventions, receipts) |
+| Scope         | one `~/.kit/memory.db` (all projects); search defaults to the current project | per-project, organized by responsibility-area                    |
+| Shared?       | **never** — private, `0600`                                                   | **yes** — committed text, travels with the repo                  |
+| Shape (above) | MEMORY (experiential)                                                         | CONTEXT (curated, durable)                                       |
 
 The personal store is yours and never leaves your machine unencrypted. The shared
 store is curated knowledge that is **treated like code** — committed, reviewed, and
@@ -44,15 +44,16 @@ yields a no-op, so a hook can never block a prompt or break a session):
 
 - **`UserPromptSubmit`** runs before every message and injects a two-sentence
   reminder that searchable memory exists (plus any open action items). The agent
-  decides when to search — memory is *pulled on demand*, never bulk-loaded into
+  decides when to search — memory is _pulled on demand_, never bulk-loaded into
   context every turn.
 - **`SessionEnd`** indexes the just-ended session into the store.
 - **`SessionStart`** (recovery) re-injects "where you left off" for the current
   project — the most recent messages + open action items — so a resumed or
   post-compaction session regains continuity instead of starting blank.
 
-That's it. No reranker, no summarization pipeline, no chunking, no sync service,
-no thirty-knob config. Less code, less surface area to break.
+That's it. No reranker, no summarization pipeline, no chunking, no hosted sync
+service, no thirty-knob config. Less code, less surface area to break. (Optional
+cross-device sync is your own git remote or command — see below, still no service.)
 
 ## Why FTS5 and not vectors
 
@@ -80,8 +81,9 @@ transcripts from every supported coding agent on the machine, each tagged with a
 `harness` so recall spans them: **Claude Code** (`~/.claude`), **Codex**
 (`~/.codex/sessions`), **Gemini CLI** (`~/.gemini/tmp`), **Continue.dev**
 (`~/.continue/sessions`), **Cursor** (`state.vscdb`), **Amazon Q Developer CLI**
-(`amazon-q/data.sqlite3`), and **Cline** (VS Code `saoudrizwan.claude-dev/tasks`).
-Absent agents are skipped silently. Adding one
+(`amazon-q/data.sqlite3`), **Cline** (VS Code `saoudrizwan.claude-dev/tasks`), and
+**OpenCode** (`~/.local/share/opencode` — SQLite `opencode.db` or the legacy
+`storage/` tree). Absent agents are skipped silently. Adding one
 is a single parser in `indexAllHarnesses()`. Each parser is built against the
 agent's own serialization format (verified from its source), never guessed. The
 Cursor + Amazon Q parsers read app-internal SQLite defensively — if the shape
@@ -147,8 +149,80 @@ kit setup                              # per repo: reinstall tools + materialize
 
 A wrong passphrase or a tampered blob fails closed (no plaintext is written). Note
 that live `claude --resume` is machine-bound — the recovered store gives you back
-the searchable *memory*, not the live session. Your **shared** project memory
+the searchable _memory_, not the live session. Your **shared** project memory
 recovers for free with `git clone`.
+
+## Cross-device sync
+
+Move your personal store between machines automatically — laptop, server, and
+ephemeral cloud sessions converging on one hub. Same encrypted-blob mechanism as
+backup, wired to a transport. **Opt-in** (no `~/.kit/sync.toml` → nothing happens),
+and the remote **only ever sees ciphertext** — the blob is AES-256-GCM encrypted
+and **gzip-compressed before encryption** (a SQLite store shrinks ~3×: 139 MB →
+~30 MB, so it fits under a git host's 100 MB file limit).
+
+```bash
+kit memory push          # encrypt + upload this machine's store to the hub
+kit memory pull          # download + merge the hub into this machine (last-write-wins)
+```
+
+Config lives at `~/.kit/sync.toml` (LOCAL — never the repo tree, so a cloned repo
+can't redirect your brain). The sync remote **must differ from the project's
+`origin`** (anti-exfil guard). Two transports:
+
+```toml
+# git transport — commit the blob to a SEPARATE private repo (any host, or self-hosted)
+[memory.sync]
+remote = "https://github.com/you/kit-memory.git"
+branch = "main"
+pull_on_start = true      # opt-in: hook pulls at session start
+push_on_end = true        # opt-in: hook pushes before an (ephemeral) container is reclaimed
+```
+
+```toml
+# command transport — bring your own move (S3 / rclone / scp / USB …)
+[memory.sync]
+transport = "command"
+push_cmd = 'scp "$KIT_MEMORY_BLOB" you@server:kit-memory.enc'
+pull_cmd = 'scp you@server:kit-memory.enc "$KIT_MEMORY_BLOB"'
+```
+
+### Two encryption modes
+
+- **Passphrase (default)** — AES-256-GCM + scrypt from `KIT_MEMORY_PASSPHRASE`.
+  Simple, but _every_ pushing machine needs the same secret.
+- **Public-key (recipient)** — for machines that can't safely hold a secret
+  (**ephemeral cloud sessions**: no secret-store, no SSH key). Encrypt to a
+  **public** key; only holders of the **private** key decrypt.
+
+```bash
+kit memory keygen        # X25519 keypair: private → ~/.kit/memory-key.json (0600),
+                         # prints a shareable "kitmem-pub-…" recipient (NOT a secret)
+```
+
+```toml
+[memory.sync]
+remote = "https://github.com/you/kit-memory.git"
+recipient = "kitmem-pub-…"   # public — safe in a setup script, env var, or committed
+pull_on_start = true
+push_on_end = true
+```
+
+With a `recipient` set, push needs **no passphrase**. Copy `~/.kit/memory-key.json`
+only to the durable machines that must decrypt (laptop, server). Under the hood:
+a fresh ephemeral X25519 keypair per blob → ECDH → HKDF-SHA256 → AES-256-GCM
+(libsodium sealed-box shape, pure `node:crypto`, zero deps; blob magic `KITMEM03`).
+
+### Seamless ephemeral capture (the payoff)
+
+A throwaway cloud session (Claude Code on the web) can now contribute its memory
+to the hub with **nothing secret in the container**: it encrypts to the public
+recipient and pushes to a private repo via the environment's injected git
+credential — no passphrase, no SSH key, no token to store. Wire it once in the
+environment's **setup script** (which re-creates the ephemeral `~/.kit/sync.toml`
+at each start) and give that environment access to the hub repo. Your durable
+machines pull and decrypt with the private key. `push_on_end` is best-effort
+(abrupt teardown can cut it), so the laptop/server stay the reliable backbone.
 
 ## Shared memory
 
@@ -201,8 +275,9 @@ Shared memory is **treated like code**:
 
 `kit memory` is part of kit's deterministic **core** (zero model calls, local-first).
 The storage backends are **modules**: SQLite is the default; an encrypted backup
-blob is the portable transport, and an opt-in Turso live-sync (and an opt-in
-embeddings escalation) layer on top without changing the core.
+blob is the portable transport, and opt-in cross-device sync (git remote or your
+own command — see [Cross-device sync](#cross-device-sync)) and an opt-in embeddings
+escalation layer on top without changing the core.
 
 ## Credits
 
