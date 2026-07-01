@@ -33,7 +33,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "smol-toml";
 import { getMemoryDir, getMemoryDbPath, openMemoryDb } from "./db.js";
-import { backupEncrypted } from "./backup.js";
+import { backupEncrypted, backupToRecipient } from "./backup.js";
 import { syncFromExport } from "./sync.js";
 import type { MergeResult } from "./merge.js";
 
@@ -59,6 +59,10 @@ export interface SyncConfig {
   pullOnStart?: boolean;
   /** Index + push the store at the end of each session (key for ephemeral containers). */
   pushOnEnd?: boolean;
+  /** Public-key (X25519 `kitmem-pub-…`) recipient. When set, push encrypts to it
+   *  instead of a passphrase — so an ephemeral session needs NO secret, only this
+   *  (non-secret) public key. Only holders of the matching private key can decrypt. */
+  recipient?: string;
 }
 
 const DEFAULT_BRANCH = "main";
@@ -97,6 +101,7 @@ export function loadSyncConfig(): SyncConfig | null {
   const bool = (v: unknown): boolean => v === true;
   const pullOnStart = bool(s.pull_on_start);
   const pushOnEnd = bool(s.push_on_end);
+  const recipient = str(s.recipient) || undefined; // public-key mode (optional)
 
   const transport: SyncTransport = s.transport === "command" ? "command" : "git";
   if (transport === "command") {
@@ -105,7 +110,7 @@ export function loadSyncConfig(): SyncConfig | null {
     if (!pushCmd || !pullCmd) {
       throw new Error('[memory.sync] transport = "command" requires both push_cmd and pull_cmd');
     }
-    return { transport, file, pushCmd, pullCmd, pullOnStart, pushOnEnd };
+    return { transport, file, pushCmd, pullCmd, pullOnStart, pushOnEnd, recipient };
   }
 
   const remote = str(s.remote);
@@ -113,7 +118,7 @@ export function loadSyncConfig(): SyncConfig | null {
   const branch = str(s.branch) || DEFAULT_BRANCH;
   assertSafeGitRef(remote, "remote");
   assertSafeGitRef(branch, "branch");
-  return { transport, file, remote, branch, pullOnStart, pushOnEnd };
+  return { transport, file, remote, branch, pullOnStart, pushOnEnd, recipient };
 }
 
 /**
@@ -256,19 +261,43 @@ export interface PushResult {
  * passphrase (KIT_MEMORY_PASSPHRASE). Clones the remote, refreshes the blob,
  * commits and pushes only when it changed (so a no-op push is free and quiet).
  */
-export function pushMemory(cfg: SyncConfig, passphrase: string, projectRoot: string): PushResult {
+/** Encrypt the live memory DB into `outPath`, picking the mode from the config:
+ *  a configured `recipient` → public-key (V3, no passphrase); otherwise the
+ *  passphrase (V2). Throws if neither is available. */
+function encryptBlobForSync(
+  cfg: SyncConfig,
+  passphrase: string | undefined,
+  outPath: string,
+): void {
+  if (cfg.recipient) {
+    backupToRecipient(cfg.recipient, getMemoryDbPath(), outPath);
+    return;
+  }
+  if (!passphrase) {
+    throw new Error(
+      "no encryption configured — set KIT_MEMORY_PASSPHRASE, or add a public-key `recipient` to [memory.sync]",
+    );
+  }
+  backupEncrypted(passphrase, getMemoryDbPath(), outPath);
+}
+
+export function pushMemory(
+  cfg: SyncConfig,
+  passphrase: string | undefined,
+  projectRoot: string,
+): PushResult {
   const dir = mkdtempSync(join(tmpdir(), "kit-memsync-"));
   try {
     if (cfg.transport === "command") {
       const blob = join(dir, cfg.file);
-      backupEncrypted(passphrase, getMemoryDbPath(), blob);
+      encryptBlobForSync(cfg, passphrase, blob);
       runTransportCmd(cfg.pushCmd!, blob);
       return { target: "command transport", file: cfg.file, pushed: true };
     }
     // git transport — clone into the (empty) dir FIRST, then write the blob inside it.
     assertRemoteNotProjectOrigin(cfg.remote!, projectRoot);
     cloneOrInit(cfg.remote!, cfg.branch ?? DEFAULT_BRANCH, dir);
-    backupEncrypted(passphrase, getMemoryDbPath(), join(dir, cfg.file));
+    encryptBlobForSync(cfg, passphrase, join(dir, cfg.file));
     git(["add", "--", cfg.file], dir);
     const dirty = git(["status", "--porcelain"], dir).trim();
     if (!dirty) return { target: cfg.remote!, file: cfg.file, pushed: false };
@@ -412,7 +441,9 @@ export function tryAutoPush(projectRoot: string): AutoSyncResult {
     return { ran: false };
   }
   if (!cfg || !cfg.pushOnEnd) return { ran: false };
-  if (!process.env.KIT_MEMORY_PASSPHRASE) {
+  // Public-key mode needs NO secret — that's the whole point for ephemeral
+  // sessions. Only the passphrase mode requires KIT_MEMORY_PASSPHRASE.
+  if (!cfg.recipient && !process.env.KIT_MEMORY_PASSPHRASE) {
     return { ran: false, note: "memory push skipped: KIT_MEMORY_PASSPHRASE not set" };
   }
   try {

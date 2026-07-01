@@ -17,17 +17,26 @@ import {
   createDecipheriv,
   randomBytes,
   scryptSync,
+  generateKeyPairSync,
+  createPublicKey,
+  createPrivateKey,
+  diffieHellman,
+  hkdfSync,
   type ScryptOptions,
+  type KeyObject,
 } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
-import { openMemoryDb, getMemoryDbPath } from "./db.js";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { openMemoryDb, getMemoryDbPath, getMemoryDir } from "./db.js";
 
 const MAGIC_V1 = Buffer.from("KITMEM01"); // legacy: scrypt defaults (N=16384, ~16 MB)
 const MAGIC_V2 = Buffer.from("KITMEM02"); // hardened: N=2^17 (~134 MB) — write path
+const MAGIC_V3 = Buffer.from("KITMEM03"); // asymmetric: X25519 → HKDF → AES-256-GCM (no passphrase)
 const MAGIC_LEN = 8;
 const SALT_LEN = 16;
 const IV_LEN = 12;
 const TAG_LEN = 16;
+const X25519_LEN = 32; // raw X25519 public key length
 
 // Hardened scrypt cost for new backups. The blob is the ONLY thing a passphrase
 // protects and is designed to sit on a USB stick / in the cloud, so make offline
@@ -68,17 +77,26 @@ export function validatePassphrase(passphrase: string): void {
   }
 }
 
-/** True if `inPath` begins with a kit memory backup MAGIC header (V1 or V2).
- *  Lets `kit memory sync` tell an encrypted backup from a raw .db export. */
-export function isEncryptedBackup(inPath: string): boolean {
-  let head: Buffer;
+function magicOf(inPath: string): Buffer | null {
   try {
-    const fd = readFileSync(inPath);
-    head = fd.subarray(0, MAGIC_LEN);
+    return readFileSync(inPath).subarray(0, MAGIC_LEN);
   } catch {
-    return false; // unreadable/missing — let the caller surface a clean error
+    return null; // unreadable/missing — let the caller surface a clean error
   }
-  return head.equals(MAGIC_V1) || head.equals(MAGIC_V2);
+}
+
+/** True if `inPath` begins with ANY kit memory backup MAGIC header (V1/V2 passphrase
+ *  or V3 public-key). Lets `kit memory sync` tell an encrypted backup from a raw .db. */
+export function isEncryptedBackup(inPath: string): boolean {
+  const m = magicOf(inPath);
+  return !!m && (m.equals(MAGIC_V1) || m.equals(MAGIC_V2) || m.equals(MAGIC_V3));
+}
+
+/** True only for a V3 (asymmetric, public-key) blob — decrypts with the local
+ *  private key, never a passphrase. The branch `kit memory pull` keys off. */
+export function isAsymmetricBackup(inPath: string): boolean {
+  const m = magicOf(inPath);
+  return !!m && m.equals(MAGIC_V3);
 }
 
 /** Encrypt the memory DB file into `outPath`. WAL is checkpointed first so the file is complete. */
@@ -131,5 +149,148 @@ export function restoreEncrypted(passphrase: string, inPath: string, destPath: s
   // 0600: never leave the decrypted plaintext brain world-readable, even when
   // restoring to a custom path outside ~/.kit. (openMemoryDb chmods the live DB;
   // this is the restore-time equivalent.)
+  writeFileSync(destPath, data, { mode: 0o600 });
+}
+
+// ── Asymmetric (public-key) mode ──────────────────────────────────────────────
+// Why: the symmetric passphrase must live on EVERY machine that pushes — which an
+// ephemeral session (no secret-safe env, no SSH key) can't do. Public-key mode
+// flips it: a session encrypts to a PUBLIC recipient key (not a secret — safe in a
+// setup script, env var, or the repo), and only the durable machines holding the
+// PRIVATE key can decrypt. So an ephemeral session needs nothing secret to push.
+//
+// Scheme (libsodium sealed-box shape, pure node:crypto — zero deps): a fresh
+// ephemeral X25519 keypair per blob; ECDH(eph_priv, recipient_pub) → HKDF-SHA256
+// (salt = eph_pub||recipient_pub, info = "kit-memory-v3") → 32-byte AES key →
+// AES-256-GCM. Layout: MAGIC_V3(8) | eph_pub(32) | iv(12) | tag(16) | ciphertext.
+
+const HKDF_INFO = Buffer.from("kit-memory-v3");
+const PUB_PREFIX = "kitmem-pub-";
+
+/** A stored X25519 private key (JWK OKP form: has both `d` and `x`). */
+export interface MemoryKeyJwk {
+  kty: "OKP";
+  crv: "X25519";
+  x: string; // base64url public component
+  d: string; // base64url private scalar
+}
+
+function rawFromJwkComponent(b64url: string): Buffer {
+  return Buffer.from(b64url, "base64url");
+}
+
+/** The recipient public string for a JWK/`x` — safe to share (NOT a secret). */
+export function publicKeyString(x: string): string {
+  return PUB_PREFIX + x;
+}
+
+/** Parse a `kitmem-pub-…` recipient string into an X25519 public KeyObject. */
+export function parseRecipient(pub: string): KeyObject {
+  if (!pub.startsWith(PUB_PREFIX)) {
+    throw new Error(`invalid recipient key: must start with "${PUB_PREFIX}"`);
+  }
+  const x = pub.slice(PUB_PREFIX.length).trim();
+  if (rawFromJwkComponent(x).length !== X25519_LEN) {
+    throw new Error("invalid recipient key: not a 32-byte X25519 public key");
+  }
+  try {
+    return createPublicKey({ key: { kty: "OKP", crv: "X25519", x }, format: "jwk" });
+  } catch {
+    throw new Error("invalid recipient key: could not parse X25519 public key");
+  }
+}
+
+/** Where the local private decryption key lives (0600), honoring KIT_MEMORY_DIR. */
+export function getMemoryKeyPath(): string {
+  return join(getMemoryDir(), "memory-key.json");
+}
+
+/** Generate a fresh X25519 keypair. Returns the shareable public string and the
+ *  private JWK to persist on durable machines only. */
+export function generateMemoryKeypair(): { publicKey: string; privateJwk: MemoryKeyJwk } {
+  const { publicKey, privateKey } = generateKeyPairSync("x25519");
+  const priv = privateKey.export({ format: "jwk" }) as unknown as MemoryKeyJwk;
+  const pub = publicKey.export({ format: "jwk" }) as { x: string };
+  return { publicKey: publicKeyString(pub.x), privateJwk: { ...priv, x: pub.x } };
+}
+
+/** Persist the private key (0600) and return the file path. */
+export function saveMemoryKey(privateJwk: MemoryKeyJwk): string {
+  const dir = getMemoryDir();
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const path = getMemoryKeyPath();
+  writeFileSync(path, JSON.stringify(privateJwk), { mode: 0o600 });
+  return path;
+}
+
+/** Load the local private key, or null if none exists / is unreadable. */
+export function loadMemoryKey(): MemoryKeyJwk | null {
+  try {
+    const j = JSON.parse(readFileSync(getMemoryKeyPath(), "utf8")) as MemoryKeyJwk;
+    return j.kty === "OKP" && j.crv === "X25519" && j.d && j.x ? j : null;
+  } catch {
+    return null;
+  }
+}
+
+function deriveSharedKey(ephPubRaw: Buffer, recipPubRaw: Buffer, shared: Buffer): Buffer {
+  const salt = Buffer.concat([ephPubRaw, recipPubRaw]);
+  return Buffer.from(hkdfSync("sha256", shared, salt, HKDF_INFO, 32));
+}
+
+/** Encrypt the memory DB to a PUBLIC recipient key (no passphrase). WAL-checkpoint first. */
+export function backupToRecipient(
+  recipient: string,
+  srcPath: string = getMemoryDbPath(),
+  outPath?: string,
+): void {
+  if (!outPath) throw new Error("backupToRecipient requires an output path");
+  const recipKey = parseRecipient(recipient);
+  const recipRaw = rawFromJwkComponent((recipKey.export({ format: "jwk" }) as { x: string }).x);
+
+  const db = openMemoryDb(srcPath);
+  db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  db.close();
+  const data = readFileSync(srcPath);
+
+  const { publicKey: ephPub, privateKey: ephPriv } = generateKeyPairSync("x25519");
+  const ephRaw = rawFromJwkComponent((ephPub.export({ format: "jwk" }) as { x: string }).x);
+  const shared = diffieHellman({ privateKey: ephPriv, publicKey: recipKey });
+  const key = deriveSharedKey(ephRaw, recipRaw, shared);
+
+  const iv = randomBytes(IV_LEN);
+  const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_LEN });
+  const ciphertext = Buffer.concat([cipher.update(data), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  writeFileSync(outPath, Buffer.concat([MAGIC_V3, ephRaw, iv, tag, ciphertext]), { mode: 0o600 });
+}
+
+/** Decrypt a V3 blob with the local private key. Throws on wrong key / tamper (GCM auth). */
+export function restoreWithKey(privateJwk: MemoryKeyJwk, inPath: string, destPath: string): void {
+  const blob = readFileSync(inPath);
+  if (!blob.subarray(0, MAGIC_LEN).equals(MAGIC_V3)) {
+    throw new Error("not a kit public-key backup (bad magic)");
+  }
+  let off = MAGIC_LEN;
+  const ephRaw = blob.subarray(off, (off += X25519_LEN));
+  const iv = blob.subarray(off, (off += IV_LEN));
+  const tag = blob.subarray(off, (off += TAG_LEN));
+  const ciphertext = blob.subarray(off);
+
+  const privKey = createPrivateKey({
+    key: { kty: "OKP", crv: "X25519", x: privateJwk.x, d: privateJwk.d },
+    format: "jwk",
+  });
+  const ephPub = createPublicKey({
+    key: { kty: "OKP", crv: "X25519", x: ephRaw.toString("base64url") },
+    format: "jwk",
+  });
+  const shared = diffieHellman({ privateKey: privKey, publicKey: ephPub });
+  const recipRaw = rawFromJwkComponent(privateJwk.x);
+  const key = deriveSharedKey(ephRaw, recipRaw, shared);
+
+  const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_LEN });
+  decipher.setAuthTag(tag);
+  const data = Buffer.concat([decipher.update(ciphertext), decipher.final()]); // throws if wrong key
   writeFileSync(destPath, data, { mode: 0o600 });
 }

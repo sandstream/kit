@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Public-key memory sync — an ephemeral session can push with NO secret.** The
+  passphrase mode (AES-256-GCM + scrypt) requires the *same secret on every
+  machine that pushes*, which an ephemeral cloud session can't safely hold (no
+  secret-store, no SSH key). New **asymmetric mode** flips it: `kit memory keygen`
+  mints an X25519 keypair; the **public** recipient string (`kitmem-pub-…`, not a
+  secret — safe in a setup script, env var, or the repo) goes in `[memory.sync]`
+  as `recipient = "…"`, and push encrypts to it (`MAGIC_V3`: ephemeral X25519 →
+  HKDF-SHA256 → AES-256-GCM, libsodium sealed-box shape, **zero new deps** — pure
+  `node:crypto`). Only machines holding the **private** key (`~/.kit/memory-key.json`,
+  0600) can decrypt on pull. So an ephemeral session needs only a public key + a
+  reachable private repo to contribute its memory — nothing secret leaves it, and
+  `push_on_end`/`pull_on_start` work passphrase-free when a recipient is set.
+
 - **External timestamp anchor (command transport) — closes the same-machine
   forge gap.** The keyless chain + machine-local HMAC anchor proves *what
   happened on this machine*, but anyone with that machine's anchor key (UID) can

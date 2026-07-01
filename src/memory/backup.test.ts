@@ -4,7 +4,16 @@ import { mkdtempSync, rmSync, existsSync, statSync, readFileSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, upsertSession, insertMessage, getStats } from "./db.js";
-import { backupEncrypted, restoreEncrypted } from "./backup.js";
+import {
+  backupEncrypted,
+  restoreEncrypted,
+  generateMemoryKeypair,
+  backupToRecipient,
+  restoreWithKey,
+  isAsymmetricBackup,
+  isEncryptedBackup,
+  parseRecipient,
+} from "./backup.js";
 
 describe("memory encrypted backup / restore", () => {
   it("roundtrips data; a wrong passphrase fails", () => {
@@ -74,5 +83,53 @@ describe("memory encrypted backup / restore", () => {
     db.close();
     assert.throws(() => restoreEncrypted("p", join(tmp, "x.db"), bogus), /magic/);
     rmSync(tmp, { recursive: true, force: true });
+  });
+});
+
+describe("memory asymmetric (public-key) backup — no passphrase, ephemeral-safe", () => {
+  it("round-trips: encrypt to a PUBLIC key, decrypt only with the matching PRIVATE key", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "kit-pk-"));
+    const src = join(tmp, "memory.db");
+    const enc = join(tmp, "blob.enc");
+    const dest = join(tmp, "restored.db");
+
+    let db = openMemoryDb(src);
+    upsertSession(db, { sessionId: "s1", harness: "claude-code" });
+    insertMessage(db, { uuid: "u1", sessionId: "s1", type: "user", content: "asymmetric secret" });
+    db.close();
+
+    const { publicKey, privateJwk } = generateMemoryKeypair();
+    // encrypt with ONLY the public string — no passphrase anywhere
+    backupToRecipient(publicKey, src, enc);
+    assert.ok(isEncryptedBackup(enc), "V3 counts as an encrypted backup");
+    assert.ok(isAsymmetricBackup(enc), "flagged as the public-key (V3) form");
+    assert.equal(readFileSync(enc).subarray(0, 8).toString(), "KITMEM03");
+    assert.equal(statSync(enc).mode & 0o777, 0o600, "blob is 0600");
+
+    restoreWithKey(privateJwk, enc, dest);
+    db = openMemoryDb(dest);
+    assert.equal(getStats(db).messages, 1);
+    db.close();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("a DIFFERENT private key cannot decrypt (confidentiality holds)", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "kit-pk2-"));
+    const src = join(tmp, "memory.db");
+    const enc = join(tmp, "blob.enc");
+    openMemoryDb(src).close();
+
+    const alice = generateMemoryKeypair();
+    const mallory = generateMemoryKeypair();
+    backupToRecipient(alice.publicKey, src, enc);
+    // Mallory's key is a valid X25519 key but the wrong recipient → GCM auth fails
+    assert.throws(() => restoreWithKey(mallory.privateJwk, enc, join(tmp, "x.db")), /./);
+    assert.ok(!existsSync(join(tmp, "x.db")), "no plaintext written on a failed decrypt");
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("parseRecipient rejects a malformed public key", () => {
+    assert.throws(() => parseRecipient("not-a-key"), /must start with/);
+    assert.throws(() => parseRecipient("kitmem-pub-deadbeef"), /X25519 public key/);
   });
 });
