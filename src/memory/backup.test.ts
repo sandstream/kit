@@ -133,3 +133,41 @@ describe("memory asymmetric (public-key) backup — no passphrase, ephemeral-saf
     assert.throws(() => parseRecipient("kitmem-pub-deadbeef"), /X25519 public key/);
   });
 });
+
+describe("memory backup — gzip compression (fits under host size caps)", () => {
+  it("the encrypted blob is much smaller than the raw DB, and still round-trips", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "kit-gz-"));
+    const src = join(tmp, "memory.db");
+    const enc = join(tmp, "blob.enc");
+    const dest = join(tmp, "restored.db");
+
+    const db = openMemoryDb(src);
+    upsertSession(db, { sessionId: "s1", harness: "claude-code" });
+    // highly compressible, repetitive content — like real transcripts
+    for (let i = 0; i < 500; i++) {
+      insertMessage(db, {
+        uuid: `u${i}`,
+        sessionId: "s1",
+        type: "user",
+        content: "the quick brown fox jumps over the lazy dog ".repeat(20),
+      });
+    }
+    db.close();
+
+    const rawSize = statSync(src).size;
+    backupToRecipient(generateMemoryKeypair().publicKey, src, enc); // any mode compresses
+    const blobSize = statSync(enc).size;
+    assert.ok(
+      blobSize < rawSize / 2,
+      `blob (${blobSize}) should be < half the raw db (${rawSize})`,
+    );
+
+    // and a passphrase-mode blob restores intact (compression is transparent)
+    backupEncrypted("Galaxy-Vortex-Quartz-2026-x9", src, enc);
+    restoreEncrypted("Galaxy-Vortex-Quartz-2026-x9", enc, dest);
+    const rdb = openMemoryDb(dest);
+    assert.equal(getStats(rdb).messages, 500);
+    rdb.close();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+});
