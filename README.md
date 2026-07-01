@@ -520,11 +520,13 @@ As of 2.0, kit's public surfaces are versioned contracts, not just code that hap
 `kit memory` gives an agent a local-first, deterministic second brain, it stores
 your raw conversation history and searches it _before answering_, so it pulls
 receipts instead of guessing. SQLite + FTS5, two hooks, no vectors, no model calls.
-It indexes transcripts from **seven** coding agents (Claude Code, Codex, Gemini,
-Continue, Cursor, Amazon Q, and Cline), each parsed against the agent's own
+It indexes transcripts from **eight** coding agents (Claude Code, Codex, Gemini,
+Continue, Cursor, Amazon Q, Cline, and OpenCode), each parsed against the agent's own
 serialization format, never guessed. A private personal tier (encrypted backup so a
-stolen laptop doesn't lose your context) plus a curated, area-organized **shared**
-tier that travels with the repo and is reviewed like code.
+stolen laptop doesn't lose your context, plus opt-in **cross-device sync** — your
+own git remote or command, ciphertext-only, with a public-key mode so even a
+throwaway cloud session can contribute with no secret) plus a curated,
+area-organized **shared** tier that travels with the repo and is reviewed like code.
 
 ```bash
 kit memory install && kit memory index
