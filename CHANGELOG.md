@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-07-01
+
 ### Added
 
 - **`sandstream-kit-plugin-sentrux` — architecture-decay findings.** A read-only
