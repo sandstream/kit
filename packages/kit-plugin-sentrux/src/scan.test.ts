@@ -45,7 +45,10 @@ describe("sentrux plugin", () => {
 
   it("infers gatePassed from violations when no explicit flag", () => {
     assert.equal(parseSentruxJson(JSON.stringify({ violations: [] })).gatePassed, true);
-    assert.equal(parseSentruxJson(JSON.stringify({ issues: [{ message: "x" }] })).gatePassed, false);
+    assert.equal(
+      parseSentruxJson(JSON.stringify({ issues: [{ message: "x" }] })).gatePassed,
+      false,
+    );
   });
 
   it("throws on invalid JSON; tolerates a non-object payload", () => {
