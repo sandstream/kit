@@ -273,9 +273,7 @@ async function memPal(): Promise<boolean> {
       return true;
     }
     console.error(`${c.red}Unknown pal action: ${action}${c.reset}`);
-    console.error(
-      "Use: kit memory pal [list|add|claim|release|done|snooze|verify|import|prune]",
-    );
+    console.error("Use: kit memory pal [list|add|claim|release|done|snooze|verify|import|prune]");
     return false;
   } finally {
     db.close();
