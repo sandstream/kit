@@ -129,6 +129,29 @@ describe("detectAgentTargets", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("wires Copilot via a .vscode/ dir (→ .github/copilot-instructions.md)", () => {
+    const dir = tmpRepo();
+    try {
+      mkdirSync(join(dir, ".vscode"));
+      const files = detectAgentTargets(dir).map((t) => t.file);
+      assert.deepEqual(files, [".github/copilot-instructions.md"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects Copilot via an existing .github/copilot-instructions.md", () => {
+    const dir = tmpRepo();
+    try {
+      mkdirSync(join(dir, ".github"));
+      writeFileSync(join(dir, ".github", "copilot-instructions.md"), "# instructions\n");
+      const agents = detectAgentTargets(dir).map((t) => t.agent);
+      assert.deepEqual(agents, ["Copilot"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("writeAgentConfig", () => {
@@ -141,6 +164,20 @@ describe("writeAgentConfig", () => {
       assert.equal(results[0].file, "CLAUDE.md");
       assert.equal(results[0].action, "created");
       const written = readFileSync(join(dir, "CLAUDE.md"), "utf-8");
+      assert.ok(written.includes(KIT_BLOCK_BEGIN) && written.includes(KIT_BLOCK_END));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("creates the parent dir for a nested target (Copilot's .github/copilot-instructions.md)", async () => {
+    const dir = tmpRepo();
+    try {
+      const t = [{ agent: "Copilot", file: ".github/copilot-instructions.md" }];
+      const results = await writeAgentConfig(dir, t);
+      assert.equal(results[0].action, "created");
+      assert.ok(existsSync(join(dir, ".github", "copilot-instructions.md")), "file created");
+      const written = readFileSync(join(dir, ".github", "copilot-instructions.md"), "utf-8");
       assert.ok(written.includes(KIT_BLOCK_BEGIN) && written.includes(KIT_BLOCK_END));
     } finally {
       rmSync(dir, { recursive: true, force: true });

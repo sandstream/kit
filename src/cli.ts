@@ -5251,7 +5251,7 @@ export const COMMAND_HELP: Record<string, string> = {
   "env current": "Show active environment marker",
   analyze: "Analyze repo + emit draft CLAUDE.md / RULES.md",
   "agent-config":
-    "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules",
+    "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules / .github/copilot-instructions.md",
   "gate-bash":
     "PreToolUse install-gate: read an agent's pending Bash command on stdin, block (exit 2) un-triaged installs",
   security:
