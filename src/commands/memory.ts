@@ -16,6 +16,7 @@ import { sparkline, fmtTokens } from "../memory/stats.js";
 import { indexAllHarnesses } from "../memory/parser.js";
 import { mergeDb } from "../memory/merge.js";
 import { buildSuggestPrompt } from "../memory/suggest.js";
+import { learnRecurring } from "../memory/learn.js";
 import { getCurrentProjectRoot } from "../memory/project.js";
 import { scanDbForSecrets } from "../memory/scan.js";
 import {
@@ -107,6 +108,7 @@ export async function cmdMemory(): Promise<boolean> {
     stats: memStats,
     status: memStats, // common typo/alias for `stats`
     suggest: memSuggest,
+    learn: memLearn,
     search: memSearch,
     hook: memHook,
     install: memInstall,
@@ -280,6 +282,40 @@ async function memPal(): Promise<boolean> {
   }
 }
 
+async function memLearn(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  const db = openMemoryDb();
+  try {
+    const candidates = learnRecurring(db, {});
+    if (jsonMode) {
+      console.log(JSON.stringify(candidates));
+      return true;
+    }
+    if (candidates.length === 0) {
+      console.log(
+        `${c.dim}no recurring instructions found — the store is small or your asks are varied${c.reset}`,
+      );
+      return true;
+    }
+    console.log(
+      `${c.bold}${candidates.length}${c.reset} recurring instruction(s) worth a memory rule:`,
+    );
+    for (const cand of candidates) {
+      const flag = cand.correction ? ` ${c.dim}· correction${c.reset}` : "";
+      const s = cand.sessions === 1 ? "session" : "sessions";
+      console.log(
+        `  ${c.bold}${cand.count}×${c.reset} ${c.dim}(${cand.sessions} ${s})${c.reset}${flag}  ${cand.example}`,
+      );
+    }
+    console.log(
+      `\n${c.dim}You keep re-typing these. Record the ones worth keeping with ${c.reset}kit memory share${c.dim} or in your rules file (CLAUDE.md / AGENTS.md) so you stop repeating them.${c.reset}`,
+    );
+    return true;
+  } finally {
+    db.close();
+  }
+}
+
 async function memHelp(): Promise<boolean> {
   console.log("kit memory — local conversation memory (SQLite + FTS5)");
   console.log("\nUsage:");
@@ -290,6 +326,9 @@ async function memHelp(): Promise<boolean> {
     "  kit memory search <query>   Search memory + curated shared decisions (current project; --global for all)",
   );
   console.log("  kit memory stats            Show what the memory store contains");
+  console.log(
+    "  kit memory learn            Surface recurring instructions you keep re-typing (candidates for a memory rule)",
+  );
   console.log("  kit memory merge <file>     Merge another machine's memory.db into this one");
   console.log(
     "  kit memory sync <file>      Sync from a memory export/backup (decrypts encrypted blobs)",

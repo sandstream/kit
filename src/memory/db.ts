@@ -344,12 +344,15 @@ export interface SearchOptions {
  * bare `AND`/`OR`/`NEAR` either crashes the query ("no such column: …") or acts
  * as an unintended operator. We split on whitespace, quote each term (escaping
  * embedded quotes by doubling them — the FTS5 string-literal rule), and
- * prefix-match it; terms are joined by implicit AND. Returns "" for an
- * empty/whitespace query so the caller can short-circuit.
+ * prefix-match it. `op` joins the terms: "AND" (implicit, the default — every
+ * term must match) or "OR" (any term — the graceful-recall fallback, ranked by
+ * bm25 so the message matching the most terms floats to the top). Returns "" for
+ * an empty/whitespace query so the caller can short-circuit.
  */
-export function toFtsMatchQuery(raw: string): string {
+export function toFtsMatchQuery(raw: string, op: "AND" | "OR" = "AND"): string {
   const terms = raw.trim().split(/\s+/).filter(Boolean);
-  return terms.map((t) => `"${t.replace(/"/g, '""')}"*`).join(" ");
+  const quoted = terms.map((t) => `"${t.replace(/"/g, '""')}"*`);
+  return quoted.join(op === "OR" ? " OR " : " ");
 }
 
 export function searchMessages(
@@ -357,27 +360,41 @@ export function searchMessages(
   query: string,
   opts: SearchOptions = {},
 ): SearchHit[] {
-  const match = toFtsMatchQuery(query);
-  if (!match) return [];
+  const terms = query.trim().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return [];
   const limit = opts.limit ?? 20;
-  const params: (string | number)[] = [match];
-  let where = "messages_fts MATCH ?";
-  if (opts.projectPath) {
-    where += " AND (m.cwd = ? OR m.cwd LIKE ?)";
-    params.push(opts.projectPath, `${opts.projectPath}/%`);
-  }
-  params.push(limit);
-  return db
-    .prepare(
-      `SELECT m.id AS id, m.uuid AS uuid, m.session_id AS sessionId, m.role AS role,
-              m.content AS content, m.timestamp AS timestamp
-       FROM messages_fts f
-       JOIN messages m ON m.id = f.rowid
-       WHERE ${where}
-       ORDER BY rank
-       LIMIT ?`,
-    )
-    .all(...params) as unknown as SearchHit[];
+
+  const run = (match: string): SearchHit[] => {
+    const params: (string | number)[] = [match];
+    let where = "messages_fts MATCH ?";
+    if (opts.projectPath) {
+      where += " AND (m.cwd = ? OR m.cwd LIKE ?)";
+      params.push(opts.projectPath, `${opts.projectPath}/%`);
+    }
+    params.push(limit);
+    return db
+      .prepare(
+        `SELECT m.id AS id, m.uuid AS uuid, m.session_id AS sessionId, m.role AS role,
+                m.content AS content, m.timestamp AS timestamp
+         FROM messages_fts f
+         JOIN messages m ON m.id = f.rowid
+         WHERE ${where}
+         ORDER BY rank
+         LIMIT ?`,
+      )
+      .all(...params) as unknown as SearchHit[];
+  };
+
+  // Precision first: an all-terms (implicit-AND) match. FTS5's `rank` is bm25,
+  // so results already come back relevance-ordered.
+  const strict = run(toFtsMatchQuery(query, "AND"));
+  if (strict.length > 0 || terms.length < 2) return strict;
+
+  // Graceful recall: a strict AND over a multi-term query returned nothing (no
+  // single message holds every term). Fall back to OR so partial matches still
+  // surface, bm25-ranked — the message covering the most terms ranks first.
+  // This is the "rank by relevance, not all-or-nothing" behavior (#164).
+  return run(toFtsMatchQuery(query, "OR"));
 }
 
 export interface QueryLogInput {

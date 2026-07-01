@@ -16,6 +16,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `claimed_by` records the winner (defaults to this device). `pal release <id>`
   returns an abandoned claim to `open`. Deterministic, zero-LLM, local; schema
   v6 (older rows have NULL claim fields — backward-compatible).
+- **`kit memory learn` — surface instructions you keep re-typing.** Deterministically
+  mines the local store for user messages repeated 3+ times (verbatim after casing /
+  punctuation normalization), ranked by distinct sessions then count, with a
+  `correction` flag for redirections ("no", "stop", "instead", "nej", "istället").
+  These recurring asks are candidates for a memory rule — record them with
+  `kit memory share` or in a rules file (CLAUDE.md / AGENTS.md) instead of re-typing.
+  Zero-LLM, local, no ML — kit finds the pattern; you decide the rule. `--json`
+  supported. Idea from headroom's `learn` (kit-research), done the kit way.
+
+### Fixed
+
+- **`kit memory search` no longer comes back empty for multi-term queries.** A
+  query whose terms don't all co-occur in a single message used to match zero
+  rows (the FTS5 expression joined terms by implicit AND). It now falls back to
+  OR when the strict AND finds nothing, bm25-ranked so the message covering the
+  most terms ranks first — relevance instead of all-or-nothing. Single-term
+  lookups and exact multi-term matches are unchanged; still zero-LLM, local,
+  no new deps. (#164)
 
 ## [3.1.0] - 2026-07-01
 
