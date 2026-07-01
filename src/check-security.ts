@@ -420,12 +420,23 @@ async function checkServiceExposure(): Promise<SecurityCheckResult[]> {
         detail: "exposed on all interfaces (verify firewall)",
         severity: "medium",
       });
-    } else {
+    } else if (netstat.includes("127.0.0.1:3199") || netstat.includes("[::1]:3199")) {
       results.push({
         category: "exposure",
         name: "Remote API",
         status: "pass",
         detail: "localhost only",
+      });
+    } else {
+      // Listening, but NOT on 0.0.0.0 and NOT on loopback → a routable interface
+      // (a LAN IP / global IPv6). Reporting "localhost only" here would greenlight
+      // an exposed approval/audit API. Gate on a POSITIVE loopback match instead.
+      results.push({
+        category: "exposure",
+        name: "Remote API",
+        status: "warn",
+        detail: "listening on a non-loopback address (verify firewall / bind to 127.0.0.1)",
+        severity: "medium",
       });
     }
   } catch {
@@ -1165,22 +1176,57 @@ export function parseOsvVulnCount(stdout: string): number {
  */
 async function checkOsvScanner(): Promise<SecurityCheckResult> {
   const name = "osv-scanner (deps)";
+  // osv covers ecosystems kit has no dedicated scanner for (go/rust/php/ruby/dart).
+  // If none is present, osv legitimately does not apply → an honest skip. If one IS
+  // present, osv absent/failed means those deps are UNSCANNED → WARN (so --strict
+  // catches it), never a silent "clean".
+  const osvEcosystemPresent = async (): Promise<boolean> => {
+    for (const m of ["go.mod", "Cargo.lock", "composer.lock", "Gemfile.lock", "pubspec.lock"]) {
+      try {
+        await access(resolve(process.cwd(), m));
+        return true;
+      } catch {
+        /* not present */
+      }
+    }
+    return false;
+  };
   const osvBin = await resolveToolBin("osv-scanner");
   if (!osvBin) {
-    return {
-      category: "supply-chain",
-      name,
-      status: "skip",
-      detail: "osv-scanner not installed (mise use aqua:google/osv-scanner)",
-    };
+    return (await osvEcosystemPresent())
+      ? {
+          category: "supply-chain",
+          name,
+          status: "warn",
+          detail:
+            "osv-scanner not installed but go/rust/php/ruby manifests are present — those dependency CVEs are UNSCANNED (mise use aqua:google/osv-scanner)",
+          severity: "medium",
+        }
+      : {
+          category: "supply-chain",
+          name,
+          status: "skip",
+          detail: "osv-scanner not installed (no go/rust/php/ruby/dart manifests to scan)",
+        };
   }
   const result = await execFileNoThrow(osvBin, ["--format", "json", "-r", "."], {
     timeout: 120_000,
   });
   const count = parseOsvVulnCount(result.stdout);
   if (count < 0) {
-    // osv exits non-zero with no JSON when there are no lockfiles to scan.
-    return { category: "supply-chain", name, status: "skip", detail: "no lockfiles to scan" };
+    // No parseable JSON. If an osv ecosystem IS present the run FAILED (crash/timeout/
+    // arg-incompat) and must not read as clean → WARN. Otherwise it's the genuine
+    // no-lockfiles case → honest skip.
+    return (await osvEcosystemPresent())
+      ? {
+          category: "supply-chain",
+          name,
+          status: "warn",
+          detail:
+            "osv-scanner produced no parseable result despite go/rust/php manifests — the run likely failed (crash/timeout); deps are UNSCANNED",
+          severity: "medium",
+        }
+      : { category: "supply-chain", name, status: "skip", detail: "no lockfiles to scan" };
   }
   if (count === 0) {
     return {
@@ -1298,20 +1344,8 @@ async function checkLicenses(): Promise<SecurityCheckResult> {
  * Run static analysis using Semgrep to catch security anti-patterns in source code.
  */
 async function checkSemgrep(): Promise<SecurityCheckResult> {
-  // Resolve mise-first (see socket): a mise-installed semgrep isn't on kit's PATH.
-  const semgrepBin = await resolveToolBin("semgrep");
-  if (!semgrepBin) {
-    return {
-      category: "supply-chain",
-      name: "semgrep SAST",
-      status: "skip",
-      detail: "semgrep not installed (mise use pipx:semgrep, or brew install semgrep)",
-    };
-  }
-
-  // Opt-in: a networked, multi-second SAST scan does not run by default. Enable
-  // it by setting KIT_SEMGREP_CONFIG to a ruleset (e.g. p/default, or a local
-  // ruleset path for air-gap). Skipping is honest — green stays "0 unreviewed".
+  // Opt-in FIRST: a networked, multi-second SAST scan does not run by default.
+  // Not opted in → skipping is honest (green stays "0 unreviewed").
   if (!process.env.KIT_SEMGREP_CONFIG?.trim()) {
     return {
       category: "supply-chain",
@@ -1319,6 +1353,22 @@ async function checkSemgrep(): Promise<SecurityCheckResult> {
       status: "skip",
       detail:
         "SAST opt-in: set KIT_SEMGREP_CONFIG (e.g. p/default, or a local ruleset path) to enable",
+    };
+  }
+
+  // Opted in → SAST is EXPECTED to run. If semgrep is absent, that is NOT a legit
+  // skip: the operator asked for SAST and it didn't happen → WARN (so --strict
+  // catches an unreviewed commit) rather than a silent green.
+  // Resolve mise-first (see socket): a mise-installed semgrep isn't on kit's PATH.
+  const semgrepBin = await resolveToolBin("semgrep");
+  if (!semgrepBin) {
+    return {
+      category: "supply-chain",
+      name: "semgrep SAST",
+      status: "warn",
+      detail:
+        "KIT_SEMGREP_CONFIG is set (SAST opted in) but semgrep is not installed — SAST did NOT run (mise use pipx:semgrep, or brew install semgrep)",
+      severity: "medium",
     };
   }
 

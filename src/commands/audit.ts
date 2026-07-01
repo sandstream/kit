@@ -110,7 +110,23 @@ async function cmdAuditVerify(): Promise<boolean> {
   try {
     content = await readFile(logPath, "utf-8");
   } catch {
-    console.log(`${c.dim}no audit log at ${logPath}${c.reset}`);
+    // Verify-by-absence is FALSE SECURITY: a deleted / never-anchored log must NOT
+    // report "verified". An erased trail is exactly what a tamper-evidence system
+    // must catch. Fail closed when strict, require_anchor, or this machine has
+    // anchored logs elsewhere (so an attacker can't erase the trail to pass green).
+    const { hasAnyAnchoredLogs } = await import("../audit-anchor.js");
+    const failClosed = strictFlag || requireAnchor || (await hasAnyAnchoredLogs());
+    if (failClosed) {
+      console.error(
+        `${c.red}✗ no audit log at ${logPath} — refusing to report verified under strict / require_anchor / a machine that has anchored logs. An erased trail is a tamper signal, not a pass.${c.reset}`,
+      );
+      return false;
+    }
+    // Genuine fresh install (no strict, no require_anchor, never anchored): surface
+    // it as a WARN, not a silent dim pass.
+    console.warn(
+      `${c.yellow}! no audit log at ${logPath} yet — nothing to verify (fresh install)${c.reset}`,
+    );
     return true;
   }
   const r = verifyAuditChain(content);

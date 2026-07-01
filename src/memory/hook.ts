@@ -9,7 +9,7 @@
  * block a prompt or break a session. Deterministic, zero model calls.
  */
 import { basename, join, resolve } from "node:path";
-import { existsSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, statSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { openMemoryDb, getStats, recentMessages, getMemoryDir, ensureMemoryDir } from "./db.js";
 import { indexClaudeTranscripts, indexAllHarnesses } from "./parser.js";
@@ -213,6 +213,23 @@ function midSessionIndexMarker(): string {
   return join(getMemoryDir(), ".mid-session-index");
 }
 
+/**
+ * Durable, best-effort log for the DETACHED session-end / mid-session workers.
+ * Their stderr is /dev/null (stdio:"ignore"), so a failure or skip there is
+ * otherwise INVISIBLE — the user believes the capture/push ran. We persist it to
+ * ~/.kit/session-end.log and surface it on the next SessionStart. Never throws.
+ */
+export function logSessionEndEvent(line: string): void {
+  try {
+    appendFileSync(
+      join(getMemoryDir(), "session-end.log"),
+      `${new Date().toISOString()}  ${line}\n`,
+    );
+  } catch {
+    /* best-effort — the log itself must never break a hook */
+  }
+}
+
 /** True if a mid-session index is due (marker missing or older than the interval). */
 export function dueForMidSessionIndex(now: number = Date.now()): boolean {
   try {
@@ -250,9 +267,26 @@ export function maybeStartMidSessionIndex(): boolean {
       detached: true,
       stdio: "ignore",
     });
+    // An async spawn failure (ENOENT/EAGAIN) must NOT leave the debounce marker
+    // stamped — that would silently mute indexing for the whole interval. Roll it
+    // back and log (stderr is /dev/null for the detached child).
+    child.on("error", (e) => {
+      try {
+        rmSync(midSessionIndexMarker(), { force: true });
+      } catch {
+        /* ignore */
+      }
+      logSessionEndEvent(`mid-session index spawn failed: ${e.message}`);
+    });
     child.unref();
     return true;
-  } catch {
+  } catch (e) {
+    try {
+      rmSync(midSessionIndexMarker(), { force: true });
+    } catch {
+      /* ignore */
+    }
+    logSessionEndEvent(`mid-session index spawn threw: ${(e as Error).message}`);
     return false; // fail-open: never block a prompt
   }
 }
@@ -307,7 +341,11 @@ export function runSessionEndIndex(): { messages: number } {
     }
     db.close();
     return { messages };
-  } catch {
-    return { messages: 0 }; // fail-open
+  } catch (e) {
+    // The detached SessionEnd worker's stderr is /dev/null, so a bare return here
+    // would make an index failure completely invisible. Persist it (surfaced on the
+    // next SessionStart) — still fail-open (a SessionEnd hook must never throw).
+    logSessionEndEvent(`session-end index FAILED: ${(e as Error).message}`);
+    return { messages: 0 };
   }
 }

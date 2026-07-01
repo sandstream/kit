@@ -260,7 +260,11 @@ async function memPal(): Promise<boolean> {
     }
     if (action === "import") {
       const r = importLegacyLedger(db);
-      console.log(`${c.green}✓${c.reset} imported ${r.imported} item(s) from the legacy ledger`);
+      console.log(
+        r.imported > 0
+          ? `${c.green}✓${c.reset} imported ${c.bold}${r.imported}${c.reset} item(s) from the legacy ledger`
+          : `${c.dim}no legacy ledger items to import (none found, or already imported)${c.reset}`,
+      );
       return true;
     }
     if (action === "prune") {
@@ -411,9 +415,17 @@ async function memMerge(): Promise<boolean> {
   const db = openMemoryDb();
   try {
     const r = mergeDb(db, sourcePath);
-    console.log(
-      `${c.green}✓${c.reset} merged ${c.bold}${r.messages}${c.reset} messages + ${r.toolUses} tool-uses · ${r.sessions} sessions · ${r.pending} pending · ${r.threads} copilots ${c.dim}from ${sourcePath}${c.reset}`,
-    );
+    if (r.messages + r.toolUses + r.pending + r.threads === 0) {
+      // `sessions` is inflated by merge even for a fully-redundant source — don't
+      // let it dress up a no-op merge as success.
+      console.log(
+        `${c.yellow}!${c.reset} nothing new merged from ${c.dim}${sourcePath}${c.reset} — already contained (${r.sessions} sessions seen)`,
+      );
+    } else {
+      console.log(
+        `${c.green}✓${c.reset} merged ${c.bold}${r.messages}${c.reset} messages + ${r.toolUses} tool-uses · ${r.sessions} sessions · ${r.pending} pending · ${r.threads} copilots ${c.dim}from ${sourcePath}${c.reset}`,
+      );
+    }
   } catch (err) {
     db.close();
     console.error(`${c.red}${(err as Error).message}${c.reset}`);
@@ -440,12 +452,18 @@ async function memSync(): Promise<boolean> {
   const db = openMemoryDb();
   try {
     const r = syncFromExport(db, src, { passphrase: pass });
-    console.log(
-      `${c.green}✓${c.reset} synced ${c.bold}${r.messages}${c.reset} messages + ${r.toolUses} tool-uses · ${r.sessions} sessions · ${r.pending} pending · ${r.threads} copilots ${c.dim}from ${src}${c.reset}`,
-    );
-    console.log(
-      `${c.dim}last-write-wins on sessions; file_index (this machine's index state) left untouched${c.reset}`,
-    );
+    if (r.messages + r.toolUses + r.pending + r.threads === 0) {
+      console.log(
+        `${c.yellow}!${c.reset} nothing new — already in sync with ${c.dim}${src}${c.reset} (${r.sessions} sessions seen)`,
+      );
+    } else {
+      console.log(
+        `${c.green}✓${c.reset} synced ${c.bold}${r.messages}${c.reset} messages + ${r.toolUses} tool-uses · ${r.sessions} sessions · ${r.pending} pending · ${r.threads} copilots ${c.dim}from ${src}${c.reset}`,
+      );
+      console.log(
+        `${c.dim}last-write-wins on sessions; file_index (this machine's index state) left untouched${c.reset}`,
+      );
+    }
   } catch (err) {
     console.error(`${c.red}${(err as Error).message}${c.reset}`);
     return false;
@@ -532,11 +550,18 @@ async function memPush(): Promise<boolean> {
   }
   try {
     const r = pushMemory(cfg, pass, getCurrentProjectRoot());
-    console.log(
-      r.pushed
-        ? `${c.green}✓${c.reset} pushed encrypted memory → ${c.bold}${r.target}${c.reset} ${c.dim}(${r.file})${c.reset}`
-        : `${c.dim}already up to date — nothing to push${c.reset}`,
-    );
+    if (!r.pushed) {
+      console.log(`${c.dim}already up to date — nothing to push${c.reset}`);
+    } else if (r.verified) {
+      console.log(
+        `${c.green}✓${c.reset} pushed encrypted memory → ${c.bold}${r.target}${c.reset} ${c.dim}(${r.file})${c.reset}`,
+      );
+    } else {
+      // command transport: the shell command exited 0 but kit can't prove the blob landed.
+      console.log(
+        `${c.yellow}⚠${c.reset} ran push command → ${c.bold}${r.target}${c.reset} ${c.dim}(${r.file})${c.reset} — exit 0, but kit cannot confirm the blob was stored; verify the destination`,
+      );
+    }
     return true;
   } catch (err) {
     console.error(`${c.red}${(err as Error).message}${c.reset}`);
@@ -592,6 +617,13 @@ async function memPull(): Promise<boolean> {
       return true;
     }
     const m = r.merge!;
+    if (m.messages + m.toolUses + m.pending + m.threads === 0) {
+      // A blob was found but nothing new merged — don't dress a redundant pull as success.
+      console.log(
+        `${c.dim}already up to date — nothing new pulled from ${r.target} (${m.sessions} sessions seen)${c.reset}`,
+      );
+      return true;
+    }
     console.log(
       `${c.green}✓${c.reset} pulled ${c.bold}${m.messages}${c.reset} messages + ${m.toolUses} tool-uses · ${m.sessions} sessions · ${m.pending} pending · ${m.threads} copilots ${c.dim}from ${r.target}${c.reset}`,
     );

@@ -254,6 +254,15 @@ export interface PushResult {
   file: string;
   /** False when the encrypted blob was byte-identical to what's already on the remote (git only). */
   pushed: boolean;
+  /**
+   * True only when kit can PROVE the blob reached durable storage. The git
+   * transport commits + pushes (a failed push is a non-zero exit → throws), so
+   * it's verified. The `command` transport runs the operator's shell command:
+   * exit 0 does NOT prove the blob landed (a typo'd bucket / no-op `rclone` /
+   * `true` all exit 0), so it is NEVER verified — the caller must say so rather
+   * than report a false success.
+   */
+  verified: boolean;
 }
 
 /**
@@ -292,7 +301,8 @@ export function pushMemory(
       const blob = join(dir, cfg.file);
       encryptBlobForSync(cfg, passphrase, blob);
       runTransportCmd(cfg.pushCmd!, blob);
-      return { target: "command transport", file: cfg.file, pushed: true };
+      // exit 0 ≠ "the blob landed" — the command could no-op. Not verifiable here.
+      return { target: "command transport", file: cfg.file, pushed: true, verified: false };
     }
     // git transport — clone into the (empty) dir FIRST, then write the blob inside it.
     assertRemoteNotProjectOrigin(cfg.remote!, projectRoot);
@@ -300,13 +310,13 @@ export function pushMemory(
     encryptBlobForSync(cfg, passphrase, join(dir, cfg.file));
     git(["add", "--", cfg.file], dir);
     const dirty = git(["status", "--porcelain"], dir).trim();
-    if (!dirty) return { target: cfg.remote!, file: cfg.file, pushed: false };
+    if (!dirty) return { target: cfg.remote!, file: cfg.file, pushed: false, verified: true };
     // Identify the commit so a fresh-init repo has an author; rely on the user's
     // git identity, falling back to a neutral one only if git has none configured.
     ensureCommitIdentity(dir);
     git(["commit", "-q", "-m", "kit memory sync", "--", cfg.file], dir);
     git(["push", "-q", "origin", `HEAD:${cfg.branch ?? DEFAULT_BRANCH}`], dir);
-    return { target: cfg.remote!, file: cfg.file, pushed: true };
+    return { target: cfg.remote!, file: cfg.file, pushed: true, verified: true };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -416,13 +426,21 @@ export function tryAutoPull(projectRoot: string): AutoSyncResult {
   let cfg: SyncConfig | null;
   try {
     cfg = loadSyncConfig();
-  } catch {
-    return { ran: false };
+  } catch (e) {
+    // A malformed sync.toml must not silently disable pull_on_start — say why.
+    return { ran: false, note: `memory pull skipped: invalid sync.toml — ${(e as Error).message}` };
   }
   if (!cfg || !cfg.pullOnStart) return { ran: false };
   try {
     const r = pullMemory(cfg, process.env.KIT_MEMORY_PASSPHRASE, projectRoot);
-    return { ran: true, note: r.found ? `memory synced from ${r.target}` : undefined };
+    // found:false is NOT nothing-to-say — the session started with the local store
+    // only (blob missing, or a command transport that exited 0 but wrote no file).
+    return {
+      ran: true,
+      note: r.found
+        ? `memory synced from ${r.target}`
+        : `memory pull: no blob at ${r.target} yet — started with the local store only`,
+    };
   } catch (e) {
     return { ran: false, note: `memory pull skipped: ${(e as Error).message}` };
   }
@@ -437,8 +455,8 @@ export function tryAutoPush(projectRoot: string): AutoSyncResult {
   let cfg: SyncConfig | null;
   try {
     cfg = loadSyncConfig();
-  } catch {
-    return { ran: false };
+  } catch (e) {
+    return { ran: false, note: `memory push skipped: invalid sync.toml — ${(e as Error).message}` };
   }
   if (!cfg || !cfg.pushOnEnd) return { ran: false };
   // Public-key mode needs NO secret — that's the whole point for ephemeral
@@ -448,7 +466,14 @@ export function tryAutoPush(projectRoot: string): AutoSyncResult {
   }
   try {
     const r = pushMemory(cfg, process.env.KIT_MEMORY_PASSPHRASE, projectRoot);
-    return { ran: true, note: r.pushed ? `memory pushed to ${r.target}` : undefined };
+    // Never report a bare success for an UNVERIFIED command-transport push — exit 0
+    // doesn't prove the blob landed, and for an ephemeral container this is the only copy.
+    const note = !r.pushed
+      ? `memory already up to date on ${r.target}`
+      : r.verified
+        ? `memory pushed to ${r.target}`
+        : `ran memory push command for ${r.target} — UNVERIFIED, confirm the blob was stored`;
+    return { ran: true, note };
   } catch (e) {
     return { ran: false, note: `memory push skipped: ${(e as Error).message}` };
   }
@@ -477,12 +502,16 @@ export function maybeSyncNudge(): string | null {
     worthIt = false;
   }
   if (!worthIt) return null;
+  let markerErr: string | null = null;
   try {
     writeFileSync(marker, "", { mode: 0o600 });
-  } catch {
-    /* best-effort — if we can't write the marker, worst case we nudge again */
+  } catch (e) {
+    // Fail-soft (worst case we nudge again), but surface it — a permanently
+    // unwritable ~/.kit is worth knowing rather than silently re-nudging forever.
+    markerErr = (e as Error).message;
   }
-  return "tip: sync your memory across machines (and back it up) — run `kit memory sync init`";
+  const tip = "tip: sync your memory across machines (and back it up) — run `kit memory sync init`";
+  return markerErr ? `${tip}\n  (note: couldn't write ~/.kit marker — ${markerErr})` : tip;
 }
 
 /** Give the throwaway clone a commit identity if the environment has none. */

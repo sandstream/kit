@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security — no false green (a deterministic self-audit found these in kit itself)
+
+- **`kit audit verify` no longer passes when the audit log is missing.** A deleted
+  or never-anchored log used to print a dim "no audit log" line and exit 0 — so an
+  attacker erasing the tamper-evident trail SILENCED the alarm instead of tripping
+  it. It now fails closed (exit 1) under `--strict`, `[governance.audit].require_anchor`,
+  or when the machine has anchored logs elsewhere; a genuine fresh install gets a
+  WARN, not a silent pass. An erased trail is a tamper signal.
+- **Governance policy config is validated.** `[policy] default_mode` is now an enum
+  and `[policy] agent_writes` a typed record, so a typo like `"read-onlyy"` or a
+  wrong type ERRORS at load instead of silently failing the read-only gate (leaving
+  the repo writable while the operator believed it was locked). `policy`/`mcp` added
+  to KNOWN_SECTIONS (no more misleading "unknown section" warning for consumed config).
+- **Publish + security CI fail closed on an unscanned tree.** `KIT_BUMBLEBEE_REQUIRED=1`
+  is set on the supply-chain gate in `publish.yml` and `security.yml`, so a scanner
+  that could not run (unavailable / timeout) BLOCKS instead of warn-and-passing an
+  unscanned release as supply-chain-clean.
+
+### Fixed — memory operations are now honest (never a silent no-op)
+
+- **`kit memory push` never reports a false success.** The `command` transport (exit 0
+  ≠ blob stored) is now marked unverified; the CLI + auto-push say "ran push command —
+  UNVERIFIED, confirm it landed" instead of a green "pushed". The git transport, which
+  proves durability, stays verified.
+- **`kit memory install` won't clobber a corrupt `settings.json`.** An existing but
+  unparseable settings file now throws (refusing to overwrite your other Claude Code
+  settings) and `writeSettings` backs up to `.bak` before the first write.
+- **Session-start pull / session-end push / index surface their outcome.** `tryAutoPull`
+  notes "no blob yet" on a missing remote and "invalid sync.toml" on a bad config;
+  `tryAutoPush` distinguishes verified / unverified / skipped; the detached SessionEnd
+  worker (whose stderr is `/dev/null`) now persists failures to `~/.kit/session-end.log`
+  instead of vanishing; mid-session-index rolls back its debounce marker on a spawn failure.
+- **`kit memory pull/merge/sync` + `pal import`** print a neutral "nothing new" instead
+  of a green success on a redundant/empty operation.
+- **`kit memory index`** surfaces unreadable transcripts and files that parsed 0 messages
+  from non-empty lines (corrupt / unrecognised format) instead of silently reporting 0.
+- **`openMemoryDb`** warns when it cannot restrict `memory.db` permissions (secret-dense
+  store possibly world-readable) instead of a bare `catch {}`.
+
 ## [3.2.0] - 2026-07-01
 
 ### Added

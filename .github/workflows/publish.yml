@@ -90,6 +90,10 @@ jobs:
         env:
           KIT_BUMBLEBEE_PROFILE: deep
           KIT_BUMBLEBEE_ROOTS: "."
+          # Fail CLOSED: a scanner that couldn't run (unavailable / timeout /
+          # incomplete) must BLOCK the publish, never warn-and-pass an unscanned
+          # release as supply-chain-clean.
+          KIT_BUMBLEBEE_REQUIRED: "1"
         run: |
           npm run build
           node scripts/run-supply-chain-check.mjs
