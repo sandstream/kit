@@ -981,6 +981,62 @@ const R12: SelfAuditRule = {
 };
 
 // ---------------------------------------------------------------------------
+// R13 — false-green: a catch swallows an error and RETURNS a success shape
+// ---------------------------------------------------------------------------
+// The dangerous pattern behind the whole "no false green" class: an error is
+// caught and turned into a POSITIVE result (available/ok/verified/passed: true, or
+// status: "pass"). That reports success for something that actually failed. We do
+// NOT flag kit's legitimate fail-open catches (return ""/[]/false/0/undefined) — a
+// success-shaped return is the unambiguous tell. Skipped when the catch surfaces
+// the error (console/throw/log) or carries the opt-out annotation. WARN (visible),
+// fails under --strict — same calibration as the scanner-health gate.
+const R13_CATCH_RE = /\bcatch\b/;
+const R13_SUCCESS_RETURN_RE =
+  /\breturn\b[^;]*?(?:\b(?:available|ok|verified|passed|success)\s*:\s*true\b|status\s*:\s*["']pass["'])/;
+const R13_SURFACING_RE =
+  /(?:console\.(?:error|warn|log)|throw\b|\blog[A-Z]\w*\s*\(|process\.exitCode)/;
+
+const R13: SelfAuditRule = {
+  id: "R13-catch-false-green",
+  name: "catch returns a success shape (false green)",
+  detectionClass: "catch-false-green",
+  severity: "warn",
+  enabled: true,
+  run(ctx) {
+    const findings: Finding[] = [];
+    for (const file of ctx.sources) {
+      const lines = file.lines;
+      for (let i = 0; i < lines.length; i++) {
+        if (!R13_CATCH_RE.test(lines[i])) continue;
+        // Bounded window: the catch body until it plausibly closes (cap 14 lines).
+        const end = Math.min(lines.length, i + 14);
+        let win = "";
+        let surfaced = false;
+        let optOut = false;
+        for (let j = i; j < end; j++) {
+          const l = lines[j];
+          win += l + "\n";
+          if (/kit-self-audit:\s*allow-catch-success/.test(l)) optOut = true;
+          if (R13_SURFACING_RE.test(l)) surfaced = true;
+          if (j > i && /^\s*\}\s*$/.test(l)) break; // block close
+        }
+        if (optOut || surfaced) continue;
+        if (R13_SUCCESS_RETURN_RE.test(win)) {
+          findings.push({
+            file,
+            line: i + 1,
+            status: "warn",
+            severity: "medium",
+            detail: `catch returns a success shape without surfacing the error (false green) — report the failure, or annotate '// kit-self-audit: allow-catch-success' if intentional: ${lines[i].trim()}`,
+          });
+        }
+      }
+    }
+    return shape(R13, findings);
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -998,6 +1054,7 @@ export const SELF_AUDIT_RULES: SelfAuditRule[] = [
   R10,
   R11,
   R12,
+  R13,
 ];
 
 // ---------------------------------------------------------------------------
