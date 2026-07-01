@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit memory pal claim` — atomic take for parallel agents.** When several
+  agents share a PAL (a durable device + ephemeral cloud sessions), two could
+  both start the same open item. `pal claim <id>` flips it to `claimed` via an
+  `UPDATE … WHERE status='open'` guard, so exactly one agent wins the race
+  (`✓ claimed` vs a no-op) and the item drops out of everyone's open list;
+  `claimed_by` records the winner (defaults to this device). `pal release <id>`
+  returns an abandoned claim to `open`. Deterministic, zero-LLM, local; schema
+  v6 (older rows have NULL claim fields — backward-compatible).
 - **`kit memory learn` — surface instructions you keep re-typing.** Deterministically
   mines the local store for user messages repeated 3+ times (verbatim after casing /
   punctuation normalization), ranked by distinct sessions then count, with a
