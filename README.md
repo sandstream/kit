@@ -298,6 +298,7 @@ adapters for the surfaces each agent exposes. Support today, per agent:
 | **OpenCode**     |      ✅       |     ✅ `AGENTS.md`     | ✅ `opencode.json` + `.opencode/plugin` |        —        |          —          |   ✅ plugin    |
 | **Cursor**       |      ✅       |   ✅ `.cursorrules`    |          ✅ `.cursor/mcp.json`          |        —        |          —          |    ✅ hook     |
 | **Cline**        |      ✅       |    ✅ `.clinerules`    |                    —                    |        —        |          —          |    ✅ hook     |
+| **Copilot**      |      —        | ✅ `copilot-instructions.md` |               —                   |        —        |          —          |      —⁸        |
 | **Gemini CLI**   |      ✅       |           —            |                    —                    |        —        |          —          |    ✅ hook     |
 | **Continue**     |      ✅       |           —            |                    —                    |        —        |          —          |      n/a⁷      |
 | **Amazon Q**     |      ✅       |           —            |                    —                    |        —        |          —          |    ✅ hook     |
@@ -311,6 +312,7 @@ adapters for the surfaces each agent exposes. Support today, per agent:
 5. kit registers lifecycle hooks so memory capture happens automatically (Claude Code `settings.json` hooks today).
 6. A **true blocking gate** (deny an un-triaged install before it runs) uses the agent's pre-tool hook — `kit agent-config --install-gate` wires it for Claude Code, Codex, Amazon Q, Gemini CLI, and Cursor (exit-2 hook commands); OpenCode via a generated `.opencode/plugin` that hooks `tool.execute.before` and throws; and Cline via an executable `.clinerules/hooks/PreToolUse` shim that blocks through Cline's `{cancel:true}` stdout contract. The agent-agnostic enforcement floor is **git hooks** (`kit hooks`, pre-commit/pre-push) — they fire in any agent or none. See [#146](https://github.com/sandstream/kit/issues/146).
 7. **Continue** exposes only a declarative tool-permission policy (`~/.continue/permissions.yaml` allow/ask/exclude) with no way to invoke an external command before a tool runs, so a kit blocking-gate adapter isn't possible there — git hooks + the rules-file block remain its floor.
+8. **GitHub Copilot** (VS Code / Visual Studio): the "use kit" rules block is written to `.github/copilot-instructions.md` (wired when a `.vscode/` dir is present or the file already exists). Memory indexing and a blocking install-gate are not yet implemented — they need Copilot's transcript format and a pre-tool-hook surface verified against primary sources first. The git-hook floor + the MCP server (`kit mcp`, added to `.vscode/mcp.json`) apply today.
 
 > The git-hook layer enforces at the VCS boundary regardless of agent; the rules-file block is **advisory** (it reminds the agent); only the blocking-gate hook **enforces** before an action runs.
 

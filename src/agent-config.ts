@@ -48,6 +48,7 @@ export const AGENT_TARGETS: AgentTarget[] = [
   { agent: "Codex", file: "AGENTS.md" },
   { agent: "Cursor", file: ".cursorrules" },
   { agent: "Cline", file: ".clinerules" },
+  { agent: "Copilot", file: ".github/copilot-instructions.md" },
 ];
 
 /**
@@ -74,6 +75,12 @@ export function detectAgentTargets(cwd: string = process.cwd()): AgentTarget[] {
         );
       case "Cursor":
         return existsSync(resolve(cwd, ".cursor"));
+      case "Copilot":
+        // GitHub Copilot (VS Code / Visual Studio) reads
+        // `.github/copilot-instructions.md`. The file check above covers an
+        // existing one; a `.vscode/` dir marks a VS Code project where Copilot
+        // is the likely agent, so wire it there too.
+        return existsSync(resolve(cwd, ".vscode"));
       default:
         return false;
     }
@@ -153,6 +160,9 @@ export async function writeAgentConfig(
         results.push({ agent: t.agent, file: t.file, action, detail: "kit block already current" });
         continue;
       }
+      // Rules files can be nested (e.g. Copilot's `.github/copilot-instructions.md`);
+      // create the parent dir. No-op for root-level targets.
+      await mkdir(dirname(path), { recursive: true });
       await writeFile(path, next, "utf-8");
       results.push({
         agent: t.agent,

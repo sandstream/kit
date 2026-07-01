@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit agent-config` now wires GitHub Copilot** — the managed "use kit" rules
+  block is written to `.github/copilot-instructions.md`, Copilot's canonical
+  custom-instructions file (VS Code / Visual Studio). Detected when a `.vscode/`
+  dir is present or the file already exists; `writeAgentConfig` creates the
+  nested parent dir (`.github/`) as needed. Fifth rules-file target alongside
+  CLAUDE.md / AGENTS.md / .cursorrules / .clinerules (Antigravity is already
+  covered via its `AGENTS.md` support). Advisory only — memory indexing and a
+  blocking install-gate for Copilot still need its transcript format + pre-tool
+  hook surface verified against primary sources; the git-hook floor and the MCP
+  server (`kit mcp`) apply to Copilot today regardless.
 - **Memory sync blobs are now gzip-compressed before encryption (~3× smaller).** A
   SQLite store compresses well (a real store: 6.3 MB → 2.1 MB; large stores
   ~139 MB → ~30 MB), which keeps the blob under a git host's 100 MB file limit and
