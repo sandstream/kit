@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-07-01
+
 ### Added
 
 - **`kit agent-config` now wires GitHub Copilot** — the managed "use kit" rules
