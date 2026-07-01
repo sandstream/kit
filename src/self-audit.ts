@@ -36,6 +36,9 @@ export interface SelfAuditCtx {
   repoRoot: string;
   sources: SourceFile[];
   pkgJson: Record<string, unknown>;
+  /** Files walkSourceFiles listed but readFileSync could not read. When non-empty,
+   *  self-audit scanned an INCOMPLETE set — a "clean" result is not authoritative. */
+  readErrors?: string[];
 }
 
 export interface SelfAuditRule {
@@ -1166,11 +1169,16 @@ function buildCtx(repoRoot: string): SelfAuditCtx {
   const srcDir = join(repoRoot, "src");
   const absFiles = walkSourceFiles(existsSync(srcDir) ? srcDir : repoRoot);
   const sources: SourceFile[] = [];
+  const readErrors: string[] = [];
   for (const abs of absFiles) {
     let text: string;
     try {
       text = readFileSync(abs, "utf8");
     } catch {
+      // Listed by the walk but unreadable now (perms / race / vanished). Scanning an
+      // incomplete set and reporting "clean" would be a false green — record it so
+      // runSelfAudit can surface the coverage gap.
+      readErrors.push(relative(repoRoot, abs).split("\\").join("/"));
       continue;
     }
     sources.push({
@@ -1179,7 +1187,7 @@ function buildCtx(repoRoot: string): SelfAuditCtx {
       lines: text.split("\n"),
     });
   }
-  return { repoRoot, sources, pkgJson: readPkgJson(repoRoot) };
+  return { repoRoot, sources, pkgJson: readPkgJson(repoRoot), readErrors };
 }
 
 /**
@@ -1196,6 +1204,19 @@ export function runSelfAudit(repoRoot: string, opts?: { only?: string[] }): Secu
   const results: SecurityCheckResult[] = [];
   for (const rule of rules) {
     results.push(...rule.run(ctx));
+  }
+  // Honest coverage: if source files couldn't be read, self-audit scanned an
+  // incomplete set — a "clean" run is NOT authoritative. Surface it as a WARN
+  // (fails under --strict) rather than letting it pass green silently.
+  if (ctx.readErrors && ctx.readErrors.length > 0) {
+    results.push({
+      category: "self-audit/incomplete",
+      name: "self-audit coverage",
+      status: "warn",
+      severity: "medium",
+      detail: `${ctx.readErrors.length} source file(s) could not be read — self-audit scanned an incomplete set; a clean result is not authoritative: ${ctx.readErrors.slice(0, 5).join(", ")}${ctx.readErrors.length > 5 ? " …" : ""}`,
+      files: ctx.readErrors.slice(0, 20),
+    });
   }
   return results;
 }
