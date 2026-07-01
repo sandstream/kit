@@ -61,6 +61,17 @@ async function check1PasswordSecret(
 }
 
 async function checkConfigSecret(value: string): Promise<{ available: boolean; detail: string }> {
+  const v = (value ?? "").trim();
+  // A declared-but-empty config secret must NOT report available — that green
+  // would say "the secret is set" when it is blank/deleted.
+  if (!v) return { available: false, detail: "config value is empty (declared but not set)" };
+  // An unresolved template/placeholder was never filled in — also not a real value.
+  if (/^(\$\{[^}]*\}|<[^>]*>|changeme|placeholder|x{3,}|todo|your[-_].*)$/i.test(v)) {
+    return {
+      available: false,
+      detail: `config value looks like an unresolved placeholder ("${v.slice(0, 24)}")`,
+    };
+  }
   return { available: true, detail: "Derived from config" };
 }
 
