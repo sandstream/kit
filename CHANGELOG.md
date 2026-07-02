@@ -6,6 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-07-02
+
+### BREAKING — strict by default: green means every check actually ran
+
+- **A check that could NOT run now FAILS the gate by default.** Previously a
+  scanner that was not installed, had no token, or errored surfaced as a WARN and
+  the gate passed — so an unscanned tree looked green. `kit check` / `kit ci` now
+  treat a _did-not-run_ WARN as a failure by default: green means every check
+  genuinely ran. Finding-WARNs (a check ran and flagged something) still stay
+  WARN. Opt out per invocation with `--lenient` (or `KIT_CI_LENIENT=1`) to
+  restore the old warn-and-pass behaviour; `--fail-on-warning` / `--strict`
+  (or `KIT_CI_STRICT=1`) additionally fails on finding-WARNs.
+  **Migration:** provision the toolchain (`kit setup` + `[scan.tooling]`
+  vault-backed tokens, verify with `kit doctor`) so real scanners run, or pass
+  `--lenient` where a scanner is legitimately unavailable. The single pure
+  `gateStatus()` decides this for both `check` and `ci`.
+
+### Added — `kit coverage --verify` binds AUTO controls to live results
+
+- **AUTO no longer reads as "passing" without evidence.** `kit coverage --verify`
+  gathers `checkSecurity()` + `runSelfAudit()` and binds each AUTO control to the
+  ACTUAL latest status of its backing checks: `verified` (ran + passed),
+  `failing` (ran + FAILED — the control is not covered), or `not-run` (nothing
+  bound a pass/fail). Binding is conservative — an unproven control reads
+  `not-run`, never verified — and a failing backing check flips its controls to
+  FAILING so coverage can never silently show green while a scanner is red. The
+  static map (no `--verify`) is unchanged and still carries the honesty
+  disclaimer. `coverage.ts` stays pure; the CLI does the IO.
+
+### Security — no false green in the self-audit itself
+
+- **New self-audit rule R13 (`catch-false-green`).** Flags a `catch` block that
+  returns a success shape (`available`/`ok`/`verified`/`passed: true`, or
+  `status: "pass"`) without surfacing the error — the exact "swallow the failure,
+  report success" pattern the release hunts. Opt out on a reviewed line with
+  `// kit-self-audit: allow-catch-success`. Zero findings on kit's own tree.
+- **Self-audit reports incomplete coverage instead of a false clean.** When source
+  files can't be read, the walk is partial — a "clean" result is not
+  authoritative. The walker now surfaces the unreadable paths (`console.warn`)
+  and self-audit emits a WARN ("scanned an incomplete set") that fails under
+  `--strict`, rather than passing green on a half-scanned tree.
+
 ## [3.3.0] - 2026-07-01
 
 ### Security — no false green (a deterministic self-audit found these in kit itself)
@@ -112,21 +154,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   public-key modes. This is what makes a private **GitHub** repo viable as the
   ephemeral-session hub (alongside a self-hosted remote, which has no size cap).
 - **Public-key memory sync — an ephemeral session can push with NO secret.** The
-  passphrase mode (AES-256-GCM + scrypt) requires the *same secret on every
-  machine that pushes*, which an ephemeral cloud session can't safely hold (no
+  passphrase mode (AES-256-GCM + scrypt) requires the _same secret on every
+  machine that pushes_, which an ephemeral cloud session can't safely hold (no
   secret-store, no SSH key). New **asymmetric mode** flips it: `kit memory keygen`
   mints an X25519 keypair; the **public** recipient string (`kitmem-pub-…`, not a
   secret — safe in a setup script, env var, or the repo) goes in `[memory.sync]`
   as `recipient = "…"`, and push encrypts to it (`MAGIC_V3`: ephemeral X25519 →
   HKDF-SHA256 → AES-256-GCM, libsodium sealed-box shape, **zero new deps** — pure
-  `node:crypto`). Only machines holding the **private** key (`~/.kit/memory-key.json`,
-  0600) can decrypt on pull. So an ephemeral session needs only a public key + a
+  `node:crypto`). Only machines holding the **private** key (`~/.kit/memory-key.json`, 0600) can decrypt on pull. So an ephemeral session needs only a public key + a
   reachable private repo to contribute its memory — nothing secret leaves it, and
   `push_on_end`/`pull_on_start` work passphrase-free when a recipient is set.
 
 - **External timestamp anchor (command transport) — closes the same-machine
-  forge gap.** The keyless chain + machine-local HMAC anchor proves *what
-  happened on this machine*, but anyone with that machine's anchor key (UID) can
+  forge gap.** The keyless chain + machine-local HMAC anchor proves _what
+  happened on this machine_, but anyone with that machine's anchor key (UID) can
   re-seal a rewritten log undetectably. `kit audit anchor --external` now folds
   an **external authority's receipt** into the seal: the documented
   `resolveExternalAnchor()` extension point is implemented via a command
@@ -148,10 +189,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   silently cleared across devices.** The adversarial pass on the 3.0 surface
   found that `palSyncFindings` auto-closed findings purely by source-tag + scope,
   with **no `origin_device` predicate** — and because the finding id was derived
-  only from `sourceTag + dedupKey` (repo-independent), the id was *identical*
+  only from `sourceTag + dedupKey` (repo-independent), the id was _identical_
   across machines on a shared/synced store. So a `kit check` on device B that
   didn't see device A's open finding would **permanently close A's blocker** (and
-  two different repos that merely shared a directory *basename* reconciled into
+  two different repos that merely shared a directory _basename_ reconciled into
   each other's findings). The reconcile now (a) folds the scope into the id so
   different repos get distinct rows, (b) scopes findings by the **absolute**
   project root rather than its basename, and (c) **device-fences** the auto-close
@@ -174,7 +215,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Memory-sync git transport hardened against option injection.** The
   `remote`/`branch` from `~/.kit/sync.toml` are passed to `git` as positional
   argv (no shell — OS metacharacters were already inert), but a value starting
-  with `-` is parsed as an *option* (a `remote` of `--upload-pack=<cmd>` turns
+  with `-` is parsed as an _option_ (a `remote` of `--upload-pack=<cmd>` turns
   `git clone` into command execution) and `ext::`/`fd::` remote helpers run
   commands by design. `loadSyncConfig` now rejects both, call sites pass
   `--end-of-options` before positional operands, and `git` runs with
@@ -220,7 +261,7 @@ removed or downgraded (enforced by the public-surface invariant).
   score + open-PAL (`⚠`) count become visible in your terminal.** Previously PAL
   only reached the agent (via the hook); the human never saw it unless they
   hand-edited `settings.json`. Install now also sets `statusLine` to `kit
-  statusline` — idempotent, and it **never clobbers a custom statusLine** (reports
+statusline` — idempotent, and it **never clobbers a custom statusLine** (reports
   it and leaves it as-is). `--no-statusline` skips it; `kit memory uninstall`
   removes only kit's own. (Paired with the device-coupled PAL count, so what you
   see in the bar is this device's real "blocked-on-you".)
@@ -232,7 +273,7 @@ removed or downgraded (enforced by the public-surface invariant).
   items** by default (legacy NULL-origin rows still show) — so a "blocked-on-you"
   created in a throwaway container/scratch dir doesn't follow you across the gap-#4
   memory sync. `kit memory pal list --all` shows every device; **`kit memory pal
-  prune`** closes this device's open items whose origin directory no longer exists
+prune`** closes this device's open items whose origin directory no longer exists
   (dead ephemeral/scratch dirs). Schema v5; backward-compatible (pre-v5 rows have
   no origin and are left untouched by prune).
 - **`kit config knobs` — a discoverable reference for the power-user env vars +
@@ -241,18 +282,18 @@ removed or downgraded (enforced by the public-surface invariant).
   read-only lockdown (`[policy].default_mode`), monorepo triage whitelisting
   (`[supply_chain].internal_scopes`) and the CI escape hatches (`KIT_ELEVATED`,
   `KIT_PROD_OK`, `KIT_NON_INTERACTIVE`) were only findable in source. `kit config
-  knobs` lists them grouped, with `env`/`cfg` tags and a ⚠ on the ones that bypass
+knobs` lists them grouped, with `env`/`cfg` tags and a ⚠ on the ones that bypass
   a safety gate (`--json` for tooling). Listed in `kit config` help + the main
   command list. (Companion to the deterministic hint engine.)
 - **Smart, deterministic hints — kit surfaces the right opt-in capability at the
   right moment (zero LLM).** A review found many powerful features (signed policy,
   audit anchoring, container/IaC scanning, malware heuristics) were only
   discoverable by reading source. A tiny rule engine (`src/hints.ts`) emits one
-  short, actionable tip from plain state checks — e.g. *"your audit log isn't
-  anchored — run `kit audit anchor`"*, *"your `.kit-policy.toml` is unsigned — run
-  `kit policy sign`"*, *"you have a Dockerfile but trivy isn't installed"*,
-  *"malware heuristics are off — enable GuardDog"*, *"you have an identity but no
-  org policy"*. Shown as a `💡 tip:` line after `kit check` and at session start.
+  short, actionable tip from plain state checks — e.g. _"your audit log isn't
+  anchored — run `kit audit anchor`"_, _"your `.kit-policy.toml` is unsigned — run
+  `kit policy sign`"_, _"you have a Dockerfile but trivy isn't installed"_,
+  _"malware heuristics are off — enable GuardDog"_, _"you have an identity but no
+  org policy"_. Shown as a `💡 tip:` line after `kit check` and at session start.
   Each tip shows **at most once** (a `~/.kit/.hint-*` marker suppresses it),
   detectors are fail-soft (a tip never breaks a check or a session), and
   `KIT_NO_HINTS=1` silences them all.
