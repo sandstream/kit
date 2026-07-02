@@ -27,8 +27,33 @@
 import { ASVS_L2_SUBSET, ASVS_VERSION, ASVS_SOURCE, ASVS_SOURCE_URL } from "./asvs-l2.js";
 import type { AsvsRequirement } from "./asvs-l2.js";
 import { ruleForCheck, ruleForSelfAudit, type RuleRef } from "../rules/catalog.js";
+import type { SecurityCheckResult } from "../check-security.js";
 
 export type Bucket = "auto" | "gap" | "manual" | "na";
+
+/**
+ * Live evidence state for an AUTO control, bound to the ACTUAL latest result of its
+ * backing checks (only set when `kit coverage --verify` passes results in):
+ *   verified - a backing check actually ran and passed
+ *   failing  - a backing check ran and FAILED (the control is NOT covered this run)
+ *   unrun    - no backing check produced a pass/fail this run (skipped / absent)
+ * Without results the field is undefined and AUTO means only "a check is mapped".
+ */
+export type EvidenceState = "verified" | "failing" | "unrun";
+
+/** Fold a control's backing-check statuses into one evidence state. */
+export function evidenceFor(
+  checks: string[],
+  byName: Map<string, SecurityCheckResult["status"]>,
+): EvidenceState {
+  let sawPass = false;
+  for (const c of checks) {
+    const st = byName.get(c);
+    if (st === "fail") return "failing"; // any failing backing check ⇒ not covered
+    if (st === "pass") sawPass = true;
+  }
+  return sawPass ? "verified" : "unrun";
+}
 
 /** One row of the static control -> kit relationship mapping. */
 interface MappingEntry {
@@ -158,6 +183,8 @@ export interface CoverageEntry {
   rationale: string;
   /** Citations resolved from src/rules/catalog.ts for the backing checks, deduped. */
   citations: RuleRef[];
+  /** Live evidence state (AUTO only, and only when --verify passed results). */
+  evidence?: EvidenceState;
 }
 
 export interface CoverageSummary {
@@ -166,6 +193,10 @@ export interface CoverageSummary {
   gap: number;
   manual: number;
   na: number;
+  /** Set only under --verify: how the AUTO controls' backing checks actually fared. */
+  autoVerified?: number;
+  autoFailing?: number;
+  autoUnrun?: number;
 }
 
 export interface CoverageReport {
@@ -197,7 +228,9 @@ function citationsFor(checks: string[]): RuleRef[] {
  * subset control has no mapping - a loud failure beats silently dropping a
  * control from the evidence map.
  */
-export function buildCoverageEntries(): CoverageEntry[] {
+export function buildCoverageEntries(
+  byName?: Map<string, SecurityCheckResult["status"]>,
+): CoverageEntry[] {
   return ASVS_L2_SUBSET.map((requirement) => {
     const mapping = MAPPING[requirement.id];
     if (!mapping) {
@@ -209,6 +242,11 @@ export function buildCoverageEntries(): CoverageEntry[] {
       checks: [...mapping.checks],
       rationale: mapping.rationale,
       citations: citationsFor(mapping.checks),
+      // Bind AUTO controls to the ACTUAL latest backing-check results when provided,
+      // so "auto" is not read as "passing" without evidence.
+      ...(byName && mapping.bucket === "auto"
+        ? { evidence: evidenceFor(mapping.checks, byName) }
+        : {}),
     };
   });
 }
@@ -217,6 +255,13 @@ export function buildCoverageEntries(): CoverageEntry[] {
 export function summarize(entries: CoverageEntry[]): CoverageSummary {
   const summary: CoverageSummary = { total: entries.length, auto: 0, gap: 0, manual: 0, na: 0 };
   for (const e of entries) summary[e.bucket]++;
+  // When AUTO controls carry live evidence (--verify), tally how they actually fared.
+  const bound = entries.filter((e) => e.bucket === "auto" && e.evidence);
+  if (bound.length > 0) {
+    summary.autoVerified = bound.filter((e) => e.evidence === "verified").length;
+    summary.autoFailing = bound.filter((e) => e.evidence === "failing").length;
+    summary.autoUnrun = bound.filter((e) => e.evidence === "unrun").length;
+  }
   return summary;
 }
 
@@ -226,18 +271,36 @@ export function summarize(entries: CoverageEntry[]): CoverageSummary {
  * is asserted in tests to keep the brand promise (green = honest) enforced.
  */
 export function honestyDisclaimer(summary: CoverageSummary): string {
-  return (
+  const base =
     `Evidence map, not a compliance attestation: kit auto-verifies ${summary.auto} of the ` +
     `${summary.total} OWASP ASVS ${ASVS_VERSION} L2 controls it maps ` +
     `(${summary.gap} gap, ${summary.manual} manual, ${summary.na} n/a). ` +
     `It does not assess the full standard and is not a substitute for a GRC tool ` +
-    `(e.g. Vanta, Drata) - feed this evidence to one.`
-  );
+    `(e.g. Vanta, Drata) - feed this evidence to one.`;
+  // Bound to live results (--verify): a mapped AUTO control is not the same as a
+  // PASSING one, so report how the backing checks actually fared this run.
+  if (summary.autoVerified !== undefined) {
+    return (
+      base +
+      ` This run (--verify): ${summary.autoVerified} verified-passing, ${summary.autoFailing} FAILING, ` +
+      `${summary.autoUnrun} not-run of the ${summary.auto} mapped AUTO controls — mapped is not passing.`
+    );
+  }
+  return base;
 }
 
-/** Build the full structured report (the --json payload). Pure + deterministic. */
-export function buildCoverageReport(): CoverageReport {
-  const entries = buildCoverageEntries();
+/**
+ * Build the full structured report (the --json payload). Pure + deterministic.
+ *
+ * Pass `results` (from `checkSecurity()` and/or `runSelfAudit()`) to bind AUTO
+ * controls to their ACTUAL latest backing-check status. Without results the map
+ * is static — AUTO means "a check is mapped", not "the check passed".
+ */
+export function buildCoverageReport(results?: SecurityCheckResult[]): CoverageReport {
+  const byName = results
+    ? new Map(results.map((r) => [r.name, r.status] as const)) // last write wins
+    : undefined;
+  const entries = buildCoverageEntries(byName);
   const summary = summarize(entries);
 
   // Group by section, preserving first-seen section order from the subset.
@@ -270,6 +333,12 @@ const BUCKET_LABEL: Record<Bucket, string> = {
   na: "N/A",
 };
 
+const EVIDENCE_LABEL: Record<EvidenceState, string> = {
+  verified: "verified",
+  failing: "FAILING",
+  unrun: "not-run",
+};
+
 /**
  * Render the report as a deterministic plain-text table grouped by ASVS section.
  * `color` wraps a bucket label for the terminal; default is identity so the
@@ -292,7 +361,8 @@ export function formatCoverageText(
       const label = color(e.bucket, BUCKET_LABEL[e.bucket].padEnd(6));
       lines.push(`  ${label} ${e.requirement.id.padEnd(9)} ${e.requirement.text}`);
       if (e.checks.length > 0) {
-        lines.push(`         evidence: ${e.checks.join(", ")}`);
+        const state = e.evidence ? `  [${EVIDENCE_LABEL[e.evidence]}]` : "";
+        lines.push(`         evidence: ${e.checks.join(", ")}${state}`);
       }
       lines.push(`         ${e.rationale}`);
     }
@@ -303,5 +373,10 @@ export function formatCoverageText(
   lines.push(
     `Summary: ${s.auto} auto · ${s.gap} gap · ${s.manual} manual · ${s.na} n/a (of ${s.total} mapped controls)`,
   );
+  if (s.autoVerified !== undefined) {
+    lines.push(
+      `Live (--verify): ${s.autoVerified} verified · ${s.autoFailing} FAILING · ${s.autoUnrun} not-run (of ${s.auto} auto)`,
+    );
+  }
   return lines.join("\n");
 }

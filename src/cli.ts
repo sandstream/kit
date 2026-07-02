@@ -3682,12 +3682,27 @@ async function cmdSelfAudit(): Promise<boolean> {
  * source a GRC tool (Vanta, Drata, ...) consumes — not a replacement for one.
  * Output is fully deterministic (the report is pure), so it is safe to diff in CI.
  */
-function cmdCoverage(): boolean {
+async function cmdCoverage(): Promise<boolean> {
   const args = process.argv.slice(2);
   const formatArg = args.find((a) => a.startsWith("--format="))?.split("=")[1];
   const jsonMode = hasFlag(args, "--json") || formatArg === "json";
+  const verify = hasFlag(args, "--verify");
 
-  const report = buildCoverageReport();
+  // --verify binds AUTO controls to the ACTUAL latest backing-check results, so
+  // "auto" reads as verified/failing/not-run instead of merely "a check is mapped".
+  // Match is by concrete check/rule name; unmatched backing checks stay "not-run".
+  let results: Awaited<ReturnType<typeof checkSecurity>> | undefined;
+  if (verify) {
+    const security = await checkSecurity();
+    // self-audit only binds when kit's own source tree is reachable (it scans kit,
+    // not the user's project); skip it cleanly otherwise — the security results
+    // still bind. runSelfAudit is only meaningful on kit's own checkout.
+    const root = resolveKitRoot();
+    const selfAudit = root ? runSelfAudit(root) : [];
+    results = [...security, ...selfAudit];
+  }
+
+  const report = buildCoverageReport(results);
 
   if (jsonMode) {
     console.log(JSON.stringify(report, null, 2));
