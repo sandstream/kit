@@ -2,16 +2,51 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
 import {
   checkSecurity,
+  gateStatus,
   parseTrivyMisconfigCount,
   parseOsvVulnCount,
   parseTrivyVulnCount,
   classifyTrufflehogFindings,
   jvmProjectKind,
   findJvmProject,
+  type SecurityCheckResult,
 } from "./check-security.js";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+describe("gateStatus — scanner-health strict by default", () => {
+  const r = (over: Partial<SecurityCheckResult>): SecurityCheckResult => ({
+    category: "supply-chain",
+    name: "x",
+    status: "warn",
+    detail: "d",
+    ...over,
+  });
+  it("passes pass/skip/fail through unchanged", () => {
+    assert.equal(gateStatus(r({ status: "pass" })), "pass");
+    assert.equal(gateStatus(r({ status: "skip" })), "skip");
+    assert.equal(gateStatus(r({ status: "fail" })), "fail");
+  });
+  it("a didNotRun warn FAILS by default (green means it actually ran)", () => {
+    assert.equal(gateStatus(r({ status: "warn", didNotRun: true })), "fail");
+  });
+  it("--lenient downgrades a didNotRun warn back to warn", () => {
+    assert.equal(gateStatus(r({ status: "warn", didNotRun: true }), { lenient: true }), "warn");
+  });
+  it("a finding warn (ran + flagged) stays warn by default", () => {
+    assert.equal(gateStatus(r({ status: "warn" })), "warn");
+  });
+  it("--fail-on-warning fails a finding warn too", () => {
+    assert.equal(gateStatus(r({ status: "warn" }), { failOnWarning: true }), "fail");
+  });
+  it("didNotRun fails under fail-on-warning regardless of lenient=false", () => {
+    assert.equal(
+      gateStatus(r({ status: "warn", didNotRun: true }), { failOnWarning: true }),
+      "fail",
+    );
+  });
+});
 
 describe("jvmProjectKind (#110)", () => {
   it("detects Maven and Gradle (incl. .kts), null otherwise", () => {

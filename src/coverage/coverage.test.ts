@@ -7,10 +7,28 @@ import {
   summarize,
   honestyDisclaimer,
   formatCoverageText,
+  evidenceFor,
   type Bucket,
 } from "./coverage.js";
+import type { SecurityCheckResult } from "../check-security.js";
 
 const VALID_BUCKETS: Bucket[] = ["auto", "gap", "manual", "na"];
+
+/** Every distinct backing-check id across all AUTO controls, deduped. */
+function autoCheckNames(): string[] {
+  const names = new Set<string>();
+  for (const e of buildCoverageEntries()) {
+    if (e.bucket === "auto") for (const c of e.checks) names.add(c);
+  }
+  return [...names];
+}
+
+/** Synthesize check results (name → status) as if the scanners had run. */
+function resultsFor(status: SecurityCheckResult["status"], names = autoCheckNames()) {
+  return names.map(
+    (name): SecurityCheckResult => ({ category: "supply-chain", name, status, detail: "fixture" }),
+  );
+}
 
 describe("coverage mapping", () => {
   it("maps every ASVS subset control exactly once (no holes)", () => {
@@ -124,5 +142,62 @@ describe("coverage report shape (--json payload)", () => {
     assert.match(text, /Evidence map/);
     assert.match(text, /AUTO/);
     assert.match(text, /Summary:/);
+  });
+});
+
+describe("coverage live evidence binding (--verify, #11)", () => {
+  it("evidenceFor: fail beats pass; pass ⇒ verified; nothing ⇒ unrun", () => {
+    const m = new Map<string, SecurityCheckResult["status"]>([
+      ["a", "pass"],
+      ["b", "fail"],
+      ["c", "warn"],
+    ]);
+    assert.equal(evidenceFor(["a", "b"], m), "failing"); // any fail wins
+    assert.equal(evidenceFor(["a"], m), "verified"); // a passing backing check
+    assert.equal(evidenceFor(["c"], m), "unrun"); // ran but only warned ⇒ not verified
+    assert.equal(evidenceFor(["z"], m), "unrun"); // absent ⇒ not verified
+  });
+
+  it("static report (no results) carries NO evidence and no live disclaimer line", () => {
+    const report = buildCoverageReport();
+    assert.equal(report.summary.autoVerified, undefined);
+    for (const e of report.sections.flatMap((s) => s.entries)) {
+      assert.equal(e.evidence, undefined);
+    }
+    assert.doesNotMatch(report.disclaimer, /This run/);
+  });
+
+  it("all-pass results bind every AUTO control to verified", () => {
+    const report = buildCoverageReport(resultsFor("pass"));
+    assert.equal(report.summary.autoVerified, report.summary.auto);
+    assert.equal(report.summary.autoFailing, 0);
+    assert.equal(report.summary.autoUnrun, 0);
+    assert.match(report.disclaimer, /verified-passing/);
+    assert.match(formatCoverageText(report), /Live \(--verify\)/);
+  });
+
+  it("a failing backing check flips its controls to FAILING (never silently green)", () => {
+    // Fail exactly one AUTO check; every control citing it must read failing.
+    const one = autoCheckNames()[0];
+    const results = resultsFor("pass").map((r) =>
+      r.name === one ? { ...r, status: "fail" as const } : r,
+    );
+    const report = buildCoverageReport(results);
+    assert.ok(report.summary.autoFailing! >= 1, "the failing check must surface as failing");
+    assert.equal(
+      report.summary.autoVerified! + report.summary.autoFailing! + report.summary.autoUnrun!,
+      report.summary.auto,
+    );
+    const affected = report.sections
+      .flatMap((s) => s.entries)
+      .filter((e) => e.bucket === "auto" && e.checks.includes(one));
+    for (const e of affected) assert.equal(e.evidence, "failing");
+  });
+
+  it("unmatched checks read unrun — a mapped control is not assumed passing", () => {
+    // No results at all for the AUTO checks ⇒ every AUTO control is unrun, not verified.
+    const report = buildCoverageReport(resultsFor("pass", ["totally-unrelated-check"]));
+    assert.equal(report.summary.autoVerified, 0);
+    assert.equal(report.summary.autoUnrun, report.summary.auto);
   });
 });

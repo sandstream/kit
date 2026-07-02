@@ -47,7 +47,10 @@ export function walkSourceFiles(root: string, opts: WalkOpts = {}): string[] {
     let entries;
     try {
       entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
+    } catch (err) {
+      // An unreadable directory would otherwise be silently skipped — its files
+      // never walked — so a partial walk could pass for a complete one. Surface it.
+      console.warn(`kit: could not read directory ${dir} — skipped (${(err as Error).message})`);
       return;
     }
     for (const e of entries) {

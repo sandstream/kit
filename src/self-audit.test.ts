@@ -70,6 +70,67 @@ describe("R1b-nan-fresh", () => {
   });
 });
 
+describe("R13-catch-false-green", () => {
+  it("fires when a catch returns a success shape (available: true)", () => {
+    const pre = `async function checkThing(v: string) {
+  try {
+    return await probe(v);
+  } catch {
+    return { available: true, detail: "assume ok" };
+  }
+}`;
+    assert.equal(countStatus(ruleById("R13-catch-false-green").run(ctxFromText(pre)), "warn"), 1);
+  });
+
+  it("fires on status: 'pass' returned from a catch", () => {
+    const pre = `function verify() {
+  try {
+    return runCheck();
+  } catch {
+    return { status: "pass" };
+  }
+}`;
+    assert.equal(countStatus(ruleById("R13-catch-false-green").run(ctxFromText(pre)), "warn"), 1);
+  });
+
+  it("is silent on a fail-open catch that returns empty/false (kit's legit pattern)", () => {
+    const ok = `function get() {
+  try {
+    return load();
+  } catch {
+    return "";
+  }
+}`;
+    const res = ruleById("R13-catch-false-green").run(ctxFromText(ok));
+    assert.equal(countStatus(res, "warn"), 0);
+    assert.equal(res[0].status, "pass");
+  });
+
+  it("is silent when the catch surfaces the error before returning", () => {
+    const ok = `function check() {
+  try {
+    return probe();
+  } catch (e) {
+    console.error(e);
+    return { ok: true };
+  }
+}`;
+    assert.equal(countStatus(ruleById("R13-catch-false-green").run(ctxFromText(ok)), "warn"), 0);
+  });
+
+  it("respects the // kit-self-audit: allow-catch-success opt-out", () => {
+    const ok = `function check() {
+  try {
+    return probe();
+  } catch {
+    // kit-self-audit: allow-catch-success
+    return { verified: true };
+  }
+}`;
+    assert.equal(countStatus(ruleById("R13-catch-false-green").run(ctxFromText(ok)), "warn"), 0);
+  });
+});
+
 describe("R2-secret-argv", () => {
   it("fires when a secret-bearing exec error is surfaced raw", () => {
     const pre = `async function sync(name: string, value: string) {

@@ -55,6 +55,39 @@ export interface SecurityCheckResult {
   files?: string[]; // Files with issues (for secrets scan)
   suggestion?: string; // Installation or remediation instructions
   rule?: RuleRef; // citation for the rule this check enforces (CWE/OWASP), if mapped
+  /**
+   * True when the check could NOT actually run (tool/binary absent, token missing,
+   * scan crashed/timed out) — as opposed to running and finding an issue. The CI
+   * gate fails these BY DEFAULT (scanner-health strict: green means every check
+   * actually ran); `--lenient` / KIT_CI_LENIENT downgrades them back to a warning.
+   * A legitimate not-applicable skip (no manifest, opt-in not enabled) is NOT
+   * didNotRun — it is an honest skip.
+   */
+  didNotRun?: boolean;
+}
+
+export interface GateOpts {
+  /** Downgrade a didNotRun result back to a warning (pre-3.3 behavior). */
+  lenient?: boolean;
+  /** Fail on ANY warning, including findings the check actually produced. */
+  failOnWarning?: boolean;
+}
+
+/**
+ * The effective gate status for a security result under kit's scanner-health-STRICT
+ * default: a check that could not RUN (`didNotRun`) FAILS unless `lenient`; a
+ * finding-level warning (the check ran and flagged something) stays a warning unless
+ * `failOnWarning`. pass/skip/fail pass through. Single source of truth so `kit check`
+ * and `kit ci` gate identically. Pure + deterministic.
+ */
+export function gateStatus(
+  r: SecurityCheckResult,
+  opts: GateOpts = {},
+): SecurityCheckResult["status"] {
+  if (r.status !== "warn") return r.status;
+  if (r.didNotRun && !opts.lenient) return "fail";
+  if (opts.failOnWarning) return "fail";
+  return "warn";
 }
 
 /**
@@ -87,6 +120,7 @@ async function checkNpmAudit(): Promise<SecurityCheckResult> {
         status: "warn",
         detail: "npm audit exited 0 but produced no report — could not confirm (unverified)",
         severity: "low",
+        didNotRun: true,
       };
     }
     return {
@@ -821,6 +855,7 @@ async function checkTrivy(): Promise<SecurityCheckResult> {
       status: "warn",
       detail: "trivy scan failed",
       severity: "medium",
+      didNotRun: true,
     };
   }
 
@@ -852,6 +887,7 @@ async function checkTrivy(): Promise<SecurityCheckResult> {
       status: "warn",
       detail: "trivy scan failed",
       severity: "medium",
+      didNotRun: true,
     };
   }
 }
@@ -1201,6 +1237,7 @@ async function checkOsvScanner(): Promise<SecurityCheckResult> {
           detail:
             "osv-scanner not installed but go/rust/php/ruby manifests are present — those dependency CVEs are UNSCANNED (mise use aqua:google/osv-scanner)",
           severity: "medium",
+          didNotRun: true,
         }
       : {
           category: "supply-chain",
@@ -1225,6 +1262,7 @@ async function checkOsvScanner(): Promise<SecurityCheckResult> {
           detail:
             "osv-scanner produced no parseable result despite go/rust/php manifests — the run likely failed (crash/timeout); deps are UNSCANNED",
           severity: "medium",
+          didNotRun: true,
         }
       : { category: "supply-chain", name, status: "skip", detail: "no lockfiles to scan" };
   }
@@ -1369,6 +1407,7 @@ async function checkSemgrep(): Promise<SecurityCheckResult> {
       detail:
         "KIT_SEMGREP_CONFIG is set (SAST opted in) but semgrep is not installed — SAST did NOT run (mise use pipx:semgrep, or brew install semgrep)",
       severity: "medium",
+      didNotRun: true,
     };
   }
 

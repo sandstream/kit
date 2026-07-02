@@ -10,7 +10,7 @@ import { validateSecrets, summarizeValidation } from "./secrets-validate.js";
 import { checkTools } from "./check-tools.js";
 import { checkServices } from "./check-services.js";
 import { checkSecrets } from "./check-secrets.js";
-import { checkSecurity } from "./check-security.js";
+import { checkSecurity, gateStatus } from "./check-security.js";
 import type { HealthCtx } from "./health.js";
 import type { SentinelSummary } from "./sentinel.js";
 import { syncSecurityFindings } from "./findings-track.js";
@@ -284,6 +284,14 @@ async function cmdCheck(): Promise<boolean> {
     return cmdVerifyAttestation();
   }
   const enforceTests = hasFlag(process.argv, "--enforce-tests");
+  // Scanner-health strict by default (see cmdCi): a check that could not RUN fails;
+  // --lenient / KIT_CI_LENIENT downgrades those to warnings. Finding-warns stay
+  // warnings unless --fail-on-warning / --strict / KIT_CI_STRICT.
+  const lenient = hasFlag(process.argv, "--lenient") || envTruthy(process.env.KIT_CI_LENIENT);
+  const failOnWarning =
+    hasFlag(process.argv, "--fail-on-warning") ||
+    hasFlag(process.argv, "--strict") ||
+    envTruthy(process.env.KIT_CI_STRICT);
   const config = await loadConfig(resolveConfigPath());
 
   return await withGovernance(
@@ -331,7 +339,12 @@ async function cmdCheck(): Promise<boolean> {
         }),
       );
 
-      const securityOk = securityResults.every((s) => s.status === "pass" || s.status === "skip");
+      // Scanner-health strict by default: a check that could not RUN (didNotRun) fails
+      // the gate unless --lenient; a finding-warn (the check ran + flagged) stays a
+      // warning and does NOT fail unless --fail-on-warning.
+      const securityOk = securityResults.every(
+        (s) => gateStatus(s, { lenient, failOnWarning }) !== "fail",
+      );
       const testsOk = testResults.every((t) => t.status !== "fail");
       const lockOk = lockResults.every((l) => l.inSync);
       const allOk =
@@ -3242,10 +3255,13 @@ async function cmdCi(): Promise<boolean> {
   const formatArg = args.find((a) => a.startsWith("--format="))?.split("=")[1] as
     | CiFormat
     | undefined;
-  // Strict CI: a scanner that could not run (not installed / no token / crashed)
-  // surfaces as a WARN in the security checks, so strict promotes warnings to
-  // failures — a non-running critical scanner can no longer exit 0. Opt-in via
-  // --strict or KIT_CI_STRICT so existing green CIs are unaffected.
+  // Scanner-health STRICT BY DEFAULT (kit's "no false green" floor): a check that
+  // could not RUN (tool/token absent, crashed) is marked didNotRun and FAILS the
+  // gate — a green means every check actually ran. `--lenient` / KIT_CI_LENIENT
+  // downgrades those back to warnings (the pre-3.3 behavior). Finding-level warnings
+  // (things a check RAN and flagged) stay warnings unless `--fail-on-warning`, or the
+  // max-strict `--strict` / KIT_CI_STRICT which fails on ANY warning.
+  const lenient = hasFlag(args, "--lenient") || envTruthy(process.env.KIT_CI_LENIENT);
   const strict = hasFlag(args, "--strict") || envTruthy(process.env.KIT_CI_STRICT);
   const failOnWarning = hasFlag(args, "--fail-on-warning") || strict;
   const jsonMode = hasFlag(args, "--json");
@@ -3324,8 +3340,13 @@ async function cmdCi(): Promise<boolean> {
         })),
         ...securityResults.map((s) => ({
           name: s.name,
-          status: s.status,
-          detail: s.detail,
+          // Scanner-health strict by default: a check that could not run fails the
+          // gate unless --lenient. A finding-warn (the check ran + flagged) is untouched.
+          status: gateStatus(s, { lenient, failOnWarning }) as JsonCheck["status"],
+          detail:
+            s.didNotRun && !lenient
+              ? `${s.detail}  [did not run — strict default; --lenient to downgrade to warn]`
+              : s.detail,
           category: `security/${s.category}`,
         })),
         ...(policyReport.present
@@ -3661,12 +3682,27 @@ async function cmdSelfAudit(): Promise<boolean> {
  * source a GRC tool (Vanta, Drata, ...) consumes — not a replacement for one.
  * Output is fully deterministic (the report is pure), so it is safe to diff in CI.
  */
-function cmdCoverage(): boolean {
+async function cmdCoverage(): Promise<boolean> {
   const args = process.argv.slice(2);
   const formatArg = args.find((a) => a.startsWith("--format="))?.split("=")[1];
   const jsonMode = hasFlag(args, "--json") || formatArg === "json";
+  const verify = hasFlag(args, "--verify");
 
-  const report = buildCoverageReport();
+  // --verify binds AUTO controls to the ACTUAL latest backing-check results, so
+  // "auto" reads as verified/failing/not-run instead of merely "a check is mapped".
+  // Match is by concrete check/rule name; unmatched backing checks stay "not-run".
+  let results: Awaited<ReturnType<typeof checkSecurity>> | undefined;
+  if (verify) {
+    const security = await checkSecurity();
+    // self-audit only binds when kit's own source tree is reachable (it scans kit,
+    // not the user's project); skip it cleanly otherwise — the security results
+    // still bind. runSelfAudit is only meaningful on kit's own checkout.
+    const root = resolveKitRoot();
+    const selfAudit = root ? runSelfAudit(root) : [];
+    results = [...security, ...selfAudit];
+  }
+
+  const report = buildCoverageReport(results);
 
   if (jsonMode) {
     console.log(JSON.stringify(report, null, 2));
