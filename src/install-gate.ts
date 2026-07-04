@@ -31,7 +31,39 @@ export interface InstallProbe {
 }
 
 /** Shell operators that separate independent commands in one Bash string. */
-const SEGMENT_SPLIT = /\s*(?:&&|\|\||;|\||\n)\s*/;
+// Command separators. Includes single `&` (job-control background) and `|&` so an
+// install placed AFTER a background/`&` op is still its own segment — `: & npm i
+// evil` and `true |& npm i evil` previously left the install non-leading and unseen.
+const SEGMENT_SPLIT = /\s*(?:&&|\|\||;|\||&|\n)\s*/;
+
+// Leading shell keywords / grouping tokens that precede a real command without
+// changing it. Stripped like PREFIX_BINS so `then npm i evil` / `{ npm i evil; }` /
+// `if true; then npm i …` don't hide the package manager from the head-anchored
+// matcher. `eval`/`xargs` are here for the UNQUOTED form; the quoted form is
+// recursed into by nestedCommands.
+const SHELL_KEYWORDS = new Set([
+  "if",
+  "then",
+  "else",
+  "elif",
+  "fi",
+  "for",
+  "while",
+  "until",
+  "do",
+  "done",
+  "case",
+  "esac",
+  "select",
+  "function",
+  "{",
+  "}",
+  "(",
+  ")",
+  "!",
+  "eval",
+  "xargs",
+]);
 
 /** A token is a flag (skip it) — `-g`, `--save-dev`, etc. */
 function isFlag(tok: string): boolean {
@@ -71,6 +103,20 @@ function stripCommandPrefix(tokens: string[]): string[] {
       while (i < tokens.length && tokens[i].startsWith("-")) i++; // skip the wrapper's own flags
       continue;
     }
+    // Leading shell keyword / grouping token (then/do/{/eval/…) → skip; also handle
+    // a grouping char glued to the next token (`{npm`, `(npm`).
+    if (SHELL_KEYWORDS.has(t)) {
+      i++;
+      continue;
+    }
+    if (/^[{(!]+/.test(t) && !SHELL_KEYWORDS.has(t)) {
+      // strip a leading run of glued grouping chars, keep the rest as a token
+      tokens[i] = t.replace(/^[{(!]+/, "");
+      if (tokens[i] === "") {
+        i++;
+      }
+      continue;
+    }
     break;
   }
   return tokens.slice(i);
@@ -88,6 +134,11 @@ function nestedCommands(command: string): string[] {
   for (const m of command.matchAll(/\$\(([^()]{1,2000})\)/g)) out.push(m[1]);
   for (const m of command.matchAll(/`([^`]{1,2000})`/g)) out.push(m[1]);
   for (const m of command.matchAll(/-c\s+(['"])([\s\S]{1,2000}?)\1/g)) out.push(m[2]);
+  // `eval '…'` / `xargs "…"` — the QUOTED script arg (the unquoted form is handled
+  // by SHELL_KEYWORDS stripping). Recurse so a quoted install can't hide behind eval.
+  for (const m of command.matchAll(/\b(?:eval|xargs)\s+(['"])([\s\S]{1,2000}?)\1/g)) {
+    out.push(m[2]);
+  }
   return out;
 }
 

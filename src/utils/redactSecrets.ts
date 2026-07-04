@@ -22,6 +22,57 @@ interface RedactPattern {
   replacement?: string;
 }
 
+// EXACT non-credential env var names the `kv-secret` matcher skips (public CI /
+// runtime metadata that would otherwise drown real findings). Deliberately NOT
+// prefix-based: excluding whole prefixes (`GITHUB_`, `VERCEL_`, `RAILWAY_`, `FLY_`,
+// `CI_`) also skipped the real tokens under them (GITHUB_TOKEN, VERCEL_TOKEN,
+// RAILWAY_TOKEN, FLY_API_TOKEN, CI_JOB_TOKEN) — a leak. Only `KIT_*` stays a prefix
+// (kit's own non-credential flag namespace).
+const KV_SECRET_EXCLUDE = [
+  "CI",
+  "NEXT_RUNTIME",
+  "RUNNER_OS",
+  "RUNNER_ARCH",
+  "RUNNER_NAME",
+  "RUNNER_TEMP",
+  "RUNNER_TOOL_CACHE",
+  "RUNNER_WORKSPACE",
+  "GITHUB_RUN_ID",
+  "GITHUB_RUN_NUMBER",
+  "GITHUB_RUN_ATTEMPT",
+  "GITHUB_SHA",
+  "GITHUB_REF",
+  "GITHUB_REF_NAME",
+  "GITHUB_REF_TYPE",
+  "GITHUB_ACTION",
+  "GITHUB_ACTOR",
+  "GITHUB_WORKFLOW",
+  "GITHUB_JOB",
+  "GITHUB_REPOSITORY",
+  "GITHUB_REPOSITORY_OWNER",
+  "GITHUB_EVENT_NAME",
+  "GITHUB_BASE_REF",
+  "GITHUB_HEAD_REF",
+  "GITHUB_SERVER_URL",
+  "GITHUB_API_URL",
+  "GITHUB_GRAPHQL_URL",
+  "CI_JOB_NAME",
+  "CI_JOB_STAGE",
+  "CI_PIPELINE_ID",
+  "CI_PROJECT_NAME",
+  "CI_PROJECT_PATH",
+  "CI_COMMIT_SHA",
+  "CI_COMMIT_REF_NAME",
+  "CI_SERVER_URL",
+];
+// `KEY=high-entropy` — a rotation value echoed back in an error message. Excludes
+// only the EXACT metadata names above (+ the KIT_ flag namespace); every other
+// uppercase KEY= with a 20+ base64url value is redacted, incl. provider tokens.
+const KV_SECRET_RE = new RegExp(
+  `(?<!_)\\b(?!(?:KIT_[A-Z0-9_]+|${KV_SECRET_EXCLUDE.join("|")})=)([A-Z][A-Z0-9_]{2,})=([A-Za-z0-9_\\-+/]{20,})`,
+  "g",
+);
+
 export const SECRET_PATTERNS: RedactPattern[] = [
   // Stripe — sk_test_, sk_live_, pk_test_, pk_live_, rk_test_, rk_live_,
   // whsec_, sk_test_..., 24+ random chars
@@ -71,7 +122,7 @@ export const SECRET_PATTERNS: RedactPattern[] = [
   //               are credentials.
   // GITHUB_RUN_ID / GITHUB_SHA — CI metadata.
   {
-    re: /(?<!_)\b(?!(?:KIT|GITHUB|CI|RUNNER|VERCEL|RAILWAY|FLY|NEXT_RUNTIME)_)([A-Z][A-Z0-9_]{2,})=([A-Za-z0-9_\-+/]{20,})/g,
+    re: KV_SECRET_RE,
     label: "kv-secret",
   },
   // Terraform — `sensitive = "..."` blocks in HCL leak the literal value

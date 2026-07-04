@@ -123,6 +123,46 @@ describe("checkForUpdate", () => {
     }
   });
 
+  it("returns null under CONFIG-declared air-gap (.kit.toml) even without KIT_AIRGAP env", async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const saved = {
+      CI: process.env.CI,
+      GH: process.env.GITHUB_ACTIONS,
+      GL: process.env.GITLAB_CI,
+      NO: process.env.KIT_NO_UPDATE_CHECK,
+      AG: process.env.KIT_AIRGAP,
+    };
+    const cwd0 = process.cwd();
+    const dir = mkdtempSync(join(tmpdir(), "kit-airgap-cfg-"));
+    writeFileSync(join(dir, ".kit.toml"), "[air_gap]\nenabled = true\n");
+    // Clear ALL other suppressors incl. the env air-gap flag, so this proves the
+    // CONFIG posture alone suppresses the beacon.
+    delete process.env.CI;
+    delete process.env.GITHUB_ACTIONS;
+    delete process.env.GITLAB_CI;
+    delete process.env.KIT_NO_UPDATE_CHECK;
+    delete process.env.KIT_AIRGAP;
+    process.chdir(dir);
+    try {
+      assert.equal(await checkForUpdate("0.1.0"), null);
+    } finally {
+      process.chdir(cwd0);
+      rmSync(dir, { recursive: true, force: true });
+      for (const [k, v] of [
+        ["CI", saved.CI],
+        ["GITHUB_ACTIONS", saved.GH],
+        ["GITLAB_CI", saved.GL],
+        ["KIT_NO_UPDATE_CHECK", saved.NO],
+        ["KIT_AIRGAP", saved.AG],
+      ] as const) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
   it("never throws — handles network errors gracefully", async () => {
     const origCI = process.env.CI;
     const origNo = process.env.KIT_NO_UPDATE_CHECK;
