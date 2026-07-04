@@ -24,6 +24,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Security — memory as attack surface (the store is replayed into the prompt)
 
+- **The shared memory tier is now Ed25519-signed on write and verifiable on read.**
+  Entries in `.kit/shared/memory.jsonl` are committed and re-injected into every
+  colleague's session as trusted "team decisions", so their integrity + provenance
+  matter. `kit memory share` now signs each entry with the machine identity (adds a
+  `kid` + `sig` over the canonical content) when one exists — no identity ⇒ unsigned
+  (backward-compatible), and sharing never auto-creates a key. New `kit memory verify`
+  reports each entry as `trusted` / `bad-sig` / `untrusted-signer` / `unsigned`.
+  Trust mirrors the policy discipline: with a committed `.kit-policy.signers` anchor
+  only those org keys are trusted (`--strict` exits non-zero on an un-anchored
+  signer); with no anchor it verifies against this machine's own keys, so tampering
+  (`bad-sig`) is always caught. Asymmetric, offline, zero-LLM.
 - **The update-check version string can no longer carry a prompt-injection payload.**
   `latest` comes from the npm registry (or its on-disk cache) and is interpolated
   verbatim into the Claude Code hooks (`staleKitNotice`), yet `isNewer()` compared

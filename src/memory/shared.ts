@@ -19,6 +19,13 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { findSecrets } from "../utils/redactSecrets.js";
+import {
+  tryLoadIdentity,
+  signWithIdentity,
+  verifySignature,
+  localPublicKeys,
+} from "../identity.js";
+import { policySignersMap, hasPolicyAnchor } from "../policy-trust.js";
 
 export type SharedKind = "decision" | "convention" | "how-built" | "status" | "security" | "note";
 
@@ -45,6 +52,10 @@ export interface SharedEntry {
   supersedes?: string;
   /** Id of the entry this one reverses (tried + undone — re-introducing it should warn). */
   reverses?: string;
+  /** Ed25519 signer id (kid) — set when the entry was signed on write. */
+  kid?: string;
+  /** Base64 Ed25519 signature over the canonical content (excludes kid/sig itself). */
+  sig?: string;
 }
 
 export interface ShareInput {
@@ -91,6 +102,83 @@ function gitHead(root: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Canonical bytes that a signature covers — every semantic field EXCEPT `kid`/`sig`
+ * (the signature can't cover itself). Reconstructed in a FIXED key order so it is
+ * independent of on-disk field order and of how the object was parsed: read →
+ * re-canonicalize → verify is byte-stable. Optional fields are included only when
+ * present, matching how `shareEntry` writes them (so an unsigned legacy entry, if
+ * later signed, canonicalizes identically). Pure.
+ */
+export function sharedEntryCanonical(entry: SharedEntry): string {
+  const canon: Record<string, unknown> = {
+    id: entry.id,
+    area: entry.area,
+    kind: entry.kind,
+    title: entry.title,
+    body: entry.body,
+    refs: entry.refs,
+    author: entry.author,
+    ts: entry.ts,
+  };
+  if (entry.source_ref !== undefined) canon.source_ref = entry.source_ref;
+  if (entry.status !== undefined) canon.status = entry.status;
+  if (entry.supersedes !== undefined) canon.supersedes = entry.supersedes;
+  if (entry.reverses !== undefined) canon.reverses = entry.reverses;
+  return JSON.stringify(canon);
+}
+
+/**
+ * Verdict for one shared entry against a kid → public-key trust store:
+ *  - `trusted`          signer is in the store AND the signature verifies;
+ *  - `bad-sig`          signer is known but the signature does NOT verify (tamper);
+ *  - `untrusted-signer` entry is signed but the signer is not in the trust store;
+ *  - `unsigned`         no signature at all (legacy / signed by no-identity machine).
+ */
+export type SharedVerdict = "trusted" | "bad-sig" | "untrusted-signer" | "unsigned";
+
+/** Classify one entry against a kid → PEM trust store. Pure, never throws. */
+export function verifySharedEntry(entry: SharedEntry, signers: Map<string, string>): SharedVerdict {
+  if (!entry.kid || !entry.sig) return "unsigned";
+  const pem = signers.get(entry.kid);
+  if (!pem) return "untrusted-signer";
+  const ok = verifySignature(sharedEntryCanonical(entry), Buffer.from(entry.sig, "base64"), pem);
+  return ok ? "trusted" : "bad-sig";
+}
+
+export interface SharedTierVerification {
+  /** True when a committed `.kit-policy.signers` anchor is present ⇒ fail-closed. */
+  anchored: boolean;
+  total: number;
+  results: { entry: SharedEntry; verdict: SharedVerdict }[];
+  counts: Record<SharedVerdict, number>;
+}
+
+/**
+ * Verify every entry in the shared tier. Trust store mirrors the policy discipline:
+ * when a committed `.kit-policy.signers` anchor is present, ONLY those org keys are
+ * trusted (an un-anchored signer → `untrusted-signer`, fail-closed under --strict);
+ * with no anchor, the machine's own identity keys resolve, giving self-integrity
+ * (tamper → `bad-sig`) without ceremony. `identityDir` is injectable for tests.
+ */
+export function verifySharedTier(root: string, identityDir?: string): SharedTierVerification {
+  const anchored = hasPolicyAnchor(root);
+  const signers = anchored ? policySignersMap(root) : localPublicKeys(identityDir);
+  const entries = readShared(root);
+  const counts: Record<SharedVerdict, number> = {
+    trusted: 0,
+    "bad-sig": 0,
+    "untrusted-signer": 0,
+    unsigned: 0,
+  };
+  const results = entries.map((entry) => {
+    const verdict = verifySharedEntry(entry, signers);
+    counts[verdict]++;
+    return { entry, verdict };
+  });
+  return { anchored, total: entries.length, results, counts };
 }
 
 export function readShared(root: string): SharedEntry[] {
@@ -144,6 +232,19 @@ export function shareEntry(root: string, input: ShareInput, now: string): Shared
   if (input.status && input.status !== "active") entry.status = input.status;
   if (input.supersedes) entry.supersedes = input.supersedes;
   if (input.reverses) entry.reverses = input.reverses;
+  // Sign on write when a machine identity exists (attributable provenance a
+  // reviewer/colleague can verify offline with just the public key). No identity ⇒
+  // unsigned entry (backward-compatible) — we never AUTO-CREATE a key as a
+  // side-effect of sharing a note. Best-effort: a sign failure leaves it unsigned.
+  const id = tryLoadIdentity();
+  if (id) {
+    try {
+      entry.kid = id.id;
+      entry.sig = signWithIdentity(sharedEntryCanonical(entry)).toString("base64");
+    } catch {
+      delete entry.kid; // no readable private key → leave the entry unsigned
+    }
+  }
   const path = getSharedPath(root);
   mkdirSync(dirname(path), { recursive: true });
   appendFileSync(path, JSON.stringify(entry) + "\n");
