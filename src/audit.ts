@@ -30,8 +30,10 @@ async function lastChainHash(logPath: string): Promise<string> {
   }
 }
 
-/** Append an event as a hash-chained line. Throws on write failure. */
-async function appendChained(logPath: string, event: AuditEvent): Promise<void> {
+/** Append an event as a hash-chained line. Throws on write failure. Returns the
+ *  chain hash of the line just written, so the anchor-advance path can bind its
+ *  seal to THIS write (not to whatever tail happens to be on disk at read time). */
+async function appendChained(logPath: string, event: AuditEvent): Promise<string> {
   const prev = await lastChainHash(logPath);
   const preHash = JSON.stringify({ ...event, prev });
   const hash = hashLine(preHash);
@@ -47,6 +49,7 @@ async function appendChained(logPath: string, event: AuditEvent): Promise<void> 
     ? { ...event, prev, hash, kid: signed.kid, sig: signed.sig }
     : { ...event, prev, hash };
   await appendFile(logPath, JSON.stringify(line) + "\n", "utf-8");
+  return hash;
 }
 
 /**
@@ -236,12 +239,14 @@ export async function appendAuditEventDirect(
   const logFile = opts.logFile ?? ".kit-audit.jsonl";
   const logPath = resolve(opts.cwd ?? process.cwd(), logFile);
   try {
-    await appendChained(logPath, auditEvent);
+    const wroteHash = await appendChained(logPath, auditEvent);
     // Best-effort external HMAC anchor advance. Fail-soft by contract: never
     // blocks the (keyless) append, so a sandboxed agent still logs even when it
-    // cannot reach ~/.kit. See audit-anchor.ts for the threat boundary.
+    // cannot reach ~/.kit. `expectedTailHashes` binds the seal to the entry we
+    // just wrote, so a concurrent writer that substitutes the tail in the
+    // append→read window can't get its forgery sealed. See audit-anchor.ts.
     const { tryAdvanceAnchorOnAppend } = await import("./audit-anchor.js");
-    await tryAdvanceAnchorOnAppend(logPath);
+    await tryAdvanceAnchorOnAppend(logPath, undefined, { expectedTailHashes: [wroteHash] });
     return true;
   } catch (error) {
     console.error(`[kit] audit-log append failed: ${error}`);
@@ -408,13 +413,15 @@ export async function logAuditEvent(
 
   let wroteLocal = false;
   try {
-    await appendChained(logPath, auditEvent);
+    const wroteHash = await appendChained(logPath, auditEvent);
     wroteLocal = true;
     // Best-effort external HMAC anchor advance (see audit-anchor.ts). Fail-soft
-    // so it never converts a successful append into a failure.
+    // so it never converts a successful append into a failure. `expectedTailHashes`
+    // binds the seal to the entry we just wrote (TOCTOU-safe against a concurrent
+    // tail substitution in the append→read window).
     try {
       const { tryAdvanceAnchorOnAppend } = await import("./audit-anchor.js");
-      await tryAdvanceAnchorOnAppend(logPath);
+      await tryAdvanceAnchorOnAppend(logPath, undefined, { expectedTailHashes: [wroteHash] });
     } catch (anchorErr) {
       console.error(`[kit] audit anchor advance skipped: ${anchorErr}`);
     }

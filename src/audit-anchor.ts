@@ -576,16 +576,36 @@ export function decideAnchorVerdict(input: AnchorVerdictInput): AnchorVerdict {
  * fresh green seal (which would launder unauthenticated entries into "sealed" and
  * erase the unsealed-tail alarm `kit audit verify` must raise). Such a tail is
  * sealed only by an explicit, operator-driven `kit audit anchor`. #fix-tail
+ *
+ * `expectedTailHashes` (the chain hashes appendChained just wrote, newest last)
+ * BINDS the seal to kit's own write. The size bound alone trusts whatever single
+ * tail entry is on disk at read time; a concurrent writer that SUBSTITUTES that
+ * entry in the append→read window would still satisfy `newSinceAnchor <= 1`. So
+ * when the caller supplies the hashes, the on-disk tail must END with exactly
+ * those hashes — otherwise the tail was rewritten by someone else and we refuse.
  */
 export async function tryAdvanceAnchorOnAppend(
   logPath: string,
   dir?: string,
-  opts: { expectedNewEntries?: number } = {},
+  opts: { expectedNewEntries?: number; expectedTailHashes?: string[] } = {},
 ): Promise<void> {
   if (process.env.KIT_AUDIT_ANCHOR === "0") return;
-  const expectedNewEntries = Math.max(1, opts.expectedNewEntries ?? 1);
+  const expectedTailHashes = opts.expectedTailHashes;
+  const expectedNewEntries = Math.max(
+    1,
+    opts.expectedNewEntries ?? expectedTailHashes?.length ?? 1,
+  );
   try {
     const content = await readFile(logPath, "utf-8");
+    const seals = lineSeals(content);
+    // Bind to kit's own write: the on-disk tail must END with exactly the hashes
+    // this append produced. If not, a concurrent writer rewrote the tail between
+    // our append and this read — do NOT seal their bytes with the machine key.
+    if (expectedTailHashes && expectedTailHashes.length > 0) {
+      if (!seals || seals.length < expectedTailHashes.length) return;
+      const onDisk = seals.slice(seals.length - expectedTailHashes.length).map((s) => s.hash);
+      if (!onDisk.every((h, i) => h === expectedTailHashes[i])) return;
+    }
     // CRITICAL: never silently re-seal over a prefix that no longer verifies.
     // Re-sealing a tampered / key-rotated log would erase a real alarm that
     // `kit audit verify` should have raised. Only advance when an existing
@@ -608,8 +628,9 @@ export async function tryAdvanceAnchorOnAppend(
       // would launder unauthenticated history into a green tip BEFORE `kit audit
       // verify` (whose no-anchor guard would otherwise catch it) ever runs. Such a
       // log is sealed only by an explicit, operator-driven `kit audit anchor`.
-      const total = lineSeals(content)?.length ?? 0;
+      const total = seals?.length ?? 0;
       if (total > expectedNewEntries) return;
+      if (total === 0) return; // nothing (or unparseable) to seal
     }
     await anchorAuditLog(logPath, content, dir);
   } catch {

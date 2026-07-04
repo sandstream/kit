@@ -459,6 +459,36 @@ describe("audit anchor - key rotation (FIX 4)", () => {
       else process.env.KIT_AUDIT_ANCHOR = prevEnv;
     }
   });
+
+  it("refuses to seal a tail that isn't the hash kit wrote (TOCTOU substitution)", async () => {
+    // Anchor covers entry 1. Then a concurrent writer SUBSTITUTES the tail entry in
+    // the append→read window. The seal must bind to the hash kit actually wrote, so
+    // a mismatch → refuse (the forged entry never gets the machine-key seal).
+    const first = await buildChain(cwd, 1);
+    const logPath = join(cwd, ".kit-audit.jsonl");
+    await anchorAuditLog(logPath, first, dir); // count = 1
+    await buildChain(cwd, 1); // kit "wrote" entry 2
+    const onDisk = lineSeals(readFileSync(logPath, "utf-8"))!;
+    const realTailHash = onDisk[onDisk.length - 1]!.hash;
+
+    const prevEnv = process.env.KIT_AUDIT_ANCHOR;
+    delete process.env.KIT_AUDIT_ANCHOR;
+    try {
+      // Attacker's version: kit thinks it wrote a DIFFERENT hash than what's on disk.
+      await tryAdvanceAnchorOnAppend(logPath, dir, { expectedTailHashes: ["f".repeat(64)] });
+      assert.equal(
+        (await readAnchorRecord(logPath, dir))!.count,
+        1,
+        "a tail that doesn't match kit's write must not be sealed",
+      );
+      // Honest path: the real hash kit wrote → advance to count 2.
+      await tryAdvanceAnchorOnAppend(logPath, dir, { expectedTailHashes: [realTailHash] });
+      assert.equal((await readAnchorRecord(logPath, dir))!.count, 2, "kit's own write seals");
+    } finally {
+      if (prevEnv === undefined) delete process.env.KIT_AUDIT_ANCHOR;
+      else process.env.KIT_AUDIT_ANCHOR = prevEnv;
+    }
+  });
 });
 
 describe("audit anchor - verdict policy (FIX 2 + FIX 3)", () => {

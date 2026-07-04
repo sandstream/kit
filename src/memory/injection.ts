@@ -130,11 +130,39 @@ function foldConfusables(text: string): string {
 
 /** Canonicalize a cell before phrase-rule matching so the rules can't be evaded by:
  *  (a) hidden chars wedged between trigger words, (b) a newline/period split
- *  (whitespace collapsed), (c) NFKC-decomposable look-alikes like FULLWIDTH
- *  `ｉｇｎｏｒｅ`, or (d) Cyrillic/Greek homoglyphs like `іgnore` / `sеcret`. Matching
- *  only — never used for the stored or re-injected text. */
+ *  (whitespace collapsed), (c) compatibility look-alikes like FULLWIDTH `ｉｇｎｏｒｅ`
+ *  or MATHEMATICAL `𝐢𝐠𝐧𝐨𝐫𝐞` (NFKD folds both), (d) combining-mark splits like
+ *  `ígnore` (i + U+0301 → decomposed, marks dropped), or (e) the curated Cyrillic/
+ *  Greek homoglyphs. Matching only — never used for the stored or re-injected text. */
 function normalizeForMatch(text: string): string {
-  return foldConfusables(stripUnsafeChars(text).normalize("NFKC")).replace(/\s+/g, " ");
+  return foldConfusables(
+    stripUnsafeChars(text)
+      .normalize("NFKD") // compatibility + canonical decomposition (fullwidth, math, accents)
+      .replace(/\p{M}+/gu, ""), // drop the combining marks NFKD split off
+  ).replace(/\s+/g, " ");
+}
+
+// Scripts that carry ASCII-Latin look-alikes and are the vehicles of homoglyph
+// smuggling. A word that mixes ASCII Latin with any of these is never legitimate
+// transcript text — it's the confusable-swap tell — and unlike the curated fold
+// this catches EVERY such codepoint, not just the ~60 we enumerated (defeats the
+// "pick a look-alike we didn't map" bypass, e.g. Armenian `ո`, Greek `υ`). CJK /
+// accented Latin / pure single-script foreign words are deliberately NOT matched:
+// accents are Latin-script, and CJK isn't confusable with ASCII, so no false alarm.
+const CONFUSABLE_SCRIPT_RE =
+  /[\p{Script=Cyrillic}\p{Script=Greek}\p{Script=Armenian}\p{Script=Coptic}\p{Script=Cherokee}]/u;
+const ASCII_LETTER_RE = /[A-Za-z]/;
+const LETTER_RUN_RE = /\p{L}+/gu;
+
+/** True when any single word mixes ASCII Latin letters with a confusable-bearing
+ *  non-Latin script — the signature of a homoglyph-obfuscated payload. */
+function hasMixedScriptToken(text: string): boolean {
+  const runs = text.match(LETTER_RUN_RE);
+  if (!runs) return false;
+  for (const run of runs) {
+    if (ASCII_LETTER_RE.test(run) && CONFUSABLE_SCRIPT_RE.test(run)) return true;
+  }
+  return false;
 }
 
 interface Rule {
@@ -260,9 +288,21 @@ export function findInjection(text: string): InjectionFinding[] {
       confidence: "high",
     });
   }
-  // Match phrase rules over the normalized view: hidden chars stripped and
-  // whitespace collapsed, so a newline/period/zero-width char wedged between
-  // trigger words can't split the phrase past the rule.
+  // Homoglyph obfuscation: a word mixing ASCII Latin with a confusable-bearing
+  // non-Latin script (`Igոore`, `previoυs`). High-confidence smuggling tell that
+  // is INDEPENDENT of the curated fold — it fires even on look-alike codepoints we
+  // never enumerated, which an allowlist fold alone can't win against.
+  if (hasMixedScriptToken(stripUnsafeChars(text))) {
+    out.push({
+      label: "mixed-script-token",
+      preview: "word mixes Latin + non-Latin look-alike script (homoglyph)",
+      confidence: "high",
+    });
+  }
+  // Match phrase rules over the normalized view: hidden chars stripped, compat/
+  // accent look-alikes folded, and whitespace collapsed, so a newline/period/
+  // zero-width char or a homoglyph swap wedged between trigger words can't split
+  // the phrase past the rule.
   const normalized = normalizeForMatch(text);
   for (const { re, label, confidence } of RULES) {
     const m = normalized.match(re);
