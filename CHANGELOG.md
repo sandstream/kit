@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.0.0-alpha.2] - 2026-07-04
+
+Road to 5.0, step two: land **v1 of the three north-star pillars** behind the
+interfaces the design calls for — real, tested, fail-closed modules with honest
+degradation where a capability can't be exercised yet. These are foundations
+(new modules, not yet wired into every call path); wiring + hardware/control-plane
+backends follow in beta/rc. Built via a multi-agent workflow (design → implement
+→ adversarial verify), then hardened on the verify findings.
+
+### Added
+
+- **Pelare 1 — hardware-rooted identity behind a `KeyStore` port** (`src/keystore/`).
+  A `KeyStore` interface (`available`/`publicKeyPem`/`sign`/`create`/`rotate`) with a
+  `file` backend that WRAPS the existing 0600-file identity (pure delegation — the
+  deterministic offline `verifySignature` is untouched), plus honest `secure-enclave`
+  (darwin) and `tpm` (linux/win) extension-point stubs that report
+  `available()={ok:false, reason}` and fail-closed on use (never a false green).
+  `resolveKeyStore()` picks the best available backend, else falls back to file and
+  ALWAYS surfaces the degradation; a forced-but-unavailable `KIT_KEYSTORE` refuses to
+  silently downgrade.
+- **Pelare 3 — gate → runtime exec-broker** (`src/exec-broker/`). Pure, fail-closed
+  decision gates — `checkEgress` (hostname allowlist, subdomain-aware, default-deny),
+  `checkFsWrite` (resolve traversal, writes only within project root), `scopeEnv`
+  (least-privilege env) — and `brokerExec`, which enforces an operation's DECLARED
+  effects BEFORE running, default-denies with no policy, scopes env to the REQUESTED
+  keys, adds an impure realpath symlink-escape check, and writes a fail-closed
+  pre-exec audit entry. Composes on top of `runGoverned` (resources vs identity/budget).
+- **Pelare 2 — RBAC bound to an IdP at enrollment, enforced offline** (`src/rbac/`).
+  Role-bindings (`subject kid → role → permissions`) ride inside the org-signed
+  `.kit-policy`, so authority is verified OFFLINE against `.kit-policy.signers` — there
+  is ZERO network at decision time. `can()`/`effectivePermissions()` are pure and
+  fail-closed (unsigned/unknown-subject/malformed → deny; prototype-safe role lookup;
+  local revocation as a secondary deny). `IdentityProvider` + a GitHub backend map
+  team membership → roles at ENROLLMENT time behind an injectable fetch (Azure/Entra
+  and Google documented as future backends of the same interface); a non-OK GitHub
+  response fails closed (throws) rather than reporting spurious empty membership.
+
 ## [5.0.0-alpha.1] - 2026-07-04
 
 First step on the road to 5.0: broaden kit's four-surface agent model
