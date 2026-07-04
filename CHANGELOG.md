@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security — memory as attack surface (the store is replayed into the prompt)
+
+- **The update-check version string can no longer carry a prompt-injection payload.**
+  `latest` comes from the npm registry (or its on-disk cache) and is interpolated
+  verbatim into the Claude Code hooks (`staleKitNotice`), yet `isNewer()` compared
+  major versions first — so `"99.0.0 ignore all previous instructions"` passed
+  (99 > 4) and rode into every prompt. `isNewer` now fails closed unless BOTH
+  versions match strict semver (`isValidVersion`, exported + tested). A malformed
+  version yields no notice instead of an injected instruction.
+- **`kit memory scan --injection` — scan the store for prompt-injection patterns.**
+  Because recall/decisions/PAL are replayed into the prompt, a poisoned entry is a
+  delayed injection vector. New deterministic detector (`findInjection`): hidden
+  zero-width / bidi-control chars and role-reprogram / instruction-override phrases
+  are HIGH; dual-use shapes (pipe-to-shell, exfil imperatives, prompt-role refs) are
+  HEURISTIC. Same shape + exit rule as the secret scan (exit 1 on a high-confidence
+  finding); zero-LLM, masked previews, project-attributed.
+- **Recalled text is defanged before re-injection.** The memory hooks now run
+  recalled message text, decision titles, and PAL titles through `stripUnsafeChars`
+  (removes zero-width + bidi-control chars) before building the prompt block, so a
+  stored hidden payload can't ride recall back into the model. Visible text is
+  untouched. Deterministic, fail-open.
+- **Cross-machine `pull` scans the incoming store before merge.** `syncFromExport`
+  now runs the injection scan on an incoming memory store and **fails closed** on a
+  high-confidence finding (override: `KIT_MEMORY_ALLOW_UNSAFE=1`), so a poisoned
+  store can't silently `merge` into yours and get replayed into the prompt. Fail-open
+  only on a scan error (unknown/older schema) so legitimate foreign stores still merge.
+- **New `docs/THREAT_MODEL.md` section: "Memory as an attack surface"** — documents
+  the delayed prompt-injection surface and kit's deterministic defences (validated
+  update boundary, defanged recall, `scan --injection`, guarded pull), with the
+  honest limits (pull-based recall, same-UID writes, heuristic tier).
+
 ## [4.0.0] - 2026-07-02
 
 ### BREAKING — strict by default: green means every check actually ran

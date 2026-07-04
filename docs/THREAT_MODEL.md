@@ -248,6 +248,36 @@ checksum-mismatched binary on its own. zero-LLM: heal classifies + applies
 deterministic fixers and emits proposals; the intelligence is the external
 agent, not embedded in kit.
 
+## Memory as an attack surface
+
+`kit memory` replays stored context into the agent's prompt every session
+(recall, curated decisions, PAL titles), and the update-check surfaces a notice
+into the same hooks. That makes the memory store, and anything interpolated into
+those hooks, a **prompt-injection surface with a delay**: text captured today —
+including whatever web content the agent read — becomes prompt context tomorrow.
+kit's stance is deterministic defence-in-depth, never model-side "please ignore":
+
+- **Validated injection boundary.** The update-check version string is validated
+  as strict semver before it can reach a prompt (a malformed
+  `"99.0.0 <payload>"` yields no notice, not an injected instruction).
+- **Defanged recall.** Recalled message text, decision titles and PAL titles are
+  run through `stripUnsafeChars` (zero-width + bidi-control removed) before the
+  hooks build the prompt block, so a hidden payload can't ride recall back in.
+- **Scannable store.** `kit memory scan --injection` deterministically flags
+  injection patterns (hidden chars, instruction-override / role-reprogram = high;
+  pipe-to-shell / exfil / prompt-role refs = heuristic), exit-1 on a high finding.
+- **Guarded pull.** A cross-machine `pull` scans the incoming store before merge
+  and fails closed on a high-confidence finding (override:
+  `KIT_MEMORY_ALLOW_UNSAFE=1`), so a poisoned store can't silently land.
+- **Reviewed shared tier.** The curated (team) tier travels with the repo and is
+  reviewed like code; the personal tier is 0600 + encrypted at rest/in transit.
+
+Honest limits: recall is *pull-based* (the agent is nudged, not forced, to
+search); a same-UID process can still write the local store outside kit (the
+same boundary the audit anchor documents); and the heuristic tier is advisory,
+not a guarantee. Signing the shared tier with the machine identity and a
+liveness gate for the capture hooks are tracked follow-ups.
+
 ## Out of scope (and why)
 
 - **LLM-router / orchestrator features.** kit is not Ruflo / Gas Town.

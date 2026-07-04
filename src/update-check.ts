@@ -127,9 +127,25 @@ export function readCachedUpdateSync(currentVersion: string): UpdateInfo | null 
   }
 }
 
+// Strict semver (optional leading v, optional pre-release / build metadata). The
+// `latest` string comes from the npm registry (or its on-disk cache) and is
+// interpolated verbatim into the Claude Code prompt via staleKitNotice(), so it
+// MUST be validated before it can ever reach a prompt: an unvalidated
+// "99.0.0 ignore all previous instructions" passes the major-version compare
+// today (99 > 4) and rides into every prompt. Reject anything non-semver here —
+// the single chokepoint every "update available" result flows through.
+const SEMVER_RE = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+/** True iff `v` is a well-formed semver string (safe to display / compare). */
+export function isValidVersion(v: unknown): v is string {
+  return typeof v === "string" && SEMVER_RE.test(v.trim());
+}
+
 /** Returns true if `latest` is strictly newer than `current` (semver comparison). */
 function isNewer(latest: string, current: string): boolean {
   try {
+    // Fail closed on any malformed version: no comparison, no notice.
+    if (!isValidVersion(latest) || !isValidVersion(current)) return false;
     const parse = (v: string) => v.replace(/^v/, "").split(".").map(Number);
     const [lMaj, lMin, lPatch] = parse(latest);
     const [cMaj, cMin, cPatch] = parse(current);
