@@ -49,6 +49,11 @@ export const AGENT_TARGETS: AgentTarget[] = [
   { agent: "Cursor", file: ".cursorrules" },
   { agent: "Cline", file: ".clinerules" },
   { agent: "Copilot", file: ".github/copilot-instructions.md" },
+  // Gemini CLI reads GEMINI.md — kit already indexes/gates Gemini but never wrote
+  // its rules file (only status-checked it), so this closes that gap.
+  { agent: "Gemini CLI", file: "GEMINI.md" },
+  // Augment reads a root .augment-guidelines file (applies to all Agent/Chat sessions).
+  { agent: "Augment", file: ".augment-guidelines" },
 ];
 
 /**
@@ -67,14 +72,23 @@ export function detectAgentTargets(cwd: string = process.cwd()): AgentTarget[] {
         // AGENTS.md is the shared cross-tool rules file: Codex AND OpenCode both
         // read it, so an OpenCode-only project (opencode.json / .opencode, no
         // .codex) should still wire its block into AGENTS.md.
+        // AGENTS.md is the Linux-Foundation cross-tool standard: Codex, OpenCode,
+        // Factory Droid (.factory) and AWS Kiro (.kiro, reads root AGENTS.md) all
+        // consume it, so any of their marker dirs should wire the block into AGENTS.md.
         return (
           existsSync(resolve(cwd, ".codex")) ||
           existsSync(resolve(cwd, ".opencode")) ||
           existsSync(resolve(cwd, "opencode.json")) ||
-          existsSync(resolve(cwd, "opencode.jsonc"))
+          existsSync(resolve(cwd, "opencode.jsonc")) ||
+          existsSync(resolve(cwd, ".kiro")) ||
+          existsSync(resolve(cwd, ".factory"))
         );
       case "Cursor":
         return existsSync(resolve(cwd, ".cursor"));
+      case "Gemini CLI":
+        return existsSync(resolve(cwd, ".gemini"));
+      case "Augment":
+        return existsSync(resolve(cwd, ".augment"));
       case "Copilot":
         // GitHub Copilot (VS Code / Visual Studio) reads
         // `.github/copilot-instructions.md`. The file check above covers an
