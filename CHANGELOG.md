@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security — MCP surface
+
+- **The mutating MCP tools now pass through the governance/audit floor.** `kit_run`,
+  `kit_secrets`, `kit_install`, and `kit_fix` previously ran with only a read-only-mode
+  guard — bypassing the revocation / budget / permission / expired-secret checks and
+  the tamper-evident audit log that the CLI applies to the same operations. They now
+  route through a new **MCP-safe** governed executor (`runGoverned`) that runs the same
+  deterministic pre-flight checks and emits the same audit events, but NEVER prompts:
+  it writes nothing to stdout (which on the MCP stdio transport IS the JSON-RPC
+  channel) and **fail-closed-denies** anything that would need interactive approval
+  (a destructive op, or a permission only approval can override) — run those via the
+  kit CLI. A blocked tool returns a `{ ok: false, governance: "denied", error }` result.
+
 ### Fixed
 
 - **`kit check` (CLI) and `kit_check` (MCP) can no longer disagree on green.** The

@@ -182,6 +182,121 @@ export async function withGovernance<T>(
   return result;
 }
 
+export interface GovernedOutcome<T> {
+  /** True → the op ran; result is set. False → denied or the op threw; reason is set. */
+  ok: boolean;
+  result?: T;
+  reason?: string;
+}
+
+/**
+ * MCP-safe governed execution — the shared "floor" the MCP mutating tools were
+ * bypassing (they only checked `isReadOnlyMode`). Unlike {@link withGovernance},
+ * which can PROMPT for approval on stdin and print to stdout — both fatal on the
+ * MCP stdio channel, where stdout IS the JSON-RPC transport — this NEVER prompts
+ * and writes NOTHING to stdout. It runs the deterministic pre-flight checks
+ * (revocation → budget → permission → secret-expiration), FAIL-CLOSED-denies
+ * anything that would require interactive approval (a destructive op, or a
+ * permission that only `requiresApproval` can override — approval can't be
+ * requested over the protocol channel), emits the same audit events, then executes
+ * and audits success/failure. Returns an outcome the caller renders itself.
+ */
+export async function runGoverned<T>(
+  config: kitConfig,
+  context: OperationContext,
+  operation: () => Promise<T>,
+): Promise<GovernedOutcome<T>> {
+  const startTime = Date.now();
+  const governanceConfig = await mergeGovernanceConfigAsync(config.governance);
+
+  // Governance disabled → run, no audit (nothing is being governed).
+  if (!governanceConfig.enabled) {
+    try {
+      return { ok: true, result: await operation() };
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  const auditDeny = (error: string, extra?: Record<string, unknown>) =>
+    logAuditEvent(governanceConfig, {
+      operation: context.operation,
+      environment: governanceConfig.environment,
+      success: false,
+      error,
+      metadata: extra ? { ...context.metadata, ...extra } : context.metadata,
+    });
+
+  // 1. Revocation
+  if (await checkRevocationStatus(config.governance)) {
+    await auditDeny("Access revoked");
+    return { ok: false, reason: "Access revoked" };
+  }
+
+  // 2. Budget
+  const budgetCheck = await checkBudgetLimits(config.governance, context.estimatedTokens || 0);
+  if (!budgetCheck.allowed) {
+    const reason = budgetCheck.reason || "Budget limit exceeded";
+    await auditDeny(reason);
+    return { ok: false, reason };
+  }
+
+  // 3. Permission — fail CLOSED for anything approval-gated (can't prompt over MCP).
+  const permissionCheck = checkOperationAllowed(governanceConfig, context.operationType);
+  if (!permissionCheck.allowed) {
+    const reason = permissionCheck.requiresApproval
+      ? `${permissionCheck.reason || "Operation requires approval"} — approval cannot be requested over the MCP channel; run this via the kit CLI to approve`
+      : permissionCheck.reason || "Operation not allowed";
+    await auditDeny(reason);
+    return { ok: false, reason };
+  }
+
+  // 4. Destructive ops need approval → not available non-interactively over MCP.
+  if (context.destructive) {
+    const reason =
+      "Destructive operation requires interactive approval — run it via the kit CLI, not MCP";
+    await auditDeny(reason);
+    return { ok: false, reason };
+  }
+
+  // 5. Secret expiration blocks the op.
+  if (governanceConfig.secrets.check_expiration && config.secrets?.keys) {
+    const secretKeys = Object.keys(config.secrets.keys);
+    const expirations = await checkSecretExpiration(config.governance, secretKeys, config.secrets);
+    if (hasExpiredSecrets(expirations)) {
+      await auditDeny("Expired secrets detected", {
+        expired_secrets: expirations.filter((e) => e.expired).map((e) => e.key),
+      });
+      return { ok: false, reason: "Operation blocked: expired secrets detected" };
+    }
+  }
+
+  // Execute + audit success/failure.
+  try {
+    const result = await operation();
+    await recordUsage(config.governance, context.estimatedTokens || 0);
+    await logAuditEvent(governanceConfig, {
+      operation: context.operation,
+      environment: governanceConfig.environment,
+      success: true,
+      duration_ms: Date.now() - startTime,
+      metadata: context.metadata,
+    });
+    return { ok: true, result };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    await logAuditEvent(governanceConfig, {
+      operation: context.operation,
+      environment: governanceConfig.environment,
+      success: false,
+      duration_ms: Date.now() - startTime,
+      error,
+      metadata: context.metadata,
+    });
+    return { ok: false, reason: error };
+  }
+}
+
 /**
  * Perform pre-flight checks without executing the operation
  */
