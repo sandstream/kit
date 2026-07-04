@@ -5,7 +5,14 @@
  * settings without touching the user's other hooks. Re-running adds nothing.
  * Honors KIT_CLAUDE_SETTINGS for tests.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  copyFileSync,
+  unlinkSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { kitWrapperPath } from "../kit-wrapper.js";
@@ -44,6 +51,51 @@ const MEMORY_HOOKS: { event: string; sub: string }[] = [
 
 export function getClaudeSettingsPath(): string {
   return process.env.KIT_CLAUDE_SETTINGS ?? join(homedir(), ".claude", "settings.json");
+}
+
+/**
+ * A durable marker that memory hooks were installed on this machine. It survives
+ * even if the hooks are later stripped from settings.json — that's the whole point:
+ * it lets a liveness check tell "never installed" (silent = fine) apart from
+ * "was installed, now GONE" (the loop silently degraded to capture-nothing).
+ */
+export function memoryInstallMarkerPath(): string {
+  return process.env.KIT_MEMORY_HOOK_MARKER ?? join(homedir(), ".kit", ".memory-hooks-installed");
+}
+
+export interface HookLiveness {
+  /** Memory hooks were installed here at least once (marker present). */
+  everInstalled: boolean;
+  /** Wired events currently present in settings.json. */
+  present: string[];
+  /** Events that SHOULD be wired (were installed) but are missing now. */
+  missing: string[];
+}
+
+/**
+ * R5: is the capture loop still wired? If memory was ever installed (marker) but
+ * a hook has since vanished from settings.json, the loop silently stops recording
+ * — the worst failure mode. This makes that visible. Deterministic, read-only.
+ */
+export function memoryHooksLiveness(
+  settingsPath: string = getClaudeSettingsPath(),
+  markerPath: string = memoryInstallMarkerPath(),
+): HookLiveness {
+  const everInstalled = existsSync(markerPath);
+  let hooks: Record<string, HookGroup[]> = {};
+  try {
+    hooks = (readSettings(settingsPath).hooks ?? {}) as Record<string, HookGroup[]>;
+  } catch {
+    hooks = {}; // unparseable settings → treat all as missing (surfaced as a problem)
+  }
+  const present: string[] = [];
+  const missing: string[] = [];
+  for (const { event, sub } of MEMORY_HOOKS) {
+    const groups = Array.isArray(hooks[event]) ? hooks[event] : [];
+    if (groupsHaveHook(groups, sub)) present.push(event);
+    else missing.push(event);
+  }
+  return { everInstalled, present, missing };
 }
 
 interface HookCmd {
@@ -115,6 +167,15 @@ export function installMemoryHooks(path: string = getClaudeSettingsPath()): {
     added.push(event);
   }
   if (added.length) writeSettings(path, s);
+  // Durable "installed here" marker for the liveness check (idempotent). After
+  // this call the hooks ARE present (added or alreadyPresent), so stamp it.
+  try {
+    const marker = memoryInstallMarkerPath();
+    mkdirSync(dirname(marker), { recursive: true });
+    if (!existsSync(marker)) writeFileSync(marker, new Date().toISOString() + "\n");
+  } catch {
+    /* best-effort: a missing marker only weakens the liveness check, never breaks install */
+  }
   return { added, alreadyPresent, resolved };
 }
 
@@ -180,5 +241,13 @@ export function uninstallMemoryHooks(path: string = getClaudeSettingsPath()): {
     }
   }
   if (removed.length) writeSettings(path, s);
+  // Intentional uninstall clears the marker, so the liveness check won't then
+  // report the (deliberate) absence as silent tampering.
+  try {
+    const marker = memoryInstallMarkerPath();
+    if (existsSync(marker)) unlinkSync(marker);
+  } catch {
+    /* best-effort */
+  }
   return { removed };
 }

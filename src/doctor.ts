@@ -163,6 +163,24 @@ async function checkKitWrapper(): Promise<DoctorCheck | null> {
   return { name, status: "pass", detail: path, category };
 }
 
+async function checkMemoryHooks(): Promise<DoctorCheck | null> {
+  const { memoryHooksLiveness } = await import("./memory/install.js");
+  const name = "memory hooks";
+  const category = "hooks";
+  const live = memoryHooksLiveness();
+  if (!live.everInstalled) return null; // never installed here → nothing to verify
+  if (live.missing.length === 0) {
+    return { name, status: "pass", detail: `${live.present.length} wired`, category };
+  }
+  // Installed once, but a hook has since vanished — capture is silently off.
+  return {
+    name,
+    status: "fail",
+    detail: `installed but missing from settings.json: ${live.missing.join(", ")} — memory capture is silently off. Run: kit memory install`,
+    category,
+  };
+}
+
 async function checkGitHooks(config: kitConfig): Promise<DoctorCheck[]> {
   if (!config.hooks) return [];
 
@@ -208,6 +226,9 @@ export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorR
 
   const wrapperCheck = await checkKitWrapper();
   if (wrapperCheck) allChecks.push(wrapperCheck);
+
+  const memoryHooksCheck = await checkMemoryHooks();
+  if (memoryHooksCheck) allChecks.push(memoryHooksCheck);
 
   const passed = allChecks.filter((c) => c.status === "pass").length;
   const warnings = allChecks.filter((c) => c.status === "warn").length;

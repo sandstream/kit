@@ -8,6 +8,7 @@ import {
   uninstallMemoryHooks,
   installStatusline,
   uninstallStatusline,
+  memoryHooksLiveness,
 } from "./install.js";
 
 describe("memory hook installer", () => {
@@ -171,5 +172,54 @@ describe("status-line installer", () => {
     installStatusline();
     assert.equal(uninstallStatusline().removed, true);
     assert.equal(JSON.parse(readFileSync(settingsPath, "utf8")).statusLine, undefined);
+  });
+});
+
+describe("memoryHooksLiveness (R5: silent hook removal is visible)", () => {
+  let tmp: string;
+  let settings: string;
+  let marker: string;
+
+  before(() => {
+    tmp = mkdtempSync(join(tmpdir(), "kit-liveness-"));
+    settings = join(tmp, "settings.json");
+    marker = join(tmp, "marker");
+  });
+  after(() => rmSync(tmp, { recursive: true, force: true }));
+
+  it("everInstalled=false when the marker is absent (never installed → no false alarm)", () => {
+    writeFileSync(settings, "{}");
+    const live = memoryHooksLiveness(settings, join(tmp, "nope"));
+    assert.equal(live.everInstalled, false);
+  });
+
+  it("all present after a real install", () => {
+    // Install into `settings`, marker into `marker`.
+    const prevS = process.env.KIT_CLAUDE_SETTINGS;
+    const prevM = process.env.KIT_MEMORY_HOOK_MARKER;
+    process.env.KIT_CLAUDE_SETTINGS = settings;
+    process.env.KIT_MEMORY_HOOK_MARKER = marker;
+    try {
+      writeFileSync(settings, "{}");
+      installMemoryHooks();
+      const live = memoryHooksLiveness(settings, marker);
+      assert.equal(live.everInstalled, true);
+      assert.deepEqual(live.missing, []);
+      assert.equal(live.present.length, 3);
+    } finally {
+      if (prevS === undefined) delete process.env.KIT_CLAUDE_SETTINGS;
+      else process.env.KIT_CLAUDE_SETTINGS = prevS;
+      if (prevM === undefined) delete process.env.KIT_MEMORY_HOOK_MARKER;
+      else process.env.KIT_MEMORY_HOOK_MARKER = prevM;
+    }
+  });
+
+  it("reports missing hooks when the marker survives but settings were stripped", () => {
+    writeFileSync(marker, "installed\n"); // durable marker present
+    writeFileSync(settings, "{}"); // ...but hooks removed
+    const live = memoryHooksLiveness(settings, marker);
+    assert.equal(live.everInstalled, true);
+    assert.equal(live.missing.length, 3, "all three hooks flagged missing");
+    assert.equal(live.present.length, 0);
   });
 });
