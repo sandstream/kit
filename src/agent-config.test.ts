@@ -181,8 +181,8 @@ describe("detectAgentTargets", () => {
     }
   });
 
-  it("wires AGENTS.md for a Kiro (.kiro/) or Droid (.factory/) project", () => {
-    for (const marker of [".kiro", ".factory"]) {
+  it("wires AGENTS.md for Kiro (.kiro/), Droid (.factory/) and Kilo (.kilocode/.kilo) projects", () => {
+    for (const marker of [".kiro", ".factory", ".kilocode", ".kilo"]) {
       const dir = tmpRepo();
       try {
         mkdirSync(join(dir, marker));
@@ -191,6 +191,17 @@ describe("detectAgentTargets", () => {
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+    }
+  });
+
+  it("wires AGENTS.md for a Kilo project marked by kilo.jsonc", () => {
+    const dir = tmpRepo();
+    try {
+      writeFileSync(join(dir, "kilo.jsonc"), "{}\n");
+      const files = detectAgentTargets(dir).map((t) => t.file);
+      assert.deepEqual(files, ["AGENTS.md"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

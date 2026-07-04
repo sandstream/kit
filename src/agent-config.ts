@@ -73,15 +73,19 @@ export function detectAgentTargets(cwd: string = process.cwd()): AgentTarget[] {
         // read it, so an OpenCode-only project (opencode.json / .opencode, no
         // .codex) should still wire its block into AGENTS.md.
         // AGENTS.md is the Linux-Foundation cross-tool standard: Codex, OpenCode,
-        // Factory Droid (.factory) and AWS Kiro (.kiro, reads root AGENTS.md) all
-        // consume it, so any of their marker dirs should wire the block into AGENTS.md.
+        // Factory Droid (.factory), AWS Kiro (.kiro) and Kilo Code (.kilocode/.kilo/
+        // kilo.jsonc — reads AGENTS.md primary, CLAUDE.md compat) all consume it,
+        // so any of their marker dirs should wire the block into AGENTS.md.
         return (
           existsSync(resolve(cwd, ".codex")) ||
           existsSync(resolve(cwd, ".opencode")) ||
           existsSync(resolve(cwd, "opencode.json")) ||
           existsSync(resolve(cwd, "opencode.jsonc")) ||
           existsSync(resolve(cwd, ".kiro")) ||
-          existsSync(resolve(cwd, ".factory"))
+          existsSync(resolve(cwd, ".factory")) ||
+          existsSync(resolve(cwd, ".kilocode")) ||
+          existsSync(resolve(cwd, ".kilo")) ||
+          existsSync(resolve(cwd, "kilo.jsonc"))
         );
       case "Cursor":
         return existsSync(resolve(cwd, ".cursor"));
