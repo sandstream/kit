@@ -216,6 +216,28 @@ export function recordRevocation(
   return rec;
 }
 
+/**
+ * Append already-formed revocation records to the local append-only log, skipping
+ * any already present (dedup by kid+ts+sig). Unlike `recordRevocation`, this does
+ * NOT sign — the caller is responsible for having VERIFIED each record's signature
+ * first (used by control-plane revocation propagation, which verifies against the
+ * org trust anchor before merging). Returns the number of new records written.
+ */
+export function appendRevocations(records: RevocationRecord[], dir?: string): number {
+  if (records.length === 0) return 0;
+  const seen = new Set(loadRevocations(dir).map((r) => `${r.kid}\n${r.ts}\n${r.sig}`));
+  const fresh = records.filter((r) => !seen.has(`${r.kid}\n${r.ts}\n${r.sig}`));
+  if (fresh.length === 0) return 0;
+  const path = revocationsPath(dir);
+  mkdirSync(identityDir(dir), { recursive: true });
+  appendFileSync(path, fresh.map((r) => JSON.stringify(r)).join("\n") + "\n", {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
+  secureFile(path);
+  return fresh.length;
+}
+
 /** All revocation records on this machine (append-only log). Best-effort: [] if absent. */
 export function loadRevocations(dir?: string): RevocationRecord[] {
   try {
