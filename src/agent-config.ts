@@ -447,6 +447,74 @@ export async function installInstallGateAmazonQ(
 }
 
 /**
+ * AWS Kiro (CLI) install-gate: add a `hooks.preToolUse` entry (matcher
+ * `execute_bash`) to each Kiro agent config under `.kiro/agents/*.json`. Kiro CLI
+ * is Amazon-Q-lineage — same agent-config hook schema (`hooks.preToolUse` array of
+ * `{matcher, command}`), same `tool_input.command` STDIN, same exit-2-blocks — so
+ * `kit gate-bash` works unchanged. Like Amazon Q, hooks are per-agent, so we wire
+ * every existing agent file and SKIP (honestly, no false-green) when none exist
+ * rather than write a partial/invalid agent config. Idempotent.
+ */
+export async function installInstallGateKiro(
+  cwd: string = process.cwd(),
+): Promise<HookInstallResult> {
+  const dir = ".kiro/agents";
+  const dirPath = resolve(cwd, dir);
+  const { isReadOnlyMode } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) return { file: dir, action: "skipped", detail: "read-only mode" };
+  let agentFiles: string[] = [];
+  try {
+    agentFiles = readdirSync(dirPath)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => join(dirPath, f));
+  } catch {
+    agentFiles = [];
+  }
+  if (agentFiles.length === 0) {
+    return {
+      file: dir,
+      action: "skipped",
+      detail: "no Kiro agent config found (create .kiro/agents/*.json first)",
+    };
+  }
+
+  let wired = 0;
+  let already = 0;
+  for (const p of agentFiles) {
+    let agent: {
+      hooks?: Record<string, { matcher?: string; command: string }[]>;
+      [k: string]: unknown;
+    };
+    try {
+      agent = JSON.parse(await readFile(p, "utf-8"));
+    } catch {
+      continue; // skip unparseable agent file
+    }
+    const hooks = (agent.hooks ??= {});
+    const pre = (hooks.preToolUse ??= []);
+    if (pre.some((h) => typeof h?.command === "string" && h.command.endsWith("gate-bash"))) {
+      already++;
+      continue;
+    }
+    pre.push({ matcher: "execute_bash", command: kitGateInvocation() });
+    try {
+      await writeFile(p, JSON.stringify(agent, null, 2) + "\n", "utf-8");
+      wired++;
+    } catch {
+      /* best-effort per file */
+    }
+  }
+  if (wired === 0) {
+    return {
+      file: dir,
+      action: "unchanged",
+      detail: `install-gate already wired (${already} agent[s])`,
+    };
+  }
+  return { file: dir, action: "updated", detail: `wired ${wired} Kiro agent config(s)` };
+}
+
+/**
  * Gemini CLI install-gate: a `BeforeTool` hook in `.gemini/settings.json` (same
  * nested hooks > Event > matcher > hooks[] shape as Claude Code). Gemini passes
  * the command in tool_input.command and blocks on exit 2 — so `kit gate-bash`
@@ -655,7 +723,15 @@ exec ${kitGateInvocation()} --format cline
 
 /** Per-agent install-gate result. */
 export interface GateInstallEntry {
-  agent: "Claude Code" | "Codex" | "Amazon Q" | "Gemini CLI" | "Cursor" | "OpenCode" | "Cline";
+  agent:
+    | "Claude Code"
+    | "Codex"
+    | "Amazon Q"
+    | "Kiro"
+    | "Gemini CLI"
+    | "Cursor"
+    | "OpenCode"
+    | "Cline";
   result: HookInstallResult;
 }
 
@@ -667,6 +743,7 @@ export async function installAllInstallGates(
     { agent: "Claude Code", result: await installInstallGate(cwd) },
     { agent: "Codex", result: await installInstallGateCodex(cwd) },
     { agent: "Amazon Q", result: await installInstallGateAmazonQ(cwd) },
+    { agent: "Kiro", result: await installInstallGateKiro(cwd) },
     { agent: "Gemini CLI", result: await installInstallGateGemini(cwd) },
     { agent: "Cursor", result: await installInstallGateCursor(cwd) },
     { agent: "OpenCode", result: await installInstallGateOpenCode(cwd) },
