@@ -14,6 +14,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   "run `kit memory search`" nudge — a near-zero rate (highlighted) means the loop
   has silently degraded to capture-only. Deterministic, computed from `query_log`
   vs sessions active in the last 7 days; no schema change.
+- **`kit doctor` now detects a silently-removed memory capture loop.** If memory
+  hooks were ever installed here (a durable marker under `~/.kit`) but a hook has
+  since vanished from `~/.claude/settings.json`, `kit doctor` reports a **fail**
+  ("memory capture is silently off") instead of the loop dying in silence — the
+  worst failure mode. `memoryHooksLiveness()` is the deterministic check; the
+  marker is written by `kit memory install` and cleared by `kit memory uninstall`
+  (so a deliberate uninstall is never flagged).
 
 ### Security — memory as attack surface (the store is replayed into the prompt)
 
