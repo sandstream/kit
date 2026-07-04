@@ -11,4 +11,4 @@ export {
   type BrokerPolicy,
 } from "./policy.js";
 
-export { brokerExec, type BrokerContext, type BrokerOutcome } from "./broker.js";
+export { brokerExec, runBrokered, type BrokerContext, type BrokerOutcome } from "./broker.js";

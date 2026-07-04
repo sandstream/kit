@@ -1,9 +1,17 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, symlinkSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { brokerExec, type BrokerContext } from "./broker.js";
+import { brokerExec, runBrokered, type BrokerContext } from "./broker.js";
 import type { BrokerPolicy } from "./policy.js";
 
 const POLICY: BrokerPolicy = {
@@ -220,6 +228,62 @@ describe("brokerExec symlink hardening (impure realpath check)", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("runBrokered opt-in (policy file present/absent)", () => {
+  const prev = process.env.KIT_EXEC_BROKER_POLICY;
+  after(() => {
+    if (prev === undefined) delete process.env.KIT_EXEC_BROKER_POLICY;
+    else process.env.KIT_EXEC_BROKER_POLICY = prev;
+  });
+
+  it("NOT configured (no policy file) → runs unmediated, no default-deny", async () => {
+    delete process.env.KIT_EXEC_BROKER_POLICY; // sandbox cwd has no .kit-exec-broker.json
+    let ran = false;
+    const out = await runBrokered(
+      CTX({ egressTargets: ["https://anything.example"] }),
+      async () => {
+        ran = true;
+        return "ok";
+      },
+    );
+    assert.equal(out.ok, true, "passthrough when broker is not opted into");
+    assert.equal(out.result, "ok");
+    assert.equal(ran, true);
+  });
+
+  it("configured with a valid policy → enforces (denies out-of-allowlist egress)", async () => {
+    const pol = join(sandbox, "broker.json");
+    writeFileSync(
+      pol,
+      JSON.stringify({
+        egress: { allow: ["api.example.com"] },
+        fs: { root: sandbox },
+        env: { declared: [] },
+      }),
+    );
+    process.env.KIT_EXEC_BROKER_POLICY = pol;
+    let ran = false;
+    const out = await runBrokered(CTX({ egressTargets: ["https://evil.com"] }), async () => {
+      ran = true;
+      return 1;
+    });
+    assert.equal(out.ok, false);
+    assert.equal(ran, false, "gate denied before running");
+  });
+
+  it("configured but MALFORMED policy → fail-closed deny (never silently off)", async () => {
+    const pol = join(sandbox, "broker-bad.json");
+    writeFileSync(pol, "{ not valid json");
+    process.env.KIT_EXEC_BROKER_POLICY = pol;
+    let ran = false;
+    const out = await runBrokered(CTX(), async () => {
+      ran = true;
+      return 1;
+    });
+    assert.equal(out.ok, false, "a broken policy fails closed, not open");
+    assert.equal(ran, false);
   });
 });
 
