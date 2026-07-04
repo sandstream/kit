@@ -32,6 +32,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   never released it — so it dropped out of every default (open) surface indefinitely,
   silently blocking the human waiting on it. `reapStaleClaims()` (run inside
   `palList`) releases any claim older than 24h back to `open` so it resurfaces.
+- **Tearing down the memory hooks is now audited.** `kit memory uninstall` removes
+  the self-playing capture loop but wrote settings with no audit trail. It now emits
+  a `memory.hooks.uninstall` audit event (best-effort, fail-open) so a teardown isn't
+  invisible where audit is enabled — a no-op when audit is off (the default), so no
+  surprise files appear.
 
 ### Security — memory sync
 
