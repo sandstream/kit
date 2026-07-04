@@ -100,6 +100,7 @@ import {
   detectAgentTargets,
   installKitPermissions,
   installAllInstallGates,
+  installAiderRules,
 } from "./agent-config.js";
 import { applyRecommendedHardening } from "./recommended.js";
 import { checkHooks, isGitRepository } from "./check-hooks.js";
@@ -1485,6 +1486,10 @@ async function cmdAgentConfig(): Promise<boolean> {
   );
 
   const results = await writeAgentConfig();
+  // Aider needs a bespoke installer (CONVENTIONS.md + a `read:` entry in
+  // .aider.conf.yml — it auto-reads no rules file), so it's not an AGENT_TARGETS row.
+  const aider = await installAiderRules();
+  if (aider.detail !== "no Aider project detected") results.push(aider);
   let failed = false;
   for (const r of results) {
     if (r.action === "failed") {
@@ -1532,7 +1537,7 @@ async function cmdAgentConfig(): Promise<boolean> {
   );
   console.log(
     `\n${c.bold}Agent support${c.reset} ${c.dim}(what kit wires up per agent):${c.reset}\n` +
-      `  ${c.dim}· Memory index: Claude Code, Codex, Cursor, Cline, Gemini, Continue, Amazon Q, Kiro, OpenCode${c.reset}\n` +
+      `  ${c.dim}· Memory index: Claude Code, Codex, Cursor, Cline, Gemini, Continue, Amazon Q, Kiro, Factory Droid, Aider, OpenCode${c.reset}\n` +
       `  ${c.dim}· "use kit" rules block: Claude Code, Codex, Cursor, Cline, OpenCode${c.reset}\n` +
       `  ${c.dim}· Config/secret audit (kit agent-audit): Claude Code, Codex, Cursor, OpenCode (+ generic .mcp.json)${c.reset}\n` +
       `  ${c.dim}· Permission allowlist + auto-capture hooks: Claude Code${c.reset}\n` +

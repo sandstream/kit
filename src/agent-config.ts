@@ -199,6 +199,131 @@ export async function writeAgentConfig(
 }
 
 /**
+ * Merge `CONVENTIONS.md` into an `.aider.conf.yml` `read:` directive without a
+ * YAML dependency. Idempotent (a mention of CONVENTIONS.md is a no-op) and
+ * conservative: handles the common scalar (`read: X`) and block-list forms, but
+ * refuses to text-edit a flow list (`read: [a, b]`) — it returns `manual:true`
+ * so the caller can tell the user to add the entry by hand rather than risk
+ * corrupting their YAML.
+ */
+export function mergeAiderRead(existing: string): {
+  next: string;
+  changed: boolean;
+  manual?: boolean;
+} {
+  if (/CONVENTIONS\.md/.test(existing)) return { next: existing, changed: false };
+  const lines = existing.split("\n");
+  const readIdx = lines.findIndex((l) => /^read\s*:/.test(l));
+  if (readIdx === -1) {
+    const sep = existing.length && !existing.endsWith("\n") ? "\n" : "";
+    return { next: existing + sep + "read:\n  - CONVENTIONS.md\n", changed: true };
+  }
+  const rhs = (lines[readIdx].match(/^read\s*:\s*(.*)$/)?.[1] ?? "").trim();
+  if (rhs === "") {
+    // Block list (or empty) follows — match the existing item indent if any.
+    let indent = "  ";
+    for (let i = readIdx + 1; i < lines.length; i++) {
+      const m = lines[i].match(/^(\s*)-\s+/);
+      if (m) {
+        indent = m[1];
+        break;
+      }
+      if (lines[i].trim() !== "" && !/^\s/.test(lines[i])) break; // next top-level key
+    }
+    lines.splice(readIdx + 1, 0, `${indent}- CONVENTIONS.md`);
+    return { next: lines.join("\n"), changed: true };
+  }
+  if (rhs.startsWith("[")) return { next: existing, changed: false, manual: true };
+  // Scalar value → promote to a two-item block list.
+  const val = rhs.replace(/^["']|["']$/g, "");
+  lines[readIdx] = `read:\n  - ${val}\n  - CONVENTIONS.md`;
+  return { next: lines.join("\n"), changed: true };
+}
+
+/**
+ * Aider rules — a BESPOKE installer (not an `AGENT_TARGETS` row). Aider does NOT
+ * auto-read any rules file, so dropping `CONVENTIONS.md` alone is a no-op. This
+ * does TWO things idempotently: (1) writes the managed kit block into
+ * `CONVENTIONS.md`, and (2) ensures `.aider.conf.yml` carries `read: CONVENTIONS.md`
+ * so aider actually loads it. Detected via `.aider.conf.yml` /
+ * `.aider.chat.history.md` / `.aider.input.history`.
+ */
+export async function installAiderRules(cwd: string = process.cwd()): Promise<AgentConfigResult> {
+  const file = "CONVENTIONS.md";
+  const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) {
+    const refusal = await refuseWrite("install-aider-rules", {});
+    return { agent: "Aider", file, action: "failed", detail: refusal.reason };
+  }
+  const detected =
+    existsSync(resolve(cwd, ".aider.conf.yml")) ||
+    existsSync(resolve(cwd, ".aider.chat.history.md")) ||
+    existsSync(resolve(cwd, ".aider.input.history"));
+  if (!detected) {
+    return { agent: "Aider", file, action: "unchanged", detail: "no Aider project detected" };
+  }
+
+  // (1) CONVENTIONS.md kit block.
+  const convPath = resolve(cwd, file);
+  let existing = "";
+  try {
+    existing = await readFile(convPath, "utf-8");
+  } catch {
+    existing = "";
+  }
+  const { next, action } = upsertKitBlock(existing);
+  try {
+    if (action !== "unchanged") await writeFile(convPath, next, "utf-8");
+  } catch (err) {
+    return {
+      agent: "Aider",
+      file,
+      action: "failed",
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  // (2) .aider.conf.yml `read: CONVENTIONS.md` — the step that makes it non-no-op.
+  const confPath = resolve(cwd, ".aider.conf.yml");
+  let conf = "";
+  try {
+    conf = await readFile(confPath, "utf-8");
+  } catch {
+    conf = "";
+  }
+  const merged = mergeAiderRead(conf);
+  let confNote = "read: CONVENTIONS.md already set";
+  if (merged.manual) {
+    confNote = "add `- CONVENTIONS.md` under read: in .aider.conf.yml (flow list not auto-merged)";
+  } else if (merged.changed) {
+    try {
+      await writeFile(confPath, merged.next, "utf-8");
+      confNote = "wired read: CONVENTIONS.md in .aider.conf.yml";
+    } catch (err) {
+      return {
+        agent: "Aider",
+        file: ".aider.conf.yml",
+        action: "failed",
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  const blockNote =
+    action === "created"
+      ? "wrote kit block to CONVENTIONS.md"
+      : action === "updated"
+        ? "updated kit block in CONVENTIONS.md"
+        : "kit block already current";
+  return {
+    agent: "Aider",
+    file,
+    action: action === "unchanged" && !merged.changed ? "unchanged" : "updated",
+    detail: `${blockNote}; ${confNote}`,
+  };
+}
+
+/**
  * The READ-ONLY kit commands an agent should be allowed to run without a
  * permission prompt. Teaching the agent to "use kit" is useless if every
  * `kit …` hits the permission wall in auto/non-interactive mode and the agent

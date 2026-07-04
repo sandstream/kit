@@ -26,6 +26,7 @@ import { indexCursorSessions } from "./cursor.js";
 import { indexAmazonQSessions } from "./amazonq.js";
 import { indexKiroSessions } from "./kiro.js";
 import { indexDroidSessions } from "./droid.js";
+import { indexAiderSessions } from "./aider.js";
 import { indexClineSessions } from "./cline.js";
 import { indexOpenCodeSessions } from "./opencode.js";
 
@@ -268,6 +269,7 @@ export function indexAllHarnesses(db: DatabaseSync): HarnessResults {
     "amazon-q": indexAmazonQSessions(db),
     kiro: indexKiroSessions(db),
     droid: indexDroidSessions(db),
+    aider: indexAiderSessions(db),
     cline: indexClineSessions(db),
     opencode: indexOpenCodeSessions(db),
   };

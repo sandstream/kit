@@ -16,6 +16,8 @@ import {
   installInstallGateKiro,
   installInstallGateDroid,
   installInstallGateAugment,
+  installAiderRules,
+  mergeAiderRead,
   installInstallGateGemini,
   installInstallGateCursor,
   installInstallGateOpenCode,
@@ -573,6 +575,81 @@ describe("installInstallGateAugment", () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-auggate2-"));
     try {
       assert.equal((await installInstallGateAugment(dir)).action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("mergeAiderRead (conf.yml read: merge, no YAML dep)", () => {
+  it("no-ops when CONVENTIONS.md is already referenced", () => {
+    const r = mergeAiderRead("read:\n  - CONVENTIONS.md\n");
+    assert.equal(r.changed, false);
+  });
+  it("creates a read block when the key is absent", () => {
+    const r = mergeAiderRead("model: gpt-4\n");
+    assert.equal(r.changed, true);
+    assert.ok(r.next.includes("read:\n  - CONVENTIONS.md"));
+    assert.ok(r.next.includes("model: gpt-4"), "preserves other keys");
+  });
+  it("promotes a scalar read: to a two-item block list", () => {
+    const r = mergeAiderRead("read: OTHER.md\n");
+    assert.equal(r.changed, true);
+    assert.ok(r.next.includes("- OTHER.md"));
+    assert.ok(r.next.includes("- CONVENTIONS.md"));
+  });
+  it("appends to an existing block list, matching indent", () => {
+    const r = mergeAiderRead("read:\n  - OTHER.md\n");
+    assert.equal(r.changed, true);
+    assert.ok(/read:\n {2}- CONVENTIONS\.md\n {2}- OTHER\.md|read:\n {2}- OTHER\.md/.test(r.next));
+    assert.ok(r.next.includes("- CONVENTIONS.md"));
+  });
+  it("refuses to text-edit a flow list (manual instead of corrupting)", () => {
+    const r = mergeAiderRead("read: [a.md, b.md]\n");
+    assert.equal(r.changed, false);
+    assert.equal(r.manual, true);
+  });
+});
+
+describe("installAiderRules (bespoke: CONVENTIONS.md + conf.yml)", () => {
+  it("writes the kit block AND wires read: CONVENTIONS.md, idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-aider-"));
+    try {
+      writeFileSync(join(dir, ".aider.conf.yml"), "model: gpt-4\n");
+      const r1 = await installAiderRules(dir);
+      assert.notEqual(r1.action, "failed");
+      const conv = readFileSync(join(dir, "CONVENTIONS.md"), "utf-8");
+      assert.ok(conv.includes("kit triage"), "kit block written to CONVENTIONS.md");
+      const conf = readFileSync(join(dir, ".aider.conf.yml"), "utf-8");
+      assert.ok(conf.includes("CONVENTIONS.md"), "read: CONVENTIONS.md wired");
+      assert.ok(conf.includes("model: gpt-4"), "preserves existing conf");
+
+      const r2 = await installAiderRules(dir);
+      assert.equal(r2.action, "unchanged");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects via a bare .aider.chat.history.md and creates both files", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-aider2-"));
+    try {
+      writeFileSync(join(dir, ".aider.chat.history.md"), "# aider chat started at x\n");
+      const r = await installAiderRules(dir);
+      assert.notEqual(r.action, "failed");
+      assert.ok(existsSync(join(dir, "CONVENTIONS.md")));
+      assert.ok(readFileSync(join(dir, ".aider.conf.yml"), "utf-8").includes("CONVENTIONS.md"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when no Aider project is present (no false-green)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-aider3-"));
+    try {
+      const r = await installAiderRules(dir);
+      assert.equal(r.detail, "no Aider project detected");
+      assert.equal(existsSync(join(dir, "CONVENTIONS.md")), false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
