@@ -398,6 +398,41 @@ describe("audit anchor - key rotation (FIX 4)", () => {
     assert.equal(after!.tip, originalTip);
     assert.equal(after!.count, originalCount);
   });
+
+  it("does NOT launder a multi-entry unsealed tail into a fresh green seal", async () => {
+    // Seal the first 3 entries, then a writer-only attacker appends 2 more
+    // keyless-rechained entries past the seal (chain-valid, but unauthenticated).
+    const first = await buildChain(cwd, 3);
+    const logPath = join(cwd, ".kit-audit.jsonl");
+    const rec = await anchorAuditLog(logPath, first, dir);
+    assert.equal(rec.count, 3);
+    await buildChain(cwd, 2); // two more entries appended (KIT_AUDIT_ANCHOR=0 → not anchored)
+
+    const prevEnv = process.env.KIT_AUDIT_ANCHOR;
+    delete process.env.KIT_AUDIT_ANCHOR; // enable append-time anchoring for this call
+    try {
+      // A normal append advances by ONE. The tail is 2 (> 1) → refuse: the anchor
+      // must stay at 3 so `kit audit verify` still flags the unsealed tail.
+      await tryAdvanceAnchorOnAppend(logPath, dir);
+      assert.equal(
+        (await readAnchorRecord(logPath, dir))!.count,
+        3,
+        "auto-advance must not absorb an unattributed tail",
+      );
+
+      // An explicit re-seal (operator running `kit audit anchor`, or a caller that
+      // truthfully declares it wrote 2) is allowed to cover the tail.
+      await tryAdvanceAnchorOnAppend(logPath, dir, { expectedNewEntries: 2 });
+      assert.equal(
+        (await readAnchorRecord(logPath, dir))!.count,
+        5,
+        "a truthfully-declared delta advances the seal",
+      );
+    } finally {
+      if (prevEnv === undefined) delete process.env.KIT_AUDIT_ANCHOR;
+      else process.env.KIT_AUDIT_ANCHOR = prevEnv;
+    }
+  });
 });
 
 describe("audit anchor - verdict policy (FIX 2 + FIX 3)", () => {

@@ -557,17 +557,33 @@ export function decideAnchorVerdict(input: AnchorVerdictInput): AnchorVerdict {
 }
 
 /**
- * Best-effort, fail-soft anchor advance for the append path. Re-seals the log
- * to cover all current entries. NEVER throws and NEVER blocks the append:
+ * Best-effort, fail-soft anchor advance for the append path. Extends the seal to
+ * cover the entry (or entries) THIS append just wrote. NEVER throws and NEVER
+ * blocks the append:
  *
  *   - disabled when KIT_AUDIT_ANCHOR=0 (the test suite sets this so incidental
  *     appends don't touch the real ~/.kit);
  *   - a sandboxed principal that cannot read/write ~/.kit simply does not
  *     anchor - the entry stays keyless-chain-protected and verifies later as
  *     "new unanchored entries since last anchor", which is honest, not a lie.
+ *
+ * `expectedNewEntries` (default 1) is how many entries the caller just appended.
+ * The auto-advance seals AT MOST that many entries past the existing anchor: it
+ * ratifies only what kit itself wrote in this call. A larger unsealed tail means
+ * entries appeared past the seal that this append did NOT create — a writer-only
+ * attacker's keyless-rechained forgeries, or a legit tail that accumulated while
+ * anchoring was unavailable. Either way auto-advance REFUSES to fold them into a
+ * fresh green seal (which would launder unauthenticated entries into "sealed" and
+ * erase the unsealed-tail alarm `kit audit verify` must raise). Such a tail is
+ * sealed only by an explicit, operator-driven `kit audit anchor`. #fix-tail
  */
-export async function tryAdvanceAnchorOnAppend(logPath: string, dir?: string): Promise<void> {
+export async function tryAdvanceAnchorOnAppend(
+  logPath: string,
+  dir?: string,
+  opts: { expectedNewEntries?: number } = {},
+): Promise<void> {
   if (process.env.KIT_AUDIT_ANCHOR === "0") return;
+  const expectedNewEntries = Math.max(1, opts.expectedNewEntries ?? 1);
   try {
     const content = await readFile(logPath, "utf-8");
     // CRITICAL: never silently re-seal over a prefix that no longer verifies.
@@ -581,6 +597,9 @@ export async function tryAdvanceAnchorOnAppend(logPath: string, dir?: string): P
       if (!key) return; // cannot verify the prefix -> do not re-seal
       const v = verifyAgainstAnchor(content, existing, key);
       if (v.status !== "anchored-ok") return; // preserve the alarm; do not re-seal
+      // Bound the auto-seal to what THIS append added. A tail larger than the
+      // caller's own writes is unattributed — do NOT absorb it into a green seal.
+      if ((v.newSinceAnchor ?? 0) > expectedNewEntries) return;
     }
     await anchorAuditLog(logPath, content, dir);
   } catch {
