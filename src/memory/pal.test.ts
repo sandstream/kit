@@ -11,6 +11,7 @@ import {
   palSnooze,
   palClaim,
   palRelease,
+  reapStaleClaims,
   palAutoVerify,
   palPrune,
   deviceId,
@@ -85,6 +86,39 @@ describe("PAL — pending actions", () => {
     const open = palList(db);
     assert.equal(open.length, 1);
     assert.equal(open[0]?.claimed_by, null); // claim cleared
+    db.close();
+  });
+
+  it("reaps a stale claim (crashed claimer) back to open; a fresh claim is spared", () => {
+    const db = fresh();
+    const id = palAdd(db, { title: "finish the migration" });
+    palClaim(db, id, "agent-a");
+    assert.deepEqual(reapStaleClaims(db), [], "a just-made claim is NOT reaped");
+    assert.equal(palList(db, { status: "claimed" }).length, 1);
+    // Backdate the claim past the TTL → abandoned.
+    db.prepare("UPDATE pending_actions SET claimed_at=datetime('now','-30 hours') WHERE id=?").run(
+      id,
+    );
+    assert.deepEqual(reapStaleClaims(db), [id]);
+    const claimed = db
+      .prepare("SELECT status, claimed_by FROM pending_actions WHERE id=?")
+      .get(id) as { status: string; claimed_by: string | null };
+    assert.equal(claimed.status, "open");
+    assert.equal(claimed.claimed_by, null);
+    db.close();
+  });
+
+  it("palList auto-reaps a stale claim so a crashed agent can't hide a blocked item", () => {
+    const db = fresh();
+    const id = palAdd(db, { title: "unblock me" });
+    palClaim(db, id, "agent-a");
+    assert.equal(palList(db).length, 0, "fresh claim stays hidden");
+    db.prepare("UPDATE pending_actions SET claimed_at=datetime('now','-48 hours') WHERE id=?").run(
+      id,
+    );
+    const open = palList(db); // reap runs inside palList
+    assert.equal(open.length, 1, "the abandoned item resurfaces as open");
+    assert.equal(open[0]?.id, id);
     db.close();
   });
 

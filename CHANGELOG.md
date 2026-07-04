@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed — self-playing loop liveness (R5)
+
+- **A silently failed background capture is now surfaced on the next SessionStart.**
+  The detached SessionEnd / mid-session index workers run with stdio ignored, so
+  their only failure channel is `~/.kit/session-end.log` — whose docstring promised
+  it was "surfaced on the next SessionStart", but nothing ever read it, so a failed
+  capture stayed invisible (the store looked captured, recorded nothing). `kit`'s
+  SessionStart recovery now reads and CONSUMES that log (each event surfaces exactly
+  once) and warns that recent turns may be unsearchable.
+- **PAL auto-releases a stale claim so a crashed agent can't hide a blocked item.**
+  `kit memory pal claim` flips an item open→claimed, but a crashed/abandoned claimer
+  never released it — so it dropped out of every default (open) surface indefinitely,
+  silently blocking the human waiting on it. `reapStaleClaims()` (run inside
+  `palList`) releases any claim older than 24h back to `open` so it resurfaces.
+
 ### Security — memory sync
 
 - **The incoming-store injection gate (R7) no longer fails open on a crafted schema.**
