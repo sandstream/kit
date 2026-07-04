@@ -245,6 +245,20 @@ describe("memory db", () => {
     db.close();
   });
 
+  it("getStats computes recall adoption (recalls per active session, 7d)", () => {
+    const db = fresh();
+    const now = new Date().toISOString();
+    upsertSession(db, { sessionId: "a", harness: "claude-code", lastMessageAt: now });
+    upsertSession(db, { sessionId: "b", harness: "claude-code", lastMessageAt: now });
+    recordQuery(db, { query: "one", hitCount: 1 });
+    recordQuery(db, { query: "two", hitCount: 1 });
+    recordQuery(db, { query: "three", hitCount: 1 });
+    const s = getStats(db);
+    assert.equal(s.recalls.activeSessions7d, 2);
+    assert.equal(s.recalls.perActiveSession7d, 1.5); // 3 recalls / 2 active sessions
+    db.close();
+  });
+
   it("getStats splits logical vs sidechain sessions", () => {
     const db = fresh();
     upsertSession(db, { sessionId: "main", harness: "claude-code", isAgentSidechain: false });

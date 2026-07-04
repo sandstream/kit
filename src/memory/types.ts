@@ -75,6 +75,11 @@ export interface MemoryStats {
     last7d: number;
     distinctQueries: number;
     topTerms: { query: string; count: number }[];
+    /** Sessions with activity in the last 7 days (denominator for adoption). */
+    activeSessions7d: number;
+    /** recalls last 7d ÷ active sessions last 7d, rounded to 1 dp — the
+     *  "is the recall nudge actually landing" signal (near 0 ⇒ agent ignores it). */
+    perActiveSession7d: number;
   };
   /** Logical vs sidechain session split + raw transcript files indexed.
    *  Exposes the "N files → M logical sessions" collapse. */

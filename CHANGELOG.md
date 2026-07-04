@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **`kit memory stats` now surfaces recall adoption.** A new
+  `~N recalls/active session (7d)` line (and `recalls.perActiveSession7d` /
+  `recalls.activeSessions7d` in `--json`) shows whether agents actually follow the
+  "run `kit memory search`" nudge — a near-zero rate (highlighted) means the loop
+  has silently degraded to capture-only. Deterministic, computed from `query_log`
+  vs sessions active in the last 7 days; no schema change.
+
 ### Security — memory as attack surface (the store is replayed into the prompt)
 
 - **The update-check version string can no longer carry a prompt-injection payload.**
