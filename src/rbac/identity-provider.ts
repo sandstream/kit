@@ -19,10 +19,13 @@
  *      point tests replace with an in-memory fake. `KIT_RBAC_GITHUB_API` overrides
  *      the base URL (e.g. GitHub Enterprise).
  *
- * FUTURE BACKENDS (same `IdentityProvider` / membership-source shape):
- *   - Azure / Entra ID: Microsoft Graph `GET /me/memberOf` (group objectIds/names).
- *   - Google: Cloud Identity Groups `groups.memberships.searchTransitiveGroups`.
- * Each becomes a `create<X>Source(...)` returning the membership interface; the
+ * SIBLING BACKENDS (same `IdentityProvider` / membership-source shape, in
+ * providers-cloud.ts):
+ *   - Azure / Entra ID: Microsoft Graph `GET /v1.0/users/{id}/memberOf`
+ *     (`createEntraApiSource` / `createEntraProvider`).
+ *   - Google: Cloud Identity `memberships:searchTransitiveGroups`
+ *     (`createGoogleApiSource` / `createGoogleProvider`).
+ * Each is a `create<X>Source(...)` returning the membership interface; the
  * compile + enforcement code is unchanged.
  *
  * Enrollment egress note: `createGithubApiSource` MUST be gated by kit's egress
@@ -126,7 +129,16 @@ export async function compileRoleBindings(input: EnrollmentInput): Promise<Enrol
     }
 
     const groups = await input.provider.resolveMembership(subject.subject);
-    const roles = [...new Set(groups.map((g) => input.roleMap[g]).filter((r): r is string => !!r))];
+    // `Object.hasOwn` + string check: a group literally named after an inherited
+    // Object.prototype key (e.g. "__proto__" via a bare, un-namespaced slug) must
+    // map to NO role, not to the inherited member (which would slip past `!!r`).
+    const roles = [
+      ...new Set(
+        groups
+          .map((g) => (Object.hasOwn(input.roleMap, g) ? input.roleMap[g] : undefined))
+          .filter((r): r is string => typeof r === "string" && r.length > 0),
+      ),
+    ];
 
     if (roles.length === 0) {
       unmapped.push(subject);

@@ -515,6 +515,10 @@ describe("rbac architecture guard — resolve stays offline", () => {
       "resolve.js must not import identity-provider",
     );
     assert.ok(
+      !/from\s+["'][^"']*providers-cloud/.test(src),
+      "resolve.js must not import providers-cloud (enrollment-only, has egress)",
+    );
+    assert.ok(
       !/from\s+["']node:(http|https|net|dns|tls)/.test(src),
       "resolve.js must not import a node network module",
     );
