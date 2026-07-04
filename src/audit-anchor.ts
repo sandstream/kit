@@ -600,6 +600,16 @@ export async function tryAdvanceAnchorOnAppend(
       // Bound the auto-seal to what THIS append added. A tail larger than the
       // caller's own writes is unattributed — do NOT absorb it into a green seal.
       if ((v.newSinceAnchor ?? 0) > expectedNewEntries) return;
+    } else {
+      // FIRST seal (no anchor yet) is bounded the SAME way: auto-anchor a log only
+      // when it is as small as this append's own writes. A pre-existing multi-entry
+      // UNANCHORED log — planted keyless forgeries, or a legit tail from when
+      // anchoring was unavailable — must NOT be auto-sealed on the next append: that
+      // would launder unauthenticated history into a green tip BEFORE `kit audit
+      // verify` (whose no-anchor guard would otherwise catch it) ever runs. Such a
+      // log is sealed only by an explicit, operator-driven `kit audit anchor`.
+      const total = lineSeals(content)?.length ?? 0;
+      if (total > expectedNewEntries) return;
     }
     await anchorAuditLog(logPath, content, dir);
   } catch {

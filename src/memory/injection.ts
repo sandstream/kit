@@ -56,11 +56,49 @@ function hasCodepoint(text: string, codes: Set<number>): boolean {
   return false;
 }
 
-/** Collapse whitespace + strip invisible chars so phrase rules can't be evaded by
- *  a newline/hidden char wedged between trigger words (the parser itself joins
- *  content blocks with '\n', which the attacker controls). */
+// Visual look-alikes (Unicode TR39 confusables, ASCII-lookalike subset): Cyrillic
+// and Greek letters that render like ASCII Latin. An attacker swaps one per trigger
+// token (`іgnore`, `sеcret`, `frоm nоw on`) so a human/agent reads the payload as
+// English while the ASCII-literal RULES never fire. Kept as [codepoint, ascii]
+// pairs so the source stays pure ASCII (same convention as ZERO_WIDTH_CODES). Folded
+// to Latin for MATCHING only — the stored/returned text is never rewritten, so this
+// cannot create a false positive against the English rules (folded foreign prose
+// only matches if it spells an English trigger, which is exactly the attack).
+const CONFUSABLE_PAIRS: ReadonlyArray<readonly [number, string]> = [
+  // Cyrillic → Latin (lowercase)
+  [0x0430, "a"], [0x0435, "e"], [0x043e, "o"], [0x0440, "p"], [0x0441, "c"],
+  [0x0443, "y"], [0x0445, "x"], [0x0456, "i"], [0x0458, "j"], [0x0455, "s"],
+  [0x04bb, "h"], [0x0501, "d"],
+  // Cyrillic → Latin (uppercase)
+  [0x0410, "a"], [0x0412, "b"], [0x0421, "c"], [0x0415, "e"], [0x041d, "h"],
+  [0x0406, "i"], [0x0408, "j"], [0x041a, "k"], [0x041c, "m"], [0x041e, "o"],
+  [0x0420, "p"], [0x0405, "s"], [0x0422, "t"], [0x0425, "x"], [0x0423, "y"],
+  // Greek → Latin (lowercase)
+  [0x03b1, "a"], [0x03bf, "o"], [0x03c1, "p"], [0x03bd, "v"], [0x03b9, "i"],
+  [0x03ba, "k"],
+  // Greek → Latin (uppercase)
+  [0x0391, "a"], [0x0392, "b"], [0x0395, "e"], [0x0397, "h"], [0x0399, "i"],
+  [0x039a, "k"], [0x039c, "m"], [0x039d, "n"], [0x039f, "o"], [0x03a1, "p"],
+  [0x03a4, "t"], [0x03a7, "x"], [0x03a5, "y"], [0x0396, "z"],
+];
+const CONFUSABLE_MAP = new Map<string, string>(
+  CONFUSABLE_PAIRS.map(([cp, a]) => [String.fromCodePoint(cp), a]),
+);
+const CONFUSABLE_RE = new RegExp(
+  "[" + CONFUSABLE_PAIRS.map(([cp]) => "\\u{" + cp.toString(16) + "}").join("") + "]",
+  "gu",
+);
+function foldConfusables(text: string): string {
+  return text.replace(CONFUSABLE_RE, (ch) => CONFUSABLE_MAP.get(ch) ?? ch);
+}
+
+/** Canonicalize a cell before phrase-rule matching so the rules can't be evaded by:
+ *  (a) hidden chars wedged between trigger words, (b) a newline/period split
+ *  (whitespace collapsed), (c) NFKC-decomposable look-alikes like FULLWIDTH
+ *  `ｉｇｎｏｒｅ`, or (d) Cyrillic/Greek homoglyphs like `іgnore` / `sеcret`. Matching
+ *  only — never used for the stored or re-injected text. */
 function normalizeForMatch(text: string): string {
-  return stripUnsafeChars(text).replace(/\s+/g, " ");
+  return foldConfusables(stripUnsafeChars(text).normalize("NFKC")).replace(/\s+/g, " ");
 }
 
 interface Rule {

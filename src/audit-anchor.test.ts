@@ -296,7 +296,7 @@ describe("audit anchor - append-path advance", () => {
     }
   });
 
-  it("tryAdvanceAnchorOnAppend seals the log when enabled", async () => {
+  it("tryAdvanceAnchorOnAppend first-seals a fresh single-entry log", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "kit-anchor-on-"));
     const dir = mkdtempSync(join(tmpdir(), "kit-anchor-onh-"));
     const prev = process.env.KIT_AUDIT_ANCHOR;
@@ -306,17 +306,43 @@ describe("audit anchor - append-path advance", () => {
     // inside buildChain cannot touch the real ~/.kit.
     process.env.KIT_AUDIT_ANCHOR_DIR = dir;
     try {
-      await buildChain(cwd, 2);
+      // The realistic append path: one entry appended, then advance (delta 1).
+      await buildChain(cwd, 1);
       const logPath = join(cwd, ".kit-audit.jsonl");
       await tryAdvanceAnchorOnAppend(logPath, dir);
       const rec = await readAnchorRecord(logPath, dir);
       assert.ok(rec);
-      assert.equal(rec!.count, 2);
+      assert.equal(rec!.count, 1);
     } finally {
       if (prev === undefined) delete process.env.KIT_AUDIT_ANCHOR;
       else process.env.KIT_AUDIT_ANCHOR = prev;
       if (prevDir === undefined) delete process.env.KIT_AUDIT_ANCHOR_DIR;
       else process.env.KIT_AUDIT_ANCHOR_DIR = prevDir;
+      rmSync(cwd, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT auto first-seal a pre-existing multi-entry UNANCHORED log", async () => {
+    // A writer-only attacker plants entries into a never-anchored log; the next
+    // legit append must NOT launder them into a fresh green seal. The no-anchor
+    // state is preserved for `kit audit verify` / an explicit `kit audit anchor`.
+    const cwd = mkdtempSync(join(tmpdir(), "kit-anchor-fs-"));
+    const dir = mkdtempSync(join(tmpdir(), "kit-anchor-fsh-"));
+    const prev = process.env.KIT_AUDIT_ANCHOR;
+    delete process.env.KIT_AUDIT_ANCHOR;
+    try {
+      await buildChain(cwd, 3); // KIT_AUDIT_ANCHOR=0 during build → never anchored
+      const logPath = join(cwd, ".kit-audit.jsonl");
+      // Default delta 1, but the log already has 3 unattributed entries → refuse.
+      await tryAdvanceAnchorOnAppend(logPath, dir);
+      assert.equal(await readAnchorRecord(logPath, dir), null, "must stay unanchored");
+      // An explicit re-seal (truthful delta ≥ total) is still allowed.
+      await tryAdvanceAnchorOnAppend(logPath, dir, { expectedNewEntries: 3 });
+      assert.equal((await readAnchorRecord(logPath, dir))!.count, 3);
+    } finally {
+      if (prev === undefined) delete process.env.KIT_AUDIT_ANCHOR;
+      else process.env.KIT_AUDIT_ANCHOR = prev;
       rmSync(cwd, { recursive: true, force: true });
       rmSync(dir, { recursive: true, force: true });
     }
