@@ -6,8 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.0.0-alpha.1] - 2026-07-04
+
+First step on the road to 5.0: broaden kit's four-surface agent model
+(rules / memory / install-gate / lifecycle hooks) across the coding-agent
+ecosystem, shipping only where the transcript path, format, and block
+contract are verified — and naming the rest as honest limitations rather
+than faking coverage.
+
 ### Added
 
+- **Six more agents onboarded (research-driven).** kit now indexes memory and/or
+  enforces installs for a much wider agent set. Every surface below was verified
+  against the agent's own format before shipping; unverifiable surfaces are
+  documented as limitations, not stubbed.
+  - **AWS Kiro CLI — memory.** New parser for `kiro-cli/data.sqlite3` (same
+    storage design as Amazon Q; reads `conversations_v2`, falling back to
+    `conversations`), tagged `harness=kiro`. Read-only, incremental, fail-safe.
+    Kiro is the 10th indexed harness. (Its install-gate + rules shipped earlier.)
+  - **Factory Droid — memory + install-gate.** Indexes its Claude-Code-compatible
+    JSONL transcripts under `~/.factory/projects/**/*.jsonl` (`harness=droid`),
+    and wires a PreToolUse gate to `.factory/hooks.json`. The one adaptation vs
+    the Claude gate is matcher `"Execute"`; `kit gate-bash` is unchanged.
+  - **Aider — memory + rules.** Parses its project-local markdown chat log
+    (`$GIT_ROOT/.aider.chat.history.md`, honoring `AIDER_CHAT_HISTORY_FILE`),
+    `harness=aider`. A **bespoke** rules installer writes `CONVENTIONS.md` AND
+    wires `read: CONVENTIONS.md` into `.aider.conf.yml` (Aider auto-reads no
+    rules file, so the block alone would be a no-op). No install-gate: Aider has
+    no pre-tool hook surface.
+  - **Google Antigravity — memory + install-gate.** New JSONL parser for
+    `~/.gemini/{antigravity-cli,antigravity-ide,antigravity}/brain/*/.system_generated/logs/transcript_full.jsonl`
+    (a real gap the `~/.gemini/tmp` Gemini parser never covered), `harness=antigravity`.
+    Install-gate to the workspace `.agents/hooks.json` (PreToolUse, matcher
+    `run_command`).
+  - **Augment — install-gate.** Wires a PreToolUse gate to `.augment/settings.json`
+    (matcher `"launch-process"`). Rules already routed via `.augment-guidelines`.
+  - **Kilo Code — rules marker.** `.kilocode` / `.kilo` / `kilo.jsonc` now route
+    the kit block into `AGENTS.md`. (Memory + gate deferred — contradicted across
+    Kilo product generations; no false-green.)
+- **`extractCommandFromHookPayload` now spans two more wire shapes.** It reads
+  Antigravity's `toolCall.args.CommandLine` and Sourcegraph Amp's
+  `arguments.command` in addition to the existing shapes — a pure,
+  backward-compatible extension so those agents' gates need no `--format` adapter.
 - **AWS Kiro install-gate.** `kit agent-config --install-gate` now wires the
   fail-closed PreToolUse gate for Kiro CLI: it adds a `hooks.preToolUse` entry
   (matcher `execute_bash`) to each `.kiro/agents/*.json` agent config. Kiro is
