@@ -85,13 +85,39 @@ export function verifyPolicyBundle(bundle: PolicyBundle, root: string): BundleVe
   try {
     writeFileSync(getPolicyPath(tmp), bundle.policyToml, "utf-8");
     writeFileSync(getPolicySigPath(tmp), bundle.policySig, "utf-8");
-    // Seed the SAME trust anchor the local repo commits, so signer resolution is
-    // "org" against our anchor — not the bundle's own (a bundle cannot vouch for
-    // itself). If we have no anchor, verifyPolicy returns `unverifiable` → reject.
+    // Seed a COPY of the local anchor so verifyPolicy sees `anchored:true` for the
+    // temp repo; the actual trust decision is the explicit org-key PIN below (the
+    // bundle's own bytes can never vouch for it).
     const localSigners = getSignersPath(root);
     if (existsSync(localSigners)) copyFileSync(localSigners, getSignersPath(tmp));
 
-    const policy = verifyPolicy(tmp);
+    // Force ORG-ANCHOR-ONLY trust. verifyPolicy resolves a signer as
+    // --key → localPublicKeys() → org anchor; the middle branch reads the VERIFYING
+    // machine's own identity, which would accept a self-signed bundle no org key ever
+    // signed. Distribution must trust ONLY the committed anchor, so resolve the sig's
+    // kid against OUR anchor here and PIN it (→ verifyPolicy takes the "key" path and
+    // never consults localPublicKeys). No org key for the kid → reject (fail-closed).
+    let sigKid: string | undefined;
+    try {
+      sigKid = (JSON.parse(bundle.policySig) as { kid?: string }).kid;
+    } catch {
+      sigKid = undefined;
+    }
+    const orgKey = typeof sigKid === "string" ? signersMap.get(sigKid) : undefined;
+    if (!orgKey) {
+      return {
+        ok: false,
+        policy: {
+          status: "unverifiable",
+          detail: "policy signer is not in the org trust anchor",
+          kid: sigKid,
+        },
+        verifiedRevocations: [],
+        reason: `policy signer ${sigKid ?? "(unknown)"} is not in the org trust anchor`,
+      };
+    }
+
+    const policy = verifyPolicy(tmp, { key: orgKey });
     if (policy.status !== "valid") {
       return {
         ok: false,
@@ -101,58 +127,64 @@ export function verifyPolicyBundle(bundle: PolicyBundle, root: string): BundleVe
       };
     }
 
-    // Verify each revocation against the org trust anchor (the signer `by` must be
-    // a trusted org signer, and the signature must cover the canonical statement).
-    const verifiedRevocations: RevocationRecord[] = [];
-    for (const rec of bundle.revocations ?? []) {
-      if (
-        typeof rec?.kid !== "string" ||
-        typeof rec?.ts !== "string" ||
-        typeof rec?.reason !== "string" ||
-        typeof rec?.by !== "string" ||
-        typeof rec?.sig !== "string"
-      ) {
-        return {
-          ok: false,
-          policy,
-          verifiedRevocations: [],
-          reason: "malformed revocation record",
-        };
-      }
-      const signerKey = signersMap.get(rec.by);
-      if (!signerKey) {
-        return {
-          ok: false,
-          policy,
-          verifiedRevocations: [],
-          reason: `revocation signed by ${rec.by}, not in the org trust anchor`,
-        };
-      }
-      let sigOk = false;
-      try {
-        sigOk = verifySignature(
-          revocationStatement(rec.kid, rec.ts, rec.reason),
-          Buffer.from(rec.sig, "base64"),
-          signerKey,
-        );
-      } catch {
-        sigOk = false;
-      }
-      if (!sigOk) {
-        return {
-          ok: false,
-          policy,
-          verifiedRevocations: [],
-          reason: `revocation for ${rec.kid} has an invalid signature`,
-        };
-      }
-      verifiedRevocations.push(rec);
-    }
-
-    return { ok: true, policy, verifiedRevocations };
+    const rev = verifyRevocationBatch(bundle.revocations ?? [], signersMap);
+    if (!rev.ok) return { ok: false, policy, verifiedRevocations: [], reason: rev.reason };
+    return { ok: true, policy, verifiedRevocations: rev.verified };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+}
+
+/**
+ * Signature-check a batch of revocations against the org trust anchor: each `by`
+ * must be a trusted org signer and its signature must cover the canonical
+ * `(kid, ts, reason)` statement. Fail-closed — the FIRST bad record rejects the
+ * whole batch (an org bundle is all-or-nothing; a partial merge could drop a
+ * revocation the org intended).
+ */
+function verifyRevocationBatch(
+  revocations: RevocationRecord[],
+  signersMap: Map<string, string>,
+): { ok: boolean; verified: RevocationRecord[]; reason?: string } {
+  const verified: RevocationRecord[] = [];
+  for (const rec of revocations) {
+    if (
+      typeof rec?.kid !== "string" ||
+      typeof rec?.ts !== "string" ||
+      typeof rec?.reason !== "string" ||
+      typeof rec?.by !== "string" ||
+      typeof rec?.sig !== "string"
+    ) {
+      return { ok: false, verified: [], reason: "malformed revocation record" };
+    }
+    const signerKey = signersMap.get(rec.by);
+    if (!signerKey) {
+      return {
+        ok: false,
+        verified: [],
+        reason: `revocation signed by ${rec.by}, not in the org trust anchor`,
+      };
+    }
+    let sigOk = false;
+    try {
+      sigOk = verifySignature(
+        revocationStatement(rec.kid, rec.ts, rec.reason),
+        Buffer.from(rec.sig, "base64"),
+        signerKey,
+      );
+    } catch {
+      sigOk = false;
+    }
+    if (!sigOk) {
+      return {
+        ok: false,
+        verified: [],
+        reason: `revocation for ${rec.kid} has an invalid signature`,
+      };
+    }
+    verified.push(rec);
+  }
+  return { ok: true, verified };
 }
 
 export interface ApplyResult {

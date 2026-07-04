@@ -106,6 +106,22 @@ describe("control-plane — verifyPolicyBundle (offline, against the org anchor)
     }
   });
 
+  it("rejects a bundle signed by the LOCAL machine key when it is NOT in the org anchor (no local-trust bypass)", () => {
+    const machineDir = mkdtempSync(join(tmpdir(), "kit-cp-machine-"));
+    const prev = process.env.KIT_IDENTITY_DIR;
+    try {
+      loadOrCreateIdentity(machineDir); // this machine's own identity
+      process.env.KIT_IDENTITY_DIR = machineDir; // localPublicKeys() now knows it
+      // Signed by the machine key, but `root`'s anchor trusts only the org signer.
+      const r = verifyPolicyBundle(signBundle(machineDir), root);
+      assert.equal(r.ok, false, "a self-signed bundle must not verify as org-valid");
+      assert.equal(r.policy.status, "unverifiable");
+    } finally {
+      process.env.KIT_IDENTITY_DIR = prev; // back to the empty verifier identity
+      rmSync(machineDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a revocation signed by an UNTRUSTED key", () => {
     const attackerDir = mkdtempSync(join(tmpdir(), "kit-cp-attacker-"));
     try {
