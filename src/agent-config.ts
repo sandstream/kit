@@ -795,6 +795,51 @@ export async function installInstallGateDroid(
   }
 }
 
+/**
+ * Augment (Auggie) install-gate: a `PreToolUse` hook in `.augment/settings.json`
+ * (same nested hooks > Event > matcher > hooks[] shape as Claude Code). The one
+ * adaptation is the shell-tool matcher is `"launch-process"` (Augment's process
+ * tool). Augment passes the command at `tool_input.command` and blocks on exit 2,
+ * so `kit gate-bash` works unchanged. We write the committable project file
+ * (config precedence: system > project `.augment/settings.json` > `.local` > user).
+ * Idempotent; preserves other settings/hooks.
+ */
+export async function installInstallGateAugment(
+  cwd: string = process.cwd(),
+): Promise<HookInstallResult> {
+  const file = ".augment/settings.json";
+  const path = resolve(cwd, file);
+  const { isReadOnlyMode } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) return { file, action: "skipped", detail: "read-only mode" };
+  if (!existsSync(resolve(cwd, ".augment")) && !existsSync(resolve(cwd, ".augment-guidelines"))) {
+    return { file, action: "skipped", detail: "no Augment project detected" };
+  }
+  let settings: { hooks?: Record<string, SettingsHookGroup[]>; [k: string]: unknown } = {};
+  let existed = false;
+  try {
+    settings = JSON.parse(await readFile(path, "utf-8")) as typeof settings;
+    existed = true;
+  } catch {
+    settings = {};
+  }
+  const hooks = (settings.hooks ??= {});
+  const pre = (hooks.PreToolUse ??= []);
+  if (pre.some((g) => g.hooks?.some((h) => h.command?.endsWith("gate-bash")))) {
+    return { file, action: "unchanged", detail: "install-gate already wired" };
+  }
+  pre.push({
+    matcher: "launch-process",
+    hooks: [{ type: "command", command: kitGateInvocation() }],
+  });
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    return { file, action: existed ? "updated" : "created" };
+  } catch (err) {
+    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /** Per-agent install-gate result. */
 export interface GateInstallEntry {
   agent:
@@ -803,6 +848,7 @@ export interface GateInstallEntry {
     | "Amazon Q"
     | "Kiro"
     | "Factory Droid"
+    | "Augment"
     | "Gemini CLI"
     | "Cursor"
     | "OpenCode"
@@ -820,6 +866,7 @@ export async function installAllInstallGates(
     { agent: "Amazon Q", result: await installInstallGateAmazonQ(cwd) },
     { agent: "Kiro", result: await installInstallGateKiro(cwd) },
     { agent: "Factory Droid", result: await installInstallGateDroid(cwd) },
+    { agent: "Augment", result: await installInstallGateAugment(cwd) },
     { agent: "Gemini CLI", result: await installInstallGateGemini(cwd) },
     { agent: "Cursor", result: await installInstallGateCursor(cwd) },
     { agent: "OpenCode", result: await installInstallGateOpenCode(cwd) },

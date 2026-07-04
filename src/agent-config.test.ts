@@ -15,6 +15,7 @@ import {
   installInstallGateAmazonQ,
   installInstallGateKiro,
   installInstallGateDroid,
+  installInstallGateAugment,
   installInstallGateGemini,
   installInstallGateCursor,
   installInstallGateOpenCode,
@@ -527,6 +528,51 @@ describe("installInstallGateDroid", () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-droidgate2-"));
     try {
       assert.equal((await installInstallGateDroid(dir)).action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installInstallGateAugment", () => {
+  it("writes a PreToolUse launch-process gate to .augment/settings.json, idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-auggate-"));
+    try {
+      mkdirSync(join(dir, ".augment"), { recursive: true });
+      const r1 = await installInstallGateAugment(dir);
+      assert.equal(r1.action, "created");
+      const s = JSON.parse(readFileSync(join(dir, ".augment", "settings.json"), "utf-8"));
+      const groups = s.hooks.PreToolUse;
+      assert.ok(Array.isArray(groups) && groups.length === 1);
+      // the one adaptation: Augment's shell tool is "launch-process"
+      assert.equal(groups[0].matcher, "launch-process");
+      assert.ok(groups[0].hooks[0].command.endsWith("gate-bash"));
+
+      const r2 = await installInstallGateAugment(dir);
+      assert.equal(r2.action, "unchanged");
+      const s2 = JSON.parse(readFileSync(join(dir, ".augment", "settings.json"), "utf-8"));
+      assert.equal(s2.hooks.PreToolUse.length, 1, "no duplicate group on re-run");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects via a bare .augment-guidelines file too", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-auggate-g-"));
+    try {
+      writeFileSync(join(dir, ".augment-guidelines"), "# guidelines\n");
+      const r = await installInstallGateAugment(dir);
+      assert.equal(r.action, "created");
+      assert.ok(existsSync(join(dir, ".augment", "settings.json")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when no Augment project is present (no false-green)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-auggate2-"));
+    try {
+      assert.equal((await installInstallGateAugment(dir)).action, "skipped");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
