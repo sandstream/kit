@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **exec-broker wired into the MCP mutating-tool path (opt-in)** via `runBrokered`
+  (`src/exec-broker/`) and `runGovernedBrokered` (`src/governance-middleware.ts`).
+  The Pelare-3 resource gates (egress / fs-write / env) now compose ON TOP of the
+  governance floor at the four MCP mutating tools. It is **opt-in and
+  non-breaking**: with no `.kit-exec-broker.json` (nor `KIT_EXEC_BROKER_POLICY`)
+  present, `runBrokered` is a transparent passthrough, so behavior is identical
+  until a user drops a policy in. A present-but-malformed policy fails **closed**
+  (deny) — a broken gate never silently disables enforcement.
 - **RBAC identity providers for Microsoft Entra ID and Google Cloud Identity**
   (`src/rbac/providers-cloud.ts`), siblings of the GitHub backend. Both compile
   role bindings at ENROLLMENT time behind an injectable membership source (real

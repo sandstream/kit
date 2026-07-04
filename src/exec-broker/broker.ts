@@ -28,7 +28,7 @@ import { dirname, resolve, sep } from "node:path";
 import type { OperationContext } from "../governance-middleware.js";
 import { appendAuditEventDirect } from "../audit.js";
 import { checkEgress, checkFsWrite, scopeEnv } from "./decisions.js";
-import type { BrokerPolicy } from "./policy.js";
+import { brokerPolicyPath, loadBrokerPolicy, type BrokerPolicy } from "./policy.js";
 
 /** Environment label stamped on broker audit entries. */
 const BROKER_ENV = "exec-broker";
@@ -144,6 +144,34 @@ function collectDenials(context: BrokerContext, policy: BrokerPolicy): string[] 
   }
 
   return denials;
+}
+
+/**
+ * OPT-IN entry point. The broker only mediates when a policy FILE is present:
+ *   - No `.kit-exec-broker.json` (nor `KIT_EXEC_BROKER_POLICY`) → run UNMEDIATED,
+ *     exactly like before the broker existed (this is the opt-in switch — a fresh
+ *     install is never silently gated).
+ *   - File present but malformed → `loadBrokerPolicy` returns null → `brokerExec`
+ *     default-DENIES. A broken gate fails closed; it never silently disables
+ *     enforcement (no false-green).
+ *   - File present + valid → full `brokerExec` mediation.
+ * This is the drop-in every call site adopts to become broker-aware without
+ * changing behavior for users who haven't opted in.
+ */
+export async function runBrokered<T>(
+  context: BrokerContext,
+  run: (scopedEnv: Record<string, string>) => Promise<T>,
+  opts: { policyOverride?: string } = {},
+): Promise<BrokerOutcome<T>> {
+  if (!existsSync(brokerPolicyPath(opts.policyOverride))) {
+    // Not configured → unmediated passthrough (full env, no scoping).
+    try {
+      return { ok: true, result: await run(scopeEnv(Object.keys(process.env), process.env)) };
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  return brokerExec(context, loadBrokerPolicy(opts.policyOverride), run);
 }
 
 /**

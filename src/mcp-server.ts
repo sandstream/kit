@@ -33,7 +33,7 @@ import { executeCommand } from "./run.js";
 import { gatherProjectContext } from "./context.js";
 import { isReadOnlyMode } from "./read-only-mode.js";
 import { escapeWorkflowCmd } from "./utils/ci-escape.js";
-import { runGoverned } from "./governance-middleware.js";
+import { runGovernedBrokered } from "./governance-middleware.js";
 import type { kitConfig } from "./config.js";
 
 const KIT_FILE = ".kit.toml";
@@ -243,7 +243,7 @@ function register_kit_install(server: McpServer): void {
           };
         }
 
-        const gov = await runGoverned(
+        const gov = await runGovernedBrokered(
           config,
           {
             operation: "tools.install",
@@ -337,7 +337,7 @@ function register_kit_secrets(server: McpServer): void {
           };
         }
 
-        const gov = await runGoverned(
+        const gov = await runGovernedBrokered(
           config,
           { operation: "secrets.generate", operationType: "write", metadata: {} },
           () => generateSecrets(config.secrets!, join(cwd ?? process.cwd(), ".env.local")),
@@ -383,7 +383,7 @@ function register_kit_fix(server: McpServer): void {
       try {
         const config = await loadConfig(configPath(cwd));
 
-        const gov = await runGoverned(
+        const gov = await runGovernedBrokered(
           config,
           { operation: "fix", operationType: "write", metadata: {} },
           async () => {
@@ -802,7 +802,7 @@ function register_kit_run(server: McpServer): void {
         // budget, permission, expired-secret block) and be audited — not just gated
         // by read-only mode.
         const config = await loadConfigForGovernance(cwd);
-        const gov = await runGoverned(
+        const gov = await runGovernedBrokered(
           config,
           { operation: "run", operationType: "write", metadata: { command } },
           () =>
