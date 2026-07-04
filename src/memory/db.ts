@@ -20,8 +20,16 @@ import type { MemoryStats, MessageInput, SearchHit, SessionInput, ToolUseInput }
 import { summarizeTokens } from "./stats.js";
 import { redactSecrets } from "../utils/redactSecrets.js";
 import { secureFile, secureDir } from "../utils/secure-perms.js";
+import { findInjection } from "./injection.js";
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
+
+/** True when text carries a HIGH-confidence prompt-injection pattern — used to
+ *  quarantine a message on insert so recall never re-injects it into the prompt. */
+function isHighConfidenceInjection(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return findInjection(text).some((f) => f.confidence === "high");
+}
 
 /**
  * Opt-in redaction-at-capture (KIT_MEMORY_REDACT=1). The memory store is raw by
@@ -86,7 +94,8 @@ CREATE TABLE IF NOT EXISTS messages (
   timestamp TEXT,
   cwd TEXT,
   git_branch TEXT,
-  version TEXT
+  version TEXT,
+  quarantined INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS tool_uses (
@@ -197,6 +206,11 @@ function migrate(db: DatabaseSync): void {
   // (unclaimed) → backward-compatible.
   ensureColumn(db, "pending_actions", "claimed_by", "TEXT");
   ensureColumn(db, "pending_actions", "claimed_at", "TEXT");
+  // v7: quarantine a message carrying a high-confidence prompt-injection pattern so
+  // recall (searchMessages / recentMessages) never re-injects it into the prompt.
+  // Set on insert going forward; `kit memory scan --injection --quarantine` backfills
+  // rows indexed before this. Older rows default 0 (shown) → backward-compatible.
+  ensureColumn(db, "messages", "quarantined", "INTEGER NOT NULL DEFAULT 0");
   const row = db.prepare("SELECT version FROM schema_meta LIMIT 1").get() as
     | { version: number }
     | undefined;
@@ -290,11 +304,16 @@ export function upsertSession(db: DatabaseSync, s: SessionInput): void {
 
 /** Insert a message idempotently (by uuid). Returns true if a new row was added. */
 export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
+  const content = captureText(m.content);
+  // Quarantine on insert: a stored message carrying a high-confidence injection
+  // pattern is excluded from recall by default (deny-by-default toward the prompt),
+  // so a poisoned transcript line never rides into a later, more-trusted session.
+  const quarantined = isHighConfidenceInjection(content) ? 1 : 0;
   const res = db
     .prepare(
       `INSERT OR IGNORE INTO messages
-       (uuid, session_id, parent_uuid, type, role, content, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, timestamp, cwd, git_branch, version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (uuid, session_id, parent_uuid, type, role, content, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, timestamp, cwd, git_branch, version, quarantined)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       m.uuid,
@@ -302,7 +321,7 @@ export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
       m.parentUuid ?? null,
       m.type,
       m.role ?? null,
-      captureText(m.content),
+      content,
       m.model ?? null,
       m.inputTokens ?? null,
       m.outputTokens ?? null,
@@ -312,6 +331,7 @@ export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
       m.cwd ?? null,
       m.gitBranch ?? null,
       m.version ?? null,
+      quarantined,
     );
   if (Number(res.changes) > 0) {
     db.prepare("UPDATE sessions SET message_count = message_count + 1 WHERE session_id = ?").run(
@@ -339,6 +359,9 @@ export interface SearchOptions {
   limit?: number;
   /** Restrict to messages whose cwd is this repo root (or a subdirectory). */
   projectPath?: string;
+  /** Include quarantined (high-confidence injection) rows. Default false: recall
+   *  excludes them so a poisoned line is never re-injected. Set for inspection. */
+  includeQuarantined?: boolean;
 }
 
 /**
@@ -375,6 +398,7 @@ export function searchMessages(
   const run = (match: string): SearchHit[] => {
     const params: (string | number)[] = [match];
     let where = "messages_fts MATCH ?";
+    if (!opts.includeQuarantined) where += " AND m.quarantined = 0";
     if (opts.projectPath) {
       where += " AND (m.cwd = ? OR m.cwd LIKE ?)";
       params.push(opts.projectPath, `${opts.projectPath}/%`);
@@ -434,6 +458,7 @@ export function recentMessages(db: DatabaseSync, opts: SearchOptions = {}): Sear
   const limit = opts.limit ?? 10;
   const params: (string | number)[] = [];
   let where = "content IS NOT NULL AND content != ''";
+  if (!opts.includeQuarantined) where += " AND quarantined = 0";
   if (opts.projectPath) {
     where += " AND (cwd = ? OR cwd LIKE ?)";
     params.push(opts.projectPath, `${opts.projectPath}/%`);
@@ -448,6 +473,35 @@ export function recentMessages(db: DatabaseSync, opts: SearchOptions = {}): Sear
        LIMIT ?`,
     )
     .all(...params) as unknown as SearchHit[];
+}
+
+/**
+ * Backfill quarantine: mark every message whose content carries a high-confidence
+ * injection pattern but isn't yet quarantined — rows indexed before v7 / before the
+ * insert-time gate. Returns the count newly quarantined. Detection is JS-side
+ * (findInjection), so we iterate the un-quarantined rows. Deterministic, zero-LLM.
+ */
+export function quarantineInjectedMessages(db: DatabaseSync): number {
+  const rows = db
+    .prepare("SELECT id, content FROM messages WHERE quarantined = 0 AND content IS NOT NULL")
+    .all() as { id: number; content: string }[];
+  const mark = db.prepare("UPDATE messages SET quarantined = 1 WHERE id = ?");
+  let n = 0;
+  for (const r of rows) {
+    if (isHighConfidenceInjection(r.content)) {
+      mark.run(r.id);
+      n++;
+    }
+  }
+  return n;
+}
+
+/** How many messages are currently quarantined (excluded from recall by default). */
+export function countQuarantined(db: DatabaseSync): number {
+  const r = db.prepare("SELECT COUNT(*) AS n FROM messages WHERE quarantined = 1").get() as
+    | { n: number }
+    | undefined;
+  return r ? Number(r.n) : 0;
 }
 
 export function getStats(db: DatabaseSync): MemoryStats {

@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security — memory as attack surface
+
+- **Recall now EXCLUDES a poisoned message, not just badges it (R3).** A message
+  carrying a high-confidence prompt-injection pattern is quarantined on insert
+  (`messages.quarantined`, schema v7) and left out of both recall paths —
+  `kit memory search` (FTS) and SessionStart recovery (`recentMessages`) — by
+  default, so a poisoned transcript line is never re-injected into a later,
+  more-trusted session. `kit memory search --include-quarantined` shows them (still
+  badged) for inspection; `kit memory scan --injection --quarantine` backfills rows
+  indexed before the gate. Deterministic (`findInjection`), zero-LLM; older rows
+  default to un-quarantined (backward-compatible).
+
 ### Fixed — self-playing loop liveness (R5)
 
 - **A silently failed background capture is now surfaced on the next SessionStart.**
