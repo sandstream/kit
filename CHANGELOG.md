@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **Control-plane distribution — signed policy + revocation propagation** (Pelare 2,
+  `src/control-plane/distribute.ts`). A `PolicyBundle` (raw `.kit-policy.toml` +
+  `.kit-policy.sig` + signed revocations) can be fetched from a file (air-gapped) or
+  an opt-in `https:` URL (injectable `fetchImpl`), then `verifyPolicyBundle` verifies
+  it **fully offline** against the repo's committed `.kit-policy.signers` trust anchor
+  — reusing the exact `verifyPolicy` codepath (no crypto re-implementation) — and
+  `applyPolicyBundle` writes it ONLY when valid, merging each revocation after a
+  per-record signature check against the anchor. Fail-closed throughout (untrusted
+  signer, tampered policy/revocation, or malformed bundle → rejected, `root`
+  untouched). New `appendRevocations` primitive merges pre-verified records
+  (dedup) without re-signing. No egress by default; zero LLM.
+
 - **exec-broker wired into the MCP mutating-tool path (opt-in)** via `runBrokered`
   (`src/exec-broker/`) and `runGovernedBrokered` (`src/governance-middleware.ts`).
   The Pelare-3 resource gates (egress / fs-write / env) now compose ON TOP of the
