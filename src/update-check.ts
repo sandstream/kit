@@ -27,6 +27,28 @@ export interface UpdateInfo {
  * Returns null if already on latest, check fails, or check is suppressed.
  * Never throws — all errors are caught silently.
  */
+/**
+ * True when the host is in an air-gap posture by EITHER the KIT_AIRGAP env var OR
+ * the checked-in `.kit.toml [air_gap] enabled = true` (the authoritative
+ * resolveAirGap notion). `scanners.isAirGap()` reads ONLY the env var, so a
+ * config-declared enclave (e.g. `kit setup --mode airgap`) without KIT_AIRGAP
+ * exported would otherwise let the npm update beacon punch through. Best-effort:
+ * a missing/invalid config falls back to the env-only signal.
+ */
+async function isAirGapPosture(): Promise<boolean> {
+  if (isAirGap()) return true;
+  try {
+    const [{ loadConfig }, { resolveAirGap }] = await Promise.all([
+      import("./config.js"),
+      import("./airgap/config.js"),
+    ]);
+    const cfg = await loadConfig(join(process.cwd(), ".kit.toml"));
+    return resolveAirGap(cfg.air_gap).enabled;
+  } catch {
+    return false; // no/invalid config → env-only posture
+  }
+}
+
 export async function checkForUpdate(currentVersion: string): Promise<UpdateInfo | null> {
   try {
     // Suppression conditions. Air-gap is one of them: the update check is the
@@ -38,7 +60,7 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateInfo
       process.env.CI === "true" ||
       process.env.GITHUB_ACTIONS === "true" ||
       process.env.GITLAB_CI === "true" ||
-      isAirGap()
+      (await isAirGapPosture())
     ) {
       return null;
     }

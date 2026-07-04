@@ -75,6 +75,29 @@ describe("redactSecrets — connection-string + sk-svcacct (regression)", () => 
   });
 });
 
+describe("redactSecrets — provider tokens (prefix-exclusion leak fix)", () => {
+  it("redacts provider tokens previously skipped by the prefix allowlist", () => {
+    for (const kv of [
+      "VERCEL_TOKEN=xQ9fL2vN8pR4tW6yA1bC3dE5gH7jK0mP",
+      "RAILWAY_TOKEN=Zk3mP9qR7sT1vW5xY8aB2cD4eF6gH0jL",
+      "FLY_API_TOKEN=aB2cD4eF6gH0jLxQ9fL2vN8pR4tW6yA1",
+      "GITHUB_TOKEN=ghXstuffZk3mP9qR7sT1vW5xY8aB2cD4eF",
+      "CI_JOB_TOKEN=Zk3mP9qR7sT1vW5xY8aB2cD4eF6gH0jL9",
+    ]) {
+      const out = redactSecrets(kv);
+      assert.ok(out.includes("[REDACTED]"), `should redact: ${kv}`);
+      assert.ok(!out.includes(kv.split("=")[1]), `raw value must be gone: ${kv}`);
+    }
+  });
+
+  it("still skips exact public CI/runtime metadata (no added noise)", () => {
+    // exact metadata names + KIT_ flags are not credentials → left intact
+    const meta =
+      "GITHUB_SHA=a3f5c8e1b2d4f6a8c0e2b4d6f8a0c2e4a3f5c8e1 KIT_POLICY_HASH=deadbeefcafebabe0011";
+    assert.equal(redactSecrets(meta), meta);
+  });
+});
+
 describe("redactSecrets", () => {
   it("redacts stripe test secret keys", () => {
     const out = redactSecrets("test_mode_api_key = 'sk_test_51T2AMtJLRlXeUG4dKBwX2nsve3BLEzy'");

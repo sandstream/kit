@@ -232,6 +232,25 @@ describe("parseInstallCommand — bypass resistance (security)", () => {
     );
   });
 
+  it("HIGH-SHELL: leading shell keywords / grouping / eval don't hide the install", () => {
+    assert.deepEqual(parseInstallCommand("if true; then npm i evil; fi").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("then npm i evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("{ npm i evil ; }").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("for x in 1; do pip install evil; done").refs, [
+      "pip:evil",
+    ]);
+    assert.deepEqual(parseInstallCommand("eval 'npm i evil'").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand('eval "pip install evil"').refs, ["pip:evil"]);
+  });
+
+  it("HIGH-BG: an install after a background `&` / `|&` is still detected", () => {
+    assert.deepEqual(parseInstallCommand(": & npm i evil".replace(/:/, "echo hi")).refs, [
+      "npm:evil",
+    ]);
+    assert.deepEqual(parseInstallCommand("echo hi & npm install evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("true |& npm i evil").refs, ["npm:evil"]);
+  });
+
   it("CRIT-2: package runners (npm exec / pnpm dlx / yarn dlx / bun x) are gated", () => {
     assert.deepEqual(parseInstallCommand("npm exec evil").refs, ["npm:evil"]);
     assert.deepEqual(parseInstallCommand("pnpm dlx evil").refs, ["npm:evil"]);
