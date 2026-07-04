@@ -49,6 +49,7 @@ import {
   effectiveStatus,
   formatAge,
   getSharedPath,
+  verifySharedTier,
   type SharedKind,
   type SharedStatus,
   type SharedEntry,
@@ -114,6 +115,7 @@ export async function cmdMemory(): Promise<boolean> {
     install: memInstall,
     uninstall: memUninstall,
     share: memShare,
+    verify: memVerify,
     areas: memAreas,
     area: memArea,
     context: memContext,
@@ -366,6 +368,9 @@ async function memHelp(): Promise<boolean> {
   console.log("  kit memory backup <file>    Encrypted backup (set KIT_MEMORY_PASSPHRASE)");
   console.log("  kit memory restore <file>   Restore an encrypted backup (new machine)");
   console.log("  kit memory share …          Promote a curated entry to shared (team) memory");
+  console.log(
+    "  kit memory verify           Verify Ed25519 signatures on the shared tier (--strict fails on an un-anchored signer)",
+  );
   console.log("  kit memory areas            List shared responsibility areas");
   console.log("  kit memory area <name>      Show shared entries for one area");
   console.log(
@@ -986,6 +991,60 @@ async function memShare(): Promise<boolean> {
     return false;
   }
   return true;
+}
+
+async function memVerify(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  const strict = hasFlag(process.argv, "--strict");
+  const root = getCurrentProjectRoot();
+  const v = verifySharedTier(root);
+  if (jsonMode) {
+    console.log(
+      JSON.stringify({
+        anchored: v.anchored,
+        total: v.total,
+        counts: v.counts,
+        results: v.results.map((r) => ({ id: r.entry.id, area: r.entry.area, verdict: r.verdict })),
+      }),
+    );
+    // Same exit rule as the human path (see below).
+    return !(v.counts["bad-sig"] > 0 || (strict && v.anchored && v.counts["untrusted-signer"] > 0));
+  }
+  if (v.total === 0) {
+    console.log(`${c.dim}no shared entries to verify (${getSharedPath(root)} is empty)${c.reset}`);
+    return true;
+  }
+  const anchorNote = v.anchored
+    ? `${c.dim}trust anchor: .kit-policy.signers (only org keys trusted)${c.reset}`
+    : `${c.dim}no .kit-policy.signers anchor — verifying against this machine's identity keys${c.reset}`;
+  console.log(
+    `${c.bold}${v.total}${c.reset} shared entr${v.total === 1 ? "y" : "ies"} · ${c.green}${v.counts.trusted} trusted${c.reset} · ${c.red}${v.counts["bad-sig"]} bad-sig${c.reset} · ${c.yellow}${v.counts["untrusted-signer"]} untrusted${c.reset} · ${c.dim}${v.counts.unsigned} unsigned${c.reset}`,
+  );
+  console.log(`  ${anchorNote}`);
+  // List anything that isn't cleanly trusted, so a tampered/untrusted entry is named.
+  for (const r of v.results) {
+    if (r.verdict === "trusted") continue;
+    const color =
+      r.verdict === "bad-sig" ? c.red : r.verdict === "untrusted-signer" ? c.yellow : c.dim;
+    const who = r.entry.kid ? ` ${c.dim}(${r.entry.kid})${c.reset}` : "";
+    console.log(
+      `  ${color}[${r.verdict}]${c.reset} ${c.bold}${r.entry.id}${c.reset} ${r.entry.title}${who}`,
+    );
+  }
+  // Exit non-zero on tamper always; on an un-anchored signer only under --strict when
+  // an anchor is present (mirrors the policy gate's "fail-closed once anchored").
+  const failed =
+    v.counts["bad-sig"] > 0 || (strict && v.anchored && v.counts["untrusted-signer"] > 0);
+  if (v.counts["bad-sig"] > 0) {
+    console.error(
+      `${c.red}✗ ${v.counts["bad-sig"]} entr${v.counts["bad-sig"] === 1 ? "y" : "ies"} failed signature verification — the shared store may have been tampered with${c.reset}`,
+    );
+  } else if (failed) {
+    console.error(
+      `${c.red}✗ ${v.counts["untrusted-signer"]} entr${v.counts["untrusted-signer"] === 1 ? "y" : "ies"} signed by a key not in .kit-policy.signers (--strict)${c.reset}`,
+    );
+  }
+  return !failed;
 }
 
 async function memAreas(): Promise<boolean> {

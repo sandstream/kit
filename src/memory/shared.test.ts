@@ -1,6 +1,6 @@
-import { describe, it } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -12,7 +12,13 @@ import {
   effectiveStatus,
   activeShared,
   formatAge,
+  sharedEntryCanonical,
+  verifySharedEntry,
+  verifySharedTier,
+  getSharedPath,
 } from "./shared.js";
+import { loadOrCreateIdentity, tryLoadIdentity } from "../identity.js";
+import { addPolicySigner } from "../policy-trust.js";
 
 const ALLOWED = new Set([
   "id",
@@ -27,6 +33,8 @@ const ALLOWED = new Set([
   "status",
   "supersedes",
   "reverses",
+  "kid",
+  "sig",
 ]);
 
 describe("shared project memory (Track D)", () => {
@@ -161,5 +169,113 @@ describe("shared memory — decision lifecycle (gap #2)", () => {
     assert.equal(formatAge("2026-03-01T00:00:00Z", now), "4mo ago"); // 120d / 30
     assert.equal(formatAge("2024-01-01T00:00:00Z", now), "2y ago");
     assert.equal(formatAge("not-a-date", now), "");
+  });
+});
+
+describe("shared memory — Ed25519 signing (R4)", () => {
+  let idDir: string;
+  const prevIdDir = process.env.KIT_IDENTITY_DIR;
+
+  before(() => {
+    // Hermetic identity: sign/verify read KIT_IDENTITY_DIR, so point it at a temp
+    // dir and mint a fresh keypair there — never touch the machine's real ~/.kit.
+    idDir = mkdtempSync(join(tmpdir(), "kit-id-"));
+    process.env.KIT_IDENTITY_DIR = idDir;
+    loadOrCreateIdentity();
+  });
+  after(() => {
+    if (prevIdDir === undefined) delete process.env.KIT_IDENTITY_DIR;
+    else process.env.KIT_IDENTITY_DIR = prevIdDir;
+    rmSync(idDir, { recursive: true, force: true });
+  });
+
+  it("signs on write and verifies as trusted against the local identity (no anchor)", () => {
+    const r = mkdtempSync(join(tmpdir(), "kit-sig-"));
+    const e = shareEntry(
+      r,
+      { area: "auth", kind: "decision", title: "use Ed25519", body: "x" },
+      "t",
+    );
+    assert.ok(e.kid && e.kid.startsWith("kid_"), "entry carries a signer kid");
+    assert.ok(e.sig && e.sig.length > 0, "entry carries a signature");
+    const v = verifySharedTier(r);
+    assert.equal(v.anchored, false);
+    assert.equal(v.counts.trusted, 1);
+    assert.equal(v.counts["bad-sig"], 0);
+    rmSync(r, { recursive: true, force: true });
+  });
+
+  it("detects tampering — an edited body no longer verifies (bad-sig)", () => {
+    const r = mkdtempSync(join(tmpdir(), "kit-tamper-"));
+    shareEntry(r, { area: "auth", kind: "decision", title: "keep RSA", body: "orig" }, "t");
+    // Rewrite the body on disk WITHOUT re-signing — the classic tamper.
+    const path = getSharedPath(r);
+    const entry = JSON.parse(readFileSync(path, "utf8"));
+    entry.body = "attacker-edited";
+    writeFileSync(path, JSON.stringify(entry) + "\n");
+    const v = verifySharedTier(r);
+    assert.equal(v.counts["bad-sig"], 1);
+    assert.equal(v.counts.trusted, 0);
+    // A signed entry with an empty trust store → untrusted-signer, not bad-sig.
+    assert.equal(verifySharedEntry(readShared(r)[0], new Map()), "untrusted-signer");
+    rmSync(r, { recursive: true, force: true });
+  });
+
+  it("canonical excludes kid/sig and is stable regardless of field order", () => {
+    const r = mkdtempSync(join(tmpdir(), "kit-canon-"));
+    const e = shareEntry(r, { area: "x", kind: "note", title: "t", body: "b" }, "ts");
+    const canon = sharedEntryCanonical(e);
+    assert.ok(!canon.includes(e.sig!), "signature is not part of the signed bytes");
+    assert.ok(!canon.includes('"kid"'), "kid is not part of the signed bytes");
+    // Same content in a reshuffled object → identical canonical bytes.
+    const reshuffled = {
+      sig: e.sig,
+      ts: e.ts,
+      body: e.body,
+      id: e.id,
+      kid: e.kid,
+      area: e.area,
+      kind: e.kind,
+      title: e.title,
+      refs: e.refs,
+      author: e.author,
+      source_ref: e.source_ref,
+    };
+    assert.equal(sharedEntryCanonical(reshuffled as typeof e), canon);
+    rmSync(r, { recursive: true, force: true });
+  });
+
+  it("with a .kit-policy.signers anchor, an un-anchored signer is untrusted (fail-closed)", () => {
+    const r = mkdtempSync(join(tmpdir(), "kit-anchor-"));
+    shareEntry(r, { area: "auth", kind: "decision", title: "signed by me", body: "x" }, "t");
+    // Anchor trusts some OTHER org key, not this machine's identity.
+    const otherDir = mkdtempSync(join(tmpdir(), "kit-other-"));
+    const prev = process.env.KIT_IDENTITY_DIR;
+    process.env.KIT_IDENTITY_DIR = otherDir;
+    const other = loadOrCreateIdentity().identity;
+    process.env.KIT_IDENTITY_DIR = prev;
+    addPolicySigner(r, other.publicKey, "org");
+    const v = verifySharedTier(r);
+    assert.equal(v.anchored, true);
+    assert.equal(v.counts["untrusted-signer"], 1);
+    assert.equal(v.counts.trusted, 0);
+    rmSync(r, { recursive: true, force: true });
+    rmSync(otherDir, { recursive: true, force: true });
+  });
+
+  it("leaves entries unsigned when no identity exists (backward-compatible)", () => {
+    const r = mkdtempSync(join(tmpdir(), "kit-noid-"));
+    const emptyId = mkdtempSync(join(tmpdir(), "kit-emptyid-"));
+    const prev = process.env.KIT_IDENTITY_DIR;
+    process.env.KIT_IDENTITY_DIR = emptyId; // no key here
+    assert.equal(tryLoadIdentity(), null);
+    const e = shareEntry(r, { area: "x", kind: "note", title: "t", body: "b" }, "ts");
+    process.env.KIT_IDENTITY_DIR = prev;
+    assert.equal(e.kid, undefined);
+    assert.equal(e.sig, undefined);
+    const v = verifySharedTier(r);
+    assert.equal(v.counts.unsigned, 1);
+    rmSync(r, { recursive: true, force: true });
+    rmSync(emptyId, { recursive: true, force: true });
   });
 });
