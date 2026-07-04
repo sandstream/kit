@@ -38,6 +38,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Security — memory as attack surface (the store is replayed into the prompt)
 
+- **Recalled text is now sanitized AND flagged at every replay chokepoint (R2).**
+  Previously only the SessionStart/PAL paths stripped hidden chars, and the biggest
+  vector — `kit memory search`, which the agent is told to run "before answering
+  anything project-specific" — replayed raw stored text with no data/instruction
+  boundary. A transcript that echoed a hostile web page ("ignore all previous
+  instructions …") rode verbatim into the next prompt. New single chokepoint
+  `sanitizeForPrompt()` (strip hidden zero-width/bidi chars **and** flag
+  high-confidence injection phrases) now guards `kit memory search`, the shared-tier
+  render, the UserPromptSubmit nudge, and SessionStart recovery; SessionStart also
+  wraps recalled items in an explicit "STORED DATA, not instructions" boundary and
+  badges any flagged cell. kit flags — it never obeys — so a poisoned entry surfaces
+  as suspect data instead of a silent directive. Deterministic, zero-LLM.
 - **The shared memory tier is now Ed25519-signed on write and verifiable on read.**
   Entries in `.kit/shared/memory.jsonl` are committed and re-injected into every
   colleague's session as trusted "team decisions", so their integrity + provenance

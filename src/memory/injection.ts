@@ -95,6 +95,31 @@ export function stripUnsafeChars(text: string): string {
   return out;
 }
 
+export interface SanitizedText {
+  /** Hidden-char-stripped text, safe to place inside a DATA block. */
+  text: string;
+  /** True when a HIGH-confidence injection pattern is present (hidden chars or a
+   *  canonical override/role-reprogram phrase) — the caller should mark it as
+   *  suspect and never treat it as an instruction. */
+  flagged: boolean;
+}
+
+/**
+ * Prepare ONE stored text cell for RE-INJECTION into the prompt. This is the single
+ * chokepoint every replay path (SessionStart recovery, the UserPromptSubmit nudge,
+ * `kit memory search` render, shared-tier render) should route store-derived text
+ * through: it (a) strips hidden zero-width/bidi chars and (b) FLAGS high-confidence
+ * injection phrases so the surface can badge them as data rather than silently
+ * replaying "ignore all previous instructions …" as if kit had said it. Flagging is
+ * computed on the ORIGINAL text (so hidden-char payloads count) but the returned
+ * text is stripped. Deterministic, zero-LLM. kit flags; the human/agent decides.
+ */
+export function sanitizeForPrompt(text: string): SanitizedText {
+  const raw = text ?? "";
+  const flagged = findInjection(raw).some((f) => f.confidence === "high");
+  return { text: stripUnsafeChars(raw), flagged };
+}
+
 /**
  * Deterministic injection-pattern findings in a single text cell. Invisible-char
  * hits first (strongest signal), then the phrase rules. One finding per label per
