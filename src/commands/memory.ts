@@ -3,7 +3,7 @@
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { existsSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import {
   openMemoryDb,
   getStats,
@@ -949,8 +949,31 @@ async function memUninstall(): Promise<boolean> {
   } else {
     console.log(`${c.dim}no kit memory hooks were installed${c.reset}`);
   }
-  if (uninstallStatusline().removed) {
+  const slRemoved = uninstallStatusline().removed;
+  if (slRemoved) {
     console.log(`${c.green}✓${c.reset} removed kit status line`);
+  }
+  // Removing the hooks tears down the self-playing capture loop — a security-relevant
+  // event. Audit it (best-effort, fail-open) so a teardown isn't invisible when audit
+  // is enabled. A no-op when audit is off (the default), so no surprise files appear.
+  if (removed.length || slRemoved) {
+    try {
+      const { logAuditEvent } = await import("../audit.js");
+      const { mergeGovernanceConfigAsync } = await import("../governance.js");
+      const { loadConfig } = await import("../config.js");
+      const cfg = await loadConfig(join(process.cwd(), ".kit.toml")).catch(
+        () => ({}) as Awaited<ReturnType<typeof loadConfig>>,
+      );
+      const gov = await mergeGovernanceConfigAsync(cfg.governance);
+      await logAuditEvent(gov, {
+        operation: "memory.hooks.uninstall",
+        environment: gov.environment,
+        success: true,
+        metadata: { removedHooks: removed, statusline: slRemoved },
+      });
+    } catch {
+      // audit is best-effort here — never let it block or fail an uninstall
+    }
   }
   return true;
 }
