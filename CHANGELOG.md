@@ -6,16 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [5.0.0-alpha.2] - 2026-07-04
+## [4.1.0] - 2026-07-04
 
-Road to 5.0, step two: land **v1 of the three north-star pillars** behind the
-interfaces the design calls for — real, tested, fail-closed modules with honest
-degradation where a capability can't be exercised yet. These are foundations
-(new modules, not yet wired into every call path); wiring + hardware/control-plane
-backends follow in beta/rc. Built via a multi-agent workflow (design → implement
-→ adversarial verify), then hardened on the verify findings.
+A wholly **additive**, backward-compatible release along two axes — broader agent
+coverage and the first **v1 foundations of the 5.0 north-star pillars**. Semver
+note: nothing here breaks an existing contract (all-new modules, no default
+flipped), so this is a MINOR, not a major. The pillar work lands behind the
+interfaces the north-star design calls for, but the _breaking_ capabilities that
+will justify **5.0.0** — hardware-key migration, enforcement-on-by-default, a
+required control plane — deliberately do NOT ship here. `5.0.0` is reserved for
+when the first of those lands. Built via a multi-agent workflow (design →
+implement → adversarial verify), then hardened on the verify findings.
 
-### Added
+### Added — 5.0 pillar foundations
 
 - **Pelare 1 — hardware-rooted identity behind a `KeyStore` port** (`src/keystore/`).
   A `KeyStore` interface (`available`/`publicKeyPem`/`sign`/`create`/`rotate`) with a
@@ -43,15 +46,12 @@ backends follow in beta/rc. Built via a multi-agent workflow (design → impleme
   and Google documented as future backends of the same interface); a non-OK GitHub
   response fails closed (throws) rather than reporting spurious empty membership.
 
-## [5.0.0-alpha.1] - 2026-07-04
+### Added — wider agent coverage
 
-First step on the road to 5.0: broaden kit's four-surface agent model
-(rules / memory / install-gate / lifecycle hooks) across the coding-agent
-ecosystem, shipping only where the transcript path, format, and block
-contract are verified — and naming the rest as honest limitations rather
-than faking coverage.
-
-### Added
+Broaden kit's four-surface agent model (rules / memory / install-gate / lifecycle
+hooks) across the coding-agent ecosystem, shipping only where the transcript path,
+format, and block contract are verified — and naming the rest as honest
+limitations rather than faking coverage.
 
 - **Six more agents onboarded (research-driven).** kit now indexes memory and/or
   enforces installs for a much wider agent set. Every surface below was verified
