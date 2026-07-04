@@ -8,6 +8,13 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Protected environment gate: NPM_TOKEN is a secret SCOPED to this environment,
+    # so it is released only after the environment's required-reviewer / branch
+    # rules pass. This is the primary defense against "anyone who can push a v* tag
+    # ships to npm" — configure required reviewers on the `npm-publish` environment
+    # in repo Settings → Environments. Without that config the token is never
+    # exposed (secret lives on the environment, not the repo).
+    environment: npm-publish
     permissions:
       contents: read # checkout
       id-token: write # npm provenance via OIDC (SLSA attestation)
@@ -50,14 +57,31 @@ jobs:
 
       - name: Import maintainer public key
         # A fresh runner has an empty GPG keyring, so verify-tag would have
-        # nothing to check the signature against. Import the committed PUBLIC
-        # key (.github/maintainer-pubkey.asc — public only, safe to commit; the
-        # private signing key never leaves the maintainer's machine) and mark
-        # it ultimately trusted so a valid signature verifies cleanly.
+        # nothing to check against. We import the committed PUBLIC key, but we do
+        # NOT blindly trust it: an attacker who can push a v* tag could also swap
+        # .github/maintainer-pubkey.asc for their own key (the workflow runs from
+        # the pushed ref). So we PIN the expected fingerprint in a repo/org secret
+        # (MAINTAINER_KEY_FPR) — which a tag pusher cannot change — and refuse to
+        # trust any imported key whose fingerprint doesn't match. Fail-closed: the
+        # secret MUST be set (no pin ⇒ no publish).
+        env:
+          EXPECTED_FPR: ${{ secrets.MAINTAINER_KEY_FPR }}
         run: |
+          if [ -z "$EXPECTED_FPR" ]; then
+            echo "::error::MAINTAINER_KEY_FPR secret is not set — refusing to publish (fail-closed). Set it to the maintainer key's full fingerprint in repo/org secrets."
+            exit 1
+          fi
           gpg --batch --import .github/maintainer-pubkey.asc
           FPR=$(gpg --list-keys --with-colons | awk -F: '/^fpr:/{print $10; exit}')
+          # Normalize (strip spaces, upcase) and compare against the pinned value.
+          NORM_FPR=$(echo "$FPR" | tr -d ' ' | tr 'a-f' 'A-F')
+          NORM_EXP=$(echo "$EXPECTED_FPR" | tr -d ' ' | tr 'a-f' 'A-F')
+          if [ "$NORM_FPR" != "$NORM_EXP" ]; then
+            echo "::error::Imported maintainer key fingerprint ($NORM_FPR) does not match the pinned MAINTAINER_KEY_FPR — refusing to publish (the in-repo pubkey may have been swapped)."
+            exit 1
+          fi
           echo "$FPR:6:" | gpg --batch --import-ownertrust
+          echo "Maintainer key fingerprint matches the pinned secret."
 
       - name: Verify tag is GPG-signed
         # Refuse to publish unsigned tags. Operators verify the same way via
