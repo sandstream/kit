@@ -16,6 +16,7 @@ import {
   installInstallGateKiro,
   installInstallGateDroid,
   installInstallGateAugment,
+  installInstallGateAntigravity,
   installAiderRules,
   mergeAiderRead,
   installInstallGateGemini,
@@ -575,6 +576,38 @@ describe("installInstallGateAugment", () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-auggate2-"));
     try {
       assert.equal((await installInstallGateAugment(dir)).action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installInstallGateAntigravity", () => {
+  it("writes a PreToolUse run_command gate to .agents/hooks.json, idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-antigrav-"));
+    try {
+      mkdirSync(join(dir, ".agents"), { recursive: true });
+      const r1 = await installInstallGateAntigravity(dir);
+      assert.equal(r1.action, "created");
+      const s = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf-8"));
+      const groups = s.hooks.PreToolUse;
+      assert.ok(Array.isArray(groups) && groups.length === 1);
+      assert.equal(groups[0].matcher, "run_command");
+      assert.ok(groups[0].hooks[0].command.endsWith("gate-bash"));
+
+      const r2 = await installInstallGateAntigravity(dir);
+      assert.equal(r2.action, "unchanged");
+      const s2 = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf-8"));
+      assert.equal(s2.hooks.PreToolUse.length, 1, "no duplicate group on re-run");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when no Antigravity (.agents/) project is present (no false-green)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-antigrav2-"));
+    try {
+      assert.equal((await installInstallGateAntigravity(dir)).action, "skipped");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

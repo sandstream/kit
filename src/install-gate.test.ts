@@ -27,6 +27,20 @@ describe("extractCommandFromHookPayload — per-agent wire shapes", () => {
       "npm install z",
     );
   });
+  it("reads toolCall.args.CommandLine (Antigravity run_command)", () => {
+    assert.equal(
+      extractCommandFromHookPayload({
+        toolCall: { name: "run_command", args: { CommandLine: "npm install evil" } },
+      }),
+      "npm install evil",
+    );
+  });
+  it("reads arguments.command (Amp permissions delegate)", () => {
+    assert.equal(
+      extractCommandFromHookPayload({ tool: "Bash", arguments: { command: "pip install evil" } }),
+      "pip install evil",
+    );
+  });
   it("joins array-form (bin + args)", () => {
     assert.equal(
       extractCommandFromHookPayload({ tool_input: { command: ["npm", "install", "z"] } }),
