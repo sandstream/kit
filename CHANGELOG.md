@@ -27,6 +27,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   (removes zero-width + bidi-control chars) before building the prompt block, so a
   stored hidden payload can't ride recall back into the model. Visible text is
   untouched. Deterministic, fail-open.
+- **Cross-machine `pull` scans the incoming store before merge.** `syncFromExport`
+  now runs the injection scan on an incoming memory store and **fails closed** on a
+  high-confidence finding (override: `KIT_MEMORY_ALLOW_UNSAFE=1`), so a poisoned
+  store can't silently `merge` into yours and get replayed into the prompt. Fail-open
+  only on a scan error (unknown/older schema) so legitimate foreign stores still merge.
+- **New `docs/THREAT_MODEL.md` section: "Memory as an attack surface"** — documents
+  the delayed prompt-injection surface and kit's deterministic defences (validated
+  update boundary, defanged recall, `scan --injection`, guarded pull), with the
+  honest limits (pull-based recall, same-UID writes, heuristic tier).
 
 ## [4.0.0] - 2026-07-02
 

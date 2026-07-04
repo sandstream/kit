@@ -21,6 +21,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mergeDb, type MergeResult } from "./merge.js";
+import { scanDbForInjection } from "./scan.js";
 import {
   isEncryptedBackup,
   isAsymmetricBackup,
@@ -32,6 +33,37 @@ import {
 export interface SyncOptions {
   /** Passphrase for an encrypted backup export (KIT_MEMORY_PASSPHRASE). */
   passphrase?: string;
+  /** Merge even if the incoming store has high-confidence injection findings. */
+  allowUnsafe?: boolean;
+}
+
+/**
+ * R7: an incoming store is untrusted — after merge its rows are replayed into the
+ * agent's prompt (recall/decisions/PAL), so a poisoned entry is a delayed injection
+ * vector. Scan the incoming DB BEFORE mergeDb and fail closed on any high-confidence
+ * finding, so a poisoned pull can't silently land. Deterministic, read-only.
+ * Override for a legitimate false positive with allowUnsafe / KIT_MEMORY_ALLOW_UNSAFE=1.
+ * Fail-open only on a scan *error* (unknown/older schema) — mergeDb handles schema;
+ * the gate's job is to block *detected* poison, not to reject every foreign store.
+ */
+function assertIncomingClean(dbPath: string, allowUnsafe: boolean): void {
+  if (allowUnsafe || process.env.KIT_MEMORY_ALLOW_UNSAFE === "1") return;
+  let high: { label: string }[] = [];
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    high = scanDbForInjection(db).filter((f) => f.confidence === "high");
+  } catch {
+    return; // can't scan (unknown schema) → let mergeDb decide; don't false-block
+  } finally {
+    db.close();
+  }
+  if (high.length) {
+    const labels = [...new Set(high.map((f) => f.label))].join(", ");
+    throw new Error(
+      `refusing to merge: incoming memory has ${high.length} high-confidence injection pattern(s) [${labels}]. ` +
+        "Inspect with `kit memory scan --injection`, or set KIT_MEMORY_ALLOW_UNSAFE=1 to override.",
+    );
+  }
 }
 
 /**
@@ -50,6 +82,7 @@ export function syncFromExport(
 
   if (!isEncryptedBackup(exportPath)) {
     // Plaintext .db (e.g. committed to the user's own repo) — merge directly.
+    assertIncomingClean(exportPath, !!opts.allowUnsafe);
     return mergeDb(target, exportPath);
   }
 
@@ -72,6 +105,7 @@ export function syncFromExport(
   try {
     if (asymmetric) restoreWithKey(privateKey!, exportPath, tmpDb);
     else restoreEncrypted(opts.passphrase!, exportPath, tmpDb);
+    assertIncomingClean(tmpDb, !!opts.allowUnsafe);
     return mergeDb(target, tmpDb);
   } finally {
     rmSync(dir, { recursive: true, force: true });
