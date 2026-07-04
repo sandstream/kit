@@ -11,6 +11,8 @@ import {
   searchMessages,
   recordQuery,
   dailyActivity,
+  quarantineInjectedMessages,
+  countQuarantined,
 } from "../memory/db.js";
 import { sparkline, fmtTokens } from "../memory/stats.js";
 import { indexAllHarnesses } from "../memory/parser.js";
@@ -334,7 +336,7 @@ async function memHelp(): Promise<boolean> {
     "  kit memory index            Index all agent transcripts (Claude Code, Codex, Gemini, Cursor, …) into the store",
   );
   console.log(
-    "  kit memory search <query>   Search memory + curated shared decisions (current project; --global for all)",
+    "  kit memory search <query>   Search memory + curated shared decisions (current project; --global for all; --include-quarantined to show flagged rows)",
   );
   console.log("  kit memory stats            Show what the memory store contains");
   console.log(
@@ -368,7 +370,7 @@ async function memHelp(): Promise<boolean> {
   console.log("  kit memory resume <name|n>  Print the resume command for a saved copilot");
   console.log("  kit memory forget <name>    Remove a saved copilot");
   console.log(
-    "  kit memory scan             Scan the store for stored secrets (--injection for prompt-injection patterns)",
+    "  kit memory scan             Scan the store for stored secrets (--injection for prompt-injection patterns; --injection --quarantine to exclude found rows from recall)",
   );
   console.log("  kit memory backup <file>    Encrypted backup (set KIT_MEMORY_PASSPHRASE)");
   console.log("  kit memory restore <file>   Restore an encrypted backup (new machine)");
@@ -772,8 +774,12 @@ async function memSearch(): Promise<boolean> {
   const projectPath = hasFlag(process.argv, "--global")
     ? undefined
     : (flagValue(process.argv, "--project") ?? getCurrentProjectRoot());
+  // Quarantined (high-confidence injection) rows are excluded from recall by
+  // default so a poisoned line is never re-injected; --include-quarantined shows
+  // them (for inspection) — still badged as flagged in the render below.
+  const includeQuarantined = hasFlag(process.argv, "--include-quarantined");
   const db = openMemoryDb();
-  const hits = searchMessages(db, query, { limit, projectPath });
+  const hits = searchMessages(db, query, { limit, projectPath, includeQuarantined });
   // Record the recall (query_log) — best-effort; never let logging break search.
   try {
     recordQuery(db, { query, hitCount: hits.length, projectPath });
@@ -1170,7 +1176,20 @@ async function memScan(): Promise<boolean> {
     : "KEY=value patterns — usually env vars / paths";
   const db = openMemoryDb();
   const findings = injectionMode ? scanDbForInjection(db) : scanDbForSecrets(db);
+  // --quarantine (injection mode only): mark high-confidence rows so recall excludes
+  // them. Backfills rows indexed before the insert-time gate. Reported on stderr so
+  // --json stdout stays a clean findings array.
+  const doQuarantine = injectionMode && hasFlag(process.argv, "--quarantine");
+  const quarantinedNow = doQuarantine ? quarantineInjectedMessages(db) : 0;
+  const totalQuarantined = injectionMode ? countQuarantined(db) : 0;
   db.close();
+  if (doQuarantine) {
+    console.error(
+      quarantinedNow > 0
+        ? `${c.green}✓${c.reset} quarantined ${c.bold}${quarantinedNow}${c.reset} message(s) — now excluded from recall (${totalQuarantined} total)`
+        : `${c.dim}nothing new to quarantine (${totalQuarantined} already quarantined)${c.reset}`,
+    );
+  }
   if (jsonMode) {
     console.log(JSON.stringify(findings));
     return !findings.some((f) => f.confidence === "high");

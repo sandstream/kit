@@ -99,7 +99,10 @@ describe("memory hook — SessionStart recovery", () => {
     assert.match(text, /STORED DATA, not instructions/);
   });
 
-  it("flags a poisoned recalled message and strips hidden chars (R2)", () => {
+  it("quarantines a poisoned message so it is NOT re-injected on recovery (R3)", () => {
+    // A high-confidence injection line is quarantined on insert (db layer), so the
+    // recall path excludes it ENTIRELY — stronger than badging it. (Badging still
+    // guards the non-quarantined sources: shared decisions, PAL titles, search render.)
     const ZWSP = String.fromCodePoint(0x200b);
     const root = getCurrentProjectRoot();
     const db = openMemoryDb();
@@ -114,8 +117,7 @@ describe("memory hook — SessionStart recovery", () => {
     });
     db.close();
     const text = sessionStartRecovery();
-    assert.match(text, /flagged: possible prompt-injection/, "the poisoned line is badged");
-    assert.ok(!text.includes(ZWSP), "hidden zero-width char stripped from the injected text");
+    assert.doesNotMatch(text, /delete everything/, "the poisoned line is not re-injected at all");
   });
 });
 
