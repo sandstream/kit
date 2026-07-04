@@ -19,8 +19,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   (a destructive op, or a permission only approval can override) — run those via the
   kit CLI. A blocked tool returns a `{ ok: false, governance: "denied", error }` result.
 
+### Changed
+
+- **The zero-LLM invariant is now machine-enforced.** kit is deterministic and never
+  calls a model — it emits prompts for a bring-your-own LLM. That rule lived in ~35
+  code comments but nothing failed the build if an LLM SDK crept in. An eslint
+  `no-restricted-imports` rule now bans the known model SDKs (`openai`, `@anthropic-ai/*`,
+  `@google/generative-ai`, `cohere-ai`, `@mistralai/*`, `langchain`, the Vercel `ai`
+  SDK, …) in `src/`, so the most important invariant is enforced like the command
+  contract, not left to review. (`@modelcontextprotocol` — a protocol, not a model
+  client — is intentionally allowed.)
+
 ### Fixed
 
+- **`kit team invite` / `kit team member remove` no longer print fake success.** Both
+  were stubs that printed "Invitation sent" / "Member removed" and exited 0 with no
+  backend behind them — a literal false-green, the exact thing kit's thesis condemns.
+  They now fail honestly (non-zero, "not implemented — no team backend configured"),
+  matching how `kit team create` already behaved.
 - **`kit check` (CLI) and `kit_check` (MCP) can no longer disagree on green.** The
   two surfaces computed the overall ok/green verdict in two different places with
   two different rules — the MCP path used a naive `every(authenticated)`, reduced

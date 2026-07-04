@@ -5554,9 +5554,15 @@ async function cmdTeam(): Promise<boolean> {
           return false;
         }
 
-        console.log(`${c.yellow}Invitation sent to ${email} as ${role}${c.reset}`);
-        console.log(`${c.dim}Check your email for the invitation link${c.reset}`);
-        return true;
+        // No backend exists — do NOT print "Invitation sent" for a no-op (that is a
+        // literal false-green, the exact thing kit's thesis condemns). Fail honestly.
+        console.error(
+          `${c.red}Error: kit team invite is not implemented — no team backend is configured${c.reset}`,
+        );
+        console.error(
+          `${c.dim}would invite ${email} as ${role}; team management requires backend service integration${c.reset}`,
+        );
+        return false;
       }
 
       case "members": {
@@ -5582,8 +5588,14 @@ async function cmdTeam(): Promise<boolean> {
           return false;
         }
 
-        console.log(`${c.yellow}Member ${email} removed from team${c.reset}`);
-        return true;
+        // No backend — never claim a removal that did not happen. Fail honestly.
+        console.error(
+          `${c.red}Error: kit team member remove is not implemented — no team backend is configured${c.reset}`,
+        );
+        console.error(
+          `${c.dim}would remove ${email}; team management requires backend service integration${c.reset}`,
+        );
+        return false;
       }
 
       case "audit": {
