@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The update-check version comparator no longer mis-parses a prerelease/patch.**
+  `isNewer` split the version on `.` and `Number()`-cast each part, so
+  `"4.0.6-rc.1"` → `["4","0","6-rc","1"]` → `Number("6-rc")` = `NaN`, and a genuinely
+  newer prerelease patch was reported as **not** newer (no update notice). It now
+  compares on the numeric `MAJOR.MINOR.PATCH` core (prerelease/build suffixes
+  stripped first) and is exported + directly tested (equal / older / newer /
+  prerelease / build / malformed). `kit memory status` (alias of `stats`) is now
+  documented in `kit memory --help`.
+
 ### Security — memory as attack surface
 
 - **Recall now EXCLUDES a poisoned message, not just badges it (R3).** A message

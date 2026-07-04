@@ -141,14 +141,28 @@ export function isValidVersion(v: unknown): v is string {
   return typeof v === "string" && SEMVER_RE.test(v.trim());
 }
 
-/** Returns true if `latest` is strictly newer than `current` (semver comparison). */
-function isNewer(latest: string, current: string): boolean {
+/**
+ * True iff `latest` is strictly newer than `current`, compared on the numeric
+ * MAJOR.MINOR.PATCH core. Prerelease/build suffixes are STRIPPED before the split —
+ * `"4.0.6-rc.1".split(".")` is `["4","0","6-rc","1"]`, and `Number("6-rc")` is NaN,
+ * so the old parser reported a genuinely newer prerelease patch as not-newer. We do
+ * not model prerelease *precedence* (e.g. `1.0.0-rc` < `1.0.0`): the registry
+ * `latest` tag is a stable release and an update notice only needs core ordering, so
+ * a core-equal pair (stable vs its own prerelease) is treated as "not newer".
+ * Exported for direct testing. Fails closed on any malformed input (no notice).
+ */
+export function isNewer(latest: string, current: string): boolean {
   try {
     // Fail closed on any malformed version: no comparison, no notice.
     if (!isValidVersion(latest) || !isValidVersion(current)) return false;
-    const parse = (v: string) => v.replace(/^v/, "").split(".").map(Number);
-    const [lMaj, lMin, lPatch] = parse(latest);
-    const [cMaj, cMin, cPatch] = parse(current);
+    const core = (v: string) =>
+      v
+        .replace(/^v/, "")
+        .replace(/[-+].*$/, "") // drop -prerelease / +build before the numeric split
+        .split(".")
+        .map(Number);
+    const [lMaj, lMin, lPatch] = core(latest);
+    const [cMaj, cMin, cPatch] = core(current);
     if (lMaj !== cMaj) return lMaj > cMaj;
     if (lMin !== cMin) return lMin > cMin;
     return lPatch > cPatch;
