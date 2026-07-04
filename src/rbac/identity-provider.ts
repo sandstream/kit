@@ -129,7 +129,16 @@ export async function compileRoleBindings(input: EnrollmentInput): Promise<Enrol
     }
 
     const groups = await input.provider.resolveMembership(subject.subject);
-    const roles = [...new Set(groups.map((g) => input.roleMap[g]).filter((r): r is string => !!r))];
+    // `Object.hasOwn` + string check: a group literally named after an inherited
+    // Object.prototype key (e.g. "__proto__" via a bare, un-namespaced slug) must
+    // map to NO role, not to the inherited member (which would slip past `!!r`).
+    const roles = [
+      ...new Set(
+        groups
+          .map((g) => (Object.hasOwn(input.roleMap, g) ? input.roleMap[g] : undefined))
+          .filter((r): r is string => typeof r === "string" && r.length > 0),
+      ),
+    ];
 
     if (roles.length === 0) {
       unmapped.push(subject);

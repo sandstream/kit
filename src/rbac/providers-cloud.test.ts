@@ -23,26 +23,26 @@ describe("rbac/providers-cloud — Entra (Microsoft Graph) source, fake fetch", 
     const fakeFetch = (async (url: string, init: { headers: Record<string, string> }) => {
       seen.push({ url: String(url), auth: init.headers.Authorization });
       const u = String(url);
-      if (u.includes("/memberOf") && !u.includes("$skiptoken")) {
+      if (u.includes("/transitiveMemberOf") && !u.includes("$skiptoken")) {
         return {
           ok: true,
           status: 200,
           json: async () => ({
             value: [
               { "@odata.type": "#microsoft.graph.group", displayName: "deployers" },
+              // defensive: an explicitly non-group object must still be dropped
               { "@odata.type": "#microsoft.graph.directoryRole", displayName: "Global Admin" },
             ],
             "@odata.nextLink": "https://graph.example.com/v1.0/x?$skiptoken=abc",
           }),
         };
       }
-      // page 2 (nextLink)
+      // page 2 (nextLink) — object WITHOUT @odata.type (the cast endpoint often
+      // omits it); must be accepted as a group.
       return {
         ok: true,
         status: 200,
-        json: async () => ({
-          value: [{ "@odata.type": "#microsoft.graph.group", id: "gid-2" }],
-        }),
+        json: async () => ({ value: [{ id: "gid-2" }] }),
       };
     }) as unknown as typeof fetch;
 
@@ -50,7 +50,7 @@ describe("rbac/providers-cloud — Entra (Microsoft Graph) source, fake fetch", 
     const groups = await src.listGroups("octo@contoso.com");
     // group displayName from p1 + id fallback from p2; the directoryRole is dropped
     assert.deepEqual(groups, ["deployers", "gid-2"]);
-    assert.ok(seen[0].url.startsWith("https://graph.example.com/v1.0/users/"));
+    assert.ok(seen[0].url.includes("/transitiveMemberOf/microsoft.graph.group"));
     assert.equal(seen[0].auth, "Bearer aad-token");
     assert.equal(seen.length, 2, "followed nextLink");
   });
@@ -62,7 +62,10 @@ describe("rbac/providers-cloud — Entra (Microsoft Graph) source, fake fetch", 
       json: async () => ({}),
     })) as unknown as typeof fetch;
     const src = createEntraApiSource({ token: "t", fetchImpl: fakeFetch });
-    await assert.rejects(() => src.listGroups("x@y.com"), /Entra memberOf failed.*HTTP 401/);
+    await assert.rejects(
+      () => src.listGroups("x@y.com"),
+      /Entra transitiveMemberOf failed.*HTTP 401/,
+    );
   });
 
   it("provider namespaces by tenant and compiles bindings offline (zero fetch)", async () => {
@@ -129,6 +132,7 @@ describe("rbac/providers-cloud — Google Cloud Identity source, fake fetch", ()
       seen[0].startsWith("https://ci.example.com/v1/groups/-/memberships:searchTransitiveGroups"),
     );
     assert.ok(seen[0].includes("member_key_id"));
+    assert.ok(seen[0].includes("labels"), "query includes the required labels term");
     assert.equal(seen.length, 2, "followed nextPageToken");
   });
 
@@ -143,6 +147,20 @@ describe("rbac/providers-cloud — Google Cloud Identity source, fake fetch", ()
       () => src.listGroups("x@y.com"),
       /Google Cloud Identity search failed.*HTTP 403/,
     );
+  });
+
+  it("fail-closed: rejects a subject containing a quote (CEL-injection guard), no fetch", async () => {
+    let calls = 0;
+    const fakeFetch = (async () => {
+      calls++;
+      return { ok: true, status: 200, json: async () => ({ memberships: [] }) };
+    }) as unknown as typeof fetch;
+    const src = createGoogleApiSource({ token: "t", fetchImpl: fakeFetch });
+    await assert.rejects(
+      () => src.listGroups("x' || member_key_id == 'y"),
+      /invalid subject.*contains quote/,
+    );
+    assert.equal(calls, 0, "rejected before any network call");
   });
 
   it("provider compiles bindings offline (zero fetch)", async () => {

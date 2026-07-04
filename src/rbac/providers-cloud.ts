@@ -81,20 +81,26 @@ export function createEntraApiSource(opts: {
   return {
     async listGroups(subject: string): Promise<string[]> {
       const groups: string[] = [];
+      // `transitiveMemberOf` (NOT `memberOf`, which is direct-only) so nested-group
+      // membership is included — symmetric with Google's transitive search. The
+      // `/microsoft.graph.group` OData cast narrows the result to groups server-side.
       let url: string | undefined =
-        `${baseUrl}/v1.0/users/${encodeURIComponent(subject)}/memberOf?$select=id,displayName`;
+        `${baseUrl}/v1.0/users/${encodeURIComponent(subject)}/transitiveMemberOf/microsoft.graph.group?$select=id,displayName`;
       // Follow pagination; a bounded guard avoids an accidental infinite loop.
       for (let page = 0; url && page < 100; page++) {
         const res = await doFetch(url, { headers });
         if (!res.ok) {
-          throw new Error(`Entra memberOf failed for ${subject}: HTTP ${res.status}`);
+          throw new Error(`Entra transitiveMemberOf failed for ${subject}: HTTP ${res.status}`);
         }
         const body = (await res.json()) as GraphMemberOfPage;
         for (const obj of body.value ?? []) {
-          if (obj["@odata.type"] === "#microsoft.graph.group") {
-            const slug = obj.displayName ?? obj.id;
-            if (typeof slug === "string" && slug.length > 0) groups.push(slug);
-          }
+          // The cast already restricts to groups; keep a DEFENSIVE drop of any
+          // object that is explicitly a non-group type, but accept objects that
+          // omit @odata.type (the cast endpoint often does).
+          const t = obj["@odata.type"];
+          if (t !== undefined && t !== "#microsoft.graph.group") continue;
+          const slug = obj.displayName ?? obj.id;
+          if (typeof slug === "string" && slug.length > 0) groups.push(slug);
         }
         url = body["@odata.nextLink"];
       }
@@ -163,8 +169,22 @@ export function createGoogleApiSource(opts: {
 
   return {
     async listGroups(subject: string): Promise<string[]> {
+      // CEL-injection guard: the subject is interpolated inside a single-quoted
+      // CEL string literal and encodeURIComponent does NOT escape `'`, so a
+      // subject containing a quote could break out of the literal. Valid member
+      // keys (emails) never contain one — reject fail-closed rather than escape.
+      if (subject.includes("'")) {
+        throw new Error(
+          `Google Cloud Identity: invalid subject ${JSON.stringify(subject)} (contains quote)`,
+        );
+      }
       const groups: string[] = [];
-      const query = encodeURIComponent(`member_key_id == '${subject}'`);
+      // The searchTransitiveGroups query MUST include BOTH a member spec AND a
+      // label term — omitting labels is an HTTP 400. Restrict to standard Google
+      // Groups (the discussion_forum label).
+      const query = encodeURIComponent(
+        `member_key_id == '${subject}' && 'cloudidentity.googleapis.com/groups.discussion_forum' in labels`,
+      );
       let pageToken: string | undefined;
       for (let page = 0; page < 100; page++) {
         const url =
