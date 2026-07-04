@@ -76,6 +76,26 @@ describe("brokerExec default-deny", () => {
   });
 });
 
+describe("brokerExec fail-closed on UNDECLARED effects (closes the dead-code false-green)", () => {
+  it("denies a gated op that declares NO effect contract, even under a valid policy", async () => {
+    let ran = false;
+    const out = await brokerExec(CTX(), POLICY, async () => {
+      ran = true;
+      return 1;
+    });
+    assert.equal(out.ok, false);
+    assert.match(out.reason ?? "", /no effect contract/);
+    assert.equal(ran, false);
+    assert.equal(auditLines().at(-1)?.success, false);
+  });
+
+  it("allows an op that EXPLICITLY declares zero effects (declaredEffects:true)", async () => {
+    const out = await brokerExec(CTX({ declaredEffects: true }), POLICY, async () => "ok");
+    assert.equal(out.ok, true);
+    assert.equal(out.result, "ok");
+  });
+});
+
 describe("brokerExec per-gate denial", () => {
   it("denies an out-of-allowlist egress target and does not run", async () => {
     let ran = false;
@@ -127,7 +147,7 @@ describe("brokerExec fail-closed audit", () => {
     // independent).
     mkdirSync(join(sandbox, ".kit-audit.jsonl"));
     let ran = false;
-    const out = await brokerExec(CTX(), POLICY, async () => {
+    const out = await brokerExec(CTX({ declaredEffects: true }), POLICY, async () => {
       ran = true;
       return 1;
     });
@@ -174,7 +194,7 @@ describe("brokerExec happy path", () => {
   });
 
   it("audits failure and returns reason when run() throws", async () => {
-    const out = await brokerExec(CTX(), POLICY, async () => {
+    const out = await brokerExec(CTX({ declaredEffects: true }), POLICY, async () => {
       throw new Error("boom");
     });
     assert.equal(out.ok, false);
@@ -185,7 +205,7 @@ describe("brokerExec happy path", () => {
   it("composes with a runGoverned-shaped inner run (round-trips result)", async () => {
     type Governed<T> = { ok: boolean; result?: T; reason?: string };
     const fakeRunGoverned = async (): Promise<Governed<number>> => ({ ok: true, result: 42 });
-    const out = await brokerExec(CTX(), POLICY, () =>
+    const out = await brokerExec(CTX({ declaredEffects: true }), POLICY, () =>
       fakeRunGoverned().then((o) =>
         o.ok ? (o.result as number) : Promise.reject(new Error(o.reason)),
       ),
@@ -273,6 +293,23 @@ describe("runBrokered opt-in (policy file present/absent)", () => {
     assert.equal(ran, false, "gate denied before running");
   });
 
+  it("configured + a gated op that declares no effects → fail-closed deny (not dead-code pass)", async () => {
+    const pol = join(sandbox, "broker.json");
+    writeFileSync(
+      pol,
+      JSON.stringify({ egress: { allow: [] }, fs: { root: sandbox }, env: { declared: [] } }),
+    );
+    process.env.KIT_EXEC_BROKER_POLICY = pol;
+    let ran = false;
+    const out = await runBrokered(CTX(), async () => {
+      ran = true;
+      return 1;
+    });
+    assert.equal(out.ok, false);
+    assert.match(out.reason ?? "", /no effect contract/);
+    assert.equal(ran, false);
+  });
+
   it("configured but MALFORMED policy → fail-closed deny (never silently off)", async () => {
     const pol = join(sandbox, "broker-bad.json");
     writeFileSync(pol, "{ not valid json");
@@ -294,7 +331,7 @@ describe("brokerExec is offline", () => {
       throw new Error("network access attempted");
     }) as typeof fetch;
     try {
-      const out = await brokerExec(CTX(), POLICY, async () => "ok");
+      const out = await brokerExec(CTX({ declaredEffects: true }), POLICY, async () => "ok");
       assert.equal(out.ok, true);
       assert.equal(out.result, "ok");
     } finally {

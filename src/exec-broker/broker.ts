@@ -40,6 +40,25 @@ export interface BrokerContext extends OperationContext {
   fsWrites?: string[];
   /** Environment variable names this operation needs. */
   envRequested?: string[];
+  /**
+   * Explicit assertion that this operation declares its effect contract — set it
+   * `true` to declare "no egress/fs/env effects" (an op the broker can safely run
+   * with empty gates). Providing any of the arrays above ALSO counts as declaring.
+   * Without a declaration, a gated op is DENIED under an active policy (fail-closed):
+   * the broker cannot mediate effects it was never told about, and silently passing
+   * it is the "gates are dead code" false-green the audit flagged.
+   */
+  declaredEffects?: boolean;
+}
+
+/** Did the caller declare this op's effect contract (arrays present, or the flag)? */
+function hasDeclaredEffects(c: BrokerContext): boolean {
+  return (
+    c.declaredEffects === true ||
+    c.egressTargets !== undefined ||
+    c.fsWrites !== undefined ||
+    c.envRequested !== undefined
+  );
 }
 
 export interface BrokerOutcome<T> {
@@ -65,6 +84,17 @@ export async function brokerExec<T>(
   // Default-deny when policy is absent. run() is NEVER invoked.
   if (!policy) {
     const reason = "exec-broker: no policy (default-deny)";
+    await audit(context, false, reason);
+    return { ok: false, reason };
+  }
+
+  // Fail-closed on UNDECLARED effects: with a policy active, an op that never
+  // declared what it touches cannot be mediated, so it is DENIED rather than
+  // waved through with trivially-empty gates (the false-green the audit found).
+  // A caller with genuinely no effects opts in explicitly via declaredEffects:true.
+  if (!hasDeclaredEffects(context)) {
+    const reason =
+      "exec-broker: operation declares no effect contract (egress/fs/env) — cannot mediate (fail-closed)";
     await audit(context, false, reason);
     return { ok: false, reason };
   }

