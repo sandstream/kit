@@ -338,7 +338,9 @@ async function memHelp(): Promise<boolean> {
   console.log(
     "  kit memory search <query>   Search memory + curated shared decisions (current project; --global for all; --include-quarantined to show flagged rows)",
   );
-  console.log("  kit memory stats            Show what the memory store contains");
+  console.log(
+    "  kit memory stats            Show what the memory store contains (alias: kit memory status)",
+  );
   console.log(
     "  kit memory learn            Surface recurring instructions you keep re-typing (candidates for a memory rule)",
   );
