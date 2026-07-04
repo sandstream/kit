@@ -58,7 +58,11 @@ function stripCommandPrefix(tokens: string[]): string[] {
   let i = 0;
   while (i < tokens.length) {
     const t = tokens[i];
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) {
+    // Any leading `NAME=VALUE` is a shell env assignment — including names with
+    // non-word chars (`env 'a:b=1' npm i evil`, `npm_config_@scope:registry=…`),
+    // which a stricter [A-Za-z_]\w* regex left as argv[0], hiding the install
+    // entirely. Broadened so no bogus assignment can mask the package manager.
+    if (/^[^\s=]+=/.test(t)) {
       i++; // VAR=value env assignment
       continue;
     }
@@ -92,7 +96,7 @@ function nestedCommands(command: string): string[] {
 // would triage is NOT what gets installed — so the whole command is unverifiable
 // (fail-closed), closing the "triage PASS while pulling attacker code" bypass.
 const SOURCE_ENV_RE =
-  /^(npm_config_.*registry|.*_registry|pip_index_url|pip_extra_index_url|uv_index.*|uv_default_index|bun_config_registry)$/i;
+  /^(npm_config_.*registry|npm_config_userconfig|npm_config_globalconfig|.*_registry|yarn_npm_registry_server|pip_index_url|pip_extra_index_url|pip_config_file|uv_index.*|uv_default_index|bun_config_registry)$/i;
 const SOURCE_FLAG_RE = /^(--registry|--index-url|--index|--extra-index-url|--default-index|-i)$/i;
 const DEFAULT_SOURCE_RE =
   /^https?:\/\/(registry\.npmjs\.org|registry\.yarnpkg\.com|pypi\.org|files\.pythonhosted\.org)(\/|$)/i;
@@ -106,7 +110,7 @@ const DEFAULT_SOURCE_RE =
 function sourceRedirect(rawTokens: string[]): string | null {
   for (let i = 0; i < rawTokens.length; i++) {
     const t = rawTokens[i];
-    const env = t.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    const env = t.match(/^([^\s=]+)=(.*)$/);
     if (env && SOURCE_ENV_RE.test(env[1])) {
       if (env[2] && !DEFAULT_SOURCE_RE.test(env[2])) return t;
       continue;

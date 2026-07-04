@@ -72,6 +72,16 @@ jobs:
             exit 1
           fi
           gpg --batch --import .github/maintainer-pubkey.asc
+          # The .asc lives on the (attacker-writable) pushed ref, so it could BUNDLE
+          # a second, attacker key after the real one — git verify-tag / gpg --verify
+          # exit 0 on ANY good signature in the keyring, so a bundled key would let an
+          # attacker-signed tag pass. Require the keyring to contain EXACTLY ONE
+          # primary key, so only the pinned key can ever validate the tag.
+          NKEYS=$(gpg --list-keys --with-colons | grep -c '^pub:')
+          if [ "$NKEYS" != "1" ]; then
+            echo "::error::maintainer-pubkey.asc imported $NKEYS keys, expected exactly 1 — refusing (a second key may have been appended to validate a rogue tag)."
+            exit 1
+          fi
           FPR=$(gpg --list-keys --with-colons | awk -F: '/^fpr:/{print $10; exit}')
           # Normalize (strip spaces, upcase) and compare against the pinned value.
           NORM_FPR=$(echo "$FPR" | tr -d ' ' | tr 'a-f' 'A-F')
@@ -81,7 +91,7 @@ jobs:
             exit 1
           fi
           echo "$FPR:6:" | gpg --batch --import-ownertrust
-          echo "Maintainer key fingerprint matches the pinned secret."
+          echo "Maintainer key fingerprint matches the pinned secret (single key in keyring)."
 
       - name: Verify tag is GPG-signed
         # Refuse to publish unsigned tags. Operators verify the same way via
