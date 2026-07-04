@@ -79,6 +79,39 @@ npm version patch  # or minor, major
 npx sandstream-kit setup
 ```
 
+### Signed release tags
+
+Release tags SHOULD be cryptographically signed so the tag itself shows as
+**Verified** on GitHub (this is separate from — and in addition to — the npm
+**provenance** attestation the publish workflow already produces via GitHub OIDC,
+and from GitHub's own signing of squash-merge commits).
+
+Git's signing config lives in your local/global git config, NOT in the repo (it
+can't be committed), so each maintainer enables it once on their own machine.
+kit uses **SSH signing** (despite the `gpg.*` config names):
+
+```bash
+# One-time, per machine — sign tags (and commits) with your SSH key:
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519.pub
+git config --global tag.gpgsign true      # auto-sign every annotated tag
+git config --global commit.gpgsign true   # (optional) auto-sign commits too
+```
+
+Make sure that same public key is added to your GitHub account under
+**Settings → SSH and GPG keys → New SSH key → key type: Signing Key**, or GitHub
+can't mark the tag Verified.
+
+Then cut a signed release tag:
+
+```bash
+git tag -s v1.2.3 -m "kit 1.2.3"   # -s = signed (or just `git tag` once tag.gpgsign=true)
+git push origin v1.2.3             # pushing the tag triggers the publish workflow
+```
+
+Prereleases (e.g. `v1.2.3-alpha.1`) publish under the npm `next` dist-tag, not
+`latest` — see `.github/workflows/publish.yml`.
+
 ### Manual Publishing
 
 If you need to publish manually (e.g., in a local environment without GitHub Actions):
