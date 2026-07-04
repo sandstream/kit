@@ -9,6 +9,9 @@ import { checkSecrets } from "./check-secrets.js";
 import { checkSecurity } from "./check-security.js";
 import { checkSkills } from "./check-skills.js";
 import { checkLockFiles } from "./check-lock.js";
+import { checkTests } from "./check-tests.js";
+import { loadBaseline, baselineGet } from "./baseline.js";
+import { computeCheckVerdict } from "./check-verdict.js";
 import { installTools } from "./install.js";
 import { loginServices } from "./login.js";
 import { generateSecrets } from "./secrets.js";
@@ -130,16 +133,30 @@ function register_kit_check(server: McpServer): void {
         const webSearchResult = config.web?.search ? await checkWebSearch(config.web.search) : null;
         const securityResults = await checkSecurity();
         const lockResults = await checkLockFiles(config);
+        // Include test-coverage in the verdict — the CLI does, and omitting it here
+        // was one half of the CLI-vs-MCP divergence. Baseline-aware, same as `kit check`.
+        const baseline = await loadBaseline();
+        const testResults = await checkTests({
+          baseline: baselineGet(baseline, "tests", "untested_files"),
+        });
 
-        const securityOk = securityResults.every((s) => s.status === "pass" || s.status === "skip");
-        const ok =
-          toolResults.every((t) => t.ok) &&
-          serviceResults.every((s) => s.authenticated) &&
-          secretResults.keys.every((s) => s.available) &&
-          skillResults.filter((s) => s.required).every((s) => s.installed) &&
-          hookResults.every((h) => h.installed && h.upToDate) &&
-          securityOk &&
-          lockResults.every((l) => l.inSync);
+        // The SAME verdict rule `kit check` uses (scanner-health-strict security via
+        // gateStatus, informational-service exemption, tests) — no second, divergent
+        // definition of "green" on the MCP surface.
+        const verdict = computeCheckVerdict(
+          {
+            tools: toolResults,
+            services: serviceResults,
+            secrets: secretResults.keys,
+            skills: skillResults,
+            hooks: hookResults,
+            security: securityResults,
+            tests: testResults,
+            locks: lockResults,
+          },
+          {},
+        );
+        const ok = verdict.ok;
 
         return {
           content: [
@@ -148,6 +165,8 @@ function register_kit_check(server: McpServer): void {
               text: JSON.stringify(
                 {
                   ok,
+                  dimensions: verdict.dimensions,
+                  failed: verdict.failed,
                   tools: toolResults,
                   services: serviceResults,
                   secrets: secretResults.keys,
@@ -155,6 +174,7 @@ function register_kit_check(server: McpServer): void {
                   hooks: hookResults,
                   webSearch: webSearchResult,
                   security: securityResults,
+                  tests: testResults,
                   locks: lockResults,
                 },
                 null,
