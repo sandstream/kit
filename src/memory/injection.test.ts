@@ -35,7 +35,10 @@ describe("findInjection", () => {
   });
 
   it("does not fire on benign engineering text (no false positives)", () => {
-    assert.deepEqual(findInjection("Let's refactor the parser and add a test for the new gate."), []);
+    assert.deepEqual(
+      findInjection("Let's refactor the parser and add a test for the new gate."),
+      [],
+    );
     assert.deepEqual(findInjection("We decided to keep the install-gate fail-closed."), []);
     assert.deepEqual(findInjection(""), []);
   });
@@ -66,7 +69,12 @@ describe("scanDbForInjection", () => {
   it("is clean on a benign store", () => {
     const db = openMemoryDb(":memory:");
     upsertSession(db, { sessionId: "s1", harness: "claude-code" });
-    insertMessage(db, { uuid: "u1", sessionId: "s1", type: "user", content: "add tests for the gate" });
+    insertMessage(db, {
+      uuid: "u1",
+      sessionId: "s1",
+      type: "user",
+      content: "add tests for the gate",
+    });
     assert.equal(scanDbForInjection(db).filter((f) => f.confidence === "high").length, 0);
   });
 });
