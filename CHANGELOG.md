@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`kit check` (CLI) and `kit_check` (MCP) can no longer disagree on green.** The
+  two surfaces computed the overall ok/green verdict in two different places with
+  two different rules — the MCP path used a naive `every(authenticated)`, reduced
+  security to `pass||skip`, and ignored test-coverage entirely, so the SAME repo
+  state could read green via MCP and red via `kit check` (a structurally guaranteed
+  false-green/false-red between the two agent surfaces). Both now call one pure
+  `computeCheckVerdict()` — scanner-health-strict security gating (`gateStatus`),
+  the informational-service exemption, and test-coverage in a single source of
+  truth. `kit_check`'s JSON now also includes per-dimension `dimensions` + `failed`
+  and the `tests` results. A test pins that the shared rule holds. Deterministic,
+  zero-LLM.
+
 ### Added
 
 - **`kit memory stats` now surfaces recall adoption.** A new

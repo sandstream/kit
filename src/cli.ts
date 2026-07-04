@@ -339,25 +339,25 @@ async function cmdCheck(): Promise<boolean> {
         }),
       );
 
-      // Scanner-health strict by default: a check that could not RUN (didNotRun) fails
-      // the gate unless --lenient; a finding-warn (the check ran + flagged) stays a
-      // warning and does NOT fail unless --fail-on-warning.
-      const securityOk = securityResults.every(
-        (s) => gateStatus(s, { lenient, failOnWarning }) !== "fail",
+      // Single source of truth for the green/ok verdict — the SAME function the
+      // MCP `kit_check` tool uses, so the two surfaces can never disagree. Applies
+      // scanner-health-strict security gating, the informational-service exemption,
+      // and test-coverage in one place.
+      const { computeCheckVerdict } = await import("./check-verdict.js");
+      const verdict = computeCheckVerdict(
+        {
+          tools: toolResults,
+          services: serviceResults,
+          secrets: secretResults.keys,
+          skills: skillResults,
+          hooks: hookResults,
+          security: securityResults,
+          tests: testResults,
+          locks: lockResults,
+        },
+        { lenient, failOnWarning },
       );
-      const testsOk = testResults.every((t) => t.status !== "fail");
-      const lockOk = lockResults.every((l) => l.inSync);
-      const allOk =
-        toolResults.every((t) => t.ok) &&
-        // Informational services (no CLI login — `#`-documented, e.g. resend
-        // env keys) are manual setup, not a failed gate. They surface as warns.
-        serviceResults.every((s) => s.authenticated || s.informational) &&
-        secretResults.keys.every((s) => s.available) &&
-        skillResults.filter((s) => s.required).every((s) => s.installed) &&
-        hookResults.every((h) => h.installed && h.upToDate) &&
-        securityOk &&
-        testsOk &&
-        lockOk;
+      const allOk = verdict.ok;
 
       // Track security findings in the PAL ledger (cross-session reminders +
       // auto-close on a clean re-scan). Opt out with [memory] track_findings = false.
