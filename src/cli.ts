@@ -5253,7 +5253,8 @@ export const COMMAND_HELP: Record<string, string> = {
     "Sync from a memory export or encrypted backup (mergeDb; last-write-wins, file_index excluded)",
   "memory install":
     "Wire UserPromptSubmit + SessionEnd + SessionStart (recovery) hooks into ~/.claude/settings.json",
-  "memory scan": "Scan the memory store for stored secrets (exit 1 if any found)",
+  "memory scan":
+    "Scan the memory store for stored secrets, or prompt-injection patterns with --injection (exit 1 on a high-confidence finding)",
   "memory backup": "Encrypted backup of the memory store (AES-256-GCM; KIT_MEMORY_PASSPHRASE)",
   "memory restore": "Restore an encrypted memory backup (e.g. on a new machine)",
   "memory share": "Promote a curated, secret-scanned entry to the shared (team) memory",

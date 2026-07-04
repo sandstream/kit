@@ -15,6 +15,7 @@
 import { basename } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { findSecrets } from "../utils/redactSecrets.js";
+import { findInjection } from "./injection.js";
 
 export type ScanConfidence = "high" | "heuristic";
 
@@ -77,8 +78,18 @@ function projectName(raw: unknown): string | null {
   return raw.includes("/") ? basename(raw) : raw;
 }
 
-/** Scan every text cell for stored secrets. Deduped, confidence-tiered, project-attributed. */
-export function scanDbForSecrets(db: DatabaseSync): ScanFinding[] {
+/** A per-cell finder: given text, return masked, confidence-tiered matches. */
+type CellFinder = (
+  text: string,
+) => { label: string; preview: string; confidence: ScanConfidence }[];
+
+/**
+ * Walk every text cell across TARGETS, apply `finder`, and return findings deduped
+ * by (label, preview) with an occurrence count, confidence tier, one sample
+ * location, and the project(s) they appear in. Shared by the secret and injection
+ * scans so they stay byte-for-byte consistent in shape and ordering.
+ */
+function scanDbWith(db: DatabaseSync, finder: CellFinder): ScanFinding[] {
   const byKey = new Map<string, ScanFinding & { _projects: Set<string> }>();
   for (const target of TARGETS) {
     const rows = db.prepare(target.select).all() as Record<string, unknown>[];
@@ -87,14 +98,14 @@ export function scanDbForSecrets(db: DatabaseSync): ScanFinding[] {
       for (const col of target.columns) {
         const val = row[col];
         if (typeof val !== "string" || !val) continue;
-        for (const f of findSecrets(val)) {
+        for (const f of finder(val)) {
           const key = `${f.label} ${f.preview}`;
           let entry = byKey.get(key);
           if (!entry) {
             entry = {
               label: f.label,
               preview: f.preview,
-              confidence: HEURISTIC_LABELS.has(f.label) ? "heuristic" : "high",
+              confidence: f.confidence,
               count: 0,
               sample: `${target.table}#${row[target.idCol]}.${col}`,
               projects: [],
@@ -114,4 +125,24 @@ export function scanDbForSecrets(db: DatabaseSync): ScanFinding[] {
       if (a.confidence !== b.confidence) return a.confidence === "high" ? -1 : 1;
       return b.count - a.count;
     });
+}
+
+/** Scan every text cell for stored secrets. Deduped, confidence-tiered, project-attributed. */
+export function scanDbForSecrets(db: DatabaseSync): ScanFinding[] {
+  return scanDbWith(db, (text) =>
+    findSecrets(text).map((f) => ({
+      label: f.label,
+      preview: f.preview,
+      confidence: HEURISTIC_LABELS.has(f.label) ? "heuristic" : "high",
+    })),
+  );
+}
+
+/**
+ * Scan every text cell for prompt-injection patterns (the store is replayed into
+ * the agent's prompt, so a poisoned entry is a delayed injection vector). Same
+ * shape as the secret scan — deduped, confidence-tiered, project-attributed.
+ */
+export function scanDbForInjection(db: DatabaseSync): ScanFinding[] {
+  return scanDbWith(db, (text) => findInjection(text));
 }

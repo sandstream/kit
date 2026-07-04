@@ -18,7 +18,7 @@ import { mergeDb } from "../memory/merge.js";
 import { buildSuggestPrompt } from "../memory/suggest.js";
 import { learnRecurring } from "../memory/learn.js";
 import { getCurrentProjectRoot } from "../memory/project.js";
-import { scanDbForSecrets } from "../memory/scan.js";
+import { scanDbForSecrets, scanDbForInjection } from "../memory/scan.js";
 import {
   backupEncrypted,
   restoreEncrypted,
@@ -360,7 +360,9 @@ async function memHelp(): Promise<boolean> {
   console.log("  kit memory threads          List saved copilots (--global for all)");
   console.log("  kit memory resume <name|n>  Print the resume command for a saved copilot");
   console.log("  kit memory forget <name>    Remove a saved copilot");
-  console.log("  kit memory scan             Scan the store for stored secrets");
+  console.log(
+    "  kit memory scan             Scan the store for stored secrets (--injection for prompt-injection patterns)",
+  );
   console.log("  kit memory backup <file>    Encrypted backup (set KIT_MEMORY_PASSPHRASE)");
   console.log("  kit memory restore <file>   Restore an encrypted backup (new machine)");
   console.log("  kit memory share …          Promote a curated entry to shared (team) memory");
@@ -1076,22 +1078,29 @@ async function memContext(): Promise<boolean> {
 
 async function memScan(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
+  // --injection scans for prompt-injection patterns (the store is replayed into
+  // the agent's prompt); default scans for stored secrets. Same shape + exit rule.
+  const injectionMode = hasFlag(process.argv, "--injection");
+  const noun = injectionMode ? "injection pattern" : "secret";
+  const heuristicNote = injectionMode
+    ? "dual-use shapes — exfil/pipe-to-shell/prompt-role refs"
+    : "KEY=value patterns — usually env vars / paths";
   const db = openMemoryDb();
-  const findings = scanDbForSecrets(db);
+  const findings = injectionMode ? scanDbForInjection(db) : scanDbForSecrets(db);
   db.close();
   if (jsonMode) {
     console.log(JSON.stringify(findings));
     return !findings.some((f) => f.confidence === "high");
   }
   if (!findings.length) {
-    console.log(`${c.green}✓${c.reset} no stored secrets found in the memory store`);
+    console.log(`${c.green}✓${c.reset} no ${noun}s found in the memory store`);
     return true;
   }
   const high = findings.filter((f) => f.confidence === "high");
   const heuristic = findings.filter((f) => f.confidence === "heuristic");
   const times = (n: number) => (n > 1 ? ` ×${n}` : "");
   if (high.length) {
-    console.log(`${c.red}⚠ ${high.length} high-confidence secret(s):${c.reset}`);
+    console.log(`${c.red}⚠ ${high.length} high-confidence ${noun}(s):${c.reset}`);
     for (const f of high) {
       const proj = f.projects.length
         ? `${c.bold}[${f.projects.join(", ")}]${c.reset}${c.dim} · `
@@ -1101,20 +1110,18 @@ async function memScan(): Promise<boolean> {
       );
     }
   } else {
-    console.log(`${c.green}✓${c.reset} no high-confidence secrets`);
+    console.log(`${c.green}✓${c.reset} no high-confidence ${noun}s`);
   }
   if (heuristic.length) {
     const showAll = hasFlag(process.argv, "--all");
     if (showAll) {
-      console.log(
-        `${c.dim}${heuristic.length} heuristic match(es) (KEY=value patterns — usually env vars / paths):${c.reset}`,
-      );
+      console.log(`${c.dim}${heuristic.length} heuristic match(es) (${heuristicNote}):${c.reset}`);
       for (const f of heuristic) {
         console.log(`  ${c.dim}${f.label} ${f.preview}${times(f.count)} · ${f.sample}${c.reset}`);
       }
     } else {
       console.log(
-        `${c.dim}+ ${heuristic.length} heuristic match(es) (likely env vars / paths) — run with --all to see${c.reset}`,
+        `${c.dim}+ ${heuristic.length} heuristic match(es) (${heuristicNote}) — run with --all to see${c.reset}`,
       );
     }
   }

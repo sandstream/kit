@@ -18,6 +18,7 @@ import { activeShared, formatAge, type SharedEntry } from "./shared.js";
 import { decisionsForPaths, changedPaths } from "./clusters.js";
 import { getCurrentProjectRoot } from "./project.js";
 import { readCachedUpdateSync, getKitVersionSync } from "../update-check.js";
+import { stripUnsafeChars } from "./injection.js";
 
 /**
  * A one-line, actionable stale-kit notice for Claude Code context, or "". Reads
@@ -46,7 +47,7 @@ export function userPromptSubmitReminder(): string {
     let pending = "";
     if (openItems.length > 0) {
       const shown = openItems.slice(0, 3);
-      const titles = shown.map((p) => `${p.id} ${p.title}`).join("; ");
+      const titles = shown.map((p) => `${p.id} ${stripUnsafeChars(p.title)}`).join("; ");
       const more = openItems.length > shown.length ? " …" : "";
       pending = ` ${openItems.length} open action item(s) blocked on you: ${titles}${more}.`;
     }
@@ -80,7 +81,7 @@ function touchedDecisionsNotice(root: string = getCurrentProjectRoot()): string 
     const parts = groups.slice(0, 2).map((g) => {
       const titles = g.decisions
         .slice(0, 2)
-        .map((d) => `[${d.kind}] ${d.title}`)
+        .map((d) => `[${d.kind}] ${stripUnsafeChars(d.title)}`)
         .join("; ");
       return `${g.area}: ${titles}`;
     });
@@ -138,20 +139,25 @@ export function sessionStartRecovery(opts: { limit?: number } = {}): string {
     }
     for (const m of recent) {
       const who = m.role === "assistant" ? "assistant" : "you";
-      const text = (m.content ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+      const text = stripUnsafeChars(m.content ?? "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 200);
       if (text) lines.push(`  · ${who}: ${text}`);
     }
     if (decisions.length > 0) {
       lines.push("Curated team decisions (shared memory, active):");
       for (const d of decisions) {
         const age = formatAge(d.ts);
-        lines.push(`  · [${d.kind}] ${d.area}: ${d.title}${age ? ` (${age})` : ""}`);
+        lines.push(
+          `  · [${d.kind}] ${stripUnsafeChars(d.area)}: ${stripUnsafeChars(d.title)}${age ? ` (${age})` : ""}`,
+        );
       }
     }
     if (openItems.length > 0) {
       const titles = openItems
         .slice(0, 3)
-        .map((p) => `${p.id} ${p.title}`)
+        .map((p) => `${p.id} ${stripUnsafeChars(p.title)}`)
         .join("; ");
       lines.push(`Open action items blocked on you: ${titles}${openItems.length > 3 ? " …" : ""}.`);
     }
