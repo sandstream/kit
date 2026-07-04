@@ -513,6 +513,15 @@ export function getStats(db: DatabaseSync): MemoryStats {
     "SELECT COUNT(*) AS n FROM query_log WHERE executed_at >= datetime('now', '-7 days')",
   );
   const distinctQueries = count("SELECT COUNT(DISTINCT query) AS n FROM query_log");
+  // Recall adoption: recalls in the last 7d over sessions active in the last 7d.
+  // query_log has no session_id, so this is a per-active-session rate (near 0 ⇒
+  // the agent is ignoring the "run kit memory search" nudge), not a
+  // distinct-sessions-with-recall count. Honest, deterministic, no schema change.
+  const activeSessions7d = count(
+    "SELECT COUNT(*) AS n FROM sessions WHERE last_message_at >= datetime('now', '-7 days')",
+  );
+  const perActiveSession7d =
+    activeSessions7d > 0 ? Math.round((recall7d / activeSessions7d) * 10) / 10 : 0;
   const topTerms = (
     db
       .prepare(
@@ -541,6 +550,8 @@ export function getStats(db: DatabaseSync): MemoryStats {
       last7d: recall7d,
       distinctQueries,
       topTerms,
+      activeSessions7d,
+      perActiveSession7d,
     },
     sessionsBreakdown: {
       logical: count("SELECT COUNT(*) AS n FROM sessions WHERE is_agent_sidechain = 0"),

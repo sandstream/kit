@@ -671,6 +671,14 @@ async function memStats(): Promise<boolean> {
   console.log(
     `  recalls    ${s.recalls.total} ${c.dim}(${s.recalls.last7d} last 7d · ${s.recalls.distinctQueries} distinct queries)${c.reset}`,
   );
+  // Adoption: are agents actually following the "run kit memory search" nudge?
+  {
+    const rate = s.recalls.perActiveSession7d;
+    const adoptionDim = rate < 0.5 ? c.yellow : c.dim;
+    console.log(
+      `             ${adoptionDim}~${rate.toFixed(1)} recalls/active session (7d, ${s.recalls.activeSessions7d} active)${c.reset}`,
+    );
+  }
   console.log(`  pending    ${s.pendingOpen} ${c.dim}(open action items)${c.reset}`);
   console.log(`  size       ${Math.round(s.sizeBytes / 1024)} KB`);
   console.log(
