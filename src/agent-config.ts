@@ -735,6 +735,66 @@ exec ${kitGateInvocation()} --format cline
   }
 }
 
+/**
+ * Factory Droid install-gate: a `PreToolUse` hook in `.factory/hooks.json`. Droid
+ * is Claude-Code-compatible and uses the same nested `{hooks:{PreToolUse:[{matcher,
+ * hooks:[{type:"command",command}]}]}}` shape — the ONE adaptation is the shell
+ * matcher is `"Execute"` (not `"Bash"`). Droid passes the command at
+ * `tool_input.command` and blocks on exit 2, so `kit gate-bash` works unchanged.
+ * Idempotent (keyed on a `gate-bash` command); also treats the legacy
+ * `.factory/hooks/hooks.json` as already-wired so we don't double-install.
+ * Preserves any other hooks/settings.
+ */
+export async function installInstallGateDroid(
+  cwd: string = process.cwd(),
+): Promise<HookInstallResult> {
+  const file = ".factory/hooks.json";
+  const path = resolve(cwd, file);
+  const { isReadOnlyMode } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) return { file, action: "skipped", detail: "read-only mode" };
+  if (!existsSync(resolve(cwd, ".factory"))) {
+    return { file, action: "skipped", detail: "no Factory Droid project detected" };
+  }
+
+  // Legacy location: if a prior hooks file already carries the gate, do nothing.
+  const legacy = resolve(cwd, ".factory/hooks/hooks.json");
+  if (existsSync(legacy)) {
+    try {
+      if ((await readFile(legacy, "utf-8")).includes("gate-bash")) {
+        return {
+          file: ".factory/hooks/hooks.json",
+          action: "unchanged",
+          detail: "install-gate already wired",
+        };
+      }
+    } catch {
+      // unreadable legacy file → fall through and write the scope-root file
+    }
+  }
+
+  let settings: { hooks?: Record<string, SettingsHookGroup[]>; [k: string]: unknown } = {};
+  let existed = false;
+  try {
+    settings = JSON.parse(await readFile(path, "utf-8")) as typeof settings;
+    existed = true;
+  } catch {
+    settings = {};
+  }
+  const hooks = (settings.hooks ??= {});
+  const pre = (hooks.PreToolUse ??= []);
+  if (pre.some((g) => g.hooks?.some((h) => h.command?.endsWith("gate-bash")))) {
+    return { file, action: "unchanged", detail: "install-gate already wired" };
+  }
+  pre.push({ matcher: "Execute", hooks: [{ type: "command", command: kitGateInvocation() }] });
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    return { file, action: existed ? "updated" : "created" };
+  } catch (err) {
+    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /** Per-agent install-gate result. */
 export interface GateInstallEntry {
   agent:
@@ -742,6 +802,7 @@ export interface GateInstallEntry {
     | "Codex"
     | "Amazon Q"
     | "Kiro"
+    | "Factory Droid"
     | "Gemini CLI"
     | "Cursor"
     | "OpenCode"
@@ -758,6 +819,7 @@ export async function installAllInstallGates(
     { agent: "Codex", result: await installInstallGateCodex(cwd) },
     { agent: "Amazon Q", result: await installInstallGateAmazonQ(cwd) },
     { agent: "Kiro", result: await installInstallGateKiro(cwd) },
+    { agent: "Factory Droid", result: await installInstallGateDroid(cwd) },
     { agent: "Gemini CLI", result: await installInstallGateGemini(cwd) },
     { agent: "Cursor", result: await installInstallGateCursor(cwd) },
     { agent: "OpenCode", result: await installInstallGateOpenCode(cwd) },
