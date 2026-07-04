@@ -11,6 +11,8 @@ import {
   dueForHarnessSweep,
   dueForMidSessionIndex,
   startDetachedSessionEnd,
+  consumeSessionEndLog,
+  logSessionEndEvent,
 } from "./hook.js";
 import { getCurrentProjectRoot } from "./project.js";
 import { shareEntry } from "./shared.js";
@@ -114,6 +116,44 @@ describe("memory hook — SessionStart recovery", () => {
     const text = sessionStartRecovery();
     assert.match(text, /flagged: possible prompt-injection/, "the poisoned line is badged");
     assert.ok(!text.includes(ZWSP), "hidden zero-width char stripped from the injected text");
+  });
+});
+
+describe("memory hook — detached-worker log surfacing (R5)", () => {
+  let tmp: string;
+  const prevDir = process.env.KIT_MEMORY_DIR;
+  const prevDb = process.env.KIT_MEMORY_DB;
+
+  before(() => {
+    tmp = mkdtempSync(join(tmpdir(), "kit-worklog-"));
+    process.env.KIT_MEMORY_DIR = tmp;
+    process.env.KIT_MEMORY_DB = join(tmp, "memory.db");
+  });
+  after(() => {
+    if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
+    else process.env.KIT_MEMORY_DIR = prevDir;
+    if (prevDb === undefined) delete process.env.KIT_MEMORY_DB;
+    else process.env.KIT_MEMORY_DB = prevDb;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("consumeSessionEndLog reads then clears the log (surfaced exactly once)", () => {
+    logSessionEndEvent("session-end index FAILED: disk full");
+    const first = consumeSessionEndLog();
+    assert.ok(
+      first.some((l) => l.includes("index FAILED")),
+      "the logged failure is read back",
+    );
+    assert.deepEqual(consumeSessionEndLog(), [], "second read is empty — the log was consumed");
+  });
+
+  it("sessionStartRecovery surfaces a worker failure, then clears it", () => {
+    logSessionEndEvent("mid-session index spawn failed: ENOENT");
+    const text = sessionStartRecovery();
+    assert.match(text, /background capture reported problems/);
+    assert.match(text, /ENOENT/);
+    // Consumed: a second start no longer repeats the same warning.
+    assert.doesNotMatch(sessionStartRecovery(), /background capture reported problems/);
   });
 });
 

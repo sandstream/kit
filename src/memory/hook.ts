@@ -9,7 +9,7 @@
  * block a prompt or break a session. Deterministic, zero model calls.
  */
 import { basename, join, resolve } from "node:path";
-import { existsSync, statSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
+import { existsSync, statSync, writeFileSync, appendFileSync, rmSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { openMemoryDb, getStats, recentMessages, getMemoryDir, ensureMemoryDir } from "./db.js";
 import { indexClaudeTranscripts, indexAllHarnesses } from "./parser.js";
@@ -125,6 +125,34 @@ export function recentDecisions(root: string, limit: number): SharedEntry[] {
 }
 
 /**
+ * Read and CONSUME the detached-worker log (`~/.kit/session-end.log`). The
+ * SessionEnd / mid-session workers run detached with stdio ignored, so their ONLY
+ * failure channel is this file (see {@link logSessionEndEvent}) — but nothing read
+ * it, so `logSessionEndEvent`'s promise to surface a failure "on the next
+ * SessionStart" went unkept and a failed capture stayed invisible (the store looked
+ * captured but recorded nothing). This reads the last few lines and DELETES the file
+ * so each event surfaces exactly once. Fail-open: [] on any error.
+ */
+export function consumeSessionEndLog(max = 5): string[] {
+  try {
+    const path = join(getMemoryDir(), "session-end.log");
+    if (!existsSync(path)) return [];
+    const lines = readFileSync(path, "utf8")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    try {
+      rmSync(path, { force: true });
+    } catch {
+      /* best-effort: worst case the same lines surface again next start */
+    }
+    return lines.slice(-max);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * SessionStart recovery — re-inject "where you left off" for THIS project after a
  * resume/compact, so the agent regains continuity instead of starting blank. Pulls
  * the most recent messages + open action items from the store. FAIL-OPEN and
@@ -142,11 +170,27 @@ export function sessionStartRecovery(opts: { limit?: number } = {}): string {
     // Fail-open (readShared swallows a missing/broken file → []).
     const decisions = recentDecisions(root, 3);
     const stale = staleKitNotice();
-    if (recent.length === 0 && openItems.length === 0 && decisions.length === 0 && !stale)
+    // Surface (once) any failure the detached capture worker logged — a silently
+    // failed capture is the worst failure mode (looks captured, recorded nothing).
+    const workerLog = consumeSessionEndLog();
+    if (
+      recent.length === 0 &&
+      openItems.length === 0 &&
+      decisions.length === 0 &&
+      !stale &&
+      workerLog.length === 0
+    )
       return "";
 
     const lines: string[] = [];
     if (stale) lines.push(stale);
+    if (workerLog.length) {
+      // kit's own diagnostic (not stored/untrusted data) — outside the DATA boundary.
+      lines.push(
+        "⚠ kit background capture reported problems since your last session (recent turns may be unsearchable — run `kit memory index`):",
+      );
+      for (const l of workerLog) lines.push(`  · ${safeCell(l)}`);
+    }
     if (recent.length > 0 || openItems.length > 0 || decisions.length > 0) {
       // Explicit data/instruction boundary: everything indented below is STORED,
       // possibly-untrusted content (transcripts can echo web pages the agent read),

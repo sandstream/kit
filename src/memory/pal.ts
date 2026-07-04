@@ -166,8 +166,36 @@ export interface PalListOptions {
   allDevices?: boolean;
 }
 
+/** A claim older than this with no release is treated as abandoned (the claimer
+ *  crashed / the ephemeral session died) and auto-released back to 'open'. */
+const STALE_CLAIM_TTL_HOURS = 24;
+
+/**
+ * Auto-release claims whose claimer went silent. `palClaim` flips open→claimed and
+ * stamps `claimed_at`, but a crashed or abandoned agent never calls `palRelease` —
+ * so the item drops out of every default (open) surface indefinitely, silently
+ * blocking the human who is actually waiting on it. This releases any `claimed` row
+ * older than `ttlHours` back to `open` so it resurfaces for another agent.
+ * Idempotent; returns the released ids. Deterministic (SQLite clock).
+ */
+export function reapStaleClaims(db: DatabaseSync, ttlHours = STALE_CLAIM_TTL_HOURS): string[] {
+  const cutoff = `-${Math.max(1, Math.floor(ttlHours))} hours`;
+  const stale = "status='claimed' AND claimed_at IS NOT NULL AND claimed_at <= datetime('now', ?)";
+  const rows = db.prepare(`SELECT id FROM pending_actions WHERE ${stale}`).all(cutoff) as {
+    id: string;
+  }[];
+  if (!rows.length) return [];
+  db.prepare(
+    `UPDATE pending_actions SET status='open', claimed_by=NULL, claimed_at=NULL WHERE ${stale}`,
+  ).run(cutoff);
+  return rows.map((r) => r.id);
+}
+
 export function palList(db: DatabaseSync, opts: PalListOptions = {}): PendingAction[] {
   const status = opts.status ?? "open";
+  // Before listing the open work, resurface anything a crashed claimer abandoned —
+  // otherwise a stale claim hides a blocked-on-you item from every default surface.
+  if (status === "open") reapStaleClaims(db);
   const where: string[] = ["status = ?"];
   const params: unknown[] = [status];
   if (opts.scope !== undefined) {
