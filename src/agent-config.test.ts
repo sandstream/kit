@@ -13,6 +13,7 @@ import {
   installInstallGate,
   installInstallGateCodex,
   installInstallGateAmazonQ,
+  installInstallGateKiro,
   installInstallGateGemini,
   installInstallGateCursor,
   installInstallGateOpenCode,
@@ -402,6 +403,38 @@ describe("installInstallGateAmazonQ", () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-qgate2-"));
     try {
       assert.equal((await installInstallGateAmazonQ(dir)).action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installInstallGateKiro", () => {
+  it("adds hooks.preToolUse to existing .kiro/agents JSONs, idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-kirogate-"));
+    try {
+      mkdirSync(join(dir, ".kiro", "agents"), { recursive: true });
+      writeFileSync(
+        join(dir, ".kiro", "agents", "default.json"),
+        JSON.stringify({ name: "default", tools: ["execute_bash"] }),
+      );
+      const r1 = await installInstallGateKiro(dir);
+      assert.equal(r1.action, "updated");
+      const a = JSON.parse(readFileSync(join(dir, ".kiro", "agents", "default.json"), "utf-8"));
+      assert.equal(a.name, "default", "preserves existing agent fields");
+      assert.equal(a.hooks.preToolUse[0].matcher, "execute_bash");
+      assert.ok(a.hooks.preToolUse[0].command.endsWith("gate-bash"));
+      const r2 = await installInstallGateKiro(dir);
+      assert.equal(r2.action, "unchanged");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when no Kiro agent config is present (no false-green)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-kirogate2-"));
+    try {
+      assert.equal((await installInstallGateKiro(dir)).action, "skipped");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

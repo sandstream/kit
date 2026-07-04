@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **AWS Kiro install-gate.** `kit agent-config --install-gate` now wires the
+  fail-closed PreToolUse gate for Kiro CLI: it adds a `hooks.preToolUse` entry
+  (matcher `execute_bash`) to each `.kiro/agents/*.json` agent config. Kiro is
+  Amazon-Q-lineage — same agent-config hook schema, same `tool_input.command`
+  STDIN, same exit-2-blocks — so `kit gate-bash` works unchanged. Per-agent like
+  Amazon Q: wires every existing agent file, and SKIPS honestly (no false-green)
+  when none exist rather than writing a partial agent config. Kiro is now the 8th
+  install-gated agent.
+
 ### Fixed
 
 - **The update-check version comparator no longer mis-parses a prerelease/patch.**
