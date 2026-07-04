@@ -14,6 +14,11 @@ import {
   installInstallGateCodex,
   installInstallGateAmazonQ,
   installInstallGateKiro,
+  installInstallGateDroid,
+  installInstallGateAugment,
+  installInstallGateAntigravity,
+  installAiderRules,
+  mergeAiderRead,
   installInstallGateGemini,
   installInstallGateCursor,
   installInstallGateOpenCode,
@@ -176,8 +181,8 @@ describe("detectAgentTargets", () => {
     }
   });
 
-  it("wires AGENTS.md for a Kiro (.kiro/) or Droid (.factory/) project", () => {
-    for (const marker of [".kiro", ".factory"]) {
+  it("wires AGENTS.md for Kiro (.kiro/), Droid (.factory/) and Kilo (.kilocode/.kilo) projects", () => {
+    for (const marker of [".kiro", ".factory", ".kilocode", ".kilo"]) {
       const dir = tmpRepo();
       try {
         mkdirSync(join(dir, marker));
@@ -186,6 +191,17 @@ describe("detectAgentTargets", () => {
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+    }
+  });
+
+  it("wires AGENTS.md for a Kilo project marked by kilo.jsonc", () => {
+    const dir = tmpRepo();
+    try {
+      writeFileSync(join(dir, "kilo.jsonc"), "{}\n");
+      const files = detectAgentTargets(dir).map((t) => t.file);
+      assert.deepEqual(files, ["AGENTS.md"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
@@ -470,6 +486,214 @@ describe("installInstallGateKiro", () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-kirogate2-"));
     try {
       assert.equal((await installInstallGateKiro(dir)).action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installInstallGateDroid", () => {
+  it("writes a PreToolUse Execute gate to .factory/hooks.json, idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-droidgate-"));
+    try {
+      mkdirSync(join(dir, ".factory"), { recursive: true });
+      const r1 = await installInstallGateDroid(dir);
+      assert.equal(r1.action, "created");
+      const s = JSON.parse(readFileSync(join(dir, ".factory", "hooks.json"), "utf-8"));
+      const groups = s.hooks.PreToolUse;
+      assert.ok(Array.isArray(groups) && groups.length === 1);
+      // the ONE adaptation vs Claude/Codex: matcher is "Execute", not "Bash"
+      assert.equal(groups[0].matcher, "Execute");
+      assert.ok(groups[0].hooks[0].command.endsWith("gate-bash"));
+
+      const r2 = await installInstallGateDroid(dir);
+      assert.equal(r2.action, "unchanged");
+      const s2 = JSON.parse(readFileSync(join(dir, ".factory", "hooks.json"), "utf-8"));
+      assert.equal(s2.hooks.PreToolUse.length, 1, "no duplicate group on re-run");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a legacy .factory/hooks/hooks.json gate as already-wired", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-droidgate-legacy-"));
+    try {
+      mkdirSync(join(dir, ".factory", "hooks"), { recursive: true });
+      writeFileSync(
+        join(dir, ".factory", "hooks", "hooks.json"),
+        JSON.stringify({
+          hooks: {
+            PreToolUse: [
+              { matcher: "Execute", hooks: [{ type: "command", command: "/x/cli.js gate-bash" }] },
+            ],
+          },
+        }),
+      );
+      const r = await installInstallGateDroid(dir);
+      assert.equal(r.action, "unchanged");
+      // must NOT create a second scope-root file
+      assert.equal(existsSync(join(dir, ".factory", "hooks.json")), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when no Factory Droid project is present (no false-green)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-droidgate2-"));
+    try {
+      assert.equal((await installInstallGateDroid(dir)).action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installInstallGateAugment", () => {
+  it("writes a PreToolUse launch-process gate to .augment/settings.json, idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-auggate-"));
+    try {
+      mkdirSync(join(dir, ".augment"), { recursive: true });
+      const r1 = await installInstallGateAugment(dir);
+      assert.equal(r1.action, "created");
+      const s = JSON.parse(readFileSync(join(dir, ".augment", "settings.json"), "utf-8"));
+      const groups = s.hooks.PreToolUse;
+      assert.ok(Array.isArray(groups) && groups.length === 1);
+      // the one adaptation: Augment's shell tool is "launch-process"
+      assert.equal(groups[0].matcher, "launch-process");
+      assert.ok(groups[0].hooks[0].command.endsWith("gate-bash"));
+
+      const r2 = await installInstallGateAugment(dir);
+      assert.equal(r2.action, "unchanged");
+      const s2 = JSON.parse(readFileSync(join(dir, ".augment", "settings.json"), "utf-8"));
+      assert.equal(s2.hooks.PreToolUse.length, 1, "no duplicate group on re-run");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects via a bare .augment-guidelines file too", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-auggate-g-"));
+    try {
+      writeFileSync(join(dir, ".augment-guidelines"), "# guidelines\n");
+      const r = await installInstallGateAugment(dir);
+      assert.equal(r.action, "created");
+      assert.ok(existsSync(join(dir, ".augment", "settings.json")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when no Augment project is present (no false-green)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-auggate2-"));
+    try {
+      assert.equal((await installInstallGateAugment(dir)).action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installInstallGateAntigravity", () => {
+  it("writes a PreToolUse run_command gate to .agents/hooks.json, idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-antigrav-"));
+    try {
+      mkdirSync(join(dir, ".agents"), { recursive: true });
+      const r1 = await installInstallGateAntigravity(dir);
+      assert.equal(r1.action, "created");
+      const s = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf-8"));
+      const groups = s.hooks.PreToolUse;
+      assert.ok(Array.isArray(groups) && groups.length === 1);
+      assert.equal(groups[0].matcher, "run_command");
+      assert.ok(groups[0].hooks[0].command.endsWith("gate-bash"));
+
+      const r2 = await installInstallGateAntigravity(dir);
+      assert.equal(r2.action, "unchanged");
+      const s2 = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf-8"));
+      assert.equal(s2.hooks.PreToolUse.length, 1, "no duplicate group on re-run");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when no Antigravity (.agents/) project is present (no false-green)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-antigrav2-"));
+    try {
+      assert.equal((await installInstallGateAntigravity(dir)).action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("mergeAiderRead (conf.yml read: merge, no YAML dep)", () => {
+  it("no-ops when CONVENTIONS.md is already referenced", () => {
+    const r = mergeAiderRead("read:\n  - CONVENTIONS.md\n");
+    assert.equal(r.changed, false);
+  });
+  it("creates a read block when the key is absent", () => {
+    const r = mergeAiderRead("model: gpt-4\n");
+    assert.equal(r.changed, true);
+    assert.ok(r.next.includes("read:\n  - CONVENTIONS.md"));
+    assert.ok(r.next.includes("model: gpt-4"), "preserves other keys");
+  });
+  it("promotes a scalar read: to a two-item block list", () => {
+    const r = mergeAiderRead("read: OTHER.md\n");
+    assert.equal(r.changed, true);
+    assert.ok(r.next.includes("- OTHER.md"));
+    assert.ok(r.next.includes("- CONVENTIONS.md"));
+  });
+  it("appends to an existing block list, matching indent", () => {
+    const r = mergeAiderRead("read:\n  - OTHER.md\n");
+    assert.equal(r.changed, true);
+    assert.ok(/read:\n {2}- CONVENTIONS\.md\n {2}- OTHER\.md|read:\n {2}- OTHER\.md/.test(r.next));
+    assert.ok(r.next.includes("- CONVENTIONS.md"));
+  });
+  it("refuses to text-edit a flow list (manual instead of corrupting)", () => {
+    const r = mergeAiderRead("read: [a.md, b.md]\n");
+    assert.equal(r.changed, false);
+    assert.equal(r.manual, true);
+  });
+});
+
+describe("installAiderRules (bespoke: CONVENTIONS.md + conf.yml)", () => {
+  it("writes the kit block AND wires read: CONVENTIONS.md, idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-aider-"));
+    try {
+      writeFileSync(join(dir, ".aider.conf.yml"), "model: gpt-4\n");
+      const r1 = await installAiderRules(dir);
+      assert.notEqual(r1.action, "failed");
+      const conv = readFileSync(join(dir, "CONVENTIONS.md"), "utf-8");
+      assert.ok(conv.includes("kit triage"), "kit block written to CONVENTIONS.md");
+      const conf = readFileSync(join(dir, ".aider.conf.yml"), "utf-8");
+      assert.ok(conf.includes("CONVENTIONS.md"), "read: CONVENTIONS.md wired");
+      assert.ok(conf.includes("model: gpt-4"), "preserves existing conf");
+
+      const r2 = await installAiderRules(dir);
+      assert.equal(r2.action, "unchanged");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects via a bare .aider.chat.history.md and creates both files", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-aider2-"));
+    try {
+      writeFileSync(join(dir, ".aider.chat.history.md"), "# aider chat started at x\n");
+      const r = await installAiderRules(dir);
+      assert.notEqual(r.action, "failed");
+      assert.ok(existsSync(join(dir, "CONVENTIONS.md")));
+      assert.ok(readFileSync(join(dir, ".aider.conf.yml"), "utf-8").includes("CONVENTIONS.md"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when no Aider project is present (no false-green)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-aider3-"));
+    try {
+      const r = await installAiderRules(dir);
+      assert.equal(r.detail, "no Aider project detected");
+      assert.equal(existsSync(join(dir, "CONVENTIONS.md")), false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
