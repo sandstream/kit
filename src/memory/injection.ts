@@ -116,6 +116,44 @@ const CONFUSABLE_PAIRS: ReadonlyArray<readonly [number, string]> = [
   [0x03a7, "x"],
   [0x03a5, "y"],
   [0x0396, "z"],
+  // Latin-block look-alikes (Script=Latin, so mixed-script checks miss them, and
+  // they have NO NFKD decomposition): IPA + small-capital letters that render as
+  // ASCII a–z. Covers fully-stylized words like `ꜱᴇᴄʀᴇᴛ` / `iɡnore`.
+  [0x0261, "g"], // ɡ latin small letter script g
+  [0x0262, "g"], // ɢ small capital g
+  [0x0274, "n"], // ɴ small capital n
+  [0x026a, "i"], // ɪ small capital i
+  [0x0280, "r"], // ʀ small capital r
+  [0x0299, "b"], // ʙ small capital b
+  [0x029c, "h"], // ʜ small capital h
+  [0x029f, "l"], // ʟ small capital l
+  [0x028f, "y"], // ʏ small capital y
+  [0x1d00, "a"], // ᴀ small capital a
+  [0x1d04, "c"], // ᴄ small capital c
+  [0x1d05, "d"], // ᴅ small capital d
+  [0x1d07, "e"], // ᴇ small capital e
+  [0x1d0a, "j"], // ᴊ small capital j
+  [0x1d0b, "k"], // ᴋ small capital k
+  [0x1d0d, "m"], // ᴍ small capital m
+  [0x1d0f, "o"], // ᴏ small capital o
+  [0x1d18, "p"], // ᴘ small capital p
+  [0x1d1b, "t"], // ᴛ small capital t
+  [0x1d1c, "u"], // ᴜ small capital u
+  [0x1d20, "v"], // ᴠ small capital v
+  [0x1d21, "w"], // ᴡ small capital w
+  [0x1d22, "z"], // ᴢ small capital z
+  [0xa730, "f"], // ꜰ small capital f
+  [0xa731, "s"], // ꜱ small capital s
+  // Cyrillic lowercase gaps used to spell trigger words
+  [0x0442, "t"], // т (renders like Latin t in many fonts)
+  [0x043a, "k"], // к
+  [0x043c, "m"], // м
+  [0x0432, "b"], // в
+  // Greek lowercase gaps
+  [0x03c5, "u"], // υ upsilon
+  [0x03b5, "e"], // ε epsilon
+  [0x03b7, "n"], // η eta (renders like n)
+  [0x03c4, "t"], // τ tau
 ];
 const CONFUSABLE_MAP = new Map<string, string>(
   CONFUSABLE_PAIRS.map(([cp, a]) => [String.fromCodePoint(cp), a]),
@@ -142,27 +180,70 @@ function normalizeForMatch(text: string): string {
   ).replace(/\s+/g, " ");
 }
 
-// Scripts that carry ASCII-Latin look-alikes and are the vehicles of homoglyph
-// smuggling. A word that mixes ASCII Latin with any of these is never legitimate
-// transcript text — it's the confusable-swap tell — and unlike the curated fold
-// this catches EVERY such codepoint, not just the ~60 we enumerated (defeats the
-// "pick a look-alike we didn't map" bypass, e.g. Armenian `ո`, Greek `υ`). CJK /
-// accented Latin / pure single-script foreign words are deliberately NOT matched:
-// accents are Latin-script, and CJK isn't confusable with ASCII, so no false alarm.
-const CONFUSABLE_SCRIPT_RE =
-  /[\p{Script=Cyrillic}\p{Script=Greek}\p{Script=Armenian}\p{Script=Coptic}\p{Script=Cherokee}]/u;
-const ASCII_LETTER_RE = /[A-Za-z]/;
 const LETTER_RUN_RE = /\p{L}+/gu;
 
-/** True when any single word mixes ASCII Latin letters with a confusable-bearing
- *  non-Latin script — the signature of a homoglyph-obfuscated payload. */
-function hasMixedScriptToken(text: string): boolean {
-  const runs = text.match(LETTER_RUN_RE);
-  if (!runs) return false;
-  for (const run of runs) {
-    if (ASCII_LETTER_RE.test(run) && CONFUSABLE_SCRIPT_RE.test(run)) return true;
+// The distinctive injection keywords. A stored word whose ONLY difference from one
+// of these is homoglyph obfuscation is an attack tell on its own — nobody writes
+// "secret" or "instructions" with a look-alike glyph benignly. Deliberately the
+// unambiguous nouns/verbs (not short common words like "all"/"new"/"you"), so a
+// stylized ordinary word can't trip it. Detection is script-AGNOSTIC (below), so it
+// beats an allowlist: it flags the *shape* "an obfuscated trigger word", whether the
+// look-alike is Cyrillic, Greek, Armenian, a Latin-block small-cap, or one we never
+// enumerated — while `αlpha`/`βeta` (skeleton not a trigger) stay silent.
+const OBFUSCATION_TRIGGER_WORDS = new Set([
+  "ignore",
+  "disregard",
+  "instructions",
+  "instruction",
+  "exfiltrate",
+  "secret",
+  "secrets",
+  "password",
+  "passwords",
+  "credential",
+  "credentials",
+  "token",
+  "tokens",
+]);
+
+/** ASCII skeleton of one word: strip marks, fold the known confusables, lowercase. */
+function tokenSkeleton(token: string): string {
+  return foldConfusables(token.normalize("NFKD").replace(/\p{M}+/gu, "")).toLowerCase();
+}
+
+/**
+ * Find a word that is a homoglyph-obfuscated injection trigger, or null. Two ways a
+ * token qualifies (both require it NOT be plain ASCII — plain phrases are the RULES'
+ * job): its folded skeleton equals a trigger exactly (fully-stylified words like
+ * `ꜱᴇᴄʀᴇᴛ`), OR — for a look-alike we didn't map — every ASCII position matches a
+ * same-length trigger and the un-folded (still non-ASCII) positions act as wildcards
+ * (`Igոore` → `ig?ore` ≡ `ignore`). Script-agnostic: no confusable table can be
+ * complete, so we match the shape, not the codepoint.
+ */
+function findObfuscatedTrigger(text: string): string | null {
+  for (const raw of stripUnsafeChars(text).match(LETTER_RUN_RE) ?? []) {
+    if (/^[A-Za-z]+$/.test(raw)) continue; // plain ASCII → handled by RULES
+    const skel = tokenSkeleton(raw);
+    if (/^[a-z]+$/.test(skel)) {
+      if (OBFUSCATION_TRIGGER_WORDS.has(skel)) return raw;
+      continue;
+    }
+    if (!/[a-z]/.test(skel)) continue; // no ASCII anchor → can't wildcard-match safely
+    for (const word of OBFUSCATION_TRIGGER_WORDS) {
+      if (word.length !== skel.length) continue;
+      let ok = true;
+      for (let i = 0; i < word.length; i++) {
+        const c = skel[i]!;
+        // ASCII letters must match; unfolded (non-ASCII) look-alikes are wildcards.
+        if (c >= "a" && c <= "z" && c !== word[i]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return raw;
+    }
   }
-  return false;
+  return null;
 }
 
 interface Rule {
@@ -288,14 +369,15 @@ export function findInjection(text: string): InjectionFinding[] {
       confidence: "high",
     });
   }
-  // Homoglyph obfuscation: a word mixing ASCII Latin with a confusable-bearing
-  // non-Latin script (`Igոore`, `previoυs`). High-confidence smuggling tell that
-  // is INDEPENDENT of the curated fold — it fires even on look-alike codepoints we
-  // never enumerated, which an allowlist fold alone can't win against.
-  if (hasMixedScriptToken(stripUnsafeChars(text))) {
+  // Homoglyph-obfuscated trigger word (`iɡnore`, `ꜱᴇᴄʀᴇᴛ`, `Igոore`). High-confidence
+  // smuggling tell that is script-AGNOSTIC — it fires on look-alikes we never mapped,
+  // which an allowlist fold alone can't win against, yet stays silent on benign
+  // script-mixing (`αlpha`) whose skeleton isn't an injection keyword.
+  const obfuscated = findObfuscatedTrigger(text);
+  if (obfuscated) {
     out.push({
-      label: "mixed-script-token",
-      preview: "word mixes Latin + non-Latin look-alike script (homoglyph)",
+      label: "homoglyph-trigger",
+      preview: `homoglyph-obfuscated trigger word "${preview(obfuscated)}"`,
       confidence: "high",
     });
   }
