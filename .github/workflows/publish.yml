@@ -104,10 +104,29 @@ jobs:
       - name: Build production artifacts
         run: npm run build:prod
 
+      - name: Resolve npm dist-tag (prerelease → next, stable → latest)
+        # A SemVer prerelease (version contains a hyphen, e.g. 5.0.0-alpha.1) MUST
+        # NOT become npm's `latest` — otherwise a plain `npm i sandstream-kit`
+        # would hand every user an alpha. Publish those under `next` so `latest`
+        # only ever moves on a stable release. Fail-closed: an unreadable/invalid
+        # version aborts the publish rather than guessing `latest`.
+        id: disttag
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "undefined" ]; then
+            echo "::error::could not read package.json version"; exit 1
+          fi
+          case "$VERSION" in
+            *-*) TAG="next" ;;   # any prerelease identifier
+            *)   TAG="latest" ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Publishing $VERSION under dist-tag '$TAG'"
+
       - name: Show what will be published
         # `npm publish --dry-run` lists the exact files going into the tarball
         # and prints the tarball SHA — gives auditors a verifiable trail.
-        run: npm publish --dry-run
+        run: npm publish --dry-run --tag ${{ steps.disttag.outputs.tag }}
 
       - name: Publish to npm with provenance
         # --provenance generates an SLSA build provenance attestation signed
@@ -115,7 +134,9 @@ jobs:
         #   npm audit signatures
         # or
         #   npm view sandstream-kit --json | jq '.dist'
-        run: npm publish --provenance --access public
+        # --tag routes prereleases to `next` (see the resolve step) so they never
+        # clobber `latest`.
+        run: npm publish --provenance --access public --tag ${{ steps.disttag.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

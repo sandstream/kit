@@ -6,17 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [4.1.0] - 2026-07-04
+## [5.0.0-alpha.1] - 2026-07-04
 
-A wholly **additive**, backward-compatible release along two axes — broader agent
-coverage and the first **v1 foundations of the 5.0 north-star pillars**. Semver
-note: nothing here breaks an existing contract (all-new modules, no default
-flipped), so this is a MINOR, not a major. The pillar work lands behind the
-interfaces the north-star design calls for, but the _breaking_ capabilities that
-will justify **5.0.0** — hardware-key migration, enforcement-on-by-default, a
-required control plane — deliberately do NOT ship here. `5.0.0` is reserved for
-when the first of those lands. Built via a multi-agent workflow (design →
-implement → adversarial verify), then hardened on the verify findings.
+**First alpha of the 5.0 line.** This opens the road to 5.0 along two axes:
+broader agent coverage and the first **v1 foundations of the three north-star
+pillars**. Everything here is additive today, but it is published as a
+**prerelease** (npm dist-tag `next`, never `latest`) because the 5.0 line will
+land _breaking_ capabilities before its stable cut — hardware-key migration,
+enforcement-on-by-default, a required control plane. Install the preview with
+`npm i sandstream-kit@next`; `npm i sandstream-kit` stays on the stable 4.x.
+Built via a multi-agent workflow (design → implement → adversarial verify), then
+hardened on the verify findings.
 
 ### Added — 5.0 pillar foundations
 
