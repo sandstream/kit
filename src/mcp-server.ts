@@ -33,6 +33,8 @@ import { executeCommand } from "./run.js";
 import { gatherProjectContext } from "./context.js";
 import { isReadOnlyMode } from "./read-only-mode.js";
 import { escapeWorkflowCmd } from "./utils/ci-escape.js";
+import { runGoverned } from "./governance-middleware.js";
+import type { kitConfig } from "./config.js";
 
 const KIT_FILE = ".kit.toml";
 
@@ -79,6 +81,33 @@ function readOnlyRefusal(tool: string): {
     ],
     isError: true,
   };
+}
+
+/** Refusal result for a mutating tool blocked by the governance floor (revocation,
+ *  budget, permission/approval, expired secrets). Mirrors the CLI's fail-closed deny. */
+function governanceRefusal(reason: string): {
+  content: { type: "text"; text: string }[];
+  isError: true;
+} {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify({ ok: false, governance: "denied", error: reason }, null, 2),
+      },
+    ],
+    isError: true,
+  };
+}
+
+/** Load config for governance; a missing/invalid .kit.toml yields an empty config
+ *  (governance disabled by default) so a governed tool still runs where it always did. */
+async function loadConfigForGovernance(cwd?: string): Promise<kitConfig> {
+  try {
+    return await loadConfig(configPath(cwd));
+  } catch {
+    return {} as kitConfig;
+  }
 }
 
 export function createMcpServer(): McpServer {
@@ -214,7 +243,17 @@ function register_kit_install(server: McpServer): void {
           };
         }
 
-        const results = await installTools(config.tools);
+        const gov = await runGoverned(
+          config,
+          {
+            operation: "tools.install",
+            operationType: "write",
+            metadata: { tools: Object.keys(config.tools) },
+          },
+          () => installTools(config.tools!),
+        );
+        if (!gov.ok) return governanceRefusal(gov.reason ?? "denied");
+        const results = gov.result!;
         const ok = results.every((r) => r.action !== "failed");
         return {
           content: [
@@ -298,10 +337,13 @@ function register_kit_secrets(server: McpServer): void {
           };
         }
 
-        const { results, written } = await generateSecrets(
-          config.secrets,
-          join(cwd ?? process.cwd(), ".env.local"),
+        const gov = await runGoverned(
+          config,
+          { operation: "secrets.generate", operationType: "write", metadata: {} },
+          () => generateSecrets(config.secrets!, join(cwd ?? process.cwd(), ".env.local")),
         );
+        if (!gov.ok) return governanceRefusal(gov.reason ?? "denied");
+        const { results, written } = gov.result!;
         const ok = results.every((r) => r.resolved);
         const writtenKeys = results.filter((r) => r.resolved).map((r) => r.name);
         // Never serialize `value` — it carries the resolved plaintext secret.
@@ -340,57 +382,70 @@ function register_kit_fix(server: McpServer): void {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_fix");
       try {
         const config = await loadConfig(configPath(cwd));
-        const actions: Array<{ name: string; action: string; detail: string }> = [];
 
-        // Fix missing tools
-        if (config.tools && Object.keys(config.tools).length > 0) {
-          const toolResults = await checkTools(config.tools);
-          if (toolResults.some((t) => !t.ok)) {
-            const installResults = await installTools(config.tools);
-            for (const r of installResults) {
-              if (r.action !== "already_ok") {
-                actions.push({ name: r.name, action: r.action, detail: r.detail });
+        const gov = await runGoverned(
+          config,
+          { operation: "fix", operationType: "write", metadata: {} },
+          async () => {
+            const actions: Array<{ name: string; action: string; detail: string }> = [];
+
+            // Fix missing tools (inside the governed closure)
+            if (config.tools && Object.keys(config.tools).length > 0) {
+              const toolResults = await checkTools(config.tools);
+              if (toolResults.some((t) => !t.ok)) {
+                const installResults = await installTools(config.tools);
+                for (const r of installResults) {
+                  if (r.action !== "already_ok") {
+                    actions.push({ name: r.name, action: r.action, detail: r.detail });
+                  }
+                }
               }
             }
-          }
-        }
 
-        // Fix missing lock files (lock functions use process.cwd())
-        const skillsLock = await readSkillsLock();
-        const cliLock = await readCliLock();
+            // Fix missing lock files (lock functions use process.cwd())
+            const skillsLock = await readSkillsLock();
+            const cliLock = await readCliLock();
 
-        if (!skillsLock) {
-          const skills: Record<string, string> = {
-            ...config.skills?.required,
-            ...config.skills?.optional,
-          };
-          const meta = await readkitMeta();
-          await updateSkillsLock(skills, meta?.name ? `${meta.name}@${meta.version}` : undefined);
-          actions.push({
-            name: "skills-lock.json",
-            action: "generated",
-            detail: "Created skills-lock.json",
-          });
-        }
-
-        if (!cliLock) {
-          const tools: Record<
-            string,
-            { version: string; source: "mise" | "npm" | "pip" | "manual" }
-          > = {};
-          if (config.tools) {
-            for (const [name, version] of Object.entries(config.tools)) {
-              tools[name] = { version, source: "mise" };
+            if (!skillsLock) {
+              const skills: Record<string, string> = {
+                ...config.skills?.required,
+                ...config.skills?.optional,
+              };
+              const meta = await readkitMeta();
+              await updateSkillsLock(
+                skills,
+                meta?.name ? `${meta.name}@${meta.version}` : undefined,
+              );
+              actions.push({
+                name: "skills-lock.json",
+                action: "generated",
+                detail: "Created skills-lock.json",
+              });
             }
-          }
-          await updateCliLock(tools);
-          actions.push({
-            name: "cli-lock.json",
-            action: "generated",
-            detail: "Created cli-lock.json",
-          });
-        }
 
+            if (!cliLock) {
+              const tools: Record<
+                string,
+                { version: string; source: "mise" | "npm" | "pip" | "manual" }
+              > = {};
+              if (config.tools) {
+                for (const [name, version] of Object.entries(config.tools)) {
+                  tools[name] = { version, source: "mise" };
+                }
+              }
+              await updateCliLock(tools);
+              actions.push({
+                name: "cli-lock.json",
+                action: "generated",
+                detail: "Created cli-lock.json",
+              });
+            }
+
+            return actions;
+          },
+        );
+        if (!gov.ok) return governanceRefusal(gov.reason ?? "denied");
+        const actions = gov.result!;
         const ok = actions.every((a) => a.action !== "failed");
         return {
           content: [
@@ -742,11 +797,23 @@ function register_kit_run(server: McpServer): void {
         const workDir = cwd ?? process.cwd();
         const commandArgs = command.split(/\s+/);
 
-        const result = await executeCommand({
-          commandArgs,
-          cwd: workDir,
-          inheritEnv: true,
-        });
+        // kit_run inherits the secret-loaded env and executes an arbitrary command,
+        // so it must pass the same governance floor as a CLI write (revocation,
+        // budget, permission, expired-secret block) and be audited — not just gated
+        // by read-only mode.
+        const config = await loadConfigForGovernance(cwd);
+        const gov = await runGoverned(
+          config,
+          { operation: "run", operationType: "write", metadata: { command } },
+          () =>
+            executeCommand({
+              commandArgs,
+              cwd: workDir,
+              inheritEnv: true,
+            }),
+        );
+        if (!gov.ok) return governanceRefusal(gov.reason ?? "denied");
+        const result = gov.result!;
 
         const status = result.timedOut
           ? "timed_out"

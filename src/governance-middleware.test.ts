@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { withGovernance, checkGovernance } from "./governance-middleware.js";
+import { withGovernance, checkGovernance, runGoverned } from "./governance-middleware.js";
 import { clearBudgetState, getBudgetStatus, recordUsage } from "./budget.js";
 import type { kitConfig, GovernanceConfig } from "./config.js";
 
@@ -303,5 +303,110 @@ describe("withGovernance", () => {
       },
     );
     assert.equal(executed, true);
+  });
+});
+
+describe("runGoverned (MCP-safe, never prompts)", () => {
+  let tempDir: string;
+  let originalCwd: string;
+
+  before(async () => {
+    originalCwd = process.cwd();
+    tempDir = await mkdtemp(join(tmpdir(), "kit-govmcp-"));
+    process.chdir(tempDir);
+  });
+  after(async () => {
+    process.chdir(originalCwd);
+    await rm(tempDir, { recursive: true, force: true });
+  });
+  afterEach(async () => {
+    await clearBudgetState();
+  });
+
+  it("runs and returns the result when governance is disabled", async () => {
+    const r = await runGoverned(disabledConfig, { operation: "run", operationType: "write" }, () =>
+      Promise.resolve("did-it"),
+    );
+    assert.deepEqual(r, { ok: true, result: "did-it" });
+  });
+
+  it("runs and returns the result when governance allows the op", async () => {
+    const r = await runGoverned(makeConfig(), { operation: "run", operationType: "write" }, () =>
+      Promise.resolve(42),
+    );
+    assert.equal(r.ok, true);
+    assert.equal(r.result, 42);
+  });
+
+  it("denies (does NOT run) when the environment forbids writes — fail-closed, no throw", async () => {
+    const config = makeConfig({
+      environment: "staging",
+      access: { staging: { read: true, write: false, delete: false } },
+    });
+    let executed = false;
+    const r = await runGoverned(config, { operation: "run", operationType: "write" }, async () => {
+      executed = true;
+      return "nope";
+    });
+    assert.equal(r.ok, false);
+    assert.equal(executed, false, "the op must not run when denied");
+    assert.match(r.reason ?? "", /Write operations not allowed/);
+  });
+
+  it("denies a DESTRUCTIVE op even when the CLI would auto-approve it (no approval over MCP)", async () => {
+    // withGovernance auto-approves this exact config; runGoverned must still refuse,
+    // because approval cannot be requested over the MCP stdio channel.
+    const config = makeConfig({
+      approval: { destructive_operations: [], production_writes: false },
+    });
+    let executed = false;
+    const r = await runGoverned(
+      config,
+      { operation: "cleanup", operationType: "delete", destructive: true },
+      async () => {
+        executed = true;
+      },
+    );
+    assert.equal(r.ok, false);
+    assert.equal(executed, false);
+    assert.match(r.reason ?? "", /interactive approval/);
+  });
+
+  it("denies when the token budget is exceeded", async () => {
+    const config = makeConfig({ agent: { max_tokens_per_day: 50, max_operations_per_hour: 100 } });
+    await recordUsage(config.governance!, 40);
+    const r = await runGoverned(
+      config,
+      { operation: "run", operationType: "write", estimatedTokens: 20 },
+      () => Promise.resolve("x"),
+    );
+    assert.equal(r.ok, false);
+    assert.match(r.reason ?? "", /budget/i);
+  });
+
+  it("captures a thrown op as ok:false (never throws) and records no usage", async () => {
+    const config = makeConfig({ agent: { max_tokens_per_day: 1000, max_operations_per_hour: 10 } });
+    const r = await runGoverned(
+      config,
+      { operation: "run", operationType: "write", estimatedTokens: 100 },
+      async () => {
+        throw new Error("boom");
+      },
+    );
+    assert.equal(r.ok, false);
+    assert.match(r.reason ?? "", /boom/);
+    const status = await getBudgetStatus(config.governance);
+    assert.equal(status.tokens_used, 0);
+  });
+
+  it("records usage after a successful governed op", async () => {
+    const config = makeConfig({ agent: { max_tokens_per_day: 1000, max_operations_per_hour: 10 } });
+    await runGoverned(
+      config,
+      { operation: "run", operationType: "write", estimatedTokens: 100 },
+      () => Promise.resolve("ok"),
+    );
+    const status = await getBudgetStatus(config.governance);
+    assert.equal(status.tokens_used, 100);
   });
 });
