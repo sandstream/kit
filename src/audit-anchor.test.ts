@@ -296,7 +296,7 @@ describe("audit anchor - append-path advance", () => {
     }
   });
 
-  it("tryAdvanceAnchorOnAppend seals the log when enabled", async () => {
+  it("tryAdvanceAnchorOnAppend first-seals a fresh single-entry log", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "kit-anchor-on-"));
     const dir = mkdtempSync(join(tmpdir(), "kit-anchor-onh-"));
     const prev = process.env.KIT_AUDIT_ANCHOR;
@@ -306,17 +306,43 @@ describe("audit anchor - append-path advance", () => {
     // inside buildChain cannot touch the real ~/.kit.
     process.env.KIT_AUDIT_ANCHOR_DIR = dir;
     try {
-      await buildChain(cwd, 2);
+      // The realistic append path: one entry appended, then advance (delta 1).
+      await buildChain(cwd, 1);
       const logPath = join(cwd, ".kit-audit.jsonl");
       await tryAdvanceAnchorOnAppend(logPath, dir);
       const rec = await readAnchorRecord(logPath, dir);
       assert.ok(rec);
-      assert.equal(rec!.count, 2);
+      assert.equal(rec!.count, 1);
     } finally {
       if (prev === undefined) delete process.env.KIT_AUDIT_ANCHOR;
       else process.env.KIT_AUDIT_ANCHOR = prev;
       if (prevDir === undefined) delete process.env.KIT_AUDIT_ANCHOR_DIR;
       else process.env.KIT_AUDIT_ANCHOR_DIR = prevDir;
+      rmSync(cwd, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT auto first-seal a pre-existing multi-entry UNANCHORED log", async () => {
+    // A writer-only attacker plants entries into a never-anchored log; the next
+    // legit append must NOT launder them into a fresh green seal. The no-anchor
+    // state is preserved for `kit audit verify` / an explicit `kit audit anchor`.
+    const cwd = mkdtempSync(join(tmpdir(), "kit-anchor-fs-"));
+    const dir = mkdtempSync(join(tmpdir(), "kit-anchor-fsh-"));
+    const prev = process.env.KIT_AUDIT_ANCHOR;
+    delete process.env.KIT_AUDIT_ANCHOR;
+    try {
+      await buildChain(cwd, 3); // KIT_AUDIT_ANCHOR=0 during build → never anchored
+      const logPath = join(cwd, ".kit-audit.jsonl");
+      // Default delta 1, but the log already has 3 unattributed entries → refuse.
+      await tryAdvanceAnchorOnAppend(logPath, dir);
+      assert.equal(await readAnchorRecord(logPath, dir), null, "must stay unanchored");
+      // An explicit re-seal (truthful delta ≥ total) is still allowed.
+      await tryAdvanceAnchorOnAppend(logPath, dir, { expectedNewEntries: 3 });
+      assert.equal((await readAnchorRecord(logPath, dir))!.count, 3);
+    } finally {
+      if (prev === undefined) delete process.env.KIT_AUDIT_ANCHOR;
+      else process.env.KIT_AUDIT_ANCHOR = prev;
       rmSync(cwd, { recursive: true, force: true });
       rmSync(dir, { recursive: true, force: true });
     }
@@ -397,6 +423,71 @@ describe("audit anchor - key rotation (FIX 4)", () => {
     const after = await readAnchorRecord(logPath, dir);
     assert.equal(after!.tip, originalTip);
     assert.equal(after!.count, originalCount);
+  });
+
+  it("does NOT launder a multi-entry unsealed tail into a fresh green seal", async () => {
+    // Seal the first 3 entries, then a writer-only attacker appends 2 more
+    // keyless-rechained entries past the seal (chain-valid, but unauthenticated).
+    const first = await buildChain(cwd, 3);
+    const logPath = join(cwd, ".kit-audit.jsonl");
+    const rec = await anchorAuditLog(logPath, first, dir);
+    assert.equal(rec.count, 3);
+    await buildChain(cwd, 2); // two more entries appended (KIT_AUDIT_ANCHOR=0 → not anchored)
+
+    const prevEnv = process.env.KIT_AUDIT_ANCHOR;
+    delete process.env.KIT_AUDIT_ANCHOR; // enable append-time anchoring for this call
+    try {
+      // A normal append advances by ONE. The tail is 2 (> 1) → refuse: the anchor
+      // must stay at 3 so `kit audit verify` still flags the unsealed tail.
+      await tryAdvanceAnchorOnAppend(logPath, dir);
+      assert.equal(
+        (await readAnchorRecord(logPath, dir))!.count,
+        3,
+        "auto-advance must not absorb an unattributed tail",
+      );
+
+      // An explicit re-seal (operator running `kit audit anchor`, or a caller that
+      // truthfully declares it wrote 2) is allowed to cover the tail.
+      await tryAdvanceAnchorOnAppend(logPath, dir, { expectedNewEntries: 2 });
+      assert.equal(
+        (await readAnchorRecord(logPath, dir))!.count,
+        5,
+        "a truthfully-declared delta advances the seal",
+      );
+    } finally {
+      if (prevEnv === undefined) delete process.env.KIT_AUDIT_ANCHOR;
+      else process.env.KIT_AUDIT_ANCHOR = prevEnv;
+    }
+  });
+
+  it("refuses to seal a tail that isn't the hash kit wrote (TOCTOU substitution)", async () => {
+    // Anchor covers entry 1. Then a concurrent writer SUBSTITUTES the tail entry in
+    // the append→read window. The seal must bind to the hash kit actually wrote, so
+    // a mismatch → refuse (the forged entry never gets the machine-key seal).
+    const first = await buildChain(cwd, 1);
+    const logPath = join(cwd, ".kit-audit.jsonl");
+    await anchorAuditLog(logPath, first, dir); // count = 1
+    await buildChain(cwd, 1); // kit "wrote" entry 2
+    const onDisk = lineSeals(readFileSync(logPath, "utf-8"))!;
+    const realTailHash = onDisk[onDisk.length - 1]!.hash;
+
+    const prevEnv = process.env.KIT_AUDIT_ANCHOR;
+    delete process.env.KIT_AUDIT_ANCHOR;
+    try {
+      // Attacker's version: kit thinks it wrote a DIFFERENT hash than what's on disk.
+      await tryAdvanceAnchorOnAppend(logPath, dir, { expectedTailHashes: ["f".repeat(64)] });
+      assert.equal(
+        (await readAnchorRecord(logPath, dir))!.count,
+        1,
+        "a tail that doesn't match kit's write must not be sealed",
+      );
+      // Honest path: the real hash kit wrote → advance to count 2.
+      await tryAdvanceAnchorOnAppend(logPath, dir, { expectedTailHashes: [realTailHash] });
+      assert.equal((await readAnchorRecord(logPath, dir))!.count, 2, "kit's own write seals");
+    } finally {
+      if (prevEnv === undefined) delete process.env.KIT_AUDIT_ANCHOR;
+      else process.env.KIT_AUDIT_ANCHOR = prevEnv;
+    }
   });
 });
 

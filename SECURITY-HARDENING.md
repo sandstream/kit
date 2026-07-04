@@ -1,5 +1,71 @@
 # kit Security Hardening Checklist
 
+## Threat model: a resourced adversary (dark-web-tier)
+
+Harden against the attacker who buys **leaked credentials, infostealer logs,
+session cookies, initial-access footholds, and hijacked packages** — not a
+mythical 0-day. Their leverage is a **false-green**: something that looks secure
+but isn't. This checklist (ordered by leverage — do the top first) removes what
+those purchases buy. Every item maps to a kit control.
+
+### A. Identity & accounts — kills the credential/cookie markets
+
+- [ ] **Passkeys / hardware WebAuthn** on GitHub org, npm, and cloud consoles
+      (phishing-resistant; immune to combolists + cookie-replay).
+- [ ] Org-wide 2FA required; no SMS fallback.
+- [ ] Short-lived tokens (OIDC / workload identity) over long-lived PATs.
+- [ ] Rotate any credential that ever touched a laptop or an `.env`.
+- [ ] kit identity key stays `0600`; move to a hardware `KeyStore` when available.
+
+### B. Secrets — makes stolen infostealer logs worthless
+
+- [ ] No plaintext secrets in `.env*` — resolve via `kit secrets` (vault-backed).
+- [ ] `gitleaks` in CI **and** as a pre-commit hook (`kit hooks`).
+- [ ] Output redaction on (kit redacts provider tokens: `GITHUB_TOKEN`,
+      `VERCEL_TOKEN`, `FLY_API_TOKEN`, `CI_JOB_TOKEN`).
+- [ ] Secret TTL + rotation; destructive secret ops require `kit auth elevate`.
+
+### C. Supply chain — the #1 one-click-to-RCE for dev tooling
+
+- [ ] **Install-gate on** for every agent in auto-mode
+      (`kit agent-config --install-gate`) — blocks un-triaged installs,
+      registry-redirects (`npm_config_registry=…`), and shell-evasion
+      (`eval` / `&` / `if…then`).
+- [ ] Committed lockfiles; `npm ci` (never `npm install`) in CI.
+- [ ] GitHub Actions SHA-pinned (not tags); Dependabot on.
+- [ ] `kit triage` before adding ANY dependency.
+
+### D. Release / publish — stops shipping malware to your users
+
+- [ ] npm publish behind a protected `environment:` (`npm-publish`) with required
+      reviewers, so `NPM_TOKEN` is never exposed to an unreviewed run.
+- [ ] Maintainer key fingerprint pinned in the **`MAINTAINER_KEY_FPR`** secret
+      (required; a swapped/appended in-repo pubkey is refused).
+- [ ] Signed release tags (`git tag -s`; see CONTRIBUTING → "Signed release tags").
+
+### E. CI/CD workflow safety
+
+- [ ] Least-privilege `permissions:` (default read-only) in every workflow.
+- [ ] Never `pull_request_target` + checkout of PR code with secrets in scope.
+- [ ] Environment-scoped secrets, not repo-wide.
+- [ ] Security stages (SAST / deps / container / IaC) are **required** checks — a
+      scanner that can't run FAILS (no false green).
+
+### F. Fleet governance — limits blast radius of a compromised key/maintainer
+
+- [ ] Org-signed `.kit-policy` distributed + verified offline against
+      `.kit-policy.signers`.
+- [ ] `kit panic` (signed revocation + rotation) rehearsed; revocations propagate.
+- [ ] Tamper-evident audit chain anchored + reviewed.
+- [ ] Air-gap mode (`kit setup --mode airgap`) on sensitive hosts — no egress by
+      default, including the update beacon.
+
+> **Meta-defense:** a resourced attacker wins on false-greens. kit's "no false
+> green" thesis and the red-team loop — _build → let a top attacker break it → fix
+> → verify_ — are the real control. Re-run that loop on every release.
+
+---
+
 ## Pre-Deployment Security Verification
 
 ### Stage 1: Code Security (Before Commit)

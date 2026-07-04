@@ -31,12 +31,219 @@ const BIDI_CONTROL_CODES = new Set([
   0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069,
 ]);
 
+// EVERY invisible / format / default-ignorable code point — not a 14-codepoint
+// allowlist. Covers the Unicode format category (\p{Cf}: zero-width family, bidi
+// controls, word-joiner, BOM, soft hyphen, Mongolian vowel separator, …), the
+// TAGS block U+E0000–E007F ("ASCII smuggling"), and both variation-selector
+// ranges. These have no legitimate place in indexed transcript text; presence is
+// a high-confidence smuggling signal and they are stripped before re-injection.
+const UNSAFE_CHAR_SOURCE =
+  "[\\p{Cf}\\u{00AD}\\u{FE00}-\\u{FE0F}\\u{E0000}-\\u{E007F}\\u{E0100}-\\u{E01EF}]";
+// no-misleading-character-class flags the variation selectors (they can combine
+// with a preceding char). That's intentional here: we match each invisible/format
+// code point INDIVIDUALLY to strip it, never as part of a grapheme — a combined
+// sequence is exactly the smuggling shape we're removing. Disable is scoped + justified.
+// eslint-disable-next-line no-misleading-character-class
+const UNSAFE_CHAR_RE = new RegExp(UNSAFE_CHAR_SOURCE, "u"); // test (non-global)
+// eslint-disable-next-line no-misleading-character-class
+const UNSAFE_CHAR_RE_G = new RegExp(UNSAFE_CHAR_SOURCE, "gu"); // strip (global)
+
 function hasCodepoint(text: string, codes: Set<number>): boolean {
   for (const ch of text) {
     const cp = ch.codePointAt(0);
     if (cp !== undefined && codes.has(cp)) return true;
   }
   return false;
+}
+
+// Visual look-alikes (Unicode TR39 confusables, ASCII-lookalike subset): Cyrillic
+// and Greek letters that render like ASCII Latin. An attacker swaps one per trigger
+// token (`іgnore`, `sеcret`, `frоm nоw on`) so a human/agent reads the payload as
+// English while the ASCII-literal RULES never fire. Kept as [codepoint, ascii]
+// pairs so the source stays pure ASCII (same convention as ZERO_WIDTH_CODES). Folded
+// to Latin for MATCHING only — the stored/returned text is never rewritten, so this
+// cannot create a false positive against the English rules (folded foreign prose
+// only matches if it spells an English trigger, which is exactly the attack).
+const CONFUSABLE_PAIRS: ReadonlyArray<readonly [number, string]> = [
+  // Cyrillic → Latin (lowercase)
+  [0x0430, "a"],
+  [0x0435, "e"],
+  [0x043e, "o"],
+  [0x0440, "p"],
+  [0x0441, "c"],
+  [0x0443, "y"],
+  [0x0445, "x"],
+  [0x0456, "i"],
+  [0x0458, "j"],
+  [0x0455, "s"],
+  [0x04bb, "h"],
+  [0x0501, "d"],
+  // Cyrillic → Latin (uppercase)
+  [0x0410, "a"],
+  [0x0412, "b"],
+  [0x0421, "c"],
+  [0x0415, "e"],
+  [0x041d, "h"],
+  [0x0406, "i"],
+  [0x0408, "j"],
+  [0x041a, "k"],
+  [0x041c, "m"],
+  [0x041e, "o"],
+  [0x0420, "p"],
+  [0x0405, "s"],
+  [0x0422, "t"],
+  [0x0425, "x"],
+  [0x0423, "y"],
+  // Greek → Latin (lowercase)
+  [0x03b1, "a"],
+  [0x03bf, "o"],
+  [0x03c1, "p"],
+  [0x03bd, "v"],
+  [0x03b9, "i"],
+  [0x03ba, "k"],
+  // Greek → Latin (uppercase)
+  [0x0391, "a"],
+  [0x0392, "b"],
+  [0x0395, "e"],
+  [0x0397, "h"],
+  [0x0399, "i"],
+  [0x039a, "k"],
+  [0x039c, "m"],
+  [0x039d, "n"],
+  [0x039f, "o"],
+  [0x03a1, "p"],
+  [0x03a4, "t"],
+  [0x03a7, "x"],
+  [0x03a5, "y"],
+  [0x0396, "z"],
+  // Latin-block look-alikes (Script=Latin, so mixed-script checks miss them, and
+  // they have NO NFKD decomposition): IPA + small-capital letters that render as
+  // ASCII a–z. Covers fully-stylized words like `ꜱᴇᴄʀᴇᴛ` / `iɡnore`.
+  [0x0261, "g"], // ɡ latin small letter script g
+  [0x0262, "g"], // ɢ small capital g
+  [0x0274, "n"], // ɴ small capital n
+  [0x026a, "i"], // ɪ small capital i
+  [0x0280, "r"], // ʀ small capital r
+  [0x0299, "b"], // ʙ small capital b
+  [0x029c, "h"], // ʜ small capital h
+  [0x029f, "l"], // ʟ small capital l
+  [0x028f, "y"], // ʏ small capital y
+  [0x1d00, "a"], // ᴀ small capital a
+  [0x1d04, "c"], // ᴄ small capital c
+  [0x1d05, "d"], // ᴅ small capital d
+  [0x1d07, "e"], // ᴇ small capital e
+  [0x1d0a, "j"], // ᴊ small capital j
+  [0x1d0b, "k"], // ᴋ small capital k
+  [0x1d0d, "m"], // ᴍ small capital m
+  [0x1d0f, "o"], // ᴏ small capital o
+  [0x1d18, "p"], // ᴘ small capital p
+  [0x1d1b, "t"], // ᴛ small capital t
+  [0x1d1c, "u"], // ᴜ small capital u
+  [0x1d20, "v"], // ᴠ small capital v
+  [0x1d21, "w"], // ᴡ small capital w
+  [0x1d22, "z"], // ᴢ small capital z
+  [0xa730, "f"], // ꜰ small capital f
+  [0xa731, "s"], // ꜱ small capital s
+  // Cyrillic lowercase gaps used to spell trigger words
+  [0x0442, "t"], // т (renders like Latin t in many fonts)
+  [0x043a, "k"], // к
+  [0x043c, "m"], // м
+  [0x0432, "b"], // в
+  // Greek lowercase gaps
+  [0x03c5, "u"], // υ upsilon
+  [0x03b5, "e"], // ε epsilon
+  [0x03b7, "n"], // η eta (renders like n)
+  [0x03c4, "t"], // τ tau
+];
+const CONFUSABLE_MAP = new Map<string, string>(
+  CONFUSABLE_PAIRS.map(([cp, a]) => [String.fromCodePoint(cp), a]),
+);
+const CONFUSABLE_RE = new RegExp(
+  "[" + CONFUSABLE_PAIRS.map(([cp]) => "\\u{" + cp.toString(16) + "}").join("") + "]",
+  "gu",
+);
+function foldConfusables(text: string): string {
+  return text.replace(CONFUSABLE_RE, (ch) => CONFUSABLE_MAP.get(ch) ?? ch);
+}
+
+/** Canonicalize a cell before phrase-rule matching so the rules can't be evaded by:
+ *  (a) hidden chars wedged between trigger words, (b) a newline/period split
+ *  (whitespace collapsed), (c) compatibility look-alikes like FULLWIDTH `ｉｇｎｏｒｅ`
+ *  or MATHEMATICAL `𝐢𝐠𝐧𝐨𝐫𝐞` (NFKD folds both), (d) combining-mark splits like
+ *  `ígnore` (i + U+0301 → decomposed, marks dropped), or (e) the curated Cyrillic/
+ *  Greek homoglyphs. Matching only — never used for the stored or re-injected text. */
+function normalizeForMatch(text: string): string {
+  return foldConfusables(
+    stripUnsafeChars(text)
+      .normalize("NFKD") // compatibility + canonical decomposition (fullwidth, math, accents)
+      .replace(/\p{M}+/gu, ""), // drop the combining marks NFKD split off
+  ).replace(/\s+/g, " ");
+}
+
+const LETTER_RUN_RE = /\p{L}+/gu;
+
+// The distinctive injection keywords. A stored word whose ONLY difference from one
+// of these is homoglyph obfuscation is an attack tell on its own — nobody writes
+// "secret" or "instructions" with a look-alike glyph benignly. Deliberately the
+// unambiguous nouns/verbs (not short common words like "all"/"new"/"you"), so a
+// stylized ordinary word can't trip it. Detection is script-AGNOSTIC (below), so it
+// beats an allowlist: it flags the *shape* "an obfuscated trigger word", whether the
+// look-alike is Cyrillic, Greek, Armenian, a Latin-block small-cap, or one we never
+// enumerated — while `αlpha`/`βeta` (skeleton not a trigger) stay silent.
+const OBFUSCATION_TRIGGER_WORDS = new Set([
+  "ignore",
+  "disregard",
+  "instructions",
+  "instruction",
+  "exfiltrate",
+  "secret",
+  "secrets",
+  "password",
+  "passwords",
+  "credential",
+  "credentials",
+  "token",
+  "tokens",
+]);
+
+/** ASCII skeleton of one word: strip marks, fold the known confusables, lowercase. */
+function tokenSkeleton(token: string): string {
+  return foldConfusables(token.normalize("NFKD").replace(/\p{M}+/gu, "")).toLowerCase();
+}
+
+/**
+ * Find a word that is a homoglyph-obfuscated injection trigger, or null. Two ways a
+ * token qualifies (both require it NOT be plain ASCII — plain phrases are the RULES'
+ * job): its folded skeleton equals a trigger exactly (fully-stylified words like
+ * `ꜱᴇᴄʀᴇᴛ`), OR — for a look-alike we didn't map — every ASCII position matches a
+ * same-length trigger and the un-folded (still non-ASCII) positions act as wildcards
+ * (`Igոore` → `ig?ore` ≡ `ignore`). Script-agnostic: no confusable table can be
+ * complete, so we match the shape, not the codepoint.
+ */
+function findObfuscatedTrigger(text: string): string | null {
+  for (const raw of stripUnsafeChars(text).match(LETTER_RUN_RE) ?? []) {
+    if (/^[A-Za-z]+$/.test(raw)) continue; // plain ASCII → handled by RULES
+    const skel = tokenSkeleton(raw);
+    if (/^[a-z]+$/.test(skel)) {
+      if (OBFUSCATION_TRIGGER_WORDS.has(skel)) return raw;
+      continue;
+    }
+    if (!/[a-z]/.test(skel)) continue; // no ASCII anchor → can't wildcard-match safely
+    for (const word of OBFUSCATION_TRIGGER_WORDS) {
+      if (word.length !== skel.length) continue;
+      let ok = true;
+      for (let i = 0; i < word.length; i++) {
+        const c = skel[i]!;
+        // ASCII letters must match; unfolded (non-ASCII) look-alikes are wildcards.
+        if (c >= "a" && c <= "z" && c !== word[i]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return raw;
+    }
+  }
+  return null;
 }
 
 interface Rule {
@@ -50,7 +257,10 @@ interface Rule {
 // so they inform without crying wolf (kit's no-false-green cuts both ways).
 const RULES: Rule[] = [
   {
-    re: /\b(ignore|disregard|forget)\b[^.\n]{0,40}\b(previous|prior|above|earlier|all)\b[^.\n]{0,25}\b(instructions?|prompts?|rules?|directions?|context)\b/i,
+    // Gaps use [\s\S] (not [^.\n]): findInjection runs rules over the
+    // whitespace-collapsed, hidden-char-stripped text, so an attacker can't split
+    // "ignore … instructions" across a newline or a period to slip the phrase past.
+    re: /\b(ignore|disregard|forget)\b[\s\S]{0,40}\b(previous|prior|above|earlier|all)\b[\s\S]{0,25}\b(instructions?|prompts?|rules?|directions?|context)\b/i,
     label: "instruction-override",
     confidence: "high",
   },
@@ -62,14 +272,19 @@ const RULES: Rule[] = [
     confidence: "heuristic",
   },
   {
-    re: /\b(exfiltrat\w*|send|leak|upload|post|email)\b[^.\n]{0,40}\b(secret|token|password|api[_-]?key|credential|\.env|ssh key|private key)\b/i,
+    // "high": an imperative pairing an exfil verb with a secret noun in one span is
+    // a canonical data-theft injection — it must QUARANTINE (db.ts) and FLAG on
+    // recall (sanitizeForPrompt), not merely inform.
+    re: /\b(exfiltrat\w*|send|leak|upload|post|email)\b[\s\S]{0,40}\b(secret|token|password|api[_-]?key|credential|\.env|ssh key|private key)\b/i,
     label: "exfil-imperative",
-    confidence: "heuristic",
+    confidence: "high",
   },
   {
-    re: /\bcurl\b[^\n|]{0,150}\|\s*(sudo\s+)?(sh|bash|zsh)\b/i,
+    // "high": curl-pipe-to-shell is unambiguous remote code execution; a stored
+    // entry replaying it into the prompt is an attack, not a dual-use hint.
+    re: /\bcurl\b[^|]{0,150}\|\s*(sudo\s+)?(sh|bash|zsh)\b/i,
     label: "pipe-to-shell",
-    confidence: "heuristic",
+    confidence: "high",
   },
 ];
 
@@ -86,13 +301,12 @@ function preview(s: string): string {
  */
 export function stripUnsafeChars(text: string): string {
   if (!text) return text;
-  let out = "";
-  for (const ch of text) {
-    const cp = ch.codePointAt(0);
-    if (cp !== undefined && (ZERO_WIDTH_CODES.has(cp) || BIDI_CONTROL_CODES.has(cp))) continue;
-    out += ch;
-  }
-  return out;
+  // Strip EVERY invisible/format/default-ignorable code point, not just the
+  // 14-codepoint zero-width+bidi allowlist: \p{Cf}, soft hyphen, variation
+  // selectors, and the TAGS block (ASCII smuggling) all get removed before
+  // re-injection. The named ZERO_WIDTH_CODES/BIDI_CONTROL_CODES sets are retained
+  // only so findInjection can attribute a specific label to those two families.
+  return text.replace(UNSAFE_CHAR_RE_G, "");
 }
 
 export interface SanitizedText {
@@ -128,22 +342,52 @@ export function sanitizeForPrompt(text: string): SanitizedText {
 export function findInjection(text: string): InjectionFinding[] {
   if (!text) return [];
   const out: InjectionFinding[] = [];
-  if (hasCodepoint(text, ZERO_WIDTH_CODES)) {
+  const seenZeroWidth = hasCodepoint(text, ZERO_WIDTH_CODES);
+  const seenBidi = hasCodepoint(text, BIDI_CONTROL_CODES);
+  if (seenZeroWidth) {
     out.push({
       label: "zero-width-char",
       preview: "hidden zero-width char(s) (U+200B family)",
       confidence: "high",
     });
   }
-  if (hasCodepoint(text, BIDI_CONTROL_CODES)) {
+  if (seenBidi) {
     out.push({
       label: "bidi-control",
       preview: "hidden bidirectional override char(s)",
       confidence: "high",
     });
   }
+  // Any OTHER invisible/format/default-ignorable char (variation selectors, the
+  // TAGS block used for ASCII smuggling, soft hyphen, …) that the two named
+  // families above didn't already attribute. These never belong in transcript
+  // text — presence alone is a high-confidence smuggling signal.
+  if (!seenZeroWidth && !seenBidi && UNSAFE_CHAR_RE.test(text)) {
+    out.push({
+      label: "hidden-format-char",
+      preview: "hidden format/invisible char(s) (ASCII smuggling)",
+      confidence: "high",
+    });
+  }
+  // Homoglyph-obfuscated trigger word (`iɡnore`, `ꜱᴇᴄʀᴇᴛ`, `Igոore`). High-confidence
+  // smuggling tell that is script-AGNOSTIC — it fires on look-alikes we never mapped,
+  // which an allowlist fold alone can't win against, yet stays silent on benign
+  // script-mixing (`αlpha`) whose skeleton isn't an injection keyword.
+  const obfuscated = findObfuscatedTrigger(text);
+  if (obfuscated) {
+    out.push({
+      label: "homoglyph-trigger",
+      preview: `homoglyph-obfuscated trigger word "${preview(obfuscated)}"`,
+      confidence: "high",
+    });
+  }
+  // Match phrase rules over the normalized view: hidden chars stripped, compat/
+  // accent look-alikes folded, and whitespace collapsed, so a newline/period/
+  // zero-width char or a homoglyph swap wedged between trigger words can't split
+  // the phrase past the rule.
+  const normalized = normalizeForMatch(text);
   for (const { re, label, confidence } of RULES) {
-    const m = text.match(re);
+    const m = normalized.match(re);
     if (m) out.push({ label, preview: preview(m[0]), confidence });
   }
   return out;
