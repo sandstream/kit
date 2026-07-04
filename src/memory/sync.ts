@@ -43,8 +43,12 @@ export interface SyncOptions {
  * vector. Scan the incoming DB BEFORE mergeDb and fail closed on any high-confidence
  * finding, so a poisoned pull can't silently land. Deterministic, read-only.
  * Override for a legitimate false positive with allowUnsafe / KIT_MEMORY_ALLOW_UNSAFE=1.
- * Fail-open only on a scan *error* (unknown/older schema) — mergeDb handles schema;
- * the gate's job is to block *detected* poison, not to reject every foreign store.
+ * Fail CLOSED on a scan *error*: the incoming store is untrusted, so if we cannot
+ * certify it clean we refuse rather than merge blind. (The scan itself is now
+ * resilient to a partial/adversarial schema — see scanTarget — so a missing column
+ * can no longer make the scan throw AND thereby bypass the gate, which was the R7
+ * hole: drop `messages.cwd` → the rich SELECT threw → catch returned → the payload
+ * in `messages.content` merged anyway. A throw here now means a genuinely unreadable DB.)
  */
 function assertIncomingClean(dbPath: string, allowUnsafe: boolean): void {
   if (allowUnsafe || process.env.KIT_MEMORY_ALLOW_UNSAFE === "1") return;
@@ -52,8 +56,12 @@ function assertIncomingClean(dbPath: string, allowUnsafe: boolean): void {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     high = scanDbForInjection(db).filter((f) => f.confidence === "high");
-  } catch {
-    return; // can't scan (unknown schema) → let mergeDb decide; don't false-block
+  } catch (e) {
+    // Fail CLOSED — untrusted input we couldn't scan is not certified clean.
+    throw new Error(
+      `refusing to merge: could not scan the incoming memory store for injection (${(e as Error).message}). ` +
+        "Inspect it, or set KIT_MEMORY_ALLOW_UNSAFE=1 to override.",
+    );
   } finally {
     db.close();
   }

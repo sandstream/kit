@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security — memory sync
+
+- **The incoming-store injection gate (R7) no longer fails open on a crafted schema.**
+  `kit memory sync` / auto-pull scan an incoming store for injection before merging,
+  but the scan ran a rich `SELECT` that also read auxiliary columns (e.g. `messages.cwd`).
+  An attacker could drop `cwd` so the scan threw "no such column", the gate's `catch`
+  fail-OPENED, and the payload in `messages.content` merged anyway (`mergeDb` tolerates
+  a missing `cwd`). The scan is now **resilient**: if the rich SELECT can't run it falls
+  back to scanning each text column that actually exists, so a missing auxiliary column
+  can never suppress scanning of a present payload column. And the sync gate now **fails
+  closed** on a genuine scan error — untrusted input we can't certify clean is refused,
+  not merged (override with `KIT_MEMORY_ALLOW_UNSAFE=1`).
+
 ### Security — MCP surface
 
 - **The mutating MCP tools now pass through the governance/audit floor.** `kit_run`,

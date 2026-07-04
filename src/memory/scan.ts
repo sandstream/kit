@@ -83,42 +83,104 @@ type CellFinder = (
   text: string,
 ) => { label: string; preview: string; confidence: ScanConfidence }[];
 
+type FindingEntry = ScanFinding & { _projects: Set<string> };
+
+/** Column names present in `table` (empty set if the table is absent). The table
+ *  name is a hardcoded TARGETS constant — never user input — so interpolation is safe. */
+function tableColumns(db: DatabaseSync, table: string): Set<string> {
+  try {
+    const rows = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    return new Set(rows.map((r) => r.name));
+  } catch {
+    return new Set();
+  }
+}
+
+/** Fold one result row's text cells into the dedup map. `idKey` names the id column
+ *  in the row (for the sample location). */
+function foldRow(
+  row: Record<string, unknown>,
+  columns: string[],
+  idKey: string,
+  table: string,
+  finder: CellFinder,
+  byKey: Map<string, FindingEntry>,
+): void {
+  const proj = projectName(row.__project);
+  for (const col of columns) {
+    const val = row[col];
+    if (typeof val !== "string" || !val) continue;
+    for (const f of finder(val)) {
+      const key = `${f.label} ${f.preview}`;
+      let entry = byKey.get(key);
+      if (!entry) {
+        entry = {
+          label: f.label,
+          preview: f.preview,
+          confidence: f.confidence,
+          count: 0,
+          sample: `${table}#${row[idKey]}.${col}`,
+          projects: [],
+          _projects: new Set<string>(),
+        };
+        byKey.set(key, entry);
+      }
+      entry.count++;
+      if (proj) entry._projects.add(proj);
+    }
+  }
+}
+
+/**
+ * Scan one target. Fast path: the rich SELECT (with its project-hint join/column).
+ * If that throws — a crafted or older store missing an auxiliary column such as
+ * `messages.cwd` — we do NOT skip the whole target. That was the R7 bypass: drop
+ * `cwd` and the rich SELECT throws, so the payload column `content` in the SAME
+ * target went unscanned and rode the merge in. Instead we fall back to scanning
+ * each text column that ACTUALLY exists, so a payload in any present column is
+ * always caught; only the (cosmetic) project attribution is dropped.
+ */
+function scanTarget(
+  db: DatabaseSync,
+  target: Target,
+  finder: CellFinder,
+  byKey: Map<string, FindingEntry>,
+): void {
+  try {
+    for (const row of db.prepare(target.select).all() as Record<string, unknown>[]) {
+      foldRow(row, target.columns, target.idCol, target.table, finder, byKey);
+    }
+    return;
+  } catch {
+    // Rich SELECT failed (missing hint column / join / table) → resilient fallback.
+  }
+  const cols = tableColumns(db, target.table);
+  if (cols.size === 0) return; // table genuinely absent → nothing here to scan
+  const idExpr = cols.has(target.idCol) ? target.idCol : "rowid";
+  for (const col of target.columns) {
+    if (!cols.has(col)) continue;
+    try {
+      const rows = db
+        .prepare(`SELECT ${idExpr} AS __id, ${col} FROM ${target.table}`)
+        .all() as Record<string, unknown>[];
+      for (const row of rows) foldRow(row, [col], "__id", target.table, finder, byKey);
+    } catch {
+      // this column is genuinely unreadable → skip just it, keep scanning the rest
+    }
+  }
+}
+
 /**
  * Walk every text cell across TARGETS, apply `finder`, and return findings deduped
  * by (label, preview) with an occurrence count, confidence tier, one sample
  * location, and the project(s) they appear in. Shared by the secret and injection
- * scans so they stay byte-for-byte consistent in shape and ordering.
+ * scans so they stay byte-for-byte consistent in shape and ordering. Resilient to a
+ * partial/adversarial schema (see scanTarget) — a missing auxiliary column can no
+ * longer suppress scanning of a present payload column.
  */
 function scanDbWith(db: DatabaseSync, finder: CellFinder): ScanFinding[] {
-  const byKey = new Map<string, ScanFinding & { _projects: Set<string> }>();
-  for (const target of TARGETS) {
-    const rows = db.prepare(target.select).all() as Record<string, unknown>[];
-    for (const row of rows) {
-      const proj = projectName(row.__project);
-      for (const col of target.columns) {
-        const val = row[col];
-        if (typeof val !== "string" || !val) continue;
-        for (const f of finder(val)) {
-          const key = `${f.label} ${f.preview}`;
-          let entry = byKey.get(key);
-          if (!entry) {
-            entry = {
-              label: f.label,
-              preview: f.preview,
-              confidence: f.confidence,
-              count: 0,
-              sample: `${target.table}#${row[target.idCol]}.${col}`,
-              projects: [],
-              _projects: new Set<string>(),
-            };
-            byKey.set(key, entry);
-          }
-          entry.count++;
-          if (proj) entry._projects.add(proj);
-        }
-      }
-    }
-  }
+  const byKey = new Map<string, FindingEntry>();
+  for (const target of TARGETS) scanTarget(db, target, finder, byKey);
   return [...byKey.values()]
     .map(({ _projects, ...f }) => ({ ...f, projects: [..._projects].sort() }))
     .sort((a, b) => {
