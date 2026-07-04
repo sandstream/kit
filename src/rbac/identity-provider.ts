@@ -19,10 +19,13 @@
  *      point tests replace with an in-memory fake. `KIT_RBAC_GITHUB_API` overrides
  *      the base URL (e.g. GitHub Enterprise).
  *
- * FUTURE BACKENDS (same `IdentityProvider` / membership-source shape):
- *   - Azure / Entra ID: Microsoft Graph `GET /me/memberOf` (group objectIds/names).
- *   - Google: Cloud Identity Groups `groups.memberships.searchTransitiveGroups`.
- * Each becomes a `create<X>Source(...)` returning the membership interface; the
+ * SIBLING BACKENDS (same `IdentityProvider` / membership-source shape, in
+ * providers-cloud.ts):
+ *   - Azure / Entra ID: Microsoft Graph `GET /v1.0/users/{id}/memberOf`
+ *     (`createEntraApiSource` / `createEntraProvider`).
+ *   - Google: Cloud Identity `memberships:searchTransitiveGroups`
+ *     (`createGoogleApiSource` / `createGoogleProvider`).
+ * Each is a `create<X>Source(...)` returning the membership interface; the
  * compile + enforcement code is unchanged.
  *
  * Enrollment egress note: `createGithubApiSource` MUST be gated by kit's egress

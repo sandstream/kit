@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **RBAC identity providers for Microsoft Entra ID and Google Cloud Identity**
+  (`src/rbac/providers-cloud.ts`), siblings of the GitHub backend. Both compile
+  role bindings at ENROLLMENT time behind an injectable membership source (real
+  wiring: Graph `GET /v1.0/users/{id}/memberOf` with `@odata.nextLink` pagination;
+  Cloud Identity `memberships:searchTransitiveGroups` with `nextPageToken`), map
+  group membership → kit roles via a `roleMap`, and are namespaceable by
+  tenant/domain. Fail-closed (a non-OK response throws, never spurious empty
+  membership); `KIT_RBAC_ENTRA_API` / `KIT_RBAC_GOOGLE_API` override the base URL.
+  Enrollment-only — never imported by the offline decision path, so RBAC stays
+  zero-network at decision time across all three IdPs. (Live endpoint shapes are
+  the documented ones; verify against a real tenant before production reliance.)
+
 ## [4.1.0] - 2026-07-04
 
 A wholly **additive**, backward-compatible release along two axes — broader agent
