@@ -92,6 +92,47 @@ export default tseslint.config(
     rules: { "no-useless-escape": "off" },
   },
   {
+    // Zero-LLM invariant, MACHINE-ENFORCED. kit is deterministic and never calls a
+    // model — it EMITS prompts for a bring-your-own LLM. That rule was documented in
+    // ~35 comments but nothing failed the build if an LLM SDK crept in. This bans the
+    // known SDKs in src/ so the most important invariant is enforced like the command
+    // contract (public-surface.test.ts), not left to code review. @modelcontextprotocol
+    // (MCP transport) is intentionally NOT banned — it is a protocol, not a model client.
+    files: ["src/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "openai",
+                "openai/*",
+                "@anthropic-ai/sdk",
+                "@anthropic-ai/*",
+                "@google/generative-ai",
+                "@google/genai",
+                "@google-cloud/vertexai",
+                "cohere-ai",
+                "@mistralai/*",
+                "groq-sdk",
+                "ollama",
+                "replicate",
+                "langchain",
+                "langchain/*",
+                "@langchain/*",
+                "llamaindex",
+                "ai", // Vercel AI SDK
+              ],
+              message:
+                "kit is ZERO-LLM: no LLM SDK may be imported in src/. kit emits prompts for a bring-your-own model; it never calls one. This invariant is enforced, not advisory.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Test files: keep correctness rules but exempt the size/complexity metrics —
     // a describe() block is one big "function" + long fixtures are normal there.
     files: ["**/*.test.ts"],
