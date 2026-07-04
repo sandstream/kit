@@ -16,6 +16,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   Amazon Q: wires every existing agent file, and SKIPS honestly (no false-green)
   when none exist rather than writing a partial agent config. Kiro is now the 8th
   install-gated agent.
+- **Wider agent coverage for the rules/context file.** `kit agent-config` now writes
+  and detects three more agents: **Gemini CLI** (`GEMINI.md` — kit already
+  indexed + install-gated Gemini but never wrote its rules file, only status-checked
+  it), and **Augment** (`.augment-guidelines`). AGENTS.md detection also now
+  recognizes **AWS Kiro** (`.kiro/`) and **Factory Droid** (`.factory/`), which read
+  the root `AGENTS.md` (the Linux-Foundation cross-tool standard) — so a Kiro- or
+  Droid-only project gets its kit block wired. Deeper coverage (memory indexing)
+  for these agents is tracked in kit-research `agent-coverage.md`.
 
 ### Fixed
 

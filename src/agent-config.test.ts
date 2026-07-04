@@ -153,6 +153,41 @@ describe("detectAgentTargets", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("detects Gemini CLI via a .gemini/ dir (→ GEMINI.md)", () => {
+    const dir = tmpRepo();
+    try {
+      mkdirSync(join(dir, ".gemini"));
+      const files = detectAgentTargets(dir).map((t) => t.file);
+      assert.deepEqual(files, ["GEMINI.md"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects Augment via a .augment/ dir (→ .augment-guidelines)", () => {
+    const dir = tmpRepo();
+    try {
+      mkdirSync(join(dir, ".augment"));
+      const files = detectAgentTargets(dir).map((t) => t.file);
+      assert.deepEqual(files, [".augment-guidelines"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("wires AGENTS.md for a Kiro (.kiro/) or Droid (.factory/) project", () => {
+    for (const marker of [".kiro", ".factory"]) {
+      const dir = tmpRepo();
+      try {
+        mkdirSync(join(dir, marker));
+        const files = detectAgentTargets(dir).map((t) => t.file);
+        assert.deepEqual(files, ["AGENTS.md"], `${marker} → AGENTS.md`);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
 });
 
 describe("writeAgentConfig", () => {
