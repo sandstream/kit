@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { DatabaseSync } from "node:sqlite";
 import { openMemoryDb, insertMessage } from "./db.js";
-import { learnRecurring, normalizeInstruction } from "./learn.js";
+import { learnRecurring, normalizeInstruction, isBoilerplate } from "./learn.js";
 
 describe("memory learn — recurring instruction mining", () => {
   const fresh = () => openMemoryDb(":memory:");
@@ -49,6 +49,52 @@ describe("memory learn — recurring instruction mining", () => {
     assert.equal(cands[0]?.correction, true);
     assert.equal(cands[1]?.sessions, 1);
     assert.equal(cands[1]?.count, 4);
+    db.close();
+  });
+
+  it("isBoilerplate flags harness scaffolding but not real instructions", () => {
+    // scaffolding — filtered
+    assert.equal(isBoilerplate("<system-reminder>do X</system-reminder>"), true);
+    assert.equal(isBoilerplate("  <local-command-caveat> ... "), true);
+    assert.equal(isBoilerplate("/model claude-sonnet"), true);
+    assert.equal(isBoilerplate("/clear"), true);
+    assert.equal(isBoilerplate("Continue from where you left off"), true);
+    assert.equal(
+      isBoilerplate("This session is being continued from a previous conversation. Summary:"),
+      true,
+    );
+    assert.equal(isBoilerplate("   "), true);
+    assert.equal(isBoilerplate("Stop hook feedback: [~/.claude/x.sh]: uncommitted changes"), true);
+    assert.equal(isBoilerplate("UserPromptSubmit hook success: You have local memory…"), true);
+    assert.equal(
+      isBoilerplate("[Image: original 2560x2000. Multiply coordinates by 1.28 …]"),
+      true,
+    );
+    // real instructions — kept
+    assert.equal(isBoilerplate("always run the tests before pushing"), false);
+    assert.equal(isBoilerplate("/etc/hosts is wrong, fix the resolver"), false); // path, not a command
+    assert.equal(isBoilerplate("no, use the wrapper instead"), false);
+  });
+
+  it("excludes harness scaffolding from candidates even when it recurs 3×+", () => {
+    const db = fresh();
+    // scaffolding repeated across sessions — must NOT surface
+    seed(db, "s1a", "s1", "<system-reminder>reindex the store</system-reminder>");
+    seed(db, "s1b", "s2", "<system-reminder>reindex the store</system-reminder>");
+    seed(db, "s1c", "s3", "<system-reminder>reindex the store</system-reminder>");
+    seed(db, "m1", "s1", "/model claude-sonnet");
+    seed(db, "m2", "s2", "/model claude-sonnet");
+    seed(db, "m3", "s3", "/model claude-sonnet");
+    seed(db, "k1", "s1", "Continue from where you left off");
+    seed(db, "k2", "s2", "Continue from where you left off");
+    seed(db, "k3", "s3", "Continue from where you left off");
+    // a genuine recurring instruction alongside the noise — must be the only candidate
+    seed(db, "r1", "s1", "prefer the self-healing wrapper for hooks");
+    seed(db, "r2", "s2", "prefer the self-healing wrapper for hooks");
+    seed(db, "r3", "s3", "prefer the self-healing wrapper for hooks");
+    const cands = learnRecurring(db);
+    assert.equal(cands.length, 1, "scaffolding filtered, only the real instruction remains");
+    assert.match(cands[0]?.example ?? "", /self-healing wrapper/i);
     db.close();
   });
 

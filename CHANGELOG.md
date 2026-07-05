@@ -61,6 +61,14 @@ fail-closed throughout.
   moves (nvm/volta/fnm) or kit relocates, so the hook could fail to spawn. The gate now
   prefers the wrapper — one stable path kit refreshes in place — and `installAllInstallGates`
   writes the wrapper first (skipped in read-only mode). `src/agent-config.ts`.
+- **`kit memory learn` no longer surfaces harness scaffolding (found by dogfooding).**
+  Injected reminders, slash-command echoes, session-continuation banners, hook output and
+  image placeholders are stored as `type='user'` rows and recur every session, so they
+  dominated the "recurring instructions" ranking and buried the real ones (`<system-reminder>`,
+  `/model`, "Continue from where you left off", "… hook success:", "[Image: …]"). A
+  deterministic, high-precision `isBoilerplate` filter (structural tags + a leading slash
+  command + a few verbatim harness phrases — never generic words) drops them before ranking.
+  `src/memory/learn.ts`.
 
 ### Security — red-team critical fixes
 
