@@ -43,7 +43,7 @@ import {
 } from "node:crypto";
 import { anchorDir, tryReadAuditAnchorKey, getAuditAnchorKey } from "./audit-anchor.js";
 import { secureFile } from "./utils/secure-perms.js";
-import { hardwareRequiredByEnv } from "./keystore/mandate.js";
+import { hardwareRequired } from "./keystore/index.js";
 
 export const ATTESTATION_FILE = ".kit-check-attestation.json";
 const ED25519_KEY_FILE = "attestation-ed25519.key";
@@ -198,12 +198,12 @@ export function expectedKeyToFingerprint(expected: string): string | null {
  * fall back to HMAC. Never throws.
  */
 async function loadOrCreateEd25519Key(dir?: string): Promise<KeyObject | null> {
-  // Under a hardware mandate, refuse the same-UID-readable Ed25519 file key entirely —
-  // otherwise the attestation receipt would be the one place kit still emits an Ed25519
-  // signature made with a kit-managed file key while KIT_REQUIRE_HARDWARE_IDENTITY is set.
-  // Returning null makes signAttestation fall through to HMAC (symmetric, out of scope) or
-  // an honest sig_alg:"none". (mandate.js is import-cycle-free.)
-  if (hardwareRequiredByEnv()) return null;
+  // Under a hardware mandate (env OR org-policy require_hardware_identity), refuse the
+  // same-UID-readable Ed25519 file key entirely — otherwise the attestation receipt would
+  // be the one place kit still emits an Ed25519 signature made with a kit-managed file key
+  // while the mandate is in force. Returning null makes signAttestation fall through to
+  // HMAC (symmetric, out of scope) or an honest sig_alg:"none".
+  if (hardwareRequired(process.cwd())) return null;
   const keyPath = ed25519KeyPath(dir);
   try {
     const pem = await readFile(keyPath, "utf-8");

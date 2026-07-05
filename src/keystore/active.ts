@@ -21,18 +21,37 @@
  * bar is the `command` backend keeping the key off the box; the mandate makes kit refuse
  * to fall back off it. Deterministic, offline, never network.
  */
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { identityId } from "../identity.js";
-import { loadPolicy } from "../policy-doc.js";
+import { loadPolicy, POLICY_FILE } from "../policy-doc.js";
 import { resolveKeyStore } from "./resolve.js";
 import { hardwareRequiredByEnv } from "./mandate.js";
 import type { KeyStoreResolution } from "./types.js";
 
 export { hardwareRequiredByEnv } from "./mandate.js";
 
-/** True when the org policy at `root` mandates a hardware identity (`.kit-policy.toml`). */
+/** Nearest ancestor of `start` (inclusive) that holds a `.kit-policy.toml`, or null. Cheap
+ *  fs walk (no git exec) so it's safe on the audit hot path — and it means a mandate at the
+ *  repo root applies even when kit is invoked from a subdirectory (closes the cwd-vs-root
+ *  gap where a policy mandate would otherwise be silently skipped). */
+function findPolicyDir(start: string): string | null {
+  let dir = start;
+  for (let i = 0; i < 64; i++) {
+    if (existsSync(join(dir, POLICY_FILE))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/** True when the governing org policy (at `root` or any ancestor) mandates a hardware
+ *  identity via `.kit-policy.toml require_hardware_identity`. */
 export function policyRequiresHardware(root: string): boolean {
   try {
-    return loadPolicy(root)?.require_hardware_identity === true;
+    const dir = findPolicyDir(root);
+    return dir !== null && loadPolicy(dir)?.require_hardware_identity === true;
   } catch {
     return false;
   }

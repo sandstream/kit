@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -133,6 +133,41 @@ describe("hardware mandate — no file-key signature escapes", () => {
     ) as { operation: string; sig?: string };
     assert.equal(line.operation, "op-pol");
     assert.equal(line.sig, undefined, "policy-mandated entry must not carry a file-key signature");
+  });
+
+  it("policy mandate applies from a SUBDIRECTORY (upward .kit-policy.toml search)", () => {
+    // Policy at the repo root; kit invoked from a nested subdir. The mandate must still be
+    // found (else a subdir invocation would silently skip a fleet policy → file signature).
+    writeFileSync(join(cwd, ".kit-policy.toml"), "version = 1\nrequire_hardware_identity = true\n");
+    const sub = join(cwd, "a", "b", "c");
+    mkdirSync(sub, { recursive: true });
+    assert.equal(policyRequiresHardware(sub), true, "found via ancestor walk");
+    assert.equal(hardwareRequired(sub), true);
+  });
+
+  it("attestation under a POLICY-only mandate also refuses the Ed25519 file key", async () => {
+    loadOrCreateIdentity();
+    writeFileSync(join(cwd, ".kit-policy.toml"), "version = 1\nrequire_hardware_identity = true\n");
+    const origCwd = process.cwd();
+    process.chdir(cwd);
+    try {
+      const att = await signAttestation(
+        {
+          schema: "kit-check-attestation/v1",
+          command: "check",
+          timestamp: "2026-01-01T00:00:00Z",
+          kit_version: "0.0.0",
+          overall_ok: true,
+          results: { passed: 1, failed: 0, warnings: 0, skipped: 0 },
+          scanners_ran: [],
+        },
+        { dir: cwd, preferEd25519: true },
+      );
+      assert.notEqual(att.sig_alg, "ed25519", "policy mandate must block the file Ed25519 path");
+      assert.equal(existsSync(join(cwd, "attestation-ed25519.key")), false);
+    } finally {
+      process.chdir(origCwd);
+    }
   });
 
   it("recordRevocation fails closed under the mandate (no file-key revocation)", () => {
