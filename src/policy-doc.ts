@@ -27,12 +27,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse } from "smol-toml";
-import {
-  localPublicKeys,
-  verifySignature,
-  isRevokedWith,
-  localRevocationAuthorities,
-} from "./identity.js";
+import { localPublicKeys, verifySignature, isRevokedWith } from "./identity.js";
 import { policySignersMap, hasPolicyAnchor } from "./policy-trust.js";
 
 export const POLICY_FILE = ".kit-policy.toml";
@@ -269,13 +264,17 @@ export function verifyPolicy(root: string, opts: { key?: string } = {}): PolicyV
       anchored,
     };
   }
-  // Revocation check with the ORG trust context: a revocation is honored only if it is
-  // validly signed by an AUTHORIZED revoker (the signer itself, this machine's local
-  // root, or an org trust-anchor signer). This stops a planted/unauthorized revocation
-  // line from falsely reporting the org's real signer as revoked (a fail-closed DoS).
+  // Revocation check with the ORG trust context: a revocation of the policy signer is
+  // honored only if it is validly signed by an AUTHORIZED revoker — the signer ITSELF
+  // (self-revoke, via by===kid inside isRevokedWith) or an ORG trust-anchor signer.
+  // The local machine root is deliberately NOT an authority here: who may revoke the
+  // org's trust anchor is an ORG decision, not something a single machine's key gets to
+  // veto. (Local root remains the authority for the LOCAL secondary deny in rbac/isRevoked.)
+  // This also stops a planted/unauthorized revocation line from falsely reporting the
+  // org's real signer as revoked (a fail-closed DoS on the trust anchor).
   const orgSigners = policySignersMap(root);
   const trustedKeys = new Map<string, string>([...localPublicKeys(), ...orgSigners]);
-  const authorities = new Set<string>([...localRevocationAuthorities(), ...orgSigners.keys()]);
+  const authorities = new Set<string>(orgSigners.keys());
   if (isRevokedWith(record.kid, trustedKeys, authorities)) {
     return {
       status: "revoked",

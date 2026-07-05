@@ -17,6 +17,7 @@ import {
   isRevoked,
   isRevokedWith,
   isAuthoritativeRevocation,
+  revokedKids,
   localRevocationAuthorities,
   revocationStatement,
   type RevocationRecord,
@@ -231,6 +232,13 @@ describe("identity", () => {
       assert.equal(localRevocationAuthorities().has(admin.id), true);
       assert.equal(isRevoked(victim.id), true);
       assert.equal(isRevokedWith(victim.id, keys, new Set([admin.id])), true);
+
+      // revokedKids (the audit-command helper) lists the target under authority…
+      assert.equal(revokedKids(keys, new Set([admin.id])).has(victim.id), true);
+      // …and lists NOTHING when the revoker is not an authority (authority narrowing:
+      // this is why policy-doc drops local root — an unauthorized cross-signer
+      // revocation must not veto the target).
+      assert.equal(revokedKids(keys, new Set()).has(victim.id), false);
     } finally {
       process.env.KIT_IDENTITY_DIR = dir;
       rmSync(d, { recursive: true, force: true });
