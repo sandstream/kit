@@ -20,13 +20,13 @@ Welcome to the kit community! This guide helps you get involved, ask questions, 
 
 **Before asking:**
 1. Check [Docs](https://github.com/sandstream/kit) for existing guides
-2. Search [GitHub Discussions](https://github.com/sandstream/kit/discussions) for similar questions
-3. Review [FAQ](https://github.com/sandstream/kit/discussions) and existing [GitHub Issues](https://github.com/sandstream/kit/issues)
+2. Search [GitHub Discussions](https://github.com/sandstream/kit/issues) for similar questions
+3. Review [FAQ](https://github.com/sandstream/kit/issues) and existing [GitHub Issues](https://github.com/sandstream/kit/issues)
 
 **Where to ask:**
-- **General questions:** [GitHub Discussions → Help](https://github.com/sandstream/kit/discussions/categories/help)
-- **Plugin development:** [GitHub Discussions → Plugin Development](https://github.com/sandstream/kit/discussions/categories/plugin-development)
-- **Troubleshooting:** [GitHub Discussions → Troubleshooting](https://github.com/sandstream/kit/discussions/categories/troubleshooting)
+- **General questions:** [GitHub Discussions → Help](https://github.com/sandstream/kit/issues)
+- **Plugin development:** [GitHub Discussions → Plugin Development](https://github.com/sandstream/kit/issues)
+- **Troubleshooting:** [GitHub Discussions → Troubleshooting](https://github.com/sandstream/kit/issues)
 - **Security issues:** Please see [Security Policy](SECURITY.md) — **DO NOT** open a public issue
 
 ### I found a bug
@@ -50,7 +50,7 @@ For production support, training, or consulting:
 
 ## GitHub Discussions
 
-[GitHub Discussions](https://github.com/sandstream/kit/discussions) is our main community forum.
+[GitHub Discussions](https://github.com/sandstream/kit/issues) is our main community forum.
 
 ### Discussion Categories
 
@@ -168,9 +168,9 @@ We use labels to categorize and track issues:
 
 ### How to Request a Feature
 
-1. **Check existing requests** — Search [GitHub Issues](https://github.com/sandstream/kit/issues?q=is%3Aopen+is%3Aissue+label%3Afeature) and [Discussions](https://github.com/sandstream/kit/discussions/categories/feature-requests)
+1. **Check existing requests** — Search [GitHub Issues](https://github.com/sandstream/kit/issues?q=is%3Aopen+is%3Aissue+label%3Afeature) and [Discussions](https://github.com/sandstream/kit/issues)
 
-2. **Post in Discussions first** — Start in [Feature Requests & Ideas](https://github.com/sandstream/kit/discussions/categories/feature-requests) to discuss before creating an issue
+2. **Post in Discussions first** — Start in [Feature Requests & Ideas](https://github.com/sandstream/kit/issues) to discuss before creating an issue
 
 3. **Create an issue** — If there's community interest, create a [Feature Request issue](https://github.com/sandstream/kit/issues/new?labels=feature)
 
@@ -295,12 +295,8 @@ All community spaces are governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 | Channel | Use For | Response Time |
 |---------|---------|----------------|
-| [GitHub Issues](https://github.com/sandstream/kit/issues) | Bug reports, feature requests | 24-48 hours |
-| [GitHub Discussions](https://github.com/sandstream/kit/discussions) | Questions, ideas, showcase | 24 hours |
+| [GitHub Issues](https://github.com/sandstream/kit/issues) | Bug reports, feature requests, questions | 24-48 hours |
 | [Email](mailto:hello@sandstre.am) | Private concerns, security | 48 hours |
-| [Twitter](https://twitter.com/kitio) | Announcements, news | N/A |
-| [Discord](https://discord.gg/kit) | Real-time chat, community | Varies |
-| [Slack Community](https://github.com/sandstream/kit) | Private workspace, enterprise | Varies |
 
 ---
 
@@ -310,7 +306,7 @@ All community spaces are governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
 - [Getting Started](docs/GETTING_STARTED_PLUGINS.md)
 - [API Reference](docs/COMMANDS.md)
 - [Plugin Development](docs/PLUGIN_DEVELOPMENT.md)
-- [FAQ](https://github.com/sandstream/kit/discussions)
+- [FAQ](https://github.com/sandstream/kit/issues)
 
 ### Examples
 - [Example Plugins](packages/example-plugins/)
@@ -328,7 +324,7 @@ All community spaces are governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Have feedback about the community or these guidelines?
 - Open an issue with the `community` label
-- Discuss in [Community Feedback](https://github.com/sandstream/kit/discussions)
+- Discuss in [Community Feedback](https://github.com/sandstream/kit/issues)
 - Email [hello@sandstre.am](mailto:hello@sandstre.am)
 
 We value your input and continuously improve our community experience.
