@@ -2,6 +2,8 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync, readdirSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 
+import { ensureKitWrapper, kitWrapperPath } from "./kit-wrapper.js";
+
 /**
  * Teach the coding agent to use kit.
  *
@@ -425,8 +427,26 @@ export async function installKitPermissions(
   }
 }
 
-/** Absolute `<node> <cli.js> gate-bash` for use inside a hook (PATH-less shell). */
+/**
+ * The gate command for a non-login hook shell. Mirrors the memory-hook invocation
+ * (`kitHookInvocation`): prefer the self-healing wrapper at the STABLE path
+ * `~/.kit/bin/kit`. Two concrete wins over baking `<node> <cli.js>` straight into
+ * every agent's config:
+ *   1. It restores the tool PATH a non-login hook shell drops (npm-global bin, mise
+ *      shims). The gate shells out to `python3` (triage) and `git`; without that
+ *      PATH those fail — triage then fail-closes and BLOCKS legitimate installs
+ *      (false-block spam), the opposite of what we want operators to live with.
+ *   2. There is ONE stable path to refresh. If node moves (nvm/volta/fnm) or kit
+ *      relocates, `ensureKitWrapper` rewrites the single wrapper in place and every
+ *      agent's hook — which all point at `~/.kit/bin/kit` — is fixed at once; no
+ *      per-agent re-wiring, and no stale absolute node path frozen into a config
+ *      file that would make the PreToolUse hook fail to spawn (a silent false green).
+ * Fall back to an absolute `<node> <cli.js>`, then a bare `kit` (relies on PATH —
+ * the last resort, kept only so the string is never empty).
+ */
 export function kitGateInvocation(): string {
+  const wrapper = kitWrapperPath();
+  if (existsSync(wrapper)) return `${wrapper} gate-bash`;
   const entry = process.argv[1];
   if (entry) return `${process.execPath} ${resolve(entry)} gate-bash`;
   return "kit gate-bash"; // last resort — relies on PATH
@@ -740,8 +760,16 @@ export async function installInstallGateCursor(
   }
 }
 
-/** The gate command as an argv array (`[node, cli.js, "gate-bash"]`) for execFileSync. */
+/** The gate command as an argv array (`[node, cli.js, "gate-bash"]`) for execFileSync.
+ *  On POSIX the self-healing wrapper is a shebanged, executable sh script that
+ *  execFileSync can spawn directly, so prefer it for the same node-version-switch
+ *  resilience as `kitGateInvocation`. On win32 the POSIX wrapper is not runnable via
+ *  execFileSync (no shebang honoring), so keep the absolute node+cli form there. */
 export function kitGateArgv(): string[] {
+  if (process.platform !== "win32") {
+    const wrapper = kitWrapperPath();
+    if (existsSync(wrapper)) return [wrapper, "gate-bash"];
+  }
   const entry = process.argv[1];
   if (entry) return [process.execPath, resolve(entry), "gate-bash"];
   return ["kit", "gate-bash"]; // last resort — relies on PATH
@@ -1033,6 +1061,13 @@ export interface GateInstallEntry {
 export async function installAllInstallGates(
   cwd: string = process.cwd(),
 ): Promise<GateInstallEntry[]> {
+  // Write/refresh the self-healing wrapper FIRST so every gate hook below embeds a
+  // wrapper invocation (which survives a node-version switch) instead of a baked
+  // node path. Best-effort and skipped in read-only mode; if the wrapper can't be
+  // written, kitGateInvocation()/kitGateArgv() transparently fall back to the
+  // absolute node+cli form.
+  const { isReadOnlyMode } = await import("./read-only-mode.js");
+  if (!isReadOnlyMode()) ensureKitWrapper();
   return [
     { agent: "Claude Code", result: await installInstallGate(cwd) },
     { agent: "Codex", result: await installInstallGateCodex(cwd) },
