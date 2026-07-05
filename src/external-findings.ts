@@ -44,8 +44,32 @@ export interface ParsedExternalFindings {
   malformed: number;
 }
 
-const SEVERITIES = new Set<ExternalSeverity>(["critical", "high", "medium", "low"]);
 const RANK: Record<ExternalSeverity, number> = { critical: 3, high: 2, medium: 1, low: 0 };
+
+/**
+ * Map a raw severity string to one of kit's four tiers. Liberal in what we accept
+ * (Postel) so a real scanner's native vocabulary ingests cleanly instead of parse-
+ * erroring: an `info`/`informational` tier (e.g. wiz) folds to `low` (warns, never
+ * fails), and `moderate` (npm/GitHub advisories) folds to `medium`. Anything
+ * unrecognized returns null → the caller counts it as malformed (surfaced, not silent).
+ */
+function normalizeSeverity(raw: string): ExternalSeverity | null {
+  switch (raw.trim().toLowerCase()) {
+    case "critical":
+      return "critical";
+    case "high":
+      return "high";
+    case "medium":
+    case "moderate":
+      return "medium";
+    case "low":
+    case "info":
+    case "informational":
+      return "low";
+    default:
+      return null;
+  }
+}
 
 /**
  * Parse `.kit-scan-results.jsonl` content. PURE and fail-safe: never throws; a line
@@ -71,14 +95,14 @@ export function parseExternalFindings(text: string): ParsedExternalFindings {
     }
     const o = obj as Record<string, unknown>;
     const source = typeof o.source === "string" ? o.source.trim() : "";
-    const severity = typeof o.severity === "string" ? o.severity.trim().toLowerCase() : "";
-    if (!source || !SEVERITIES.has(severity as ExternalSeverity)) {
+    const severity = typeof o.severity === "string" ? normalizeSeverity(o.severity) : null;
+    if (!source || !severity) {
       malformed++;
       continue;
     }
     findings.push({
       source,
-      severity: severity as ExternalSeverity,
+      severity,
       title: typeof o.title === "string" ? o.title : undefined,
       id: typeof o.id === "string" ? o.id : undefined,
       package: typeof o.package === "string" ? o.package : undefined,

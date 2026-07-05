@@ -83,6 +83,40 @@ describe("externalFindingResults (no-false-green)", () => {
   });
 });
 
+describe("reference integration: the shipped kit-plugin-* emit shapes ingest cleanly", () => {
+  // These mirror the exact lines kit-plugin-snyk/-wiz/-sentrux append to
+  // .kit-scan-results.jsonl, so the contract stays wired to the real emitters.
+  it("snyk / wiz / sentrux findings all parse (incl. wiz 'informational' → low)", () => {
+    const lines = [
+      // snyk: severity already critical|high|medium|low
+      '{"timestamp":"t","source":"snyk","project":"p","severity":"high","id":"SNYK-1","title":"x","package":"lodash"}',
+      // wiz: emits .toLowerCase() of INFORMATIONAL|LOW|…|CRITICAL — 'informational' must fold to low, not error
+      '{"timestamp":"t","source":"wiz","severity":"informational","id":"W-1","title":"y"}',
+      '{"timestamp":"t","source":"wiz","severity":"critical","id":"W-2"}',
+      // sentrux: normalized to the four tiers + a hardcoded "high"
+      '{"timestamp":"t","source":"sentrux","severity":"medium","title":"z"}',
+    ].join("\n");
+    const { findings, malformed } = parseExternalFindings(lines);
+    assert.equal(malformed, 0, "no shipped-plugin line should be treated as malformed");
+    assert.equal(findings.length, 4);
+    const wizInfo = findings.find((f) => f.source === "wiz" && f.id === "W-1");
+    assert.equal(wizInfo?.severity, "low", "wiz 'informational' folds to low");
+
+    const results = externalFindingResults({ findings, malformed });
+    assert.equal(results.find((r) => r.name === "external: wiz")?.status, "fail"); // has critical
+    assert.equal(results.find((r) => r.name === "external: snyk")?.status, "fail"); // high
+    assert.equal(results.find((r) => r.name === "external: sentrux")?.status, "warn"); // medium
+  });
+
+  it("accepts the common 'moderate' alias (npm/GitHub advisories) → medium", () => {
+    const { findings, malformed } = parseExternalFindings(
+      '{"source":"gh-advisory","severity":"moderate"}',
+    );
+    assert.equal(malformed, 0);
+    assert.equal(findings[0].severity, "medium");
+  });
+});
+
 describe("checkExternalFindings (IO)", () => {
   it("returns [] when no results file is present (no-op)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-ext-"));
