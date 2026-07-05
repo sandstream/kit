@@ -795,7 +795,11 @@ function register_kit_run(server: McpServer): void {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_run");
       try {
         const workDir = cwd ?? process.cwd();
-        const commandArgs = command.split(/\s+/);
+        // Tokenize like a shell (respecting quotes) — a naive whitespace split turns
+        // `git commit -m "a b"` into the wrong argv and silently runs a different
+        // command. An unterminated quote throws → we refuse rather than mis-split.
+        const { shellSplit } = await import("./utils/shellSplit.js");
+        const commandArgs = shellSplit(command);
 
         // kit_run inherits the secret-loaded env and executes an arbitrary command,
         // so it must pass the same governance floor as a CLI write (revocation,
