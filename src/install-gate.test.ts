@@ -282,6 +282,69 @@ describe("parseInstallCommand — bypass resistance (security)", () => {
   });
 });
 
+describe("parseInstallCommand — sweep hardening (bypass closes)", () => {
+  const gated = (cmd: string) => {
+    const p = parseInstallCommand(cmd);
+    return p.isInstall && (p.refs.length > 0 || p.unverifiable.length > 0);
+  };
+
+  it("intra-word quoting no longer hides the binary/subcommand", () => {
+    assert.deepEqual(parseInstallCommand('n"p"m install evil').refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand('npm i"nstall" evil').refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("np'm' i evil").refs, ["npm:evil"]);
+  });
+
+  it("path- and backslash-qualified package managers are matched (basename)", () => {
+    assert.deepEqual(parseInstallCommand("/usr/bin/npm install evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("./node_modules/.bin/pnpm add evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("\\npm install evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("/usr/bin/sudo /usr/bin/npm i evil").refs, ["npm:evil"]);
+  });
+
+  it("process substitution and here-strings are recursed", () => {
+    assert.deepEqual(parseInstallCommand("cat <(npm install evil)").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("diff <(npm i evil) /dev/null").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand('bash <<< "npm i evil"').refs, ["npm:evil"]);
+  });
+
+  it("fetch-and-run verbs are covered (init/create/uvx/uv tool/pipx run/npm x)", () => {
+    assert.deepEqual(parseInstallCommand("npm init evil").refs, ["npm:create-evil"]);
+    assert.deepEqual(parseInstallCommand("npm create evil").refs, ["npm:create-evil"]);
+    assert.deepEqual(parseInstallCommand("yarn create evil").refs, ["npm:create-evil"]);
+    assert.deepEqual(parseInstallCommand("npm x evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("uvx evil").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("uv tool install evil").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("uv tool run evil").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("pipx run evil").refs, ["pip:evil"]);
+  });
+
+  it("builtin wrapper is stripped", () => {
+    assert.deepEqual(parseInstallCommand("builtin npm i evil").refs, ["npm:evil"]);
+  });
+
+  it("xargs-stdin and $VAR-indirected installs fail closed (unverifiable)", () => {
+    const x = parseInstallCommand("echo evil | xargs npm i");
+    assert.equal(x.isInstall, true);
+    assert.ok(x.unverifiable.includes("xargs-stdin-install"));
+    const v = parseInstallCommand("PM=npm; $PM install evil");
+    assert.equal(v.isInstall, true);
+    assert.ok(v.unverifiable.some((u) => u.startsWith("indirect-bin:")));
+    assert.ok(gated("echo evil | xargs npm i") && gated("PM=npm; $PM install evil"));
+  });
+
+  it("does NOT over-trigger: comments, requirement files, and runner args", () => {
+    // trailing comment stripped — only the real package is triaged, no bogus refs
+    assert.deepEqual(parseInstallCommand("npm i react # installs react").refs, ["npm:react"]);
+    // -r/-e file operands are not packages
+    const r = parseInstallCommand("pip install -r requirements.txt");
+    assert.deepEqual(r.refs, []);
+    assert.deepEqual(r.unverifiable, []);
+    // a runner's trailing args are NOT packages (only the fetched tool is)
+    assert.deepEqual(parseInstallCommand("npx cowsay moo").refs, ["npm:cowsay"]);
+    assert.deepEqual(parseInstallCommand("npm create vite myapp").refs, ["npm:create-vite"]);
+  });
+});
+
 // Fake triage: pass everything except names in `blocklist`.
 function fakeDeps(blocklist: string[] = []): GateDeps {
   return {
