@@ -2,9 +2,35 @@
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
 import { loadOrCreateIdentity, tryLoadIdentity, rotateIdentity, identityId } from "../identity.js";
+import { activeKeyStoreStatus, hardwareRequiredByEnv } from "../keystore/index.js";
 
 export async function cmdIdentity(): Promise<boolean> {
   const sub = process.argv[3] ?? "show";
+
+  if (sub === "keystore") {
+    const st = activeKeyStoreStatus();
+    const rooted = st.hardwareRooted
+      ? `${c.green}hardware-rooted${c.reset}`
+      : `${c.yellow}NOT hardware-rooted${c.reset}`;
+    console.log(`${c.bold}kit identity keystore${c.reset}`);
+    console.log(`  backend        ${c.bold}${st.kind}${c.reset}  (${rooted})`);
+    console.log(`  key id         ${st.kid ?? c.dim + "none" + c.reset}`);
+    console.log(
+      `  hardware req'd  ${hardwareRequiredByEnv() ? "yes (KIT_REQUIRE_HARDWARE_IDENTITY)" : "no"}`,
+    );
+    if (st.reason) console.log(`  ${c.dim}${st.reason}${c.reset}`);
+    if (!st.hardwareRooted) {
+      console.log(
+        `  ${c.dim}to close the same-UID key-theft gap: KIT_KEYSTORE=command with KIT_KEYSTORE_SIGN_CMD + KIT_KEYSTORE_PUBKEY (TPM/HSM/enclave/YubiKey)${c.reset}`,
+      );
+    }
+    // Fail closed in the exit code when hardware is mandated but not in force.
+    if (hardwareRequiredByEnv() && !st.hardwareRooted) {
+      console.error(`${c.red}✗ hardware-rooted identity required but not active${c.reset}`);
+      return false;
+    }
+    return true;
+  }
 
   if (sub === "init") {
     const { identity, created } = loadOrCreateIdentity();
@@ -56,6 +82,6 @@ export async function cmdIdentity(): Promise<boolean> {
     return true;
   }
 
-  console.error(`${c.red}usage: kit identity <init|show [--public]|rotate>${c.reset}`);
+  console.error(`${c.red}usage: kit identity <init|show [--public]|rotate|keystore>${c.reset}`);
   return false;
 }

@@ -27,7 +27,8 @@ import {
   type PolicySignature,
 } from "../policy-doc.js";
 import { evaluatePolicy, formatPolicyEval } from "../policy-check.js";
-import { tryLoadIdentity, signWithIdentity } from "../identity.js";
+import { identityId } from "../identity.js";
+import { resolveKeyStore, assertHardwareIdentity, isHardwareRooted } from "../keystore/index.js";
 
 export async function cmdPolicy(): Promise<boolean> {
   const sub = process.argv[3] ?? "show";
@@ -116,23 +117,49 @@ function policySign(root: string): boolean {
     for (const e of v.errors) console.error(`  ${c.red}-${c.reset} ${e}`);
     return false;
   }
-  const identity = tryLoadIdentity();
-  if (!identity) {
+  // Sign through the resolved keystore, not the file key directly: this is what lets a
+  // hardware-rooted (command/TPM/enclave) backend sign the org policy, and what makes
+  // a hardware mandate enforceable. Falls back to the file backend unchanged by default.
+  const res = resolveKeyStore();
+  const pub = res.store.publicKeyPem();
+  if (!pub) {
     console.error(
-      `${c.red}no identity to sign with${c.reset} — run ${c.bold}kit identity init${c.reset}`,
+      `${c.red}no identity to sign with${c.reset} — ` +
+        (res.availability.ok
+          ? `run ${c.bold}kit identity init${c.reset}`
+          : (res.availability.reason ?? "keystore unavailable")),
     );
     return false;
   }
+  // Fail closed if a hardware-rooted identity is mandated (KIT_REQUIRE_HARDWARE_IDENTITY)
+  // but the active backend isn't one — never sign the org's standard with a same-UID key.
+  try {
+    assertHardwareIdentity(res);
+  } catch (e) {
+    console.error(`${c.red}✗ ${(e as Error).message}${c.reset}`);
+    return false;
+  }
+  const kid = identityId(pub);
   const bytes = canonicalPolicyBytes(doc);
+  let sigB64: string;
+  try {
+    sigB64 = res.store.sign(bytes).toString("base64");
+  } catch (e) {
+    console.error(`${c.red}✗ signing failed: ${(e as Error).message}${c.reset}`);
+    return false;
+  }
   const record: PolicySignature = {
-    kid: identity.id,
-    sig: signWithIdentity(bytes).toString("base64"),
+    kid,
+    sig: sigB64,
     ts: new Date().toISOString(),
     fingerprint: policyFingerprint(doc),
   };
   writeFileSync(getPolicySigPath(root), JSON.stringify(record, null, 2) + "\n", "utf-8");
+  const rootedNote = isHardwareRooted(res)
+    ? ` ${c.dim}(${res.store.kind}, hardware-rooted)${c.reset}`
+    : "";
   console.log(
-    `${c.green}✓${c.reset} signed ${c.bold}${record.fingerprint}${c.reset} as ${c.bold}${identity.id}${c.reset} ${c.dim}→ ${getPolicySigPath(root)}${c.reset}`,
+    `${c.green}✓${c.reset} signed ${c.bold}${record.fingerprint}${c.reset} as ${c.bold}${kid}${c.reset}${rootedNote} ${c.dim}→ ${getPolicySigPath(root)}${c.reset}`,
   );
   console.log(
     `${c.dim}commit .kit-policy.toml + .kit-policy.sig; verifiers check it with the public key (kit identity show --public)${c.reset}`,
