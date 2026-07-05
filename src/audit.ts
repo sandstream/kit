@@ -67,15 +67,33 @@ async function appendChained(logPath: string, event: AuditEvent): Promise<string
  * forbidden key.
  */
 function signLineHash(hash: string): { kid: string; sig: string } | null {
+  let res;
   try {
-    const res = resolveKeyStore();
-    const pub = res.store.publicKeyPem();
-    if (!pub) return null; // no identity → keyless (fine)
-    assertHardwareIdentity(res); // mandate + non-hardware → throw → caught → keyless
+    res = resolveKeyStore();
+  } catch {
+    return null;
+  }
+  const pub = res.store.publicKeyPem();
+  if (!pub) return null; // no identity → keyless (fine, backward-compatible)
+  try {
+    assertHardwareIdentity(res); // mandate + non-hardware → expected keyless, silently
+  } catch {
+    return null;
+  }
+  try {
     const sig = res.store.sign(hash).toString("base64");
     return { kid: identityId(pub), sig };
-  } catch {
-    return null; // no identity / mandate unmet / signer error → unsigned, not a failure
+  } catch (e) {
+    // A configured, available NON-file backend that fails to sign is not the same as "no
+    // identity": don't SILENTLY de-attribute the chain (a stealthy downgrade an attacker
+    // could induce by breaking the signer). Surface it; the entry is still left keyless and
+    // the append never blocks (the hash chain still protects it).
+    if (res.store.kind !== "file") {
+      console.error(
+        `[kit] audit signing via the ${res.store.kind} keystore failed: ${(e as Error).message} — entry left keyless`,
+      );
+    }
+    return null;
   }
 }
 

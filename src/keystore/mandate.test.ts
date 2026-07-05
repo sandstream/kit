@@ -3,8 +3,18 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadOrCreateIdentity, signWithIdentity, recordRevocation } from "../identity.js";
+import {
+  loadOrCreateIdentity,
+  signWithIdentity,
+  recordRevocation,
+  rotateIdentity,
+  identityId,
+  loadRevocations,
+} from "../identity.js";
 import { appendAuditEventDirect } from "../audit.js";
+import { keystoreRecordRevocation } from "./revoke.js";
+import { existsSync } from "node:fs";
+import { signAttestation } from "../check-attestation.js";
 
 // The mandate must be COMPREHENSIVE: with KIT_REQUIRE_HARDWARE_IDENTITY set and only a
 // file key present, NO code path may emit a file-key signature — not policy sign, not the
@@ -48,6 +58,50 @@ describe("hardware mandate — no file-key signature escapes", () => {
   it("loadOrCreateIdentity refuses to MINT a file key under the mandate", () => {
     process.env.KIT_REQUIRE_HARDWARE_IDENTITY = "1";
     assert.throws(() => loadOrCreateIdentity(), /refusing to create a file identity/);
+  });
+
+  it("rotateIdentity refuses to re-mint a file key under the mandate", () => {
+    loadOrCreateIdentity(); // an identity exists pre-mandate
+    process.env.KIT_REQUIRE_HARDWARE_IDENTITY = "1";
+    assert.throws(() => rotateIdentity(), /refusing to rotate into a file identity/);
+  });
+
+  it("keystoreRecordRevocation: file kid without mandate; fails closed under mandate", () => {
+    const me = loadOrCreateIdentity().identity;
+    const rec = keystoreRecordRevocation("kid_old", "compromised");
+    assert.equal(rec.by, identityId(me.publicKey), "attributed to the active (file) kid");
+    assert.equal(
+      loadRevocations().some((r) => r.kid === "kid_old"),
+      true,
+    );
+    process.env.KIT_REQUIRE_HARDWARE_IDENTITY = "1";
+    assert.throws(() => keystoreRecordRevocation("kid_old2", "x"), /required/i);
+  });
+
+  it("attestation does NOT mint/use an Ed25519 file key under the mandate", async () => {
+    loadOrCreateIdentity();
+    process.env.KIT_REQUIRE_HARDWARE_IDENTITY = "1";
+    // preferEd25519 would normally use the file Ed25519 key; under the mandate that path
+    // is refused, so the receipt is HMAC or "none" — never an ed25519 file-key signature —
+    // and no attestation-ed25519 key file is created.
+    const att = await signAttestation(
+      {
+        schema: "kit-check-attestation/v1",
+        command: "check",
+        timestamp: "2026-01-01T00:00:00Z",
+        kit_version: "0.0.0",
+        overall_ok: true,
+        results: { passed: 1, failed: 0, warnings: 0, skipped: 0 },
+        scanners_ran: [],
+      },
+      { dir: idDir, preferEd25519: true },
+    );
+    assert.notEqual(att.sig_alg, "ed25519", "must not sign attestation with the file Ed25519 key");
+    assert.equal(
+      existsSync(join(idDir, "attestation-ed25519.key")),
+      false,
+      "no Ed25519 file key minted under the mandate",
+    );
   });
 
   it("recordRevocation fails closed under the mandate (no file-key revocation)", () => {

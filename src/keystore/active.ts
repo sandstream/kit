@@ -9,9 +9,17 @@
  * honest degradation reason — whenever hardware is required but the resolved backend
  * isn't hardware-rooted.
  *
- * The requirement can come from the environment (KIT_REQUIRE_HARDWARE_IDENTITY) or be
- * passed in by a caller that read it from `.kit-policy` / config (so policy can mandate
- * it fleet-wide). Deterministic, offline, never network.
+ * The requirement is read from the environment (KIT_REQUIRE_HARDWARE_IDENTITY). The
+ * `required` parameter also lets a caller fold in a policy/config mandate — the plumbing
+ * is here, but a `.kit-policy` field is NOT wired yet, so today the mandate is env-driven
+ * (a fleet-wide policy mandate is a follow-up).
+ *
+ * HONEST SCOPE: the env mandate enforces OPERATOR INTENT — it stops kit from silently
+ * auto-using the same-UID file key when the operator wants hardware. It is NOT itself a
+ * defense against a same-UID attacker, who can unset the env var (and could read the file
+ * key directly anyway — the boundary the threat model documents). What actually raises the
+ * bar is the `command` backend keeping the key off the box; the mandate makes kit refuse
+ * to fall back off it. Deterministic, offline, never network.
  */
 import { identityId } from "../identity.js";
 import { resolveKeyStore } from "./resolve.js";

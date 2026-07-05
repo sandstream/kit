@@ -388,6 +388,16 @@ export function rotateIdentity(
   dir?: string,
   now: string = new Date().toISOString(),
 ): { identity: Identity; previousId: string | null } {
+  // Mirror loadOrCreateIdentity: never MINT a same-UID-readable file key under a hardware
+  // mandate — otherwise rotate would re-plant exactly the key the mandate forbids (and a
+  // later env unset would let signWithIdentity use it). Fail closed.
+  if (hardwareRequiredByEnv()) {
+    throw new Error(
+      "refusing to rotate into a file identity key: a hardware/externally-held identity is " +
+        "required (KIT_REQUIRE_HARDWARE_IDENTITY). Rotate the key in your TPM/HSM/enclave and " +
+        "update KIT_KEYSTORE_PUBKEY instead.",
+    );
+  }
   const prev = tryLoadIdentity(dir);
   if (prev && existsSync(keyPath(dir))) {
     const stamp = now.replace(/[:.]/g, "-");

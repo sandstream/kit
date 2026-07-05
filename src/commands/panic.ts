@@ -16,7 +16,8 @@
 // zero-LLM, local-first.
 import { c } from "../utils/colors.js";
 import { flagValue, hasFlag } from "../utils/flags.js";
-import { tryLoadIdentity, rotateIdentity, recordRevocation } from "../identity.js";
+import { tryLoadIdentity, rotateIdentity } from "../identity.js";
+import { keystoreRecordRevocation } from "../keystore/revoke.js";
 import { appendAuditEventDirect } from "../audit.js";
 
 /** The accounts/controls kit can only orchestrate — never silently "handle". */
@@ -60,11 +61,13 @@ export async function cmdPanic(): Promise<boolean> {
   //    a fresh keypair becomes current.
   const { identity: fresh, previousId } = rotateIdentity();
 
-  // 2) Signed revocation of the old key, signed BY the new (now-current) one.
+  // 2) Signed revocation of the old key, signed BY the new (now-current) one — via the
+  //    active keystore, so a hardware backend signs+attributes it (and a mandate is
+  //    honored) instead of always using the file key.
   let revoked = false;
   if (previousId) {
     try {
-      recordRevocation(previousId, reason);
+      keystoreRecordRevocation(previousId, reason);
       revoked = true;
     } catch (err) {
       console.error(
