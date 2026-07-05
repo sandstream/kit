@@ -647,6 +647,17 @@ describe("parseInstallCommand — round-5 bypass closes", () => {
     assert.deepEqual(p.refs, ["npm:evil"]);
   });
 
+  it("nested-command queue is linear on many duplicate nested items (no O(N^2) shift)", () => {
+    // `queue.shift()` on a large array was O(N); N identical `$(…)` items → O(N^2) (~4.5s at
+    // 80k). A head cursor + push-dedup makes it linear.
+    const cmd = "$(npm i evil) ".repeat(80000);
+    const start = process.hrtime.bigint();
+    const p = parseInstallCommand(cmd);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    assert.ok(ms < 1500, `parse took ${ms}ms — possible O(N^2) regression`);
+    assert.equal(p.isInstall, true); // fail-closed: unresolvable indirection
+  });
+
   it("exec -c/--call shell string is recursed, not mis-gated as a package", () => {
     for (const cmd of [
       'npm exec -c "npm i evil"',

@@ -526,11 +526,25 @@ export function parseInstallCommand(command: string): InstallProbe {
   // so a wrapper (`sh -c '…'`, `$(…)`) can't smuggle an install past the splitter.
   const seen = new Set<string>();
   const queue: string[] = [command];
-  while (queue.length > 0 && seen.size < 64) {
-    const cmd = normalizeShellWhitespace(queue.shift()!);
+  // Dequeue with a head cursor, NOT queue.shift(): shift() is O(N) on a large array, and the
+  // `seen` cap doesn't bound the array — a command with many identical nested items (e.g.
+  // `$(npm i evil)` repeated) enqueues N duplicates that are shifted-and-skipped, giving O(N²)
+  // on the PreToolUse hot path. A cursor makes each dequeue O(1); only-push-unseen keeps the
+  // array near-linear in the input.
+  const queued = new Set<string>(queue);
+  let head = 0;
+  while (head < queue.length && seen.size < 64) {
+    const cmd = normalizeShellWhitespace(queue[head++]);
     if (seen.has(cmd)) continue;
     seen.add(cmd);
-    queue.push(...nestedCommands(cmd));
+    // Enqueue each distinct nested command once — a command with N identical nested items
+    // (`$(npm i evil)` repeated) must not push N duplicates that keep the array growing.
+    for (const nested of nestedCommands(cmd)) {
+      if (!queued.has(nested)) {
+        queued.add(nested);
+        queue.push(nested);
+      }
+    }
     for (const segment of cmd.split(SEGMENT_SPLIT)) scanSegment(segment, probe);
   }
 
