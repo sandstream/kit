@@ -331,6 +331,38 @@ describe("rbac/resolve — end-to-end signed policy + revocation + tamper", () =
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("a PLANTED (unsigned/unauthorized) revocation does NOT deny a valid subject", () => {
+    const root = repo();
+    const revFile = join(idDir, "revocations.jsonl");
+    try {
+      const { publicKey } = generateKeyPairSync("ed25519");
+      const goodKid = identityId(publicKey.export({ type: "spki", format: "pem" }) as string);
+      writePolicyToml(root, goodKid);
+      sign(root);
+      const loaded = loadVerifiedPolicy(root);
+      assert.equal(can(goodKid, "deploy:prod", loaded), true);
+      // A writer-only attacker plants a revocation of the legit subject, signed by
+      // some key with no authority over it, with a junk signature. Pre-fix this
+      // silently denied a real subject (DoS); the authority model must ignore it.
+      const planted = {
+        kid: goodKid,
+        by: "kid_" + "0".repeat(32),
+        ts: "2026-01-01T00:00:00Z",
+        reason: "pwn",
+        sig: Buffer.from("junk").toString("base64"),
+      };
+      writeFileSync(revFile, JSON.stringify(planted) + "\n");
+      assert.equal(
+        can(goodKid, "deploy:prod", loaded),
+        true,
+        "planted revocation must not deny the subject",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(revFile, { force: true });
+    }
+  });
 });
 
 describe("rbac/identity-provider — enrollment compiles bindings offline", () => {

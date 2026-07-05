@@ -31,7 +31,13 @@
  */
 import { loadPolicy, verifyPolicy } from "../policy-doc.js";
 import type { PolicyDoc, PolicyVerifyResult } from "../policy-doc.js";
-import { identityId, isRevoked } from "../identity.js";
+import {
+  identityId,
+  isRevokedWith,
+  localPublicKeys,
+  localRevocationAuthorities,
+} from "../identity.js";
+import { policySignersMap } from "../policy-trust.js";
 import { extractRbac, permissionMatches } from "./policy-schema.js";
 import type { RbacPolicy } from "./policy-schema.js";
 
@@ -141,8 +147,13 @@ export function can(
   verifiedPolicy: VerifiedPolicy | null,
 ): boolean {
   if (!usable(verifiedPolicy)) return false;
-  // Secondary, best-effort deny: a locally-recorded revocation of the subject.
-  if (isRevoked(subjectKid)) return false;
+  // Secondary deny: an AUTHORITATIVE revocation of the subject — self-revoked, or revoked
+  // by this machine's local root or an org trust-anchor signer, with a verifying signature.
+  // (Unauthorized/unsigned records are ignored so a planted line can't deny a real subject.)
+  const orgSigners = policySignersMap(verifiedPolicy!.root);
+  const trustedKeys = new Map<string, string>([...localPublicKeys(), ...orgSigners]);
+  const authorities = new Set<string>([...localRevocationAuthorities(), ...orgSigners.keys()]);
+  if (isRevokedWith(subjectKid, trustedKeys, authorities)) return false;
   const perms = effectivePermissions(subjectKid, verifiedPolicy);
   return perms.some((grant) => permissionMatches(grant, permission));
 }
