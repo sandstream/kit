@@ -22,11 +22,31 @@
  * to fall back off it. Deterministic, offline, never network.
  */
 import { identityId } from "../identity.js";
+import { loadPolicy } from "../policy-doc.js";
 import { resolveKeyStore } from "./resolve.js";
 import { hardwareRequiredByEnv } from "./mandate.js";
 import type { KeyStoreResolution } from "./types.js";
 
 export { hardwareRequiredByEnv } from "./mandate.js";
+
+/** True when the org policy at `root` mandates a hardware identity (`.kit-policy.toml`). */
+export function policyRequiresHardware(root: string): boolean {
+  try {
+    return loadPolicy(root)?.require_hardware_identity === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The EFFECTIVE mandate: the environment mandate OR the org policy mandate. Tightening-only
+ * by construction (an OR) — a `false`/absent policy value can never relax the env mandate,
+ * so a repo-local policy can add the requirement fleet-wide but never disable it. This is
+ * what the enforcement call sites pass as `required`.
+ */
+export function hardwareRequired(root?: string): boolean {
+  return hardwareRequiredByEnv() || (root ? policyRequiresHardware(root) : false);
+}
 
 /**
  * Is the resolved backend genuinely hardware-rooted — i.e. the private key is NOT a

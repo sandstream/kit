@@ -12,7 +12,7 @@
  * keystore and identity primitives without the import cycle identity.ts must avoid.
  */
 import { resolveKeyStore } from "./resolve.js";
-import { assertHardwareIdentity } from "./active.js";
+import { assertHardwareIdentity, hardwareRequired } from "./active.js";
 import {
   identityId,
   revocationStatement,
@@ -36,7 +36,8 @@ export function keystoreRecordRevocation(
   const res = resolveKeyStore({ dir });
   const pub = res.store.publicKeyPem();
   if (!pub) throw new Error("no current identity to sign the revocation");
-  assertHardwareIdentity(res); // hardware mandate: fail closed rather than file-sign
+  // env OR org-policy mandate: fail closed rather than file-sign the revocation.
+  assertHardwareIdentity(res, hardwareRequired(process.cwd()));
   const by = identityId(pub);
   const sig = res.store.sign(revocationStatement(kid, now, reason)).toString("base64");
   const rec: RevocationRecord = { kid, reason, ts: now, by, sig };

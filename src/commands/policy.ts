@@ -28,7 +28,12 @@ import {
 } from "../policy-doc.js";
 import { evaluatePolicy, formatPolicyEval } from "../policy-check.js";
 import { identityId } from "../identity.js";
-import { resolveKeyStore, assertHardwareIdentity, isHardwareRooted } from "../keystore/index.js";
+import {
+  resolveKeyStore,
+  assertHardwareIdentity,
+  isHardwareRooted,
+  hardwareRequired,
+} from "../keystore/index.js";
 
 export async function cmdPolicy(): Promise<boolean> {
   const sub = process.argv[3] ?? "show";
@@ -131,10 +136,11 @@ function policySign(root: string): boolean {
     );
     return false;
   }
-  // Fail closed if a hardware-rooted identity is mandated (KIT_REQUIRE_HARDWARE_IDENTITY)
-  // but the active backend isn't one — never sign the org's standard with a same-UID key.
+  // Fail closed if a hardware-rooted identity is mandated (env OR this policy's own
+  // require_hardware_identity) but the active backend isn't one — never sign the org's
+  // standard with a same-UID key.
   try {
-    assertHardwareIdentity(res);
+    assertHardwareIdentity(res, hardwareRequired(root));
   } catch (e) {
     console.error(`${c.red}✗ ${(e as Error).message}${c.reset}`);
     return false;

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 import type { GovernanceConfig } from "./config.js";
 import { identityId, verifySignature } from "./identity.js";
-import { resolveKeyStore, assertHardwareIdentity } from "./keystore/index.js";
+import { resolveKeyStore, assertHardwareIdentity, hardwareRequired } from "./keystore/index.js";
 
 // ── Tamper-evident hash chain ───────────────────────────────────────────────
 // Each appended line carries `prev` (the previous line's hash) and `hash`
@@ -76,7 +76,8 @@ function signLineHash(hash: string): { kid: string; sig: string } | null {
   const pub = res.store.publicKeyPem();
   if (!pub) return null; // no identity → keyless (fine, backward-compatible)
   try {
-    assertHardwareIdentity(res); // mandate + non-hardware → expected keyless, silently
+    // env OR org-policy mandate; non-hardware under a mandate → expected keyless, silently
+    assertHardwareIdentity(res, hardwareRequired(process.cwd()));
   } catch {
     return null;
   }

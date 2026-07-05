@@ -2,7 +2,12 @@
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
 import { loadOrCreateIdentity, tryLoadIdentity, rotateIdentity, identityId } from "../identity.js";
-import { activeKeyStoreStatus, hardwareRequiredByEnv } from "../keystore/index.js";
+import {
+  activeKeyStoreStatus,
+  hardwareRequiredByEnv,
+  hardwareRequired,
+  policyRequiresHardware,
+} from "../keystore/index.js";
 
 /** `kit identity keystore` — surface the active signing backend, honestly. */
 function identityKeystore(): boolean {
@@ -16,9 +21,14 @@ function identityKeystore(): boolean {
   console.log(`${c.bold}kit identity keystore${c.reset}`);
   console.log(`  backend        ${c.bold}${st.kind}${c.reset}  (${held})`);
   console.log(`  key id         ${st.kid ?? c.dim + "none" + c.reset}`);
-  console.log(
-    `  hardware req'd  ${hardwareRequiredByEnv() ? "yes (KIT_REQUIRE_HARDWARE_IDENTITY)" : "no"}`,
-  );
+  const byEnv = hardwareRequiredByEnv();
+  const byPolicy = policyRequiresHardware(process.cwd());
+  const reqLabel = byEnv
+    ? "yes (KIT_REQUIRE_HARDWARE_IDENTITY)"
+    : byPolicy
+      ? "yes (.kit-policy require_hardware_identity)"
+      : "no";
+  console.log(`  hardware req'd  ${reqLabel}`);
   if (st.hardwareRooted) {
     console.log(
       `  ${c.dim}note: kit can't attest this command fronts real hardware — that (non-exportable key + touch/PIN) is the operator's responsibility${c.reset}`,
@@ -30,8 +40,8 @@ function identityKeystore(): boolean {
       `  ${c.dim}to move the key out of a kit-managed file: KIT_KEYSTORE=command with KIT_KEYSTORE_SIGN_CMD + KIT_KEYSTORE_PUBKEY (TPM/HSM/enclave/YubiKey)${c.reset}`,
     );
   }
-  // Fail closed in the exit code when hardware is mandated but not in force.
-  if (hardwareRequiredByEnv() && !st.hardwareRooted) {
+  // Fail closed in the exit code when hardware is mandated (env OR policy) but not in force.
+  if ((byEnv || byPolicy) && !st.hardwareRooted) {
     console.error(`${c.red}✗ hardware-rooted identity required but not active${c.reset}`);
     return false;
   }
@@ -44,6 +54,14 @@ export async function cmdIdentity(): Promise<boolean> {
   if (sub === "keystore") return identityKeystore();
 
   if (sub === "init") {
+    // Under a hardware mandate (env OR org policy), refuse to mint a same-UID file key —
+    // a clean message rather than the raw guard throw from loadOrCreateIdentity.
+    if (hardwareRequired(process.cwd())) {
+      console.error(
+        `${c.red}✗ hardware/externally-held identity required${c.reset} ${c.dim}(env or .kit-policy require_hardware_identity)${c.reset} — provision the key in your TPM/HSM/enclave and set KIT_KEYSTORE=command; kit won't create a file key`,
+      );
+      return false;
+    }
     const { identity, created } = loadOrCreateIdentity();
     console.log(
       `${c.green}✓${c.reset} identity ${created ? "created" : "already exists"}: ${c.bold}${identity.id}${c.reset}`,
@@ -83,6 +101,12 @@ export async function cmdIdentity(): Promise<boolean> {
   }
 
   if (sub === "rotate") {
+    if (hardwareRequired(process.cwd())) {
+      console.error(
+        `${c.red}✗ hardware/externally-held identity required${c.reset} ${c.dim}(env or .kit-policy require_hardware_identity)${c.reset} — rotate the key in your TPM/HSM/enclave and update KIT_KEYSTORE_PUBKEY; kit won't mint a file key`,
+      );
+      return false;
+    }
     const { identity, previousId } = rotateIdentity();
     console.log(`${c.green}✓${c.reset} rotated identity → ${c.bold}${identity.id}${c.reset}`);
     if (previousId) {

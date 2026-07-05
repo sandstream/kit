@@ -22,10 +22,19 @@ describe("policy-doc — validation", () => {
       require_triage: true,
       required_scanners: ["trivy", "trufflehog"],
       prod_writes_need_approval: false,
+      require_hardware_identity: true,
       min_kit_version: "2.2.0",
       thresholds: { code_health: 7.5 },
     });
     assert.equal(r.ok, true, r.errors.join("; "));
+  });
+
+  it("type-checks require_hardware_identity as a boolean", () => {
+    assert.match(
+      validatePolicy({ version: 1, require_hardware_identity: "yes" }).errors.join(),
+      /require_hardware_identity.*boolean/,
+    );
+    assert.equal(validatePolicy({ version: 1, require_hardware_identity: true }).ok, true);
   });
 
   it("flags a missing / non-integer / future version", () => {

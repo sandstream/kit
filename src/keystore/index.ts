@@ -11,8 +11,11 @@ export { resolveKeyStore } from "./resolve.js";
 export {
   isHardwareRooted,
   hardwareRequiredByEnv,
+  policyRequiresHardware,
+  hardwareRequired,
   assertHardwareIdentity,
   keystoreSign,
   activeKeyStoreStatus,
   type KeyStoreStatus,
 } from "./active.js";
+export { keystoreRecordRevocation } from "./revoke.js";

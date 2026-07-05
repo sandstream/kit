@@ -20,7 +20,7 @@ import { existsSync, readFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { findSecrets } from "../utils/redactSecrets.js";
 import { identityId, verifySignature, localPublicKeys } from "../identity.js";
-import { resolveKeyStore, assertHardwareIdentity } from "../keystore/index.js";
+import { resolveKeyStore, assertHardwareIdentity, hardwareRequired } from "../keystore/index.js";
 import { policySignersMap, hasPolicyAnchor } from "../policy-trust.js";
 
 export type SharedKind = "decision" | "convention" | "how-built" | "status" | "security" | "note";
@@ -239,7 +239,7 @@ export function shareEntry(root: string, input: ShareInput, now: string): Shared
     const res = resolveKeyStore();
     const pub = res.store.publicKeyPem();
     if (pub) {
-      assertHardwareIdentity(res);
+      assertHardwareIdentity(res, hardwareRequired(root));
       entry.kid = identityId(pub);
       entry.sig = res.store.sign(sharedEntryCanonical(entry)).toString("base64");
     }

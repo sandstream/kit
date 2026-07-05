@@ -52,6 +52,13 @@ export interface PolicyDoc {
   prod_writes_need_approval?: boolean;
   /** Minimum kit version this policy expects. */
   min_kit_version?: string;
+  /**
+   * Mandate a hardware/externally-held signing identity fleet-wide: when true, kit refuses
+   * to sign audit/memory/policy/revocation artifacts with the same-UID-readable file key
+   * (same effect as KIT_REQUIRE_HARDWARE_IDENTITY). Tightening-only — it can add the
+   * mandate but a `false`/absent value never RELAXES an environment mandate.
+   */
+  require_hardware_identity?: boolean;
   /** Numeric thresholds (e.g. code_health). */
   thresholds?: PolicyThresholds;
 }
@@ -104,6 +111,7 @@ export function validatePolicy(doc: unknown): PolicyValidation {
   };
   bool("require_triage");
   bool("prod_writes_need_approval");
+  bool("require_hardware_identity");
   if (
     d.required_scanners !== undefined &&
     (!Array.isArray(d.required_scanners) || d.required_scanners.some((s) => typeof s !== "string"))

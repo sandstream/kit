@@ -13,7 +13,8 @@ import {
 } from "../identity.js";
 import { appendAuditEventDirect } from "../audit.js";
 import { keystoreRecordRevocation } from "./revoke.js";
-import { existsSync } from "node:fs";
+import { hardwareRequired, policyRequiresHardware } from "./active.js";
+import { existsSync, writeFileSync } from "node:fs";
 import { signAttestation } from "../check-attestation.js";
 
 // The mandate must be COMPREHENSIVE: with KIT_REQUIRE_HARDWARE_IDENTITY set and only a
@@ -102,6 +103,36 @@ describe("hardware mandate — no file-key signature escapes", () => {
       false,
       "no Ed25519 file key minted under the mandate",
     );
+  });
+
+  it("a .kit-policy require_hardware_identity mandate (no env) forces audit keyless", async () => {
+    loadOrCreateIdentity();
+    // Org policy at the repo root mandates hardware — NO env var set.
+    writeFileSync(join(cwd, ".kit-policy.toml"), "version = 1\nrequire_hardware_identity = true\n");
+    assert.equal(policyRequiresHardware(cwd), true);
+    assert.equal(hardwareRequired(cwd), true, "policy alone triggers the effective mandate");
+    assert.equal(hardwareRequired(idDir), false, "a dir without the policy is unaffected");
+
+    // Audit append runs at `cwd` (where the policy lives) → the entry must be KEYLESS,
+    // never file-signed, even though KIT_REQUIRE_HARDWARE_IDENTITY is unset.
+    const origCwd = process.cwd();
+    process.chdir(cwd);
+    try {
+      assert.equal(
+        await appendAuditEventDirect(
+          { operation: "op-pol", environment: "dev", success: true },
+          { cwd },
+        ),
+        true,
+      );
+    } finally {
+      process.chdir(origCwd);
+    }
+    const line = JSON.parse(
+      readFileSync(join(cwd, ".kit-audit.jsonl"), "utf-8").trim().split("\n").at(-1)!,
+    ) as { operation: string; sig?: string };
+    assert.equal(line.operation, "op-pol");
+    assert.equal(line.sig, undefined, "policy-mandated entry must not carry a file-key signature");
   });
 
   it("recordRevocation fails closed under the mandate (no file-key revocation)", () => {
