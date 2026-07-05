@@ -23,8 +23,11 @@ import {
   installInstallGateCursor,
   installInstallGateOpenCode,
   installInstallGateCline,
+  kitGateInvocation,
+  kitGateArgv,
   READONLY_KIT_PERMISSIONS,
 } from "./agent-config.js";
+import { kitWrapperPath, kitBinDir } from "./kit-wrapper.js";
 import { statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -391,6 +394,57 @@ describe("installInstallGate", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+describe("kitGateInvocation / kitGateArgv (prefer the self-healing wrapper)", () => {
+  // The gate hook should point at the stable ~/.kit/bin/kit wrapper rather than
+  // bake a volatile absolute node path into every agent's config: the wrapper
+  // restores the tool PATH a non-login hook shell drops (so triage's python3/git
+  // resolve) and is the single place kit refreshes if node moves — one stable path
+  // vs. a per-agent node path that can go stale and make the hook fail to spawn.
+  const withHome = (fn: (home: string) => void) => {
+    const prev = process.env.HOME;
+    const home = mkdtempSync(join(tmpdir(), "kit-gatehome-"));
+    process.env.HOME = home;
+    try {
+      fn(home);
+    } finally {
+      if (prev === undefined) delete process.env.HOME;
+      else process.env.HOME = prev;
+      rmSync(home, { recursive: true, force: true });
+    }
+  };
+
+  it(
+    "prefers the self-healing wrapper when one is present",
+    { skip: process.platform === "win32" },
+    () => {
+      withHome((home) => {
+        const wrapper = kitWrapperPath(home);
+        mkdirSync(kitBinDir(home), { recursive: true });
+        writeFileSync(wrapper, '#!/bin/sh\nexec kit "$@"\n');
+        assert.equal(kitGateInvocation(), `${wrapper} gate-bash`);
+        assert.deepEqual(kitGateArgv(), [wrapper, "gate-bash"]);
+      });
+    },
+  );
+
+  it(
+    "falls back to an absolute node+cli when no wrapper exists",
+    { skip: process.platform === "win32" },
+    () => {
+      withHome(() => {
+        // fresh HOME → no ~/.kit/bin/kit → must use the resolved node+cli form, never a bare `kit`
+        const inv = kitGateInvocation();
+        assert.ok(inv.startsWith(process.execPath), "starts with the absolute node path");
+        assert.ok(inv.endsWith("gate-bash"));
+        assert.ok(!inv.startsWith("kit "), "never the PATH-dependent bare form when cli resolves");
+        const argv = kitGateArgv();
+        assert.equal(argv[0], process.execPath);
+        assert.equal(argv[argv.length - 1], "gate-bash");
+      });
+    },
+  );
 });
 
 describe("installInstallGateCodex", () => {

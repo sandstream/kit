@@ -52,6 +52,15 @@ fail-closed throughout.
   false-blocked because the stale copy fetched the literal `pkg@1.2.3` name → 404). The
   installed copy is now version-stamped and refreshed when it was written by an older kit.
   `src/triage.ts`.
+- **Install-gate hooks now route through the self-healing wrapper (found by dogfooding).**
+  `kit agent-config --install-gate` wired each agent's PreToolUse hook with a baked
+  absolute `<node> <cli.js> gate-bash`, diverging from the memory hooks (which prefer the
+  stable `~/.kit/bin/kit` wrapper). Two costs: the gate ran in a non-login hook shell
+  without the tool PATH, so triage's `python3`/`git` subprocesses could fail (fail-closed,
+  but spamming false-blocks); and a baked node path frozen into a config goes stale if node
+  moves (nvm/volta/fnm) or kit relocates, so the hook could fail to spawn. The gate now
+  prefers the wrapper — one stable path kit refreshes in place — and `installAllInstallGates`
+  writes the wrapper first (skipped in read-only mode). `src/agent-config.ts`.
 
 ### Security — red-team critical fixes
 
