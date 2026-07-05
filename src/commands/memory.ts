@@ -1190,6 +1190,24 @@ async function memContext(): Promise<boolean> {
   return true;
 }
 
+/**
+ * Mitigation context for a plain `--injection` scan with high-confidence findings.
+ * The scan reads EVERY row regardless of quarantine state, so on a store that already
+ * ran --quarantine the same high list reappears and reads as "still exposed" — but
+ * quarantined rows are excluded from recall and cannot be re-injected. We surface that
+ * state and point at the fix rather than SUPPRESSING findings: an allowlist on an
+ * injection scanner would be a bypass (an attacker's "just discussing…" is the payload).
+ */
+function printInjectionMitigation(totalQuarantined: number): void {
+  const already =
+    totalQuarantined > 0
+      ? `${c.dim}${totalQuarantined} message(s) already quarantined (excluded from recall). ${c.reset}`
+      : "";
+  console.log(
+    `${already}${c.dim}Run ${c.reset}kit memory scan --injection --quarantine${c.dim} to exclude high-confidence rows from recall.${c.reset}`,
+  );
+}
+
 async function memScan(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
   // --injection scans for prompt-injection patterns (the store is replayed into
@@ -1238,6 +1256,9 @@ async function memScan(): Promise<boolean> {
     }
   } else {
     console.log(`${c.green}✓${c.reset} no high-confidence ${noun}s`);
+  }
+  if (injectionMode && !doQuarantine && high.length) {
+    printInjectionMitigation(totalQuarantined);
   }
   if (heuristic.length) {
     const showAll = hasFlag(process.argv, "--all");
