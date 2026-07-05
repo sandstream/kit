@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security — PII parity: detect a Swedish personnummer at rest
+
+- **`findSecrets` now detects a Swedish personnummer (Luhn-validated).** kit's patterns
+  were secret-focused and caught no PII (the ruvnet/AIDefence research flagged the gap).
+  A personnummer carries a Luhn check digit, so detection is high-precision — it validates
+  the check digit and a plausible date rather than matching a bare 10/12-digit run, so a
+  timestamp/id/phone number doesn't trip it. Matched values are masked (never echoed), so
+  `kit memory scan` surfaces a personnummer leaked into the store without re-leaking it.
+  `src/utils/redactSecrets.ts`.
+
+### Security — MCP `kit_run` tokenization
+
+- **`kit_run` tokenizes like a shell instead of a naive whitespace split.** `command.split(/\s+/)`
+  turned `git commit -m "a b"` into the wrong argv and silently ran a different command. A new
+  `shellSplit` util tokenizes POSIX-style (quotes, escapes) without evaluating anything (argv is
+  run via execFile, no shell); an unterminated quote is refused, not mis-split. Same fix applied
+  to the `.kit.toml [setup]` command runner. (The other holistic-review MCP items — mutating tools
+  routed through governance/audit, and a single `computeCheckVerdict` shared by CLI and MCP — were
+  already in place.) `src/utils/shellSplit.ts`, `src/mcp-server.ts`, `src/cli.ts`.
+
 ### Security — `kit check` now gates on a poisoned memory store (R3)
 
 - **`kit check` scans the memory store for a replayable prompt-injection.** The store is
