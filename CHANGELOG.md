@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security — self-healing scanner preflight: install a missing scanner instead of only failing (found by dogfooding)
+
+- **`kit check` / `kit ci` now auto-provision a declared-but-missing scanner before
+  scanning.** A missing scanner shouldn't just fail the gate — in an ephemeral
+  environment it should be installed so the scan actually runs. `autoInstallScanners`
+  installs any security scanner that is DECLARED in `.kit.toml [tools]` but not yet
+  present (`semgrep`, `socket`, `trufflehog`, `trivy`, `osv-scanner`), then the scan
+  runs against it. It is the runtime complement to `kit install` at env-setup (which
+  provisions the same tools); this backstops the case where setup did not run. Only
+  kit's known scanner refs are touched, and only when already declared, so it can
+  never pull in a tool the project didn't opt into. Triage-gated and read-only-aware
+  (via `installTools`), best-effort (a failed install leaves the check to fail closed),
+  skipped when air-gapped, and opt-out via `--no-auto-install` / `KIT_CHECK_NO_AUTOINSTALL`.
+  `src/install.ts`, `src/cli.ts`.
+
+### Security — scanner-health strict: a missing scanner no longer passes as a warning (found by dogfooding)
+
+- **`didNotRun` was missing on tool-absent scanner branches.** `check-security`'s
+  contract is that a check which could not RUN because its tool is absent is
+  `didNotRun` and FAILS the strict gate (`kit ci`) — "green means every check
+  actually ran". Five branches violated it, returning a plain `warn`: `pip-audit`
+  (with a `requirements.txt` present), `guarddog` (opted in, manifest present),
+  `trivy` container / IaC / Maven scans (Dockerfile / Compose / Terraform / pom
+  present), and the `license check` (neither `license-checker` nor `npx`
+  available). A repo with Dockerfiles but no trivy therefore passed strict CI as a
+  mere warning — a scanner-health false-green. All five now set `didNotRun`, so an
+  unscanned-because-uninstalled scanner fails strict (still downgradable with
+  `--lenient` / `KIT_CI_LENIENT`). Local `kit check` output is unchanged; opt-in and
+  not-applicable cases remain honest skips. `src/check-security.ts`.
+
 ### Security — supply-chain gate, secrets/audit & control-plane hardening (backlog B1–B5)
 
 A deep MEDIUM/LOW security sweep, each area hardened through repeated adversarial

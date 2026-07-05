@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { installTools, miseErrorDetail, type InstallDeps } from "./install.js";
+import {
+  installTools,
+  ensureScannersInstalled,
+  miseErrorDetail,
+  type InstallDeps,
+} from "./install.js";
 
 function makeDeps(overrides: Partial<InstallDeps> = {}): InstallDeps {
   return {
@@ -159,6 +164,89 @@ describe("installTools", () => {
     assert.equal(gateCalled, false); // gate skipped entirely
     // post-install verify re-checks; with stub checkTools it stays not-ok → failed, but mise DID run
     assert.notEqual(results[0].action, "blocked");
+  });
+});
+
+describe("ensureScannersInstalled (self-healing check preflight)", () => {
+  it("returns [] when disabled, air-gapped, or no tools (no install attempted)", async () => {
+    let checked = false;
+    const deps = makeDeps({
+      checkTools: async () => {
+        checked = true;
+        return [];
+      },
+    });
+    assert.deepEqual(
+      await ensureScannersInstalled({ semgrep: "latest" }, { disabled: true }, deps),
+      [],
+    );
+    assert.deepEqual(
+      await ensureScannersInstalled({ semgrep: "latest" }, { airGapped: true }, deps),
+      [],
+    );
+    assert.deepEqual(await ensureScannersInstalled(undefined, {}, deps), []);
+    assert.equal(checked, false, "no gating path should have touched checkTools");
+  });
+
+  it("installs ONLY declared scanner refs — never other project tools", async () => {
+    const seen = new Set<string>();
+    const deps = makeDeps({
+      checkTools: async (tools) => {
+        for (const k of Object.keys(tools)) seen.add(k);
+        return Object.keys(tools).map((name) => ({
+          name,
+          required: "latest",
+          installed: null,
+          ok: false,
+        }));
+      },
+      miseInstall: async () => ({ ok: true, detail: "installed" }),
+    });
+    await ensureScannersInstalled(
+      {
+        node: "22", // not a scanner → must be ignored
+        semgrep: "latest", // scanner
+        "aqua:aquasecurity/trivy": "latest", // scanner
+        "some/random-tool": "1", // not a scanner → ignored
+      },
+      {},
+      deps,
+    );
+    assert.deepEqual(
+      [...seen].sort(),
+      ["aqua:aquasecurity/trivy", "semgrep"],
+      "only known scanner refs reach installTools",
+    );
+  });
+
+  it("returns [] when the project declares no scanner tools", async () => {
+    const deps = makeDeps({
+      checkTools: async () => {
+        throw new Error("should not be called — nothing to install");
+      },
+    });
+    assert.deepEqual(await ensureScannersInstalled({ node: "22", python: "3.12" }, {}, deps), []);
+  });
+
+  it("is triage-gated: a blocked scanner is not installed (inherits installTools)", async () => {
+    let miseCalled = false;
+    const deps = makeDeps({
+      checkTools: async () => [
+        { name: "aqua:aquasecurity/trivy", required: "latest", installed: null, ok: false },
+      ],
+      gateInstall: async (tool) => ({ tool, decision: "blocked", reason: "typosquat" }),
+      miseInstall: async () => {
+        miseCalled = true;
+        return { ok: true, detail: "installed" };
+      },
+    });
+    const results = await ensureScannersInstalled(
+      { "aqua:aquasecurity/trivy": "latest" },
+      {},
+      deps,
+    );
+    assert.equal(results[0]?.action, "blocked");
+    assert.equal(miseCalled, false);
   });
 });
 
