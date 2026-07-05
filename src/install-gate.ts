@@ -580,7 +580,17 @@ function hasExecCallFlag(tokens: string[]): boolean {
   const isExecRunner =
     /^(npm|pnpm|yarn|bun)$/.test(tokens[0] ?? "") && /^(exec|dlx|x)$/.test(tokens[1] ?? "");
   if (!isExecRunner) return false;
-  return tokens.some((t) => t === "-c" || t === "--call" || /^(-c|--call)=/.test(t));
+  // The runner parses `-c`/`--call` only BEFORE the first positional (the command). After
+  // the command appears, a `-c` belongs to THAT tool (`npm exec jest -c jest.config.js` —
+  // `-c` is jest's; `jest` is a real fetched package that must still be gated), so stop.
+  for (let i = 2; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t === "-c" || t === "--call" || /^(-c|--call)=/.test(t)) return true;
+    if (t === "--") return false; // everything after `--` is the command + its own args
+    if (!t.startsWith("-")) return false; // first positional (the command) reached
+    if (/^(-p|--package|--with|--spec|--from)$/.test(t)) i++; // skip a value-consuming flag
+  }
+  return false;
 }
 
 /**

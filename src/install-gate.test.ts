@@ -559,6 +559,14 @@ describe("parseInstallCommand — round-5 bypass closes", () => {
     // --package alongside -c: the package is still gated, the call string recursed
     assert.deepEqual(parseInstallCommand('npm exec --package=evil -c "cmd"').refs, ["npm:evil"]);
   });
+
+  it("a -c AFTER the exec command is the TOOL's flag — the package is still gated", () => {
+    // `npm exec jest -c jest.config.js`: -c belongs to jest; jest is a fetched package that
+    // must NOT be suppressed. Only a -c/--call BEFORE the command is npm's shell-call flag.
+    assert.deepEqual(parseInstallCommand("npm exec jest -c jest.config.js").refs, ["npm:jest"]);
+    assert.deepEqual(parseInstallCommand("npm exec eslint . -c .eslintrc").refs, ["npm:eslint"]);
+    assert.deepEqual(parseInstallCommand("npm exec --package foo -c bar").refs, ["npm:foo"]);
+  });
 });
 
 // Fake triage: pass everything except names in `blocklist`.
