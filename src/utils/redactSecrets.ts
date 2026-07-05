@@ -165,7 +165,11 @@ export const SECRET_PATTERNS: RedactPattern[] = [
   // The `kv-secret` class stops at the `:`/`@`, so these slipped through. Redact
   // ONLY the password and keep the scheme/user/host as diagnostic context.
   {
-    re: /\b([a-z][a-z0-9+.-]*:\/\/[^\s:@/]*:)[^\s@/]{3,}@/gi,
+    // Scheme bounded to {0,15} (real URI schemes are ≤~11 chars): an unbounded `[a-z0-9+.-]*`
+    // rescanned a long hyphen/dot run from every start looking for `://`, giving O(n²)
+    // backtracking on hostile input (a DoS on the scanner / status redaction hot path). The
+    // userinfo/password runs are capped too so no single segment can drive quadratic cost.
+    re: /\b([a-z][a-z0-9+.-]{0,15}:\/\/[^\s:@/]{0,128}:)[^\s@/]{3,256}@/gi,
     label: "url-credentials",
     replacement: "$1[REDACTED]@",
   },
@@ -174,7 +178,7 @@ export const SECRET_PATTERNS: RedactPattern[] = [
   // The `user:pw@` matcher above stops at the `:`; this one requires a colon-free 16+ char
   // userinfo (a real username is short and wouldn't be a secret) and keeps the scheme.
   {
-    re: /\b([a-z][a-z0-9+.-]*:\/\/)[A-Za-z0-9._~%+-]{16,}@/gi,
+    re: /\b([a-z][a-z0-9+.-]{0,15}:\/\/)[A-Za-z0-9._~%+-]{16,256}@/gi,
     label: "url-token-userinfo",
     replacement: "$1[REDACTED]@",
   },

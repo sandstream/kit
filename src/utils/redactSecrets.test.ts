@@ -115,6 +115,19 @@ describe("redactSecrets — B3 coverage (PEM / cloud / url-token)", () => {
     assert.equal(redactSecrets("https://peter@example.com"), "https://peter@example.com");
   });
 
+  it("URL patterns are ReDoS-safe on a long hyphen/dot run with no scheme", () => {
+    // The unbounded scheme run `[a-z0-9+.-]*` rescanned from every start looking for `://`
+    // → O(n²). Bounding the scheme keeps it linear.
+    const payload = "a-".repeat(100000); // 200 KB, no `://`
+    const t0 = process.hrtime.bigint();
+    redactSecrets(payload);
+    findSecrets(payload);
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    assert.ok(ms < 200, `hyphen-run scanned in ${ms.toFixed(0)}ms — possible ReDoS`);
+    // real connection strings still redact (incl. a long-ish scheme like mongodb+srv)
+    assert.match(redactSecrets("mongodb+srv://u:passwordvalue@c.mongodb.net"), /\[REDACTED\]@/);
+  });
+
   it("PEM matcher is ReDoS-safe on an unterminated near-miss body", () => {
     const payload = "-----BEGIN RSA PRIVATE KEY-----" + "A".repeat(200000);
     const t0 = process.hrtime.bigint();

@@ -380,6 +380,26 @@ describe("audit sink — secret redaction (B3)", () => {
     }
   });
 
+  it("redacts secrets in top-level operation/environment too (command lines)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-audit-openv-"));
+    try {
+      await appendAuditEventDirect(
+        {
+          operation: `run: git push https://ghp_${"a".repeat(36)}@github.com`,
+          environment: "prod",
+          success: true,
+        },
+        { cwd: dir },
+      );
+      const raw = readFileSync(join(dir, ".kit-audit.jsonl"), "utf8");
+      assert.ok(!raw.includes("ghp_a"), "token in operation must be redacted");
+      assert.ok(raw.includes("[REDACTED]"));
+      assert.equal(verifyAuditChain(raw).ok, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("a __proto__ metadata key does not pollute Object.prototype during redaction", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-audit-proto-"));
     try {

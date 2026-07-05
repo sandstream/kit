@@ -34,6 +34,11 @@ function redactAuditValue(v: unknown): unknown {
 function redactAuditEvent(event: AuditEvent): AuditEvent {
   return {
     ...event,
+    // operation strings commonly embed a command line, so a token can land there;
+    // environment is redacted too for the same reason. Both are cheap and normal values
+    // ("secrets.generate", "prod") never match a credential pattern → no false redaction.
+    operation: redactSecrets(event.operation),
+    environment: redactSecrets(event.environment),
     error: event.error ? redactSecrets(event.error) : event.error,
     metadata: event.metadata
       ? (redactAuditValue(event.metadata) as Record<string, unknown>)
@@ -481,6 +486,8 @@ export async function logAuditEvent(
       >;
     }
     if (auditEvent.error) auditEvent.error = redactSecrets(auditEvent.error);
+    auditEvent.operation = redactSecrets(auditEvent.operation);
+    auditEvent.environment = redactSecrets(auditEvent.environment);
   }
 
   // Write to local JSONL file (hash-chained for tamper-evidence). The boolean
