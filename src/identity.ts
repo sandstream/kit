@@ -143,9 +143,20 @@ export function localPublicKeys(dir?: string): Map<string, string> {
   const map = new Map<string, string>();
   const base = identityDir(dir);
   const add = (rec: Identity | null) => {
-    if (rec && typeof rec.id === "string" && typeof rec.publicKey === "string") {
-      map.set(rec.id, rec.publicKey);
+    if (!rec || typeof rec.id !== "string" || typeof rec.publicKey !== "string") return;
+    // A kid IS the fingerprint of its public key, so re-derive and require the match.
+    // Without this, a writer-only attacker could drop a crafted identity.json.*.bak
+    // (or overwrite the record) claiming `{id: <a victim/authority kid>, publicKey:
+    // <attacker key>}` — poisoning this kid→pubkey map so a forged revocation "by"
+    // that kid verifies against the attacker's key. Binding kid==fingerprint(pub)
+    // makes the map unspoofable: the attacker can't produce a key whose fingerprint
+    // is someone else's kid.
+    try {
+      if (identityId(rec.publicKey) !== rec.id) return;
+    } catch {
+      return; // unparseable public key → skip
     }
+    map.set(rec.id, rec.publicKey);
   };
   add(tryLoadIdentity(dir));
   try {

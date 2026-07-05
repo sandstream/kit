@@ -137,6 +137,31 @@ describe("identity", () => {
     }
   });
 
+  it("localPublicKeys rejects a spoofed .bak whose id != fingerprint(publicKey)", () => {
+    const d = mkdtempSync(join(tmpdir(), "kit-keypoison-"));
+    try {
+      process.env.KIT_IDENTITY_DIR = d;
+      const me = loadOrCreateIdentity().identity;
+      // Attacker drops a .bak claiming to BE `me` (same kid) but carrying THEIR key,
+      // trying to poison the kid→pubkey map so a forged revocation "by me" verifies.
+      const attacker = generateKeyPairSync("ed25519").publicKey.export({
+        type: "spki",
+        format: "pem",
+      }) as string;
+      writeFileSync(
+        join(d, "identity.json.2099-01-01T00-00-00-000Z.bak"),
+        JSON.stringify({ id: me.id, algo: "ed25519", publicKey: attacker, createdAt: "x" }),
+      );
+      // The map must still bind `me.id` to the REAL key (fingerprint check rejects the
+      // spoof), so the attacker's key can never masquerade as an authority.
+      assert.equal(localPublicKeys().get(me.id), me.publicKey);
+      assert.notEqual(localPublicKeys().get(me.id), attacker);
+    } finally {
+      process.env.KIT_IDENTITY_DIR = dir;
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
   it("does NOT honor a planted, unsigned, or unauthorized revocation (authority model)", () => {
     const d = mkdtempSync(join(tmpdir(), "kit-revoke-dos-"));
     try {
