@@ -478,6 +478,56 @@ describe("parseInstallCommand — round-3 bypass closes", () => {
   });
 });
 
+describe("parseInstallCommand — round-4 bypass closes", () => {
+  it("a -c glued into a shell short-flag cluster is still recursed (bash -lc / -xc / -cl)", () => {
+    // `bash -lc '…'` (login) is the canonical cron/CI form — must not slip the gate.
+    for (const cmd of [
+      'bash -lc "npm i evil"',
+      'sh -xc "npm i evil"',
+      'bash -ic "npm i evil"',
+      'sh -uxc "npm i evil"',
+      'bash -cl "npm i evil"',
+      '/usr/bin/env -S bash -lc "npm i evil"',
+    ]) {
+      assert.deepEqual(parseInstallCommand(cmd).refs, ["npm:evil"], cmd);
+    }
+    // still NOT a shell invocation → not gated
+    assert.equal(parseInstallCommand('git commit -m "use -c flag"').isInstall, false);
+    assert.equal(parseInstallCommand("git commit -c HEAD").isInstall, false);
+  });
+
+  it("an ANSI-C / locale $'…' shell -c argument is recursed", () => {
+    assert.deepEqual(parseInstallCommand("bash -c $'npm i evil'").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand('bash -c $"pip install evil"').refs, ["pip:evil"]);
+  });
+
+  it("npm ci|clean-install with a registry redirect fails closed; bare ci is benign", () => {
+    for (const cmd of ["npm ci --registry evil", "npm clean-install --registry evil"]) {
+      const p = parseInstallCommand(cmd);
+      assert.equal(p.isInstall, true, cmd);
+      assert.ok(
+        p.unverifiable.some((u) => u.startsWith("alt-registry:")),
+        cmd,
+      );
+    }
+    assert.equal(parseInstallCommand("npm ci").isInstall, false);
+    assert.equal(parseInstallCommand("npm clean-install").isInstall, false);
+  });
+
+  it("pip requirement-flag skipping does NOT eat an npm/yarn positional package", () => {
+    // `-r`/`-c`/`-e` are pip file-flags; on npm they aren't valueless-consuming, so the
+    // package after them must still be gated (previously dropped by the global compactor).
+    assert.deepEqual(parseInstallCommand("npm i -e evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("npm i -c evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("npm i -r evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("yarn add -e evil").refs, ["npm:evil"]);
+    // pip requirement files are still correctly skipped (not mis-triaged as packages)
+    const r = parseInstallCommand("pip install -r requirements.txt");
+    assert.deepEqual(r.refs, []);
+    assert.deepEqual(r.unverifiable, []);
+  });
+});
+
 // Fake triage: pass everything except names in `blocklist`.
 function fakeDeps(blocklist: string[] = []): GateDeps {
   return {

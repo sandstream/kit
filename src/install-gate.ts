@@ -211,12 +211,14 @@ function nestedCommands(command: string): string[] {
   const out: string[] = [];
   for (const m of command.matchAll(/\$\(([^()]{1,2000})\)/g)) out.push(m[1]);
   for (const m of command.matchAll(/`([^`]{1,2000})`/g)) out.push(m[1]);
-  // `sh -c '…'` / `bash -euo pipefail -c "…"` — the quoted arg to a SHELL's `-c` is executed,
-  // so recurse into it. Anchored to a shell binary (optionally path-qualified, with flags
-  // between) rather than any `-c` anywhere: a bare `-c` in an unrelated command's quoted
-  // argument (`git commit -m "…-c…"`) isn't a shell invocation and must not be gated.
+  // `sh -c '…'` / `bash -lc "…"` / `bash -euo pipefail -c $'…'` — the quoted arg to a SHELL's
+  // `-c` is executed, so recurse into it. Anchored to a shell binary (optionally path-qualified,
+  // with flags between) rather than any `-c` anywhere: a bare `-c` in an unrelated command's
+  // quoted argument (`git commit -m "…-c…"`) isn't a shell invocation and must not be gated.
+  // `-[A-Za-z]*c[A-Za-z]*` matches `-c` glued into a short-flag cluster (`-lc`/`-xc`/`-cl`,
+  // the common cron/CI form); `\$?` accepts an ANSI-C/locale `$'…'`/`$"…"` command arg.
   for (const m of command.matchAll(
-    /(?:^|\s)(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|ash|fish)(?:\s+\S+)*?\s+-c\s+(['"])([\s\S]{1,2000}?)\1/g,
+    /(?:^|\s)(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|ash|fish)(?:\s+\S+)*?\s+-[A-Za-z]*c[A-Za-z]*\s+\$?(['"])([\s\S]{1,2000}?)\1/g,
   )) {
     out.push(m[2]);
   }
@@ -380,8 +382,13 @@ const MATCHERS: Matcher[] = [
     argStart: (t) => {
       const bin = t[0];
       // install-test|it also install the named package (then run tests); update|upgrade
-      // re-fetch untriaged tarballs at attacker-chosen versions — all gated like install.
-      if (bin === "npm" && /^(install|i|add|install-test|it|update|upgrade)$/.test(t[1] ?? ""))
+      // re-fetch untriaged tarballs at attacker-chosen versions; ci|clean-install do a full
+      // lockfile install (running postinstall) — all gated like install. `ci` takes no
+      // package operand, so it only matters for the bare-reinstall + registry-redirect check.
+      if (
+        bin === "npm" &&
+        /^(install|i|add|install-test|it|update|upgrade|ci|clean-install)$/.test(t[1] ?? "")
+      )
         return 2;
       if (
         (bin === "pnpm" || bin === "yarn" || bin === "bun") &&
@@ -487,6 +494,11 @@ export function parseInstallCommand(command: string): InstallProbe {
  * `-p/--package` detection read the FULL tokens/raw, so dropping flags here loses nothing.)
  */
 function compactPositionals(tokens: string[]): string[] {
+  // `-r`/`-c`/`-e` requirement flags are PIP concepts whose value is a file, not a package.
+  // Skipping their value only makes sense for a pip-family command — on an npm/yarn install
+  // those aren't valueless flags, so eating the next token would drop a real package
+  // (`npm i -e evil` must still gate `evil`). Source/package-value flags exist in both.
+  const pipFamily = /^(pip|pip3|pipx|uv|uvx|poetry|pdm|python|python3)$/.test(tokens[0] ?? "");
   const pos: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i];
@@ -500,7 +512,11 @@ function compactPositionals(tokens: string[]): string[] {
       if (glued) pos.push(glued[1]);
       continue;
     }
-    if (SOURCE_FLAG_RE.test(tok) || REQUIREMENT_FLAG_RE.test(tok) || VALUE_PKG_FLAG_RE.test(tok)) {
+    if (
+      SOURCE_FLAG_RE.test(tok) ||
+      VALUE_PKG_FLAG_RE.test(tok) ||
+      (pipFamily && REQUIREMENT_FLAG_RE.test(tok))
+    ) {
       i++; // skip the flag AND its value token
       continue;
     }
