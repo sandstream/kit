@@ -578,6 +578,48 @@ describe("parseInstallCommand — round-5 bypass closes", () => {
     assert.deepEqual(parseInstallCommand("npm i @scope/pkg@1").refs, ["npm:@scope/pkg"]);
   });
 
+  it("version-pinned exec -c recurses the shell string (corepack pnpm@9 exec -c)", () => {
+    // regression: the @version strip made the segment matcher suppress the positional, so the
+    // nestedCommands exec-call recursion must also allow @version or the string is never seen.
+    for (const cmd of [
+      'corepack pnpm@9 exec -c "npm i evil"',
+      'corepack pnpm@9.1.0 exec -c "npm i evil"',
+      'corepack yarn@1 exec -c "npm i evil"',
+      'pnpm@9 exec -c "npm i evil"',
+      'bun@1 x -c "npm i evil"',
+    ]) {
+      assert.ok(parseInstallCommand(cmd).refs.includes("npm:evil"), cmd);
+    }
+    assert.ok(
+      parseInstallCommand('corepack pnpm@9 exec --call "pip install evil"').refs.includes(
+        "pip:evil",
+      ),
+    );
+  });
+
+  it("a runner whose first positional is a package manager recurses the inner install", () => {
+    // `npx npm i evil` runs npm's install for real; the runner alone would gate only npm:npm.
+    for (const cmd of [
+      "npx npm i evil",
+      "pnpm exec npm i evil",
+      "yarn dlx npm i evil",
+      "npm exec npm i evil",
+      "corepack pnpm@9 exec yarn add evil",
+      "npx pip install evil",
+    ]) {
+      assert.ok(
+        parseInstallCommand(cmd).refs.includes("npm:evil") ||
+          parseInstallCommand(cmd).refs.includes("pip:evil"),
+        cmd,
+      );
+    }
+    // a normal runner fetching a real tool is unaffected (gates the tool, no over-trigger)
+    assert.deepEqual(parseInstallCommand("npx tsc --build").refs, ["npm:tsc"]);
+    assert.deepEqual(parseInstallCommand("npx create-react-app myapp").refs, [
+      "npm:create-react-app",
+    ]);
+  });
+
   it("exec -c/--call shell string is recursed, not mis-gated as a package", () => {
     for (const cmd of [
       'npm exec -c "npm i evil"',

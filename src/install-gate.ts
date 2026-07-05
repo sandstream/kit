@@ -247,11 +247,23 @@ function nestedCommands(command: string): string[] {
   // `npm|pnpm|yarn|bun exec|dlx|x  -c/--call '<shell string>'` runs the string in a shell
   // (with node_modules/.bin on PATH), so an install inside it really executes — recurse.
   // The runner path itself gates nothing positional here (hasExecCallFlag), so the package
-  // is only seen via this recursion.
+  // is only seen via this recursion. `(?:@\S+)?` allows corepack's version-pinned dispatch
+  // (`corepack pnpm@9 exec -c …`) — binBase strips the @version for the segment matcher, so
+  // this recursion must match it too or the string is neither gated nor re-scanned.
   for (const m of command.matchAll(
-    /(?:npm|pnpm|yarn|bun)\s+(?:exec|dlx|x)\b[^\n]*?\s(?:--call|-c)(?:=|\s)\s*(['"])([\s\S]{1,2000}?)\1/g,
+    /(?:npm|pnpm|yarn|bun)(?:@\S+)?\s+(?:exec|dlx|x)\b[^\n]*?\s(?:--call|-c)(?:=|\s)\s*(['"])([\s\S]{1,2000}?)\1/g,
   )) {
     out.push(m[2]);
+  }
+  // A package runner whose FIRST positional is itself a package manager
+  // (`npx npm i evil`, `pnpm exec npm i evil`, `corepack pnpm@9 exec yarn add evil`) runs that
+  // manager's install for real, but the runner path would gate only the manager name (npm:npm,
+  // reputable → PASS) and miss the real package. Recurse from the inner manager so its args are
+  // scanned as a command. Contrived but a genuine bypass; fail-closed.
+  for (const m of command.matchAll(
+    /(?:npx|bunx|(?:npm|pnpm|yarn|bun)(?:@\S+)?\s+(?:exec|dlx|x))\s+((?:npm|pnpm|yarn|bun|pip|pip3|pipx|uv|uvx|python|python3|poetry|pdm)(?:@\S+)?\s[^\n]{1,2000})/g,
+  )) {
+    out.push(m[1]);
   }
   return out;
 }
