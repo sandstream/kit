@@ -34,7 +34,11 @@ export interface InstallProbe {
 // Command separators. Includes single `&` (job-control background) and `|&` so an
 // install placed AFTER a background/`&` op is still its own segment — `: & npm i
 // evil` and `true |& npm i evil` previously left the install non-leading and unseen.
-const SEGMENT_SPLIT = /\s*(?:&&|\|\||;|\||&|\n)\s*/;
+// NO surrounding `\s*`: padding the separator with `\s*` makes String.split O(N²) on a
+// long whitespace run (each start position greedily consumes the run, fails, backtracks) —
+// a hot-path DoS on a whitespace-padded command. `scanSegment` trims each segment, so the
+// split output is byte-identical without the padding, and matching is linear.
+const SEGMENT_SPLIT = /&&|\|\||;|\||&|\n/;
 
 // Leading shell keywords / grouping tokens that precede a real command without
 // changing it. Stripped like PREFIX_BINS so `then npm i evil` / `{ npm i evil; }` /

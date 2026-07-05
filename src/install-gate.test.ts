@@ -636,6 +636,17 @@ describe("parseInstallCommand — round-5 bypass closes", () => {
     assert.deepEqual(p.refs, ["npm:sometool"]);
   });
 
+  it("segment splitting is linear on whitespace-padded input (no O(N^2) blowup)", () => {
+    // A long leading whitespace run made SEGMENT_SPLIT's `\s*` padding quadratic (~30s at
+    // 200k). Detection stays correct; this guards the timing.
+    const cmd = " ".repeat(200000) + "npm i evil";
+    const start = process.hrtime.bigint();
+    const p = parseInstallCommand(cmd);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    assert.ok(ms < 500, `parse took ${ms}ms — possible O(N^2) regression`);
+    assert.deepEqual(p.refs, ["npm:evil"]);
+  });
+
   it("exec -c/--call shell string is recursed, not mis-gated as a package", () => {
     for (const cmd of [
       'npm exec -c "npm i evil"',
