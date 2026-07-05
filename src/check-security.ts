@@ -1692,6 +1692,12 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
   results.push(await checkDiskEncryption());
   results.push(checkMemoryDirSafety());
 
+  // Inbound integration: fold any third-party findings a partner tool emitted to
+  // `.kit-scan-results.jsonl` into the verdict. No file → no-op. Can only escalate
+  // (fail/warn), never green the gate — see external-findings.ts.
+  const { checkExternalFindings } = await import("./external-findings.js");
+  results.push(...(await checkExternalFindings()));
+
   // Attach a rule citation (CWE/OWASP) to each finding whose check is mapped in
   // the local rules catalog. Deterministic lookup, no network. Unmapped checks
   // pass through unchanged.
