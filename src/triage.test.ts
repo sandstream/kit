@@ -218,4 +218,21 @@ describe("installBundledTriageSkill (self-bootstrapping the gate)", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("stamps a version marker so a stale copy can be detected + refreshed", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "kit-triage-"));
+    const target = resolve(dir, ".claude/skills/triage");
+    try {
+      await installBundledTriageSkill(target);
+      // the install writes a .kit-skill-version stamp (drives the upgrade-refresh path in
+      // ensureTriageScript — without it, an improved triage.py never reaches existing installs)
+      const marker = await readFile(resolve(target, ".kit-skill-version"), "utf8");
+      assert.match(marker.trim(), /^\d+\.\d+\.\d+/);
+      // the freshly-installed script carries the current version-resolver logic
+      const py = await readFile(resolve(target, "scripts/triage.py"), "utf8");
+      assert.match(py, /_resolve_npm_spec/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

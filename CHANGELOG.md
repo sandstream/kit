@@ -45,6 +45,13 @@ fail-closed throughout.
   the `agent_writes` authz lookup is `Object.hasOwn`-guarded against prototype keys;
   `.env.local` is created `0o600` atomically. `src/id-generator.ts`, `src/policy.ts`,
   `src/provision.ts`.
+- **Triage skill refresh on upgrade (found by dogfooding).** The bundled triage script
+  was only copied to `~/.claude/skills/triage` when ABSENT, so a kit upgrade that improved
+  `triage.py` (e.g. the B2 version resolver, new secret patterns) never reached existing
+  installs — the CLI silently kept running the old script (a pinned `pkg@1.2.3` was even
+  false-blocked because the stale copy fetched the literal `pkg@1.2.3` name → 404). The
+  installed copy is now version-stamped and refreshed when it was written by an older kit.
+  `src/triage.ts`.
 
 ### Security — red-team critical fixes
 

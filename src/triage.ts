@@ -3,7 +3,8 @@
  * Wraps the Python triage script and integrates with kit's check-security system.
  */
 
-import { access, cp, mkdir } from "node:fs/promises";
+import { access, cp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +19,21 @@ const TRIAGE_SKILL_DIR = resolve(homedir(), ".claude/skills/triage");
 const TRIAGE_SCRIPT = resolve(TRIAGE_SKILL_DIR, "scripts/triage.py");
 /** The copy kit ships in its own package (published via package.json "files"). */
 const BUNDLED_TRIAGE_SKILL = resolve(__dirname, "..", "skills", "triage");
+/** Stamp of the kit version that produced the installed skill copy. Used to refresh a STALE
+ *  copy after a kit upgrade — otherwise an improved `triage.py` (e.g. a fixed version resolver
+ *  or a new secret pattern) would never reach existing installs, silently running old logic. */
+const SKILL_VERSION_MARKER = resolve(TRIAGE_SKILL_DIR, ".kit-skill-version");
+const KIT_VERSION = (() => {
+  try {
+    return (
+      JSON.parse(readFileSync(resolve(__dirname, "..", "package.json"), "utf-8")) as {
+        version: string;
+      }
+    ).version;
+  } catch {
+    return "unknown";
+  }
+})();
 
 /**
  * Self-bootstrap the gate: copy the triage skill kit ships with into
@@ -32,9 +48,20 @@ export async function installBundledTriageSkill(
     await mkdir(dirname(targetDir), { recursive: true });
     await cp(BUNDLED_TRIAGE_SKILL, targetDir, { recursive: true });
     await access(resolve(targetDir, "scripts/triage.py"));
+    // Stamp the version so a later kit upgrade knows to refresh this copy.
+    await writeFile(resolve(targetDir, ".kit-skill-version"), KIT_VERSION, "utf-8");
     return true;
   } catch {
     return false;
+  }
+}
+
+/** True when the installed skill was written by the CURRENT kit version. */
+async function installedSkillIsCurrent(): Promise<boolean> {
+  try {
+    return (await readFile(SKILL_VERSION_MARKER, "utf-8")).trim() === KIT_VERSION;
+  } catch {
+    return false; // no marker → an old/hand-copied skill → treat as stale
   }
 }
 
@@ -57,7 +84,9 @@ export interface TriageResult {
 async function ensureTriageScript(): Promise<boolean> {
   try {
     await access(TRIAGE_SCRIPT);
-    return true;
+    // Present — but refresh if it was written by an older kit (stale logic otherwise persists).
+    if (await installedSkillIsCurrent()) return true;
+    return installBundledTriageSkill();
   } catch {
     return installBundledTriageSkill();
   }
