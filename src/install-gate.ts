@@ -234,7 +234,30 @@ function nestedCommands(command: string): string[] {
   // shell (`bash <<< "npm i evil"`); recurse into it.
   for (const m of command.matchAll(/<<<\s*(['"])([\s\S]{1,2000}?)\1/g)) out.push(m[2]);
   for (const m of command.matchAll(/<<<\s*([^\s'"][^\n]{0,2000})/g)) out.push(m[1]);
+  // `npm|pnpm|yarn|bun exec|dlx|x  -c/--call '<shell string>'` runs the string in a shell
+  // (with node_modules/.bin on PATH), so an install inside it really executes — recurse.
+  // The runner path itself gates nothing positional here (hasExecCallFlag), so the package
+  // is only seen via this recursion.
+  for (const m of command.matchAll(
+    /(?:npm|pnpm|yarn|bun)\s+(?:exec|dlx|x)\b[^\n]*?\s(?:--call|-c)(?:=|\s)\s*(['"])([\s\S]{1,2000}?)\1/g,
+  )) {
+    out.push(m[2]);
+  }
   return out;
+}
+
+/**
+ * Normalize runtime whitespace expansions to a real space BEFORE tokenizing. In any POSIX
+ * shell `${IFS}`/`$IFS` (and ANSI-C `$'\t'`/`$'\n'`) expand to whitespace, so
+ * `npm${IFS}i${IFS}evil` runs `npm i evil` — but a literal-`\s+` tokenizer keeps it one
+ * token and every matcher misses it (the canonical word-split gate bypass). Collapsing them
+ * first makes the real argv visible. `$IFS` is matched only as a whole var (not `$IFSx`).
+ */
+function normalizeShellWhitespace(command: string): string {
+  return command
+    .replace(/(["']?)\$\{IFS\}\1/g, " ")
+    .replace(/(["']?)\$IFS\1(?=[^A-Za-z0-9_]|$)/g, " ")
+    .replace(/\$'(?:\\[tnr]| )'/g, " ");
 }
 
 // Env vars / flags that REDIRECT where a package manager fetches from. If any is
@@ -471,7 +494,7 @@ export function parseInstallCommand(command: string): InstallProbe {
   const seen = new Set<string>();
   const queue: string[] = [command];
   while (queue.length > 0 && seen.size < 64) {
-    const cmd = queue.shift()!;
+    const cmd = normalizeShellWhitespace(queue.shift()!);
     if (seen.has(cmd)) continue;
     seen.add(cmd);
     queue.push(...nestedCommands(cmd));
@@ -548,8 +571,22 @@ function indirectInstall(tokens: string[], probe: InstallProbe): boolean {
 }
 
 /**
+ * `npm|pnpm|yarn|bun exec|dlx|x  -c/--call '<str>'` runs `<str>` in a shell, so the
+ * positional is NOT a fetched package (`npm exec -c "npm i evil"` would otherwise mis-gate
+ * `npm` and miss `evil`). The string itself is recursed by `nestedCommands`; here we just
+ * suppress the positional-as-package for the runner.
+ */
+function hasExecCallFlag(tokens: string[]): boolean {
+  const isExecRunner =
+    /^(npm|pnpm|yarn|bun)$/.test(tokens[0] ?? "") && /^(exec|dlx|x)$/.test(tokens[1] ?? "");
+  if (!isExecRunner) return false;
+  return tokens.some((t) => t === "-c" || t === "--call" || /^(-c|--call)=/.test(t));
+}
+
+/**
  * The packages a matched invocation actually FETCHES.
- *  - pkgFlagOnly (uv run): the positional is a LOCAL script — only `--with` fetches.
+ *  - pkgFlagOnly (uv run) / exec -c call: the positional is a LOCAL script or shell string —
+ *    only `--with`/`--package` flags fetch; the string is recursed elsewhere.
  *  - other runners: primary = replace-flags (`-p`/`--package`/`--spec`/`--from`) if present
  *    else the first positional, PLUS every `--with` (an extra fetched package).
  *  - installer: every positional is a package.
@@ -557,8 +594,8 @@ function indirectInstall(tokens: string[], probe: InstallProbe): boolean {
 function resolveTargets(m: Matcher, args: string[], tokens: string[]): string[] {
   if (!m.single) return args;
   const withFlags = withPackageFlags(tokens);
-  if (m.pkgFlagOnly) return withFlags;
   const replaceFlags = replacePackageFlags(tokens);
+  if (m.pkgFlagOnly || hasExecCallFlag(tokens)) return [...replaceFlags, ...withFlags];
   return [...(replaceFlags.length ? replaceFlags : args.slice(0, 1)), ...withFlags];
 }
 

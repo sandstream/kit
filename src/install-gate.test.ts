@@ -528,6 +528,39 @@ describe("parseInstallCommand — round-4 bypass closes", () => {
   });
 });
 
+describe("parseInstallCommand — round-5 bypass closes", () => {
+  it("$IFS / ${IFS} whitespace obfuscation is normalized before tokenizing", () => {
+    // `${IFS}` expands to whitespace, so this really runs `npm i evil`.
+    assert.deepEqual(parseInstallCommand("npm${IFS}i${IFS}evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("npm${IFS}install${IFS}evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("pip${IFS}install${IFS}evil").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("npm$IFS'i'$IFS'evil'").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("X=1 npm${IFS}i${IFS}evil").refs, ["npm:evil"]);
+    // even nested inside a shell -c
+    assert.deepEqual(parseInstallCommand("sh -c 'npm${IFS}i${IFS}evil'").refs, ["npm:evil"]);
+    // a different variable ($IFS2) is NOT collapsed
+    assert.equal(parseInstallCommand("npm$IFS2i").isInstall, false);
+  });
+
+  it("exec -c/--call shell string is recursed, not mis-gated as a package", () => {
+    for (const cmd of [
+      'npm exec -c "npm i evil"',
+      'npm exec --call "npm i evil"',
+      'pnpm exec -c "npm i evil"',
+      'pnpm dlx -c "npm i evil"',
+      'yarn exec -c "npm i evil"',
+      'bun x -c "npm i evil"',
+    ]) {
+      // the inner install is gated; the runner does NOT gate the shell string's first word
+      assert.deepEqual(parseInstallCommand(cmd).refs, ["npm:evil"], cmd);
+    }
+    // exec WITHOUT a call flag still gates the fetched tool positionally
+    assert.deepEqual(parseInstallCommand("npm exec cowsay").refs, ["npm:cowsay"]);
+    // --package alongside -c: the package is still gated, the call string recursed
+    assert.deepEqual(parseInstallCommand('npm exec --package=evil -c "cmd"').refs, ["npm:evil"]);
+  });
+});
+
 // Fake triage: pass everything except names in `blocklist`.
 function fakeDeps(blocklist: string[] = []): GateDeps {
   return {
