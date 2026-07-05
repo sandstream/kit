@@ -260,8 +260,10 @@ function nestedCommands(command: string): string[] {
   // manager's install for real, but the runner path would gate only the manager name (npm:npm,
   // reputable → PASS) and miss the real package. Recurse from the inner manager so its args are
   // scanned as a command. Contrived but a genuine bypass; fail-closed.
+  // `(?:(?:--|-\S+|\S+=\S+)\s+)*` tolerates flags between the runner and the inner manager
+  // (`npx -y npm i evil`, `npm exec -- npm i evil`) — the inner pm need not be adjacent.
   for (const m of command.matchAll(
-    /(?:npx|bunx|(?:npm|pnpm|yarn|bun)(?:@\S+)?\s+(?:exec|dlx|x))\s+((?:npm|pnpm|yarn|bun|pip|pip3|pipx|uv|uvx|python|python3|poetry|pdm)(?:@\S+)?\s[^\n]{1,2000})/g,
+    /(?:npx|bunx|(?:npm|pnpm|yarn|bun)(?:@\S+)?\s+(?:exec|dlx|x))\s+(?:(?:--|-\S+|\S+=\S+)\s+)*((?:npm|pnpm|yarn|bun|pip|pip3|pipx|uv|uvx|python|python3|poetry|pdm)(?:@\S+)?\s[^\n]{1,2000})/g,
   )) {
     out.push(m[1]);
   }

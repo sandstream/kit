@@ -606,6 +606,10 @@ describe("parseInstallCommand — round-5 bypass closes", () => {
       "npm exec npm i evil",
       "corepack pnpm@9 exec yarn add evil",
       "npx pip install evil",
+      // flags / `--` between the runner and the inner manager must not let it escape
+      "npx -y npm i evil",
+      "npx --yes npm i evil",
+      "npm exec -- npm i evil",
     ]) {
       assert.ok(
         parseInstallCommand(cmd).refs.includes("npm:evil") ||
