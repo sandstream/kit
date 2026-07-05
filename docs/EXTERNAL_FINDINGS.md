@@ -16,13 +16,13 @@ Append one JSON object per line to **`.kit-scan-results.jsonl`** in the project 
 {"source":"my-inhouse-gate","severity":"medium","title":"Deprecated TLS config"}
 ```
 
-| Field | Required | Meaning |
-|-------|----------|---------|
-| `source` | **yes** | Non-empty tool name. Findings are grouped and reported per source (`external: <source>`). |
-| `severity` | **yes** | `critical` \| `high` \| `medium` \| `low` (case-insensitive). |
-| `title` | no | Short description (used in the detail line). |
-| `id` | no | Stable finding id (for your own dedupe/tracking). |
-| `package` | no | Affected package, if applicable. |
+| Field      | Required | Meaning                                                                                                                                                                                                                   |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `source`   | **yes**  | Non-empty tool name. Findings are grouped and reported per source (`external: <source>`).                                                                                                                                 |
+| `severity` | **yes**  | `critical` \| `high` \| `medium` \| `low` (case-insensitive). Common aliases fold in: `moderate` → `medium`; `info` / `informational` → `low`. Unrecognized values are surfaced as a parse warning, not silently dropped. |
+| `title`    | no       | Short description (used in the detail line).                                                                                                                                                                              |
+| `id`       | no       | Stable finding id (for your own dedupe/tracking).                                                                                                                                                                         |
+| `package`  | no       | Affected package, if applicable.                                                                                                                                                                                          |
 
 Extra keys are ignored, so you can carry your own metadata on the same line.
 
