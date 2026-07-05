@@ -5,6 +5,7 @@ Welcome to the kit community! This guide covers how to get help, report issues, 
 ## Table of Contents
 
 - [Getting Help](#getting-help)
+- [GitHub Discussions](#github-discussions)
 - [Reporting Issues](#reporting-issues)
 - [Feature Requests](#feature-requests)
 - [Contributing Code](#contributing-code)
@@ -19,11 +20,13 @@ Welcome to the kit community! This guide covers how to get help, report issues, 
 
 **Before asking:**
 1. Check the [documentation](https://github.com/sandstream/kit#readme) and [command reference](docs/COMMANDS.md).
-2. Search existing [GitHub Issues](https://github.com/sandstream/kit/issues) for the same question.
+2. Search [GitHub Discussions](https://github.com/sandstream/kit/discussions) and [Issues](https://github.com/sandstream/kit/issues) for the same question.
 
 **Where to ask:**
-- **Usage questions & troubleshooting:** open a [GitHub Issue](https://github.com/sandstream/kit/issues/new).
-- **Security issues:** see the [Security Policy](SECURITY.md) — **do not** open a public issue for a vulnerability.
+- **Usage questions & troubleshooting:** start a thread in [GitHub Discussions → Q&A](https://github.com/sandstream/kit/discussions/categories/q-a).
+- **Ideas & feedback:** [GitHub Discussions → Ideas](https://github.com/sandstream/kit/discussions/categories/ideas).
+- **Bugs:** open a [GitHub Issue](https://github.com/sandstream/kit/issues/new) (see below).
+- **Security issues:** see the [Security Policy](SECURITY.md) — **do not** open a public issue or discussion for a vulnerability.
 
 ### I found a bug
 
@@ -39,6 +42,22 @@ See the [Bug Report Template](#bug-report-template) below.
 ### I need commercial support
 
 For production support, training, or consulting, contact [hello@sandstre.am](mailto:hello@sandstre.am).
+
+---
+
+## GitHub Discussions
+
+[GitHub Discussions](https://github.com/sandstream/kit/discussions) is the place for
+conversation; [Issues](https://github.com/sandstream/kit/issues) are for tracked bugs and
+feature requests. Categories:
+
+- **Q&A** — usage questions and troubleshooting. Mark the answer that helped.
+- **Ideas** — propose and discuss features before they become issues.
+- **Show and tell** — share what you've built with kit.
+- **General** — anything else that isn't a bug or a concrete feature request.
+
+Please search before posting, include your kit version and OS, and follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ---
 
@@ -169,7 +188,8 @@ All community spaces are governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 | Channel | Use For |
 |---------|---------|
-| [GitHub Issues](https://github.com/sandstream/kit/issues) | Bug reports, feature requests, usage questions |
+| [GitHub Discussions](https://github.com/sandstream/kit/discussions) | Questions, ideas, showcase, general conversation |
+| [GitHub Issues](https://github.com/sandstream/kit/issues) | Bug reports, feature requests |
 | [Email](mailto:hello@sandstre.am) | Private concerns, security, commercial support |
 
 ---
