@@ -624,6 +624,18 @@ describe("parseInstallCommand — round-5 bypass closes", () => {
     ]);
   });
 
+  it("chaining flag-tolerance is ReDoS-safe (no catastrophic backtracking)", () => {
+    // A long run of `-x=y`-shaped tokens with no trailing package manager forced the earlier
+    // regex (overlapping `-\S+` / `\S+=\S+` alternatives) into 2^N parse paths. The mutually
+    // exclusive alternatives make it linear — this completes near-instantly instead of hanging.
+    const cmd = "npm exec " + "-x=y ".repeat(400) + "sometool";
+    const start = process.hrtime.bigint();
+    const p = parseInstallCommand(cmd);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    assert.ok(ms < 500, `parse took ${ms}ms — possible ReDoS regression`);
+    assert.deepEqual(p.refs, ["npm:sometool"]);
+  });
+
   it("exec -c/--call shell string is recursed, not mis-gated as a package", () => {
     for (const cmd of [
       'npm exec -c "npm i evil"',
