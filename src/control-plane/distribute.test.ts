@@ -47,6 +47,26 @@ function signBundle(signerDir: string, revocations?: RevocationRecord[]): Policy
   }
 }
 
+/** Build an org-signed bundle for arbitrary policy TOML (used for the revision ratchet). */
+function signBundleToml(signerDir: string, policyToml: string): PolicyBundle {
+  const authorDir = mkdtempSync(join(tmpdir(), "kit-cp-author-"));
+  try {
+    writeFileSync(getPolicyPath(authorDir), policyToml, "utf-8");
+    const doc = loadPolicy(authorDir)!;
+    const { identity } = loadOrCreateIdentity(signerDir);
+    const sig = signWithIdentity(canonicalPolicyBytes(doc), signerDir).toString("base64");
+    const policySig = JSON.stringify({
+      kid: identity.id,
+      sig,
+      ts: "2026-07-04T00:00:00.000Z",
+      fingerprint: policyFingerprint(doc),
+    });
+    return { policyToml, policySig };
+  } finally {
+    rmSync(authorDir, { recursive: true, force: true });
+  }
+}
+
 describe("control-plane — verifyPolicyBundle (offline, against the org anchor)", () => {
   let signerDir: string;
   let verifierKit: string;
@@ -189,6 +209,57 @@ describe("control-plane — applyPolicyBundle (write-after-verify, fail-closed)"
     assert.equal(again.applied, true);
     assert.equal(again.revocationsAdded, 0);
     assert.equal(loadRevocations(mergeDir).length, 1);
+  });
+
+  it("enforces the monotonic revision ratchet (rejects a signed rollback)", () => {
+    const rroot = mkdtempSync(join(tmpdir(), "kit-cp2-rev-"));
+    const rmerge = mkdtempSync(join(tmpdir(), "kit-cp2-revm-"));
+    try {
+      addPolicySigner(rroot, loadOrCreateIdentity(signerDir).identity.publicKey);
+      // apply revision 5
+      assert.equal(
+        applyPolicyBundle(signBundleToml(signerDir, "version = 1\nrevision = 5\n"), rroot, {
+          identityDir: rmerge,
+        }).applied,
+        true,
+      );
+      // a validly-signed OLDER revision (3) is refused — the replay/rollback attack
+      const rollback = applyPolicyBundle(
+        signBundleToml(signerDir, "version = 1\nrevision = 3\n"),
+        rroot,
+        {
+          identityDir: rmerge,
+        },
+      );
+      assert.equal(rollback.applied, false);
+      assert.match(rollback.reason ?? "", /rollback/);
+      assert.match(loadPolicy(rroot)!.revision + "", /5/); // on-disk policy unchanged
+      // a validly-signed bundle with NO revision is also refused once a revision is set
+      assert.equal(
+        applyPolicyBundle(signBundleToml(signerDir, "version = 1\n"), rroot, {
+          identityDir: rmerge,
+        }).applied,
+        false,
+      );
+      // a strictly-greater revision (6) advances
+      assert.equal(
+        applyPolicyBundle(signBundleToml(signerDir, "version = 1\nrevision = 6\n"), rroot, {
+          identityDir: rmerge,
+        }).applied,
+        true,
+      );
+      assert.equal(loadPolicy(rroot)!.revision, 6);
+      // idempotent re-apply of the SAME (revision 6) bundle is allowed
+      assert.equal(
+        applyPolicyBundle(signBundleToml(signerDir, "version = 1\nrevision = 6\n"), rroot, {
+          identityDir: rmerge,
+        }).applied,
+        true,
+      );
+    } finally {
+      rmSync(rroot, { recursive: true, force: true });
+      rmSync(rmerge, { recursive: true, force: true });
+    }
   });
 
   it("refuses to apply an unverifiable bundle and leaves root untouched", () => {

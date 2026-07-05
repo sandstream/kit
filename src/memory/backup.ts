@@ -58,10 +58,30 @@ function readMemoryDbCompressed(srcPath: string): Buffer {
   return gzipSync(readFileSync(srcPath));
 }
 
+// Hard ceiling on the decompressed size. A V3 (public-key) blob is near-unauthenticated —
+// the recipient public key is meant to be shared, so anyone can craft a VALID blob whose
+// plaintext is a gzip bomb (a few KB → many GB). Without a cap, `kit memory pull` of such a
+// blob exhausts memory on the durable box. 1 GiB is well above a real brain (a large store
+// is ~139 MB uncompressed) while bounding a bomb; an over-limit blob throws a clear error
+// instead of OOMing.
+const MAX_DECOMPRESSED_BYTES = 1024 * 1024 * 1024;
+
 /** Gunzip if the buffer carries the gzip magic (0x1f 0x8b); otherwise return as-is
- *  (a pre-compression blob, whose plaintext is a raw SQLite file). */
-function maybeGunzip(buf: Buffer): Buffer {
-  return buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b ? gunzipSync(buf) : buf;
+ *  (a pre-compression blob, whose plaintext is a raw SQLite file). Bounded output so a
+ *  crafted blob can't decompress into a memory-exhausting gzip bomb. `maxBytes` is a test
+ *  seam; production callers use the default 1 GiB ceiling. */
+export function maybeGunzip(buf: Buffer, maxBytes: number = MAX_DECOMPRESSED_BYTES): Buffer {
+  if (!(buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b)) return buf;
+  try {
+    return gunzipSync(buf, { maxOutputLength: maxBytes });
+  } catch (e) {
+    if (e instanceof RangeError) {
+      throw new Error(
+        `backup decompresses beyond the ${Math.round(maxBytes / (1024 * 1024))} MB limit — refusing (possible gzip bomb)`,
+      );
+    }
+    throw e;
+  }
 }
 
 const MIN_PASSPHRASE_LEN = 12;
