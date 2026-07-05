@@ -408,6 +408,21 @@ function pipName(tok: string): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * The version/dist-tag suffix of an install target, carried onto the triage ref so the gate
+ * triages the SPECIFIC version being installed — not `latest`. A clean `latest` can hide a
+ * yanked/malicious pinned version (`npm i evil@1.2.3` was triaged as `evil@latest`). Returns
+ * "" when no version is pinned. npm form → `@1.2.3`/`@next`; pip form → `==1.2.3`/`>=2`.
+ */
+function npmVersion(tok: string): string {
+  const m = tok.match(/^(?:@[a-z0-9][\w.-]*\/[a-z0-9][\w.-]*|[a-z0-9][\w.-]*)(@[^/\s]+)$/i);
+  return m ? m[1] : "";
+}
+function pipVersion(tok: string): string {
+  const m = tok.match(/^[a-z0-9][\w.-]*(?:\[[\w,.-]*\])?\s*([<>=!~][^\s]*)$/i);
+  return m ? m[1] : "";
+}
+
 interface Matcher {
   /** Does this segment's leading tokens start an in-scope install? Returns the index of the first ARG token, or -1. */
   argStart(tokens: string[]): number;
@@ -725,8 +740,11 @@ function applyMatcher(
   for (const arg of targets) {
     if (isLocalTarget(arg)) continue; // user's own code — nothing to triage
     const name = m.toName(arg);
-    if (name) probe.refs.push(`${m.scheme}:${name}`);
-    else probe.unverifiable.push(arg); // fail-closed: can't reduce to a ref
+    if (name) {
+      // Carry the pinned version/tag onto the ref so triage checks THAT version, not latest.
+      const ver = m.scheme === "npm" ? npmVersion(arg) : pipVersion(arg);
+      probe.refs.push(`${m.scheme}:${name}${ver}`);
+    } else probe.unverifiable.push(arg); // fail-closed: can't reduce to a ref
   }
   return true;
 }

@@ -70,14 +70,15 @@ describe("parseInstallCommand — detection", () => {
 
   it("pnpm / yarn / bun add", () => {
     assert.deepEqual(refs("pnpm add react react-dom"), ["npm:react", "npm:react-dom"]);
-    assert.deepEqual(refs("yarn add lodash@4.17.21"), ["npm:lodash"]); // version stripped
+    assert.deepEqual(refs("yarn add lodash@4.17.21"), ["npm:lodash@4.17.21"]); // version carried
     assert.deepEqual(refs("bun add zod"), ["npm:zod"]);
   });
 
-  it("scoped packages keep the scope, drop the version", () => {
+  it("scoped packages keep the scope AND the pinned version", () => {
     assert.deepEqual(refs("npm install @modelcontextprotocol/sdk@1.2.3"), [
-      "npm:@modelcontextprotocol/sdk",
+      "npm:@modelcontextprotocol/sdk@1.2.3",
     ]);
+    assert.deepEqual(refs("npm i @scope/pkg"), ["npm:@scope/pkg"]); // no version → bare
   });
 
   it("npx / bunx execution is gated (first non-flag token)", () => {
@@ -88,7 +89,7 @@ describe("parseInstallCommand — detection", () => {
 
   it("pip / pip3 / pipx / uv / python -m pip", () => {
     assert.deepEqual(refs("pip install requests"), ["pip:requests"]);
-    assert.deepEqual(refs("pip3 install Flask>=2.0"), ["pip:Flask"]); // version spec stripped
+    assert.deepEqual(refs("pip3 install Flask>=2.0"), ["pip:Flask>=2.0"]); // version spec carried
     assert.deepEqual(refs("pipx install black"), ["pip:black"]);
     assert.deepEqual(refs("uv add httpx"), ["pip:httpx"]);
     assert.deepEqual(refs("uv pip install numpy"), ["pip:numpy"]);
@@ -278,7 +279,20 @@ describe("parseInstallCommand — bypass resistance (security)", () => {
 
   it("quoted package names are handled (no false-positive block)", () => {
     assert.deepEqual(parseInstallCommand("npm i 'express'").refs, ["npm:express"]);
-    assert.deepEqual(parseInstallCommand('npm i "lodash@4"').refs, ["npm:lodash"]);
+    assert.deepEqual(parseInstallCommand('npm i "lodash@4"').refs, ["npm:lodash@4"]);
+  });
+
+  it("carries the pinned version/tag onto the ref so triage checks THAT version (B2)", () => {
+    const refs = (c: string) => parseInstallCommand(c).refs;
+    // a clean `latest` can hide a yanked/malicious pinned version — the ref must carry it
+    assert.deepEqual(refs("npm i evil@1.2.3"), ["npm:evil@1.2.3"]);
+    assert.deepEqual(refs("npm i left-pad@0.0.3 react@18"), ["npm:left-pad@0.0.3", "npm:react@18"]);
+    assert.deepEqual(refs("npm i foo@next"), ["npm:foo@next"]); // dist-tag carried
+    assert.deepEqual(refs("pip install requests==2.0.0"), ["pip:requests==2.0.0"]);
+    assert.deepEqual(refs("npx create-react-app@5 myapp"), ["npm:create-react-app@5"]); // runner
+    assert.deepEqual(refs("npm create vite@4 app"), ["npm:create-vite@4"]); // initiator + version
+    // no version → bare name (unchanged)
+    assert.deepEqual(refs("npm i express"), ["npm:express"]);
   });
 });
 
@@ -574,8 +588,8 @@ describe("parseInstallCommand — round-5 bypass closes", () => {
     // benign version-pinned management commands are NOT installs
     assert.equal(parseInstallCommand("corepack use pnpm@9").isInstall, false);
     assert.equal(parseInstallCommand("corepack prepare pnpm@9 --activate").isInstall, false);
-    // a scoped/versioned PACKAGE arg is unaffected (only argv0 is @-stripped)
-    assert.deepEqual(parseInstallCommand("npm i @scope/pkg@1").refs, ["npm:@scope/pkg"]);
+    // argv0 @-strip is bin-only; a scoped/versioned PACKAGE keeps scope AND pinned version
+    assert.deepEqual(parseInstallCommand("npm i @scope/pkg@1").refs, ["npm:@scope/pkg@1"]);
   });
 
   it("version-pinned exec -c recurses the shell string (corepack pnpm@9 exec -c)", () => {

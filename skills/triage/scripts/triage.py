@@ -19,9 +19,21 @@ Design contract (matches kit's watertight gate):
     are surfaced and scored but do not, by themselves, withhold PASS (criticals do).
 
 Exit code is always 0 on a completed evaluation; kit reads the text, not the code.
+
+Scope (what a PASS DOES and does NOT mean):
+  - PASS means the SPECIFIC target — including a pinned version or dist-tag (`name@1.2.3`,
+    `name@next`, `name==1.2.3`) — EXISTS and clears the health checks: not-found, deprecated,
+    or yanked is a CRITICAL; newness / abandonment / single-maintainer / no-license are
+    warnings. A pinned version is triaged directly, so a clean `latest` never vouches for a
+    yanked or malicious pinned version.
+  - PASS is NOT a malware verdict. This gate does no typosquat, install-script, or behavioral
+    analysis. Deep malware detection is GuardDog (opt-in, separate + heavier: `KIT_GUARDDOG=1`
+    or `[scan] guarddog = true`, run via `kit check`). Treat this as an existence + health +
+    version gate, not proof the code is safe to run.
 """
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -113,8 +125,21 @@ class Report:
             print("TRIAGE FAILED")
 
 
+def _split_npm_spec(target):
+    """Split a npm target into (name, version|tag|None). Handles `@scope/name@ver`
+    (the version `@` is the one AFTER the scope slash) and plain `name@ver`."""
+    if target.startswith("@"):
+        slash = target.find("/")
+        at = target.find("@", slash + 1) if slash != -1 else -1
+    else:
+        at = target.find("@")
+    if at > 0:
+        return target[:at], target[at + 1:]
+    return target, None
+
+
 def triage_npm(rep):
-    pkg = rep.target
+    pkg, spec = _split_npm_spec(rep.target)
     url = f"{NPM_REGISTRY}/{urllib.parse.quote(pkg, safe='@/')}"
     try:
         data, _ = _get_json(url)
@@ -128,18 +153,36 @@ def triage_npm(rep):
         rep.critical("could not reach the npm registry (offline?) -- cannot verify")
         return
 
-    latest = (data.get("dist-tags") or {}).get("latest")
+    dist_tags = data.get("dist-tags") or {}
     versions = data.get("versions") or {}
-    meta = versions.get(latest, {}) if latest else {}
     times = data.get("time") or {}
+    latest = dist_tags.get("latest")
 
+    # Resolve WHICH version to inspect for deprecation/existence. A pinned exact version
+    # or dist-tag is checked directly -- a clean `latest` must never vouch for a yanked or
+    # malicious pinned version (`npm i evil@1.2.3`). A range we can't resolve deterministically
+    # (no semver here) falls back to latest with a note.
+    target_ver = latest
+    if spec:
+        if spec in dist_tags:
+            target_ver = dist_tags[spec]
+        elif spec in versions:
+            target_ver = spec
+        elif re.match(r"^[0-9]+\.[0-9]+", spec):
+            rep.critical(f"pinned version '{spec}' of '{pkg}' not found (yanked/unpublished)")
+            return
+        else:
+            rep.warn(f"version spec '{spec}' is a range -- triaged latest ({latest}) instead")
+
+    meta = versions.get(target_ver, {}) if target_ver else {}
     if meta.get("deprecated"):
-        rep.critical(f"latest version {latest} is DEPRECATED: {str(meta.get('deprecated'))[:80]}")
+        rep.critical(f"version {target_ver} is DEPRECATED: {str(meta.get('deprecated'))[:80]}")
     created_days = _days_since(times.get("created"))
     last_days = _days_since(times.get(latest)) if latest else None
     maint = data.get("maintainers") or meta.get("maintainers") or []
 
-    rep.fact(f"latest {latest}, {len(versions)} versions, {len(maint)} maintainer(s)")
+    tag = f" (latest {latest})" if target_ver != latest else ""
+    rep.fact(f"triaged {target_ver}{tag}, {len(versions)} versions, {len(maint)} maintainer(s)")
     if created_days is not None:
         rep.fact(f"first published {created_days} days ago")
         if created_days < NEW_DAYS:
@@ -150,8 +193,18 @@ def triage_npm(rep):
         rep.warn("single maintainer -- bus-factor / takeover risk")
 
 
+def _split_pip_spec(target):
+    """Split a pip requirement into (name, spec|None), dropping any `[extras]`.
+    e.g. `requests[security]==1.2.3` -> ('requests', '==1.2.3'); `Flask>=2` -> ('Flask', '>=2')."""
+    m = re.match(r"^([A-Za-z0-9][\w.-]*)(?:\[[\w,.-]*\])?\s*(.*)$", target)
+    if not m:
+        return target, None
+    spec = m.group(2).strip()
+    return m.group(1), (spec or None)
+
+
 def triage_pip(rep):
-    pkg = rep.target
+    pkg, spec = _split_pip_spec(rep.target)
     url = f"{PYPI_INDEX}/pypi/{urllib.parse.quote(pkg)}/json"
     try:
         data, _ = _get_json(url)
@@ -167,11 +220,26 @@ def triage_pip(rep):
 
     info = data.get("info") or {}
     releases = data.get("releases") or {}
-    ver = info.get("version")
+    latest = info.get("version")
+
+    # An exact `==` pin is checked directly: a clean latest must not vouch for a yanked or
+    # unpublished pinned version. A range (no resolver here) falls back to latest with a note.
+    ver = latest
+    if spec and spec.startswith("=="):
+        pin = spec[2:].strip()
+        if pin in releases:
+            ver = pin
+        else:
+            rep.critical(f"pinned version '{pin}' of '{pkg}' not found (yanked/unpublished)")
+            return
+    elif spec:
+        rep.warn(f"version spec '{spec}' is a range -- triaged latest ({latest}) instead")
+
     files = releases.get(ver) or []
     if any(f.get("yanked") for f in files):
-        rep.critical(f"latest version {ver} is YANKED")
-    rep.fact(f"latest {ver}, {len(releases)} releases, author: {info.get('author') or 'unknown'}")
+        rep.critical(f"version {ver} is YANKED")
+    tag = f" (latest {latest})" if ver != latest else ""
+    rep.fact(f"triaged {ver}{tag}, {len(releases)} releases, author: {info.get('author') or 'unknown'}")
     last_iso = files[0].get("upload_time_iso_8601") if files else None
     last_days = _days_since(last_iso)
     if last_days is not None and last_days > ABANDONED_DAYS:
