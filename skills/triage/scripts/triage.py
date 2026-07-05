@@ -138,6 +138,71 @@ def _split_npm_spec(target):
     return target, None
 
 
+def _stable_semver(v):
+    """(major, minor, patch) for a STABLE X.Y.Z (no pre-release/build), else None."""
+    m = re.match(r"^(\d+)\.(\d+)\.(\d+)$", v)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+
+
+def _resolve_npm_spec(spec, version_keys):
+    """Resolve a npm version spec to the concrete published version npm WOULD install — the
+    MAX stable version satisfying it — or None if we can't parse it (→ caller fails closed).
+    A leading `v` is tolerated (npm loose-parses it). Handles exact, `X`/`X.Y`/`X.x` partials,
+    `^`, `~`, and single comparators (`>=`, `>`, `<`, `<=`, `=`). Compound/hyphen/`||` ranges
+    return None (fail-closed) — they're rare in a CLI install and must not silently pass latest.
+    """
+    spec = spec.strip()
+    if spec[1:2].isdigit() and spec[:1] == "v":
+        spec = spec[1:]  # npm tolerates a leading v (v1.2.3 == 1.2.3)
+    if spec in version_keys:
+        return spec  # exact
+    if any(c in spec for c in (" ", "||", " - ", ",")):
+        return None  # compound/hyphen range — don't guess
+    op = ""
+    for o in (">=", "<=", "^", "~", ">", "<", "="):
+        if spec.startswith(o):
+            op, spec = o, spec[len(o):].strip()
+            break
+    if spec.startswith("v") and spec[1:2].isdigit():
+        spec = spec[1:]
+    nums = []
+    for p in spec.split("."):
+        if p in ("x", "X", "*", ""):
+            break
+        if not p.isdigit():
+            return None
+        nums.append(int(p))
+    base = tuple((nums + [0, 0, 0])[:3])
+
+    def satisfies(t):
+        if op == "^" and nums:
+            if base[0] > 0:
+                return base <= t < (base[0] + 1, 0, 0)
+            if len(nums) >= 2 and base[1] > 0:
+                return base <= t < (0, base[1] + 1, 0)
+            return base <= t < (base[0], base[1], base[2] + 1)
+        if op == "~" and nums:
+            hi = (base[0], base[1] + 1, 0) if len(nums) >= 2 else (base[0] + 1, 0, 0)
+            return base <= t < hi
+        if op == ">=":
+            return t >= base
+        if op == ">":
+            return t > base
+        if op == "<=":
+            return t <= base
+        if op == "<":
+            return t < base
+        if op == "=":
+            return t == base
+        return all(t[i] == n for i, n in enumerate(nums))  # bare partial: 1 → 1.x.x
+
+    cands = sorted(t for t in (_stable_semver(v) for v in version_keys) if t and satisfies(t))
+    if not cands:
+        return None
+    best = cands[-1]
+    return f"{best[0]}.{best[1]}.{best[2]}"
+
+
 def triage_npm(rep):
     pkg, spec = _split_npm_spec(rep.target)
     url = f"{NPM_REGISTRY}/{urllib.parse.quote(pkg, safe='@/')}"
@@ -158,21 +223,24 @@ def triage_npm(rep):
     times = data.get("time") or {}
     latest = dist_tags.get("latest")
 
-    # Resolve WHICH version to inspect for deprecation/existence. A pinned exact version
-    # or dist-tag is checked directly -- a clean `latest` must never vouch for a yanked or
-    # malicious pinned version (`npm i evil@1.2.3`). A range we can't resolve deterministically
-    # (no semver here) falls back to latest with a note.
+    # Resolve WHICH version to inspect for deprecation/existence. A dist-tag, an exact pin, or
+    # a range/partial (`@2`, `@^1.2`, `@1.x`, `@v1.2.3`) is resolved to the concrete version npm
+    # WOULD install -- a clean `latest` must never vouch for a yanked/deprecated/malicious pinned
+    # or in-range version. An unresolvable spec fails CLOSED (never silently passes latest).
     target_ver = latest
     if spec:
         if spec in dist_tags:
             target_ver = dist_tags[spec]
-        elif spec in versions:
-            target_ver = spec
-        elif re.match(r"^[0-9]+\.[0-9]+", spec):
-            rep.critical(f"pinned version '{spec}' of '{pkg}' not found (yanked/unpublished)")
-            return
         else:
-            rep.warn(f"version spec '{spec}' is a range -- triaged latest ({latest}) instead")
+            resolved = _resolve_npm_spec(spec, list(versions.keys()))
+            if resolved:
+                target_ver = resolved
+            else:
+                rep.critical(
+                    f"version spec '{spec}' of '{pkg}' could not be resolved to a published "
+                    f"version (yanked/unpublished/unsupported range) -- cannot verify"
+                )
+                return
 
     meta = versions.get(target_ver, {}) if target_ver else {}
     if meta.get("deprecated"):
@@ -203,6 +271,63 @@ def _split_pip_spec(target):
     return m.group(1), (spec or None)
 
 
+def _pep_release(v):
+    """Numeric release tuple of a PEP 440 version (epoch/pre/post/dev ignored), else None."""
+    m = re.match(r"^(?:\d+!)?(\d+(?:\.\d+)*)", v)
+    return tuple(int(x) for x in m.group(1).split(".")) if m else None
+
+
+def _pep_stable(v):
+    """True for a plain release version (no a/b/rc/dev/post pre-release suffix)."""
+    return re.match(r"^(?:\d+!)?\d+(?:\.\d+)*$", v) is not None
+
+
+def _resolve_pip_spec(spec, release_keys):
+    """Resolve a single pip version spec to the concrete release pip WOULD install (max
+    satisfying), or None if unparseable/compound (→ caller fails closed). Handles
+    `==`/`===`/`==X.*`, `>=`,`>`,`<`,`<=`,`!=`,`~=`. Compound (`,`) ranges return None."""
+    spec = spec.strip()
+    if "," in spec:
+        return None
+    m = re.match(r"^(===|==|~=|>=|<=|!=|>|<)\s*([0-9][\w.*!+-]*)$", spec)
+    if not m:
+        return None
+    op, ver = m.group(1), m.group(2)
+    if op in ("==", "==="):
+        if op == "==" and ver.endswith(".*"):
+            pref = ver[:-2]
+            cands = sorted(
+                (r for r in release_keys if r == pref or r.startswith(pref + ".")),
+                key=lambda r: _pep_release(r) or (),
+            )
+            return cands[-1] if cands else None
+        return ver if ver in release_keys else None
+    want = _pep_release(ver)
+    if want is None:
+        return None
+
+    def ok(t):
+        if op == ">=":
+            return t >= want
+        if op == ">":
+            return t > want
+        if op == "<=":
+            return t <= want
+        if op == "<":
+            return t < want
+        if op == "!=":
+            return t != want
+        if op == "~=" and len(want) >= 2:  # compatible release
+            return t >= want and t[: len(want) - 1] == want[: len(want) - 1]
+        return False
+
+    cands = sorted(
+        (r for r in release_keys if _pep_stable(r) and _pep_release(r) and ok(_pep_release(r))),
+        key=lambda r: _pep_release(r),
+    )
+    return cands[-1] if cands else None
+
+
 def triage_pip(rep):
     pkg, spec = _split_pip_spec(rep.target)
     url = f"{PYPI_INDEX}/pypi/{urllib.parse.quote(pkg)}/json"
@@ -222,18 +347,20 @@ def triage_pip(rep):
     releases = data.get("releases") or {}
     latest = info.get("version")
 
-    # An exact `==` pin is checked directly: a clean latest must not vouch for a yanked or
-    # unpublished pinned version. A range (no resolver here) falls back to latest with a note.
+    # A pin or range is resolved to the concrete release pip WOULD install (max satisfying) and
+    # checked directly -- a clean latest must not vouch for a yanked/older in-range version. An
+    # unresolvable/compound spec fails CLOSED rather than silently passing latest.
     ver = latest
-    if spec and spec.startswith("=="):
-        pin = spec[2:].strip()
-        if pin in releases:
-            ver = pin
+    if spec:
+        resolved = _resolve_pip_spec(spec, list(releases.keys()))
+        if resolved:
+            ver = resolved
         else:
-            rep.critical(f"pinned version '{pin}' of '{pkg}' not found (yanked/unpublished)")
+            rep.critical(
+                f"version spec '{spec}' of '{pkg}' could not be resolved to a published "
+                f"release (yanked/unpublished/unsupported range) -- cannot verify"
+            )
             return
-    elif spec:
-        rep.warn(f"version spec '{spec}' is a range -- triaged latest ({latest}) instead")
 
     files = releases.get(ver) or []
     if any(f.get("yanked") for f in files):

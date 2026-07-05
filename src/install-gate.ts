@@ -396,8 +396,10 @@ function isLocalTarget(tok: string): boolean {
 
 /** A clean npm package name (optionally scoped, optionally @version) → bare name. */
 function npmName(tok: string): string | null {
-  // @scope/name(@version)?  or  name(@version)?
-  const m = tok.match(/^(@[a-z0-9][\w.-]*\/[a-z0-9][\w.-]*|[a-z0-9][\w.-]*)(@[^/\s]+)?$/i);
+  // @scope/name(@version)?  or  name(@version)?  The version excludes `:` so an ALIAS spec
+  // (`foo@npm:realpkg`, `foo@git+ssh://…`) fails to validate → routed to `unverifiable`
+  // rather than triaging the innocent alias NAME while the aliased target actually installs.
+  const m = tok.match(/^(@[a-z0-9][\w.-]*\/[a-z0-9][\w.-]*|[a-z0-9][\w.-]*)(@[^/\s:]+)?$/i);
   return m ? m[1] : null;
 }
 
@@ -415,7 +417,7 @@ function pipName(tok: string): string | null {
  * "" when no version is pinned. npm form → `@1.2.3`/`@next`; pip form → `==1.2.3`/`>=2`.
  */
 function npmVersion(tok: string): string {
-  const m = tok.match(/^(?:@[a-z0-9][\w.-]*\/[a-z0-9][\w.-]*|[a-z0-9][\w.-]*)(@[^/\s]+)$/i);
+  const m = tok.match(/^(?:@[a-z0-9][\w.-]*\/[a-z0-9][\w.-]*|[a-z0-9][\w.-]*)(@[^/\s:]+)$/i);
   return m ? m[1] : "";
 }
 function pipVersion(tok: string): string {

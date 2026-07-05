@@ -294,6 +294,21 @@ describe("parseInstallCommand — bypass resistance (security)", () => {
     // no version → bare name (unchanged)
     assert.deepEqual(refs("npm i express"), ["npm:express"]);
   });
+
+  it("an npm alias/protocol spec is fail-closed, not triaged as the innocent name (B2)", () => {
+    // `lodash-x@npm:express@4` INSTALLS express but names lodash-x — must NOT triage lodash-x.
+    for (const cmd of [
+      "npm i lodash-x@npm:express@4",
+      "npm i foo@git+ssh://h/r",
+      "npm i a@file:./x",
+    ]) {
+      const p = parseInstallCommand(cmd);
+      assert.equal(p.refs.length, 0, cmd);
+      assert.equal(p.unverifiable.length, 1, cmd);
+    }
+    // a `v`-prefixed version is still carried (triage strips the v and resolves it)
+    assert.deepEqual(parseInstallCommand("npm i evil@v1.2.3").refs, ["npm:evil@v1.2.3"]);
+  });
 });
 
 describe("parseInstallCommand — sweep hardening (bypass closes)", () => {
