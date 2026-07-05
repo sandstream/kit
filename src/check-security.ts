@@ -190,6 +190,10 @@ async function checkPipAudit(): Promise<SecurityCheckResult> {
       status: "warn",
       detail: "pip-audit not installed (run: pip install pip-audit)",
       severity: "medium",
+      // requirements.txt is present (we returned above otherwise) → a Python
+      // project's CVEs are UNSCANNED because the tool is absent: a scanner-health
+      // failure under strict, not an honest skip.
+      didNotRun: true,
     };
   }
 
@@ -801,6 +805,9 @@ async function checkGuardDog(): Promise<SecurityCheckResult> {
       detail: "guarddog not installed — malware heuristics unavailable",
       severity: "medium",
       suggestion: "mise use pipx:guarddog",
+      // guarddog is opted in (env/config) AND a manifest is present, but the tool
+      // is absent → the opted-in malware scan did NOT run (mirrors semgrep below).
+      didNotRun: true,
     };
   }
 
@@ -839,6 +846,9 @@ async function checkTrivy(): Promise<SecurityCheckResult> {
       detail: "trivy not installed -container CVEs undetected",
       severity: "medium",
       suggestion: "mise use aqua:aquasecurity/trivy  (or: brew install trivy)",
+      // A Dockerfile is present but trivy is absent → container CVEs UNSCANNED: a
+      // scanner-health failure under strict, not an honest skip.
+      didNotRun: true,
     };
   }
 
@@ -962,6 +972,9 @@ async function checkTrivyConfig(): Promise<SecurityCheckResult> {
       detail: "trivy not installed -IaC misconfigurations undetected",
       severity: "medium",
       suggestion: "mise use aqua:aquasecurity/trivy  (or: brew install trivy)",
+      // IaC (Dockerfile/Compose/Terraform) is present but trivy is absent → those
+      // misconfigurations are UNSCANNED: a scanner-health failure under strict.
+      didNotRun: true,
     };
   }
 
@@ -1098,6 +1111,9 @@ async function checkMavenAudit(): Promise<SecurityCheckResult> {
       detail: "trivy not installed -maven CVEs undetected",
       severity: "medium",
       suggestion: "mise use aqua:aquasecurity/trivy  (or: brew install trivy)",
+      // A Maven/Gradle project is present but trivy is absent → JVM dependency CVEs
+      // are UNSCANNED: a scanner-health failure under strict, not an honest skip.
+      didNotRun: true,
     };
   }
 
@@ -1323,6 +1339,9 @@ async function checkLicenses(): Promise<SecurityCheckResult> {
       detail: "license-checker not installed (npx also unavailable)",
       severity: "low",
       suggestion: "npm install -g license-checker",
+      // Neither the binary nor the npx fallback is available → the license scan
+      // could not run at all: a scanner-health failure under strict, not a skip.
+      didNotRun: true,
     };
   }
 

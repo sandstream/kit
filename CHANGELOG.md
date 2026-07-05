@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security — scanner-health strict: a missing scanner no longer passes as a warning (found by dogfooding)
+
+- **`didNotRun` was missing on tool-absent scanner branches.** `check-security`'s
+  contract is that a check which could not RUN because its tool is absent is
+  `didNotRun` and FAILS the strict gate (`kit ci`) — "green means every check
+  actually ran". Five branches violated it, returning a plain `warn`: `pip-audit`
+  (with a `requirements.txt` present), `guarddog` (opted in, manifest present),
+  `trivy` container / IaC / Maven scans (Dockerfile / Compose / Terraform / pom
+  present), and the `license check` (neither `license-checker` nor `npx`
+  available). A repo with Dockerfiles but no trivy therefore passed strict CI as a
+  mere warning — a scanner-health false-green. All five now set `didNotRun`, so an
+  unscanned-because-uninstalled scanner fails strict (still downgradable with
+  `--lenient` / `KIT_CI_LENIENT`). Local `kit check` output is unchanged; opt-in and
+  not-applicable cases remain honest skips. `src/check-security.ts`.
+
 ### Security — supply-chain gate, secrets/audit & control-plane hardening (backlog B1–B5)
 
 A deep MEDIUM/LOW security sweep, each area hardened through repeated adversarial

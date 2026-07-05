@@ -207,6 +207,23 @@ describe("checkSecurity", () => {
     }
   });
 
+  it("marks every tool-absent warn as didNotRun (scanner-health contract)", () => {
+    // The module's contract: a check that could not RUN because its tool is absent
+    // is `didNotRun` (fails the strict gate) — not a mere warning that slips through
+    // as green. Environment-independent: where the tool IS installed the check turns
+    // to pass (filtered out here); where it is absent it must carry didNotRun.
+    const toolAbsentWarns = cached.filter(
+      (r) => r.status === "warn" && /not installed|npx also unavailable/i.test(r.detail),
+    );
+    for (const r of toolAbsentWarns) {
+      assert.strictEqual(
+        r.didNotRun,
+        true,
+        `"${r.name}" (${r.detail}) is a tool-absent warn but is not marked didNotRun — it would pass the strict gate as a mere warning`,
+      );
+    }
+  });
+
   it("includes npm audit check", () => {
     assert.ok(
       cached.find((r) => r.name === "npm audit"),
