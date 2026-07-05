@@ -71,6 +71,28 @@ function isFlag(tok: string): boolean {
 }
 
 /**
+ * Package(s) named by a runner's `-p`/`--package` flag (`npx --package=evil cmd`,
+ * `npm exec -p evil -- cmd`). For a runner these are the FETCHED packages, while the
+ * positional is the command to run — so `--package=evil somecmd` must gate `evil`, not
+ * `somecmd`. Returns the flag values found (equals- and space-separated forms).
+ */
+function packageFlagTargets(rest: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    const eq = rest[i].match(/^(?:-p|--package|--spec|--from)=(.+)$/);
+    if (eq) {
+      out.push(eq[1]);
+      continue;
+    }
+    if (/^(?:-p|--package|--spec|--from)$/.test(rest[i])) {
+      if (rest[i + 1] !== undefined && !rest[i + 1].startsWith("-")) out.push(rest[i + 1]);
+      i++;
+    }
+  }
+  return out;
+}
+
+/**
  * Remove quote characters from a token, matching how the shell strips quotes WITHIN a
  * word — `n"p"m` → `npm`, `i'nstall'` → `install`, `'pkg'` → `pkg`. The old version only
  * unwrapped quotes around a WHOLE token, so intra-word quoting (`n"p"m install evil`) hid
@@ -190,7 +212,8 @@ function nestedCommands(command: string): string[] {
 // (fail-closed), closing the "triage PASS while pulling attacker code" bypass.
 const SOURCE_ENV_RE =
   /^(npm_config_.*registry|npm_config_userconfig|npm_config_globalconfig|.*_registry|yarn_npm_registry_server|pip_index_url|pip_extra_index_url|pip_config_file|uv_index.*|uv_default_index|bun_config_registry)$/i;
-const SOURCE_FLAG_RE = /^(--registry|--index-url|--index|--extra-index-url|--default-index|-i)$/i;
+const SOURCE_FLAG_RE =
+  /^(--registry|--index-url|--index|--extra-index-url|--default-index|--userconfig|--globalconfig|-i)$/i;
 // pip flags whose VALUE is a FILE/path, not a registry package — skip the value so
 // `pip install -r requirements.txt` isn't mis-triaged as a package `requirements.txt`
 // (a false positive that blocks a benign install and pushes users off the gate).
@@ -221,7 +244,7 @@ function sourceRedirect(rawTokens: string[]): string | null {
       continue;
     }
     const flagEq = t.match(
-      /^(--registry|--index-url|--index|--extra-index-url|--default-index)=(.*)$/i,
+      /^(--registry|--index-url|--index|--extra-index-url|--default-index|--userconfig|--globalconfig)=(.*)$/i,
     );
     if (flagEq) {
       if (!DEFAULT_SOURCE_RE.test(flagEq[2])) return t;
@@ -331,15 +354,21 @@ const MATCHERS: Matcher[] = [
     scheme: "pip",
     toName: pipName,
     argStart: (t) => {
-      if ((t[0] === "pip" || t[0] === "pip3" || t[0] === "pipx") && t[1] === "install") return 2;
+      // pip install|wheel|download — wheel/download still fetch from PyPI and run the
+      // sdist's setup.py (arbitrary code), so they must be gated like install.
+      if ((t[0] === "pip" || t[0] === "pip3") && /^(install|wheel|download)$/.test(t[1] ?? ""))
+        return 2;
+      if (t[0] === "pipx" && t[1] === "install") return 2;
       if (t[0] === "uv" && t[1] === "pip" && t[2] === "install") return 3;
       if (t[0] === "uv" && t[1] === "add") return 2;
       if (t[0] === "uv" && t[1] === "tool" && t[2] === "install") return 3;
+      // Other PyPI-backed installers.
+      if ((t[0] === "poetry" || t[0] === "pdm") && t[1] === "add") return 2;
       if (
         (t[0] === "python" || t[0] === "python3") &&
         t[1] === "-m" &&
         t[2] === "pip" &&
-        t[3] === "install"
+        /^(install|wheel|download)$/.test(t[3] ?? "")
       )
         return 4;
       return -1;
@@ -387,6 +416,34 @@ export function parseInstallCommand(command: string): InstallProbe {
   return probe;
 }
 
+/**
+ * Flag-compacted positionals for verb + arg detection. Option flags are dropped so a
+ * manager flag BEFORE the subcommand (`npm -g install evil`, `pip -q install evil`,
+ * `npm --registry=X install express`) can't shift the verb past the fixed-index matchers
+ * — the CRITICAL bypass. Kept: the structural `-m` in `python -m pip`. Skipped together:
+ * the VALUE of a source/requirement flag (`--registry URL`, `-r reqs.txt`) so it isn't
+ * mistaken for a package. Stops at an inline `#` comment. (Source-redirect and
+ * `-p/--package` detection read the FULL tokens/raw, so dropping flags here loses nothing.)
+ */
+function compactPositionals(tokens: string[]): string[] {
+  const pos: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (tok.startsWith("#")) break;
+    if (tok === "-m" && pos.length === 1 && /^python3?$/.test(pos[0])) {
+      pos.push(tok); // structural: python -m pip
+      continue;
+    }
+    if (SOURCE_FLAG_RE.test(tok) || REQUIREMENT_FLAG_RE.test(tok)) {
+      i++; // skip the flag AND its value token
+      continue;
+    }
+    if (isFlag(tok)) continue; // drop option flag (can't shift the subcommand)
+    pos.push(tok);
+  }
+  return pos;
+}
+
 /** Match one shell segment against the package-manager matchers, mutating `probe`. */
 function scanSegment(segment: string, probe: InstallProbe): void {
   const raw = stripInlineComment(segment)
@@ -400,35 +457,34 @@ function scanSegment(segment: string, probe: InstallProbe): void {
   tokens[0] = binBase(tokens[0]); // /usr/bin/npm, \npm, ./bin/pnpm → npm/pnpm
 
   // Fail-closed on an install run through an unresolvable indirection: `$PM install evil`,
-  // `${X} add evil`. argv0 is a shell variable the static parser can't expand, and the
-  // next token is an install/runner verb — we can't verify what actually runs → block.
+  // `${X} add evil`, `$(which npm) i evil`, `` `which npm` i evil ``. argv0 isn't a
+  // statically-known binary (a bare variable, or a command substitution), and some token
+  // is an install/runner verb — we can't verify what actually runs → block. A var-prefixed
+  // PATH like `$HOME/bin/tool` is NOT treated as dynamic (it has a real path), so no FP.
+  const dynamicBin =
+    /^\$\{?\w+\}?$/.test(tokens[0]) || tokens[0].startsWith("$(") || tokens[0].startsWith("`");
   if (
-    /^\$\{?\w+\}?$/.test(tokens[0]) &&
-    /^(install|i|add|create|init|exec|dlx|x|run)$/.test(tokens[1] ?? "")
+    dynamicBin &&
+    tokens
+      .slice(1)
+      .some((t) => /^(install|i|add|create|init|exec|dlx|x|run|wheel|download)$/.test(binBase(t)))
   ) {
     probe.isInstall = true;
     probe.unverifiable.push(`indirect-bin:${tokens[0]}`);
     return;
   }
 
+  const pos = compactPositionals(tokens);
+  if (pos.length === 0) return;
+
   for (const m of MATCHERS) {
-    const start = m.argStart(tokens);
+    const start = m.argStart(pos);
     if (start < 0) continue;
-    // Build the package args, skipping flags AND the VALUE token of a source flag
-    // (`-i URL`, `--registry URL`) or a requirement/editable file flag (`-r reqs.txt`),
-    // and stopping at an inline `#` comment token.
-    const rest = tokens.slice(start);
-    const args: string[] = [];
-    for (let i = 0; i < rest.length; i++) {
-      const tok = rest[i];
-      if (tok.startsWith("#")) break; // inline comment
-      if (SOURCE_FLAG_RE.test(tok) || REQUIREMENT_FLAG_RE.test(tok)) {
-        i++; // skip the flag AND its value token
-        continue;
-      }
-      if (!isFlag(tok)) args.push(tok);
-    }
-    if (args.length === 0) {
+    const args = pos.slice(start); // positionals after the verb (flags already removed)
+    // For a runner, the fetched package can be named by `-p`/`--package`/`--spec`/`--from`
+    // (`npx --package=evil cmd`); then the POSITIONAL is the command to run, not a package.
+    const pkgFlags = m.single ? packageFlagTargets(tokens) : [];
+    if (args.length === 0 && pkgFlags.length === 0) {
       // `echo evil | xargs npm i` feeds the package on stdin, leaving zero visible args
       // while still installing. If this segment is an xargs target, fail-closed rather
       // than treating it as a benign bare reinstall.
@@ -443,9 +499,10 @@ function scanSegment(segment: string, probe: InstallProbe): void {
     // fail-closed (mark unverifiable) even if every name is reputable.
     const redirect = sourceRedirect(raw);
     if (redirect) probe.unverifiable.push(`alt-registry:${redirect}`);
-    // A RUNNER (npx/create/exec/uvx…) fetches only its FIRST arg; the rest are that
-    // tool's arguments. An INSTALLER treats every arg as a package.
-    const targets = m.single ? args.slice(0, 1) : args;
+    // A RUNNER fetches its `-p`/`--package` package(s) if present, else only its FIRST
+    // positional; the rest are that tool's arguments. An INSTALLER treats every positional
+    // as a package.
+    const targets = m.single ? (pkgFlags.length ? pkgFlags : args.slice(0, 1)) : args;
     for (const arg of targets) {
       if (isLocalTarget(arg)) continue; // user's own code — nothing to triage
       const name = m.toName(arg);
