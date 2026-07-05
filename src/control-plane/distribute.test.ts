@@ -262,6 +262,29 @@ describe("control-plane — applyPolicyBundle (write-after-verify, fail-closed)"
     }
   });
 
+  it("an unsigned planted high revision does not freeze legitimate updates", () => {
+    const rroot = mkdtempSync(join(tmpdir(), "kit-cp2-f2-"));
+    const rmerge = mkdtempSync(join(tmpdir(), "kit-cp2-f2m-"));
+    try {
+      addPolicySigner(rroot, loadOrCreateIdentity(signerDir).identity.publicKey);
+      applyPolicyBundle(signBundleToml(signerDir, "version = 1\nrevision = 5\n"), rroot, {
+        identityDir: rmerge,
+      });
+      // attacker with local write plants an UNSIGNED high revision (sig still matches rev 5)
+      writeFileSync(getPolicyPath(rroot), "version = 1\nrevision = 999999\n", "utf-8");
+      // the on-disk policy no longer verifies → its revision is NOT a trusted floor → a
+      // legitimate org-signed rev 6 still applies (no fail-closed DoS on updates)
+      const r = applyPolicyBundle(signBundleToml(signerDir, "version = 1\nrevision = 6\n"), rroot, {
+        identityDir: rmerge,
+      });
+      assert.equal(r.applied, true, r.reason);
+      assert.equal(loadPolicy(rroot)!.revision, 6);
+    } finally {
+      rmSync(rroot, { recursive: true, force: true });
+      rmSync(rmerge, { recursive: true, force: true });
+    }
+  });
+
   it("refuses to apply an unverifiable bundle and leaves root untouched", () => {
     const cleanRoot = mkdtempSync(join(tmpdir(), "kit-cp2-clean-"));
     try {

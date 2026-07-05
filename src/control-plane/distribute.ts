@@ -216,25 +216,34 @@ export function applyPolicyBundle(
   if (!verdict.ok) return { applied: false, revocationsAdded: 0, reason: verdict.reason };
 
   // Monotonic-revision ratchet: reject a validly-signed bundle that would ROLL BACK the
-  // applied policy. The org signs each `revision`; an attacker on the untrusted transport
-  // can only REPLAY a genuinely-signed older bundle — which carries an older (or absent)
-  // revision. Once the current policy declares a revision, an incoming bundle must declare a
-  // strictly-greater one (equal is allowed only for the byte-identical policy — an idempotent
-  // re-sync). A fleet that never sets `revision` keeps today's behavior (no enforcement).
+  // applied policy. The org signs each `revision` (it's in the canonical signed bytes, so it
+  // can't be forged over the transport); an attacker who REPLAYS a genuinely-signed older
+  // bundle carries an older (or absent) revision. Once the applied policy declares a revision,
+  // an incoming bundle must declare a strictly-greater one (equal only for the byte-identical
+  // policy — idempotent re-sync). A fleet that never sets `revision` keeps today's behavior.
+  //
+  // The floor is trusted ONLY if the on-disk policy itself VERIFIES against the org anchor —
+  // an unsigned/tampered local file must not set the floor, else a planted high `revision`
+  // would freeze all legit updates (fail-closed DoS). (A local attacker who DELETES the policy
+  // can still reset the floor; fully closing that needs a persistent tamper-evident high-water
+  // mark — tracked separately. Enforcement fails closed on any policy they can't org-sign.)
   const current = loadPolicy(root);
-  if (current?.revision !== undefined) {
+  const floor =
+    current?.revision !== undefined && verifyPolicy(root).status === "valid"
+      ? current.revision
+      : undefined;
+  if (floor !== undefined) {
     const incoming = parsePolicyToml(bundle.policyToml);
     const incomingRev = incoming?.revision;
     const rollback =
       incomingRev === undefined ||
-      incomingRev < current.revision ||
-      (incomingRev === current.revision &&
-        verdict.policy.fingerprint !== policyFingerprint(current));
+      incomingRev < floor ||
+      (incomingRev === floor && verdict.policy.fingerprint !== policyFingerprint(current));
     if (rollback) {
       return {
         applied: false,
         revocationsAdded: 0,
-        reason: `policy revision ${incomingRev ?? "(absent)"} does not advance the applied revision ${current.revision} — refusing rollback`,
+        reason: `policy revision ${incomingRev ?? "(absent)"} does not advance the applied revision ${floor} — refusing rollback`,
       };
     }
   }
