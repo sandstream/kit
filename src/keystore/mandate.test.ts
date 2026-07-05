@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -13,7 +13,8 @@ import {
 } from "../identity.js";
 import { appendAuditEventDirect } from "../audit.js";
 import { keystoreRecordRevocation } from "./revoke.js";
-import { existsSync } from "node:fs";
+import { hardwareRequired, policyRequiresHardware } from "./active.js";
+import { existsSync, writeFileSync } from "node:fs";
 import { signAttestation } from "../check-attestation.js";
 
 // The mandate must be COMPREHENSIVE: with KIT_REQUIRE_HARDWARE_IDENTITY set and only a
@@ -102,6 +103,85 @@ describe("hardware mandate — no file-key signature escapes", () => {
       false,
       "no Ed25519 file key minted under the mandate",
     );
+  });
+
+  it("a .kit-policy require_hardware_identity mandate (no env) forces audit keyless", async () => {
+    loadOrCreateIdentity();
+    // Org policy at the repo root mandates hardware — NO env var set.
+    writeFileSync(join(cwd, ".kit-policy.toml"), "version = 1\nrequire_hardware_identity = true\n");
+    assert.equal(policyRequiresHardware(cwd), true);
+    assert.equal(hardwareRequired(cwd), true, "policy alone triggers the effective mandate");
+    assert.equal(hardwareRequired(idDir), false, "a dir without the policy is unaffected");
+
+    // Audit append runs at `cwd` (where the policy lives) → the entry must be KEYLESS,
+    // never file-signed, even though KIT_REQUIRE_HARDWARE_IDENTITY is unset.
+    const origCwd = process.cwd();
+    process.chdir(cwd);
+    try {
+      assert.equal(
+        await appendAuditEventDirect(
+          { operation: "op-pol", environment: "dev", success: true },
+          { cwd },
+        ),
+        true,
+      );
+    } finally {
+      process.chdir(origCwd);
+    }
+    const line = JSON.parse(
+      readFileSync(join(cwd, ".kit-audit.jsonl"), "utf-8").trim().split("\n").at(-1)!,
+    ) as { operation: string; sig?: string };
+    assert.equal(line.operation, "op-pol");
+    assert.equal(line.sig, undefined, "policy-mandated entry must not carry a file-key signature");
+  });
+
+  it("fail-closed on a present-but-non-boolean require_hardware_identity (typo footgun)", () => {
+    // `= 1` / `= "true"` are validation errors, but must NOT silently disable the mandate.
+    writeFileSync(join(cwd, ".kit-policy.toml"), "version = 1\nrequire_hardware_identity = 1\n");
+    assert.equal(policyRequiresHardware(cwd), true, "non-boolean present → mandate ON");
+    // A strict false / absent is the only "not mandated".
+    writeFileSync(
+      join(cwd, ".kit-policy.toml"),
+      "version = 1\nrequire_hardware_identity = false\n",
+    );
+    assert.equal(policyRequiresHardware(cwd), false);
+    writeFileSync(join(cwd, ".kit-policy.toml"), "version = 1\n");
+    assert.equal(policyRequiresHardware(cwd), false);
+  });
+
+  it("policy mandate applies from a SUBDIRECTORY (upward .kit-policy.toml search)", () => {
+    // Policy at the repo root; kit invoked from a nested subdir. The mandate must still be
+    // found (else a subdir invocation would silently skip a fleet policy → file signature).
+    writeFileSync(join(cwd, ".kit-policy.toml"), "version = 1\nrequire_hardware_identity = true\n");
+    const sub = join(cwd, "a", "b", "c");
+    mkdirSync(sub, { recursive: true });
+    assert.equal(policyRequiresHardware(sub), true, "found via ancestor walk");
+    assert.equal(hardwareRequired(sub), true);
+  });
+
+  it("attestation under a POLICY-only mandate also refuses the Ed25519 file key", async () => {
+    loadOrCreateIdentity();
+    writeFileSync(join(cwd, ".kit-policy.toml"), "version = 1\nrequire_hardware_identity = true\n");
+    const origCwd = process.cwd();
+    process.chdir(cwd);
+    try {
+      const att = await signAttestation(
+        {
+          schema: "kit-check-attestation/v1",
+          command: "check",
+          timestamp: "2026-01-01T00:00:00Z",
+          kit_version: "0.0.0",
+          overall_ok: true,
+          results: { passed: 1, failed: 0, warnings: 0, skipped: 0 },
+          scanners_ran: [],
+        },
+        { dir: cwd, preferEd25519: true },
+      );
+      assert.notEqual(att.sig_alg, "ed25519", "policy mandate must block the file Ed25519 path");
+      assert.equal(existsSync(join(cwd, "attestation-ed25519.key")), false);
+    } finally {
+      process.chdir(origCwd);
+    }
   });
 
   it("recordRevocation fails closed under the mandate (no file-key revocation)", () => {

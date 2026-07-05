@@ -21,12 +21,57 @@
  * bar is the `command` backend keeping the key off the box; the mandate makes kit refuse
  * to fall back off it. Deterministic, offline, never network.
  */
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { identityId } from "../identity.js";
+import { loadPolicy, POLICY_FILE } from "../policy-doc.js";
 import { resolveKeyStore } from "./resolve.js";
 import { hardwareRequiredByEnv } from "./mandate.js";
 import type { KeyStoreResolution } from "./types.js";
 
 export { hardwareRequiredByEnv } from "./mandate.js";
+
+/** Nearest ancestor of `start` (inclusive) that holds a `.kit-policy.toml`, or null. Cheap
+ *  fs walk (no git exec) so it's safe on the audit hot path — and it means a mandate at the
+ *  repo root applies even when kit is invoked from a subdirectory (closes the cwd-vs-root
+ *  gap where a policy mandate would otherwise be silently skipped). */
+function findPolicyDir(start: string): string | null {
+  let dir = start;
+  for (let i = 0; i < 64; i++) {
+    if (existsSync(join(dir, POLICY_FILE))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/** True when the governing org policy (at `root` or any ancestor) mandates a hardware
+ *  identity via `.kit-policy.toml require_hardware_identity`. Fail-closed on a present-but-
+ *  non-boolean value (a typo like `= 1` / `= "true"`): the operator clearly intended to set
+ *  the mandate, so we treat it as ON rather than silently OFF (kit policy validate still
+ *  flags it). Only a strict `false`/absent value means "not mandated". */
+export function policyRequiresHardware(root: string): boolean {
+  try {
+    const dir = findPolicyDir(root);
+    if (dir === null) return false;
+    const v = loadPolicy(dir)?.require_hardware_identity;
+    if (v === undefined || v === false) return false;
+    return true; // true, or present-but-non-boolean → fail-closed ON
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The EFFECTIVE mandate: the environment mandate OR the org policy mandate. Tightening-only
+ * by construction (an OR) — a `false`/absent policy value can never relax the env mandate,
+ * so a repo-local policy can add the requirement fleet-wide but never disable it. This is
+ * what the enforcement call sites pass as `required`.
+ */
+export function hardwareRequired(root?: string): boolean {
+  return hardwareRequiredByEnv() || (root ? policyRequiresHardware(root) : false);
+}
 
 /**
  * Is the resolved backend genuinely hardware-rooted — i.e. the private key is NOT a
