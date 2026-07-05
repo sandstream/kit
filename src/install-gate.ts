@@ -158,6 +158,11 @@ const PREFIX_BINS = new Set([
   "doas",
   "setsid",
   "stdbuf",
+  // corepack ships with Node and dispatches to the pinned package manager, so
+  // `corepack pnpm add evil` really runs `pnpm add evil`. It's a pure wrapper; stripping
+  // it exposes the real manager. Its own subcommands (enable/install/use) reduce to a
+  // bare verb no matcher claims, so no false positive.
+  "corepack",
 ]);
 
 /** Drop leading wrapper bins + `VAR=value` env assignments, returning the real argv. */
@@ -252,10 +257,12 @@ function nestedCommands(command: string): string[] {
  * `npm${IFS}i${IFS}evil` runs `npm i evil` — but a literal-`\s+` tokenizer keeps it one
  * token and every matcher misses it (the canonical word-split gate bypass). Collapsing them
  * first makes the real argv visible. `$IFS` is matched only as a whole var (not `$IFSx`).
+ * The braced form allows any parameter-expansion operator (`${IFS:0:1}`, `${IFS%%x}`) — all
+ * still expand to whitespace and word-split — while `$IFSx` stays a different variable.
  */
 function normalizeShellWhitespace(command: string): string {
   return command
-    .replace(/(["']?)\$\{IFS\}\1/g, " ")
+    .replace(/(["']?)\$\{IFS[^}]*\}\1/g, " ")
     .replace(/(["']?)\$IFS\1(?=[^A-Za-z0-9_]|$)/g, " ")
     .replace(/\$'(?:\\[tnr]| )'/g, " ");
 }

@@ -542,6 +542,23 @@ describe("parseInstallCommand — round-5 bypass closes", () => {
     assert.equal(parseInstallCommand("npm$IFS2i").isInstall, false);
   });
 
+  it("$IFS parameter-expansion forms (${IFS:0:1}, ${IFS%%x}) also word-split", () => {
+    assert.deepEqual(parseInstallCommand("npm${IFS:0:1}i${IFS:0:1}evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("npm${IFS%%x}i${IFS%%x}evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("npm${IFS#}i${IFS#}evil").refs, ["npm:evil"]);
+    // a benign `$IFS` mention is not a false positive
+    assert.equal(parseInstallCommand("echo $IFS variable").isInstall, false);
+  });
+
+  it("corepack wrapper is stripped so the real package manager is gated", () => {
+    assert.deepEqual(parseInstallCommand("corepack pnpm add evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("corepack yarn add evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("corepack npm install evil").refs, ["npm:evil"]);
+    // corepack's own subcommands are not installs
+    assert.equal(parseInstallCommand("corepack enable").isInstall, false);
+    assert.equal(parseInstallCommand("corepack install").isInstall, false);
+  });
+
   it("exec -c/--call shell string is recursed, not mis-gated as a package", () => {
     for (const cmd of [
       'npm exec -c "npm i evil"',
