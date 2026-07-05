@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateKeyPairSync } from "node:crypto";
@@ -15,7 +15,12 @@ import {
   recordRevocation,
   loadRevocations,
   isRevoked,
+  isRevokedWith,
+  isAuthoritativeRevocation,
+  revokedKids,
+  localRevocationAuthorities,
   revocationStatement,
+  type RevocationRecord,
 } from "./identity.js";
 
 describe("identity", () => {
@@ -130,6 +135,113 @@ describe("identity", () => {
     } finally {
       process.env.KIT_IDENTITY_DIR = dir;
       rmSync(own, { recursive: true, force: true });
+    }
+  });
+
+  it("localPublicKeys rejects a spoofed .bak whose id != fingerprint(publicKey)", () => {
+    const d = mkdtempSync(join(tmpdir(), "kit-keypoison-"));
+    try {
+      process.env.KIT_IDENTITY_DIR = d;
+      const me = loadOrCreateIdentity().identity;
+      // Attacker drops a .bak claiming to BE `me` (same kid) but carrying THEIR key,
+      // trying to poison the kid→pubkey map so a forged revocation "by me" verifies.
+      const attacker = generateKeyPairSync("ed25519").publicKey.export({
+        type: "spki",
+        format: "pem",
+      }) as string;
+      writeFileSync(
+        join(d, "identity.json.2099-01-01T00-00-00-000Z.bak"),
+        JSON.stringify({ id: me.id, algo: "ed25519", publicKey: attacker, createdAt: "x" }),
+      );
+      // The map must still bind `me.id` to the REAL key (fingerprint check rejects the
+      // spoof), so the attacker's key can never masquerade as an authority.
+      assert.equal(localPublicKeys().get(me.id), me.publicKey);
+      assert.notEqual(localPublicKeys().get(me.id), attacker);
+    } finally {
+      process.env.KIT_IDENTITY_DIR = dir;
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT honor a planted, unsigned, or unauthorized revocation (authority model)", () => {
+    const d = mkdtempSync(join(tmpdir(), "kit-revoke-dos-"));
+    try {
+      process.env.KIT_IDENTITY_DIR = d;
+      const me = loadOrCreateIdentity().identity; // e.g. the org policy signer on this box
+      const revPath = join(d, "revocations.jsonl");
+
+      // A writer-only attacker plants a revocation of `me`, claiming some other key
+      // signed it, with a junk signature. The old bare existence-check honored this
+      // (fail-closed DoS on the real signer); the authority model must not.
+      const fromStranger: RevocationRecord = {
+        kid: me.id,
+        by: "kid_" + "0".repeat(32),
+        ts: "2026-01-01T00:00:00Z",
+        reason: "pwn",
+        sig: Buffer.from("junk").toString("base64"),
+      };
+      writeFileSync(revPath, JSON.stringify(fromStranger) + "\n");
+      assert.equal(loadRevocations().length, 1, "the planted record is on disk");
+      assert.equal(isRevoked(me.id), false, "unauthorized revoker must be ignored");
+
+      // Even a forged SELF-revocation (by === kid) fails: the signature can't verify
+      // against me's real public key (the attacker cannot forge Ed25519).
+      writeFileSync(revPath, JSON.stringify({ ...fromStranger, by: me.id }) + "\n");
+      assert.equal(isRevoked(me.id), false, "forged self-revocation with a bad sig is ignored");
+    } finally {
+      process.env.KIT_IDENTITY_DIR = dir;
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("isAuthoritativeRevocation: self OR authorized signer with a valid sig only", () => {
+    const d = mkdtempSync(join(tmpdir(), "kit-revoke-auth-"));
+    try {
+      process.env.KIT_IDENTITY_DIR = d;
+      // `admin` signs a revocation of `victim` (a genuinely different key).
+      const victim = loadOrCreateIdentity().identity;
+      const { identity: admin } = rotateIdentity(); // admin is now current; signs the record
+      const rec = recordRevocation(victim.id, "compromised", undefined, "2026-06-01T00:00:00Z");
+      assert.equal(rec.by, admin.id);
+
+      const keys = localPublicKeys(); // { admin, victim(archived) }
+
+      // Authorized: admin is in the authority set → honored.
+      assert.equal(isAuthoritativeRevocation(rec, keys, new Set([admin.id])), true);
+      // Unauthorized: admin NOT an authority and by !== kid → rejected despite a valid sig.
+      assert.equal(isAuthoritativeRevocation(rec, keys, new Set()), false);
+      // Revoker's public key unknown → cannot verify → rejected.
+      assert.equal(isAuthoritativeRevocation(rec, new Map(), new Set([admin.id])), false);
+      // Tampered target (kid) breaks the signature → rejected even though authorized.
+      assert.equal(
+        isAuthoritativeRevocation(
+          { ...rec, kid: "kid_" + "f".repeat(32) },
+          keys,
+          new Set([admin.id]),
+        ),
+        false,
+      );
+
+      // A self-revocation (by === kid) needs no explicit authority, only a valid sig.
+      const selfRec = recordRevocation(admin.id, "retiring", undefined, "2026-06-02T00:00:00Z");
+      assert.equal(selfRec.by, admin.id);
+      assert.equal(selfRec.kid, admin.id);
+      assert.equal(isAuthoritativeRevocation(selfRec, keys, new Set()), true);
+
+      // The default local isRevoked honors admin (the current identity is local root).
+      assert.equal(localRevocationAuthorities().has(admin.id), true);
+      assert.equal(isRevoked(victim.id), true);
+      assert.equal(isRevokedWith(victim.id, keys, new Set([admin.id])), true);
+
+      // revokedKids (the audit-command helper) lists the target under authority…
+      assert.equal(revokedKids(keys, new Set([admin.id])).has(victim.id), true);
+      // …and lists NOTHING when the revoker is not an authority (authority narrowing:
+      // this is why policy-doc drops local root — an unauthorized cross-signer
+      // revocation must not veto the target).
+      assert.equal(revokedKids(keys, new Set()).has(victim.id), false);
+    } finally {
+      process.env.KIT_IDENTITY_DIR = dir;
+      rmSync(d, { recursive: true, force: true });
     }
   });
 

@@ -144,7 +144,9 @@ async function cmdAuditVerify(): Promise<boolean> {
   // signed by an unknown key are reported but do not fail verify. A FORGED
   // signature (invalid > 0) is a hard failure.
   const { verifyAuditSignatures } = await import("../audit.js");
-  const { localPublicKeys, loadRevocations } = await import("../identity.js");
+  const { localPublicKeys, revokedKids, localRevocationAuthorities } =
+    await import("../identity.js");
+  const { policySignersMap } = await import("../policy-trust.js");
   const trust = localPublicKeys();
   const s = verifyAuditSignatures(content, (kid) => trust.get(kid) ?? null);
   if (s.signed > 0) {
@@ -161,7 +163,15 @@ async function cmdAuditVerify(): Promise<boolean> {
     // Revocation note (kit panic): entries signed by a now-revoked key are still
     // valid HISTORICAL evidence (the signature was good when made), but that key
     // is no longer trusted for NEW signatures. Surface it; don't fail on it.
-    const revoked = new Set(loadRevocations().map((r) => r.kid));
+    // Only AUTHORITATIVE revocations count — a bare existence check would let a
+    // writer-only attacker plant a line and forge a "signed by a REVOKED key /
+    // kit panic" alarm (integrity-signal DoS). Use the same authority model as
+    // policy/rbac: self-revoke, this machine's local root, or an org anchor signer.
+    const orgSigners = policySignersMap(process.cwd());
+    const revoked = revokedKids(
+      new Map([...trust, ...orgSigners]),
+      new Set([...localRevocationAuthorities(), ...orgSigners.keys()]),
+    );
     if (revoked.size > 0) {
       let revokedSigs = 0;
       for (const line of content.split("\n")) {

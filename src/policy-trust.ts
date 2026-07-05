@@ -41,12 +41,23 @@ export function loadPolicySigners(root: string): PolicySigner[] {
       signers?: unknown;
     };
     if (!raw || !Array.isArray(raw.signers)) return [];
-    return raw.signers.filter(
-      (s): s is PolicySigner =>
-        !!s &&
-        typeof (s as PolicySigner).id === "string" &&
-        typeof (s as PolicySigner).publicKey === "string",
-    );
+    return raw.signers.filter((s): s is PolicySigner => {
+      if (
+        !s ||
+        typeof (s as PolicySigner).id !== "string" ||
+        typeof (s as PolicySigner).publicKey !== "string"
+      ) {
+        return false;
+      }
+      // A kid IS the fingerprint of its public key — re-derive and require the match, so
+      // a hand-edited anchor can't list a key under someone else's kid (keeps the kid⇒key
+      // invariant honest everywhere it's consumed: policy verify AND revocation authority).
+      try {
+        return identityId((s as PolicySigner).publicKey) === (s as PolicySigner).id;
+      } catch {
+        return false;
+      }
+    });
   } catch {
     return [];
   }

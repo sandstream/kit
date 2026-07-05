@@ -143,9 +143,20 @@ export function localPublicKeys(dir?: string): Map<string, string> {
   const map = new Map<string, string>();
   const base = identityDir(dir);
   const add = (rec: Identity | null) => {
-    if (rec && typeof rec.id === "string" && typeof rec.publicKey === "string") {
-      map.set(rec.id, rec.publicKey);
+    if (!rec || typeof rec.id !== "string" || typeof rec.publicKey !== "string") return;
+    // A kid IS the fingerprint of its public key, so re-derive and require the match.
+    // Without this, a writer-only attacker could drop a crafted identity.json.*.bak
+    // (or overwrite the record) claiming `{id: <a victim/authority kid>, publicKey:
+    // <attacker key>}` — poisoning this kid→pubkey map so a forged revocation "by"
+    // that kid verifies against the attacker's key. Binding kid==fingerprint(pub)
+    // makes the map unspoofable: the attacker can't produce a key whose fingerprint
+    // is someone else's kid.
+    try {
+      if (identityId(rec.publicKey) !== rec.id) return;
+    } catch {
+      return; // unparseable public key → skip
     }
+    map.set(rec.id, rec.publicKey);
   };
   add(tryLoadIdentity(dir));
   try {
@@ -250,9 +261,94 @@ export function loadRevocations(dir?: string): RevocationRecord[] {
   }
 }
 
-/** True if `kid` has a revocation record. Pure read. */
+/**
+ * Is `rec` an AUTHORITATIVE revocation — one kit should actually honor? A record is
+ * honored only when BOTH hold:
+ *   1. its Ed25519 signature verifies against `by`'s public key (from `trustedKeys`);
+ *   2. `by` has AUTHORITY over `kid`: either `by === kid` (a key revoking itself, incl.
+ *      the rotation case where the successor id equals the record's own), or `by` is in
+ *      `authorities` (a trust-anchor set — org signers and/or this machine's local root).
+ *
+ * This is the fix for cross-signer revocation authority: without it, `isRevoked` was a
+ * bare existence check over `revocations.jsonl`, so ANY line — unsigned, or signed by a
+ * key with no authority over the target — revoked the target. A writer-only attacker
+ * could plant `{kid: <an org signer>}` and make the org's validly-signed policy verify as
+ * "revoked" (a fail-closed DoS on the real trust anchor), or revoke an arbitrary RBAC
+ * subject. Requiring a valid signature by an authorized revoker closes both: the attacker
+ * cannot forge an Ed25519 signature by an authority key. Pure; fail-closed on any doubt.
+ */
+export function isAuthoritativeRevocation(
+  rec: RevocationRecord,
+  trustedKeys: Map<string, string>,
+  authorities: Set<string>,
+): boolean {
+  if (
+    !rec ||
+    typeof rec.kid !== "string" ||
+    typeof rec.by !== "string" ||
+    typeof rec.ts !== "string" ||
+    typeof rec.reason !== "string" ||
+    typeof rec.sig !== "string"
+  ) {
+    return false;
+  }
+  if (rec.by !== rec.kid && !authorities.has(rec.by)) return false; // unauthorized revoker
+  const pub = trustedKeys.get(rec.by);
+  if (!pub) return false; // revoker's public key unknown → can't verify → don't honor
+  return verifySignature(
+    revocationStatement(rec.kid, rec.ts, rec.reason),
+    Buffer.from(rec.sig, "base64"),
+    pub,
+  );
+}
+
+/** kids carrying at least one AUTHORITATIVE revocation under the given trust context. */
+export function revokedKids(
+  trustedKeys: Map<string, string>,
+  authorities: Set<string>,
+  dir?: string,
+): Set<string> {
+  const out = new Set<string>();
+  for (const rec of loadRevocations(dir)) {
+    if (isAuthoritativeRevocation(rec, trustedKeys, authorities)) out.add(rec.kid);
+  }
+  return out;
+}
+
+/**
+ * Authority-aware revocation check against an explicit trust context. Callers that know
+ * the org trust anchor (e.g. policy verification) pass the org signers so org-propagated
+ * revocations are honored; a local-only caller passes just the machine's own keys.
+ */
+export function isRevokedWith(
+  kid: string,
+  trustedKeys: Map<string, string>,
+  authorities: Set<string>,
+  dir?: string,
+): boolean {
+  return loadRevocations(dir).some(
+    (r) => r.kid === kid && isAuthoritativeRevocation(r, trustedKeys, authorities),
+  );
+}
+
+/**
+ * LOCAL revocation authorities for this machine: the current identity is the local trust
+ * root (and is the rotation successor of its own archived keys, which it signs revocations
+ * with). Every key can additionally self-revoke (handled in isAuthoritativeRevocation).
+ */
+export function localRevocationAuthorities(dir?: string): Set<string> {
+  const cur = tryLoadIdentity(dir);
+  return new Set<string>(cur ? [cur.id] : []);
+}
+
+/**
+ * True if `kid` is revoked under this machine's LOCAL trust context (its own current +
+ * archived keys; the current identity as authority). Org-anchor-signed revocations are
+ * honored by callers that pass the org context via `isRevokedWith` (see policy-doc). This
+ * no longer honors unsigned/unauthorized records — it verifies signature + authority.
+ */
 export function isRevoked(kid: string, dir?: string): boolean {
-  return loadRevocations(dir).some((r) => r.kid === kid);
+  return isRevokedWith(kid, localPublicKeys(dir), localRevocationAuthorities(dir), dir);
 }
 
 /**
