@@ -53,11 +53,14 @@ export function parseEnvFile(content: string): Record<string, string> {
 }
 
 /**
- * Redact a secret value: show first 4 chars + ****
+ * Redact a secret value for display: reveal a short leading fragment for recognizability,
+ * but only a fraction that stays negligible. The old fixed 4-char prefix exposed 50–80% of
+ * a short secret (a 5–8 char token was mostly readable); reveal at most 4 chars AND at most
+ * ~1/6 of the value, fully masking anything too short.
  */
 export function redactValue(value: string): string {
-  if (value.length <= 4) return "****";
-  return value.slice(0, 4) + "****";
+  const reveal = Math.min(4, Math.floor(value.length / 6));
+  return reveal > 0 ? value.slice(0, reveal) + "****" : "****";
 }
 
 export async function inspectEnv(

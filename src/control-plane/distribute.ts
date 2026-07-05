@@ -33,6 +33,9 @@ import {
   verifyPolicy,
   getPolicyPath,
   getPolicySigPath,
+  loadPolicy,
+  parsePolicyToml,
+  policyFingerprint,
   type PolicyVerifyResult,
 } from "./../policy-doc.js";
 import { getSignersPath, policySignersMap } from "./../policy-trust.js";
@@ -52,6 +55,10 @@ export interface PolicyBundle {
   /** Signed revocation records to propagate (each verified before merge). */
   revocations?: RevocationRecord[];
 }
+
+/** Upper bound on a remotely-fetched bundle. Real bundles are a few KB; this caps a hostile
+ *  endpoint's response without touching the local-file (air-gap) path. */
+const MAX_BUNDLE_BYTES = 5 * 1024 * 1024;
 
 /** Type guard: a parsed value is a well-formed PolicyBundle. Fail-closed. */
 export function isPolicyBundle(v: unknown): v is PolicyBundle {
@@ -208,6 +215,39 @@ export function applyPolicyBundle(
   const verdict = verifyPolicyBundle(bundle, root);
   if (!verdict.ok) return { applied: false, revocationsAdded: 0, reason: verdict.reason };
 
+  // Monotonic-revision ratchet: reject a validly-signed bundle that would ROLL BACK the
+  // applied policy. The org signs each `revision` (it's in the canonical signed bytes, so it
+  // can't be forged over the transport); an attacker who REPLAYS a genuinely-signed older
+  // bundle carries an older (or absent) revision. Once the applied policy declares a revision,
+  // an incoming bundle must declare a strictly-greater one (equal only for the byte-identical
+  // policy — idempotent re-sync). A fleet that never sets `revision` keeps today's behavior.
+  //
+  // The floor is trusted ONLY if the on-disk policy itself VERIFIES against the org anchor —
+  // an unsigned/tampered local file must not set the floor, else a planted high `revision`
+  // would freeze all legit updates (fail-closed DoS). (A local attacker who DELETES the policy
+  // can still reset the floor; fully closing that needs a persistent tamper-evident high-water
+  // mark — tracked separately. Enforcement fails closed on any policy they can't org-sign.)
+  const current = loadPolicy(root);
+  const floor =
+    current?.revision !== undefined && verifyPolicy(root).status === "valid"
+      ? current.revision
+      : undefined;
+  if (floor !== undefined) {
+    const incoming = parsePolicyToml(bundle.policyToml);
+    const incomingRev = incoming?.revision;
+    const rollback =
+      incomingRev === undefined ||
+      incomingRev < floor ||
+      (incomingRev === floor && verdict.policy.fingerprint !== policyFingerprint(current));
+    if (rollback) {
+      return {
+        applied: false,
+        revocationsAdded: 0,
+        reason: `policy revision ${incomingRev ?? "(absent)"} does not advance the applied revision ${floor} — refusing rollback`,
+      };
+    }
+  }
+
   writeFileSync(getPolicyPath(root), bundle.policyToml, "utf-8");
   writeFileSync(getPolicySigPath(root), bundle.policySig, "utf-8");
   const revocationsAdded = appendRevocations(verdict.verifiedRevocations, opts.identityDir);
@@ -231,9 +271,21 @@ export async function fetchPolicyBundle(
   let raw: string;
   if (/^https?:\/\//.test(source)) {
     const doFetch = opts.fetchImpl ?? fetch;
-    const res = await doFetch(source, { headers: { Accept: "application/json" } });
+    // Bounded fetch: a 15s timeout so a hung/slow endpoint can't stall indefinitely, and a
+    // size cap so a hostile endpoint can't stream an unbounded body. A real bundle is a few KB.
+    const res = await doFetch(source, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
+    });
     if (!res.ok) throw new Error(`policy bundle fetch failed: HTTP ${res.status}`);
+    const declared = Number(res.headers?.get?.("content-length"));
+    if (Number.isFinite(declared) && declared > MAX_BUNDLE_BYTES) {
+      throw new Error(`policy bundle too large: ${declared} bytes (max ${MAX_BUNDLE_BYTES})`);
+    }
     raw = await res.text();
+    if (raw.length > MAX_BUNDLE_BYTES) {
+      throw new Error(`policy bundle too large: ${raw.length} bytes (max ${MAX_BUNDLE_BYTES})`);
+    }
   } else {
     const path = source.startsWith("file:") ? new URL(source).pathname : source;
     raw = readFileSync(path, "utf-8");

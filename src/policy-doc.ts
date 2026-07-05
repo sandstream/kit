@@ -44,6 +44,14 @@ export interface PolicyThresholds {
 export interface PolicyDoc {
   /** Schema version (integer). Required. */
   version: number;
+  /**
+   * Monotonic policy revision (non-negative integer). Opt-in: once a fleet publishes a
+   * policy with a `revision`, kit refuses to apply a distributed bundle whose revision is
+   * lower (a rollback) — closing the "replay an older validly-signed policy to re-enable a
+   * removed permission" attack on the untrusted transport. Absent → no rollback protection
+   * (backward-compatible); enforcement is a one-way ratchet from the first revision set.
+   */
+  revision?: number;
   /** No untriaged installs (the install-gate must be on). */
   require_triage?: boolean;
   /** Scanners that MUST run (a missing/errored one fails the gate). */
@@ -79,9 +87,38 @@ export function loadPolicy(root: string): PolicyDoc | null {
   }
 }
 
+/** Parse raw `.kit-policy.toml` TEXT (not a path). Returns null when unparseable. Used by
+ *  the control plane to read the incoming bundle's `revision` for rollback protection. */
+export function parsePolicyToml(text: string): PolicyDoc | null {
+  try {
+    return parse(text) as unknown as PolicyDoc;
+  } catch {
+    return null;
+  }
+}
+
 export interface PolicyValidation {
   ok: boolean;
   errors: string[];
+}
+
+/** `revision` (if present) must be a non-negative integer. Extracted to keep validatePolicy
+ *  within the cyclomatic-complexity budget. */
+function revisionError(v: unknown): string | null {
+  if (v === undefined) return null;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+    return "`revision` must be a non-negative integer";
+  }
+  return null;
+}
+
+/** `required_scanners` (if present) must be an array of strings. */
+function requiredScannersError(v: unknown): string | null {
+  if (v === undefined) return null;
+  if (!Array.isArray(v) || v.some((s) => typeof s !== "string")) {
+    return "`required_scanners` must be an array of strings";
+  }
+  return null;
 }
 
 /** Validate a parsed policy against the allow-listed schema. Pure. */
@@ -112,15 +149,13 @@ export function validatePolicy(doc: unknown): PolicyValidation {
   bool("require_triage");
   bool("prod_writes_need_approval");
   bool("require_hardware_identity");
-  if (
-    d.required_scanners !== undefined &&
-    (!Array.isArray(d.required_scanners) || d.required_scanners.some((s) => typeof s !== "string"))
-  ) {
-    errors.push("`required_scanners` must be an array of strings");
-  }
+  const scannersErr = requiredScannersError(d.required_scanners);
+  if (scannersErr) errors.push(scannersErr);
   if (d.min_kit_version !== undefined && typeof d.min_kit_version !== "string") {
     errors.push("`min_kit_version` must be a string");
   }
+  const revErr = revisionError(d.revision);
+  if (revErr) errors.push(revErr);
   if (d.thresholds !== undefined) {
     if (typeof d.thresholds !== "object" || d.thresholds === null) {
       errors.push("`thresholds` must be a table");

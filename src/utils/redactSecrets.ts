@@ -96,6 +96,15 @@ export const SECRET_PATTERNS: RedactPattern[] = [
     re: /"private_key":\s*"-----BEGIN [^"]{1,8000}-----END [^"]{0,200}-----\\n"/g,
     label: "gcp-private-key",
   },
+  // Raw (non-JSON) PEM private key block — `id_rsa`, a leaked `.pem`, or a key pasted
+  // into a config/env. The JSON form above only catches an escaped-newline value inside
+  // a `"private_key"` field; a bare armored block slipped through entirely. The body is a
+  // single bounded lazy run between the BEGIN/END markers — no ambiguous alternation — so
+  // it can't catastrophically backtrack. {1,8000} covers a 4096-bit key.
+  {
+    re: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]{1,8000}?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----/g,
+    label: "pem-private-key",
+  },
   { re: /\bAIza[0-9A-Za-z\-_]{35}\b/g, label: "google-api-key" },
   // Slack
   { re: /\bxox[abprs]-[A-Za-z0-9-]{10,}/g, label: "slack-token" },
@@ -108,6 +117,17 @@ export const SECRET_PATTERNS: RedactPattern[] = [
   { re: /\bsk-[A-Za-z0-9]{40,}/g, label: "openai-key" },
   // Resend
   { re: /\bre_[A-Za-z0-9_]{20,}/g, label: "resend-key" },
+  // Azure storage connection string — the `AccountKey=<base64>` component is the
+  // credential; the rest (AccountName, EndpointSuffix) is not. Azure keys are 88-char
+  // base64 ending in `==`; match 40+ base64 chars to be safe.
+  { re: /\bAccountKey=[A-Za-z0-9+/]{40,}={0,2}/gi, label: "azure-account-key" },
+  // SendGrid API key — `SG.<22 base64url>.<43 base64url>`.
+  { re: /\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b/g, label: "sendgrid-key" },
+  // Slack app-level token (`xapp-`) — the `xox[abprs]-` matcher above doesn't cover it.
+  { re: /\bxapp-[A-Za-z0-9-]{10,}/g, label: "slack-app-token" },
+  // npm automation/publish token — `npm_` + 36 base62 chars (distinct from the
+  // `npm_config_*` env prefix, whose underscore breaks this run).
+  { re: /\bnpm_[A-Za-z0-9]{36}\b/g, label: "npm-token" },
   // Generic `KEY=high-entropy` — catches rotation values that get echoed
   // back inside `op item create ... KEY=<value>` style error messages.
   // Only triggers on uppercase-snake-case identifiers followed by `=`
@@ -145,8 +165,21 @@ export const SECRET_PATTERNS: RedactPattern[] = [
   // The `kv-secret` class stops at the `:`/`@`, so these slipped through. Redact
   // ONLY the password and keep the scheme/user/host as diagnostic context.
   {
-    re: /\b([a-z][a-z0-9+.-]*:\/\/[^\s:@/]*:)[^\s@/]{3,}@/gi,
+    // Scheme bounded to {0,15} (real URI schemes are ≤~11 chars): an unbounded `[a-z0-9+.-]*`
+    // rescanned a long hyphen/dot run from every start looking for `://`, giving O(n²)
+    // backtracking on hostile input (a DoS on the scanner / status redaction hot path). The
+    // userinfo/password runs are capped too so no single segment can drive quadratic cost.
+    re: /\b([a-z][a-z0-9+.-]{0,15}:\/\/[^\s:@/]{0,128}:)[^\s@/]{3,256}@/gi,
     label: "url-credentials",
+    replacement: "$1[REDACTED]@",
+  },
+  // Token in the URL userinfo with NO colon — `https://<token>@host` — the common git /
+  // registry / webhook form (`https://ghp_xxx@github.com`, `https://<pat>@dev.azure.com`).
+  // The `user:pw@` matcher above stops at the `:`; this one requires a colon-free 16+ char
+  // userinfo (a real username is short and wouldn't be a secret) and keeps the scheme.
+  {
+    re: /\b([a-z][a-z0-9+.-]{0,15}:\/\/)[A-Za-z0-9._~%+-]{16,256}@/gi,
+    label: "url-token-userinfo",
     replacement: "$1[REDACTED]@",
   },
   // Generic high-entropy hex tokens (32+ hex chars) — last resort

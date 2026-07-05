@@ -19,9 +19,21 @@ Design contract (matches kit's watertight gate):
     are surfaced and scored but do not, by themselves, withhold PASS (criticals do).
 
 Exit code is always 0 on a completed evaluation; kit reads the text, not the code.
+
+Scope (what a PASS DOES and does NOT mean):
+  - PASS means the SPECIFIC target — including a pinned version or dist-tag (`name@1.2.3`,
+    `name@next`, `name==1.2.3`) — EXISTS and clears the health checks: not-found, deprecated,
+    or yanked is a CRITICAL; newness / abandonment / single-maintainer / no-license are
+    warnings. A pinned version is triaged directly, so a clean `latest` never vouches for a
+    yanked or malicious pinned version.
+  - PASS is NOT a malware verdict. This gate does no typosquat, install-script, or behavioral
+    analysis. Deep malware detection is GuardDog (opt-in, separate + heavier: `KIT_GUARDDOG=1`
+    or `[scan] guarddog = true`, run via `kit check`). Treat this as an existence + health +
+    version gate, not proof the code is safe to run.
 """
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -113,8 +125,99 @@ class Report:
             print("TRIAGE FAILED")
 
 
+def _split_npm_spec(target):
+    """Split a npm target into (name, version|tag|None). Handles `@scope/name@ver`
+    (the version `@` is the one AFTER the scope slash) and plain `name@ver`."""
+    if target.startswith("@"):
+        slash = target.find("/")
+        at = target.find("@", slash + 1) if slash != -1 else -1
+    else:
+        at = target.find("@")
+    if at > 0:
+        return target[:at], target[at + 1:]
+    return target, None
+
+
+def _stable_semver(v):
+    """(major, minor, patch) for a STABLE X.Y.Z (no pre-release/build), else None."""
+    m = re.match(r"^(\d+)\.(\d+)\.(\d+)$", v)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+
+
+def _resolve_npm_spec(spec, version_keys):
+    """Resolve a npm version spec to the concrete published version npm WOULD install — the
+    MAX stable version satisfying it — or None if we can't parse it (→ caller fails closed).
+    A leading `v` is tolerated (npm loose-parses it). Handles exact, `X`/`X.Y`/`X.x` partials,
+    `^`, `~`, and single comparators (`>=`, `>`, `<`, `<=`, `=`). Compound/hyphen/`||` ranges
+    return None (fail-closed) — they're rare in a CLI install and must not silently pass latest.
+    """
+    spec = spec.strip()
+    if spec[1:2].isdigit() and spec[:1] == "v":
+        spec = spec[1:]  # npm tolerates a leading v (v1.2.3 == 1.2.3)
+    if spec in version_keys:
+        return spec  # exact
+    if any(c in spec for c in (" ", "||", " - ", ",")):
+        return None  # compound/hyphen range — don't guess
+    op = ""
+    for o in (">=", "<=", "^", "~", ">", "<", "="):
+        if spec.startswith(o):
+            op, spec = o, spec[len(o):].strip()
+            break
+    if spec.startswith("v") and spec[1:2].isdigit():
+        spec = spec[1:]
+    nums = []
+    for p in spec.split("."):
+        if p in ("x", "X", "*", ""):
+            break
+        if not p.isdigit() or len(p) > 18:
+            return None  # non-numeric or absurdly long component (avoid int() blowups)
+        nums.append(int(p))
+    if len(nums) > 3 or (op and not nums):
+        return None  # not a 3-part semver / an operator with no version → don't guess
+    base = tuple((nums + [0, 0, 0])[:3])
+
+    def bump_partial():
+        # x-range upper bound of a PARTIAL version: <=1 → 2.0.0, <=1.2 → 1.3.0, >1 → 2.0.0
+        b = list(base)
+        b[len(nums) - 1] += 1
+        for j in range(len(nums), 3):
+            b[j] = 0
+        return tuple(b)
+
+    def satisfies(t):
+        if op == "^" and nums:
+            # npm caret: bump the leftmost NON-ZERO component (or the last specified when all
+            # are zero), zeroing the rest. ^1.2.3<2.0.0, ^0.2.3<0.3.0, ^0.0.3<0.0.4, ^0.0<0.1.0.
+            idx = next((i for i, n in enumerate(nums) if n > 0), len(nums) - 1)
+            hi = list(base)
+            hi[idx] += 1
+            for j in range(idx + 1, 3):
+                hi[j] = 0
+            return base <= t < tuple(hi)
+        if op == "~" and nums:
+            hi = (base[0], base[1] + 1, 0) if len(nums) >= 2 else (base[0] + 1, 0, 0)
+            return base <= t < hi
+        if op == ">=":
+            return t >= base
+        if op == "<":
+            return t < base
+        if op == "<=":  # partial <= desugars to an x-range bound (<=1 → <2.0.0)
+            return t <= base if len(nums) >= 3 else t < bump_partial()
+        if op == ">":  # partial > desugars likewise (>1 → >=2.0.0)
+            return t > base if len(nums) >= 3 else t >= bump_partial()
+        if op == "=":
+            return t == base
+        return all(i < len(t) and t[i] == n for i, n in enumerate(nums))  # bare partial: 1 → 1.x.x
+
+    cands = sorted(t for t in (_stable_semver(v) for v in version_keys) if t and satisfies(t))
+    if not cands:
+        return None
+    best = cands[-1]
+    return f"{best[0]}.{best[1]}.{best[2]}"
+
+
 def triage_npm(rep):
-    pkg = rep.target
+    pkg, spec = _split_npm_spec(rep.target)
     url = f"{NPM_REGISTRY}/{urllib.parse.quote(pkg, safe='@/')}"
     try:
         data, _ = _get_json(url)
@@ -128,18 +231,39 @@ def triage_npm(rep):
         rep.critical("could not reach the npm registry (offline?) -- cannot verify")
         return
 
-    latest = (data.get("dist-tags") or {}).get("latest")
+    dist_tags = data.get("dist-tags") or {}
     versions = data.get("versions") or {}
-    meta = versions.get(latest, {}) if latest else {}
     times = data.get("time") or {}
+    latest = dist_tags.get("latest")
 
+    # Resolve WHICH version to inspect for deprecation/existence. A dist-tag, an exact pin, or
+    # a range/partial (`@2`, `@^1.2`, `@1.x`, `@v1.2.3`) is resolved to the concrete version npm
+    # WOULD install -- a clean `latest` must never vouch for a yanked/deprecated/malicious pinned
+    # or in-range version. An unresolvable spec fails CLOSED (never silently passes latest).
+    target_ver = latest
+    if spec:
+        if spec in dist_tags:
+            target_ver = dist_tags[spec]
+        else:
+            resolved = _resolve_npm_spec(spec, list(versions.keys()))
+            if resolved:
+                target_ver = resolved
+            else:
+                rep.critical(
+                    f"version spec '{spec}' of '{pkg}' could not be resolved to a published "
+                    f"version (yanked/unpublished/unsupported range) -- cannot verify"
+                )
+                return
+
+    meta = versions.get(target_ver, {}) if target_ver else {}
     if meta.get("deprecated"):
-        rep.critical(f"latest version {latest} is DEPRECATED: {str(meta.get('deprecated'))[:80]}")
+        rep.critical(f"version {target_ver} is DEPRECATED: {str(meta.get('deprecated'))[:80]}")
     created_days = _days_since(times.get("created"))
     last_days = _days_since(times.get(latest)) if latest else None
     maint = data.get("maintainers") or meta.get("maintainers") or []
 
-    rep.fact(f"latest {latest}, {len(versions)} versions, {len(maint)} maintainer(s)")
+    tag = f" (latest {latest})" if target_ver != latest else ""
+    rep.fact(f"triaged {target_ver}{tag}, {len(versions)} versions, {len(maint)} maintainer(s)")
     if created_days is not None:
         rep.fact(f"first published {created_days} days ago")
         if created_days < NEW_DAYS:
@@ -150,8 +274,90 @@ def triage_npm(rep):
         rep.warn("single maintainer -- bus-factor / takeover risk")
 
 
+def _split_pip_spec(target):
+    """Split a pip requirement into (name, spec|None), dropping any `[extras]`.
+    e.g. `requests[security]==1.2.3` -> ('requests', '==1.2.3'); `Flask>=2` -> ('Flask', '>=2')."""
+    m = re.match(r"^([A-Za-z0-9][\w.-]*)(?:\[[\w,.-]*\])?\s*(.*)$", target)
+    if not m:
+        return target, None
+    spec = m.group(2).strip()
+    return m.group(1), (spec or None)
+
+
+def _pep_release(v):
+    """Numeric release tuple of a PEP 440 version (epoch/pre/post/dev ignored), else None."""
+    m = re.match(r"^(?:\d+!)?(\d+(?:\.\d+)*)", v)
+    if not m:
+        return None
+    parts = m.group(1).split(".")
+    if any(len(p) > 18 for p in parts):  # avoid int() blowups on absurd input
+        return None
+    return tuple(int(x) for x in parts)
+
+
+def _pep_stable(v):
+    """True for a plain release version (no a/b/rc/dev/post pre-release suffix)."""
+    return re.match(r"^(?:\d+!)?\d+(?:\.\d+)*$", v) is not None
+
+
+def _resolve_pip_spec(spec, release_keys):
+    """Resolve a single pip version spec to the concrete release pip WOULD install (max
+    satisfying), or None if unparseable/compound (→ caller fails closed). Handles
+    `==`/`===`/`==X.*`, `>=`,`>`,`<`,`<=`,`!=`,`~=`. Compound (`,`) ranges return None."""
+    spec = spec.strip()
+    if "," in spec:
+        return None
+    m = re.match(r"^(===|==|~=|>=|<=|!=|>|<)\s*([0-9][\w.*!+-]*)$", spec)
+    if not m:
+        return None
+    op, ver = m.group(1), m.group(2)
+    if op in ("==", "==="):
+        if op == "==" and ver.endswith(".*"):
+            pref = ver[:-2]
+            # STABLE releases only — pip excludes pre-releases from `==X.*` without --pre.
+            cands = sorted(
+                (
+                    r
+                    for r in release_keys
+                    if _pep_stable(r) and (r == pref or r.startswith(pref + "."))
+                ),
+                key=lambda r: _pep_release(r) or (),
+            )
+            return cands[-1] if cands else None
+        return ver if ver in release_keys else None
+    want = _pep_release(ver)
+    if want is None:
+        return None
+
+    def ok(t):
+        # Compare zero-padded to equal length: PEP 440 treats 2.20 == 2.20.0, so a bare
+        # `<=2.20` must include 2.20.0 (Python tuple compare would otherwise exclude it).
+        n = max(len(t), len(want))
+        tt = tuple(t) + (0,) * (n - len(t))
+        ww = tuple(want) + (0,) * (n - len(want))
+        if op == ">=":
+            return tt >= ww
+        if op == ">":
+            return tt > ww
+        if op == "<=":
+            return tt <= ww
+        if op == "<":
+            return tt < ww
+        if op == "!=":
+            return tt != ww
+        if op == "~=" and len(want) >= 2:  # compatible release: >= want, same prefix minus last
+            return tt >= ww and t[: len(want) - 1] == want[: len(want) - 1]
+        return False
+
+    cands = sorted(
+        (r for r in release_keys if _pep_stable(r) and _pep_release(r) and ok(_pep_release(r))),
+        key=lambda r: _pep_release(r),
+    )
+    return cands[-1] if cands else None
+
+
 def triage_pip(rep):
-    pkg = rep.target
+    pkg, spec = _split_pip_spec(rep.target)
     url = f"{PYPI_INDEX}/pypi/{urllib.parse.quote(pkg)}/json"
     try:
         data, _ = _get_json(url)
@@ -167,11 +373,28 @@ def triage_pip(rep):
 
     info = data.get("info") or {}
     releases = data.get("releases") or {}
-    ver = info.get("version")
+    latest = info.get("version")
+
+    # A pin or range is resolved to the concrete release pip WOULD install (max satisfying) and
+    # checked directly -- a clean latest must not vouch for a yanked/older in-range version. An
+    # unresolvable/compound spec fails CLOSED rather than silently passing latest.
+    ver = latest
+    if spec:
+        resolved = _resolve_pip_spec(spec, list(releases.keys()))
+        if resolved:
+            ver = resolved
+        else:
+            rep.critical(
+                f"version spec '{spec}' of '{pkg}' could not be resolved to a published "
+                f"release (yanked/unpublished/unsupported range) -- cannot verify"
+            )
+            return
+
     files = releases.get(ver) or []
     if any(f.get("yanked") for f in files):
-        rep.critical(f"latest version {ver} is YANKED")
-    rep.fact(f"latest {ver}, {len(releases)} releases, author: {info.get('author') or 'unknown'}")
+        rep.critical(f"version {ver} is YANKED")
+    tag = f" (latest {latest})" if ver != latest else ""
+    rep.fact(f"triaged {ver}{tag}, {len(releases)} releases, author: {info.get('author') or 'unknown'}")
     last_iso = files[0].get("upload_time_iso_8601") if files else None
     last_days = _days_since(last_iso)
     if last_days is not None and last_days > ABANDONED_DAYS:
@@ -309,7 +532,13 @@ def main(argv):
     if not fn:
         rep.critical(f"unknown triage type '{ttype}'")
     else:
-        fn(rep)
+        # Fail CLOSED on any unexpected error: an escaping exception would skip rep.emit()
+        # entirely (no verdict line → kit can't see a PASS, but also no explicit block). Turn
+        # it into a CRITICAL so the gate always renders a decisive, safe verdict.
+        try:
+            fn(rep)
+        except Exception as e:  # noqa: BLE001 -- deliberate catch-all for a fail-closed gate
+            rep.critical(f"triage error ({type(e).__name__}) -- cannot verify")
     rep.emit()
     return 0
 

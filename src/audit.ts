@@ -4,6 +4,47 @@ import { createHash } from "node:crypto";
 import type { GovernanceConfig } from "./config.js";
 import { identityId, verifySignature } from "./identity.js";
 import { resolveKeyStore, assertHardwareIdentity, hardwareRequired } from "./keystore/index.js";
+import { redactSecrets } from "./utils/redactSecrets.js";
+
+// Redact secrets from an audit event BEFORE it is hashed and written. The sink previously
+// stored `error` and `metadata` verbatim, so a credential echoed in an error message or
+// carried under a metadata key (detail/value/output/…) landed in `.kit-audit.jsonl` in
+// plaintext — and, with remote audit on, was shipped. Redaction runs over the whole event,
+// so the persisted line AND its chain hash cover the redacted form (chain stays consistent).
+// Uses defineProperty for reassembly so a `__proto__`/`constructor` metadata key can't
+// pollute the prototype during the walk.
+function redactAuditValue(v: unknown): unknown {
+  if (typeof v === "string") return redactSecrets(v);
+  if (Array.isArray(v)) return v.map(redactAuditValue);
+  if (v && typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v)) {
+      Object.defineProperty(out, k, {
+        value: redactAuditValue(val),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
+    return out;
+  }
+  return v;
+}
+
+function redactAuditEvent(event: AuditEvent): AuditEvent {
+  return {
+    ...event,
+    // operation strings commonly embed a command line, so a token can land there;
+    // environment is redacted too for the same reason. Both are cheap and normal values
+    // ("secrets.generate", "prod") never match a credential pattern → no false redaction.
+    operation: redactSecrets(event.operation),
+    environment: redactSecrets(event.environment),
+    error: event.error ? redactSecrets(event.error) : event.error,
+    metadata: event.metadata
+      ? (redactAuditValue(event.metadata) as Record<string, unknown>)
+      : event.metadata,
+  };
+}
 
 // ── Tamper-evident hash chain ───────────────────────────────────────────────
 // Each appended line carries `prev` (the previous line's hash) and `hash`
@@ -262,10 +303,12 @@ export async function appendAuditEventDirect(
   event: Omit<AuditEvent, "timestamp">,
   opts: { cwd?: string; logFile?: string } = {},
 ): Promise<boolean> {
-  const auditEvent: AuditEvent = {
+  // Redact at construction so EVERY sink — chain write, remote push, pending queue —
+  // sees the redacted event, not just the on-disk chain.
+  const auditEvent: AuditEvent = redactAuditEvent({
     timestamp: new Date().toISOString(),
     ...event,
-  };
+  });
   const logFile = opts.logFile ?? ".kit-audit.jsonl";
   const logPath = resolve(opts.cwd ?? process.cwd(), logFile);
   try {
@@ -430,9 +473,21 @@ export async function logAuditEvent(
     ...event,
   };
 
-  // Remove secrets from metadata if include_secrets is false
-  if (!config.audit.include_secrets && auditEvent.metadata) {
-    auditEvent.metadata = sanitizeMetadata(auditEvent.metadata);
+  // When include_secrets is false (the default), strip secrets two ways: by KEY NAME
+  // (sanitizeMetadata drops keys like `password`) AND by VALUE — redact known credential
+  // patterns from the metadata values and the error string, so a secret echoed in an error
+  // message or carried under an innocuous key (detail/value/output) never persists locally
+  // or ships to Remote. include_secrets=true is an explicit opt-in and skips both.
+  if (!config.audit.include_secrets) {
+    if (auditEvent.metadata) {
+      auditEvent.metadata = redactAuditValue(sanitizeMetadata(auditEvent.metadata)) as Record<
+        string,
+        unknown
+      >;
+    }
+    if (auditEvent.error) auditEvent.error = redactSecrets(auditEvent.error);
+    auditEvent.operation = redactSecrets(auditEvent.operation);
+    auditEvent.environment = redactSecrets(auditEvent.environment);
   }
 
   // Write to local JSONL file (hash-chained for tamper-evidence). The boolean

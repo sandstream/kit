@@ -897,7 +897,7 @@ For Cline, add the same config to your `cline_mcp_settings.json`.
 ### Getting Help
 
 - 📚 **Plugin Development**: [docs/PLUGIN_DEVELOPMENT.md](docs/PLUGIN_DEVELOPMENT.md), [docs/ADAPTER_GUIDE.md](docs/ADAPTER_GUIDE.md), [docs/MCP_TOOLS_GUIDE.md](docs/MCP_TOOLS_GUIDE.md)
-- 💬 **Discussions**: [github.com/sandstream/kit/discussions](https://github.com/sandstream/kit/discussions)
+- 💬 **Discussions**: [github.com/sandstream/kit/discussions](https://github.com/sandstream/kit/issues)
 - 🐛 **Issues**: [github.com/sandstream/kit/issues](https://github.com/sandstream/kit/issues)
 - 🤝 **Contributing**: [CONTRIBUTING.md](CONTRIBUTING.md), [COMMUNITY.md](COMMUNITY.md)
 

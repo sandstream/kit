@@ -35,13 +35,18 @@ describe("parseEnvFile", () => {
 });
 
 describe("redactValue", () => {
-  it("shows first 4 chars + **** for longer values", () => {
-    assert.equal(redactValue("sk-or-v1-abc123"), "sk-o****");
+  it("reveals at most 4 chars and at most ~1/6 of the value", () => {
+    assert.equal(redactValue("sk-or-v1-abc123"), "sk****"); // len 15 → reveal 2
+    assert.equal(redactValue("a".repeat(24)), "aaaa****"); // long → cap at 4
+    assert.equal(redactValue("a".repeat(60)), "aaaa****"); // still capped at 4
   });
 
-  it("returns **** for values of 4 chars or less", () => {
+  it("fully masks short values (no fixed-prefix leak)", () => {
+    // The old fixed 4-char prefix exposed most of a short secret; short values now mask fully.
     assert.equal(redactValue("abc"), "****");
     assert.equal(redactValue("abcd"), "****");
+    assert.equal(redactValue("abcde"), "****"); // len 5 → reveal 0
+    assert.equal(redactValue("secret"), "s****"); // len 6 → reveal 1
   });
 
   it("works for empty string", () => {

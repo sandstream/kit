@@ -13,7 +13,9 @@ import {
   isAsymmetricBackup,
   isEncryptedBackup,
   parseRecipient,
+  maybeGunzip,
 } from "./backup.js";
+import { gzipSync } from "node:zlib";
 
 describe("memory encrypted backup / restore", () => {
   it("roundtrips data; a wrong passphrase fails", () => {
@@ -131,6 +133,19 @@ describe("memory asymmetric (public-key) backup — no passphrase, ephemeral-saf
   it("parseRecipient rejects a malformed public key", () => {
     assert.throws(() => parseRecipient("not-a-key"), /must start with/);
     assert.throws(() => parseRecipient("kitmem-pub-deadbeef"), /X25519 public key/);
+  });
+});
+
+describe("memory backup — gzip-bomb guard (bounded decompression)", () => {
+  it("refuses a blob that decompresses past the cap; passes legit data through", () => {
+    // A tiny gzip that expands to 1 MB of zeros — with a small cap it must be refused
+    // (a V3 public-key blob is near-unauthenticated, so a bomb plaintext is craftable).
+    const bomb = gzipSync(Buffer.alloc(1024 * 1024));
+    assert.throws(() => maybeGunzip(bomb, 4096), /gzip bomb/);
+    // legit small payload round-trips under the default cap
+    assert.equal(maybeGunzip(gzipSync(Buffer.from("hello"))).toString(), "hello");
+    // a non-gzip (pre-compression) blob passes through untouched
+    assert.equal(maybeGunzip(Buffer.from("rawsqlite")).toString(), "rawsqlite");
   });
 });
 
