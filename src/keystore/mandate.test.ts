@@ -135,6 +135,20 @@ describe("hardware mandate — no file-key signature escapes", () => {
     assert.equal(line.sig, undefined, "policy-mandated entry must not carry a file-key signature");
   });
 
+  it("fail-closed on a present-but-non-boolean require_hardware_identity (typo footgun)", () => {
+    // `= 1` / `= "true"` are validation errors, but must NOT silently disable the mandate.
+    writeFileSync(join(cwd, ".kit-policy.toml"), "version = 1\nrequire_hardware_identity = 1\n");
+    assert.equal(policyRequiresHardware(cwd), true, "non-boolean present → mandate ON");
+    // A strict false / absent is the only "not mandated".
+    writeFileSync(
+      join(cwd, ".kit-policy.toml"),
+      "version = 1\nrequire_hardware_identity = false\n",
+    );
+    assert.equal(policyRequiresHardware(cwd), false);
+    writeFileSync(join(cwd, ".kit-policy.toml"), "version = 1\n");
+    assert.equal(policyRequiresHardware(cwd), false);
+  });
+
   it("policy mandate applies from a SUBDIRECTORY (upward .kit-policy.toml search)", () => {
     // Policy at the repo root; kit invoked from a nested subdir. The mandate must still be
     // found (else a subdir invocation would silently skip a fleet policy → file signature).

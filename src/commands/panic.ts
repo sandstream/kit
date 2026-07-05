@@ -18,6 +18,8 @@ import { c } from "../utils/colors.js";
 import { flagValue, hasFlag } from "../utils/flags.js";
 import { tryLoadIdentity, rotateIdentity } from "../identity.js";
 import { keystoreRecordRevocation } from "../keystore/revoke.js";
+import { hardwareRequired } from "../keystore/index.js";
+import { getCurrentProjectRoot } from "../memory/project.js";
 import { appendAuditEventDirect } from "../audit.js";
 
 /** The accounts/controls kit can only orchestrate — never silently "handle". */
@@ -53,6 +55,18 @@ export async function cmdPanic(): Promise<boolean> {
     console.error(
       `${c.red}no identity to rotate${c.reset} — there is nothing to revoke. ` +
         `Run ${c.bold}kit identity init${c.reset} first if you want a signing identity.`,
+    );
+    return false;
+  }
+
+  // Under a hardware mandate (env OR org policy), refuse to rotate INTO a file key — panic
+  // reaches rotateIdentity() directly, whose own guard is env-only, so without this a
+  // policy-only mandate would let panic re-mint exactly the same-UID file key the mandate
+  // forbids. Provision/rotate the hardware key out of band instead.
+  if (hardwareRequired(getCurrentProjectRoot())) {
+    console.error(
+      `${c.red}✗ hardware/externally-held identity required${c.reset} ${c.dim}(env or .kit-policy require_hardware_identity)${c.reset} — ` +
+        `rotate the key in your TPM/HSM/enclave and update KIT_KEYSTORE_PUBKEY; kit won't mint a file key here.`,
     );
     return false;
   }

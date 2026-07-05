@@ -47,11 +47,17 @@ function findPolicyDir(start: string): string | null {
 }
 
 /** True when the governing org policy (at `root` or any ancestor) mandates a hardware
- *  identity via `.kit-policy.toml require_hardware_identity`. */
+ *  identity via `.kit-policy.toml require_hardware_identity`. Fail-closed on a present-but-
+ *  non-boolean value (a typo like `= 1` / `= "true"`): the operator clearly intended to set
+ *  the mandate, so we treat it as ON rather than silently OFF (kit policy validate still
+ *  flags it). Only a strict `false`/absent value means "not mandated". */
 export function policyRequiresHardware(root: string): boolean {
   try {
     const dir = findPolicyDir(root);
-    return dir !== null && loadPolicy(dir)?.require_hardware_identity === true;
+    if (dir === null) return false;
+    const v = loadPolicy(dir)?.require_hardware_identity;
+    if (v === undefined || v === false) return false;
+    return true; // true, or present-but-non-boolean → fail-closed ON
   } catch {
     return false;
   }
