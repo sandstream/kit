@@ -39,6 +39,7 @@ import {
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { secureFile } from "./utils/secure-perms.js";
+import { hardwareRequiredByEnv } from "./keystore/mandate.js";
 
 const KEY_FILE = "identity.key"; // PKCS8 PEM private key (0600)
 const RECORD_FILE = "identity.json"; // public identity record (0600)
@@ -127,6 +128,16 @@ export function loadOrCreateIdentity(
 ): { identity: Identity; created: boolean } {
   const existing = tryLoadIdentity(dir);
   if (existing && existsSync(keyPath(dir))) return { identity: existing, created: false };
+  // Don't MINT a same-UID-readable file key under a hardware mandate — a coexisting file
+  // key is exactly what would undercut the mandate (an attacker could read+use it while
+  // kit believes it's hardware-rooted). Fail closed: provision the hardware key instead.
+  if (hardwareRequiredByEnv()) {
+    throw new Error(
+      "refusing to create a file identity key: a hardware/externally-held identity is required " +
+        "(KIT_REQUIRE_HARDWARE_IDENTITY). Provision the key in your TPM/HSM/enclave and set " +
+        "KIT_KEYSTORE=command with KIT_KEYSTORE_SIGN_CMD + KIT_KEYSTORE_PUBKEY.",
+    );
+  }
   const { privatePem, identity } = generateIdentity(now);
   writeIdentity(dir, privatePem, identity);
   return { identity, created: true };
@@ -174,8 +185,25 @@ export function localPublicKeys(dir?: string): Map<string, string> {
   return map;
 }
 
-/** Sign data with the identity's private key (Ed25519). Throws if no identity exists. */
+/**
+ * Sign data with the identity's private key (Ed25519). Throws if no identity exists.
+ *
+ * FAIL-CLOSED under a hardware mandate: this function reads the same-UID-readable 0600
+ * PKCS8 file key, so if KIT_REQUIRE_HARDWARE_IDENTITY is set it MUST refuse — otherwise
+ * the mandate would be a false green for every caller that reaches the file signer
+ * directly (audit-chain entries, revocations, elevation, …), not just the keystore-routed
+ * ones. This is the universal backstop; the keystore's ExternalCommandKeyStore signs via
+ * hardware without ever calling this path, so a properly configured `command` backend is
+ * unaffected. (mandate.js is import-cycle-free by construction.)
+ */
 export function signWithIdentity(data: Buffer | string, dir?: string): Buffer {
+  if (hardwareRequiredByEnv()) {
+    throw new Error(
+      "refusing to sign with the same-UID-readable file key: a hardware/externally-held identity " +
+        "is required (KIT_REQUIRE_HARDWARE_IDENTITY). Configure KIT_KEYSTORE=command with " +
+        "KIT_KEYSTORE_SIGN_CMD + KIT_KEYSTORE_PUBKEY so the key lives outside kit.",
+    );
+  }
   const pem = readFileSync(keyPath(dir), "utf-8");
   const msg = Buffer.isBuffer(data) ? data : Buffer.from(data);
   return edSign(null, msg, createPrivateKey(pem));
@@ -360,6 +388,16 @@ export function rotateIdentity(
   dir?: string,
   now: string = new Date().toISOString(),
 ): { identity: Identity; previousId: string | null } {
+  // Mirror loadOrCreateIdentity: never MINT a same-UID-readable file key under a hardware
+  // mandate — otherwise rotate would re-plant exactly the key the mandate forbids (and a
+  // later env unset would let signWithIdentity use it). Fail closed.
+  if (hardwareRequiredByEnv()) {
+    throw new Error(
+      "refusing to rotate into a file identity key: a hardware/externally-held identity is " +
+        "required (KIT_REQUIRE_HARDWARE_IDENTITY). Rotate the key in your TPM/HSM/enclave and " +
+        "update KIT_KEYSTORE_PUBKEY instead.",
+    );
+  }
   const prev = tryLoadIdentity(dir);
   if (prev && existsSync(keyPath(dir))) {
     const stamp = now.replace(/[:.]/g, "-");

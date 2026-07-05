@@ -4,6 +4,15 @@
  */
 export type { KeyStore, KeyStoreKind, KeyStoreAvailability, KeyStoreResolution } from "./types.js";
 export { FileKeyStore } from "./file-store.js";
+export { ExternalCommandKeyStore } from "./command-store.js";
 export { SecureEnclaveKeyStore } from "./secure-enclave-store.js";
 export { TpmKeyStore } from "./tpm-store.js";
 export { resolveKeyStore } from "./resolve.js";
+export {
+  isHardwareRooted,
+  hardwareRequiredByEnv,
+  assertHardwareIdentity,
+  keystoreSign,
+  activeKeyStoreStatus,
+  type KeyStoreStatus,
+} from "./active.js";

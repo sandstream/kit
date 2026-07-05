@@ -2,9 +2,46 @@
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
 import { loadOrCreateIdentity, tryLoadIdentity, rotateIdentity, identityId } from "../identity.js";
+import { activeKeyStoreStatus, hardwareRequiredByEnv } from "../keystore/index.js";
+
+/** `kit identity keystore` — surface the active signing backend, honestly. */
+function identityKeystore(): boolean {
+  const st = activeKeyStoreStatus();
+  // "external (operator-fronted)" — NOT an unqualified "hardware-rooted": kit only knows
+  // the key isn't a kit-managed file; it cannot attest the operator's command truly fronts
+  // a secure element. Honest labels, no false green.
+  const held = st.hardwareRooted
+    ? `${c.green}external key — operator-fronted${c.reset}`
+    : `${c.yellow}kit-managed file key (same-UID readable)${c.reset}`;
+  console.log(`${c.bold}kit identity keystore${c.reset}`);
+  console.log(`  backend        ${c.bold}${st.kind}${c.reset}  (${held})`);
+  console.log(`  key id         ${st.kid ?? c.dim + "none" + c.reset}`);
+  console.log(
+    `  hardware req'd  ${hardwareRequiredByEnv() ? "yes (KIT_REQUIRE_HARDWARE_IDENTITY)" : "no"}`,
+  );
+  if (st.hardwareRooted) {
+    console.log(
+      `  ${c.dim}note: kit can't attest this command fronts real hardware — that (non-exportable key + touch/PIN) is the operator's responsibility${c.reset}`,
+    );
+  }
+  if (st.reason) console.log(`  ${c.dim}${st.reason}${c.reset}`);
+  if (!st.hardwareRooted) {
+    console.log(
+      `  ${c.dim}to move the key out of a kit-managed file: KIT_KEYSTORE=command with KIT_KEYSTORE_SIGN_CMD + KIT_KEYSTORE_PUBKEY (TPM/HSM/enclave/YubiKey)${c.reset}`,
+    );
+  }
+  // Fail closed in the exit code when hardware is mandated but not in force.
+  if (hardwareRequiredByEnv() && !st.hardwareRooted) {
+    console.error(`${c.red}✗ hardware-rooted identity required but not active${c.reset}`);
+    return false;
+  }
+  return true;
+}
 
 export async function cmdIdentity(): Promise<boolean> {
   const sub = process.argv[3] ?? "show";
+
+  if (sub === "keystore") return identityKeystore();
 
   if (sub === "init") {
     const { identity, created } = loadOrCreateIdentity();
@@ -56,6 +93,6 @@ export async function cmdIdentity(): Promise<boolean> {
     return true;
   }
 
-  console.error(`${c.red}usage: kit identity <init|show [--public]|rotate>${c.reset}`);
+  console.error(`${c.red}usage: kit identity <init|show [--public]|rotate|keystore>${c.reset}`);
   return false;
 }

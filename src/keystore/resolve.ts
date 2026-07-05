@@ -24,17 +24,23 @@
  */
 import type { KeyStore, KeyStoreKind, KeyStoreResolution } from "./types.js";
 import { FileKeyStore } from "./file-store.js";
+import { ExternalCommandKeyStore } from "./command-store.js";
 import { SecureEnclaveKeyStore } from "./secure-enclave-store.js";
 import { TpmKeyStore } from "./tpm-store.js";
 
-/** Preference order for AUTO mode: strongest (hardware) first, file last. */
-const PREFERENCE: KeyStoreKind[] = ["secure-enclave", "tpm", "file"];
-const VALID_KINDS: KeyStoreKind[] = ["file", "secure-enclave", "tpm"];
+/** Preference order for AUTO mode: strongest (hardware) first, file last. The
+ *  operator-fronted "command" backend is preferred when configured — it is the one
+ *  real hardware-rooted option today; the native stubs are unavailable pending a
+ *  binding, so AUTO falls through them to file. */
+const PREFERENCE: KeyStoreKind[] = ["command", "secure-enclave", "tpm", "file"];
+const VALID_KINDS: KeyStoreKind[] = ["file", "command", "secure-enclave", "tpm"];
 
 function makeStore(kind: KeyStoreKind, dir?: string): KeyStore {
   switch (kind) {
     case "file":
       return new FileKeyStore(dir);
+    case "command":
+      return new ExternalCommandKeyStore();
     case "secure-enclave":
       return new SecureEnclaveKeyStore();
     case "tpm":

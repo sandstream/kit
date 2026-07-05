@@ -2,7 +2,8 @@ import { appendFile, readFile, writeFile, rename } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 import type { GovernanceConfig } from "./config.js";
-import { tryLoadIdentity, signWithIdentity, verifySignature } from "./identity.js";
+import { identityId, verifySignature } from "./identity.js";
+import { resolveKeyStore, assertHardwareIdentity } from "./keystore/index.js";
 
 // ── Tamper-evident hash chain ───────────────────────────────────────────────
 // Each appended line carries `prev` (the previous line's hash) and `hash`
@@ -53,18 +54,46 @@ async function appendChained(logPath: string, event: AuditEvent): Promise<string
 }
 
 /**
- * Sign a line hash with the local kit identity, if one is present. Returns the
- * key id + base64 Ed25519 signature, or null when no identity exists / signing
- * fails. Pure best-effort: callers never gate on the result.
+ * Sign a line hash with the ACTIVE keystore (hardware/externally-held when configured,
+ * else the file identity), if one is present. Returns the key id + base64 Ed25519
+ * signature, or null when no identity exists / signing fails. Pure best-effort: callers
+ * never gate on the result.
+ *
+ * Routing through the keystore (not signWithIdentity directly) is what lets a hardware
+ * backend sign the audit chain AND makes the KIT_REQUIRE_HARDWARE_IDENTITY mandate real
+ * here: under a mandate with only the file key, assertHardwareIdentity throws → we return
+ * null → the entry is left KEYLESS (the hash chain still protects it) rather than emitting
+ * a mandate-violating file-key signature. Fail-closed toward unsigned, never toward a
+ * forbidden key.
  */
 function signLineHash(hash: string): { kid: string; sig: string } | null {
-  const identity = tryLoadIdentity();
-  if (!identity) return null;
+  let res;
   try {
-    const sig = signWithIdentity(hash).toString("base64");
-    return { kid: identity.id, sig };
+    res = resolveKeyStore();
   } catch {
-    return null; // record present but key unreadable → unsigned, not a failure
+    return null;
+  }
+  const pub = res.store.publicKeyPem();
+  if (!pub) return null; // no identity → keyless (fine, backward-compatible)
+  try {
+    assertHardwareIdentity(res); // mandate + non-hardware → expected keyless, silently
+  } catch {
+    return null;
+  }
+  try {
+    const sig = res.store.sign(hash).toString("base64");
+    return { kid: identityId(pub), sig };
+  } catch (e) {
+    // A configured, available NON-file backend that fails to sign is not the same as "no
+    // identity": don't SILENTLY de-attribute the chain (a stealthy downgrade an attacker
+    // could induce by breaking the signer). Surface it; the entry is still left keyless and
+    // the append never blocks (the hash chain still protects it).
+    if (res.store.kind !== "file") {
+      console.error(
+        `[kit] audit signing via the ${res.store.kind} keystore failed: ${(e as Error).message} — entry left keyless`,
+      );
+    }
+    return null;
   }
 }
 

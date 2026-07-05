@@ -16,8 +16,10 @@
  */
 import type { Identity } from "../identity.js";
 
-/** The backends kit knows about. "file" is the working default today. */
-export type KeyStoreKind = "file" | "secure-enclave" | "tpm";
+/** The backends kit knows about. "file" is the working default today; "command" is the
+ *  first REAL hardware-rooted backend (operator-fronted TPM/HSM/enclave, key never in
+ *  kit); "secure-enclave"/"tpm" are native stubs pending a working binding. */
+export type KeyStoreKind = "file" | "command" | "secure-enclave" | "tpm";
 
 /** Whether a backend can operate in the CURRENT environment. Honest, never faked. */
 export interface KeyStoreAvailability {
