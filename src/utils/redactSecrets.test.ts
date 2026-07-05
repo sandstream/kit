@@ -75,6 +75,56 @@ describe("redactSecrets — connection-string + sk-svcacct (regression)", () => 
   });
 });
 
+describe("redactSecrets — B3 coverage (PEM / cloud / url-token)", () => {
+  it("redacts a raw (non-JSON) PEM private key block", () => {
+    for (const kind of ["RSA ", "EC ", "OPENSSH ", ""]) {
+      const pem = `-----BEGIN ${kind}PRIVATE KEY-----\nMIIEvQIBADANBg\n-----END ${kind}PRIVATE KEY-----`;
+      const out = redactSecrets(`key=${pem}`);
+      assert.ok(out.includes("[REDACTED]"), kind);
+      assert.ok(!out.includes("MIIEvQIBADANBg"), kind);
+    }
+    assert.deepEqual(
+      findSecrets("-----BEGIN EC PRIVATE KEY-----\nabc\n-----END EC PRIVATE KEY-----").map(
+        (f) => f.label,
+      ),
+      ["pem-private-key"],
+    );
+  });
+
+  it("redacts an Azure storage AccountKey but keeps AccountName", () => {
+    const conn =
+      "AccountName=devstore;AccountKey=" + "a".repeat(86) + "==;EndpointSuffix=core.windows.net";
+    const out = redactSecrets(conn);
+    assert.ok(out.includes("AccountName=devstore"));
+    assert.ok(out.includes("[REDACTED]"));
+    assert.ok(!out.includes("a".repeat(86)));
+  });
+
+  it("redacts SendGrid, Slack app-level, and npm tokens", () => {
+    assert.ok(redactSecrets("SG.abcd1234efgh5678.ijkl9012mnop3456qrst").includes("[REDACTED]"));
+    assert.ok(redactSecrets("xapp-1-A012B-345678-abcdef123456").includes("[REDACTED]"));
+    assert.ok(redactSecrets("npm_" + "a".repeat(36)).includes("[REDACTED]"));
+    // npm_config_* env vars are NOT tokens (underscore breaks the run) → no false positive
+    assert.equal(redactSecrets("npm_config_registry=x"), "npm_config_registry=x");
+  });
+
+  it("redacts a token in the URL userinfo with no colon (git/registry PAT form)", () => {
+    const out = redactSecrets("https://ghp_abcdefghijklmnopqrstuvwxyz012345@github.com/o/r");
+    assert.match(out, /https:\/\/\[REDACTED\]@github\.com/);
+    // a short, non-secret username is left alone
+    assert.equal(redactSecrets("https://peter@example.com"), "https://peter@example.com");
+  });
+
+  it("PEM matcher is ReDoS-safe on an unterminated near-miss body", () => {
+    const payload = "-----BEGIN RSA PRIVATE KEY-----" + "A".repeat(200000);
+    const t0 = process.hrtime.bigint();
+    redactSecrets(payload);
+    findSecrets(payload);
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    assert.ok(ms < 200, `PEM-shaped blob scanned in ${ms.toFixed(0)}ms — should be <200ms`);
+  });
+});
+
 describe("redactSecrets — provider tokens (prefix-exclusion leak fix)", () => {
   it("redacts provider tokens previously skipped by the prefix allowlist", () => {
     for (const kv of [

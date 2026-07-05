@@ -40,11 +40,26 @@ const DEFAULT_FILE_NAMES = [
   "docker-compose.yaml",
   "terraform.tfvars",
   "terraform.tfvars.json",
+  // Credential-bearing files the scan previously never opened: registry/auth configs and
+  // raw private keys. The PEM / npm-token / url-credentials patterns only help if the file
+  // is actually read.
+  ".npmrc",
+  ".netrc",
+  ".pgpass",
+  "id_rsa",
+  "id_dsa",
+  "id_ecdsa",
+  "id_ed25519",
 ];
 
 const DEFAULT_RECURSIVE_DIRS = ["scripts", "config", "infra", "terraform", ".github"];
 
 const RECURSIVE_FILE_EXTS = /\.(sh|js|ts|mjs|cjs|json|yml|yaml|toml|tf|tfvars|tfstate|env)$/;
+
+// Text private-key / cert files (`server.pem`, `tls.key`) — scanned at the root and inside
+// the recursive dirs so a raw PEM block is caught. Binary keystores (.p12/.pfx) are omitted:
+// they carry no text pattern to match and would just be slurped-and-skipped.
+const KEY_FILE_EXTS = /\.(pem|key)$/i;
 
 const SKIP_DIR_NAMES = new Set([
   "node_modules",
@@ -119,6 +134,18 @@ export async function scanPlaintextSecrets(
     await scanFile(name, absolute);
   }
 
+  // Pass 1b: root-level private-key / cert files by extension (`server.pem`, `tls.key`) —
+  // exact-name matching in Pass 1 can't catch arbitrarily-named key files.
+  try {
+    for (const ent of (await readdir(cwd, { withFileTypes: true })) as unknown as Dirent[]) {
+      if ((ent.isFile() || ent.isSymbolicLink()) && KEY_FILE_EXTS.test(ent.name)) {
+        await scanFile(ent.name, join(cwd, ent.name));
+      }
+    }
+  } catch {
+    /* unreadable cwd — skip */
+  }
+
   // Pass 2: depth-limited walk of the configured dirs.
   for (const dirName of dirTargets) {
     const root = resolve(cwd, dirName);
@@ -150,7 +177,7 @@ export async function scanPlaintextSecrets(
       // Only match the known-noisy extensions to keep the scan fast.
       // .tfstate is intentionally included even though it's huge in some
       // repos — the size guard above caps the slurp.
-      if (!RECURSIVE_FILE_EXTS.test(ent.name)) continue;
+      if (!RECURSIVE_FILE_EXTS.test(ent.name) && !KEY_FILE_EXTS.test(ent.name)) continue;
       await scanFile(childRel, childAbs);
     }
   }

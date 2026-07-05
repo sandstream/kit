@@ -346,6 +346,61 @@ describe("formatAuditLog", () => {
   });
 });
 
+describe("audit sink — secret redaction (B3)", () => {
+  it("redacts secrets in error + metadata before writing, and the chain still verifies", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-audit-redact-"));
+    try {
+      const ok = await appendAuditEventDirect(
+        {
+          operation: "elevate",
+          environment: "prod",
+          success: false,
+          error: "failed: key sk-abcdefghijklmnopqrstuvwxyz0123456789ABCD rejected",
+          metadata: {
+            detail: "postgres://app:S3cr3tPassw0rd@db/x",
+            nested: {
+              pem: "-----BEGIN RSA PRIVATE KEY-----\\nMIIabc\\n-----END RSA PRIVATE KEY-----",
+            },
+            count: 7,
+          },
+        },
+        { cwd: dir },
+      );
+      assert.equal(ok, true);
+      const raw = readFileSync(join(dir, ".kit-audit.jsonl"), "utf8");
+      // no secret material persisted
+      assert.ok(!raw.includes("sk-abcdefghijklmnop"), "api key must be gone");
+      assert.ok(!raw.includes("S3cr3tPassw0rd"), "db password must be gone");
+      assert.ok(!raw.includes("MIIabc"), "pem body must be gone");
+      // non-secret structure preserved, and the hash chain covers the redacted form
+      assert.ok(raw.includes('"count":7'));
+      assert.equal(verifyAuditChain(raw).ok, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a __proto__ metadata key does not pollute Object.prototype during redaction", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-audit-proto-"));
+    try {
+      await appendAuditEventDirect(
+        {
+          operation: "x",
+          environment: "dev",
+          success: true,
+          metadata: JSON.parse(
+            '{"__proto__":{"polluted":"sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}',
+          ),
+        },
+        { cwd: dir },
+      );
+      assert.equal(({} as Record<string, unknown>).polluted, undefined);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("verifyAuditChain (tamper-evidence)", () => {
   async function writeEvents(dir: string, n: number): Promise<void> {
     for (let i = 0; i < n; i++) {
