@@ -1,14 +1,18 @@
 /**
  * Centralized ID generation utility
- * Consolidates Date.now() + random pattern used across services
+ * Consolidates the timestamp + random pattern used across services
  */
+import { randomUUID } from "node:crypto";
 
 /**
- * Generate unique ID with optional prefix
- * Pattern: prefix + timestamp-randomString (max 255 chars)
+ * Generate a unique ID with an optional prefix.
+ * Pattern: prefix + timestamp-uuid (max 255 chars). The random component is a
+ * cryptographically-strong UUID (was `Math.random()`, ~11 chars of predictable
+ * entropy) so IDs are unguessable even where one is used as an approval/reference
+ * handle, not just a correlation id. The leading timestamp keeps rough sortability.
  */
 export function generateId(prefix: string = ""): string {
-  const id = `${prefix}${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const id = `${prefix}${Date.now()}-${randomUUID()}`;
   return id.slice(0, 255);
 }
 

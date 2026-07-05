@@ -46,7 +46,10 @@ async function updateEnvFile(projectPath: string, secrets: Record<string, string
     lines.push(`${key}=${value}`);
   }
 
-  await writeFile(envPath, lines.join("\n") + "\n", "utf-8");
+  // Create owner-only FROM THE START (mode applies on creation) so a plaintext-secret
+  // .env.local is never briefly world-readable between write and chmod — the same pattern
+  // secrets.ts uses. secureFile then enforces 0o600 / icacls on a pre-existing file too.
+  await writeFile(envPath, lines.join("\n") + "\n", { encoding: "utf-8", mode: 0o600 });
   secureFile(envPath); // plaintext secrets — restrict to owner (0o600 / icacls)
 }
 

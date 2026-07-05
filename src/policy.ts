@@ -118,7 +118,12 @@ export async function checkPolicy(
     });
     return result;
   }
-  const allowed = policy.agent_writes[vendor];
+  // Own-property guard: a `vendor` of `toString`/`constructor`/`__proto__` would otherwise
+  // resolve to an inherited Object.prototype member (a truthy function) and slip past the
+  // `!allowed` deny — or throw downstream in this authz path. Only an OWN key is a real rule.
+  const allowed = Object.hasOwn(policy.agent_writes, vendor)
+    ? policy.agent_writes[vendor]
+    : undefined;
   if (!allowed) {
     const result: PolicyCheckResult = {
       approved: false,

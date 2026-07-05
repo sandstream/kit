@@ -90,6 +90,16 @@ describe("checkPolicy", () => {
     assert.match(r.reason, /op "resolve_issue" not in/);
   });
 
+  it("denies a prototype-member vendor name (own-property guard)", async () => {
+    // `toString`/`constructor` resolve to Object.prototype members — a truthy function that
+    // could slip past the deny or throw in the authz path. Only an OWN rule counts.
+    for (const vendor of ["toString", "constructor", "__proto__", "hasOwnProperty"]) {
+      const r = await checkPolicy({ agent_writes: { sentry: ["resolve_issue"] } }, vendor, "x");
+      assert.equal(r.approved, false, vendor);
+      assert.match(r.reason, /not in \[policy\.agent_writes\]/);
+    }
+  });
+
   it("approves when vendor + op match the allow-list", async () => {
     const r = await checkPolicy(
       { agent_writes: { sentry: ["resolve_issue", "create_release"] } },
