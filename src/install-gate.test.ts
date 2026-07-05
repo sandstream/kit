@@ -676,6 +676,29 @@ describe("parseInstallCommand — round-5 bypass closes", () => {
     assert.deepEqual(parseInstallCommand('npm exec --package=evil -c "cmd"').refs, ["npm:evil"]);
   });
 
+  it("a backslash-escaped quote inside a nested shell -c does not end the arg early", () => {
+    // `sh -c "sh -c \"npm i evil\""` — the escaped inner quotes are NOT the closer, so the
+    // inner install must still be recursed and gated (across shell -c, exec -c, and eval).
+    assert.deepEqual(parseInstallCommand('sh -c "sh -c \\"npm i evil\\""').refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand('bash -c "bash -lc \\"pip install evil\\""').refs, [
+      "pip:evil",
+    ]);
+    assert.deepEqual(parseInstallCommand('npm exec -c "sh -c \\"npm i evil\\""').refs, [
+      "npm:evil",
+    ]);
+    // the single-quote inner form and plain forms still work
+    assert.deepEqual(parseInstallCommand("sh -c \"sh -c 'npm i evil'\"").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand('bash -c "npm i evil"').refs, ["npm:evil"]);
+  });
+
+  it("escaped-quote body regex is ReDoS-safe (backslash run stays linear)", () => {
+    const cmd = 'bash -c "' + "\\".repeat(200000);
+    const start = process.hrtime.bigint();
+    parseInstallCommand(cmd);
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    assert.ok(ms < 500, `parse took ${ms}ms — possible ReDoS regression`);
+  });
+
   it("a -c AFTER the exec command is the TOOL's flag — the package is still gated", () => {
     // `npm exec jest -c jest.config.js`: -c belongs to jest; jest is a fetched package that
     // must NOT be suppressed. Only a -c/--call BEFORE the command is npm's shell-call flag.

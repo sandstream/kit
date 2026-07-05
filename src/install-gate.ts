@@ -221,6 +221,20 @@ function stripCommandPrefix(tokens: string[]): string[] {
  * text (bounded, to stay linear-time on hostile input) and gate it like a
  * top-level one. Fail-closed.
  */
+// A quoted body that does NOT stop at a backslash-ESCAPED quote: a `\"` inside a
+// double-quoted arg is a literal quote, not the closer (`sh -c "sh -c \"npm i evil\""`).
+// The two alternatives are mutually exclusive (a char is either a backslash — first alt,
+// consuming it plus the next char — or a non-backslash), so there is no quantifier
+// ambiguity and no catastrophic backtracking. Bounded to stay linear on hostile input.
+const QUOTED_BODY = /(['"])((?:\\[\s\S]|[^\\]){1,2000}?)\1/;
+
+/** Unescape a double-quoted shell body (`\"`→`"`, `\\`→`\`, `\$`→`$`) so an install hidden
+ *  behind escaped quotes is re-scannable after extraction. Single-quoted bodies keep
+ *  backslashes literal (shell semantics), so only unescape when the delimiter was `"`. */
+function pushQuoted(out: string[], quote: string, body: string): void {
+  out.push(quote === '"' ? body.replace(/\\([\s\S])/g, "$1") : body);
+}
+
 function nestedCommands(command: string): string[] {
   const out: string[] = [];
   for (const m of command.matchAll(/\$\(([^()]{1,2000})\)/g)) out.push(m[1]);
@@ -232,21 +246,29 @@ function nestedCommands(command: string): string[] {
   // `-[A-Za-z]*c[A-Za-z]*` matches `-c` glued into a short-flag cluster (`-lc`/`-xc`/`-cl`,
   // the common cron/CI form); `\$?` accepts an ANSI-C/locale `$'…'`/`$"…"` command arg.
   for (const m of command.matchAll(
-    /(?:^|\s)(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|ash|fish)(?:\s+\S+)*?\s+-[A-Za-z]*c[A-Za-z]*\s+\$?(['"])([\s\S]{1,2000}?)\1/g,
+    new RegExp(
+      /(?:^|\s)(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|ash|fish)(?:\s+\S+)*?\s+-[A-Za-z]*c[A-Za-z]*\s+\$?/
+        .source + QUOTED_BODY.source,
+      "g",
+    ),
   )) {
-    out.push(m[2]);
+    pushQuoted(out, m[1], m[2]);
   }
   // `eval '…'` / `xargs "…"` — the QUOTED script arg (the unquoted form is handled
   // by SHELL_KEYWORDS stripping). Recurse so a quoted install can't hide behind eval.
-  for (const m of command.matchAll(/\b(?:eval|xargs)\s+(['"])([\s\S]{1,2000}?)\1/g)) {
-    out.push(m[2]);
+  for (const m of command.matchAll(
+    new RegExp(/\b(?:eval|xargs)\s+/.source + QUOTED_BODY.source, "g"),
+  )) {
+    pushQuoted(out, m[1], m[2]);
   }
   // Process substitution `<(…)` / `>(…)` — the inner command RUNS, so
   // `cat <(npm install evil)` must be gated. The splitter never enters these.
   for (const m of command.matchAll(/[<>]\(([^()]{1,2000})\)/g)) out.push(m[1]);
   // Here-string `<<< "npm i evil"` (quoted or bare word) — the operand is fed to a
   // shell (`bash <<< "npm i evil"`); recurse into it.
-  for (const m of command.matchAll(/<<<\s*(['"])([\s\S]{1,2000}?)\1/g)) out.push(m[2]);
+  for (const m of command.matchAll(new RegExp(/<<<\s*/.source + QUOTED_BODY.source, "g"))) {
+    pushQuoted(out, m[1], m[2]);
+  }
   for (const m of command.matchAll(/<<<\s*([^\s'"][^\n]{0,2000})/g)) out.push(m[1]);
   // `npm|pnpm|yarn|bun exec|dlx|x  -c/--call '<shell string>'` runs the string in a shell
   // (with node_modules/.bin on PATH), so an install inside it really executes — recurse.
@@ -255,9 +277,13 @@ function nestedCommands(command: string): string[] {
   // (`corepack pnpm@9 exec -c …`) — binBase strips the @version for the segment matcher, so
   // this recursion must match it too or the string is neither gated nor re-scanned.
   for (const m of command.matchAll(
-    /(?:npm|pnpm|yarn|bun)(?:@\S+)?\s+(?:exec|dlx|x)\b[^\n]*?\s(?:--call|-c)(?:=|\s)\s*(['"])([\s\S]{1,2000}?)\1/g,
+    new RegExp(
+      /(?:npm|pnpm|yarn|bun)(?:@\S+)?\s+(?:exec|dlx|x)\b[^\n]*?\s(?:--call|-c)(?:=|\s)\s*/.source +
+        QUOTED_BODY.source,
+      "g",
+    ),
   )) {
-    out.push(m[2]);
+    pushQuoted(out, m[1], m[2]);
   }
   // A package runner whose FIRST positional is itself a package manager
   // (`npx npm i evil`, `pnpm exec npm i evil`, `corepack pnpm@9 exec yarn add evil`) runs that
