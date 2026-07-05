@@ -69,6 +69,12 @@ fail-closed throughout.
   deterministic, high-precision `isBoilerplate` filter (structural tags + a leading slash
   command + a few verbatim harness phrases — never generic words) drops them before ranking.
   `src/memory/learn.ts`.
+- **`kit memory scan --injection` surfaces quarantine state (found by dogfooding).** The scan
+  reads every row regardless of quarantine, so re-running it after `--quarantine` showed the
+  same high-confidence list and read as "still exposed" even though those rows are excluded
+  from recall. Plain injection scans with high-confidence findings now print how many messages
+  are already quarantined and point at `--quarantine`. Deliberately NOT a path/content allowlist:
+  a suppression channel on an injection scanner would be a bypass. `src/commands/memory.ts`.
 
 ### Security — red-team critical fixes
 
