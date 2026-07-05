@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, upsertSession, insertMessage, getStats, markFileIndexed } from "./db.js";
@@ -101,6 +101,56 @@ describe("memory sync", () => {
       const target = openMemoryDb(":memory:");
       assert.throws(() => syncFromExport(target, srcPath), /refusing to merge/);
       assert.equal(getStats(target).messages, 0, "the crafted poisoned row did not land");
+      target.close();
+    } finally {
+      if (prev === undefined) delete process.env.KIT_MEMORY_ALLOW_UNSAFE;
+      else process.env.KIT_MEMORY_ALLOW_UNSAFE = prev;
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("R7: refuses an incoming store poisoned with a hidden bidi/zero-width payload", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "kit-sync-"));
+    const prev = process.env.KIT_MEMORY_ALLOW_UNSAFE;
+    delete process.env.KIT_MEMORY_ALLOW_UNSAFE;
+    try {
+      const srcPath = join(tmp, "hidden.db");
+      const src = openMemoryDb(srcPath);
+      upsertSession(src, { sessionId: "sB", harness: "codex" });
+      // A right-to-left override (U+202E) is a high-confidence smuggling signal on its
+      // own — a different injection class than the phrase rule above. (assertIncomingClean
+      // scans every row regardless of quarantine, so no un-quarantine dance is needed.)
+      insertMessage(src, {
+        uuid: "b1",
+        sessionId: "sB",
+        type: "user",
+        content: "totally benign " + String.fromCharCode(0x202e) + "looking text",
+      });
+      src.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      src.close();
+
+      const target = openMemoryDb(":memory:");
+      assert.throws(() => syncFromExport(target, srcPath), /refusing to merge/);
+      assert.equal(getStats(target).messages, 0, "the hidden-char payload did not land");
+      target.close();
+    } finally {
+      if (prev === undefined) delete process.env.KIT_MEMORY_ALLOW_UNSAFE;
+      else process.env.KIT_MEMORY_ALLOW_UNSAFE = prev;
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("R7: fails CLOSED when the incoming file cannot be read as a store (untrusted, uncertified)", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "kit-sync-"));
+    const prev = process.env.KIT_MEMORY_ALLOW_UNSAFE;
+    delete process.env.KIT_MEMORY_ALLOW_UNSAFE;
+    try {
+      const srcPath = join(tmp, "not-a-db.db");
+      writeFileSync(srcPath, "this is not a sqlite database");
+      const target = openMemoryDb(":memory:");
+      // Cannot certify an unreadable/untrusted store clean → refuse, don't merge blind.
+      assert.throws(() => syncFromExport(target, srcPath));
+      assert.equal(getStats(target).messages, 0, "nothing merged from an uncertifiable store");
       target.close();
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_ALLOW_UNSAFE;
