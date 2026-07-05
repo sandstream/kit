@@ -6,6 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security — supply-chain gate, secrets/audit & control-plane hardening (backlog B1–B5)
+
+A deep MEDIUM/LOW security sweep, each area hardened through repeated adversarial
+re-attacks against the compiled build until it converged. Deterministic and
+fail-closed throughout.
+
+- **Install-gate parser (B1).** Closed ~20 fetch-and-execute bypass classes in the
+  `gate-bash` hook: intra-word quoting, path/backslash/env-prefix binaries, process
+  substitution + here-strings, missing verbs (`npm install-test`/`it`/`update`/`ci`,
+  `yarn global add`, `uv run --with`, `corepack` incl. `corepack pnpm@9` dispatch,
+  create/init initiators), shell `-c` (flag clusters `-lc`, ANSI-C `$'…'`,
+  escaped-quote nesting), `${IFS}`/`${IFS<op>}` word-splitting, `npm exec -c/--call`
+  and runner→package-manager chaining, bare-reinstall + registry-redirect fail-close,
+  and `$VAR`/`xargs` indirection. Also fixed three hot-path algorithmic-complexity
+  DoS issues (regex ReDoS, `SEGMENT_SPLIT` O(N²), queue-driver O(N²)) — all now
+  linear with timing regression tests. `src/install-gate.ts`.
+- **Triage version semantics (B2).** The gate stripped the version, so `npm i evil@1.2.3`
+  was triaged as `latest` — a clean latest could vouch for a yanked/malicious pinned
+  version. The pinned version/tag is now carried onto the triage ref and the triage
+  script **resolves the spec to the exact version the manager installs** (semver /
+  PEP 440: exact pins, dist-tags, ranges like `@2`/`@^1`/`<2`/`~=1.2`); npm alias specs
+  (`name@npm:other`) fail closed. Documented that a PASS is an existence/health/version
+  gate, not a malware verdict (that is opt-in GuardDog). `src/install-gate.ts`,
+  `skills/triage/scripts/triage.py`.
+- **Secrets & redaction (B3).** New detectors — raw PEM private keys, Azure `AccountKey=`,
+  SendGrid, Slack `xapp-`, npm tokens, token-in-URL-userinfo (all ReDoS-bounded). The
+  audit sink now redacts `error`/`metadata`/`operation`/`environment` **by value** before
+  writing (covers the chain, remote push, and pending queue), the hash chain still
+  verifies, and reassembly is prototype-pollution-safe. `env-inspect` no longer leaks a
+  fixed prefix; the plaintext scanner now opens `.npmrc`/`id_rsa`/`*.pem`/`*.key`.
+- **Control-plane (B4).** A monotonic, signed `policy.revision` ratchet rejects a replayed
+  older policy over the untrusted transport (the floor is trusted only from a verifying
+  on-disk policy). gzip-bomb guard bounds decompression on `kit memory pull`; the remote
+  bundle fetch is now timeout- and size-capped. `src/control-plane/distribute.ts`,
+  `src/policy-doc.ts`, `src/memory/backup.ts`.
+- **Cross-cutting (B5).** IDs use `crypto.randomUUID()` (unguessable approval handles);
+  the `agent_writes` authz lookup is `Object.hasOwn`-guarded against prototype keys;
+  `.env.local` is created `0o600` atomically. `src/id-generator.ts`, `src/policy.ts`,
+  `src/provision.ts`.
+- **Triage skill refresh on upgrade (found by dogfooding).** The bundled triage script
+  was only copied to `~/.claude/skills/triage` when ABSENT, so a kit upgrade that improved
+  `triage.py` (e.g. the B2 version resolver, new secret patterns) never reached existing
+  installs — the CLI silently kept running the old script (a pinned `pkg@1.2.3` was even
+  false-blocked because the stale copy fetched the literal `pkg@1.2.3` name → 404). The
+  installed copy is now version-stamped and refreshed when it was written by an older kit.
+  `src/triage.ts`.
+
 ### Security — red-team critical fixes
 
 A code-in-hand adversarial red-team of kit found three CONFIRMED critical
