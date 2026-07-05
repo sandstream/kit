@@ -208,3 +208,29 @@ export function scanDbForSecrets(db: DatabaseSync): ScanFinding[] {
 export function scanDbForInjection(db: DatabaseSync): ScanFinding[] {
   return scanDbWith(db, (text) => findInjection(text));
 }
+
+/**
+ * Count the messages that would actually be REPLAYED into a prompt (quarantined = 0)
+ * yet carry a HIGH-confidence injection pattern — the rows `kit check` must fail on.
+ * Quarantined rows are already excluded from recall (mitigated), so they don't count;
+ * a non-quarantined high-confidence row is a live vector (e.g. indexed before the
+ * insert-time quarantine gate existed). Returns the count plus one sample location.
+ * Throws if the store schema can't be queried — the caller turns that into a
+ * fail-closed scanner-health result (never a silent pass).
+ */
+export function replayableInjectionCount(db: DatabaseSync): { count: number; sample?: string } {
+  const rows = db
+    .prepare(
+      "SELECT rowid AS rowid, content FROM messages WHERE quarantined = 0 AND content IS NOT NULL AND content != ''",
+    )
+    .all() as { rowid: number; content: string }[];
+  let count = 0;
+  let sample: string | undefined;
+  for (const r of rows) {
+    if (findInjection(r.content).some((f) => f.confidence === "high")) {
+      count++;
+      sample ??= `messages#${r.rowid}`;
+    }
+  }
+  return { count, sample };
+}

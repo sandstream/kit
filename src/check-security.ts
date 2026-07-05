@@ -91,6 +91,73 @@ export function gateStatus(
 }
 
 /**
+ * R3 — a poisoned memory store is a delayed prompt-injection: stored text is replayed
+ * into every session via recall. Quarantined rows are excluded from recall (mitigated),
+ * so this flags `kit check` only when a NON-quarantined message still carries a
+ * high-confidence injection (e.g. indexed before the insert-time quarantine gate).
+ *
+ * It WARNS (not hard-fail) because the scanner cannot tell "a message DISCUSSING an
+ * injection" from "a poisoned message" — a hard fail would turn every security
+ * researcher's gate permanently red. The warn names the one-command remediation
+ * (`kit memory scan --injection --quarantine`, which excludes the rows from recall so
+ * the warn clears), and it ESCALATES to a fail under `--fail-on-warning` / strict CI.
+ * If the store can't be opened/scanned that is a scanner-health failure (`didNotRun`,
+ * fails strict by default) — never a silent pass. No store → honest skip.
+ */
+async function checkMemoryInjection(): Promise<SecurityCheckResult> {
+  const name = "memory injection";
+  const category = "secrets" as const;
+  const { existsSync } = await import("node:fs");
+  const { getMemoryDbPath, openMemoryDb } = await import("./memory/db.js");
+  const path = getMemoryDbPath();
+  if (!existsSync(path)) {
+    return { category, name, status: "skip", detail: "no memory store to scan" };
+  }
+  let db: import("node:sqlite").DatabaseSync;
+  try {
+    db = openMemoryDb(path);
+  } catch (e) {
+    return {
+      category,
+      name,
+      status: "warn",
+      severity: "high",
+      didNotRun: true,
+      detail: `could not open memory store to scan for injection: ${(e as Error).message}`,
+    };
+  }
+  try {
+    const { replayableInjectionCount } = await import("./memory/scan.js");
+    const { count, sample } = replayableInjectionCount(db);
+    if (count > 0) {
+      return {
+        category,
+        name,
+        status: "warn",
+        severity: "high",
+        detail: `${count} non-quarantined high-confidence injection(s) recallable from the memory store (${sample}) — run \`kit memory scan --injection --quarantine\` (fails under --fail-on-warning)`,
+      };
+    }
+    return { category, name, status: "pass", detail: "no replayable injection in memory recall" };
+  } catch (e) {
+    return {
+      category,
+      name,
+      status: "warn",
+      severity: "high",
+      didNotRun: true,
+      detail: `memory injection scan failed: ${(e as Error).message}`,
+    };
+  } finally {
+    try {
+      db.close();
+    } catch {
+      /* best-effort close */
+    }
+  }
+}
+
+/**
  * Run npm audit and check for high/critical vulnerabilities
  */
 async function checkNpmAudit(): Promise<SecurityCheckResult> {
@@ -1691,6 +1758,10 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
   const { checkDiskEncryption, checkMemoryDirSafety } = await import("./check-disk-encryption.js");
   results.push(await checkDiskEncryption());
   results.push(checkMemoryDirSafety());
+  // A poisoned memory store is a delayed prompt-injection replayed into every recall;
+  // fail-closed if a non-quarantined high-confidence injection is present or the scan
+  // can't run. (Recall render paths already sanitize; this gates the store itself.)
+  results.push(await checkMemoryInjection());
 
   // Inbound integration: fold any third-party findings a partner tool emitted to
   // `.kit-scan-results.jsonl` into the verdict. No file → no-op. Can only escalate

@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security — `kit check` now gates on a poisoned memory store (R3)
+
+- **`kit check` scans the memory store for a replayable prompt-injection.** The store is
+  replayed into every session via recall, so a poisoned entry is a delayed injection.
+  Recall already excludes quarantined rows and sanitizes render paths; the missing piece
+  was that `kit check` never scanned the store itself, so a message indexed BEFORE the
+  insert-time quarantine gate (a non-quarantined high-confidence injection) was still
+  recallable and `kit check` reported green. A new `memory injection` check flags those
+  rows and names the one-command fix (`kit memory scan --injection --quarantine`, which
+  excludes them from recall so the flag clears). It WARNS by default — the scanner can't
+  tell a message _discussing_ an injection from a poisoned one, so a hard fail would turn
+  every security researcher's gate permanently red — and ESCALATES to a fail under
+  `--fail-on-warning` / strict CI. Fail-closed (`didNotRun`) if the store can't be
+  opened/scanned; honest skip when there is no store. `src/memory/scan.ts`,
+  `src/check-security.ts`.
+
 ### Integration — external findings ingestion: connect any scanner to `kit check`
 
 - **`kit check` now folds third-party findings into its verdict.** A partner tool
