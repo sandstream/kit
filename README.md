@@ -914,3 +914,30 @@ See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 - [mise-en-place](https://mise.jdx.dev): tool version management
 - [1Password CLI](https://developer.1password.com/docs/cli/): secret management
 - Node.js CLI (primarily TypeScript; JavaScript tooling/scripts, plus a Python triage checker)
+
+## Acknowledgements
+
+kit is its own codebase, but several projects shaped how we approached specific
+problems. We studied them and borrowed ideas and design patterns — the
+implementations here are kit's own (deterministic, zero-LLM). Thanks to:
+
+- **[cloudctx](https://github.com/chadptk1238/cloudctx)** (MIT) — the memory
+  store's SQLite schema and two-hook capture design.
+- **[headroom](https://github.com/chopratejas/headroom)** — the idea behind
+  `kit memory learn`: mine transcripts for recurring instructions and *suggest*
+  memory rules (kit does it deterministically, bring-your-own-LLM, no model call).
+- **[guild](https://github.com/mathomhaus/guild)** (Apache-2.0) — atomic PAL
+  ("blocked-on-you") claiming: claim/release with auto-release of abandoned
+  claims, so parallel agents don't collide on the same item.
+- **[veto](https://github.com/PlawIO/veto)** (Apache-2.0) — expressing
+  allow/deny/approval decisions declaratively and proving guarantees with a
+  checked-in baseline enforced in CI; echoed in kit's gated, fail-closed checks.
+- **[aigis](https://github.com/killertcell428/aigis)** (Apache-2.0) — the
+  tamper-evident audit trail and a reproducible findings shape, and the idea of
+  filtering memory writes against prompt injection.
+
+We also learned from peers in the zero-LLM agent-safety and dev-tooling space —
+including [sentrux](https://github.com/sentrux/sentrux),
+[rtk](https://github.com/rtk-ai/rtk), and
+[depgraph-cli](https://github.com/synthesiseng/depgraph-cli) — even where kit
+hasn't (yet) drawn code or patterns from them.
