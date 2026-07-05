@@ -407,6 +407,77 @@ describe("parseInstallCommand — sweep hardening (bypass closes)", () => {
   });
 });
 
+describe("parseInstallCommand — round-3 bypass closes", () => {
+  const gated = (cmd: string) => {
+    const p = parseInstallCommand(cmd);
+    return p.isInstall && (p.refs.length > 0 || p.unverifiable.length > 0);
+  };
+
+  it("uv run --with fetches a package; a plain uv run script does not", () => {
+    // `--with` installs+executes an arbitrary PyPI package before the script runs.
+    assert.deepEqual(parseInstallCommand("uv run --with evil script.py").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("uv run --with=evil script.py").refs, ["pip:evil"]);
+    // the positional is a LOCAL script, never gated; no --with → not an install at all.
+    const plain = parseInstallCommand("uv run script.py");
+    assert.equal(plain.isInstall, false);
+    assert.deepEqual(plain.refs, []);
+  });
+
+  it("yarn global add|install is matched (verb at index 2)", () => {
+    assert.deepEqual(parseInstallCommand("yarn global add evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("yarn global install evil").refs, ["npm:evil"]);
+  });
+
+  it("glued python -mpip / -m=pip is expanded and gated", () => {
+    assert.deepEqual(parseInstallCommand("python -mpip install evil").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("python3 -mpip install evil").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand("python -m=pip install evil").refs, ["pip:evil"]);
+  });
+
+  it("runner --with adds a SECOND fetched package (order-independent)", () => {
+    // both the tool AND the --with package are fetched — gate both, whatever the order.
+    assert.deepEqual(parseInstallCommand("uvx --with evil sometool").refs, [
+      "pip:sometool",
+      "pip:evil",
+    ]);
+    assert.deepEqual(parseInstallCommand("uvx sometool --with evil").refs, [
+      "pip:sometool",
+      "pip:evil",
+    ]);
+  });
+
+  it("npm install-test|it and update|upgrade with a named package are gated", () => {
+    assert.deepEqual(parseInstallCommand("npm install-test evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("npm it evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("npm update left-pad").refs, ["npm:left-pad"]);
+    assert.deepEqual(parseInstallCommand("npm upgrade left-pad").refs, ["npm:left-pad"]);
+    // bare update (no package) reinstalls declared deps → not an add
+    assert.equal(parseInstallCommand("npm update").isInstall, false);
+  });
+
+  it("bare reinstall + registry redirect fails closed (no named package)", () => {
+    // `npm i --registry evil` pulls attacker tarballs even with no package argument.
+    const p = parseInstallCommand("npm i --registry evil-pkg");
+    assert.equal(p.isInstall, true);
+    assert.ok(p.unverifiable.some((u) => u.startsWith("alt-registry:")));
+    assert.deepEqual(p.refs, []);
+    // a truly bare reinstall is still benign
+    assert.equal(parseInstallCommand("npm i").isInstall, false);
+    assert.equal(parseInstallCommand("npm ci").isInstall, false);
+  });
+
+  it("does NOT false-positive on an install phrase in a non-shell -c argument", () => {
+    // `-c` is only a shell script when a shell binary precedes it; an unrelated command's
+    // quoted arg that merely contains `-c`/an install phrase must not be gated.
+    assert.equal(gated('git commit -m "used the -c flag today"'), false);
+    assert.equal(gated('git commit -m "npm install evil"'), false);
+    // a real shell -c IS still recursed into
+    assert.deepEqual(parseInstallCommand('bash -c "npm i evil"').refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("sh -c 'pip install evil'").refs, ["pip:evil"]);
+    assert.deepEqual(parseInstallCommand('bash -euo pipefail -c "npm i evil"').refs, ["npm:evil"]);
+  });
+});
+
 // Fake triage: pass everything except names in `blocklist`.
 function fakeDeps(blocklist: string[] = []): GateDeps {
   return {
