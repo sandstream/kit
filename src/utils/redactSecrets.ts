@@ -285,6 +285,48 @@ function findEntropyKvSecrets(text: string): SecretFinding[] {
   return out;
 }
 
+// PII parity (from the ruvnet/AIDefence research): kit's patterns are secret-focused
+// and detect no PII. A Swedish personnummer is the highest-value, most-relevant PII to
+// catch at rest in the memory store — and it is high-PRECISION because it carries a Luhn
+// check digit, so we validate rather than match a bare 10/12-digit run (which would flag
+// every timestamp/id). Detection only (masked), never echoed. Samordningsnummer (day+60)
+// is intentionally out of scope to keep false positives low.
+const PERSONNUMMER_RE = /\b(\d{6}|\d{8})[-+]?(\d{4})\b/g;
+
+/** Luhn checksum over a 10-digit personnummer core (weights 2,1,… over the first 9).
+ *  Uses charCodeAt digit math (not Number()) so each char is a plain 0–9 with no NaN
+ *  path — the input is always a `\d{10}` capture from PERSONNUMMER_RE. */
+function personnummerLuhnValid(core10: string): boolean {
+  let sum = 0;
+  for (let i = 0; i < 9; i++) {
+    let digit = (core10.charCodeAt(i) - 48) * (i % 2 === 0 ? 2 : 1);
+    if (digit > 9) digit -= 9;
+    sum += digit;
+  }
+  return (10 - (sum % 10)) % 10 === core10.charCodeAt(9) - 48;
+}
+
+function findSwedishPersonnummer(text: string): SecretFinding[] {
+  const out: SecretFinding[] = [];
+  for (const m of text.matchAll(PERSONNUMMER_RE)) {
+    const datePart = m[1];
+    const last4 = m[2];
+    const core10 = (datePart.length === 8 ? datePart.slice(2) : datePart) + last4; // YYMMDD+NNNN
+    const mm = Number(core10.slice(2, 4));
+    const dd = Number(core10.slice(4, 6));
+    // isFinite guard is defensive (the slices are always digits) and keeps the date
+    // check off the NaN<cutoff fail-open path.
+    if (!Number.isFinite(mm) || !Number.isFinite(dd)) continue;
+    if (mm < 1 || mm > 12 || dd < 1 || dd > 31) continue; // not a plausible date → skip
+    if (!personnummerLuhnValid(core10)) continue; // fails the check digit → not a personnummer
+    out.push({
+      label: "swedish-personnummer",
+      preview: `${core10.slice(0, 4)}…${core10.slice(-2)}`,
+    });
+  }
+  return out;
+}
+
 export function findSecrets(
   text: string,
   opts: { entropyBackstop?: boolean } = {},
@@ -305,6 +347,7 @@ export function findSecrets(
       });
     }
   }
+  findings.push(...findSwedishPersonnummer(text)); // PII-at-rest (Luhn-validated)
   if (opts.entropyBackstop) findings.push(...findEntropyKvSecrets(text));
   return findings;
 }

@@ -244,3 +244,25 @@ describe("safeStatusLine", () => {
     assert.equal(safeStatusLine("\n  \n"), "");
   });
 });
+
+describe("findSecrets — Swedish personnummer (PII parity, Luhn-validated)", () => {
+  const pnr = (text: string) => findSecrets(text).filter((f) => f.label === "swedish-personnummer");
+
+  it("detects a valid personnummer in 10-digit (with separator) and 12-digit form", () => {
+    assert.equal(pnr("patient 900101-1239 in the notes").length, 1);
+    assert.equal(pnr("199001011239").length, 1);
+  });
+
+  it("masks the match — never echoes the full number", () => {
+    const [f] = pnr("900101-1239");
+    assert.ok(f && !f.preview.includes("011239"), "preview must not contain the full personnummer");
+    assert.match(f.preview, /…/);
+  });
+
+  it("rejects a wrong check digit, an implausible date, and phone-shaped numbers (low FP)", () => {
+    assert.equal(pnr("id 9001011230 here").length, 0); // wrong Luhn check digit
+    assert.equal(pnr("ts 1234567890 log").length, 0); // MM=34 → not a date
+    assert.equal(pnr("call 0701234567 now").length, 0); // phone-shaped, fails validation
+    assert.equal(pnr("no pii in this line").length, 0);
+  });
+});

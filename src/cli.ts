@@ -1271,9 +1271,9 @@ async function cmdEscalate(): Promise<boolean> {
 /**
  * Run a command string from a `.kit.toml [setup]` field. These are commands the
  * user configured themselves, but kit's exec invariant forbids a shell — so we
- * split on whitespace (fine for `pnpm install`, `supabase db push`, `uv sync`,
- * `go mod download`) and REFUSE anything with shell operators rather than
- * mis-running it. Returns true on exit 0.
+ * tokenize like a shell (respecting quotes, so `--arg "a b"` stays one argument)
+ * and REFUSE anything with shell operators rather than mis-running it. Returns
+ * true on exit 0.
  */
 async function runConfiguredCommand(label: string, cmdStr: string): Promise<boolean> {
   if (/[&|;<>`$()]/.test(cmdStr)) {
@@ -1282,8 +1282,18 @@ async function runConfiguredCommand(label: string, cmdStr: string): Promise<bool
     );
     return false;
   }
+  let commandArgs: string[];
+  try {
+    const { shellSplit } = await import("./utils/shellSplit.js");
+    commandArgs = shellSplit(cmdStr);
+  } catch {
+    console.log(
+      `  ${c.yellow}!${c.reset} ${label}: ${c.dim}unbalanced quotes — run it yourself: ${c.reset}${c.bold}${cmdStr}${c.reset}`,
+    );
+    return false;
+  }
   console.log(`  ${c.dim}$ ${cmdStr}${c.reset}`);
-  const res = await executeCommand({ commandArgs: cmdStr.trim().split(/\s+/), cwd: process.cwd() });
+  const res = await executeCommand({ commandArgs, cwd: process.cwd() });
   if (res.exitCode === 0) {
     console.log(`  ${c.green}✓${c.reset} ${label}`);
     return true;
