@@ -125,10 +125,15 @@ function withPackageFlags(rest: string[]): string[] {
  * A backslash-escaped quote (`\"`) is a literal quote in an unquoted word, so keep it.
  */
 function dequote(tok: string): string {
+  // Protect an escaped quote as a NON-quote marker BEFORE stripping unescaped quotes —
+  // the old `\x00$1` kept the quote char, so step 2's quote-strip removed it and step 3's
+  // restore never matched, leaking a bare `\x00` into the token (and into block-reason
+  // strings). The marker carries the quote type so it restores exactly.
   return tok
-    .replace(/\\(['"])/g, "\x00$1")
+    .replace(/\\(['"])/g, (_, q) => (q === '"' ? "\x00D" : "\x00S"))
     .replace(/['"]/g, "")
-    .replace(/\x00(['"])/g, "$1");
+    .replace(/\x00D/g, '"')
+    .replace(/\x00S/g, "'");
 }
 
 /**
