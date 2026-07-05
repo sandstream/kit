@@ -136,7 +136,12 @@ function dequote(tok: string): string {
 function binBase(tok: string): string {
   const noEsc = tok.replace(/^\\+/, "");
   const base = noEsc.split("/").pop();
-  return base && base.length > 0 ? base : noEsc;
+  const resolved = base && base.length > 0 ? base : noEsc;
+  // Strip a trailing `@version` — corepack's `pnpm@9` / `yarn@1.22.19` dispatch syntax leaves
+  // that as argv0 after the wrapper is stripped, so `t[0] === "pnpm"` never matched. Only bin
+  // names flow through binBase (never package args), so a scoped/versioned package like
+  // `@scope/pkg@1` is unaffected.
+  return resolved.replace(/@.+$/, "");
 }
 
 /**

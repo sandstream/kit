@@ -559,6 +559,25 @@ describe("parseInstallCommand — round-5 bypass closes", () => {
     assert.equal(parseInstallCommand("corepack install").isInstall, false);
   });
 
+  it("corepack version-pinned dispatch (pnpm@9) resolves to the real manager", () => {
+    // `corepack pnpm@9 add evil` leaves argv0 `pnpm@9` after the wrapper strip; binBase now
+    // drops the @version so the matcher fires.
+    assert.deepEqual(parseInstallCommand("corepack pnpm@9 add evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("corepack yarn@1.22.19 add evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("corepack npm@10 i evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("corepack pnpm@8 dlx evil").refs, ["npm:evil"]);
+    assert.deepEqual(parseInstallCommand("sudo corepack pnpm@latest add evil").refs, ["npm:evil"]);
+    // version-pinned + registry redirect still fails closed on the redirect
+    const redir = parseInstallCommand("corepack pnpm@9 add evil --registry http://evil");
+    assert.equal(redir.isInstall, true);
+    assert.ok(redir.unverifiable.some((u) => u.startsWith("alt-registry:")));
+    // benign version-pinned management commands are NOT installs
+    assert.equal(parseInstallCommand("corepack use pnpm@9").isInstall, false);
+    assert.equal(parseInstallCommand("corepack prepare pnpm@9 --activate").isInstall, false);
+    // a scoped/versioned PACKAGE arg is unaffected (only argv0 is @-stripped)
+    assert.deepEqual(parseInstallCommand("npm i @scope/pkg@1").refs, ["npm:@scope/pkg"]);
+  });
+
   it("exec -c/--call shell string is recursed, not mis-gated as a package", () => {
     for (const cmd of [
       'npm exec -c "npm i evil"',
