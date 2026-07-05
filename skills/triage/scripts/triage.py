@@ -169,32 +169,45 @@ def _resolve_npm_spec(spec, version_keys):
     for p in spec.split("."):
         if p in ("x", "X", "*", ""):
             break
-        if not p.isdigit():
-            return None
+        if not p.isdigit() or len(p) > 18:
+            return None  # non-numeric or absurdly long component (avoid int() blowups)
         nums.append(int(p))
+    if len(nums) > 3 or (op and not nums):
+        return None  # not a 3-part semver / an operator with no version → don't guess
     base = tuple((nums + [0, 0, 0])[:3])
+
+    def bump_partial():
+        # x-range upper bound of a PARTIAL version: <=1 → 2.0.0, <=1.2 → 1.3.0, >1 → 2.0.0
+        b = list(base)
+        b[len(nums) - 1] += 1
+        for j in range(len(nums), 3):
+            b[j] = 0
+        return tuple(b)
 
     def satisfies(t):
         if op == "^" and nums:
-            if base[0] > 0:
-                return base <= t < (base[0] + 1, 0, 0)
-            if len(nums) >= 2 and base[1] > 0:
-                return base <= t < (0, base[1] + 1, 0)
-            return base <= t < (base[0], base[1], base[2] + 1)
+            # npm caret: bump the leftmost NON-ZERO component (or the last specified when all
+            # are zero), zeroing the rest. ^1.2.3<2.0.0, ^0.2.3<0.3.0, ^0.0.3<0.0.4, ^0.0<0.1.0.
+            idx = next((i for i, n in enumerate(nums) if n > 0), len(nums) - 1)
+            hi = list(base)
+            hi[idx] += 1
+            for j in range(idx + 1, 3):
+                hi[j] = 0
+            return base <= t < tuple(hi)
         if op == "~" and nums:
             hi = (base[0], base[1] + 1, 0) if len(nums) >= 2 else (base[0] + 1, 0, 0)
             return base <= t < hi
         if op == ">=":
             return t >= base
-        if op == ">":
-            return t > base
-        if op == "<=":
-            return t <= base
         if op == "<":
             return t < base
+        if op == "<=":  # partial <= desugars to an x-range bound (<=1 → <2.0.0)
+            return t <= base if len(nums) >= 3 else t < bump_partial()
+        if op == ">":  # partial > desugars likewise (>1 → >=2.0.0)
+            return t > base if len(nums) >= 3 else t >= bump_partial()
         if op == "=":
             return t == base
-        return all(t[i] == n for i, n in enumerate(nums))  # bare partial: 1 → 1.x.x
+        return all(i < len(t) and t[i] == n for i, n in enumerate(nums))  # bare partial: 1 → 1.x.x
 
     cands = sorted(t for t in (_stable_semver(v) for v in version_keys) if t and satisfies(t))
     if not cands:
@@ -274,7 +287,12 @@ def _split_pip_spec(target):
 def _pep_release(v):
     """Numeric release tuple of a PEP 440 version (epoch/pre/post/dev ignored), else None."""
     m = re.match(r"^(?:\d+!)?(\d+(?:\.\d+)*)", v)
-    return tuple(int(x) for x in m.group(1).split(".")) if m else None
+    if not m:
+        return None
+    parts = m.group(1).split(".")
+    if any(len(p) > 18 for p in parts):  # avoid int() blowups on absurd input
+        return None
+    return tuple(int(x) for x in parts)
 
 
 def _pep_stable(v):
@@ -296,8 +314,13 @@ def _resolve_pip_spec(spec, release_keys):
     if op in ("==", "==="):
         if op == "==" and ver.endswith(".*"):
             pref = ver[:-2]
+            # STABLE releases only — pip excludes pre-releases from `==X.*` without --pre.
             cands = sorted(
-                (r for r in release_keys if r == pref or r.startswith(pref + ".")),
+                (
+                    r
+                    for r in release_keys
+                    if _pep_stable(r) and (r == pref or r.startswith(pref + "."))
+                ),
                 key=lambda r: _pep_release(r) or (),
             )
             return cands[-1] if cands else None
@@ -307,18 +330,23 @@ def _resolve_pip_spec(spec, release_keys):
         return None
 
     def ok(t):
+        # Compare zero-padded to equal length: PEP 440 treats 2.20 == 2.20.0, so a bare
+        # `<=2.20` must include 2.20.0 (Python tuple compare would otherwise exclude it).
+        n = max(len(t), len(want))
+        tt = tuple(t) + (0,) * (n - len(t))
+        ww = tuple(want) + (0,) * (n - len(want))
         if op == ">=":
-            return t >= want
+            return tt >= ww
         if op == ">":
-            return t > want
+            return tt > ww
         if op == "<=":
-            return t <= want
+            return tt <= ww
         if op == "<":
-            return t < want
+            return tt < ww
         if op == "!=":
-            return t != want
-        if op == "~=" and len(want) >= 2:  # compatible release
-            return t >= want and t[: len(want) - 1] == want[: len(want) - 1]
+            return tt != ww
+        if op == "~=" and len(want) >= 2:  # compatible release: >= want, same prefix minus last
+            return tt >= ww and t[: len(want) - 1] == want[: len(want) - 1]
         return False
 
     cands = sorted(
@@ -504,7 +532,13 @@ def main(argv):
     if not fn:
         rep.critical(f"unknown triage type '{ttype}'")
     else:
-        fn(rep)
+        # Fail CLOSED on any unexpected error: an escaping exception would skip rep.emit()
+        # entirely (no verdict line → kit can't see a PASS, but also no explicit block). Turn
+        # it into a CRITICAL so the gate always renders a decisive, safe verdict.
+        try:
+            fn(rep)
+        except Exception as e:  # noqa: BLE001 -- deliberate catch-all for a fail-closed gate
+            rep.critical(f"triage error ({type(e).__name__}) -- cannot verify")
     rep.emit()
     return 0
 
