@@ -3,13 +3,18 @@
  * port, and the one that closes the same-UID key-theft gap TODAY without kit shipping
  * any native code.
  *
- * The private key lives in whatever hardware the operator fronts — a TPM 2.0 object,
- * a PKCS#11/YubiKey slot, an ssh-agent-held resident key, an Apple Secure Enclave
- * helper — and NEVER enters kit's process or disk. kit holds only the PUBLIC key and
- * shells out to an operator-supplied command to produce each signature. A same-UID
- * attacker who can read ~/.kit finds no private key to steal: there is no key file.
- * (Whether they can *use* the key while the machine is unlocked is the operator's
- * command's concern — a good command requires touch/PIN/presence for each sign.)
+ * The private key lives wherever the operator's command fronts it — ideally hardware
+ * (a TPM 2.0 object, a PKCS#11/YubiKey slot, an ssh-agent resident key, a Secure Enclave
+ * helper) — and NEVER enters kit's process or a kit-managed file. kit holds only the
+ * PUBLIC key and shells out to sign. So a same-UID attacker who reads ~/.kit finds no
+ * kit-managed private key to steal.
+ *
+ * HONEST BOUNDARY — kit CANNOT ATTEST HARDWARE. kit only knows it isn't holding the key
+ * itself; it cannot verify the operator's command actually fronts a secure element (the
+ * command could, e.g., read a plaintext key file). So the truthful claim is "the key is
+ * external / operator-fronted (not a kit-managed file)", NOT "provably in hardware".
+ * Whether the key is truly non-exportable and gated by touch/PIN/presence is the
+ * operator's command's responsibility, and is what actually closes the same-UID gap.
  *
  * This mirrors commandExternalAnchor in audit-anchor.ts: kit ships NO network/native
  * client (that would break the local-first, zero-dep, offline posture); the operator
@@ -102,8 +107,15 @@ export class ExternalCommandKeyStore implements KeyStore {
     try {
       out = execSync(cmd, {
         input,
-        // Do NOT leak kit's env wholesale into the signer; pass only what it needs.
-        env: { ...process.env, KIT_SIGN_ALGO: "ed25519" },
+        // Do NOT leak kit's env wholesale into the signer: kit's process env can hold
+        // resolved secrets / vault tokens (KIT_*), and the signer is exactly the
+        // component we treat as potentially compromised. Pass a MINIMAL allowlist —
+        // enough to find binaries and know the algorithm, nothing sensitive.
+        env: {
+          PATH: process.env.PATH ?? "",
+          HOME: process.env.HOME ?? "",
+          KIT_SIGN_ALGO: "ed25519",
+        },
         stdio: ["pipe", "pipe", "pipe"],
         timeout: 30_000,
         maxBuffer: 1 << 20,

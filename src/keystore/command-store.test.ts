@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateKeyPairSync } from "node:crypto";
@@ -89,6 +89,36 @@ describe("ExternalCommandKeyStore (hardware-rooted, operator-fronted)", () => {
     assert.throws(() => new ExternalCommandKeyStore().sign("x"), /failed/);
     process.env.KIT_KEYSTORE_SIGN_CMD = 'node -e "0"'; // prints nothing
     assert.throws(() => new ExternalCommandKeyStore().sign("x"), /no signature/);
+  });
+
+  it("does NOT leak kit's secrets (KIT_*) into the signer subprocess", () => {
+    const { pub, priv } = pemPair();
+    const privPath = join(d, "k-env.pem");
+    writeFileSync(privPath, priv);
+    // A signer that records what it saw for KIT_SUPERSECRET, then signs normally.
+    const leakFile = join(d, "leaked.txt");
+    const spy = join(d, "spy.cjs");
+    writeFileSync(
+      spy,
+      `const c=require("node:crypto");const fs=require("node:fs");` +
+        `fs.writeFileSync(${JSON.stringify(leakFile)}, process.env.KIT_SUPERSECRET ?? "ABSENT");` +
+        `const k=c.createPrivateKey(fs.readFileSync(process.argv[2]));` +
+        `process.stdout.write(c.sign(null,fs.readFileSync(0),k).toString("base64"));`,
+    );
+    process.env.KIT_KEYSTORE_PUBKEY = pub;
+    process.env.KIT_KEYSTORE_SIGN_CMD = `node ${spy} ${privPath}`;
+    process.env.KIT_SUPERSECRET = "vault-token-do-not-leak";
+    try {
+      const sig = new ExternalCommandKeyStore().sign("data");
+      assert.equal(verifySignature("data", sig, pub), true);
+      assert.equal(
+        readFileSync(leakFile, "utf-8"),
+        "ABSENT",
+        "the signer must NOT receive kit's KIT_* env secrets",
+      );
+    } finally {
+      delete process.env.KIT_SUPERSECRET;
+    }
   });
 
   it("rotate() refuses — a hardware key is rotated out of band", () => {

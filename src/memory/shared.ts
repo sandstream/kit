@@ -19,12 +19,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { findSecrets } from "../utils/redactSecrets.js";
-import {
-  tryLoadIdentity,
-  signWithIdentity,
-  verifySignature,
-  localPublicKeys,
-} from "../identity.js";
+import { identityId, verifySignature, localPublicKeys } from "../identity.js";
+import { resolveKeyStore, assertHardwareIdentity } from "../keystore/index.js";
 import { policySignersMap, hasPolicyAnchor } from "../policy-trust.js";
 
 export type SharedKind = "decision" | "convention" | "how-built" | "status" | "security" | "note";
@@ -232,18 +228,23 @@ export function shareEntry(root: string, input: ShareInput, now: string): Shared
   if (input.status && input.status !== "active") entry.status = input.status;
   if (input.supersedes) entry.supersedes = input.supersedes;
   if (input.reverses) entry.reverses = input.reverses;
-  // Sign on write when a machine identity exists (attributable provenance a
-  // reviewer/colleague can verify offline with just the public key). No identity ⇒
-  // unsigned entry (backward-compatible) — we never AUTO-CREATE a key as a
-  // side-effect of sharing a note. Best-effort: a sign failure leaves it unsigned.
-  const id = tryLoadIdentity();
-  if (id) {
-    try {
-      entry.kid = id.id;
-      entry.sig = signWithIdentity(sharedEntryCanonical(entry)).toString("base64");
-    } catch {
-      delete entry.kid; // no readable private key → leave the entry unsigned
+  // Sign on write via the ACTIVE keystore (hardware/externally-held when configured, else
+  // the file identity) when one exists — attributable provenance a reviewer/colleague can
+  // verify offline with just the public key. No identity ⇒ unsigned entry (backward-
+  // compatible) — we never AUTO-CREATE a key as a side-effect of sharing a note.
+  // Best-effort + fail-closed: under a hardware mandate with only the file key,
+  // assertHardwareIdentity throws → the entry is left UNSIGNED rather than signed with a
+  // mandate-violating file key.
+  try {
+    const res = resolveKeyStore();
+    const pub = res.store.publicKeyPem();
+    if (pub) {
+      assertHardwareIdentity(res);
+      entry.kid = identityId(pub);
+      entry.sig = res.store.sign(sharedEntryCanonical(entry)).toString("base64");
     }
+  } catch {
+    delete entry.kid; // no key / mandate unmet / signer error → leave the entry unsigned
   }
   const path = getSharedPath(root);
   mkdirSync(dirname(path), { recursive: true });

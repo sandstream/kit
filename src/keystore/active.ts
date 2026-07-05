@@ -15,7 +15,10 @@
  */
 import { identityId } from "../identity.js";
 import { resolveKeyStore } from "./resolve.js";
+import { hardwareRequiredByEnv } from "./mandate.js";
 import type { KeyStoreResolution } from "./types.js";
+
+export { hardwareRequiredByEnv } from "./mandate.js";
 
 /**
  * Is the resolved backend genuinely hardware-rooted — i.e. the private key is NOT a
@@ -25,12 +28,6 @@ import type { KeyStoreResolution } from "./types.js";
  */
 export function isHardwareRooted(res: KeyStoreResolution): boolean {
   return res.store.kind !== "file" && res.availability.ok && !res.degraded;
-}
-
-/** True when the environment mandates a hardware-rooted identity. */
-export function hardwareRequiredByEnv(): boolean {
-  const v = (process.env.KIT_REQUIRE_HARDWARE_IDENTITY ?? "").trim().toLowerCase();
-  return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
 /**
