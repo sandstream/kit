@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Integration — external findings ingestion: connect any scanner to `kit check`
+
+- **`kit check` now folds third-party findings into its verdict.** A partner tool
+  (a `kit-plugin-*`, or any in-house gate) appends one JSON object per line to
+  `.kit-scan-results.jsonl` — `{source, severity, title?, id?, package?}` — and
+  `kit check --category security` ingests it: `critical`/`high` **fail** the gate
+  (like `npm audit`), `medium`/`low` **warn**, grouped per source. This is the inbound
+  integration contract from the research: partners connect _to_ kit's stable surface;
+  kit's core needs no per-partner code (the `kit-plugin-snyk`/`-wiz`/`-sentrux` plugins
+  already write this file — nothing consumed it into the verdict until now).
+  No-false-green: ingestion can only add/escalate findings, never emit a `pass`, and a
+  garbage/hostile file cannot green the gate; unparseable lines are surfaced (never
+  silently dropped). No file → no-op. Deterministic, zero-LLM. New `src/external-findings.ts`;
+  documented in `docs/EXTERNAL_FINDINGS.md`.
+
 ### Security — self-healing scanner preflight: install a missing scanner instead of only failing (found by dogfooding)
 
 - **`kit check` / `kit ci` now auto-provision a declared-but-missing scanner before
