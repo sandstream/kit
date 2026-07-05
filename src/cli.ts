@@ -325,6 +325,7 @@ async function cmdCheck(): Promise<boolean> {
       const webSearchResult = config.web?.search
         ? await step("web search", () => checkWebSearch(config.web!.search!))
         : null;
+      await autoInstallScanners(config, live); // self-heal missing scanners before scanning
       const securityResults = await step("security scan", () => checkSecurity());
       const lockResults = await step("lock files", () => checkLockFiles(config));
 
@@ -746,6 +747,39 @@ async function cmdInstall(): Promise<boolean> {
       return allOk;
     },
   );
+}
+
+/**
+ * Self-healing scanner preflight for `kit check` / `kit ci`. Installs any security
+ * scanner declared in `.kit.toml [tools]` but not yet present, so the scan actually
+ * RUNS in an ephemeral environment instead of reporting the scanner missing (which
+ * fails the strict gate). Complements `kit install` at env-setup — this backstops
+ * the case where setup did not run. Opt out with `--no-auto-install` /
+ * `KIT_CHECK_NO_AUTOINSTALL`; skipped when air-gapped. installTools is triage-gated
+ * and read-only-aware, so this can never run an untriaged binary or write in
+ * --read-only mode. Best-effort: a failed install just leaves the check to fail closed.
+ */
+async function autoInstallScanners(config: kitConfig, live: boolean): Promise<void> {
+  if (!config.tools) return;
+  const { ensureScannersInstalled } = await import("./install.js");
+  const { resolveAirGap } = await import("./airgap/config.js");
+  const disabled =
+    hasFlag(process.argv, "--no-auto-install") ||
+    ["1", "true", "yes"].includes(
+      (process.env.KIT_CHECK_NO_AUTOINSTALL ?? "").trim().toLowerCase(),
+    );
+  const results = await ensureScannersInstalled(config.tools, {
+    disabled,
+    airGapped: resolveAirGap(config.air_gap, process.env).enabled,
+  });
+  const newly = results.filter((r) => r.action === "installed");
+  if (live && newly.length) {
+    console.log(
+      `  ${c.green}✓${c.reset} ${c.dim}auto-installed ${newly
+        .map((r) => r.name)
+        .join(", ")} so its scan can run${c.reset}`,
+    );
+  }
 }
 
 async function ensureSecretsBackend(config: kitConfig): Promise<boolean> {
@@ -3293,6 +3327,7 @@ async function cmdCi(): Promise<boolean> {
       const skillResults = config.skills
         ? await step("skills", () => checkSkills(config.skills!))
         : [];
+      await autoInstallScanners(config, live); // self-heal missing scanners before scanning
       const securityResults = await step("security scan", () => checkSecurity());
       const lockResults = await step("lock files", () => checkLockFiles(config));
       // Signed org policy (.kit-policy.toml) — opt-in (absent ⇒ present:false ⇒ no

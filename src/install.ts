@@ -39,6 +39,56 @@ export function miseErrorDetail(message: string, stderr = ""): string {
   return firstMsg;
 }
 
+/**
+ * The mise refs kit treats as security scanners — the DEFAULT set plus the two
+ * conditionally-provisioned ones (trivy for containers/IaC, osv-scanner for
+ * ecosystems without a dedicated scanner). Only these are auto-installed by the
+ * `kit check` self-healing preflight, and only when the project ALREADY declares
+ * them in `.kit.toml [tools]` — so the preflight can never pull in a tool the
+ * project didn't opt into. Kept in sync with toml-generator's provisioning.
+ */
+const SCANNER_REFS = new Set<string>([
+  "semgrep",
+  "npm:@socketsecurity/cli",
+  "aqua:trufflesecurity/trufflehog",
+  "aqua:aquasecurity/trivy",
+  "aqua:google/osv-scanner",
+]);
+
+export interface EnsureScannersOpts {
+  /** Opt-out (KIT_CHECK_NO_AUTOINSTALL / --no-auto-install) — keep check read-only. */
+  disabled?: boolean;
+  /** Air-gapped posture → don't attempt a (possibly-blocked) network install; the
+   *  enclave pre-provisions tools and the check fails closed if one is missing. */
+  airGapped?: boolean;
+}
+
+/**
+ * Self-healing preflight for `kit check` / `kit ci`: install any security scanner
+ * that is DECLARED in `.kit.toml [tools]` but not yet present, so an ephemeral
+ * environment actually RUNS the scan instead of reporting the scanner missing
+ * (which now fails the strict gate). This is the runtime complement to `kit install`
+ * at env-setup: setup provisions the scanners, and this backstops the case where
+ * setup did not run. Only kit's known scanner refs are touched, only when already
+ * declared, so it can never install a tool the project didn't opt into. Triage-gated
+ * and read-only-aware via installTools; best-effort — a failure just leaves the
+ * scanner missing and the check fails closed honestly. Returns the install results
+ * (empty when skipped or nothing to do).
+ */
+export async function ensureScannersInstalled(
+  tools: ToolConfig | undefined,
+  opts: EnsureScannersOpts = {},
+  deps: InstallDeps = defaultDeps,
+): Promise<InstallResult[]> {
+  if (opts.disabled || opts.airGapped || !tools) return [];
+  const scanners: ToolConfig = {};
+  for (const [ref, version] of Object.entries(tools)) {
+    if (SCANNER_REFS.has(ref)) scanners[ref] = version;
+  }
+  if (Object.keys(scanners).length === 0) return [];
+  return installTools(scanners, deps);
+}
+
 async function miseInstall(
   tool: string,
   version: string,
