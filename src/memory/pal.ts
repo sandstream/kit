@@ -62,6 +62,18 @@ function hostnameDeviceId(): string {
  *     peer on a shared store can also guess from `sha256(hostname+user)`.
  *  3. Hostname-derived hash, only if the id file can't be read or written.
  */
+/**
+ * True when a KIT_DEVICE_ID override is set AND well-formed — i.e. actually TRUSTED
+ * by deviceId() (a malformed override is ignored, so it is not "active"). This id is
+ * trust-bearing: the device fences in palList/palSyncFindings auto-close another
+ * device's open findings by it, so a spoofed value could silently close them. Callers
+ * (kit check) surface a warning when it is active on a real store.
+ */
+export function deviceIdOverrideActive(): boolean {
+  const override = (process.env.KIT_DEVICE_ID ?? "").trim();
+  return override !== "" && DEVICE_ID_RE.test(override);
+}
+
 export function deviceId(): string {
   const override = (process.env.KIT_DEVICE_ID ?? "").trim();
   if (override && DEVICE_ID_RE.test(override)) return override;

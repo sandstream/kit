@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security — surface a trust-bearing KIT_DEVICE_ID override (#79)
+
+- **`kit check` warns when a KIT_DEVICE_ID override is active on a real store.** The
+  device id is trust-bearing — the device fences in `palList` / `palSyncFindings`
+  auto-close another device's open findings by it, so a spoofed value could silently
+  close them; the protection was doc-only. New `deviceIdOverrideActive()` +
+  `device-id override` check warns (never fails by default; escalates under
+  `--fail-on-warning`) when a well-formed override is set AND a store exists (a fence is
+  actually in effect); skips otherwise. `src/memory/pal.ts`, `src/check-security.ts`.
+
 ### Security — shared-tier signature verification on the recall inject path (R4/#77)
 
 - **Auto-injected team decisions are now signature-verified.** `recentDecisions`

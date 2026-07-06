@@ -15,6 +15,7 @@ import {
   palAutoVerify,
   palPrune,
   deviceId,
+  deviceIdOverrideActive,
   importLegacyLedger,
   palSyncFindings,
   findingPalId,
@@ -464,5 +465,27 @@ describe("PAL — device coupling (don't nag about ephemeral-session items)", ()
   it("deviceId is stable within a process and overridable", () => {
     assert.equal(deviceId(), deviceId());
     withDevice("pinned", () => assert.equal(deviceId(), "pinned"));
+  });
+});
+
+describe("deviceIdOverrideActive (KIT_DEVICE_ID trust posture)", () => {
+  const withEnv = (val: string | undefined, fn: () => void) => {
+    const prev = process.env.KIT_DEVICE_ID;
+    if (val === undefined) delete process.env.KIT_DEVICE_ID;
+    else process.env.KIT_DEVICE_ID = val;
+    try {
+      fn();
+    } finally {
+      if (prev === undefined) delete process.env.KIT_DEVICE_ID;
+      else process.env.KIT_DEVICE_ID = prev;
+    }
+  };
+
+  it("is false when unset, true for a well-formed override, false for a malformed one", () => {
+    withEnv(undefined, () => assert.equal(deviceIdOverrideActive(), false));
+    withEnv("laptop-2", () => assert.equal(deviceIdOverrideActive(), true));
+    withEnv("   ", () => assert.equal(deviceIdOverrideActive(), false));
+    // malformed (spaces/punctuation) is ignored by deviceId() → not "active"
+    withEnv("bad id!", () => assert.equal(deviceIdOverrideActive(), false));
   });
 });
