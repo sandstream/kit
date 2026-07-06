@@ -91,6 +91,41 @@ export function gateStatus(
 }
 
 /**
+ * A KIT_DEVICE_ID override is trust-bearing: the device fences in `palList` /
+ * `palSyncFindings` auto-close another device's open findings by this id, so a
+ * spoofed value could silently close them. deviceId() only validates the format —
+ * this surfaces the posture. WARNs (never fails by default) when the override is
+ * active AND a real store exists (a device fence is actually in effect); skips
+ * otherwise. Escalates under `--fail-on-warning`.
+ */
+export async function checkDeviceIdOverride(): Promise<SecurityCheckResult> {
+  const name = "device-id override";
+  const category = "secrets" as const;
+  const { deviceIdOverrideActive } = await import("./memory/pal.js");
+  if (!deviceIdOverrideActive()) {
+    return { category, name, status: "skip", detail: "no KIT_DEVICE_ID override" };
+  }
+  const { existsSync } = await import("node:fs");
+  const { getMemoryDbPath } = await import("./memory/db.js");
+  if (!existsSync(getMemoryDbPath())) {
+    return {
+      category,
+      name,
+      status: "skip",
+      detail: "KIT_DEVICE_ID set but no store — no device fence in effect",
+    };
+  }
+  return {
+    category,
+    name,
+    status: "warn",
+    severity: "low",
+    detail:
+      "KIT_DEVICE_ID override is active — device-fenced auto-close of PAL/security findings trusts this value; unset it unless this device intentionally uses a fixed id",
+  };
+}
+
+/**
  * R5 — the self-playing loop (memory capture + statusline) depends on hooks in
  * ~/.claude/settings.json. If they were installed here (durable marker present) but
  * have since VANISHED from settings.json, capture is silently OFF — the store looks
@@ -1799,6 +1834,7 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
   // Self-playing loop liveness: fail if capture hooks were installed but have since
   // vanished from settings.json (capture silently off — a false green).
   results.push(await checkMemoryHooksLiveness());
+  results.push(await checkDeviceIdOverride());
 
   // Inbound integration: fold any third-party findings a partner tool emitted to
   // `.kit-scan-results.jsonl` into the verdict. No file → no-op. Can only escalate

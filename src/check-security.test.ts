@@ -10,6 +10,7 @@ import {
   jvmProjectKind,
   findJvmProject,
   checkMemoryHooksLiveness,
+  checkDeviceIdOverride,
   type SecurityCheckResult,
 } from "./check-security.js";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -46,6 +47,56 @@ describe("gateStatus — scanner-health strict by default", () => {
       gateStatus(r({ status: "warn", didNotRun: true }), { failOnWarning: true }),
       "fail",
     );
+  });
+});
+
+describe("checkDeviceIdOverride (#79 — trust-bearing env override)", () => {
+  const withEnv = async (
+    deviceId: string | undefined,
+    dbPath: string | undefined,
+    fn: (r: SecurityCheckResult) => void,
+  ) => {
+    const prevD = process.env.KIT_DEVICE_ID;
+    const prevDb = process.env.KIT_MEMORY_DB;
+    try {
+      if (deviceId === undefined) delete process.env.KIT_DEVICE_ID;
+      else process.env.KIT_DEVICE_ID = deviceId;
+      if (dbPath === undefined) delete process.env.KIT_MEMORY_DB;
+      else process.env.KIT_MEMORY_DB = dbPath;
+      fn(await checkDeviceIdOverride());
+    } finally {
+      if (prevD === undefined) delete process.env.KIT_DEVICE_ID;
+      else process.env.KIT_DEVICE_ID = prevD;
+      if (prevDb === undefined) delete process.env.KIT_MEMORY_DB;
+      else process.env.KIT_MEMORY_DB = prevDb;
+    }
+  };
+
+  it("skips when no override is set", async () => {
+    await withEnv(undefined, undefined, (r) => assert.equal(r.status, "skip"));
+  });
+
+  it("skips when set but no store exists (no device fence in effect)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-devid-"));
+    try {
+      await withEnv("laptop-1", join(dir, "nope.db"), (r) => assert.equal(r.status, "skip"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("WARNs when a valid override is active on a real store", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-devid-"));
+    try {
+      const dbPath = join(dir, "memory.db");
+      writeFileSync(dbPath, ""); // existsSync is all the check needs
+      await withEnv("laptop-1", dbPath, (r) => {
+        assert.equal(r.status, "warn");
+        assert.match(r.detail, /KIT_DEVICE_ID/);
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
