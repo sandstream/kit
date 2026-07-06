@@ -177,6 +177,34 @@ export function verifySharedTier(root: string, identityDir?: string): SharedTier
   return { anchored, total: entries.length, results, counts };
 }
 
+/**
+ * Filter shared entries down to those SAFE to AUTO-INJECT into a prompt (SessionStart
+ * recovery / touched-decisions notice). Closes the gap where a curated team entry was
+ * replayed as trusted "Curated team decisions" with no signature check:
+ *   - a `bad-sig` (content changed after signing by a key we HOLD) is ALWAYS dropped —
+ *     tamper must never be replayed, in any mode;
+ *   - when a committed `.kit-policy.signers` anchor is present (the org opted into
+ *     signing), ONLY org-`trusted` entries are injected — unsigned / unknown-signer
+ *     entries are not trusted team decisions;
+ *   - with NO anchor, everything but tamper is kept (org trust can't be established
+ *     without an anchor, so we don't break the common team-without-anchor case).
+ * Pure; `identityDir` injectable for tests.
+ */
+export function recallSafeShared(
+  root: string,
+  entries: SharedEntry[],
+  identityDir?: string,
+): SharedEntry[] {
+  const anchored = hasPolicyAnchor(root);
+  const signers = anchored ? policySignersMap(root) : localPublicKeys(identityDir);
+  return entries.filter((e) => {
+    const verdict = verifySharedEntry(e, signers);
+    if (verdict === "bad-sig") return false; // tamper against a known key — never inject
+    if (anchored && verdict !== "trusted") return false; // org anchor ⇒ only org-trusted
+    return true;
+  });
+}
+
 export function readShared(root: string): SharedEntry[] {
   const path = getSharedPath(root);
   if (!existsSync(path)) return [];

@@ -91,6 +91,40 @@ export function gateStatus(
 }
 
 /**
+ * R5 — the self-playing loop (memory capture + statusline) depends on hooks in
+ * ~/.claude/settings.json. If they were installed here (durable marker present) but
+ * have since VANISHED from settings.json, capture is silently OFF — the store looks
+ * installed but records nothing, a false green. `kit doctor` already flags this; this
+ * folds the same liveness into the `kit check` security gate. Skips when never
+ * installed (CI / fresh machine) and after a clean `kit memory uninstall` (which
+ * clears the marker), so it fails ONLY on genuine silent degradation.
+ */
+export async function checkMemoryHooksLiveness(): Promise<SecurityCheckResult> {
+  const name = "memory hooks liveness";
+  const category = "secrets" as const;
+  const { memoryHooksLiveness } = await import("./memory/install.js");
+  const live = memoryHooksLiveness();
+  if (!live.everInstalled) {
+    return { category, name, status: "skip", detail: "memory hooks not installed here" };
+  }
+  if (live.missing.length === 0) {
+    return {
+      category,
+      name,
+      status: "pass",
+      detail: `${live.present.length} capture hook(s) wired`,
+    };
+  }
+  return {
+    category,
+    name,
+    status: "fail",
+    severity: "high",
+    detail: `memory capture is silently OFF — installed here but missing from settings.json: ${live.missing.join(", ")}. Run: kit memory install`,
+  };
+}
+
+/**
  * R3 — a poisoned memory store is a delayed prompt-injection: stored text is replayed
  * into every session via recall. Quarantined rows are excluded from recall (mitigated),
  * so this flags `kit check` only when a NON-quarantined message still carries a
@@ -1762,6 +1796,9 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
   // fail-closed if a non-quarantined high-confidence injection is present or the scan
   // can't run. (Recall render paths already sanitize; this gates the store itself.)
   results.push(await checkMemoryInjection());
+  // Self-playing loop liveness: fail if capture hooks were installed but have since
+  // vanished from settings.json (capture silently off — a false green).
+  results.push(await checkMemoryHooksLiveness());
 
   // Inbound integration: fold any third-party findings a partner tool emitted to
   // `.kit-scan-results.jsonl` into the verdict. No file → no-op. Can only escalate

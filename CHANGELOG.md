@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security — shared-tier signature verification on the recall inject path (R4/#77)
+
+- **Auto-injected team decisions are now signature-verified.** `recentDecisions`
+  (SessionStart recovery / touched-decisions notice) replayed curated shared entries
+  into every session as trusted "Curated team decisions" without checking their
+  signature — so a tampered or forged entry rode in as trusted. `recallSafeShared`
+  now filters before injection: a `bad-sig` (content changed after signing by a key we
+  hold) is ALWAYS dropped, and under a committed `.kit-policy.signers` anchor only
+  org-`trusted` entries are injected. With no anchor the common team case is preserved
+  (only tamper is dropped). `src/memory/shared.ts`, `src/memory/hook.ts`.
+
+### Security — `kit check` gates on memory-hooks liveness (R5/#71)
+
+- **`kit check` now fails when the self-playing capture loop silently degraded.**
+  Memory capture + statusline depend on hooks in `~/.claude/settings.json`; if they were
+  installed here (durable marker present) but have since vanished, capture is silently off
+  (the store looks installed but records nothing). `kit doctor` already flagged this and
+  `kit memory uninstall` already audits the teardown; a new `memory hooks liveness` check
+  folds the same liveness into the `kit check` security gate. Skips when never installed
+  (CI / fresh machine) and after a clean uninstall, so it fails only on genuine silent
+  degradation. `src/check-security.ts`.
+
 ### Security — PII parity: detect a Swedish personnummer at rest
 
 - **`findSecrets` now detects a Swedish personnummer (Luhn-validated).** kit's patterns

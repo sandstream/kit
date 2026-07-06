@@ -9,9 +9,10 @@ import {
   classifyTrufflehogFindings,
   jvmProjectKind,
   findJvmProject,
+  checkMemoryHooksLiveness,
   type SecurityCheckResult,
 } from "./check-security.js";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -45,6 +46,61 @@ describe("gateStatus — scanner-health strict by default", () => {
       gateStatus(r({ status: "warn", didNotRun: true }), { failOnWarning: true }),
       "fail",
     );
+  });
+});
+
+describe("checkMemoryHooksLiveness (R5 — self-playing loop gate)", () => {
+  const hookCmd = (sub: string) => ({
+    hooks: [{ type: "command", command: `kit memory hook ${sub}` }],
+  });
+  const ALL_HOOKS = {
+    hooks: {
+      UserPromptSubmit: [hookCmd("user-prompt-submit")],
+      SessionEnd: [hookCmd("session-end")],
+      SessionStart: [hookCmd("session-start")],
+    },
+  };
+
+  const withEnv = async (
+    markerExists: boolean,
+    settings: unknown,
+    fn: (r: SecurityCheckResult) => void,
+  ) => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-live-"));
+    const prevM = process.env.KIT_MEMORY_HOOK_MARKER;
+    const prevS = process.env.KIT_CLAUDE_SETTINGS;
+    try {
+      const marker = join(dir, "marker");
+      if (markerExists) writeFileSync(marker, "2026-01-01T00:00:00Z\n");
+      const settingsPath = join(dir, "settings.json");
+      writeFileSync(settingsPath, JSON.stringify(settings));
+      process.env.KIT_MEMORY_HOOK_MARKER = marker;
+      process.env.KIT_CLAUDE_SETTINGS = settingsPath;
+      fn(await checkMemoryHooksLiveness());
+    } finally {
+      if (prevM === undefined) delete process.env.KIT_MEMORY_HOOK_MARKER;
+      else process.env.KIT_MEMORY_HOOK_MARKER = prevM;
+      if (prevS === undefined) delete process.env.KIT_CLAUDE_SETTINGS;
+      else process.env.KIT_CLAUDE_SETTINGS = prevS;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it("skips when never installed here (no marker → CI / fresh machine)", async () => {
+    await withEnv(false, ALL_HOOKS, (r) => assert.equal(r.status, "skip"));
+  });
+
+  it("passes when installed and all capture hooks are still wired", async () => {
+    await withEnv(true, ALL_HOOKS, (r) => assert.equal(r.status, "pass"));
+  });
+
+  it("FAILS when installed but a hook has vanished (capture silently off)", async () => {
+    const missingOne = { hooks: { UserPromptSubmit: [hookCmd("user-prompt-submit")] } };
+    await withEnv(true, missingOne, (r) => {
+      assert.equal(r.status, "fail");
+      assert.match(r.detail, /silently OFF/);
+      assert.match(r.detail, /SessionEnd|SessionStart/);
+    });
   });
 });
 
