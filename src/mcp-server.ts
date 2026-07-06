@@ -10,7 +10,7 @@ import { checkSecurity } from "./check-security.js";
 import { checkSkills } from "./check-skills.js";
 import { checkLockFiles } from "./check-lock.js";
 import { checkTests } from "./check-tests.js";
-import { loadBaseline, baselineGet } from "./baseline.js";
+import { loadBaselineForGate, baselineGet, BASELINE_FILE } from "./baseline.js";
 import { computeCheckVerdict } from "./check-verdict.js";
 import { installTools } from "./install.js";
 import { loginServices } from "./login.js";
@@ -164,7 +164,18 @@ function register_kit_check(server: McpServer): void {
         const lockResults = await checkLockFiles(config);
         // Include test-coverage in the verdict — the CLI does, and omitting it here
         // was one half of the CLI-vs-MCP divergence. Baseline-aware, same as `kit check`.
-        const baseline = await loadBaseline();
+        const { baseline, ignored: baselineIgnored } = await loadBaselineForGate();
+        if (baselineIgnored) {
+          // Same fail-closed baseline handling as `kit check` — parity so the two
+          // surfaces never disagree on the verdict.
+          securityResults.push({
+            category: "secrets",
+            name: "baseline integrity",
+            status: "warn",
+            severity: "low",
+            detail: `${BASELINE_FILE} ignored (${baselineIgnored}) — gating on all findings; re-freeze with 'kit baseline freeze'`,
+          });
+        }
         const testResults = await checkTests({
           baseline: baselineGet(baseline, "tests", "untested_files"),
         });

@@ -332,8 +332,19 @@ async function cmdCheck(): Promise<boolean> {
       // Test-coverage enforcement (--enforce-tests CLI flag overrides config).
       // Baseline-aware: pre-existing untested files only warn; net-new fail.
       const { checkTests } = await import("./check-tests.js");
-      const { loadBaseline, baselineGet } = await import("./baseline.js");
-      const baseline = await loadBaseline();
+      const { loadBaselineForGate, baselineGet, BASELINE_FILE } = await import("./baseline.js");
+      const { baseline, ignored: baselineIgnored } = await loadBaselineForGate();
+      if (baselineIgnored) {
+        // Fail-closed + visible: a corrupt/tampered baseline is ignored (nothing
+        // suppressed) and surfaced as a finding, never a crash of the gate.
+        securityResults.push({
+          category: "secrets",
+          name: "baseline integrity",
+          status: "warn",
+          severity: "low",
+          detail: `${BASELINE_FILE} ignored (${baselineIgnored}) — gating on all findings; re-freeze with 'kit baseline freeze'`,
+        });
+      }
       const testResults = await step("test coverage", () =>
         checkTests({
           enforce: enforceTests,
@@ -580,8 +591,13 @@ async function cmdDesign(): Promise<boolean> {
   const enforce = hasFlag(process.argv, "--enforce");
   const jsonMode = hasFlag(process.argv, "--json");
   const { checkDesign } = await import("./check-design.js");
-  const { loadBaseline, baselineGet } = await import("./baseline.js");
-  const baseline = await loadBaseline();
+  const { loadBaselineForGate, baselineGet, BASELINE_FILE } = await import("./baseline.js");
+  const { baseline, ignored: baselineIgnored } = await loadBaselineForGate();
+  if (baselineIgnored) {
+    console.error(
+      `${c.yellow}!${c.reset} ${BASELINE_FILE} ignored (${baselineIgnored}) — gating on all findings`,
+    );
+  }
   const results = await checkDesign({
     enforce,
     baseline: {
