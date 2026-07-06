@@ -197,7 +197,14 @@ async function checkMemoryInjection(): Promise<SecurityCheckResult> {
   }
   try {
     const { replayableInjectionCount } = await import("./memory/scan.js");
-    const { count, sample } = replayableInjectionCount(db);
+    const { count, sample, scanned } = replayableInjectionCount(db);
+    if (scanned === 0) {
+      // Empty store ≡ absent store — nothing recallable to scan. Reporting `skip`
+      // here (not `pass`) keeps `kit check` deterministic: the first run materializes
+      // an empty memory.db as a side effect, and without this the second run would
+      // flip this check skip→pass on identical input.
+      return { category, name, status: "skip", detail: "memory store empty — nothing to scan" };
+    }
     if (count > 0) {
       return {
         category,

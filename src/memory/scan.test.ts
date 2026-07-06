@@ -141,4 +141,22 @@ describe("replayableInjectionCount (gates kit check on a poisoned store)", () =>
     assert.equal(replayableInjectionCount(db).count, 0);
     db.close();
   });
+
+  it("reports `scanned` so an empty store reads the same as an absent one (determinism)", () => {
+    // Empty store: 0 rows scanned → the check treats this identically to 'no store',
+    // so `kit check` can't flip skip→pass once a run materializes an empty memory.db.
+    const empty = openMemoryDb(":memory:");
+    const r0 = replayableInjectionCount(empty);
+    assert.equal(r0.scanned, 0);
+    assert.equal(r0.count, 0);
+    empty.close();
+    // Non-empty clean store: rows are scanned, still zero injections.
+    const clean = openMemoryDb(":memory:");
+    upsertSession(clean, { sessionId: "s1", harness: "claude-code" });
+    insertMessage(clean, { uuid: "c1", sessionId: "s1", type: "user", content: "clean note" });
+    const r1 = replayableInjectionCount(clean);
+    assert.equal(r1.scanned, 1);
+    assert.equal(r1.count, 0);
+    clean.close();
+  });
 });
