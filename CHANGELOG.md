@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-07-06
+
 ### Security — surface a trust-bearing KIT_DEVICE_ID override (#79)
 
 - **`kit check` warns when a KIT_DEVICE_ID override is active on a real store.** The
