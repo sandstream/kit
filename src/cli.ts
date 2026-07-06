@@ -5854,11 +5854,23 @@ async function main(): Promise<void> {
         .catch(() => {}); // never fail
     }
   } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+    const code = err instanceof Error && "code" in err ? (err as { code?: string }).code : undefined;
+    const jsonMode = hasFlag(args, "--json");
+    if (code === "ENOENT") {
+      // In --json mode emit a valid JSON error so consumers never get empty stdout.
+      if (jsonMode) console.log(JSON.stringify({ ok: false, error: `${KIT_FILE} not found` }));
       console.error(`${c.red}Error: ${KIT_FILE} not found in ${process.cwd()}${c.reset}`);
       console.error(
         `${c.dim}Create a .kit.toml to define your project's tools, services, and secrets.${c.reset}`,
       );
+      process.exitCode = 1;
+    } else if (code === "KIT_INVALID_CONFIG") {
+      // A malformed .kit.toml (bad TOML syntax or failed schema validation) must fail
+      // CLOSED like a missing one — a clean error + exit 1, never an uncaught stack
+      // trace with empty --json stdout (a denial-of-verdict any dropped file could cause).
+      const msg = err instanceof Error ? err.message : String(err);
+      if (jsonMode) console.log(JSON.stringify({ ok: false, error: msg }));
+      console.error(`${c.red}${msg}${c.reset}`);
       process.exitCode = 1;
     } else {
       throw err;
