@@ -49,4 +49,52 @@ describe("memory merge", () => {
     assert.throws(() => mergeDb(target, "/nope/missing.db"), /not found/);
     target.close();
   });
+
+  it("reports imported project keys so a foreign scope is loud (#247)", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "kit-merge-"));
+    const srcPath = join(tmp, "container.db");
+    const src = openMemoryDb(srcPath);
+    upsertSession(src, { sessionId: "c1", harness: "claude-code", project: "-home-user" });
+    insertMessage(src, { uuid: "m1", sessionId: "c1", type: "user", content: "in a container" });
+    src.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    src.close();
+
+    const target = openMemoryDb(":memory:");
+    const r = mergeDb(target, srcPath);
+    assert.deepEqual(r.projects, { "-home-user": 1 });
+    target.close();
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("--remap-project rehomes imported sessions into the given project (#247)", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "kit-merge-"));
+    const srcPath = join(tmp, "container.db");
+    const src = openMemoryDb(srcPath);
+    upsertSession(src, { sessionId: "c1", harness: "claude-code", project: "-home-user" });
+    insertMessage(src, { uuid: "m1", sessionId: "c1", type: "user", content: "in a container" });
+    src.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    src.close();
+
+    const target = openMemoryDb(":memory:");
+    const r = mergeDb(target, srcPath, { remapProject: "/Users/x/dev/kit" });
+    assert.deepEqual(r.projects, { "-Users-x-dev-kit": 1 });
+    const row = target.prepare("SELECT project FROM sessions WHERE session_id = 'c1'").get() as {
+      project: string;
+    };
+    assert.equal(row.project, "-Users-x-dev-kit");
+
+    // Re-merge with remap also rehomes an ALREADY-imported foreign session
+    // (upsert: a non-null incoming project wins) — the recovery path when the
+    // first merge forgot the flag.
+    const target2 = openMemoryDb(":memory:");
+    mergeDb(target2, srcPath); // first: lands foreign
+    mergeDb(target2, srcPath, { remapProject: "/Users/x/dev/kit" }); // rehome
+    const row2 = target2.prepare("SELECT project FROM sessions WHERE session_id = 'c1'").get() as {
+      project: string;
+    };
+    assert.equal(row2.project, "-Users-x-dev-kit");
+    target.close();
+    target2.close();
+    rmSync(tmp, { recursive: true, force: true });
+  });
 });

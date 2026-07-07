@@ -17,31 +17,67 @@ export interface MergeResult {
   toolUses: number;
   pending: number;
   threads: number;
+  /**
+   * Sessions imported per project key (AFTER any remap). Lets the CLI say loudly
+   * which scopes the merge landed in — a foreign key (e.g. a container's
+   * "-home-user") is invisible to project-scoped search, and "merged" must not
+   * read as "reachable" when it is not (#247).
+   */
+  projects: Record<string, number>;
+}
+
+export interface MergeOpts {
+  /**
+   * Rewrite every imported session's project key to this project root, so
+   * sessions from another machine/container join the scope they belong to
+   * instead of staying under a foreign path like "-home-user" (#247).
+   */
+  remapProject?: string;
 }
 
 type Row = Record<string, unknown>;
 const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
 const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
 
-export function mergeDb(target: DatabaseSync, sourcePath: string): MergeResult {
+/** Project keys are stored in the Claude-projects form: path with / → -. */
+export function projectKeyFor(projectRoot: string): string {
+  return projectRoot.replace(/\//g, "-");
+}
+
+export function mergeDb(
+  target: DatabaseSync,
+  sourcePath: string,
+  opts: MergeOpts = {},
+): MergeResult {
   if (!existsSync(sourcePath)) throw new Error(`source memory db not found: ${sourcePath}`);
   const src = new DatabaseSync(sourcePath, { readOnly: true });
-  const out: MergeResult = { sessions: 0, messages: 0, toolUses: 0, pending: 0, threads: 0 };
+  const out: MergeResult = {
+    sessions: 0,
+    messages: 0,
+    toolUses: 0,
+    pending: 0,
+    threads: 0,
+    projects: {},
+  };
+  const remapKey = opts.remapProject ? projectKeyFor(opts.remapProject) : undefined;
 
   try {
     // Sessions
     for (const s of src.prepare("SELECT * FROM sessions").all() as Row[]) {
       const sessionId = str(s.session_id);
       if (!sessionId) continue;
+      const project = remapKey ?? str(s.project);
       upsertSession(target, {
         sessionId,
         harness: str(s.harness) ?? "claude-code",
-        project: str(s.project),
+        project,
         firstMessageAt: str(s.first_message_at),
         lastMessageAt: str(s.last_message_at),
         isAgentSidechain: !!s.is_agent_sidechain,
       });
       out.sessions++;
+      const key = project ?? "(no project)";
+      out.projects[key] = (out.projects[key] ?? 0) + 1;
     }
 
     // tool_uses grouped by message uuid (copied only for newly-added messages)
