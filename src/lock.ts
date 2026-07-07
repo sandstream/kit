@@ -78,6 +78,7 @@ export async function readSkillsLock(): Promise<SkillsLock | null> {
     const content = await readFile(lockPath, "utf-8");
     return JSON.parse(content) as SkillsLock;
   } catch (error) {
+    // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- interpolates a module-level constant filename, not user input
     console.error(`Failed to read ${SKILLS_LOCK_FILE}:`, error);
     return null;
   }
@@ -94,6 +95,7 @@ export async function writeSkillsLock(lock: SkillsLock): Promise<void> {
     const content = JSON.stringify(lock, null, 2) + "\n";
     await writeFile(lockPath, content, "utf-8");
   } catch (error) {
+    // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- interpolates a module-level constant filename, not user input
     console.error(`Failed to write ${SKILLS_LOCK_FILE}:`, error);
     throw error;
   }
@@ -113,6 +115,7 @@ export async function readCliLock(): Promise<CliLock | null> {
     const content = await readFile(lockPath, "utf-8");
     return JSON.parse(content) as CliLock;
   } catch (error) {
+    // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- interpolates a module-level constant filename, not user input
     console.error(`Failed to read ${CLI_LOCK_FILE}:`, error);
     return null;
   }
@@ -129,6 +132,7 @@ export async function writeCliLock(lock: CliLock): Promise<void> {
     const content = JSON.stringify(lock, null, 2) + "\n";
     await writeFile(lockPath, content, "utf-8");
   } catch (error) {
+    // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- interpolates a module-level constant filename, not user input
     console.error(`Failed to write ${CLI_LOCK_FILE}:`, error);
     throw error;
   }
@@ -148,6 +152,7 @@ export async function readkitMeta(): Promise<kitMeta | null> {
     const content = await readFile(metaPath, "utf-8");
     return JSON.parse(content) as kitMeta;
   } catch (error) {
+    // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- interpolates a module-level constant filename, not user input
     console.error(`Failed to read ${KIT_META_FILE}:`, error);
     return null;
   }
@@ -164,6 +169,7 @@ export async function writekitMeta(meta: kitMeta): Promise<void> {
     const content = JSON.stringify(meta, null, 2) + "\n";
     await writeFile(metaPath, content, "utf-8");
   } catch (error) {
+    // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- interpolates a module-level constant filename, not user input
     console.error(`Failed to write ${KIT_META_FILE}:`, error);
     throw error;
   }

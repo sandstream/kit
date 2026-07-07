@@ -2621,7 +2621,11 @@ async function readSecretValueFromVault(
     await generateSecrets(isolated, tmpEnv);
     secureFile(tmpEnv); // materialized plaintext secret → owner-only
     const content = readFileSync(tmpEnv, "utf-8");
-    const match = content.match(new RegExp(`^${keyName}=(.*)$`, "m"));
+    // Escape the key before interpolating into the regex — every other regex
+    // builder in kit escapes; this one predates the convention (semgrep catch).
+    const escapedKey = keyName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- key is regex-escaped above
+    const match = content.match(new RegExp(`^${escapedKey}=(.*)$`, "m"));
     return match ? match[1] : null;
   } catch {
     return null;
