@@ -1811,8 +1811,17 @@ async function generateConfigFile(
     console.log(`${c.dim}Could not detect project type — generating minimal config.${c.reset}\n`);
   } else {
     console.log(
-      `  ${c.green}✓${c.reset} Detected: ${c.bold}${detectedLabel}${c.reset}  ${c.dim}(confidence: ${(stack.confidence * 100).toFixed(0)}%)${c.reset}\n`,
+      `  ${c.green}✓${c.reset} Detected: ${c.bold}${detectedLabel}${c.reset}  ${c.dim}(confidence: ${(stack.confidence * 100).toFixed(0)}%)${c.reset}`,
     );
+    // P4 — turn the confidence signal into a guard. Mis-detections cluster in the low band
+    // (~60%) while unambiguous stacks score 85–90%; when we're below that, say so and show how
+    // to correct it, rather than committing a possibly-wrong language silently.
+    if (stack.confidence < 0.7) {
+      console.log(
+        `  ${c.yellow}!${c.reset} ${c.dim}Low confidence — if this is wrong, set the right language under ${c.reset}${c.bold}[project]${c.reset}${c.dim} in .kit.toml (a polyglot repo can carry several manifests).${c.reset}`,
+      );
+    }
+    console.log();
   }
 
   // ── Plaintext-secrets scan ─────────────────────────────────────────────
@@ -5856,7 +5865,8 @@ async function main(): Promise<void> {
         .catch(() => {}); // never fail
     }
   } catch (err: unknown) {
-    const code = err instanceof Error && "code" in err ? (err as { code?: string }).code : undefined;
+    const code =
+      err instanceof Error && "code" in err ? (err as { code?: string }).code : undefined;
     const jsonMode = hasFlag(args, "--json");
     if (code === "ENOENT") {
       // In --json mode emit a valid JSON error so consumers never get empty stdout.

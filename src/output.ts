@@ -352,17 +352,39 @@ export function printSummary(
   const ok = toolsOk + servicesOk + secretsOk + securityOk;
   const allGood = ok === total;
 
+  // P5 — separate SETUP GAPS (a tool not installed, a service not logged in, a scanner that
+  // couldn't run) from REAL issues (an actual finding a check produced). On a fresh clone the
+  // gap is almost all setup, so a flat "8 issues" reads as failure when it isn't. Missing
+  // tools/auth/secrets are setup; a security result that FAILED because it couldn't run
+  // (didNotRun) is setup too; everything else non-passing is a real finding.
+  const setupGaps =
+    tools.length -
+    toolsOk +
+    (services.length - servicesOk) +
+    (secrets.length - secretsOk) +
+    (security?.filter((s) => s.status !== "pass" && s.status !== "skip" && s.didNotRun).length ??
+      0);
+  const realIssues =
+    security?.filter((s) => s.status !== "pass" && s.status !== "skip" && !s.didNotRun).length ?? 0;
+
   if (allGood) {
     console.log(`${c.bold}${c.green}All ${total} checks passed ✓${c.reset}`);
   } else {
-    console.log(
-      `${c.bold}${ok}/${total} checks passed${c.reset}` +
-        `  ${c.red}(${total - ok} issues)${c.reset}`,
-    );
+    const parts = [`${c.bold}${ok}/${total} passed${c.reset}`];
+    if (setupGaps > 0)
+      parts.push(`${c.yellow}${setupGaps} setup gap${setupGaps === 1 ? "" : "s"}${c.reset}`);
+    if (realIssues > 0)
+      parts.push(`${c.red}${realIssues} real issue${realIssues === 1 ? "" : "s"}${c.reset}`);
+    console.log(parts.join(`${c.dim}  ·  ${c.reset}`));
     console.log();
-    console.log(
-      `${c.dim}Run ${c.reset}${c.bold}kit install${c.reset}${c.dim} to fix tools, ${c.reset}${c.bold}kit login${c.reset}${c.dim} to fix auth${c.reset}`,
-    );
+    if (setupGaps > 0)
+      console.log(
+        `${c.dim}Setup gaps are expected on a fresh clone — run ${c.reset}${c.bold}kit install${c.reset}${c.dim} / ${c.reset}${c.bold}kit login${c.reset}${c.dim} / ${c.reset}${c.bold}kit secrets${c.reset}${c.dim}.${c.reset}`,
+      );
+    if (realIssues > 0)
+      console.log(
+        `${c.dim}Real issues are genuine findings — run ${c.reset}${c.bold}kit check --category security${c.reset}${c.dim} for detail.${c.reset}`,
+      );
   }
 
   console.log();
