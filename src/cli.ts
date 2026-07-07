@@ -5845,8 +5845,10 @@ async function main(): Promise<void> {
 
     process.exitCode = ok ? 0 : 1;
 
-    // Non-interactive / CI: skip update check
-    if (!nonInteractive) {
+    // Non-interactive / CI: skip update check. Also skip in --json mode: the notice
+    // prints to stdout and would corrupt a machine-readable JSON payload (e.g.
+    // `kit check --json` piped to a parser).
+    if (!nonInteractive && !hasFlag(args, "--json")) {
       checkForUpdate(KIT_VERSION)
         .then((info) => {
           if (info) printUpdateNotice(info);
