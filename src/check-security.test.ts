@@ -202,13 +202,13 @@ describe("findJvmProject (#110 — Gradle + nested depth)", () => {
   });
 });
 
-describe("classifyTrufflehogFindings (verified vs unverified)", () => {
+describe("classifyTrufflehogFindings (verified vs unverified vs public-by-design)", () => {
   const line = (det: string, verified: boolean) =>
     JSON.stringify({ DetectorName: det, Verified: verified });
 
   it("ignores the trufflehog info log line (no DetectorName)", () => {
     const out = classifyTrufflehogFindings('{"level":"info","msg":"starting"}\n');
-    assert.deepStrictEqual(out, { verified: 0, unverified: 0 });
+    assert.deepStrictEqual(out, { verified: 0, unverified: 0, publicByDesign: 0 });
   });
 
   it("splits verified-live from unverified findings", () => {
@@ -218,12 +218,65 @@ describe("classifyTrufflehogFindings (verified vs unverified)", () => {
       line("Postgres", false),
       line("AWS", true),
     ].join("\n");
-    assert.deepStrictEqual(classifyTrufflehogFindings(stdout), { verified: 1, unverified: 2 });
+    assert.deepStrictEqual(classifyTrufflehogFindings(stdout), {
+      verified: 1,
+      unverified: 2,
+      publicByDesign: 0,
+    });
   });
 
   it("counts an unparseable DetectorName line conservatively as unverified", () => {
     const out = classifyTrufflehogFindings('{"DetectorName":"X" broken json');
-    assert.deepStrictEqual(out, { verified: 0, unverified: 1 });
+    assert.deepStrictEqual(out, { verified: 0, unverified: 1, publicByDesign: 0 });
+  });
+});
+
+describe("public-by-design client keys (#250)", () => {
+  const AIZA = "AIza" + "A".repeat(35);
+  const fbLine = JSON.stringify({
+    DetectorName: "GoogleApiKey",
+    Verified: false,
+    Raw: AIZA,
+    SourceMetadata: { Data: { Git: { file: "src/firebase.ts" } } },
+  });
+  const fbConfig = `export const firebaseConfig = { apiKey: "${AIZA}", authDomain: "x.firebaseapp.com", projectId: "x" }`;
+
+  it("Firebase web config = public-by-design ONLY with co-occurring config context", () => {
+    const withContext = classifyTrufflehogFindings(fbLine, () => fbConfig);
+    assert.deepStrictEqual(withContext, { verified: 0, unverified: 0, publicByDesign: 1 });
+    // Same AIza key WITHOUT Firebase context could be a privileged server key —
+    // stays a normal unverified finding.
+    const without = classifyTrufflehogFindings(fbLine, () => `const key = "${AIZA}"`);
+    assert.deepStrictEqual(without, { verified: 0, unverified: 1, publicByDesign: 0 });
+    // Unreadable/deleted file ⇒ never downgrade on missing evidence.
+    const unreadable = classifyTrufflehogFindings(fbLine, () => null);
+    assert.deepStrictEqual(unreadable, { verified: 0, unverified: 1, publicByDesign: 0 });
+  });
+
+  it("a VERIFIED-LIVE AIza key is never waved through as public-by-design", () => {
+    const liveLine = JSON.stringify({
+      DetectorName: "GoogleApiKey",
+      Verified: true,
+      Raw: AIZA,
+      SourceMetadata: { Data: { Git: { file: "src/firebase.ts" } } },
+    });
+    const out = classifyTrufflehogFindings(liveLine, () => fbConfig);
+    assert.deepStrictEqual(out, { verified: 1, unverified: 0, publicByDesign: 0 });
+  });
+
+  it("Sentry DSN and PostHog project keys are public-by-design by shape alone", () => {
+    const dsn = JSON.stringify({
+      DetectorName: "SentryDSN",
+      Verified: false,
+      Raw: "https://abcdef0123456789@o123.ingest.sentry.io/456",
+    });
+    const phc = JSON.stringify({
+      DetectorName: "Generic",
+      Verified: false,
+      Raw: "phc_" + "a".repeat(43),
+    });
+    const out = classifyTrufflehogFindings([dsn, phc].join("\n"), () => null);
+    assert.deepStrictEqual(out, { verified: 0, unverified: 0, publicByDesign: 2 });
   });
 });
 

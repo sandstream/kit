@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, access, readdir } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
@@ -702,23 +703,78 @@ async function checkPinnedVersions(): Promise<SecurityCheckResult> {
  * test fixtures / example connection strings / docs. A DetectorName line that won't
  * parse is counted conservatively as unverified (surfaced, just not as critical).
  */
-export function classifyTrufflehogFindings(stdout: string): {
+/**
+ * Public-by-design client keys (#250): shapes that SHIP in client bundles on
+ * purpose — "rotate now" is wrong advice for them; the real control is key
+ * restrictions / security rules. Curated allowlist, one entry per shape:
+ *   - firebase-web-config: an AIza… Google API key, but ONLY when the finding's
+ *     file also carries Firebase web-config context (authDomain/projectId/
+ *     firebaseConfig). An AIza key WITHOUT that context stays a normal finding —
+ *     it could be a privileged server key (conservative default).
+ *   - sentry-dsn / posthog-project-key: inherently client-side by shape alone.
+ */
+const AIZA_RE = /AIza[0-9A-Za-z_-]{35}/;
+const FIREBASE_CONTEXT_RE = /authDomain|firebaseConfig|messagingSenderId|projectId/;
+const SENTRY_DSN_RE = /https:\/\/[0-9a-f]{16,}@[a-z0-9.-]*sentry\.io\/\d+/;
+const POSTHOG_KEY_RE = /phc_[A-Za-z0-9]{40,}/;
+
+export interface TrufflehogFinding {
+  verified: boolean;
+  raw: string;
+  file?: string;
+}
+
+/**
+ * True when a finding is a public-by-design client key. `readFile` supplies the
+ * finding's CURRENT worktree content for co-occurrence checks; returning null
+ * (file gone / unreadable) keeps the finding a normal one — never downgrade on
+ * missing evidence.
+ */
+export function isPublicByDesign(
+  f: TrufflehogFinding,
+  readFile: (path: string) => string | null,
+): boolean {
+  if (f.verified) return false; // a VERIFIED-LIVE credential is never waved through
+  if (SENTRY_DSN_RE.test(f.raw) || POSTHOG_KEY_RE.test(f.raw)) return true;
+  if (AIZA_RE.test(f.raw) && f.file) {
+    const content = readFile(f.file);
+    if (content && FIREBASE_CONTEXT_RE.test(content)) return true;
+  }
+  return false;
+}
+
+export function classifyTrufflehogFindings(
+  stdout: string,
+  readFile: (path: string) => string | null = () => null,
+): {
   verified: number;
   unverified: number;
+  publicByDesign: number;
 } {
   let verified = 0;
   let unverified = 0;
+  let publicByDesign = 0;
   for (const line of stdout.trim().split("\n")) {
     if (!line.includes('"DetectorName"')) continue;
     try {
-      const j = JSON.parse(line) as { Verified?: boolean };
-      if (j.Verified === true) verified++;
+      const j = JSON.parse(line) as {
+        Verified?: boolean;
+        Raw?: string;
+        SourceMetadata?: { Data?: { Git?: { file?: string } } };
+      };
+      const finding: TrufflehogFinding = {
+        verified: j.Verified === true,
+        raw: j.Raw ?? "",
+        file: j.SourceMetadata?.Data?.Git?.file,
+      };
+      if (finding.verified) verified++;
+      else if (isPublicByDesign(finding, readFile)) publicByDesign++;
       else unverified++;
     } catch {
       unverified++;
     }
   }
-  return { verified, unverified };
+  return { verified, unverified, publicByDesign };
 }
 
 /**
@@ -760,14 +816,30 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
       // now). Unverified secret-shaped strings (overwhelmingly test fixtures /
       // example connection strings) are a warn to review, not a release-blocking
       // critical. Avoids failing a clean repo on its own test data.
-      const { verified, unverified } = classifyTrufflehogFindings(stdout);
+      // Public-by-design client keys (#250: Firebase web config, Sentry DSN,
+      // PostHog) are split out with truthful advice — rotating them fixes nothing.
+      const readWorktreeFile = (p: string): string | null => {
+        try {
+          return readFileSync(resolve(process.cwd(), p), "utf8");
+        } catch {
+          return null;
+        }
+      };
+      const { verified, unverified, publicByDesign } = classifyTrufflehogFindings(
+        stdout,
+        readWorktreeFile,
+      );
+      const pbdNote =
+        publicByDesign > 0
+          ? `; ${publicByDesign} public-by-design client key(s) (Firebase web config / DSN) — verify API-key restrictions + security rules, rotation not applicable`
+          : "";
 
       if (verified > 0) {
         return {
           category: "secrets",
           name: "secrets scan",
           status: "fail",
-          detail: `${verified} VERIFIED-LIVE secret(s) in git history -rotate now; run: trufflehog git file://.`,
+          detail: `${verified} VERIFIED-LIVE secret(s) in git history -rotate now; run: trufflehog git file://.${pbdNote}`,
           severity: "critical",
         };
       }
@@ -776,7 +848,7 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
           category: "secrets",
           name: "secrets scan",
           status: "warn",
-          detail: `${unverified} unverified secret-shaped string(s) in git history (0 verified-live) — review for test/example data: trufflehog git file://.`,
+          detail: `${unverified} unverified secret-shaped string(s) in git history (0 verified-live) — review for test/example data: trufflehog git file://.${pbdNote}`,
           severity: "medium",
         };
       }
@@ -785,7 +857,7 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
         category: "secrets",
         name: "secrets scan",
         status: "pass",
-        detail: "no committed secrets (trufflehog git)",
+        detail: `no committed secrets (trufflehog git)${pbdNote}`,
       };
     } catch {
       return {
