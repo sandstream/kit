@@ -539,6 +539,134 @@ const JS_APP_FRAMEWORKS = new Set([
   "react-native",
 ]);
 
+/** Source-file extension → language, for the census fallback. JS/TS kept separate but folded
+ *  via JS_FAMILY. `.h` → C (C/C++ share the family anyway). Ambiguous extensions (`.v`, `.m`,
+ *  `.sc`) are omitted rather than risk a wrong call. */
+const EXT_LANG: Record<string, string> = {
+  ".ts": "typescript",
+  ".tsx": "typescript",
+  ".mts": "typescript",
+  ".cts": "typescript",
+  ".js": "javascript",
+  ".jsx": "javascript",
+  ".mjs": "javascript",
+  ".cjs": "javascript",
+  ".py": "python",
+  ".go": "go",
+  ".rs": "rust",
+  ".rb": "ruby",
+  ".php": "php",
+  ".java": "java",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
+  ".cs": "csharp",
+  ".fs": "fsharp",
+  ".c": "c",
+  ".h": "c",
+  ".cpp": "cpp",
+  ".cc": "cpp",
+  ".cxx": "cpp",
+  ".hpp": "cpp",
+  ".hh": "cpp",
+  ".swift": "swift",
+  ".dart": "dart",
+  ".ex": "elixir",
+  ".exs": "elixir",
+  ".scala": "scala",
+  ".zig": "zig",
+  ".cr": "crystal",
+  ".ml": "ocaml",
+  ".hs": "haskell",
+  ".jl": "julia",
+  ".lua": "lua",
+};
+const JS_FAMILY = new Set(["javascript", "typescript"]);
+/** Dirs that are vendored / generated / not the project's own source — excluded from the census
+ *  so a JS app's `node_modules` or a Rails app's `vendor/` can't skew the language count. */
+const CENSUS_SKIP = new Set([
+  "node_modules",
+  "vendor",
+  "dist",
+  "build",
+  "out",
+  ".next",
+  ".nuxt",
+  ".git",
+  "target",
+  ".venv",
+  "venv",
+  "__pycache__",
+  "third_party",
+  "deps",
+  ".cache",
+  "coverage",
+  "bin",
+  "obj",
+  "tmp",
+  "testdata",
+  "test-data",
+  "fixtures",
+  "__fixtures__",
+  ".idea",
+  ".vscode",
+  "Pods",
+]);
+
+/**
+ * Linguist-style source census: a BOUNDED walk of the tree counting source files per language,
+ * so detection can weigh actual code volume — the way past the manifest-detection ceiling for
+ * genuinely polyglot repos. File-count (not byte) for speed; vendored/generated dirs excluded;
+ * capped at 6000 files / depth 10 so a giant monorepo stays fast. Returns the dominant language
+ * + its share, or null if no source files were found.
+ */
+async function sourceCensus(cwd: string): Promise<{ top: string; share: number } | null> {
+  const counts: Record<string, number> = {};
+  let total = 0;
+  let scanned = 0;
+  const stack: { dir: string; depth: number }[] = [{ dir: cwd, depth: 0 }];
+  while (stack.length > 0 && scanned < 6000) {
+    const { dir, depth } = stack.pop()!;
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (e.name.startsWith(".") && e.isDirectory()) continue;
+      if (e.isDirectory()) {
+        if (!CENSUS_SKIP.has(e.name) && depth < 10)
+          stack.push({ dir: join(dir, e.name), depth: depth + 1 });
+        continue;
+      }
+      if (!e.isFile()) continue;
+      scanned++;
+      const dot = e.name.lastIndexOf(".");
+      if (dot < 0) continue;
+      const lang = EXT_LANG[e.name.slice(dot).toLowerCase()];
+      if (!lang) continue;
+      counts[lang] = (counts[lang] ?? 0) + 1;
+      total++;
+    }
+  }
+  if (total === 0) return null;
+  // Fold JS+TS so a TS app with a few .js configs isn't split under its own dominance.
+  const folded: Record<string, number> = {};
+  for (const [lang, n] of Object.entries(counts)) {
+    const key = JS_FAMILY.has(lang) ? "typescript" : lang;
+    folded[key] = (folded[key] ?? 0) + n;
+  }
+  let top = "";
+  let topN = 0;
+  for (const [lang, n] of Object.entries(folded)) {
+    if (n > topN) {
+      top = lang;
+      topN = n;
+    }
+  }
+  return { top, share: topN / total };
+}
+
 /** A backend signal strong enough to override a co-present `package.json`. Deliberately
  *  excludes Go/Rust/C-C++/JVM/exotic/mobile: those appear as secondary manifests inside JS
  *  projects (native addons, build tools, Packagist mirrors) too often to outrank an app's
@@ -601,7 +729,7 @@ export async function detectStack(cwd: string): Promise<DetectedStack> {
     }
   }
 
-  if (js && backends.length > 0) {
+  if (js) {
     // JS is primary when it's a real app (meta-framework). Otherwise a co-present backend
     // wins ONLY if it's a STRONG signal — a real backend app, not a secondary manifest a
     // JS project routinely carries (a Packagist `composer.json`, a native-addon `Cargo.toml`,
@@ -611,10 +739,22 @@ export async function detectStack(cwd: string): Promise<DetectedStack> {
     if (js.framework && JS_APP_FRAMEWORKS.has(js.framework)) return js;
     const strong = backends.find(isStrongBackend);
     if (strong) return strong;
+    // No strong backend and not a JS app framework: the package.json may be an asset/tooling
+    // manifest of a repo whose real code (and manifest) live in subdirs (a Ruby/Rails monorepo
+    // like spree). Consult a source census — if another language clearly dominates the actual
+    // code, trust that over the bare package.json. (chart.js / pnpm: JS dominates → stays JS.)
+    const census = await sourceCensus(cwd);
+    if (census && !JS_FAMILY.has(census.top) && census.share >= 0.5) {
+      return { language: census.top, services: js.services, tools: {}, confidence: 0.6 };
+    }
     return js;
   }
-  if (js) return js;
   if (backends.length > 0) return backends[0];
+
+  // No recognized manifest at all — fall back to a source census (fixes manifest-less repos
+  // like a classic no-composer WordPress tree). Any real language beats `unknown`.
+  const census = await sourceCensus(cwd);
+  if (census) return { language: census.top, services: [], tools: {}, confidence: 0.55 };
 
   return { language: "unknown", services: [], tools: {}, confidence: 0.0 };
 }
