@@ -18,6 +18,7 @@
 import { readFile, access } from "node:fs/promises";
 import { resolve, relative, basename } from "node:path";
 import { walkSourceFiles } from "./source-walk.js";
+import { workspaceSourceDirs } from "./workspaces.js";
 
 export interface TestCheckResult {
   category: "tests";
@@ -126,21 +127,35 @@ export async function checkTests(
   const enforce = opts.enforce ?? false;
   const results: TestCheckResult[] = [];
 
-  // No src/ at all = N/A
-  const anyDirExists = (
-    await Promise.all((opts.srcDirs ?? DEFAULT_SRC_DIRS).map((d) => pathExists(resolve(cwd, d))))
-  ).some(Boolean);
+  // Monorepo (#249): when the root has no src dirs, resolve workspaces
+  // (package.json workspaces / pnpm-workspace.yaml) and scan each workspace's
+  // source dirs instead of returning an empty green for a tree full of code.
+  let srcDirs = opts.srcDirs ?? DEFAULT_SRC_DIRS;
+  const anyRootDir = (await Promise.all(srcDirs.map((d) => pathExists(resolve(cwd, d))))).some(
+    Boolean,
+  );
+  if (!anyRootDir && !opts.srcDirs) {
+    const wsDirs = workspaceSourceDirs(cwd);
+    if (wsDirs.length > 0) srcDirs = wsDirs;
+  }
+
+  // No sources at all = N/A — but say so in monorepo terms so an empty scan is
+  // never mistaken for a clean one.
+  const anyDirExists = (await Promise.all(srcDirs.map((d) => pathExists(resolve(cwd, d))))).some(
+    Boolean,
+  );
   if (!anyDirExists) {
     results.push({
       category: "tests",
       name: "unit-test coverage",
       status: "skip",
-      detail: "no src/ directory found",
+      detail:
+        "no source directories matched (src/ or workspace src dirs) — if this is a monorepo, workspace resolution may have missed them; set [tests] src_globs",
     });
     return results;
   }
 
-  const untested = await findUntestedSources(cwd, opts.srcDirs);
+  const untested = await findUntestedSources(cwd, srcDirs);
   const baseline = new Set(opts.baseline ?? []);
   const netNew = untested.filter((f) => !baseline.has(f));
 
