@@ -190,10 +190,28 @@ async function detectFromPackageJson(cwd: string): Promise<DetectedStack | null>
   };
 }
 
+/** True when the repo is a Python PACKAGE that compiles a native (C/C++/Rust) extension as
+ *  part of ITS OWN build — so Python is primary and the native code is the extension. Signal:
+ *  a `setup.py`, or a pyproject build-backend that compiles native code (setuptools / maturin
+ *  / scikit-build / meson-python / pybind). A poetry/flit/hatchling backend (pure-Python
+ *  packaging) does NOT count — there the native code is a sibling project (llama.cpp). */
+async function pythonBuildsNativeExtension(cwd: string): Promise<boolean> {
+  if (await fileExists(join(cwd, "setup.py"))) return true;
+  const pyproject = await readFile(join(cwd, "pyproject.toml"), "utf-8").catch(() => null);
+  if (!pyproject) return false;
+  const backend =
+    pyproject.match(/build-backend\s*=\s*["']([^"']+)["']/i)?.[1]?.toLowerCase() ?? "";
+  return /setuptools|maturin|scikit|mesonpy|meson_python|meson-python|pybind|cffi/.test(backend);
+}
+
 async function detectFromPython(cwd: string): Promise<DetectedStack | null> {
   const hasRequirements = await fileExists(join(cwd, "requirements.txt"));
   const hasPyproject = await fileExists(join(cwd, "pyproject.toml"));
-  if (!hasRequirements && !hasPyproject) return null;
+  // setup.py / setup.cfg are the legacy Python package markers — a repo can ship them with
+  // no requirements.txt/pyproject (older libs, or native-extension packages).
+  const hasSetup =
+    (await fileExists(join(cwd, "setup.py"))) || (await fileExists(join(cwd, "setup.cfg")));
+  if (!hasRequirements && !hasPyproject && !hasSetup) return null;
 
   let framework: string | undefined;
   let contents = "";
@@ -567,6 +585,21 @@ export async function detectStack(cwd: string): Promise<DetectedStack> {
       detectFromSwift(cwd),
     ])
   ).filter((s): s is DetectedStack => s !== null);
+
+  // Native-Python-extension override. The compiled-first ordering above correctly reads a
+  // C++/Rust project that merely ships Python *scripts* (llama.cpp) as C++. But a Python
+  // *package that compiles a native extension* (Pillow, matplotlib, pyca/cryptography) is
+  // Python-primary — the C/Rust is the extension, not the product. Tell them apart by the
+  // Python build system: a native build backend (setup.py / setuptools / maturin /
+  // scikit-build / meson-python) means "this Python package builds the native code", whereas
+  // llama.cpp's poetry/flit backend packages a pure-Python sibling and CMake builds the C++.
+  const pyIdx = backends.findIndex((b) => b.language === "python");
+  if (pyIdx > 0 && ["c", "cpp", "rust"].includes(backends[0].language)) {
+    if (await pythonBuildsNativeExtension(cwd)) {
+      const [py] = backends.splice(pyIdx, 1);
+      backends.unshift(py);
+    }
+  }
 
   if (js && backends.length > 0) {
     // JS is primary when it's a real app (meta-framework). Otherwise a co-present backend

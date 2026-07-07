@@ -666,12 +666,38 @@ describe("detectStack", () => {
     await makeProject(dir, {
       "CMakeLists.txt": "project(llama)\nadd_executable(main src/main.cpp)\n",
       "requirements.txt": "numpy\ntorch\n",
+      // a pure-Python sibling packaged with poetry — does NOT make the repo Python
+      "pyproject.toml": '[build-system]\nbuild-backend = "poetry.core.masonry.api"\n',
       "src/main.cpp": "int main(){}\n",
     });
     try {
       assert.equal((await detectStack(dir)).language, "cpp");
     } finally {
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a Python package that compiles a native extension is Python, not C/Rust (Pillow, cryptography)", async () => {
+    // setup.py → setuptools compiles the C; the C is the extension, Python is the product.
+    const cext = join(tmpdir(), `kit-detect-${process.pid}-pyc`);
+    await makeProject(cext, {
+      "setup.py": "from setuptools import setup, Extension\nsetup()\n",
+      Makefile: "all:\n\tcc ext.c\n",
+      "src/_imaging.c": "int f(){return 0;}\n",
+    });
+    // maturin build-backend → Rust compiled into a Python wheel (pyca/cryptography).
+    const rext = join(tmpdir(), `kit-detect-${process.pid}-pyr`);
+    await makeProject(rext, {
+      "pyproject.toml": '[build-system]\nbuild-backend = "maturin"\n',
+      "Cargo.toml": '[package]\nname = "_rust"\n',
+      "src/lib.rs": "pub fn f() {}\n",
+    });
+    try {
+      assert.equal((await detectStack(cext)).language, "python");
+      assert.equal((await detectStack(rext)).language, "python");
+    } finally {
+      await rm(cext, { recursive: true, force: true });
+      await rm(rext, { recursive: true, force: true });
     }
   });
 
