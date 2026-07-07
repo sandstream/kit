@@ -5,6 +5,7 @@ import { writeFile, access, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "node:path";
 import { loadConfig, type kitConfig, type SecretKeyConfig } from "./config.js";
+import type { StandardsCheckResult } from "./check-standards.js";
 import { createInterface } from "node:readline/promises";
 import { validateSecrets, summarizeValidation } from "./secrets-validate.js";
 import { checkTools } from "./check-tools.js";
@@ -641,7 +642,10 @@ async function cmdDesign(): Promise<boolean> {
 async function cmdStandards(): Promise<boolean> {
   const enforce = hasFlag(process.argv, "--enforce");
   const jsonMode = hasFlag(process.argv, "--json");
+  const category = flagValue(process.argv, "--category"); // general | specific | <lang>
   const { checkStandards } = await import("./check-standards.js");
+  const { checkStandardsSpecific, SPECIFIC_LANGUAGES } =
+    await import("./check-standards-specific.js");
   const { loadBaselineForGate, baselineGet, BASELINE_FILE } = await import("./baseline.js");
   const { baseline, ignored: baselineIgnored } = await loadBaselineForGate();
   if (baselineIgnored) {
@@ -652,32 +656,79 @@ async function cmdStandards(): Promise<boolean> {
   const config = await loadConfig(resolveConfigPath()).catch(
     () => ({}) as Awaited<ReturnType<typeof loadConfig>>,
   );
-  const g = config.standards?.general;
-  const thresholds = {
-    ...(typeof g?.max_complexity === "number" ? { maxComplexity: g.max_complexity } : {}),
-    ...(typeof g?.max_function_lines === "number"
-      ? { maxFunctionLines: g.max_function_lines }
-      : {}),
-    ...(typeof g?.max_file_lines === "number" ? { maxFileLines: g.max_file_lines } : {}),
-    ...(typeof g?.max_duplication_pct === "number"
-      ? { maxDuplicationPct: g.max_duplication_pct }
-      : {}),
-  };
-  const results = await checkStandards({
-    enforce: enforce || config.standards?.enforce === true,
-    thresholds,
-    baseline: {
-      complexity: baselineGet(baseline, "standards", "complexity"),
-      duplication: baselineGet(baseline, "standards", "duplication"),
-      size: baselineGet(baseline, "standards", "size"),
-    },
-  });
+  const effectiveEnforce = enforce || config.standards?.enforce === true;
+
+  // `--category` scoping: default runs general + specific(detected). "general" or
+  // "specific" narrow the dimension; a language name narrows specific to that language.
+  const langCategory = category && SPECIFIC_LANGUAGES.includes(category) ? category : undefined;
+  const runGeneral = !category || category === "general";
+  const runSpecific = !category || category === "specific" || !!langCategory;
+
+  const results: StandardsCheckResult[] = [];
+
+  if (runGeneral) {
+    const g = config.standards?.general;
+    const thresholds = {
+      ...(typeof g?.max_complexity === "number" ? { maxComplexity: g.max_complexity } : {}),
+      ...(typeof g?.max_function_lines === "number"
+        ? { maxFunctionLines: g.max_function_lines }
+        : {}),
+      ...(typeof g?.max_file_lines === "number" ? { maxFileLines: g.max_file_lines } : {}),
+      ...(typeof g?.max_duplication_pct === "number"
+        ? { maxDuplicationPct: g.max_duplication_pct }
+        : {}),
+    };
+    results.push(
+      ...(await checkStandards({
+        enforce: effectiveEnforce,
+        thresholds,
+        baseline: {
+          complexity: baselineGet(baseline, "standards", "complexity"),
+          duplication: baselineGet(baseline, "standards", "duplication"),
+          size: baselineGet(baseline, "standards", "size"),
+        },
+      })),
+    );
+  }
+
+  if (runSpecific) {
+    let language = langCategory;
+    if (!language) {
+      const { detectStack } = await import("./stack-detector.js");
+      language = (await detectStack(process.cwd())).language;
+    }
+    if (SPECIFIC_LANGUAGES.includes(language)) {
+      const langCfg = (config.standards as Record<string, unknown> | undefined)?.[language] as
+        | Record<string, boolean>
+        | undefined;
+      results.push(
+        ...(await checkStandardsSpecific({
+          language,
+          enforce: effectiveEnforce,
+          enabled: langCfg,
+          baseline: baselineGet(baseline, "standards", `specific/${language}`),
+        })),
+      );
+    } else if (category === "specific" || langCategory) {
+      // asked for specific but the detected language has no P2 support — be honest.
+      results.push({
+        category: "standards",
+        dimension: "specific",
+        name: `specific (${language})`,
+        status: "skip",
+        detail: `no per-language standards gate for '${language}' yet (P2 covers ${SPECIFIC_LANGUAGES.join(", ")})`,
+      });
+    }
+  }
+
   const ok = results.every((r) => r.status !== "fail");
   if (jsonMode) {
     console.log(JSON.stringify({ ok, checks: results }, null, 2));
     return ok;
   }
-  console.log(`${c.bold}Standards${c.reset} ${c.dim}(general — deterministic, zero-LLM)${c.reset}`);
+  console.log(
+    `${c.bold}Standards${c.reset} ${c.dim}(general + per-language — deterministic, zero-LLM)${c.reset}`,
+  );
   for (const r of results) {
     const icon =
       r.status === "pass"
@@ -770,9 +821,22 @@ async function cmdBaseline(): Promise<boolean> {
   baselineSet(baseline, "standards", "complexity", standards.complexity);
   baselineSet(baseline, "standards", "duplication", standards.duplication);
   baselineSet(baseline, "standards", "size", standards.size);
+  // P2: freeze the detected language's specific-linter findings too.
+  const { collectSpecificKeys, SPECIFIC_LANGUAGES } = await import("./check-standards-specific.js");
+  const { detectStack } = await import("./stack-detector.js");
+  const detectedLang = (await detectStack(process.cwd())).language;
+  let specificCount = 0;
+  if (SPECIFIC_LANGUAGES.includes(detectedLang)) {
+    const specificKeys = await collectSpecificKeys(process.cwd(), detectedLang);
+    baselineSet(baseline, "standards", `specific/${detectedLang}`, specificKeys);
+    specificCount = specificKeys.length;
+  }
   await saveBaseline(baseline);
   const standardsTotal =
-    standards.complexity.length + standards.duplication.length + standards.size.length;
+    standards.complexity.length +
+    standards.duplication.length +
+    standards.size.length +
+    specificCount;
   console.log(
     `${c.green}✓${c.reset} Wrote ${BASELINE_FILE} — ${untested.length} untested file(s), ${design.a11y.length} a11y, ${design.tokens.length} design-token, ${standardsTotal} standards finding(s) frozen.`,
   );
@@ -5446,7 +5510,7 @@ export const COMMAND_HELP: Record<string, string> = {
     "Signable org policy-as-code in .kit-policy.toml (init/show/validate/sign/verify/check/trust) — identity-signed standard, org-distributable + enforced offline (experimental)",
   design: "Check design quality (a11y, design tokens) against the baseline",
   standards:
-    "Dev-standards gate: general code-quality metrics (complexity/duplication/size) vs the baseline (--enforce fails CI)",
+    "Dev-standards gate: general metrics (complexity/duplication/size) + per-language linters vs the baseline (--category general|specific|<lang>, --enforce fails CI)",
   baseline:
     "Freeze current warnings into .kit-baseline.json so future runs gate only net-new findings",
   memory: "Local conversation memory — index transcripts + show stats",
