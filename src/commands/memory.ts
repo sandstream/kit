@@ -921,6 +921,16 @@ async function memHook(): Promise<boolean> {
     // text on stdout is what gets injected as context).
     const pulled = tryAutoPull(getCurrentProjectRoot());
     if (pulled.note) console.error(`${c.dim}${pulled.note}${c.reset}`);
+    // Inject the statusline (stdout → context) so the agent GETS the setup score /
+    // update mark / PAL count deterministically — instead of a rules-file line
+    // asking it to go run `kit statusline` itself (prose advises; the hook delivers).
+    try {
+      const { buildStatuslineText } = await import("../statusline.js");
+      const line = await buildStatuslineText({ cwd: getCurrentProjectRoot() });
+      if (line) console.log(`kit statusline: ${line}`);
+    } catch {
+      /* statusline must never break session start */
+    }
     const text = sessionStartRecovery();
     if (text) console.log(text);
     // One-time upgrade nudge when sync isn't configured yet.

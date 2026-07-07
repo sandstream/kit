@@ -21,6 +21,7 @@ sandstream-kit-*.tgz
 .kit-escalation.txt
 .claude/
 .cursor/
+.codex/
 opencode.json
 
 # editor/cloud-sync conflict copies ("filename 2.ext")
