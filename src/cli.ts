@@ -658,11 +658,21 @@ async function cmdStandards(): Promise<boolean> {
   );
   const effectiveEnforce = enforce || config.standards?.enforce === true;
 
-  // `--category` scoping: default runs general + specific(detected). "general" or
-  // "specific" narrow the dimension; a language name narrows specific to that language.
+  // `--category` scoping: default runs general + specific(detected) + plugins.
+  // "general"/"specific"/"plugins" narrow the dimension; a language name narrows
+  // specific to that language.
   const langCategory = category && SPECIFIC_LANGUAGES.includes(category) ? category : undefined;
   const runGeneral = !category || category === "general";
   const runSpecific = !category || category === "specific" || !!langCategory;
+  const runPlugins = !category || category === "plugins";
+
+  // Detect the project language once — both the specific gate and the plugin
+  // `applies_to` filter key off it (a language name via --category overrides).
+  let language = langCategory;
+  if ((runSpecific || runPlugins) && !language) {
+    const { detectStack } = await import("./stack-detector.js");
+    language = (await detectStack(process.cwd())).language;
+  }
 
   const results: StandardsCheckResult[] = [];
 
@@ -691,12 +701,7 @@ async function cmdStandards(): Promise<boolean> {
     );
   }
 
-  if (runSpecific) {
-    let language = langCategory;
-    if (!language) {
-      const { detectStack } = await import("./stack-detector.js");
-      language = (await detectStack(process.cwd())).language;
-    }
+  if (runSpecific && language) {
     if (SPECIFIC_LANGUAGES.includes(language)) {
       const langCfg = (config.standards as Record<string, unknown> | undefined)?.[language] as
         | Record<string, boolean>
@@ -719,6 +724,33 @@ async function cmdStandards(): Promise<boolean> {
         detail: `no per-language standards gate for '${language}' yet (P2 covers ${SPECIFIC_LANGUAGES.join(", ")})`,
       });
     }
+  }
+
+  if (runPlugins && language) {
+    const { checkStandardsPlugins, DEFAULT_PLUGIN_DIR } = await import("./standards-plugins.js");
+    const { checkStandardsMjsPlugins } = await import("./standards-plugins-exec.js");
+    const pluginCfg = config.standards?.plugins;
+    const dirs =
+      pluginCfg?.dirs && pluginCfg.dirs.length > 0 ? pluginCfg.dirs : [DEFAULT_PLUGIN_DIR];
+    const pluginBaseline = baselineGet(baseline, "standards", "plugins");
+    // Declarative TOML rules (pure regex) + programmatic *.mjs (restricted child,
+    // determinism-verified). Both net-new-gate against the same baseline key.
+    results.push(
+      ...checkStandardsPlugins({
+        language,
+        enforce: effectiveEnforce,
+        dirs,
+        baseline: pluginBaseline,
+      }),
+    );
+    results.push(
+      ...(await checkStandardsMjsPlugins({
+        language,
+        enforce: effectiveEnforce,
+        dirs,
+        baseline: pluginBaseline,
+      })),
+    );
   }
 
   const ok = results.every((r) => r.status !== "fail");
@@ -831,11 +863,27 @@ async function cmdBaseline(): Promise<boolean> {
     baselineSet(baseline, "standards", `specific/${detectedLang}`, specificKeys);
     specificCount = specificKeys.length;
   }
+  // P3: freeze declarative-plugin matches for the detected language.
+  const { collectPluginKeys, DEFAULT_PLUGIN_DIR } = await import("./standards-plugins.js");
+  const freezeCfg = await loadConfig(resolveConfigPath()).catch(
+    () => ({}) as Awaited<ReturnType<typeof loadConfig>>,
+  );
+  const pluginDirs =
+    freezeCfg.standards?.plugins?.dirs && freezeCfg.standards.plugins.dirs.length > 0
+      ? freezeCfg.standards.plugins.dirs
+      : [DEFAULT_PLUGIN_DIR];
+  const { collectMjsPluginKeys } = await import("./standards-plugins-exec.js");
+  const pluginKeys = [
+    ...collectPluginKeys(process.cwd(), detectedLang, pluginDirs),
+    ...(await collectMjsPluginKeys(process.cwd(), detectedLang, pluginDirs)),
+  ];
+  baselineSet(baseline, "standards", "plugins", pluginKeys);
   await saveBaseline(baseline);
   const standardsTotal =
     standards.complexity.length +
     standards.duplication.length +
     standards.size.length +
+    pluginKeys.length +
     specificCount;
   console.log(
     `${c.green}✓${c.reset} Wrote ${BASELINE_FILE} — ${untested.length} untested file(s), ${design.a11y.length} a11y, ${design.tokens.length} design-token, ${standardsTotal} standards finding(s) frozen.`,
@@ -5510,7 +5558,7 @@ export const COMMAND_HELP: Record<string, string> = {
     "Signable org policy-as-code in .kit-policy.toml (init/show/validate/sign/verify/check/trust) — identity-signed standard, org-distributable + enforced offline (experimental)",
   design: "Check design quality (a11y, design tokens) against the baseline",
   standards:
-    "Dev-standards gate: general metrics (complexity/duplication/size) + per-language linters vs the baseline (--category general|specific|<lang>, --enforce fails CI)",
+    "Dev-standards gate: general metrics + per-language linters + user plugins vs the baseline (--category general|specific|plugins|<lang>, --enforce fails CI)",
   baseline:
     "Freeze current warnings into .kit-baseline.json so future runs gate only net-new findings",
   memory: "Local conversation memory — index transcripts + show stats",

@@ -17,12 +17,13 @@ export interface ExecResult {
 export async function execFileNoThrow(
   command: string,
   args: string[],
-  options?: { timeout?: number; env?: NodeJS.ProcessEnv; maxBuffer?: number },
+  options?: { timeout?: number; env?: NodeJS.ProcessEnv; maxBuffer?: number; cwd?: string },
 ): Promise<ExecResult> {
   try {
     const { stdout, stderr } = await execFileAsync(command, args, {
       timeout: options?.timeout ?? 30_000,
       env: options?.env ?? process.env,
+      cwd: options?.cwd,
       // Tool reporters (lizard --csv, scc --by-file) can exceed Node's 1 MB default
       // on a large repo; a truncated stream would corrupt the parse. Let callers raise it.
       maxBuffer: options?.maxBuffer ?? 1024 * 1024,
