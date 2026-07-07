@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { classifyGuardDog } from "./guarddog.js";
+import { depsHashFor, loadGuardDogCache, saveGuardDogCache } from "./guarddog-cache.js";
 import { buildSemgrepArgs, semgrepConfig, isAirGap, isLocalSemgrepConfig } from "./scanners.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
 import {
@@ -991,9 +992,11 @@ async function checkGuardDog(): Promise<SecurityCheckResult> {
     };
   }
 
-  // Pick the ecosystem from the lockfile/manifest present.
+  // Direct deps first (#205): guarddog costs ~25s/package (tarball + per-package
+  // semgrep) — a 12k-package lockfile can NEVER finish inside the check budget,
+  // so verifying it always produced an honest-but-useless UNVERIFIED. Direct
+  // deps are guarddog's depth; the full tree gets breadth from bumblebee + osv.
   const candidates: { ecosystem: string; file: string }[] = [
-    { ecosystem: "npm", file: "package-lock.json" },
     { ecosystem: "npm", file: "package.json" },
     { ecosystem: "pypi", file: "requirements.txt" },
   ];
@@ -1008,7 +1011,7 @@ async function checkGuardDog(): Promise<SecurityCheckResult> {
     }
   }
   if (!target) {
-    return { ...base, status: "skip", detail: "no package-lock.json / requirements.txt to scan" };
+    return { ...base, status: "skip", detail: "no package.json / requirements.txt to scan" };
   }
 
   const bin = await resolveToolBin("guarddog");
@@ -1025,12 +1028,39 @@ async function checkGuardDog(): Promise<SecurityCheckResult> {
     };
   }
 
+  // Verdict cache (#205): an unchanged direct-deps set with a completed clean
+  // scan doesn't re-pay the ~25s/package cost. Only CLEAN verdicts are cached;
+  // fails and incomplete scans always re-run. npm only (the hash reads
+  // package.json deps).
+  let depsHash: string | null = null;
+  if (target.ecosystem === "npm") {
+    try {
+      depsHash = depsHashFor(readFileSync(resolve(process.cwd(), target.file), "utf8"));
+    } catch {
+      depsHash = null;
+    }
+    const cached = depsHash ? loadGuardDogCache() : null;
+    if (cached && depsHash && cached.depsHash === depsHash) {
+      return {
+        ...base,
+        status: "pass",
+        detail: `no malware indicators — cached clean verdict from ${cached.scannedAt.slice(0, 10)} (${cached.packages} direct dep(s), unchanged since)`,
+      };
+    }
+  }
+
+  const timeoutMs = Number(process.env.KIT_GUARDDOG_TIMEOUT_MS ?? "") || 300_000;
   const result = await execFileNoThrow(
     bin,
     [target.ecosystem, "verify", target.file, "--output-format=json"],
-    { timeout: 300_000 },
+    { timeout: timeoutMs },
   );
-  return classifyGuardDog(result.stdout || result.stderr);
+  const verdict = classifyGuardDog(result.stdout || result.stderr);
+  if (verdict.status === "pass" && depsHash) {
+    const packages = Number(verdict.detail.match(/\((\d+) package/)?.[1] ?? 0);
+    saveGuardDogCache({ depsHash, scannedAt: new Date().toISOString(), packages });
+  }
+  return verdict;
 }
 
 /**
