@@ -18,6 +18,7 @@
 import { readFile, access } from "node:fs/promises";
 import { resolve, relative } from "node:path";
 import { walkSourceFiles } from "./source-walk.js";
+import { workspaceSourceDirs } from "./workspaces.js";
 
 export interface DesignCheckResult {
   category: "design";
@@ -171,9 +172,11 @@ export async function checkDesign(
     baseline?: { a11y?: string[]; tokens?: string[] };
   } = {},
 ): Promise<DesignCheckResult[]> {
-  const srcRoots = (opts.srcRoots ?? ["src", "app", "components"]).map((d) =>
-    resolve(process.cwd(), d),
-  );
+  // Monorepo (#249): also scan each workspace's src/app/components — a Turborepo
+  // full of tsx under apps/* must not read as "no components found".
+  const rootDirs = opts.srcRoots ?? ["src", "app", "components"];
+  const wsDirs = opts.srcRoots ? [] : workspaceSourceDirs(process.cwd(), rootDirs);
+  const srcRoots = [...rootDirs, ...wsDirs].map((d) => resolve(process.cwd(), d));
   const tokenFiles = opts.tokenFiles ?? ["design-tokens", "tokens.ts", "theme.ts"];
   const enforce = opts.enforce ?? false;
   const results: DesignCheckResult[] = [];
@@ -196,7 +199,8 @@ export async function checkDesign(
       category: "design",
       name: "a11y (static scan)",
       status: "skip",
-      detail: "no tsx/jsx/astro/vue files found",
+      detail:
+        "no tsx/jsx/astro/vue files found (root + workspace src dirs) — if this is a monorepo, workspace resolution may have missed them",
     });
     return results;
   }

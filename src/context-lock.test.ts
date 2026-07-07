@@ -15,8 +15,13 @@ import {
   suggestContextToml,
   hasLockableContext,
   clerkEnvFromKey,
+  repoDeclaredGcpProjects,
+  gcpProjectMismatch,
   type LiveContext,
 } from "./context-lock.js";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 describe("context lock", () => {
   it("passes only when the exact declared pair matches", () => {
@@ -329,5 +334,48 @@ describe("applyContext read-only mode", () => {
     } finally {
       delete process.env.KIT_READ_ONLY;
     }
+  });
+});
+
+describe("gcloud vs repo-declared projects (.firebaserc, #251)", () => {
+  const withRepo = (firebaserc: string | null, fn: (dir: string) => void): void => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-fbrc-"));
+    try {
+      if (firebaserc !== null) writeFileSync(join(dir, ".firebaserc"), firebaserc);
+      fn(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const liveWith = (project: string | null): LiveContext => ({
+    gcloud: { account: "a@b.se", project },
+  });
+
+  it("reads declared projects from .firebaserc, deduped", () => {
+    withRepo('{"projects":{"default":"ug-stg","prod":"ug-prod","alias":"ug-stg"}}', (dir) => {
+      assert.deepEqual(repoDeclaredGcpProjects(dir).sort(), ["ug-prod", "ug-stg"]);
+    });
+  });
+
+  it("flags an active gcloud project that is not one of the repo's own", () => {
+    withRepo('{"projects":{"default":"ug-stg","prod":"ug-prod"}}', (dir) => {
+      const m = gcpProjectMismatch(liveWith("iris-28239450"), dir);
+      assert.ok(m);
+      assert.equal(m!.active, "iris-28239450");
+      assert.deepEqual(m!.declared.sort(), ["ug-prod", "ug-stg"]);
+    });
+  });
+
+  it("stays silent when they match, when nothing is declared, or when gcloud is empty", () => {
+    withRepo('{"projects":{"default":"ug-stg"}}', (dir) => {
+      assert.equal(gcpProjectMismatch(liveWith("ug-stg"), dir), null);
+      assert.equal(gcpProjectMismatch(liveWith(null), dir), null);
+    });
+    withRepo(null, (dir) => {
+      assert.equal(gcpProjectMismatch(liveWith("anything"), dir), null);
+    });
+    withRepo("{broken json", (dir) => {
+      assert.equal(gcpProjectMismatch(liveWith("anything"), dir), null);
+    });
   });
 });

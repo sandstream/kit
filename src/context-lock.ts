@@ -395,6 +395,46 @@ export async function gatherLive(cwd: string = process.cwd()): Promise<LiveConte
   return live;
 }
 
+/**
+ * GCP project ids the REPO ITSELF declares (#251). `.firebaserc` is the
+ * deterministic, repo-local source of truth: {"projects": {"default": "x", ...}}.
+ * Returns [] when absent/unreadable — no declaration, nothing to cross-check.
+ */
+export function repoDeclaredGcpProjects(cwd: string = process.cwd()): string[] {
+  try {
+    const raw = readFileSync(resolve(cwd, ".firebaserc"), "utf8");
+    const j = JSON.parse(raw) as { projects?: Record<string, unknown> };
+    const vals = Object.values(j.projects ?? {}).filter(
+      (v): v is string => typeof v === "string" && v.length > 0,
+    );
+    return [...new Set(vals)];
+  } catch {
+    return [];
+  }
+}
+
+export interface GcpProjectMismatch {
+  active: string;
+  declared: string[];
+}
+
+/**
+ * Cross-check the ACTIVE gcloud project against the repo's own declared
+ * projects (#251): an active context from another customer (captured ambient
+ * state) in a repo that names its projects is the cross-account class of
+ * mistake. null = no active project, repo declares nothing, or they match.
+ */
+export function gcpProjectMismatch(
+  live: LiveContext,
+  cwd: string = process.cwd(),
+): GcpProjectMismatch | null {
+  const active = live.gcloud?.project ?? null;
+  if (!active) return null;
+  const declared = repoDeclaredGcpProjects(cwd);
+  if (declared.length === 0 || declared.includes(active)) return null;
+  return { active, declared };
+}
+
 /** Verify the declared context against live tool state. Empty if nothing declared. */
 export async function checkContext(
   ctx: ContextConfig | undefined,
@@ -419,7 +459,22 @@ export async function checkContext(
       },
     };
   }
-  return compareContext(declared, await gatherLive(cwd));
+  const live = await gatherLive(cwd);
+  const findings = compareContext(declared, live);
+  // Repo-declared truth beats ambient state (#251): even when [context.gcloud]
+  // itself is not declared, an active gcloud project that is not one of the
+  // repo's own .firebaserc projects is a cross-account mismatch.
+  const fb = gcpProjectMismatch(live, cwd);
+  if (fb && !declared.gcloud?.project) {
+    findings.push({
+      tool: "gcloud",
+      field: "project (.firebaserc)",
+      status: "mismatch",
+      expected: fb.declared.join(" | "),
+      actual: fb.active,
+    });
+  }
+  return findings;
 }
 
 // ── kit context use — activate the declared context ──────────────────────────

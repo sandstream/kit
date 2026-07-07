@@ -318,14 +318,18 @@ const R1b: SelfAuditRule = {
         // in the same fn means the comparison can't be reached with NaN.
         const wtext = windowText(file, w);
         const guarded =
+          // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- parseVar is a source identifier, escapeRe()ed
           new RegExp(`Number\\.isFinite\\s*\\(\\s*${escapeRe(parseVar)}\\b`).test(wtext) ||
+          // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- parseVar is a source identifier, escapeRe()ed
           new RegExp(`!\\s*isNaN\\s*\\(\\s*${escapeRe(parseVar)}\\b`).test(wtext) ||
+          // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- parseVar is a source identifier, escapeRe()ed
           new RegExp(`isNaN\\s*\\(\\s*${escapeRe(parseVar)}\\b`).test(wtext);
 
         // Is the parsed var compared with < or > against something (a cutoff)?
         const compareLineIdx = findLineMatching(
           file.lines,
           w,
+          // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- parseVar is a source identifier, escapeRe()ed
           new RegExp(`\\b${escapeRe(parseVar)}\\s*[<>]`),
         );
         if (compareLineIdx >= 0 && !guarded) {
@@ -1203,7 +1207,9 @@ export function runSelfAudit(repoRoot: string, opts?: { only?: string[] }): Secu
   );
   const results: SecurityCheckResult[] = [];
   for (const rule of rules) {
-    results.push(...rule.run(ctx));
+    // Stamp the stable rule id so consumers (kit coverage --verify) can bind
+    // evidence by id — result names are human-facing and free to change.
+    results.push(...rule.run(ctx).map((r) => ({ ...r, ruleId: rule.id })));
   }
   // Honest coverage: if source files couldn't be read, self-audit scanned an
   // incomplete set — a "clean" run is NOT authoritative. Surface it as a WARN

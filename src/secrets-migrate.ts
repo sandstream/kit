@@ -210,6 +210,7 @@ export async function commentOutInFile(
     for (const key of validKeys) {
       // Key is regex-safe after isValidKeyName, but escape defensively in
       // case the validator is ever relaxed.
+      // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- key is escapeRegex()ed; validator upstream restricts key names
       const re = new RegExp(`^(\\s*)${escapeRegex(key)}\\s*=`);
       if (re.test(line)) {
         matched = true;

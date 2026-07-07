@@ -10,7 +10,7 @@ import { validateSecrets, summarizeValidation } from "./secrets-validate.js";
 import { checkTools } from "./check-tools.js";
 import { checkServices } from "./check-services.js";
 import { checkSecrets } from "./check-secrets.js";
-import { checkSecurity, gateStatus } from "./check-security.js";
+import { checkSecurity, gateStatus, type SecurityCheckResult } from "./check-security.js";
 import type { HealthCtx } from "./health.js";
 import type { SentinelSummary } from "./sentinel.js";
 import { syncSecurityFindings } from "./findings-track.js";
@@ -118,7 +118,12 @@ import { c } from "./utils/colors.js";
 import { gatherStatus } from "./status.js";
 import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
 import { collectHints } from "./hints.js";
-import { gatherLive, suggestContextToml, hasLockableContext } from "./context-lock.js";
+import {
+  gatherLive,
+  suggestContextToml,
+  hasLockableContext,
+  gcpProjectMismatch,
+} from "./context-lock.js";
 import { cmdEnv } from "./commands/env.js";
 import { cmdContext } from "./commands/context.js";
 import { cmdConfig } from "./commands/config.js";
@@ -1932,6 +1937,17 @@ async function generateConfigFile(
 async function offerContextLock(configPath: string, nonInteractive: boolean): Promise<void> {
   const live = await gatherLive(process.cwd());
   if (!hasLockableContext(live)) return;
+  // Never suggest locking a foreign active project (#251): when the repo's own
+  // .firebaserc names its projects and the active gcloud context is not one of
+  // them, warn with both values and suggest the REPO's project instead.
+  const fb = gcpProjectMismatch(live, process.cwd());
+  if (fb) {
+    console.log(
+      `${c.red}✗ active gcloud project ${c.bold}${fb.active}${c.reset}${c.red} is not one of this repo's declared project(s) ${c.bold}${fb.declared.join(", ")}${c.reset}${c.red} (.firebaserc)${c.reset}` +
+        `\n  ${c.dim}suggesting the repo's own project below; switch the CLI with:${c.reset} gcloud config set project ${fb.declared[0]}\n`,
+    );
+    live.gcloud = { account: live.gcloud?.account ?? null, project: fb.declared[0] };
+  }
   const block = suggestContextToml(live);
   if (!block.trim()) return;
 
@@ -2605,7 +2621,11 @@ async function readSecretValueFromVault(
     await generateSecrets(isolated, tmpEnv);
     secureFile(tmpEnv); // materialized plaintext secret → owner-only
     const content = readFileSync(tmpEnv, "utf-8");
-    const match = content.match(new RegExp(`^${keyName}=(.*)$`, "m"));
+    // Escape the key before interpolating into the regex — every other regex
+    // builder in kit escapes; this one predates the convention (semgrep catch).
+    const escapedKey = keyName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- key is regex-escaped above
+    const match = content.match(new RegExp(`^${escapedKey}=(.*)$`, "m"));
     return match ? match[1] : null;
   } catch {
     return null;
@@ -3749,7 +3769,37 @@ async function cmdCoverage(): Promise<boolean> {
     // still bind. runSelfAudit is only meaningful on kit's own checkout.
     const root = resolveKitRoot();
     const selfAudit = root ? runSelfAudit(root) : [];
-    results = [...security, ...selfAudit];
+    // Command-backed evidence cheap enough to run inline (#206): CI hardening
+    // lint + transcript credential scan. Synthesized under the exact ids the
+    // coverage mapping cites, so those controls bind to a live run instead of
+    // reading not-run. Heavier command evidence (kit secrets validate) stays
+    // honestly unbound.
+    const { runGhaAudit } = await import("./gha-audit.js");
+    const { runCiAudit } = await import("./ci-audit.js");
+    const ciResults = [...runGhaAudit(process.cwd()), ...runCiAudit(process.cwd())];
+    const ciFails = ciResults.filter((r) => r.status === "fail").length;
+    const transcriptHits = await scanTranscripts(process.cwd());
+    const commandEvidence: SecurityCheckResult[] = [
+      {
+        category: "supply-chain",
+        name: "gha-audit",
+        status: ciResults.length === 0 ? "skip" : ciFails > 0 ? "fail" : "pass",
+        detail:
+          ciResults.length === 0
+            ? "no CI workflows to lint"
+            : `${ciResults.length} CI hardening check(s), ${ciFails} failing`,
+      },
+      {
+        category: "secrets",
+        name: "scan-transcripts",
+        status: transcriptHits.length > 0 ? "warn" : "pass",
+        detail:
+          transcriptHits.length > 0
+            ? `${transcriptHits.length} credential-shaped hit(s) in agent transcripts`
+            : "no credentials found in agent transcripts",
+      },
+    ];
+    results = [...security, ...selfAudit, ...commandEvidence];
   }
 
   const report = buildCoverageReport(results);

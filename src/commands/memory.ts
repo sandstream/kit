@@ -424,13 +424,16 @@ async function memIndex(): Promise<boolean> {
 
 async function memMerge(): Promise<boolean> {
   const sourcePath = process.argv[4];
-  if (!sourcePath) {
-    console.error(`${c.red}usage: kit memory merge <other-machine-memory.db>${c.reset}`);
+  if (!sourcePath || sourcePath.startsWith("--")) {
+    console.error(
+      `${c.red}usage: kit memory merge <other-machine-memory.db> [--remap-project <path>]${c.reset}`,
+    );
     return false;
   }
+  const remapProject = flagValue(process.argv, "--remap-project");
   const db = openMemoryDb();
   try {
-    const r = mergeDb(db, sourcePath);
+    const r = mergeDb(db, sourcePath, remapProject ? { remapProject } : {});
     if (r.messages + r.toolUses + r.pending + r.threads === 0) {
       // `sessions` is inflated by merge even for a fully-redundant source — don't
       // let it dress up a no-op merge as success.
@@ -441,6 +444,24 @@ async function memMerge(): Promise<boolean> {
       console.log(
         `${c.green}✓${c.reset} merged ${c.bold}${r.messages}${c.reset} messages + ${r.toolUses} tool-uses · ${r.sessions} sessions · ${r.pending} pending · ${r.threads} copilots ${c.dim}from ${sourcePath}${c.reset}`,
       );
+    }
+    // Scope visibility (#247): "merged" must not read as "reachable". Sessions
+    // keyed to a foreign project (a container's -home-user, another machine's
+    // tree) are invisible to project-scoped search — say where they landed.
+    const currentKey = getCurrentProjectRoot()?.replace(/\//g, "-");
+    const foreign = Object.entries(r.projects).filter(([k]) => k !== currentKey);
+    if (foreign.length > 0) {
+      for (const [key, n] of foreign) {
+        console.log(
+          `  ${c.dim}${n} session(s) under ${c.reset}${key}${c.dim} — not this project${c.reset}`,
+        );
+      }
+      if (!remapProject) {
+        console.log(
+          `${c.yellow}!${c.reset} foreign-keyed sessions are invisible to project-scoped search — ` +
+            `re-merge with ${c.bold}--remap-project <path>${c.reset} to rehome them, or search with ${c.bold}--global${c.reset}`,
+        );
+      }
     }
   } catch (err) {
     db.close();

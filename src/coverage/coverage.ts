@@ -41,18 +41,44 @@ export type Bucket = "auto" | "gap" | "manual" | "na";
  */
 export type EvidenceState = "verified" | "failing" | "unrun";
 
+/**
+ * Mapping-id → actual checkSecurity result name, for the few ids that name a kit
+ * concept rather than a literal result. EXACT, curated equivalences only — broad
+ * category matching is deliberately NOT done (any passing result in a category
+ * would "verify" unrelated controls: a new false-green class).
+ */
+export const CHECK_ID_ALIASES: Record<string, string> = {
+  "supply-chain": "bumblebee (supply-chain)",
+};
+
 /** Fold a control's backing-check statuses into one evidence state. */
 export function evidenceFor(
   checks: string[],
-  byName: Map<string, SecurityCheckResult["status"]>,
+  byKey: Map<string, SecurityCheckResult["status"]>,
 ): EvidenceState {
   let sawPass = false;
   for (const c of checks) {
-    const st = byName.get(c);
+    const st = byKey.get(c) ?? byKey.get(CHECK_ID_ALIASES[c] ?? "");
     if (st === "fail") return "failing"; // any failing backing check ⇒ not covered
     if (st === "pass") sawPass = true;
   }
   return sawPass ? "verified" : "unrun";
+}
+
+/**
+ * Index results for evidence binding: by result name AND by self-audit rule id
+ * (e.g. "R2-secret-argv"), so the mapping can cite stable rule ids. Last write
+ * wins per key.
+ */
+export function indexResults(
+  results: SecurityCheckResult[],
+): Map<string, SecurityCheckResult["status"]> {
+  const byKey = new Map<string, SecurityCheckResult["status"]>();
+  for (const r of results) {
+    byKey.set(r.name, r.status);
+    if (r.ruleId) byKey.set(r.ruleId, r.status);
+  }
+  return byKey;
 }
 
 /** One row of the static control -> kit relationship mapping. */
@@ -297,10 +323,8 @@ export function honestyDisclaimer(summary: CoverageSummary): string {
  * is static — AUTO means "a check is mapped", not "the check passed".
  */
 export function buildCoverageReport(results?: SecurityCheckResult[]): CoverageReport {
-  const byName = results
-    ? new Map(results.map((r) => [r.name, r.status] as const)) // last write wins
-    : undefined;
-  const entries = buildCoverageEntries(byName);
+  const byKey = results ? indexResults(results) : undefined;
+  const entries = buildCoverageEntries(byKey);
   const summary = summarize(entries);
 
   // Group by section, preserving first-seen section order from the subset.

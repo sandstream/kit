@@ -201,6 +201,7 @@ async function rewriteConfigRef(
   }
   // Match the whole inline-table line for this key. keyName is already
   // validated by isValidKeyName above; escapeRegex is defense-in-depth.
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- keyName validated by isValidKeyName + escapeRegex (defense-in-depth)
   const lineRe = new RegExp(`^(\\s*${escapeRegex(keyName)}\\s*=\\s*\\{)[^}\\n]*(\\}\\s*)$`, "m");
   const match = text.match(lineRe);
   if (!match) {

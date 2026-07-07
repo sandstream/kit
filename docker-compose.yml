@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   # kit CLI - for testing CLI commands
@@ -47,6 +47,15 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: kit-postgres
+    # Hardening (semgrep no-new-privileges / writable-filesystem): no setuid
+    # escalation; root fs read-only — postgres writes only via the data volume
+    # and the tmpfs run/tmp dirs.
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/postgresql
     environment:
       POSTGRES_USER: kit
       POSTGRES_PASSWORD: password
@@ -68,6 +77,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: kit-redis
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
     ports:
       - "6379:6379"
     volumes:

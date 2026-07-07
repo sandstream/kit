@@ -91,6 +91,7 @@ export function globToRegExp(glob: string): RegExp {
       pendingStarStar = false;
     }
   }
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- built from a glob the function itself escapes above; no user-controlled pattern
   return new RegExp(re + "$");
 }
 
