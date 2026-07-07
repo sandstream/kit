@@ -346,8 +346,9 @@ async function hasSourceExt(cwd: string, exts: string[]): Promise<boolean> {
 async function detectFromRuby(cwd: string): Promise<DetectedStack | null> {
   const gemfile = await readFile(join(cwd, "Gemfile"), "utf-8").catch(() => null);
   const hasGemspec = (await readdir(cwd).catch(() => [])).some((f) => f.endsWith(".gemspec"));
-  const hasRakefile = await fileExists(join(cwd, "Rakefile"));
-  if (gemfile === null && !hasGemspec && !hasRakefile) return null;
+  // A bare Rakefile is NOT a Ruby signal — Go/C projects (fzf) ship one for build tasks.
+  // Require a Gemfile or a .gemspec.
+  if (gemfile === null && !hasGemspec) return null;
 
   const text = gemfile ?? "";
   let framework: string | undefined;
@@ -467,12 +468,32 @@ const EXOTIC: { file: string; language: string }[] = [
   { file: "stack.yaml", language: "haskell" },
 ];
 
+/** True if a real Zig SOURCE file exists (a `.zig` that isn't the `build.zig`/`build.zig.zon`
+ *  build script) in cwd or cwd/src — so a C project that merely uses build.zig isn't Zig. */
+async function hasZigSources(cwd: string): Promise<boolean> {
+  for (const dir of [cwd, join(cwd, "src")]) {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (e.isFile() && e.name.endsWith(".zig") && e.name !== "build.zig") return true;
+    }
+  }
+  return false;
+}
+
 async function detectFromExotic(cwd: string): Promise<DetectedStack | null> {
   for (const { file, language } of EXOTIC) {
-    if (await fileExists(join(cwd, file))) {
-      const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
-      return { language, services, tools: {}, confidence: 0.7 };
-    }
+    if (!(await fileExists(join(cwd, file)))) continue;
+    // `build.zig` is also used as a BUILD tool by C projects (neovim) — only call it Zig
+    // when actual .zig SOURCES exist (a .zig file other than the build script itself), so
+    // neovim falls through to C/C++.
+    if (language === "zig" && !(await hasZigSources(cwd))) continue;
+    const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
+    return { language, services, tools: {}, confidence: 0.7 };
   }
   // Julia: Project.toml is also used elsewhere, so require a Julia source signal.
   if ((await fileExists(join(cwd, "Project.toml"))) && (await hasSourceExt(cwd, [".jl"]))) {
@@ -495,41 +516,57 @@ const JS_APP_FRAMEWORKS = new Set([
   "react-native",
 ]);
 
+/** A backend signal strong enough to override a co-present `package.json`. Deliberately
+ *  excludes Go/Rust/C-C++/JVM/exotic/mobile: those appear as secondary manifests inside JS
+ *  projects (native addons, build tools, Packagist mirrors) too often to outrank an app's
+ *  own package.json. PHP counts only with a detected framework (Laravel/Symfony). */
+function isStrongBackend(s: DetectedStack): boolean {
+  if (["python", "ruby", "csharp", "fsharp", "elixir"].includes(s.language)) return true;
+  if (s.language === "php" && s.framework) return true;
+  return false;
+}
+
 /**
  * Detect the project stack. Multi-ecosystem aware: a repo often ships a front-end
  * `package.json` alongside its real backend (Django/Rails/Laravel/.NET), so a bare
- * package.json no longer wins by default — a definitive backend manifest takes primary
- * unless the JS side declares a real app framework. Returns `unknown` only when nothing
+ * package.json no longer wins by default — a STRONG backend signal takes primary unless
+ * the JS side declares a real app framework. Returns `unknown` only when nothing
  * recognizable is found.
  */
 export async function detectStack(cwd: string): Promise<DetectedStack> {
   const js = await detectFromPackageJson(cwd);
 
-  // Backends in priority order (first present wins as primary among backends). Native
-  // mobile (flutter/swift) and JVM come after the server languages.
+  // Backends in priority order — first present wins as primary among backends (matters only
+  // when a repo has NO package.json but several backend manifests). Ruby is LATE so a Go/
+  // Scala repo that ships a secondary Gemfile (fzf's gem wrapper, scala's Jekyll docs) is
+  // not mislabelled Ruby; C/C++ is last of the languages so a build.zig/sbt wins its bootstrap.
   const backends = (
     await Promise.all([
       detectFromPython(cwd),
       detectFromPhp(cwd),
-      detectFromRuby(cwd),
       detectFromDotnet(cwd),
       detectFromGo(cwd),
       detectFromRust(cwd),
       detectFromJvm(cwd),
-      // Exotic before C/C++: a `build.zig` / `build.sbt` is more specific than the CMake
-      // or Makefile a repo may also carry to bootstrap (ziglang/zig ships both).
       detectFromExotic(cwd),
       detectFromCpp(cwd),
+      detectFromRuby(cwd),
       detectFromFlutter(cwd),
       detectFromSwift(cwd),
     ])
   ).filter((s): s is DetectedStack => s !== null);
 
   if (js && backends.length > 0) {
-    // JS is primary only when it's a real app (meta-framework); otherwise the
-    // co-present backend manifest is the real story and the package.json is assets.
+    // JS is primary when it's a real app (meta-framework). Otherwise a co-present backend
+    // wins ONLY if it's a STRONG signal — a real backend app, not a secondary manifest a
+    // JS project routinely carries (a Packagist `composer.json`, a native-addon `Cargo.toml`,
+    // a tooling `go.mod`). Strong = Python/Ruby/.NET/Elixir, or PHP with a framework
+    // (Laravel/Symfony ⇒ artisan). This fixes django/rails/laravel/aspnetcore without
+    // regressing chart.js (composer mirror) or pnpm (Rust addon) → both stay JS.
     if (js.framework && JS_APP_FRAMEWORKS.has(js.framework)) return js;
-    return backends[0];
+    const strong = backends.find(isStrongBackend);
+    if (strong) return strong;
+    return js;
   }
   if (js) return js;
   if (backends.length > 0) return backends[0];

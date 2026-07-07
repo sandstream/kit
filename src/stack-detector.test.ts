@@ -567,9 +567,67 @@ describe("detectStack", () => {
     await makeProject(dir, {
       "build.zig": "pub fn build(b: *std.Build) void {}\n",
       "CMakeLists.txt": "project(zig)\n",
+      "src/main.zig": "pub fn main() void {}\n",
     });
     try {
       assert.equal((await detectStack(dir)).language, "zig");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a JS lib with a secondary composer.json (Packagist mirror) stays JS", async () => {
+    // chart.js regression: composer.json with no PHP framework must NOT win over package.json.
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-chartjs`);
+    await makeProject(dir, {
+      "package.json": JSON.stringify({ name: "chart.js", devDependencies: { rollup: "4.0.0" } }),
+      "composer.json": JSON.stringify({ name: "chartjs/chart.js" }),
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "typescript");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a JS tool with a native-addon Cargo.toml stays JS", async () => {
+    // pnpm regression: a secondary Cargo.toml must NOT win over package.json.
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-pnpm`);
+    await makeProject(dir, {
+      "package.json": JSON.stringify({ name: "pnpm" }),
+      "Cargo.toml": '[package]\nname = "pnpm-exe"\n',
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "typescript");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a Go tool with a secondary Gemfile (gem wrapper, no package.json) is Go", async () => {
+    // fzf regression: Go primary; the Gemfile must not make it Ruby.
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-fzf`);
+    await makeProject(dir, {
+      "go.mod": "module fzf\ngo 1.22\n",
+      Gemfile: `gem "fzf"\n`,
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "go");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("build.zig used only as a build tool (no .zig sources) falls through to C", async () => {
+    // neovim regression: build.zig + CMake + .c sources ⇒ C, not Zig.
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-nvim`);
+    await makeProject(dir, {
+      "build.zig": "pub fn build() void {}\n",
+      "CMakeLists.txt": "project(nvim)\n",
+      "src/main.c": "int main(){return 0;}\n",
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "c");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
