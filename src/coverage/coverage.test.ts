@@ -200,4 +200,43 @@ describe("coverage live evidence binding (--verify, #11)", () => {
     assert.equal(report.summary.autoVerified, 0);
     assert.equal(report.summary.autoUnrun, report.summary.auto);
   });
+
+  it("binds self-audit results by ruleId, not just name (#206)", () => {
+    // V7.1.1 cites "scan-transcripts" + "R2-secret-argv". A self-audit result whose
+    // NAME is human-facing but whose ruleId is R2-secret-argv must bind it.
+    const results: SecurityCheckResult[] = [
+      {
+        category: "self-audit/secret-argv",
+        name: "secret leaked via exec error",
+        status: "pass",
+        detail: "fixture",
+        ruleId: "R2-secret-argv",
+      },
+    ];
+    const report = buildCoverageReport(results);
+    const v711 = report.sections.flatMap((s) => s.entries).find((e) => e.requirement.id === "V7.1.1")!;
+    assert.equal(v711.evidence, "verified");
+  });
+
+  it("resolves curated aliases (supply-chain → bumblebee) but never broad categories (#206)", () => {
+    // "supply-chain" in the mapping binds to the bumblebee RESULT NAME via the
+    // curated alias — an arbitrary result in the supply-chain CATEGORY must not bind.
+    const bumblebee: SecurityCheckResult = {
+      category: "supply-chain",
+      name: "bumblebee (supply-chain)",
+      status: "pass",
+      detail: "fixture",
+    };
+    const v1424 = (r: ReturnType<typeof buildCoverageReport>) =>
+      r.sections.flatMap((s) => s.entries).find((e) => e.requirement.id === "V14.2.4")!;
+    assert.equal(v1424(buildCoverageReport([bumblebee])).evidence, "verified");
+    // Same category, different name, no alias ⇒ must NOT verify (no category matching).
+    const unrelated: SecurityCheckResult = {
+      category: "supply-chain",
+      name: "pinned versions",
+      status: "pass",
+      detail: "fixture",
+    };
+    assert.equal(v1424(buildCoverageReport([unrelated])).evidence, "unrun");
+  });
 });

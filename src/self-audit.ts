@@ -1203,7 +1203,9 @@ export function runSelfAudit(repoRoot: string, opts?: { only?: string[] }): Secu
   );
   const results: SecurityCheckResult[] = [];
   for (const rule of rules) {
-    results.push(...rule.run(ctx));
+    // Stamp the stable rule id so consumers (kit coverage --verify) can bind
+    // evidence by id — result names are human-facing and free to change.
+    results.push(...rule.run(ctx).map((r) => ({ ...r, ruleId: rule.id })));
   }
   // Honest coverage: if source files couldn't be read, self-audit scanned an
   // incomplete set — a "clean" run is NOT authoritative. Surface it as a WARN

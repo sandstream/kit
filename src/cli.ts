@@ -10,7 +10,7 @@ import { validateSecrets, summarizeValidation } from "./secrets-validate.js";
 import { checkTools } from "./check-tools.js";
 import { checkServices } from "./check-services.js";
 import { checkSecrets } from "./check-secrets.js";
-import { checkSecurity, gateStatus } from "./check-security.js";
+import { checkSecurity, gateStatus, type SecurityCheckResult } from "./check-security.js";
 import type { HealthCtx } from "./health.js";
 import type { SentinelSummary } from "./sentinel.js";
 import { syncSecurityFindings } from "./findings-track.js";
@@ -3749,7 +3749,37 @@ async function cmdCoverage(): Promise<boolean> {
     // still bind. runSelfAudit is only meaningful on kit's own checkout.
     const root = resolveKitRoot();
     const selfAudit = root ? runSelfAudit(root) : [];
-    results = [...security, ...selfAudit];
+    // Command-backed evidence cheap enough to run inline (#206): CI hardening
+    // lint + transcript credential scan. Synthesized under the exact ids the
+    // coverage mapping cites, so those controls bind to a live run instead of
+    // reading not-run. Heavier command evidence (kit secrets validate) stays
+    // honestly unbound.
+    const { runGhaAudit } = await import("./gha-audit.js");
+    const { runCiAudit } = await import("./ci-audit.js");
+    const ciResults = [...runGhaAudit(process.cwd()), ...runCiAudit(process.cwd())];
+    const ciFails = ciResults.filter((r) => r.status === "fail").length;
+    const transcriptHits = await scanTranscripts(process.cwd());
+    const commandEvidence: SecurityCheckResult[] = [
+      {
+        category: "supply-chain",
+        name: "gha-audit",
+        status: ciResults.length === 0 ? "skip" : ciFails > 0 ? "fail" : "pass",
+        detail:
+          ciResults.length === 0
+            ? "no CI workflows to lint"
+            : `${ciResults.length} CI hardening check(s), ${ciFails} failing`,
+      },
+      {
+        category: "secrets",
+        name: "scan-transcripts",
+        status: transcriptHits.length > 0 ? "warn" : "pass",
+        detail:
+          transcriptHits.length > 0
+            ? `${transcriptHits.length} credential-shaped hit(s) in agent transcripts`
+            : "no credentials found in agent transcripts",
+      },
+    ];
+    results = [...security, ...selfAudit, ...commandEvidence];
   }
 
   const report = buildCoverageReport(results);

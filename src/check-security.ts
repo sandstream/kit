@@ -64,6 +64,12 @@ export interface SecurityCheckResult {
    * didNotRun — it is an honest skip.
    */
   didNotRun?: boolean;
+  /**
+   * The self-audit rule id (e.g. "R2-secret-argv") that produced this result.
+   * Lets consumers (kit coverage --verify) bind evidence by the stable rule id
+   * instead of the human-facing result name. Only set on self-audit results.
+   */
+  ruleId?: string;
 }
 
 export interface GateOpts {
