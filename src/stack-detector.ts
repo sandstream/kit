@@ -190,10 +190,28 @@ async function detectFromPackageJson(cwd: string): Promise<DetectedStack | null>
   };
 }
 
+/** True when the repo is a Python PACKAGE that compiles a native (C/C++/Rust) extension as
+ *  part of ITS OWN build — so Python is primary and the native code is the extension. Signal:
+ *  a `setup.py`, or a pyproject build-backend that compiles native code (setuptools / maturin
+ *  / scikit-build / meson-python / pybind). A poetry/flit/hatchling backend (pure-Python
+ *  packaging) does NOT count — there the native code is a sibling project (llama.cpp). */
+async function pythonBuildsNativeExtension(cwd: string): Promise<boolean> {
+  if (await fileExists(join(cwd, "setup.py"))) return true;
+  const pyproject = await readFile(join(cwd, "pyproject.toml"), "utf-8").catch(() => null);
+  if (!pyproject) return false;
+  const backend =
+    pyproject.match(/build-backend\s*=\s*["']([^"']+)["']/i)?.[1]?.toLowerCase() ?? "";
+  return /setuptools|maturin|scikit|mesonpy|meson_python|meson-python|pybind|cffi/.test(backend);
+}
+
 async function detectFromPython(cwd: string): Promise<DetectedStack | null> {
   const hasRequirements = await fileExists(join(cwd, "requirements.txt"));
   const hasPyproject = await fileExists(join(cwd, "pyproject.toml"));
-  if (!hasRequirements && !hasPyproject) return null;
+  // setup.py / setup.cfg are the legacy Python package markers — a repo can ship them with
+  // no requirements.txt/pyproject (older libs, or native-extension packages).
+  const hasSetup =
+    (await fileExists(join(cwd, "setup.py"))) || (await fileExists(join(cwd, "setup.cfg")));
+  if (!hasRequirements && !hasPyproject && !hasSetup) return null;
 
   let framework: string | undefined;
   let contents = "";
@@ -274,6 +292,11 @@ async function detectFromPhp(cwd: string): Promise<DetectedStack | null> {
   if (composer.require?.["laravel/framework"]) framework = "laravel";
   else if (composer.require?.["symfony/framework-bundle"]) framework = "symfony";
 
+  // A composer.json alone can be a Packagist mirror of a JS lib (chart.js). Real .php
+  // sources (or a framework) make it a genuine PHP project — bump confidence so the
+  // selection logic treats it as a STRONG backend that beats an asset package.json
+  // (phpmyadmin, filament), while a source-less mirror stays weak → JS.
+  const hasPhpSources = await hasSourceExt(cwd, [".php"]);
   const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
 
   return {
@@ -281,7 +304,7 @@ async function detectFromPhp(cwd: string): Promise<DetectedStack | null> {
     framework,
     services,
     tools: { php: "8.3", composer: "latest" },
-    confidence: framework ? 0.85 : 0.6,
+    confidence: framework ? 0.85 : hasPhpSources ? 0.8 : 0.6,
   };
 }
 
@@ -519,10 +542,11 @@ const JS_APP_FRAMEWORKS = new Set([
 /** A backend signal strong enough to override a co-present `package.json`. Deliberately
  *  excludes Go/Rust/C-C++/JVM/exotic/mobile: those appear as secondary manifests inside JS
  *  projects (native addons, build tools, Packagist mirrors) too often to outrank an app's
- *  own package.json. PHP counts only with a detected framework (Laravel/Symfony). */
+ *  own package.json. PHP counts with a framework OR real .php sources (confidence ≥ 0.8) —
+ *  a source-less composer.json (Packagist mirror of a JS lib) stays weak → JS. */
 function isStrongBackend(s: DetectedStack): boolean {
   if (["python", "ruby", "csharp", "fsharp", "elixir"].includes(s.language)) return true;
-  if (s.language === "php" && s.framework) return true;
+  if (s.language === "php") return !!s.framework || s.confidence >= 0.8;
   return false;
 }
 
@@ -537,24 +561,45 @@ export async function detectStack(cwd: string): Promise<DetectedStack> {
   const js = await detectFromPackageJson(cwd);
 
   // Backends in priority order — first present wins as primary among backends (matters only
-  // when a repo has NO package.json but several backend manifests). Ruby is LATE so a Go/
-  // Scala repo that ships a secondary Gemfile (fzf's gem wrapper, scala's Jekyll docs) is
-  // not mislabelled Ruby; C/C++ is last of the languages so a build.zig/sbt wins its bootstrap.
+  // when a repo has NO package.json but several backend manifests). Ordering principle:
+  // COMPILED / systems languages first, SCRIPTING/tooling languages last — because Python
+  // (build scripts + requirements.txt) and Ruby (a Rakefile/Gemfile) routinely ride along
+  // inside a C/C++/Go/Rust/JVM/Scala project as tooling, not as the primary language. So:
+  //  - cpp before rust  → git (Cargo.toml + a few .rs, but 200+ .c) reads as C, not Rust
+  //  - cpp before dotnet → protobuf/rocksdb (CMake + a C#-bindings dir) read as C++, not C#
+  //  - cpp/jvm/exotic before python → llama.cpp→C++, spark→JVM (not their Python build scripts)
+  // A detector only fires on a REAL signal (cpp needs C/C++ sources or CMake; rust needs
+  // Cargo), so a pure Python/Ruby repo still wins — the compiled detectors simply decline.
   const backends = (
     await Promise.all([
-      detectFromPython(cwd),
-      detectFromPhp(cwd),
-      detectFromDotnet(cwd),
       detectFromGo(cwd),
-      detectFromRust(cwd),
       detectFromJvm(cwd),
       detectFromExotic(cwd),
       detectFromCpp(cwd),
+      detectFromRust(cwd),
+      detectFromDotnet(cwd),
+      detectFromPython(cwd),
+      detectFromPhp(cwd),
       detectFromRuby(cwd),
       detectFromFlutter(cwd),
       detectFromSwift(cwd),
     ])
   ).filter((s): s is DetectedStack => s !== null);
+
+  // Native-Python-extension override. The compiled-first ordering above correctly reads a
+  // C++/Rust project that merely ships Python *scripts* (llama.cpp) as C++. But a Python
+  // *package that compiles a native extension* (Pillow, matplotlib, pyca/cryptography) is
+  // Python-primary — the C/Rust is the extension, not the product. Tell them apart by the
+  // Python build system: a native build backend (setup.py / setuptools / maturin /
+  // scikit-build / meson-python) means "this Python package builds the native code", whereas
+  // llama.cpp's poetry/flit backend packages a pure-Python sibling and CMake builds the C++.
+  const pyIdx = backends.findIndex((b) => b.language === "python");
+  if (pyIdx > 0 && ["c", "cpp", "rust"].includes(backends[0].language)) {
+    if (await pythonBuildsNativeExtension(cwd)) {
+      const [py] = backends.splice(pyIdx, 1);
+      backends.unshift(py);
+    }
+  }
 
   if (js && backends.length > 0) {
     // JS is primary when it's a real app (meta-framework). Otherwise a co-present backend
