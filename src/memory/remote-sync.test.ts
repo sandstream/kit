@@ -78,6 +78,40 @@ describe("remote-sync — loadSyncConfig (LOCAL, ~/.kit only)", () => {
     }
   });
 
+  it("encryption is ON by default and OFF only on an explicit encrypt = false", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-cfg-"));
+    const prev = process.env.KIT_MEMORY_DIR;
+    process.env.KIT_MEMORY_DIR = dir;
+    try {
+      // no `encrypt` key → secure by default
+      writeFileSync(getSyncConfigPath(), '[memory.sync]\nremote = "git@h:me/mem.git"\n');
+      assert.equal(loadSyncConfig()?.encrypt, true);
+      // encrypt = true → still encrypted
+      writeFileSync(
+        getSyncConfigPath(),
+        '[memory.sync]\nremote = "git@h:me/mem.git"\nencrypt = true\n',
+      );
+      assert.equal(loadSyncConfig()?.encrypt, true);
+      // encrypt = false → opt-out honored
+      writeFileSync(
+        getSyncConfigPath(),
+        '[memory.sync]\nremote = "git@h:me/mem.git"\nencrypt = false\n',
+      );
+      assert.equal(loadSyncConfig()?.encrypt, false);
+      // a non-boolean must NOT silently disable encryption — anything but a literal
+      // `false` stays encrypted (fail-safe).
+      writeFileSync(
+        getSyncConfigPath(),
+        '[memory.sync]\nremote = "git@h:me/mem.git"\nencrypt = "false"\n',
+      );
+      assert.equal(loadSyncConfig()?.encrypt, true);
+    } finally {
+      if (prev === undefined) delete process.env.KIT_MEMORY_DIR;
+      else process.env.KIT_MEMORY_DIR = prev;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a git-option-injecting remote/branch (leading '-', ext::/fd:: helpers)", () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-cfg-"));
     const prev = process.env.KIT_MEMORY_DIR;
@@ -140,6 +174,7 @@ describe("remote-sync — push → pull round trip over a git remote", () => {
         remote: bare,
         branch: "main",
         file: "memory.enc",
+        encrypt: true,
       };
 
       // --- machine A: seed a message, then push ---
@@ -186,6 +221,66 @@ describe("remote-sync — push → pull round trip over a git remote", () => {
     }
   });
 
+  it("encrypt = false pushes a PLAINTEXT SQLite blob that pulls with NO passphrase", () => {
+    const bare = mkdtempSync(join(tmpdir(), "kit-pbare-")) + "/mem.git";
+    const machineA = mkdtempSync(join(tmpdir(), "kit-pA-"));
+    const machineB = mkdtempSync(join(tmpdir(), "kit-pB-"));
+    const proj = mkdtempSync(join(tmpdir(), "kit-pproj-"));
+    const prevDir = process.env.KIT_MEMORY_DIR;
+    const marker = "plaintext-sync-marker-qqq";
+    try {
+      execFileSync("git", ["init", "--bare", "-q", bare]);
+      const cfg: SyncConfig = {
+        transport: "git",
+        remote: bare,
+        branch: "main",
+        file: "memory.db",
+        encrypt: false,
+      };
+
+      process.env.KIT_MEMORY_DIR = machineA;
+      const dbA = openMemoryDb();
+      upsertSession(dbA, { sessionId: "s-plain", harness: "claude-code", project: "p" });
+      insertMessage(dbA, {
+        uuid: "u-plain",
+        sessionId: "s-plain",
+        type: "message",
+        role: "user",
+        content: marker,
+      });
+      dbA.close();
+
+      // NO passphrase, NO recipient — the whole point of the low-ceremony path.
+      const pushed = pushMemory(cfg, undefined, proj);
+      assert.equal(pushed.pushed, true);
+      assert.equal(pushed.verified, true);
+
+      // the remote blob is a real, unencrypted SQLite file (magic "SQLite format 3\0"),
+      // NOT a kit backup MAGIC — proving encryption was actually skipped.
+      const inspect = mkdtempSync(join(tmpdir(), "kit-pinspect-"));
+      git(["clone", "-q", "--branch", "main", bare, "."], inspect);
+      const blob = readFileSync(join(inspect, "memory.db"));
+      assert.equal(blob.subarray(0, 16).toString("latin1"), "SQLite format 3\0");
+      rmSync(inspect, { recursive: true, force: true });
+
+      // machine B pulls with NO passphrase and recalls the message.
+      process.env.KIT_MEMORY_DIR = machineB;
+      const r = pullMemory(cfg, undefined, proj);
+      assert.equal(r.found, true);
+      assert.ok((r.merge?.messages ?? 0) >= 1, "at least one message merged");
+      const dbB = openMemoryDb();
+      const hits = searchMessages(dbB, "marker");
+      dbB.close();
+      assert.ok(hits.some((h) => (h.content ?? "").includes(marker)));
+    } finally {
+      if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
+      else process.env.KIT_MEMORY_DIR = prevDir;
+      for (const d of [bare.replace(/\/mem\.git$/, ""), machineA, machineB, proj]) {
+        rmSync(d, { recursive: true, force: true });
+      }
+    }
+  });
+
   it("pull reports 'not found' when the remote has no blob yet", () => {
     const bare = mkdtempSync(join(tmpdir(), "kit-bare2-")) + "/mem.git";
     const machine = mkdtempSync(join(tmpdir(), "kit-M-"));
@@ -195,7 +290,7 @@ describe("remote-sync — push → pull round trip over a git remote", () => {
       execFileSync("git", ["init", "--bare", "-q", bare]);
       process.env.KIT_MEMORY_DIR = machine;
       const r = pullMemory(
-        { transport: "git", remote: bare, branch: "main", file: "memory.enc" },
+        { transport: "git", remote: bare, branch: "main", file: "memory.enc", encrypt: true },
         PASS,
         proj,
       );
@@ -248,6 +343,7 @@ describe("remote-sync — command transport (bring-your-own move: S3/rclone/scp/
       file: "memory.enc",
       pushCmd: `cp "$KIT_MEMORY_BLOB" "${storeBlob}"`,
       pullCmd: `cp "${storeBlob}" "$KIT_MEMORY_BLOB"`,
+      encrypt: true,
     };
     try {
       process.env.KIT_MEMORY_DIR = machineA;
@@ -296,6 +392,7 @@ describe("remote-sync — command transport (bring-your-own move: S3/rclone/scp/
       file: "memory.enc",
       pushCmd: `env > "${envDump}"`,
       pullCmd: "true",
+      encrypt: true,
     };
     try {
       process.env.KIT_MEMORY_DIR = machine;
@@ -325,7 +422,13 @@ describe("remote-sync — command transport (bring-your-own move: S3/rclone/scp/
     try {
       process.env.KIT_MEMORY_DIR = machine;
       const r = pullMemory(
-        { transport: "command", file: "memory.enc", pushCmd: "true", pullCmd: "true" },
+        {
+          transport: "command",
+          file: "memory.enc",
+          pushCmd: "true",
+          pullCmd: "true",
+          encrypt: true,
+        },
         PASS,
         proj,
       );
