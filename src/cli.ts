@@ -337,8 +337,19 @@ async function cmdCheck(): Promise<boolean> {
       // Test-coverage enforcement (--enforce-tests CLI flag overrides config).
       // Baseline-aware: pre-existing untested files only warn; net-new fail.
       const { checkTests } = await import("./check-tests.js");
-      const { loadBaseline, baselineGet } = await import("./baseline.js");
-      const baseline = await loadBaseline();
+      const { loadBaselineForGate, baselineGet, BASELINE_FILE } = await import("./baseline.js");
+      const { baseline, ignored: baselineIgnored } = await loadBaselineForGate();
+      if (baselineIgnored) {
+        // Fail-closed + visible: a corrupt/tampered baseline is ignored (nothing
+        // suppressed) and surfaced as a finding, never a crash of the gate.
+        securityResults.push({
+          category: "secrets",
+          name: "baseline integrity",
+          status: "warn",
+          severity: "low",
+          detail: `${BASELINE_FILE} ignored (${baselineIgnored}) — gating on all findings; re-freeze with 'kit baseline freeze'`,
+        });
+      }
       const testResults = await step("test coverage", () =>
         checkTests({
           enforce: enforceTests,
@@ -585,8 +596,13 @@ async function cmdDesign(): Promise<boolean> {
   const enforce = hasFlag(process.argv, "--enforce");
   const jsonMode = hasFlag(process.argv, "--json");
   const { checkDesign } = await import("./check-design.js");
-  const { loadBaseline, baselineGet } = await import("./baseline.js");
-  const baseline = await loadBaseline();
+  const { loadBaselineForGate, baselineGet, BASELINE_FILE } = await import("./baseline.js");
+  const { baseline, ignored: baselineIgnored } = await loadBaselineForGate();
+  if (baselineIgnored) {
+    console.error(
+      `${c.yellow}!${c.reset} ${BASELINE_FILE} ignored (${baselineIgnored}) — gating on all findings`,
+    );
+  }
   const results = await checkDesign({
     enforce,
     baseline: {
@@ -1800,8 +1816,17 @@ async function generateConfigFile(
     console.log(`${c.dim}Could not detect project type — generating minimal config.${c.reset}\n`);
   } else {
     console.log(
-      `  ${c.green}✓${c.reset} Detected: ${c.bold}${detectedLabel}${c.reset}  ${c.dim}(confidence: ${(stack.confidence * 100).toFixed(0)}%)${c.reset}\n`,
+      `  ${c.green}✓${c.reset} Detected: ${c.bold}${detectedLabel}${c.reset}  ${c.dim}(confidence: ${(stack.confidence * 100).toFixed(0)}%)${c.reset}`,
     );
+    // P4 — turn the confidence signal into a guard. Mis-detections cluster in the low band
+    // (~60%) while unambiguous stacks score 85–90%; when we're below that, say so and show how
+    // to correct it, rather than committing a possibly-wrong language silently.
+    if (stack.confidence < 0.7) {
+      console.log(
+        `  ${c.yellow}!${c.reset} ${c.dim}Low confidence — if this is wrong, set the right language under ${c.reset}${c.bold}[project]${c.reset}${c.dim} in .kit.toml (a polyglot repo can carry several manifests).${c.reset}`,
+      );
+    }
+    console.log();
   }
 
   // ── Plaintext-secrets scan ─────────────────────────────────────────────
@@ -5879,8 +5904,10 @@ async function main(): Promise<void> {
 
     process.exitCode = ok ? 0 : 1;
 
-    // Non-interactive / CI: skip update check
-    if (!nonInteractive) {
+    // Non-interactive / CI: skip update check. Also skip in --json mode: the notice
+    // prints to stdout and would corrupt a machine-readable JSON payload (e.g.
+    // `kit check --json` piped to a parser).
+    if (!nonInteractive && !hasFlag(args, "--json")) {
       checkForUpdate(KIT_VERSION)
         .then((info) => {
           if (info) printUpdateNotice(info);
@@ -5888,11 +5915,24 @@ async function main(): Promise<void> {
         .catch(() => {}); // never fail
     }
   } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+    const code =
+      err instanceof Error && "code" in err ? (err as { code?: string }).code : undefined;
+    const jsonMode = hasFlag(args, "--json");
+    if (code === "ENOENT") {
+      // In --json mode emit a valid JSON error so consumers never get empty stdout.
+      if (jsonMode) console.log(JSON.stringify({ ok: false, error: `${KIT_FILE} not found` }));
       console.error(`${c.red}Error: ${KIT_FILE} not found in ${process.cwd()}${c.reset}`);
       console.error(
         `${c.dim}Create a .kit.toml to define your project's tools, services, and secrets.${c.reset}`,
       );
+      process.exitCode = 1;
+    } else if (code === "KIT_INVALID_CONFIG") {
+      // A malformed .kit.toml (bad TOML syntax or failed schema validation) must fail
+      // CLOSED like a missing one — a clean error + exit 1, never an uncaught stack
+      // trace with empty --json stdout (a denial-of-verdict any dropped file could cause).
+      const msg = err instanceof Error ? err.message : String(err);
+      if (jsonMode) console.log(JSON.stringify({ ok: false, error: msg }));
+      console.error(`${c.red}${msg}${c.reset}`);
       process.exitCode = 1;
     } else {
       throw err;

@@ -417,4 +417,233 @@ describe("detectStack", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  // --- New ecosystems + polyglot masking (compatibility sweep fixes) ---
+
+  it("detects Ruby from a Gemfile (Rails)", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-ruby`);
+    await makeProject(dir, { Gemfile: `gem "rails", "~> 7.1"\n` });
+    try {
+      const s = await detectStack(dir);
+      assert.equal(s.language, "ruby");
+      assert.equal(s.framework, "rails");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("polyglot masking: a backend Gemfile wins over an asset package.json", async () => {
+    // rails/discourse ship a package.json for the asset pipeline; the backend is Ruby.
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-polyruby`);
+    await makeProject(dir, {
+      Gemfile: `gem "rails"\n`,
+      "package.json": JSON.stringify({ dependencies: { esbuild: "0.19.0" } }),
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "ruby");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("polyglot masking: Django (manage.py + pyproject) wins over an asset package.json", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-polypy`);
+    await makeProject(dir, {
+      "pyproject.toml": '[project]\ndependencies = ["django"]\n',
+      "package.json": JSON.stringify({ devDependencies: { webpack: "5.0.0" } }),
+    });
+    try {
+      const s = await detectStack(dir);
+      assert.equal(s.language, "python");
+      assert.equal(s.framework, "django");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a real JS meta-framework still wins over an incidental backend manifest", async () => {
+    // Next.js app that also vendors a go.mod tool — JS remains primary.
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-jswins`);
+    await makeProject(dir, {
+      "package.json": JSON.stringify({ dependencies: { next: "14.0.0" } }),
+      "go.mod": "module tool\ngo 1.22\n",
+    });
+    try {
+      const s = await detectStack(dir);
+      assert.equal(s.language, "typescript");
+      assert.equal(s.framework, "nextjs");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects .NET from global.json even when projects live under src/", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-dotnet`);
+    await makeProject(dir, {
+      "global.json": `{ "sdk": { "version": "8.0.100" } }`,
+      "package.json": JSON.stringify({ devDependencies: { typescript: "5.0.0" } }),
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "csharp");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("JVM: a plain Java Gradle project is Java, not Kotlin", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-java`);
+    await makeProject(dir, {
+      "build.gradle": `plugins { id 'java' }\ndependencies { implementation 'org.springframework.boot:spring-boot' }\n`,
+      "src/main/java/App.java": "class App {}\n",
+    });
+    try {
+      const s = await detectStack(dir);
+      assert.equal(s.language, "java");
+      assert.equal(s.framework, "spring");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("JVM: Maven pom.xml is Java", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-maven`);
+    await makeProject(dir, { "pom.xml": `<project><groupId>com.google.guava</groupId></project>` });
+    try {
+      assert.equal((await detectStack(dir)).language, "java");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("JVM: a Kotlin Gradle (.kts + kotlin plugin) is Kotlin", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-kt`);
+    await makeProject(dir, { "build.gradle.kts": `plugins { kotlin("jvm") version "1.9.0" }\n` });
+    try {
+      assert.equal((await detectStack(dir)).language, "kotlin");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects C from a Makefile + .c sources", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-c`);
+    await makeProject(dir, {
+      Makefile: "all:\n\tcc main.c\n",
+      "main.c": "int main(){return 0;}\n",
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "c");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects C++ from CMakeLists.txt even with sources in non-standard dirs", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-cpp`);
+    await makeProject(dir, {
+      "CMakeLists.txt": "project(app)\nadd_executable(app libobs/main.cpp)\n",
+      "libobs/main.cpp": "int main(){}\n",
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "cpp");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a bare Makefile with no C/C++ sources is NOT mislabelled C", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-bareMake`);
+    await makeProject(dir, { Makefile: "build:\n\tgo build\n", "main.go": "package main\n" });
+    try {
+      // go.mod-less Go dir: no C sources ⇒ C/C++ detector must decline ⇒ unknown, not "c".
+      assert.notEqual((await detectStack(dir)).language, "c");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects exotic ecosystems (Zig via build.zig, even with a CMake bootstrap)", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-zig`);
+    await makeProject(dir, {
+      "build.zig": "pub fn build(b: *std.Build) void {}\n",
+      "CMakeLists.txt": "project(zig)\n",
+      "src/main.zig": "pub fn main() void {}\n",
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "zig");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a JS lib with a secondary composer.json (Packagist mirror) stays JS", async () => {
+    // chart.js regression: composer.json with no PHP framework must NOT win over package.json.
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-chartjs`);
+    await makeProject(dir, {
+      "package.json": JSON.stringify({ name: "chart.js", devDependencies: { rollup: "4.0.0" } }),
+      "composer.json": JSON.stringify({ name: "chartjs/chart.js" }),
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "typescript");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a JS tool with a native-addon Cargo.toml stays JS", async () => {
+    // pnpm regression: a secondary Cargo.toml must NOT win over package.json.
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-pnpm`);
+    await makeProject(dir, {
+      "package.json": JSON.stringify({ name: "pnpm" }),
+      "Cargo.toml": '[package]\nname = "pnpm-exe"\n',
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "typescript");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a Go tool with a secondary Gemfile (gem wrapper, no package.json) is Go", async () => {
+    // fzf regression: Go primary; the Gemfile must not make it Ruby.
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-fzf`);
+    await makeProject(dir, {
+      "go.mod": "module fzf\ngo 1.22\n",
+      Gemfile: `gem "fzf"\n`,
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "go");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("build.zig used only as a build tool (no .zig sources) falls through to C", async () => {
+    // neovim regression: build.zig + CMake + .c sources ⇒ C, not Zig.
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-nvim`);
+    await makeProject(dir, {
+      "build.zig": "pub fn build() void {}\n",
+      "CMakeLists.txt": "project(nvim)\n",
+      "src/main.c": "int main(){return 0;}\n",
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "c");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("detects Elixir (mix.exs) and Scala (build.sbt)", async () => {
+    const ex = join(tmpdir(), `kit-detect-${process.pid}-ex`);
+    const sc = join(tmpdir(), `kit-detect-${process.pid}-sc`);
+    await makeProject(ex, { "mix.exs": "defmodule App.MixProject do\nend\n" });
+    await makeProject(sc, { "build.sbt": `name := "app"\n` });
+    try {
+      assert.equal((await detectStack(ex)).language, "elixir");
+      assert.equal((await detectStack(sc)).language, "scala");
+    } finally {
+      await rm(ex, { recursive: true, force: true });
+      await rm(sc, { recursive: true, force: true });
+    }
+  });
 });

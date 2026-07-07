@@ -218,7 +218,11 @@ export function scanDbForInjection(db: DatabaseSync): ScanFinding[] {
  * Throws if the store schema can't be queried — the caller turns that into a
  * fail-closed scanner-health result (never a silent pass).
  */
-export function replayableInjectionCount(db: DatabaseSync): { count: number; sample?: string } {
+export function replayableInjectionCount(db: DatabaseSync): {
+  count: number;
+  sample?: string;
+  scanned: number;
+} {
   const rows = db
     .prepare(
       "SELECT rowid AS rowid, content FROM messages WHERE quarantined = 0 AND content IS NOT NULL AND content != ''",
@@ -232,5 +236,8 @@ export function replayableInjectionCount(db: DatabaseSync): { count: number; sam
       sample ??= `messages#${r.rowid}`;
     }
   }
-  return { count, sample };
+  // `scanned` = recallable (non-quarantined, non-empty) rows actually examined. Lets
+  // callers treat an EMPTY store the same as an ABSENT one, so `kit check` doesn't flip
+  // skip→pass once a run materializes an empty memory.db.
+  return { count, sample, scanned: rows.length };
 }

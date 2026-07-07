@@ -205,7 +205,14 @@ async function checkMemoryInjection(): Promise<SecurityCheckResult> {
   }
   try {
     const { replayableInjectionCount } = await import("./memory/scan.js");
-    const { count, sample } = replayableInjectionCount(db);
+    const { count, sample, scanned } = replayableInjectionCount(db);
+    if (scanned === 0) {
+      // Empty store ≡ absent store — nothing recallable to scan. Reporting `skip`
+      // here (not `pass`) keeps `kit check` deterministic: the first run materializes
+      // an empty memory.db as a side effect, and without this the second run would
+      // flip this check skip→pass on identical input.
+      return { category, name, status: "skip", detail: "memory store empty — nothing to scan" };
+    }
     if (count > 0) {
       return {
         category,
@@ -916,7 +923,7 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
             category: "secrets",
             name: "secrets scan",
             status: "warn",
-            detail: `${files.size} file(s) with unverified secret-shaped strings (basic scan, trufflehog absent) — review for real credentials`,
+            detail: `${files.size} file(s) with unverified secret-shaped strings (basic scan, trufflehog absent — HEAD/working-tree only, does NOT scan git history) — review for real credentials`,
             severity: "medium",
             files: Array.from(files),
             suggestion:
@@ -933,7 +940,7 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
       name: "secrets scan",
       status: "pass",
       detail:
-        "basic scan: no secret-shaped strings outside tests/fixtures (install trufflehog for verified detection)",
+        "basic scan: no secret-shaped strings outside tests/fixtures — HEAD/working-tree only, NOT git history; install trufflehog for full-history + verified detection",
     };
   }
 }

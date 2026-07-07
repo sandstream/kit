@@ -197,6 +197,13 @@ function setupSection(stack: DetectedStack): string {
   else if (stack.language === "dart") installCmd = frameworkSetup?.install ?? "dart pub get";
   else if (stack.language === "swift") installCmd = frameworkSetup?.install ?? "swift build";
   else if (stack.language === "kotlin") installCmd = frameworkSetup?.install ?? "./gradlew build";
+  else if (stack.language === "ruby") installCmd = frameworkSetup?.install ?? "bundle install";
+  else if (stack.language === "java")
+    installCmd = frameworkSetup?.install ?? (stack.tools.java ? "./gradlew build" : "mvn install");
+  else if (stack.language === "csharp" || stack.language === "fsharp")
+    installCmd = frameworkSetup?.install ?? "dotnet restore";
+  else if (stack.language === "c" || stack.language === "cpp")
+    installCmd = frameworkSetup?.install ?? "cmake -B build && cmake --build build";
   else installCmd = frameworkSetup?.install ?? "npm install";
 
   // First detected service that declares a migrate command wins. Registry order

@@ -214,6 +214,29 @@ node = "22"
     }
   });
 
+  it("throws a tagged InvalidConfigError on malformed TOML syntax (not a raw TomlError)", async () => {
+    // Regression: a .kit.toml with broken syntax used to throw an uncaught TomlError out
+    // of the parser, crashing `kit check` with empty --json stdout. It must now surface as
+    // kit's own tagged error so the gate can fail closed cleanly.
+    const tmpFile = join(tmpdir(), `.kit-test-${process.pid}-badsyntax.toml`);
+    await writeFile(tmpFile, `this is not = = valid ]] toml`, "utf-8");
+    try {
+      await assert.rejects(
+        () => loadConfig(tmpFile),
+        (err: Error & { code?: string }) => {
+          assert.equal(err.code, "KIT_INVALID_CONFIG", `expected tagged code, got: ${err.code}`);
+          assert.ok(
+            err.message.includes("Invalid .kit.toml"),
+            `expected 'Invalid .kit.toml' in: ${err.message}`,
+          );
+          return true;
+        },
+      );
+    } finally {
+      await unlink(tmpFile);
+    }
+  });
+
   it("throws a friendly error when secret source is an unknown enum value", async () => {
     const tmpFile = join(tmpdir(), `.kit-test-${process.pid}-val2.toml`);
     await writeFile(

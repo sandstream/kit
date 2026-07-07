@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   loadBaseline,
+  loadBaselineForGate,
   saveBaseline,
   baselineGet,
   baselineSet,
@@ -69,6 +70,77 @@ describe("loadBaseline", () => {
         () => loadBaseline(dir),
         new RegExp(`failed to read ${BASELINE_FILE.replace(".", "\\.")}`),
       );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects version:1 with no categories object (was a latent baselineGet crash)", async () => {
+    const dir = tmp();
+    try {
+      writeFileSync(join(dir, BASELINE_FILE), JSON.stringify({ version: 1 }));
+      await assert.rejects(() => loadBaseline(dir), /missing 'categories' object/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// Regression: a malformed / tampered `.kit-baseline.json` MUST NOT crash the gate.
+// It used to throw an uncaught exception out of `kit check` (empty stdout in --json —
+// a denial-of-verdict). loadBaselineForGate fails CLOSED: ignore the file (empty
+// baseline suppresses nothing → every finding gates) and report the reason.
+describe("loadBaselineForGate (fail-closed, never throws)", () => {
+  const CASES: Array<[string, string]> = [
+    ["no version field", JSON.stringify({ categories: {} })],
+    ["version:1 but no categories", JSON.stringify({ version: 1 })],
+    ["unsupported version", JSON.stringify({ version: 2, categories: {} })],
+    ["not JSON at all", "this is not json {{{"],
+    ["JSON array, not object", "[1,2,3]"],
+    ["literal null", "null"],
+  ];
+  for (const [name, content] of CASES) {
+    it(`ignores ${name} and returns an empty baseline`, async () => {
+      const dir = tmp();
+      try {
+        writeFileSync(join(dir, BASELINE_FILE), content);
+        const { baseline, ignored } = await loadBaselineForGate(dir);
+        assert.equal(baseline.version, 1);
+        assert.deepEqual(baseline.categories, {}, "must suppress nothing");
+        assert.ok(ignored, "must report why the baseline was ignored");
+        // and the empty baseline is safe to query without throwing
+        assert.deepEqual(baselineGet(baseline, "tests", "untested_files"), []);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  it("no file → empty baseline, ignored=null (normal case, not an error)", async () => {
+    const dir = tmp();
+    try {
+      const { baseline, ignored } = await loadBaselineForGate(dir);
+      assert.equal(ignored, null);
+      assert.deepEqual(baseline.categories, {});
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("valid baseline → loaded, ignored=null", async () => {
+    const dir = tmp();
+    try {
+      writeFileSync(
+        join(dir, BASELINE_FILE),
+        JSON.stringify({
+          version: 1,
+          generated: "x",
+          categories: { tests: { untested_files: ["src/a.ts"] } },
+        }),
+      );
+      const { baseline, ignored } = await loadBaselineForGate(dir);
+      assert.equal(ignored, null);
+      assert.deepEqual(baselineGet(baseline, "tests", "untested_files"), ["src/a.ts"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

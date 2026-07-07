@@ -44,14 +44,31 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
+/**
+ * Strict parse of baseline file content. Throws on anything that isn't a
+ * well-formed, version-1 baseline object WITH a `categories` object — a bare
+ * `{"version":1}` used to parse "successfully" and then blow up later in
+ * `baselineGet` with a `Cannot read properties of undefined` TypeError.
+ */
+function parseBaseline(raw: string): Baseline {
+  const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("baseline is not a JSON object");
+  }
+  const o = parsed as Record<string, unknown>;
+  if (o.version !== 1) throw new Error(`unsupported baseline version: ${o.version}`);
+  if (!o.categories || typeof o.categories !== "object" || Array.isArray(o.categories)) {
+    throw new Error("baseline missing 'categories' object");
+  }
+  return parsed as Baseline;
+}
+
 export async function loadBaseline(cwd = process.cwd()): Promise<Baseline> {
   const path = resolve(cwd, BASELINE_FILE);
   if (!(await pathExists(path))) return { ...EMPTY_BASELINE };
   try {
     const raw = await readFile(path, "utf-8");
-    const parsed = JSON.parse(raw);
-    if (parsed.version !== 1) throw new Error(`unsupported baseline version: ${parsed.version}`);
-    return parsed;
+    return parseBaseline(raw);
   } catch (err) {
     throw new Error(
       `failed to read ${BASELINE_FILE}: ${err instanceof Error ? err.message : String(err)}`,
@@ -59,9 +76,37 @@ export async function loadBaseline(cwd = process.cwd()): Promise<Baseline> {
   }
 }
 
+/**
+ * Never-throws loader for the GATE paths (`kit check`, `kit review`, MCP `kit_check`).
+ * A baseline only ever SUPPRESSES findings, so a malformed / unreadable / tampered file
+ * must not crash the gate: we fail CLOSED by ignoring it (an empty baseline suppresses
+ * nothing, so every finding gates) and return `ignored` with the reason so the caller
+ * can surface it as a visible finding instead of a silent swallow. This is the fix for
+ * the crash where a hand-written or corrupted `.kit-baseline.json` (no `version`, no
+ * `categories`, non-JSON, null, array, …) took down `kit check` with an uncaught
+ * exception and — in `--json` mode — emitted zero stdout (a denial-of-verdict any
+ * process able to drop the file could trigger).
+ */
+export async function loadBaselineForGate(
+  cwd = process.cwd(),
+): Promise<{ baseline: Baseline; ignored: string | null }> {
+  const path = resolve(cwd, BASELINE_FILE);
+  if (!(await pathExists(path))) return { baseline: { ...EMPTY_BASELINE }, ignored: null };
+  try {
+    const raw = await readFile(path, "utf-8");
+    return { baseline: parseBaseline(raw), ignored: null };
+  } catch (err) {
+    return {
+      baseline: { ...EMPTY_BASELINE },
+      ignored: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 /** Lookup baseline entries for one category + key. Returns empty array if absent. */
 export function baselineGet(baseline: Baseline, category: string, key: string): string[] {
-  return baseline.categories[category]?.[key] ?? [];
+  // `?.` on `categories` too: a hand-written baseline may omit it entirely.
+  return baseline.categories?.[category]?.[key] ?? [];
 }
 
 /**

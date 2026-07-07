@@ -2,6 +2,20 @@ import { readFile } from "node:fs/promises";
 import { parse } from "smol-toml";
 import { z } from "zod";
 
+/**
+ * A `.kit.toml` that exists but is unparseable or fails schema validation. Tagged so the
+ * gate (`kit check`/`review`) can fail CLOSED with a clean message + exit 1 — the same
+ * way a MISSING config is handled — instead of letting a raw TomlError crash the process
+ * with an uncaught stack trace and empty `--json` stdout (a denial-of-verdict).
+ */
+export class InvalidConfigError extends Error {
+  readonly code = "KIT_INVALID_CONFIG";
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidConfigError";
+  }
+}
+
 export interface ToolConfig {
   [name: string]: string;
 }
@@ -753,14 +767,24 @@ export function mergeEnvironmentConfig(base: kitConfig, override: EnvOverride): 
 
 export async function loadConfig(path: string, envName?: string): Promise<kitConfig> {
   const content = await readFile(path, "utf-8");
-  const raw = parse(content) as Record<string, unknown>;
+  let raw: Record<string, unknown>;
+  try {
+    raw = parse(content) as Record<string, unknown>;
+  } catch (err) {
+    // A TOML *syntax* error throws out of the parser before schema validation. Convert
+    // it to kit's own tagged, friendly error so the gate can fail CLOSED with a clean
+    // message instead of letting a raw TomlError crash the process (empty --json stdout).
+    throw new InvalidConfigError(
+      `Invalid .kit.toml: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 
   // Validate — surface friendly errors for wrong types, invalid enum values, etc.
   const result = kitConfigSchema.safeParse(raw);
 
   if (!result.success) {
     const formatted = formatValidationErrors(result.error.issues);
-    throw new Error(`Invalid .kit.toml:\n${formatted}`);
+    throw new InvalidConfigError(`Invalid .kit.toml:\n${formatted}`);
   }
 
   // Warn about unknown top-level sections (likely typos like [tolls] vs [tools])
