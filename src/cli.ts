@@ -118,7 +118,12 @@ import { c } from "./utils/colors.js";
 import { gatherStatus } from "./status.js";
 import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
 import { collectHints } from "./hints.js";
-import { gatherLive, suggestContextToml, hasLockableContext } from "./context-lock.js";
+import {
+  gatherLive,
+  suggestContextToml,
+  hasLockableContext,
+  gcpProjectMismatch,
+} from "./context-lock.js";
 import { cmdEnv } from "./commands/env.js";
 import { cmdContext } from "./commands/context.js";
 import { cmdConfig } from "./commands/config.js";
@@ -1932,6 +1937,17 @@ async function generateConfigFile(
 async function offerContextLock(configPath: string, nonInteractive: boolean): Promise<void> {
   const live = await gatherLive(process.cwd());
   if (!hasLockableContext(live)) return;
+  // Never suggest locking a foreign active project (#251): when the repo's own
+  // .firebaserc names its projects and the active gcloud context is not one of
+  // them, warn with both values and suggest the REPO's project instead.
+  const fb = gcpProjectMismatch(live, process.cwd());
+  if (fb) {
+    console.log(
+      `${c.red}✗ active gcloud project ${c.bold}${fb.active}${c.reset}${c.red} is not one of this repo's declared project(s) ${c.bold}${fb.declared.join(", ")}${c.reset}${c.red} (.firebaserc)${c.reset}` +
+        `\n  ${c.dim}suggesting the repo's own project below; switch the CLI with:${c.reset} gcloud config set project ${fb.declared[0]}\n`,
+    );
+    live.gcloud = { account: live.gcloud?.account ?? null, project: fb.declared[0] };
+  }
   const block = suggestContextToml(live);
   if (!block.trim()) return;
 

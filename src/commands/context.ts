@@ -9,6 +9,7 @@ import {
   contextPrompt,
   gatherLive,
   suggestContextToml,
+  gcpProjectMismatch,
 } from "../context-lock.js";
 import { gatherProjectContext } from "../context.js";
 
@@ -25,7 +26,18 @@ async function cmdContextCheck(): Promise<boolean> {
     console.log(
       `${c.dim}No [context] declared in .kit.toml — each CLI is unlocked from its account + project.${c.reset}`,
     );
-    const suggestion = suggestContextToml(await gatherLive(process.cwd()));
+    const live = await gatherLive(process.cwd());
+    // Even undeclared, the repo's own .firebaserc is authoritative (#251): an
+    // active gcloud project from another customer must not pass silently.
+    const fb = gcpProjectMismatch(live, process.cwd());
+    if (fb) {
+      console.log(
+        `\n${c.red}✗ active gcloud project ${c.bold}${fb.active}${c.reset}${c.red} is not one of this repo's declared project(s) ${c.bold}${fb.declared.join(", ")}${c.reset}${c.red} (.firebaserc)${c.reset}` +
+          `\n  ${c.dim}switch with:${c.reset} gcloud config set project ${fb.declared[0]}`,
+      );
+      return false;
+    }
+    const suggestion = suggestContextToml(live);
     if (suggestion) {
       console.log(
         `\nDetected here — add a ${c.bold}[context]${c.reset} block to .kit.toml to lock it:\n`,
