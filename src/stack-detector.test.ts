@@ -633,6 +633,62 @@ describe("detectStack", () => {
     }
   });
 
+  it("a C project with a stray Cargo.toml + C sources is C, not Rust (git)", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-gitc`);
+    await makeProject(dir, {
+      "Cargo.toml": '[package]\nname = "contrib"\n',
+      Makefile: "all:\n\tcc x.c\n",
+      "x.c": "int main(){return 0;}\n",
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "c");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a C++ project (CMake) with a C#-bindings global.json is C++, not C# (protobuf)", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-pb`);
+    await makeProject(dir, {
+      "CMakeLists.txt": "project(pb)\nadd_library(pb src/pb.cc)\n",
+      "global.json": `{ "sdk": { "version": "8.0.0" } }`,
+      "src/pb.cc": "int f(){return 0;}\n",
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "cpp");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a C++ project with Python build scripts is C++, not Python (llama.cpp)", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-llama`);
+    await makeProject(dir, {
+      "CMakeLists.txt": "project(llama)\nadd_executable(main src/main.cpp)\n",
+      "requirements.txt": "numpy\ntorch\n",
+      "src/main.cpp": "int main(){}\n",
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "cpp");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("PHP with .php sources beats an asset package.json even without a framework (phpMyAdmin)", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-pma`);
+    await makeProject(dir, {
+      "composer.json": JSON.stringify({ require: { "phpmyadmin/sql-parser": "^5" } }),
+      "package.json": JSON.stringify({ devDependencies: { webpack: "5.0.0" } }),
+      "index.php": "<?php echo 1;",
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "php");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("detects Elixir (mix.exs) and Scala (build.sbt)", async () => {
     const ex = join(tmpdir(), `kit-detect-${process.pid}-ex`);
     const sc = join(tmpdir(), `kit-detect-${process.pid}-sc`);

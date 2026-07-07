@@ -274,6 +274,11 @@ async function detectFromPhp(cwd: string): Promise<DetectedStack | null> {
   if (composer.require?.["laravel/framework"]) framework = "laravel";
   else if (composer.require?.["symfony/framework-bundle"]) framework = "symfony";
 
+  // A composer.json alone can be a Packagist mirror of a JS lib (chart.js). Real .php
+  // sources (or a framework) make it a genuine PHP project — bump confidence so the
+  // selection logic treats it as a STRONG backend that beats an asset package.json
+  // (phpmyadmin, filament), while a source-less mirror stays weak → JS.
+  const hasPhpSources = await hasSourceExt(cwd, [".php"]);
   const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
 
   return {
@@ -281,7 +286,7 @@ async function detectFromPhp(cwd: string): Promise<DetectedStack | null> {
     framework,
     services,
     tools: { php: "8.3", composer: "latest" },
-    confidence: framework ? 0.85 : 0.6,
+    confidence: framework ? 0.85 : hasPhpSources ? 0.8 : 0.6,
   };
 }
 
@@ -519,10 +524,11 @@ const JS_APP_FRAMEWORKS = new Set([
 /** A backend signal strong enough to override a co-present `package.json`. Deliberately
  *  excludes Go/Rust/C-C++/JVM/exotic/mobile: those appear as secondary manifests inside JS
  *  projects (native addons, build tools, Packagist mirrors) too often to outrank an app's
- *  own package.json. PHP counts only with a detected framework (Laravel/Symfony). */
+ *  own package.json. PHP counts with a framework OR real .php sources (confidence ≥ 0.8) —
+ *  a source-less composer.json (Packagist mirror of a JS lib) stays weak → JS. */
 function isStrongBackend(s: DetectedStack): boolean {
   if (["python", "ruby", "csharp", "fsharp", "elixir"].includes(s.language)) return true;
-  if (s.language === "php" && s.framework) return true;
+  if (s.language === "php") return !!s.framework || s.confidence >= 0.8;
   return false;
 }
 
@@ -537,19 +543,25 @@ export async function detectStack(cwd: string): Promise<DetectedStack> {
   const js = await detectFromPackageJson(cwd);
 
   // Backends in priority order — first present wins as primary among backends (matters only
-  // when a repo has NO package.json but several backend manifests). Ruby is LATE so a Go/
-  // Scala repo that ships a secondary Gemfile (fzf's gem wrapper, scala's Jekyll docs) is
-  // not mislabelled Ruby; C/C++ is last of the languages so a build.zig/sbt wins its bootstrap.
+  // when a repo has NO package.json but several backend manifests). Ordering principle:
+  // COMPILED / systems languages first, SCRIPTING/tooling languages last — because Python
+  // (build scripts + requirements.txt) and Ruby (a Rakefile/Gemfile) routinely ride along
+  // inside a C/C++/Go/Rust/JVM/Scala project as tooling, not as the primary language. So:
+  //  - cpp before rust  → git (Cargo.toml + a few .rs, but 200+ .c) reads as C, not Rust
+  //  - cpp before dotnet → protobuf/rocksdb (CMake + a C#-bindings dir) read as C++, not C#
+  //  - cpp/jvm/exotic before python → llama.cpp→C++, spark→JVM (not their Python build scripts)
+  // A detector only fires on a REAL signal (cpp needs C/C++ sources or CMake; rust needs
+  // Cargo), so a pure Python/Ruby repo still wins — the compiled detectors simply decline.
   const backends = (
     await Promise.all([
-      detectFromPython(cwd),
-      detectFromPhp(cwd),
-      detectFromDotnet(cwd),
       detectFromGo(cwd),
-      detectFromRust(cwd),
       detectFromJvm(cwd),
       detectFromExotic(cwd),
       detectFromCpp(cwd),
+      detectFromRust(cwd),
+      detectFromDotnet(cwd),
+      detectFromPython(cwd),
+      detectFromPhp(cwd),
       detectFromRuby(cwd),
       detectFromFlutter(cwd),
       detectFromSwift(cwd),
