@@ -411,6 +411,8 @@ export interface kitConfig {
     python?: Record<string, boolean>;
     go?: Record<string, boolean>;
     rust?: Record<string, boolean>;
+    /** P3 user-defined plugins: local discovery dirs + published org packages. */
+    plugins?: { dirs?: string[]; packages?: string[] };
   };
 }
 
@@ -693,6 +695,13 @@ export const kitConfigSchema = z
         python: z.record(z.string(), z.boolean()).optional(),
         go: z.record(z.string(), z.boolean()).optional(),
         rust: z.record(z.string(), z.boolean()).optional(),
+        plugins: z
+          .object({
+            dirs: z.array(z.string()).optional(),
+            packages: z.array(z.string()).optional(),
+          })
+          .passthrough()
+          .optional(),
       })
       .passthrough()
       .optional(),

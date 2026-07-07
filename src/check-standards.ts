@@ -33,8 +33,9 @@ import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 
 export interface StandardsCheckResult {
   category: "standards";
-  /** general = cross-cutting metric; specific = per-language linter (P2); plugin = user rule (P3). */
-  dimension: "general" | "specific" | "plugin";
+  /** general = cross-cutting metric; specific = per-language linter (P2);
+   *  plugin = user rule (P3); platform = deploy-surface gate e.g. container (P4). */
+  dimension: "general" | "specific" | "plugin" | "platform";
   name: string;
   status: "pass" | "fail" | "warn" | "skip";
   severity?: "high" | "medium" | "low";

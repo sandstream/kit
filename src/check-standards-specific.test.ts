@@ -9,6 +9,12 @@ import {
   parseGofmtList,
   parseClippyShort,
   parseCargoFmtCheck,
+  parseRubocopJson,
+  parsePhpstanJson,
+  parseKtlintJson,
+  parseCheckstyle,
+  parseDotnetFormat,
+  makeLineColParser,
   checkStandardsSpecific,
   scanSpecific,
   collectSpecificKeys,
@@ -229,7 +235,99 @@ describe("scanSpecific + collectSpecificKeys", () => {
     const s = await scanSpecific(process.cwd(), "typescript", { eslint: false, tsc: false });
     assert.deepEqual(s.runs, []);
   });
-  it("exposes the four P2 languages", () => {
-    assert.deepEqual([...SPECIFIC_LANGUAGES].sort(), ["go", "python", "rust", "typescript"]);
+  it("exposes the P2 core + P4 breadth languages", () => {
+    // P2: typescript/python/go/rust · P4: ruby/php/kotlin/java/csharp/cpp/c
+    for (const lang of [
+      "typescript",
+      "python",
+      "go",
+      "rust",
+      "ruby",
+      "php",
+      "kotlin",
+      "java",
+      "csharp",
+      "cpp",
+      "c",
+    ]) {
+      assert.ok(SPECIFIC_LANGUAGES.includes(lang), `${lang} is supported`);
+    }
+  });
+});
+
+describe("specific parsers — P4 languages", () => {
+  it("rubocop json", () => {
+    const json = JSON.stringify({
+      files: [
+        {
+          path: "app/models/user.rb",
+          offenses: [
+            {
+              location: { line: 12 },
+              cop_name: "Style/StringLiterals",
+              message: "prefer single quotes",
+            },
+          ],
+        },
+      ],
+    });
+    const f = parseRubocopJson(ok(json, 1));
+    assert.deepEqual(f, [
+      {
+        file: "app/models/user.rb",
+        line: 12,
+        rule: "Style/StringLiterals",
+        message: "prefer single quotes",
+      },
+    ]);
+  });
+
+  it("phpstan json (files keyed by path)", () => {
+    const json = JSON.stringify({
+      files: { "src/App.php": { messages: [{ line: 5, message: "Undefined variable $x" }] } },
+    });
+    const f = parsePhpstanJson(ok(json, 1));
+    assert.deepEqual(f, [{ file: "src/App.php", line: 5, message: "Undefined variable $x" }]);
+  });
+
+  it("ktlint json", () => {
+    const json = JSON.stringify([
+      {
+        file: "src/Main.kt",
+        errors: [{ line: 3, message: "Unexpected indentation", rule: "indent" }],
+      },
+    ]);
+    const f = parseKtlintJson(ok(json, 1));
+    assert.deepEqual(f, [
+      { file: "src/Main.kt", line: 3, rule: "indent", message: "Unexpected indentation" },
+    ]);
+  });
+
+  it("checkstyle plain output", () => {
+    const out = "[WARN] /repo/src/Main.java:10:5: Missing a Javadoc comment. [JavadocMethod]";
+    const f = parseCheckstyle(ok(out, 1));
+    assert.equal(f.length, 1);
+    assert.equal(f[0].file, "/repo/src/Main.java");
+    assert.equal(f[0].line, 10);
+    assert.equal(f[0].rule, "JavadocMethod");
+  });
+
+  it("dotnet format verify-no-changes", () => {
+    const out =
+      "  /repo/Program.cs(7,1): error WHITESPACE: Fix whitespace formatting. [/repo/App.csproj]";
+    const f = parseDotnetFormat(ok(out, 2));
+    assert.equal(f.length, 1);
+    assert.equal(f[0].file, "/repo/Program.cs");
+    assert.equal(f[0].line, 7);
+    assert.equal(f[0].rule, "WHITESPACE");
+  });
+
+  it("cppcheck via makeLineColParser (ext-filtered)", () => {
+    const parse = makeLineColParser(/\.(c|cc|cpp|cxx|h|hh|hpp)$/);
+    const out = ["src/main.cpp:42: Array index out of bounds", "somenoise: not a finding"].join(
+      "\n",
+    );
+    const f = parse(err(out));
+    assert.deepEqual(f, [{ file: "src/main.cpp", line: 42, message: "Array index out of bounds" }]);
   });
 });

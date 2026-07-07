@@ -664,6 +664,7 @@ const R7: SelfAuditRule = {
 // test in self-audit.test.ts.
 export const READ_ONLY_SAFE = new Set<string>([
   "kit_check",
+  "kit_standards",
   "kit_env",
   "kit_ci",
   "kit_context",
