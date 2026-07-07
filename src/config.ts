@@ -405,6 +405,12 @@ export interface kitConfig {
       max_file_lines?: number;
       max_duplication_pct?: number;
     };
+    /** P2 per-language linter toggles: `[standards.<lang>]` with `<linter> = false`
+     *  to disable a specific delegate (all on by default for the detected language). */
+    typescript?: Record<string, boolean>;
+    python?: Record<string, boolean>;
+    go?: Record<string, boolean>;
+    rust?: Record<string, boolean>;
   };
 }
 
@@ -683,6 +689,10 @@ export const kitConfigSchema = z
           })
           .passthrough()
           .optional(),
+        typescript: z.record(z.string(), z.boolean()).optional(),
+        python: z.record(z.string(), z.boolean()).optional(),
+        go: z.record(z.string(), z.boolean()).optional(),
+        rust: z.record(z.string(), z.boolean()).optional(),
       })
       .passthrough()
       .optional(),
