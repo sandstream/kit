@@ -190,6 +190,130 @@ export function parseCargoFmtCheck(res: ExecResult): SpecificFinding[] {
   return out;
 }
 
+/** rubocop `--format json`: `{ files: [{ path, offenses: [{ location: { line }, cop_name, message }] }] }`. */
+export function parseRubocopJson(res: ExecResult): SpecificFinding[] {
+  let data: unknown;
+  try {
+    data = JSON.parse(res.stdout);
+  } catch {
+    return [];
+  }
+  const root = (data ?? {}) as Record<string, unknown>;
+  const files = Array.isArray(root.files) ? root.files : [];
+  const out: SpecificFinding[] = [];
+  for (const f of files) {
+    const file = (f ?? {}) as Record<string, unknown>;
+    const path = typeof file.path === "string" ? file.path : undefined;
+    if (!path) continue;
+    const offenses = Array.isArray(file.offenses) ? file.offenses : [];
+    for (const o of offenses) {
+      const off = (o ?? {}) as Record<string, unknown>;
+      const loc = (off.location ?? {}) as Record<string, unknown>;
+      out.push({
+        file: path,
+        line: typeof loc.line === "number" ? loc.line : undefined,
+        rule: typeof off.cop_name === "string" ? off.cop_name : undefined,
+        message: typeof off.message === "string" ? off.message : undefined,
+      });
+    }
+  }
+  return out;
+}
+
+/** phpstan `analyse --error-format=json`: `{ files: { "<path>": { messages: [{ line, message }] } } }`. */
+export function parsePhpstanJson(res: ExecResult): SpecificFinding[] {
+  let data: unknown;
+  try {
+    data = JSON.parse(res.stdout);
+  } catch {
+    return [];
+  }
+  const root = (data ?? {}) as Record<string, unknown>;
+  const files = (root.files ?? {}) as Record<string, unknown>;
+  const out: SpecificFinding[] = [];
+  for (const [path, v] of Object.entries(files)) {
+    const messages = Array.isArray((v as Record<string, unknown>)?.messages)
+      ? ((v as Record<string, unknown>).messages as unknown[])
+      : [];
+    for (const m of messages) {
+      const msg = (m ?? {}) as Record<string, unknown>;
+      out.push({
+        file: path,
+        line: typeof msg.line === "number" ? msg.line : undefined,
+        message: typeof msg.message === "string" ? msg.message : undefined,
+      });
+    }
+  }
+  return out;
+}
+
+/** ktlint `--reporter=json`: `[{ file, errors: [{ line, message, rule }] }]`. */
+export function parseKtlintJson(res: ExecResult): SpecificFinding[] {
+  let data: unknown;
+  try {
+    data = JSON.parse(res.stdout);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(data)) return [];
+  const out: SpecificFinding[] = [];
+  for (const f of data) {
+    const file = (f ?? {}) as Record<string, unknown>;
+    const path = typeof file.file === "string" ? file.file : undefined;
+    if (!path) continue;
+    const errors = Array.isArray(file.errors) ? file.errors : [];
+    for (const e of errors) {
+      const err = (e ?? {}) as Record<string, unknown>;
+      out.push({
+        file: path,
+        line: typeof err.line === "number" ? err.line : undefined,
+        rule: typeof err.rule === "string" ? err.rule : undefined,
+        message: typeof err.message === "string" ? err.message : undefined,
+      });
+    }
+  }
+  return out;
+}
+
+/** Generic `path:line[:col]: [severity:] message` linter output (cppcheck, clang-tidy).
+ *  `extFilter` restricts to files with that extension so unrelated lines are ignored. */
+export function makeLineColParser(extFilter: RegExp) {
+  return (res: ExecResult): SpecificFinding[] => {
+    const text = `${res.stdout}\n${res.stderr}`;
+    const out: SpecificFinding[] = [];
+    const re = /^(.+?):(\d+):(?:\d+:)?\s+(.*)$/;
+    for (const line of text.split("\n")) {
+      const m = re.exec(line.trim());
+      if (m && extFilter.test(m[1])) out.push({ file: m[1], line: Number(m[2]), message: m[3] });
+    }
+    return out;
+  };
+}
+
+/** checkstyle plain output: `[SEVERITY] /path/File.java:line:col: message [Rule]`. */
+export function parseCheckstyle(res: ExecResult): SpecificFinding[] {
+  const text = `${res.stdout}\n${res.stderr}`;
+  const out: SpecificFinding[] = [];
+  const re = /^\[\w+\]\s+(.+?):(\d+)(?::\d+)?:\s+(.*?)(?:\s+\[(\w+)\])?$/;
+  for (const line of text.split("\n")) {
+    const m = re.exec(line.trim());
+    if (m) out.push({ file: m[1], line: Number(m[2]), rule: m[4], message: m[3] });
+  }
+  return out;
+}
+
+/** `dotnet format --verify-no-changes`: `  path(line,col): error WHITESPACE: msg [proj]`. */
+export function parseDotnetFormat(res: ExecResult): SpecificFinding[] {
+  const text = `${res.stdout}\n${res.stderr}`;
+  const out: SpecificFinding[] = [];
+  const re = /^(.+?)\((\d+),\d+\):\s+(?:error|warning)\s+(\w+):\s+(.*?)(?:\s+\[.*\])?$/;
+  for (const line of text.split("\n")) {
+    const m = re.exec(line.trim());
+    if (m) out.push({ file: m[1], line: Number(m[2]), rule: m[3], message: m[4] });
+  }
+  return out;
+}
+
 // ── The per-language registry ──────────────────────────────────────────────────
 
 const REGISTRY: Record<string, LinterSpec[]> = {
@@ -272,9 +396,88 @@ const REGISTRY: Record<string, LinterSpec[]> = {
       maxBuffer: 32 * 1024 * 1024,
     },
   ],
+  // ── P4: remaining ecosystems (now that detection covers them) ──────────────────
+  ruby: [
+    {
+      id: "rubocop",
+      label: "rubocop",
+      bin: "rubocop",
+      args: ["--format", "json"],
+      parse: parseRubocopJson,
+      timeout: 120_000,
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  ],
+  php: [
+    {
+      id: "phpstan",
+      label: "phpstan",
+      bin: "phpstan",
+      args: ["analyse", "--error-format=json", "--no-progress"],
+      parse: parsePhpstanJson,
+      timeout: 120_000,
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  ],
+  kotlin: [
+    {
+      id: "ktlint",
+      label: "ktlint",
+      bin: "ktlint",
+      args: ["--reporter=json"],
+      parse: parseKtlintJson,
+      timeout: 120_000,
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  ],
+  java: [
+    {
+      id: "checkstyle",
+      label: "checkstyle",
+      bin: "checkstyle",
+      // needs a ruleset (-c) to run; absent one it errors → honest setup gap.
+      args: ["-c", "/google_checks.xml", "src"],
+      parse: parseCheckstyle,
+      timeout: 120_000,
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  ],
+  csharp: [
+    {
+      id: "dotnet-format",
+      label: "dotnet format --verify-no-changes",
+      bin: "dotnet",
+      args: ["format", "--verify-no-changes", "--verbosity", "quiet"],
+      parse: parseDotnetFormat,
+      timeout: 300_000,
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  ],
+  cpp: [
+    {
+      id: "cppcheck",
+      label: "cppcheck",
+      bin: "cppcheck",
+      args: ["--enable=warning,style", "--quiet", "--template={file}:{line}: {message}", "."],
+      parse: makeLineColParser(/\.(c|cc|cpp|cxx|h|hh|hpp)$/),
+      timeout: 180_000,
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  ],
+  c: [
+    {
+      id: "cppcheck",
+      label: "cppcheck",
+      bin: "cppcheck",
+      args: ["--enable=warning,style", "--quiet", "--template={file}:{line}: {message}", "."],
+      parse: makeLineColParser(/\.(c|h)$/),
+      timeout: 180_000,
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  ],
 };
 
-/** The languages P2 has specific linters for. */
+/** The languages the specific gate has linters for (P2 core + P4 breadth). */
 export const SPECIFIC_LANGUAGES = Object.keys(REGISTRY);
 
 // ── Runner + result assembly ────────────────────────────────────────────────────

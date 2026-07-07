@@ -665,6 +665,7 @@ async function cmdStandards(): Promise<boolean> {
   const runGeneral = !category || category === "general";
   const runSpecific = !category || category === "specific" || !!langCategory;
   const runPlugins = !category || category === "plugins";
+  const runPlatform = !category || category === "platform";
 
   // Detect the project language once — both the specific gate and the plugin
   // `applies_to` filter key off it (a language name via --category overrides).
@@ -753,13 +754,23 @@ async function cmdStandards(): Promise<boolean> {
     );
   }
 
+  if (runPlatform) {
+    const { checkStandardsPlatform } = await import("./check-standards-platform.js");
+    results.push(
+      ...(await checkStandardsPlatform({
+        enforce: effectiveEnforce,
+        baseline: baselineGet(baseline, "standards", "platform"),
+      })),
+    );
+  }
+
   const ok = results.every((r) => r.status !== "fail");
   if (jsonMode) {
     console.log(JSON.stringify({ ok, checks: results }, null, 2));
     return ok;
   }
   console.log(
-    `${c.bold}Standards${c.reset} ${c.dim}(general + per-language — deterministic, zero-LLM)${c.reset}`,
+    `${c.bold}Standards${c.reset} ${c.dim}(general + per-language + plugins + platform — deterministic, zero-LLM)${c.reset}`,
   );
   for (const r of results) {
     const icon =
@@ -878,12 +889,17 @@ async function cmdBaseline(): Promise<boolean> {
     ...(await collectMjsPluginKeys(process.cwd(), detectedLang, pluginDirs)),
   ];
   baselineSet(baseline, "standards", "plugins", pluginKeys);
+  // P4: freeze container (platform) findings.
+  const { collectPlatformKeys } = await import("./check-standards-platform.js");
+  const platformKeys = await collectPlatformKeys(process.cwd());
+  baselineSet(baseline, "standards", "platform", platformKeys);
   await saveBaseline(baseline);
   const standardsTotal =
     standards.complexity.length +
     standards.duplication.length +
     standards.size.length +
     pluginKeys.length +
+    platformKeys.length +
     specificCount;
   console.log(
     `${c.green}✓${c.reset} Wrote ${BASELINE_FILE} — ${untested.length} untested file(s), ${design.a11y.length} a11y, ${design.tokens.length} design-token, ${standardsTotal} standards finding(s) frozen.`,
