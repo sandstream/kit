@@ -6,6 +6,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-07-07
+
+### Fixed — dogfood findings from real projects (a Turborepo + a Firebase repo)
+
+- **Monorepo workspace resolution (#249).** `kit review`'s source-rooted checks
+  (test coverage, a11y/design scan) said "no src/ found" in a Turborepo full of
+  tsx under `apps/*`/`packages/*` — an empty green. New `src/workspaces.ts`
+  resolves workspaces from `package.json` + `pnpm-workspace.yaml`; both checks
+  scan each workspace's src dirs, and an empty scan is an explicit monorepo-aware
+  skip — scanned-zero-files can never read as scanned-clean.
+- **Public-by-design client keys get truthful advice (#250).** A Firebase
+  web-config apiKey was flagged "leaked secret — rotate". The secrets scan now
+  classifies public-by-design shapes (Firebase web config with co-occurring
+  authDomain/projectId context, Sentry DSN, PostHog project key) and says
+  "verify API-key restrictions + security rules" instead. Conservative: no
+  context or unreadable file keeps the finding; a VERIFIED-LIVE credential is
+  never waved through.
+- **Active gcloud context is cross-checked against the repo's own projects
+  (#251).** `kit init` captured another customer's ACTIVE gcloud project into a
+  repo whose `.firebaserc` names its own. The context-lock offer now warns with
+  both values named and suggests the repo's project; `kit context check` flags
+  the mismatch (exit 1) even with no `[context]` declared.
+
+### Changed — guarddog that can actually finish (#205)
+
+- **Direct-deps target + clean-verdict cache + nightly sweep.** guarddog costs
+  ~25s/package, so verifying a 12k-package lockfile always timed out into
+  UNVERIFIED. It now verifies `package.json` (direct deps — guarddog's depth;
+  the full tree keeps bumblebee + osv breadth), caches only COMPLETE clean
+  verdicts keyed by a direct-deps hash (`~/.kit/guarddog-cache.json`; hits say
+  the verdict date, never pretend to have just scanned), and a nightly
+  fail-closed `guarddog-nightly` job in security.yml runs the uncached sweep
+  with a 45-minute budget. `KIT_GUARDDOG_TIMEOUT_MS` overrides the local 300s.
+
+### Added — evidence + memory reach
+
+- **`kit coverage --verify` binds more evidence without a false-green shortcut
+  (#206).** Self-audit results carry their stable `ruleId`; coverage binds by
+  name OR rule id, resolves a curated alias map (broad category matching was
+  deliberately rejected — it would let any passing category-mate "verify"
+  unrelated controls), and runs the cheap command-backed evidence inline
+  (gha-audit/ci-audit, transcript scan). On kit: 4 not-run → 1 (only the
+  vault-backed secrets validation stays honestly unbound).
+- **`kit memory merge --remap-project` + loud foreign-scope summary (#247).**
+  A merged session keyed to another machine's path (a container's `-home-user`)
+  is invisible to project-scoped search — "merged" must not read as "reachable".
+  The merge now reports where sessions landed and points to `--remap-project` /
+  `--global`; re-merging with the flag rehomes an already-imported session.
+
+### Security — semgrep p/default: 31 findings → 0 (sec-09ef20)
+
+- Pinned `actions/checkout@v4` + `actions/setup-node@v4` to commit SHAs in
+  kit's own action and shipped templates (kit's gha-audit rule, applied to
+  kit's own house).
+- docker-compose: `no-new-privileges` + read-only root fs on postgres/redis.
+- Escaped a key interpolated into a regex in the one builder that predated the
+  escapeRegex convention; remaining regexp/formatstring findings suppressed
+  per-site with justification (escaped internal identifiers, module constants).
+
 ## [4.2.0] - 2026-07-06
 
 ### Security — surface a trust-bearing KIT_DEVICE_ID override (#79)
