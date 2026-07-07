@@ -715,6 +715,55 @@ describe("detectStack", () => {
     }
   });
 
+  it("source census: a manifest-less repo is detected by its dominant source language (WordPress)", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-census-unknown`);
+    await makeProject(dir, {
+      "index.php": "<?php echo 1;",
+      "wp-load.php": "<?php",
+      "wp-includes/post.php": "<?php",
+      "wp-admin/admin.php": "<?php",
+      "readme.html": "<html></html>",
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "php");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("source census: a dominant backend language overrides a bare asset package.json", async () => {
+    // A Rails-style repo whose gems live in subdirs (no root Gemfile) but ships an asset
+    // package.json: the census sees Ruby dominate and overrides the bare package.json.
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-census-override`);
+    await makeProject(dir, {
+      "package.json": JSON.stringify({ devDependencies: { esbuild: "0.19.0" } }),
+      "core/app/models/order.rb": "class Order; end",
+      "core/app/models/product.rb": "class Product; end",
+      "api/lib/api.rb": "module Api; end",
+      "admin/app/controller.rb": "class C; end",
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "ruby");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("source census does NOT override when JS itself dominates (chart.js + composer mirror)", async () => {
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-census-js`);
+    await makeProject(dir, {
+      "package.json": JSON.stringify({ name: "chart.js" }),
+      "composer.json": JSON.stringify({ name: "chartjs/chart.js" }),
+      "src/index.js": "export default {}",
+      "src/core.js": "export const x = 1",
+    });
+    try {
+      assert.equal((await detectStack(dir)).language, "typescript");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("detects Elixir (mix.exs) and Scala (build.sbt)", async () => {
     const ex = join(tmpdir(), `kit-detect-${process.pid}-ex`);
     const sc = join(tmpdir(), `kit-detect-${process.pid}-sc`);

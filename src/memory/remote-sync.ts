@@ -33,7 +33,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "smol-toml";
 import { getMemoryDir, getMemoryDbPath, openMemoryDb } from "./db.js";
-import { backupEncrypted, backupToRecipient } from "./backup.js";
+import { backupEncrypted, backupToRecipient, backupPlain } from "./backup.js";
 import { syncFromExport } from "./sync.js";
 import type { MergeResult } from "./merge.js";
 
@@ -63,6 +63,11 @@ export interface SyncConfig {
    *  instead of a passphrase — so an ephemeral session needs NO secret, only this
    *  (non-secret) public key. Only holders of the matching private key can decrypt. */
   recipient?: string;
+  /** Encrypt the synced blob (default TRUE). Set `encrypt = false` for the low-ceremony
+   *  path: the blob is a plain SQLite DB — no passphrase, no recipient. Requires a PRIVATE
+   *  destination (the store can hold secret-shaped strings); the pull path still runs the
+   *  R7 injection scan before merge. */
+  encrypt: boolean;
 }
 
 const DEFAULT_BRANCH = "main";
@@ -102,6 +107,8 @@ export function loadSyncConfig(): SyncConfig | null {
   const pullOnStart = bool(s.pull_on_start);
   const pushOnEnd = bool(s.push_on_end);
   const recipient = str(s.recipient) || undefined; // public-key mode (optional)
+  // Encryption is ON unless explicitly disabled (`encrypt = false`) — secure by default.
+  const encrypt = s.encrypt !== false;
 
   const transport: SyncTransport = s.transport === "command" ? "command" : "git";
   if (transport === "command") {
@@ -110,7 +117,7 @@ export function loadSyncConfig(): SyncConfig | null {
     if (!pushCmd || !pullCmd) {
       throw new Error('[memory.sync] transport = "command" requires both push_cmd and pull_cmd');
     }
-    return { transport, file, pushCmd, pullCmd, pullOnStart, pushOnEnd, recipient };
+    return { transport, file, pushCmd, pullCmd, pullOnStart, pushOnEnd, recipient, encrypt };
   }
 
   const remote = str(s.remote);
@@ -118,7 +125,7 @@ export function loadSyncConfig(): SyncConfig | null {
   const branch = str(s.branch) || DEFAULT_BRANCH;
   assertSafeGitRef(remote, "remote");
   assertSafeGitRef(branch, "branch");
-  return { transport, file, remote, branch, pullOnStart, pushOnEnd, recipient };
+  return { transport, file, remote, branch, pullOnStart, pushOnEnd, recipient, encrypt };
 }
 
 /**
@@ -278,6 +285,12 @@ function encryptBlobForSync(
   passphrase: string | undefined,
   outPath: string,
 ): void {
+  if (cfg.encrypt === false) {
+    // Opt-out: write a plain SQLite snapshot. No passphrase/recipient required — the
+    // destination is trusted to be private and the pull path still R7-scans before merge.
+    backupPlain(getMemoryDbPath(), outPath);
+    return;
+  }
   if (cfg.recipient) {
     backupToRecipient(cfg.recipient, getMemoryDbPath(), outPath);
     return;

@@ -578,8 +578,10 @@ async function memPush(): Promise<boolean> {
   }
   if (!cfg) return syncNotConfigured();
   const pass = process.env.KIT_MEMORY_PASSPHRASE ?? flagValue(process.argv, "--passphrase");
-  // Public-key mode (recipient set) needs no secret; passphrase mode does.
-  if (!cfg.recipient && !pass) {
+  // Encryption is on by default: public-key mode (recipient set) needs no secret; passphrase
+  // mode does. The `encrypt = false` opt-out needs neither — the blob is a plain SQLite DB, so
+  // don't demand a passphrase the plaintext path will never use.
+  if (cfg.encrypt !== false && !cfg.recipient && !pass) {
     console.error(
       `${c.red}set KIT_MEMORY_PASSPHRASE (or --passphrase), or add a public-key \`recipient\` to [memory.sync] — the pushed blob is encrypted${c.reset}`,
     );
@@ -587,16 +589,27 @@ async function memPush(): Promise<boolean> {
   }
   try {
     const r = pushMemory(cfg, pass, getCurrentProjectRoot());
+    const kind = cfg.encrypt === false ? "PLAINTEXT" : "encrypted";
     if (!r.pushed) {
       console.log(`${c.dim}already up to date — nothing to push${c.reset}`);
+    } else if (cfg.encrypt === false && r.verified) {
+      // No false green: this blob is an unencrypted SQLite DB. Say so plainly — the
+      // destination MUST be private (it can hold secret-shaped recall strings).
+      console.log(
+        `${c.yellow}⚠${c.reset} pushed ${c.bold}PLAINTEXT${c.reset} memory → ${c.bold}${r.target}${c.reset} ${c.dim}(${r.file})${c.reset} — the blob is an unencrypted SQLite DB; keep this destination PRIVATE`,
+      );
     } else if (r.verified) {
       console.log(
-        `${c.green}✓${c.reset} pushed encrypted memory → ${c.bold}${r.target}${c.reset} ${c.dim}(${r.file})${c.reset}`,
+        `${c.green}✓${c.reset} pushed ${kind} memory → ${c.bold}${r.target}${c.reset} ${c.dim}(${r.file})${c.reset}`,
       );
     } else {
       // command transport: the shell command exited 0 but kit can't prove the blob landed.
+      const plain =
+        cfg.encrypt === false
+          ? " — NOTE: this blob is unencrypted PLAINTEXT, keep the destination PRIVATE"
+          : "";
       console.log(
-        `${c.yellow}⚠${c.reset} ran push command → ${c.bold}${r.target}${c.reset} ${c.dim}(${r.file})${c.reset} — exit 0, but kit cannot confirm the blob was stored; verify the destination`,
+        `${c.yellow}⚠${c.reset} ran push command → ${c.bold}${r.target}${c.reset} ${c.dim}(${r.file})${c.reset} — exit 0, but kit cannot confirm the blob was stored; verify the destination${plain}`,
       );
     }
     return true;

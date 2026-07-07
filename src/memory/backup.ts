@@ -26,7 +26,7 @@ import {
   type KeyObject,
 } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { openMemoryDb, getMemoryDbPath, getMemoryDir } from "./db.js";
 
@@ -160,6 +160,28 @@ export function backupEncrypted(
   // 0600: the blob is encrypted, but there is no reason to leave your whole
   // (encrypted) brain world-readable on a shared host.
   writeFileSync(outPath, Buffer.concat([MAGIC_V2, salt, iv, tag, ciphertext]), { mode: 0o600 });
+}
+
+/**
+ * Write an UNENCRYPTED, consistent snapshot of the memory DB to `outPath` (SQLite
+ * `VACUUM INTO` after a WAL checkpoint → a standalone .db the pull side merges directly).
+ * For the low-ceremony `[memory.sync] encrypt = false` option: no passphrase, no recipient.
+ * The blob is plaintext, so the sync DESTINATION MUST be private (the store can hold
+ * secret-shaped strings) — the pull path still runs the R7 injection scan before merge.
+ * 0600 like every other kit-written store file.
+ */
+export function backupPlain(srcPath: string = getMemoryDbPath(), outPath?: string): void {
+  if (!outPath) throw new Error("backupPlain requires an output path");
+  const db = openMemoryDb(srcPath);
+  try {
+    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    // VACUUM INTO requires the target not to exist (a prior blob may have been pulled in).
+    if (existsSync(outPath)) rmSync(outPath);
+    db.exec(`VACUUM INTO '${outPath.replace(/'/g, "''")}'`);
+  } finally {
+    db.close();
+  }
+  chmodSync(outPath, 0o600);
 }
 
 /** Decrypt a backup blob into `destPath`. Throws on a wrong passphrase or tampered blob (GCM auth). */
