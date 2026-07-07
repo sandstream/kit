@@ -68,14 +68,9 @@ import type { SecretsStore } from "./toml-generator.js";
 import { generateSecrets } from "./secrets.js";
 import { syncSecrets } from "./secrets-sync.js";
 import { generateCompletions } from "./completions.js";
-import {
-  checkForUpdate,
-  printUpdateNotice,
-  readCachedUpdateSync,
-  getKitVersionSync,
-} from "./update-check.js";
-import { resolveMode, MODE_NAMES, modeScore, type SubsystemStatus } from "./setup-modes.js";
-import { formatStatusline } from "./statusline.js";
+import { checkForUpdate, printUpdateNotice } from "./update-check.js";
+import { resolveMode, MODE_NAMES, modeScore } from "./setup-modes.js";
+import { quickSubsystems } from "./statusline.js";
 import { checkSkills } from "./check-skills.js";
 import { checkLockFiles } from "./check-lock.js";
 import { collectEscalations, formatEscalationMessage } from "./escalate.js";
@@ -1715,12 +1710,14 @@ async function cmdAgentConfig(): Promise<boolean> {
   } else if (perms.action === "failed") {
     console.log(`\n  ${c.yellow}!${c.reset} could not update ${perms.file}: ${perms.detail}`);
   }
-  // Opt-in: a true blocking install-gate (PreToolUse hook) so an agent in
-  // auto-mode can't run an un-triaged `npm install` past kit. The rules block
-  // above only advises; this enforces (blocks the install before it runs).
-  if (hasFlag(process.argv, "--install-gate")) {
+  // Default-ON: the true blocking gates (PreToolUse hooks) — un-triaged installs
+  // and plaintext secrets aimed at .env* are blocked BEFORE they run/land. The
+  // rules block above only advises; these enforce. An instruction the agent can
+  // ignore is a false green, so enforcement is the default; --no-install-gate
+  // opts out (--install-gate is still accepted for backward compatibility).
+  if (!hasFlag(process.argv, "--no-install-gate")) {
     console.log(
-      `\n  ${c.bold}PreToolUse install-gate${c.reset} ${c.dim}(blocks un-triaged installs before they run):${c.reset}`,
+      `\n  ${c.bold}PreToolUse gates${c.reset} ${c.dim}(block un-triaged installs + plaintext .env* secrets before they happen; --no-install-gate to skip):${c.reset}`,
     );
     for (const { agent, result } of await installAllInstallGates()) {
       if (result.action === "created" || result.action === "updated") {
@@ -2235,88 +2232,17 @@ async function offerPosture(
   );
 }
 
-/** Cheap, read-only subsystem presence (file-existence only — no shell/network), for
- *  the statusline + `kit status` score. Safe to run on every prompt render. */
-function quickSubsystems(cwd: string): SubsystemStatus[] {
-  const has = (p: string) => existsSync(resolve(cwd, p));
-  const tomlHas = (needle: string) => {
-    try {
-      return readFileSync(resolve(cwd, ".kit.toml"), "utf-8").includes(needle);
-    } catch {
-      return false;
-    }
-  };
-  // Default memory-db location (avoid importing the sqlite module on the hot path).
-  const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
-  const memoryOk = home ? existsSync(join(home, ".kit", "memory.db")) : false;
-  return [
-    { key: "config", label: ".kit.toml", ok: has(".kit.toml"), next: "kit init" },
-    { key: "tools", label: "tools locked", ok: has(".kit/cli-lock.json"), next: "kit install" },
-    { key: "secrets", label: ".env.local", ok: has(".env.local"), next: "kit secrets" },
-    {
-      key: "hooks",
-      label: "git hooks",
-      ok: has(".githooks/pre-commit") || has(".git/hooks/pre-commit"),
-      next: "kit hooks install",
-    },
-    {
-      key: "agent-config",
-      label: "agent config",
-      ok: ["CLAUDE.md", "AGENTS.md", ".cursorrules", ".clinerules", "GEMINI.md"].some(has),
-      next: "kit agent-config",
-    },
-    { key: "memory", label: "memory", ok: memoryOk, next: "kit memory install" },
-    {
-      key: "posture",
-      label: "[air_gap]",
-      ok: tomlHas("[air_gap]"),
-      next: "kit setup --mode airgap",
-    },
-  ];
-}
-
-/** Open-PAL ("blocked on you") count — cheap, 0 on any error. Memory modules are
- *  dynamically imported so the sqlite dependency stays off other commands' startup. */
-async function quickPalCount(): Promise<number> {
-  try {
-    const { openMemoryDb } = await import("./memory/db.js");
-    const { palList } = await import("./memory/pal.js");
-    const db = openMemoryDb();
-    try {
-      return palList(db).length;
-    } finally {
-      db.close();
-    }
-  } catch {
-    return 0;
-  }
-}
-
 /**
  * `kit statusline` — one compact, fast, read-only line for ANY harness's info bar
  * (Claude Code statusLine, a shell PS1, …): setup score for the active mode + an
  * "update available" mark + the open PAL count. Agent-agnostic; never blocks
- * (cached update only, file-presence subsystem checks).
+ * (cached update only, file-presence subsystem checks). Assembly lives in
+ * statusline.ts so the memory SessionStart hook injects the SAME line as context.
  */
 async function cmdStatusline(): Promise<boolean> {
   process.env.KIT_NO_UPDATE_CHECK = "1"; // never let the post-command notice pollute the single line
-  let config: kitConfig = {} as kitConfig;
-  try {
-    config = await loadConfig(resolveConfigPath());
-  } catch {
-    /* no/invalid .kit.toml — statusline still works (mode=full default) */
-  }
-  const { profile } = resolveMode(flagValue(process.argv, "--mode"), config.setup?.mode);
-  const { done, total } = modeScore(profile, quickSubsystems(process.cwd()));
-  const update = readCachedUpdateSync(getKitVersionSync());
-  console.log(
-    formatStatusline({
-      mode: profile.mode,
-      score: { done, total },
-      update: update?.latest ?? null,
-      pal: await quickPalCount(),
-    }),
-  );
+  const { buildStatuslineText } = await import("./statusline.js");
+  console.log(await buildStatuslineText({ modeFlag: flagValue(process.argv, "--mode") }));
   return true;
 }
 
@@ -5556,6 +5482,8 @@ export const COMMAND_HELP: Record<string, string> = {
     "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules / .github/copilot-instructions.md",
   "gate-bash":
     "PreToolUse install-gate: read an agent's pending Bash command on stdin, block (exit 2) un-triaged installs",
+  "gate-env":
+    "PreToolUse env-gate: read an agent's pending Write/Edit on stdin, block (exit 2) plaintext secrets aimed at .env* files",
   security:
     "Security policy + scanners (policy | scan-staged | scan-build | verify-pull | prescan | …)",
   "security policy": "Dependency allowlist enforcement (init|add|check)",
@@ -6140,6 +6068,50 @@ export async function cmdGateBash(): Promise<boolean> {
   return true;
 }
 
+/**
+ * PreToolUse hook body for the env-write-gate: block a Write/Edit that puts a
+ * plaintext secret into a real `.env*` file, BEFORE it lands. Mirrors gate-bash:
+ * fail-open on unparseable payloads (never break the agent), exit-2 deny on block.
+ */
+export async function cmdGateEnv(): Promise<boolean> {
+  let raw = "";
+  try {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+    raw = Buffer.concat(chunks).toString("utf8");
+  } catch {
+    return true; // no stdin / read error → do not block
+  }
+  let payload: unknown;
+  try {
+    payload = raw ? JSON.parse(raw) : {};
+  } catch {
+    return true; // unparseable hook payload → do not block (avoid breaking the agent)
+  }
+  const { extractWriteFromHookPayload, decideEnvWriteGate } = await import("./env-write-gate.js");
+  const write = extractWriteFromHookPayload(payload);
+  if (!write) return true; // not a file write → allow
+  const verdict = decideEnvWriteGate(write.filePath, write.text);
+  if (verdict.block) {
+    if (gateFormat() === "cline") {
+      console.log(
+        JSON.stringify({
+          cancel: true,
+          errorMessage: `kit env-gate: ${verdict.reason} — resolve secrets with \`kit secrets\` (vault-backed) instead of plaintext .env`,
+        }),
+      );
+      return true;
+    }
+    const { writeSync } = await import("node:fs");
+    writeSync(
+      2,
+      `kit env-gate: BLOCKED — ${verdict.reason}\nNever write secrets to .env* in plaintext. Resolve them with \`kit secrets\` (vault-backed), or use a placeholder in .env.example.\n`,
+    );
+    process.exit(2); // PreToolUse deny
+  }
+  return true;
+}
+
 /** The `--format <fmt>` value for gate-bash (`--format cline` | `--format=cline`). */
 function gateFormat(): string {
   const argv = process.argv;
@@ -6212,6 +6184,7 @@ export const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
   team: cmdTeam,
   memory: cmdMemory,
   "gate-bash": cmdGateBash,
+  "gate-env": cmdGateEnv,
 };
 
 /**
@@ -6286,6 +6259,7 @@ export const COMMAND_TIERS: Record<string, CommandTier> = {
   team: "experimental",
   memory: "stable",
   "gate-bash": "experimental",
+  "gate-env": "experimental",
 };
 
 /**

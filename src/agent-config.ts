@@ -23,18 +23,21 @@ export const KIT_BLOCK_BEGIN =
 export const KIT_BLOCK_END = "<!-- END kit -->";
 
 /** The canonical "use kit" instruction. Kept short on purpose — agents read it
- *  every turn, so it states the rules, not the rationale. */
+ *  every turn, so it states the rules, not the rationale. Rules that have gained a
+ *  DETERMINISTIC enforcement layer (hooks/gates) are stated as facts, not asks —
+ *  prose only advises, so each rule migrates out of this block as its gate ships
+ *  (statusline → session-start injection; triage → gate-bash; .env secrets →
+ *  gate-env; elevation → enforced in the CLI itself). */
 export const KIT_INSTRUCTION = `## kit
 
-This project uses [kit](https://github.com/sandstream/kit) to manage tools, secrets, and environment setup. As the agent working here:
+This project uses [kit](https://github.com/sandstream/kit) to manage tools, secrets, and environment setup. The hard rules are ENFORCED by hooks, not this text: the session-start hook injects the kit statusline (setup score · update mark · open-PAL count) as context, and PreToolUse gates block un-triaged package installs and plaintext secrets aimed at \`.env*\` before they happen. As the agent working here:
 
-- At session start run \`kit statusline\` and surface it — it shows the setup score for the active mode, whether a kit update is available, and the open "blocked-on-you" (PAL) count.
 - Run \`kit check\` before starting; if it reports \`fail\`, run \`kit fix\` then re-check.
-- Recall prior decisions with \`kit memory search "<query>"\` (cross-session, cross-agent); keep the local store current with \`kit memory index\`.
-- Before installing ANY dependency, run \`kit triage npm|pip|docker|repo <target>\` and only install if it passes.
-- Never write secrets to \`.env*\` in plaintext — resolve them with \`kit secrets\` (vault-backed).
+- Recall prior decisions with \`kit memory search "<query>"\` (cross-session, cross-agent).
+- Resolve secrets with \`kit secrets\` (vault-backed); put placeholders in \`.env.example\` — the env-gate blocks plaintext \`.env*\` writes.
+- For dependencies outside the install-gate's reach (git repos, URLs, vendored code), run \`kit triage repo <target>\` first.
 - After a batch of edits, run \`kit check --category security\`; halt and surface findings on \`fail\`.
-- Destructive secret ops require \`kit auth elevate\` first.`;
+- Destructive secret ops require \`kit auth elevate\` first (the CLI enforces this).`;
 
 export interface AgentTarget {
   /** Agent/tool name for display. */
@@ -445,11 +448,16 @@ export async function installKitPermissions(
  * the last resort, kept only so the string is never empty).
  */
 export function kitGateInvocation(): string {
+  return kitSubcommandInvocation("gate-bash");
+}
+
+/** Same stable-wrapper resolution for any kit subcommand baked into a hook. */
+function kitSubcommandInvocation(sub: string): string {
   const wrapper = kitWrapperPath();
-  if (existsSync(wrapper)) return `${wrapper} gate-bash`;
+  if (existsSync(wrapper)) return `${wrapper} ${sub}`;
   const entry = process.argv[1];
-  if (entry) return `${process.execPath} ${resolve(entry)} gate-bash`;
-  return "kit gate-bash"; // last resort — relies on PATH
+  if (entry) return `${process.execPath} ${resolve(entry)} ${sub}`;
+  return `kit ${sub}`; // last resort — relies on PATH
 }
 
 export interface HookInstallResult {
@@ -500,6 +508,51 @@ export async function installInstallGate(cwd: string = process.cwd()): Promise<H
   if (already) return { file, action: "unchanged", detail: "install-gate already wired" };
 
   pre.push({ matcher: "Bash", hooks: [{ type: "command", command: kitGateInvocation() }] });
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    return { file, action: existed ? "updated" : "created" };
+  } catch (err) {
+    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Install the PreToolUse env-write-gate into `.claude/settings.json`: block a
+ * Write/Edit that puts a plaintext secret into a real `.env*` file BEFORE it lands
+ * (`kit gate-env`) — the *enforce* layer for the "never write secrets to .env*"
+ * rule, which as prose only advises. Idempotent (keyed on a command ending in
+ * `gate-env`); preserves other hooks. Claude Code only (the Write/Edit tool shapes
+ * we know); other agents keep the after-the-fact plaintext scan in `kit check`.
+ */
+export async function installEnvWriteGate(cwd: string = process.cwd()): Promise<HookInstallResult> {
+  const file = ".claude/settings.json";
+  const path = resolve(cwd, file);
+
+  const { isReadOnlyMode } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) return { file, action: "skipped", detail: "read-only mode" };
+  if (!existsSync(resolve(cwd, ".claude")) && !existsSync(resolve(cwd, "CLAUDE.md"))) {
+    return { file, action: "skipped", detail: "no Claude Code project detected" };
+  }
+
+  let settings: { hooks?: Record<string, SettingsHookGroup[]>; [k: string]: unknown } = {};
+  let existed = false;
+  try {
+    settings = JSON.parse(await readFile(path, "utf-8")) as typeof settings;
+    existed = true;
+  } catch {
+    settings = {};
+  }
+
+  const hooks = (settings.hooks ??= {});
+  const pre = (hooks.PreToolUse ??= []);
+  const already = pre.some((g) => g.hooks?.some((h) => h.command?.endsWith("gate-env")));
+  if (already) return { file, action: "unchanged", detail: "env-write-gate already wired" };
+
+  pre.push({
+    matcher: "Write|Edit|NotebookEdit",
+    hooks: [{ type: "command", command: kitSubcommandInvocation("gate-env") }],
+  });
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
@@ -1044,6 +1097,7 @@ export async function installInstallGateAntigravity(
 export interface GateInstallEntry {
   agent:
     | "Claude Code"
+    | "Claude Code (env-write)"
     | "Codex"
     | "Amazon Q"
     | "Kiro"
@@ -1080,5 +1134,8 @@ export async function installAllInstallGates(
     { agent: "Cursor", result: await installInstallGateCursor(cwd) },
     { agent: "OpenCode", result: await installInstallGateOpenCode(cwd) },
     { agent: "Cline", result: await installInstallGateCline(cwd) },
+    // Env-write-gate (block plaintext secrets aimed at .env* BEFORE they land) —
+    // Claude Code only today; other agents keep the after-the-fact plaintext scan.
+    { agent: "Claude Code (env-write)", result: await installEnvWriteGate(cwd) },
   ];
 }
