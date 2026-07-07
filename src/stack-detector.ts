@@ -322,55 +322,217 @@ async function detectFromSwift(cwd: string): Promise<DetectedStack | null> {
   };
 }
 
-async function detectFromAndroid(cwd: string): Promise<DetectedStack | null> {
-  const gradle =
-    (await readFile(join(cwd, "build.gradle.kts"), "utf-8").catch(() => null)) ??
-    (await readFile(join(cwd, "build.gradle"), "utf-8").catch(() => null));
-  const hasSettings =
-    (await fileExists(join(cwd, "settings.gradle.kts"))) ||
-    (await fileExists(join(cwd, "settings.gradle")));
-  if (gradle === null && !hasSettings) return null;
+/** Shallow scan for source files with any of the given extensions, in cwd and cwd/src
+ *  (one level each). Deterministic, bounded — never walks the whole tree. Used to tell
+ *  siblings apart (C vs C++, Java vs Kotlin) without a full-repo crawl. */
+async function hasSourceExt(cwd: string, exts: string[]): Promise<boolean> {
+  const want = new Set(exts.map((e) => e.toLowerCase()));
+  for (const dir of [cwd, join(cwd, "src")]) {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (!e.isFile()) continue;
+      const dot = e.name.lastIndexOf(".");
+      if (dot >= 0 && want.has(e.name.slice(dot).toLowerCase())) return true;
+    }
+  }
+  return false;
+}
 
-  // Only call it Android when the Android Gradle plugin is applied; otherwise
-  // it's a generic JVM/Gradle project (label the language, not a mobile framework).
-  const framework =
-    gradle && /com\.android\.(application|library)/.test(gradle) ? "android" : undefined;
+async function detectFromRuby(cwd: string): Promise<DetectedStack | null> {
+  const gemfile = await readFile(join(cwd, "Gemfile"), "utf-8").catch(() => null);
+  const hasGemspec = (await readdir(cwd).catch(() => [])).some((f) => f.endsWith(".gemspec"));
+  const hasRakefile = await fileExists(join(cwd, "Rakefile"));
+  if (gemfile === null && !hasGemspec && !hasRakefile) return null;
+
+  const text = gemfile ?? "";
+  let framework: string | undefined;
+  if (/\brails\b/.test(text)) framework = "rails";
+  else if (/\bsinatra\b/.test(text)) framework = "sinatra";
+  else if (/\bjekyll\b/.test(text)) framework = "jekyll";
+
   const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
-
   return {
-    language: "kotlin",
+    language: "ruby",
     framework,
     services,
-    tools: {},
-    confidence: framework ? 0.85 : 0.6,
+    tools: { ruby: "latest", bundler: "latest" },
+    confidence: framework ? 0.85 : gemfile ? 0.75 : 0.6,
   };
 }
 
+async function detectFromDotnet(cwd: string): Promise<DetectedStack | null> {
+  const entries = await readdir(cwd).catch(() => []);
+  const srcEntries = await readdir(join(cwd, "src")).catch(() => []);
+  const isProj = (f: string) => f.endsWith(".csproj") || f.endsWith(".sln") || f.endsWith(".slnf");
+  const hasCs = entries.some(isProj) || srcEntries.some(isProj);
+  const hasFs = entries.some((f) => f.endsWith(".fsproj"));
+  // Big .NET repos (aspnetcore) keep their projects deep under src/, but always carry a
+  // root .NET anchor — global.json / Directory.Build.props / NuGet.config.
+  const hasAnchor =
+    (await fileExists(join(cwd, "global.json"))) ||
+    (await fileExists(join(cwd, "Directory.Build.props"))) ||
+    (await fileExists(join(cwd, "NuGet.config"))) ||
+    (await fileExists(join(cwd, "nuget.config")));
+  if (!hasCs && !hasFs && !hasAnchor) return null;
+
+  const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
+  return {
+    language: hasFs && !hasCs ? "fsharp" : "csharp",
+    services,
+    tools: { dotnet: "latest" },
+    confidence: 0.8,
+  };
+}
+
+async function detectFromJvm(cwd: string): Promise<DetectedStack | null> {
+  const hasPom = await fileExists(join(cwd, "pom.xml"));
+  const gradleKts = await readFile(join(cwd, "build.gradle.kts"), "utf-8").catch(() => null);
+  const gradle =
+    gradleKts ?? (await readFile(join(cwd, "build.gradle"), "utf-8").catch(() => null));
+  const hasSettings =
+    (await fileExists(join(cwd, "settings.gradle.kts"))) ||
+    (await fileExists(join(cwd, "settings.gradle")));
+  if (!hasPom && gradle === null && !hasSettings) return null;
+
+  const gradleText = gradle ?? "";
+  const androidPlugin = /com\.android\.(application|library)/.test(gradleText);
+  // Language: Android defaults to Kotlin; otherwise pick Kotlin only on a real Kotlin
+  // signal (a .kts build, the Kotlin Gradle plugin, or .kt sources) so a plain Java
+  // Maven/Gradle project (spring-boot, guava, RxJava) is correctly labelled Java —
+  // not Kotlin, the sibling it used to be conflated with.
+  const kotlinSignal =
+    gradleKts !== null ||
+    /kotlin\("jvm"\)|org\.jetbrains\.kotlin|id\s+["']kotlin/.test(gradleText) ||
+    (await fileExists(join(cwd, "src/main/kotlin"))) ||
+    (await hasSourceExt(cwd, [".kt"]));
+  const language = androidPlugin || kotlinSignal ? "kotlin" : "java";
+
+  let framework: string | undefined;
+  if (androidPlugin) framework = "android";
+  else if (/org\.springframework\.boot|spring-boot/.test(gradleText)) framework = "spring";
+
+  const tools: Record<string, string> =
+    language === "kotlin" ? { kotlin: "latest" } : { java: "latest" };
+  const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
+  return {
+    language,
+    framework,
+    services,
+    tools,
+    confidence: framework ? 0.85 : 0.7,
+  };
+}
+
+async function detectFromCpp(cwd: string): Promise<DetectedStack | null> {
+  // CMake/Meson are used almost exclusively for C/C++ — a definitive signal on their own,
+  // even when sources live in non-standard dirs (obs-studio's libobs/, curl's lib/).
+  const hasCmakeOrMeson =
+    (await fileExists(join(cwd, "CMakeLists.txt"))) || (await fileExists(join(cwd, "meson.build")));
+  const hasWeakBuild =
+    (await fileExists(join(cwd, "Makefile"))) ||
+    (await fileExists(join(cwd, "configure"))) ||
+    (await fileExists(join(cwd, "configure.ac")));
+  if (!hasCmakeOrMeson && !hasWeakBuild) return null;
+
+  const isCpp = await hasSourceExt(cwd, [".cpp", ".cc", ".cxx", ".hpp", ".hh"]);
+  const isC = await hasSourceExt(cwd, [".c", ".h"]);
+  // A bare Makefile/configure is ambiguous (Go/asm/etc. use them too) — require actual
+  // C/C++ sources. CMake/Meson stands alone; default to C++ when sources aren't at the
+  // top level (CMake projects skew C++).
+  if (!hasCmakeOrMeson && !isCpp && !isC) return null;
+
+  const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
+  return {
+    language: isCpp ? "cpp" : isC ? "c" : "cpp",
+    services,
+    tools: {},
+    confidence: 0.7,
+  };
+}
+
+/** Lightweight manifest→language map for ecosystems kit doesn't set up deeply yet, so
+ *  they detect correctly (a right answer + osv-scanner) instead of coming up `unknown`. */
+const EXOTIC: { file: string; language: string }[] = [
+  { file: "mix.exs", language: "elixir" },
+  { file: "build.sbt", language: "scala" },
+  { file: "build.zig", language: "zig" },
+  { file: "v.mod", language: "v" },
+  { file: "shard.yml", language: "crystal" },
+  { file: "dune-project", language: "ocaml" },
+  { file: "stack.yaml", language: "haskell" },
+];
+
+async function detectFromExotic(cwd: string): Promise<DetectedStack | null> {
+  for (const { file, language } of EXOTIC) {
+    if (await fileExists(join(cwd, file))) {
+      const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
+      return { language, services, tools: {}, confidence: 0.7 };
+    }
+  }
+  // Julia: Project.toml is also used elsewhere, so require a Julia source signal.
+  if ((await fileExists(join(cwd, "Project.toml"))) && (await hasSourceExt(cwd, [".jl"]))) {
+    const services = await detectServices({ fileExists: (p) => fileExists(join(cwd, p)) });
+    return { language: "julia", services, tools: {}, confidence: 0.7 };
+  }
+  return null;
+}
+
+/** JS app frameworks that mean JavaScript/TypeScript is the PRIMARY app — as opposed
+ *  to a bare `react`/`vue`/`express` dep, which routinely appears as the front-end of a
+ *  Rails/Django/Laravel/.NET backend. When only the latter is present alongside a backend
+ *  manifest, the backend is primary (fixes polyglot masking). */
+const JS_APP_FRAMEWORKS = new Set([
+  "nextjs",
+  "remix",
+  "sveltekit",
+  "astro",
+  "nestjs",
+  "react-native",
+]);
+
 /**
- * Detect the project stack from files in the given directory.
- * Returns null only if no recognizable project files are found.
+ * Detect the project stack. Multi-ecosystem aware: a repo often ships a front-end
+ * `package.json` alongside its real backend (Django/Rails/Laravel/.NET), so a bare
+ * package.json no longer wins by default — a definitive backend manifest takes primary
+ * unless the JS side declares a real app framework. Returns `unknown` only when nothing
+ * recognizable is found.
  */
 export async function detectStack(cwd: string): Promise<DetectedStack> {
-  // Try detection in priority order — first match wins. Node first (RN/Expo apps
-  // carry package.json); native-mobile detectors are reached only when none of
-  // the language manifests above them matched.
-  const result =
-    (await detectFromPackageJson(cwd)) ??
-    (await detectFromPython(cwd)) ??
-    (await detectFromGo(cwd)) ??
-    (await detectFromRust(cwd)) ??
-    (await detectFromPhp(cwd)) ??
-    (await detectFromFlutter(cwd)) ??
-    (await detectFromSwift(cwd)) ??
-    (await detectFromAndroid(cwd));
+  const js = await detectFromPackageJson(cwd);
 
-  if (result) return result;
+  // Backends in priority order (first present wins as primary among backends). Native
+  // mobile (flutter/swift) and JVM come after the server languages.
+  const backends = (
+    await Promise.all([
+      detectFromPython(cwd),
+      detectFromPhp(cwd),
+      detectFromRuby(cwd),
+      detectFromDotnet(cwd),
+      detectFromGo(cwd),
+      detectFromRust(cwd),
+      detectFromJvm(cwd),
+      // Exotic before C/C++: a `build.zig` / `build.sbt` is more specific than the CMake
+      // or Makefile a repo may also carry to bootstrap (ziglang/zig ships both).
+      detectFromExotic(cwd),
+      detectFromCpp(cwd),
+      detectFromFlutter(cwd),
+      detectFromSwift(cwd),
+    ])
+  ).filter((s): s is DetectedStack => s !== null);
 
-  // Unknown project — return minimal fallback
-  return {
-    language: "unknown",
-    services: [],
-    tools: {},
-    confidence: 0.0,
-  };
+  if (js && backends.length > 0) {
+    // JS is primary only when it's a real app (meta-framework); otherwise the
+    // co-present backend manifest is the real story and the package.json is assets.
+    if (js.framework && JS_APP_FRAMEWORKS.has(js.framework)) return js;
+    return backends[0];
+  }
+  if (js) return js;
+  if (backends.length > 0) return backends[0];
+
+  return { language: "unknown", services: [], tools: {}, confidence: 0.0 };
 }
