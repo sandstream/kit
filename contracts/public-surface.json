@@ -232,6 +232,7 @@
     "kit_run",
     "kit_secrets",
     "kit_skill_marketplace",
+    "kit_standards",
     "kit_workflow_execute"
   ]
 }

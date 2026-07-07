@@ -45,6 +45,7 @@ const KIT_FILE = ".kit.toml";
 // this list, so the snapshot can never silently drift.
 export const KIT_MCP_TOOLS: readonly string[] = [
   "kit_check",
+  "kit_standards",
   "kit_install",
   "kit_login",
   "kit_secrets",
@@ -116,6 +117,7 @@ export function createMcpServer(): McpServer {
   // One registrar per tool — keeps this composition flat (was a 774-line
   // function). Each register_* attaches its tool to the server.
   register_kit_check(server);
+  register_kit_standards(server);
   register_kit_install(server);
   register_kit_login(server);
   register_kit_secrets(server);
@@ -220,6 +222,50 @@ function register_kit_check(server: McpServer): void {
                 null,
                 2,
               ),
+            },
+          ],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+}
+
+function register_kit_standards(server: McpServer): void {
+  // kit_standards — run the dev-standards gate (general + per-language + plugins +
+  // platform) and return the SAME { ok, checks, summary } envelope as `kit standards`.
+  // Read-only: no writes, so no governance/read-only gating.
+  server.tool(
+    "kit_standards",
+    "Run kit standards (deterministic dev-standards gate: complexity/duplication/size + per-language linters + user plugins + container) and return structured findings. Read-only.",
+    {
+      cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
+      enforce: z
+        .boolean()
+        .optional()
+        .describe("Fail on net-new findings AND setup gaps (CI posture)"),
+      category: z
+        .string()
+        .optional()
+        .describe("Scope: general | specific | plugins | platform | <language>"),
+    },
+    async ({ cwd, enforce, category }) => {
+      try {
+        const { runStandardsGate } = await import("./standards-run.js");
+        const { ok, checks, summary, baselineIgnored } = await runStandardsGate({
+          cwd,
+          enforce,
+          category,
+        });
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ ok, checks, summary, baselineIgnored }, null, 2),
             },
           ],
         };

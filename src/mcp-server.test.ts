@@ -65,6 +65,7 @@ describe("MCP server tool registration", () => {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name);
       assert.ok(names.includes("kit_check"), "kit_check missing");
+      assert.ok(names.includes("kit_standards"), "kit_standards missing");
       assert.ok(names.includes("kit_install"), "kit_install missing");
       assert.ok(names.includes("kit_login"), "kit_login missing");
       assert.ok(names.includes("kit_secrets"), "kit_secrets missing");
@@ -81,7 +82,7 @@ describe("MCP server tool registration", () => {
       assert.ok(names.includes("kit_agent_governance"), "kit_agent_governance missing");
       assert.ok(names.includes("kit_skill_marketplace"), "kit_skill_marketplace missing");
       assert.ok(names.includes("kit_workflow_execute"), "kit_workflow_execute missing");
-      assert.equal(tools.length, 17);
+      assert.equal(tools.length, 18);
     } finally {
       await cleanup();
     }

@@ -5,7 +5,7 @@ import { writeFile, access, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "node:path";
 import { loadConfig, type kitConfig, type SecretKeyConfig } from "./config.js";
-import type { StandardsCheckResult } from "./check-standards.js";
+import type { Baseline } from "./baseline.js";
 import { createInterface } from "node:readline/promises";
 import { validateSecrets, summarizeValidation } from "./secrets-validate.js";
 import { checkTools } from "./check-tools.js";
@@ -639,134 +639,98 @@ async function cmdDesign(): Promise<boolean> {
  * warn by default, `--enforce` fails on net-new findings AND on setup gaps (a tool
  * that could not run) — fail-closed for CI, quiet for local first-runs.
  */
+/**
+ * Snapshot every `kit standards` dimension (general + specific + plugins + platform)
+ * into the given baseline object and return the total number of findings frozen.
+ * Shared by `kit baseline freeze` and `kit standards freeze` so the two never drift.
+ */
+async function freezeStandardsBaseline(baseline: Baseline, cwd: string): Promise<number> {
+  const { collectStandardsKeys } = await import("./check-standards.js");
+  const { collectSpecificKeys, SPECIFIC_LANGUAGES } = await import("./check-standards-specific.js");
+  const { collectPluginKeys, DEFAULT_PLUGIN_DIR } = await import("./standards-plugins.js");
+  const { collectMjsPluginKeys } = await import("./standards-plugins-exec.js");
+  const { collectPlatformKeys } = await import("./check-standards-platform.js");
+  const { detectStack } = await import("./stack-detector.js");
+  const { baselineSet } = await import("./baseline.js");
+  const cfg = await loadConfig(resolveConfigPath()).catch(
+    () => ({}) as Awaited<ReturnType<typeof loadConfig>>,
+  );
+
+  const general = await collectStandardsKeys(cwd);
+  baselineSet(baseline, "standards", "complexity", general.complexity);
+  baselineSet(baseline, "standards", "duplication", general.duplication);
+  baselineSet(baseline, "standards", "size", general.size);
+
+  const lang = (await detectStack(cwd)).language;
+  let specificCount = 0;
+  if (SPECIFIC_LANGUAGES.includes(lang)) {
+    const keys = await collectSpecificKeys(cwd, lang);
+    baselineSet(baseline, "standards", `specific/${lang}`, keys);
+    specificCount = keys.length;
+  }
+
+  const dirs =
+    cfg.standards?.plugins?.dirs && cfg.standards.plugins.dirs.length > 0
+      ? cfg.standards.plugins.dirs
+      : [DEFAULT_PLUGIN_DIR];
+  const pluginKeys = [
+    ...collectPluginKeys(cwd, lang, dirs),
+    ...(await collectMjsPluginKeys(cwd, lang, dirs)),
+  ];
+  baselineSet(baseline, "standards", "plugins", pluginKeys);
+
+  const platformKeys = await collectPlatformKeys(cwd);
+  baselineSet(baseline, "standards", "platform", platformKeys);
+
+  return (
+    general.complexity.length +
+    general.duplication.length +
+    general.size.length +
+    specificCount +
+    pluginKeys.length +
+    platformKeys.length
+  );
+}
+
+/** `kit standards freeze` — snapshot ONLY the standards dimensions into the baseline. */
+async function cmdStandardsFreeze(): Promise<boolean> {
+  const { loadBaseline, saveBaseline, BASELINE_FILE } = await import("./baseline.js");
+  const baseline = await loadBaseline();
+  const total = await freezeStandardsBaseline(baseline, process.cwd());
+  await saveBaseline(baseline);
+  console.log(
+    `${c.green}✓${c.reset} Wrote ${BASELINE_FILE} — ${total} standards finding(s) frozen (general + specific + plugins + platform).`,
+  );
+  console.log(`  Future \`kit standards\` runs gate only on NEW findings.`);
+  return true;
+}
+
 async function cmdStandards(): Promise<boolean> {
+  const sub = process.argv[3];
+  if (sub === "freeze") return cmdStandardsFreeze();
   const enforce = hasFlag(process.argv, "--enforce");
   const jsonMode = hasFlag(process.argv, "--json");
-  const category = flagValue(process.argv, "--category"); // general | specific | <lang>
-  const { checkStandards } = await import("./check-standards.js");
-  const { checkStandardsSpecific, SPECIFIC_LANGUAGES } =
-    await import("./check-standards-specific.js");
-  const { loadBaselineForGate, baselineGet, BASELINE_FILE } = await import("./baseline.js");
-  const { baseline, ignored: baselineIgnored } = await loadBaselineForGate();
+  const category = flagValue(process.argv, "--category"); // general | specific | plugins | platform | <lang>
+  const { BASELINE_FILE } = await import("./baseline.js");
+  const { runStandardsGate } = await import("./standards-run.js");
+  // The SAME orchestration the MCP `kit_standards` tool uses — no divergent gate.
+  const {
+    ok,
+    checks: results,
+    summary,
+    baselineIgnored,
+  } = await runStandardsGate({
+    enforce,
+    category,
+  });
   if (baselineIgnored) {
     console.error(
       `${c.yellow}!${c.reset} ${BASELINE_FILE} ignored (${baselineIgnored}) — gating on all findings`,
     );
   }
-  const config = await loadConfig(resolveConfigPath()).catch(
-    () => ({}) as Awaited<ReturnType<typeof loadConfig>>,
-  );
-  const effectiveEnforce = enforce || config.standards?.enforce === true;
-
-  // `--category` scoping: default runs general + specific(detected) + plugins.
-  // "general"/"specific"/"plugins" narrow the dimension; a language name narrows
-  // specific to that language.
-  const langCategory = category && SPECIFIC_LANGUAGES.includes(category) ? category : undefined;
-  const runGeneral = !category || category === "general";
-  const runSpecific = !category || category === "specific" || !!langCategory;
-  const runPlugins = !category || category === "plugins";
-  const runPlatform = !category || category === "platform";
-
-  // Detect the project language once — both the specific gate and the plugin
-  // `applies_to` filter key off it (a language name via --category overrides).
-  let language = langCategory;
-  if ((runSpecific || runPlugins) && !language) {
-    const { detectStack } = await import("./stack-detector.js");
-    language = (await detectStack(process.cwd())).language;
-  }
-
-  const results: StandardsCheckResult[] = [];
-
-  if (runGeneral) {
-    const g = config.standards?.general;
-    const thresholds = {
-      ...(typeof g?.max_complexity === "number" ? { maxComplexity: g.max_complexity } : {}),
-      ...(typeof g?.max_function_lines === "number"
-        ? { maxFunctionLines: g.max_function_lines }
-        : {}),
-      ...(typeof g?.max_file_lines === "number" ? { maxFileLines: g.max_file_lines } : {}),
-      ...(typeof g?.max_duplication_pct === "number"
-        ? { maxDuplicationPct: g.max_duplication_pct }
-        : {}),
-    };
-    results.push(
-      ...(await checkStandards({
-        enforce: effectiveEnforce,
-        thresholds,
-        baseline: {
-          complexity: baselineGet(baseline, "standards", "complexity"),
-          duplication: baselineGet(baseline, "standards", "duplication"),
-          size: baselineGet(baseline, "standards", "size"),
-        },
-      })),
-    );
-  }
-
-  if (runSpecific && language) {
-    if (SPECIFIC_LANGUAGES.includes(language)) {
-      const langCfg = (config.standards as Record<string, unknown> | undefined)?.[language] as
-        | Record<string, boolean>
-        | undefined;
-      results.push(
-        ...(await checkStandardsSpecific({
-          language,
-          enforce: effectiveEnforce,
-          enabled: langCfg,
-          baseline: baselineGet(baseline, "standards", `specific/${language}`),
-        })),
-      );
-    } else if (category === "specific" || langCategory) {
-      // asked for specific but the detected language has no P2 support — be honest.
-      results.push({
-        category: "standards",
-        dimension: "specific",
-        name: `specific (${language})`,
-        status: "skip",
-        detail: `no per-language standards gate for '${language}' yet (P2 covers ${SPECIFIC_LANGUAGES.join(", ")})`,
-      });
-    }
-  }
-
-  if (runPlugins && language) {
-    const { checkStandardsPlugins, DEFAULT_PLUGIN_DIR } = await import("./standards-plugins.js");
-    const { checkStandardsMjsPlugins } = await import("./standards-plugins-exec.js");
-    const pluginCfg = config.standards?.plugins;
-    const dirs =
-      pluginCfg?.dirs && pluginCfg.dirs.length > 0 ? pluginCfg.dirs : [DEFAULT_PLUGIN_DIR];
-    const pluginBaseline = baselineGet(baseline, "standards", "plugins");
-    // Declarative TOML rules (pure regex) + programmatic *.mjs (restricted child,
-    // determinism-verified). Both net-new-gate against the same baseline key.
-    results.push(
-      ...checkStandardsPlugins({
-        language,
-        enforce: effectiveEnforce,
-        dirs,
-        baseline: pluginBaseline,
-      }),
-    );
-    results.push(
-      ...(await checkStandardsMjsPlugins({
-        language,
-        enforce: effectiveEnforce,
-        dirs,
-        baseline: pluginBaseline,
-      })),
-    );
-  }
-
-  if (runPlatform) {
-    const { checkStandardsPlatform } = await import("./check-standards-platform.js");
-    results.push(
-      ...(await checkStandardsPlatform({
-        enforce: effectiveEnforce,
-        baseline: baselineGet(baseline, "standards", "platform"),
-      })),
-    );
-  }
-
-  const ok = results.every((r) => r.status !== "fail");
+  const gaps = results.filter((r) => r.didNotRun);
   if (jsonMode) {
-    console.log(JSON.stringify({ ok, checks: results }, null, 2));
+    console.log(JSON.stringify({ ok, checks: results, summary }, null, 2));
     return ok;
   }
   console.log(
@@ -784,12 +748,17 @@ async function cmdStandards(): Promise<boolean> {
     console.log(`  ${icon} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
     if (r.files) for (const f of r.files) console.log(`      ${c.dim}- ${f}${c.reset}`);
   }
-  // P5-lite: separate SETUP GAPS (a tool not installed) from real findings so a
-  // wall of "did not run" never reads as a quality failure.
-  const gaps = results.filter((r) => r.didNotRun);
+  // Score over gates that ran, then setup gaps and findings called out separately so
+  // neither is mistaken for the other.
+  const scoreColor = summary.failed > 0 ? c.red : summary.findings > 0 ? c.yellow : c.green;
+  console.log(
+    `  ${scoreColor}score ${summary.score}${c.reset} gates passed` +
+      `${summary.findings > 0 ? ` · ${summary.findings} with findings` : ""}` +
+      `${gaps.length > 0 ? ` · ${c.dim}${gaps.length} setup gap(s) (not run)${c.reset}` : ""}`,
+  );
   if (gaps.length > 0 && !enforce) {
     console.log(
-      `  ${c.dim}${gaps.length} setup gap(s) — install the tool(s) to enable these gates; --enforce fails CI on them${c.reset}`,
+      `  ${c.dim}setup gaps are un-provisioned tools, not failures — install them to enable those gates; --enforce fails CI on them${c.reset}`,
     );
   }
   return ok;
@@ -854,53 +823,14 @@ async function cmdBaseline(): Promise<boolean> {
 
   const { findUntestedSources } = await import("./check-tests.js");
   const { collectDesignKeys } = await import("./check-design.js");
-  const { collectStandardsKeys } = await import("./check-standards.js");
   const untested = await findUntestedSources();
   baselineSet(baseline, "tests", "untested_files", untested);
   const design = await collectDesignKeys();
   baselineSet(baseline, "design", "a11y", design.a11y);
   baselineSet(baseline, "design", "tokens", design.tokens);
-  const standards = await collectStandardsKeys();
-  baselineSet(baseline, "standards", "complexity", standards.complexity);
-  baselineSet(baseline, "standards", "duplication", standards.duplication);
-  baselineSet(baseline, "standards", "size", standards.size);
-  // P2: freeze the detected language's specific-linter findings too.
-  const { collectSpecificKeys, SPECIFIC_LANGUAGES } = await import("./check-standards-specific.js");
-  const { detectStack } = await import("./stack-detector.js");
-  const detectedLang = (await detectStack(process.cwd())).language;
-  let specificCount = 0;
-  if (SPECIFIC_LANGUAGES.includes(detectedLang)) {
-    const specificKeys = await collectSpecificKeys(process.cwd(), detectedLang);
-    baselineSet(baseline, "standards", `specific/${detectedLang}`, specificKeys);
-    specificCount = specificKeys.length;
-  }
-  // P3: freeze declarative-plugin matches for the detected language.
-  const { collectPluginKeys, DEFAULT_PLUGIN_DIR } = await import("./standards-plugins.js");
-  const freezeCfg = await loadConfig(resolveConfigPath()).catch(
-    () => ({}) as Awaited<ReturnType<typeof loadConfig>>,
-  );
-  const pluginDirs =
-    freezeCfg.standards?.plugins?.dirs && freezeCfg.standards.plugins.dirs.length > 0
-      ? freezeCfg.standards.plugins.dirs
-      : [DEFAULT_PLUGIN_DIR];
-  const { collectMjsPluginKeys } = await import("./standards-plugins-exec.js");
-  const pluginKeys = [
-    ...collectPluginKeys(process.cwd(), detectedLang, pluginDirs),
-    ...(await collectMjsPluginKeys(process.cwd(), detectedLang, pluginDirs)),
-  ];
-  baselineSet(baseline, "standards", "plugins", pluginKeys);
-  // P4: freeze container (platform) findings.
-  const { collectPlatformKeys } = await import("./check-standards-platform.js");
-  const platformKeys = await collectPlatformKeys(process.cwd());
-  baselineSet(baseline, "standards", "platform", platformKeys);
+  // All standards dimensions (general + specific + plugins + platform) via the shared helper.
+  const standardsTotal = await freezeStandardsBaseline(baseline, process.cwd());
   await saveBaseline(baseline);
-  const standardsTotal =
-    standards.complexity.length +
-    standards.duplication.length +
-    standards.size.length +
-    pluginKeys.length +
-    platformKeys.length +
-    specificCount;
   console.log(
     `${c.green}✓${c.reset} Wrote ${BASELINE_FILE} — ${untested.length} untested file(s), ${design.a11y.length} a11y, ${design.tokens.length} design-token, ${standardsTotal} standards finding(s) frozen.`,
   );
