@@ -52,6 +52,19 @@ export const DEFAULT_SECURITY_SCANNERS: Record<string, string> = {
   "aqua:trufflesecurity/trufflehog": "latest",
 };
 
+/**
+ * The multi-language tools the GENERAL `kit standards` gate delegates to, keyed by
+ * mise tool ref → version. NOT added to a generated .kit.toml by default (standards
+ * is opt-in): a project that wants the gate provisions these, and `kit standards`
+ * resolves each bin mise-first (falling back to PATH), reporting a setup gap when
+ * one is absent. lizard = complexity, jscpd = duplication, scc = size/shape.
+ */
+export const DEFAULT_STANDARDS_TOOLS: Record<string, string> = {
+  "pipx:lizard": "latest",
+  "npm:jscpd": "latest",
+  "aqua:boyter/scc": "latest",
+};
+
 function lines(...parts: (string | null | undefined)[]): string {
   return parts.filter(Boolean).join("\n");
 }

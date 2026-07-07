@@ -394,6 +394,18 @@ export interface kitConfig {
    *  ONLY on a triage PASS (never on fail/offline). Stays off by default because
    *  auto-installing is a deliberate trust decision. */
   update?: { check?: boolean; auto?: boolean };
+  /** `kit standards` — the deterministic dev-standards gate. `enforce` (default
+   *  false): net-new findings AND setup gaps FAIL (CI opts in; also via --enforce).
+   *  `[standards.general]` overrides the calibrated metric thresholds. */
+  standards?: {
+    enforce?: boolean;
+    general?: {
+      max_complexity?: number;
+      max_function_lines?: number;
+      max_file_lines?: number;
+      max_duplication_pct?: number;
+    };
+  };
 }
 
 // ─── Zod validation schemas ──────────────────────────────────────────────────
@@ -587,6 +599,7 @@ export const KNOWN_SECTIONS = new Set([
   "memory",
   "update",
   "scan", // [scan.tooling] — vault-backed scanner tokens (#65)
+  "standards", // [standards] — dev-standards gate thresholds (kit standards)
   "air_gap", // [air_gap] — no-egress / offline config (#85)
   "policy", // [policy] — governance: default_mode gate + agent_writes pre-approvals
   "mcp", // [mcp] — MCP server config (consumed by kit mcp)
@@ -655,6 +668,21 @@ export const kitConfigSchema = z
           .passthrough()
           .optional(),
         guarddog: z.boolean().optional(),
+      })
+      .passthrough()
+      .optional(),
+    standards: z
+      .object({
+        enforce: z.boolean().optional(),
+        general: z
+          .object({
+            max_complexity: z.number().optional(),
+            max_function_lines: z.number().optional(),
+            max_file_lines: z.number().optional(),
+            max_duplication_pct: z.number().optional(),
+          })
+          .passthrough()
+          .optional(),
       })
       .passthrough()
       .optional(),

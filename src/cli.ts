@@ -633,7 +633,76 @@ async function cmdDesign(): Promise<boolean> {
 }
 
 /**
- * `kit review` — meta-runner: check + design + tests in one shot.
+ * `kit standards` — the deterministic dev-standards gate (P1: the general,
+ * language-agnostic code-quality metrics via lizard/jscpd/scc). Mirrors `kit design`:
+ * warn by default, `--enforce` fails on net-new findings AND on setup gaps (a tool
+ * that could not run) — fail-closed for CI, quiet for local first-runs.
+ */
+async function cmdStandards(): Promise<boolean> {
+  const enforce = hasFlag(process.argv, "--enforce");
+  const jsonMode = hasFlag(process.argv, "--json");
+  const { checkStandards } = await import("./check-standards.js");
+  const { loadBaselineForGate, baselineGet, BASELINE_FILE } = await import("./baseline.js");
+  const { baseline, ignored: baselineIgnored } = await loadBaselineForGate();
+  if (baselineIgnored) {
+    console.error(
+      `${c.yellow}!${c.reset} ${BASELINE_FILE} ignored (${baselineIgnored}) — gating on all findings`,
+    );
+  }
+  const config = await loadConfig(resolveConfigPath()).catch(
+    () => ({}) as Awaited<ReturnType<typeof loadConfig>>,
+  );
+  const g = config.standards?.general;
+  const thresholds = {
+    ...(typeof g?.max_complexity === "number" ? { maxComplexity: g.max_complexity } : {}),
+    ...(typeof g?.max_function_lines === "number"
+      ? { maxFunctionLines: g.max_function_lines }
+      : {}),
+    ...(typeof g?.max_file_lines === "number" ? { maxFileLines: g.max_file_lines } : {}),
+    ...(typeof g?.max_duplication_pct === "number"
+      ? { maxDuplicationPct: g.max_duplication_pct }
+      : {}),
+  };
+  const results = await checkStandards({
+    enforce: enforce || config.standards?.enforce === true,
+    thresholds,
+    baseline: {
+      complexity: baselineGet(baseline, "standards", "complexity"),
+      duplication: baselineGet(baseline, "standards", "duplication"),
+      size: baselineGet(baseline, "standards", "size"),
+    },
+  });
+  const ok = results.every((r) => r.status !== "fail");
+  if (jsonMode) {
+    console.log(JSON.stringify({ ok, checks: results }, null, 2));
+    return ok;
+  }
+  console.log(`${c.bold}Standards${c.reset} ${c.dim}(general — deterministic, zero-LLM)${c.reset}`);
+  for (const r of results) {
+    const icon =
+      r.status === "pass"
+        ? `${c.green}✓${c.reset}`
+        : r.status === "fail"
+          ? `${c.red}✗${c.reset}`
+          : r.status === "warn"
+            ? `${c.yellow}!${c.reset}`
+            : `${c.dim}-${c.reset}`;
+    console.log(`  ${icon} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
+    if (r.files) for (const f of r.files) console.log(`      ${c.dim}- ${f}${c.reset}`);
+  }
+  // P5-lite: separate SETUP GAPS (a tool not installed) from real findings so a
+  // wall of "did not run" never reads as a quality failure.
+  const gaps = results.filter((r) => r.didNotRun);
+  if (gaps.length > 0 && !enforce) {
+    console.log(
+      `  ${c.dim}${gaps.length} setup gap(s) — install the tool(s) to enable these gates; --enforce fails CI on them${c.reset}`,
+    );
+  }
+  return ok;
+}
+
+/**
+ * `kit review` — meta-runner: check + design + standards in one shot.
  * Convenient single-command gate for AI agents and PR checks.
  */
 async function cmdReview(): Promise<boolean> {
@@ -648,6 +717,10 @@ async function cmdReview(): Promise<boolean> {
   if (!jsonMode) console.log(`\n${c.bold}=== design ===${c.reset}`);
   const designOk = await cmdDesign();
   if (!designOk) allOk = false;
+
+  if (!jsonMode) console.log(`\n${c.bold}=== standards ===${c.reset}`);
+  const standardsOk = await cmdStandards();
+  if (!standardsOk) allOk = false;
 
   if (!jsonMode) {
     console.log(
@@ -687,14 +760,21 @@ async function cmdBaseline(): Promise<boolean> {
 
   const { findUntestedSources } = await import("./check-tests.js");
   const { collectDesignKeys } = await import("./check-design.js");
+  const { collectStandardsKeys } = await import("./check-standards.js");
   const untested = await findUntestedSources();
   baselineSet(baseline, "tests", "untested_files", untested);
   const design = await collectDesignKeys();
   baselineSet(baseline, "design", "a11y", design.a11y);
   baselineSet(baseline, "design", "tokens", design.tokens);
+  const standards = await collectStandardsKeys();
+  baselineSet(baseline, "standards", "complexity", standards.complexity);
+  baselineSet(baseline, "standards", "duplication", standards.duplication);
+  baselineSet(baseline, "standards", "size", standards.size);
   await saveBaseline(baseline);
+  const standardsTotal =
+    standards.complexity.length + standards.duplication.length + standards.size.length;
   console.log(
-    `${c.green}✓${c.reset} Wrote ${BASELINE_FILE} — ${untested.length} untested file(s), ${design.a11y.length} a11y, ${design.tokens.length} design-token finding(s) frozen.`,
+    `${c.green}✓${c.reset} Wrote ${BASELINE_FILE} — ${untested.length} untested file(s), ${design.a11y.length} a11y, ${design.tokens.length} design-token, ${standardsTotal} standards finding(s) frozen.`,
   );
   console.log(`  Future runs will gate only on NEW findings.`);
   return true;
@@ -5353,7 +5433,7 @@ export const COMMAND_HELP: Record<string, string> = {
     "Ingest external SARIF / OSV reports into kit's consolidated verdict (kit ingest <sarif|osv> <file>)",
   "verify-provenance":
     "Verify a release's SLSA provenance bundle offline (Ed25519 + SHA256 / cosign)",
-  review: "Full repo audit — runs check + design in one gate (for agents / PR checks)",
+  review: "Full repo audit — runs check + design + standards in one gate (for agents / PR checks)",
   "self-audit":
     "Audit kit's own source against its 12 self-hardening rules (--list-rules, --only=<ids>, --format)",
   coverage:
@@ -5365,6 +5445,8 @@ export const COMMAND_HELP: Record<string, string> = {
   policy:
     "Signable org policy-as-code in .kit-policy.toml (init/show/validate/sign/verify/check/trust) — identity-signed standard, org-distributable + enforced offline (experimental)",
   design: "Check design quality (a11y, design tokens) against the baseline",
+  standards:
+    "Dev-standards gate: general code-quality metrics (complexity/duplication/size) vs the baseline (--enforce fails CI)",
   baseline:
     "Freeze current warnings into .kit-baseline.json so future runs gate only net-new findings",
   memory: "Local conversation memory — index transcripts + show stats",
@@ -5564,7 +5646,7 @@ function cmdHelp(subcommand?: string): boolean {
         "health",
       ],
     ],
-    ["Review & quality", ["review", "design", "coverage", "baseline", "analyze"]],
+    ["Review & quality", ["review", "design", "standards", "coverage", "baseline", "analyze"]],
     ["Secrets & environments", ["secrets", "env", "login"]],
     [
       "Security & supply chain",
@@ -6066,6 +6148,7 @@ export const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
   triage: cmdTriage,
   baseline: cmdBaseline,
   design: cmdDesign,
+  standards: cmdStandards,
   review: cmdReview,
   pkg: cmdPkg,
   team: cmdTeam,
@@ -6139,6 +6222,7 @@ export const COMMAND_TIERS: Record<string, CommandTier> = {
   triage: "stable",
   baseline: "stable",
   design: "stable",
+  standards: "stable",
   review: "stable",
   pkg: "stable",
   team: "experimental",
