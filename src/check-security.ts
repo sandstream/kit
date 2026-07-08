@@ -168,21 +168,27 @@ export async function checkMemoryHooksLiveness(): Promise<SecurityCheckResult> {
 }
 
 /**
- * Gate liveness — the enforcement floor must prove it exists. If this repo was
- * taught kit (managed "use kit" block present → `kit agent teach` ran, which
- * installs the PreToolUse gates by default) but a gate has since vanished from
- * `.claude/settings.json`, the agent runs UN-gated while kit still reports green.
- * That is the worst false green: the floor an agent never touches because it isn't
- * there. Skips on a never-taught repo (un-adopted, not degraded); fails on a taught
- * repo with a missing gate. Deterministic, read-only.
+ * Gate liveness — the enforcement floor must prove it exists. If kit installed the
+ * PreToolUse gates on THIS machine (machine-local marker present) but a gate has
+ * since vanished from `.claude/settings.json`, the agent runs UN-gated while kit
+ * still reports green. That is the worst false green: the floor an agent never
+ * touches because it isn't there. Keys off the machine-local install marker — NOT
+ * the committed CLAUDE.md block, which travels to every clone/CI where the gitignored
+ * `.claude/settings.json` legitimately doesn't exist. Skips where gates were never
+ * installed (fresh checkout / CI / un-adopted); fails on a machine that lost a gate.
  */
 export async function checkGateLiveness(cwd?: string): Promise<SecurityCheckResult> {
   const name = "enforcement gate liveness";
   const category = "exposure" as const;
   const { gateLiveness } = await import("./agent-config.js");
   const live = gateLiveness(cwd);
-  if (!live.taught) {
-    return { category, name, status: "skip", detail: "kit agent-config not wired here" };
+  if (!live.everInstalled) {
+    return {
+      category,
+      name,
+      status: "skip",
+      detail: "enforcement gates not installed on this machine",
+    };
   }
   const missing: string[] = [];
   if (!live.installGate) missing.push("install-gate (gate-bash)");

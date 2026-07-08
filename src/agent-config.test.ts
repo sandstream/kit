@@ -888,13 +888,13 @@ describe("installInstallGateCline", () => {
 });
 
 describe("gateLiveness (enforcement floor must prove it exists)", () => {
-  const CLAUDE = KIT_BLOCK_BEGIN + "\n## kit\n...\n" + KIT_BLOCK_END + "\n";
   const settings = (cmds: string[]) =>
     JSON.stringify({
       hooks: {
         PreToolUse: cmds.map((c) => ({ matcher: "x", hooks: [{ type: "command", command: c }] })),
       },
     });
+  const mark = (dir: string) => writeFileSync(join(dir, ".claude/.kit-gates-installed"), "x\n");
 
   function repo(fn: (dir: string) => void) {
     const dir = mkdtempSync(join(tmpdir(), "kit-gatelive-"));
@@ -906,56 +906,58 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
     }
   }
 
-  it("not taught (no managed block) → taught:false, no false alarm", () => {
+  it("no install marker (fresh checkout / CI) → everInstalled:false, no false alarm", () => {
     repo((dir: string) => {
-      writeFileSync(join(dir, "CLAUDE.md"), "just some project notes\n");
-      const live = gateLiveness(dir);
-      assert.equal(live.taught, false);
+      // the committed block is present, but the machine-local marker is NOT — this
+      // is the normal clone/CI case that must NOT fail.
+      writeFileSync(join(dir, "CLAUDE.md"), KIT_BLOCK_BEGIN + "\n" + KIT_BLOCK_END + "\n");
+      assert.equal(gateLiveness(dir).everInstalled, false);
     });
   });
 
-  it("taught + both gates wired → all true", () => {
+  it("marker present + both gates wired → all true", () => {
     repo((dir: string) => {
-      writeFileSync(join(dir, "CLAUDE.md"), CLAUDE);
+      mark(dir);
       writeFileSync(
         join(dir, ".claude/settings.json"),
         settings(["~/.kit/bin/kit gate-bash", "~/.kit/bin/kit gate-env"]),
       );
-      const live = gateLiveness(dir);
-      assert.deepEqual(live, { taught: true, installGate: true, envGate: true });
+      assert.deepEqual(gateLiveness(dir), {
+        everInstalled: true,
+        installGate: true,
+        envGate: true,
+      });
     });
   });
 
-  it("taught but env-gate vanished → the silent-degradation case", () => {
+  it("marker present but env-gate vanished → the silent-degradation case", () => {
     repo((dir: string) => {
-      writeFileSync(join(dir, "CLAUDE.md"), CLAUDE);
+      mark(dir);
       writeFileSync(join(dir, ".claude/settings.json"), settings(["~/.kit/bin/kit gate-bash"]));
       const live = gateLiveness(dir);
-      assert.equal(live.taught, true);
+      assert.equal(live.everInstalled, true);
       assert.equal(live.installGate, true);
       assert.equal(live.envGate, false);
     });
   });
 
-  it("taught but settings.json missing/unparseable → both gates read absent (a problem)", () => {
+  it("marker present but settings.json unparseable → both gates read absent (a problem)", () => {
     repo((dir: string) => {
-      writeFileSync(join(dir, "CLAUDE.md"), CLAUDE);
+      mark(dir);
       writeFileSync(join(dir, ".claude/settings.json"), "{ not json");
       const live = gateLiveness(dir);
-      assert.equal(live.taught, true);
+      assert.equal(live.everInstalled, true);
       assert.equal(live.installGate, false);
       assert.equal(live.envGate, false);
     });
   });
 
-  it("the block in AGENTS.md counts as taught too", () => {
+  it("markGatesInstalled writes the marker gateLiveness reads", async () => {
+    const { markGatesInstalled } = await import("./agent-config.js");
     repo((dir: string) => {
-      writeFileSync(join(dir, "AGENTS.md"), CLAUDE);
-      writeFileSync(
-        join(dir, ".claude/settings.json"),
-        settings(["kit gate-bash", "kit gate-env"]),
-      );
-      assert.equal(gateLiveness(dir).taught, true);
+      assert.equal(gateLiveness(dir).everInstalled, false);
+      markGatesInstalled(dir);
+      assert.equal(gateLiveness(dir).everInstalled, true);
     });
   });
 });
