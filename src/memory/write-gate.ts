@@ -6,8 +6,10 @@
  * agent memory: rows are stored first and inspected later, so a poisoned or malformed
  * line lands in the store before anything vets it. This module is the deterministic,
  * fail-closed authorization a memory row must pass BEFORE it is persisted — the
- * "Write Authorization" primitive, reusing kit's existing R7 injection detector
- * (no LLM in the verdict path).
+ * "Write Authorization" primitive, reusing kit's existing R7 injection detector and
+ * (G2) its plaintext-secret pattern detector (no LLM in the verdict path). Flagging a
+ * secret-bearing row keeps a credential from being persisted and later re-injected
+ * into a prompt via recall — the stdout→context leak the gap analysis §2.2 measures.
  *
  * Two modes, secure-by-default (warn), matching the warn→enforce ramp `kit standards`
  * uses:
@@ -23,10 +25,11 @@
  * the prompt on any unexpected evaluation error (quarantine in warn, reject in enforce).
  */
 import { findInjection } from "./injection.js";
+import { findSecrets } from "../utils/redactSecrets.js";
 import type { MessageInput } from "./types.js";
 
 export type WriteGateDecision = "allow" | "quarantine" | "reject";
-export type WriteGateReasonCode = "injection" | "oversize" | "schema";
+export type WriteGateReasonCode = "injection" | "oversize" | "schema" | "secret";
 
 export interface WriteGateReason {
   code: WriteGateReasonCode;
@@ -96,10 +99,21 @@ export function evaluateWriteGate(
     reasons.push({ code: "injection", detail: "high-confidence prompt-injection pattern" });
   }
 
+  // 4. Secret (G2) — a plaintext credential that would otherwise be persisted and
+  //    could ride back into a later prompt via recall (the stdout→context leak the
+  //    gap analysis §2.2 measures). Reuses kit's pattern detector; the detail carries
+  //    only a masked label/preview, never the raw secret. Skipped when capture-time
+  //    redaction already masked it (findSecrets then finds nothing).
+  const secrets = content ? findSecrets(content) : [];
+  if (secrets.length > 0) {
+    const labels = [...new Set(secrets.map((s) => s.label))].join(", ");
+    reasons.push({ code: "secret", detail: `plaintext secret(s): ${labels}` });
+  }
+
   let decision: WriteGateDecision;
   if (schemaBad) {
     decision = "reject"; // unstorable in any mode
-  } else if (injected || oversize) {
+  } else if (injected || oversize || secrets.length > 0) {
     decision = enforce ? "reject" : "quarantine";
   } else {
     decision = "allow";

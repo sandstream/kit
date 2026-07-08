@@ -79,6 +79,25 @@ describe("evaluateWriteGate (pure verdict)", () => {
     );
   });
 
+  it("flags a plaintext secret (G2) — quarantine in warn, reject in enforce", () => {
+    const withKey = "here is the key sk-ant-api03-abc123def456ghi789jkl012mno345pqr678stu";
+    const warn = evaluateWriteGate(base({ content: withKey }), withKey, { enforce: false });
+    assert.equal(warn.decision, "quarantine");
+    assert.ok(warn.reasons.some((r) => r.code === "secret"));
+    assert.equal(
+      evaluateWriteGate(base({ content: withKey }), withKey, { enforce: true }).decision,
+      "reject",
+    );
+  });
+
+  it("secret reason never echoes the raw secret (masked label/preview only)", () => {
+    const raw = "AKIAIOSFODNN7EXAMPLE and more";
+    const v = evaluateWriteGate(base({ content: raw }), raw);
+    const secretReason = v.reasons.find((r) => r.code === "secret");
+    assert.ok(secretReason);
+    assert.ok(!secretReason!.detail.includes("AKIAIOSFODNN7EXAMPLE"));
+  });
+
   it("is deterministic — identical input yields identical verdict", () => {
     const a = evaluateWriteGate(base({ content: INJECTION }), INJECTION);
     const b = evaluateWriteGate(base({ content: INJECTION }), INJECTION);
