@@ -16,13 +16,15 @@ import { DatabaseSync } from "node:sqlite";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { existsSync, mkdirSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import type { MemoryStats, MessageInput, SearchHit, SessionInput, ToolUseInput } from "./types.js";
 import { summarizeTokens } from "./stats.js";
 import { redactSecrets } from "../utils/redactSecrets.js";
 import { secureFile, secureDir } from "../utils/secure-perms.js";
 import { findInjection } from "./injection.js";
+import { evaluateWriteGate, writeGateEnforcing, type WriteGateVerdict } from "./write-gate.js";
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 /** True when text carries a HIGH-confidence prompt-injection pattern — used to
  *  quarantine a message on insert so recall never re-injects it into the prompt. */
@@ -131,6 +133,14 @@ CREATE TABLE IF NOT EXISTS pending_actions (
   verify_passes INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS memory_tombstones (
+  uuid TEXT PRIMARY KEY,
+  content_sha256 TEXT NOT NULL,
+  session_id TEXT,
+  reason TEXT,
+  deleted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS file_index (
   path TEXT PRIMARY KEY,
   mtime_ms INTEGER NOT NULL,
@@ -211,6 +221,10 @@ function migrate(db: DatabaseSync): void {
   // Set on insert going forward; `kit memory scan --injection --quarantine` backfills
   // rows indexed before this. Older rows default 0 (shown) → backward-compatible.
   ensureColumn(db, "messages", "quarantined", "INTEGER NOT NULL DEFAULT 0");
+  // v8: verified-forget (G1) — memory_tombstones records that a row was deleted
+  // (uuid + content SHA-256, never the content itself) so "forgotten" is a checkable,
+  // durable claim. The table is created by SCHEMA_SQL above (CREATE IF NOT EXISTS),
+  // so existing stores gain it on next open; no column migration needed.
   const row = db.prepare("SELECT version FROM schema_meta LIMIT 1").get() as
     | { version: number }
     | undefined;
@@ -302,13 +316,27 @@ export function upsertSession(db: DatabaseSync, s: SessionInput): void {
   );
 }
 
-/** Insert a message idempotently (by uuid). Returns true if a new row was added. */
+/** Insert a message idempotently (by uuid). Returns true if a new row was added.
+ *  Returns false when the row already exists OR the capture-time write-gate (G1)
+ *  rejects it (schema-invalid always; injection/oversize under KIT_MEMORY_WRITE_ENFORCE). */
 export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
   const content = captureText(m.content);
-  // Quarantine on insert: a stored message carrying a high-confidence injection
-  // pattern is excluded from recall by default (deny-by-default toward the prompt),
-  // so a poisoned transcript line never rides into a later, more-trusted session.
-  const quarantined = isHighConfidenceInjection(content) ? 1 : 0;
+  // Capture-time WRITE-GATE (G1): authorize the row BEFORE it lands. Fail closed
+  // toward the prompt — any unexpected gate error quarantines (warn) or rejects
+  // (enforce), never silently allows. A "quarantine" verdict preserves kit's prior
+  // behavior exactly (stored, excluded from recall) so enabling the gate is a no-op
+  // in warn mode; a "reject" verdict means the poisoned/malformed row never persists.
+  let verdict: WriteGateVerdict;
+  try {
+    verdict = evaluateWriteGate(m, content);
+  } catch {
+    verdict = {
+      decision: writeGateEnforcing() ? "reject" : "quarantine",
+      reasons: [{ code: "schema", detail: "write-gate evaluation error" }],
+    };
+  }
+  if (verdict.decision === "reject") return false;
+  const quarantined = verdict.decision === "quarantine" ? 1 : 0;
   const res = db
     .prepare(
       `INSERT OR IGNORE INTO messages
@@ -340,6 +368,123 @@ export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Proof that a memory row was forgotten. Every field is a checked fact, not an
+ * assumption — `ok` is the conjunction the caller should gate on.
+ */
+export interface ForgetProof {
+  uuid: string;
+  /** Was a row with this uuid present before the delete? */
+  found: boolean;
+  /** SHA-256 of the deleted content (empty if not found) — the durable receipt. */
+  contentSha256: string;
+  /** The messages row with this uuid is absent after the delete. */
+  rowGone: boolean;
+  /** The FTS5 shadow index is consistent with the content table (no dangling entry). */
+  ftsConsistent: boolean;
+  /** A tombstone recording the deletion was written. */
+  tombstoned: boolean;
+  /** All of the above — a verified forget. */
+  ok: boolean;
+}
+
+/**
+ * VERIFIED-FORGET (G1): hard-delete a memory row and PROVE it is gone.
+ *
+ * The gap analysis (§2.1, verified 3-0) found post-deletion verification is an
+ * industry-wide blind spot: systems delete but never check. This does the delete
+ * inside a transaction (FTS is auto-purged by the messages_ad trigger), records a
+ * content-hash tombstone (never the content — the store is secret-dense), then
+ * READS BACK three independent facts: the row is absent, the FTS index is
+ * internally consistent (integrity-check), and the tombstone exists. It fails
+ * CLOSED — any check that can't confirm leaves `ok:false` rather than claiming
+ * success. Deterministic, zero-LLM.
+ *
+ * Returns `found:false` (with `ok:false`) when no such row exists.
+ */
+export function forgetMemory(db: DatabaseSync, uuid: string, reason?: string): ForgetProof {
+  const empty: ForgetProof = {
+    uuid,
+    found: false,
+    contentSha256: "",
+    rowGone: false,
+    ftsConsistent: false,
+    tombstoned: false,
+    ok: false,
+  };
+  const existing = db
+    .prepare("SELECT id, session_id, content FROM messages WHERE uuid = ?")
+    .get(uuid) as { id: number; session_id: string; content: string | null } | undefined;
+  if (!existing) return empty;
+
+  const contentSha256 = createHash("sha256")
+    .update(existing.content ?? "", "utf8")
+    .digest("hex");
+
+  // Delete + tombstone + message_count fixup atomically. The messages_ad trigger
+  // removes the FTS shadow row in the same transaction.
+  const tx = db.prepare("BEGIN");
+  tx.run();
+  try {
+    db.prepare("DELETE FROM messages WHERE uuid = ?").run(uuid);
+    db.prepare(
+      "UPDATE sessions SET message_count = MAX(message_count - 1, 0) WHERE session_id = ?",
+    ).run(existing.session_id);
+    db.prepare(
+      `INSERT INTO memory_tombstones (uuid, content_sha256, session_id, reason)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(uuid) DO UPDATE SET
+         content_sha256 = excluded.content_sha256,
+         deleted_at = CURRENT_TIMESTAMP,
+         reason = excluded.reason`,
+    ).run(uuid, contentSha256, existing.session_id, reason ?? null);
+    db.prepare("COMMIT").run();
+  } catch (err) {
+    try {
+      db.prepare("ROLLBACK").run();
+    } catch {
+      /* rollback best-effort */
+    }
+    throw err;
+  }
+
+  // Read back three independent proofs — fail closed on each.
+  const rowGone =
+    (db.prepare("SELECT COUNT(*) c FROM messages WHERE uuid = ?").get(uuid) as { c: number }).c ===
+    0;
+  const tombstoned =
+    (
+      db.prepare("SELECT COUNT(*) c FROM memory_tombstones WHERE uuid = ?").get(uuid) as {
+        c: number;
+      }
+    ).c === 1;
+  // FTS5 'integrity-check' raises SQLITE_CORRUPT if the shadow index disagrees with
+  // the content table — i.e. if a dangling entry for the deleted row survived. No
+  // throw ⇒ the index is consistent and the deleted row's terms are truly gone.
+  let ftsConsistent = false;
+  try {
+    db.prepare("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')").run();
+    ftsConsistent = true;
+  } catch {
+    ftsConsistent = false;
+  }
+
+  return {
+    uuid,
+    found: true,
+    contentSha256,
+    rowGone,
+    ftsConsistent,
+    tombstoned,
+    ok: rowGone && ftsConsistent && tombstoned,
+  };
+}
+
+/** Count recorded tombstones (verified-forget receipts). */
+export function countTombstones(db: DatabaseSync): number {
+  return (db.prepare("SELECT COUNT(*) c FROM memory_tombstones").get() as { c: number }).c;
 }
 
 export function insertToolUse(db: DatabaseSync, t: ToolUseInput): void {

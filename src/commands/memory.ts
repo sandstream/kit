@@ -13,6 +13,7 @@ import {
   dailyActivity,
   quarantineInjectedMessages,
   countQuarantined,
+  forgetMemory,
 } from "../memory/db.js";
 import { sparkline, fmtTokens } from "../memory/stats.js";
 import { indexAllHarnesses } from "../memory/parser.js";
@@ -133,6 +134,7 @@ export async function cmdMemory(): Promise<boolean> {
     threads: memThreads,
     resume: memResume,
     forget: memForget,
+    "forget-message": memForgetMessage,
     pal: memPal,
   };
 
@@ -373,6 +375,7 @@ async function memHelp(): Promise<boolean> {
   console.log("  kit memory threads          List saved copilots (--global for all)");
   console.log("  kit memory resume <name|n>  Print the resume command for a saved copilot");
   console.log("  kit memory forget <name>    Remove a saved copilot");
+  console.log("  kit memory forget-message <uuid>  Verified-forget a memory row (prove it's gone)");
   console.log(
     "  kit memory scan             Scan the store for stored secrets (--injection for prompt-injection patterns; --injection --quarantine to exclude found rows from recall)",
   );
@@ -1461,4 +1464,52 @@ async function memForget(): Promise<boolean> {
     ok ? `${c.green}✓${c.reset} forgot ${name}` : `${c.dim}no copilot '${name}'${c.reset}`,
   );
   return true;
+}
+
+/**
+ * Verified-forget (G1): hard-delete a single memory row by uuid and PROVE it is
+ * gone (row absent + FTS index consistent + tombstone written). Prints the proof
+ * and exits non-zero if any check fails — "forgotten" must be checkable, not
+ * assumed. Use `kit memory search` to find the uuid to forget.
+ */
+async function memForgetMessage(): Promise<boolean> {
+  const reason = flagValue(process.argv, "--reason") ?? undefined;
+  // uuid is a single positional token; skip flags AND the space-separated value
+  // of --reason so `forget-message <uuid> --reason "x"` doesn't fold "x" into the uuid.
+  const raw = process.argv.slice(4);
+  const positional: string[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const a = raw[i];
+    if (a === "--reason") {
+      i++; // consume the flag's value
+      continue;
+    }
+    if (a.startsWith("--")) continue;
+    positional.push(a);
+  }
+  const uuid = (positional[0] ?? "").trim();
+  if (!uuid) {
+    console.error(`${c.red}usage: kit memory forget-message <uuid> [--reason <text>]${c.reset}`);
+    return false;
+  }
+  const db = openMemoryDb();
+  const proof = forgetMemory(db, uuid, reason);
+  db.close();
+
+  if (!proof.found) {
+    console.log(`${c.dim}no memory row with uuid '${uuid}' (nothing to forget)${c.reset}`);
+    return false;
+  }
+  const mark = (b: boolean) => (b ? `${c.green}✓${c.reset}` : `${c.red}✗${c.reset}`);
+  console.log(
+    proof.ok
+      ? `${c.green}✓ forgot ${uuid}${c.reset} — verified gone`
+      : `${c.red}✗ forget ${uuid} could not be fully verified${c.reset}`,
+  );
+  console.log(`  ${mark(proof.rowGone)} row deleted`);
+  console.log(`  ${mark(proof.ftsConsistent)} search index consistent`);
+  console.log(
+    `  ${mark(proof.tombstoned)} tombstone recorded (sha256 ${proof.contentSha256.slice(0, 12)}…)`,
+  );
+  return proof.ok;
 }
