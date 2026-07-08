@@ -373,7 +373,9 @@ TRIAGE PASSED
 
 Trust model documented in [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md);
 data flow per command in [`docs/DATA_FLOW.md`](./docs/DATA_FLOW.md);
-release-verification in [`docs/VERIFY.md`](./docs/VERIFY.md).
+release-verification in [`docs/VERIFY.md`](./docs/VERIFY.md). kit's verdicts are
+produced by deterministic code, never an LLM — a CI-enforced contract, see
+[`docs/ZERO_LLM_CONTRACT.md`](./docs/ZERO_LLM_CONTRACT.md).
 
 - `kit doctor`: Deep diagnostics: Node.js version, mise, .env.local, tools in PATH, git hooks
 - `kit env`: Inspect environment variables from .env.local (`--show-values`, `--missing`, `--json`)
