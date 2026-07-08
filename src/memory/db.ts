@@ -452,10 +452,14 @@ export function forgetMemory(db: DatabaseSync, uuid: string, reason?: string): F
 
   // Read back three independent proofs — fail closed on each.
   const rowGone =
-    (db.prepare("SELECT COUNT(*) c FROM messages WHERE uuid = ?").get(uuid) as { c: number }).c === 0;
+    (db.prepare("SELECT COUNT(*) c FROM messages WHERE uuid = ?").get(uuid) as { c: number }).c ===
+    0;
   const tombstoned =
-    (db.prepare("SELECT COUNT(*) c FROM memory_tombstones WHERE uuid = ?").get(uuid) as { c: number })
-      .c === 1;
+    (
+      db.prepare("SELECT COUNT(*) c FROM memory_tombstones WHERE uuid = ?").get(uuid) as {
+        c: number;
+      }
+    ).c === 1;
   // FTS5 'integrity-check' raises SQLITE_CORRUPT if the shadow index disagrees with
   // the content table — i.e. if a dangling entry for the deleted row survived. No
   // throw ⇒ the index is consistent and the deleted row's terms are truly gone.

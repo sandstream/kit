@@ -1508,6 +1508,8 @@ async function memForgetMessage(): Promise<boolean> {
   );
   console.log(`  ${mark(proof.rowGone)} row deleted`);
   console.log(`  ${mark(proof.ftsConsistent)} search index consistent`);
-  console.log(`  ${mark(proof.tombstoned)} tombstone recorded (sha256 ${proof.contentSha256.slice(0, 12)}…)`);
+  console.log(
+    `  ${mark(proof.tombstoned)} tombstone recorded (sha256 ${proof.contentSha256.slice(0, 12)}…)`,
+  );
   return proof.ok;
 }

@@ -43,8 +43,14 @@ describe("evaluateWriteGate (pure verdict)", () => {
 
   it("quarantines an oversize row in warn, rejects in enforce", () => {
     const big = "x".repeat(MAX_CONTENT_BYTES + 1);
-    assert.equal(evaluateWriteGate(base({ content: big }), big, { enforce: false }).decision, "quarantine");
-    assert.equal(evaluateWriteGate(base({ content: big }), big, { enforce: true }).decision, "reject");
+    assert.equal(
+      evaluateWriteGate(base({ content: big }), big, { enforce: false }).decision,
+      "quarantine",
+    );
+    assert.equal(
+      evaluateWriteGate(base({ content: big }), big, { enforce: true }).decision,
+      "reject",
+    );
   });
 
   it("counts bytes not chars for the oversize ceiling", () => {
@@ -63,8 +69,14 @@ describe("evaluateWriteGate (pure verdict)", () => {
   });
 
   it("flags each missing identifier (uuid, sessionId, type)", () => {
-    assert.ok(evaluateWriteGate(base({ sessionId: "  " }), "hi").reasons.some((r) => r.detail.includes("sessionId")));
-    assert.ok(evaluateWriteGate(base({ type: "" }), "hi").reasons.some((r) => r.detail.includes("type")));
+    assert.ok(
+      evaluateWriteGate(base({ sessionId: "  " }), "hi").reasons.some((r) =>
+        r.detail.includes("sessionId"),
+      ),
+    );
+    assert.ok(
+      evaluateWriteGate(base({ type: "" }), "hi").reasons.some((r) => r.detail.includes("type")),
+    );
   });
 
   it("is deterministic — identical input yields identical verdict", () => {
@@ -137,7 +149,8 @@ describe("insertMessage × write-gate", () => {
     const db = setup();
     assert.equal(insertMessage(db, base({ uuid: "" })), false);
     assert.equal(
-      (db.prepare("SELECT COUNT(*) c FROM messages WHERE session_id = 's1'").get() as { c: number }).c,
+      (db.prepare("SELECT COUNT(*) c FROM messages WHERE session_id = 's1'").get() as { c: number })
+        .c,
       0,
     );
     db.close();

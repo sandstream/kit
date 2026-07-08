@@ -107,8 +107,18 @@ describe("forgetMemory (verified-forget, G1)", () => {
 
   it("forgetting one row leaves siblings intact and recallable", () => {
     const db = setup();
-    insertMessage(db, { uuid: "u1", sessionId: "s1", type: "user", content: "keep the aardvark note" });
-    insertMessage(db, { uuid: "u2", sessionId: "s1", type: "user", content: "drop the beetle note" });
+    insertMessage(db, {
+      uuid: "u1",
+      sessionId: "s1",
+      type: "user",
+      content: "keep the aardvark note",
+    });
+    insertMessage(db, {
+      uuid: "u2",
+      sessionId: "s1",
+      type: "user",
+      content: "drop the beetle note",
+    });
     forgetMemory(db, "u2");
     assert.equal(searchMessages(db, "beetle").length, 0);
     assert.equal(searchMessages(db, "aardvark").length, 1);
