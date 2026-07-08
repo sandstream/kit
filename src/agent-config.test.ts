@@ -26,6 +26,7 @@ import {
   kitGateInvocation,
   kitGateArgv,
   READONLY_KIT_PERMISSIONS,
+  gateLiveness,
 } from "./agent-config.js";
 import { kitWrapperPath, kitBinDir } from "./kit-wrapper.js";
 import { statSync } from "node:fs";
@@ -883,5 +884,78 @@ describe("installInstallGateCline", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("gateLiveness (enforcement floor must prove it exists)", () => {
+  const CLAUDE = KIT_BLOCK_BEGIN + "\n## kit\n...\n" + KIT_BLOCK_END + "\n";
+  const settings = (cmds: string[]) =>
+    JSON.stringify({
+      hooks: {
+        PreToolUse: cmds.map((c) => ({ matcher: "x", hooks: [{ type: "command", command: c }] })),
+      },
+    });
+
+  function repo(fn: (dir: string) => void) {
+    const dir = mkdtempSync(join(tmpdir(), "kit-gatelive-"));
+    try {
+      mkdirSync(join(dir, ".claude"), { recursive: true });
+      return fn(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("not taught (no managed block) → taught:false, no false alarm", () => {
+    repo((dir: string) => {
+      writeFileSync(join(dir, "CLAUDE.md"), "just some project notes\n");
+      const live = gateLiveness(dir);
+      assert.equal(live.taught, false);
+    });
+  });
+
+  it("taught + both gates wired → all true", () => {
+    repo((dir: string) => {
+      writeFileSync(join(dir, "CLAUDE.md"), CLAUDE);
+      writeFileSync(
+        join(dir, ".claude/settings.json"),
+        settings(["~/.kit/bin/kit gate-bash", "~/.kit/bin/kit gate-env"]),
+      );
+      const live = gateLiveness(dir);
+      assert.deepEqual(live, { taught: true, installGate: true, envGate: true });
+    });
+  });
+
+  it("taught but env-gate vanished → the silent-degradation case", () => {
+    repo((dir: string) => {
+      writeFileSync(join(dir, "CLAUDE.md"), CLAUDE);
+      writeFileSync(join(dir, ".claude/settings.json"), settings(["~/.kit/bin/kit gate-bash"]));
+      const live = gateLiveness(dir);
+      assert.equal(live.taught, true);
+      assert.equal(live.installGate, true);
+      assert.equal(live.envGate, false);
+    });
+  });
+
+  it("taught but settings.json missing/unparseable → both gates read absent (a problem)", () => {
+    repo((dir: string) => {
+      writeFileSync(join(dir, "CLAUDE.md"), CLAUDE);
+      writeFileSync(join(dir, ".claude/settings.json"), "{ not json");
+      const live = gateLiveness(dir);
+      assert.equal(live.taught, true);
+      assert.equal(live.installGate, false);
+      assert.equal(live.envGate, false);
+    });
+  });
+
+  it("the block in AGENTS.md counts as taught too", () => {
+    repo((dir: string) => {
+      writeFileSync(join(dir, "AGENTS.md"), CLAUDE);
+      writeFileSync(
+        join(dir, ".claude/settings.json"),
+        settings(["kit gate-bash", "kit gate-env"]),
+      );
+      assert.equal(gateLiveness(dir).taught, true);
+    });
   });
 });

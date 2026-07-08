@@ -1,5 +1,5 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 
 import { ensureKitWrapper, kitWrapperPath } from "./kit-wrapper.js";
@@ -473,6 +473,51 @@ interface SettingsHookCmd {
 interface SettingsHookGroup {
   matcher?: string;
   hooks?: SettingsHookCmd[];
+}
+
+/**
+ * Gate liveness — is the deterministic ENFORCEMENT floor actually wired, or has it
+ * silently vanished? A gate is only real if it's on the agent's action path; a repo
+ * that was taught kit (managed block present) but whose PreToolUse gates were removed
+ * looks green while the agent runs un-gated — the worst false green (the "floor that
+ * isn't there"). This makes the floor prove it exists. Deterministic, read-only.
+ *
+ * `taught` = a managed "use kit" block exists in an agent rules file here (i.e.
+ * `kit agent teach` ran, which installs the gates by default). Only then are the
+ * gates EXPECTED — a never-taught repo isn't a degradation, just un-adopted.
+ */
+export interface GateLiveness {
+  /** kit agent-config ran here (managed block present in a rules file). */
+  taught: boolean;
+  /** PreToolUse install-gate (`gate-bash`) present in .claude/settings.json. */
+  installGate: boolean;
+  /** PreToolUse env-write-gate (`gate-env`) present. */
+  envGate: boolean;
+}
+
+export function gateLiveness(
+  cwd: string = process.cwd(),
+  settingsPath: string = resolve(cwd, ".claude/settings.json"),
+): GateLiveness {
+  const taught = AGENT_TARGETS.some((t) => {
+    try {
+      return readFileSync(resolve(cwd, t.file), "utf-8").includes(KIT_BLOCK_BEGIN);
+    } catch {
+      return false;
+    }
+  });
+  let pre: SettingsHookGroup[] = [];
+  try {
+    const settings = JSON.parse(readFileSync(settingsPath, "utf-8")) as {
+      hooks?: Record<string, SettingsHookGroup[]>;
+    };
+    pre = Array.isArray(settings.hooks?.PreToolUse) ? settings.hooks.PreToolUse : [];
+  } catch {
+    pre = []; // missing/unparseable settings → no gates present (surfaced as a problem)
+  }
+  const has = (suffix: string) =>
+    pre.some((g) => g.hooks?.some((h) => h.command?.endsWith(suffix)));
+  return { taught, installGate: has("gate-bash"), envGate: has("gate-env") };
 }
 
 /**

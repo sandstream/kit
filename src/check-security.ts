@@ -168,6 +168,38 @@ export async function checkMemoryHooksLiveness(): Promise<SecurityCheckResult> {
 }
 
 /**
+ * Gate liveness — the enforcement floor must prove it exists. If this repo was
+ * taught kit (managed "use kit" block present → `kit agent teach` ran, which
+ * installs the PreToolUse gates by default) but a gate has since vanished from
+ * `.claude/settings.json`, the agent runs UN-gated while kit still reports green.
+ * That is the worst false green: the floor an agent never touches because it isn't
+ * there. Skips on a never-taught repo (un-adopted, not degraded); fails on a taught
+ * repo with a missing gate. Deterministic, read-only.
+ */
+export async function checkGateLiveness(cwd?: string): Promise<SecurityCheckResult> {
+  const name = "enforcement gate liveness";
+  const category = "exposure" as const;
+  const { gateLiveness } = await import("./agent-config.js");
+  const live = gateLiveness(cwd);
+  if (!live.taught) {
+    return { category, name, status: "skip", detail: "kit agent-config not wired here" };
+  }
+  const missing: string[] = [];
+  if (!live.installGate) missing.push("install-gate (gate-bash)");
+  if (!live.envGate) missing.push("env-write-gate (gate-env)");
+  if (missing.length === 0) {
+    return { category, name, status: "pass", detail: "PreToolUse enforcement gates wired" };
+  }
+  return {
+    category,
+    name,
+    status: "fail",
+    severity: "high",
+    detail: `enforcement floor has a hole — taught kit here but PreToolUse gate(s) missing from .claude/settings.json: ${missing.join(", ")}. The agent runs un-gated. Run: kit agent-config`,
+  };
+}
+
+/**
  * R3 — a poisoned memory store is a delayed prompt-injection: stored text is replayed
  * into every session via recall. Quarantined rows are excluded from recall (mitigated),
  * so this flags `kit check` only when a NON-quarantined message still carries a
@@ -1949,6 +1981,10 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
   // Self-playing loop liveness: fail if capture hooks were installed but have since
   // vanished from settings.json (capture silently off — a false green).
   results.push(await checkMemoryHooksLiveness());
+  // Enforcement floor liveness: fail if kit was taught here but a PreToolUse gate
+  // has vanished — the agent runs un-gated while kit still reads green. The floor
+  // must prove it exists.
+  results.push(await checkGateLiveness());
   results.push(await checkDeviceIdOverride());
 
   // Inbound integration: fold any third-party findings a partner tool emitted to
