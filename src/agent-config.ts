@@ -1,5 +1,5 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 
 import { ensureKitWrapper, kitWrapperPath } from "./kit-wrapper.js";
@@ -476,6 +476,65 @@ interface SettingsHookGroup {
 }
 
 /**
+ * Gate liveness — is the deterministic ENFORCEMENT floor actually wired, or has it
+ * silently vanished? A gate is only real if it's on the agent's action path; a
+ * machine where kit installed the PreToolUse gates but they were later removed looks
+ * green while the agent runs un-gated — the worst false green (the "floor that isn't
+ * there"). This makes the floor prove it exists. Deterministic, read-only.
+ *
+ * The "expected" signal is a MACHINE-LOCAL marker written when a gate is installed —
+ * NOT the committed CLAUDE.md block. The block travels with the repo (present in any
+ * fresh checkout / CI), but the gates live in the gitignored, machine-local
+ * `.claude/settings.json`; keying off the block would false-fail every clone that
+ * commits its block and gitignores `.claude/` (the normal setup). The marker lives
+ * beside the gates (also gitignored), so a fresh checkout has neither → correctly
+ * "not installed here", while a set-up machine that lost a gate → degradation.
+ */
+export interface GateLiveness {
+  /** Gates were installed on THIS machine for this project (marker present). */
+  everInstalled: boolean;
+  /** PreToolUse install-gate (`gate-bash`) present in .claude/settings.json. */
+  installGate: boolean;
+  /** PreToolUse env-write-gate (`gate-env`) present. */
+  envGate: boolean;
+}
+
+/** Machine-local marker recording that kit installed the gates here (gitignored, beside them). */
+export function gateMarkerPath(cwd: string = process.cwd()): string {
+  return resolve(cwd, ".claude/.kit-gates-installed");
+}
+
+/** Record that the enforcement gates were installed here (best-effort; never throws). */
+export function markGatesInstalled(cwd: string = process.cwd()): void {
+  try {
+    const dir = resolve(cwd, ".claude");
+    if (!existsSync(dir)) return; // no .claude/ → not a Claude Code project; nothing to mark
+    writeFileSync(gateMarkerPath(cwd), new Date().toISOString() + "\n");
+  } catch {
+    /* marking is advisory — a failed touch must never break gate installation */
+  }
+}
+
+export function gateLiveness(
+  cwd: string = process.cwd(),
+  settingsPath: string = resolve(cwd, ".claude/settings.json"),
+): GateLiveness {
+  const everInstalled = existsSync(gateMarkerPath(cwd));
+  let pre: SettingsHookGroup[] = [];
+  try {
+    const settings = JSON.parse(readFileSync(settingsPath, "utf-8")) as {
+      hooks?: Record<string, SettingsHookGroup[]>;
+    };
+    pre = Array.isArray(settings.hooks?.PreToolUse) ? settings.hooks.PreToolUse : [];
+  } catch {
+    pre = []; // missing/unparseable settings → no gates present (surfaced as a problem)
+  }
+  const has = (suffix: string) =>
+    pre.some((g) => g.hooks?.some((h) => h.command?.endsWith(suffix)));
+  return { everInstalled, installGate: has("gate-bash"), envGate: has("gate-env") };
+}
+
+/**
  * Install the PreToolUse install-gate hook into `.claude/settings.json` so an
  * un-triaged package install is BLOCKED before it runs — the *enforce* layer for
  * agent auto-mode (the rules-file block only *advises*; an agent can otherwise run
@@ -505,12 +564,16 @@ export async function installInstallGate(cwd: string = process.cwd()): Promise<H
   const hooks = (settings.hooks ??= {});
   const pre = (hooks.PreToolUse ??= []);
   const already = pre.some((g) => g.hooks?.some((h) => h.command?.endsWith("gate-bash")));
-  if (already) return { file, action: "unchanged", detail: "install-gate already wired" };
+  if (already) {
+    markGatesInstalled(cwd); // gate present → record it for liveness (idempotent)
+    return { file, action: "unchanged", detail: "install-gate already wired" };
+  }
 
   pre.push({ matcher: "Bash", hooks: [{ type: "command", command: kitGateInvocation() }] });
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    markGatesInstalled(cwd);
     return { file, action: existed ? "updated" : "created" };
   } catch (err) {
     return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
@@ -547,7 +610,10 @@ export async function installEnvWriteGate(cwd: string = process.cwd()): Promise<
   const hooks = (settings.hooks ??= {});
   const pre = (hooks.PreToolUse ??= []);
   const already = pre.some((g) => g.hooks?.some((h) => h.command?.endsWith("gate-env")));
-  if (already) return { file, action: "unchanged", detail: "env-write-gate already wired" };
+  if (already) {
+    markGatesInstalled(cwd);
+    return { file, action: "unchanged", detail: "env-write-gate already wired" };
+  }
 
   pre.push({
     matcher: "Write|Edit|NotebookEdit",
@@ -556,6 +622,7 @@ export async function installEnvWriteGate(cwd: string = process.cwd()): Promise<
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    markGatesInstalled(cwd);
     return { file, action: existed ? "updated" : "created" };
   } catch (err) {
     return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };

@@ -1619,6 +1619,14 @@ async function cmdSetup(): Promise<boolean> {
       `  ${c.green}✓${c.reset} allowed ${perms.added.length} read-only kit command(s) ${c.dim}→ ${perms.file}${c.reset}`,
     );
   }
+  // Install the ENFORCEMENT gates too — a block that only advises leaves the floor
+  // out, which the gate-liveness check (rightly) fails. `kit agent teach` installs
+  // these by default; setup must too, so a fresh setup produces a complete floor.
+  for (const { agent, result } of await installAllInstallGates()) {
+    if (result.action === "created" || result.action === "updated") {
+      console.log(`  ${c.green}✓${c.reset} ${agent} gate ${c.dim}→ ${result.file}${c.reset}`);
+    }
+  }
   console.log();
 
   // Step 6: Verify

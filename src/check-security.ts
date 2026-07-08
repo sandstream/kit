@@ -168,6 +168,44 @@ export async function checkMemoryHooksLiveness(): Promise<SecurityCheckResult> {
 }
 
 /**
+ * Gate liveness — the enforcement floor must prove it exists. If kit installed the
+ * PreToolUse gates on THIS machine (machine-local marker present) but a gate has
+ * since vanished from `.claude/settings.json`, the agent runs UN-gated while kit
+ * still reports green. That is the worst false green: the floor an agent never
+ * touches because it isn't there. Keys off the machine-local install marker — NOT
+ * the committed CLAUDE.md block, which travels to every clone/CI where the gitignored
+ * `.claude/settings.json` legitimately doesn't exist. Skips where gates were never
+ * installed (fresh checkout / CI / un-adopted); fails on a machine that lost a gate.
+ */
+export async function checkGateLiveness(cwd?: string): Promise<SecurityCheckResult> {
+  const name = "enforcement gate liveness";
+  const category = "exposure" as const;
+  const { gateLiveness } = await import("./agent-config.js");
+  const live = gateLiveness(cwd);
+  if (!live.everInstalled) {
+    return {
+      category,
+      name,
+      status: "skip",
+      detail: "enforcement gates not installed on this machine",
+    };
+  }
+  const missing: string[] = [];
+  if (!live.installGate) missing.push("install-gate (gate-bash)");
+  if (!live.envGate) missing.push("env-write-gate (gate-env)");
+  if (missing.length === 0) {
+    return { category, name, status: "pass", detail: "PreToolUse enforcement gates wired" };
+  }
+  return {
+    category,
+    name,
+    status: "fail",
+    severity: "high",
+    detail: `enforcement floor has a hole — taught kit here but PreToolUse gate(s) missing from .claude/settings.json: ${missing.join(", ")}. The agent runs un-gated. Run: kit agent-config`,
+  };
+}
+
+/**
  * R3 — a poisoned memory store is a delayed prompt-injection: stored text is replayed
  * into every session via recall. Quarantined rows are excluded from recall (mitigated),
  * so this flags `kit check` only when a NON-quarantined message still carries a
@@ -1949,6 +1987,10 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
   // Self-playing loop liveness: fail if capture hooks were installed but have since
   // vanished from settings.json (capture silently off — a false green).
   results.push(await checkMemoryHooksLiveness());
+  // Enforcement floor liveness: fail if kit was taught here but a PreToolUse gate
+  // has vanished — the agent runs un-gated while kit still reads green. The floor
+  // must prove it exists.
+  results.push(await checkGateLiveness());
   results.push(await checkDeviceIdOverride());
 
   // Inbound integration: fold any third-party findings a partner tool emitted to
