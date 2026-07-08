@@ -148,6 +148,7 @@ import { cloneRepository } from "./clone.js";
 import { executeCommand } from "./run.js";
 import { listServices, openService } from "./open.js";
 import { cmdTriage } from "./commands/triage.js";
+import { cmdSlopsquat } from "./commands/slopsquat.js";
 import { parsePkgSpec, installPkg } from "./pkg.js";
 import { cmdMemory } from "./commands/memory.js";
 import { resolveKitRoot, runSelfAudit, SELF_AUDIT_RULES } from "./self-audit.js";
@@ -5550,6 +5551,7 @@ export const COMMAND_HELP: Record<string, string> = {
   "create-plugin": "Scaffold a new kit plugin package",
   plugin: "Discover and manage kit plugins (search, list, scaffold, install)",
   triage: "Security evaluation before installing packages, images, or skills",
+  slopsquat: "Score npm/PyPI packages for hallucination/slopsquat risk (registry metadata)",
   pkg: "Install package with mandatory triage (kit pkg npm:express)",
   team: "Manage team members, roles, and permissions (RBAC, invitations, audit logs)",
   completions: "Output shell completion script (bash, zsh, fish)",
@@ -6184,6 +6186,7 @@ export const COMMANDS: Record<string, () => boolean | Promise<boolean>> = {
   context: cmdContext,
   config: cmdConfig,
   triage: cmdTriage,
+  slopsquat: cmdSlopsquat,
   baseline: cmdBaseline,
   design: cmdDesign,
   standards: cmdStandards,
@@ -6259,6 +6262,7 @@ export const COMMAND_TIERS: Record<string, CommandTier> = {
   context: "stable",
   config: "stable",
   triage: "stable",
+  slopsquat: "experimental",
   baseline: "stable",
   design: "stable",
   standards: "stable",
