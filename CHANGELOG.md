@@ -6,6 +6,79 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-07-07
+
+### Added — `kit standards`: the third quality dimension (P1–P5, #255–#257)
+
+- **General gate (P1).** Language-agnostic code-quality metrics, measured the same
+  way on every stack: complexity + function length (lizard), duplication (jscpd),
+  file size / god-files (scc). Calibrated conservative defaults, overridable via
+  `[standards.general]`. Pure parsers unit-tested against fixtures; tool runners
+  resolve mise-first.
+- **Per-language gate (P2 + P4).** Delegates to each ecosystem's canonical linter
+  in report mode: eslint + `tsc --noEmit` (TS/JS), ruff + mypy (Python),
+  `go vet` + `gofmt -l` (Go), clippy + `cargo fmt --check` (Rust), rubocop (Ruby),
+  phpstan (PHP), ktlint (Kotlin), checkstyle (Java), `dotnet format` (C#),
+  cppcheck (C/C++). Node-ecosystem tools resolve the PROJECT-LOCAL
+  `node_modules/.bin` first — a global tsc resolves types against the wrong tree
+  and floods phantom errors (a false positive is as harmful as a false green).
+- **User plugins (P3).** Teams encode subjective standards under
+  `.kit/standards.d/`; kit ships none. Declarative TOML rules (strict
+  schema-validated, fail-closed on malformed/duplicate/bad-regex) and
+  programmatic `*.mjs` `evaluate(ctx)` run in a restricted child (env allowlist —
+  no secrets, hard timeout, output schema) and DETERMINISM-VERIFIED: each plugin
+  runs twice and divergent output is rejected.
+- **Platform gate (P4).** Container: hadolint over discovered Dockerfiles
+  (bounded-depth, vendor-excluded). No Dockerfile ⇒ the gate honestly doesn't apply.
+- **Ergonomics + parity (P5).** `kit standards freeze` (standards-only baseline);
+  a score summary that counts SETUP GAPS (tool not installed) separately from real
+  findings — the score is over gates that actually ran; MCP `kit_standards` tool
+  sharing ONE orchestrator with the CLI (`standards-run.ts`) so the two surfaces
+  can never disagree. `kit review` is now check + design + standards.
+- Everywhere: baseline-aware net-new gating, warn-by-default, `--enforce` fails
+  net-new findings AND setup gaps (fail-closed for CI).
+
+### Added — detection past the manifest ceiling (#255)
+
+- **Linguist-style source census.** When manifests mislead (polyglot repos, bare
+  `package.json` over a php/ruby tree), a bounded file-count census (≤6000 files,
+  vendor-excluded, JS+TS folded) breaks the tie. Conservative: only overrides a
+  weak/bare package.json or fills the no-manifest fallback.
+
+### Added — memory sync options (#255)
+
+- **`[memory.sync] encrypt = false`** — the low-ceremony plaintext path: a plain
+  SQLite snapshot (`VACUUM INTO`, 0600), no passphrase, no recipient. Secure by
+  default: anything but the literal boolean `false` keeps encryption ON. No false
+  green: `kit memory push` reports PLAINTEXT + "keep destination PRIVATE" instead
+  of claiming the blob is encrypted; the pull path still injection-scans (R7)
+  before merge.
+
+### Changed — prose → enforcement (#258)
+
+- **Statusline is injected, not requested.** The memory SessionStart hook now
+  prints `kit statusline: …` to stdout (injected as agent context); the managed
+  rules block no longer asks the agent to run it.
+- **`kit gate-env`** — new PreToolUse gate: blocks a Write/Edit that puts a
+  plaintext secret into a real `.env*` file BEFORE it lands (same detector as the
+  plaintext scan; `.env.example`/templates exempt; placeholders allowed).
+- **Gates are default-on in `kit agent teach`** (`--no-install-gate` opts out):
+  un-triaged installs + plaintext .env\* secrets are blocked, not advised against.
+  The generated "use kit" block shrank accordingly — it now states what is
+  enforced; rules migrate out of prose as their gate ships.
+
+### Fixed
+
+- **PAL scope unification — statusline ⚠ and `pal list` can no longer disagree.**
+  Three surfaces used three scope definitions (auto-tracker: absolute root;
+  `pal add`: basename; statusline: unscoped) — a statusline showed ⚠156 (mostly
+  dead temp-dir scopes) while `pal list` showed 0, hiding the project's own 6 open
+  items. Canonical scope is the ABSOLUTE project root; `palList` also matches
+  legacy basename rows; `quickPalCount` uses the same filter as `pal list`.
+- `kit check --json` no longer leaks the update banner into the JSON envelope.
+- `execFileNoThrow` gains `maxBuffer`/`cwd` options (large linter output;
+  gate children).
+
 ## [4.3.0] - 2026-07-07
 
 ### Fixed — dogfood findings from real projects (a Turborepo + a Firebase repo)

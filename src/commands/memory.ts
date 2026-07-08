@@ -3,7 +3,7 @@
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import {
   openMemoryDb,
   getStats,
@@ -150,9 +150,9 @@ async function memPal(): Promise<boolean> {
   const db = openMemoryDb();
   try {
     if (action === "list") {
-      const scope = hasFlag(process.argv, "--global")
-        ? undefined
-        : basename(getCurrentProjectRoot());
+      // Canonical scope = ABSOLUTE project root (same as the auto-tracker writes —
+      // basenames collide across repos); palList also matches legacy basename rows.
+      const scope = hasFlag(process.argv, "--global") ? undefined : getCurrentProjectRoot();
       // Device-coupled by default: only THIS device's items (+ legacy rows) show,
       // so an ephemeral session's items don't nag here. --all opts back in.
       const items = palList(db, { scope, allDevices: hasFlag(process.argv, "--all") });
@@ -201,7 +201,9 @@ async function memPal(): Promise<boolean> {
       const id = palAdd(db, {
         title,
         check,
-        scope: flagValue(process.argv, "--scope") ?? basename(getCurrentProjectRoot()),
+        // Same canonical scope as the auto-tracker (absolute root), so manual and
+        // auto items live under ONE scope definition and every surface agrees.
+        scope: flagValue(process.argv, "--scope") ?? getCurrentProjectRoot(),
       });
       console.log(`${c.green}✓${c.reset} added ${c.bold}${id}${c.reset}`);
       return true;

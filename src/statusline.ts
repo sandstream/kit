@@ -89,14 +89,18 @@ export function quickSubsystems(cwd: string): SubsystemStatus[] {
 }
 
 /** Open-PAL ("blocked on you") count — cheap, 0 on any error. Memory modules are
- *  dynamically imported so the sqlite dependency stays off other commands' startup. */
-export async function quickPalCount(): Promise<number> {
+ *  dynamically imported so the sqlite dependency stays off other commands' startup.
+ *  Scoped to the CURRENT project (same definition as `kit memory pal list`) so the
+ *  statusline ⚠ and the list can never disagree — an unscoped count once showed
+ *  ⚠156 (mostly dead temp-dir scopes) while the list correctly showed 0. */
+export async function quickPalCount(cwd?: string): Promise<number> {
   try {
     const { openMemoryDb } = await import("./memory/db.js");
     const { palList } = await import("./memory/pal.js");
+    const { getCurrentProjectRoot } = await import("./memory/project.js");
     const db = openMemoryDb();
     try {
-      return palList(db).length;
+      return palList(db, { scope: getCurrentProjectRoot(cwd) }).length;
     } finally {
       db.close();
     }
@@ -127,6 +131,6 @@ export async function buildStatuslineText(
     mode: profile.mode,
     score: { done, total },
     update: update?.latest ?? null,
-    pal: await quickPalCount(),
+    pal: await quickPalCount(cwd),
   });
 }
