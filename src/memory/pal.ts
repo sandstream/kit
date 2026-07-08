@@ -18,7 +18,7 @@
 import { randomBytes, createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { homedir, hostname, userInfo } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
 /** A device id is an opaque, filesystem- and SQL-safe token. We validate any
@@ -211,8 +211,17 @@ export function palList(db: DatabaseSync, opts: PalListOptions = {}): PendingAct
   const where: string[] = ["status = ?"];
   const params: unknown[] = [status];
   if (opts.scope !== undefined) {
-    where.push("(scope = ? OR scope IS NULL)");
-    params.push(opts.scope);
+    // Canonical scope is the ABSOLUTE project root (see syncSecurityFindings —
+    // basenames collide across repos). Legacy rows (pre-fix `pal add`) stored the
+    // basename, so a path scope also matches its basename form; NULL = global.
+    const alias = basename(opts.scope);
+    if (alias && alias !== opts.scope) {
+      where.push("(scope = ? OR scope = ? OR scope IS NULL)");
+      params.push(opts.scope, alias);
+    } else {
+      where.push("(scope = ? OR scope IS NULL)");
+      params.push(opts.scope);
+    }
   }
   if (!opts.allDevices) {
     // NULL origin_device = legacy/pre-v5 row → always shown (backward-compatible).

@@ -39,12 +39,14 @@
 
 ## Code quality + reviews
 
-| Command                 | Purpose                                                                |
-| ----------------------- | ---------------------------------------------------------------------- |
-| `kit design`            | A11y + design-token checks, baseline-aware.                            |
-| `kit review`            | Meta-runner — `check + design + tests` gate for PR.                    |
-| `kit baseline [freeze]` | Snapshot current acceptable warnings to `.kit-baseline.json`.          |
-| `kit analyze [--write]` | Mine git history + framework markers → draft `CLAUDE.md` / `RULES.md`. |
+| Command                                                                               | Purpose                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kit design`                                                                          | A11y + design-token checks, baseline-aware.                                                                                                                                                                                                               |
+| `kit standards [--category general\|specific\|plugins\|platform\|<lang>] [--enforce]` | Dev-standards gate: general metrics (complexity/duplication/size via lizard/jscpd/scc) + per-language linters (11 langs) + user plugins (`.kit/standards.d/`) + container (hadolint). Warn by default; `--enforce` fails net-new findings AND setup gaps. |
+| `kit standards freeze`                                                                | Snapshot only the standards dimensions into `.kit-baseline.json`.                                                                                                                                                                                         |
+| `kit review`                                                                          | Meta-runner — `check + design + standards` gate for PR.                                                                                                                                                                                                   |
+| `kit baseline [freeze]`                                                               | Snapshot current acceptable warnings to `.kit-baseline.json`.                                                                                                                                                                                             |
+| `kit analyze [--write]`                                                               | Mine git history + framework markers → draft `CLAUDE.md` / `RULES.md`.                                                                                                                                                                                    |
 
 ## Secrets
 
@@ -188,18 +190,21 @@
 
 Local-first second brain — SQLite + FTS5, deterministic, zero model calls. Full guide: `docs/MEMORY.md`.
 
-| Command                                                                     | Purpose                                                                                                                  |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `kit memory index`                                                          | Index `~/.claude` transcripts into `~/.kit/memory.db` (idempotent).                                                      |
-| `kit memory search <query>`                                                 | Full-text recall; defaults to the current project, `--global` across all.                                                |
-| `kit memory stats`                                                          | Sessions / messages / tool-uses / DB size.                                                                               |
-| `kit memory suggest [--limit N] [--json]`                                   | Emit a BYO-LLM review prompt (recent activity + open items) to stdout — pipe to your own model. kit never calls a model. |
-| `kit memory install` / `uninstall`                                          | Wire (or remove) the `UserPromptSubmit` + `SessionEnd` hooks in `~/.claude/settings.json`.                               |
-| `kit memory scan`                                                           | Scan the store for stored secrets (masked; exits 1 if any found).                                                        |
-| `kit memory backup <file>` / `restore <file>`                               | Encrypted AES-256-GCM backup/restore (`KIT_MEMORY_PASSPHRASE`).                                                          |
-| `kit memory pal [list\|add\|done\|snooze\|verify\|import]`                  | Pending-action ledger; auto-closes on verify. Project-scoped (`--global` for all).                                       |
-| `kit memory save <name>` / `threads` / `resume <name\|n>` / `forget <name>` | Named copilots — bookmark + resume sessions.                                                                             |
-| `kit memory share …` / `areas` / `area <name>`                              | Shared, area-organized team memory (committed, secret-scanned, reviewed like code).                                      |
+| Command                                                                     | Purpose                                                                                                                                                                                                      |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `kit memory index`                                                          | Index `~/.claude` transcripts into `~/.kit/memory.db` (idempotent).                                                                                                                                          |
+| `kit memory search <query>`                                                 | Full-text recall; defaults to the current project, `--global` across all.                                                                                                                                    |
+| `kit memory stats`                                                          | Sessions / messages / tool-uses / DB size.                                                                                                                                                                   |
+| `kit memory suggest [--limit N] [--json]`                                   | Emit a BYO-LLM review prompt (recent activity + open items) to stdout — pipe to your own model. kit never calls a model.                                                                                     |
+| `kit memory install` / `uninstall`                                          | Wire (or remove) the `UserPromptSubmit` + `SessionEnd` hooks in `~/.claude/settings.json`.                                                                                                                   |
+| `kit memory scan`                                                           | Scan the store for stored secrets (masked; exits 1 if any found).                                                                                                                                            |
+| `kit memory backup <file>` / `restore <file>`                               | Encrypted AES-256-GCM backup/restore (`KIT_MEMORY_PASSPHRASE`).                                                                                                                                              |
+| `kit memory sync init <remote> [--auto]`                                    | Write `~/.kit/sync.toml` (LOCAL, never committed). `--auto` = pull at session start + push at session end via the hooks.                                                                                     |
+| `kit memory push` / `pull`                                                  | Sync the store to/from your PRIVATE remote. Encrypted by default (passphrase or `recipient` public key — `kit memory keygen`); `encrypt = false` opts into a plaintext blob (destination must stay private). |
+| `kit memory keygen`                                                         | X25519 recipient keypair: ephemeral sessions push encrypted with NO secret; only holders of the private key decrypt.                                                                                         |
+| `kit memory pal [list\|add\|done\|snooze\|verify\|import]`                  | Pending-action ledger; auto-closes on verify. Project-scoped (`--global` for all).                                                                                                                           |
+| `kit memory save <name>` / `threads` / `resume <name\|n>` / `forget <name>` | Named copilots — bookmark + resume sessions.                                                                                                                                                                 |
+| `kit memory share …` / `areas` / `area <name>`                              | Shared, area-organized team memory (committed, secret-scanned, reviewed like code).                                                                                                                          |
 
 ## Exit codes
 

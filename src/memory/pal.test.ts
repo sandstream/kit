@@ -39,6 +39,34 @@ describe("PAL — pending actions", () => {
     db.close();
   });
 
+  it("scope: an absolute-root scope matches canonical, legacy-basename, and NULL rows — never other projects", () => {
+    const db = fresh();
+    // canonical (what the auto-tracker + fixed `pal add` write)
+    palAdd(db, { title: "canonical", scope: "/home/me/work/api" });
+    // legacy (pre-fix `pal add` stored the basename)
+    palAdd(db, { title: "legacy", scope: "api" });
+    // global (no scope) — always shown
+    palAdd(db, { title: "global" });
+    // a DIFFERENT project that happens to share the basename must NOT match by path
+    palAdd(db, { title: "other-project", scope: "/home/me/scratch/web" });
+
+    const items = palList(db, { scope: "/home/me/work/api" });
+    const titles = items.map((p) => p.title).sort();
+    assert.deepEqual(titles, ["canonical", "global", "legacy"]);
+    db.close();
+  });
+
+  it("scope: statusline count and pal list agree by construction (same filter)", () => {
+    const db = fresh();
+    palAdd(db, { title: "mine", scope: "/repo/kit" });
+    palAdd(db, { title: "ghost from temp-dir run", scope: "/tmp/kit-integ-check-xyz" });
+    // The unscoped count (old statusline behavior) sees both; the scoped one — the
+    // definition both surfaces now share — sees only this project's item + globals.
+    assert.equal(palList(db).length, 2);
+    assert.equal(palList(db, { scope: "/repo/kit" }).length, 1);
+    db.close();
+  });
+
   it("done closes; closed leaves the open list", () => {
     const db = fresh();
     const id = palAdd(db, { title: "x" });
