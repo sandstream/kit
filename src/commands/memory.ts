@@ -2,8 +2,8 @@
 // subcommand dispatcher; restructured to a handler table in a follow-up.
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, writeFileSync, mkdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 import {
   openMemoryDb,
   getStats,
@@ -20,6 +20,7 @@ import { indexAllHarnesses } from "../memory/parser.js";
 import { mergeDb } from "../memory/merge.js";
 import { buildSuggestPrompt } from "../memory/suggest.js";
 import { learnRecurring } from "../memory/learn.js";
+import { scaffoldFromCandidate } from "../insight/scaffold.js";
 import { getCurrentProjectRoot } from "../memory/project.js";
 import { scanDbForSecrets, scanDbForInjection } from "../memory/scan.js";
 import { sanitizeForPrompt } from "../memory/injection.js";
@@ -324,8 +325,28 @@ async function memLearn(): Promise<boolean> {
         `  ${c.bold}${cand.count}×${c.reset} ${c.dim}(${cand.sessions} ${s})${c.reset}${flag}  ${cand.example}`,
       );
     }
+
+    // --scaffold [dir]: codify — write a reviewable skill DRAFT per candidate.
+    // Deterministic skeletons (.draft.md, never a live skill); default dir cwd.
+    if (hasFlag(process.argv, "--scaffold")) {
+      const dirArg = flagValue(process.argv, "--scaffold");
+      const outDir = resolve(process.cwd(), dirArg && !dirArg.startsWith("-") ? dirArg : ".");
+      mkdirSync(outDir, { recursive: true });
+      console.log(`\n${c.bold}Scaffolding drafts${c.reset} ${c.dim}→ ${outDir}${c.reset}`);
+      for (const cand of candidates) {
+        const { filename, content } = scaffoldFromCandidate(cand);
+        const path = join(outDir, filename);
+        writeFileSync(path, content, { encoding: "utf-8" });
+        console.log(`  ${c.green}✓${c.reset} ${filename}`);
+      }
+      console.log(
+        `${c.dim}Drafts only — review + fill the steps, then move a keeper into place. kit installs nothing.${c.reset}`,
+      );
+      return true;
+    }
+
     console.log(
-      `\n${c.dim}You keep re-typing these. Record the ones worth keeping with ${c.reset}kit memory share${c.dim} or in your rules file (CLAUDE.md / AGENTS.md) so you stop repeating them.${c.reset}`,
+      `\n${c.dim}You keep re-typing these. Record the ones worth keeping with ${c.reset}kit memory share${c.dim}, scaffold skill drafts with ${c.reset}kit memory learn --scaffold${c.dim}, or add them to your rules file (CLAUDE.md / AGENTS.md).${c.reset}`,
     );
     return true;
   } finally {
