@@ -220,13 +220,9 @@
     "whoami"
   ],
   "mcpTools": [
-    "kit_adapter_check",
-    "kit_adapter_install",
     "kit_add",
-    "kit_agent_governance",
     "kit_check",
     "kit_ci",
-    "kit_configure",
     "kit_context",
     "kit_env",
     "kit_fix",
@@ -235,8 +231,6 @@
     "kit_login",
     "kit_run",
     "kit_secrets",
-    "kit_skill_marketplace",
-    "kit_standards",
-    "kit_workflow_execute"
+    "kit_standards"
   ]
 }
