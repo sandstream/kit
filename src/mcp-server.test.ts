@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer, KIT_MCP_TOOLS } from "./mcp-server.js";
+import { mcpExposedToolNames } from "./cli.js";
 
 // Standard .gitignore so security check passes in temp dirs
 const GITIGNORE = ".env\n.env.local\n.env.*.local\n";
@@ -95,6 +96,16 @@ describe("MCP server tool registration", () => {
     } finally {
       await cleanup();
     }
+  });
+
+  // CLI = MCP: which verbs are exposed as MCP tools is OWNED by the CLI
+  // COMMAND_REGISTRY (each descriptor's `mcp: true`), and mcpExposedToolNames()
+  // derives the `kit_<verb>` names from it. This asserts KIT_MCP_TOOLS — and
+  // therefore the actually-registered tools (guarded above) — match that single
+  // source, so a verb can't be MCP-exposed without a registry entry, nor a
+  // registry `mcp` marker exist without a registered tool.
+  it("KIT_MCP_TOOLS matches the CLI COMMAND_REGISTRY mcp-exposed verbs (CLI = MCP)", () => {
+    assert.deepEqual([...KIT_MCP_TOOLS].sort(), mcpExposedToolNames());
   });
 });
 
