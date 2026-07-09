@@ -28,6 +28,7 @@ import { cmdUpgrade } from "./commands/upgrade.js";
 import { cmdDoctor, cmdAdd, cmdSetup, cmdInit } from "./commands/setup.js";
 import { cmdReview } from "./commands/review.js";
 import { cmdInsight } from "./commands/insight.js";
+import { cmdProfile } from "./commands/profile.js";
 import {
   cmdStatus,
   cmdHealth,
@@ -674,6 +675,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     stability: "experimental",
     help: "Deterministic lifecycle insight (unused: loaded-but-never-called MCP servers, from the transcript index; --json)",
   },
+  profile: {
+    handler: cmdProfile,
+    stability: "experimental",
+    help: "Versioned, traveling project profile — declare {skills, mcp, workflows, plugins, vault, gates, scope} and audit declared-vs-discovered drift (show|freeze|check; --json, --gate)",
+  },
   pkg: {
     handler: cmdPkg,
     stability: "stable",
@@ -707,6 +713,11 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   "check verify-attestation": "Verify a signed .kit-check-attestation.json receipt",
   "airgap verify":
     "Prove zero-egress: assert every scanner that would run air-gapped resolves to a local artifact (no cloud-only, no registry semgrep config)",
+  "profile show": "Render the declared project profile with per-line reconciliation marks",
+  "profile freeze":
+    "Snapshot the discovered toolchain into .kit-profile.toml (preserves operator-authored workflows/plugins/scope/gates)",
+  "profile check":
+    "Report declared-vs-discovered drift (--gate fails CI on any drift; honest skip when no profile declared)",
   "memory index": "Index ~/.claude transcripts into the SQLite memory store",
   "memory search": "Full-text search memory (current project; --global for all)",
   "memory stats": "Show what the local memory store contains",
