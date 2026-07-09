@@ -8,6 +8,7 @@ import {
   hardwareRequired,
   policyRequiresHardware,
 } from "../keystore/index.js";
+import { keystoreRecordRevocation } from "../keystore/revoke.js";
 
 /** `kit identity keystore` — surface the active signing backend, honestly. */
 function identityKeystore(): boolean {
@@ -48,10 +49,56 @@ function identityKeystore(): boolean {
   return true;
 }
 
+/**
+ * `kit identity migrate` — you've provisioned an external/hardware-held key
+ * (KIT_KEYSTORE=command → your TPM/HSM/enclave/YubiKey) and made it active; this
+ * records a signed revocation of the OLD kit-managed file key, SIGNED BY and
+ * ATTRIBUTED TO the new active key, so verifiers learn the file key is
+ * superseded. kit never mints hardware keys (they are operator-fronted), so
+ * "migration" is revoke-the-old, not a kit-run rotation. Past signatures by the
+ * file key stay verifiable via its archived public key; the file key is revoked.
+ * Fail-closed: refuses unless a hardware/external backend is actually active.
+ */
+async function identityMigrate(): Promise<boolean> {
+  const st = activeKeyStoreStatus();
+  if (!st.hardwareRooted) {
+    console.error(
+      `${c.red}✗ no external/hardware backend active${c.reset} — set ${c.bold}KIT_KEYSTORE=command${c.reset} ${c.dim}(+ KIT_KEYSTORE_SIGN_CMD + KIT_KEYSTORE_PUBKEY, fronting your TPM/HSM/enclave/YubiKey)${c.reset} first; kit won't "migrate" onto a file key`,
+    );
+    return false;
+  }
+  const fileId = tryLoadIdentity();
+  if (!fileId) {
+    console.log(
+      `${c.dim}no kit-managed file key found — nothing to revoke; the active identity is already ${st.kid ?? "external"}.${c.reset}`,
+    );
+    return true;
+  }
+  if (st.kid && fileId.id === st.kid) {
+    console.error(
+      `${c.red}✗ the active key IS the file key${c.reset} — nothing migrated. Point ${c.bold}KIT_KEYSTORE_PUBKEY${c.reset} at a different (hardware-held) key before migrating.`,
+    );
+    return false;
+  }
+  const rec = keystoreRecordRevocation(fileId.id, "migrated to hardware-rooted identity");
+  console.log(
+    `${c.green}✓${c.reset} migrated to ${c.bold}${st.kind}${c.reset} identity ${c.bold}${st.kid}${c.reset}`,
+  );
+  console.log(
+    `  ${c.yellow}!${c.reset} ${c.dim}revoked old file key ${rec.kid} (revocation signed by the active key ${rec.by}); its past signatures stay verifiable, new ones use ${st.kid}${c.reset}`,
+  );
+  console.log(
+    `  ${c.dim}the old private key file under ~/.kit is now revoked — delete it once you've confirmed the hardware key works everywhere.${c.reset}`,
+  );
+  return true;
+}
+
 export async function cmdIdentity(): Promise<boolean> {
   const sub = process.argv[3] ?? "show";
 
   if (sub === "keystore") return identityKeystore();
+
+  if (sub === "migrate") return await identityMigrate();
 
   if (sub === "init") {
     // Under a hardware mandate (env OR org policy), refuse to mint a same-UID file key —
@@ -117,6 +164,8 @@ export async function cmdIdentity(): Promise<boolean> {
     return true;
   }
 
-  console.error(`${c.red}usage: kit identity <init|show [--public]|rotate|keystore>${c.reset}`);
+  console.error(
+    `${c.red}usage: kit identity <init|show [--public]|rotate|keystore|migrate>${c.reset}`,
+  );
   return false;
 }
