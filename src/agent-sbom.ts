@@ -127,3 +127,39 @@ export function discoverAgentToolchain(cwd: string): {
   }
   return { skills, mcpServers };
 }
+
+/**
+ * Best-effort discovery of the plugins a project loads: the `kitPlugins` array in
+ * `package.json` (npm package names; the same list `loadPluginAdapters` consumes). When the
+ * plugin is installed, its version is read from `node_modules/<name>/package.json`. Pure
+ * filesystem read; missing/malformed inputs yield `[]`, never throw — matching
+ * `discoverAgentToolchain`'s defensive posture. Kept separate so it can be composed without
+ * changing `discoverAgentToolchain`'s shape (and its `kit sbom --agent` / `kit insight` callers).
+ */
+export function discoverPlugins(cwd: string): AgentComponentInput[] {
+  let names: string[];
+  try {
+    const pkg = JSON.parse(readFileSync(resolve(cwd, "package.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const raw = pkg.kitPlugins;
+    names = Array.isArray(raw) ? raw.filter((p): p is string => typeof p === "string") : [];
+  } catch {
+    return [];
+  }
+  const out: AgentComponentInput[] = [];
+  for (const name of names) {
+    let version: string | undefined;
+    try {
+      const dep = JSON.parse(
+        readFileSync(resolve(cwd, "node_modules", name, "package.json"), "utf8"),
+      ) as Record<string, unknown>;
+      if (typeof dep.version === "string") version = dep.version;
+    } catch {
+      /* plugin not installed — declared name only */
+    }
+    out.push({ name, version, source: "package.json:kitPlugins" });
+  }
+  return out;
+}

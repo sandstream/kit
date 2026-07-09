@@ -17,7 +17,7 @@
  */
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
-import { discoverAgentToolchain } from "../agent-sbom.js";
+import { discoverAgentToolchain, discoverPlugins } from "../agent-sbom.js";
 import {
   loadProfile,
   saveProfile,
@@ -165,16 +165,17 @@ async function profileFreeze(jsonMode: boolean): Promise<boolean> {
   const { skills, mcpServers } = discoverAgentToolchain(cwd);
   const actual = await discoverActualState(cwd);
 
-  // Snapshot the discoverable dimensions; preserve operator-authored sections verbatim.
+  // Snapshot the discoverable dimensions (skills/mcp/plugins/vault); preserve the
+  // non-discoverable, operator-authored sections (workflows/gates/scope) verbatim.
   const next: KitProfile = {
     version: existing?.version ?? 1,
     generated: existing?.generated ?? new Date(0).toISOString(),
     skills: toComponents(skills),
     mcp: toComponents(mcpServers),
+    plugins: toComponents(discoverPlugins(cwd)),
   };
   if (existing?.name) next.name = existing.name;
   if (existing?.workflows) next.workflows = existing.workflows;
-  if (existing?.plugins) next.plugins = existing.plugins;
   if (existing?.gates) next.gates = existing.gates;
   if (existing?.scope) next.scope = existing.scope;
   const vaultStore = actual.vaultStore ?? existing?.vault?.store;
@@ -188,13 +189,13 @@ async function profileFreeze(jsonMode: boolean): Promise<boolean> {
   }
   console.log(`${c.bold}kit profile freeze${c.reset} → ${c.bold}${PROFILE_FILE}${c.reset}`);
   console.log(
-    `  ${c.green}✓${c.reset} ${next.skills?.length ?? 0} skill(s), ${next.mcp?.length ?? 0} mcp server(s)${
+    `  ${c.green}✓${c.reset} ${next.skills?.length ?? 0} skill(s), ${next.mcp?.length ?? 0} mcp server(s), ${next.plugins?.length ?? 0} plugin(s)${
       next.vault?.store ? `, vault store=${next.vault.store}` : ""
     }`,
   );
-  if (existing?.workflows || existing?.plugins || existing?.scope || existing?.gates) {
+  if (existing?.workflows || existing?.scope || existing?.gates) {
     console.log(
-      `  ${c.dim}preserved operator-authored sections (workflows/plugins/scope/gates) unchanged${c.reset}`,
+      `  ${c.dim}preserved operator-authored sections (workflows/scope/gates) unchanged${c.reset}`,
     );
   }
   console.log(`  ${c.dim}${profileFingerprint(next)}${c.reset}`);
