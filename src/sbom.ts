@@ -14,6 +14,12 @@ import type { LockPkg } from "./supply-chain.js";
 export interface Component {
   name: string;
   version: string;
+  /** CycloneDX component type; defaults to "library" (npm deps). */
+  type?: "library" | "application" | "data" | "machine-learning-model";
+  /** Package URL; defaults to `pkg:npm/<name>@<version>` when omitted. */
+  purl?: string;
+  /** Optional provenance note (file path, server command, source) for humans. */
+  provenance?: string;
 }
 
 /** Lock packages → distinct {name, version} components (skips the root + versionless). */
@@ -31,7 +37,7 @@ export function lockComponents(lockPkgs: LockPkg[]): Component[] {
 }
 
 function purl(c: Component): string {
-  return `pkg:npm/${c.name}@${c.version}`;
+  return c.purl ?? `pkg:npm/${c.name}@${c.version}`;
 }
 
 export function toCycloneDX(components: Component[]): unknown {
@@ -40,10 +46,11 @@ export function toCycloneDX(components: Component[]): unknown {
     specVersion: "1.5",
     version: 1,
     components: components.map((c) => ({
-      type: "library",
+      type: c.type ?? "library",
       name: c.name,
       version: c.version,
       purl: purl(c),
+      ...(c.provenance ? { properties: [{ name: "kit:provenance", value: c.provenance }] } : {}),
     })),
   };
 }
