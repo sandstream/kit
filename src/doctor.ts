@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { kitConfig } from "./config.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
+import { activeKeyStoreStatus, hardwareRequired } from "./keystore/active.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -206,6 +207,46 @@ async function checkGitHooks(config: kitConfig): Promise<DoctorCheck[]> {
   }));
 }
 
+/**
+ * Identity KeyStore posture (Pelare 1). Surfaces WHICH backend signs kit's
+ * identity and — per the North Star design principle — makes any degradation to
+ * the file-backed 0600 key HONEST rather than silent:
+ *   pass  hardware-rooted (Secure Enclave / TPM / external command)
+ *   warn  file-backed 0600 key (the working default; no hardware backend active)
+ *   fail  hardware REQUIRED (KIT_REQUIRE_HARDWARE / policy) but unavailable —
+ *         fail-closed, the same posture keystoreSign enforces at sign time.
+ */
+function checkIdentityKeystore(): DoctorCheck {
+  const name = "identity keystore";
+  const category = "security";
+  const st = activeKeyStoreStatus();
+  const required = hardwareRequired();
+
+  if (required && !st.hardwareRooted) {
+    return {
+      name,
+      status: "fail",
+      detail: `hardware identity required but unavailable — ${st.reason ?? "no hardware backend"} (signing is fail-closed)`,
+      category,
+    };
+  }
+  if (st.hardwareRooted && st.available) {
+    return {
+      name,
+      status: "pass",
+      detail: `hardware-rooted: ${st.kind}${st.kid ? ` (${st.kid})` : ""}`,
+      category,
+    };
+  }
+  // File-backed default — accepted, but surfaced (never silent).
+  return {
+    name,
+    status: "warn",
+    detail: `file-backed key (0600)${st.kid ? ` (${st.kid})` : ""} — no hardware backend active; migrate with 'kit identity' or require one via KIT_REQUIRE_HARDWARE`,
+    category,
+  };
+}
+
 export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorResult> {
   const allChecks: DoctorCheck[] = [];
 
@@ -229,6 +270,8 @@ export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorR
 
   const memoryHooksCheck = await checkMemoryHooks();
   if (memoryHooksCheck) allChecks.push(memoryHooksCheck);
+
+  allChecks.push(checkIdentityKeystore());
 
   const passed = allChecks.filter((c) => c.status === "pass").length;
   const warnings = allChecks.filter((c) => c.status === "warn").length;

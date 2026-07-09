@@ -144,4 +144,22 @@ describe("runDoctor", () => {
       await rmdir(tmpDir);
     }
   });
+
+  it("surfaces the identity keystore posture (Pelare 1 — never silent)", async () => {
+    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-9`);
+    await mkdir(tmpDir, { recursive: true });
+    try {
+      const result = await runDoctor({}, tmpDir);
+      const ks = result.checks.find((c) => c.name === "identity keystore");
+      assert.ok(ks, "identity keystore check should always be present");
+      // Backend-dependent, but must be an honest, non-silent verdict.
+      assert.ok(
+        ["pass", "warn", "fail"].includes(ks.status),
+        `identity keystore must report a real posture, got ${ks.status}`,
+      );
+      assert.ok(ks.detail.length > 0, "identity keystore must explain its posture");
+    } finally {
+      await rmdir(tmpDir);
+    }
+  });
 });
