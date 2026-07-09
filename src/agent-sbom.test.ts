@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { agentToolchainComponents, mcpServersFromConfig } from "./agent-sbom.js";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { agentToolchainComponents, mcpServersFromConfig, discoverPlugins } from "./agent-sbom.js";
 import { toCycloneDX, toSpdx, type Component } from "./sbom.js";
 
 describe("agentToolchainComponents", () => {
@@ -50,6 +53,44 @@ describe("mcpServersFromConfig", () => {
     assert.equal(mcpServersFromConfig({ servers: { a: {} } }).length, 1);
     assert.deepEqual(mcpServersFromConfig("nope"), []);
     assert.deepEqual(mcpServersFromConfig({ mcpServers: null }), []);
+  });
+});
+
+describe("discoverPlugins", () => {
+  it("reads kitPlugins from package.json and resolves installed versions", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-plugins-"));
+    try {
+      writeFileSync(
+        join(dir, "package.json"),
+        JSON.stringify({ kitPlugins: ["@acme/kit-railway", "kit-plugin-x"] }),
+      );
+      // one plugin installed (version resolvable), one not
+      mkdirSync(join(dir, "node_modules/@acme/kit-railway"), { recursive: true });
+      writeFileSync(
+        join(dir, "node_modules/@acme/kit-railway/package.json"),
+        JSON.stringify({ name: "@acme/kit-railway", version: "2.3.0" }),
+      );
+      const plugins = discoverPlugins(dir);
+      const byName = Object.fromEntries(plugins.map((p) => [p.name, p]));
+      assert.equal(byName["@acme/kit-railway"].version, "2.3.0");
+      assert.equal(byName["@acme/kit-railway"].source, "package.json:kitPlugins");
+      assert.equal(byName["kit-plugin-x"].version, undefined); // declared but not installed
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns [] when there is no package.json or no kitPlugins (never throws)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-plugins-"));
+    try {
+      assert.deepEqual(discoverPlugins(dir), []);
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "p" }));
+      assert.deepEqual(discoverPlugins(dir), []);
+      writeFileSync(join(dir, "package.json"), "{ not json");
+      assert.deepEqual(discoverPlugins(dir), []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -128,7 +128,7 @@ describe("computeProfileDrift", () => {
 });
 
 describe("discoverActualState", () => {
-  it("discovers skills + MCP servers + vault store; workflows/plugins remain unknown", async () => {
+  it("discovers skills + MCP servers + plugins + vault store; workflows remain unknown", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-reconcile-"));
     try {
       mkdirSync(join(dir, ".claude/skills/api-test"), { recursive: true });
@@ -137,6 +137,7 @@ describe("discoverActualState", () => {
         join(dir, ".mcp.json"),
         JSON.stringify({ mcpServers: { postgres: { command: "npx x" } } }),
       );
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ kitPlugins: ["@acme/kit-x"] }));
       writeFileSync(join(dir, ".kit.toml"), `[secrets]\nstore = "1password"\n`);
 
       const state = await discoverActualState(dir);
@@ -148,9 +149,12 @@ describe("discoverActualState", () => {
         state.mcp.map((s) => s.name),
         ["postgres"],
       );
+      assert.deepEqual(
+        state.plugins?.map((p) => p.name),
+        ["@acme/kit-x"],
+      );
       assert.equal(state.vaultStore, "1password");
-      assert.equal(state.workflows, null);
-      assert.equal(state.plugins, null);
+      assert.equal(state.workflows, null); // no on-disk workflow convention yet
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -176,6 +180,24 @@ describe("discoverActualState", () => {
       const state = await discoverActualState(dir);
       const d = computeProfileDrift(profile({ skills: [{ name: "api-test" }] }), state);
       assert.equal(d.clean, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("audits plugin drift now that plugins are discoverable (was previously unaudited)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-reconcile-"));
+    try {
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ kitPlugins: ["@acme/kit-x"] }));
+      const state = await discoverActualState(dir);
+      // declared a DIFFERENT plugin → the declared one is removed, the present one is added
+      const d = computeProfileDrift(profile({ plugins: [{ name: "@acme/kit-old" }] }), state);
+      assert.deepEqual(d.unaudited, []); // no longer unaudited
+      const statuses = Object.fromEntries(
+        d.entries.filter((e) => e.kind === "plugin").map((e) => [e.name, e.status]),
+      );
+      assert.equal(statuses["@acme/kit-old"], "removed");
+      assert.equal(statuses["@acme/kit-x"], "added");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

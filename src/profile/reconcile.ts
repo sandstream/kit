@@ -21,7 +21,7 @@
  */
 import { resolve } from "node:path";
 import { loadConfig } from "../config.js";
-import { discoverAgentToolchain } from "../agent-sbom.js";
+import { discoverAgentToolchain, discoverPlugins } from "../agent-sbom.js";
 import type { KitProfile, ProfileComponent } from "./schema.js";
 
 export type ComponentKind = "skill" | "mcp" | "workflow" | "plugin";
@@ -171,12 +171,14 @@ export function computeProfileDrift(declared: KitProfile, actual: DiscoveredStat
 
 /**
  * Best-effort snapshot of the ACTUAL project state, mirroring `discoverAgentToolchain`'s
- * defensive posture: missing/malformed inputs degrade to "unknown", never throw. Workflows and
- * plugins are `null` (their discovery lands in step 4) so drift honestly reports them unaudited
- * rather than pretending they are absent.
+ * defensive posture: missing/malformed inputs degrade to "unknown", never throw. Plugins are
+ * discovered from `package.json` `kitPlugins` (so plugin drift is auditable); workflows remain
+ * `null` — there is no on-disk workflow convention to reconcile against yet, so drift honestly
+ * reports declared workflows as unaudited rather than pretending they are absent.
  */
 export async function discoverActualState(cwd = process.cwd()): Promise<DiscoveredState> {
   const { skills, mcpServers } = discoverAgentToolchain(cwd);
+  const plugins = discoverPlugins(cwd);
   let vaultStore: string | undefined;
   try {
     const cfg = await loadConfig(resolve(cwd, ".kit.toml"));
@@ -188,7 +190,7 @@ export async function discoverActualState(cwd = process.cwd()): Promise<Discover
     skills: skills.map((s) => ({ name: s.name, version: s.version })),
     mcp: mcpServers.map((s) => ({ name: s.name, version: s.version })),
     workflows: null,
-    plugins: null,
+    plugins: plugins.map((p) => ({ name: p.name, version: p.version })),
     vaultStore,
   };
 }
