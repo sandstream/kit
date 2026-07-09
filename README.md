@@ -900,6 +900,7 @@ For Cline, add the same config to your `cline_mcp_settings.json`.
 
 - 📚 **Plugin Development**: [docs/PLUGIN_DEVELOPMENT.md](docs/PLUGIN_DEVELOPMENT.md), [docs/ADAPTER_GUIDE.md](docs/ADAPTER_GUIDE.md), [docs/MCP_TOOLS_GUIDE.md](docs/MCP_TOOLS_GUIDE.md)
 - 🔤 **Acronyms & terms**: [docs/GLOSSARY.md](docs/GLOSSARY.md) — what SBOM, MCP, PAL, SLSA, … mean in kit
+- 📐 **Standards coverage & gaps**: [docs/STANDARDS.md](docs/STANDARDS.md) — which security standards kit maps to (OWASP, ASVS, SLSA, …) and which it doesn't yet
 - 💬 **Discussions**: [github.com/sandstream/kit/discussions](https://github.com/sandstream/kit/issues)
 - 🐛 **Issues**: [github.com/sandstream/kit/issues](https://github.com/sandstream/kit/issues)
 - 🤝 **Contributing**: [CONTRIBUTING.md](CONTRIBUTING.md), [COMMUNITY.md](COMMUNITY.md)
