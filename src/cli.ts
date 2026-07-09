@@ -10,7 +10,6 @@ import { checkTools } from "./check-tools.js";
 import { checkServices } from "./check-services.js";
 import { checkSecrets } from "./check-secrets.js";
 import { checkSecurity, type SecurityCheckResult } from "./check-security.js";
-import { installTools } from "./install.js";
 import { loginServices } from "./login.js";
 import { check1PasswordStatus, detect1PasswordMode } from "./onepassword.js";
 import { isNonInteractive } from "./environment.js";
@@ -20,7 +19,6 @@ import { hasFlag, flagValue } from "./utils/flags.js";
 import { scanPlaintextSecrets } from "./scan-plaintext.js";
 import { analyzeRepo, renderClaudeMd, renderRulesMd } from "./analyze.js";
 import { scanTranscripts } from "./scan-transcripts.js";
-import { consumeElevation } from "./elevation.js";
 import { checkGitignore, patchGitignore } from "./check-gitignore.js";
 import type { SecretsStore } from "./toml-generator.js";
 import { generateCompletions } from "./completions.js";
@@ -82,6 +80,7 @@ import { cmdSentinel } from "./commands/sentinel.js";
 import { cmdStandards, cmdBaseline } from "./commands/standards.js";
 import { cmdCheck } from "./commands/check.js";
 import { cmdDesign } from "./commands/design.js";
+import { cmdInstall } from "./commands/install.js";
 import {
   type CiFormat,
   type JsonCheck,
@@ -220,76 +219,6 @@ async function cmdReview(): Promise<boolean> {
     );
   }
   return allOk;
-}
-
-async function cmdInstall(): Promise<boolean> {
-  const config = await loadConfig(resolveConfigPath());
-
-  if (!config.tools || Object.keys(config.tools).length === 0) {
-    console.log(`${c.dim}No tools configured in ${KIT_FILE}${c.reset}`);
-    return true;
-  }
-
-  const toolsConfig = config.tools;
-
-  // WATERTIGHT: kit triages every third-party tool before installing it. The
-  // `--no-triage` override is a deliberate, audited security action — it must
-  // hold a one-shot elevation, or the install is refused.
-  let skipTriage = false;
-  if (hasFlag(process.argv, "--no-triage")) {
-    const elev = await consumeElevation("tools.install.no-triage");
-    if (!elev.ok) {
-      console.error(`${c.red}✗ --no-triage refused: ${elev.reason}${c.reset}`);
-      console.error(
-        `${c.dim}Run 'kit auth elevate --scope tools.install.no-triage' first, or drop --no-triage to let triage run.${c.reset}`,
-      );
-      return false;
-    }
-    skipTriage = true;
-    console.log(
-      `${c.yellow}⚠ --no-triage: triage gate bypassed (elevation consumed, audit-logged)${c.reset}`,
-    );
-  }
-
-  console.log(`${c.bold}${c.cyan}Installing tools via mise...${c.reset}\n`);
-
-  return await withGovernance(
-    config,
-    {
-      operation: "tools.install",
-      operationType: "write",
-      metadata: {
-        tools: Object.keys(toolsConfig),
-        skipTriage,
-      },
-    },
-    async () => {
-      const results = await installTools(toolsConfig, undefined, { skipTriage });
-      let allOk = true;
-
-      for (const r of results) {
-        const icon =
-          r.action === "failed"
-            ? `${c.red}✗${c.reset}`
-            : r.action === "blocked"
-              ? `${c.yellow}⛔${c.reset}`
-              : `${c.green}✓${c.reset}`;
-        const label =
-          r.action === "already_ok"
-            ? `${c.dim}already installed${c.reset}`
-            : r.action === "installed"
-              ? `${c.green}installed${c.reset}`
-              : r.action === "blocked"
-                ? `${c.yellow}blocked by triage${c.reset}`
-                : `${c.red}failed${c.reset}`;
-        console.log(`  ${icon} ${r.name}  ${label}  ${c.dim}${r.detail}${c.reset}`);
-        if (r.action === "failed" || r.action === "blocked") allOk = false;
-      }
-
-      console.log();
-      return allOk;
-    },
-  );
 }
 
 async function ensureSecretsBackend(config: kitConfig): Promise<boolean> {
