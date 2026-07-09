@@ -668,14 +668,6 @@ export const READ_ONLY_SAFE = new Set<string>([
   "kit_env",
   "kit_ci",
   "kit_context",
-  "kit_adapter_check",
-  // No-op scaffolding stubs: they assemble a JSON response and perform no real
-  // side-effect. If any gains a real sink, drop it here and add the guard.
-  "kit_configure",
-  "kit_adapter_install",
-  "kit_workflow_execute",
-  "kit_skill_marketplace",
-  "kit_agent_governance",
 ]);
 const GUARD_WINDOW = 12;
 // Real side-effects in an MCP handler body: filesystem writes, process exec, secret

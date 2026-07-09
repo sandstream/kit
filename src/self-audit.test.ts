@@ -359,7 +359,7 @@ describe("R8-readonly-guard", () => {
     // fail-open hole; this asserts the allowlist stays in sync with mcp-server.ts.
     const post = realSource("src/mcp-server.ts");
     const tools = extractKitTools(post);
-    assert.ok(tools.length >= 17, `expected >= 17 kit_* tools, found ${tools.length}`);
+    assert.ok(tools.length >= 12, `expected >= 12 kit_* tools, found ${tools.length}`);
 
     const unclassified: string[] = [];
     for (const t of tools) {
