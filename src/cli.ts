@@ -10,7 +10,7 @@ import { createInterface } from "node:readline/promises";
 import { checkTools } from "./check-tools.js";
 import { checkServices } from "./check-services.js";
 import { checkSecrets } from "./check-secrets.js";
-import { checkSecurity, gateStatus, type SecurityCheckResult } from "./check-security.js";
+import { checkSecurity, type SecurityCheckResult } from "./check-security.js";
 import type { HealthCtx } from "./health.js";
 import type { SentinelSummary } from "./sentinel.js";
 import { syncSecurityFindings } from "./findings-track.js";
@@ -90,12 +90,22 @@ import { cmdGhaAudit } from "./commands/gha-audit.js";
 import { cmdIdentity } from "./commands/identity.js";
 import { cmdPanic } from "./commands/panic.js";
 import { cmdPolicy } from "./commands/policy.js";
-import { evaluatePolicy } from "./policy-check.js";
 import { cmdSbom } from "./commands/sbom.js";
 import { cmdSecurity } from "./commands/security.js";
 import { cmdSecrets } from "./commands/secrets.js";
 import { cmdUpgrade, selfUpgrade } from "./commands/upgrade.js";
 import { cmdDoctor, cmdAdd } from "./commands/setup.js";
+import { cmdCi } from "./commands/ci.js";
+import {
+  type CiFormat,
+  type JsonCheck,
+  type JsonCheckOutput,
+  detectCiFormat,
+  emitGithubAnnotations,
+  emitGitlabJunit,
+  autoInstallScanners,
+  maybeEmitCheckAttestation,
+} from "./cli-checks-shared.js";
 import { cmdAuth } from "./commands/auth.js";
 import { cmdAudit } from "./commands/audit.js";
 import { cmdMcp } from "./commands/mcp.js";
@@ -133,27 +143,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const KIT_VERSION = (
   JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8")) as { version: string }
 ).version;
-
-interface JsonCheck {
-  name: string;
-  status: "pass" | "fail" | "warn" | "skip";
-  detail: string;
-  category: string;
-  files?: string[];
-  severity?: "critical" | "high" | "medium" | "low";
-}
-
-interface JsonCheckOutput {
-  ok: boolean;
-  checks: JsonCheck[];
-  summary: {
-    passed: number;
-    failed: number;
-    warnings: number;
-    skipped: number;
-    advisories?: number;
-  };
-}
 
 /** Map a security finding to a short, actionable PAL title/detail. */
 async function cmdHeal(): Promise<boolean> {
@@ -218,35 +207,6 @@ async function cmdHeal(): Promise<boolean> {
     );
   }
   return green;
-}
-
-/**
- * Emit a signed `.kit-check-attestation.json` receipt after a check/ci run, but
- * only when the operator opts in (`--attest` flag or `KIT_ATTEST=1`). Writing a
- * new file into the repo on every run would surprise scripted users, so it is
- * gated. The signing step is fail-soft inside emitAttestation: a signing failure
- * never alters the check verdict; at worst the receipt is unsigned.
- */
-async function maybeEmitCheckAttestation(
-  command: "check" | "ci",
-  overallOk: boolean,
-  summary: { passed: number; failed: number; warnings: number; skipped: number },
-  scannersRan: { id: string; status: string }[],
-  quiet: boolean,
-): Promise<void> {
-  if (!hasFlag(process.argv, "--attest") && !envTruthy(process.env.KIT_ATTEST)) return;
-  const { emitAttestation } = await import("./check-attestation.js");
-  const res = await emitAttestation(
-    { command, kitVersion: KIT_VERSION, overallOk, results: summary, scannersRan },
-    process.cwd(),
-  );
-  if (res && !quiet) {
-    const signedNote =
-      res.att.sig_alg === "none"
-        ? `${c.yellow}unsigned (${res.att.unsigned_reason})${c.reset}`
-        : `${c.dim}signed ${res.att.sig_alg}${c.reset}`;
-    console.log(`${c.dim}attestation: ${res.path}${c.reset} ${signedNote}`);
-  }
 }
 
 async function cmdCheck(): Promise<boolean> {
@@ -871,39 +831,6 @@ async function cmdInstall(): Promise<boolean> {
       return allOk;
     },
   );
-}
-
-/**
- * Self-healing scanner preflight for `kit check` / `kit ci`. Installs any security
- * scanner declared in `.kit.toml [tools]` but not yet present, so the scan actually
- * RUNS in an ephemeral environment instead of reporting the scanner missing (which
- * fails the strict gate). Complements `kit install` at env-setup — this backstops
- * the case where setup did not run. Opt out with `--no-auto-install` /
- * `KIT_CHECK_NO_AUTOINSTALL`; skipped when air-gapped. installTools is triage-gated
- * and read-only-aware, so this can never run an untriaged binary or write in
- * --read-only mode. Best-effort: a failed install just leaves the check to fail closed.
- */
-async function autoInstallScanners(config: kitConfig, live: boolean): Promise<void> {
-  if (!config.tools) return;
-  const { ensureScannersInstalled } = await import("./install.js");
-  const { resolveAirGap } = await import("./airgap/config.js");
-  const disabled =
-    hasFlag(process.argv, "--no-auto-install") ||
-    ["1", "true", "yes"].includes(
-      (process.env.KIT_CHECK_NO_AUTOINSTALL ?? "").trim().toLowerCase(),
-    );
-  const results = await ensureScannersInstalled(config.tools, {
-    disabled,
-    airGapped: resolveAirGap(config.air_gap, process.env).enabled,
-  });
-  const newly = results.filter((r) => r.action === "installed");
-  if (live && newly.length) {
-    console.log(
-      `  ${c.green}✓${c.reset} ${c.dim}auto-installed ${newly
-        .map((r) => r.name)
-        .join(", ")} so its scan can run${c.reset}`,
-    );
-  }
 }
 
 async function ensureSecretsBackend(config: kitConfig): Promise<boolean> {
@@ -2050,289 +1977,6 @@ async function offerFirstInstallPrescan(): Promise<void> {
     console.log(`\n${c.dim}Full report:${c.reset} ${report.summaryPath}`);
   }
   console.log();
-}
-
-type CiFormat = "github" | "gitlab" | "json" | "text";
-
-function detectCiFormat(): CiFormat {
-  if (process.env.GITHUB_ACTIONS === "true") return "github";
-  if (process.env.GITLAB_CI === "true") return "gitlab";
-  if (process.env.CI === "true") return "text";
-  return "text";
-}
-
-function emitGithubAnnotations(checks: JsonCheck[]): void {
-  for (const ch of checks) {
-    // Carry the offending file:line into the annotation when the finding has one.
-    const where = ch.files && ch.files.length > 0 ? ` [${ch.files[0]}]` : "";
-    const msg = escapeWorkflowCmd(`${ch.category}/${ch.name}: ${ch.detail}${where}`);
-    if (ch.status === "fail") {
-      console.log(`::error::${msg}`);
-    } else if (ch.status === "warn") {
-      console.log(`::warning::${msg}`);
-    }
-  }
-}
-
-function emitGitlabJunit(checks: JsonCheck[], allOk: boolean): void {
-  const failures = checks.filter((c) => c.status === "fail");
-  const warnings = checks.filter((c) => c.status === "warn");
-  const lines: string[] = [
-    `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<testsuites name="kit-ci" tests="${checks.length}" failures="${failures.length}" errors="0">`,
-    `  <testsuite name="kit" tests="${checks.length}" failures="${failures.length}">`,
-  ];
-  for (const ch of checks) {
-    lines.push(`    <testcase name="${xmlEscape(ch.name)}" classname="${xmlEscape(ch.category)}">`);
-    if (ch.status === "fail") {
-      lines.push(`      <failure message="${xmlEscape(ch.detail)}"/>`);
-    } else if (ch.status === "warn") {
-      lines.push(`      <system-out>${xmlEscape(ch.detail)}</system-out>`);
-    }
-    lines.push(`    </testcase>`);
-  }
-  lines.push(`  </testsuite>`, `</testsuites>`);
-  const xml = lines.join("\n");
-  // Write to file for GitLab artifact collection — synchronous so the report is
-  // guaranteed flushed before this (sync) function returns.
-  writeFileSync("kit-report.xml", xml, "utf8");
-  if (!allOk || warnings.length > 0) {
-    console.log(
-      `CI report written to kit-report.xml (${failures.length} failures, ${warnings.length} warnings)`,
-    );
-  }
-}
-
-async function cmdCi(): Promise<boolean> {
-  const args = process.argv.slice(2);
-
-  // `kit ci --init <gitlab|bitbucket>` — emit the pipeline snippet that runs
-  // `kit ci` on a non-GitHub host. Prints to stdout (copy-paste); `--write`
-  // writes the file only when absent (never clobbers an existing pipeline).
-  const initIdx = args.indexOf("--init");
-  if (initIdx !== -1) {
-    const { pipelineSnippet, isCiHost, CI_HOSTS } = await import("./ci-init.js");
-    const host = args[initIdx + 1] ?? "";
-    if (!isCiHost(host)) {
-      console.error(`kit ci --init: host must be one of ${CI_HOSTS.join(", ")}`);
-      return false;
-    }
-    const { file, content } = pipelineSnippet(host);
-    if (hasFlag(args, "--write")) {
-      const path = resolve(process.cwd(), file);
-      if (existsSync(path)) {
-        console.error(`${file} already exists — not overwriting. Snippet to merge in:\n`);
-        console.log(content);
-        return false;
-      }
-      writeFileSync(path, content, "utf8");
-      console.log(`${c.green}✓${c.reset} wrote ${file}`);
-      return true;
-    }
-    console.log(content);
-    return true;
-  }
-
-  const formatArg = args.find((a) => a.startsWith("--format="))?.split("=")[1] as
-    | CiFormat
-    | undefined;
-  // Scanner-health STRICT BY DEFAULT (kit's "no false green" floor): a check that
-  // could not RUN (tool/token absent, crashed) is marked didNotRun and FAILS the
-  // gate — a green means every check actually ran. `--lenient` / KIT_CI_LENIENT
-  // downgrades those back to warnings (the pre-3.3 behavior). Finding-level warnings
-  // (things a check RAN and flagged) stay warnings unless `--fail-on-warning`, or the
-  // max-strict `--strict` / KIT_CI_STRICT which fails on ANY warning.
-  const lenient = hasFlag(args, "--lenient") || envTruthy(process.env.KIT_CI_LENIENT);
-  const strict = hasFlag(args, "--strict") || envTruthy(process.env.KIT_CI_STRICT);
-  const failOnWarning = hasFlag(args, "--fail-on-warning") || strict;
-  const jsonMode = hasFlag(args, "--json");
-  const format: CiFormat = formatArg ?? (jsonMode ? "json" : detectCiFormat());
-
-  const config = await loadConfig(resolveConfigPath());
-
-  return await withGovernance(
-    config,
-    { operation: "check", operationType: "read", metadata: {} },
-    async () => {
-      const live = format === "text";
-      if (live) stepHeader("CI checks");
-      const step = <T>(label: string, fn: () => Promise<T>): Promise<T> =>
-        live ? runStep(label, fn) : fn();
-
-      const toolResults = config.tools ? await step("tools", () => checkTools(config.tools!)) : [];
-      const serviceResults = config.services
-        ? await step("services", () => checkServices(config.services!))
-        : [];
-      const secretResults = config.secrets
-        ? await step("secrets", () => checkSecrets(config.secrets!))
-        : { templateExists: null, keys: [] };
-      const skillResults = config.skills
-        ? await step("skills", () => checkSkills(config.skills!))
-        : [];
-      await autoInstallScanners(config, live); // self-heal missing scanners before scanning
-      const securityResults = await step("security scan", () => checkSecurity());
-      const lockResults = await step("lock files", () => checkLockFiles(config));
-      // Signed org policy (.kit-policy.toml) — opt-in (absent ⇒ present:false ⇒ no
-      // items ⇒ no effect on the verdict). Folds the same evaluatePolicy() the
-      // `kit policy check` command uses into the CI gate, so a tampered/revoked
-      // signature, unmet min_kit_version, or (under --strict) a missing required
-      // scanner fails CI like any other check.
-      const policyReport = await step("policy", () => evaluatePolicy(process.cwd(), { strict }));
-      const policyStatus = (s: "pass" | "warn" | "fail" | "n/a"): JsonCheck["status"] =>
-        s === "n/a" ? "skip" : s;
-
-      const checks: JsonCheck[] = [
-        ...toolResults.map((t) => ({
-          name: t.name,
-          status: (t.ok ? "pass" : "fail") as JsonCheck["status"],
-          detail: t.installed ? `installed ${t.installed}` : "not installed",
-          category: "tools",
-        })),
-        ...serviceResults.map((s) => ({
-          name: s.name,
-          // Informational services (no CLI login) are a manual-setup warning,
-          // not a CI failure.
-          status: (s.authenticated
-            ? "pass"
-            : s.informational
-              ? "warn"
-              : "fail") as JsonCheck["status"],
-          detail: s.informational
-            ? s.output || "manual setup (no CLI login)"
-            : (s.output ?? (s.authenticated ? "authenticated" : "not authenticated")),
-          category: "services",
-        })),
-        ...secretResults.keys.map((s) => ({
-          name: s.name,
-          status: (s.unverified ? "warn" : s.available ? "pass" : "fail") as JsonCheck["status"],
-          detail: s.detail ?? (s.available ? "available" : "missing"),
-          category: "secrets",
-        })),
-        ...skillResults.map((s) => ({
-          name: s.name,
-          status: (s.installed ? "pass" : s.required ? "fail" : "warn") as JsonCheck["status"],
-          detail: s.installed ? "installed" : "not installed",
-          category: "skills",
-        })),
-        ...lockResults.map((l) => ({
-          name: l.category === "skills-lock" ? "skills-lock.json" : "cli-lock.json",
-          status: (l.inSync ? "pass" : l.exists ? "warn" : "fail") as JsonCheck["status"],
-          detail: l.detail,
-          category: "lock",
-        })),
-        ...securityResults.map((s) => ({
-          name: s.name,
-          // Scanner-health strict by default: a check that could not run fails the
-          // gate unless --lenient. A finding-warn (the check ran + flagged) is untouched.
-          status: gateStatus(s, { lenient, failOnWarning }) as JsonCheck["status"],
-          detail:
-            s.didNotRun && !lenient
-              ? `${s.detail}  [did not run — strict default; --lenient to downgrade to warn]`
-              : s.detail,
-          category: `security/${s.category}`,
-        })),
-        ...(policyReport.present
-          ? [
-              ...(policyReport.signature
-                ? [
-                    {
-                      name: "signature",
-                      status: policyStatus(policyReport.signature.status),
-                      detail: policyReport.signature.detail,
-                      category: "policy",
-                    },
-                  ]
-                : []),
-              ...policyReport.items.map((i) => ({
-                name: i.requirement,
-                status: policyStatus(i.status),
-                detail: i.detail,
-                category: "policy",
-              })),
-            ]
-          : []),
-      ];
-
-      const summary = checks.reduce(
-        (acc, c) => {
-          if (c.status === "pass") acc.passed++;
-          else if (c.status === "fail") acc.failed++;
-          else if (c.status === "warn") acc.warnings++;
-          else acc.skipped++;
-          return acc;
-        },
-        { passed: 0, failed: 0, warnings: 0, skipped: 0 },
-      );
-
-      const allOk = summary.failed === 0 && (!failOnWarning || summary.warnings === 0);
-
-      if (format === "github") {
-        if (process.env.GITHUB_STEP_SUMMARY) {
-          // Emit markdown summary to GitHub Actions step summary. Strip CR/LF so a
-          // crafted detail can't inject new markdown/table rows, and escape `|` so
-          // it can't forge extra table cells.
-          const mdCell = (s: string) =>
-            String(s)
-              .replace(/[\r\n]+/g, " ")
-              .replace(/\|/g, "\\|");
-          const lines = [
-            "## kit CI Report",
-            `| Status | Check | Detail |`,
-            `|--------|-------|--------|`,
-            ...checks.map(
-              (c) =>
-                `| ${c.status === "pass" ? "✅" : c.status === "warn" ? "⚠️" : "❌"} | \`${mdCell(`${c.category}/${c.name}`)}\` | ${mdCell(c.detail)} |`,
-            ),
-            ``,
-            `**${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings**`,
-          ];
-          await import("node:fs/promises").then(({ appendFile }) =>
-            appendFile(process.env.GITHUB_STEP_SUMMARY!, lines.join("\n") + "\n"),
-          );
-        }
-        emitGithubAnnotations(checks);
-        console.log(
-          `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`,
-        );
-      } else if (format === "gitlab") {
-        emitGitlabJunit(checks, allOk);
-        console.log(
-          `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`,
-        );
-      } else if (format === "json") {
-        const output: JsonCheckOutput = { ok: allOk, checks, summary };
-        console.log(JSON.stringify(output, null, 2));
-      } else {
-        // text
-        const failures = checks.filter((c) => c.status === "fail");
-        const warnings = checks.filter((c) => c.status === "warn");
-        if (failures.length > 0) {
-          console.log(`FAILURES:`);
-          failures.forEach((f) => console.log(`  ✗ [${f.category}] ${f.name}: ${f.detail}`));
-        }
-        if (warnings.length > 0) {
-          console.log(`WARNINGS:`);
-          warnings.forEach((w) => console.log(`  ! [${w.category}] ${w.name}: ${w.detail}`));
-        }
-        console.log(
-          `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`,
-        );
-      }
-
-      // Opt-in signed attestation receipt. scanners_ran reflects the security
-      // gates (which ran vs were skipped/errored). Quiet in json/non-text so it
-      // never corrupts machine-readable output.
-      await maybeEmitCheckAttestation(
-        "ci",
-        allOk,
-        summary,
-        securityResults.map((s) => ({ id: s.name, status: s.status })),
-        format !== "text",
-      );
-
-      return allOk;
-    },
-  );
 }
 
 async function cmdVerifyAttestation(): Promise<boolean> {
