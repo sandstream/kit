@@ -185,6 +185,8 @@
     "profile check",
     "profile freeze",
     "profile show",
+    "profile sign",
+    "profile verify",
     "review",
     "run",
     "sbom",
