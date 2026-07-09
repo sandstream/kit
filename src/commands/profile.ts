@@ -32,6 +32,8 @@ import {
   type ProfileDrift,
   type DriftEntry,
 } from "../profile/reconcile.js";
+import { signProfile, verifyProfileSignature } from "../profile/sign.js";
+import { flagValue } from "../utils/flags.js";
 
 function noProfileNotice(jsonMode: boolean): boolean {
   if (jsonMode) {
@@ -199,12 +201,74 @@ async function profileFreeze(jsonMode: boolean): Promise<boolean> {
   return true;
 }
 
+async function profileSign(jsonMode: boolean): Promise<boolean> {
+  const res = await signProfile();
+  if (!res.ok) {
+    if (jsonMode) {
+      console.log(JSON.stringify({ signed: false, error: res.error }, null, 2));
+    } else {
+      console.error(`${c.red}✗ ${res.error}${c.reset}`);
+    }
+    return false;
+  }
+  if (jsonMode) {
+    console.log(
+      JSON.stringify({ signed: true, kid: res.kid, fingerprint: res.fingerprint }, null, 2),
+    );
+    return true;
+  }
+  const rootedNote = res.rooted ? ` ${c.dim}(hardware-rooted)${c.reset}` : "";
+  console.log(
+    `${c.green}✓${c.reset} signed ${c.bold}${res.fingerprint}${c.reset} as ${c.bold}${res.kid}${c.reset}${rootedNote} ${c.dim}→ ${PROFILE_FILE}.sig${c.reset}`,
+  );
+  console.log(
+    `${c.dim}commit ${PROFILE_FILE} + ${PROFILE_FILE}.sig; verifiers check it offline against .kit-policy.signers${c.reset}`,
+  );
+  return true;
+}
+
+async function profileVerify(jsonMode: boolean): Promise<boolean> {
+  const r = await verifyProfileSignature(process.cwd(), { key: flagValue(process.argv, "--key") });
+  if (jsonMode) {
+    console.log(JSON.stringify(r, null, 2));
+    // trust-absence (unverifiable) is not a forge — mirror kit policy verify's fail-open there.
+    return r.status === "valid" || r.status === "unverifiable";
+  }
+  switch (r.status) {
+    case "valid":
+      console.log(
+        `${c.green}✓ profile signature valid${c.reset}  ${c.dim}${r.fingerprint} ${r.detail}${c.reset}`,
+      );
+      return true;
+    case "unverifiable":
+      console.warn(`${c.yellow}! ${r.detail}${c.reset}`);
+      return true;
+    case "unsigned":
+      console.error(`${c.red}${r.detail}${c.reset}`);
+      return false;
+    case "invalid":
+      console.error(
+        `${c.red}✗ profile signature INVALID${c.reset} ${c.dim}(${r.detail})${c.reset}`,
+      );
+      return false;
+    case "revoked":
+      console.error(
+        `${c.red}✗ profile signed by a REVOKED key${c.reset} ${c.dim}(${r.detail})${c.reset}`,
+      );
+      return false;
+  }
+}
+
 export async function cmdProfile(): Promise<boolean> {
   const sub = process.argv[3] ?? "show";
   const jsonMode = hasFlag(process.argv, "--json");
   if (sub === "show") return await profileShow(jsonMode);
   if (sub === "freeze") return await profileFreeze(jsonMode);
   if (sub === "check") return await profileCheck(jsonMode, hasFlag(process.argv, "--gate"));
-  console.error(`${c.red}usage: kit profile <show|freeze|check> [--json] [--gate]${c.reset}`);
+  if (sub === "sign") return await profileSign(jsonMode);
+  if (sub === "verify") return await profileVerify(jsonMode);
+  console.error(
+    `${c.red}usage: kit profile <show|freeze|check|sign|verify> [--json] [--gate] [--key <pem>]${c.reset}`,
+  );
   return false;
 }

@@ -678,7 +678,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   profile: {
     handler: cmdProfile,
     stability: "experimental",
-    help: "Versioned, traveling project profile — declare {skills, mcp, workflows, plugins, vault, gates, scope} and audit declared-vs-discovered drift (show|freeze|check; --json, --gate)",
+    help: "Versioned, traveling project profile — declare {skills, mcp, workflows, plugins, vault, gates, scope}, audit declared-vs-discovered drift, and sign the scope/RoE (show|freeze|check|sign|verify; --json, --gate, --key)",
   },
   pkg: {
     handler: cmdPkg,
@@ -718,6 +718,10 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     "Snapshot the discovered toolchain into .kit-profile.toml (preserves operator-authored workflows/plugins/scope/gates)",
   "profile check":
     "Report declared-vs-discovered drift (--gate fails CI on any drift; honest skip when no profile declared)",
+  "profile sign":
+    "Sign the profile (scope/RoE) into .kit-profile.sig via your identity/keystore — offline-verifiable",
+  "profile verify":
+    "Verify .kit-profile.sig offline (--key pin → local identity → org .kit-policy.signers)",
   "memory index": "Index ~/.claude transcripts into the SQLite memory store",
   "memory search": "Full-text search memory (current project; --global for all)",
   "memory stats": "Show what the local memory store contains",
