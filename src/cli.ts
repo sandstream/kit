@@ -153,6 +153,9 @@ import { parsePkgSpec, installPkg } from "./pkg.js";
 import { cmdMemory } from "./commands/memory.js";
 import { resolveKitRoot, runSelfAudit, SELF_AUDIT_RULES } from "./self-audit.js";
 import { buildCoverageReport, formatCoverageText, type Bucket } from "./coverage/coverage.js";
+import { buildStandardReport, formatStandardText } from "./coverage/standard.js";
+import { OWASP_LLM_TOP10 } from "./coverage/owasp-llm-top10.js";
+import { SSDF_218A } from "./coverage/ssdf-218a.js";
 import { escapeWorkflowCmd, xmlEscape } from "./utils/ci-escape.js";
 
 // Re-exported for tests + downstream emitters (ci-escaping.test.ts imports these
@@ -3900,13 +3903,6 @@ async function cmdCoverage(): Promise<boolean> {
     results = [...security, ...selfAudit, ...commandEvidence];
   }
 
-  const report = buildCoverageReport(results);
-
-  if (jsonMode) {
-    console.log(JSON.stringify(report, null, 2));
-    return true;
-  }
-
   const colorBucket = (bucket: Bucket, label: string): string => {
     const tint =
       bucket === "auto"
@@ -3919,6 +3915,31 @@ async function cmdCoverage(): Promise<boolean> {
     return `${tint}${label}${c.reset}`;
   };
 
+  // --standard selects which pinned standard to map against (default ASVS, the
+  // original path). llm-top10 / ssdf route through the generic evidence-map engine.
+  const standard = args.find((a) => a.startsWith("--standard="))?.split("=")[1] ?? "asvs";
+  const STANDARDS = { "llm-top10": OWASP_LLM_TOP10, ssdf: SSDF_218A } as const;
+  if (standard !== "asvs") {
+    const descriptor = STANDARDS[standard as keyof typeof STANDARDS];
+    if (!descriptor) {
+      console.error(
+        `${c.red}unknown --standard '${standard}' (use: asvs | llm-top10 | ssdf)${c.reset}`,
+      );
+      process.exitCode = 1;
+      return false;
+    }
+    const stdReport = buildStandardReport(descriptor, results);
+    console.log(
+      jsonMode ? JSON.stringify(stdReport, null, 2) : formatStandardText(stdReport, colorBucket),
+    );
+    return true;
+  }
+
+  const report = buildCoverageReport(results);
+  if (jsonMode) {
+    console.log(JSON.stringify(report, null, 2));
+    return true;
+  }
   console.log(formatCoverageText(report, colorBucket));
   return true;
 }
@@ -5430,7 +5451,7 @@ export const COMMAND_HELP: Record<string, string> = {
   "self-audit":
     "Audit kit's own source against its 12 self-hardening rules (--list-rules, --only=<ids>, --format)",
   coverage:
-    "Evidence map: which OWASP ASVS L2 controls kit's deterministic checks auto-verify vs gap/manual/n-a (NOT a compliance attestation; --json for GRC tools)",
+    "Evidence map: which standard's controls kit's deterministic checks auto-verify vs gap/manual/n-a — OWASP ASVS L2 (default), OWASP LLM Top 10, or NIST SSDF via --standard=asvs|llm-top10|ssdf (NOT a compliance attestation; --json for GRC tools)",
   identity:
     "Manage this machine/agent's Ed25519 identity (init/show/rotate) — asymmetric, attributable signing for audit/policy (experimental)",
   panic:

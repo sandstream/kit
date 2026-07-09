@@ -236,7 +236,7 @@ export interface CoverageReport {
 }
 
 /** Resolve catalog citations for a set of check ids, deduped by citation id. */
-function citationsFor(checks: string[]): RuleRef[] {
+export function citationsFor(checks: string[]): RuleRef[] {
   const out: RuleRef[] = [];
   const seen = new Set<string>();
   for (const id of checks) {
