@@ -27,6 +27,7 @@ import { cmdSecrets } from "./commands/secrets.js";
 import { cmdUpgrade } from "./commands/upgrade.js";
 import { cmdDoctor, cmdAdd, cmdSetup, cmdInit } from "./commands/setup.js";
 import { cmdReview } from "./commands/review.js";
+import { cmdInsight } from "./commands/insight.js";
 import {
   cmdStatus,
   cmdHealth,
@@ -667,6 +668,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdReview,
     stability: "stable",
     help: "Full repo audit — runs check + design + standards in one gate (for agents / PR checks)",
+  },
+  insight: {
+    handler: cmdInsight,
+    stability: "experimental",
+    help: "Deterministic lifecycle insight (unused: loaded-but-never-called MCP servers, from the transcript index; --json)",
   },
   pkg: {
     handler: cmdPkg,
