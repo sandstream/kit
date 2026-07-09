@@ -12,6 +12,8 @@
  * covers both. Pure + deterministic (data → components); discovery is best-effort and
  * kept separate.
  */
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
 import type { Component } from "./sbom.js";
 
 export type AgentComponentKind = "skill" | "mcp-server" | "plugin";
@@ -83,4 +85,45 @@ export function mcpServersFromConfig(json: unknown): AgentComponentInput[] {
     out.push({ name, source: command ?? url });
   }
   return out;
+}
+
+/**
+ * Best-effort, defensive discovery of the agent-toolchain pieces loaded under
+ * `cwd` — skills (each `.claude/skills/<name>/SKILL.md`) and MCP servers (union
+ * across the common config locations, via mcpServersFromConfig). Pure filesystem
+ * read; missing/malformed inputs are skipped, never thrown. Shared by
+ * `kit sbom --agent` and `kit insight` so both see the SAME loaded set.
+ */
+export function discoverAgentToolchain(cwd: string): {
+  skills: AgentComponentInput[];
+  mcpServers: AgentComponentInput[];
+} {
+  const skills: AgentComponentInput[] = [];
+  const skillsDir = resolve(cwd, ".claude/skills");
+  try {
+    for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+      if (entry.isDirectory() && existsSync(resolve(skillsDir, entry.name, "SKILL.md"))) {
+        skills.push({ name: entry.name, source: `.claude/skills/${entry.name}` });
+      }
+    }
+  } catch {
+    /* no skills dir — fine */
+  }
+
+  const mcpServers: AgentComponentInput[] = [];
+  const seen = new Set<string>();
+  for (const rel of [".mcp.json", ".claude.json", ".cursor/mcp.json", ".vscode/mcp.json"]) {
+    try {
+      const parsed = JSON.parse(readFileSync(resolve(cwd, rel), "utf8"));
+      for (const s of mcpServersFromConfig(parsed)) {
+        if (!seen.has(s.name)) {
+          seen.add(s.name);
+          mcpServers.push(s);
+        }
+      }
+    } catch {
+      /* missing/malformed config — skip */
+    }
+  }
+  return { skills, mcpServers };
 }
