@@ -393,10 +393,34 @@ async function main(): Promise<void> {
  * help (multi-word keys like "memory search") has no handler or tier of its own,
  * so it lives in SUBCOMMAND_HELP and is merged into COMMAND_HELP.
  */
-interface CommandDescriptor {
+export interface CommandDescriptor {
   handler: () => boolean | Promise<boolean>;
   stability: CommandTier;
   help: string;
+  /**
+   * When true, this verb is ALSO exposed as an MCP tool (named `kit_<verb>` with
+   * `-` → `_`). The MCP server (mcp-server.ts) hand-registers each such tool with
+   * its input schema, but which verbs are exposed is owned here — a drift test
+   * (mcp-server.test.ts) asserts KIT_MCP_TOOLS matches this set, so "CLI = MCP"
+   * is a provable invariant. mcp-server.ts can't import this registry (it would
+   * cycle via commands/mcp.ts), hence the test-time cross-check rather than a
+   * runtime derivation.
+   */
+  mcp?: boolean;
+}
+
+/** CLI verb → MCP tool name (`add` → `kit_add`, `supply-chain` → `kit_supply_chain`). */
+export function mcpToolName(verb: string): string {
+  return `kit_${verb.replace(/-/g, "_")}`;
+}
+
+/** The MCP tool names derived from every registry verb marked `mcp: true`, sorted.
+ *  The mcp-server.test.ts drift guard asserts KIT_MCP_TOOLS equals this set. */
+export function mcpExposedToolNames(): string[] {
+  return Object.entries(COMMAND_REGISTRY)
+    .filter(([, d]) => d.mcp)
+    .map(([verb]) => mcpToolName(verb))
+    .sort();
 }
 
 const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
@@ -415,6 +439,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdCheck,
     stability: "stable",
     help: "Check status of all tools, services, secrets, and lock files",
+    mcp: true,
   },
   health: {
     handler: cmdHealth,
@@ -466,18 +491,26 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdInit,
     stability: "stable",
     help: "Detect stack, generate .kit.toml, and run full setup (--no-setup: config + lock files only)",
+    mcp: true,
   },
   upgrade: { handler: cmdUpgrade, stability: "stable", help: "Update lock files from .kit.toml" },
-  install: { handler: cmdInstall, stability: "stable", help: "Install missing tools via mise" },
+  install: {
+    handler: cmdInstall,
+    stability: "stable",
+    help: "Install missing tools via mise",
+    mcp: true,
+  },
   login: {
     handler: cmdLogin,
     stability: "stable",
     help: "Guided login to all configured services",
+    mcp: true,
   },
   secrets: {
     handler: cmdSecrets,
     stability: "stable",
     help: "Generate .env.local from template + secret store",
+    mcp: true,
   },
   setup: {
     handler: cmdSetup,
@@ -485,7 +518,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     help: "Full pipeline: install → login → secrets → agent config → verify",
   },
   skills: { handler: cmdSkills, stability: "stable", help: "Check status of agent skills" },
-  fix: { handler: cmdFix, stability: "stable", help: "Auto-fix what is possible" },
+  fix: { handler: cmdFix, stability: "stable", help: "Auto-fix what is possible", mcp: true },
   heal: {
     handler: cmdHeal,
     stability: "stable",
@@ -507,6 +540,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdAdd,
     stability: "stable",
     help: "Provision a service (kit add --list to see all adapters)",
+    mcp: true,
   },
   audit: { handler: cmdAudit, stability: "stable", help: "View audit log of kit operations" },
   auth: {
@@ -519,7 +553,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     stability: "stable",
     help: "MCP server over stdio (Claude Code/Cursor/Codex); 'kit mcp list|auth|set-token|clear' manages declared servers",
   },
-  env: { handler: cmdEnv, stability: "stable", help: "Show current environment info" },
+  env: { handler: cmdEnv, stability: "stable", help: "Show current environment info", mcp: true },
   doctor: {
     handler: cmdDoctor,
     stability: "stable",
@@ -549,6 +583,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdCi,
     stability: "stable",
     help: "CI-native check: GitHub Actions annotations, GitLab JUnit, JSON (--init gitlab|bitbucket scaffolds a pipeline)",
+    mcp: true,
   },
   "self-audit": {
     handler: cmdSelfAudit,
@@ -584,6 +619,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdRun,
     stability: "stable",
     help: "Execute a command with project env vars loaded",
+    mcp: true,
   },
   open: {
     handler: cmdOpen,
@@ -594,6 +630,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdContext,
     stability: "stable",
     help: "Show project context: tools, services, secrets, environment",
+    mcp: true,
   },
   config: {
     handler: cmdConfig,
@@ -624,6 +661,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdStandards,
     stability: "stable",
     help: "Dev-standards gate: general metrics + per-language linters + user plugins vs the baseline (--category general|specific|plugins|<lang>, --enforce fails CI)",
+    mcp: true,
   },
   review: {
     handler: cmdReview,
