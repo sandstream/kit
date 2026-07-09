@@ -7,9 +7,9 @@
  * Honesty rules (no false green):
  * - MCP servers correlate cleanly (a call is `mcp__<server>__<tool>`), so they get
  *   a real used/unused verdict.
- * - Skills DON'T reliably appear in the tool_uses table (a skill invocation is not
- *   a distinct tool call), so their verdict is "unknown" here — NEVER "unused".
- *   Skill-usage detection lands in a later step; until then we refuse to guess.
+ * - Skills correlate via the `Skill` tool's `{skill:<slug>}` input (exact slug
+ *   match against the loaded skill's directory name) — a real used/unused verdict.
+ *   Passing no skill-usage map falls back to "unknown" (never "unused").
  * - "unused" is a PRUNE SUGGESTION, never an automatic removal.
  */
 import type { AgentComponentInput } from "../agent-sbom.js";
@@ -41,6 +41,7 @@ export interface UnusedReport {
 export function computeUnused(
   loaded: { skills: AgentComponentInput[]; mcpServers: AgentComponentInput[] },
   usage: ToolUsageEntry[],
+  skillUsage?: Map<string, number>,
 ): UnusedReport {
   // Sum recorded refs per MCP server across all its tools.
   const serverRefs = new Map<string, number>();
@@ -53,13 +54,21 @@ export function computeUnused(
     a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 
   const findings: UnusedFinding[] = [];
+  const pruneCandidates: string[] = [];
 
   for (const s of [...loaded.skills].sort(byName)) {
-    // Skills can't be judged from tool_uses yet — honest "unknown", never "unused".
-    findings.push({ kind: "skill", name: s.name, source: s.source, refs: 0, verdict: "unknown" });
+    // With a skill-usage map, judge by exact-slug invocation count; without one,
+    // stay honest ("unknown" — never "unused").
+    if (skillUsage === undefined) {
+      findings.push({ kind: "skill", name: s.name, source: s.source, refs: 0, verdict: "unknown" });
+      continue;
+    }
+    const refs = skillUsage.get(s.name) ?? 0;
+    const verdict: UsageVerdict = refs > 0 ? "used" : "unused";
+    if (verdict === "unused") pruneCandidates.push(s.name);
+    findings.push({ kind: "skill", name: s.name, source: s.source, refs, verdict });
   }
 
-  const pruneCandidates: string[] = [];
   for (const m of [...loaded.mcpServers].sort(byName)) {
     const refs = serverRefs.get(m.name) ?? 0;
     const verdict: UsageVerdict = refs > 0 ? "used" : "unused";

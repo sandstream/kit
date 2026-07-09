@@ -70,3 +70,38 @@ export function hasIndexedToolUsage(db: DatabaseSync): boolean {
   const row = db.prepare("SELECT COUNT(*) AS n FROM tool_uses").get() as { n: number };
   return row.n > 0;
 }
+
+/**
+ * Pure skill-usage tally. A skill invocation is recorded as a `Skill` tool call
+ * whose `tool_input` JSON carries `{ "skill": "<slug>", ... }`; count per slug,
+ * skipping unparseable/blank inputs. Deterministic (Map insertion is not relied
+ * on — callers look up by slug). Zero-LLM: pure JSON + counting.
+ */
+export function tallySkillUsage(toolInputs: (string | null | undefined)[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const raw of toolInputs) {
+    if (raw == null) continue;
+    let slug: unknown;
+    try {
+      slug = (JSON.parse(raw) as { skill?: unknown }).skill;
+    } catch {
+      continue; // malformed tool_input — skip
+    }
+    if (typeof slug !== "string") continue;
+    const s = slug.trim();
+    if (s.length === 0) continue;
+    counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * Scan the memory DB for skill invocations (`tool_name = 'Skill'`), returning a
+ * slug → invocation-count map. Deterministic given the DB.
+ */
+export function scanSkillUsage(db: DatabaseSync): Map<string, number> {
+  const rows = db.prepare("SELECT tool_input FROM tool_uses WHERE tool_name = 'Skill'").all() as {
+    tool_input: string | null;
+  }[];
+  return tallySkillUsage(rows.map((r) => r.tool_input));
+}

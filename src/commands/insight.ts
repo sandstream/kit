@@ -1,18 +1,17 @@
 /**
  * `kit insight` — Pelare 4's deterministic lifecycle-insight surface. First
- * subcommand: `unused` — which loaded MCP servers were never actually called,
- * correlating the loaded toolchain (agent-sbom) against recorded tool usage
- * (the memory index's tool_uses table). Zero-LLM, pure counting.
+ * subcommand: `unused` — which loaded MCP servers / skills were never actually
+ * called, correlating the loaded toolchain (agent-sbom) against recorded usage
+ * (the memory index's tool_uses table: MCP tools by `mcp__<server>__<tool>`,
+ * skills by the `Skill` tool's `{skill}` input). Zero-LLM, pure counting.
  *
- * Honesty (no false green): reports SUGGESTIONS, never auto-removes; skills are
- * reported "unknown" (their usage isn't judgeable from tool_uses yet, not
- * "unused"); and with no indexed usage it SKIPS ("can't judge") rather than
- * declaring everything unused.
+ * Honesty (no false green): reports SUGGESTIONS, never auto-removes; and with no
+ * indexed usage it SKIPS ("can't judge") rather than declaring everything unused.
  */
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
 import { discoverAgentToolchain } from "../agent-sbom.js";
-import { scanToolUsage, hasIndexedToolUsage } from "../insight/usage-scan.js";
+import { scanToolUsage, scanSkillUsage, hasIndexedToolUsage } from "../insight/usage-scan.js";
 import { computeUnused } from "../insight/unused.js";
 
 async function insightUnused(): Promise<boolean> {
@@ -37,7 +36,8 @@ async function insightUnused(): Promise<boolean> {
     }
 
     const usage = scanToolUsage(db);
-    const report = computeUnused(loaded, usage);
+    const skillUsage = scanSkillUsage(db);
+    const report = computeUnused(loaded, usage, skillUsage);
 
     if (jsonMode) {
       console.log(JSON.stringify({ skipped: false, ...report }, null, 2));
@@ -65,8 +65,12 @@ async function insightUnused(): Promise<boolean> {
     if (skills.length > 0) {
       console.log(`  ${c.bold}skills${c.reset}`);
       for (const f of skills) {
+        const mark = f.verdict === "used" ? `${c.green}✓${c.reset}` : `${c.yellow}⚠${c.reset}`;
+        const tag =
+          f.verdict === "used" ? `${c.green}used${c.reset}   ` : `${c.yellow}UNUSED${c.reset} `;
+        const note = f.verdict === "unused" ? `  ${c.dim}loaded, never invoked${c.reset}` : "";
         console.log(
-          `    ${c.dim}?${c.reset} ${c.dim}unknown${c.reset} ${f.name}  ${c.dim}usage detection lands next — not judged${c.reset}`,
+          `    ${mark} ${tag} ${f.name}  ${c.dim}${f.refs} invocation(s)${c.reset}${note}`,
         );
       }
     }
@@ -78,7 +82,7 @@ async function insightUnused(): Promise<boolean> {
 
     if (report.pruneCandidates.length > 0) {
       console.log(
-        `  ${c.dim}→ prune candidates (MCP): ${c.reset}${report.pruneCandidates.join(", ")}  ${c.dim}(kit removes nothing automatically)${c.reset}`,
+        `  ${c.dim}→ prune candidates: ${c.reset}${report.pruneCandidates.join(", ")}  ${c.dim}(kit removes nothing automatically)${c.reset}`,
       );
     }
     return true;

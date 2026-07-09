@@ -1,7 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { openMemoryDb } from "../memory/db.js";
-import { mcpServerOf, tallyToolUsage, scanToolUsage, hasIndexedToolUsage } from "./usage-scan.js";
+import {
+  mcpServerOf,
+  tallyToolUsage,
+  scanToolUsage,
+  hasIndexedToolUsage,
+  tallySkillUsage,
+  scanSkillUsage,
+} from "./usage-scan.js";
 
 describe("mcpServerOf", () => {
   it("extracts the server slug from an mcp__server__tool name", () => {
@@ -87,6 +94,45 @@ describe("scanToolUsage", () => {
     const db = openMemoryDb(":memory:");
     assert.equal(hasIndexedToolUsage(db), false);
     assert.deepEqual(scanToolUsage(db), []);
+    db.close();
+  });
+});
+
+describe("tallySkillUsage", () => {
+  it("counts skill slugs from Skill tool_input, skipping malformed/blank", () => {
+    const counts = tallySkillUsage([
+      '{"skill":"deep-research","args":"x"}',
+      '{"skill":"deep-research"}',
+      '{"skill":"artifact-design"}',
+      '{"skill":"  "}',
+      "{not json",
+      '{"noskill":true}',
+      null,
+    ]);
+    assert.equal(counts.get("deep-research"), 2);
+    assert.equal(counts.get("artifact-design"), 1);
+    assert.equal(counts.size, 2);
+  });
+});
+
+describe("scanSkillUsage", () => {
+  it("reads only Skill tool_uses and tallies by slug", () => {
+    const db = openMemoryDb(":memory:");
+    const insert = db.prepare(
+      "INSERT INTO tool_uses (message_uuid, session_id, tool_name, tool_input, timestamp) VALUES (?, ?, ?, ?, ?)",
+    );
+    let i = 0;
+    const add = (tool: string, input: string) =>
+      insert.run(`m${i++}`, "s1", tool, input, "2026-01-01T00:00:00Z");
+    add("Skill", '{"skill":"triage"}');
+    add("Skill", '{"skill":"triage"}');
+    add("Bash", "{}"); // not a skill call — ignored
+    add("Skill", '{"skill":"deep-research"}');
+
+    const counts = scanSkillUsage(db);
+    assert.equal(counts.get("triage"), 2);
+    assert.equal(counts.get("deep-research"), 1);
+    assert.equal(counts.size, 2);
     db.close();
   });
 });
