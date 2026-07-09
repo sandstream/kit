@@ -32,7 +32,7 @@ describe("computeUnused", () => {
     assert.deepEqual(report.pruneCandidates, ["some-server"]);
   });
 
-  it("never judges a skill 'unused' — verdict is 'unknown' until skill-usage detection lands", () => {
+  it("leaves skill verdict 'unknown' when no skill-usage map is provided (never 'unused')", () => {
     const report = computeUnused(
       { skills: [{ name: "pdf-process" }], mcpServers: [] },
       usage([["Bash", 5]]),
@@ -40,7 +40,22 @@ describe("computeUnused", () => {
     const skill = report.findings.find((f) => f.name === "pdf-process");
     assert.equal(skill?.kind, "skill");
     assert.equal(skill?.verdict, "unknown");
-    assert.deepEqual(report.pruneCandidates, []); // skills are never prune candidates here
+    assert.deepEqual(report.pruneCandidates, []);
+  });
+
+  it("judges skills used/unused from the skill-usage map (exact slug), unused ⇒ prune candidate", () => {
+    const report = computeUnused(
+      { skills: [{ name: "deep-research" }, { name: "pdf-process" }], mcpServers: [] },
+      [],
+      new Map([["deep-research", 4]]),
+    );
+    const dr = report.findings.find((f) => f.name === "deep-research");
+    const pdf = report.findings.find((f) => f.name === "pdf-process");
+    assert.equal(dr?.verdict, "used");
+    assert.equal(dr?.refs, 4);
+    assert.equal(pdf?.verdict, "unused");
+    assert.equal(pdf?.refs, 0);
+    assert.deepEqual(report.pruneCandidates, ["pdf-process"]);
   });
 
   it("orders findings skills-first then mcp-servers, each by name asc (deterministic)", () => {
