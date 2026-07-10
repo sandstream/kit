@@ -5,6 +5,7 @@
 // and offline-verifiable. Distinct from `.kit.toml [policy.agent_writes]` (the 2.x
 // per-repo agent-write pre-approval) — this is the org-level standard.
 import { existsSync, writeFileSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { getCurrentProjectRoot } from "../memory/project.js";
@@ -30,6 +31,7 @@ import { evaluatePolicy, formatPolicyEval } from "../policy-check.js";
 import { pullPolicy } from "../policy-pull.js";
 import { pullRevocations } from "../revocation-pull.js";
 import { extractRbac } from "../rbac/policy-schema.js";
+import { mintApprovalToken, APPROVAL_TOKENS_FILE } from "../approval-tokens.js";
 import { identityId } from "../identity.js";
 import {
   resolveKeyStore,
@@ -60,11 +62,48 @@ export async function cmdPolicy(): Promise<boolean> {
       return policyPull(root);
     case "pull-revocations":
       return policyPullRevocations(root);
+    case "approve":
+      return policyApprove(root);
     default:
       console.error(
-        `${c.red}usage: kit policy <init|show|validate|sign|verify|check|trust|pull|pull-revocations>${c.reset}`,
+        `${c.red}usage: kit policy <init|show|validate|sign|verify|check|trust|pull|pull-revocations|approve>${c.reset}`,
       );
       return false;
+  }
+}
+
+/**
+ * `kit policy approve <operation> [--env <env>] [--ttl <seconds>]` — mint a signed, time-boxed
+ * approval token for an operation, signed by this identity. Honored offline by `requestApproval`
+ * ONLY if this identity is in the verifier's `.kit-policy.signers` org trust anchor (fail-closed).
+ * Distribute the token like any other signed artifact (commit / pull channel).
+ */
+function policyApprove(root: string): boolean {
+  const operation = process.argv[4];
+  if (!operation || operation.startsWith("-")) {
+    console.error(
+      `${c.red}usage: kit policy approve <operation> [--env <env>] [--ttl <seconds>]${c.reset}`,
+    );
+    return false;
+  }
+  const environment = flagValue(process.argv, "--env") ?? "prod";
+  const ttl = Number(flagValue(process.argv, "--ttl") ?? "3600");
+  if (!Number.isFinite(ttl) || ttl <= 0) {
+    console.error(`${c.red}--ttl must be a positive number of seconds${c.reset}`);
+    return false;
+  }
+  try {
+    const tk = mintApprovalToken(operation, environment, ttl, { root });
+    console.log(
+      `${c.green}✓${c.reset} minted approval for ${c.bold}${operation}${c.reset} ${c.dim}(env ${environment}, expires ${tk.expires}) as ${tk.kid} → ${join(root, APPROVAL_TOKENS_FILE)}${c.reset}`,
+    );
+    console.log(
+      `${c.dim}honored offline only if ${tk.kid} is in the verifier's .kit-policy.signers anchor; distribute/commit ${APPROVAL_TOKENS_FILE}${c.reset}`,
+    );
+    return true;
+  } catch (e) {
+    console.error(`${c.red}✗ approve failed: ${(e as Error).message}${c.reset}`);
+    return false;
   }
 }
 
