@@ -251,6 +251,38 @@ describe("brokerExec symlink hardening (impure realpath check)", () => {
   });
 });
 
+describe("brokerExec multi-root fs (policy.fs.roots)", () => {
+  it("allows a write under ANY listed root and denies one under none", async () => {
+    const a = mkdtempSync(join(tmpdir(), "kit-broker-a-"));
+    const b = mkdtempSync(join(tmpdir(), "kit-broker-b-"));
+    const outside = mkdtempSync(join(tmpdir(), "kit-broker-out-"));
+    try {
+      const policy: BrokerPolicy = { ...POLICY, fs: { root: a, roots: [b] } };
+      // under the primary root
+      assert.equal(
+        (await brokerExec(CTX({ fsWrites: [join(a, "x.txt")] }), policy, async () => 1)).ok,
+        true,
+      );
+      // under the additional root
+      assert.equal(
+        (await brokerExec(CTX({ fsWrites: [join(b, "y.txt")] }), policy, async () => 1)).ok,
+        true,
+      );
+      // under neither → denied
+      const out = await brokerExec(
+        CTX({ fsWrites: [join(outside, "z.txt")] }),
+        policy,
+        async () => 1,
+      );
+      assert.equal(out.ok, false);
+    } finally {
+      rmSync(a, { recursive: true, force: true });
+      rmSync(b, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("runBrokered opt-in (policy file present/absent)", () => {
   const prev = process.env.KIT_EXEC_BROKER_POLICY;
   after(() => {

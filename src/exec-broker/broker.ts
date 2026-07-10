@@ -28,7 +28,7 @@ import { dirname, resolve, sep } from "node:path";
 import type { OperationContext } from "../governance-middleware.js";
 import { appendAuditEventDirect } from "../audit.js";
 import { checkEgress, checkFsWrite, scopeEnv } from "./decisions.js";
-import { brokerPolicyPath, loadBrokerPolicy, type BrokerPolicy } from "./policy.js";
+import { brokerPolicyPath, loadBrokerPolicy, policyFsRoots, type BrokerPolicy } from "./policy.js";
 
 /** Environment label stamped on broker audit entries. */
 const BROKER_ENV = "exec-broker";
@@ -157,14 +157,21 @@ function collectDenials(context: BrokerContext, policy: BrokerPolicy): string[] 
     if (!d.ok) denials.push(d.reason ?? `egress denied: ${target}`);
   }
 
+  const roots = policyFsRoots(policy);
   for (const path of context.fsWrites ?? []) {
-    const d = checkFsWrite(path, policy.fs.root);
-    if (!d.ok) {
-      denials.push(d.reason ?? `fs-write denied: ${path}`);
-      continue;
+    // Allowed iff SOME root passes BOTH the pure traversal gate AND the symlink-aware gate.
+    // Denied only when every root rejects it; report the primary root's reason for clarity.
+    const allowed = roots.some(
+      (root) => checkFsWrite(path, root).ok && checkFsWriteRealpath(path, root).ok,
+    );
+    if (!allowed) {
+      const d = checkFsWrite(path, policy.fs.root);
+      const sl = d.ok ? checkFsWriteRealpath(path, policy.fs.root) : d;
+      denials.push(
+        (!d.ok ? d.reason : sl.reason) ??
+          `fs-write denied: ${path} outside ${roots.length} allowed root(s)`,
+      );
     }
-    const sl = checkFsWriteRealpath(path, policy.fs.root);
-    if (!sl.ok) denials.push(sl.reason ?? `fs-write symlink-escape denied: ${path}`);
   }
 
   for (const key of context.envRequested ?? []) {
