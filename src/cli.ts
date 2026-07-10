@@ -678,7 +678,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   profile: {
     handler: cmdProfile,
     stability: "experimental",
-    help: "Versioned, traveling project profile — declare {skills, mcp, workflows, plugins, vault, gates, scope}, audit declared-vs-discovered drift, and sign the scope/RoE (show|freeze|check|sign|verify; --json, --gate, --key)",
+    help: "Versioned, traveling project profile — declare {skills, mcp, workflows, plugins, vault, gates, scope}, audit declared-vs-discovered drift, sign the scope/RoE, and export/import a portable signed bundle to a fresh host (show|freeze|check|sign|verify|export|import; --json, --gate, --key, --out)",
   },
   pkg: {
     handler: cmdPkg,
@@ -732,6 +732,10 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     "Sign the profile (scope/RoE) into .kit-profile.sig via your identity/keystore — offline-verifiable",
   "profile verify":
     "Verify .kit-profile.sig offline (--key pin → local identity → org .kit-policy.signers)",
+  "profile export":
+    "Export a portable signed bundle (profile + signature + signer key) to --out or stdout",
+  "profile import":
+    "Import a portable bundle on a fresh host — integrity-verify offline, fail-closed on tamper/revoked (authoritative only once the signer is anchored)",
   "memory index": "Index ~/.claude transcripts into the SQLite memory store",
   "memory search": "Full-text search memory (current project; --global for all)",
   "memory stats": "Show what the local memory store contains",
