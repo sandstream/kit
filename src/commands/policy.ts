@@ -28,6 +28,7 @@ import {
 } from "../policy-doc.js";
 import { evaluatePolicy, formatPolicyEval } from "../policy-check.js";
 import { pullPolicy } from "../policy-pull.js";
+import { pullRevocations } from "../revocation-pull.js";
 import { identityId } from "../identity.js";
 import {
   resolveKeyStore,
@@ -56,9 +57,11 @@ export async function cmdPolicy(): Promise<boolean> {
       return policyTrust(root);
     case "pull":
       return policyPull(root);
+    case "pull-revocations":
+      return policyPullRevocations(root);
     default:
       console.error(
-        `${c.red}usage: kit policy <init|show|validate|sign|verify|check|trust|pull>${c.reset}`,
+        `${c.red}usage: kit policy <init|show|validate|sign|verify|check|trust|pull|pull-revocations>${c.reset}`,
       );
       return false;
   }
@@ -95,6 +98,37 @@ function policyPull(root: string): boolean {
         ? ""
         : " — the source policy is unsigned, tampered, or signed by an untrusted/revoked key";
   console.error(`${c.red}✗ policy pull failed${c.reset} ${c.dim}(${r.detail})${c.reset}${hint}`);
+  return false;
+}
+
+/**
+ * `kit policy pull-revocations <source>` — fetch a signed `revocations.jsonl` feed from a
+ * self-hostable source and monotone-merge the AUTHORITATIVE records (valid signature by an org
+ * trust-anchor signer, or a self-revoke) into the local append-only log. Add-only: it can only add
+ * revocations, never un-revoke one. Non-authoritative records are dropped and counted.
+ */
+function policyPullRevocations(root: string): boolean {
+  const source = process.argv[4];
+  if (!source) {
+    console.error(
+      `${c.red}usage: kit policy pull-revocations <source>${c.reset} ${c.dim}(a local path or file:// dir with revocations.jsonl)${c.reset}`,
+    );
+    return false;
+  }
+  const r = pullRevocations(source, root);
+  if (r.ok) {
+    console.log(
+      `${c.green}✓${c.reset} ${r.detail}${r.rejected ? ` ${c.dim}(unauthorized records ignored — fail-closed)${c.reset}` : ""}`,
+    );
+    return true;
+  }
+  const hint =
+    r.status === "no-anchor"
+      ? " — add trusted org keys with `kit policy trust add` (committed out of band)"
+      : "";
+  console.error(
+    `${c.red}✗ pull-revocations failed${c.reset} ${c.dim}(${r.detail})${c.reset}${hint}`,
+  );
   return false;
 }
 
