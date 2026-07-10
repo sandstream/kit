@@ -49,7 +49,7 @@ import {
   cmdTeam,
 } from "./commands/agent.js";
 import { cmdSelfAudit, cmdCoverage, cmdAnalyze } from "./commands/coverage.js";
-import { cmdGateBash, cmdGateEnv } from "./commands/gate.js";
+import { cmdGateBash, cmdGateEnv, cmdGateEgress, cmdGateFs } from "./commands/gate.js";
 import { cmdCi } from "./commands/ci.js";
 import { cmdSentinel } from "./commands/sentinel.js";
 import { cmdStandards, cmdBaseline } from "./commands/standards.js";
@@ -704,6 +704,16 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdGateEnv,
     stability: "experimental",
     help: "PreToolUse env-gate: read an agent's pending Write/Edit on stdin, block (exit 2) plaintext secrets aimed at .env* files",
+  },
+  "gate-egress": {
+    handler: cmdGateEgress,
+    stability: "experimental",
+    help: "PreToolUse egress-gate (exec-broker): block (exit 2) Bash network targets outside the signed [scope].egress — fail-closed without a verified scope",
+  },
+  "gate-fs": {
+    handler: cmdGateFs,
+    stability: "experimental",
+    help: "PreToolUse fs-gate (exec-broker): block (exit 2) Write/Edit outside the signed [scope].fs — fail-closed without a verified scope",
   },
 };
 
