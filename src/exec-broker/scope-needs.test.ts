@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { loadOrCreateIdentity } from "../identity.js";
 import { PROFILE_FILE } from "../profile/schema.js";
 import { signProfile } from "../profile/sign.js";
-import { checkScopeNeeds } from "./needs.js";
+import { checkScopeNeeds } from "./scope-needs.js";
 import { withGovernance } from "../governance-middleware.js";
 import type { kitConfig, GovernanceConfig } from "../config.js";
 

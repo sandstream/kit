@@ -13,7 +13,7 @@ import {
   formatSecretExpirationWarnings,
   hasExpiredSecrets,
 } from "./secret-expiration.js";
-import { checkScopeNeeds, type ScopeNeeds } from "./broker/needs.js";
+import { checkScopeNeeds, type ScopeNeeds } from "./exec-broker/scope-needs.js";
 
 export interface OperationContext {
   operation: string;
@@ -25,7 +25,7 @@ export interface OperationContext {
    * What this operation is about to touch (hosts / write paths / secret env keys) — the
    * exec-broker's input (Pillar 3). Optional and additive: undeclared ⇒ no scope check (the
    * advisory floor is unchanged). When declared AND the project declares a [scope]/RoE, every
-   * need must be inside the VERIFIED scope — see broker/needs.ts for the fail-closed rules.
+   * need must be inside the VERIFIED scope — see exec-broker/scope-needs.ts for the rules.
    */
   scopeNeeds?: ScopeNeeds;
 }
