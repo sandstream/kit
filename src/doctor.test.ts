@@ -159,7 +159,7 @@ describe("runDoctor", () => {
     }
   });
 
-  it("exec-broker runtime: skips when enforce_runtime is not opted in", async () => {
+  it("exec-broker runtime: skips when no [scope] is declared (nothing to mediate)", async () => {
     const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-rt-skip`);
     await mkdir(tmpDir, { recursive: true });
     try {
@@ -167,7 +167,7 @@ describe("runDoctor", () => {
       const rt = result.checks.find((c) => c.name === "exec-broker runtime");
       assert.ok(rt, "exec-broker runtime check should always be present");
       assert.equal(rt.status, "skip");
-      assert.ok(rt.detail.includes("enforce_runtime"), `unexpected detail: ${rt.detail}`);
+      assert.ok(rt.detail.includes("no [scope]"), `unexpected detail: ${rt.detail}`);
     } finally {
       await rm(tmpDir, { recursive: true });
     }

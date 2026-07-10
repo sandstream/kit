@@ -433,19 +433,48 @@ enforce_runtime = true
     assert.equal(ran, false);
   });
 
-  it("signed scope WITHOUT enforce_runtime → runtime unchanged (falls through to passthrough)", async () => {
+  it("DEFAULT-ON: a signed scope WITHOUT enforce_runtime observes by default (audits would-deny, never denies)", async () => {
     await writeSignedProfile(`version = 1\n[scope]\negress = ["api.acme.com"]\n`, true);
     let ran = false;
     const out = await runBrokered(
-      CTX({ egressTargets: ["https://evil.com"] }), // off-scope, but no runtime opt-in → not gated
+      CTX({ egressTargets: ["https://evil.com"] }), // off-scope: enforce WOULD deny; observe records it
       async () => {
         ran = true;
         return "ok";
       },
       { cwd: sandbox },
     );
-    assert.equal(out.ok, true, "a signed scope alone does not gate the MCP runtime");
+    assert.equal(out.ok, true, "observe-by-default never denies");
     assert.equal(ran, true);
+    const obs = auditLines().find((l) => (l.metadata as { phase?: string })?.phase === "observe");
+    assert.ok(obs, "default-on mediates in observe → an observe audit entry is written");
+    const wouldDeny = (obs!.metadata as { wouldDeny?: string[] }).wouldDeny ?? [];
+    assert.ok(
+      wouldDeny.some((d) => d.includes("evil.com")),
+      `the would-be denial is recorded: ${JSON.stringify(wouldDeny)}`,
+    );
+  });
+
+  it("explicit enforce_runtime = false → runtime OFF (opt out of mediation entirely)", async () => {
+    await writeSignedProfile(
+      `version = 1\n[scope]\negress = ["api.acme.com"]\nenforce_runtime = false\n`,
+      true,
+    );
+    let ran = false;
+    const out = await runBrokered(
+      CTX({ egressTargets: ["https://evil.com"] }),
+      async () => {
+        ran = true;
+        return "ok";
+      },
+      { cwd: sandbox },
+    );
+    assert.equal(out.ok, true);
+    assert.equal(ran, true);
+    assert.ok(
+      !auditLines().some((l) => (l.metadata as { phase?: string })?.phase === "observe"),
+      "explicit off writes no observe audit entry",
+    );
   });
 
   it("infrastructure op under a restrictive enforce_runtime scope → allowed + audited exemption", async () => {

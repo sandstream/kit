@@ -64,11 +64,21 @@ interface ScopeShape {
   enforce_runtime?: boolean | "observe";
 }
 
-/** Map the signed `enforce_runtime` declaration onto the runtime posture. */
+/**
+ * Map the signed `enforce_runtime` declaration onto the runtime posture (Pillar 3 default-on).
+ *   - `"observe"` → dry-run (mediate, audit would-be denials, never deny);
+ *   - `true`      → enforce (mediate + deny);
+ *   - `false`     → explicit OFF (opt out of runtime mediation entirely);
+ *   - ABSENT      → DEFAULT-ON: a declared scope mediates in `observe` by default. Turning mediation
+ *     on by default is safe because observe never denies — nothing an upgrade could break; it only
+ *     starts recording what enforce WOULD block. Enforce-by-default stays an explicit `true` until
+ *     field evidence from observe justifies flipping it.
+ */
 function runtimeModeOf(scope: ScopeShape): "off" | "observe" | "enforce" {
   if (scope.enforce_runtime === "observe") return "observe";
   if (scope.enforce_runtime === true) return "enforce";
-  return "off";
+  if (scope.enforce_runtime === false) return "off";
+  return "observe";
 }
 
 /** Map a verified profile `[scope]` onto a BrokerPolicy (fs paths resolved against `cwd`). */
