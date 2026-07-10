@@ -27,6 +27,7 @@ import {
   type PolicySignature,
 } from "../policy-doc.js";
 import { evaluatePolicy, formatPolicyEval } from "../policy-check.js";
+import { pullPolicy } from "../policy-pull.js";
 import { identityId } from "../identity.js";
 import {
   resolveKeyStore,
@@ -53,12 +54,48 @@ export async function cmdPolicy(): Promise<boolean> {
       return policyCheck(root);
     case "trust":
       return policyTrust(root);
+    case "pull":
+      return policyPull(root);
     default:
       console.error(
-        `${c.red}usage: kit policy <init|show|validate|sign|verify|check|trust>${c.reset}`,
+        `${c.red}usage: kit policy <init|show|validate|sign|verify|check|trust|pull>${c.reset}`,
       );
       return false;
   }
+}
+
+/**
+ * `kit policy pull <source>` — fetch an org-signed policy from a self-hostable source (a local
+ * path or `file://` dir holding `.kit-policy.toml` + `.kit-policy.sig`) and apply it ONLY if it
+ * verifies offline against this project's LOCAL `.kit-policy.signers` anchor. Fail-closed: anything
+ * short of a valid signature keeps the existing policy. The trust anchor is never fetched.
+ */
+function policyPull(root: string): boolean {
+  const source = process.argv[4];
+  if (!source) {
+    console.error(
+      `${c.red}usage: kit policy pull <source>${c.reset} ${c.dim}(a local path or file:// dir with .kit-policy.toml + .kit-policy.sig)${c.reset}`,
+    );
+    return false;
+  }
+  const r = pullPolicy(source, root);
+  if (r.ok) {
+    console.log(
+      `${c.green}✓${c.reset} ${r.detail}  ${c.dim}${r.fingerprint ?? ""} → ${getPolicyPath(root)}${c.reset}`,
+    );
+    console.log(
+      `${c.dim}verify anytime with ${c.reset}${c.bold}kit policy verify${c.reset}${c.dim}; commit the applied .kit-policy.toml + .kit-policy.sig${c.reset}`,
+    );
+    return true;
+  }
+  const hint =
+    r.status === "no-anchor"
+      ? " — add trusted org keys with `kit policy trust add` (committed out of band)"
+      : r.status === "no-source"
+        ? ""
+        : " — the source policy is unsigned, tampered, or signed by an untrusted/revoked key";
+  console.error(`${c.red}✗ policy pull failed${c.reset} ${c.dim}(${r.detail})${c.reset}${hint}`);
+  return false;
 }
 
 function policyInit(root: string): boolean {

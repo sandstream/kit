@@ -610,7 +610,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   policy: {
     handler: cmdPolicy,
     stability: "experimental",
-    help: "Signable org policy-as-code in .kit-policy.toml (init/show/validate/sign/verify/check/trust) — identity-signed standard, org-distributable + enforced offline (experimental)",
+    help: "Signable org policy-as-code in .kit-policy.toml (init/show/validate/sign/verify/check/trust/pull) — identity-signed standard, org-distributable + enforced offline (experimental)",
   },
   clone: {
     handler: cmdClone,
