@@ -173,7 +173,7 @@ async function auditGateDeny(gate: string, reason: string): Promise<void> {
 /**
  * `kit gate-egress` — PreToolUse egress-gate (exec-broker, Pillar 3). Reads the pending tool
  * call on stdin; if it is a Bash command with explicit http(s) network targets, they must all
- * be inside the SIGNED [scope].egress (verified via brokerScope — fail-closed: a wired gate
+ * be inside the SIGNED [scope].egress (via the signed profile policy — fail-closed: a wired gate
  * with no verified scope grants nothing). Off-scope → exit 2 + audit. Commands without an
  * unambiguous URL pass through (conservative extraction; see broker/extract.ts).
  */
@@ -187,16 +187,18 @@ export async function cmdGateEgress(): Promise<boolean> {
   const hosts = extractHostsFromCommand(command);
   if (hosts.length === 0) return true; // no unambiguous network target → allow
 
-  const { brokerScope } = await import("../broker/decide.js");
-  const scope = await brokerScope(process.cwd());
+  // Canonical exec-broker: the signed profile scope → BrokerPolicy, egress checked with the
+  // shared decisions.checkEgress. A wired gate with no VERIFIED scope grants nothing (policy null).
+  const { profileBrokerPolicy } = await import("../exec-broker/profile-policy.js");
+  const { checkEgress } = await import("../exec-broker/decisions.js");
+  const { policy } = await profileBrokerPolicy(process.cwd());
   let denied: string[];
   let why: string;
-  if (!scope) {
+  if (!policy) {
     denied = hosts;
     why = `network egress to ${hosts.join(", ")} denied — no verified scope/RoE (unsigned, tampered, or missing); a wired egress-gate grants nothing`;
   } else {
-    const { hostInScope } = await import("../broker/scope.js");
-    denied = hosts.filter((h) => !hostInScope(h, scope));
+    denied = hosts.filter((h) => !checkEgress(h, { allow: policy.egress.allow }).ok);
     why = `host(s) outside the signed egress scope: ${denied.join(", ")}`;
   }
   if (denied.length === 0) return true;
@@ -210,7 +212,7 @@ export async function cmdGateEgress(): Promise<boolean> {
 /**
  * `kit gate-fs` — PreToolUse fs-gate (exec-broker, Pillar 3). Reads the pending tool call on
  * stdin; a Write/Edit must target a path inside the SIGNED [scope].fs (default: the project
- * root), verified via brokerScope — fail-closed: a wired gate with no verified scope grants
+ * root), via the signed profile policy — fail-closed: a wired gate with no verified scope grants
  * nothing. Off-scope → exit 2 + audit. Non-write tool calls pass through.
  */
 export async function cmdGateFs(): Promise<boolean> {
@@ -220,15 +222,21 @@ export async function cmdGateFs(): Promise<boolean> {
   const write = extractWriteFromHookPayload(payload);
   if (!write) return true; // not a file write → allow
 
-  const { brokerScope } = await import("../broker/decide.js");
-  const scope = await brokerScope(process.cwd());
-  if (!scope) {
+  // Canonical exec-broker: signed profile scope → BrokerPolicy; the write must land under some
+  // allowed root, checked with the shared decisions.checkFsWrite. No verified scope → deny.
+  const { profileBrokerPolicy } = await import("../exec-broker/profile-policy.js");
+  const { checkFsWrite } = await import("../exec-broker/decisions.js");
+  const { policyFsRoots } = await import("../exec-broker/policy.js");
+  const { resolve } = await import("node:path");
+  const { policy } = await profileBrokerPolicy(process.cwd());
+  if (!policy) {
     const why = `write to ${write.filePath} denied — no verified scope/RoE (unsigned, tampered, or missing); a wired fs-gate grants nothing`;
     await auditGateDeny("gate-fs", why);
     return await gateDeny("fs-gate", `${why}\nSign the profile scope: \`kit profile sign\`.`);
   }
-  const { pathInScope } = await import("../broker/scope.js");
-  if (pathInScope(write.filePath, scope, process.cwd())) return true;
+  // Resolve the hook's path against the agent cwd first, then containment-check against each root.
+  const abs = resolve(process.cwd(), write.filePath);
+  if (policyFsRoots(policy).some((root) => checkFsWrite(abs, root).ok)) return true;
   const why = `write outside the signed fs scope: ${write.filePath}`;
   await auditGateDeny("gate-fs", why);
   return await gateDeny(
