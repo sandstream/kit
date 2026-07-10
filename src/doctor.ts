@@ -294,6 +294,44 @@ async function scopeDegradationStatus(cwd: string): Promise<"warn" | "fail"> {
   }
 }
 
+/**
+ * Exec-broker MCP-RUNTIME mediation posture (Pillar 3 adoption). The scope row above says whether a
+ * signed scope EXISTS; this says whether the RUNTIME actually mediates governed MCP ops against it —
+ * "delivered but not opted in" must never read as "enforcing":
+ *   skip  enforce_runtime not set — the runtime is NOT mediating (opt in with `[scope].enforce_runtime = true`)
+ *   pass  enforce_runtime set + scope verified — governed MCP ops are mediated against the signed scope
+ *   fail  enforce_runtime set + scope unsigned/tampered — opted in but untrustworthy: governed ops fail-closed-denied
+ */
+async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
+  const name = "exec-broker runtime";
+  const category = "security";
+  const { enforceRuntime, policy } = await profileBrokerPolicy(cwd);
+  if (!enforceRuntime) {
+    return {
+      name,
+      status: "skip",
+      detail:
+        "MCP-runtime mediation not opted in — set [scope].enforce_runtime = true and re-sign to mediate governed MCP ops against the scope",
+      category,
+    };
+  }
+  if (policy) {
+    return {
+      name,
+      status: "pass",
+      detail: "runtime mediation active — governed MCP ops are mediated against the signed scope",
+      category,
+    };
+  }
+  return {
+    name,
+    status: "fail",
+    detail:
+      "runtime mediation opted in but the scope is unsigned/invalid — governed MCP ops are fail-closed-denied; run 'kit profile sign'",
+    category,
+  };
+}
+
 export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorResult> {
   const allChecks: DoctorCheck[] = [];
 
@@ -321,6 +359,7 @@ export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorR
   allChecks.push(checkIdentityKeystore());
 
   allChecks.push(await checkBrokerScope(cwd));
+  allChecks.push(await checkBrokerRuntime(cwd));
 
   const passed = allChecks.filter((c) => c.status === "pass").length;
   const warnings = allChecks.filter((c) => c.status === "warn").length;
