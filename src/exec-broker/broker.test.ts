@@ -447,6 +447,65 @@ enforce_runtime = true
     assert.equal(out.ok, true, "a signed scope alone does not gate the MCP runtime");
     assert.equal(ran, true);
   });
+
+  it("infrastructure op under a restrictive enforce_runtime scope → allowed + audited exemption", async () => {
+    // fs scope is "src" only, yet an infra op (tool provisioning) is exempt — allowed, and it goes
+    // through brokerExec (NOT a silent migration passthrough), leaving an explicit exemption entry.
+    await writeSignedProfile(`version = 1\n[scope]\nfs = ["src"]\nenforce_runtime = true\n`, true);
+    let ran = false;
+    const out = await runBrokered(
+      CTX({ infrastructure: true }),
+      async () => {
+        ran = true;
+        return "ok";
+      },
+      { cwd: sandbox },
+    );
+    assert.equal(out.ok, true);
+    assert.equal(ran, true);
+    assert.ok(
+      auditLines().some(
+        (l) => (l.metadata as { exemption?: string })?.exemption === "infrastructure",
+      ),
+      "the exemption must be audited explicitly, not silently passed",
+    );
+  });
+});
+
+describe("brokerExec infrastructure exemption", () => {
+  it("runs an infrastructure op even when policy is null (RoE does not govern it)", async () => {
+    let ran = false;
+    const out = await brokerExec(CTX({ infrastructure: true }), null, async () => {
+      ran = true;
+      return 1;
+    });
+    assert.equal(out.ok, true, "a null policy default-denies every NON-infra op; infra is exempt");
+    assert.equal(ran, true);
+  });
+
+  it("bypasses the resource gates a non-infra op would be denied by, and audits the exemption", async () => {
+    const denyAll: BrokerPolicy = {
+      egress: { allow: [] },
+      fs: { root: sandbox },
+      env: { declared: [] },
+    };
+    let ran = false;
+    const out = await brokerExec(
+      CTX({ infrastructure: true, egressTargets: ["https://evil.com"] }),
+      denyAll,
+      async () => {
+        ran = true;
+        return "ok";
+      },
+    );
+    assert.equal(out.ok, true, "off-scope egress is bypassed for an infrastructure op");
+    assert.equal(ran, true);
+    assert.ok(
+      auditLines().some(
+        (l) => (l.metadata as { exemption?: string })?.exemption === "infrastructure",
+      ),
+    );
+  });
 });
 
 describe("brokerExec is offline", () => {
