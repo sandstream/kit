@@ -67,6 +67,11 @@ export async function selfUpgrade(): Promise<boolean> {
     console.log(
       `\n${c.green}${c.bold}✓ kit upgraded${c.reset} — run ${c.bold}kit --version${c.reset} to confirm.`,
     );
+    // The RUNNING process is still the old version — without this, the exit
+    // banner would announce "Update available: old → new" right after a
+    // successful upgrade, reading as "the upgrade didn't take".
+    const { suppressUpdateNotice } = await import("../update-check.js");
+    suppressUpdateNotice();
     return true;
   } catch (err: unknown) {
     const { redactSecrets } = await import("../utils/redactSecrets.js");
