@@ -56,6 +56,7 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateInfo
     // what makes "no outbound network by default" / air-gap mode a COMPLETE
     // posture, not one with a lone npm-registry beacon poking through.
     if (
+      noticeSuppressed ||
       process.env.KIT_NO_UPDATE_CHECK === "1" ||
       process.env.CI === "true" ||
       process.env.GITHUB_ACTIONS === "true" ||
@@ -116,6 +117,17 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateInfo
   } catch {
     return null;
   }
+}
+
+/**
+ * Suppress this invocation's update notice. Called after a successful
+ * `kit upgrade --self`: the RUNNING process still reports the pre-upgrade
+ * version, so the exit banner would announce "Update available: old → new"
+ * immediately after installing new — a false "the upgrade didn't take" signal.
+ */
+let noticeSuppressed = false;
+export function suppressUpdateNotice(): void {
+  noticeSuppressed = true;
 }
 
 /** Current kit version from the installed package.json (sync, fail-safe). */

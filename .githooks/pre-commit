@@ -1,4 +1,7 @@
 #!/usr/bin/env sh
 # pre-commit — block internal references in staged content before they land.
 # Term list is resolved outside this repo (see no-internal-leaks.sh header).
-exec "$(git rev-parse --show-toplevel)/.githooks/no-internal-leaks.sh" --staged
+"$(git rev-parse --show-toplevel)/.githooks/no-internal-leaks.sh" --staged || exit 1
+# Receipt for kit's post-commit skip-detector (.kit-hook-ran): prove that
+# pre-commit actually ran, so honest commits stop logging as "bypassed".
+date -u +"%Y-%m-%dT%H:%M:%SZ" > "$(git rev-parse --git-dir)/.kit-hook-ran" 2>/dev/null || true
