@@ -121,4 +121,28 @@ describe("profileBrokerPolicy", () => {
     assert.deepEqual(r.signHostsDeclared, []);
     assert.deepEqual(r.signHosts, []);
   });
+
+  it("runtimeMode reflects the enforce_runtime declaration (off / observe / enforce)", async () => {
+    // off — no scope
+    assert.equal((await profileBrokerPolicy(proj)).runtimeMode, "off");
+    // observe
+    writeFileSync(join(proj, PROFILE_FILE), `version = 1\n[scope]\nenforce_runtime = "observe"\n`);
+    await signProfile(proj);
+    const obs = await profileBrokerPolicy(proj);
+    assert.equal(obs.runtimeMode, "observe");
+    assert.equal(obs.enforceRuntime, false, "observe is not enforce");
+    // enforce
+    writeFileSync(join(proj, PROFILE_FILE), `version = 1\n[scope]\nenforce_runtime = true\n`);
+    await signProfile(proj);
+    const enf = await profileBrokerPolicy(proj);
+    assert.equal(enf.runtimeMode, "enforce");
+    assert.equal(enf.enforceRuntime, true);
+  });
+
+  it("runtimeMode is read from the declaration even before signing", async () => {
+    writeFileSync(join(proj, PROFILE_FILE), `version = 1\n[scope]\nenforce_runtime = "observe"\n`);
+    const r = await profileBrokerPolicy(proj); // unsigned
+    assert.equal(r.runtimeMode, "observe");
+    assert.equal(r.policy, null, "unsigned → null policy (observe still reports would-denies)");
+  });
 });

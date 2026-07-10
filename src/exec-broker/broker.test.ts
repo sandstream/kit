@@ -472,6 +472,73 @@ enforce_runtime = true
   });
 });
 
+describe("runBrokered OBSERVE mode (Pillar 3 default-on ladder — dry-run)", () => {
+  const OBSERVE = `version = 1\n[scope]\negress = ["api.acme.com"]\nenforce_runtime = "observe"\n`;
+
+  async function writeObserve(sign: boolean): Promise<void> {
+    loadOrCreateIdentity();
+    writeFileSync(join(sandbox, PROFILE_FILE), OBSERVE);
+    if (sign) await signProfile(sandbox);
+    delete process.env.KIT_EXEC_BROKER_POLICY;
+  }
+
+  const observeLine = () =>
+    auditLines().find((l) => (l.metadata as { phase?: string })?.phase === "observe");
+
+  it("OFF-scope egress → still RUNS (never denies) but records the would-be denial", async () => {
+    await writeObserve(true);
+    let ran = false;
+    const out = await runBrokered(
+      CTX({ egressTargets: ["https://evil.com"] }),
+      async () => {
+        ran = true;
+        return "ok";
+      },
+      { cwd: sandbox },
+    );
+    assert.equal(out.ok, true, "observe must never deny");
+    assert.equal(ran, true);
+    const obs = observeLine();
+    assert.ok(obs, "an observe audit entry must be written");
+    const wouldDeny = (obs!.metadata as { wouldDeny?: string[] }).wouldDeny ?? [];
+    assert.ok(
+      wouldDeny.some((d) => d.includes("evil.com")),
+      `would-be denial must be recorded: ${JSON.stringify(wouldDeny)}`,
+    );
+  });
+
+  it("IN-scope egress → runs with an empty would-deny (clean, ready to enforce)", async () => {
+    await writeObserve(true);
+    const out = await runBrokered(
+      CTX({ egressTargets: ["https://api.acme.com/v1"] }),
+      async () => "ok",
+      { cwd: sandbox },
+    );
+    assert.equal(out.ok, true);
+    assert.deepEqual((observeLine()!.metadata as { wouldDeny?: string[] }).wouldDeny, []);
+  });
+
+  it("UNSIGNED observe scope → runs, but records the default-deny that enforce would apply", async () => {
+    await writeObserve(false);
+    let ran = false;
+    const out = await runBrokered(
+      CTX({ egressTargets: ["https://api.acme.com/v1"] }),
+      async () => {
+        ran = true;
+        return "ok";
+      },
+      { cwd: sandbox },
+    );
+    assert.equal(out.ok, true, "observe never denies, even on an unsigned scope");
+    assert.equal(ran, true);
+    const wouldDeny = (observeLine()!.metadata as { wouldDeny?: string[] }).wouldDeny ?? [];
+    assert.ok(
+      wouldDeny.some((d) => d.includes("default-deny")),
+      `unsigned observe must record the default-deny: ${JSON.stringify(wouldDeny)}`,
+    );
+  });
+});
+
 describe("brokerExec infrastructure exemption", () => {
   it("runs an infrastructure op even when policy is null (RoE does not govern it)", async () => {
     let ran = false;

@@ -196,6 +196,25 @@ describe("runDoctor", () => {
     }
   });
 
+  it("exec-broker runtime: warns in OBSERVE (dry-run) mode", async () => {
+    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-rt-observe`);
+    await mkdir(tmpDir, { recursive: true });
+    await writeFile(
+      join(tmpDir, ".kit-profile.toml"),
+      `version = 1\n[scope]\negress = ["api.acme.com"]\nenforce_runtime = "observe"\n`,
+      "utf-8",
+    );
+    try {
+      const result = await runDoctor({}, tmpDir);
+      const rt = result.checks.find((c) => c.name === "exec-broker runtime");
+      assert.ok(rt, "exec-broker runtime check should be present");
+      assert.equal(rt.status, "warn");
+      assert.ok(rt.detail.includes("OBSERVE"), `detail should name the observe mode: ${rt.detail}`);
+    } finally {
+      await rm(tmpDir, { recursive: true });
+    }
+  });
+
   it("surfaces the identity keystore posture (Pelare 1 — never silent)", async () => {
     const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-9`);
     await mkdir(tmpDir, { recursive: true });
