@@ -13,6 +13,7 @@ import {
   formatSecretExpirationWarnings,
   hasExpiredSecrets,
 } from "./secret-expiration.js";
+import { checkScopeNeeds, type ScopeNeeds } from "./broker/needs.js";
 
 export interface OperationContext {
   operation: string;
@@ -20,6 +21,13 @@ export interface OperationContext {
   destructive?: boolean;
   metadata?: Record<string, unknown>;
   estimatedTokens?: number;
+  /**
+   * What this operation is about to touch (hosts / write paths / secret env keys) — the
+   * exec-broker's input (Pillar 3). Optional and additive: undeclared ⇒ no scope check (the
+   * advisory floor is unchanged). When declared AND the project declares a [scope]/RoE, every
+   * need must be inside the VERIFIED scope — see broker/needs.ts for the fail-closed rules.
+   */
+  scopeNeeds?: ScopeNeeds;
 }
 
 export interface GovernanceResult {
@@ -68,6 +76,18 @@ export async function withGovernance<T>(
   if (!budgetCheck.allowed) {
     await auditDeny(budgetCheck.reason || "Budget limit exceeded");
     throw new Error(budgetCheck.reason || "Budget limit exceeded");
+  }
+
+  // 2.5 Scope enforcement (exec-broker, Pillar 3): declared needs vs the signed [scope]/RoE.
+  //     Checked BEFORE any approval prompt — a scope denial is not operator-overridable (the
+  //     RoE is a signed artifact; widening it means editing + re-signing the profile), so the
+  //     operator is never prompted to approve an operation that will be scope-denied anyway.
+  if (context.scopeNeeds) {
+    const scopeDenial = await checkScopeNeeds(context.scopeNeeds);
+    if (scopeDenial) {
+      await auditDeny(scopeDenial);
+      throw new Error(scopeDenial);
+    }
   }
 
   // Track whether the operator already approved this op in step 3, so a
