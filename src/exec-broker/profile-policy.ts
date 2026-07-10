@@ -29,12 +29,18 @@ export interface ProfilePolicyResult {
   /** The governing policy — non-null ONLY when regime is "active" AND the signature verified. */
   policy: BrokerPolicy | null;
   /**
-   * Did the scope opt IN to enforcement at the MCP runtime (`[scope].enforce_runtime = true`)?
-   * Read from the DECLARATION regardless of signature status: opted-in + unsigned ⇒ this is true
-   * AND `policy` is null, so the runtime default-denies declared ops (fail-closed). False when no
-   * scope is declared or the profile is unreadable.
+   * Did the scope opt IN to ENFORCING runtime mediation (`[scope].enforce_runtime = true`)? Read
+   * from the DECLARATION regardless of signature status: opted-in + unsigned ⇒ this is true AND
+   * `policy` is null, so the runtime default-denies declared ops (fail-closed). False for observe /
+   * off / no scope / unreadable. Equivalent to `runtimeMode === "enforce"` (kept for back-compat).
    */
   enforceRuntime: boolean;
+  /**
+   * The declared runtime posture (Pillar 3 default-on ladder): `"off"` (absent/false — runtime
+   * unchanged), `"observe"` (dry-run: mediate but never deny, audit would-be denials), or
+   * `"enforce"` (mediate + deny). Read from the DECLARATION regardless of signature status.
+   */
+  runtimeMode: "off" | "observe" | "enforce";
   /**
    * Keyless "sign, don't store" hosts (Pillar 2 tail) declared in `[scope].sign`, read from the
    * DECLARATION regardless of signature status — so `kit doctor` can surface "declared but
@@ -55,7 +61,14 @@ interface ScopeShape {
   fs?: string[];
   secrets?: string[];
   sign?: string[];
-  enforce_runtime?: boolean;
+  enforce_runtime?: boolean | "observe";
+}
+
+/** Map the signed `enforce_runtime` declaration onto the runtime posture. */
+function runtimeModeOf(scope: ScopeShape): "off" | "observe" | "enforce" {
+  if (scope.enforce_runtime === "observe") return "observe";
+  if (scope.enforce_runtime === true) return "enforce";
+  return "off";
 }
 
 /** Map a verified profile `[scope]` onto a BrokerPolicy (fs paths resolved against `cwd`). */
@@ -81,6 +94,7 @@ export async function profileBrokerPolicy(cwd = process.cwd()): Promise<ProfileP
         regime: "none",
         policy: null,
         enforceRuntime: false,
+        runtimeMode: "off",
         signHostsDeclared: [],
         signHosts: [],
         detail: "no profile declared",
@@ -95,6 +109,7 @@ export async function profileBrokerPolicy(cwd = process.cwd()): Promise<ProfileP
       regime: "active",
       policy: null,
       enforceRuntime: false,
+      runtimeMode: "off",
       signHostsDeclared: [],
       signHosts: [],
       detail: `profile unreadable — ${err instanceof Error ? err.message : String(err)} (default-deny)`,
@@ -105,13 +120,15 @@ export async function profileBrokerPolicy(cwd = process.cwd()): Promise<ProfileP
       regime: "none",
       policy: null,
       enforceRuntime: false,
+      runtimeMode: "off",
       signHostsDeclared: [],
       signHosts: [],
       detail: "profile declares no [scope]/RoE",
     };
   }
 
-  const enforceRuntime = scope.enforce_runtime === true;
+  const runtimeMode = runtimeModeOf(scope);
+  const enforceRuntime = runtimeMode === "enforce";
   const signHostsDeclared = scope.sign ? [...scope.sign] : [];
   const v = await verifyProfileSignature(cwd);
   if (v.status === "valid") {
@@ -119,6 +136,7 @@ export async function profileBrokerPolicy(cwd = process.cwd()): Promise<ProfileP
       regime: "active",
       policy: scopeToPolicy(scope, cwd),
       enforceRuntime,
+      runtimeMode,
       signHostsDeclared,
       signHosts: signHostsDeclared,
       detail: `scope verified (${v.detail})`,
@@ -128,6 +146,7 @@ export async function profileBrokerPolicy(cwd = process.cwd()): Promise<ProfileP
     regime: "active",
     policy: null,
     enforceRuntime,
+    runtimeMode,
     signHostsDeclared,
     signHosts: [],
     detail: `scope declared but ${v.status} — ${v.detail}; grants nothing (fail-closed)`,

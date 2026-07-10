@@ -187,6 +187,31 @@ export async function brokerExec<T>(
 }
 
 /**
+ * OBSERVE (dry-run) enforcement — Pillar 3 default-on ladder. Run the SAME gates as brokerExec over
+ * the declared effects, but NEVER deny: record the would-be denials to the audit trail
+ * (`phase: "observe"`, `wouldDeny`) and always execute with the FULL env (behavior-neutral — observe
+ * must not alter what the op sees). A null policy (unverified scope) is reported as the default-deny
+ * that enforce mode WOULD apply, so an operator sees "this op would be denied under enforce" without
+ * anything actually breaking. Never a false green: the op is audited as observed, not as mediated.
+ */
+async function brokerObserve<T>(
+  context: BrokerContext,
+  policy: BrokerPolicy | null | undefined,
+  run: (scopedEnv: Record<string, string>) => Promise<T>,
+): Promise<BrokerOutcome<T>> {
+  const wouldDeny = policy
+    ? collectDenials(context, policy)
+    : ["exec-broker: no policy (default-deny)"];
+  await audit(context, true, undefined, { phase: "observe", wouldDeny });
+  try {
+    const result = await run(scopeEnv(Object.keys(process.env), process.env));
+    return { ok: true, result };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Run all three resource gates over an operation's DECLARED effects and return one
  * denial line per violation (empty array = all gates passed). Extracted from
  * brokerExec so the enforcement wrapper stays simple. fs-write is checked twice:
@@ -253,11 +278,15 @@ export async function runBrokered<T>(
   // 1. Signed profile scope at the runtime — only when the scope explicitly opted in.
   const { profileBrokerPolicy } = await import("./profile-policy.js");
   const signed = await profileBrokerPolicy(opts.cwd ?? process.cwd());
-  if (signed.enforceRuntime) {
+  if (signed.runtimeMode !== "off") {
     if (hasDeclaredEffects(context)) {
-      return brokerExec(context, signed.policy, run);
+      // "observe" = dry-run: mediate the same gates but NEVER deny — record would-be denials so an
+      // operator can see what default-on would block before flipping to "enforce" (Pillar 3 ladder).
+      return signed.runtimeMode === "observe"
+        ? brokerObserve(context, signed.policy, run)
+        : brokerExec(context, signed.policy, run);
     }
-    // Undeclared op under runtime enforcement → migration passthrough (unchanged behavior).
+    // Undeclared op under runtime enforcement/observe → migration passthrough (unchanged behavior).
     try {
       return { ok: true, result: await run(scopeEnv(Object.keys(process.env), process.env)) };
     } catch (err) {

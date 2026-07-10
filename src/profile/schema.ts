@@ -80,12 +80,15 @@ export interface ProfileScope {
    */
   sign?: string[];
   /**
-   * Explicit opt-in to exec-broker enforcement AT THE MCP RUNTIME (not just the PreToolUse gates /
-   * governance floor). When true and the scope is verified, governed MCP ops that declare their
-   * effects are mediated against this scope; when false/absent, the runtime is unchanged. Being
-   * inside `[scope]`, this flag is covered by the signature — it cannot be flipped without re-signing.
+   * Exec-broker enforcement AT THE MCP RUNTIME (not just the PreToolUse gates / governance floor):
+   *   - `true`      → mediate governed MCP ops against the verified scope and DENY on a violation;
+   *   - `"observe"` → dry-run: mediate the SAME gates but NEVER deny — record would-be denials to the
+   *                   audit trail so an operator can see what default-on would block before it does;
+   *   - absent/false → the runtime is unchanged.
+   * Being inside `[scope]`, this flag is covered by the signature — it cannot be changed without
+   * re-signing. See `pillar3-runtime-default-on-5.0.md` for the off → observe → enforce ladder.
    */
-  enforce_runtime?: boolean;
+  enforce_runtime?: boolean | "observe";
 }
 
 export interface KitProfile {
@@ -155,7 +158,7 @@ const kitProfileSchema = z
         fs: z.array(z.string()).optional(),
         secrets: z.array(z.string()).optional(),
         sign: z.array(z.string()).optional(),
-        enforce_runtime: z.boolean().optional(),
+        enforce_runtime: z.union([z.boolean(), z.literal("observe")]).optional(),
       })
       .strict()
       .optional(),

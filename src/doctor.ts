@@ -309,13 +309,25 @@ async function scopeDegradationStatus(cwd: string): Promise<"warn" | "fail"> {
 async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
   const name = "exec-broker runtime";
   const category = "security";
-  const { enforceRuntime, policy } = await profileBrokerPolicy(cwd);
-  if (!enforceRuntime) {
+  const { runtimeMode, policy } = await profileBrokerPolicy(cwd);
+  if (runtimeMode === "off") {
     return {
       name,
       status: "skip",
       detail:
-        "MCP-runtime mediation not opted in — set [scope].enforce_runtime = true and re-sign to mediate governed MCP ops against the scope",
+        'MCP-runtime mediation not opted in — set [scope].enforce_runtime = true (or "observe" for a dry-run) and re-sign to mediate governed MCP ops against the scope',
+      category,
+    };
+  }
+  if (runtimeMode === "observe") {
+    // Dry-run: never denies. warn (not pass) — mediation is not actually protecting yet; the point is
+    // to read the would-be denials in the audit trail, then graduate to enforce.
+    return {
+      name,
+      status: "warn",
+      detail: policy
+        ? "runtime mediation in OBSERVE mode — gates run but never deny; would-be denials are recorded to the audit trail. Review them, then set enforce_runtime = true"
+        : "runtime OBSERVE mode but the scope is unsigned/invalid — every declared op would be denied under enforce; run 'kit profile sign' before graduating",
       category,
     };
   }
