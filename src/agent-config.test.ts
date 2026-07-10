@@ -11,6 +11,7 @@ import {
   writeAgentConfig,
   installKitPermissions,
   installInstallGate,
+  installBrokerGates,
   installInstallGateCodex,
   installInstallGateAmazonQ,
   installInstallGateKiro,
@@ -391,6 +392,68 @@ describe("installInstallGate", () => {
     try {
       const r = await installInstallGate(dir);
       assert.equal(r.action, "skipped");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installBrokerGates (Pillar 3, opt-in)", () => {
+  it("wires PreToolUse gate-egress (Bash) + gate-fs (Write|Edit|NotebookEdit), idempotently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-broker-gate-"));
+    try {
+      mkdirSync(join(dir, ".claude"), { recursive: true });
+      const r1 = await installBrokerGates(dir);
+      assert.equal(r1.action, "created");
+      const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
+      const groups = s.hooks.PreToolUse;
+      assert.equal(groups.length, 2);
+      const egress = groups.find((g: { matcher: string }) => g.matcher === "Bash");
+      const fs = groups.find((g: { matcher: string }) => g.matcher === "Write|Edit|NotebookEdit");
+      assert.ok(egress.hooks[0].command.endsWith("gate-egress"));
+      assert.ok(fs.hooks[0].command.endsWith("gate-fs"));
+
+      const r2 = await installBrokerGates(dir);
+      assert.equal(r2.action, "unchanged");
+      const s2 = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
+      assert.equal(s2.hooks.PreToolUse.length, 2, "no duplicate groups on re-run");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("adds only the missing gate when one is already wired", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-broker-gate2-"));
+    try {
+      mkdirSync(join(dir, ".claude"), { recursive: true });
+      writeFileSync(
+        join(dir, ".claude", "settings.json"),
+        JSON.stringify({
+          hooks: {
+            PreToolUse: [
+              { matcher: "Bash", hooks: [{ type: "command", command: "kit gate-egress" }] },
+            ],
+          },
+        }),
+      );
+      const r = await installBrokerGates(dir);
+      assert.equal(r.action, "updated");
+      const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
+      assert.equal(s.hooks.PreToolUse.length, 2);
+      assert.ok(
+        s.hooks.PreToolUse.some((g: { hooks: { command: string }[] }) =>
+          g.hooks[0].command.endsWith("gate-fs"),
+        ),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when no Claude Code project is present", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-broker-gate3-"));
+    try {
+      assert.equal((await installBrokerGates(dir)).action, "skipped");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
