@@ -13,6 +13,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brokerExec, runBrokered, type BrokerContext } from "./broker.js";
 import type { BrokerPolicy } from "./policy.js";
+import { loadOrCreateIdentity } from "../identity.js";
+import { PROFILE_FILE } from "../profile/schema.js";
+import { signProfile } from "../profile/sign.js";
 
 const POLICY: BrokerPolicy = {
   egress: { allow: ["api.example.com"] },
@@ -353,6 +356,96 @@ describe("runBrokered opt-in (policy file present/absent)", () => {
     });
     assert.equal(out.ok, false, "a broken policy fails closed, not open");
     assert.equal(ran, false);
+  });
+});
+
+describe("runBrokered signed-scope runtime enforcement (opt-in via enforce_runtime)", () => {
+  const SIGNED_ENFORCED = `version = 1
+[scope]
+egress = ["api.acme.com"]
+enforce_runtime = true
+`;
+
+  async function writeSignedProfile(body: string, sign: boolean): Promise<void> {
+    loadOrCreateIdentity();
+    writeFileSync(join(sandbox, PROFILE_FILE), body);
+    if (sign) await signProfile(sandbox);
+    delete process.env.KIT_EXEC_BROKER_POLICY; // isolate: the signed path must not depend on JSON
+  }
+
+  it("verified scope + declared IN-scope egress → mediates and runs", async () => {
+    await writeSignedProfile(SIGNED_ENFORCED, true);
+    let ran = false;
+    const out = await runBrokered(
+      CTX({ egressTargets: ["https://api.acme.com/v1"] }),
+      async () => {
+        ran = true;
+        return "ok";
+      },
+      { cwd: sandbox },
+    );
+    assert.equal(out.ok, true);
+    assert.equal(ran, true);
+  });
+
+  it("verified scope + declared OFF-scope egress → denied, never runs", async () => {
+    await writeSignedProfile(SIGNED_ENFORCED, true);
+    let ran = false;
+    const out = await runBrokered(
+      CTX({ egressTargets: ["https://evil.com"] }),
+      async () => {
+        ran = true;
+        return 1;
+      },
+      { cwd: sandbox },
+    );
+    assert.equal(out.ok, false);
+    assert.equal(ran, false);
+  });
+
+  it("verified scope + op declares NO effects → MIGRATION passthrough (runs, unchanged)", async () => {
+    await writeSignedProfile(SIGNED_ENFORCED, true);
+    let ran = false;
+    const out = await runBrokered(
+      CTX(),
+      async () => {
+        ran = true;
+        return "ok";
+      },
+      { cwd: sandbox },
+    );
+    assert.equal(out.ok, true, "an undeclared op is not yet mediated at the runtime (migration)");
+    assert.equal(ran, true);
+  });
+
+  it("enforce_runtime declared but UNSIGNED → declared op fail-closed denied (policy null)", async () => {
+    await writeSignedProfile(SIGNED_ENFORCED, false);
+    let ran = false;
+    const out = await runBrokered(
+      CTX({ egressTargets: ["https://api.acme.com/v1"] }),
+      async () => {
+        ran = true;
+        return 1;
+      },
+      { cwd: sandbox },
+    );
+    assert.equal(out.ok, false, "opted into runtime enforcement but scope unsigned → default-deny");
+    assert.equal(ran, false);
+  });
+
+  it("signed scope WITHOUT enforce_runtime → runtime unchanged (falls through to passthrough)", async () => {
+    await writeSignedProfile(`version = 1\n[scope]\negress = ["api.acme.com"]\n`, true);
+    let ran = false;
+    const out = await runBrokered(
+      CTX({ egressTargets: ["https://evil.com"] }), // off-scope, but no runtime opt-in → not gated
+      async () => {
+        ran = true;
+        return "ok";
+      },
+      { cwd: sandbox },
+    );
+    assert.equal(out.ok, true, "a signed scope alone does not gate the MCP runtime");
+    assert.equal(ran, true);
   });
 });
 
