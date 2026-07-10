@@ -6,6 +6,7 @@ import { SKIPPED_COMMITS_LOG } from "../hooks.js";
 import { triageMcpTools, extractToolDefs } from "../mcp-triage.js";
 import { discoverPlugins } from "../agent-sbom.js";
 import { scanPluginManifest, manifestHasHighRisk } from "../plugin-triage.js";
+import { triageVaultConfig } from "../vault-triage.js";
 
 export async function cmdTriage(): Promise<boolean> {
   const args = process.argv.slice(3);
@@ -22,6 +23,9 @@ export async function cmdTriage(): Promise<boolean> {
   }
   if (typeArg === "plugin") {
     return cmdTriagePlugin(filtered.slice(1));
+  }
+  if (typeArg === "vault-config") {
+    return cmdTriageVaultConfig();
   }
   const type = typeArg as TriageType;
   const target = filtered[1];
@@ -45,6 +49,9 @@ export async function cmdTriage(): Promise<boolean> {
     );
     console.log(
       "  kit triage plugin [name]             Triage kitPlugins (npm supply-chain + manifest-poisoning scan); all declared if no name",
+    );
+    console.log(
+      "  kit triage vault-config              Triage the secret-backend selection (.kit.toml secrets.store + per-key source); never reads secret values",
     );
     console.log("  kit triage all <target>              Auto-detect and run all checks");
     console.log("  kit triage tools                     Show installed security tools");
@@ -134,6 +141,51 @@ export async function cmdTriage(): Promise<boolean> {
   }
 
   return overall;
+}
+
+/**
+ * `kit triage vault-config` — triage the project's secret-backend SELECTION (`.kit.toml`
+ * `secrets.store` + per-key `source`): flag an unknown/typo'd backend (silently no vault) and
+ * surface local/plaintext sources. Never reads a secret value. Deterministic, zero-LLM.
+ */
+async function cmdTriageVaultConfig(): Promise<boolean> {
+  const { loadConfig } = await import("../config.js");
+  const { resolve } = await import("node:path");
+  let secrets;
+  try {
+    const cfg = await loadConfig(resolve(process.cwd(), ".kit.toml"));
+    secrets = cfg.secrets;
+  } catch {
+    console.log(`${c.dim}no readable .kit.toml — nothing to triage.${c.reset}`);
+    return true;
+  }
+  const { findings, passed } = triageVaultConfig(secrets);
+  if (findings.length === 0) {
+    console.log(
+      `${c.dim}no secret-backend selection configured (.kit.toml [secrets]) — nothing to triage.${c.reset}`,
+    );
+    return true;
+  }
+  console.log(
+    `${c.bold}kit triage vault-config${c.reset} ${c.dim}(backend selection only — no secret values read)${c.reset}`,
+  );
+  for (const f of findings) {
+    const mark =
+      f.assurance === "vault-backed"
+        ? `${c.green}✓${c.reset}`
+        : f.assurance === "local-plaintext"
+          ? `${c.yellow}!${c.reset}`
+          : `${c.red}✗${c.reset}`;
+    console.log(
+      `  ${mark} ${f.scope}  ${c.bold}${f.source}${c.reset}  ${c.dim}${f.note}${c.reset}`,
+    );
+  }
+  if (!passed) {
+    console.log(
+      `\n${c.red}✗ unknown backend id(s) — a typo or unsupported backend means secrets silently fall through.${c.reset}`,
+    );
+  }
+  return passed;
 }
 
 /**
