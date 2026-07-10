@@ -5,7 +5,8 @@ import { promisify } from "node:util";
 import type { kitConfig } from "./config.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { activeKeyStoreStatus, hardwareRequired } from "./keystore/active.js";
-import { brokerStatus } from "./broker/decide.js";
+import { profileBrokerPolicy } from "./exec-broker/profile-policy.js";
+import { verifyProfileSignature } from "./profile/sign.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -260,21 +261,36 @@ function checkIdentityKeystore(): DoctorCheck {
 async function checkBrokerScope(cwd: string): Promise<DoctorCheck> {
   const name = "exec-broker scope";
   const category = "security";
-  const st = await brokerStatus(cwd);
-  switch (st.state) {
-    case "verified":
-      return { name, status: "pass", detail: st.detail, category };
-    case "none":
-      return {
-        name,
-        status: "skip",
-        detail: `${st.detail} — declare [scope] in .kit-profile.toml and run 'kit profile sign' to arm the exec-broker`,
-        category,
-      };
-    case "unsigned":
-      return { name, status: "warn", detail: `${st.detail}; run 'kit profile sign'`, category };
-    case "invalid":
-      return { name, status: "fail", detail: st.detail, category };
+  // The canonical broker's signed-scope provider (reconciliation R4): one source for the gates,
+  // the governance floor, AND this posture line — there is one broker, not two.
+  const { regime, policy, detail } = await profileBrokerPolicy(cwd);
+  if (regime === "none") {
+    return {
+      name,
+      status: "skip",
+      detail: `${detail} — declare [scope] in .kit-profile.toml and run 'kit profile sign' to arm the exec-broker`,
+      category,
+    };
+  }
+  if (policy) {
+    return { name, status: "pass", detail, category };
+  }
+  // Declared but untrustworthy (policy null). Preserve the honest warn-vs-fail split: a
+  // never-signed scope is a WARN (just sign it); a tampered/revoked/malformed one is a FAIL.
+  const status = await scopeDegradationStatus(cwd);
+  if (status === "warn") {
+    return { name, status: "warn", detail: `${detail}; run 'kit profile sign'`, category };
+  }
+  return { name, status: "fail", detail, category };
+}
+
+/** Distinguish an unsigned (warn) scope from an invalid/revoked/malformed (fail) one. */
+async function scopeDegradationStatus(cwd: string): Promise<"warn" | "fail"> {
+  try {
+    const v = await verifyProfileSignature(cwd);
+    return v.status === "unsigned" || v.status === "unverifiable" ? "warn" : "fail";
+  } catch {
+    return "fail"; // a broken artifact must never read as a mere warning
   }
 }
 
