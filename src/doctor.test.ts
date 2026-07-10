@@ -145,6 +145,43 @@ describe("runDoctor", () => {
     }
   });
 
+  it("exec-broker runtime: skips when enforce_runtime is not opted in", async () => {
+    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-rt-skip`);
+    await mkdir(tmpDir, { recursive: true });
+    try {
+      const result = await runDoctor({}, tmpDir);
+      const rt = result.checks.find((c) => c.name === "exec-broker runtime");
+      assert.ok(rt, "exec-broker runtime check should always be present");
+      assert.equal(rt.status, "skip");
+      assert.ok(rt.detail.includes("enforce_runtime"), `unexpected detail: ${rt.detail}`);
+    } finally {
+      await rm(tmpDir, { recursive: true });
+    }
+  });
+
+  it("exec-broker runtime: fails when opted in but the scope is unsigned (fail-closed)", async () => {
+    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-rt-fail`);
+    await mkdir(tmpDir, { recursive: true });
+    // enforce_runtime declared but the profile is NOT signed → runtime denies governed ops.
+    await writeFile(
+      join(tmpDir, ".kit-profile.toml"),
+      `version = 1\n[scope]\negress = ["api.acme.com"]\nenforce_runtime = true\n`,
+      "utf-8",
+    );
+    try {
+      const result = await runDoctor({}, tmpDir);
+      const rt = result.checks.find((c) => c.name === "exec-broker runtime");
+      assert.ok(rt, "exec-broker runtime check should be present");
+      assert.equal(rt.status, "fail");
+      assert.ok(
+        rt.detail.includes("fail-closed-denied") || rt.detail.includes("unsigned"),
+        `detail should explain the fail-closed posture: ${rt.detail}`,
+      );
+    } finally {
+      await rm(tmpDir, { recursive: true });
+    }
+  });
+
   it("surfaces the identity keystore posture (Pelare 1 — never silent)", async () => {
     const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-9`);
     await mkdir(tmpDir, { recursive: true });
