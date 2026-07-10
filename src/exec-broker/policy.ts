@@ -18,8 +18,19 @@ import { resolve } from "node:path";
 
 export interface BrokerPolicy {
   egress: { allow: string[] };
-  fs: { root: string };
+  /**
+   * Filesystem write-scope. `root` is the primary allowed root (required, back-compatible with
+   * the original single-root policy + `.kit-exec-broker.json`). `roots` optionally adds more
+   * allowed roots — the effective allowed set is `[root, ...roots]`. This lets a richer source
+   * (the signed profile's `[scope].fs` path LIST) map faithfully without breaking the JSON shape.
+   */
+  fs: { root: string; roots?: string[] };
   env: { declared: string[] };
+}
+
+/** The effective list of allowed write-roots for a policy: `[root, ...roots]`, de-duplicated. */
+export function policyFsRoots(policy: BrokerPolicy): string[] {
+  return [...new Set([policy.fs.root, ...(policy.fs.roots ?? [])])];
 }
 
 /** The env override knob for this module (mirrors the amazonq/kiro parsers). */
@@ -56,13 +67,15 @@ function validateBrokerPolicy(parsed: unknown): BrokerPolicy | null {
   const fs = p.fs as Record<string, unknown> | undefined;
   if (typeof fs !== "object" || fs === null) return null;
   if (typeof fs.root !== "string" || fs.root.length === 0) return null;
+  // Optional `roots`: when present it must be a string[] (fail-closed on any other shape).
+  if (fs.roots !== undefined && !isStringArray(fs.roots)) return null;
 
   const env = p.env as Record<string, unknown> | undefined;
   if (typeof env !== "object" || env === null || !isStringArray(env.declared)) return null;
 
   return {
     egress: { allow: [...egress.allow] },
-    fs: { root: fs.root },
+    fs: fs.roots ? { root: fs.root, roots: [...fs.roots] } : { root: fs.root },
     env: { declared: [...env.declared] },
   };
 }
