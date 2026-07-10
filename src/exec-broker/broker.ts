@@ -49,12 +49,25 @@ export interface BrokerContext extends OperationContext {
    * it is the "gates are dead code" false-green the audit flagged.
    */
   declaredEffects?: boolean;
+  /**
+   * Infrastructure exemption (MCP-runtime adoption step 3): this op is kit's OWN
+   * tool-provisioning (e.g. `kit install`/`kit fix` shelling out to mise), NOT an
+   * agent project action the `[scope]` RoE is meant to govern — it writes to the
+   * toolchain's data dir under `$HOME` and fetches from tool hosts BY DESIGN, so it
+   * cannot fit a project-scoped `[scope].fs`/egress. Marked ops are ALLOWED but
+   * AUDITED as an explicit exemption (`exemption: "infrastructure"`) — this is the
+   * honest alternative to `declaredEffects:true`, which would falsely claim the op
+   * has no egress/fs effects. Set ONLY by kit's own fixed handlers, never from
+   * agent-controllable input.
+   */
+  infrastructure?: boolean;
 }
 
-/** Did the caller declare this op's effect contract (arrays present, or the flag)? */
+/** Did the caller declare this op's effect contract (arrays present, or a flag)? */
 function hasDeclaredEffects(c: BrokerContext): boolean {
   return (
     c.declaredEffects === true ||
+    c.infrastructure === true ||
     c.egressTargets !== undefined ||
     c.fsWrites !== undefined ||
     c.envRequested !== undefined
@@ -81,6 +94,36 @@ export async function brokerExec<T>(
   policy: BrokerPolicy | null | undefined,
   run: (scopedEnv: Record<string, string>) => Promise<T>,
 ): Promise<BrokerOutcome<T>> {
+  // Infrastructure exemption: kit's OWN tool-provisioning is not governed by the project [scope]
+  // RoE (it writes to $HOME and fetches from tool hosts by design — see BrokerContext.infrastructure).
+  // Allow it, but AUDIT the exemption explicitly (never a silent pass, never a false "no effects"
+  // claim). Runs with full env — provisioning needs its environment. Independent of policy state:
+  // the RoE does not govern this op, so its signature/validity is irrelevant here. Fail-closed
+  // auditability still applies (refuse if the pre-exec authorization entry can't be written).
+  if (context.infrastructure) {
+    const authorized = await appendAuditEventDirect({
+      operation: context.operation,
+      environment: BROKER_ENV,
+      success: true,
+      metadata: { ...context.metadata, phase: "authorized", exemption: "infrastructure" },
+    });
+    if (!authorized) {
+      return {
+        ok: false,
+        reason: "exec-broker: audit-log unavailable; refusing to execute (fail-closed)",
+      };
+    }
+    try {
+      const result = await run(scopeEnv(Object.keys(process.env), process.env));
+      await audit(context, true, undefined, { exemption: "infrastructure" });
+      return { ok: true, result };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      await audit(context, false, reason, { exemption: "infrastructure" });
+      return { ok: false, reason };
+    }
+  }
+
   // Default-deny when policy is absent. run() is NEVER invoked.
   if (!policy) {
     const reason = "exec-broker: no policy (default-deny)";

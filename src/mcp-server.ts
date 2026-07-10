@@ -294,6 +294,9 @@ function register_kit_install(server: McpServer): void {
             operation: "tools.install",
             operationType: "write",
             metadata: { tools: Object.keys(config.tools) },
+            // Infrastructure: mise installs to $HOME + fetches from tool hosts by design — not an
+            // agent project action the [scope] RoE governs. Allowed but audited as an exemption.
+            infrastructure: true,
           },
           () => installTools(config.tools!),
           { cwd: cwd ?? process.cwd() },
@@ -443,7 +446,14 @@ function register_kit_fix(server: McpServer): void {
 
         const gov = await runGovernedBrokered(
           config,
-          { operation: "fix", operationType: "write", metadata: {} },
+          {
+            operation: "fix",
+            operationType: "write",
+            metadata: {},
+            // Infrastructure: fix installs tools (mise → $HOME) and writes lock files as kit's own
+            // provisioning — not an agent project action the [scope] RoE governs. Audited exemption.
+            infrastructure: true,
+          },
           async () => {
             const actions: Array<{ name: string; action: string; detail: string }> = [];
 
