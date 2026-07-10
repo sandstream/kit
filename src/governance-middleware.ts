@@ -14,6 +14,7 @@ import {
   hasExpiredSecrets,
 } from "./secret-expiration.js";
 import { checkScopeNeeds, type ScopeNeeds } from "./exec-broker/scope-needs.js";
+import type { BrokerContext } from "./exec-broker/broker.js";
 
 export interface OperationContext {
   operation: string;
@@ -323,26 +324,33 @@ export async function runGoverned<T>(
  * BEFORE governance (identity / budget / permission) runs; the two are separate
  * concerns that stack.
  *
- * OPT-IN and non-breaking: `runBrokered` is a passthrough unless a broker policy
- * file (`.kit-exec-broker.json` / `KIT_EXEC_BROKER_POLICY`) is present, so a call
- * site swapping `runGoverned` → `runGovernedBrokered` behaves IDENTICALLY until a
- * user opts in by dropping a policy in. A present-but-malformed policy fails
- * closed (deny). Returns the same {@link GovernedOutcome} shape callers already
- * render.
+ * OPT-IN and non-breaking: `runBrokered` is a passthrough unless a policy source is opted into —
+ * a signed profile scope with `[scope].enforce_runtime = true`, or a `.kit-exec-broker.json` /
+ * `KIT_EXEC_BROKER_POLICY` file. A call site swapping `runGoverned` → `runGovernedBrokered`
+ * behaves IDENTICALLY until a user opts in. A present-but-malformed policy fails closed (deny).
+ * Returns the same {@link GovernedOutcome} shape callers already render.
+ *
+ * `opts.cwd` is the project directory whose signed profile governs — pass the tool's own `cwd`
+ * (not the process cwd) so the RIGHT project's `[scope]` is resolved. Defaults to `process.cwd()`.
  */
 export async function runGovernedBrokered<T>(
   config: kitConfig,
-  context: OperationContext,
+  context: BrokerContext,
   operation: () => Promise<T>,
+  opts: { cwd?: string } = {},
 ): Promise<GovernedOutcome<T>> {
   const { runBrokered } = await import("./exec-broker/index.js");
-  const outcome = await runBrokered(context, async () => {
-    const gov = await runGoverned(config, context, operation);
-    // Signal a governance denial (or op error) as a throw so the broker layer
-    // surfaces it as a not-ok outcome with the same reason.
-    if (!gov.ok) throw new Error(gov.reason ?? "denied");
-    return gov.result as T;
-  });
+  const outcome = await runBrokered(
+    context,
+    async () => {
+      const gov = await runGoverned(config, context, operation);
+      // Signal a governance denial (or op error) as a throw so the broker layer
+      // surfaces it as a not-ok outcome with the same reason.
+      if (!gov.ok) throw new Error(gov.reason ?? "denied");
+      return gov.result as T;
+    },
+    { cwd: opts.cwd },
+  );
   return outcome.ok ? { ok: true, result: outcome.result } : { ok: false, reason: outcome.reason };
 }
 

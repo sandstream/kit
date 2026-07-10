@@ -7,6 +7,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer, KIT_MCP_TOOLS } from "./mcp-server.js";
 import { mcpExposedToolNames } from "./cli.js";
+import { loadOrCreateIdentity } from "./identity.js";
+import { signProfile } from "./profile/sign.js";
+import { PROFILE_FILE } from "./profile/schema.js";
 
 // Standard .gitignore so security check passes in temp dirs
 const GITIGNORE = ".env\n.env.local\n.env.*.local\n";
@@ -348,6 +351,94 @@ describe("kit_secrets", () => {
       const result = await client.callTool({ name: "kit_secrets", arguments: { cwd: tempDir } });
       const data = parseResult(result) as { ok: boolean; writtenKeys: string[] };
       assert.equal(data.ok, true);
+      assert.ok(data.writtenKeys.includes("APP_KEY"));
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+// ─── kit_secrets under [scope].enforce_runtime (exec-broker at the MCP runtime) ──────────
+describe("kit_secrets + signed-scope runtime enforcement (MCP-runtime adoption step 2)", () => {
+  let tempDir: string;
+  let idDir: string;
+  let savedId: string | undefined;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "kit-mcp-secfs-"));
+    idDir = await mkdtemp(join(tmpdir(), "kit-mcp-id-"));
+    savedId = process.env.KIT_IDENTITY_DIR;
+    process.env.KIT_IDENTITY_DIR = idDir;
+    loadOrCreateIdentity();
+    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_CONFIG_SECRET, "utf-8");
+  });
+
+  afterEach(async () => {
+    if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
+    else process.env.KIT_IDENTITY_DIR = savedId;
+    await rm(tempDir, { recursive: true, force: true });
+    await rm(idDir, { recursive: true, force: true });
+  });
+
+  it("ALLOWS the .env.local write when it is inside the signed [scope].fs (default root)", async () => {
+    await writeFile(join(tempDir, PROFILE_FILE), `version = 1\n[scope]\nenforce_runtime = true\n`);
+    await signProfile(tempDir);
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({ name: "kit_secrets", arguments: { cwd: tempDir } });
+      const data = parseResult(result) as { ok: boolean; writtenKeys: string[] };
+      assert.equal(data.ok, true);
+      assert.ok(data.writtenKeys.includes("APP_KEY"));
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("DENIES the .env.local write when it is outside the signed [scope].fs", async () => {
+    // fs scope is "src" only ⇒ the root .env.local write is off-scope ⇒ broker default-denies.
+    await writeFile(
+      join(tempDir, PROFILE_FILE),
+      `version = 1\n[scope]\nfs = ["src"]\nenforce_runtime = true\n`,
+    );
+    await signProfile(tempDir);
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({ name: "kit_secrets", arguments: { cwd: tempDir } });
+      assert.equal(result.isError, true, "off-scope .env.local write must be denied");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("fail-closed deny when enforce_runtime is declared but the scope is UNSIGNED", async () => {
+    await writeFile(join(tempDir, PROFILE_FILE), `version = 1\n[scope]\nenforce_runtime = true\n`);
+    // Deliberately NOT signed — opted into runtime enforcement but the scope is untrustworthy.
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({ name: "kit_secrets", arguments: { cwd: tempDir } });
+      assert.equal(
+        result.isError,
+        true,
+        "opted into runtime enforcement + unsigned ⇒ default-deny",
+      );
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("without enforce_runtime the runtime is unchanged (write proceeds)", async () => {
+    // A signed scope that does NOT opt in ⇒ migration passthrough ⇒ secrets still written.
+    await writeFile(join(tempDir, PROFILE_FILE), `version = 1\n[scope]\nfs = ["src"]\n`);
+    await signProfile(tempDir);
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({ name: "kit_secrets", arguments: { cwd: tempDir } });
+      const data = parseResult(result) as { ok: boolean; writtenKeys: string[] };
+      assert.equal(
+        data.ok,
+        true,
+        "no enforce_runtime ⇒ not gated even though .env.local is off the fs scope",
+      );
       assert.ok(data.writtenKeys.includes("APP_KEY"));
     } finally {
       await cleanup();

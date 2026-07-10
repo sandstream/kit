@@ -296,6 +296,7 @@ function register_kit_install(server: McpServer): void {
             metadata: { tools: Object.keys(config.tools) },
           },
           () => installTools(config.tools!),
+          { cwd: cwd ?? process.cwd() },
         );
         if (!gov.ok) return governanceRefusal(gov.reason ?? "denied");
         const results = gov.result!;
@@ -382,10 +383,22 @@ function register_kit_secrets(server: McpServer): void {
           };
         }
 
+        const envLocalPath = join(cwd ?? process.cwd(), ".env.local");
         const gov = await runGovernedBrokered(
           config,
-          { operation: "secrets.generate", operationType: "write", metadata: {} },
-          () => generateSecrets(config.secrets!, join(cwd ?? process.cwd(), ".env.local")),
+          {
+            operation: "secrets.generate",
+            operationType: "write",
+            metadata: {},
+            // Honest effect declaration (MCP-runtime adoption step 2): kit's OWN direct effect is
+            // the .env.local write. The configured vault CLI resolves secrets in ITS OWN
+            // subprocess, whose network I/O is the CLI's — not kit's — and thus out of the
+            // exec-broker's reach (a documented limit, like kit_run's command). So fs is the
+            // declarable effect here; egress/env are not kit's to claim.
+            fsWrites: [envLocalPath],
+          },
+          () => generateSecrets(config.secrets!, envLocalPath),
+          { cwd: cwd ?? process.cwd() },
         );
         if (!gov.ok) return governanceRefusal(gov.reason ?? "denied");
         const { results, written } = gov.result!;
@@ -488,6 +501,7 @@ function register_kit_fix(server: McpServer): void {
 
             return actions;
           },
+          { cwd: cwd ?? process.cwd() },
         );
         if (!gov.ok) return governanceRefusal(gov.reason ?? "denied");
         const actions = gov.result!;
@@ -860,6 +874,7 @@ function register_kit_run(server: McpServer): void {
               cwd: workDir,
               inheritEnv: true,
             }),
+          { cwd: workDir },
         );
         if (!gov.ok) return governanceRefusal(gov.reason ?? "denied");
         const result = gov.result!;
