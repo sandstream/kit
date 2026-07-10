@@ -112,6 +112,131 @@ export async function cmdGateEnv(): Promise<boolean> {
   return true;
 }
 
+/**
+ * Shared stdin reader for the exec-broker gates: the pending-tool-call JSON, or `null` when
+ * the envelope is unreadable/unparseable. The envelope comes from the agent HARNESS (not the
+ * model), so an unparseable one is a harness/config problem — fail-open like gate-bash/gate-env
+ * (never break the agent on garbage), while the scope decisions themselves stay fail-closed.
+ */
+async function readHookPayload(): Promise<unknown | null> {
+  let raw = "";
+  try {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+    raw = Buffer.concat(chunks).toString("utf8");
+  } catch {
+    return null;
+  }
+  try {
+    return raw ? (JSON.parse(raw) as unknown) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Deny helper for the broker gates: Cline stdout-JSON contract or exit-2 PreToolUse deny. */
+async function gateDeny(label: string, message: string): Promise<boolean> {
+  if (gateFormat() === "cline") {
+    console.log(JSON.stringify({ cancel: true, errorMessage: `kit ${label}: ${message}` }));
+    return true;
+  }
+  const { writeSync } = await import("node:fs");
+  writeSync(2, `kit ${label}: BLOCKED — ${message}\n`);
+  process.exit(2); // PreToolUse deny
+}
+
+/**
+ * Best-effort audit of a broker-gate deny (design §3.3: every deny leaves an audit entry).
+ * Wrapped: a missing/unreadable .kit.toml or audit backend must never change the verdict —
+ * the deny already happened, and deny is the safe outcome.
+ */
+async function auditGateDeny(gate: string, reason: string): Promise<void> {
+  try {
+    const { loadConfig } = await import("../config.js");
+    const { mergeGovernanceConfigAsync } = await import("../governance.js");
+    const { logAuditEvent } = await import("../audit.js");
+    const { resolve } = await import("node:path");
+    const cfg = await loadConfig(resolve(process.cwd(), ".kit.toml"));
+    const gov = await mergeGovernanceConfigAsync(cfg.governance);
+    await logAuditEvent(gov, {
+      operation: gate,
+      environment: gov.environment,
+      success: false,
+      error: reason,
+      metadata: { phase: "pretooluse-deny" },
+    });
+  } catch {
+    /* best-effort — see above */
+  }
+}
+
+/**
+ * `kit gate-egress` — PreToolUse egress-gate (exec-broker, Pillar 3). Reads the pending tool
+ * call on stdin; if it is a Bash command with explicit http(s) network targets, they must all
+ * be inside the SIGNED [scope].egress (verified via brokerScope — fail-closed: a wired gate
+ * with no verified scope grants nothing). Off-scope → exit 2 + audit. Commands without an
+ * unambiguous URL pass through (conservative extraction; see broker/extract.ts).
+ */
+export async function cmdGateEgress(): Promise<boolean> {
+  const payload = await readHookPayload();
+  if (payload === null) return true; // unreadable envelope → never break the agent
+  const { extractCommandFromHookPayload } = await import("../install-gate.js");
+  const command = extractCommandFromHookPayload(payload);
+  if (!command) return true; // not a shell command → allow
+  const { extractHostsFromCommand } = await import("../broker/extract.js");
+  const hosts = extractHostsFromCommand(command);
+  if (hosts.length === 0) return true; // no unambiguous network target → allow
+
+  const { brokerScope } = await import("../broker/decide.js");
+  const scope = await brokerScope(process.cwd());
+  let denied: string[];
+  let why: string;
+  if (!scope) {
+    denied = hosts;
+    why = `network egress to ${hosts.join(", ")} denied — no verified scope/RoE (unsigned, tampered, or missing); a wired egress-gate grants nothing`;
+  } else {
+    const { hostInScope } = await import("../broker/scope.js");
+    denied = hosts.filter((h) => !hostInScope(h, scope));
+    why = `host(s) outside the signed egress scope: ${denied.join(", ")}`;
+  }
+  if (denied.length === 0) return true;
+  await auditGateDeny("gate-egress", why);
+  return await gateDeny(
+    "egress-gate",
+    `${why}\nDeclare the host in .kit-profile.toml [scope].egress and re-sign: \`kit profile sign\`.`,
+  );
+}
+
+/**
+ * `kit gate-fs` — PreToolUse fs-gate (exec-broker, Pillar 3). Reads the pending tool call on
+ * stdin; a Write/Edit must target a path inside the SIGNED [scope].fs (default: the project
+ * root), verified via brokerScope — fail-closed: a wired gate with no verified scope grants
+ * nothing. Off-scope → exit 2 + audit. Non-write tool calls pass through.
+ */
+export async function cmdGateFs(): Promise<boolean> {
+  const payload = await readHookPayload();
+  if (payload === null) return true; // unreadable envelope → never break the agent
+  const { extractWriteFromHookPayload } = await import("../env-write-gate.js");
+  const write = extractWriteFromHookPayload(payload);
+  if (!write) return true; // not a file write → allow
+
+  const { brokerScope } = await import("../broker/decide.js");
+  const scope = await brokerScope(process.cwd());
+  if (!scope) {
+    const why = `write to ${write.filePath} denied — no verified scope/RoE (unsigned, tampered, or missing); a wired fs-gate grants nothing`;
+    await auditGateDeny("gate-fs", why);
+    return await gateDeny("fs-gate", `${why}\nSign the profile scope: \`kit profile sign\`.`);
+  }
+  const { pathInScope } = await import("../broker/scope.js");
+  if (pathInScope(write.filePath, scope, process.cwd())) return true;
+  const why = `write outside the signed fs scope: ${write.filePath}`;
+  await auditGateDeny("gate-fs", why);
+  return await gateDeny(
+    "fs-gate",
+    `${why}\nDeclare the path in .kit-profile.toml [scope].fs and re-sign: \`kit profile sign\`.`,
+  );
+}
+
 /** The `--format <fmt>` value for gate-bash (`--format cline` | `--format=cline`). */
 function gateFormat(): string {
   const argv = process.argv;
