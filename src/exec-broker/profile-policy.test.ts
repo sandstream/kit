@@ -80,4 +80,24 @@ describe("profileBrokerPolicy", () => {
     const r = await profileBrokerPolicy(proj);
     assert.equal(r.policy?.fs.root, resolve(proj, "."));
   });
+
+  it("enforceRuntime is false unless the scope opts in", async () => {
+    writeFileSync(join(proj, PROFILE_FILE), SCOPED);
+    await signProfile(proj);
+    assert.equal((await profileBrokerPolicy(proj)).enforceRuntime, false);
+  });
+
+  it("enforceRuntime reflects [scope].enforce_runtime — even before signing (opt-in is the declaration)", async () => {
+    const body = `version = 1\n[scope]\negress = ["api.acme.com"]\nenforce_runtime = true\n`;
+    writeFileSync(join(proj, PROFILE_FILE), body);
+    // Unsigned: opted in, but policy is null (fail-closed) — the runtime default-denies declared ops.
+    const unsigned = await profileBrokerPolicy(proj);
+    assert.equal(unsigned.enforceRuntime, true);
+    assert.equal(unsigned.policy, null);
+    // Signed: opted in AND a governing policy is present.
+    await signProfile(proj);
+    const signed = await profileBrokerPolicy(proj);
+    assert.equal(signed.enforceRuntime, true);
+    assert.deepEqual(signed.policy?.egress.allow, ["api.acme.com"]);
+  });
 });

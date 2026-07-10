@@ -71,6 +71,13 @@ export interface ProfileScope {
   fs?: string[];
   /** Secret-scope: env-var names the operation is allowed to see. */
   secrets?: string[];
+  /**
+   * Explicit opt-in to exec-broker enforcement AT THE MCP RUNTIME (not just the PreToolUse gates /
+   * governance floor). When true and the scope is verified, governed MCP ops that declare their
+   * effects are mediated against this scope; when false/absent, the runtime is unchanged. Being
+   * inside `[scope]`, this flag is covered by the signature — it cannot be flipped without re-signing.
+   */
+  enforce_runtime?: boolean;
 }
 
 export interface KitProfile {
@@ -139,6 +146,7 @@ const kitProfileSchema = z
         egress: z.array(z.string()).optional(),
         fs: z.array(z.string()).optional(),
         secrets: z.array(z.string()).optional(),
+        enforce_runtime: z.boolean().optional(),
       })
       .strict()
       .optional(),

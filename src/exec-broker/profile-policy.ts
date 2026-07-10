@@ -28,14 +28,25 @@ export interface ProfilePolicyResult {
   regime: "none" | "active";
   /** The governing policy — non-null ONLY when regime is "active" AND the signature verified. */
   policy: BrokerPolicy | null;
+  /**
+   * Did the scope opt IN to enforcement at the MCP runtime (`[scope].enforce_runtime = true`)?
+   * Read from the DECLARATION regardless of signature status: opted-in + unsigned ⇒ this is true
+   * AND `policy` is null, so the runtime default-denies declared ops (fail-closed). False when no
+   * scope is declared or the profile is unreadable.
+   */
+  enforceRuntime: boolean;
   detail: string;
 }
 
+interface ScopeShape {
+  egress?: string[];
+  fs?: string[];
+  secrets?: string[];
+  enforce_runtime?: boolean;
+}
+
 /** Map a verified profile `[scope]` onto a BrokerPolicy (fs paths resolved against `cwd`). */
-function scopeToPolicy(
-  scope: { egress?: string[]; fs?: string[]; secrets?: string[] },
-  cwd: string,
-): BrokerPolicy {
+function scopeToPolicy(scope: ScopeShape, cwd: string): BrokerPolicy {
   const roots = (scope.fs && scope.fs.length > 0 ? scope.fs : ["."]).map((p) => resolve(cwd, p));
   return {
     egress: { allow: scope.egress ? [...scope.egress] : [] },
@@ -49,33 +60,47 @@ function scopeToPolicy(
  * profile surfaces as regime "active" with a null policy (fail-closed), never as "none".
  */
 export async function profileBrokerPolicy(cwd = process.cwd()): Promise<ProfilePolicyResult> {
-  let scope: { egress?: string[]; fs?: string[]; secrets?: string[] } | undefined;
+  let scope: ScopeShape | undefined;
   try {
     const profile = await loadProfile(cwd);
-    if (!profile) return { regime: "none", policy: null, detail: "no profile declared" };
+    if (!profile) {
+      return { regime: "none", policy: null, enforceRuntime: false, detail: "no profile declared" };
+    }
     scope = profile.scope;
   } catch (err) {
     // A profile exists but is malformed — a declared-but-broken RoE. Treat as active+deny, never
-    // "none" (a broken artifact must not silently disable enforcement).
+    // "none" (a broken artifact must not silently disable enforcement). enforceRuntime is false: the
+    // opt-in flag is unreadable, and the broken profile is surfaced as a hard fail by `kit doctor`.
     return {
       regime: "active",
       policy: null,
+      enforceRuntime: false,
       detail: `profile unreadable — ${err instanceof Error ? err.message : String(err)} (default-deny)`,
     };
   }
-  if (!scope) return { regime: "none", policy: null, detail: "profile declares no [scope]/RoE" };
+  if (!scope) {
+    return {
+      regime: "none",
+      policy: null,
+      enforceRuntime: false,
+      detail: "profile declares no [scope]/RoE",
+    };
+  }
 
+  const enforceRuntime = scope.enforce_runtime === true;
   const v = await verifyProfileSignature(cwd);
   if (v.status === "valid") {
     return {
       regime: "active",
       policy: scopeToPolicy(scope, cwd),
+      enforceRuntime,
       detail: `scope verified (${v.detail})`,
     };
   }
   return {
     regime: "active",
     policy: null,
+    enforceRuntime,
     detail: `scope declared but ${v.status} — ${v.detail}; grants nothing (fail-closed)`,
   };
 }

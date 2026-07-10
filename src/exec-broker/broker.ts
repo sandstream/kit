@@ -184,22 +184,45 @@ function collectDenials(context: BrokerContext, policy: BrokerPolicy): string[] 
 }
 
 /**
- * OPT-IN entry point. The broker only mediates when a policy FILE is present:
- *   - No `.kit-exec-broker.json` (nor `KIT_EXEC_BROKER_POLICY`) → run UNMEDIATED,
- *     exactly like before the broker existed (this is the opt-in switch — a fresh
- *     install is never silently gated).
- *   - File present but malformed → `loadBrokerPolicy` returns null → `brokerExec`
- *     default-DENIES. A broken gate fails closed; it never silently disables
- *     enforcement (no false-green).
- *   - File present + valid → full `brokerExec` mediation.
- * This is the drop-in every call site adopts to become broker-aware without
- * changing behavior for users who haven't opted in.
+ * OPT-IN entry point. Policy-source precedence (reconciliation §4 / MCP-runtime adoption):
+ *
+ *   1. SIGNED profile scope with `[scope].enforce_runtime = true` (the explicit runtime opt-in):
+ *      - op DECLARES its effects → mediate against the signed policy (`policy` is null when the
+ *        scope is unsigned/tampered, so `brokerExec` default-DENIES — fail-closed);
+ *      - op declares NO effects → MIGRATION passthrough. A governed op is only mediated at the
+ *        runtime once it honestly declares what it touches; until each op opts in, its behavior is
+ *        unchanged (deliberate — see `pillar3-mcp-runtime-adoption-5.0.md` §5 step 1). This is NOT
+ *        the false-green of a JSON policy waving an undeclared op through: that path stays
+ *        fail-closed below.
+ *   2. Else the unsigned `.kit-exec-broker.json` (nor `KIT_EXEC_BROKER_POLICY`):
+ *      - absent → run UNMEDIATED (the original opt-in switch — a fresh install is never gated);
+ *      - present but malformed → `loadBrokerPolicy` returns null → `brokerExec` default-DENIES;
+ *      - present + valid → full `brokerExec` mediation.
+ *
+ * This is the drop-in every call site adopts to become broker-aware without changing behavior for
+ * users who haven't opted in to EITHER source.
  */
 export async function runBrokered<T>(
   context: BrokerContext,
   run: (scopedEnv: Record<string, string>) => Promise<T>,
-  opts: { policyOverride?: string } = {},
+  opts: { policyOverride?: string; cwd?: string } = {},
 ): Promise<BrokerOutcome<T>> {
+  // 1. Signed profile scope at the runtime — only when the scope explicitly opted in.
+  const { profileBrokerPolicy } = await import("./profile-policy.js");
+  const signed = await profileBrokerPolicy(opts.cwd ?? process.cwd());
+  if (signed.enforceRuntime) {
+    if (hasDeclaredEffects(context)) {
+      return brokerExec(context, signed.policy, run);
+    }
+    // Undeclared op under runtime enforcement → migration passthrough (unchanged behavior).
+    try {
+      return { ok: true, result: await run(scopeEnv(Object.keys(process.env), process.env)) };
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  // 2. Unsigned JSON policy (original opt-in via file presence).
   if (!existsSync(brokerPolicyPath(opts.policyOverride))) {
     // Not configured → unmediated passthrough (full env, no scoping).
     try {
