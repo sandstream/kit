@@ -630,6 +630,65 @@ export async function installEnvWriteGate(cwd: string = process.cwd()): Promise<
 }
 
 /**
+ * Install the exec-broker PreToolUse gates (Pillar 3) into `.claude/settings.json`:
+ * `kit gate-egress` (matcher `Bash`) blocks network targets outside the signed [scope].egress,
+ * and `kit gate-fs` (matcher `Write|Edit|NotebookEdit`) blocks writes outside [scope].fs.
+ *
+ * Unlike the install/env gates this is OPT-IN (`kit agent-config --broker-gate`), NOT default:
+ * the broker is fail-closed, so a wired egress-gate with no verified scope denies ALL network
+ * — desirable only once the operator has declared + signed a `[scope]`/RoE. Wiring it is that
+ * deliberate opt-in. Claude Code only today (the settings schema we know); idempotent (keyed on
+ * each gate command); preserves other hooks.
+ */
+export async function installBrokerGates(cwd: string = process.cwd()): Promise<HookInstallResult> {
+  const file = ".claude/settings.json";
+  const path = resolve(cwd, file);
+
+  const { isReadOnlyMode } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) return { file, action: "skipped", detail: "read-only mode" };
+  if (!existsSync(resolve(cwd, ".claude")) && !existsSync(resolve(cwd, "CLAUDE.md"))) {
+    return { file, action: "skipped", detail: "no Claude Code project detected" };
+  }
+
+  let settings: { hooks?: Record<string, SettingsHookGroup[]>; [k: string]: unknown } = {};
+  let existed = false;
+  try {
+    settings = JSON.parse(await readFile(path, "utf-8")) as typeof settings;
+    existed = true;
+  } catch {
+    settings = {};
+  }
+
+  const hooks = (settings.hooks ??= {});
+  const pre = (hooks.PreToolUse ??= []);
+  const wired = (sub: string) => pre.some((g) => g.hooks?.some((h) => h.command?.endsWith(sub)));
+  const hasEgress = wired("gate-egress");
+  const hasFs = wired("gate-fs");
+  if (hasEgress && hasFs) {
+    return { file, action: "unchanged", detail: "broker gates already wired" };
+  }
+  if (!hasEgress) {
+    pre.push({
+      matcher: "Bash",
+      hooks: [{ type: "command", command: kitSubcommandInvocation("gate-egress") }],
+    });
+  }
+  if (!hasFs) {
+    pre.push({
+      matcher: "Write|Edit|NotebookEdit",
+      hooks: [{ type: "command", command: kitSubcommandInvocation("gate-fs") }],
+    });
+  }
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    return { file, action: existed ? "updated" : "created" };
+  } catch (err) {
+    return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Codex install-gate: a `[[hooks.PreToolUse]]` block in `.codex/config.toml`
  * (matcher `^Bash$`) that runs `kit gate-bash` and exits 2 to block. We APPEND
  * the TOML block as text rather than parse→stringify, so the user's existing

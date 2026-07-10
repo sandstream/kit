@@ -23,6 +23,7 @@ import {
   detectAgentTargets,
   installKitPermissions,
   installAllInstallGates,
+  installBrokerGates,
   installAiderRules,
 } from "../agent-config.js";
 
@@ -168,6 +169,24 @@ export async function cmdAgentConfig(): Promise<boolean> {
       } else {
         console.log(`    ${c.dim}· ${agent} skipped: ${result.detail ?? result.action}${c.reset}`);
       }
+    }
+  }
+  // Opt-in: the exec-broker gates (Pillar 3). NOT default — a wired egress-gate is fail-closed
+  // (no verified [scope] ⇒ deny all network), so it's only wanted once the operator has declared
+  // + signed a scope/RoE. `--broker-gate` is that deliberate opt-in.
+  if (hasFlag(process.argv, "--broker-gate")) {
+    console.log(
+      `\n  ${c.bold}exec-broker gates${c.reset} ${c.dim}(block network/writes outside the signed [scope]/RoE; fail-closed — declare + sign a scope first with ${c.reset}${c.bold}kit profile sign${c.reset}${c.dim}):${c.reset}`,
+    );
+    const r = await installBrokerGates();
+    if (r.action === "created" || r.action === "updated") {
+      console.log(
+        `    ${c.green}✓${c.reset} Claude Code ${c.dim}→ ${r.file} (gate-egress + gate-fs)${c.reset}`,
+      );
+    } else if (r.action === "unchanged") {
+      console.log(`    ${c.dim}= Claude Code already wired (${r.file})${c.reset}`);
+    } else {
+      console.log(`    ${c.dim}· Claude Code skipped: ${r.detail ?? r.action}${c.reset}`);
     }
   }
   console.log(
