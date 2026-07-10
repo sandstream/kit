@@ -4,6 +4,8 @@ import { hasFlag, flagValue } from "../utils/flags.js";
 import { runTriage, listTriageTools, type TriageType } from "../triage.js";
 import { SKIPPED_COMMITS_LOG } from "../hooks.js";
 import { triageMcpTools, extractToolDefs } from "../mcp-triage.js";
+import { discoverPlugins } from "../agent-sbom.js";
+import { scanPluginManifest, manifestHasHighRisk } from "../plugin-triage.js";
 
 export async function cmdTriage(): Promise<boolean> {
   const args = process.argv.slice(3);
@@ -17,6 +19,9 @@ export async function cmdTriage(): Promise<boolean> {
   }
   if (typeArg === "mcp") {
     return cmdTriageMcp(filtered.slice(1));
+  }
+  if (typeArg === "plugin") {
+    return cmdTriagePlugin(filtered.slice(1));
   }
   const type = typeArg as TriageType;
   const target = filtered[1];
@@ -37,6 +42,9 @@ export async function cmdTriage(): Promise<boolean> {
     console.log("  kit triage skill <path|name>         Evaluate Claude Code / agent skill");
     console.log(
       "  kit triage mcp <server> --tools <f>  Evaluate MCP tool metadata (poisoning) + pin against drift",
+    );
+    console.log(
+      "  kit triage plugin [name]             Triage kitPlugins (npm supply-chain + manifest-poisoning scan); all declared if no name",
     );
     console.log("  kit triage all <target>              Auto-detect and run all checks");
     console.log("  kit triage tools                     Show installed security tools");
@@ -126,6 +134,68 @@ export async function cmdTriage(): Promise<boolean> {
   }
 
   return overall;
+}
+
+/**
+ * `kit triage plugin [name]` — triage the project's kitPlugins (npm packages that
+ * `loadPluginAdapters` will import + run). For each: the existing npm registry triage
+ * (install-scripts / slopsquat / dep-confusion) plus a static manifest-poisoning scan of the
+ * installed package.json (R7 injection detector over description/keywords) — never importing the
+ * plugin. With no name, triages every plugin declared in package.json `kitPlugins`. Version
+ * drift is intentionally left to `kit profile check`. Exits non-zero if any plugin fails.
+ */
+async function cmdTriagePlugin(args: string[]): Promise<boolean> {
+  const { readFile } = await import("node:fs/promises");
+  const { resolve } = await import("node:path");
+  const cwd = process.cwd();
+  const explicit = args.find((a) => !a.startsWith("-"));
+
+  const names = explicit ? [explicit] : discoverPlugins(cwd).map((p) => p.name);
+  if (names.length === 0) {
+    console.log(`${c.dim}no kitPlugins declared in package.json — nothing to triage.${c.reset}`);
+    return true;
+  }
+
+  let allPassed = true;
+  for (const name of names) {
+    console.log(
+      `\n${c.bold}Triaging plugin: ${name}${c.reset} ${c.dim}(npm supply-chain + manifest)${c.reset}`,
+    );
+    const result = await runTriage("npm", name);
+    console.log(result.output);
+
+    // Static manifest-poisoning scan of the INSTALLED package.json (no import of plugin code).
+    let manifestClean = true;
+    try {
+      const pkg = JSON.parse(
+        await readFile(resolve(cwd, "node_modules", name, "package.json"), "utf-8"),
+      );
+      const findings = scanPluginManifest(pkg);
+      if (findings.length === 0) {
+        console.log(
+          `  ${c.green}✓ manifest clean${c.reset} ${c.dim}(no injection patterns)${c.reset}`,
+        );
+      } else {
+        for (const f of findings) {
+          const tag =
+            f.confidence === "high" ? `${c.red}[HIGH]${c.reset}` : `${c.yellow}[heur]${c.reset}`;
+          console.log(`  ${tag} manifest ${f.field}: ${f.label}`);
+        }
+        if (manifestHasHighRisk(findings)) manifestClean = false;
+      }
+    } catch {
+      console.log(`  ${c.dim}(plugin not installed — manifest scan skipped)${c.reset}`);
+    }
+
+    const pluginPassed = result.passed && manifestClean;
+    if (pluginPassed) await recordTriageRun("npm", name, false);
+    else allPassed = false;
+  }
+
+  if (!allPassed) {
+    console.log(`\n${c.yellow}⚠️  Review warnings above before trusting these plugins.${c.reset}`);
+  }
+  return allPassed;
 }
 
 const MCP_PIN_FILE = ".kit-mcp-pins.json";
