@@ -33,7 +33,9 @@ import {
   type DriftEntry,
 } from "../profile/reconcile.js";
 import { signProfile, verifyProfileSignature } from "../profile/sign.js";
+import { exportBundle, importBundle } from "../profile/portable.js";
 import { flagValue } from "../utils/flags.js";
+import { readFileSync, writeFileSync } from "node:fs";
 
 function noProfileNotice(jsonMode: boolean): boolean {
   if (jsonMode) {
@@ -260,6 +262,72 @@ async function profileVerify(jsonMode: boolean): Promise<boolean> {
   }
 }
 
+function profileExport(jsonMode: boolean): boolean {
+  const res = exportBundle();
+  if (!res.ok || !res.bundle) {
+    if (jsonMode) console.log(JSON.stringify({ exported: false, error: res.error }, null, 2));
+    else console.error(`${c.red}✗ ${res.error}${c.reset}`);
+    return false;
+  }
+  const out = flagValue(process.argv, "--out");
+  const text = JSON.stringify(res.bundle, null, 2) + "\n";
+  if (out) {
+    writeFileSync(out, text, "utf-8");
+    if (jsonMode) console.log(JSON.stringify({ exported: true, out }, null, 2));
+    else
+      console.log(
+        `${c.green}✓${c.reset} bundle written ${c.dim}→ ${out}${c.reset}\n${c.dim}carry it to a new host and run 'kit profile import <bundle>'${c.reset}`,
+      );
+  } else {
+    // No --out → emit the bundle to stdout so it can be piped/redirected.
+    process.stdout.write(text);
+  }
+  return true;
+}
+
+function profileImport(jsonMode: boolean): boolean {
+  const path = process.argv[4];
+  if (!path || path.startsWith("-")) {
+    console.error(`${c.red}usage: kit profile import <bundle.json> [--json]${c.reset}`);
+    return false;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf-8"));
+  } catch (e) {
+    console.error(
+      `${c.red}✗ cannot read bundle: ${e instanceof Error ? e.message : String(e)}${c.reset}`,
+    );
+    return false;
+  }
+  const r = importBundle(parsed, process.cwd());
+  if (jsonMode) {
+    console.log(JSON.stringify(r, null, 2));
+    return r.status === "imported-trusted" || r.status === "imported-unanchored";
+  }
+  switch (r.status) {
+    case "imported-trusted":
+      console.log(
+        `${c.green}✓ imported & trusted${c.reset} ${c.dim}${r.fingerprint} — ${r.detail}${c.reset}`,
+      );
+      return true;
+    case "imported-unanchored":
+      console.warn(
+        `${c.yellow}! imported (integrity verified, not yet authoritative)${c.reset} ${c.dim}${r.detail}${c.reset}`,
+      );
+      return true;
+    case "revoked":
+      console.error(`${c.red}✗ refused — ${r.detail}${c.reset}`);
+      return false;
+    case "malformed":
+      console.error(`${c.red}✗ ${r.detail}${c.reset}`);
+      return false;
+    case "invalid":
+      console.error(`${c.red}✗ refused — integrity check failed: ${r.detail}${c.reset}`);
+      return false;
+  }
+}
+
 export async function cmdProfile(): Promise<boolean> {
   const sub = process.argv[3] ?? "show";
   const jsonMode = hasFlag(process.argv, "--json");
@@ -268,8 +336,10 @@ export async function cmdProfile(): Promise<boolean> {
   if (sub === "check") return await profileCheck(jsonMode, hasFlag(process.argv, "--gate"));
   if (sub === "sign") return await profileSign(jsonMode);
   if (sub === "verify") return await profileVerify(jsonMode);
+  if (sub === "export") return profileExport(jsonMode);
+  if (sub === "import") return profileImport(jsonMode);
   console.error(
-    `${c.red}usage: kit profile <show|freeze|check|sign|verify> [--json] [--gate] [--key <pem>]${c.reset}`,
+    `${c.red}usage: kit profile <show|freeze|check|sign|verify|export|import> [--json] [--gate] [--key <pem>] [--out <path>]${c.reset}`,
   );
   return false;
 }
