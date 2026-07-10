@@ -309,13 +309,17 @@ async function scopeDegradationStatus(cwd: string): Promise<"warn" | "fail"> {
 async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
   const name = "exec-broker runtime";
   const category = "security";
-  const { runtimeMode, policy } = await profileBrokerPolicy(cwd);
+  const { runtimeMode, policy, regime } = await profileBrokerPolicy(cwd);
   if (runtimeMode === "off") {
+    // Default-on: a declared scope mediates in observe by default, so "off" means either no scope is
+    // declared here, or the scope explicitly opted OUT with enforce_runtime = false.
     return {
       name,
       status: "skip",
       detail:
-        'MCP-runtime mediation not opted in — set [scope].enforce_runtime = true (or "observe" for a dry-run) and re-sign to mediate governed MCP ops against the scope',
+        regime === "none"
+          ? "no [scope] declared — nothing to mediate at the MCP runtime"
+          : "MCP-runtime mediation explicitly OFF ([scope].enforce_runtime = false); remove it to get observe-by-default, or set true to enforce",
       category,
     };
   }

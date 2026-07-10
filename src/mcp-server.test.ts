@@ -426,8 +426,9 @@ describe("kit_secrets + signed-scope runtime enforcement (MCP-runtime adoption s
     }
   });
 
-  it("without enforce_runtime the runtime is unchanged (write proceeds)", async () => {
-    // A signed scope that does NOT opt in ⇒ migration passthrough ⇒ secrets still written.
+  it("default-on (no enforce_runtime) OBSERVES but never denies (write proceeds)", async () => {
+    // A signed scope that does NOT set the flag ⇒ default-on observe ⇒ would-be denials are audited
+    // but the write still proceeds (observe never denies), even though .env.local is off the fs scope.
     await writeFile(join(tempDir, PROFILE_FILE), `version = 1\n[scope]\nfs = ["src"]\n`);
     await signProfile(tempDir);
     const { client, cleanup } = await createTestClient();
@@ -437,7 +438,7 @@ describe("kit_secrets + signed-scope runtime enforcement (MCP-runtime adoption s
       assert.equal(
         data.ok,
         true,
-        "no enforce_runtime ⇒ not gated even though .env.local is off the fs scope",
+        "observe-by-default never denies even though .env.local is off the fs scope",
       );
       assert.ok(data.writtenKeys.includes("APP_KEY"));
     } finally {

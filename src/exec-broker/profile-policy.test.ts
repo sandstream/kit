@@ -145,4 +145,22 @@ describe("profileBrokerPolicy", () => {
     assert.equal(r.runtimeMode, "observe");
     assert.equal(r.policy, null, "unsigned → null policy (observe still reports would-denies)");
   });
+
+  it("DEFAULT-ON: a declared scope with no enforce_runtime defaults to observe", async () => {
+    writeFileSync(join(proj, PROFILE_FILE), `version = 1\n[scope]\negress = ["h.io"]\n`);
+    await signProfile(proj);
+    const r = await profileBrokerPolicy(proj);
+    assert.equal(
+      r.runtimeMode,
+      "observe",
+      "mediation is on (dry-run) by default for a declared scope",
+    );
+    assert.equal(r.enforceRuntime, false, "default-on is observe, not enforce");
+  });
+
+  it("enforce_runtime = false is an explicit opt-out (runtimeMode off)", async () => {
+    writeFileSync(join(proj, PROFILE_FILE), `version = 1\n[scope]\nenforce_runtime = false\n`);
+    await signProfile(proj);
+    assert.equal((await profileBrokerPolicy(proj)).runtimeMode, "off");
+  });
 });
