@@ -10,6 +10,7 @@ import { profileBrokerPolicy } from "./exec-broker/profile-policy.js";
 import { verifyProfileSignature } from "./profile/sign.js";
 import { verifyPolicy, loadPolicy, getPolicyPath } from "./policy-doc.js";
 import { extractRbac } from "./rbac/policy-schema.js";
+import { tryLoadIdentity, isRevoked } from "./identity.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -336,6 +337,52 @@ async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
 }
 
 /**
+ * Keyless-credential posture (Pelare 2 tail — "sign, don't store"). Reports whether any hosts are
+ * declared keyless (`[scope].sign`) and whether kit can actually sign for them — never silent:
+ *   skip  no keyless hosts declared
+ *   pass  keyless hosts declared, scope VERIFIED, and a usable identity can sign
+ *   fail  keyless hosts declared but the scope is unsigned/unverified (list not trusted), OR
+ *         verified but no usable identity to sign with — requests would be fail-closed denied
+ */
+async function checkKeyless(cwd: string): Promise<DoctorCheck> {
+  const name = "keyless credentials";
+  const category = "security";
+  const { signHostsDeclared, signHosts, detail } = await profileBrokerPolicy(cwd);
+  if (signHostsDeclared.length === 0) {
+    return {
+      name,
+      status: "skip",
+      detail:
+        "no keyless hosts declared — add hosts to [scope].sign and re-sign to require signed requests instead of stored tokens",
+      category,
+    };
+  }
+  if (signHosts.length === 0) {
+    return {
+      name,
+      status: "fail",
+      detail: `${signHostsDeclared.length} keyless host(s) declared but the scope is unverified — ${detail}; not trusted (fail-closed)`,
+      category,
+    };
+  }
+  const identity = tryLoadIdentity();
+  if (!identity || isRevoked(identity.id)) {
+    return {
+      name,
+      status: "fail",
+      detail: `${signHosts.length} keyless host(s) require signing but ${identity ? `identity ${identity.id} is revoked` : "no usable identity is available"} — requests fail-closed`,
+      category,
+    };
+  }
+  return {
+    name,
+    status: "pass",
+    detail: `${signHosts.length} keyless host(s) require signed requests; identity ${identity.id} ready (no stored bearer)`,
+    category,
+  };
+}
+
+/**
  * Control-plane posture (Pelare 2): is a DISTRIBUTED org policy present at this project, and is it
  * trustworthy? Honest — "distributed" must never silently mean "unverified":
  *   skip  no .kit-policy.toml here (nothing distributed yet)
@@ -420,6 +467,7 @@ export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorR
 
   allChecks.push(await checkBrokerScope(cwd));
   allChecks.push(await checkBrokerRuntime(cwd));
+  allChecks.push(await checkKeyless(cwd));
   allChecks.push(checkControlPlane(cwd));
 
   const passed = allChecks.filter((c) => c.status === "pass").length;

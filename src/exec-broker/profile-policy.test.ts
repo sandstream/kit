@@ -100,4 +100,25 @@ describe("profileBrokerPolicy", () => {
     assert.equal(signed.enforceRuntime, true);
     assert.deepEqual(signed.policy?.egress.allow, ["api.acme.com"]);
   });
+
+  it("signHosts is effective only when the scope verifies; declared list is always surfaced", async () => {
+    const body = `version = 1\n[scope]\negress = ["api.acme.com"]\nsign = ["api.acme.com", ".internal.io"]\n`;
+    writeFileSync(join(proj, PROFILE_FILE), body);
+    // Unsigned: declared list is surfaced, but the EFFECTIVE list is empty (fail-closed).
+    const unsigned = await profileBrokerPolicy(proj);
+    assert.deepEqual(unsigned.signHostsDeclared, ["api.acme.com", ".internal.io"]);
+    assert.deepEqual(unsigned.signHosts, []);
+    // Signed: the declared list becomes effective.
+    await signProfile(proj);
+    const signed = await profileBrokerPolicy(proj);
+    assert.deepEqual(signed.signHosts, ["api.acme.com", ".internal.io"]);
+  });
+
+  it("signHosts is empty when no [scope].sign is declared", async () => {
+    writeFileSync(join(proj, PROFILE_FILE), SCOPED);
+    await signProfile(proj);
+    const r = await profileBrokerPolicy(proj);
+    assert.deepEqual(r.signHostsDeclared, []);
+    assert.deepEqual(r.signHosts, []);
+  });
 });

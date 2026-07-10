@@ -72,6 +72,14 @@ export interface ProfileScope {
   /** Secret-scope: env-var names the operation is allowed to see. */
   secrets?: string[];
   /**
+   * Keyless-credential hosts (Pillar 2 tail — "sign, don't store"). Hosts listed here require a
+   * signed request (RFC 9421 HTTP Message Signatures minted from the agent's identity) rather than
+   * a stored bearer token. Same host-matching as `egress` (exact, or a leading-dot suffix match).
+   * Being inside the signed `[scope]`, this list is covered by the signature — a host cannot be
+   * marked keyless without re-signing, and it only takes effect once the scope verifies.
+   */
+  sign?: string[];
+  /**
    * Explicit opt-in to exec-broker enforcement AT THE MCP RUNTIME (not just the PreToolUse gates /
    * governance floor). When true and the scope is verified, governed MCP ops that declare their
    * effects are mediated against this scope; when false/absent, the runtime is unchanged. Being
@@ -146,6 +154,7 @@ const kitProfileSchema = z
         egress: z.array(z.string()).optional(),
         fs: z.array(z.string()).optional(),
         secrets: z.array(z.string()).optional(),
+        sign: z.array(z.string()).optional(),
         enforce_runtime: z.boolean().optional(),
       })
       .strict()

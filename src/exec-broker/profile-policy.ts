@@ -35,6 +35,18 @@ export interface ProfilePolicyResult {
    * scope is declared or the profile is unreadable.
    */
   enforceRuntime: boolean;
+  /**
+   * Keyless "sign, don't store" hosts (Pillar 2 tail) declared in `[scope].sign`, read from the
+   * DECLARATION regardless of signature status — so `kit doctor` can surface "declared but
+   * unverified" as a fail-closed posture. Empty when no scope / none declared / unreadable.
+   */
+  signHostsDeclared: string[];
+  /**
+   * EFFECTIVE keyless hosts: the declared list, but ONLY when the scope's signature verified. Empty
+   * otherwise (fail-closed) — an unverified `[scope].sign` grants no keyless behavior, mirroring how
+   * an unverified scope yields a null broker policy.
+   */
+  signHosts: string[];
   detail: string;
 }
 
@@ -42,6 +54,7 @@ interface ScopeShape {
   egress?: string[];
   fs?: string[];
   secrets?: string[];
+  sign?: string[];
   enforce_runtime?: boolean;
 }
 
@@ -64,7 +77,14 @@ export async function profileBrokerPolicy(cwd = process.cwd()): Promise<ProfileP
   try {
     const profile = await loadProfile(cwd);
     if (!profile) {
-      return { regime: "none", policy: null, enforceRuntime: false, detail: "no profile declared" };
+      return {
+        regime: "none",
+        policy: null,
+        enforceRuntime: false,
+        signHostsDeclared: [],
+        signHosts: [],
+        detail: "no profile declared",
+      };
     }
     scope = profile.scope;
   } catch (err) {
@@ -75,6 +95,8 @@ export async function profileBrokerPolicy(cwd = process.cwd()): Promise<ProfileP
       regime: "active",
       policy: null,
       enforceRuntime: false,
+      signHostsDeclared: [],
+      signHosts: [],
       detail: `profile unreadable — ${err instanceof Error ? err.message : String(err)} (default-deny)`,
     };
   }
@@ -83,17 +105,22 @@ export async function profileBrokerPolicy(cwd = process.cwd()): Promise<ProfileP
       regime: "none",
       policy: null,
       enforceRuntime: false,
+      signHostsDeclared: [],
+      signHosts: [],
       detail: "profile declares no [scope]/RoE",
     };
   }
 
   const enforceRuntime = scope.enforce_runtime === true;
+  const signHostsDeclared = scope.sign ? [...scope.sign] : [];
   const v = await verifyProfileSignature(cwd);
   if (v.status === "valid") {
     return {
       regime: "active",
       policy: scopeToPolicy(scope, cwd),
       enforceRuntime,
+      signHostsDeclared,
+      signHosts: signHostsDeclared,
       detail: `scope verified (${v.detail})`,
     };
   }
@@ -101,6 +128,8 @@ export async function profileBrokerPolicy(cwd = process.cwd()): Promise<ProfileP
     regime: "active",
     policy: null,
     enforceRuntime,
+    signHostsDeclared,
+    signHosts: [],
     detail: `scope declared but ${v.status} — ${v.detail}; grants nothing (fail-closed)`,
   };
 }
