@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import type { kitConfig } from "./config.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { activeKeyStoreStatus, hardwareRequired } from "./keystore/active.js";
+import { brokerStatus } from "./broker/decide.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -247,6 +248,36 @@ function checkIdentityKeystore(): DoctorCheck {
   };
 }
 
+/**
+ * Exec-broker scope posture (Pelare 3). Surfaces the state of the signed [scope]/RoE the
+ * broker enforces against — per the design principle, "enforced" must never silently mean
+ * "no-op" and a degradation is surfaced, never swallowed:
+ *   pass  scope declared + signature verified (this scope governs)
+ *   skip  no profile / no [scope] declared — nothing to enforce yet
+ *   warn  scope declared but unsigned/unverifiable — grants nothing (fail-closed)
+ *   fail  signature invalid/revoked or profile malformed — grants nothing (fail-closed)
+ */
+async function checkBrokerScope(cwd: string): Promise<DoctorCheck> {
+  const name = "exec-broker scope";
+  const category = "security";
+  const st = await brokerStatus(cwd);
+  switch (st.state) {
+    case "verified":
+      return { name, status: "pass", detail: st.detail, category };
+    case "none":
+      return {
+        name,
+        status: "skip",
+        detail: `${st.detail} — declare [scope] in .kit-profile.toml and run 'kit profile sign' to arm the exec-broker`,
+        category,
+      };
+    case "unsigned":
+      return { name, status: "warn", detail: `${st.detail}; run 'kit profile sign'`, category };
+    case "invalid":
+      return { name, status: "fail", detail: st.detail, category };
+  }
+}
+
 export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorResult> {
   const allChecks: DoctorCheck[] = [];
 
@@ -272,6 +303,8 @@ export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorR
   if (memoryHooksCheck) allChecks.push(memoryHooksCheck);
 
   allChecks.push(checkIdentityKeystore());
+
+  allChecks.push(await checkBrokerScope(cwd));
 
   const passed = allChecks.filter((c) => c.status === "pass").length;
   const warnings = allChecks.filter((c) => c.status === "warn").length;
