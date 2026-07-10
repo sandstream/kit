@@ -11,7 +11,8 @@ import { triageVaultConfig } from "../vault-triage.js";
 export async function cmdTriage(): Promise<boolean> {
   const args = process.argv.slice(3);
   const sandbox = hasFlag(args, "--sandbox");
-  const filtered = args.filter((a) => a !== "--sandbox");
+  const deep = hasFlag(args, "--deep");
+  const filtered = args.filter((a) => a !== "--sandbox" && a !== "--deep");
   const typeArg = filtered[0];
   // `check-deps` is a pre-commit subcommand handled below before we narrow
   // to TriageType; the rest of this function works against TriageType only.
@@ -44,6 +45,9 @@ export async function cmdTriage(): Promise<boolean> {
     );
     console.log("  kit triage repo <github-url>         Evaluate GitHub repository");
     console.log("  kit triage skill <path|name>         Evaluate Claude Code / agent skill");
+    console.log(
+      "  kit triage skill <path|name> --deep  + SkillSpector (NVIDIA) static Stage 1 (no LLM, no egress) when installed",
+    );
     console.log(
       "  kit triage mcp <server> --tools <f>  Evaluate MCP tool metadata (poisoning) + pin against drift",
     );
@@ -127,7 +131,17 @@ export async function cmdTriage(): Promise<boolean> {
     );
   }
 
-  const overall = result.passed && sandboxClean;
+  // --deep on a skill: delegate to SkillSpector's STATIC Stage 1 (no LLM, no egress). Fail-closed.
+  let deepClean = true;
+  if (deep && type === "skill") {
+    deepClean = await deepSkillScan(target);
+  } else if (deep && type !== "skill") {
+    console.log(
+      `\n${c.dim}(--deep currently only applies to skill; ignored for ${type})${c.reset}`,
+    );
+  }
+
+  const overall = result.passed && sandboxClean && deepClean;
   if (!overall) {
     console.log(`\n${c.yellow}⚠️  Review warnings above before proceeding.${c.reset}`);
   }
@@ -141,6 +155,42 @@ export async function cmdTriage(): Promise<boolean> {
   }
 
   return overall;
+}
+
+/**
+ * `kit triage skill … --deep` helper: run SkillSpector's static Stage 1 (no LLM, no egress) and fold
+ * its normalized findings into the verdict. Returns `false` only on a real high/critical finding or a
+ * scan error; an ABSENT delegate is surfaced honestly and returns `true` (deep didn't run — the base
+ * triage verdict still governs; kit never claims a deep-clean it didn't perform).
+ */
+async function deepSkillScan(target: string): Promise<boolean> {
+  const { runSkillspectorStage1, SKILLSPECTOR_SOURCE } =
+    await import("../skillspector-delegate.js");
+  console.log(
+    `\n${c.bold}Deep scan (${SKILLSPECTOR_SOURCE}, static — no LLM, no egress):${c.reset}`,
+  );
+  const deepRes = await runSkillspectorStage1(target);
+  if (deepRes.status === "unavailable") {
+    console.log(`  ${c.yellow}! ${deepRes.detail}${c.reset}`);
+    return true;
+  }
+  if (deepRes.status === "error") {
+    console.log(`  ${c.red}✗ deep scan errored: ${deepRes.detail}${c.reset}`);
+    return false;
+  }
+  if (deepRes.findings.length === 0) {
+    console.log(`  ${c.green}✓ no findings from the deep static scan${c.reset}`);
+    return true;
+  }
+  for (const f of deepRes.findings) {
+    const sev = f.severity ?? "info";
+    const tag =
+      sev === "critical" || sev === "high"
+        ? `${c.red}[${sev.toUpperCase()}]${c.reset}`
+        : `${c.yellow}[${sev}]${c.reset}`;
+    console.log(`  ${tag} ${f.detail}`);
+  }
+  return !(deepRes.worst === "critical" || deepRes.worst === "high");
 }
 
 /**
