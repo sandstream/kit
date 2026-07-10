@@ -3,6 +3,7 @@ import { isNonInteractive } from "./environment.js";
 import type { GovernanceConfig } from "./config.js";
 import { mergeGovernanceConfig, isDestructiveOperation } from "./governance.js";
 import { IdGenerators } from "./id-generator.js";
+import { checkSignedApproval } from "./approval-tokens.js";
 
 export interface ApprovalRequest {
   operation: string;
@@ -107,6 +108,18 @@ export async function requestApproval(
     (request.environment === "prod" && fullConfig.approval.production_writes);
 
   if (!requiresApproval) {
+    return true;
+  }
+
+  // Control-plane approval routing (Pillar 2 §4.5): honor a valid, offline-verifiable SIGNED
+  // approval token before prompting. Opt-in (no token store ⇒ falls through), fail-closed (only an
+  // org-authority-signed, unexpired, op+env-matching, non-revoked token grants) — never auto-approves.
+  const routed = checkSignedApproval(
+    { operation: request.operation, environment: request.environment },
+    process.cwd(),
+  );
+  if (routed.approved) {
+    console.log(`✓ approved via signed approval token (${routed.detail})`);
     return true;
   }
 
