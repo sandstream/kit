@@ -1,9 +1,21 @@
-import { describe, it } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { writeFile, unlink, mkdir, rmdir, rm } from "node:fs/promises";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runDoctor } from "./doctor.js";
+import { loadOrCreateIdentity, identityId } from "./identity.js";
+import { resolveKeyStore } from "./keystore/index.js";
+import {
+  loadPolicy,
+  canonicalPolicyBytes,
+  policyFingerprint,
+  getPolicyPath,
+  getPolicySigPath,
+  type PolicySignature,
+} from "./policy-doc.js";
+import { addPolicySigner } from "./policy-trust.js";
 
 describe("runDoctor", () => {
   it("returns skip for Node.js check when no package.json exists", async () => {
@@ -198,5 +210,65 @@ describe("runDoctor", () => {
     } finally {
       await rmdir(tmpDir);
     }
+  });
+});
+
+describe("runDoctor — control plane (org policy) row (Pillar 2 §4.6)", () => {
+  let idDir: string;
+  let proj: string;
+  let savedId: string | undefined;
+
+  beforeEach(() => {
+    idDir = mkdtempSync(join(tmpdir(), "kit-id-"));
+    proj = mkdtempSync(join(tmpdir(), "kit-cp-"));
+    savedId = process.env.KIT_IDENTITY_DIR;
+    process.env.KIT_IDENTITY_DIR = idDir;
+    loadOrCreateIdentity();
+  });
+
+  afterEach(() => {
+    if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
+    else process.env.KIT_IDENTITY_DIR = savedId;
+    rmSync(idDir, { recursive: true, force: true });
+    rmSync(proj, { recursive: true, force: true });
+  });
+
+  const cpRow = async () =>
+    (await runDoctor({}, proj)).checks.find((c) => c.name === "control plane (org policy)");
+
+  it("skips when no org policy is distributed here", async () => {
+    const row = await cpRow();
+    assert.ok(row);
+    assert.equal(row.status, "skip");
+  });
+
+  it("warns when an org policy is present but unsigned", async () => {
+    writeFileSync(getPolicyPath(proj), "version = 1\n", "utf-8");
+    const row = await cpRow();
+    assert.ok(row);
+    assert.equal(row.status, "warn");
+  });
+
+  it("passes for a present + verified org policy (and notes RBAC)", async () => {
+    writeFileSync(
+      getPolicyPath(proj),
+      `version = 1\n[rbac.roles]\ndeployer = ["deploy:prod"]\n\n[[rbac.bindings]]\nkid = "kid_x"\nrole = "deployer"\n`,
+      "utf-8",
+    );
+    const pub = resolveKeyStore().store.publicKeyPem()!;
+    const doc = loadPolicy(proj)!;
+    const record: PolicySignature = {
+      kid: identityId(pub),
+      sig: resolveKeyStore().store.sign(canonicalPolicyBytes(doc)).toString("base64"),
+      ts: new Date().toISOString(),
+      fingerprint: policyFingerprint(doc),
+    };
+    writeFileSync(getPolicySigPath(proj), JSON.stringify(record, null, 2) + "\n", "utf-8");
+    addPolicySigner(proj, pub, "org");
+
+    const row = await cpRow();
+    assert.ok(row);
+    assert.equal(row.status, "pass", row.detail);
+    assert.match(row.detail, /RBAC 1 role/);
   });
 });

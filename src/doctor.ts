@@ -5,8 +5,11 @@ import { promisify } from "node:util";
 import type { kitConfig } from "./config.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { activeKeyStoreStatus, hardwareRequired } from "./keystore/active.js";
+import { existsSync } from "node:fs";
 import { profileBrokerPolicy } from "./exec-broker/profile-policy.js";
 import { verifyProfileSignature } from "./profile/sign.js";
+import { verifyPolicy, loadPolicy, getPolicyPath } from "./policy-doc.js";
+import { extractRbac } from "./rbac/policy-schema.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -332,6 +335,63 @@ async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
   };
 }
 
+/**
+ * Control-plane posture (Pelare 2): is a DISTRIBUTED org policy present at this project, and is it
+ * trustworthy? Honest — "distributed" must never silently mean "unverified":
+ *   skip  no .kit-policy.toml here (nothing distributed yet)
+ *   pass  policy present + signature verified (org standard + any RBAC it carries govern)
+ *   warn  present but unsigned/unverifiable — run kit policy verify
+ *   fail  present but signature invalid/revoked, or unparseable — not trusted
+ */
+function checkControlPlane(cwd: string): DoctorCheck {
+  const name = "control plane (org policy)";
+  const category = "security";
+  if (!existsSync(getPolicyPath(cwd))) {
+    return {
+      name,
+      status: "skip",
+      detail: "no .kit-policy.toml here — `kit policy pull <source>` to fetch a signed org policy",
+      category,
+    };
+  }
+  const doc = loadPolicy(cwd);
+  if (!doc) {
+    return {
+      name,
+      status: "fail",
+      detail: "org policy present but unparseable — not trusted",
+      category,
+    };
+  }
+  const v = verifyPolicy(cwd);
+  const rbac = extractRbac(doc);
+  const rbacNote = rbac
+    ? ` · RBAC ${Object.keys(rbac.roles).length} role(s), ${rbac.bindings.length} binding(s)`
+    : "";
+  if (v.status === "valid") {
+    return {
+      name,
+      status: "pass",
+      detail: `org policy verified${v.fingerprint ? ` (${v.fingerprint})` : ""}${rbacNote}`,
+      category,
+    };
+  }
+  if (v.status === "unsigned" || v.status === "unverifiable") {
+    return {
+      name,
+      status: "warn",
+      detail: `org policy present but ${v.status} — ${v.detail}`,
+      category,
+    };
+  }
+  return {
+    name,
+    status: "fail",
+    detail: `org policy ${v.status} — ${v.detail}; not trusted`,
+    category,
+  };
+}
+
 export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorResult> {
   const allChecks: DoctorCheck[] = [];
 
@@ -360,6 +420,7 @@ export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorR
 
   allChecks.push(await checkBrokerScope(cwd));
   allChecks.push(await checkBrokerRuntime(cwd));
+  allChecks.push(checkControlPlane(cwd));
 
   const passed = allChecks.filter((c) => c.status === "pass").length;
   const warnings = allChecks.filter((c) => c.status === "warn").length;
