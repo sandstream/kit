@@ -29,6 +29,7 @@ import {
 import { evaluatePolicy, formatPolicyEval } from "../policy-check.js";
 import { pullPolicy } from "../policy-pull.js";
 import { pullRevocations } from "../revocation-pull.js";
+import { extractRbac } from "../rbac/policy-schema.js";
 import { identityId } from "../identity.js";
 import {
   resolveKeyStore,
@@ -86,6 +87,18 @@ function policyPull(root: string): boolean {
     console.log(
       `${c.green}✓${c.reset} ${r.detail}  ${c.dim}${r.fingerprint ?? ""} → ${getPolicyPath(root)}${c.reset}`,
     );
+    // Fleet-RBAC distributes IN the signed policy (§4.4). Surface what arrived so the operator sees
+    // the roles/bindings were distributed — best-effort; never changes the pull verdict.
+    try {
+      const rbac = extractRbac(loadPolicy(root));
+      if (rbac) {
+        console.log(
+          `${c.dim}distributed RBAC: ${Object.keys(rbac.roles).length} role(s), ${rbac.bindings.length} binding(s)${rbac.defaultRole ? `, default role ${rbac.defaultRole}` : ""}${c.reset}`,
+        );
+      }
+    } catch {
+      /* best-effort summary only */
+    }
     console.log(
       `${c.dim}verify anytime with ${c.reset}${c.bold}kit policy verify${c.reset}${c.dim}; commit the applied .kit-policy.toml + .kit-policy.sig${c.reset}`,
     );
