@@ -16,6 +16,8 @@ import {
   type PolicySignature,
 } from "./policy-doc.js";
 import { addPolicySigner } from "./policy-trust.js";
+import { PROFILE_FILE } from "./profile/schema.js";
+import { signProfile } from "./profile/sign.js";
 
 describe("runDoctor", () => {
   it("returns skip for Node.js check when no package.json exists", async () => {
@@ -270,5 +272,60 @@ describe("runDoctor — control plane (org policy) row (Pillar 2 §4.6)", () => 
     assert.ok(row);
     assert.equal(row.status, "pass", row.detail);
     assert.match(row.detail, /RBAC 1 role/);
+  });
+});
+
+describe("runDoctor — keyless credentials row (Pillar 2 tail)", () => {
+  let idDir: string;
+  let proj: string;
+  let savedId: string | undefined;
+
+  beforeEach(() => {
+    idDir = mkdtempSync(join(tmpdir(), "kit-id-"));
+    proj = mkdtempSync(join(tmpdir(), "kit-kl-"));
+    savedId = process.env.KIT_IDENTITY_DIR;
+    process.env.KIT_IDENTITY_DIR = idDir;
+    loadOrCreateIdentity();
+  });
+
+  afterEach(() => {
+    if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
+    else process.env.KIT_IDENTITY_DIR = savedId;
+    rmSync(idDir, { recursive: true, force: true });
+    rmSync(proj, { recursive: true, force: true });
+  });
+
+  const klRow = async () =>
+    (await runDoctor({}, proj)).checks.find((c) => c.name === "keyless credentials");
+
+  it("skips when no [scope].sign hosts are declared", async () => {
+    const row = await klRow();
+    assert.ok(row);
+    assert.equal(row.status, "skip");
+  });
+
+  it("fails when keyless hosts are declared but the scope is unverified (fail-closed)", async () => {
+    writeFileSync(
+      join(proj, PROFILE_FILE),
+      `version = 1\n[scope]\nsign = ["api.acme.com"]\n`,
+      "utf-8",
+    );
+    const row = await klRow();
+    assert.ok(row);
+    assert.equal(row.status, "fail");
+    assert.match(row.detail, /unverified|not trusted/);
+  });
+
+  it("passes when keyless hosts are declared, the scope is verified, and an identity can sign", async () => {
+    writeFileSync(
+      join(proj, PROFILE_FILE),
+      `version = 1\n[scope]\nsign = ["api.acme.com"]\n`,
+      "utf-8",
+    );
+    await signProfile(proj);
+    const row = await klRow();
+    assert.ok(row);
+    assert.equal(row.status, "pass", row.detail);
+    assert.match(row.detail, /require signed requests/);
   });
 });
