@@ -14,6 +14,7 @@ import { walkSourceFiles } from "../source-walk.js";
 import {
   buildImportGraph,
   relevantSlice,
+  budgetSlice,
   type FileImports,
   type RepoGraph,
 } from "../repomap/graph.js";
@@ -67,21 +68,26 @@ export async function cmdMap(): Promise<boolean> {
       "  kit map <path...>            Files connected to <path> within --depth import hops",
     );
     console.log("  kit map <path> --depth 2     Widen the neighborhood (default 1)");
+    console.log(
+      "  kit map <path> --budget 20   Keep only the 20 nearest files (drops are logged, never silent)",
+    );
     console.log("  kit map <path> --json        Emit the slice as JSON (for an agent/tool)");
     console.log("\nExample:");
-    console.log("  kit map src/exec-broker/broker.ts --depth 2");
+    console.log("  kit map src/exec-broker/broker.ts --depth 2 --budget 25");
     return args.length !== 0;
   }
 
   const json = hasFlag(args, "--json");
   const depthRaw = flagValue(process.argv, "--depth");
   const depth = depthRaw ? Math.max(0, Number.parseInt(depthRaw, 10) || 0) : 1;
+  const budgetRaw = flagValue(process.argv, "--budget");
+  const budget = budgetRaw ? Math.max(0, Number.parseInt(budgetRaw, 10) || 0) : 0;
   const root = process.cwd();
-  // Positional seeds = args minus flags AND minus the value consumed by `--depth`.
+  // Positional seeds = args minus flags AND minus the values consumed by `--depth` / `--budget`.
   const positional: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a === "--depth") {
+    if (a === "--depth" || a === "--budget") {
       i++; // skip its value
       continue;
     }
@@ -100,28 +106,62 @@ export async function cmdMap(): Promise<boolean> {
     return false;
   }
 
-  const slice = relevantSlice(graph, seeds, depth);
-  const files = slice.nodes.filter((n) => n.kind === "file");
-  const externals = slice.nodes.filter((n) => n.kind === "external");
+  const full = relevantSlice(graph, seeds, depth);
+  // Apply a file-count budget: keep the nearest-to-seed files, log the rest (never silent).
+  const { kept, dropped } = budgetSlice(full, seeds, budget);
+  const keptIds = new Set(kept.map((n) => n.id));
+  const slice: RepoGraph =
+    budget > 0
+      ? { nodes: kept, edges: full.edges.filter((e) => keptIds.has(e.from) && keptIds.has(e.to)) }
+      : full;
+  const droppedFiles = dropped.filter((n) => n.kind === "file").map((n) => n.id);
 
   if (json) {
-    console.log(JSON.stringify({ seeds, depth, slice, missing }, null, 2));
+    console.log(
+      JSON.stringify(
+        { seeds, depth, budget: budget || null, slice, dropped: droppedFiles, missing },
+        null,
+        2,
+      ),
+    );
     return true;
   }
 
+  printReadableSlice({ slice, seeds, depth, budget, droppedFiles, missing });
+  return true;
+}
+
+/** Human-readable render of a slice (the non-`--json` path). Kept separate so `cmdMap` stays lean. */
+function printReadableSlice(o: {
+  slice: RepoGraph;
+  seeds: string[];
+  depth: number;
+  budget: number;
+  droppedFiles: string[];
+  missing: string[];
+}): void {
+  const files = o.slice.nodes.filter((n) => n.kind === "file");
+  const externals = o.slice.nodes.filter((n) => n.kind === "external");
   console.log(
-    `${c.bold}Relevant slice${c.reset} ${c.dim}(depth ${depth}, from ${seeds.join(", ")})${c.reset}`,
+    `${c.bold}Relevant slice${c.reset} ${c.dim}(depth ${o.depth}, from ${o.seeds.join(", ")})${c.reset}`,
   );
   console.log(`  ${c.bold}${files.length}${c.reset} files · ${externals.length} external packages`);
   for (const n of files) {
-    const isSeed = seeds.includes(n.id);
+    const isSeed = o.seeds.includes(n.id);
     console.log(`  ${isSeed ? `${c.green}◆${c.reset}` : "·"} ${n.id}`);
   }
   if (externals.length) {
     console.log(`  ${c.dim}external:${c.reset} ${externals.map((n) => n.id).join(", ")}`);
   }
-  if (missing.length) {
-    console.log(`  ${c.yellow}unmatched seeds:${c.reset} ${missing.join(", ")}`);
+  if (o.droppedFiles.length) {
+    const shown = o.droppedFiles.slice(0, 15);
+    const more = o.droppedFiles.length - shown.length;
+    const tail = more > 0 ? `, …and ${more} more (use --json for the full list)` : "";
+    console.log(
+      `  ${c.yellow}${o.droppedFiles.length} file(s) dropped to fit --budget ${o.budget}:${c.reset} ${shown.join(", ")}${tail}`,
+    );
   }
-  return true;
+  if (o.missing.length) {
+    console.log(`  ${c.yellow}unmatched seeds:${c.reset} ${o.missing.join(", ")}`);
+  }
 }
