@@ -11,8 +11,17 @@ import { relative, resolve } from "node:path";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { walkSourceFiles } from "../source-walk.js";
-import { buildImportGraph, relevantSlice, type FileImports, type RepoGraph } from "../repomap/graph.js";
-import { parseImportSpecifiers, resolveImport, isRelativeSpecifier } from "../repomap/extract-ts.js";
+import {
+  buildImportGraph,
+  relevantSlice,
+  type FileImports,
+  type RepoGraph,
+} from "../repomap/graph.js";
+import {
+  parseImportSpecifiers,
+  resolveImport,
+  isRelativeSpecifier,
+} from "../repomap/extract-ts.js";
 
 const EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
 
@@ -50,9 +59,13 @@ export function buildRepoGraph(root: string): RepoGraph {
 export async function cmdMap(): Promise<boolean> {
   const args = process.argv.slice(3);
   if (args.length === 0 || hasFlag(args, "--help") || hasFlag(args, "-h")) {
-    console.log(`${c.bold}kit map${c.reset} — deterministic repo-map: the relevant slice around a file\n`);
+    console.log(
+      `${c.bold}kit map${c.reset} — deterministic repo-map: the relevant slice around a file\n`,
+    );
     console.log("Usage:");
-    console.log("  kit map <path...>            Files connected to <path> within --depth import hops");
+    console.log(
+      "  kit map <path...>            Files connected to <path> within --depth import hops",
+    );
     console.log("  kit map <path> --depth 2     Widen the neighborhood (default 1)");
     console.log("  kit map <path> --json        Emit the slice as JSON (for an agent/tool)");
     console.log("\nExample:");
