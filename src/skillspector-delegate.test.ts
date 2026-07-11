@@ -5,6 +5,7 @@ import {
   stage1Args,
   normalizeSkillspectorSarif,
   runSkillspectorStage1,
+  skillspectorStatus,
   LLM_ENV_VARS,
   SKILLSPECTOR_SOURCE,
   SKILLSPECTOR_BIN,
@@ -101,5 +102,11 @@ describe("skillspector delegate — fail-closed when the binary is absent", () =
     const r = await runSkillspectorStage1("./skill");
     assert.equal(r.status, "unavailable");
     if (r.status === "unavailable") assert.match(r.detail, new RegExp(SKILLSPECTOR_BIN));
+  });
+
+  it("skillspectorStatus reports not-available when the binary is absent", async () => {
+    const s = await skillspectorStatus();
+    assert.equal(s.available, false);
+    assert.match(s.detail, new RegExp(SKILLSPECTOR_BIN));
   });
 });

@@ -353,6 +353,28 @@ async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
 }
 
 /**
+ * Deep skill-scanner delegate posture. The optional SkillSpector (NVIDIA) delegate deepens
+ * `kit triage skill --deep` (static Stage 1 only — kit never runs its LLM stage). Optional, so its
+ * absence is a `skip`, not a failure:
+ *   pass  installed — deep static skill triage is available
+ *   skip  not installed — --deep falls back to kit's built-in checks
+ */
+async function checkDeepSkillScanner(): Promise<DoctorCheck> {
+  const name = "deep skill scanner";
+  const category = "security";
+  const { skillspectorStatus } = await import("./skillspector-delegate.js");
+  const s = await skillspectorStatus();
+  return s.available
+    ? {
+        name,
+        status: "pass",
+        detail: `SkillSpector ${s.version ? `${s.version} ` : ""}— deep skill triage available (static Stage 1 only; kit never runs its LLM stage)`,
+        category,
+      }
+    : { name, status: "skip", detail: s.detail, category };
+}
+
+/**
  * Keyless-credential posture (Pelare 2 tail — "sign, don't store"). Reports whether any hosts are
  * declared keyless (`[scope].sign`) and whether kit can actually sign for them — never silent:
  *   skip  no keyless hosts declared
@@ -484,6 +506,7 @@ export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorR
   allChecks.push(await checkBrokerScope(cwd));
   allChecks.push(await checkBrokerRuntime(cwd));
   allChecks.push(await checkKeyless(cwd));
+  allChecks.push(await checkDeepSkillScanner());
   allChecks.push(checkControlPlane(cwd));
 
   const passed = allChecks.filter((c) => c.status === "pass").length;

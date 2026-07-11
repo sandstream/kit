@@ -78,6 +78,30 @@ export function normalizeSkillspectorSarif(sarifJson: string): SecurityCheckResu
   }));
 }
 
+export interface SkillspectorStatus {
+  available: boolean;
+  version?: string;
+  detail: string;
+}
+
+/**
+ * Detect whether the SkillSpector delegate is installed (mise-first, then PATH) and its version.
+ * Runs `--version` with the SAME scrubbed env as a scan, so probing can never touch a provider.
+ * Never throws.
+ */
+export async function skillspectorStatus(): Promise<SkillspectorStatus> {
+  const bin = await resolveToolBin(SKILLSPECTOR_BIN);
+  if (!bin) {
+    return {
+      available: false,
+      detail: `${SKILLSPECTOR_BIN} not installed — 'kit triage skill --deep' uses kit's built-in checks only`,
+    };
+  }
+  const res = await execFileNoThrow(bin, ["--version"], { timeout: 10_000, env: scrubbedEnv() });
+  const version = (res.stdout.trim() || res.stderr.trim()).split("\n")[0] || undefined;
+  return { available: true, version, detail: version ? `available (${version})` : "available" };
+}
+
 export type SkillspectorResult =
   | { status: "ok"; findings: SecurityCheckResult[]; worst: SecurityCheckResult["severity"] }
   | { status: "unavailable"; detail: string }
