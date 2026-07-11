@@ -109,3 +109,76 @@ export function relevantSlice(graph: RepoGraph, seeds: string[], depth: number):
   const edges = graph.edges.filter((e) => keep.has(e.from) && keep.has(e.to));
   return { nodes, edges };
 }
+
+/**
+ * BFS distance (undirected import hops) from the nearest seed to every reachable node in `graph`.
+ * Seeds are distance 0; unreachable nodes are absent from the map. Pure and deterministic.
+ */
+export function distancesFromSeeds(graph: RepoGraph, seeds: string[]): Map<string, number> {
+  const known = new Set(graph.nodes.map((n) => n.id));
+  const adj = new Map<string, Set<string>>();
+  for (const n of graph.nodes) adj.set(n.id, new Set());
+  for (const e of graph.edges) {
+    adj.get(e.from)?.add(e.to);
+    adj.get(e.to)?.add(e.from);
+  }
+  const dist = new Map<string, number>();
+  let frontier: string[] = [];
+  for (const s of seeds) {
+    if (known.has(s) && !dist.has(s)) {
+      dist.set(s, 0);
+      frontier.push(s);
+    }
+  }
+  let d = 0;
+  while (frontier.length) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      for (const nb of adj.get(id) ?? []) {
+        if (!dist.has(nb)) {
+          dist.set(nb, d + 1);
+          next.push(nb);
+        }
+      }
+    }
+    d++;
+    frontier = next;
+  }
+  return dist;
+}
+
+export interface BudgetResult {
+  kept: RepoNode[];
+  dropped: RepoNode[];
+}
+
+/**
+ * Rank a slice's FILE nodes by relevance — nearest-to-a-seed first (BFS distance), then path for a
+ * stable tie-break — and keep at most `maxFiles`, returning the rest as `dropped` (never silently
+ * truncated: the caller logs the drop). `external` nodes are metadata, not budgeted: every external
+ * incident to a kept file is kept. `maxFiles <= 0` keeps everything. Pure and deterministic.
+ */
+export function budgetSlice(slice: RepoGraph, seeds: string[], maxFiles: number): BudgetResult {
+  const files = slice.nodes.filter((n) => n.kind === "file");
+  const externals = slice.nodes.filter((n) => n.kind === "external");
+  if (maxFiles <= 0 || files.length <= maxFiles) {
+    return { kept: slice.nodes, dropped: [] };
+  }
+
+  const dist = distancesFromSeeds(slice, seeds);
+  const rank = (n: RepoNode) => dist.get(n.id) ?? Number.MAX_SAFE_INTEGER;
+  const ranked = [...files].sort((a, b) => rank(a) - rank(b) || (a.id < b.id ? -1 : 1));
+  const keptFiles = ranked.slice(0, maxFiles);
+  const droppedFiles = ranked.slice(maxFiles);
+
+  const keptIds = new Set(keptFiles.map((n) => n.id));
+  const keptExternals = externals.filter((ext) =>
+    slice.edges.some((e) => e.to === ext.id && keptIds.has(e.from)),
+  );
+
+  const byId = (a: RepoNode, b: RepoNode) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  return {
+    kept: [...keptFiles, ...keptExternals].sort(byId),
+    dropped: droppedFiles.sort(byId),
+  };
+}

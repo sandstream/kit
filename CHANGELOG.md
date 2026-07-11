@@ -67,11 +67,13 @@ is additive and every new gate is opt-in or degrades honestly.
   `kit triage vault-config` (backend-selection), and plugin discovery close the
   last unaudited surfaces.
 - **Repo-map (`kit map`).** A deterministic, zero-LLM import graph of the repo:
-  `kit map <path> [--depth N] [--json]` returns the minimal relevant SLICE around a
-  seed file (the files connected within N import hops, both directions, plus the
-  external packages) — so an agent loads part of a growing repo, not the whole
-  tree. Pure graph core + a dependency-free TS/JS extractor; relative specifiers
-  that resolve to no known file are dropped, never guessed.
+  `kit map <path> [--depth N] [--budget N] [--json]` returns the minimal relevant
+  SLICE around a seed file (the files connected within N import hops, both
+  directions, plus the external packages) — so an agent loads part of a growing
+  repo, not the whole tree. `--budget` keeps the N nearest-to-seed files and
+  **logs every drop** (never silent truncation). Pure graph core + a
+  dependency-free TS/JS extractor; relative specifiers that resolve to no known
+  file are dropped, never guessed.
 
 ### Triage delegate — deep skill scanning, borrowed authority (#327–#332)
 
