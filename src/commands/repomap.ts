@@ -7,6 +7,7 @@
  * Design: `kit-research/docs/research/pillar4-repo-map-5.0.md`. Deterministic and offline.
  */
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { relative, resolve } from "node:path";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
@@ -26,6 +27,7 @@ import {
 import {
   parseCodeowners,
   ownerFor,
+  topAuthor,
   CODEOWNERS_PATHS,
   type CodeownersRule,
 } from "../repomap/ownership.js";
@@ -134,21 +136,22 @@ export async function cmdMap(): Promise<boolean> {
       : full;
   const droppedFiles = dropped.filter((n) => n.kind === "file").map((n) => n.id);
 
-  // Ownership (deterministic, from a committed CODEOWNERS): who to route each slice file to.
-  const rules = loadCodeowners(root);
-  const owners: Record<string, string[]> = {};
-  if (rules.length) {
-    for (const n of slice.nodes) {
-      if (n.kind !== "file") continue;
-      const who = ownerFor(n.id, rules);
-      if (who.length) owners[n.id] = who;
-    }
-  }
+  // Ownership: who to route each slice file to — CODEOWNERS if present, else git-blame top-author.
+  const { owners, source } = computeOwners(root, slice);
 
   if (json) {
     console.log(
       JSON.stringify(
-        { seeds, depth, budget: budget || null, slice, owners, dropped: droppedFiles, missing },
+        {
+          seeds,
+          depth,
+          budget: budget || null,
+          slice,
+          owners,
+          ownerSource: source,
+          dropped: droppedFiles,
+          missing,
+        },
         null,
         2,
       ),
@@ -156,8 +159,58 @@ export async function cmdMap(): Promise<boolean> {
     return true;
   }
 
-  printReadableSlice({ slice, seeds, depth, budget, droppedFiles, missing, owners });
+  printReadableSlice({ slice, seeds, depth, budget, droppedFiles, missing, owners, source });
   return true;
+}
+
+/** Max files to git-blame for the ownership fallback — bounds per-file git calls on a big slice. */
+const BLAME_CAP = 60;
+
+/**
+ * Owners for the slice's files. Prefers a committed CODEOWNERS (deterministic, no I/O beyond the
+ * file read). Without one, falls back to each file's git-blame top-author (bounded by BLAME_CAP,
+ * fail-closed: git absent/errored → no owner, never guessed). Returns the source so the UI can say so.
+ */
+function computeOwners(
+  root: string,
+  slice: RepoGraph,
+): { owners: Record<string, string[]>; source: "codeowners" | "git" | "none" } {
+  const files = slice.nodes.filter((n) => n.kind === "file");
+  const owners: Record<string, string[]> = {};
+
+  const rules = loadCodeowners(root);
+  if (rules.length) {
+    for (const n of files) {
+      const who = ownerFor(n.id, rules);
+      if (who.length) owners[n.id] = who;
+    }
+    return { owners, source: "codeowners" };
+  }
+
+  let blamed = false;
+  for (const n of files.slice(0, BLAME_CAP)) {
+    const author = gitTopAuthor(root, n.id);
+    if (author) {
+      owners[n.id] = [`${author} (git)`];
+      blamed = true;
+    }
+  }
+  return { owners, source: blamed ? "git" : "none" };
+}
+
+/** A file's git-blame top-author, or null if git is absent/errors (fail-closed — never guessed). */
+function gitTopAuthor(root: string, file: string): string | null {
+  try {
+    const out = execFileSync("git", ["-C", root, "log", "--format=%an", "--", file], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5_000,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    return topAuthor(out.split("\n"));
+  } catch {
+    return null;
+  }
 }
 
 /** Human-readable render of a slice (the non-`--json` path). Kept separate so `cmdMap` stays lean. */
@@ -169,11 +222,18 @@ function printReadableSlice(o: {
   droppedFiles: string[];
   missing: string[];
   owners: Record<string, string[]>;
+  source: "codeowners" | "git" | "none";
 }): void {
   const files = o.slice.nodes.filter((n) => n.kind === "file");
   const externals = o.slice.nodes.filter((n) => n.kind === "external");
+  const ownerNote =
+    o.source === "codeowners"
+      ? ` ${c.dim}· owners from CODEOWNERS${c.reset}`
+      : o.source === "git"
+        ? ` ${c.dim}· owners from git blame${c.reset}`
+        : "";
   console.log(
-    `${c.bold}Relevant slice${c.reset} ${c.dim}(depth ${o.depth}, from ${o.seeds.join(", ")})${c.reset}`,
+    `${c.bold}Relevant slice${c.reset} ${c.dim}(depth ${o.depth}, from ${o.seeds.join(", ")})${c.reset}${ownerNote}`,
   );
   console.log(`  ${c.bold}${files.length}${c.reset} files · ${externals.length} external packages`);
   for (const n of files) {

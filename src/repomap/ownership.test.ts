@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseCodeowners, ownerFor } from "./ownership.js";
+import { parseCodeowners, ownerFor, topAuthor } from "./ownership.js";
 
 describe("repomap ownership — parseCodeowners", () => {
   it("parses rules, skipping comments and blanks; keeps order + multiple owners", () => {
@@ -71,5 +71,20 @@ describe("repomap ownership — glob edge cases", () => {
       [],
       "leading / anchors to root",
     );
+  });
+});
+
+describe("repomap ownership — topAuthor (git-blame fallback)", () => {
+  it("returns the most frequent author", () => {
+    assert.equal(topAuthor(["Ada", "Bo", "Ada", "Ada", "Bo"]), "Ada");
+  });
+  it("breaks ties alphabetically for determinism", () => {
+    assert.equal(topAuthor(["Bo", "Ada"]), "Ada");
+    assert.equal(topAuthor(["Zed", "Ada", "Zed", "Ada"]), "Ada");
+  });
+  it("ignores blank lines and returns null for no history", () => {
+    assert.equal(topAuthor(["", "  ", "Ada", ""]), "Ada");
+    assert.equal(topAuthor([]), null);
+    assert.equal(topAuthor(["", "   "]), null);
   });
 });

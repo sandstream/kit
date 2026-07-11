@@ -97,3 +97,26 @@ export function ownerFor(path: string, rules: CodeownersRule[]): string[] {
 
 /** The standard locations a CODEOWNERS file may live, in GitHub's precedence order. */
 export const CODEOWNERS_PATHS = ["CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"];
+
+/**
+ * The most frequent author from a file's `git log --format=%an` lines — the de-facto owner when no
+ * CODEOWNERS exists. Ties break alphabetically for determinism; blank lines are ignored; null if the
+ * file has no history. Pure (the caller does the git I/O and feeds the lines here).
+ */
+export function topAuthor(authorLines: string[]): string | null {
+  const counts = new Map<string, number>();
+  for (const raw of authorLines) {
+    const name = raw.trim();
+    if (name) counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  if (counts.size === 0) return null;
+  let best: string | null = null;
+  let bestN = -1;
+  for (const [name, n] of [...counts].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    if (n > bestN) {
+      best = name;
+      bestN = n;
+    }
+  }
+  return best;
+}
