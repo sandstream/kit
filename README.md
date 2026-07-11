@@ -4,7 +4,7 @@
 
 For AI agents and humans. Manages tools, auth, secrets, and project setup. Zero LLM calls, local-first, multi-vault.
 
-**kit 2.0** makes its two promises concrete: `green = honest` is now externally _provable_ (kit can emit a signed receipt, anchored to a key its own process cannot recompute, proving which scanners actually ran and that none failed open, verifiable offline), and kit's CLI, config schema, and plugin SDK are frozen, versioned contracts that will not break across any 2.x release. See [Stability & contracts](#stability--contracts).
+**kit** makes two promises concrete and keeps them across every major since 2.0: `green = honest` is externally _provable_ (kit can emit a signed receipt, anchored to a key its own process cannot recompute, proving which scanners actually ran and that none failed open, verifiable offline), and kit's CLI, config schema, and plugin SDK are frozen, versioned contracts that do not break across a major line. **kit 5.0** turns the provable local floor into a continuous, portable, fail-closed **governance layer for the agent loop** — hardware-rooted identity, an offline-verified control plane, one exec-broker enforcing a signed scope, and a traveling profile you can carry to a fresh host. See [What's new in 5.0](#whats-new-in-50) and [Stability & contracts](#stability--contracts).
 
 🌐 [sandstre.am/kit](https://sandstre.am/kit)
 
@@ -66,6 +66,38 @@ Fresh or ephemeral environment (cloud container, Claude Code on the web, CI, new
 laptop)? Wire `kit setup` + `kit memory sync` into the environment's setup script
 so it fuels itself — config, secrets (vault-backed), agent gates, identity, and
 recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md).
+
+## What's new in 5.0
+
+kit 5.0 is the **North Star** release: it takes kit from a point-in-time verifier
+to a *continuous, portable, fail-closed governance layer* for the agent loop.
+Four pillars, all additive over 4.x — no stable command removed. Highlights:
+
+- **Pillar 1 — hardware-rooted identity.** `kit doctor` surfaces which backend
+  signs kit's identity (Secure Enclave / TPM / external command vs. a file-backed
+  0600 key) and never silently downgrades; `KIT_REQUIRE_HARDWARE` makes a missing
+  hardware backend fail-closed. `kit identity migrate` moves onto hardware and
+  revokes the old key in one audited step.
+- **Pillar 2 — control plane + keyless credentials.** `kit policy pull` /
+  `pull-revocations` distribute an org-signed policy, verified and enforced fully
+  offline; `kit policy approve` mints offline signed approval tokens. Keyless
+  egress signs requests with RFC 9421 HTTP Message Signatures for hosts in
+  `[scope].sign` — sign, don't store.
+- **Pillar 3 — one exec-broker.** A single signed-scope governance floor drives
+  the PreToolUse gates (`kit gate-egress` / `gate-fs`), the MCP runtime, and the
+  `kit doctor` posture. Runtime mediation is **on by default in observe mode**
+  (audits what it *would* deny); enforce is an explicit opt-in.
+- **Pillar 4 — traveling profile.** `kit profile` declares your
+  `{skills, mcp, workflows, plugins, vault, gates, scope}`, audits
+  declared-vs-discovered drift, signs the scope/RoE, and **exports/imports** a
+  portable signed bundle to a fresh host — integrity-verified offline,
+  fail-closed on tamper.
+- **Deep skill triage.** `kit triage skill --deep` delegates to NVIDIA
+  SkillSpector's static Stage 1 (no LLM, no egress) and `kit setup --recommended`
+  wires the triage gates into your pre-commit hook.
+
+All of it holds the frozen CLI / config / plugin contracts. See
+[CHANGELOG.md](CHANGELOG.md) for the full list.
 
 ## What's new in 3.0
 
