@@ -23,6 +23,12 @@ import {
   resolveImport,
   isRelativeSpecifier,
 } from "../repomap/extract-ts.js";
+import {
+  parseCodeowners,
+  ownerFor,
+  CODEOWNERS_PATHS,
+  type CodeownersRule,
+} from "../repomap/ownership.js";
 
 const EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
 
@@ -55,6 +61,18 @@ export function buildRepoGraph(root: string): RepoGraph {
     files.push({ path, internal, external });
   }
   return buildImportGraph(files);
+}
+
+/** Load CODEOWNERS rules from the first standard location that exists (empty if none). */
+function loadCodeowners(root: string): CodeownersRule[] {
+  for (const rel of CODEOWNERS_PATHS) {
+    try {
+      return parseCodeowners(readFileSync(resolve(root, rel), "utf-8"));
+    } catch {
+      /* not here — try the next location */
+    }
+  }
+  return [];
 }
 
 export async function cmdMap(): Promise<boolean> {
@@ -116,10 +134,21 @@ export async function cmdMap(): Promise<boolean> {
       : full;
   const droppedFiles = dropped.filter((n) => n.kind === "file").map((n) => n.id);
 
+  // Ownership (deterministic, from a committed CODEOWNERS): who to route each slice file to.
+  const rules = loadCodeowners(root);
+  const owners: Record<string, string[]> = {};
+  if (rules.length) {
+    for (const n of slice.nodes) {
+      if (n.kind !== "file") continue;
+      const who = ownerFor(n.id, rules);
+      if (who.length) owners[n.id] = who;
+    }
+  }
+
   if (json) {
     console.log(
       JSON.stringify(
-        { seeds, depth, budget: budget || null, slice, dropped: droppedFiles, missing },
+        { seeds, depth, budget: budget || null, slice, owners, dropped: droppedFiles, missing },
         null,
         2,
       ),
@@ -127,7 +156,7 @@ export async function cmdMap(): Promise<boolean> {
     return true;
   }
 
-  printReadableSlice({ slice, seeds, depth, budget, droppedFiles, missing });
+  printReadableSlice({ slice, seeds, depth, budget, droppedFiles, missing, owners });
   return true;
 }
 
@@ -139,6 +168,7 @@ function printReadableSlice(o: {
   budget: number;
   droppedFiles: string[];
   missing: string[];
+  owners: Record<string, string[]>;
 }): void {
   const files = o.slice.nodes.filter((n) => n.kind === "file");
   const externals = o.slice.nodes.filter((n) => n.kind === "external");
@@ -148,7 +178,9 @@ function printReadableSlice(o: {
   console.log(`  ${c.bold}${files.length}${c.reset} files · ${externals.length} external packages`);
   for (const n of files) {
     const isSeed = o.seeds.includes(n.id);
-    console.log(`  ${isSeed ? `${c.green}◆${c.reset}` : "·"} ${n.id}`);
+    const who = o.owners[n.id];
+    const ownerTag = who?.length ? ` ${c.dim}${who.join(" ")}${c.reset}` : "";
+    console.log(`  ${isSeed ? `${c.green}◆${c.reset}` : "·"} ${n.id}${ownerTag}`);
   }
   if (externals.length) {
     console.log(`  ${c.dim}external:${c.reset} ${externals.map((n) => n.id).join(", ")}`);
