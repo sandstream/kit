@@ -24,6 +24,7 @@ import {
   resolveImport,
   isRelativeSpecifier,
 } from "../repomap/extract-ts.js";
+import { parsePythonImports, resolvePythonImport } from "../repomap/extract-py.js";
 import {
   parseCodeowners,
   ownerFor,
@@ -39,7 +40,7 @@ import {
   type CoChange,
 } from "../repomap/cochange.js";
 
-const EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
+const EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py"];
 
 /** Walk `root`, parse imports, and build the whole-repo import graph (repo-relative posix ids). */
 export function buildRepoGraph(root: string): RepoGraph {
@@ -56,20 +57,37 @@ export function buildRepoGraph(root: string): RepoGraph {
     } catch {
       /* unreadable — treat as no imports */
     }
-    const internal: string[] = [];
-    const external: string[] = [];
-    for (const spec of parseImportSpecifiers(source)) {
-      if (isRelativeSpecifier(spec)) {
-        const target = resolveImport(path, spec, fileSet);
-        if (target) internal.push(target);
-        // a relative spec that resolves to nothing is dropped (generated/missing) — never guessed
-      } else {
-        external.push(spec);
-      }
-    }
-    files.push({ path, internal, external });
+    files.push({ path, ...resolveImports(path, source, fileSet) });
   }
   return buildImportGraph(files);
+}
+
+/** Resolve one file's imports to in-repo targets + external specifiers, dispatched by language. */
+function resolveImports(
+  path: string,
+  source: string,
+  fileSet: Set<string>,
+): { internal: string[]; external: string[] } {
+  const internal: string[] = [];
+  const external: string[] = [];
+  if (path.endsWith(".py")) {
+    // Python: resolve dotted/relative imports to repo files; unresolved → external (never guessed).
+    for (const tok of parsePythonImports(source)) {
+      const target = resolvePythonImport(path, tok, fileSet);
+      if (target) internal.push(target);
+      else external.push(tok);
+    }
+  } else {
+    for (const spec of parseImportSpecifiers(source)) {
+      if (!isRelativeSpecifier(spec)) {
+        external.push(spec);
+        continue;
+      }
+      const target = resolveImport(path, spec, fileSet);
+      if (target) internal.push(target); // unresolved relative spec is dropped — never guessed
+    }
+  }
+  return { internal, external };
 }
 
 /** Load CODEOWNERS rules from the first standard location that exists (empty if none). */
