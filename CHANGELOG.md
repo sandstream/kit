@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [5.0.0] - 2026-07-11
 
-kit 5.0 is the **North Star** release: kit stops being only a _point-in-time_
+With 5.0, kit stops being only a _point-in-time_
 verifier and becomes a _continuous, portable, fail-closed governance layer_ for
 the agent loop. Four pillars land, on top of a unified command surface. Nothing
 here breaks the 2.x/4.x CLI, config, or plugin contracts — every new capability
@@ -508,10 +508,10 @@ false-greens; all three are now closed:
 ## [4.1.0] - 2026-07-04
 
 A wholly **additive**, backward-compatible release along two axes — broader agent
-coverage and the first **v1 foundations of the 5.0 north-star pillars**. Semver
+coverage and the first **v1 foundations of the 5.0 pillars**. Semver
 note: nothing here breaks an existing contract (all-new modules, no default
 flipped), so this is a MINOR, not a major. The pillar work lands behind the
-interfaces the north-star design calls for, but the _breaking_ capabilities that
+interfaces the 5.0 design calls for, but the _breaking_ capabilities that
 will justify **5.0.0** — hardware-key migration, enforcement-on-by-default, a
 required control plane — deliberately do NOT ship here; `5.0.0` is reserved for
 when the first of those lands. Built via a multi-agent workflow (design →

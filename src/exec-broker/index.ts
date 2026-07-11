@@ -1,4 +1,4 @@
-// Pelare 3 — exec-broker: public barrel. Callers import from
+// Pillar 3 — exec-broker: public barrel. Callers import from
 // "exec-broker/index.js".
 
 export { checkEgress, checkFsWrite, scopeEnv, type BrokerDecision } from "./decisions.js";

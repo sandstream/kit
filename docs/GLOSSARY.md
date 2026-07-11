@@ -44,7 +44,7 @@ output. Grouped by area; kit-specific meaning noted where it matters.
 | **AES-256-GCM** | Advanced Encryption Standard / Galois-Counter Mode | Authenticated encryption used for encrypted sync blobs. |
 | **JWT** | JSON Web Token | A signed token format kit's secret detector recognizes (and skips known public demo keys). |
 | **TOTP** | Time-based One-Time Password | 2FA codes; kit treats them as secrets. |
-| **TPM / HSM** | Trusted Platform Module / Hardware Security Module | Hardware key stores; the "regulated tier" for non-exportable keys (kit 5.0 north star). |
+| **TPM / HSM** | Trusted Platform Module / Hardware Security Module | Hardware key stores; the "regulated tier" for non-exportable keys (kit 5.0 design). |
 | **TOFU** | Trust On First Use | Pin-on-first-sight trust model (same shape as the MCP drift pin). |
 | **TSA** | Time-Stamping Authority | Trusted timestamp source for attestations. |
 | **GPG** | GNU Privacy Guard | OpenPGP signing kit can verify. |

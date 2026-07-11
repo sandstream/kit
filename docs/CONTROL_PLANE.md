@@ -1,6 +1,6 @@
 # kit control plane (self-hostable, offline-verified)
 
-kit's control plane (North Star Pillar 2) is a **verifier and distributor of signed artifacts, not
+kit's control plane (5.0 Pillar 2) is a **verifier and distributor of signed artifacts, not
 a runtime-dependent service.** It has **no server logic**: the "plane" is a folder of signed files
 behind any file server, object store, or git remote. Every machine verifies those files **offline**
 against a committed trust anchor. There is no telemetry and no egress by default; if the plane

@@ -6,7 +6,7 @@
  * loadOrCreateIdentity / rotateIdentity / tryLoadIdentity and threads the
  * existing KIT_IDENTITY_DIR override (via the optional constructor `dir`)
  * straight through. Rewriting any of that here would fork the trust code; the
- * whole point of Pelare 1 is that this backend is a thin adapter over the
+ * whole point of Pillar 1 is that this backend is a thin adapter over the
  * primitive kit already ships.
  *
  * HONEST THREAT BOUNDARY: this backend stores the private key as a 0600 file

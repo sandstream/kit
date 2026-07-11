@@ -1,5 +1,5 @@
 /**
- * kit control plane (Pelare 2) — `kit policy pull-revocations`: fetch signed identity-key
+ * kit control plane (Pillar 2) — `kit policy pull-revocations`: fetch signed identity-key
  * revocations from a self-hostable source and MONOTONE-merge the authoritative ones into the local
  * append-only log (`revocations.jsonl`). Design: `pillar2-control-plane-5.0.md` §4.3.
  *

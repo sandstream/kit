@@ -1,5 +1,5 @@
 /**
- * kit RBAC schema — Pelare 2 (role-based access control bound to an IdP at
+ * kit RBAC schema — Pillar 2 (role-based access control bound to an IdP at
  * ENROLLMENT time, enforced fully OFFLINE from the org-signed `.kit-policy.toml`).
  *
  * This module is the PURE, zero-dependency schema shared by the enforcement path

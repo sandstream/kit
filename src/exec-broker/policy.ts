@@ -1,4 +1,4 @@
-// Pelare 3 — exec-broker: policy shape + fail-closed loader.
+// Pillar 3 — exec-broker: policy shape + fail-closed loader.
 //
 // The BrokerPolicy declares what an operation is ALLOWED to touch: an egress
 // hostname allowlist, a filesystem write root, and the environment keys it may

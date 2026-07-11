@@ -1,5 +1,5 @@
 /**
- * kit control plane (Pelare 2) — `kit policy pull`: fetch an org-signed policy from a self-hostable
+ * kit control plane (Pillar 2) — `kit policy pull`: fetch an org-signed policy from a self-hostable
  * source and APPLY it only if it verifies OFFLINE against the LOCAL trust anchor.
  *
  * Design: `kit-research/docs/research/pillar2-control-plane-5.0.md` (MVP, §4.1). This is a

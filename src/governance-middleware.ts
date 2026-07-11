@@ -319,7 +319,7 @@ export async function runGoverned<T>(
 }
 
 /**
- * {@link runGoverned} with the Pelare 3 exec-broker composed ON TOP. The broker
+ * {@link runGoverned} with the Pillar 3 exec-broker composed ON TOP. The broker
  * gates an operation's declared RESOURCE effects (egress / fs-write / env)
  * BEFORE governance (identity / budget / permission) runs; the two are separate
  * concerns that stack.

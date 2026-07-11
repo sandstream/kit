@@ -1,4 +1,4 @@
-// Pelare 3 — exec-broker: the three pure, fail-closed decision functions.
+// Pillar 3 — exec-broker: the three pure, fail-closed decision functions.
 //
 // These gate the CONCRETE effects of an agent's tool-call (network egress,
 // filesystem write, environment exposure) at the moment before `run()` touches a

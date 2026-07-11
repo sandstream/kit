@@ -1,5 +1,5 @@
 /**
- * kit RBAC — cloud identity-provider backends for Pelare 2 (Microsoft Entra ID
+ * kit RBAC — cloud identity-provider backends for Pillar 2 (Microsoft Entra ID
  * and Google Cloud Identity), siblings of the GitHub backend in
  * identity-provider.ts. Like GitHub, these are consulted ONLY at ENROLLMENT time
  * to compile role bindings; they are NEVER imported by the enforcement path

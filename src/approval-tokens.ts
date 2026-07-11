@@ -1,5 +1,5 @@
 /**
- * kit control plane (Pelare 2) — offline-verifiable signed approval tokens (§4.5, approval-routing).
+ * kit control plane (Pillar 2) — offline-verifiable signed approval tokens (§4.5, approval-routing).
  *
  * `requestApproval` can already prompt interactively or call a webhook/remote API. This adds a
  * THIRD, offline, no-egress path: an org authority mints a time-boxed, operation-scoped **signed

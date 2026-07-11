@@ -1,5 +1,5 @@
 /**
- * KeyStore port — Pelare 1: hardware-rooted identity behind an interface.
+ * KeyStore port — Pillar 1: hardware-rooted identity behind an interface.
  *
  * This is the abstraction seam that lets kit's Ed25519 private key migrate from
  * the current 0600 PKCS8 PEM file under ~/.kit to NON-EXPORTABLE hardware

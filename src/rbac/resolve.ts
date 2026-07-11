@@ -1,6 +1,6 @@
 /**
  * kit RBAC resolver — the OFFLINE, deterministic, fail-CLOSED decision engine
- * for Pelare 2.
+ * for Pillar 2.
  *
  * `can(subjectKid, permission, verifiedPolicy)` and
  * `effectivePermissions(subjectKid, verifiedPolicy)` are PURE functions over a
