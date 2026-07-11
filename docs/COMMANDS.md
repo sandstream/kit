@@ -144,6 +144,7 @@
 | `kit triage all <target>`        | Auto-detect + run all checks.                                        |
 | `kit triage tools`               | List installed security tools.                                       |
 | `kit triage check-deps`          | Pre-commit gate: fail if staged deps lack triage entries.            |
+| `kit triage check-skills`        | Pre-commit gate: fail if staged skills lack a `--deep` triage entry. |
 
 ## Packages + plugins
 

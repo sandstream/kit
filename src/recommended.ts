@@ -22,8 +22,13 @@ function kitInvocation(): string {
 /**
  * The opinionated "recommended" hardening layered on top of `kit setup`:
  *   - cross-harness memory capture (the Claude Code hooks)
- *   - a pre-commit secret-scan gate
+ *   - a pre-commit gate: secret-scan + triage gates for newly-added deps and staged skills
  *   - a pre-push context-check gate (only when `[context]` is declared)
+ *
+ * The triage gates (`kit triage check-deps` / `check-skills`) were always meant to run at
+ * commit time — they're the fail-closed chokepoint that refuses staged deps/skills lacking a
+ * recent triage. Wiring them into the recommended pre-commit turns the documented gates into
+ * enforced ones. Both are cheap no-ops when nothing relevant is staged.
  *
  * Each piece is idempotent and uses the already-hardened installers
  * (absolute-path memory hooks; hooksPath-aware, no-clobber git hooks). It
@@ -37,7 +42,13 @@ export async function applyRecommendedHardening(
   const memory = installMemoryHooks();
 
   const kit = kitInvocation();
-  const hookConfig: HooksConfig = { "pre-commit": [`${kit} security scan-staged`] };
+  const hookConfig: HooksConfig = {
+    "pre-commit": [
+      `${kit} security scan-staged`,
+      `${kit} triage check-deps`,
+      `${kit} triage check-skills`,
+    ],
+  };
   // The context-check gate only makes sense once a context is declared.
   if (config.context) {
     hookConfig["pre-push"] = [`${kit} context check`];
