@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { resolve, join } from "node:path";
+import { resolve, join, relative } from "node:path";
 import { loadConfig } from "./config.js";
 import { checkTools } from "./check-tools.js";
 import { checkServices } from "./check-services.js";
@@ -31,6 +31,7 @@ import { generateToml } from "./toml-generator.js";
 import { writeFile, access } from "node:fs/promises";
 import { executeCommand } from "./run.js";
 import { gatherProjectContext } from "./context.js";
+import { mapReport } from "./commands/repomap.js";
 import { isReadOnlyMode } from "./read-only-mode.js";
 import { escapeWorkflowCmd } from "./utils/ci-escape.js";
 import { runGovernedBrokered } from "./governance-middleware.js";
@@ -56,6 +57,7 @@ export const KIT_MCP_TOOLS: readonly string[] = [
   "kit_ci",
   "kit_run",
   "kit_context",
+  "kit_map",
 ];
 
 function configPath(cwd?: string): string {
@@ -122,6 +124,7 @@ export function createMcpServer(): McpServer {
   register_kit_ci(server);
   register_kit_run(server);
   register_kit_context(server);
+  register_kit_map(server);
 
   return server;
 }
@@ -959,6 +962,50 @@ function register_kit_context(server: McpServer): void {
             },
           ],
         };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+}
+
+function register_kit_map(server: McpServer): void {
+  // kit_map — deterministic repo-map: the relevant slice around a seed file (read-only). Shares the
+  // exact core (mapReport) with the `kit map` CLI, so the two surfaces can't disagree.
+  server.tool(
+    "kit_map",
+    "Deterministic, zero-LLM repo-map: given seed file path(s), return the relevant SLICE of the codebase — files connected within N import hops (both directions) + external packages, each attributed to its owner (CODEOWNERS or git-blame). Optionally budget the slice to the N nearest files and add historical co-change coupling. Use it to load only the part of a growing repo that matters to a task, instead of the whole tree.",
+    {
+      paths: z
+        .array(z.string())
+        .min(1)
+        .describe("Seed file path(s) to map around (repo-relative or absolute)"),
+      depth: z.number().int().min(0).optional().describe("Import hops from the seed (default 1)"),
+      budget: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe("Keep only the N nearest-to-seed files (0 = unbounded); drops are reported"),
+      co_change: z
+        .boolean()
+        .optional()
+        .describe("Add files that historically change WITH each seed (git history)"),
+      cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
+    },
+    async ({ paths, depth, budget, co_change, cwd }) => {
+      try {
+        const root = cwd ?? process.cwd();
+        const seeds = paths.map((s) => relative(root, resolve(root, s)).split("\\").join("/"));
+        const report = mapReport(root, seeds, {
+          depth: depth ?? 1,
+          budget: budget ?? 0,
+          coChange: co_change ?? false,
+        });
+        return { content: [{ type: "text" as const, text: JSON.stringify(report, null, 2) }] };
       } catch (err) {
         return {
           content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],

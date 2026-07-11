@@ -79,7 +79,9 @@ is additive and every new gate is opt-in or degrades honestly.
   absent/errored → no owner, never guessed) — so an agent knows who to route to.
   `--co-change` adds each seed's historically co-changing files from git history
   (coupling imports miss — schema↔migration, code↔test), from one bounded
-  `git log`; fail-closed when git is absent.
+  `git log`; fail-closed when git is absent. Exposed to agents as the **`kit_map`
+  MCP tool** (paths / depth / budget / co_change), sharing one core (`mapReport`)
+  with the CLI so the two surfaces can't disagree.
 
 ### Triage delegate — deep skill scanning, borrowed authority (#327–#332)
 

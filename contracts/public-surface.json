@@ -246,6 +246,7 @@
     "kit_init",
     "kit_install",
     "kit_login",
+    "kit_map",
     "kit_run",
     "kit_secrets",
     "kit_standards"
