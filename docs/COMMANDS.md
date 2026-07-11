@@ -1,6 +1,6 @@
 # kit commands
 
-> Complete reference for every `kit <subcommand>`. Last updated 2026-06-27 (kit 2.0.0).
+> Complete reference for every `kit <subcommand>`. Last updated 2026-07-11 (kit 5.0.0).
 > Pair this with `docs/THREAT_MODEL.md` (what data flows where) and
 > `docs/DATA_FLOW.md` (exact reads/writes per op).
 
