@@ -233,7 +233,7 @@ export async function cmdSetup(): Promise<boolean> {
     recommended = profile.recommended;
   } else {
     recommended = await promptConfirm(
-      `Use the recommended profile? Wires cross-harness memory hooks (in ~/.claude) + git secret-scan${config.context ? " + context-check" : ""} gates after the core steps. [Y/n] `,
+      `Use the recommended profile? Wires cross-harness memory hooks (in ~/.claude) + git secret-scan + triage${config.context ? " + context-check" : ""} gates after the core steps. [Y/n] `,
       10000,
       profile.recommended,
     );

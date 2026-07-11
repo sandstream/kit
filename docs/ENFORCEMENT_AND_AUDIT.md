@@ -15,7 +15,8 @@ Deterministic, fail-closed, zero-LLM:
 - **PreToolUse gates** — `gate-bash`, `gate-env` block un-triaged installs and plaintext-secret
   writes *before* they land.
 - **Capture-time gates** — the memory write-gate (G1), install-gate, slopsquat scoring (G4).
-- **Commit/CI chokepoints** — `kit triage check-deps` (pre-commit), branch-protected checks.
+- **Commit/CI chokepoints** — `kit triage check-deps` + `kit triage check-skills` (pre-commit,
+  wired by `kit setup --recommended`), branch-protected checks.
 - **`warn → enforce` ramp** — a new gate warns first, then fails once enforced.
 
 This is the "gravitation": you *can't* do X. It shapes **how** software gets built.

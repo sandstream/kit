@@ -28,16 +28,18 @@ describe("applyRecommendedHardening", () => {
     return mkdtempSync(join(tmp, "git-")) + "/.git";
   }
 
-  it("wires memory hooks + a pre-commit secret-scan, and a pre-push when context is declared", async () => {
+  it("wires memory hooks + a pre-commit secret-scan + triage gates, and a pre-push when context is declared", async () => {
     const g = gitDir();
     const r = await applyRecommendedHardening({ context: { git: { email: "x@y.z" } } }, g);
 
     // 3 memory hooks (UserPromptSubmit/SessionEnd/SessionStart).
     assert.equal(r.memory.added.length, 3);
 
-    // pre-commit secret-scan gate.
+    // pre-commit secret-scan + triage gates (deps + skills).
     const pc = readFileSync(join(g, "hooks", "pre-commit"), "utf-8");
     assert.ok(pc.includes("security scan-staged"), "pre-commit runs security scan-staged");
+    assert.ok(pc.includes("triage check-deps"), "pre-commit runs the dep triage gate");
+    assert.ok(pc.includes("triage check-skills"), "pre-commit runs the skill triage gate");
 
     // pre-push context-check gate (context was declared).
     assert.ok(existsSync(join(g, "hooks", "pre-push")), "pre-push installed when context declared");
