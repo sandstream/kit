@@ -6,6 +6,101 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-07-11
+
+kit 5.0 is the **North Star** release: kit stops being only a *point-in-time*
+verifier and becomes a *continuous, portable, fail-closed governance layer* for
+the agent loop. Four pillars land, on top of a unified command surface. Nothing
+here breaks the 2.x/4.x CLI, config, or plugin contracts — every new capability
+is additive and every new gate is opt-in or degrades honestly.
+
+### Pillar 1 — Hardware-rooted identity (#289, #290)
+
+- **Honest keystore posture.** `kit doctor` surfaces WHICH backend signs kit's
+  identity (Secure Enclave / TPM / external command vs. the file-backed 0600
+  key) and NEVER silently downgrades: a file-backed key is a `warn`, and
+  `KIT_REQUIRE_HARDWARE` makes a missing hardware backend a fail-closed `fail`.
+- **`kit identity migrate`.** Move identity onto a hardware backend and revoke
+  the old file key in one attributable, audited step.
+
+### Pillar 2 — Control plane + keyless credentials (#317–#323)
+
+- **Offline-verified policy distribution.** `kit policy pull` fetches an
+  org-signed `.kit-policy.toml`, verifies it against the anchored signers
+  entirely offline, and `pull-revocations` propagates revocations monotonically
+  (never un-revokes). Fleet-RBAC rides the same signed channel.
+- **Offline signed approval tokens.** `kit policy approve` mints/consumes
+  identity-signed, offline-verifiable approval tokens for gated operations.
+- **Keyless credentials — sign, don't store.** A pure RFC 9421 HTTP Message
+  Signatures core (`src/keyless/http-sig.ts`) plus an identity bridge lets kit
+  sign egress requests for hosts declared in `[scope].sign` instead of holding a
+  long-lived secret. `kit doctor` reports the keyless posture, fail-closed.
+- **Control-plane posture row** in `kit doctor` + self-host protocol docs.
+
+### Pillar 3 — Exec-broker: one governance floor (#303–#316, #324–#326)
+
+- **Pure scope-decision core** (`checkEgress` / `checkFsWrite` / `scopeEnv`) with
+  fail-closed source resolution: no verified signed scope ⇒ grants nothing.
+- **PreToolUse enforcers** `kit gate-egress` / `kit gate-fs` block Bash network
+  targets and Write/Edit paths outside the signed `[scope]`, wired via
+  `kit agent-config --broker-gate`.
+- **Runtime mediation at the MCP surface**, staged safely: `off → observe
+  (dry-run, audits `wouldDeny`) → enforce`. A verified scope now **observes by
+  default** (`[scope].enforce_runtime` absent ⇒ observe) — mediation is on out of
+  the box without breaking anyone; enforce remains an explicit opt-in.
+- **Reconciliation (R1–R4).** The duplicate broker core was deleted and the whole
+  governance floor unified onto ONE exec-broker: CLI gates, the MCP runtime, and
+  the `kit doctor` posture all read the same signed decision — there is one
+  broker, not two.
+
+### Pillar 4 — Traveling profile + lifecycle insight (#291–#299, #325)
+
+- **Versioned, portable profile.** `kit profile` declares
+  `{skills, mcp, workflows, plugins, vault, gates, scope}` with canonical
+  serialization; `show|freeze|check` report declared-vs-discovered drift; `sign`
+  binds the scope/RoE; **`export`/`import`** move a signed bundle to a fresh host,
+  integrity-verified offline and fail-closed on tamper/revocation.
+- **Lifecycle insight.** A deterministic transcript tool-usage scanner powers
+  `kit insight unused` (loaded-but-never-called MCP servers), real
+  loaded-but-unused verdicts for skills, and a repeat→codify skill-draft scaffold.
+- **BYO-gap closers.** `kit triage plugin` (supply-chain + manifest-poisoning),
+  `kit triage vault-config` (backend-selection), and plugin discovery close the
+  last unaudited surfaces.
+
+### Triage delegate — deep skill scanning, borrowed authority (#327–#332)
+
+- **`kit triage skill --deep`** delegates to NVIDIA SkillSpector's STATIC Stage 1
+  (regex + AST + offline OSV) and normalizes its SARIF into kit's verdict,
+  attributed to the source. kit NEVER runs SkillSpector's LLM stage — enforced by
+  a scrubbed child env (every `SKILLSPECTOR_*` + provider key stripped) and a
+  static invocation. Fail-closed: an absent binary is a `skip`, never a silent
+  deep-clean.
+- **Commit-time enforcement.** `kit triage check-skills` blocks a staged skill
+  that lacks a fresh `--deep` triage; `kit setup --recommended` now wires both
+  triage gates (`check-deps` + `check-skills`) into the pre-commit hook; and
+  `kit doctor` reports whether the gates are actually wired.
+
+### Unified surface (#271–#288)
+
+- **One source of truth.** `cli.ts` was decomposed into cohesive `commands/*`
+  modules and a `COMMAND_REGISTRY` from which the CLI verbs, MCP exposure, help,
+  and stability tiers are all derived — a drift test proves CLI ≡ MCP.
+- **No false green.** Six fabricated-success MCP stubs were removed; a tool that
+  can't really run now says so.
+
+### Added — coverage + supply-chain gates (#255–#266, #270)
+
+- `kit coverage --standard` maps kit's deterministic checks to OWASP ASVS L2,
+  OWASP LLM Top 10 (2025), and NIST SSDF (800-218A) evidence maps.
+- Memory write-gate + verified-forget (G1), secret write-gate (G2), calibrated
+  slopsquat risk score (G4), `kit triage mcp` tool-poisoning/rug-pull (G3), and
+  the agent-toolchain SBOM over skills/MCP/plugins (G5).
+
+### Changed
+
+- Minimum Node.js is 22+. The public CLI/config/plugin contracts are unchanged;
+  5.0 is a major version for the scope of new capability, not for any break.
+
 ## [4.4.0] - 2026-07-07
 
 ### Added — `kit standards`: the third quality dimension (P1–P5, #255–#257)
