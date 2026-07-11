@@ -679,7 +679,8 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   map: {
     handler: cmdMap,
     stability: "experimental",
-    help: "Deterministic repo-map: the relevant slice of files around a seed (import graph, --depth, --json) — load part of a growing repo, not all of it (experimental)",
+    help: "Deterministic repo-map: the relevant slice of files around a seed (import graph, --depth, --budget, --co-change, --json) — load part of a growing repo, not all of it (experimental)",
+    mcp: true,
   },
   profile: {
     handler: cmdProfile,

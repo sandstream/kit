@@ -127,66 +127,82 @@ export async function cmdMap(): Promise<boolean> {
   }
   const seeds = positional.map((s) => relative(root, resolve(root, s)).split("\\").join("/"));
 
-  const graph = buildRepoGraph(root);
-  const known = new Set(graph.nodes.map((n) => n.id));
-  const missing = seeds.filter((s) => !known.has(s));
-  if (missing.length === seeds.length) {
+  const report = mapReport(root, seeds, { depth, budget, coChange: wantCoChange });
+  if (report.missing.length === seeds.length) {
     console.error(
-      `${c.red}no seed matched a source file — check the path(s):${c.reset} ${missing.join(", ")}`,
+      `${c.red}no seed matched a source file — check the path(s):${c.reset} ${report.missing.join(", ")}`,
     );
     return false;
   }
 
-  const full = relevantSlice(graph, seeds, depth);
-  // Apply a file-count budget: keep the nearest-to-seed files, log the rest (never silent).
-  const { kept, dropped } = budgetSlice(full, seeds, budget);
-  const keptIds = new Set(kept.map((n) => n.id));
-  const slice: RepoGraph =
-    budget > 0
-      ? { nodes: kept, edges: full.edges.filter((e) => keptIds.has(e.from) && keptIds.has(e.to)) }
-      : full;
-  const droppedFiles = dropped.filter((n) => n.kind === "file").map((n) => n.id);
-
-  // Ownership: who to route each slice file to — CODEOWNERS if present, else git-blame top-author.
-  const { owners, source } = computeOwners(root, slice);
-
-  // Co-change (opt-in): files that historically changed WITH each seed, from git history. Coupling
-  // that imports miss (schema↔migration, code↔test). Fail-closed: git absent/errored → empty.
-  const coChanged: Record<string, CoChange[]> = wantCoChange ? computeCoChange(root, seeds) : {};
-
   if (json) {
-    console.log(
-      JSON.stringify(
-        {
-          seeds,
-          depth,
-          budget: budget || null,
-          slice,
-          owners,
-          ownerSource: source,
-          coChanged: wantCoChange ? coChanged : undefined,
-          dropped: droppedFiles,
-          missing,
-        },
-        null,
-        2,
-      ),
-    );
+    console.log(JSON.stringify(report, null, 2));
     return true;
   }
 
   printReadableSlice({
-    slice,
+    slice: report.slice,
     seeds,
     depth,
     budget,
-    droppedFiles,
-    missing,
-    owners,
-    source,
-    coChanged,
+    droppedFiles: report.dropped,
+    missing: report.missing,
+    owners: report.owners,
+    source: report.ownerSource,
+    coChanged: report.coChanged ?? {},
   });
   return true;
+}
+
+export interface MapReport {
+  seeds: string[];
+  depth: number;
+  budget: number | null;
+  slice: RepoGraph;
+  owners: Record<string, string[]>;
+  ownerSource: "codeowners" | "git" | "none";
+  coChanged?: Record<string, CoChange[]>;
+  dropped: string[];
+  missing: string[];
+}
+
+/**
+ * The shared repo-map core behind BOTH `kit map` (CLI) and the `kit_map` MCP tool — one function so
+ * the two surfaces can never disagree (surface-unification doctrine). Deterministic; git usage in
+ * ownership/co-change is bounded and fail-closed. `seeds` are repo-relative posix paths.
+ */
+export function mapReport(
+  root: string,
+  seeds: string[],
+  opts: { depth: number; budget: number; coChange: boolean },
+): MapReport {
+  const graph = buildRepoGraph(root);
+  const known = new Set(graph.nodes.map((n) => n.id));
+  const missing = seeds.filter((s) => !known.has(s));
+
+  const full = relevantSlice(graph, seeds, opts.depth);
+  const { kept, dropped } = budgetSlice(full, seeds, opts.budget);
+  const keptIds = new Set(kept.map((n) => n.id));
+  const slice: RepoGraph =
+    opts.budget > 0
+      ? { nodes: kept, edges: full.edges.filter((e) => keptIds.has(e.from) && keptIds.has(e.to)) }
+      : full;
+  const droppedFiles = dropped.filter((n) => n.kind === "file").map((n) => n.id);
+
+  const { owners, source } = computeOwners(root, slice);
+  const coChanged = opts.coChange ? computeCoChange(root, seeds) : undefined;
+
+  return {
+    seeds,
+    depth: opts.depth,
+    budget: opts.budget || null,
+    slice,
+    owners,
+    ownerSource: source,
+    coChanged,
+    dropped: droppedFiles,
+    missing,
+  };
 }
 
 /** Commits to scan for co-change coupling — bounds the single `git log` call on a deep history. */

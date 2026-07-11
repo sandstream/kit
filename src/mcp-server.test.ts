@@ -80,7 +80,8 @@ describe("MCP server tool registration", () => {
       assert.ok(names.includes("kit_ci"), "kit_ci missing");
       assert.ok(names.includes("kit_run"), "kit_run missing");
       assert.ok(names.includes("kit_context"), "kit_context missing");
-      assert.equal(tools.length, 12);
+      assert.ok(names.includes("kit_map"), "kit_map missing");
+      assert.equal(tools.length, 13);
     } finally {
       await cleanup();
     }
@@ -780,6 +781,46 @@ describe("kit_init", () => {
       const content = await readFile(join(projectDir, ".kit.toml"), "utf-8");
       assert.equal(content, original, "original content should be unchanged");
     } finally {
+      await cleanup();
+    }
+  });
+});
+
+// ─── kit_map ───────────────────────────────────────────────────────────────
+describe("kit_map", () => {
+  it("returns the relevant import-slice around a seed (deterministic, read-only)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "kit-mcp-map-"));
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(
+      join(dir, "src", "a.ts"),
+      `import { b } from "./b.js";\nexport const a = b;\n`,
+      "utf-8",
+    );
+    await writeFile(join(dir, "src", "b.ts"), `export const b = 1;\n`, "utf-8");
+    await writeFile(join(dir, "src", "unrelated.ts"), `export const z = 0;\n`, "utf-8");
+
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_map",
+        arguments: { paths: ["src/a.ts"], cwd: dir },
+      });
+      const data = parseResult(result) as {
+        slice: { nodes: { id: string; kind: string }[] };
+        ownerSource: string;
+      };
+      const files = data.slice.nodes
+        .filter((n) => n.kind === "file")
+        .map((n) => n.id)
+        .sort();
+      assert.deepEqual(
+        files,
+        ["src/a.ts", "src/b.ts"],
+        "a's import-neighborhood, not unrelated.ts",
+      );
+      assert.ok(["codeowners", "git", "none"].includes(data.ownerSource));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
       await cleanup();
     }
   });
