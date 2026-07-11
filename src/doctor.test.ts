@@ -245,7 +245,7 @@ describe("runDoctor", () => {
     }
   });
 
-  it("surfaces the identity keystore posture (Pelare 1 — never silent)", async () => {
+  it("surfaces the identity keystore posture (Pillar 1 — never silent)", async () => {
     const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-9`);
     await mkdir(tmpDir, { recursive: true });
     try {

@@ -69,7 +69,7 @@ recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md
 
 ## What's new in 5.0
 
-kit 5.0 is the **North Star** release: it takes kit from a point-in-time verifier
+kit 5.0 takes kit from a point-in-time verifier
 to a _continuous, portable, fail-closed governance layer_ for the agent loop.
 Four pillars, all additive over 4.x — no stable command removed. Highlights:
 

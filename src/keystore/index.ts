@@ -1,5 +1,5 @@
 /**
- * Barrel for the KeyStore port (Pelare 1). Callers import from
+ * Barrel for the KeyStore port (Pillar 1). Callers import from
  * "./keystore/index.js" — one public path for the whole pillar.
  */
 export type { KeyStore, KeyStoreKind, KeyStoreAvailability, KeyStoreResolution } from "./types.js";

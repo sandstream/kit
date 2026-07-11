@@ -1,5 +1,5 @@
 /**
- * `kit insight` — Pelare 4's deterministic lifecycle-insight surface. First
+ * `kit insight` — Pillar 4's deterministic lifecycle-insight surface. First
  * subcommand: `unused` — which loaded MCP servers / skills were never actually
  * called, correlating the loaded toolchain (agent-sbom) against recorded usage
  * (the memory index's tool_uses table: MCP tools by `mcp__<server>__<tool>`,

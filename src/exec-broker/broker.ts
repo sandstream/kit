@@ -1,4 +1,4 @@
-// Pelare 3 — exec-broker: the enforcement wrapper.
+// Pillar 3 — exec-broker: the enforcement wrapper.
 //
 // brokerExec moves governance from advisory-at-chokepoint to ENFORCED-AT-EXEC:
 // it runs the three pure decision gates on an operation's DECLARED effects

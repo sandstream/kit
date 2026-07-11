@@ -214,8 +214,8 @@ async function checkGitHooks(config: kitConfig): Promise<DoctorCheck[]> {
 }
 
 /**
- * Identity KeyStore posture (Pelare 1). Surfaces WHICH backend signs kit's
- * identity and — per the North Star design principle — makes any degradation to
+ * Identity KeyStore posture (Pillar 1). Surfaces WHICH backend signs kit's
+ * identity and — per the 5.0 design principle — makes any degradation to
  * the file-backed 0600 key HONEST rather than silent:
  *   pass  hardware-rooted (Secure Enclave / TPM / external command)
  *   warn  file-backed 0600 key (the working default; no hardware backend active)
@@ -254,7 +254,7 @@ function checkIdentityKeystore(): DoctorCheck {
 }
 
 /**
- * Exec-broker scope posture (Pelare 3). Surfaces the state of the signed [scope]/RoE the
+ * Exec-broker scope posture (Pillar 3). Surfaces the state of the signed [scope]/RoE the
  * broker enforces against — per the design principle, "enforced" must never silently mean
  * "no-op" and a degradation is surfaced, never swallowed:
  *   pass  scope declared + signature verified (this scope governs)
@@ -428,7 +428,7 @@ async function checkTriageGates(cwd: string): Promise<DoctorCheck> {
 }
 
 /**
- * Keyless-credential posture (Pelare 2 tail — "sign, don't store"). Reports whether any hosts are
+ * Keyless-credential posture (Pillar 2 tail — "sign, don't store"). Reports whether any hosts are
  * declared keyless (`[scope].sign`) and whether kit can actually sign for them — never silent:
  *   skip  no keyless hosts declared
  *   pass  keyless hosts declared, scope VERIFIED, and a usable identity can sign
@@ -474,7 +474,7 @@ async function checkKeyless(cwd: string): Promise<DoctorCheck> {
 }
 
 /**
- * Control-plane posture (Pelare 2): is a DISTRIBUTED org policy present at this project, and is it
+ * Control-plane posture (Pillar 2): is a DISTRIBUTED org policy present at this project, and is it
  * trustworthy? Honest — "distributed" must never silently mean "unverified":
  *   skip  no .kit-policy.toml here (nothing distributed yet)
  *   pass  policy present + signature verified (org standard + any RBAC it carries govern)

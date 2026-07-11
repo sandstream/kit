@@ -1,5 +1,5 @@
 /**
- * kit RBAC identity providers — the ENROLLMENT-ONLY IdP layer for Pelare 2.
+ * kit RBAC identity providers — the ENROLLMENT-ONLY IdP layer for Pillar 2.
  *
  * An IdP (GitHub today; Azure/Entra and Google are documented future backends of
  * the SAME interface) is consulted ONLY at enrollment time to compile role

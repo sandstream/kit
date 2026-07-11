@@ -1,8 +1,8 @@
 /**
- * kit control plane — Pelare 2: signed-policy distribution + revocation propagation.
+ * kit control plane — Pillar 2: signed-policy distribution + revocation propagation.
  *
  * The control plane is a VERIFIER and DISTRIBUTOR of signed artifacts, NOT a
- * runtime-dependent service. Everything here holds the north-star invariants:
+ * runtime-dependent service. Everything here holds the 5.0-design invariants:
  *   - local-first / air-gap: a bundle can be a plain FILE; the only network is the
  *     opt-in `https:` fetch, behind an injectable `fetchImpl` (so tests + air-gap
  *     runs touch zero network). No egress by default, no telemetry.
