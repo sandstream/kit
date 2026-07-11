@@ -14,6 +14,7 @@ import {
   isEncryptedBackup,
   parseRecipient,
   maybeGunzip,
+  restoreFailureMessage,
 } from "./backup.js";
 import { gzipSync } from "node:zlib";
 
@@ -184,5 +185,41 @@ describe("memory backup — gzip compression (fits under host size caps)", () =>
     assert.equal(getStats(rdb).messages, 500);
     rdb.close();
     rmSync(tmp, { recursive: true, force: true });
+  });
+});
+
+describe("restoreFailureMessage — honest restore errors (not always 'wrong passphrase')", () => {
+  it("blames the passphrase ONLY for a genuine AES-GCM auth failure", () => {
+    assert.equal(
+      restoreFailureMessage(new Error("Unsupported state or unable to authenticate data")),
+      "wrong passphrase or corrupt backup",
+    );
+    assert.equal(
+      restoreFailureMessage(
+        new Error("error:1e000065:Cipher functions:OPENSSL_internal:BAD_DECRYPT"),
+      ),
+      "wrong passphrase or corrupt backup",
+    );
+  });
+
+  it("surfaces the REAL cause for non-crypto failures", () => {
+    assert.match(
+      restoreFailureMessage(
+        new Error("ENOENT: no such file or directory, open '/tmp/missing.enc'"),
+      ),
+      /ENOENT|no such file/,
+    );
+    assert.equal(
+      restoreFailureMessage(new Error("not a kit memory backup (bad magic)")),
+      "not a kit memory backup (bad magic)",
+    );
+    assert.match(
+      restoreFailureMessage(new Error("EACCES: permission denied")),
+      /EACCES|permission/,
+    );
+  });
+
+  it("never throws on a non-Error value", () => {
+    assert.equal(restoreFailureMessage("weird"), "weird");
   });
 });

@@ -185,6 +185,18 @@ export function backupPlain(srcPath: string = getMemoryDbPath(), outPath?: strin
 }
 
 /** Decrypt a backup blob into `destPath`. Throws on a wrong passphrase or tampered blob (GCM auth). */
+/**
+ * Map a restore error to a user-facing message. Only a genuine AES-GCM auth failure (wrong key /
+ * tampered ciphertext) blames the passphrase; every other cause — missing file, bad magic,
+ * permissions — surfaces its real message instead of the misleading "wrong passphrase". Pure.
+ */
+export function restoreFailureMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /unable to authenticate|bad[ _]decrypt|unsupported state|auth tag/i.test(msg)
+    ? "wrong passphrase or corrupt backup"
+    : msg;
+}
+
 export function restoreEncrypted(passphrase: string, inPath: string, destPath: string): void {
   const blob = readFileSync(inPath);
   const magic = blob.subarray(0, MAGIC_LEN);
