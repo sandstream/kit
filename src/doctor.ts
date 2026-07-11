@@ -375,6 +375,59 @@ async function checkDeepSkillScanner(): Promise<DoctorCheck> {
 }
 
 /**
+ * Triage pre-commit gate posture (increment 2d). Reports whether the commit-time triage chokepoint
+ * (`kit triage check-deps` + `kit triage check-skills`) is actually wired into the repo's pre-commit
+ * hook — the honest counterpart to `kit setup --recommended` installing it. Never silent:
+ *   pass  both triage gates present in the pre-commit hook
+ *   warn  the hook exists but is missing one gate (partial — e.g. wired before check-skills shipped)
+ *   skip  not a git repo, or the gates aren't wired (optional; run `kit setup --recommended`)
+ * Pure decision split out for testing.
+ */
+export function triageGateStatus(hookContent: string | null): {
+  status: DoctorCheckStatus;
+  detail: string;
+} {
+  const has = (needle: string) => !!hookContent && hookContent.includes(needle);
+  const deps = has("triage check-deps");
+  const skills = has("triage check-skills");
+  if (deps && skills) {
+    return { status: "pass", detail: "pre-commit runs triage check-deps + check-skills" };
+  }
+  if (deps || skills) {
+    return {
+      status: "warn",
+      detail: `pre-commit wires only triage ${deps ? "check-deps" : "check-skills"} — missing ${
+        deps ? "check-skills" : "check-deps"
+      }; re-run 'kit setup --recommended'`,
+    };
+  }
+  return {
+    status: "skip",
+    detail:
+      "triage pre-commit gates not wired — run 'kit setup --recommended' to enforce dep/skill triage at commit time",
+  };
+}
+
+async function checkTriageGates(cwd: string): Promise<DoctorCheck> {
+  const name = "triage pre-commit gates";
+  const category = "security";
+  const { isGitRepository } = await import("./check-hooks.js");
+  if (!isGitRepository()) {
+    return { name, status: "skip", detail: "not a git repository", category };
+  }
+  const { resolveHooksDir } = await import("./hooks.js");
+  const hookPath = join(resolveHooksDir(join(cwd, ".git")), "pre-commit");
+  let content: string | null = null;
+  try {
+    content = await readFile(hookPath, "utf-8");
+  } catch {
+    content = null; // no pre-commit hook → gates not wired
+  }
+  const { status, detail } = triageGateStatus(content);
+  return { name, status, detail, category };
+}
+
+/**
  * Keyless-credential posture (Pelare 2 tail — "sign, don't store"). Reports whether any hosts are
  * declared keyless (`[scope].sign`) and whether kit can actually sign for them — never silent:
  *   skip  no keyless hosts declared
@@ -507,6 +560,7 @@ export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorR
   allChecks.push(await checkBrokerRuntime(cwd));
   allChecks.push(await checkKeyless(cwd));
   allChecks.push(await checkDeepSkillScanner());
+  allChecks.push(await checkTriageGates(cwd));
   allChecks.push(checkControlPlane(cwd));
 
   const passed = allChecks.filter((c) => c.status === "pass").length;
