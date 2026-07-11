@@ -31,6 +31,13 @@ import {
   CODEOWNERS_PATHS,
   type CodeownersRule,
 } from "../repomap/ownership.js";
+import {
+  parseCoChangeLog,
+  coChangeCounts,
+  topCoChanged,
+  COCHANGE_SEP,
+  type CoChange,
+} from "../repomap/cochange.js";
 
 const EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
 
@@ -91,13 +98,17 @@ export async function cmdMap(): Promise<boolean> {
     console.log(
       "  kit map <path> --budget 20   Keep only the 20 nearest files (drops are logged, never silent)",
     );
+    console.log(
+      "  kit map <path> --co-change   Add files that historically change WITH the seed (git history)",
+    );
     console.log("  kit map <path> --json        Emit the slice as JSON (for an agent/tool)");
     console.log("\nExample:");
-    console.log("  kit map src/exec-broker/broker.ts --depth 2 --budget 25");
+    console.log("  kit map src/exec-broker/broker.ts --depth 2 --budget 25 --co-change");
     return args.length !== 0;
   }
 
   const json = hasFlag(args, "--json");
+  const wantCoChange = hasFlag(args, "--co-change");
   const depthRaw = flagValue(process.argv, "--depth");
   const depth = depthRaw ? Math.max(0, Number.parseInt(depthRaw, 10) || 0) : 1;
   const budgetRaw = flagValue(process.argv, "--budget");
@@ -139,6 +150,10 @@ export async function cmdMap(): Promise<boolean> {
   // Ownership: who to route each slice file to — CODEOWNERS if present, else git-blame top-author.
   const { owners, source } = computeOwners(root, slice);
 
+  // Co-change (opt-in): files that historically changed WITH each seed, from git history. Coupling
+  // that imports miss (schema↔migration, code↔test). Fail-closed: git absent/errored → empty.
+  const coChanged: Record<string, CoChange[]> = wantCoChange ? computeCoChange(root, seeds) : {};
+
   if (json) {
     console.log(
       JSON.stringify(
@@ -149,6 +164,7 @@ export async function cmdMap(): Promise<boolean> {
           slice,
           owners,
           ownerSource: source,
+          coChanged: wantCoChange ? coChanged : undefined,
           dropped: droppedFiles,
           missing,
         },
@@ -159,8 +175,58 @@ export async function cmdMap(): Promise<boolean> {
     return true;
   }
 
-  printReadableSlice({ slice, seeds, depth, budget, droppedFiles, missing, owners, source });
+  printReadableSlice({
+    slice,
+    seeds,
+    depth,
+    budget,
+    droppedFiles,
+    missing,
+    owners,
+    source,
+    coChanged,
+  });
   return true;
+}
+
+/** Commits to scan for co-change coupling — bounds the single `git log` call on a deep history. */
+const COCHANGE_COMMITS = 1500;
+
+/**
+ * Top co-changed files per seed from git history. One bounded `git log --name-only` call; parsed and
+ * counted purely. Fail-closed: git absent/errored → `{}` (no coupling claimed, never guessed).
+ */
+function computeCoChange(root: string, seeds: string[]): Record<string, CoChange[]> {
+  let raw: string;
+  try {
+    raw = execFileSync(
+      "git",
+      [
+        "-C",
+        root,
+        "log",
+        `-n${COCHANGE_COMMITS}`,
+        "--no-merges",
+        "--name-only",
+        `--format=${COCHANGE_SEP}%H`,
+      ],
+      {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 15_000,
+        maxBuffer: 64 * 1024 * 1024,
+      },
+    );
+  } catch {
+    return {};
+  }
+  const counts = coChangeCounts(parseCoChangeLog(raw));
+  const out: Record<string, CoChange[]> = {};
+  for (const seed of seeds) {
+    const top = topCoChanged(counts, seed);
+    if (top.length) out[seed] = top;
+  }
+  return out;
 }
 
 /** Max files to git-blame for the ownership fallback — bounds per-file git calls on a big slice. */
@@ -223,6 +289,7 @@ function printReadableSlice(o: {
   missing: string[];
   owners: Record<string, string[]>;
   source: "codeowners" | "git" | "none";
+  coChanged: Record<string, CoChange[]>;
 }): void {
   const files = o.slice.nodes.filter((n) => n.kind === "file");
   const externals = o.slice.nodes.filter((n) => n.kind === "external");
@@ -252,6 +319,13 @@ function printReadableSlice(o: {
     console.log(
       `  ${c.yellow}${o.droppedFiles.length} file(s) dropped to fit --budget ${o.budget}:${c.reset} ${shown.join(", ")}${tail}`,
     );
+  }
+  for (const seed of o.seeds) {
+    const co = o.coChanged[seed];
+    if (co?.length) {
+      const list = co.map((x) => `${x.file} (${x.count})`).join(", ");
+      console.log(`  ${c.dim}co-changes with ${seed}:${c.reset} ${list}`);
+    }
   }
   if (o.missing.length) {
     console.log(`  ${c.yellow}unmatched seeds:${c.reset} ${o.missing.join(", ")}`);

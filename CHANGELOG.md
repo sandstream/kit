@@ -77,6 +77,9 @@ is additive and every new gate is opt-in or degrades honestly.
   — from a committed **CODEOWNERS** (deterministic, last-match-wins), or the
   **git-blame top-author** when no CODEOWNERS exists (fail-closed: git
   absent/errored → no owner, never guessed) — so an agent knows who to route to.
+  `--co-change` adds each seed's historically co-changing files from git history
+  (coupling imports miss — schema↔migration, code↔test), from one bounded
+  `git log`; fail-closed when git is absent.
 
 ### Triage delegate — deep skill scanning, borrowed authority (#327–#332)
 
