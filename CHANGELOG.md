@@ -73,9 +73,10 @@ is additive and every new gate is opt-in or degrades honestly.
   repo, not the whole tree. `--budget` keeps the N nearest-to-seed files and
   **logs every drop** (never silent truncation). Pure graph core + a
   dependency-free TS/JS extractor; relative specifiers that resolve to no known
-  file are dropped, never guessed. Each slice file is annotated with its
-  **CODEOWNERS** owner(s) (deterministic, last-match-wins) so an agent knows who
-  to route to.
+  file are dropped, never guessed. Each slice file is annotated with its owner(s)
+  — from a committed **CODEOWNERS** (deterministic, last-match-wins), or the
+  **git-blame top-author** when no CODEOWNERS exists (fail-closed: git
+  absent/errored → no owner, never guessed) — so an agent knows who to route to.
 
 ### Triage delegate — deep skill scanning, borrowed authority (#327–#332)
 
