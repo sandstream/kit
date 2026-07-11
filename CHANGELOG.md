@@ -128,6 +128,9 @@ is additive and every new gate is opt-in or degrades honestly.
 
 ## [4.4.0] - 2026-07-07
 
+> Note: 4.4.0 was prepared in-repo but never published to npm (the registry went
+> straight from 4.3.0 to 5.0.0). Everything below ships as part of 5.0.0.
+
 ### Added — `kit standards`: the third quality dimension (P1–P5, #255–#257)
 
 - **General gate (P1).** Language-agnostic code-quality metrics, measured the same
