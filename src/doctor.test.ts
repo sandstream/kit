@@ -4,7 +4,7 @@ import { writeFile, unlink, mkdir, rmdir, rm } from "node:fs/promises";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runDoctor } from "./doctor.js";
+import { runDoctor, triageGateStatus } from "./doctor.js";
 import { loadOrCreateIdentity, identityId } from "./identity.js";
 import { resolveKeyStore } from "./keystore/index.js";
 import {
@@ -230,6 +230,21 @@ describe("runDoctor", () => {
     }
   });
 
+  it("triage pre-commit gates: check is always present (skip when not wired)", async () => {
+    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-triage-gates`);
+    await mkdir(tmpDir, { recursive: true });
+    try {
+      const result = await runDoctor({}, tmpDir);
+      const g = result.checks.find((c) => c.name === "triage pre-commit gates");
+      assert.ok(g, "triage pre-commit gates check should always be present");
+      // tmpDir is not a git repo → skip; a wired repo would be pass — both honest.
+      assert.ok(["skip", "pass", "warn"].includes(g.status), `unexpected status: ${g.status}`);
+      assert.ok(g.detail.length > 0);
+    } finally {
+      await rm(tmpDir, { recursive: true });
+    }
+  });
+
   it("surfaces the identity keystore posture (Pelare 1 — never silent)", async () => {
     const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-9`);
     await mkdir(tmpDir, { recursive: true });
@@ -361,5 +376,33 @@ describe("runDoctor — keyless credentials row (Pillar 2 tail)", () => {
     assert.ok(row);
     assert.equal(row.status, "pass", row.detail);
     assert.match(row.detail, /require signed requests/);
+  });
+});
+
+describe("triageGateStatus (pure — pre-commit gate posture)", () => {
+  it("pass when both triage gates are wired into the pre-commit hook", () => {
+    const hook =
+      "#!/bin/sh\nkit security scan-staged\nkit triage check-deps\nkit triage check-skills\n";
+    const r = triageGateStatus(hook);
+    assert.equal(r.status, "pass");
+    assert.match(r.detail, /check-deps \+ check-skills/);
+  });
+
+  it("warn (partial drift) when only check-deps is wired — names the missing gate", () => {
+    const r = triageGateStatus("#!/bin/sh\nkit triage check-deps\n");
+    assert.equal(r.status, "warn");
+    assert.match(r.detail, /missing check-skills/);
+  });
+
+  it("warn (partial drift) when only check-skills is wired", () => {
+    const r = triageGateStatus("#!/bin/sh\nkit triage check-skills\n");
+    assert.equal(r.status, "warn");
+    assert.match(r.detail, /missing check-deps/);
+  });
+
+  it("skip when neither gate is present or there is no hook (never silent — suggests setup)", () => {
+    assert.equal(triageGateStatus("#!/bin/sh\nkit security scan-staged\n").status, "skip");
+    assert.equal(triageGateStatus(null).status, "skip");
+    assert.match(triageGateStatus(null).detail, /kit setup --recommended/);
   });
 });
