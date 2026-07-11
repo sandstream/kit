@@ -70,7 +70,7 @@ recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md
 ## What's new in 5.0
 
 kit 5.0 is the **North Star** release: it takes kit from a point-in-time verifier
-to a *continuous, portable, fail-closed governance layer* for the agent loop.
+to a _continuous, portable, fail-closed governance layer_ for the agent loop.
 Four pillars, all additive over 4.x — no stable command removed. Highlights:
 
 - **Pillar 1 — hardware-rooted identity.** `kit doctor` surfaces which backend
@@ -86,7 +86,7 @@ Four pillars, all additive over 4.x — no stable command removed. Highlights:
 - **Pillar 3 — one exec-broker.** A single signed-scope governance floor drives
   the PreToolUse gates (`kit gate-egress` / `gate-fs`), the MCP runtime, and the
   `kit doctor` posture. Runtime mediation is **on by default in observe mode**
-  (audits what it *would* deny); enforce is an explicit opt-in.
+  (audits what it _would_ deny); enforce is an explicit opt-in.
 - **Pillar 4 — traveling profile.** `kit profile` declares your
   `{skills, mcp, workflows, plugins, vault, gates, scope}`, audits
   declared-vs-discovered drift, signs the scope/RoE, and **exports/imports** a
@@ -96,7 +96,7 @@ Four pillars, all additive over 4.x — no stable command removed. Highlights:
   SkillSpector's static Stage 1 (no LLM, no egress) and `kit setup --recommended`
   wires the triage gates into your pre-commit hook.
 - **Repo-map (`kit map` / MCP `kit_map`).** A deterministic, zero-LLM code map:
-  given a seed file, get the relevant *slice* of the repo — import neighbors
+  given a seed file, get the relevant _slice_ of the repo — import neighbors
   (TS/JS + Python), a `--budget` cap with a logged drop-list, owner attribution
   (CODEOWNERS or git-blame), and `--co-change` coupling from git history — so an
   agent loads part of a growing repo, not the whole tree.
@@ -328,17 +328,17 @@ The block is regenerated in place on re-run; edit outside its markers freely.
 kit is **agent-agnostic** — it's a CLI that any coding agent can run, plus opt-in
 adapters for the surfaces each agent exposes. Support today, per agent:
 
-| Agent            | Memory index¹ | "use kit" rules block² |         Agent/MCP config audit³         | Perm allowlist⁴ | Auto-capture hooks⁵ | Blocking gate⁶ |
-| :--------------- | :-----------: | :--------------------: | :-------------------------------------: | :-------------: | :-----------------: | :------------: |
-| **Claude Code**  |      ✅       |     ✅ `CLAUDE.md`     |   ✅ + commands/agents/skills/plugins   |       ✅        |         ✅          |    ✅ hook     |
-| **OpenAI Codex** |      ✅       |     ✅ `AGENTS.md`     |           ✅ `.codex/config`            |        —        |          —          |    ✅ hook     |
-| **OpenCode**     |      ✅       |     ✅ `AGENTS.md`     | ✅ `opencode.json` + `.opencode/plugin` |        —        |          —          |   ✅ plugin    |
-| **Cursor**       |      ✅       |   ✅ `.cursorrules`    |          ✅ `.cursor/mcp.json`          |        —        |          —          |    ✅ hook     |
-| **Cline**        |      ✅       |    ✅ `.clinerules`    |                    —                    |        —        |          —          |    ✅ hook     |
-| **Copilot**      |      —        | ✅ `copilot-instructions.md` |               —                   |        —        |          —          |      —⁸        |
-| **Gemini CLI**   |      ✅       |           —            |                    —                    |        —        |          —          |    ✅ hook     |
-| **Continue**     |      ✅       |           —            |                    —                    |        —        |          —          |      n/a⁷      |
-| **Amazon Q**     |      ✅       |           —            |                    —                    |        —        |          —          |    ✅ hook     |
+| Agent            | Memory index¹ |    "use kit" rules block²    |         Agent/MCP config audit³         | Perm allowlist⁴ | Auto-capture hooks⁵ | Blocking gate⁶ |
+| :--------------- | :-----------: | :--------------------------: | :-------------------------------------: | :-------------: | :-----------------: | :------------: |
+| **Claude Code**  |      ✅       |        ✅ `CLAUDE.md`        |   ✅ + commands/agents/skills/plugins   |       ✅        |         ✅          |    ✅ hook     |
+| **OpenAI Codex** |      ✅       |        ✅ `AGENTS.md`        |           ✅ `.codex/config`            |        —        |          —          |    ✅ hook     |
+| **OpenCode**     |      ✅       |        ✅ `AGENTS.md`        | ✅ `opencode.json` + `.opencode/plugin` |        —        |          —          |   ✅ plugin    |
+| **Cursor**       |      ✅       |      ✅ `.cursorrules`       |          ✅ `.cursor/mcp.json`          |        —        |          —          |    ✅ hook     |
+| **Cline**        |      ✅       |       ✅ `.clinerules`       |                    —                    |        —        |          —          |    ✅ hook     |
+| **Copilot**      |       —       | ✅ `copilot-instructions.md` |                    —                    |        —        |          —          |       —⁸       |
+| **Gemini CLI**   |      ✅       |              —               |                    —                    |        —        |          —          |    ✅ hook     |
+| **Continue**     |      ✅       |              —               |                    —                    |        —        |          —          |      n/a⁷      |
+| **Amazon Q**     |      ✅       |              —               |                    —                    |        —        |          —          |    ✅ hook     |
 
 ✅ supported · — not yet · n/a not applicable (no surface) ([#146](https://github.com/sandstream/kit/issues/146))
 
@@ -966,7 +966,7 @@ implementations here are kit's own (deterministic, zero-LLM). Thanks to:
 - **[cloudctx](https://github.com/chadptk1238/cloudctx)** (MIT) — the memory
   store's SQLite schema and two-hook capture design.
 - **[headroom](https://github.com/chopratejas/headroom)** — the idea behind
-  `kit memory learn`: mine transcripts for recurring instructions and *suggest*
+  `kit memory learn`: mine transcripts for recurring instructions and _suggest_
   memory rules (kit does it deterministically, bring-your-own-LLM, no model call).
 - **[guild](https://github.com/mathomhaus/guild)** (Apache-2.0) — atomic PAL
   ("blocked-on-you") claiming: claim/release with auto-release of abandoned

@@ -191,13 +191,13 @@
 
 Deterministic, zero-LLM code map: load only the relevant slice of a growing repo. Also exposed to agents as the `kit_map` MCP tool (same core — CLI ≡ MCP).
 
-| Command                        | Purpose                                                                                                             |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `kit map <path...>`            | The files connected to the seed(s) within `--depth` import hops (both directions) + external packages. TS/JS + Python. |
-| `kit map <path> --depth N`     | Widen the neighborhood (default 1).                                                                                  |
-| `kit map <path> --budget N`    | Keep only the N nearest-to-seed files; every drop is logged (never silent truncation).                               |
-| `kit map <path> --co-change`   | Add files that historically change WITH the seed (bounded `git log`; fail-closed without git).                       |
-| `kit map <path> --json`        | Emit the slice (+ owners, ownerSource, coChanged, dropped) for an agent/tool.                                        |
+| Command                      | Purpose                                                                                                                |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `kit map <path...>`          | The files connected to the seed(s) within `--depth` import hops (both directions) + external packages. TS/JS + Python. |
+| `kit map <path> --depth N`   | Widen the neighborhood (default 1).                                                                                    |
+| `kit map <path> --budget N`  | Keep only the N nearest-to-seed files; every drop is logged (never silent truncation).                                 |
+| `kit map <path> --co-change` | Add files that historically change WITH the seed (bounded `git log`; fail-closed without git).                         |
+| `kit map <path> --json`      | Emit the slice (+ owners, ownerSource, coChanged, dropped) for an agent/tool.                                          |
 
 Every slice file is attributed to its owner — CODEOWNERS (last-match-wins) or the git-blame top-author fallback; no CODEOWNERS and no git ⇒ no owner shown, never guessed.
 
