@@ -29,6 +29,7 @@ import { cmdDoctor, cmdAdd, cmdSetup, cmdInit } from "./commands/setup.js";
 import { cmdReview } from "./commands/review.js";
 import { cmdInsight } from "./commands/insight.js";
 import { cmdProfile } from "./commands/profile.js";
+import { cmdMap } from "./commands/repomap.js";
 import {
   cmdStatus,
   cmdHealth,
@@ -674,6 +675,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdInsight,
     stability: "experimental",
     help: "Deterministic lifecycle insight (unused: loaded-but-never-called MCP servers, from the transcript index; --json)",
+  },
+  map: {
+    handler: cmdMap,
+    stability: "experimental",
+    help: "Deterministic repo-map: the relevant slice of files around a seed (import graph, --depth, --json) — load part of a growing repo, not all of it (experimental)",
   },
   profile: {
     handler: cmdProfile,
