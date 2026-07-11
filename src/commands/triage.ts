@@ -151,7 +151,7 @@ export async function cmdTriage(): Promise<boolean> {
   // a failed triage means the user explicitly chose not to install, so it
   // shouldn't unblock the commit.
   if (overall && target) {
-    await recordTriageRun(type, target, sandbox);
+    await recordTriageRun(type, target, sandbox, deep);
   }
 
   return overall;
@@ -415,10 +415,17 @@ interface TriageLogEntry {
   type: string;
   target: string;
   sandbox: boolean;
+  /** Whether a deep delegate scan (SkillSpector Stage 1) ran — lets a gate require it for skills. */
+  deep?: boolean;
   granter: string;
 }
 
-async function recordTriageRun(type: string, target: string, sandbox: boolean): Promise<void> {
+async function recordTriageRun(
+  type: string,
+  target: string,
+  sandbox: boolean,
+  deep = false,
+): Promise<void> {
   const { appendFile } = await import("node:fs/promises");
   const { resolve } = await import("node:path");
   const entry: TriageLogEntry = {
@@ -426,6 +433,7 @@ async function recordTriageRun(type: string, target: string, sandbox: boolean): 
     type,
     target,
     sandbox,
+    deep,
     granter: process.env.USER ?? "unknown",
   };
   try {

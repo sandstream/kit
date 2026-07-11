@@ -215,6 +215,21 @@ describe("runDoctor", () => {
     }
   });
 
+  it("deep skill scanner: skips when SkillSpector is not installed (optional delegate)", async () => {
+    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-deep`);
+    await mkdir(tmpDir, { recursive: true });
+    try {
+      const result = await runDoctor({}, tmpDir);
+      const deep = result.checks.find((c) => c.name === "deep skill scanner");
+      assert.ok(deep, "deep skill scanner check should always be present");
+      // Not installed in CI → skip (optional); if a future runner has it, pass is also honest.
+      assert.ok(["skip", "pass"].includes(deep.status), `unexpected status: ${deep.status}`);
+      assert.ok(deep.detail.length > 0);
+    } finally {
+      await rm(tmpDir, { recursive: true });
+    }
+  });
+
   it("surfaces the identity keystore posture (Pelare 1 — never silent)", async () => {
     const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-9`);
     await mkdir(tmpDir, { recursive: true });
