@@ -27,6 +27,7 @@ import { sanitizeForPrompt } from "../memory/injection.js";
 import {
   backupEncrypted,
   restoreEncrypted,
+  restoreFailureMessage,
   generateMemoryKeypair,
   saveMemoryKey,
   loadMemoryKey,
@@ -1389,8 +1390,10 @@ async function memRestore(): Promise<boolean> {
   }
   try {
     restoreEncrypted(pass, inFile, dest);
-  } catch {
-    console.error(`${c.red}restore failed — wrong passphrase or corrupt backup${c.reset}`);
+  } catch (err) {
+    // Surface the REAL cause (missing file, permissions, bad format) instead of always
+    // blaming the passphrase — only a genuine AES-GCM auth failure means wrong-key/corrupt.
+    console.error(`${c.red}restore failed — ${restoreFailureMessage(err)}${c.reset}`);
     return false;
   }
   console.log(`${c.green}✓${c.reset} restored → ${dest}`);

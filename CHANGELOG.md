@@ -8,8 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [5.0.0] - 2026-07-11
 
-kit 5.0 is the **North Star** release: kit stops being only a *point-in-time*
-verifier and becomes a *continuous, portable, fail-closed governance layer* for
+kit 5.0 is the **North Star** release: kit stops being only a _point-in-time_
+verifier and becomes a _continuous, portable, fail-closed governance layer_ for
 the agent loop. Four pillars land, on top of a unified command surface. Nothing
 here breaks the 2.x/4.x CLI, config, or plugin contracts — every new capability
 is additive and every new gate is opt-in or degrades honestly.
@@ -45,7 +45,7 @@ is additive and every new gate is opt-in or degrades honestly.
   targets and Write/Edit paths outside the signed `[scope]`, wired via
   `kit agent-config --broker-gate`.
 - **Runtime mediation at the MCP surface**, staged safely: `off → observe
-  (dry-run, audits `wouldDeny`) → enforce`. A verified scope now **observes by
+(dry-run, audits `wouldDeny`) → enforce`. A verified scope now **observes by
   default** (`[scope].enforce_runtime` absent ⇒ observe) — mediation is on out of
   the box without breaking anyone; enforce remains an explicit opt-in.
 - **Reconciliation (R1–R4).** The duplicate broker core was deleted and the whole
@@ -95,6 +95,13 @@ is additive and every new gate is opt-in or degrades honestly.
 - Memory write-gate + verified-forget (G1), secret write-gate (G2), calibrated
   slopsquat risk score (G4), `kit triage mcp` tool-poisoning/rug-pull (G3), and
   the agent-toolchain SBOM over skills/MCP/plugins (G5).
+
+### Fixed
+
+- `kit memory restore` now surfaces the REAL failure cause (missing file, bad
+  format, permissions) instead of always reporting "wrong passphrase or corrupt
+  backup" — only a genuine AES-GCM auth failure blames the passphrase now
+  (`restoreFailureMessage`, unit-tested).
 
 ### Changed
 
