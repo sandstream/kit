@@ -95,6 +95,11 @@ Four pillars, all additive over 4.x — no stable command removed. Highlights:
 - **Deep skill triage.** `kit triage skill --deep` delegates to NVIDIA
   SkillSpector's static Stage 1 (no LLM, no egress) and `kit setup --recommended`
   wires the triage gates into your pre-commit hook.
+- **Repo-map (`kit map` / MCP `kit_map`).** A deterministic, zero-LLM code map:
+  given a seed file, get the relevant *slice* of the repo — import neighbors
+  (TS/JS + Python), a `--budget` cap with a logged drop-list, owner attribution
+  (CODEOWNERS or git-blame), and `--co-change` coupling from git history — so an
+  agent loads part of a growing repo, not the whole tree.
 
 All of it holds the frozen CLI / config / plugin contracts. See
 [CHANGELOG.md](CHANGELOG.md) for the full list.
