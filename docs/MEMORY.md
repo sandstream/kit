@@ -85,14 +85,16 @@ transcripts from every supported coding agent on the machine, each tagged with a
 schema as Amazon Q, `conversations_v2` with a `conversations` fallback),
 **Factory Droid** (`~/.factory/projects/**/*.jsonl` — Claude-Code-compatible JSONL),
 **Aider** (project-local `$GIT_ROOT/.aider.chat.history.md` markdown, honoring
-`AIDER_CHAT_HISTORY_FILE`), **Cline** (VS Code `saoudrizwan.claude-dev/tasks`), and
+`AIDER_CHAT_HISTORY_FILE`), **Antigravity** (`~/.gemini/{antigravity-cli,antigravity-ide,antigravity}/brain/<id>/.system_generated/logs/transcript_full.jsonl` —
+JSONL brain logs; the opaque protobuf conversation DB is ignored),
+**Cline** (VS Code `saoudrizwan.claude-dev/tasks`), and
 **OpenCode** (`~/.local/share/opencode` — SQLite `opencode.db` or the legacy
 `storage/` tree). Absent agents are skipped silently. Adding one
 is a single parser in `indexAllHarnesses()`. Each parser is built against the
 agent's own serialization format (verified from its source), never guessed. The
 Cursor + Amazon Q + Kiro parsers read app-internal SQLite defensively — if the
 shape ever differs they index nothing rather than risk wrong data. (GitHub Copilot
-CLI, Antigravity IDE, and Zed stay out until their formats are
+CLI and Zed stay out until their formats are
 source-verifiable: see the table in the repo notes.)
 
 ### Pending actions (PAL)

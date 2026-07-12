@@ -328,17 +328,22 @@ The block is regenerated in place on re-run; edit outside its markers freely.
 kit is **agent-agnostic** — it's a CLI that any coding agent can run, plus opt-in
 adapters for the surfaces each agent exposes. Support today, per agent:
 
-| Agent            | Memory index¹ |    "use kit" rules block²    |         Agent/MCP config audit³         | Perm allowlist⁴ | Auto-capture hooks⁵ | Blocking gate⁶ |
-| :--------------- | :-----------: | :--------------------------: | :-------------------------------------: | :-------------: | :-----------------: | :------------: |
-| **Claude Code**  |      ✅       |        ✅ `CLAUDE.md`        |   ✅ + commands/agents/skills/plugins   |       ✅        |         ✅          |    ✅ hook     |
-| **OpenAI Codex** |      ✅       |        ✅ `AGENTS.md`        |           ✅ `.codex/config`            |        —        |          —          |    ✅ hook     |
-| **OpenCode**     |      ✅       |        ✅ `AGENTS.md`        | ✅ `opencode.json` + `.opencode/plugin` |        —        |          —          |   ✅ plugin    |
-| **Cursor**       |      ✅       |      ✅ `.cursorrules`       |          ✅ `.cursor/mcp.json`          |        —        |          —          |    ✅ hook     |
-| **Cline**        |      ✅       |       ✅ `.clinerules`       |                    —                    |        —        |          —          |    ✅ hook     |
-| **Copilot**      |       —       | ✅ `copilot-instructions.md` |                    —                    |        —        |          —          |       —⁸       |
-| **Gemini CLI**   |      ✅       |              —               |                    —                    |        —        |          —          |    ✅ hook     |
-| **Continue**     |      ✅       |              —               |                    —                    |        —        |          —          |      n/a⁷      |
-| **Amazon Q**     |      ✅       |              —               |                    —                    |        —        |          —          |    ✅ hook     |
+| Agent             | Memory index¹ |    "use kit" rules block²    |         Agent/MCP config audit³         | Perm allowlist⁴ | Auto-capture hooks⁵ | Blocking gate⁶ |
+| :---------------- | :-----------: | :--------------------------: | :-------------------------------------: | :-------------: | :-----------------: | :------------: |
+| **Claude Code**   |      ✅       |        ✅ `CLAUDE.md`        |   ✅ + commands/agents/skills/plugins   |       ✅        |         ✅          |    ✅ hook     |
+| **OpenAI Codex**  |      ✅       |        ✅ `AGENTS.md`        |           ✅ `.codex/config`            |        —        |          —          |    ✅ hook     |
+| **OpenCode**      |      ✅       |        ✅ `AGENTS.md`        | ✅ `opencode.json` + `.opencode/plugin` |        —        |          —          |   ✅ plugin    |
+| **Cursor**        |      ✅       |      ✅ `.cursorrules`       |          ✅ `.cursor/mcp.json`          |        —        |          —          |    ✅ hook     |
+| **Cline**         |      ✅       |       ✅ `.clinerules`       |                    —                    |        —        |          —          |    ✅ hook     |
+| **Copilot**       |       —       | ✅ `copilot-instructions.md` |                    —                    |        —        |          —          |       —⁸       |
+| **Gemini CLI**    |      ✅       |        ✅ `GEMINI.md`        |                    —                    |        —        |          —          |    ✅ hook     |
+| **Continue**      |      ✅       |              —               |                    —                    |        —        |          —          |      n/a⁷      |
+| **Amazon Q**      |      ✅       |              —               |                    —                    |        —        |          —          |    ✅ hook     |
+| **AWS Kiro**      |      ✅       |   ✅ `AGENTS.md` (shared)    |                    —                    |        —        |          —          |    ✅ hook     |
+| **Factory Droid** |      ✅       |   ✅ `AGENTS.md` (shared)    |                    —                    |        —        |          —          |    ✅ hook     |
+| **Aider**         |      ✅       |              —               |                    —                    |        —        |          —          |       —        |
+| **Antigravity**   |      ✅       |              —               |                    —                    |        —        |          —          |    ✅ hook     |
+| **Augment**       |       —       |   ✅ `.augment-guidelines`   |                    —                    |        —        |          —          |    ✅ hook     |
 
 ✅ supported · — not yet · n/a not applicable (no surface) ([#146](https://github.com/sandstream/kit/issues/146))
 
@@ -347,7 +352,7 @@ adapters for the surfaces each agent exposes. Support today, per agent:
 3. `kit agent-audit` flags plaintext secrets, cleartext/inline-code MCP servers, and malware-shaped hooks in the agent's config. Generic `.mcp.json` / `.claude.json` are scanned for every agent regardless.
 4. kit can pre-authorize its read-only commands so they run without a prompt (Claude Code's `permissions.allow` today).
 5. kit registers lifecycle hooks so memory capture happens automatically (Claude Code `settings.json` hooks today).
-6. A **true blocking gate** (deny an un-triaged install before it runs) uses the agent's pre-tool hook — `kit agent-config --install-gate` wires it for Claude Code, Codex, Amazon Q, Gemini CLI, and Cursor (exit-2 hook commands); OpenCode via a generated `.opencode/plugin` that hooks `tool.execute.before` and throws; and Cline via an executable `.clinerules/hooks/PreToolUse` shim that blocks through Cline's `{cancel:true}` stdout contract. The agent-agnostic enforcement floor is **git hooks** (`kit hooks`, pre-commit/pre-push) — they fire in any agent or none. See [#146](https://github.com/sandstream/kit/issues/146).
+6. A **true blocking gate** (deny an un-triaged install before it runs) uses the agent's pre-tool hook — `kit agent-config` wires it by default (`--no-install-gate` opts out) for Claude Code, Codex, Amazon Q, Gemini CLI, and Cursor (exit-2 hook commands); AWS Kiro, Factory Droid, Augment, and Antigravity via their hook/settings files (`.kiro/agents`, `.factory/hooks.json`, `.augment/settings.json`, `.agents/hooks.json`); OpenCode via a generated `.opencode/plugin` that hooks `tool.execute.before` and throws; and Cline via an executable `.clinerules/hooks/PreToolUse` shim that blocks through Cline's `{cancel:true}` stdout contract — **11 agents** in all. The agent-agnostic enforcement floor is **git hooks** (`kit hooks`, pre-commit/pre-push) — they fire in any agent or none. See [#146](https://github.com/sandstream/kit/issues/146).
 7. **Continue** exposes only a declarative tool-permission policy (`~/.continue/permissions.yaml` allow/ask/exclude) with no way to invoke an external command before a tool runs, so a kit blocking-gate adapter isn't possible there — git hooks + the rules-file block remain its floor.
 8. **GitHub Copilot** (VS Code / Visual Studio): the "use kit" rules block is written to `.github/copilot-instructions.md` (wired when a `.vscode/` dir is present or the file already exists). Memory indexing and a blocking install-gate are not yet implemented — they need Copilot's transcript format and a pre-tool-hook surface verified against primary sources first. The git-hook floor + the MCP server (`kit mcp`, added to `.vscode/mcp.json`) apply today.
 
@@ -560,10 +565,10 @@ As of 2.0, kit's public surfaces are versioned contracts, not just code that hap
 
 `kit memory` gives an agent a local-first, deterministic second brain, it stores
 your raw conversation history and searches it _before answering_, so it pulls
-receipts instead of guessing. SQLite + FTS5, two hooks, no vectors, no model calls.
-It indexes transcripts from **eight** coding agents (Claude Code, Codex, Gemini,
-Continue, Cursor, Amazon Q, Cline, and OpenCode), each parsed against the agent's own
-serialization format, never guessed. A private personal tier (encrypted backup so a
+receipts instead of guessing. SQLite + FTS5, three hooks, no vectors, no model calls.
+It indexes transcripts from **twelve** coding agents (Claude Code, Codex, Gemini,
+Continue, Cursor, Amazon Q, AWS Kiro, Factory Droid, Aider, Antigravity, Cline, and
+OpenCode), each parsed against the agent's own serialization format, never guessed. A private personal tier (encrypted backup so a
 stolen laptop doesn't lose your context, plus opt-in **cross-device sync** — your
 own git remote or command, ciphertext-only, with a public-key mode so even a
 throwaway cloud session can contribute with no secret) plus a curated,
