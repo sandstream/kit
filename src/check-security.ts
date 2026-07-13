@@ -826,6 +826,42 @@ export function classifyTrufflehogFindings(
 /**
  * Scan for secrets in code using trufflehog or basic pattern matching
  */
+/**
+ * Filter git-grep hits from the DEGRADED secrets path (no trufflehog) down to the files
+ * worth a warn. It's an UNVERIFIED grep, so it drops the three dominant false-positive
+ * classes to not drown real signal:
+ *   1. test / fixture / mock files — fake credentials live here by design
+ *      (`sk_test_invalid_for_test...`, sample JWTs). The AUTHORITATIVE scanners
+ *      (trufflehog + the CI gitleaks job) still scan these and verify live, so
+ *      suppressing them HERE only de-noises the local stopgap, it does not weaken
+ *      the real gate.
+ *   2. all-caps identifier VALUES — an env-var NAME like `SOCKET_SECURITY_API_TOKEN`
+ *      is a config key, never a secret.
+ *   3. pure substitution EXPRESSIONS — `${{ secrets.X }}` (GitHub Actions), `${VAR}`
+ *      (shell/compose), `{{ .Values.x }}` (Helm/Jinja). These are the CORRECT way to
+ *      reference a secret, never a literal credential (found flagging curl's workflow
+ *      files in the findings sweep).
+ * Input: `git grep -n` output lines (`file:line:content`). Pure and deterministic.
+ */
+export function basicSecretScanFiles(lines: string[]): string[] {
+  const TEST_PATH = /(\.test\.|\.spec\.|__tests__|\/__mocks__\/|\/fixtures?\/|\.fixture\.)/;
+  const VALUE_RE =
+    /(?:api[_-]?key|secret[_-]?key|password|token|credential)["']?\s*[:=]\s*["']([^"']{20,})/i;
+  const TEMPLATE_VALUE = /^\s*(\$\{\{[^}]*\}\}|\$\{[A-Za-z_][A-Za-z0-9_:.-]*\}|\{\{[^}]*\}\})\s*$/;
+  const files = new Set<string>();
+  for (const line of lines) {
+    const m = line.match(/^([^:]+):\d+:(.*)$/);
+    if (!m) continue;
+    const [, file, content] = m;
+    if (TEST_PATH.test(file)) continue;
+    const value = content.match(VALUE_RE)?.[1] ?? "";
+    if (/^[A-Z][A-Z0-9_]+$/.test(value)) continue; // env-var name, not a secret
+    if (TEMPLATE_VALUE.test(value)) continue; // substitution syntax, not a literal
+    files.add(file);
+  }
+  return [...files];
+}
+
 async function checkSecretsInCode(): Promise<SecurityCheckResult> {
   try {
     // Check if we're in a git repo
@@ -929,41 +965,16 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
       );
 
       if (stdout.trim()) {
-        const lines = stdout.trim().split("\n");
+        const files = basicSecretScanFiles(stdout.trim().split("\n"));
 
-        // This is the DEGRADED path (no trufflehog). It's an UNVERIFIED grep, so
-        // — like the trufflehog `unverified` branch above — it's a medium warn,
-        // not a high one, and it filters its two dominant false-positive classes
-        // so it doesn't drown real signal:
-        //   1. test / fixture / mock files — fake credentials live here by design
-        //      (`sk_test_invalid_for_test...`, sample JWTs). The AUTHORITATIVE
-        //      scanners (trufflehog + the CI gitleaks job) still scan these and
-        //      verify live, so suppressing them HERE only de-noises the local
-        //      stopgap, it does not weaken the real gate.
-        //   2. all-caps identifier VALUES — an env-var NAME like
-        //      `SOCKET_SECURITY_API_TOKEN` is a config key, never a secret.
-        const TEST_PATH = /(\.test\.|\.spec\.|__tests__|\/__mocks__\/|\/fixtures?\/|\.fixture\.)/;
-        const VALUE_RE =
-          /(?:api[_-]?key|secret[_-]?key|password|token|credential)["']?\s*[:=]\s*["']([^"']{20,})/i;
-        const files = new Set<string>();
-        for (const line of lines) {
-          const m = line.match(/^([^:]+):\d+:(.*)$/);
-          if (!m) continue;
-          const [, file, content] = m;
-          if (TEST_PATH.test(file)) continue;
-          const value = content.match(VALUE_RE)?.[1] ?? "";
-          if (/^[A-Z][A-Z0-9_]+$/.test(value)) continue; // env-var name, not a secret
-          files.add(file);
-        }
-
-        if (files.size > 0) {
+        if (files.length > 0) {
           return {
             category: "secrets",
             name: "secrets scan",
             status: "warn",
-            detail: `${files.size} file(s) with unverified secret-shaped strings (basic scan, trufflehog absent — HEAD/working-tree only, does NOT scan git history) — review for real credentials`,
+            detail: `${files.length} file(s) with unverified secret-shaped strings (basic scan, trufflehog absent — HEAD/working-tree only, does NOT scan git history) — review for real credentials`,
             severity: "medium",
-            files: Array.from(files),
+            files,
             suggestion:
               "Install trufflehog for verified detection (it confirms live secrets, skipping test/example data):\n  • kit install (provisions the declared aqua:trufflesecurity/trufflehog)\n  • macOS/Linux: brew install trufflehog\n  • Go: go install github.com/trufflesecurity/trufflehog/v3@latest",
           };
