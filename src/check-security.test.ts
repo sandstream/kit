@@ -453,6 +453,7 @@ describe("basicSecretScanFiles — degraded-path false-positive filter", () => {
       hit(".github/workflows/ci.yml", `GH_TOKEN: '${"$"}{{ secrets.GITHUB_TOKEN }}'`),
       hit("docker-compose.yml", `password: '${"$"}{POSTGRES_PASSWORD_FROM_ENV}'`),
       hit("chart/values.yaml", `apiKey: '{{ .Values.global.apiKeySecretRef }}'`),
+      hit("docs/contributing.md", `PYTEST_OPENAI_API_KEY="$(llm keys get openai)"`),
     ]);
     assert.deepStrictEqual(files, []);
   });

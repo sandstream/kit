@@ -838,16 +838,18 @@ export function classifyTrufflehogFindings(
  *   2. all-caps identifier VALUES — an env-var NAME like `SOCKET_SECURITY_API_TOKEN`
  *      is a config key, never a secret.
  *   3. pure substitution EXPRESSIONS — `${{ secrets.X }}` (GitHub Actions), `${VAR}`
- *      (shell/compose), `{{ .Values.x }}` (Helm/Jinja). These are the CORRECT way to
- *      reference a secret, never a literal credential (found flagging curl's workflow
- *      files in the findings sweep).
+ *      (shell/compose), `{{ .Values.x }}` (Helm/Jinja), `$(cmd)` (shell command
+ *      substitution). These are the CORRECT way to reference a secret, never a literal
+ *      credential (found flagging curl's workflows and llm's contributing docs in the
+ *      findings sweep).
  * Input: `git grep -n` output lines (`file:line:content`). Pure and deterministic.
  */
 export function basicSecretScanFiles(lines: string[]): string[] {
   const TEST_PATH = /(\.test\.|\.spec\.|__tests__|\/__mocks__\/|\/fixtures?\/|\.fixture\.)/;
   const VALUE_RE =
     /(?:api[_-]?key|secret[_-]?key|password|token|credential)["']?\s*[:=]\s*["']([^"']{20,})/i;
-  const TEMPLATE_VALUE = /^\s*(\$\{\{[^}]*\}\}|\$\{[A-Za-z_][A-Za-z0-9_:.-]*\}|\{\{[^}]*\}\})\s*$/;
+  const TEMPLATE_VALUE =
+    /^\s*(\$\{\{[^}]*\}\}|\$\{[A-Za-z_][A-Za-z0-9_:.-]*\}|\{\{[^}]*\}\}|\$\([^)]*\))\s*$/;
   const files = new Set<string>();
   for (const line of lines) {
     const m = line.match(/^([^:]+):\d+:(.*)$/);
