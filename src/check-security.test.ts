@@ -1,6 +1,7 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert";
 import {
+  basicSecretScanFiles,
   checkSecurity,
   gateStatus,
   parseTrivyMisconfigCount,
@@ -418,5 +419,58 @@ describe("checkSecurity", () => {
       cached.find((r) => r.name === "secrets scan"),
       "should include secrets scan check",
     );
+  });
+});
+
+describe("basicSecretScanFiles — degraded-path false-positive filter", () => {
+  const hit = (file: string, content: string) => `${file}:12:${content}`;
+
+  it("flags a literal secret-shaped value outside tests", () => {
+    const files = basicSecretScanFiles([
+      hit("src/config.ts", `const apiKey = "literal-looking-value-0123456789abcdef"`),
+    ]);
+    assert.deepStrictEqual(files, ["src/config.ts"]);
+  });
+
+  it("skips test/fixture/mock paths", () => {
+    const files = basicSecretScanFiles([
+      hit("src/auth.test.ts", `password = "hunter2hunter2hunter2hunter2"`),
+      hit("src/__mocks__/api.ts", `token = "aaaaaaaaaaaaaaaaaaaaaaaaaaaa"`),
+      hit("test/fixtures/creds.json", `"api_key": "bbbbbbbbbbbbbbbbbbbbbbbb"`),
+    ]);
+    assert.deepStrictEqual(files, []);
+  });
+
+  it("skips all-caps env-var NAMES used as values", () => {
+    const files = basicSecretScanFiles([
+      hit("src/env.ts", `token = "SOCKET_SECURITY_API_TOKEN_LONG"`),
+    ]);
+    assert.deepStrictEqual(files, []);
+  });
+
+  it("skips pure substitution expressions (Actions / shell / Helm) — the curl case", () => {
+    const files = basicSecretScanFiles([
+      hit(".github/workflows/ci.yml", `GH_TOKEN: '${"$"}{{ secrets.GITHUB_TOKEN }}'`),
+      hit("docker-compose.yml", `password: '${"$"}{POSTGRES_PASSWORD_FROM_ENV}'`),
+      hit("chart/values.yaml", `apiKey: '{{ .Values.global.apiKeySecretRef }}'`),
+      hit("docs/contributing.md", `PYTEST_OPENAI_API_KEY="$(llm keys get openai)"`),
+    ]);
+    assert.deepStrictEqual(files, []);
+  });
+
+  it("still flags a template-PREFIXED literal (not a pure expression)", () => {
+    const files = basicSecretScanFiles([
+      hit("src/leak.ts", `token = "${"$"}{{ secrets.X }}-plus-a-literal-suffix"`),
+    ]);
+    assert.deepStrictEqual(files, ["src/leak.ts"]);
+  });
+
+  it("dedupes multiple hits in one file and ignores malformed grep lines", () => {
+    const files = basicSecretScanFiles([
+      hit("src/a.ts", `password = "cccccccccccccccccccccccc"`),
+      hit("src/a.ts", `api_key = "dddddddddddddddddddddddd"`),
+      "not-a-grep-line",
+    ]);
+    assert.deepStrictEqual(files, ["src/a.ts"]);
   });
 });

@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Secrets scan (degraded path): substitution expressions are no longer flagged.**
+  The basic no-trufflehog scan flagged pure template references — `${{ secrets.X }}`
+  (GitHub Actions), `${VAR}` (shell/compose), `{{ .Values.x }}` (Helm/Jinja),
+  `$(cmd)` (command substitution) — as
+  secret-shaped strings; these are the _correct_ way to reference a secret, never a
+  literal credential. Found by running the findings sweep against `curl/curl`
+  (workflow files) and `simonw/llm` (contributing docs) — the only warns on both. The filter is now an exported pure function
+  (`basicSecretScanFiles`) with unit tests; a template-_prefixed_ literal still flags.
+
 ## [5.0.0] - 2026-07-11
 
 With 5.0, kit stops being only a _point-in-time_
