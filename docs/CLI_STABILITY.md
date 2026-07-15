@@ -33,6 +33,15 @@ The authoritative, machine-readable list lives in
 [`contracts/public-surface.json`](../contracts/public-surface.json) under
 `commands`.
 
+kit also publishes its command surface as an [OpenCLI](https://opencli.org)
+document — [`contracts/kit.opencli.json`](../contracts/kit.opencli.json) — generated
+from the same `COMMAND_REGISTRY` source of truth (`scripts/gen-opencli.mjs`, drift-tested
+by `opencli.test.ts`). It's an "OpenAPI for CLIs" description so an external agent or tool
+can learn kit's commands without scraping `--help`; each command carries `x-kit-stability`
+and `x-kit-mcp`, and `x-kit-args-modeled: false` marks that per-flag argument metadata is
+not modeled yet (absent args/flags must not be read as "takes none"). Treated as an output
+format, not a dependency — the spec is pre-1.0.
+
 ## Stable command promise
 
 For a `stable` command, across the whole 2.x line kit will not:
