@@ -1,0 +1,928 @@
+{
+  "commands": {
+    "add": {
+      "kind": "command",
+      "summary": "Provision a service (kit add --list to see all adapters)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": true,
+      "x-kit-stability": "stable"
+    },
+    "agent-audit": {
+      "kind": "command",
+      "summary": "Audit agent / MCP / hook configs for plaintext secrets + malware-shaped hooks",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "agent-config": {
+      "kind": "command",
+      "summary": "Inject a managed 'use kit' block into CLAUDE.md / AGENTS.md / .cursorrules / .clinerules / .github/copilot-instructions.md",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "airgap": {
+      "commands": {
+        "verify": {
+          "kind": "command",
+          "summary": "Prove zero-egress: assert every scanner that would run air-gapped resolves to a local artifact (no cloud-only, no registry semgrep config)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
+      "summary": "Air-gap posture tools (verify)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "analyze": {
+      "kind": "command",
+      "summary": "Analyze repo + emit draft CLAUDE.md / RULES.md",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "audit": {
+      "commands": {
+        "anchor": {
+          "kind": "command",
+          "summary": "Seal the audit log with the machine-local HMAC key (--external also gets a receipt from KIT_EXTERNAL_ANCHOR_CMD — closes the same-UID gap)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "export": {
+          "kind": "command",
+          "summary": "Emit the audit log for a SIEM (--format cef|syslog|json)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "secrets": {
+          "kind": "command",
+          "summary": "Forensics: who/what touched each key + when (reads audit log)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "verify": {
+          "kind": "command",
+          "summary": "Verify the audit log's keyless hash chain + HMAC anchor (--require-external demands a TSA receipt; exit 1 on break/forge/truncation)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
+      "summary": "View audit log of kit operations",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "auth": {
+      "commands": {
+        "elevate": {
+          "kind": "command",
+          "summary": "Mint elevation marker for destructive secret ops (TOTP/yes-prompt)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "revoke": {
+          "kind": "command",
+          "summary": "Drop the elevation marker",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "setup-totp": {
+          "kind": "command",
+          "summary": "Enroll TOTP secret (writes ~/.kit/totp-secret 0600)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "status": {
+          "kind": "command",
+          "summary": "Show active elevation",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
+      "summary": "TOTP-gated elevation for destructive secret ops (elevate|status|revoke|setup-totp)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "baseline": {
+      "kind": "command",
+      "summary": "Freeze current warnings into .kit-baseline.json so future runs gate only net-new findings",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "check": {
+      "commands": {
+        "verify-attestation": {
+          "kind": "command",
+          "summary": "Verify a signed .kit-check-attestation.json receipt",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
+      "summary": "Check status of all tools, services, secrets, and lock files",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": true,
+      "x-kit-stability": "stable"
+    },
+    "ci": {
+      "kind": "command",
+      "summary": "CI-native check: GitHub Actions annotations, GitLab JUnit, JSON (--init gitlab|bitbucket scaffolds a pipeline)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": true,
+      "x-kit-stability": "stable"
+    },
+    "clone": {
+      "kind": "command",
+      "summary": "Clone a Git repository and run kit setup",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "config": {
+      "commands": {
+        "knobs": {
+          "kind": "command",
+          "summary": "List power-user env vars + .kit.toml fields kit honors (--json)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "migrate": {
+          "kind": "command",
+          "summary": "Migrate .kit.toml to the current schema version (--dry-run inspect, --check CI gate, --force overwrite backup)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
+      "summary": "Inspect + migrate the .kit.toml schema version",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "context": {
+      "commands": {
+        "--prompt": {
+          "kind": "command",
+          "summary": "Print a compact active-gcloud indicator for your shell prompt (PS1)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "check": {
+          "kind": "command",
+          "summary": "Verify each CLI's live account+project matches .kit.toml [context] (exits non-zero on mismatch)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "use": {
+          "kind": "command",
+          "summary": "Activate the declared context: gcloud config + repo git identity",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
+      "summary": "Show project context: tools, services, secrets, environment",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": true,
+      "x-kit-stability": "stable"
+    },
+    "coverage": {
+      "kind": "command",
+      "summary": "Evidence map: which standard's controls kit's deterministic checks auto-verify vs gap/manual/n-a — OWASP ASVS L2 (default), OWASP LLM Top 10, or NIST SSDF via --standard=asvs|llm-top10|ssdf (NOT a compliance attestation; --json for GRC tools)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
+    "create-plugin": {
+      "kind": "command",
+      "summary": "Scaffold a new kit plugin package",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "design": {
+      "kind": "command",
+      "summary": "Check design quality (a11y, design tokens) against the baseline",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "doctor": {
+      "kind": "command",
+      "summary": "Deep diagnostics — checks environment health in detail",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "env": {
+      "commands": {
+        "current": {
+          "kind": "command",
+          "summary": "Show active environment marker",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "switch": {
+          "kind": "command",
+          "summary": "Switch active environment (dev/staging/prod). Gates prod-key reads.",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
+      "summary": "Show current environment info",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": true,
+      "x-kit-stability": "stable"
+    },
+    "escalate": {
+      "kind": "command",
+      "summary": "List what needs human action",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "fix": {
+      "kind": "command",
+      "summary": "Auto-fix what is possible",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": true,
+      "x-kit-stability": "stable"
+    },
+    "gate-bash": {
+      "kind": "command",
+      "summary": "PreToolUse install-gate: read an agent's pending Bash command on stdin, block (exit 2) un-triaged installs",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
+    "gate-egress": {
+      "kind": "command",
+      "summary": "PreToolUse egress-gate (exec-broker): block (exit 2) Bash network targets outside the signed [scope].egress — fail-closed without a verified scope",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
+    "gate-env": {
+      "kind": "command",
+      "summary": "PreToolUse env-gate: read an agent's pending Write/Edit on stdin, block (exit 2) plaintext secrets aimed at .env* files",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
+    "gate-fs": {
+      "kind": "command",
+      "summary": "PreToolUse fs-gate (exec-broker): block (exit 2) Write/Edit outside the signed [scope].fs — fail-closed without a verified scope",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
+    "gha-audit": {
+      "kind": "command",
+      "summary": "CI hardening lint — unpinned actions/images + pwn-request/remote-include (GitHub Actions, GitLab CI, Bitbucket Pipelines)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "governance": {
+      "kind": "command",
+      "summary": "View governance status and agent access controls",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "heal": {
+      "kind": "command",
+      "summary": "Loop: auto-fix safe findings, re-scan until green; gate destructive, fail-closed on tamper (--dry-run, --agent)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "health": {
+      "kind": "command",
+      "summary": "Deep environment health diagnostics — granular pass/fail across tools, services, config",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "hooks": {
+      "commands": {
+        "add": {
+          "kind": "command",
+          "summary": "Install a built-in hook (e.g. secret-scan)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
+      "summary": "Manage git hooks",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "identity": {
+      "kind": "command",
+      "summary": "Manage this machine/agent's Ed25519 identity (init/show/rotate) — asymmetric, attributable signing for audit/policy (experimental)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
+    "ingest": {
+      "kind": "command",
+      "summary": "Ingest external SARIF / OSV reports into kit's consolidated verdict (kit ingest <sarif|osv> <file>)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "init": {
+      "kind": "command",
+      "summary": "Detect stack, generate .kit.toml, and run full setup (--no-setup: config + lock files only)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": true,
+      "x-kit-stability": "stable"
+    },
+    "insight": {
+      "kind": "command",
+      "summary": "Deterministic lifecycle insight (unused: loaded-but-never-called MCP servers, from the transcript index; --json)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
+    "install": {
+      "kind": "command",
+      "summary": "Install missing tools via mise",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": true,
+      "x-kit-stability": "stable"
+    },
+    "login": {
+      "commands": {
+        "--plan": {
+          "kind": "command",
+          "summary": "Show the resolved auth strategy per service (vault/interactive/capture + passkey) without logging in",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
+      "summary": "Guided login to all configured services",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": true,
+      "x-kit-stability": "stable"
+    },
+    "map": {
+      "kind": "command",
+      "summary": "Deterministic repo-map: the relevant slice of files around a seed (import graph, --depth, --budget, --co-change, --json) — load part of a growing repo, not all of it (experimental)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": true,
+      "x-kit-stability": "experimental"
+    },
+    "mcp": {
+      "kind": "command",
+      "summary": "MCP server over stdio (Claude Code/Cursor/Codex); 'kit mcp list|auth|set-token|clear' manages declared servers",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "memory": {
+      "commands": {
+        "area": {
+          "kind": "command",
+          "summary": "Show shared entries for one area (decisions, how-built, status, security)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "areas": {
+          "kind": "command",
+          "summary": "List shared responsibility areas (stripe, whatsapp, …)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "backup": {
+          "kind": "command",
+          "summary": "Encrypted backup of the memory store (AES-256-GCM; KIT_MEMORY_PASSPHRASE)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "context": {
+          "kind": "command",
+          "summary": "Push-surface active decisions for the area(s) whose files you're touching (deterministic, path→cluster)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "index": {
+          "kind": "command",
+          "summary": "Index ~/.claude transcripts into the SQLite memory store",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "install": {
+          "kind": "command",
+          "summary": "Wire UserPromptSubmit + SessionEnd + SessionStart (recovery) hooks into ~/.claude/settings.json",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "merge": {
+          "kind": "command",
+          "summary": "Merge another machine's memory.db into this one (dedup by uuid)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "pal": {
+          "kind": "command",
+          "summary": "Pending action ledger — list/add/done/snooze/verify/import 'blocked-on-you' items",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "restore": {
+          "kind": "command",
+          "summary": "Restore an encrypted memory backup (e.g. on a new machine)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "resume": {
+          "kind": "command",
+          "summary": "Print the resume command for a saved copilot (by name or number)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "save": {
+          "kind": "command",
+          "summary": "Bookmark the current session as a named copilot",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "scan": {
+          "kind": "command",
+          "summary": "Scan the memory store for stored secrets, or prompt-injection patterns with --injection (exit 1 on a high-confidence finding)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "search": {
+          "kind": "command",
+          "summary": "Full-text search memory (current project; --global for all)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "share": {
+          "kind": "command",
+          "summary": "Promote a curated, secret-scanned entry to the shared (team) memory",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "stats": {
+          "kind": "command",
+          "summary": "Show what the local memory store contains",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "suggest": {
+          "kind": "command",
+          "summary": "Emit a BYO-LLM review prompt (recent activity + open items) — pipe to your own model",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "sync": {
+          "kind": "command",
+          "summary": "Sync from a memory export or encrypted backup (mergeDb; last-write-wins, file_index excluded)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "threads": {
+          "kind": "command",
+          "summary": "List saved copilots (current project; --global for all)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
+      "summary": "Local conversation memory — index transcripts + show stats",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "open": {
+      "kind": "command",
+      "summary": "Open service dashboard in browser (stripe, vercel, railway, etc.)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "panic": {
+      "kind": "command",
+      "summary": "Compromise response: rotate identity + emit a signed revocation + audit it + print the platform-revocation checklist (experimental)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
+    "pkg": {
+      "kind": "command",
+      "summary": "Install package with mandatory triage (kit pkg npm:express)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "plugin": {
+      "kind": "command",
+      "summary": "Discover and manage kit plugins (search, list, scaffold, install)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "policy": {
+      "kind": "command",
+      "summary": "Signable org policy-as-code in .kit-policy.toml (init/show/validate/sign/verify/check/trust/pull/pull-revocations/approve) — identity-signed standard, org-distributable + enforced offline (experimental)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
+    "profile": {
+      "commands": {
+        "check": {
+          "kind": "command",
+          "summary": "Report declared-vs-discovered drift (--gate fails CI on any drift; honest skip when no profile declared)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "export": {
+          "kind": "command",
+          "summary": "Export a portable signed bundle (profile + signature + signer key) to --out or stdout",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "freeze": {
+          "kind": "command",
+          "summary": "Snapshot the discovered toolchain into .kit-profile.toml (preserves operator-authored workflows/plugins/scope/gates)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "import": {
+          "kind": "command",
+          "summary": "Import a portable bundle on a fresh host — integrity-verify offline, fail-closed on tamper/revoked (authoritative only once the signer is anchored)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "show": {
+          "kind": "command",
+          "summary": "Render the declared project profile with per-line reconciliation marks",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "sign": {
+          "kind": "command",
+          "summary": "Sign the profile (scope/RoE) into .kit-profile.sig via your identity/keystore — offline-verifiable",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "verify": {
+          "kind": "command",
+          "summary": "Verify .kit-profile.sig offline (--key pin → local identity → org .kit-policy.signers)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        }
+      },
+      "kind": "group",
+      "summary": "Versioned, traveling project profile — declare {skills, mcp, workflows, plugins, vault, gates, scope}, audit declared-vs-discovered drift, sign the scope/RoE, and export/import a portable signed bundle to a fresh host (show|freeze|check|sign|verify|export|import; --json, --gate, --key, --out)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
+    "review": {
+      "kind": "command",
+      "summary": "Full repo audit — runs check + design + standards in one gate (for agents / PR checks)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "run": {
+      "kind": "command",
+      "summary": "Execute a command with project env vars loaded",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": true,
+      "x-kit-stability": "stable"
+    },
+    "sbom": {
+      "kind": "command",
+      "summary": "Generate a CycloneDX / SPDX SBOM from the lockfile (SARIF emit via kit scan --sarif)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "scan": {
+      "kind": "command",
+      "summary": "Run external scanners (snyk/trivy/grype/semgrep/osv) and merge them into one local verdict (--strict / [governance.scan] required_scanners gate non-running scanners)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "secrets": {
+      "commands": {
+        "migrate": {
+          "kind": "command",
+          "summary": "Migrate plaintext secrets in .env* → configured vault",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "onecli": {
+          "kind": "command",
+          "summary": "Register a key with OneCLI gateway so agent never sees the real value",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "propagate": {
+          "kind": "command",
+          "summary": "Push a value to deploy targets only (skips vault-write). --stdin safer than --value",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "purge-history": {
+          "kind": "command",
+          "summary": "Destructive: rewrite git history to remove a leaked value (--force-history)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "revoke-old": {
+          "kind": "command",
+          "summary": "Revoke a previously-minted scoped key (Supabase Mgmt API)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "rotate": {
+          "kind": "command",
+          "summary": "Rotate a key: write new value to vault (explicit / random)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "set": {
+          "kind": "command",
+          "summary": "Capture a value to the vault: kit secrets set <KEY> --stdin (safer) | --value <v>",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "sync": {
+          "kind": "command",
+          "summary": "Push resolved secrets to GitHub Actions / .env.ci / stdout",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
+      "summary": "Generate .env.local from template + secret store",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": true,
+      "x-kit-stability": "stable"
+    },
+    "security": {
+      "commands": {
+        "check-gitignore": {
+          "kind": "command",
+          "summary": "Verify .gitignore covers sensitive paths (--fix to auto-patch)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "clear-cache": {
+          "kind": "command",
+          "summary": "Clear cached scanner binary (after intentional rebuild)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "costs": {
+          "kind": "command",
+          "summary": "Snapshot per-key spend vs policy cap (Stripe live; others stubbed)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "policy": {
+          "kind": "command",
+          "summary": "Dependency allowlist enforcement (init|add|check)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "prescan": {
+          "kind": "command",
+          "summary": "Multi-repo baseline sweep (secrets, gitignore, branch-protect; --deep adds CVE/workflow-drift/bumblebee; --format=json + --vs-baseline=<path> for CI drift)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "prescan-diff": {
+          "kind": "command",
+          "summary": "Diff two prescan reports — surface new regressions + fixed findings since baseline",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "scan-build": {
+          "kind": "command",
+          "summary": "Scan build artifacts (.next/, dist/) for inlined secrets",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "scan-staged": {
+          "kind": "command",
+          "summary": "Pre-commit: scan staged files for credential patterns",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "scan-transcripts": {
+          "kind": "command",
+          "summary": "Scan agent transcripts + prompt caches for leaked credentials",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "verify-pull": {
+          "kind": "command",
+          "summary": "After git pull: audit new deps, gitignore drops, introduced secrets",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
+      "summary": "Security policy + scanners (policy | scan-staged | scan-build | verify-pull | prescan | …)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "self-audit": {
+      "kind": "command",
+      "summary": "Audit kit's own source against its 12 self-hardening rules (--list-rules, --only=<ids>, --format)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "sentinel": {
+      "kind": "command",
+      "summary": "Autonomous redline watcher — propose/apply guarded remediations (run|install|status)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "setup": {
+      "commands": {
+        "--recommended": {
+          "kind": "command",
+          "summary": "Opinionated profile: setup + memory hooks + git secret-scan/context-check gates",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        }
+      },
+      "kind": "group",
+      "summary": "Full pipeline: install → login → secrets → agent config → verify",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "skills": {
+      "kind": "command",
+      "summary": "Check status of agent skills",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "slopsquat": {
+      "kind": "command",
+      "summary": "Score npm/PyPI packages for hallucination/slopsquat risk (registry metadata)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
+    "standards": {
+      "kind": "command",
+      "summary": "Dev-standards gate: general metrics + per-language linters + user plugins vs the baseline (--category general|specific|plugins|<lang>, --enforce fails CI)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": true,
+      "x-kit-stability": "stable"
+    },
+    "status": {
+      "kind": "command",
+      "summary": "Adoption checklist — what's set up across kit + the next step for each gap",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "statusline": {
+      "kind": "command",
+      "summary": "Compact one-line status (mode score · update · open PAL) for any agent's info bar — wire into Claude Code statusLine / a shell PS1",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "supply-chain": {
+      "kind": "command",
+      "summary": "Install-time supply-chain triage: install-scripts, lockfile-drift, dep-confusion, slopsquat",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "team": {
+      "kind": "command",
+      "summary": "Manage team members, roles, and permissions (RBAC, invitations, audit logs)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
+    "triage": {
+      "kind": "command",
+      "summary": "Security evaluation before installing packages, images, or skills",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "upgrade": {
+      "kind": "command",
+      "summary": "Update lock files from .kit.toml",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "verify-provenance": {
+      "kind": "command",
+      "summary": "Verify a release's SLSA provenance bundle offline (Ed25519 + SHA256 / cosign)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
+    "whoami": {
+      "kind": "command",
+      "summary": "Show current agent / user identity",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    }
+  },
+  "info": {
+    "binary": "kit",
+    "summary": "Deterministic, local-first developer-environment manager and fail-closed governance layer for AI agents and humans.",
+    "title": "kit",
+    "version": "5.0.0"
+  },
+  "opencliVersion": "1.0.0-alpha.12"
+}
