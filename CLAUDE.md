@@ -12,3 +12,16 @@ This project uses [kit](https://github.com/sandstream/kit) to manage tools, secr
 - Destructive secret ops require `kit auth elevate` first (the CLI enforces this).
 
 <!-- END kit -->
+
+## Public artifacts — issue & PR hygiene
+
+`sandstream/kit` is a **public** repository. When opening issues or PRs here:
+
+- **Never put a `claude.ai/code/session_…` URL in an issue or PR body.** It is
+  internal session metadata, not useful to readers, and it clutters the public
+  record (it accumulated on ~160 existing artifacts). The only footer to use is
+  the generic `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
+- No internal session IDs, private dashboard/console links, or paths under
+  another customer's project in public bodies.
+- Findings that could be a real security leak in a named third-party repo go to
+  the private `sandstream/kit-research` repo, never a public kit issue.
