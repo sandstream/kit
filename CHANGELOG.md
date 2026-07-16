@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **`kit bootstrap` (experimental) — one-command cold start for an ephemeral
+  environment.** Composes `setup` → `identity init` → `policy pull` → `profile import`
+  → `memory restore` behind one idempotent, non-interactive verb, driven by a single
+  platform-injected seed (vault auth + `KIT_MEMORY_PASSPHRASE`/`KIT_MEMORY_BACKUP` +
+  optional `--profile` bundle). The floor is fail-closed (config/identity/policy+profile
+  integrity — a broken gate aborts); the fuel is fail-open (secrets availability, recall
+  degrade to a blank-but-working environment). `--json` emits a redacted receipt; the
+  seed is never fetched, stored, or logged. See docs/ENV_FUELING.md.
+
 ### Fixed
 
 - **Secrets scan (degraded path): substitution expressions are no longer flagged.**
