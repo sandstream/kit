@@ -847,6 +847,13 @@
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
+    "skill": {
+      "kind": "command",
+      "summary": "Module-discipline linter for a SKILL.md: contract shape, trigger + sibling-collision, declared least-privilege scope, and CI regression drift (test <path> [--json] [--gate] [--update-snapshot]) — proves a skill is engineered like a module, NOT that its output is good (rubric grading is delegated) (experimental)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
     "skills": {
       "kind": "command",
       "summary": "Check status of agent skills",
