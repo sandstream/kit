@@ -125,6 +125,13 @@
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
+    "bootstrap": {
+      "kind": "command",
+      "summary": "Cold-start an ephemeral environment in one command: setup → identity → policy pull → profile import → memory restore, from one platform-injected seed (fail-closed floor, fail-open fuel, --json receipt) (experimental)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
     "check": {
       "commands": {
         "verify-attestation": {

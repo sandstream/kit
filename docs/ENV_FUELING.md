@@ -6,7 +6,23 @@ tools, secrets, agent gates, identity, and recall by hand every time is the tax
 this guide removes: wire two commands into the environment's **setup script** and
 every new environment fuels itself.
 
-The whole pattern is:
+The whole pattern is one command:
+
+```sh
+kit bootstrap             # setup → identity → policy pull → profile import → memory restore
+```
+
+`kit bootstrap` (experimental) composes the steps below from **one seed** the
+environment's secret store injects: vault auth, `KIT_MEMORY_PASSPHRASE` /
+`KIT_MEMORY_BACKUP`, and an optional `--profile` bundle. It is idempotent and
+non-interactive-safe. The **floor is fail-closed** (config, identity, and
+policy/profile integrity — a broken gate stops the bootstrap); the **fuel is
+fail-open** (secrets availability and recall degrade to a blank-but-working
+environment, never a failed container). `--json` emits a redacted receipt of what
+each step established, skipped, or degraded. It never fetches, stores, or logs the
+seed.
+
+The explicit two-step form still works and is the explainer for what `bootstrap` does:
 
 ```sh
 kit setup --recommended   # config: tools, secrets (vault-backed), agent gates, verify

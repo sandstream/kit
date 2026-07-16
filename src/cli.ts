@@ -29,6 +29,7 @@ import { cmdDoctor, cmdAdd, cmdSetup, cmdInit } from "./commands/setup.js";
 import { cmdReview } from "./commands/review.js";
 import { cmdInsight } from "./commands/insight.js";
 import { cmdProfile } from "./commands/profile.js";
+import { cmdBootstrap } from "./commands/bootstrap.js";
 import { cmdMap } from "./commands/repomap.js";
 import {
   cmdStatus,
@@ -602,6 +603,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdIdentity,
     stability: "experimental",
     help: "Manage this machine/agent's Ed25519 identity (init/show/rotate) — asymmetric, attributable signing for audit/policy (experimental)",
+  },
+  bootstrap: {
+    handler: cmdBootstrap,
+    stability: "experimental",
+    help: "Cold-start an ephemeral environment in one command: setup → identity → policy pull → profile import → memory restore, from one platform-injected seed (fail-closed floor, fail-open fuel, --json receipt) (experimental)",
   },
   panic: {
     handler: cmdPanic,
