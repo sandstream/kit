@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit skill test <path>` (experimental) — module-discipline linter for a
+  `SKILL.md`.** Treats an agent skill as a software module and runs four deterministic,
+  zero-LLM checks: **contract** (required frontmatter present + slug-shaped name +
+  non-trivial description + body), **trigger** (a trigger is declared + no collision with
+  a sibling skill's normalized trigger), **scope** (declared least-privilege —
+  `allowed-tools` present and bounded, wildcard/absent fails), and **regression**
+  (contract+trigger+scope fingerprint vs a committed `.kit-skill.snapshot.json`, drift
+  fails like `public-surface.json`; `--update-snapshot` pins it). `--gate` makes any
+  failure a non-zero CI exit; `--json` for tooling. It is the module-discipline sibling
+  of `kit triage skill` (which answers "safe to install?"). Honest seams stated in every
+  run: proving a skill _refrains from_ forbidden actions and _stays within_ its declared
+  scope at **runtime** needs the exec-broker (a later phase), and grading whether the
+  output is _good_ is an LLM judgement that kit **delegates** to an eval harness and never
+  runs. Design: kit-research skills-as-software-modules note.
 - **`kit bootstrap` (experimental) — one-command cold start for an ephemeral
   environment.** Composes `setup` → `identity init` → `policy pull` → `profile import`
   → `memory restore` behind one idempotent, non-interactive verb, driven by a single

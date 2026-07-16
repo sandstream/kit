@@ -30,6 +30,7 @@ import { cmdReview } from "./commands/review.js";
 import { cmdInsight } from "./commands/insight.js";
 import { cmdProfile } from "./commands/profile.js";
 import { cmdBootstrap } from "./commands/bootstrap.js";
+import { cmdSkill } from "./commands/skill.js";
 import { cmdMap } from "./commands/repomap.js";
 import {
   cmdStatus,
@@ -655,6 +656,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdSlopsquat,
     stability: "experimental",
     help: "Score npm/PyPI packages for hallucination/slopsquat risk (registry metadata)",
+  },
+  skill: {
+    handler: cmdSkill,
+    stability: "experimental",
+    help: "Module-discipline linter for a SKILL.md: contract shape, trigger + sibling-collision, declared least-privilege scope, and CI regression drift (test <path> [--json] [--gate] [--update-snapshot]) — proves a skill is engineered like a module, NOT that its output is good (rubric grading is delegated) (experimental)",
   },
   baseline: {
     handler: cmdBaseline,
