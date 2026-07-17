@@ -150,7 +150,7 @@ async function gateDeny(label: string, message: string): Promise<boolean> {
  * Wrapped: a missing/unreadable .kit.toml or audit backend must never change the verdict —
  * the deny already happened, and deny is the safe outcome.
  */
-async function auditGateDeny(gate: string, reason: string): Promise<void> {
+async function auditGateDeny(gate: string, reason: string, sessionId?: string): Promise<void> {
   try {
     const { loadConfig } = await import("../config.js");
     const { mergeGovernanceConfigAsync } = await import("../governance.js");
@@ -158,16 +158,30 @@ async function auditGateDeny(gate: string, reason: string): Promise<void> {
     const { resolve } = await import("node:path");
     const cfg = await loadConfig(resolve(process.cwd(), ".kit.toml"));
     const gov = await mergeGovernanceConfigAsync(cfg.governance);
+    // The session_id join key lets `kit skill test --runtime` attribute this deny to the
+    // skill run that was active when it fired (negative-control HELD evidence) — session-bounded,
+    // not a global timestamp guess. Omitted from metadata when the harness gave no session.
+    const metadata: Record<string, unknown> = { phase: "pretooluse-deny" };
+    if (sessionId) metadata.session_id = sessionId;
     await logAuditEvent(gov, {
       operation: gate,
       environment: gov.environment,
       success: false,
       error: reason,
-      metadata: { phase: "pretooluse-deny" },
+      metadata,
     });
   } catch {
     /* best-effort — see above */
   }
+}
+
+/** Read the harness-supplied `session_id` off a PreToolUse payload; "" when absent. */
+function sessionIdOf(payload: unknown): string {
+  if (payload && typeof payload === "object") {
+    const s = (payload as { session_id?: unknown }).session_id;
+    if (typeof s === "string") return s;
+  }
+  return "";
 }
 
 /**
@@ -202,7 +216,7 @@ export async function cmdGateEgress(): Promise<boolean> {
     why = `host(s) outside the signed egress scope: ${denied.join(", ")}`;
   }
   if (denied.length === 0) return true;
-  await auditGateDeny("gate-egress", why);
+  await auditGateDeny("gate-egress", why, sessionIdOf(payload));
   return await gateDeny(
     "egress-gate",
     `${why}\nDeclare the host in .kit-profile.toml [scope].egress and re-sign: \`kit profile sign\`.`,
@@ -231,7 +245,7 @@ export async function cmdGateFs(): Promise<boolean> {
   const { policy } = await profileBrokerPolicy(process.cwd());
   if (!policy) {
     const why = `write to ${write.filePath} denied — no verified scope/RoE (unsigned, tampered, or missing); a wired fs-gate grants nothing`;
-    await auditGateDeny("gate-fs", why);
+    await auditGateDeny("gate-fs", why, sessionIdOf(payload));
     return await gateDeny("fs-gate", `${why}\nSign the profile scope: \`kit profile sign\`.`);
   }
   // Resolve the hook's path against the agent cwd first, then containment-check against each root.

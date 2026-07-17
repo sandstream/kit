@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit skill test --runtime` now proves negative controls HELD, not just detects violations.**
+  A forbidden action a gate _denied_ never runs, so it is absent from the transcript — it lands
+  in `.kit-audit.jsonl` as a `gate-egress`/`gate-fs` deny. The gate now stamps the PreToolUse
+  `session_id` on that deny event as a **join key**, and the runtime audit attributes each deny
+  to the skill run that was active when it fired (session + span time-window — precise and
+  session-bounded, not a global timestamp guess). The negative-control check can now report
+  **"control held — N forbidden attempt(s) denied"** with evidence, closing the path that was
+  deferred in the previous increment for lack of a join key. Best-effort: no audit log → no
+  denial evidence (never breaks the audit); a denied action is `deniedForbidden`, never counted
+  as a violation that ran. Deterministic, zero-LLM.
+
 - **`kit skill test --runtime` now checks egress/fs target-scope, not just tool-scope.**
   When a signed broker scope is present, each span-attributed action is enriched with a
   broker verdict via the SAME decisions the gate-egress / gate-fs enforcers apply

@@ -4,6 +4,7 @@ import {
   parseSkillOpen,
   attributeRuns,
   brokerVerdictForRow,
+  targetSpanWindows,
   type ToolCallRow,
 } from "./attribute.js";
 import type { BrokerPolicy } from "../exec-broker/policy.js";
@@ -23,10 +24,16 @@ describe("parseSkillOpen", () => {
   });
 });
 
-const row = (sessionId: string, tool: string, opensSkill: string | null = null): ToolCallRow => ({
+const row = (
+  sessionId: string,
+  tool: string,
+  opensSkill: string | null = null,
+  timestamp = "",
+): ToolCallRow => ({
   sessionId,
   tool,
   input: null,
+  timestamp,
   opensSkill,
 });
 
@@ -122,6 +129,47 @@ const policy: BrokerPolicy = {
   fs: { root: "/repo", roots: ["/repo/extra"] },
   env: { declared: [] },
 };
+
+describe("targetSpanWindows", () => {
+  it("emits a window per target span: [Skill open, next skill open) within a session", () => {
+    const rows: ToolCallRow[] = [
+      row("s1", "Skill", "run-tests", "t1"),
+      row("s1", "Bash", null, "t2"),
+      row("s1", "Skill", "deploy", "t3"), // closes run-tests at t3
+      row("s1", "Bash", null, "t4"),
+    ];
+    assert.deepEqual(targetSpanWindows(rows, "run-tests"), [
+      { sessionId: "s1", start: "t1", end: "t3" },
+    ]);
+  });
+
+  it("a trailing target span is open-ended (end === '')", () => {
+    const rows: ToolCallRow[] = [
+      row("s1", "Skill", "other", "t1"),
+      row("s1", "Skill", "run-tests", "t2"),
+      row("s1", "Bash", null, "t3"),
+    ];
+    assert.deepEqual(targetSpanWindows(rows, "run-tests"), [
+      { sessionId: "s1", start: "t2", end: "" },
+    ]);
+  });
+
+  it("closes an open target span at a session boundary", () => {
+    const rows: ToolCallRow[] = [
+      row("s1", "Skill", "run-tests", "t1"),
+      row("s2", "Skill", "run-tests", "t2"),
+    ];
+    const w = targetSpanWindows(rows, "run-tests");
+    assert.deepEqual(w, [
+      { sessionId: "s1", start: "t1", end: "" },
+      { sessionId: "s2", start: "t2", end: "" },
+    ]);
+  });
+
+  it("returns no windows when the target never opens a span", () => {
+    assert.deepEqual(targetSpanWindows([row("s1", "Skill", "other", "t1")], "run-tests"), []);
+  });
+});
 
 describe("brokerVerdictForRow", () => {
   it("Bash: in-scope when every extracted host is allowed, out-of-scope otherwise", () => {
