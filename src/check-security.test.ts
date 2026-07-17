@@ -493,8 +493,28 @@ describe("lockfile ecosystem coverage (#353)", () => {
   });
 
   it("covers the non-npm/pip ecosystems that used to false-fail", () => {
-    for (const name of ["Cargo.lock", "go.sum", "Gemfile.lock", "composer.lock", "pubspec.lock"]) {
+    for (const name of [
+      "Cargo.lock",
+      "go.sum",
+      "Gemfile.lock",
+      "composer.lock",
+      "pubspec.lock",
+      "Package.resolved",
+      "mix.lock",
+      "flake.lock",
+    ]) {
       assert.ok(byName[name], `missing ecosystem: ${name}`);
+    }
+  });
+
+  it("does NOT flag opt-in-lockfile ecosystems (Gradle/Maven/.NET) — no new false-red", () => {
+    // Their lockfiles are opt-in; a missing one is not a finding. Absence from the
+    // map is intentional (JVM/.NET vulns are covered by trivy/osv instead).
+    for (const m of ["pom.xml", "build.gradle", "packages.lock.json"]) {
+      assert.ok(
+        !LOCKFILE_ECOSYSTEMS.some((e) => e.manifests.includes(m)),
+        `${m} should not gate the committed-lockfile check`,
+      );
     }
   });
 
