@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-07-16
+
 ### Added
 
 - **`kit skill test <path>` (experimental) — module-discipline linter for a
@@ -41,6 +43,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   literal credential. Found by running the findings sweep against `curl/curl`
   (workflow files) and `simonw/llm` (contributing docs) — the only warns on both. The filter is now an exported pure function
   (`basicSecretScanFiles`) with unit tests; a template-_prefixed_ literal still flags.
+- **Lockfile handling is ecosystem-aware — no more false-RED on pnpm/bun/yarn/cargo/go/…
+  repos (#354).** Both signal layers were npm/pip-only: `npm audit` ran on any
+  `package.json` (erroring into a high-severity `audit check failed` on pnpm/bun/yarn),
+  and the committed-lockfile check only accepted `package-lock.json` / `requirements.txt`
+  (flagging a healthy repo that commits `pnpm-lock.yaml` / `bun.lock` / `Cargo.lock` /
+  `go.sum` / … as "no lockfile"). Now `npm audit` skips honestly (not-applicable; deps
+  still covered by osv-scanner) when there is no npm lockfile, and a new
+  `LOCKFILE_ECOSYSTEMS` map accepts any valid committed lockfile per present manifest.
+  Found by pointing kit's floor at the agent harnesses it integrates with; verified e2e
+  (cline/opencode/codex/create-t3-app: 2 false-red high-fails each → skip + pass).
 
 ## [5.0.0] - 2026-07-11
 
