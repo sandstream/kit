@@ -28,7 +28,13 @@ import {
   type CheckResult,
   type DisclaimedItem,
 } from "../skill/test.js";
-import { auditRuntime, type RuntimeCheckResult, type RuntimeEvidence } from "../skill/adherence.js";
+import type { DatabaseSync } from "node:sqlite";
+import {
+  auditRuntime,
+  type RuntimeCheckResult,
+  type RuntimeEvidence,
+  type ObservedAction,
+} from "../skill/adherence.js";
 import { readRunEvidence } from "../skill/attribute.js";
 
 /** Snapshot file written next to the SKILL.md it pins. */
@@ -88,6 +94,25 @@ function mark(status: CheckResult["status"]): string {
 }
 
 /**
+ * Denied forbidden attempts for a skill, from `.kit-audit.jsonl` gate-deny records attributed to
+ * its run windows via the `session_id` join key. Best-effort: no audit log / unreadable → no
+ * denial evidence, never breaks the audit.
+ */
+async function gatherDenialActions(db: DatabaseSync, skillName: string): Promise<ObservedAction[]> {
+  try {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const jsonl = readFileSync(resolve(process.cwd(), ".kit-audit.jsonl"), "utf-8");
+    const { readToolCallRows, targetSpanWindows } = await import("../skill/attribute.js");
+    const { parseGateDenials, denialActionsForSkill } = await import("../skill/denials.js");
+    const windows = targetSpanWindows(readToolCallRows(db), skillName);
+    return denialActionsForSkill(windows, parseGateDenials(jsonl));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Gather the two runtime checks (adherence, negative controls) from the transcript index.
  * Honest skips when the skill has no name to attribute by, or the index is unavailable —
  * never a silent pass. The pure `auditRuntime` decides; this only sources the evidence.
@@ -115,7 +140,11 @@ async function gatherRuntime(
     } catch {
       /* no verified scope — tool-scope adherence only */
     }
-    evidence = readRunEvidence(db, skillName, policy);
+    // Denial evidence: gate-deny records in .kit-audit.jsonl, attributed to this skill's run
+    // windows by the session_id join key the gates now stamp. This lets negative-controls report
+    // "control HELD" (a forbidden attempt was blocked), not just detect a violation that ran.
+    const denialActions = await gatherDenialActions(db, skillName);
+    evidence = readRunEvidence(db, skillName, { policy, denialActions });
   } catch {
     return skipBoth("transcript index unavailable — runtime audit skipped");
   }

@@ -34,8 +34,53 @@ export interface ToolCallRow {
   tool: string;
   /** Raw `tool_input` JSON (for egress/fs target-scope verdicts); null when absent. */
   input: string | null;
+  /** ISO timestamp of the call (for denial→span time-window attribution); "" when absent. */
+  timestamp: string;
   /** For a `Skill` row, the invoked skill slug (parsed from `tool_input`); else null. */
   opensSkill: string | null;
+}
+
+/**
+ * The time window of one target-skill run within a session: `[start, end)`. `start` is the
+ * `Skill` call's timestamp; `end` is the NEXT `Skill` call's timestamp in the same session, or
+ * "" (open — until session end). A denial at time T belongs to the span with `start ≤ T < end`
+ * in the SAME session — precise, session-bounded attribution, not a global timestamp guess.
+ */
+export interface SpanWindow {
+  sessionId: string;
+  start: string;
+  end: string;
+}
+
+/**
+ * Compute the target skill's run windows from ordered rows (by `session_id, id`). Each `Skill`
+ * row opens a span whose end is the next `Skill` row's timestamp in that session (any skill), or
+ * "" at session end. Only the target skill's windows are returned. Pure.
+ */
+export function targetSpanWindows(rows: ToolCallRow[], target: string): SpanWindow[] {
+  const windows: SpanWindow[] = [];
+  let curSession: string | null = null;
+  let openTarget: { start: string } | null = null; // an open target span awaiting its end
+
+  const closeOpen = (end: string): void => {
+    if (openTarget && curSession !== null) {
+      windows.push({ sessionId: curSession, start: openTarget.start, end });
+      openTarget = null;
+    }
+  };
+
+  for (const row of rows) {
+    if (row.sessionId !== curSession) {
+      closeOpen(""); // previous session's open target span runs to session end
+      curSession = row.sessionId;
+    }
+    if (row.opensSkill !== null) {
+      closeOpen(row.timestamp); // any new skill closes the prior target span at its start
+      if (row.opensSkill === target) openTarget = { start: row.timestamp };
+    }
+  }
+  closeOpen(""); // final open target span runs to session end
+  return windows;
 }
 
 /** Per-action broker verdict from a signed scope, or undefined when the action carries no target. */
@@ -146,29 +191,45 @@ export function attributeRuns(
   return { actions, runs, sessions: sessionsWithSpan.size, confidence: "span" };
 }
 
+/** Read ordered `tool_uses` rows (by `session_id, id`) so spans reconstruct exactly. */
+export function readToolCallRows(db: DatabaseSync): ToolCallRow[] {
+  const raw = db
+    .prepare(
+      "SELECT session_id, tool_name, tool_input, timestamp FROM tool_uses ORDER BY session_id, id",
+    )
+    .all() as {
+    session_id: string | null;
+    tool_name: string | null;
+    tool_input: string | null;
+    timestamp: string | null;
+  }[];
+  return raw.map((r) => ({
+    sessionId: r.session_id ?? "",
+    tool: (r.tool_name ?? "").trim(),
+    input: r.tool_input,
+    timestamp: r.timestamp ?? "",
+    opensSkill: parseSkillOpen(r.tool_name ?? "", r.tool_input),
+  }));
+}
+
 /**
- * Read ordered `tool_uses` rows from the memory DB and attribute them to `target`. The
- * ORDER BY (session_id, id) reproduces per-session call order so spans reconstruct exactly.
- * Deterministic given the DB. The pure `attributeRuns` does the decision.
+ * Attribute the memory DB's recorded runs to `target`. With a signed broker policy, each action
+ * is enriched with an egress/fs target-scope verdict (without one, tool-scope adherence still
+ * applies). `denialActions` (attributed from the audit log, `denials.ts`) are appended so the
+ * negative-control check can see denied-and-blocked forbidden attempts. Deterministic given the
+ * DB + inputs; the pure `attributeRuns` does the decision.
  */
 export function readRunEvidence(
   db: DatabaseSync,
   target: string,
-  policy?: BrokerPolicy | null,
+  opts: { policy?: BrokerPolicy | null; denialActions?: ObservedAction[] } = {},
 ): RuntimeEvidence {
-  const raw = db
-    .prepare("SELECT session_id, tool_name, tool_input FROM tool_uses ORDER BY session_id, id")
-    .all() as { session_id: string | null; tool_name: string | null; tool_input: string | null }[];
-  const rows: ToolCallRow[] = raw.map((r) => ({
-    sessionId: r.session_id ?? "",
-    tool: (r.tool_name ?? "").trim(),
-    input: r.tool_input,
-    opensSkill: parseSkillOpen(r.tool_name ?? "", r.tool_input),
-  }));
-  // With a signed broker policy, enrich each action with an egress/fs target-scope verdict;
-  // without one, tool-scope adherence still applies (verdicts stay undefined).
-  const verdictOf = policy
-    ? (row: ToolCallRow) => brokerVerdictForRow(row.tool, row.input, policy)
+  const rows = readToolCallRows(db);
+  const verdictOf = opts.policy
+    ? (row: ToolCallRow) => brokerVerdictForRow(row.tool, row.input, opts.policy as BrokerPolicy)
     : undefined;
-  return attributeRuns(rows, target, verdictOf);
+  const evidence = attributeRuns(rows, target, verdictOf);
+  const denialActions = opts.denialActions ?? [];
+  if (denialActions.length === 0) return evidence;
+  return { ...evidence, actions: [...evidence.actions, ...denialActions] };
 }
