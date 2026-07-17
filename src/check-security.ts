@@ -525,6 +525,13 @@ export const LOCKFILE_ECOSYSTEMS: { name: string; manifests: string[]; lockfiles
   { name: "Gemfile.lock", manifests: ["Gemfile"], lockfiles: ["Gemfile.lock"] },
   { name: "composer.lock", manifests: ["composer.json"], lockfiles: ["composer.lock"] },
   { name: "pubspec.lock", manifests: ["pubspec.yaml"], lockfiles: ["pubspec.lock"] },
+  // Ecosystems where a committed lockfile is the NORM (so a missing one is a real
+  // finding). Deliberately NOT here: Gradle/Maven/.NET — their lockfiles are opt-in,
+  // so flagging their absence would re-introduce the #354 false-red (JVM/.NET
+  // dependency vulns are covered by trivy/osv-scanner instead).
+  { name: "Package.resolved", manifests: ["Package.swift"], lockfiles: ["Package.resolved"] },
+  { name: "mix.lock", manifests: ["mix.exs"], lockfiles: ["mix.lock"] },
+  { name: "flake.lock", manifests: ["flake.nix"], lockfiles: ["flake.lock"] },
 ];
 
 async function checkLockfilesCommitted(): Promise<SecurityCheckResult[]> {
