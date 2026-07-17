@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **`kit skill test --runtime` (experimental) — the recorded-run audit that closes two
+  of the checks P1 disclaimed.** kit never runs a skill (zero-LLM); it audits what the
+  agent already recorded. The memory transcript index (`tool_uses`) reconstructs each
+  skill run as a **span** — a `Skill` invocation opens it, following tool calls until the
+  next `Skill` call or session end are that skill's actions — and two checks now decide
+  from that evidence: **adherence** (an out-of-declared-scope tool that actually ran →
+  `fail`; all in-scope across N observed runs → `pass`; no recorded run → honest `skip`)
+  and **negative controls** (a forbidden action that succeeded → `fail`; none attempted →
+  `skip` "not exercised", never a false-green pass). Low-confidence attribution downgrades
+  a would-be fail to an inconclusive `skip` — kit never blames a skill for an action it
+  cannot attribute. Off by default; `--runtime` opts in. Honest coverage limit surfaced:
+  verdicts cover _observed_ runs, not all runs; denial-based "control held" evidence and
+  egress/fs target-scope adherence are later increments. `rubric` stays OUT forever (LLM —
+  delegated). Design: kit-research skill-test-p2-runtime-adherence note.
+
 ## [5.1.0] - 2026-07-16
 
 ### Added
