@@ -15,7 +15,8 @@
  *   break kit's no-egress charter. kit NEVER invokes Stage 2. This is enforced two ways, both testable:
  *     1. SCRUBBED ENV — every SKILLSPECTOR_ (and provider-API-key) var is stripped from the child env, so
  *        Stage 2 cannot silently activate from ambient config (`scrubbedEnv`).
- *     2. STATIC INVOCATION — we run a plain `scan … --format sarif` and read only Stage-1 SARIF.
+ *     2. STATIC INVOCATION — we run `scan … --format sarif --no-llm` (Stage 2 disabled in the
+ *        argv itself, not just the env) and read only Stage-1 SARIF.
  *   Fail-CLOSED: a missing binary or a scan error is a DEGRADED result (never a silent pass); the
  *   caller must not report "deep-clean" when the delegate did not actually run.
  *
@@ -61,9 +62,14 @@ export function scrubbedEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Proce
   return out;
 }
 
-/** Argv for a static, SARIF-emitting Stage-1 scan. No `--llm`/provider flags are ever added. */
+/**
+ * Argv for a static, SARIF-emitting Stage-1 scan. `--no-llm` explicitly disables the
+ * optional Stage-2 semantic pass in the argv itself — belt-and-suspenders over the env
+ * scrub (`scrubbedEnv`), so a future SkillSpector default or ambient config can never
+ * silently re-enable the LLM stage. No `--llm`/provider flag is ever added.
+ */
 export function stage1Args(target: string): string[] {
-  return ["scan", target, "--format", "sarif"];
+  return ["scan", target, "--format", "sarif", "--no-llm"];
 }
 
 /**

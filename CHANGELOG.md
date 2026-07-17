@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security
+
+- **SkillSpector delegate now passes `--no-llm` explicitly** (`kit triage skill --deep`).
+  kit ran SkillSpector's Stage-1 static scan only, suppressing the optional Stage-2 LLM pass
+  via env scrubbing alone (`SKILLSPECTOR_PROVIDER=""` + stripped provider keys). It now also
+  passes the `--no-llm` flag in the argv itself — belt-and-suspenders, so a future
+  SkillSpector default or ambient config can never silently re-enable the model stage
+  (which would ship file contents to a provider, breaking kit's zero-LLM / no-egress
+  charter). The zero-LLM intent is now legible in the command line, not only the environment.
+
 ## [5.2.0] - 2026-07-18
 
 ### Added
