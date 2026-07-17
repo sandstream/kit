@@ -295,6 +295,34 @@ async function checkNpmAudit(): Promise<SecurityCheckResult> {
     };
   }
 
+  // npm audit REQUIRES an npm lockfile. On a pnpm/yarn/bun repo it errors out,
+  // which previously surfaced as a high-severity FAIL on a perfectly healthy repo
+  // (#353). Skip honestly instead — it is not-applicable, not a failure, and those
+  // repos' dependency vulnerabilities are still covered by osv-scanner. (No
+  // false-green risk: OSV runs regardless.)
+  const hasNpmLock = await access(resolve(process.cwd(), "package-lock.json"))
+    .then(() => true)
+    .catch(() => false);
+  if (!hasNpmLock) {
+    const other = (
+      await Promise.all(
+        (["pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock"] as const).map((f) =>
+          access(resolve(process.cwd(), f))
+            .then(() => f)
+            .catch(() => null),
+        ),
+      )
+    ).find(Boolean);
+    return {
+      category: "dependency",
+      name: "npm audit",
+      status: "skip",
+      detail: other
+        ? `no package-lock.json — repo uses ${other}; npm audit not applicable (deps covered by osv-scanner)`
+        : "no package-lock.json — npm audit not applicable (deps covered by osv-scanner)",
+    };
+  }
+
   try {
     const { stdout } = await exec("npm", ["audit", "--audit-level=high", "--json"], {
       timeout: 30_000,
@@ -465,83 +493,97 @@ async function checkEnvGitignored(): Promise<SecurityCheckResult> {
 /**
  * Check if package-lock.json or requirements.txt are committed
  */
+/**
+ * Per-ecosystem lockfile map (#353): for each ecosystem whose MANIFEST is present,
+ * a committed lockfile of ANY kind for that ecosystem satisfies the reproducibility
+ * check. Previously only package-lock.json + requirements.txt counted, so a healthy
+ * pnpm/yarn/bun/cargo/go/ruby/php/dart repo that committed its own lockfile was
+ * false-flagged "not committed [high]". The result `name` keeps the canonical
+ * lockfile of the ecosystem (stable for coverage/citation mapping); the detail names
+ * whichever lockfile actually satisfied it.
+ */
+export const LOCKFILE_ECOSYSTEMS: { name: string; manifests: string[]; lockfiles: string[] }[] = [
+  {
+    name: "package-lock.json",
+    manifests: ["package.json"],
+    lockfiles: [
+      "package-lock.json",
+      "npm-shrinkwrap.json",
+      "pnpm-lock.yaml",
+      "yarn.lock",
+      "bun.lockb",
+      "bun.lock",
+    ],
+  },
+  {
+    name: "requirements.txt",
+    manifests: ["requirements.txt", "pyproject.toml", "Pipfile"],
+    lockfiles: ["requirements.txt", "poetry.lock", "Pipfile.lock", "uv.lock", "pdm.lock"],
+  },
+  { name: "Cargo.lock", manifests: ["Cargo.toml"], lockfiles: ["Cargo.lock"] },
+  { name: "go.sum", manifests: ["go.mod"], lockfiles: ["go.sum"] },
+  { name: "Gemfile.lock", manifests: ["Gemfile"], lockfiles: ["Gemfile.lock"] },
+  { name: "composer.lock", manifests: ["composer.json"], lockfiles: ["composer.lock"] },
+  { name: "pubspec.lock", manifests: ["pubspec.yaml"], lockfiles: ["pubspec.lock"] },
+];
+
 async function checkLockfilesCommitted(): Promise<SecurityCheckResult[]> {
   const results: SecurityCheckResult[] = [];
+  const present = (f: string): Promise<boolean> =>
+    access(resolve(process.cwd(), f))
+      .then(() => true)
+      .catch(() => false);
 
-  // Check package-lock.json
+  // Resolve git-tracked state once — a non-git tree is a single honest warn, not a
+  // per-ecosystem repeat.
+  let gitOk = true;
   try {
-    await access(resolve(process.cwd(), "package.json"));
-
-    try {
-      const { stdout } = await exec("git", ["ls-files", "package-lock.json"], {
-        timeout: 5_000,
-      });
-
-      if (stdout.trim()) {
-        results.push({
-          category: "supply-chain",
-          name: "package-lock.json",
-          status: "pass",
-          detail: "committed to git",
-        });
-      } else {
-        results.push({
-          category: "supply-chain",
-          name: "package-lock.json",
-          status: "fail",
-          detail: "not committed to git",
-          severity: "high",
-        });
-      }
-    } catch {
-      results.push({
-        category: "supply-chain",
-        name: "package-lock.json",
-        status: "warn",
-        detail: "git check failed (not in a git repo?)",
-        severity: "low",
-      });
-    }
+    await exec("git", ["rev-parse", "--git-dir"], { timeout: 5_000 });
   } catch {
-    // No package.json, skip
+    gitOk = false;
   }
 
-  // Check requirements.txt
-  try {
-    await access(resolve(process.cwd(), "requirements.txt"));
+  for (const eco of LOCKFILE_ECOSYSTEMS) {
+    const hasManifest = (await Promise.all(eco.manifests.map(present))).some(Boolean);
+    if (!hasManifest) continue;
 
-    try {
-      const { stdout } = await exec("git", ["ls-files", "requirements.txt"], {
-        timeout: 5_000,
-      });
-
-      if (stdout.trim()) {
-        results.push({
-          category: "supply-chain",
-          name: "requirements.txt",
-          status: "pass",
-          detail: "committed to git",
-        });
-      } else {
-        results.push({
-          category: "supply-chain",
-          name: "requirements.txt",
-          status: "fail",
-          detail: "not committed to git",
-          severity: "high",
-        });
-      }
-    } catch {
+    if (!gitOk) {
       results.push({
         category: "supply-chain",
-        name: "requirements.txt",
+        name: eco.name,
         status: "warn",
         detail: "git check failed (not in a git repo?)",
         severity: "low",
       });
+      continue;
     }
-  } catch {
-    // No requirements.txt, skip
+
+    // A committed lockfile of ANY kind for this ecosystem satisfies the check.
+    let committed: string | null = null;
+    for (const lf of eco.lockfiles) {
+      const { stdout } = await exec("git", ["ls-files", lf], { timeout: 5_000 });
+      if (stdout.trim()) {
+        committed = lf;
+        break;
+      }
+    }
+
+    if (committed) {
+      results.push({
+        category: "supply-chain",
+        name: eco.name,
+        status: "pass",
+        detail: `committed to git (${committed})`,
+      });
+    } else {
+      results.push({
+        category: "supply-chain",
+        name: eco.name,
+        status: "fail",
+        detail: `no committed lockfile for the detected ecosystem (${eco.lockfiles.slice(0, 3).join(" / ")}…)`,
+        severity: "high",
+      });
+    }
   }
 
   return results;

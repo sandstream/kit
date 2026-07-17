@@ -12,6 +12,7 @@ import {
   findJvmProject,
   checkMemoryHooksLiveness,
   checkDeviceIdOverride,
+  LOCKFILE_ECOSYSTEMS,
   type SecurityCheckResult,
 } from "./check-security.js";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -472,5 +473,41 @@ describe("basicSecretScanFiles — degraded-path false-positive filter", () => {
       "not-a-grep-line",
     ]);
     assert.deepStrictEqual(files, ["src/a.ts"]);
+  });
+});
+
+describe("lockfile ecosystem coverage (#353)", () => {
+  const byName = Object.fromEntries(LOCKFILE_ECOSYSTEMS.map((e) => [e.name, e]));
+
+  it("npm/node accepts any JS lockfile, not just package-lock.json", () => {
+    const npm = byName["package-lock.json"];
+    for (const lf of [
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "yarn.lock",
+      "bun.lockb",
+      "bun.lock",
+    ]) {
+      assert.ok(npm.lockfiles.includes(lf), `npm ecosystem should accept ${lf}`);
+    }
+  });
+
+  it("covers the non-npm/pip ecosystems that used to false-fail", () => {
+    for (const name of ["Cargo.lock", "go.sum", "Gemfile.lock", "composer.lock", "pubspec.lock"]) {
+      assert.ok(byName[name], `missing ecosystem: ${name}`);
+    }
+  });
+
+  it("python accepts poetry/pipenv/uv locks, not just requirements.txt", () => {
+    const py = byName["requirements.txt"];
+    for (const lf of ["requirements.txt", "poetry.lock", "Pipfile.lock", "uv.lock"]) {
+      assert.ok(py.lockfiles.includes(lf), `python ecosystem should accept ${lf}`);
+    }
+  });
+
+  it("every ecosystem lists at least one manifest and one lockfile", () => {
+    for (const e of LOCKFILE_ECOSYSTEMS) {
+      assert.ok(e.manifests.length > 0 && e.lockfiles.length > 0, `${e.name} malformed`);
+    }
   });
 });
