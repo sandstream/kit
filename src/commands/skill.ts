@@ -106,7 +106,16 @@ async function gatherRuntime(
   try {
     const { openMemoryDb } = await import("../memory/db.js");
     const db = openMemoryDb();
-    evidence = readRunEvidence(db, skillName);
+    // A signed broker scope enriches actions with egress/fs target-scope verdicts; absent one,
+    // tool-scope adherence still applies. A missing/invalid policy must never break the audit.
+    let policy = null;
+    try {
+      const { profileBrokerPolicy } = await import("../exec-broker/profile-policy.js");
+      policy = (await profileBrokerPolicy(process.cwd())).policy;
+    } catch {
+      /* no verified scope — tool-scope adherence only */
+    }
+    evidence = readRunEvidence(db, skillName, policy);
   } catch {
     return skipBoth("transcript index unavailable — runtime audit skipped");
   }

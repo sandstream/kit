@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit skill test --runtime` now checks egress/fs target-scope, not just tool-scope.**
+  When a signed broker scope is present, each span-attributed action is enriched with a
+  broker verdict via the SAME decisions the gate-egress / gate-fs enforcers apply
+  (`checkEgress`/`checkFsWrite`): a `Bash` command's hosts, a `WebFetch` URL, and a
+  `Write`/`Edit` `file_path` are checked against the signed `[scope]`. This catches a skill
+  that stays within its declared _tools_ but uses an allowed tool (Bash/WebFetch) to reach
+  an _off-scope host_ or write outside the allowed roots — the exfil-via-allowed-tool vector
+  — folding it into the existing `adherence`/`negative` verdicts. Without a verified scope,
+  tool-scope adherence still applies (verdicts stay undefined). Deterministic, zero-LLM.
+
 - **`kit skill test --runtime` (experimental) — the recorded-run audit that closes two
   of the checks P1 disclaimed.** kit never runs a skill (zero-LLM); it audits what the
   agent already recorded. The memory transcript index (`tool_uses`) reconstructs each
