@@ -24,13 +24,70 @@
  */
 import type { DatabaseSync } from "node:sqlite";
 import type { ObservedAction, RuntimeEvidence } from "./adherence.js";
+import { checkEgress, checkFsWrite } from "../exec-broker/decisions.js";
+import { policyFsRoots, type BrokerPolicy } from "../exec-broker/policy.js";
+import { extractHostsFromCommand } from "../broker/extract.js";
 
 /** One ordered tool-call row from `tool_uses`, reduced to what attribution needs. */
 export interface ToolCallRow {
   sessionId: string;
   tool: string;
+  /** Raw `tool_input` JSON (for egress/fs target-scope verdicts); null when absent. */
+  input: string | null;
   /** For a `Skill` row, the invoked skill slug (parsed from `tool_input`); else null. */
   opensSkill: string | null;
+}
+
+/** Per-action broker verdict from a signed scope, or undefined when the action carries no target. */
+export type BrokerVerdict = "in-scope" | "out-of-scope" | undefined;
+
+/** Pull a string field from a row's `tool_input` JSON; null on absent/unparseable/non-string. */
+function inputField(input: string | null, key: string): string | null {
+  if (input == null) return null;
+  try {
+    const v = (JSON.parse(input) as Record<string, unknown>)[key];
+    return typeof v === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Egress/fs target-scope verdict for a recorded action against a signed broker policy — the
+ * SAME decisions the gate-egress / gate-fs enforcers apply, pointed at a transcript row.
+ *   - Bash: extract hosts from the command; any host outside `policy.egress.allow` → out-of-scope.
+ *   - WebFetch: its `url` checked against the egress allowlist.
+ *   - Write/Edit: its `file_path` must land under some allowed fs root.
+ *   - Any other tool, or a tool with no extractable target → undefined (tool-scope still applies).
+ * Pure. Deterministic given (row, policy).
+ */
+export function brokerVerdictForRow(
+  tool: string,
+  input: string | null,
+  policy: BrokerPolicy,
+): BrokerVerdict {
+  if (tool === "Bash") {
+    const command = inputField(input, "command");
+    if (command === null) return undefined;
+    const hosts = extractHostsFromCommand(command);
+    if (hosts.length === 0) return undefined;
+    return hosts.every((h) => checkEgress(h, { allow: policy.egress.allow }).ok)
+      ? "in-scope"
+      : "out-of-scope";
+  }
+  if (tool === "WebFetch") {
+    const url = inputField(input, "url");
+    if (url === null) return undefined;
+    return checkEgress(url, { allow: policy.egress.allow }).ok ? "in-scope" : "out-of-scope";
+  }
+  if (tool === "Write" || tool === "Edit") {
+    const path = inputField(input, "file_path");
+    if (path === null) return undefined;
+    return policyFsRoots(policy).some((root) => checkFsWrite(path, root).ok)
+      ? "in-scope"
+      : "out-of-scope";
+  }
+  return undefined;
 }
 
 /**
@@ -59,7 +116,11 @@ export function parseSkillOpen(tool: string, toolInput: string | null | undefine
  * session change) closes the span. The `Skill` row itself is a boundary, never an action.
  * Pure. Confidence is always `span` (we have explicit run boundaries).
  */
-export function attributeRuns(rows: ToolCallRow[], target: string): RuntimeEvidence {
+export function attributeRuns(
+  rows: ToolCallRow[],
+  target: string,
+  verdictOf?: (row: ToolCallRow) => BrokerVerdict,
+): RuntimeEvidence {
   const actions: ObservedAction[] = [];
   const sessionsWithSpan = new Set<string>();
   let runs = 0;
@@ -79,7 +140,7 @@ export function attributeRuns(rows: ToolCallRow[], target: string): RuntimeEvide
       }
       continue; // the Skill row opens/closes a span; it is not itself an action
     }
-    if (active) actions.push({ tool: row.tool, denied: false });
+    if (active) actions.push({ tool: row.tool, denied: false, brokerVerdict: verdictOf?.(row) });
   }
 
   return { actions, runs, sessions: sessionsWithSpan.size, confidence: "span" };
@@ -90,14 +151,24 @@ export function attributeRuns(rows: ToolCallRow[], target: string): RuntimeEvide
  * ORDER BY (session_id, id) reproduces per-session call order so spans reconstruct exactly.
  * Deterministic given the DB. The pure `attributeRuns` does the decision.
  */
-export function readRunEvidence(db: DatabaseSync, target: string): RuntimeEvidence {
+export function readRunEvidence(
+  db: DatabaseSync,
+  target: string,
+  policy?: BrokerPolicy | null,
+): RuntimeEvidence {
   const raw = db
     .prepare("SELECT session_id, tool_name, tool_input FROM tool_uses ORDER BY session_id, id")
     .all() as { session_id: string | null; tool_name: string | null; tool_input: string | null }[];
   const rows: ToolCallRow[] = raw.map((r) => ({
     sessionId: r.session_id ?? "",
     tool: (r.tool_name ?? "").trim(),
+    input: r.tool_input,
     opensSkill: parseSkillOpen(r.tool_name ?? "", r.tool_input),
   }));
-  return attributeRuns(rows, target);
+  // With a signed broker policy, enrich each action with an egress/fs target-scope verdict;
+  // without one, tool-scope adherence still applies (verdicts stay undefined).
+  const verdictOf = policy
+    ? (row: ToolCallRow) => brokerVerdictForRow(row.tool, row.input, policy)
+    : undefined;
+  return attributeRuns(rows, target, verdictOf);
 }

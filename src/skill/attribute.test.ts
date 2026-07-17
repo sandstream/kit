@@ -1,6 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseSkillOpen, attributeRuns, type ToolCallRow } from "./attribute.js";
+import {
+  parseSkillOpen,
+  attributeRuns,
+  brokerVerdictForRow,
+  type ToolCallRow,
+} from "./attribute.js";
+import type { BrokerPolicy } from "../exec-broker/policy.js";
 
 describe("parseSkillOpen", () => {
   it("returns the slug for a Skill call", () => {
@@ -20,6 +26,7 @@ describe("parseSkillOpen", () => {
 const row = (sessionId: string, tool: string, opensSkill: string | null = null): ToolCallRow => ({
   sessionId,
   tool,
+  input: null,
   opensSkill,
 });
 
@@ -99,5 +106,78 @@ describe("attributeRuns", () => {
     const rows: ToolCallRow[] = [row("s1", "Skill", "x"), row("s1", "Bash")];
     const ev = attributeRuns(rows, "x");
     assert.equal(ev.actions[0].denied, false);
+  });
+
+  it("threads a broker verdict onto attributed actions via verdictOf", () => {
+    const rows: ToolCallRow[] = [row("s1", "Skill", "x"), row("s1", "WebFetch")];
+    const ev = attributeRuns(rows, "x", (r) =>
+      r.tool === "WebFetch" ? "out-of-scope" : undefined,
+    );
+    assert.equal(ev.actions[0].brokerVerdict, "out-of-scope");
+  });
+});
+
+const policy: BrokerPolicy = {
+  egress: { allow: ["api.example.com", ".trusted.dev"] },
+  fs: { root: "/repo", roots: ["/repo/extra"] },
+  env: { declared: [] },
+};
+
+describe("brokerVerdictForRow", () => {
+  it("Bash: in-scope when every extracted host is allowed, out-of-scope otherwise", () => {
+    assert.equal(
+      brokerVerdictForRow(
+        "Bash",
+        JSON.stringify({ command: "curl https://api.example.com/x" }),
+        policy,
+      ),
+      "in-scope",
+    );
+    assert.equal(
+      brokerVerdictForRow("Bash", JSON.stringify({ command: "curl https://evil.com/x" }), policy),
+      "out-of-scope",
+    );
+  });
+
+  it("Bash: no extractable host → undefined (tool-scope still applies)", () => {
+    assert.equal(
+      brokerVerdictForRow("Bash", JSON.stringify({ command: "ls -la" }), policy),
+      undefined,
+    );
+  });
+
+  it("WebFetch: url checked against the egress allowlist (suffix match honored)", () => {
+    assert.equal(
+      brokerVerdictForRow("WebFetch", JSON.stringify({ url: "https://sub.trusted.dev/a" }), policy),
+      "in-scope",
+    );
+    assert.equal(
+      brokerVerdictForRow("WebFetch", JSON.stringify({ url: "https://elsewhere.net" }), policy),
+      "out-of-scope",
+    );
+  });
+
+  it("Write/Edit: file_path must land under an allowed fs root", () => {
+    assert.equal(
+      brokerVerdictForRow("Write", JSON.stringify({ file_path: "/repo/src/a.ts" }), policy),
+      "in-scope",
+    );
+    assert.equal(
+      brokerVerdictForRow("Edit", JSON.stringify({ file_path: "/repo/extra/b.ts" }), policy),
+      "in-scope",
+    );
+    assert.equal(
+      brokerVerdictForRow("Write", JSON.stringify({ file_path: "/etc/passwd" }), policy),
+      "out-of-scope",
+    );
+  });
+
+  it("non-egress/fs tools and unparseable/absent input → undefined", () => {
+    assert.equal(
+      brokerVerdictForRow("Read", JSON.stringify({ file_path: "/x" }), policy),
+      undefined,
+    );
+    assert.equal(brokerVerdictForRow("Bash", null, policy), undefined);
+    assert.equal(brokerVerdictForRow("Bash", "not json", policy), undefined);
   });
 });
