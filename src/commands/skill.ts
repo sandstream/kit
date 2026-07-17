@@ -26,7 +26,10 @@ import {
   type SiblingSkill,
   type SkillSnapshot,
   type CheckResult,
+  type DisclaimedItem,
 } from "../skill/test.js";
+import { auditRuntime, type RuntimeCheckResult, type RuntimeEvidence } from "../skill/adherence.js";
+import { readRunEvidence } from "../skill/attribute.js";
 
 /** Snapshot file written next to the SKILL.md it pins. */
 const SNAPSHOT_NAME = ".kit-skill.snapshot.json";
@@ -84,6 +87,90 @@ function mark(status: CheckResult["status"]): string {
   return `${c.yellow}−${c.reset}`; // skip
 }
 
+/**
+ * Gather the two runtime checks (adherence, negative controls) from the transcript index.
+ * Honest skips when the skill has no name to attribute by, or the index is unavailable —
+ * never a silent pass. The pure `auditRuntime` decides; this only sources the evidence.
+ */
+async function gatherRuntime(
+  skillName: string,
+  allowedTools: string[] | undefined,
+): Promise<RuntimeCheckResult[]> {
+  const skipBoth = (reason: string): RuntimeCheckResult[] => [
+    { id: "adherence", status: "skip", detail: reason },
+    { id: "negative", status: "skip", detail: reason },
+  ];
+  if (!skillName)
+    return skipBoth("no name in frontmatter — cannot attribute recorded runs to this skill");
+  let evidence: RuntimeEvidence;
+  try {
+    const { openMemoryDb } = await import("../memory/db.js");
+    const db = openMemoryDb();
+    evidence = readRunEvidence(db, skillName);
+  } catch {
+    return skipBoth("transcript index unavailable — runtime audit skipped");
+  }
+  return auditRuntime(allowedTools, evidence).checks;
+}
+
+interface SkillTestRender {
+  name: string;
+  checks: CheckResult[];
+  runtime: boolean;
+  runtimeChecks: RuntimeCheckResult[];
+  disclaimed: readonly DisclaimedItem[];
+  overallOk: boolean;
+  hasSkips: boolean;
+  json: boolean;
+}
+
+/** Render the folded static + (optional) runtime report as JSON or human output. */
+function renderResult(r: SkillTestRender): void {
+  if (r.json) {
+    console.log(
+      JSON.stringify(
+        {
+          skill: r.name,
+          checks: r.checks,
+          ...(r.runtime ? { runtime: r.runtimeChecks } : {}),
+          disclaimed: r.disclaimed,
+          ok: r.overallOk,
+          hasSkips: r.hasSkips,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+  console.log(
+    `${c.bold}kit skill test${c.reset} ${c.dim}${r.name} — module-discipline checks (deterministic)${c.reset}`,
+  );
+  for (const ch of r.checks) {
+    console.log(`  ${mark(ch.status)} ${ch.id.padEnd(11)} ${c.dim}${ch.detail}${c.reset}`);
+  }
+  if (r.runtime) {
+    console.log(`  ${c.dim}runtime (recorded-run audit):${c.reset}`);
+    for (const ch of r.runtimeChecks) {
+      console.log(`  ${mark(ch.status)} ${ch.id.padEnd(11)} ${c.dim}${ch.detail}${c.reset}`);
+    }
+  }
+  console.log(`\n  ${c.dim}not decided here (by design):${c.reset}`);
+  for (const d of r.disclaimed) {
+    console.log(`  ${c.dim}·${c.reset} ${c.dim}${d.id.padEnd(16)} ${d.reason}${c.reset}`);
+  }
+  if (r.overallOk) {
+    const note = r.hasSkips
+      ? "(some checks skipped — see above)"
+      : "(engineered like a module; not a judgement of quality)";
+    console.log(`\n${c.green}module discipline: ok${c.reset} ${c.dim}${note}${c.reset}`);
+  } else {
+    console.log(
+      `\n${c.red}module discipline: fail${c.reset} ${c.dim}(a check failed — see above)${c.reset}`,
+    );
+  }
+}
+
 export async function cmdSkill(): Promise<boolean> {
   const sub = process.argv[3];
   const args = process.argv.slice(4);
@@ -91,7 +178,7 @@ export async function cmdSkill(): Promise<boolean> {
 
   if (sub !== "test") {
     console.error(
-      `${c.red}usage: kit skill test <path-to-SKILL.md|skill-dir> [--json] [--gate] [--update-snapshot]${c.reset}`,
+      `${c.red}usage: kit skill test <path-to-SKILL.md|skill-dir> [--runtime] [--json] [--gate] [--update-snapshot]${c.reset}`,
     );
     return false;
   }
@@ -99,7 +186,7 @@ export async function cmdSkill(): Promise<boolean> {
   const target = args.find((a) => !a.startsWith("-")) ?? flagValue(process.argv, "--path");
   if (!target) {
     console.error(
-      `${c.red}usage: kit skill test <path-to-SKILL.md|skill-dir> [--json] [--gate] [--update-snapshot]${c.reset}`,
+      `${c.red}usage: kit skill test <path-to-SKILL.md|skill-dir> [--runtime] [--json] [--gate] [--update-snapshot]${c.reset}`,
     );
     return false;
   }
@@ -133,36 +220,30 @@ export async function cmdSkill(): Promise<boolean> {
     snapshot: loadSnapshot(skillPath),
   });
 
-  if (json) {
-    console.log(
-      JSON.stringify({ skill: manifest.name ?? basename(dirname(skillPath)), ...report }, null, 2),
-    );
-  } else {
-    console.log(
-      `${c.bold}kit skill test${c.reset} ${c.dim}${manifest.name ?? basename(dirname(skillPath))} — module-discipline checks (deterministic)${c.reset}`,
-    );
-    for (const ch of report.checks) {
-      console.log(`  ${mark(ch.status)} ${ch.id.padEnd(11)} ${c.dim}${ch.detail}${c.reset}`);
-    }
-    console.log(`\n  ${c.dim}not decided here (by design):${c.reset}`);
-    for (const d of report.disclaimed) {
-      console.log(`  ${c.dim}·${c.reset} ${c.dim}${d.id.padEnd(16)} ${d.reason}${c.reset}`);
-    }
-    if (report.ok && report.hasSkips) {
-      console.log(
-        `\n${c.green}module discipline: ok${c.reset} ${c.dim}(some checks skipped — see above)${c.reset}`,
-      );
-    } else if (report.ok) {
-      console.log(
-        `\n${c.green}module discipline: ok${c.reset} ${c.dim}(engineered like a module; not a judgement of quality)${c.reset}`,
-      );
-    } else {
-      console.log(
-        `\n${c.red}module discipline: fail${c.reset} ${c.dim}(a check failed — see above)${c.reset}`,
-      );
-    }
-  }
+  // --runtime opts into the recorded-run audit; it upgrades the adherence + negative-control
+  // rows from disclaimed-OUT to real verdicts. rubric stays OUT forever (LLM — delegated).
+  const runtime = hasFlag(process.argv, "--runtime");
+  const runtimeChecks = runtime
+    ? await gatherRuntime(manifest.name ?? "", manifest.allowedTools)
+    : [];
+  const disclaimed = runtime
+    ? report.disclaimed.filter((d) => d.id === "rubric")
+    : report.disclaimed;
+  const runtimeOk = runtimeChecks.every((r) => r.status !== "fail");
+  const overallOk = report.ok && runtimeOk;
+  const hasSkips = report.hasSkips || runtimeChecks.some((r) => r.status === "skip");
+
+  renderResult({
+    name: manifest.name ?? basename(dirname(skillPath)),
+    checks: report.checks,
+    runtime,
+    runtimeChecks,
+    disclaimed,
+    overallOk,
+    hasSkips,
+    json,
+  });
 
   // --gate makes any failure a non-zero exit for CI; without it, the report is advisory.
-  return hasFlag(process.argv, "--gate") ? report.ok : true;
+  return hasFlag(process.argv, "--gate") ? overallOk : true;
 }

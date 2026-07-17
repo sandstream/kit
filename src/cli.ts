@@ -660,7 +660,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   skill: {
     handler: cmdSkill,
     stability: "experimental",
-    help: "Module-discipline linter for a SKILL.md: contract shape, trigger + sibling-collision, declared least-privilege scope, and CI regression drift (test <path> [--json] [--gate] [--update-snapshot]) — proves a skill is engineered like a module, NOT that its output is good (rubric grading is delegated) (experimental)",
+    help: "Module-discipline linter for a SKILL.md: contract shape, trigger + sibling-collision, declared least-privilege scope, and CI regression drift — plus --runtime to audit recorded runs for scope-adherence + negative controls (from the transcript index, zero-LLM) (test <path> [--runtime] [--json] [--gate] [--update-snapshot]) — proves a skill is engineered like a module, NOT that its output is good (rubric grading is delegated) (experimental)",
   },
   baseline: {
     handler: cmdBaseline,
