@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-07-18
+
 ### Added
 
 - **`kit skill test --runtime` now proves negative controls HELD, not just detects violations.**
