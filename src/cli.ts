@@ -29,6 +29,7 @@ import { cmdDoctor, cmdAdd, cmdSetup, cmdInit } from "./commands/setup.js";
 import { cmdReview } from "./commands/review.js";
 import { cmdInsight } from "./commands/insight.js";
 import { cmdProfile } from "./commands/profile.js";
+import { cmdBroker } from "./commands/broker.js";
 import { cmdBootstrap } from "./commands/bootstrap.js";
 import { cmdSkill } from "./commands/skill.js";
 import { cmdMap } from "./commands/repomap.js";
@@ -699,6 +700,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     stability: "experimental",
     help: "Versioned, traveling project profile — declare {skills, mcp, workflows, plugins, vault, gates, scope}, audit declared-vs-discovered drift, sign the scope/RoE, and export/import a portable signed bundle to a fresh host (show|freeze|check|sign|verify|export|import; --json, --gate, --key, --out)",
   },
+  broker: {
+    handler: cmdBroker,
+    stability: "experimental",
+    help: "exec-broker runtime posture — graduate observe→enforce on evidence: enforce-readiness reads the recorded observe window and reports ready | would-block (+ exactly what breaks) | untested (--json, --gate)",
+  },
   pkg: {
     handler: cmdPkg,
     stability: "stable",
@@ -755,6 +761,8 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     "Export a portable signed bundle (profile + signature + signer key) to --out or stdout",
   "profile import":
     "Import a portable bundle on a fresh host — integrity-verify offline, fail-closed on tamper/revoked (authoritative only once the signer is anchored)",
+  "broker enforce-readiness":
+    "Read the recorded observe window (.kit-audit.jsonl) and report whether it's safe to flip exec-broker to enforce: ready | would-block (+ exactly what breaks) | untested (--gate fails CI on any not-ready verdict)",
   "memory index": "Index ~/.claude transcripts into the SQLite memory store",
   "memory search": "Full-text search memory (current project; --global for all)",
   "memory stats": "Show what the local memory store contains",
