@@ -56,8 +56,10 @@ import {
   formatAge,
   getSharedPath,
   verifySharedTier,
+  SHARED_KINDS,
   type SharedKind,
   type SharedStatus,
+  type SharedProvenance,
   type SharedEntry,
 } from "../memory/shared.js";
 import {
@@ -1057,6 +1059,20 @@ async function memUninstall(): Promise<boolean> {
   return true;
 }
 
+/** Validate the enum-valued share flags; returns an error message, or null when all are ok. Pure. */
+function validateShareEnums(
+  kind: SharedKind,
+  provenance: string | undefined,
+  confidence: string | undefined,
+): string | null {
+  if (!SHARED_KINDS.includes(kind)) return `--kind ${kind}: unknown kind`;
+  if (provenance && !["operator", "derived", "inferred"].includes(provenance))
+    return `--provenance ${provenance}: must be operator|derived|inferred`;
+  if (confidence && !["low", "medium", "high"].includes(confidence))
+    return `--confidence ${confidence}: must be low|medium|high`;
+  return null;
+}
+
 async function memShare(): Promise<boolean> {
   const area = flagValue(process.argv, "--area");
   const title = flagValue(process.argv, "--title");
@@ -1067,10 +1083,20 @@ async function memShare(): Promise<boolean> {
   const supersedes = flagValue(process.argv, "--supersedes");
   const reverses = flagValue(process.argv, "--reverses");
   const status = flagValue(process.argv, "--status") as SharedStatus | undefined;
+  const provenance = flagValue(process.argv, "--provenance") as SharedProvenance | undefined;
+  const confidence = flagValue(process.argv, "--confidence") as
+    | "low"
+    | "medium"
+    | "high"
+    | undefined;
+  const usage = `${c.red}usage: kit memory share --area <a> --title <t> [--kind ${SHARED_KINDS.join("|")}] [--body <b>] [--ref <r>] [--provenance operator|derived|inferred] [--confidence low|medium|high] [--supersedes <id>] [--reverses <id>]${c.reset}`;
   if (!area || !title) {
-    console.error(
-      `${c.red}usage: kit memory share --area <a> --title <t> [--kind decision|convention|how-built|status|security|note] [--body <b>] [--ref <r>] [--supersedes <id>] [--reverses <id>]${c.reset}`,
-    );
+    console.error(usage);
+    return false;
+  }
+  const enumError = validateShareEnums(kind, provenance, confidence);
+  if (enumError) {
+    console.error(`${c.red}${enumError}${c.reset}`);
     return false;
   }
   const root = getCurrentProjectRoot();
@@ -1091,7 +1117,18 @@ async function memShare(): Promise<boolean> {
   try {
     const e = shareEntry(
       root,
-      { area, kind, title, body, refs: ref ? [ref] : [], status, supersedes, reverses },
+      {
+        area,
+        kind,
+        title,
+        body,
+        refs: ref ? [ref] : [],
+        status,
+        supersedes,
+        reverses,
+        provenance,
+        confidence,
+      },
       new Date().toISOString(),
     );
     const rel =

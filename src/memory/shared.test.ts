@@ -17,6 +17,9 @@ import {
   verifySharedTier,
   recallSafeShared,
   getSharedPath,
+  provenanceRank,
+  SHARED_KINDS,
+  type SharedEntry,
 } from "./shared.js";
 import { loadOrCreateIdentity, tryLoadIdentity } from "../identity.js";
 import { addPolicySigner } from "../policy-trust.js";
@@ -313,5 +316,82 @@ describe("shared memory — Ed25519 signing (R4)", () => {
     assert.equal(v.counts.unsigned, 1);
     rmSync(r, { recursive: true, force: true });
     rmSync(emptyId, { recursive: true, force: true });
+  });
+});
+
+describe("shared memory — negative-space kinds + provenance (J1 + B1)", () => {
+  it("SHARED_KINDS includes the negative-space kinds idea + abandoned", () => {
+    assert.ok(SHARED_KINDS.includes("idea"));
+    assert.ok(SHARED_KINDS.includes("abandoned"));
+  });
+
+  it("round-trips an abandoned entry with provenance + confidence", () => {
+    const r = mkdtempSync(join(tmpdir(), "kit-neg-"));
+    const e = shareEntry(
+      r,
+      {
+        area: "auth",
+        kind: "abandoned",
+        title: "tried JWT-in-cookie, dropped it",
+        body: "CSRF surface too large; went with header tokens",
+        provenance: "operator",
+        confidence: "high",
+      },
+      "2026-07-18T00:00:00Z",
+    );
+    assert.equal(e.kind, "abandoned");
+    assert.equal(e.provenance, "operator");
+    assert.equal(e.confidence, "high");
+    const back = readShared(r)[0];
+    assert.equal(back.kind, "abandoned");
+    assert.equal(back.provenance, "operator");
+    assert.equal(back.confidence, "high");
+    rmSync(r, { recursive: true, force: true });
+  });
+
+  it("provenance/confidence are absent on the entry when not provided (byte-compat)", () => {
+    const r = mkdtempSync(join(tmpdir(), "kit-prov0-"));
+    const e = shareEntry(r, { area: "x", kind: "note", title: "t", body: "b" }, "ts");
+    assert.equal(e.provenance, undefined);
+    assert.equal(e.confidence, undefined);
+    // The persisted line carries no provenance/confidence keys at all.
+    const raw = readFileSync(getSharedPath(r), "utf8").trim();
+    assert.ok(!raw.includes("provenance"));
+    assert.ok(!raw.includes("confidence"));
+    rmSync(r, { recursive: true, force: true });
+  });
+
+  it("provenanceRank: operator (or absent) < derived < inferred", () => {
+    const mk = (p?: "operator" | "derived" | "inferred"): SharedEntry => ({
+      id: "1",
+      area: "a",
+      kind: "decision",
+      title: "t",
+      body: "b",
+      refs: [],
+      author: "x",
+      ts: "ts",
+      ...(p ? { provenance: p } : {}),
+    });
+    assert.equal(provenanceRank(mk()), 0); // absent ⇒ operator
+    assert.equal(provenanceRank(mk("operator")), 0);
+    assert.equal(provenanceRank(mk("derived")), 1);
+    assert.equal(provenanceRank(mk("inferred")), 2);
+  });
+
+  it("canonical includes provenance/confidence only when present (legacy stays byte-identical)", () => {
+    const base: SharedEntry = {
+      id: "1",
+      area: "a",
+      kind: "decision",
+      title: "t",
+      body: "b",
+      refs: [],
+      author: "x",
+      ts: "ts",
+    };
+    assert.ok(!sharedEntryCanonical(base).includes("provenance"));
+    const withProv = sharedEntryCanonical({ ...base, provenance: "derived" });
+    assert.ok(withProv.includes("derived"));
   });
 });

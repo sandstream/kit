@@ -14,7 +14,13 @@ import { spawn } from "node:child_process";
 import { openMemoryDb, getStats, recentMessages, getMemoryDir, ensureMemoryDir } from "./db.js";
 import { indexClaudeTranscripts, indexAllHarnesses } from "./parser.js";
 import { palList } from "./pal.js";
-import { activeShared, recallSafeShared, formatAge, type SharedEntry } from "./shared.js";
+import {
+  activeShared,
+  recallSafeShared,
+  provenanceRank,
+  formatAge,
+  type SharedEntry,
+} from "./shared.js";
 import { decisionsForPaths, changedPaths } from "./clusters.js";
 import { getCurrentProjectRoot } from "./project.js";
 import { readCachedUpdateSync, getKitVersionSync } from "../update-check.js";
@@ -113,14 +119,27 @@ function touchedDecisionsNotice(root: string = getCurrentProjectRoot()): string 
  * activeShared returns [] on a missing/broken store. Deterministic, no model.
  */
 export function recentDecisions(root: string, limit: number): SharedEntry[] {
-  const DURABLE = new Set<SharedEntry["kind"]>(["decision", "convention", "security", "status"]);
+  // `abandoned` is included: resurfacing "we tried X here and dropped it, because Y" before
+  // someone re-tries it is among the highest-value recall. `idea`/`note`/`how-built` stay
+  // excluded as lower-signal for auto-injection.
+  const DURABLE = new Set<SharedEntry["kind"]>([
+    "decision",
+    "convention",
+    "security",
+    "status",
+    "abandoned",
+  ]);
   try {
     const durable = activeShared(root).filter((e) => DURABLE.has(e.kind));
     // Verify signatures before auto-injecting: drop tampered entries (and, under a
     // `.kit-policy.signers` anchor, anything not org-trusted) so a poisoned/forged team
     // entry is never replayed as a trusted "Curated team decision". (R4/#77)
+    // Order: operator-stated before kit-derived (provenanceRank), then newest-first — a
+    // human's explicit decision outranks a pattern kit merely inferred.
     return recallSafeShared(root, durable)
-      .sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0))
+      .sort(
+        (a, b) => provenanceRank(a) - provenanceRank(b) || (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0),
+      )
       .slice(0, limit);
   } catch {
     return [];

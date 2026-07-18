@@ -23,7 +23,36 @@ import { identityId, verifySignature, localPublicKeys } from "../identity.js";
 import { resolveKeyStore, assertHardwareIdentity, hardwareRequired } from "../keystore/index.js";
 import { policySignersMap, hasPolicyAnchor } from "../policy-trust.js";
 
-export type SharedKind = "decision" | "convention" | "how-built" | "status" | "security" | "note";
+export type SharedKind =
+  | "decision"
+  | "convention"
+  | "how-built"
+  | "status"
+  | "security"
+  | "note"
+  // Negative-space kinds — the knowledge that evaporates hardest:
+  | "idea" // considered / not-yet-built
+  | "abandoned"; // tried and dropped, with the reason (re-introducing it should warn)
+
+/** All known kinds — for CLI validation so a typo doesn't persist a garbage kind. */
+export const SHARED_KINDS: readonly SharedKind[] = [
+  "decision",
+  "convention",
+  "how-built",
+  "status",
+  "security",
+  "note",
+  "idea",
+  "abandoned",
+];
+
+/**
+ * Origin of a curated entry — lets recall prefer an operator's explicit statement over a
+ * pattern kit merely derived. `operator` = a human stated it (the default when absent, since
+ * a human promoted the entry); `derived` = kit inferred it (e.g. `memory learn` repetition);
+ * `inferred` = a weaker guess. Ranking: operator > derived > inferred.
+ */
+export type SharedProvenance = "operator" | "derived" | "inferred";
 
 /**
  * Lifecycle of a decision. Append-only: we never edit an old entry, a change is a
@@ -48,6 +77,10 @@ export interface SharedEntry {
   supersedes?: string;
   /** Id of the entry this one reverses (tried + undone — re-introducing it should warn). */
   reverses?: string;
+  /** Origin of the entry; absent ⇒ `operator` (a human promoted it). */
+  provenance?: SharedProvenance;
+  /** Optional operator-supplied confidence; display + tiebreak only, never a gate. */
+  confidence?: "low" | "medium" | "high";
   /** Ed25519 signer id (kid) — set when the entry was signed on write. */
   kid?: string;
   /** Base64 Ed25519 signature over the canonical content (excludes kid/sig itself). */
@@ -63,6 +96,8 @@ export interface ShareInput {
   status?: SharedStatus;
   supersedes?: string;
   reverses?: string;
+  provenance?: SharedProvenance;
+  confidence?: "low" | "medium" | "high";
 }
 
 export function getSharedPath(root: string): string {
@@ -123,6 +158,10 @@ export function sharedEntryCanonical(entry: SharedEntry): string {
   if (entry.status !== undefined) canon.status = entry.status;
   if (entry.supersedes !== undefined) canon.supersedes = entry.supersedes;
   if (entry.reverses !== undefined) canon.reverses = entry.reverses;
+  // Appended last + only-when-present so legacy entries canonicalize byte-identically
+  // (an unsigned pre-provenance entry, if later signed, is unchanged).
+  if (entry.provenance !== undefined) canon.provenance = entry.provenance;
+  if (entry.confidence !== undefined) canon.confidence = entry.confidence;
   return JSON.stringify(canon);
 }
 
@@ -256,6 +295,10 @@ export function shareEntry(root: string, input: ShareInput, now: string): Shared
   if (input.status && input.status !== "active") entry.status = input.status;
   if (input.supersedes) entry.supersedes = input.supersedes;
   if (input.reverses) entry.reverses = input.reverses;
+  // Provenance/confidence are written only when explicitly provided, so an operator-stated
+  // entry (the common case) stays byte-identical to pre-provenance entries; absent ⇒ operator.
+  if (input.provenance) entry.provenance = input.provenance;
+  if (input.confidence) entry.confidence = input.confidence;
   // Sign on write via the ACTIVE keystore (hardware/externally-held when configured, else
   // the file identity) when one exists — attributable provenance a reviewer/colleague can
   // verify offline with just the public key. No identity ⇒ unsigned entry (backward-
@@ -315,6 +358,22 @@ export function effectiveStatus(entry: SharedEntry, all: SharedEntry[]): SharedS
     if (e.supersedes === entry.id) result = "superseded";
   }
   return result;
+}
+
+/**
+ * Recall priority by origin (lower = surfaced first): an operator's explicit statement
+ * outranks something kit derived, which outranks a weak inference. Absent provenance ⇒
+ * `operator` (a human promoted the entry). Pure — surfacing sorts by this, then recency.
+ */
+export function provenanceRank(entry: SharedEntry): number {
+  switch (entry.provenance ?? "operator") {
+    case "operator":
+      return 0;
+    case "derived":
+      return 1;
+    case "inferred":
+      return 2;
+  }
 }
 
 /** The currently-active shared entries (effectiveStatus === "active"). */
