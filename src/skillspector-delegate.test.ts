@@ -69,10 +69,13 @@ describe("skillspector delegate — zero-LLM enforcement (no egress)", () => {
     assert.equal(base.OPENAI_API_KEY, "sk-x", "base env untouched");
   });
 
-  it("stage1Args never contains an LLM/provider flag", () => {
+  it("stage1Args explicitly disables Stage 2 and never enables an LLM/provider", () => {
     const args = stage1Args("./skill");
-    assert.deepEqual(args, ["scan", "./skill", "--format", "sarif"]);
-    assert.ok(!args.some((a) => /llm|provider|model|openai|anthropic/i.test(a)));
+    assert.deepEqual(args, ["scan", "./skill", "--format", "sarif", "--no-llm"]);
+    // The only LLM-related flag is the DISABLING one; nothing enables a provider/model.
+    assert.ok(args.includes("--no-llm"));
+    assert.ok(!args.includes("--llm"));
+    assert.ok(!args.some((a) => /provider|model|openai|anthropic/i.test(a)));
   });
 });
 
