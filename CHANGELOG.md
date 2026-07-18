@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **kit memory captures the full decision lifecycle — negative-space kinds + provenance.**
+  The curated shared tier gains two kinds for the knowledge that evaporates hardest:
+  **`idea`** (considered / not-yet-built) and **`abandoned`** (tried and dropped, with the
+  reason). `abandoned` entries are re-surfaced on resume for the area you're touching — so
+  the next session sees _"we tried X here and dropped it, because Y"_ **before** re-trying it.
+  Entries also carry optional **`provenance`** (`operator` | `derived` | `inferred`, absent ⇒
+  operator) and **`confidence`**; recall now orders an operator's explicit statement **above**
+  a pattern kit merely derived, then by recency. Both fields are signature-covered and written
+  only when set, so existing entries stay byte-identical. `kit memory share` gains
+  `--provenance` / `--confidence` and now validates `--kind` (a typo no longer persists a
+  garbage kind). Deterministic, zero-LLM.
+
 ### Security
 
 - **SkillSpector delegate now passes `--no-llm` explicitly** (`kit triage skill --deep`).
