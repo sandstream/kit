@@ -306,6 +306,15 @@ async function scopeDegradationStatus(cwd: string): Promise<"warn" | "fail"> {
  *   pass  enforce_runtime set + scope verified — governed MCP ops are mediated against the signed scope
  *   fail  enforce_runtime set + scope unsigned/tampered — opted in but untrustworthy: governed ops fail-closed-denied
  */
+/** Read the recorded audit log for the observe→enforce nudge; "" when absent/unreadable. */
+async function readAuditLog(cwd: string): Promise<string> {
+  try {
+    return await readFile(join(cwd, ".kit-audit.jsonl"), "utf-8");
+  } catch {
+    return "";
+  }
+}
+
 async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
   const name = "exec-broker runtime";
   const category = "security";
@@ -326,14 +335,29 @@ async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
   if (runtimeMode === "observe") {
     // Dry-run: never denies. warn (not pass) — mediation is not actually protecting yet; the point is
     // to read the would-be denials in the audit trail, then graduate to enforce.
-    return {
-      name,
-      status: "warn",
-      detail: policy
-        ? "runtime mediation in OBSERVE mode — gates run but never deny; would-be denials are recorded to the audit trail. Review them, then set enforce_runtime = true"
-        : "runtime OBSERVE mode but the scope is unsigned/invalid — every declared op would be denied under enforce; run 'kit profile sign' before graduating",
-      category,
-    };
+    if (!policy) {
+      return {
+        name,
+        status: "warn",
+        detail:
+          "runtime OBSERVE mode but the scope is unsigned/invalid — every declared op would be denied under enforce; run 'kit profile sign' before graduating",
+        category,
+      };
+    }
+    // Evidence-based nudge (E3): read the recorded observe window and point to the exact next step.
+    const { parseObserveRecords, assessEnforceReadiness } =
+      await import("./exec-broker/enforce-readiness.js");
+    const r = assessEnforceReadiness(parseObserveRecords(await readAuditLog(cwd)));
+    let detail: string;
+    if (r.verdict === "ready") {
+      detail = `runtime in OBSERVE — ${r.opsObserved} op(s) observed, none would be denied. Safe to graduate: run 'kit broker enforce'`;
+    } else if (r.verdict === "would-block") {
+      detail = `runtime in OBSERVE — ${r.wouldBlockOps} of ${r.opsObserved} observed op(s) would be denied under enforce; run 'kit broker enforce-readiness' to see them, then declare in [scope] + re-sign`;
+    } else {
+      detail =
+        "runtime in OBSERVE — gates run but never deny, and no would-be denials are recorded yet. Exercise the workflow, then 'kit broker enforce-readiness' before graduating";
+    }
+    return { name, status: "warn", detail, category };
   }
   if (policy) {
     return {
