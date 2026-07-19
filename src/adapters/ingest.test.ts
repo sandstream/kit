@@ -132,3 +132,12 @@ describe("ingestStrict", () => {
     assert.equal(ingestStrict("osv", JSON.stringify({ runs: [] })).ok, false);
   });
 });
+
+describe("parseSarif / parseOsv — non-object JSON honors the 'malformed → []' contract", () => {
+  it("returns [] for null / number / string (never throws on log.runs / log.results)", () => {
+    for (const bad of ["null", "42", '"a string"']) {
+      assert.deepEqual(parseSarif(bad), [], `parseSarif(${bad})`);
+      assert.deepEqual(parseOsv(bad), [], `parseOsv(${bad})`);
+    }
+  });
+});

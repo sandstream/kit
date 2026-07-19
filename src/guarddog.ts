@@ -34,8 +34,14 @@ export function classifyGuardDog(stdout: string): SecurityCheckResult {
 
   let entries: GuardDogResult[];
   try {
-    const j = JSON.parse(stdout);
-    entries = Array.isArray(j) ? j : [j];
+    const j: unknown = JSON.parse(stdout);
+    // Filter non-object entries: JSON.parse("null")/"[null]"/"[{},null]" is valid JSON, so the
+    // catch never fires — but a null entry would throw a TypeError in the loop below (outside the
+    // try), crashing the whole security run. Dropping them makes `null`/`[null]` fall through to
+    // the length-0 UNVERIFIED verdict instead of a false pass.
+    entries = (Array.isArray(j) ? j : [j]).filter(
+      (x): x is GuardDogResult => x !== null && typeof x === "object",
+    );
   } catch {
     return {
       ...base,

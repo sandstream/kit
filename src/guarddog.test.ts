@@ -52,3 +52,18 @@ describe("classifyGuardDog", () => {
     assert.equal(classifyGuardDog("[]").status, "warn");
   });
 });
+
+describe("classifyGuardDog — malformed JSON entries never crash the security run", () => {
+  it("treats a bare null / [null] as UNVERIFIED (not an uncaught TypeError, not a false pass)", () => {
+    for (const stdout of ["null", "[null]"]) {
+      const r = classifyGuardDog(stdout);
+      assert.equal(r.status, "warn", `${stdout} → warn`);
+      assert.match(r.detail, /UNVERIFIED/);
+    }
+  });
+
+  it("drops a null element but still classifies the real entries", () => {
+    const r = classifyGuardDog(`[${JSON.stringify({ issues: 0, errors: {} })},null]`);
+    assert.equal(r.status, "pass"); // the one real, clean entry — null dropped, no throw
+  });
+});

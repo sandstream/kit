@@ -723,3 +723,45 @@ describe("kit self-audit (clean tree, machine output)", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Malformed .kit-profile.toml must fail CLOSED (denial-of-verdict guard)
+// ---------------------------------------------------------------------------
+
+describe("kit profile — malformed .kit-profile.toml fails closed", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "kit-profile-crash-"));
+    await writeFile(join(dir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("exits 1 with valid JSON (never an empty-stdout crash) on invalid profile TOML", async () => {
+    await writeFile(join(dir, ".kit-profile.toml"), "version = = 1\n", "utf-8");
+    const result = await runCli(["profile", "check", "--gate", "--json"], dir);
+    assert.equal(result.exitCode, 1);
+    // The fix: KIT_INVALID_PROFILE is caught like KIT_INVALID_CONFIG — a clean JSON verdict,
+    // not an uncaught stack trace with empty stdout.
+    assert.ok(
+      result.stdout.trim().length > 0,
+      `stdout must not be empty; stderr: ${result.stderr}`,
+    );
+    const out = JSON.parse(result.stdout);
+    assert.equal(out.ok, false);
+  });
+
+  it("does not crash `profile show --json` on a schema-invalid profile", async () => {
+    await writeFile(join(dir, ".kit-profile.toml"), "version = 999999\n", "utf-8");
+    const result = await runCli(["profile", "show", "--json"], dir);
+    assert.equal(result.exitCode, 1);
+    assert.ok(
+      result.stdout.trim().length > 0,
+      `stdout must not be empty; stderr: ${result.stderr}`,
+    );
+    assert.equal(JSON.parse(result.stdout).ok, false);
+  });
+});

