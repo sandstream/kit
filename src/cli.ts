@@ -53,7 +53,13 @@ import {
   cmdTeam,
 } from "./commands/agent.js";
 import { cmdSelfAudit, cmdCoverage, cmdAnalyze } from "./commands/coverage.js";
-import { cmdGateBash, cmdGateEnv, cmdGateEgress, cmdGateFs } from "./commands/gate.js";
+import {
+  cmdGateBash,
+  cmdGateEnv,
+  cmdGateEgress,
+  cmdGateFs,
+  runGateFailClosed,
+} from "./commands/gate.js";
 import { cmdCi } from "./commands/ci.js";
 import { cmdSentinel } from "./commands/sentinel.js";
 import { cmdStandards, cmdBaseline } from "./commands/standards.js";
@@ -333,7 +339,11 @@ async function main(): Promise<void> {
       const handler = COMMANDS[resolved];
       if (handler) {
         emitDeprecationWarning(resolved);
-        ok = await handler();
+        // PreToolUse gates must fail CLOSED: an internal fault has to DENY (exit 2), never fall
+        // through to the generic catch below (exit 1 = non-blocking = the op would proceed).
+        ok = GATE_VERBS.has(resolved)
+          ? await runGateFailClosed(resolved, handler)
+          : await handler();
       } else {
         console.error(`Unknown command: ${command}`);
         const { didYouMean } = await import("./utils/didYouMean.js");
@@ -741,6 +751,10 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     help: "PreToolUse fs-gate (exec-broker): block (exit 2) Write/Edit outside the signed [scope].fs — fail-closed without a verified scope",
   },
 };
+
+// PreToolUse deny gates: an internal fault in one must DENY (exit 2), never fall through to the
+// generic exit-1 path (non-blocking → the op would proceed). Dispatched via runGateFailClosed.
+const GATE_VERBS = new Set(["gate-bash", "gate-env", "gate-egress", "gate-fs"]);
 
 // Help for multi-word sub-commands (e.g. `kit memory search`). Help-only: no
 // dispatch handler or stability tier of their own — merged into COMMAND_HELP below.

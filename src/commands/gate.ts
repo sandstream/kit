@@ -146,6 +146,33 @@ async function gateDeny(label: string, message: string): Promise<boolean> {
 }
 
 /**
+ * Run a PreToolUse gate FAIL-CLOSED: any unexpected error from the handler DENIES (exit 2 —
+ * the block signal) instead of propagating to the CLI's generic error path, which sets exit 1.
+ * Exit 1 is a NON-BLOCKING error per the PreToolUse contract, i.e. the tool call would proceed —
+ * so an internal fault (e.g. `process.cwd()` throwing ENOENT because the cwd was removed
+ * mid-run) would silently ALLOW the very operation the gate exists to mediate. A security gate
+ * must fail closed: on any fault, block. Cline uses its stdout {cancel:true} contract instead of
+ * exit 2. Returns the handler's boolean when it does not throw.
+ */
+export async function runGateFailClosed(
+  label: string,
+  handler: () => boolean | Promise<boolean>,
+): Promise<boolean> {
+  try {
+    return await handler();
+  } catch (err) {
+    const reason = `gate error (fail-closed): ${err instanceof Error ? err.message : String(err)}`;
+    if (gateFormat() === "cline") {
+      console.log(JSON.stringify({ cancel: true, errorMessage: `kit ${label}: ${reason}` }));
+      return false;
+    }
+    const { writeSync } = await import("node:fs");
+    writeSync(2, `kit ${label}: BLOCKED — ${reason}\n`);
+    process.exit(2); // PreToolUse deny — never let an internal fault fail open
+  }
+}
+
+/**
  * Best-effort audit of a broker-gate deny (design §3.3: every deny leaves an audit entry).
  * Wrapped: a missing/unreadable .kit.toml or audit backend must never change the verdict —
  * the deny already happened, and deny is the safe outcome.
@@ -240,6 +267,7 @@ export async function cmdGateFs(): Promise<boolean> {
   // allowed root, checked with the shared decisions.checkFsWrite. No verified scope → deny.
   const { profileBrokerPolicy } = await import("../exec-broker/profile-policy.js");
   const { checkFsWrite } = await import("../exec-broker/decisions.js");
+  const { checkFsWriteRealpath } = await import("../exec-broker/realpath-check.js");
   const { policyFsRoots } = await import("../exec-broker/policy.js");
   const { resolve } = await import("node:path");
   const { policy } = await profileBrokerPolicy(process.cwd());
@@ -248,9 +276,18 @@ export async function cmdGateFs(): Promise<boolean> {
     await auditGateDeny("gate-fs", why, sessionIdOf(payload));
     return await gateDeny("fs-gate", `${why}\nSign the profile scope: \`kit profile sign\`.`);
   }
-  // Resolve the hook's path against the agent cwd first, then containment-check against each root.
+  // Resolve the hook's path against the agent cwd, then require BOTH gates per root — the pure
+  // string/traversal check AND the symlink-aware realpath check — exactly as the canonical broker
+  // (broker.ts collectDenials) does. Without the realpath check a symlink inside a signed root
+  // pointing outside would let the write escape scope (the enforcement point must not be weaker
+  // than the broker it mirrors).
   const abs = resolve(process.cwd(), write.filePath);
-  if (policyFsRoots(policy).some((root) => checkFsWrite(abs, root).ok)) return true;
+  if (
+    policyFsRoots(policy).some(
+      (root) => checkFsWrite(abs, root).ok && checkFsWriteRealpath(abs, root).ok,
+    )
+  )
+    return true;
   const why = `write outside the signed fs scope: ${write.filePath}`;
   await auditGateDeny("gate-fs", why);
   return await gateDeny(
