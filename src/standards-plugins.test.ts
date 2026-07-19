@@ -10,6 +10,7 @@ import {
   checkStandardsPlugins,
   collectPluginKeys,
   pluginKey,
+  hasReDoSRisk,
   DEFAULT_PLUGIN_DIR,
 } from "./standards-plugins.js";
 
@@ -179,6 +180,48 @@ describe("standards-plugins — evaluate + gate", () => {
     const repo = tmpRepo();
     try {
       assert.deepEqual(checkStandardsPlugins({ cwd: repo, language: "typescript" }), []);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("standards-plugins — hasReDoSRisk (nested-quantifier detector)", () => {
+  it("flags nested unbounded quantifiers (catastrophic backtracking)", () => {
+    for (const re of ["(a+)+", "(a+)+$", "(a*)*", "(\\d+)+", "([a-z]+)+", "((ab)+)+", "(a{2,})+"]) {
+      assert.equal(hasReDoSRisk(re), true, `should flag: ${re}`);
+    }
+  });
+
+  it("does not flag safe patterns (no false positives)", () => {
+    for (const re of [
+      "console\\.log",
+      "(abc)+", // quantified group, no INNER quantifier
+      "a+",
+      "\\d+",
+      "[a-z]+",
+      "(ab)*cd+",
+      "(a|b)+", // alternation of single chars, no inner quantifier
+      "(a{2,5})+", // BOUNDED inner quantifier is safe
+      "foo(bar)?baz",
+      "\\(a+\\)+", // escaped parens are literals, not a group
+    ]) {
+      assert.equal(hasReDoSRisk(re), false, `should NOT flag: ${re}`);
+    }
+  });
+});
+
+describe("standards-plugins — ReDoS-prone plugin rejected at load", () => {
+  it("drops a nested-quantifier match with an integrity warn (never compiled/run)", () => {
+    const repo = tmpRepo();
+    try {
+      writePlugin(repo, "redos.toml", `[standard]\nid = "redos"\ntitle = "x"\nmatch = '(a+)+$'\n`);
+      const { plugins, integrity } = loadStandardPlugins(repo, [DEFAULT_PLUGIN_DIR]);
+      assert.equal(plugins.length, 0, "the ReDoS-prone plugin must not load");
+      assert.ok(
+        integrity.some((i) => i.status === "warn" && /ReDoS-prone/.test(i.detail)),
+        "must surface a ReDoS integrity warning",
+      );
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
