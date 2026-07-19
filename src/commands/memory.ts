@@ -831,7 +831,7 @@ async function memSearch(): Promise<boolean> {
   const query = terms.join(" ").trim();
   if (!query) {
     console.error(
-      `${c.red}usage: kit memory search <query> [--global] [--project=<path>] [--limit=N]${c.reset}`,
+      `${c.red}usage: kit memory search <query> [--global] [--project=<path>] [--limit=N] [--fresh]${c.reset}`,
     );
     return false;
   }
@@ -843,8 +843,11 @@ async function memSearch(): Promise<boolean> {
   // default so a poisoned line is never re-injected; --include-quarantined shows
   // them (for inspection) — still badged as flagged in the render below.
   const includeQuarantined = hasFlag(process.argv, "--include-quarantined");
+  // --fresh: recency-aware ranking (RRF-fuse bm25 relevance + recency). Off by default so the
+  // relevance-first ordering is unchanged unless asked for.
+  const recencyBoost = hasFlag(process.argv, "--fresh");
   const db = openMemoryDb();
-  const hits = searchMessages(db, query, { limit, projectPath, includeQuarantined });
+  const hits = searchMessages(db, query, { limit, projectPath, includeQuarantined, recencyBoost });
   // Record the recall (query_log) — best-effort; never let logging break search.
   try {
     recordQuery(db, { query, hitCount: hits.length, projectPath });

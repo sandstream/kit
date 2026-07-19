@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit memory search --fresh` — recency-aware recall (deterministic, zero-LLM).** By default
+  recall is bm25 relevance-first (unchanged). `--fresh` fetches a larger candidate pool and
+  **RRF-fuses** two incommensurable signals — bm25 relevance and recency — _by rank_ (no score
+  normalization), so a fresh, still-relevant hit can outrank a marginally-more-relevant stale
+  one ("when relevance is otherwise equal, the newer answer wins"). Relevance still dominates;
+  recency breaks the lower ranks. Exposes a reusable `fuseByRrf` primitive for future
+  multi-signal fusion. Borrowed from the Cerebras knowledge-base ranking stack, kept on-charter
+  (kit has one lexical retriever + recency; no embeddings, no reranker model).
+
 - **`kit broker enforce-readiness` — graduate observe→enforce on evidence, not nerve.**
   The exec-broker runtime ladder is off → observe → enforce, but the human step between the last
   two had no evidence: an operator in observe (which watches but never denies) had no way to
