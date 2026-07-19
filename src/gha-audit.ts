@@ -100,14 +100,28 @@ export function runGhaAudit(cwd: string): SecurityCheckResult[] {
     ];
   }
   const out: SecurityCheckResult[] = [];
+  const unreadable: string[] = [];
   for (const f of files) {
+    let text: string;
     try {
-      out.push(...auditWorkflow(readFileSync(join(dir, f), "utf8"), f));
+      text = readFileSync(join(dir, f), "utf8");
     } catch {
-      // unreadable file → skip it (fail-open)
+      unreadable.push(f); // do NOT silently skip — an unread workflow must not be reported clean
+      continue;
     }
+    out.push(...auditWorkflow(text, f));
   }
-  if (out.length === 0) {
+  if (unreadable.length > 0) {
+    // Scanner-health: a workflow we could not read was NOT audited, so we must not emit the
+    // blanket "all pinned" pass over it (that would be a false green for a supply-chain scanner).
+    out.push({
+      category: "supply-chain",
+      name: "gha-audit",
+      status: "warn",
+      severity: "medium",
+      detail: `could not read ${unreadable.length} workflow(s): ${unreadable.join(", ")} — not audited`,
+    });
+  } else if (out.length === 0) {
     out.push({
       category: "supply-chain",
       name: "gha-audit",

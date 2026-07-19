@@ -36,6 +36,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Security
 
+- **Secrets, audit, and scanner robustness (four bug-sweep findings, class F).**
+  - **`"manual"` rotation policy no longer crashes the vault.** `storeSecret`/`rotateSecret` did
+    `parseInt(rotation_policy)`, which is `NaN` for the valid `"manual"` value → `new Date(now +
+NaN).toISOString()` threw `RangeError` (and in `rotateSecret`, after the key was already
+    rotated — leaving unaudited, inconsistent state). Day-based policies (`30d`/`60d`/`90d`) are
+    now matched explicitly; `manual`/`never` simply leave `next_rotation_at` unset.
+  - **`kit gha-audit` no longer reports a false green over unreadable workflows.** A workflow it
+    could not read (perms/EISDIR/TOCTOU) was silently skipped, then the run emitted "all actions
+    pinned" — a false pass for a supply-chain scanner. Unreadable workflows now surface a
+    scanner-health `warn` naming them, and the blanket pass is suppressed.
+  - **Staged-secret pre-commit scan no longer falls back to a divergent working copy.** On a
+    `git show :file` failure (e.g. a staged blob over the buffer cap) it read the working copy —
+    which a developer can clean after staging the secret, the exact un-stage bypass the scan
+    exists to stop. The cap is raised so realistic files scan from the staged blob, and an
+    unreadable staged blob now fails **closed** (flagged) instead of trusting the working copy.
+  - **`kit audit secrets --since-days` NaN-guarded** — a non-numeric value silently returned all
+    events (window ignored); it now falls back to 30.
+
 - **Malformed input now yields a verdict, never an uncaught crash (fail-closed parsers).** The
   bug sweep found the historical "malformed file → uncaught throw → empty stdout" class had
   reappeared in several spots, all now fixed:

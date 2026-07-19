@@ -95,6 +95,40 @@ describe("secrets-service", () => {
       assert.ok(secret.next_rotation_at);
     });
 
+    it("does not crash on a 'manual' rotation policy (NaN-guard); next_rotation_at stays unset", () => {
+      initializeVault(teamId);
+      // parseInt("manual") is NaN → new Date(now+NaN).toISOString() used to throw RangeError.
+      const { secret, error } = storeSecret(
+        teamId,
+        "manual_key",
+        "secret",
+        "password",
+        userId,
+        "team",
+        "manual",
+      );
+      assert.ok(!error);
+      assert.equal(secret.rotation_policy, "manual");
+      assert.equal(secret.next_rotation_at, undefined);
+    });
+
+    it("rotateSecret does not crash for a 'manual'-policy secret (NaN-guard)", () => {
+      initializeVault(teamId);
+      const { secret } = storeSecret(
+        teamId,
+        "manual_rotate",
+        "secret",
+        "password",
+        userId,
+        "team",
+        "manual",
+      );
+      const { secret: rotated, error } = rotateSecret(teamId, secret.id, userId, "manual");
+      assert.ok(!error);
+      assert.equal(rotated.next_rotation_at, undefined);
+      assert.ok(rotated.last_rotated_at); // rotation completed + recorded, no throw
+    });
+
     it("stores secret with expiry", () => {
       initializeVault(teamId);
       const expireDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();

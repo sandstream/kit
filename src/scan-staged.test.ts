@@ -54,6 +54,26 @@ describe("scanStagedFiles", () => {
     }
   });
 
+  it("scans the STAGED blob, not the working copy (secret survives a working-copy cleanup)", async () => {
+    const dir = tmpGitRepo();
+    try {
+      // Stage a secret, then edit the working copy to remove it. The scanner must still flag the
+      // staged blob — it must NOT read the (now-clean) working copy. This is the un-stage bypass
+      // the fix hardens (the working-copy fallback was removed for divergent reads).
+      writeFileSync(
+        join(dir, ".env"),
+        "STRIPE_SECRET_KEY=sk_te" + "st_51T2AMtJLRlXeUG4dKBwX2nsve3BLEzy\n",
+      );
+      execSync("git add .env", { cwd: dir });
+      writeFileSync(join(dir, ".env"), "STRIPE_SECRET_KEY=redacted\n"); // working copy cleaned
+      const hits = await scanStagedFiles(dir);
+      assert.equal(hits.length, 1);
+      assert.ok(hits[0].findings.some((f) => f.label === "stripe-key"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("flags a staged Supabase service-role JWT", async () => {
     const dir = tmpGitRepo();
     try {

@@ -11,7 +11,10 @@ import { hasFlag, flagValue } from "../utils/flags.js";
 async function cmdAuditSecrets(): Promise<boolean> {
   const args = process.argv.slice(4); // after "audit secrets"
   const sinceIdx = args.indexOf("--since-days");
-  const sinceDays = sinceIdx >= 0 && args[sinceIdx + 1] ? parseInt(args[sinceIdx + 1], 10) : 30;
+  // NaN-guard: a non-numeric --since-days would make the cutoff NaN, so the time-window filter
+  // silently no-ops and ALL events are returned (wrong output, no error). Fall back to 30.
+  const sinceRaw = sinceIdx >= 0 && args[sinceIdx + 1] ? parseInt(args[sinceIdx + 1], 10) : 30;
+  const sinceDays = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : 30;
   const keyFilter = flagValue(args, "--key");
   const jsonMode = hasFlag(args, "--json");
 

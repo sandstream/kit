@@ -11,6 +11,18 @@ import type {
   AccessLevel,
 } from "./secrets-model.js";
 
+/**
+ * next_rotation_at for a day-based rotation policy ("30d"/"60d"/"90d"); undefined for "never"
+ * and "manual". Guards the NaN trap: parseInt("manual") is NaN, and `new Date(now + NaN)` is an
+ * Invalid Date whose .toISOString() THROWS — crashing storeSecret/rotateSecret on a valid,
+ * typed input. Match the numeric shape explicitly instead of parseInt-ing the whole string.
+ */
+function nextRotationAt(policy: RotationPolicy): string | undefined {
+  const m = /^(\d+)d$/.exec(policy);
+  if (!m) return undefined;
+  return new Date(Date.now() + Number(m[1]) * 24 * 60 * 60 * 1000).toISOString();
+}
+
 const secrets = new Map<string, Secret>();
 const encryptionKeys = new Map<string, EncryptionKey>();
 const secretShares = new Map<string, SecretShare>();
@@ -92,11 +104,9 @@ export function storeSecret(
     tags,
   };
 
-  // Set next rotation date
-  if (rotation_policy !== "never") {
-    const days = parseInt(rotation_policy);
-    secret.next_rotation_at = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
-  }
+  // Set next rotation date (day-based policies only; "manual"/"never" leave it unset).
+  const next = nextRotationAt(rotation_policy);
+  if (next) secret.next_rotation_at = next;
 
   secrets.set(secret.id, secret);
   logAccess(team_id, created_by, "created", "success", secret.id);
@@ -184,10 +194,8 @@ export function rotateSecret(
   secret.last_rotated_at = new Date().toISOString();
   secret.updated_at = new Date().toISOString();
 
-  if (secret.rotation_policy !== "never") {
-    const days = parseInt(secret.rotation_policy);
-    secret.next_rotation_at = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
-  }
+  const next = nextRotationAt(secret.rotation_policy);
+  if (next) secret.next_rotation_at = next;
 
   // Record rotation history
   const history: RotationHistory = {
