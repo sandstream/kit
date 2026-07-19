@@ -36,6 +36,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Security
 
+- **exec-broker PreToolUse gates hardened to fail closed (three bypasses, found by an internal
+  bug sweep).** The runtime enforcement point (`kit gate-fs` / `kit gate-egress`) and the CLI's
+  gate dispatch had gaps where an attacker or an internal fault could slip past confinement:
+  - **fs-gate was symlink-blind.** It ran only the pure string-containment check and omitted the
+    symlink-aware realpath check the canonical exec-broker already uses, so a symlink inside the
+    signed `[scope].fs` root pointing outside (e.g. `data → /`) let a write escape scope. The
+    gate now requires **both** checks per root — parity with the broker (the enforcement point
+    must never be weaker than the broker it mirrors). The realpath check now lives in a shared
+    `exec-broker/realpath-check.ts` so there is one source of truth.
+  - **A gate that threw failed OPEN.** Deny is signalled by `exit 2`; any thrown error fell
+    through to the generic `exit 1` (a _non-blocking_ PreToolUse result), so an internal fault
+    (e.g. the working directory removed mid-run → `process.cwd()` throws) would silently ALLOW
+    the very operation the gate exists to mediate. Gate dispatch now runs fail-closed: any
+    handler fault DENIES (exit 2 / Cline `{cancel:true}`).
+
 - **SkillSpector delegate now passes `--no-llm` explicitly** (`kit triage skill --deep`).
   kit ran SkillSpector's Stage-1 static scan only, suppressing the optional Stage-2 LLM pass
   via env scrubbing alone (`SKILLSPECTOR_PROVIDER=""` + stripped provider keys). It now also

@@ -6,7 +6,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +56,7 @@ beforeEach(async () => {
   process.env.KIT_IDENTITY_DIR = idDir;
   loadOrCreateIdentity();
   writeFileSync(join(proj, PROFILE_FILE), SCOPED);
+  mkdirSync(join(proj, "src"), { recursive: true }); // the declared [scope].fs root exists, as in a real project
   await signProfile(proj);
 });
 
@@ -115,5 +116,15 @@ describe("kit gate-fs (subprocess)", () => {
 
   it("passes non-write tool calls through", () => {
     assert.equal(runGate("gate-fs", bash("ls")).status, 0);
+  });
+
+  it("denies a write through a symlink that escapes the signed root (realpath parity with broker)", () => {
+    // A symlink INSIDE the signed `src` root pointing outside the project passes the pure
+    // string-containment check but must be caught by the symlink-aware realpath check — exactly
+    // what the canonical broker does. Without it the write escapes [scope].fs. (src/ is created in beforeEach.)
+    symlinkSync(tmpdir(), join(proj, "src", "out")); // src/out -> outside the project
+    const r = runGate("gate-fs", write("src/out/evil.txt"));
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /outside the signed fs scope/);
   });
 });

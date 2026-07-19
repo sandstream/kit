@@ -23,8 +23,8 @@
 //
 // Zero LLM, zero network. Deterministic + offline.
 
-import { existsSync, realpathSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
+import { existsSync } from "node:fs";
+import { checkFsWriteRealpath } from "./realpath-check.js";
 import type { OperationContext } from "../governance-middleware.js";
 import { appendAuditEventDirect } from "../audit.js";
 import { checkEgress, checkFsWrite, scopeEnv } from "./decisions.js";
@@ -304,30 +304,6 @@ export async function runBrokered<T>(
     }
   }
   return brokerExec(context, loadBrokerPolicy(opts.policyOverride), run);
-}
-
-/**
- * Symlink-aware fs-write check (impure companion to the pure decisions.checkFsWrite).
- * Realpath the nearest EXISTING ancestor of the resolved target and confirm it is
- * the real root or strictly under it — catching a symlink inside the root that
- * points outside. The not-yet-existing tail of the path cannot contain symlinks
- * (nothing is there to be one). Any fs/realpath error → fail-closed deny.
- */
-function checkFsWriteRealpath(path: string, projectRoot: string): { ok: boolean; reason?: string } {
-  try {
-    const root = realpathSync(resolve(projectRoot));
-    let cur = resolve(root, path);
-    while (!existsSync(cur)) {
-      const parent = dirname(cur);
-      if (parent === cur) break; // reached the filesystem root
-      cur = parent;
-    }
-    const real = realpathSync(cur);
-    if (real === root || real.startsWith(root + sep)) return { ok: true };
-    return { ok: false, reason: `fs-write: real path ${real} escapes root ${root}` };
-  } catch {
-    return { ok: false, reason: "fs-write: realpath check failed (fail-closed)" };
-  }
 }
 
 /**
