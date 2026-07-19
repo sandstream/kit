@@ -134,6 +134,13 @@
     },
     "broker": {
       "commands": {
+        "enforce": {
+          "kind": "command",
+          "summary": "Guided observe→enforce flip: readiness pre-flight (refuses unless ready; --force overrides), set [scope].enforce_runtime = true, re-sign the profile scope, and audit the transition",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
         "enforce-readiness": {
           "kind": "command",
           "summary": "Read the recorded observe window (.kit-audit.jsonl) and report whether it's safe to flip exec-broker to enforce: ready | would-block (+ exactly what breaks) | untested (--gate fails CI on any not-ready verdict)",
@@ -143,7 +150,7 @@
         }
       },
       "kind": "group",
-      "summary": "exec-broker runtime posture — graduate observe→enforce on evidence: enforce-readiness reads the recorded observe window and reports ready | would-block (+ exactly what breaks) | untested (--json, --gate)",
+      "summary": "exec-broker runtime posture — graduate observe→enforce on evidence: enforce-readiness reports ready | would-block (+ what breaks) | untested; enforce does the guided, signed flip (refuses unless ready, --force overrides) (--json, --gate, --force)",
       "x-kit-args-modeled": false,
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"

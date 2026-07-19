@@ -127,6 +127,7 @@
     "baseline",
     "bootstrap",
     "broker",
+    "broker enforce",
     "broker enforce-readiness",
     "check",
     "check verify-attestation",

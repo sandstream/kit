@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit broker enforce` — the guided observe→enforce flip (Pillar 3 capstone).** Turns the
+  exec-broker from _observational_ to _protective_ in one evidence-gated command. It runs the
+  `enforce-readiness` pre-flight and **refuses without `--force` unless the verdict is `ready`**
+  (fail-closed — it will not silently enable a posture the observed evidence says would break, or
+  one with no evidence at all), then sets `[scope].enforce_runtime = true`, **re-signs** the
+  profile scope (so the flip is attributable — enforce only takes effect under a valid signature),
+  and audits the transition (`phase: "enforce-enabled"`). On a sign failure it surfaces that the
+  scope won't verify until re-signed (never a silent half-enabled state). Completes the
+  observe→enforce ladder: `enforce-readiness` (E1/E2) tells you it's safe; `enforce` does it.
+  Deterministic, zero-LLM. `--json` for machines.
+
 - **`kit memory search --fresh` — recency-aware recall (deterministic, zero-LLM).** By default
   recall is bm25 relevance-first (unchanged). `--fresh` fetches a larger candidate pool and
   **RRF-fuses** two incommensurable signals — bm25 relevance and recency — _by rank_ (no score
