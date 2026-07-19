@@ -132,6 +132,22 @@
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
+    "broker": {
+      "commands": {
+        "enforce-readiness": {
+          "kind": "command",
+          "summary": "Read the recorded observe window (.kit-audit.jsonl) and report whether it's safe to flip exec-broker to enforce: ready | would-block (+ exactly what breaks) | untested (--gate fails CI on any not-ready verdict)",
+          "x-kit-args-modeled": false,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        }
+      },
+      "kind": "group",
+      "summary": "exec-broker runtime posture — graduate observe→enforce on evidence: enforce-readiness reads the recorded observe window and reports ready | would-block (+ exactly what breaks) | untested (--json, --gate)",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
     "check": {
       "commands": {
         "verify-attestation": {

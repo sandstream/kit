@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit broker enforce-readiness` — graduate observe→enforce on evidence, not nerve.**
+  The exec-broker runtime ladder is off → observe → enforce, but the human step between the last
+  two had no evidence: an operator in observe (which watches but never denies) had no way to
+  answer _"is it safe to flip to enforce?"_, so people stayed in observe forever and the
+  governance never actually protected. This command reads the recorded observe window
+  (`.kit-audit.jsonl`, the `wouldDeny` events observe already writes) and reports a verdict:
+  **`ready`** (nothing observed would be denied), **`would-block`** (+ the exact would-be
+  denials, tallied — so you declare them in `[scope]` and re-sign, or accept them knowingly,
+  before flipping), or the honest **`untested`** (no observe data — deliberately not a green
+  "ready"; coverage is only what was observed). Turns the flip from a leap into a diff.
+  `--json` for machines; `--gate` fails CI on any not-`ready` verdict. Deterministic, zero-LLM,
+  reads the audit log only — never executes anything. (The guided `kit broker enforce` flip is
+  a follow-up.)
+
 - **kit memory captures the full decision lifecycle — negative-space kinds + provenance.**
   The curated shared tier gains two kinds for the knowledge that evaporates hardest:
   **`idea`** (considered / not-yet-built) and **`abandoned`** (tried and dropped, with the
