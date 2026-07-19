@@ -45,6 +45,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Security
 
+- **Standards plugins reject ReDoS-prone regexes at load (class E — completes the bug sweep).**
+  A declarative standards plugin's `match` was compiled and run over every source line with no
+  protection against catastrophic backtracking, so a crafted plugin (`match = '(a+)+$'`) could
+  hang `kit check` indefinitely — a fail-open DoS via a PR-submitted TOML. A deterministic,
+  dependency-free detector (`hasReDoSRisk`) now flags the classic nested-unbounded-quantifier
+  shape (`(a+)+`, `(\d*)*`, `((ab)+)+`, `(a{2,})+`) and **rejects** such a plugin at load with an
+  integrity warning — it is never compiled into the per-line evaluator. Honest limit: it catches
+  the nested-quantifier class (the common, cited ReDoS), not every catastrophic regex; the
+  existing max-line-length cap remains as defense-in-depth.
+
 - **Secrets, audit, and scanner robustness (four bug-sweep findings, class F).**
   - **`"manual"` rotation policy no longer crashes the vault.** `storeSecret`/`rotateSecret` did
     `parseInt(rotation_policy)`, which is `NaN` for the valid `"manual"` value → `new Date(now +

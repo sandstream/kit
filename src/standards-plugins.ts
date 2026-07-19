@@ -19,7 +19,8 @@
  *     surfaces a `plugin integrity` warning, never crashing the gate (the lesson from
  *     the .kit-baseline.json crash fix).
  *   - Deterministic by construction: a regex over the repo's own files is a pure
- *     function of the repo. Line length is capped to bound pathological regexes.
+ *     function of the repo. A ReDoS-prone `match` (nested unbounded quantifier) is REJECTED at
+ *     load (never run); line length is additionally capped as defense-in-depth.
  *   - Net-new gating on stable `plugin/<id>:<file>:<line>` keys, same as every other
  *     standards dimension.
  *
@@ -154,6 +155,18 @@ export function loadStandardPlugins(cwd: string, dirs: string[]): LoadPluginsRes
         integrity.push(integrityWarn(rel, `invalid match regex (${(e as Error).message})`));
         continue;
       }
+      // Reject a ReDoS-prone pattern (nested unbounded quantifier) at LOAD — never compile it into
+      // the per-line evaluator, where a crafted plugin could hang `kit check` with catastrophic
+      // backtracking. Fail closed: the plugin is dropped with an integrity warning.
+      if (hasReDoSRisk(s.match)) {
+        integrity.push(
+          integrityWarn(
+            rel,
+            `match regex is ReDoS-prone (nested quantifier) — rejected: ${s.match}`,
+          ),
+        );
+        continue;
+      }
       plugins.push({
         id: s.id,
         title: s.title,
@@ -211,6 +224,70 @@ export function globToRegExp(glob: string): RegExp {
 
 function isExcluded(relFile: string, patterns: RegExp[]): boolean {
   return patterns.some((re) => re.test(relFile));
+}
+
+/** Length of an UNBOUNDED quantifier token at position i, else 0. `*`, `+`, `{n,}` are unbounded
+ *  (catastrophic when nested); `?`, `{n}`, `{n,m}` are bounded (safe). Absorbs a lazy/possessive
+ *  suffix so `*?`/`+?`/`*+` isn't mis-read as a second quantifier. */
+function unboundedQuantLen(p: string, i: number): number {
+  const ch = p[i];
+  if (ch === "*" || ch === "+") return p[i + 1] === "?" || p[i + 1] === "+" ? 2 : 1;
+  if (ch === "{") {
+    const m = /^\{\d*,\}/.exec(p.slice(i)); // {n,} (unbounded upper); {n} / {n,m} do NOT match
+    if (m) return p[i + m[0].length] === "?" ? m[0].length + 1 : m[0].length;
+  }
+  return 0;
+}
+
+/**
+ * Conservative ReDoS-shape detector: true when the pattern applies an UNBOUNDED quantifier to a
+ * group whose body ALSO contains an unbounded quantifier — the classic exponential-backtracking
+ * shape (`(a+)+`, `(\d*)*`, `(a+)*$`, `((ab)+)+`). Deterministic, dependency-free. Assumes the
+ * pattern is already syntactically valid (call after `new RegExp` succeeds). Honest limit: it
+ * catches the nested-quantifier class (the common, cited ReDoS), not every catastrophic regex
+ * (e.g. overlapping alternation `(a|a)+`) — those stay bounded only by MAX_LINE_LEN.
+ */
+export function hasReDoSRisk(pattern: string): boolean {
+  const bodyHadUnbounded: boolean[] = []; // per currently-open group: has its body seen `*`/`+`/`{n,}`?
+  const markParent = (): void => {
+    if (bodyHadUnbounded.length > 0) bodyHadUnbounded[bodyHadUnbounded.length - 1] = true;
+  };
+  let inClass = false; // inside [...] — parens/quantifiers are literal there
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === "\\") {
+      i++; // escaped char → literal, skip it
+      continue;
+    }
+    if (inClass) {
+      if (ch === "]") inClass = false;
+      continue;
+    }
+    if (ch === "[") {
+      inClass = true;
+      continue;
+    }
+    if (ch === "(") {
+      bodyHadUnbounded.push(false);
+      continue;
+    }
+    if (ch === ")") {
+      const inner = bodyHadUnbounded.pop() ?? false;
+      const qlen = unboundedQuantLen(pattern, i + 1);
+      if (qlen > 0) {
+        if (inner) return true; // (…unbounded…) followed by an unbounded quantifier → ReDoS
+        markParent(); // the quantified group is itself an unbounded atom in the parent's body
+        i += qlen;
+      }
+      continue;
+    }
+    const qlen = unboundedQuantLen(pattern, i);
+    if (qlen > 0) {
+      markParent();
+      i += qlen - 1; // -1: the loop's i++ advances the last char
+    }
+  }
+  return false;
 }
 
 export interface PluginFinding {
