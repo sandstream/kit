@@ -79,7 +79,11 @@ interface SarifLog {
 export function parseSarif(json: string): SecurityCheckResult[] {
   let log: SarifLog;
   try {
-    log = JSON.parse(json) as SarifLog;
+    const parsed: unknown = JSON.parse(json);
+    // JSON.parse("null")/"42" is valid JSON but not an object; `log.runs` would then throw a
+    // TypeError, breaking the documented "malformed input → []" contract. Guard it.
+    if (parsed === null || typeof parsed !== "object") return [];
+    log = parsed as SarifLog;
   } catch {
     return [];
   }
@@ -156,7 +160,9 @@ function osvSeverity(v: OsvVuln): Severity {
 export function parseOsv(json: string): SecurityCheckResult[] {
   let log: OsvLog;
   try {
-    log = JSON.parse(json) as OsvLog;
+    const parsed: unknown = JSON.parse(json);
+    if (parsed === null || typeof parsed !== "object") return []; // non-object → [] (contract)
+    log = parsed as OsvLog;
   } catch {
     return [];
   }

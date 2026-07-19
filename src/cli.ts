@@ -387,10 +387,11 @@ async function main(): Promise<void> {
         `${c.dim}Create a .kit.toml to define your project's tools, services, and secrets.${c.reset}`,
       );
       process.exitCode = 1;
-    } else if (code === "KIT_INVALID_CONFIG") {
-      // A malformed .kit.toml (bad TOML syntax or failed schema validation) must fail
-      // CLOSED like a missing one — a clean error + exit 1, never an uncaught stack
-      // trace with empty --json stdout (a denial-of-verdict any dropped file could cause).
+    } else if (code === "KIT_INVALID_CONFIG" || code === "KIT_INVALID_PROFILE") {
+      // A malformed .kit.toml OR .kit-profile.toml (bad TOML / failed schema validation) must
+      // fail CLOSED like a missing one — a clean error + exit 1, never an uncaught stack trace
+      // with empty --json stdout (a denial-of-verdict any dropped/edited file could cause). The
+      // profile commands (show/check/freeze/sign/verify) all propagate InvalidProfileError here.
       const msg = err instanceof Error ? err.message : String(err);
       if (jsonMode) console.log(JSON.stringify({ ok: false, error: msg }));
       console.error(`${c.red}${msg}${c.reset}`);
