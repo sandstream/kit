@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { findSecrets, type SecretFinding } from "./utils/redactSecrets.js";
 import { exec } from "./utils/exec.js";
 
@@ -49,25 +48,35 @@ export async function scanStagedFiles(cwd: string = process.cwd()): Promise<Stag
     return [];
   }
 
-  const { resolve } = await import("node:path");
   const hits: StagedHit[] = [];
   for (const path of paths) {
     // Read the staged blob (`git show :file`) so a developer can't bypass
-    // by un-staging the change after the hook fires. Cap at 1 MiB.
+    // by un-staging the change after the hook fires.
     let content: string;
     try {
       const { stdout } = await exec("git", ["show", `:${path}`], {
         cwd,
         timeout: 5_000,
-        maxBuffer: 1 * 1024 * 1024,
+        // Raised from 1 MiB so realistic staged text files are scanned from the STAGED blob, not
+        // skipped. (Was 1 MiB — a >1 MiB staged blob overflowed and fell through to the bypass.)
+        maxBuffer: 25 * 1024 * 1024,
       });
       content = stdout;
     } catch {
-      try {
-        content = await readFile(resolve(cwd, path), "utf-8");
-      } catch {
-        continue;
-      }
+      // The staged blob could not be read (too large even for the raised cap, or unreadable). Do
+      // NOT fall back to the working copy: it can diverge from what is being committed (stage the
+      // secret, then edit the working copy clean) — exactly the un-stage bypass this scanner
+      // exists to prevent. Fail closed: flag it so the commit is blocked and handled explicitly.
+      hits.push({
+        file: path,
+        findings: [
+          {
+            label: "unscannable staged blob (fail-closed)",
+            preview: "staged content could not be read to scan for secrets — verify manually",
+          },
+        ],
+      });
+      continue;
     }
     const findings = findSecrets(content);
     if (findings.length > 0) {

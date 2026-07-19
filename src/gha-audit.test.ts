@@ -40,3 +40,36 @@ describe("auditWorkflow", () => {
     assert.deepEqual(auditWorkflow(wf, "ok.yml"), []);
   });
 });
+
+import { runGhaAudit } from "./gha-audit.js";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+describe("runGhaAudit — unreadable workflow never yields a false-green pass", () => {
+  it("emits a scanner-health warn (not 'all pinned' pass) when a workflow can't be read", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-gha-"));
+    try {
+      const wfDir = join(dir, ".github", "workflows");
+      mkdirSync(wfDir, { recursive: true });
+      // A clean, readable workflow…
+      writeFileSync(
+        join(wfDir, "ci.yml"),
+        "jobs:\n  b:\n    steps:\n      - uses: actions/checkout@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a\n",
+      );
+      // …and an UNREADABLE one (a directory named *.yml makes readFileSync throw EISDIR).
+      mkdirSync(join(wfDir, "deploy.yml"));
+      const results = runGhaAudit(dir);
+      assert.ok(
+        results.some((r) => r.status === "warn" && /could not read/.test(r.detail ?? "")),
+        "must surface a scanner-health warn for the unreadable workflow",
+      );
+      assert.ok(
+        !results.some((r) => r.status === "pass" && /all actions pinned/.test(r.detail ?? "")),
+        "must NOT emit the blanket all-pinned pass when a workflow was not audited",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
