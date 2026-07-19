@@ -379,6 +379,65 @@ describe("runDoctor — keyless credentials row (Pillar 2 tail)", () => {
   });
 });
 
+describe("runDoctor — exec-broker runtime observe→enforce nudge (E3)", () => {
+  let idDir: string;
+  let proj: string;
+  let savedId: string | undefined;
+
+  beforeEach(() => {
+    idDir = mkdtempSync(join(tmpdir(), "kit-id-"));
+    proj = mkdtempSync(join(tmpdir(), "kit-nudge-"));
+    savedId = process.env.KIT_IDENTITY_DIR;
+    process.env.KIT_IDENTITY_DIR = idDir;
+    loadOrCreateIdentity();
+  });
+
+  afterEach(() => {
+    if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
+    else process.env.KIT_IDENTITY_DIR = savedId;
+    rmSync(idDir, { recursive: true, force: true });
+    rmSync(proj, { recursive: true, force: true });
+  });
+
+  const observe = (wouldDeny: string[]) =>
+    JSON.stringify({ operation: "bash", success: true, metadata: { phase: "observe", wouldDeny } });
+  const rtRow = async () =>
+    (await runDoctor({}, proj)).checks.find((c) => c.name === "exec-broker runtime");
+
+  async function signedObserveProfile(): Promise<void> {
+    writeFileSync(
+      join(proj, PROFILE_FILE),
+      `version = 1\n[scope]\negress = ["api.acme.com"]\nenforce_runtime = "observe"\n`,
+      "utf-8",
+    );
+    await signProfile(proj);
+  }
+
+  it("a clean observe window nudges to 'kit broker enforce'", async () => {
+    await signedObserveProfile();
+    writeFileSync(join(proj, ".kit-audit.jsonl"), `${observe([])}\n${observe([])}\n`, "utf-8");
+    const row = await rtRow();
+    assert.ok(row);
+    assert.equal(row.status, "warn");
+    assert.match(row.detail, /kit broker enforce/);
+    assert.match(row.detail, /none would be denied/);
+  });
+
+  it("a would-block observe window points to enforce-readiness, not the flip", async () => {
+    await signedObserveProfile();
+    writeFileSync(
+      join(proj, ".kit-audit.jsonl"),
+      `${observe(["egress evil.test not in scope"])}\n`,
+      "utf-8",
+    );
+    const row = await rtRow();
+    assert.ok(row);
+    assert.equal(row.status, "warn");
+    assert.match(row.detail, /enforce-readiness/);
+    assert.doesNotMatch(row.detail, /Safe to graduate/);
+  });
+});
+
 describe("triageGateStatus (pure — pre-commit gate posture)", () => {
   it("pass when both triage gates are wired into the pre-commit hook", () => {
     const hook =

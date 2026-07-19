@@ -17,7 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   and audits the transition (`phase: "enforce-enabled"`). On a sign failure it surfaces that the
   scope won't verify until re-signed (never a silent half-enabled state). Completes the
   observe→enforce ladder: `enforce-readiness` (E1/E2) tells you it's safe; `enforce` does it.
-  Deterministic, zero-LLM. `--json` for machines.
+  Deterministic, zero-LLM. `--json` for machines. `kit doctor`'s exec-broker-runtime row now
+  gives an **evidence-based nudge**: in observe with a clean window it points to `kit broker
+enforce`; with would-be denials it points to `kit broker enforce-readiness` to see them first.
 
 - **`kit memory search --fresh` — recency-aware recall (deterministic, zero-LLM).** By default
   recall is bm25 relevance-first (unchanged). `--fresh` fetches a larger candidate pool and
