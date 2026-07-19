@@ -779,7 +779,8 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   "broker enforce-readiness":
     "Read the recorded observe window (.kit-audit.jsonl) and report whether it's safe to flip exec-broker to enforce: ready | would-block (+ exactly what breaks) | untested (--gate fails CI on any not-ready verdict)",
   "memory index": "Index ~/.claude transcripts into the SQLite memory store",
-  "memory search": "Full-text search memory (current project; --global for all)",
+  "memory search":
+    "Full-text search memory (current project; --global for all; --fresh = recency-aware ranking)",
   "memory stats": "Show what the local memory store contains",
   "memory suggest":
     "Emit a BYO-LLM review prompt (recent activity + open items) — pipe to your own model",

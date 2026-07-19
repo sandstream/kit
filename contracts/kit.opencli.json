@@ -521,7 +521,7 @@
         },
         "search": {
           "kind": "command",
-          "summary": "Full-text search memory (current project; --global for all)",
+          "summary": "Full-text search memory (current project; --global for all; --fresh = recency-aware ranking)",
           "x-kit-args-modeled": false,
           "x-kit-mcp": false,
           "x-kit-stability": "stable"

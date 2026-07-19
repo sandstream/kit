@@ -13,6 +13,7 @@ import {
   toFtsMatchQuery,
   quarantineInjectedMessages,
   countQuarantined,
+  fuseByRrf,
 } from "./db.js";
 
 describe("memory db", () => {
@@ -401,6 +402,89 @@ describe("memory quarantine (R3 — recall excludes injected rows)", () => {
     assert.equal(quarantineInjectedMessages(db), 1, "backfill marks it");
     assert.equal(quarantineInjectedMessages(db), 0, "idempotent — nothing left to mark");
     assert.equal(searchMessages(db, "instructions").length, 0, "now excluded from recall");
+    db.close();
+  });
+});
+
+describe("fuseByRrf", () => {
+  const key = (x: { id: string }) => x.id;
+
+  it("rewards consensus across lists over a single #1", () => {
+    // b is #1 in list A but absent from B; a is #2 in both. Consensus (a) should win.
+    const A = [{ id: "b" }, { id: "a" }, { id: "c" }];
+    const B = [{ id: "d" }, { id: "a" }, { id: "c" }];
+    const fused = fuseByRrf([A, B], key).map((x) => x.id);
+    assert.equal(fused[0], "a"); // appears high in BOTH lists → beats b (#1 in one only)
+  });
+
+  it("is a stable identity for a single list (order preserved)", () => {
+    const A = [{ id: "x" }, { id: "y" }, { id: "z" }];
+    assert.deepEqual(
+      fuseByRrf([A], key).map((x) => x.id),
+      ["x", "y", "z"],
+    );
+  });
+
+  it("dedups items appearing in multiple lists", () => {
+    const A = [{ id: "a" }, { id: "b" }];
+    const B = [{ id: "b" }, { id: "a" }];
+    assert.equal(fuseByRrf([A, B], key).length, 2);
+  });
+
+  it("breaks ties deterministically by key", () => {
+    // a and b are perfectly symmetric across the two lists → tie → key-ascending.
+    const A = [{ id: "a" }, { id: "b" }];
+    const B = [{ id: "b" }, { id: "a" }];
+    assert.deepEqual(
+      fuseByRrf([A, B], key).map((x) => x.id),
+      ["a", "b"],
+    );
+  });
+});
+
+describe("searchMessages --fresh (recency-aware ranking)", () => {
+  const fresh = () => openMemoryDb(":memory:");
+
+  it("default is relevance-only; --fresh lifts a fresh but less-relevant hit above a stale mid one", () => {
+    const db = fresh();
+    upsertSession(db, { sessionId: "s1", harness: "claude-code", project: "/repo" });
+    // All match "deploy"; bm25 length-normalization ranks the shortest match highest, so relevance
+    // order is strong > mid > weak. `weak` is the FRESHEST (and least relevant).
+    insertMessage(db, {
+      uuid: "strong",
+      sessionId: "s1",
+      type: "user",
+      content: "deploy",
+      timestamp: "2022-01-01T00:00:00.000Z",
+    });
+    insertMessage(db, {
+      uuid: "mid",
+      sessionId: "s1",
+      type: "user",
+      content: "deploy alpha beta",
+      timestamp: "2021-01-01T00:00:00.000Z",
+    });
+    insertMessage(db, {
+      uuid: "weak",
+      sessionId: "s1",
+      type: "user",
+      content: "deploy alpha beta gamma delta epsilon",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+
+    // Default: pure relevance — freshest-but-weakest ("weak") sits last.
+    const plain = searchMessages(db, "deploy").map((h) => h.uuid);
+    assert.equal(plain[0], "strong");
+    assert.ok(plain.indexOf("mid") < plain.indexOf("weak"), `relevance order: ${plain}`);
+
+    // --fresh: RRF fuses recency, promoting the fresh "weak" above the stale "mid"; the strongest
+    // relevance match still leads (relevance dominates, recency breaks the lower ranks).
+    const boosted = searchMessages(db, "deploy", { recencyBoost: true }).map((h) => h.uuid);
+    assert.equal(boosted[0], "strong");
+    assert.ok(
+      boosted.indexOf("weak") < boosted.indexOf("mid"),
+      `recency-boosted order: ${boosted}`,
+    );
     db.close();
   });
 });

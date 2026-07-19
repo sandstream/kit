@@ -507,6 +507,35 @@ export interface SearchOptions {
   /** Include quarantined (high-confidence injection) rows. Default false: recall
    *  excludes them so a poisoned line is never re-injected. Set for inspection. */
   includeQuarantined?: boolean;
+  /** Opt-in recency-aware ranking (`kit memory search --fresh`): RRF-fuse bm25 relevance with
+   *  recency so a fresh, still-relevant hit outranks a marginally-more-relevant stale one. Off by
+   *  default — the relevance-first ordering is unchanged unless a caller asks for it. */
+  recencyBoost?: boolean;
+}
+
+/**
+ * Reciprocal Rank Fusion — merge several ranked lists of the SAME items into one, by RANK not by
+ * score. This lets incommensurable signals (e.g. bm25 relevance vs recency) combine WITHOUT any
+ * score normalization: each list contributes `1/(k + rank)` (rank 1-based) to an item's fused
+ * score, and `k` (default 60, the standard smoothing constant) makes agreement across lists count
+ * for more than a single list's #1. Deterministic — ties break by key ascending. Pure, zero-LLM.
+ */
+export function fuseByRrf<T>(lists: T[][], keyOf: (x: T) => string | number, k = 60): T[] {
+  const score = new Map<string | number, number>();
+  const item = new Map<string | number, T>();
+  for (const list of lists) {
+    for (let i = 0; i < list.length; i++) {
+      const key = keyOf(list[i]);
+      score.set(key, (score.get(key) ?? 0) + 1 / (k + i + 1));
+      if (!item.has(key)) item.set(key, list[i]);
+    }
+  }
+  return [...item.keys()]
+    .sort((a, b) => {
+      const d = (score.get(b) ?? 0) - (score.get(a) ?? 0);
+      return d !== 0 ? d : a < b ? -1 : a > b ? 1 : 0; // deterministic tiebreak by key
+    })
+    .map((key) => item.get(key) as T);
 }
 
 /**
@@ -539,6 +568,9 @@ export function searchMessages(
   const terms = query.trim().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return [];
   const limit = opts.limit ?? 20;
+  // Recency-boost needs a candidate POOL larger than `limit` to re-rank; the default path fetches
+  // exactly `limit` (behavior unchanged).
+  const poolLimit = opts.recencyBoost ? Math.max(limit * 4, 40) : limit;
 
   const run = (match: string): SearchHit[] => {
     const params: (string | number)[] = [match];
@@ -548,7 +580,7 @@ export function searchMessages(
       where += " AND (m.cwd = ? OR m.cwd LIKE ?)";
       params.push(opts.projectPath, `${opts.projectPath}/%`);
     }
-    params.push(limit);
+    params.push(poolLimit);
     return db
       .prepare(
         `SELECT m.id AS id, m.uuid AS uuid, m.session_id AS sessionId, m.role AS role,
@@ -565,13 +597,21 @@ export function searchMessages(
   // Precision first: an all-terms (implicit-AND) match. FTS5's `rank` is bm25,
   // so results already come back relevance-ordered.
   const strict = run(toFtsMatchQuery(query, "AND"));
-  if (strict.length > 0 || terms.length < 2) return strict;
-
   // Graceful recall: a strict AND over a multi-term query returned nothing (no
   // single message holds every term). Fall back to OR so partial matches still
   // surface, bm25-ranked — the message covering the most terms ranks first.
   // This is the "rank by relevance, not all-or-nothing" behavior (#164).
-  return run(toFtsMatchQuery(query, "OR"));
+  const pool = strict.length > 0 || terms.length < 2 ? strict : run(toFtsMatchQuery(query, "OR"));
+
+  if (!opts.recencyBoost) return pool.slice(0, limit);
+
+  // Recency-aware: RRF-fuse the bm25-relevance order with a recency order (two incommensurable
+  // signals blended by RANK — no score normalization), so a fresh, still-relevant hit can
+  // outrank a marginally-more-relevant stale one. Relevance still dominates; recency breaks
+  // near-ties (the "when relevance is otherwise equal, newer wins" rule). Then take top `limit`.
+  const recencyOf = (h: SearchHit): number => (h.timestamp ? Date.parse(h.timestamp) || 0 : 0);
+  const byRecency = [...pool].sort((a, b) => recencyOf(b) - recencyOf(a));
+  return fuseByRrf<SearchHit>([pool, byRecency], (h) => h.id).slice(0, limit);
 }
 
 export interface QueryLogInput {
