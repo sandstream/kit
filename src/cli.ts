@@ -714,7 +714,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   broker: {
     handler: cmdBroker,
     stability: "experimental",
-    help: "exec-broker runtime posture — graduate observe→enforce on evidence: enforce-readiness reads the recorded observe window and reports ready | would-block (+ exactly what breaks) | untested (--json, --gate)",
+    help: "exec-broker runtime posture — graduate observe→enforce on evidence: enforce-readiness reports ready | would-block (+ what breaks) | untested; enforce does the guided, signed flip (refuses unless ready, --force overrides) (--json, --gate, --force)",
   },
   pkg: {
     handler: cmdPkg,
@@ -778,6 +778,8 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     "Import a portable bundle on a fresh host — integrity-verify offline, fail-closed on tamper/revoked (authoritative only once the signer is anchored)",
   "broker enforce-readiness":
     "Read the recorded observe window (.kit-audit.jsonl) and report whether it's safe to flip exec-broker to enforce: ready | would-block (+ exactly what breaks) | untested (--gate fails CI on any not-ready verdict)",
+  "broker enforce":
+    "Guided observe→enforce flip: readiness pre-flight (refuses unless ready; --force overrides), set [scope].enforce_runtime = true, re-sign the profile scope, and audit the transition",
   "memory index": "Index ~/.claude transcripts into the SQLite memory store",
   "memory search":
     "Full-text search memory (current project; --global for all; --fresh = recency-aware ranking)",

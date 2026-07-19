@@ -12,10 +12,15 @@
  *   - `enforce-readiness` — read the observe evidence and turn the flip from a leap into a diff:
  *       `ready` (nothing observed would break), `would-block` (+ exactly what breaks), or the
  *       honest `untested` (no observe data — coverage is only what was observed, never a green).
+ *   - `enforce` — the guided flip: run the readiness pre-flight, REFUSE without `--force` unless
+ *       the verdict is `ready` (fail-closed — never silently enable a posture that will break the
+ *       workflow), then set `[scope].enforce_runtime = true`, re-sign the profile scope, and audit
+ *       the transition (`phase: "enforce-enabled"`). The re-sign is why the flip is attributable:
+ *       enforce only takes effect under a valid signature.
  *
- * Reads the recorded audit log only — never executes anything. Deterministic, zero-LLM. The
- * guided `kit broker enforce` flip is a follow-up (E3). `--json` on every subcommand; `--gate`
- * turns a not-`ready` verdict into a non-zero exit for CI.
+ * `enforce-readiness` reads the recorded audit log only — never executes anything. Deterministic,
+ * zero-LLM. `--json` on every subcommand; `enforce-readiness --gate` turns a not-`ready` verdict
+ * into a non-zero exit for CI; `enforce --force` overrides the readiness refusal.
  */
 import { resolve } from "node:path";
 import { readFileSync } from "node:fs";
@@ -26,6 +31,38 @@ import {
   assessEnforceReadiness,
   type EnforceReadiness,
 } from "../exec-broker/enforce-readiness.js";
+
+/**
+ * Pure pre-flight decision for the guided flip: only a `ready` verdict flips unforced. A
+ * `would-block` or `untested` verdict is REFUSED unless `--force` (fail-closed — an operator must
+ * not silently enable a posture the observed evidence says will break, or that has no evidence at
+ * all). Returns whether to proceed + the human reason. Deterministic, no I/O.
+ */
+export function enforceGateDecision(
+  readiness: EnforceReadiness,
+  force: boolean,
+): { proceed: boolean; reason: string } {
+  if (readiness.verdict === "ready") {
+    return {
+      proceed: true,
+      reason: `${readiness.opsObserved} observed op(s), none would be denied`,
+    };
+  }
+  if (force) {
+    return { proceed: true, reason: `forced flip despite '${readiness.verdict}' (--force)` };
+  }
+  if (readiness.verdict === "would-block") {
+    return {
+      proceed: false,
+      reason: `${readiness.wouldBlockOps} of ${readiness.opsObserved} observed op(s) would be denied under enforce — declare them in [scope] and re-sign, or pass --force`,
+    };
+  }
+  return {
+    proceed: false,
+    reason:
+      "no observe evidence yet (untested) — run under observe to gather a clean window first, or pass --force",
+  };
+}
 
 const AUDIT_FILE = ".kit-audit.jsonl";
 
@@ -80,6 +117,107 @@ async function brokerEnforceReadiness(jsonMode: boolean, gate: boolean): Promise
   return gate ? readiness.verdict === "ready" : true;
 }
 
+/** Best-effort audit of the observe→enforce transition (design §2: the posture change is on the
+ *  record). A missing .kit.toml / audit backend must never abort the flip — it already happened. */
+async function auditEnforceTransition(
+  cwd: string,
+  opsObserved: number,
+  forced: boolean,
+): Promise<void> {
+  try {
+    const { loadConfig } = await import("../config.js");
+    const { mergeGovernanceConfigAsync } = await import("../governance.js");
+    const { logAuditEvent } = await import("../audit.js");
+    const cfg = await loadConfig(resolve(cwd, ".kit.toml"));
+    const gov = await mergeGovernanceConfigAsync(cfg.governance);
+    await logAuditEvent(gov, {
+      operation: "broker.enforce",
+      environment: gov.environment,
+      success: true,
+      metadata: { phase: "enforce-enabled", opsObserved, forced },
+    });
+  } catch {
+    /* best-effort — the flip + re-sign are the source of truth, not this log line */
+  }
+}
+
+async function brokerEnforce(jsonMode: boolean, force: boolean): Promise<boolean> {
+  const cwd = process.cwd();
+  const { loadProfile, saveProfile } = await import("../profile/schema.js");
+  const { signProfile } = await import("../profile/sign.js");
+
+  const profile = await loadProfile(cwd);
+  if (!profile?.scope) {
+    const why =
+      "no [scope] to enforce — declare a scope in .kit-profile.toml and `kit profile sign` first";
+    if (jsonMode) console.log(JSON.stringify({ enforced: false, reason: why }, null, 2));
+    else console.error(`${c.red}✗ ${why}${c.reset}`);
+    return false;
+  }
+
+  const readiness = assessEnforceReadiness(parseObserveRecords(readAuditJsonl(cwd)));
+  const decision = enforceGateDecision(readiness, force);
+  if (!decision.proceed) {
+    if (jsonMode) {
+      console.log(
+        JSON.stringify(
+          { enforced: false, verdict: readiness.verdict, reason: decision.reason },
+          null,
+          2,
+        ),
+      );
+    } else {
+      console.error(
+        `${c.red}✗ refusing to flip to enforce${c.reset} ${c.dim}— ${decision.reason}${c.reset}`,
+      );
+      for (const { reason, count } of readiness.reasons) {
+        console.error(`    ${c.yellow}⚠${c.reset} ${c.bold}${count}×${c.reset}  ${reason}`);
+      }
+    }
+    return false;
+  }
+
+  if (profile.scope.enforce_runtime === true) {
+    const msg = "already enforcing ([scope].enforce_runtime = true) — nothing to do";
+    if (jsonMode) console.log(JSON.stringify({ enforced: true, alreadyEnforcing: true }, null, 2));
+    else console.log(`${c.green}✓${c.reset} ${c.dim}${msg}${c.reset}`);
+    return true;
+  }
+
+  // Flip + re-sign: enforce only takes effect under a valid signature, so the transition is
+  // attributable. On a sign failure the scope won't verify → the runtime stays effectively off
+  // (not a silent enforce), and we surface it so the operator re-signs.
+  profile.scope.enforce_runtime = true;
+  await saveProfile(profile, cwd);
+  const sig = await signProfile(cwd);
+  if (!sig.ok) {
+    const why = `set enforce_runtime = true, but re-signing failed (${sig.error}); the scope will not verify until signed — run \`kit profile sign\``;
+    if (jsonMode)
+      console.log(JSON.stringify({ enforced: false, signed: false, reason: why }, null, 2));
+    else console.error(`${c.red}✗ ${why}${c.reset}`);
+    return false;
+  }
+  await auditEnforceTransition(cwd, readiness.opsObserved, force);
+
+  if (jsonMode) {
+    console.log(
+      JSON.stringify(
+        { enforced: true, forced: force, fingerprint: sig.fingerprint, kid: sig.kid },
+        null,
+        2,
+      ),
+    );
+    return true;
+  }
+  console.log(
+    `${c.green}✓ enforce enabled${c.reset} ${c.dim}— ${decision.reason}; scope re-signed (${sig.fingerprint})${c.reset}`,
+  );
+  console.log(
+    `${c.dim}the exec-broker now DENIES declared ops outside [scope]. Commit .kit-profile.toml + .kit-profile.sig.${c.reset}`,
+  );
+  return true;
+}
+
 export async function cmdBroker(): Promise<boolean> {
   // A flag in the subcommand slot (`kit broker --json`) means "no subcommand" → default.
   const rawSub = process.argv[3];
@@ -88,6 +226,11 @@ export async function cmdBroker(): Promise<boolean> {
   if (sub === "enforce-readiness") {
     return await brokerEnforceReadiness(jsonMode, hasFlag(process.argv, "--gate"));
   }
-  console.error(`${c.red}usage: kit broker <enforce-readiness> [--json] [--gate]${c.reset}`);
+  if (sub === "enforce") {
+    return await brokerEnforce(jsonMode, hasFlag(process.argv, "--force"));
+  }
+  console.error(
+    `${c.red}usage: kit broker <enforce-readiness | enforce> [--json] [--gate] [--force]${c.reset}`,
+  );
   return false;
 }
