@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.3.0] - 2026-07-19
+
 ### Added
 
 - **`kit broker enforce` — the guided observe→enforce flip (Pillar 3 capstone).** Turns the
