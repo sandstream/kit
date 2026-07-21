@@ -486,7 +486,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   scan: {
     handler: cmdScan,
     stability: "stable",
-    help: "Run external scanners (snyk/trivy/grype/semgrep/osv) and merge them into one local verdict (--strict / [governance.scan] required_scanners gate non-running scanners)",
+    help: "Run external scanners (snyk/trivy/grype/semgrep/osv) and merge them into one local verdict; --list-delegates shows the toggleable scanner library, [scan].delegates picks which run (--strict / [governance.scan] required_scanners gate non-running scanners)",
   },
   airgap: { handler: cmdAirgap, stability: "stable", help: "Air-gap posture tools (verify)" },
   "verify-provenance": {

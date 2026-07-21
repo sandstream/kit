@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit scan` delegate library — connect what kit shouldn't rebuild, toggleable.** The external
+  scanner registry (snyk/trivy/grype/semgrep/osv-scanner/socket) is now a **toggleable delegate
+  library**, mirroring the coverage-standards registry: `kit scan --list-delegates` enumerates it
+  with on/off state, and `[scan].delegates` in `.kit.toml` is an allow-list that picks which
+  scanners run (absent/empty ⇒ all on, backwards-compatible). The principle it encodes: **kit
+  delegates *detection* to best-of-breed tools, never its *verdict*** — findings still merge into
+  one deterministic, fail-closed result. `enabledScanners` / `isScannerEnabled` / `SCANNER_IDS`
+  are exported + unit-tested.
+
 - **`kit coverage` — agent-native standards + a toggleable standards library.** Coverage
   evidence maps are now a **registry** (single source of truth) instead of a hardcoded pair, and
   two standards native to kit's own lane land as the first new entries: **OWASP Top 10 for Agentic

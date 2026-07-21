@@ -13,7 +13,8 @@ export async function cmdScan(): Promise<boolean> {
   const { resolveToolBin } = await import("../utils/resolveTool.js");
   const { execFileNoThrow } = await import("../utils/execFileNoThrow.js");
   const { loadBaseline, baselineGet, baselineSet, saveBaseline } = await import("../baseline.js");
-  const { SCANNERS, airGapScanners } = await import("../scanners.js");
+  const { SCANNERS, airGapScanners, enabledScanners, isScannerEnabled } =
+    await import("../scanners.js");
   const cwd = process.cwd();
   // Config-free by design: scanning is project-agnostic, so a missing .kit.toml is
   // NOT an error — fall back to an empty config (air-gap + tooling tokens then come
@@ -21,12 +22,32 @@ export async function cmdScan(): Promise<boolean> {
   const configPath = resolveConfigPath();
   const config = existsSync(configPath) ? await loadConfig(configPath) : ({} as kitConfig);
 
+  // Delegate library: [scan].delegates toggles which external scanners kit shells
+  // out to. kit delegates DETECTION, never its verdict. --list-delegates enumerates
+  // the registry with on/off state and exits.
+  const delegates = config.scan?.delegates;
+  if (hasFlag(process.argv, "--list-delegates")) {
+    for (const s of SCANNERS) {
+      const on = isScannerEnabled(s.id, delegates);
+      const tag = on ? `${c.green}on ${c.reset}` : `${c.dim}off${c.reset}`;
+      const notes = [
+        s.needsToken ? `needs ${s.needsToken}` : null,
+        s.cloudOnly ? "cloud-only" : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      console.log(`${tag} ${s.id.padEnd(13)} ${s.format}${notes ? `  (${notes})` : ""}`);
+    }
+    return true;
+  }
+  const selectedScanners = enabledScanners(SCANNERS, delegates);
+
   // Air-gap posture from `.kit.toml [air_gap]` + env (env overrides). When
   // enabled, drop cloud-only scanners and run the rest against local DBs with no
   // network. See docs/AIR_GAP.md.
   const { resolveAirGap } = await import("../airgap/config.js");
   const ag = resolveAirGap(config.air_gap, process.env);
-  const airgap = airGapScanners(SCANNERS, ag.enabled);
+  const airgap = airGapScanners(selectedScanners, ag.enabled);
   if (ag.enabled) {
     console.log(
       `${c.dim}air-gap mode: offline scanners only${airgap.dropped.length ? ` (skipping cloud-only: ${airgap.dropped.join(", ")})` : ""}${c.reset}`,
@@ -84,7 +105,7 @@ export async function cmdScan(): Promise<boolean> {
       project_id: tooling.project_id,
       environment: tooling.env,
     });
-    for (const s of SCANNERS) {
+    for (const s of selectedScanners) {
       if (s.needsToken && !process.env[s.needsToken] && map.has(s.needsToken)) {
         toolingTokens[s.needsToken] = map.get(s.needsToken)!;
       }
