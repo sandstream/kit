@@ -65,6 +65,7 @@ import {
   type SharedProvenance,
   type SharedEntry,
 } from "../memory/shared.js";
+import { renderObsidianVault } from "../memory/obsidian.js";
 import {
   userPromptSubmitReminder,
   maybeStartMidSessionIndex,
@@ -133,6 +134,7 @@ export async function cmdMemory(): Promise<boolean> {
     verify: memVerify,
     areas: memAreas,
     area: memArea,
+    export: memExport,
     context: memContext,
     scan: memScan,
     backup: memBackup,
@@ -413,7 +415,12 @@ async function memHelp(): Promise<boolean> {
     "  kit memory verify           Verify Ed25519 signatures on the shared tier (--strict fails on an un-anchored signer)",
   );
   console.log("  kit memory areas            List shared responsibility areas");
-  console.log("  kit memory area <name>      Show shared entries for one area");
+  console.log(
+    "  kit memory area <name>      Show shared entries for one area (--stale for aged-out rules)",
+  );
+  console.log(
+    "  kit memory export --obsidian <dir>  Render the curated shared tier as an Obsidian vault (--json for a dry-run manifest)",
+  );
   console.log(
     "  kit memory context [paths]  Surface active decisions for the area(s) you're touching (--changed = working tree)",
   );
@@ -1333,6 +1340,56 @@ async function memArea(): Promise<boolean> {
     if (e.body) console.log(`    ${e.body}`);
     if (e.refs.length) console.log(`    ${c.dim}refs: ${e.refs.join(", ")}${c.reset}`);
   }
+  return true;
+}
+
+async function memExport(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  // Only the Obsidian target is implemented; require it explicitly so a future
+  // `--json`-only dry-run or other targets stay unambiguous.
+  if (!hasFlag(process.argv, "--obsidian")) {
+    console.error(
+      `${c.red}usage: kit memory export --obsidian <dir> [--json]${c.reset}  ${c.dim}(renders the curated shared tier as an Obsidian vault)${c.reset}`,
+    );
+    return false;
+  }
+  const root = getCurrentProjectRoot();
+  const entries = readShared(root);
+  const files = renderObsidianVault(entries);
+
+  if (jsonMode) {
+    // Dry-run-friendly: report what WOULD be written (paths + sizes), no side effects.
+    console.log(
+      JSON.stringify({ files: files.map((f) => ({ path: f.path, bytes: f.content.length })) }),
+    );
+    return true;
+  }
+
+  const outDir = flagValue(process.argv, "--obsidian");
+  if (!outDir) {
+    console.error(`${c.red}--obsidian needs a target directory${c.reset}`);
+    return false;
+  }
+  if (!files.length) {
+    console.log(`${c.dim}no curated shared entries to export${c.reset}`);
+    return true;
+  }
+  const base = resolve(outDir);
+  try {
+    for (const f of files) {
+      const full = join(base, f.path);
+      mkdirSync(join(full, ".."), { recursive: true });
+      writeFileSync(full, f.content, { encoding: "utf-8" });
+    }
+  } catch (err) {
+    // Fail-closed on a write error — never report a partial export as success.
+    console.error(`${c.red}✗ export failed: ${(err as Error).message}${c.reset}`);
+    return false;
+  }
+  const areas = new Set(entries.map((e) => e.area)).size;
+  console.log(
+    `${c.green}✓ exported${c.reset} ${files.length} note(s) across ${areas} area(s) → ${c.bold}${base}${c.reset}`,
+  );
   return true;
 }
 

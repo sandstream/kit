@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit memory export --obsidian <dir>` — the curated shared tier as an Obsidian vault (J3).**
+  Renders each shared decision/convention as an Obsidian note (YAML frontmatter with
+  id/area/kind/status/provenance + `kit/*` tags, an H1 title, body, refs) grouped under `area/`,
+  with `[[wikilinks]]` for supersede/reverse relations and a per-area `_index.md` MOC. Pure,
+  deterministic renderer (`renderObsidianVault`); `--json` emits a dry-run manifest (paths +
+  bytes, no writes); write errors fail closed (never a partial-export "success"). Read-only over
+  already-secret-scanned entries, so the export never re-introduces a secret.
+
 - **`kit memory search --brief` — progressive-disclosure recall (B3).** Returns the *minimal
   sufficient slice* of a recall — top-ranked hits trimmed to budget-bounded snippets — and reports
   how many were **withheld** so you can expand (`--limit` / drop `--brief`), instead of dumping
