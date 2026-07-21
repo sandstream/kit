@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit triage mcp` — MCP-Security-Checklist static checks (borrowed from SlowMist/OWASP MCP
+  Top 10).** Beyond tool-poisoning (R7) and rug-pull drift, triage now surfaces four deterministic,
+  static review signals: **dangerous-capability** (a tool name/description implying arbitrary
+  exec/deletion — confirm least-privilege + human approval), **secret-as-parameter** (a param
+  shaped like a credential — inject at the boundary, MCP01), **undocumented** (a tool with no
+  description — can't be triaged), and **unconstrained-input** (`additionalProperties: true`).
+  All **heuristic-confidence and advisory** — they surface for review but never flip the pass/fail
+  verdict, which stays gated on high-confidence poisoning + drift (no false-block). `checklistFindings`
+  is exported + unit-tested; pure and deterministic.
+
 - **`kit memory export --obsidian <dir>` — the curated shared tier as an Obsidian vault (J3).**
   Renders each shared decision/convention as an Obsidian note (YAML frontmatter with
   id/area/kind/status/provenance + `kit/*` tags, an H1 title, body, refs) grouped under `area/`,

@@ -5,6 +5,7 @@ import {
   hashToolset,
   classifyDrift,
   triageMcpTools,
+  checklistFindings,
   extractToolDefs,
   type McpToolDef,
 } from "./mcp-triage.js";
@@ -111,5 +112,53 @@ describe("extractToolDefs", () => {
   it("drops entries without a string name and tolerates garbage", () => {
     assert.deepEqual(extractToolDefs([{ description: "no name" }, 5, null]), []);
     assert.deepEqual(extractToolDefs("nonsense"), []);
+  });
+});
+
+describe("checklistFindings (MCP-Security-Checklist static checks)", () => {
+  it("flags a dangerous capability by name/description (heuristic)", () => {
+    const f = checklistFindings([{ name: "run_command", description: "exec a shell command" }]);
+    assert.ok(f.some((x) => x.label.startsWith("dangerous-capability")));
+    assert.ok(f.every((x) => x.confidence === "heuristic"));
+  });
+
+  it("flags a secret-shaped parameter", () => {
+    const f = checklistFindings([
+      {
+        name: "call_api",
+        description: "call it",
+        inputSchema: { type: "object", properties: { api_key: { type: "string" } } },
+      },
+    ]);
+    assert.ok(f.some((x) => x.field === "param:api_key" && /secret-shaped/.test(x.label)));
+  });
+
+  it("flags an undocumented tool and unconstrained input", () => {
+    const f = checklistFindings([
+      { name: "t", description: "", inputSchema: { type: "object", additionalProperties: true } },
+    ]);
+    assert.ok(f.some((x) => /undocumented/.test(x.label)));
+    assert.ok(f.some((x) => /unconstrained input/.test(x.label)));
+  });
+
+  it("a clean, documented, constrained tool yields no checklist findings", () => {
+    const f = checklistFindings([
+      {
+        name: "get_weather",
+        description: "Return the forecast for a city",
+        inputSchema: {
+          type: "object",
+          properties: { city: { type: "string" } },
+          additionalProperties: false,
+        },
+      },
+    ]);
+    assert.equal(f.length, 0);
+  });
+
+  it("checklist findings are advisory — they do NOT flip triageMcpTools.passed", () => {
+    const r = triageMcpTools("s", [{ name: "run_command", description: "exec shell" }]);
+    assert.ok(r.findings.some((x) => x.label.startsWith("dangerous-capability")));
+    assert.equal(r.passed, true); // heuristic-only ⇒ still passes (no high-confidence poisoning, no drift)
   });
 });
