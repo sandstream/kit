@@ -6,7 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.4.0] - 2026-07-21
+
 ### Added
+
+- **`kit triage mcp` — MCP-Security-Checklist static checks (borrowed from SlowMist/OWASP MCP
+  Top 10).** Beyond tool-poisoning (R7) and rug-pull drift, triage now surfaces four deterministic,
+  static review signals: **dangerous-capability** (a tool name/description implying arbitrary
+  exec/deletion — confirm least-privilege + human approval), **secret-as-parameter** (a param
+  shaped like a credential — inject at the boundary, MCP01), **undocumented** (a tool with no
+  description — can't be triaged), and **unconstrained-input** (`additionalProperties: true`).
+  All **heuristic-confidence and advisory** — they surface for review but never flip the pass/fail
+  verdict, which stays gated on high-confidence poisoning + drift (no false-block). `checklistFindings`
+  is exported + unit-tested; pure and deterministic.
+
+- **`kit memory export --obsidian <dir>` — the curated shared tier as an Obsidian vault (J3).**
+  Renders each shared decision/convention as an Obsidian note (YAML frontmatter with
+  id/area/kind/status/provenance + `kit/*` tags, an H1 title, body, refs) grouped under `area/`,
+  with `[[wikilinks]]` for supersede/reverse relations and a per-area `_index.md` MOC. Pure,
+  deterministic renderer (`renderObsidianVault`); `--json` emits a dry-run manifest (paths +
+  bytes, no writes); write errors fail closed (never a partial-export "success"). Read-only over
+  already-secret-scanned entries, so the export never re-introduces a secret.
+
+- **`kit memory search --brief` — progressive-disclosure recall (B3).** Returns the *minimal
+  sufficient slice* of a recall — top-ranked hits trimmed to budget-bounded snippets — and reports
+  how many were **withheld** so you can expand (`--limit` / drop `--brief`), instead of dumping
+  every match into context. Never silently truncates: the withheld count is explicit (same
+  discipline as `kit map`'s logged drops), and the first hit is always disclosed. Pure core
+  `progressiveDisclose` (deterministic; default 1200-char budget / 240-char snippets / 8 hits),
+  unit-tested; `--json` carries the structured `disclosure`.
+
+- **`kit memory` rule aging — surface stale machine-origin rules for review, never auto-drop (B2).**
+  Curated shared-tier rules now carry a deterministic **aging class**: only `derived`/`inferred`
+  *active* rules age (fresh < 180d ≤ aging < 360d ≤ stale); an **operator's explicit rule is
+  foundational and never ages** (the human owns its relevance), and superseded/reversed entries are
+  history. `kit memory areas` prints an aging nudge when machine-origin rules go stale; `kit memory
+  area <name>` badges each entry and takes `--stale` to show only aged-out rules for review (JSON
+  carries the `aging` field). kit never deletes — it flags for re-affirm/supersede. Pure core
+  (`classifyAging` / `agingReport`), unit-tested; deterministic, zero-LLM.
+
+- **`kit scan` delegate library — connect what kit shouldn't rebuild, toggleable.** The external
+  scanner registry (snyk/trivy/grype/semgrep/osv-scanner/socket) is now a **toggleable delegate
+  library**, mirroring the coverage-standards registry: `kit scan --list-delegates` enumerates it
+  with on/off state, and `[scan].delegates` in `.kit.toml` is an allow-list that picks which
+  scanners run (absent/empty ⇒ all on, backwards-compatible). The principle it encodes: **kit
+  delegates *detection* to best-of-breed tools, never its *verdict*** — findings still merge into
+  one deterministic, fail-closed result. `enabledScanners` / `isScannerEnabled` / `SCANNER_IDS`
+  are exported + unit-tested.
 
 - **`kit coverage` — agent-native standards + a toggleable standards library.** Coverage
   evidence maps are now a **registry** (single source of truth) instead of a hardcoded pair, and

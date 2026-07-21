@@ -170,6 +170,31 @@ export const SCANNERS: ScannerDef[] = [
   },
 ];
 
+/** Every registered scanner id, in registry order — the delegate library. */
+export const SCANNER_IDS: readonly string[] = SCANNERS.map((s) => s.id);
+
+/**
+ * Resolve which scanner delegates are enabled given the optional `[scan].delegates`
+ * allow-list from .kit.toml. Absent or empty ⇒ every registered scanner is enabled
+ * (backwards-compatible). Unknown ids in the config are ignored here. Order follows
+ * the registry, not the config. This is the "connect what we should not copy"
+ * toggle — kit delegates DETECTION, never its verdict.
+ */
+export function enabledScanners(
+  defs: ScannerDef[] = SCANNERS,
+  configDelegates?: readonly string[],
+): ScannerDef[] {
+  if (!configDelegates || configDelegates.length === 0) return [...defs];
+  const allow = new Set(configDelegates);
+  return defs.filter((s) => allow.has(s.id));
+}
+
+/** Is scanner `id` enabled under the given `[scan].delegates` toggle? Empty ⇒ all on. */
+export function isScannerEnabled(id: string, configDelegates?: readonly string[]): boolean {
+  if (!configDelegates || configDelegates.length === 0) return true;
+  return configDelegates.includes(id);
+}
+
 /** True when air-gap mode is requested via env (KIT_AIRGAP=1/true/yes). */
 export function isAirGap(env: NodeJS.ProcessEnv = process.env): boolean {
   return ["1", "true", "yes"].includes((env.KIT_AIRGAP ?? "").trim().toLowerCase());

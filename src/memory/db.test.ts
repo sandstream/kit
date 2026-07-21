@@ -14,7 +14,9 @@ import {
   quarantineInjectedMessages,
   countQuarantined,
   fuseByRrf,
+  progressiveDisclose,
 } from "./db.js";
+import type { SearchHit } from "./types.js";
 
 describe("memory db", () => {
   const fresh = () => openMemoryDb(":memory:");
@@ -486,5 +488,64 @@ describe("searchMessages --fresh (recency-aware ranking)", () => {
       `recency-boosted order: ${boosted}`,
     );
     db.close();
+  });
+});
+
+describe("progressiveDisclose (B3)", () => {
+  const hit = (id: number, content: string): SearchHit => ({
+    id,
+    uuid: `u${id}`,
+    sessionId: "s",
+    role: "assistant",
+    content,
+    timestamp: "2026-07-01T00:00:00Z",
+  });
+
+  it("trims each hit to the snippet budget and marks truncation", () => {
+    const long = "x".repeat(500);
+    const d = progressiveDisclose([hit(1, long)], { snippetChars: 100, budgetChars: 10_000 });
+    assert.equal(d.shown, 1);
+    assert.equal(d.hits[0].truncated, true);
+    assert.ok(d.hits[0].snippet.length <= 101); // 100 + ellipsis
+    assert.ok(d.hits[0].snippet.endsWith("…"));
+  });
+
+  it("short content is shown whole, not truncated", () => {
+    const d = progressiveDisclose([hit(1, "short")], { snippetChars: 100 });
+    assert.equal(d.hits[0].truncated, false);
+    assert.equal(d.hits[0].snippet, "short");
+  });
+
+  it("stops at the character budget and reports the withheld count (no silent drop)", () => {
+    const hits = [hit(1, "a".repeat(80)), hit(2, "b".repeat(80)), hit(3, "c".repeat(80))];
+    const d = progressiveDisclose(hits, { snippetChars: 80, budgetChars: 100 });
+    // first fits (80), second would overflow (160 > 100) → stop
+    assert.equal(d.shown, 1);
+    assert.equal(d.withheld, 2);
+  });
+
+  it("always discloses at least the first hit even if it alone exceeds budget", () => {
+    const d = progressiveDisclose([hit(1, "z".repeat(500))], {
+      snippetChars: 500,
+      budgetChars: 10,
+    });
+    assert.equal(d.shown, 1);
+    assert.equal(d.withheld, 0);
+  });
+
+  it("honours maxHits and preserves rank order", () => {
+    const hits = [hit(1, "a"), hit(2, "b"), hit(3, "c"), hit(4, "d")];
+    const d = progressiveDisclose(hits, { maxHits: 2, budgetChars: 10_000 });
+    assert.deepEqual(
+      d.hits.map((h) => h.id),
+      [1, 2],
+    );
+    assert.equal(d.withheld, 2);
+  });
+
+  it("empty input → empty disclosure", () => {
+    const d = progressiveDisclose([]);
+    assert.equal(d.shown, 0);
+    assert.equal(d.withheld, 0);
   });
 });

@@ -8,6 +8,9 @@ import {
   airGapScanners,
   isAirGap,
   SCANNERS,
+  SCANNER_IDS,
+  enabledScanners,
+  isScannerEnabled,
   buildSemgrepArgs,
   semgrepConfig,
   isLocalSemgrepConfig,
@@ -396,5 +399,36 @@ describe("verifyAirGapScanners (provable zero-egress reducer)", () => {
     const report = verifyAirGapScanners(withSemgrep, { semgrepConfig: "p/default" });
     assert.equal(report.ok, false);
     assert.ok(report.rows.find((r) => r.id === "semgrep" && !r.ok));
+  });
+});
+
+describe("scanner delegate library toggle ([scan].delegates)", () => {
+  it("SCANNER_IDS lists every registered scanner in registry order", () => {
+    assert.deepEqual(
+      [...SCANNER_IDS],
+      SCANNERS.map((s) => s.id),
+    );
+    assert.ok(SCANNER_IDS.includes("trivy") && SCANNER_IDS.includes("osv-scanner"));
+  });
+
+  it("no toggle ⇒ every scanner enabled (backwards-compatible)", () => {
+    assert.equal(enabledScanners(SCANNERS).length, SCANNERS.length);
+    assert.equal(enabledScanners(SCANNERS, []).length, SCANNERS.length);
+    assert.equal(isScannerEnabled("trivy"), true);
+    assert.equal(isScannerEnabled("trivy", []), true);
+  });
+
+  it("allow-list toggles delegates on/off, in registry order", () => {
+    const enabled = enabledScanners(SCANNERS, ["osv-scanner", "trivy"]);
+    assert.deepEqual(
+      enabled.map((s) => s.id),
+      SCANNERS.filter((s) => s.id === "trivy" || s.id === "osv-scanner").map((s) => s.id),
+    );
+    assert.equal(isScannerEnabled("trivy", ["osv-scanner", "trivy"]), true);
+    assert.equal(isScannerEnabled("snyk", ["osv-scanner", "trivy"]), false);
+  });
+
+  it("unknown ids in the allow-list are ignored (no crash, just filtered out)", () => {
+    assert.equal(enabledScanners(SCANNERS, ["does-not-exist"]).length, 0);
   });
 });

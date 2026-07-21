@@ -356,7 +356,15 @@ export interface kitConfig {
   /** `kit scan` / `kit check` scanner settings. `tooling` = an Infisical project to
    *  resolve scanner tokens (SNYK_TOKEN, …) from; `guarddog` = enable the local
    *  behavioral-malware scan in `kit check` (persistent alt to KIT_GUARDDOG=1). */
-  scan?: { tooling?: { project_id?: string; env?: string }; guarddog?: boolean };
+  scan?: {
+    tooling?: { project_id?: string; env?: string };
+    guarddog?: boolean;
+    /** `kit scan` delegate library toggle: an allow-list of scanner ids
+     *  (snyk/trivy/grype/semgrep/osv-scanner/socket) to run. Absent/empty ⇒ all
+     *  registered scanners on (backwards-compatible); `kit scan --list-delegates`
+     *  shows on/off. kit delegates DETECTION here, never its verdict. */
+    delegates?: string[];
+  };
   /**
    * No-egress / air-gapped posture (declarative; see docs/AIR_GAP.md). Equivalent
    * to the `KIT_*` env vars, but checked in so the enclave config is reproducible.
@@ -681,6 +689,7 @@ export const kitConfigSchema = z
           .passthrough()
           .optional(),
         guarddog: z.boolean().optional(),
+        delegates: z.array(z.string()).optional(),
       })
       .passthrough()
       .optional(),

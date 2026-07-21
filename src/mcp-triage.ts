@@ -100,6 +100,86 @@ export function analyzeMcpTools(tools: McpToolDef[]): {
   return { findings, toolsetHash: hashToolset(tools) };
 }
 
+/** Recursively collect property-key paths from a JSON schema (for name-based checks). */
+function collectParamNames(schema: unknown, path = ""): string[] {
+  const out: string[] = [];
+  if (!schema || typeof schema !== "object") return out;
+  const obj = schema as Record<string, unknown>;
+  const props = obj.properties;
+  if (props && typeof props === "object") {
+    for (const [key, val] of Object.entries(props as Record<string, unknown>)) {
+      const p = path ? `${path}.${key}` : key;
+      out.push(p);
+      out.push(...collectParamNames(val, p));
+    }
+  }
+  if (obj.items) out.push(...collectParamNames(obj.items, path ? `${path}[]` : "[]"));
+  return out;
+}
+
+// Deterministic patterns derived from the OWASP/SlowMist MCP-Security-Checklist —
+// static, heuristic (never high-confidence, so they surface for review but never
+// flip the pass/fail verdict, which stays gated on high-confidence poisoning + drift).
+const DANGEROUS_CAPABILITY =
+  /\b(exec|eval|shell|spawn|system|sudo|run[_-]?command|delete[_-]?all|drop[_-]?(table|database)|rm\b)/i;
+const SECRET_PARAM =
+  /(^|[_-])(token|secret|password|passwd|api[_-]?key|apikey|credential|private[_-]?key)([_-]|$)/i;
+
+/**
+ * Static MCP-Security-Checklist findings over tool defs (SlowMist / OWASP MCP Top 10).
+ * Deterministic + heuristic-confidence — advisory review signals, NOT verdict-flipping:
+ *  - dangerous-capability: a tool name/description implying arbitrary exec/deletion
+ *    (confirm least-privilege + human approval).
+ *  - secret-as-parameter: a parameter shaped like a credential (inject at the boundary,
+ *    do not accept as a tool arg — MCP01).
+ *  - undocumented: a tool with no description (cannot be triaged; MCP checklist).
+ *  - unconstrained-input: top-level `additionalProperties: true` (validate inputs).
+ */
+export function checklistFindings(tools: McpToolDef[]): McpToolFinding[] {
+  const findings: McpToolFinding[] = [];
+  for (const tool of tools) {
+    const name = tool.name || "(unnamed)";
+    const hay = `${tool.name} ${tool.description ?? ""}`;
+    if (DANGEROUS_CAPABILITY.test(hay)) {
+      findings.push({
+        tool: name,
+        field: "name",
+        label: "dangerous-capability (confirm least-privilege + human approval)",
+        confidence: "heuristic",
+      });
+    }
+    if (!tool.description || tool.description.trim() === "") {
+      findings.push({
+        tool: name,
+        field: "description",
+        label: "undocumented tool (cannot be triaged; add a clear description)",
+        confidence: "heuristic",
+      });
+    }
+    for (const p of collectParamNames(tool.inputSchema)) {
+      const leaf = p.split(".").pop() ?? p;
+      if (SECRET_PARAM.test(leaf)) {
+        findings.push({
+          tool: name,
+          field: `param:${p}`,
+          label: "secret-shaped parameter (inject at the boundary, not as a tool arg)",
+          confidence: "heuristic",
+        });
+      }
+    }
+    const schema = tool.inputSchema as Record<string, unknown> | undefined;
+    if (schema && typeof schema === "object" && schema.additionalProperties === true) {
+      findings.push({
+        tool: name,
+        field: "schema",
+        label: "unconstrained input (additionalProperties: true — validate inputs)",
+        confidence: "heuristic",
+      });
+    }
+  }
+  return findings;
+}
+
 /** Deterministic content hash of a tool set — order-independent, whitespace-exact. */
 export function hashToolset(tools: McpToolDef[]): string {
   const canonical = tools
@@ -136,7 +216,10 @@ export function triageMcpTools(
   tools: McpToolDef[],
   pinnedHash?: string,
 ): McpTriageResult {
-  const { findings, toolsetHash } = analyzeMcpTools(tools);
+  const { findings: poisoning, toolsetHash } = analyzeMcpTools(tools);
+  // Poisoning findings (can be high-confidence → gate) + advisory MCP-checklist
+  // findings (always heuristic → surfaced, never verdict-flipping).
+  const findings = [...poisoning, ...checklistFindings(tools)];
   const drift = classifyDrift(pinnedHash, toolsetHash);
   const hasHighPoisoning = findings.some((f) => f.confidence === "high");
   return {

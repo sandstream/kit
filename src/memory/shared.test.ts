@@ -18,6 +18,9 @@ import {
   recallSafeShared,
   getSharedPath,
   provenanceRank,
+  classifyAging,
+  agingReport,
+  DEFAULT_AGING_THRESHOLD_DAYS,
   SHARED_KINDS,
   type SharedEntry,
 } from "./shared.js";
@@ -393,5 +396,76 @@ describe("shared memory — negative-space kinds + provenance (J1 + B1)", () => 
     assert.ok(!sharedEntryCanonical(base).includes("provenance"));
     const withProv = sharedEntryCanonical({ ...base, provenance: "derived" });
     assert.ok(withProv.includes("derived"));
+  });
+});
+
+describe("shared memory — rule aging (B2)", () => {
+  const NOW = new Date("2026-07-01T00:00:00Z");
+  const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000).toISOString();
+  const mk = (over: Partial<SharedEntry>): SharedEntry => ({
+    id: over.id ?? "e1",
+    area: "core",
+    kind: "decision",
+    title: "t",
+    body: "b",
+    refs: [],
+    author: "a",
+    ts: over.ts ?? daysAgo(400),
+    ...over,
+  });
+
+  it("operator (and absent-provenance) rules NEVER age — the human owns relevance", () => {
+    const old = mk({ ts: daysAgo(1000), provenance: "operator" });
+    assert.equal(classifyAging(old, "active", NOW), "n/a");
+    const legacy = mk({ ts: daysAgo(1000) }); // absent provenance ⇒ operator
+    assert.equal(classifyAging(legacy, "active", NOW), "n/a");
+  });
+
+  it("derived/inferred rules age by the threshold bands", () => {
+    const T = DEFAULT_AGING_THRESHOLD_DAYS;
+    assert.equal(
+      classifyAging(mk({ provenance: "derived", ts: daysAgo(T - 10) }), "active", NOW),
+      "fresh",
+    );
+    assert.equal(
+      classifyAging(mk({ provenance: "derived", ts: daysAgo(T + 10) }), "active", NOW),
+      "aging",
+    );
+    assert.equal(
+      classifyAging(mk({ provenance: "inferred", ts: daysAgo(T * 2 + 10) }), "active", NOW),
+      "stale",
+    );
+  });
+
+  it("non-active entries (superseded/reversed) are history ⇒ n/a", () => {
+    const e = mk({ provenance: "derived", ts: daysAgo(1000) });
+    assert.equal(classifyAging(e, "superseded", NOW), "n/a");
+    assert.equal(classifyAging(e, "reversed", NOW), "n/a");
+  });
+
+  it("unparseable ts ⇒ n/a (never a spurious stale)", () => {
+    assert.equal(classifyAging(mk({ provenance: "derived", ts: "nope" }), "active", NOW), "n/a");
+  });
+
+  it("agingReport buckets only active machine-origin rules; leaves operator rules out", () => {
+    const entries = [
+      mk({ id: "op", provenance: "operator", ts: daysAgo(1000) }),
+      mk({ id: "fresh", provenance: "derived", ts: daysAgo(10) }),
+      mk({ id: "aging", provenance: "derived", ts: daysAgo(DEFAULT_AGING_THRESHOLD_DAYS + 5) }),
+      mk({
+        id: "stale",
+        provenance: "inferred",
+        ts: daysAgo(DEFAULT_AGING_THRESHOLD_DAYS * 2 + 5),
+      }),
+    ];
+    const r = agingReport(entries, NOW);
+    assert.deepEqual(
+      r.aging.map((e) => e.id),
+      ["aging"],
+    );
+    assert.deepEqual(
+      r.stale.map((e) => e.id),
+      ["stale"],
+    );
   });
 });

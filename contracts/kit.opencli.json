@@ -691,7 +691,7 @@
     },
     "scan": {
       "kind": "command",
-      "summary": "Run external scanners (snyk/trivy/grype/semgrep/osv) and merge them into one local verdict (--strict / [governance.scan] required_scanners gate non-running scanners)",
+      "summary": "Run external scanners (snyk/trivy/grype/semgrep/osv) and merge them into one local verdict; --list-delegates shows the toggleable scanner library, [scan].delegates picks which run (--strict / [governance.scan] required_scanners gate non-running scanners)",
       "x-kit-args-modeled": false,
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
@@ -959,7 +959,7 @@
     "binary": "kit",
     "summary": "Deterministic, local-first developer-environment manager and fail-closed governance layer for AI agents and humans.",
     "title": "kit",
-    "version": "5.3.0"
+    "version": "5.4.0"
   },
   "opencliVersion": "1.0.0-alpha.12"
 }

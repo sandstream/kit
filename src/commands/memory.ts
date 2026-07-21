@@ -9,6 +9,7 @@ import {
   getStats,
   getMemoryDbPath,
   searchMessages,
+  progressiveDisclose,
   recordQuery,
   dailyActivity,
   quarantineInjectedMessages,
@@ -54,6 +55,8 @@ import {
   readShared,
   effectiveStatus,
   formatAge,
+  classifyAging,
+  agingReport,
   getSharedPath,
   verifySharedTier,
   SHARED_KINDS,
@@ -62,6 +65,7 @@ import {
   type SharedProvenance,
   type SharedEntry,
 } from "../memory/shared.js";
+import { renderObsidianVault } from "../memory/obsidian.js";
 import {
   userPromptSubmitReminder,
   maybeStartMidSessionIndex,
@@ -130,6 +134,7 @@ export async function cmdMemory(): Promise<boolean> {
     verify: memVerify,
     areas: memAreas,
     area: memArea,
+    export: memExport,
     context: memContext,
     scan: memScan,
     backup: memBackup,
@@ -364,7 +369,7 @@ async function memHelp(): Promise<boolean> {
     "  kit memory index            Index all agent transcripts (Claude Code, Codex, Gemini, Cursor, …) into the store",
   );
   console.log(
-    "  kit memory search <query>   Search memory + curated shared decisions (current project; --global for all; --include-quarantined to show flagged rows)",
+    "  kit memory search <query>   Search memory + curated shared decisions (current project; --global for all; --fresh recency-aware; --brief progressive-disclosure; --include-quarantined to show flagged rows)",
   );
   console.log(
     "  kit memory stats            Show what the memory store contains (alias: kit memory status)",
@@ -410,7 +415,12 @@ async function memHelp(): Promise<boolean> {
     "  kit memory verify           Verify Ed25519 signatures on the shared tier (--strict fails on an un-anchored signer)",
   );
   console.log("  kit memory areas            List shared responsibility areas");
-  console.log("  kit memory area <name>      Show shared entries for one area");
+  console.log(
+    "  kit memory area <name>      Show shared entries for one area (--stale for aged-out rules)",
+  );
+  console.log(
+    "  kit memory export --obsidian <dir>  Render the curated shared tier as an Obsidian vault (--json for a dry-run manifest)",
+  );
   console.log(
     "  kit memory context [paths]  Surface active decisions for the area(s) you're touching (--changed = working tree)",
   );
@@ -831,7 +841,7 @@ async function memSearch(): Promise<boolean> {
   const query = terms.join(" ").trim();
   if (!query) {
     console.error(
-      `${c.red}usage: kit memory search <query> [--global] [--project=<path>] [--limit=N] [--fresh]${c.reset}`,
+      `${c.red}usage: kit memory search <query> [--global] [--project=<path>] [--limit=N] [--fresh] [--brief]${c.reset}`,
     );
     return false;
   }
@@ -846,6 +856,10 @@ async function memSearch(): Promise<boolean> {
   // --fresh: recency-aware ranking (RRF-fuse bm25 relevance + recency). Off by default so the
   // relevance-first ordering is unchanged unless asked for.
   const recencyBoost = hasFlag(process.argv, "--fresh");
+  // --brief: progressive-disclosure recall (B3) — return the minimal sufficient
+  // slice (budget-bounded snippets) and report how many hits were withheld, instead
+  // of dumping every match. Never silently truncates.
+  const brief = hasFlag(process.argv, "--brief");
   const db = openMemoryDb();
   const hits = searchMessages(db, query, { limit, projectPath, includeQuarantined, recencyBoost });
   // Record the recall (query_log) — best-effort; never let logging break search.
@@ -869,7 +883,11 @@ async function memSearch(): Promise<boolean> {
   }
 
   if (jsonMode) {
-    console.log(JSON.stringify({ messages: hits, shared }));
+    console.log(
+      JSON.stringify(
+        brief ? { disclosure: progressiveDisclose(hits), shared } : { messages: hits, shared },
+      ),
+    );
     return true;
   }
 
@@ -906,6 +924,27 @@ async function memSearch(): Promise<boolean> {
   if (!hits.length) {
     if (shared.length) return true; // curated results already shown; raw recall empty
     console.log(`${c.dim}no matches for "${query}" ${projectPath ?? "(global)"}${c.reset}`);
+    return true;
+  }
+  if (brief) {
+    // Progressive disclosure (B3): the minimal sufficient slice + an explicit
+    // withheld count (never a silent truncation).
+    const disc = progressiveDisclose(hits);
+    console.log(
+      `${c.bold}${disc.shown}${c.reset} of ${hits.length} match(es) ${scope} ${c.dim}— brief${c.reset}`,
+    );
+    for (const h of disc.hits) {
+      const s = sanitizeForPrompt(h.snippet);
+      const snippet = s.text.replace(/\s+/g, " ");
+      console.log(
+        `  ${c.dim}${h.timestamp ?? "?"}${c.reset} ${c.bold}${h.role ?? h.uuid ?? ""}${c.reset}  ${snippet}${s.flagged ? ` ${c.red}${INJECTION_TAG}${c.reset}` : ""}`,
+      );
+    }
+    if (disc.withheld > 0) {
+      console.log(
+        `${c.dim}  … ${disc.withheld} more withheld (budget ${disc.budgetChars} chars) — drop --brief or raise --limit to expand${c.reset}`,
+      );
+    }
     return true;
   }
   console.log(`${c.bold}${hits.length}${c.reset} match(es) ${scope}`);
@@ -1222,6 +1261,19 @@ async function memAreas(): Promise<boolean> {
       `  ${c.bold}${a.area}${c.reset} ${c.dim}· ${a.count} entr${a.count === 1 ? "y" : "ies"}${c.reset}`,
     );
   }
+  // Rule-aging nudge (B2): surface machine-origin (derived/inferred) rules that have
+  // aged out so the operator can re-affirm/supersede them. Never auto-dropped;
+  // operator rules are foundational and excluded from aging entirely.
+  const aging = agingReport(readShared(getCurrentProjectRoot()));
+  if (aging.stale.length > 0) {
+    console.log(
+      `\n${c.yellow}⚠ ${aging.stale.length} derived/inferred rule(s) stale (>${aging.thresholdDays * 2}d)${c.reset} ${c.dim}— review with 'kit memory area <name> --stale' (operator rules never age)${c.reset}`,
+    );
+  } else if (aging.aging.length > 0) {
+    console.log(
+      `\n${c.dim}⧖ ${aging.aging.length} derived/inferred rule(s) aging (>${aging.thresholdDays}d) — kit memory area <name> --stale${c.reset}`,
+    );
+  }
   return true;
 }
 
@@ -1234,14 +1286,30 @@ async function memArea(): Promise<boolean> {
   }
   const root = getCurrentProjectRoot();
   const all = readShared(root);
-  const entries = all.filter((e) => e.area === name);
+  // --stale (B2): review view — only machine-origin rules that have aged out.
+  const staleOnly = hasFlag(process.argv, "--stale");
+  let entries = all.filter((e) => e.area === name);
+  if (staleOnly) {
+    entries = entries.filter((e) => classifyAging(e, effectiveStatus(e, all)) === "stale");
+  }
   if (jsonMode) {
-    // Enrich with the EFFECTIVE lifecycle status (computed against the full set).
-    console.log(JSON.stringify(entries.map((e) => ({ ...e, status: effectiveStatus(e, all) }))));
+    // Enrich with the EFFECTIVE lifecycle status + aging class (computed against the full set).
+    console.log(
+      JSON.stringify(
+        entries.map((e) => {
+          const status = effectiveStatus(e, all);
+          return { ...e, status, aging: classifyAging(e, status) };
+        }),
+      ),
+    );
     return true;
   }
   if (!entries.length) {
-    console.log(`${c.dim}no shared memory for area '${name}'${c.reset}`);
+    console.log(
+      staleOnly
+        ? `${c.dim}no stale derived/inferred rules in area '${name}'${c.reset}`
+        : `${c.dim}no shared memory for area '${name}'${c.reset}`,
+    );
     return true;
   }
   console.log(
@@ -1258,13 +1326,70 @@ async function memArea(): Promise<boolean> {
         ? ` ${c.dim}→ ${e.supersedes}${c.reset}`
         : "";
     const age = formatAge(e.ts);
+    const agingCls = classifyAging(e, st);
+    const agingBadge =
+      agingCls === "stale"
+        ? ` ${c.yellow}[stale]${c.reset}`
+        : agingCls === "aging"
+          ? ` ${c.dim}[aging]${c.reset}`
+          : "";
     const prov = `${e.author}${e.source_ref ? ` @${e.source_ref}` : ""}${age ? ` · ${age}` : ""}`;
     console.log(
-      `  ${c.bold}[${e.kind}]${c.reset} ${e.title}${badge}${rel} ${c.dim}— ${prov}${c.reset}`,
+      `  ${c.bold}[${e.kind}]${c.reset} ${e.title}${badge}${agingBadge}${rel} ${c.dim}— ${prov}${c.reset}`,
     );
     if (e.body) console.log(`    ${e.body}`);
     if (e.refs.length) console.log(`    ${c.dim}refs: ${e.refs.join(", ")}${c.reset}`);
   }
+  return true;
+}
+
+async function memExport(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  // Only the Obsidian target is implemented; require it explicitly so a future
+  // `--json`-only dry-run or other targets stay unambiguous.
+  if (!hasFlag(process.argv, "--obsidian")) {
+    console.error(
+      `${c.red}usage: kit memory export --obsidian <dir> [--json]${c.reset}  ${c.dim}(renders the curated shared tier as an Obsidian vault)${c.reset}`,
+    );
+    return false;
+  }
+  const root = getCurrentProjectRoot();
+  const entries = readShared(root);
+  const files = renderObsidianVault(entries);
+
+  if (jsonMode) {
+    // Dry-run-friendly: report what WOULD be written (paths + sizes), no side effects.
+    console.log(
+      JSON.stringify({ files: files.map((f) => ({ path: f.path, bytes: f.content.length })) }),
+    );
+    return true;
+  }
+
+  const outDir = flagValue(process.argv, "--obsidian");
+  if (!outDir) {
+    console.error(`${c.red}--obsidian needs a target directory${c.reset}`);
+    return false;
+  }
+  if (!files.length) {
+    console.log(`${c.dim}no curated shared entries to export${c.reset}`);
+    return true;
+  }
+  const base = resolve(outDir);
+  try {
+    for (const f of files) {
+      const full = join(base, f.path);
+      mkdirSync(join(full, ".."), { recursive: true });
+      writeFileSync(full, f.content, { encoding: "utf-8" });
+    }
+  } catch (err) {
+    // Fail-closed on a write error — never report a partial export as success.
+    console.error(`${c.red}✗ export failed: ${(err as Error).message}${c.reset}`);
+    return false;
+  }
+  const areas = new Set(entries.map((e) => e.area)).size;
+  console.log(
+    `${c.green}✓ exported${c.reset} ${files.length} note(s) across ${areas} area(s) → ${c.bold}${base}${c.reset}`,
+  );
   return true;
 }
 
