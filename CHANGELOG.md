@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.4.0] - 2026-07-21
+
 ### Added
 
 - **`kit triage mcp` — MCP-Security-Checklist static checks (borrowed from SlowMist/OWASP MCP
