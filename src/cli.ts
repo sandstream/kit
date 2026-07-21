@@ -610,7 +610,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   coverage: {
     handler: cmdCoverage,
     stability: "experimental",
-    help: "Evidence map: which standard's controls kit's deterministic checks auto-verify vs gap/manual/n-a — OWASP ASVS L2 (default), OWASP LLM Top 10, or NIST SSDF via --standard=asvs|llm-top10|ssdf (NOT a compliance attestation; --json for GRC tools)",
+    help: "Evidence map: which standard's controls kit's deterministic checks auto-verify vs gap/manual/n-a — --standard=asvs|llm-top10|ssdf|agentic-top10|mcp-top10|all (default asvs); --list-standards to enumerate, [coverage].standards to toggle on/off (NOT a compliance attestation; --json for GRC tools)",
   },
   identity: {
     handler: cmdIdentity,
