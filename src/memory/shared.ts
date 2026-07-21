@@ -396,3 +396,63 @@ export function formatAge(ts: string, now: Date = new Date()): string {
   if (days < 365) return `${Math.floor(days / 30)}mo ago`;
   return `${Math.floor(days / 365)}y ago`;
 }
+
+/** Recall-aging class for a curated entry. `n/a` = not subject to aging. */
+export type AgingClass = "fresh" | "aging" | "stale" | "n/a";
+
+/** Default aging threshold (days): fresh < T ≤ aging < 2T ≤ stale. */
+export const DEFAULT_AGING_THRESHOLD_DAYS = 180;
+
+/**
+ * Deterministic recall-aging classification for a single curated entry.
+ *
+ * ONLY machine-origin (`derived` / `inferred`) entries that are currently ACTIVE
+ * age. An operator's explicit rule is foundational — it is NEVER marked stale
+ * (aging is about pruning what kit *guessed*, not overriding what a human decided);
+ * it always classifies `n/a`. Superseded/reversed entries are history ⇒ `n/a`.
+ *
+ * Age bands (by entry `ts` vs `now`): fresh < threshold ≤ aging < 2×threshold ≤ stale.
+ * Pure — no IO, no ambient clock (pass `now`). Never deletes; classification only.
+ */
+export function classifyAging(
+  entry: SharedEntry,
+  effStatus: SharedStatus,
+  now: Date = new Date(),
+  thresholdDays: number = DEFAULT_AGING_THRESHOLD_DAYS,
+): AgingClass {
+  if (effStatus !== "active") return "n/a";
+  const prov = entry.provenance ?? "operator";
+  if (prov === "operator") return "n/a"; // human-owned; the human owns relevance
+  const then = new Date(entry.ts).getTime();
+  if (!Number.isFinite(then)) return "n/a";
+  const days = Math.floor((now.getTime() - then) / 86_400_000);
+  if (days >= thresholdDays * 2) return "stale";
+  if (days >= thresholdDays) return "aging";
+  return "fresh";
+}
+
+export interface AgingReport {
+  thresholdDays: number;
+  aging: SharedEntry[];
+  stale: SharedEntry[];
+}
+
+/**
+ * Classify the whole tier and collect the machine-origin entries that have aged
+ * out. A review aid — the operator decides whether to re-affirm (promote to
+ * `operator` provenance), supersede, or leave them. kit never auto-drops.
+ */
+export function agingReport(
+  entries: SharedEntry[],
+  now: Date = new Date(),
+  thresholdDays: number = DEFAULT_AGING_THRESHOLD_DAYS,
+): AgingReport {
+  const aging: SharedEntry[] = [];
+  const stale: SharedEntry[] = [];
+  for (const e of entries) {
+    const cls = classifyAging(e, effectiveStatus(e, entries), now, thresholdDays);
+    if (cls === "aging") aging.push(e);
+    else if (cls === "stale") stale.push(e);
+  }
+  return { thresholdDays, aging, stale };
+}

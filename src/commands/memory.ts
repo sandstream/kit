@@ -54,6 +54,8 @@ import {
   readShared,
   effectiveStatus,
   formatAge,
+  classifyAging,
+  agingReport,
   getSharedPath,
   verifySharedTier,
   SHARED_KINDS,
@@ -1222,6 +1224,19 @@ async function memAreas(): Promise<boolean> {
       `  ${c.bold}${a.area}${c.reset} ${c.dim}· ${a.count} entr${a.count === 1 ? "y" : "ies"}${c.reset}`,
     );
   }
+  // Rule-aging nudge (B2): surface machine-origin (derived/inferred) rules that have
+  // aged out so the operator can re-affirm/supersede them. Never auto-dropped;
+  // operator rules are foundational and excluded from aging entirely.
+  const aging = agingReport(readShared(getCurrentProjectRoot()));
+  if (aging.stale.length > 0) {
+    console.log(
+      `\n${c.yellow}⚠ ${aging.stale.length} derived/inferred rule(s) stale (>${aging.thresholdDays * 2}d)${c.reset} ${c.dim}— review with 'kit memory area <name> --stale' (operator rules never age)${c.reset}`,
+    );
+  } else if (aging.aging.length > 0) {
+    console.log(
+      `\n${c.dim}⧖ ${aging.aging.length} derived/inferred rule(s) aging (>${aging.thresholdDays}d) — kit memory area <name> --stale${c.reset}`,
+    );
+  }
   return true;
 }
 
@@ -1234,14 +1249,30 @@ async function memArea(): Promise<boolean> {
   }
   const root = getCurrentProjectRoot();
   const all = readShared(root);
-  const entries = all.filter((e) => e.area === name);
+  // --stale (B2): review view — only machine-origin rules that have aged out.
+  const staleOnly = hasFlag(process.argv, "--stale");
+  let entries = all.filter((e) => e.area === name);
+  if (staleOnly) {
+    entries = entries.filter((e) => classifyAging(e, effectiveStatus(e, all)) === "stale");
+  }
   if (jsonMode) {
-    // Enrich with the EFFECTIVE lifecycle status (computed against the full set).
-    console.log(JSON.stringify(entries.map((e) => ({ ...e, status: effectiveStatus(e, all) }))));
+    // Enrich with the EFFECTIVE lifecycle status + aging class (computed against the full set).
+    console.log(
+      JSON.stringify(
+        entries.map((e) => {
+          const status = effectiveStatus(e, all);
+          return { ...e, status, aging: classifyAging(e, status) };
+        }),
+      ),
+    );
     return true;
   }
   if (!entries.length) {
-    console.log(`${c.dim}no shared memory for area '${name}'${c.reset}`);
+    console.log(
+      staleOnly
+        ? `${c.dim}no stale derived/inferred rules in area '${name}'${c.reset}`
+        : `${c.dim}no shared memory for area '${name}'${c.reset}`,
+    );
     return true;
   }
   console.log(
@@ -1258,9 +1289,16 @@ async function memArea(): Promise<boolean> {
         ? ` ${c.dim}→ ${e.supersedes}${c.reset}`
         : "";
     const age = formatAge(e.ts);
+    const agingCls = classifyAging(e, st);
+    const agingBadge =
+      agingCls === "stale"
+        ? ` ${c.yellow}[stale]${c.reset}`
+        : agingCls === "aging"
+          ? ` ${c.dim}[aging]${c.reset}`
+          : "";
     const prov = `${e.author}${e.source_ref ? ` @${e.source_ref}` : ""}${age ? ` · ${age}` : ""}`;
     console.log(
-      `  ${c.bold}[${e.kind}]${c.reset} ${e.title}${badge}${rel} ${c.dim}— ${prov}${c.reset}`,
+      `  ${c.bold}[${e.kind}]${c.reset} ${e.title}${badge}${agingBadge}${rel} ${c.dim}— ${prov}${c.reset}`,
     );
     if (e.body) console.log(`    ${e.body}`);
     if (e.refs.length) console.log(`    ${c.dim}refs: ${e.refs.join(", ")}${c.reset}`);

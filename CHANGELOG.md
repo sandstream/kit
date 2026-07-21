@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit memory` rule aging — surface stale machine-origin rules for review, never auto-drop (B2).**
+  Curated shared-tier rules now carry a deterministic **aging class**: only `derived`/`inferred`
+  *active* rules age (fresh < 180d ≤ aging < 360d ≤ stale); an **operator's explicit rule is
+  foundational and never ages** (the human owns its relevance), and superseded/reversed entries are
+  history. `kit memory areas` prints an aging nudge when machine-origin rules go stale; `kit memory
+  area <name>` badges each entry and takes `--stale` to show only aged-out rules for review (JSON
+  carries the `aging` field). kit never deletes — it flags for re-affirm/supersede. Pure core
+  (`classifyAging` / `agingReport`), unit-tested; deterministic, zero-LLM.
+
 - **`kit scan` delegate library — connect what kit shouldn't rebuild, toggleable.** The external
   scanner registry (snyk/trivy/grype/semgrep/osv-scanner/socket) is now a **toggleable delegate
   library**, mirroring the coverage-standards registry: `kit scan --list-delegates` enumerates it
