@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **`kit coverage` — agent-native standards + a toggleable standards library.** Coverage
+  evidence maps are now a **registry** (single source of truth) instead of a hardcoded pair, and
+  two standards native to kit's own lane land as the first new entries: **OWASP Top 10 for Agentic
+  Applications (2026)** (`--standard=agentic-top10`) and **OWASP MCP Top 10 (2025)**
+  (`--standard=mcp-top10`). `--standard=all` runs every enabled standard; `--list-standards`
+  enumerates the library with on/off state; and `[coverage].standards` in `.kit.toml` is an
+  allow-list that toggles standards on and off (absent ⇒ all on, backwards-compatible). Adding a
+  future standard is one registry entry + its descriptor. Still an **evidence map, never a
+  compliance attestation**; deterministic and zero-LLM. The two new maps are honest about kit's
+  lane — strong on tool-misuse / identity+privilege / supply-chain / memory-poisoning / audit,
+  explicit `gap`/`na` on inter-agent comms, cascading failures, human-trust, and rogue-agent
+  detection. (Control ids/titles confirmed via secondary indexes; owasp.org first-party fetch was
+  HTTP-403 blocked — caveat carried on each descriptor.)
+
 ## [5.3.0] - 2026-07-19
 
 ### Added

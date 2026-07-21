@@ -394,6 +394,11 @@ export interface kitConfig {
    *  ONLY on a triage PASS (never on fail/offline). Stays off by default because
    *  auto-installing is a deliberate trust decision. */
   update?: { check?: boolean; auto?: boolean };
+  /** `kit coverage` — evidence-map standards toggle. `[coverage].standards` is an
+   *  allow-list of standard keys (asvs, llm-top10, ssdf, agentic-top10, mcp-top10)
+   *  that `--standard=all` runs and `--list-standards` marks enabled; absent/empty
+   *  ⇒ all registered standards are on. */
+  coverage?: { standards?: string[] };
   /** `kit standards` — the deterministic dev-standards gate. `enforce` (default
    *  false): net-new findings AND setup gaps FAIL (CI opts in; also via --enforce).
    *  `[standards.general]` overrides the calibrated metric thresholds. */
@@ -755,6 +760,12 @@ export const kitConfigSchema = z
       .object({
         check: z.boolean().optional(),
         auto: z.boolean().optional(),
+      })
+      .passthrough()
+      .optional(),
+    coverage: z
+      .object({
+        standards: z.array(z.string()).optional(),
       })
       .passthrough()
       .optional(),

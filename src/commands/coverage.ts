@@ -13,8 +13,16 @@ import { analyzeRepo, renderClaudeMd, renderRulesMd } from "../analyze.js";
 import { resolveKitRoot, runSelfAudit, SELF_AUDIT_RULES } from "../self-audit.js";
 import { buildCoverageReport, formatCoverageText, type Bucket } from "../coverage/coverage.js";
 import { buildStandardReport, formatStandardText } from "../coverage/standard.js";
-import { OWASP_LLM_TOP10 } from "../coverage/owasp-llm-top10.js";
-import { SSDF_218A } from "../coverage/ssdf-218a.js";
+import {
+  COVERAGE_STANDARDS,
+  COVERAGE_STANDARD_KEYS,
+  getCoverageStandard,
+  enabledCoverageStandards,
+  isCoverageStandardEnabled,
+  type CoverageStandard,
+} from "../coverage/registry.js";
+import { loadConfig } from "../config.js";
+import { resolveConfigPath } from "../cli-shared.js";
 import {
   type CiFormat,
   type JsonCheck,
@@ -243,32 +251,66 @@ export async function cmdCoverage(): Promise<boolean> {
     return `${tint}${label}${c.reset}`;
   };
 
-  // --standard selects which pinned standard to map against (default ASVS, the
-  // original path). llm-top10 / ssdf route through the generic evidence-map engine.
-  const standard = args.find((a) => a.startsWith("--standard="))?.split("=")[1] ?? "asvs";
-  const STANDARDS = { "llm-top10": OWASP_LLM_TOP10, ssdf: SSDF_218A } as const;
-  if (standard !== "asvs") {
-    const descriptor = STANDARDS[standard as keyof typeof STANDARDS];
-    if (!descriptor) {
-      console.error(
-        `${c.red}unknown --standard '${standard}' (use: asvs | llm-top10 | ssdf)${c.reset}`,
-      );
-      process.exitCode = 1;
-      return false;
+  // Standards come from the registry (single source of truth). The optional
+  // [coverage].standards allow-list in .kit.toml toggles which are enabled;
+  // absent/empty ⇒ all on (backwards-compatible).
+  const config = await loadConfig(resolveConfigPath()).catch(() => undefined);
+  const configStandards = config?.coverage?.standards;
+
+  // --list-standards: enumerate the registry (with on/off per the toggle) and exit.
+  if (hasFlag(args, "--list-standards")) {
+    for (const s of COVERAGE_STANDARDS) {
+      const on = isCoverageStandardEnabled(s.key, configStandards);
+      const tag = on ? `${c.green}on ${c.reset}` : `${c.dim}off${c.reset}`;
+      console.log(`${tag} ${s.key.padEnd(14)} ${s.label} (${s.version})`);
     }
-    const stdReport = buildStandardReport(descriptor, results);
-    console.log(
-      jsonMode ? JSON.stringify(stdReport, null, 2) : formatStandardText(stdReport, colorBucket),
-    );
     return true;
   }
 
-  const report = buildCoverageReport(results);
-  if (jsonMode) {
-    console.log(JSON.stringify(report, null, 2));
+  // Render one standard: asvs uses the legacy report; descriptors use the engine.
+  const renderOne = (std: CoverageStandard): { text: string; json: unknown } => {
+    if (std.kind === "asvs") {
+      const report = buildCoverageReport(results);
+      return { text: formatCoverageText(report, colorBucket), json: report };
+    }
+    const report = buildStandardReport(std.descriptor!, results);
+    return { text: formatStandardText(report, colorBucket), json: report };
+  };
+
+  // --standard selects the pinned standard (default asvs). "all" runs every
+  // standard enabled by [coverage].standards.
+  const standard = args.find((a) => a.startsWith("--standard="))?.split("=")[1] ?? "asvs";
+
+  if (standard === "all") {
+    const enabled = enabledCoverageStandards(configStandards);
+    if (jsonMode) {
+      const out: Record<string, unknown> = {};
+      for (const s of enabled) out[s.key] = renderOne(s).json;
+      console.log(JSON.stringify(out, null, 2));
+    } else {
+      console.log(enabled.map((s) => renderOne(s).text).join("\n\n"));
+    }
     return true;
   }
-  console.log(formatCoverageText(report, colorBucket));
+
+  const std = getCoverageStandard(standard);
+  if (!std) {
+    console.error(
+      `${c.red}unknown --standard '${standard}' (use: ${COVERAGE_STANDARD_KEYS.join(" | ")} | all)${c.reset}`,
+    );
+    process.exitCode = 1;
+    return false;
+  }
+  if (!isCoverageStandardEnabled(standard, configStandards)) {
+    console.error(
+      `${c.red}--standard '${standard}' is disabled in [coverage].standards (enable it there or drop the allow-list)${c.reset}`,
+    );
+    process.exitCode = 1;
+    return false;
+  }
+
+  const one = renderOne(std);
+  console.log(jsonMode ? JSON.stringify(one.json, null, 2) : one.text);
   return true;
 }
 

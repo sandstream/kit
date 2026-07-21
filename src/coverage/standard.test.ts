@@ -8,10 +8,17 @@ import {
 } from "./standard.js";
 import { OWASP_LLM_TOP10 } from "./owasp-llm-top10.js";
 import { SSDF_218A } from "./ssdf-218a.js";
+import { OWASP_AGENTIC_TOP10 } from "./owasp-agentic-top10.js";
+import { OWASP_MCP_TOP10 } from "./owasp-mcp-top10.js";
 import type { SecurityCheckResult } from "../check-security.js";
 
 const VALID_BUCKETS = ["auto", "gap", "manual", "na"];
-const DESCRIPTORS: StandardDescriptor[] = [OWASP_LLM_TOP10, SSDF_218A];
+const DESCRIPTORS: StandardDescriptor[] = [
+  OWASP_LLM_TOP10,
+  SSDF_218A,
+  OWASP_AGENTIC_TOP10,
+  OWASP_MCP_TOP10,
+];
 
 for (const d of DESCRIPTORS) {
   describe(`standard mapping — ${d.key}`, () => {
