@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit memory search --brief` — progressive-disclosure recall (B3).** Returns the *minimal
+  sufficient slice* of a recall — top-ranked hits trimmed to budget-bounded snippets — and reports
+  how many were **withheld** so you can expand (`--limit` / drop `--brief`), instead of dumping
+  every match into context. Never silently truncates: the withheld count is explicit (same
+  discipline as `kit map`'s logged drops), and the first hit is always disclosed. Pure core
+  `progressiveDisclose` (deterministic; default 1200-char budget / 240-char snippets / 8 hits),
+  unit-tested; `--json` carries the structured `disclosure`.
+
 - **`kit memory` rule aging — surface stale machine-origin rules for review, never auto-drop (B2).**
   Curated shared-tier rules now carry a deterministic **aging class**: only `derived`/`inferred`
   *active* rules age (fresh < 180d ≤ aging < 360d ≤ stale); an **operator's explicit rule is

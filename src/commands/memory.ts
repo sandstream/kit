@@ -9,6 +9,7 @@ import {
   getStats,
   getMemoryDbPath,
   searchMessages,
+  progressiveDisclose,
   recordQuery,
   dailyActivity,
   quarantineInjectedMessages,
@@ -366,7 +367,7 @@ async function memHelp(): Promise<boolean> {
     "  kit memory index            Index all agent transcripts (Claude Code, Codex, Gemini, Cursor, …) into the store",
   );
   console.log(
-    "  kit memory search <query>   Search memory + curated shared decisions (current project; --global for all; --include-quarantined to show flagged rows)",
+    "  kit memory search <query>   Search memory + curated shared decisions (current project; --global for all; --fresh recency-aware; --brief progressive-disclosure; --include-quarantined to show flagged rows)",
   );
   console.log(
     "  kit memory stats            Show what the memory store contains (alias: kit memory status)",
@@ -833,7 +834,7 @@ async function memSearch(): Promise<boolean> {
   const query = terms.join(" ").trim();
   if (!query) {
     console.error(
-      `${c.red}usage: kit memory search <query> [--global] [--project=<path>] [--limit=N] [--fresh]${c.reset}`,
+      `${c.red}usage: kit memory search <query> [--global] [--project=<path>] [--limit=N] [--fresh] [--brief]${c.reset}`,
     );
     return false;
   }
@@ -848,6 +849,10 @@ async function memSearch(): Promise<boolean> {
   // --fresh: recency-aware ranking (RRF-fuse bm25 relevance + recency). Off by default so the
   // relevance-first ordering is unchanged unless asked for.
   const recencyBoost = hasFlag(process.argv, "--fresh");
+  // --brief: progressive-disclosure recall (B3) — return the minimal sufficient
+  // slice (budget-bounded snippets) and report how many hits were withheld, instead
+  // of dumping every match. Never silently truncates.
+  const brief = hasFlag(process.argv, "--brief");
   const db = openMemoryDb();
   const hits = searchMessages(db, query, { limit, projectPath, includeQuarantined, recencyBoost });
   // Record the recall (query_log) — best-effort; never let logging break search.
@@ -871,7 +876,11 @@ async function memSearch(): Promise<boolean> {
   }
 
   if (jsonMode) {
-    console.log(JSON.stringify({ messages: hits, shared }));
+    console.log(
+      JSON.stringify(
+        brief ? { disclosure: progressiveDisclose(hits), shared } : { messages: hits, shared },
+      ),
+    );
     return true;
   }
 
@@ -908,6 +917,27 @@ async function memSearch(): Promise<boolean> {
   if (!hits.length) {
     if (shared.length) return true; // curated results already shown; raw recall empty
     console.log(`${c.dim}no matches for "${query}" ${projectPath ?? "(global)"}${c.reset}`);
+    return true;
+  }
+  if (brief) {
+    // Progressive disclosure (B3): the minimal sufficient slice + an explicit
+    // withheld count (never a silent truncation).
+    const disc = progressiveDisclose(hits);
+    console.log(
+      `${c.bold}${disc.shown}${c.reset} of ${hits.length} match(es) ${scope} ${c.dim}— brief${c.reset}`,
+    );
+    for (const h of disc.hits) {
+      const s = sanitizeForPrompt(h.snippet);
+      const snippet = s.text.replace(/\s+/g, " ");
+      console.log(
+        `  ${c.dim}${h.timestamp ?? "?"}${c.reset} ${c.bold}${h.role ?? h.uuid ?? ""}${c.reset}  ${snippet}${s.flagged ? ` ${c.red}${INJECTION_TAG}${c.reset}` : ""}`,
+      );
+    }
+    if (disc.withheld > 0) {
+      console.log(
+        `${c.dim}  … ${disc.withheld} more withheld (budget ${disc.budgetChars} chars) — drop --brief or raise --limit to expand${c.reset}`,
+      );
+    }
     return true;
   }
   console.log(`${c.bold}${hits.length}${c.reset} match(es) ${scope}`);

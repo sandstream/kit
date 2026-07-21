@@ -614,6 +614,72 @@ export function searchMessages(
   return fuseByRrf<SearchHit>([pool, byRecency], (h) => h.id).slice(0, limit);
 }
 
+/** One disclosed hit — a compact, budget-trimmed view of a SearchHit. */
+export interface DisclosedHit {
+  id: number;
+  uuid: string | null;
+  sessionId: string;
+  role: string | null;
+  timestamp: string | null;
+  /** Content trimmed to the snippet budget (whole content when it already fits). */
+  snippet: string;
+  /** True when the snippet is shorter than the full content. */
+  truncated: boolean;
+}
+
+export interface Disclosure {
+  hits: DisclosedHit[];
+  /** How many ranked hits were disclosed. */
+  shown: number;
+  /** Ranked hits NOT disclosed (budget or count reached) — surfaced, never silently dropped. */
+  withheld: number;
+  budgetChars: number;
+}
+
+export interface DiscloseOptions {
+  /** Total character budget across all snippets (default 1200). */
+  budgetChars?: number;
+  /** Per-hit snippet cap (default 240). */
+  snippetChars?: number;
+  /** Hard cap on hits shown regardless of budget (default 8). */
+  maxHits?: number;
+}
+
+/**
+ * Progressive-disclosure recall (B3): given RANKED hits, return the minimal
+ * sufficient slice that fits a character budget — the smallest context that still
+ * carries signal — and report how many were WITHHELD so the caller can expand.
+ * Never silently truncates: `withheld` is explicit (same discipline as `kit map`'s
+ * logged drops). Pure + deterministic (input order preserved; no clock/random).
+ */
+export function progressiveDisclose(hits: SearchHit[], opts: DiscloseOptions = {}): Disclosure {
+  const budgetChars = opts.budgetChars ?? 1200;
+  const snippetChars = opts.snippetChars ?? 240;
+  const maxHits = opts.maxHits ?? 8;
+  const shown: DisclosedHit[] = [];
+  let used = 0;
+  for (const h of hits) {
+    if (shown.length >= maxHits) break;
+    const content = h.content ?? "";
+    const full = content.length <= snippetChars;
+    const snippet = full ? content : content.slice(0, snippetChars).trimEnd() + "…";
+    // Stop once this snippet would overflow the budget — but always disclose at
+    // least the first hit so a query never returns an empty-but-nonzero result.
+    if (shown.length > 0 && used + snippet.length > budgetChars) break;
+    shown.push({
+      id: h.id,
+      uuid: h.uuid,
+      sessionId: h.sessionId,
+      role: h.role,
+      timestamp: h.timestamp,
+      snippet,
+      truncated: !full,
+    });
+    used += snippet.length;
+  }
+  return { hits: shown, shown: shown.length, withheld: hits.length - shown.length, budgetChars };
+}
+
 export interface QueryLogInput {
   query: string;
   hitCount: number;
