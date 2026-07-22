@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.4.1] - 2026-07-22
+
+### Security
+
+- **`npm audit fix` — `fast-uri` high-severity host-confusion (GHSA-4c8g-83qw-93j6 /
+  GHSA-v2hh-gcrm-f6hx).** The v5.4.0 publish attempt failed the fail-closed npm-audit
+  gate (working as designed, not a CI flake): `fast-uri` 3.0.0-3.1.3, transitive via
+  `@modelcontextprotocol/sdk -> ajv -> fast-uri`, is vulnerable to host confusion via
+  failed IDN canonicalization / a literal backslash authority delimiter. Fixed with a
+  non-force `npm audit fix` (no breaking change). Two remaining moderate findings
+  (`hono`/`@hono/node-server` chain) require `--force` (downgrades the MCP SDK,
+  breaking) and sit below the `--audit-level=high` gate threshold, so left alone.
+
 ## [5.4.0] - 2026-07-21
 
 ### Added
@@ -28,8 +41,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   bytes, no writes); write errors fail closed (never a partial-export "success"). Read-only over
   already-secret-scanned entries, so the export never re-introduces a secret.
 
-- **`kit memory search --brief` — progressive-disclosure recall (B3).** Returns the *minimal
-  sufficient slice* of a recall — top-ranked hits trimmed to budget-bounded snippets — and reports
+- **`kit memory search --brief` — progressive-disclosure recall (B3).** Returns the _minimal
+  sufficient slice_ of a recall — top-ranked hits trimmed to budget-bounded snippets — and reports
   how many were **withheld** so you can expand (`--limit` / drop `--brief`), instead of dumping
   every match into context. Never silently truncates: the withheld count is explicit (same
   discipline as `kit map`'s logged drops), and the first hit is always disclosed. Pure core
@@ -38,10 +51,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - **`kit memory` rule aging — surface stale machine-origin rules for review, never auto-drop (B2).**
   Curated shared-tier rules now carry a deterministic **aging class**: only `derived`/`inferred`
-  *active* rules age (fresh < 180d ≤ aging < 360d ≤ stale); an **operator's explicit rule is
+  _active_ rules age (fresh < 180d ≤ aging < 360d ≤ stale); an **operator's explicit rule is
   foundational and never ages** (the human owns its relevance), and superseded/reversed entries are
   history. `kit memory areas` prints an aging nudge when machine-origin rules go stale; `kit memory
-  area <name>` badges each entry and takes `--stale` to show only aged-out rules for review (JSON
+area <name>` badges each entry and takes `--stale` to show only aged-out rules for review (JSON
   carries the `aging` field). kit never deletes — it flags for re-affirm/supersede. Pure core
   (`classifyAging` / `agingReport`), unit-tested; deterministic, zero-LLM.
 
@@ -50,7 +63,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   library**, mirroring the coverage-standards registry: `kit scan --list-delegates` enumerates it
   with on/off state, and `[scan].delegates` in `.kit.toml` is an allow-list that picks which
   scanners run (absent/empty ⇒ all on, backwards-compatible). The principle it encodes: **kit
-  delegates *detection* to best-of-breed tools, never its *verdict*** — findings still merge into
+  delegates _detection_ to best-of-breed tools, never its _verdict_** — findings still merge into
   one deterministic, fail-closed result. `enabledScanners` / `isScannerEnabled` / `SCANNER_IDS`
   are exported + unit-tested.
 
