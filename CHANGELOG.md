@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.4.1] - 2026-07-22
+
+### Security
+
+- Lockfile bump to clear a newly-published **high** transitive advisory in `fast-uri`
+  (host confusion via failed IDN canonicalization / literal backslash authority delimiter —
+  GHSA-4c8g-83qw-93j6, GHSA-v2hh-gcrm-f6hx) via a non-forcing `npm audit fix`. No source
+  changes; identical CLI surface to 5.4.0. (5.4.0's publish was blocked by the publish gate's
+  `npm audit --audit-level=high` step when the advisory landed; this is the audit-clean
+  re-release.)
+
 ## [5.4.0] - 2026-07-21
 
 ### Added
