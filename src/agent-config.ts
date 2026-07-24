@@ -171,7 +171,7 @@ export async function writeAgentConfig(
 
   for (const t of chosen) {
     const path = resolve(cwd, t.file);
-    let existing = "";
+    let existing: string;
     try {
       existing = await readFile(path, "utf-8");
     } catch {
@@ -274,7 +274,7 @@ export async function installAiderRules(cwd: string = process.cwd()): Promise<Ag
 
   // (1) CONVENTIONS.md kit block.
   const convPath = resolve(cwd, file);
-  let existing = "";
+  let existing: string;
   try {
     existing = await readFile(convPath, "utf-8");
   } catch {
@@ -294,7 +294,7 @@ export async function installAiderRules(cwd: string = process.cwd()): Promise<Ag
 
   // (2) .aider.conf.yml `read: CONVENTIONS.md` — the step that makes it non-no-op.
   const confPath = resolve(cwd, ".aider.conf.yml");
-  let conf = "";
+  let conf: string;
   try {
     conf = await readFile(confPath, "utf-8");
   } catch {
@@ -712,7 +712,7 @@ export async function installInstallGateCodex(
     return { file, action: "skipped", detail: "no Codex project detected" };
   }
 
-  let existing = "";
+  let existing: string;
   let existed = false;
   try {
     existing = await readFile(path, "utf-8");
@@ -747,7 +747,7 @@ export async function installInstallGateAmazonQ(
   const dirPath = resolve(cwd, dir);
   const { isReadOnlyMode } = await import("./read-only-mode.js");
   if (isReadOnlyMode()) return { file: dir, action: "skipped", detail: "read-only mode" };
-  let agentFiles: string[] = [];
+  let agentFiles: string[];
   try {
     agentFiles = readdirSync(dirPath)
       .filter((f) => f.endsWith(".json"))
@@ -811,7 +811,7 @@ export async function installInstallGateKiro(
   const dirPath = resolve(cwd, dir);
   const { isReadOnlyMode } = await import("./read-only-mode.js");
   if (isReadOnlyMode()) return { file: dir, action: "skipped", detail: "read-only mode" };
-  let agentFiles: string[] = [];
+  let agentFiles: string[];
   try {
     agentFiles = readdirSync(dirPath)
       .filter((f) => f.endsWith(".json"))

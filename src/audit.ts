@@ -409,7 +409,7 @@ async function parkPendingEntry(event: AuditEvent, companyId: string): Promise<v
  */
 async function drainPendingQueue(): Promise<void> {
   const queuePath = resolve(process.cwd(), PENDING_QUEUE_FILE);
-  let content = "";
+  let content: string;
   try {
     content = await readFile(queuePath, "utf-8");
   } catch {

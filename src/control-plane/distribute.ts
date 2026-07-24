@@ -172,7 +172,7 @@ function verifyRevocationBatch(
         reason: `revocation signed by ${rec.by}, not in the org trust anchor`,
       };
     }
-    let sigOk = false;
+    let sigOk: boolean;
     try {
       sigOk = verifySignature(
         revocationStatement(rec.kid, rec.ts, rec.reason),

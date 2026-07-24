@@ -395,7 +395,7 @@ async function cmdSecretsOneCli(): Promise<boolean> {
   const placeholder = generatePlaceholder();
   const { writeFile, readFile, access } = await import("node:fs/promises");
   const envPath = `${process.cwd()}/.env.local`;
-  let envContent = "";
+  let envContent: string;
   try {
     await access(envPath);
     envContent = await readFile(envPath, "utf-8");

@@ -851,7 +851,7 @@ async function offerFirstInstallPrescan(): Promise<void> {
 
   const readline = await import("node:readline/promises");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  let answer = "";
+  let answer: string;
   let scanPath = "";
   try {
     answer = (await rl.question(`Run a prescan now? [y/N] `)).trim().toLowerCase();

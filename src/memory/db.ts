@@ -463,7 +463,7 @@ export function forgetMemory(db: DatabaseSync, uuid: string, reason?: string): F
   // FTS5 'integrity-check' raises SQLITE_CORRUPT if the shadow index disagrees with
   // the content table — i.e. if a dangling entry for the deleted row survived. No
   // throw ⇒ the index is consistent and the deleted row's terms are truly gone.
-  let ftsConsistent = false;
+  let ftsConsistent: boolean;
   try {
     db.prepare("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')").run();
     ftsConsistent = true;

@@ -188,7 +188,7 @@ async function syncToGitHub(
   // Attempt to use libsodium-wrappers for native encryption.
   // It's an optional peer dependency — fall back to gh CLI if absent.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let sodium: any = null;
+  let sodium: any;
   try {
     sodium = await import("libsodium-wrappers" as string);
     await sodium.ready;

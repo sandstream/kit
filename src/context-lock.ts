@@ -550,7 +550,7 @@ export async function applyContext(
 
   const results: ApplyResult[] = [];
   for (const step of planContext(ctx)) {
-    let ok = false;
+    let ok: boolean;
     try {
       await exec(step.tool, step.argv, { timeout: 8_000, cwd: step.local ? cwd : undefined });
       ok = true;
