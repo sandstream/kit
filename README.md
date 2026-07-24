@@ -263,7 +263,8 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit setup`: Full pipeline: install → hooks → login → secrets → check
 - `kit check`: Status of tools, services, secrets, hooks, security, tests
 - `kit fix`: Auto-remediate gaps (tools, gitignore, hooks, .env.template)
-- `kit review` / `kit heal`: One-gate repo audit (check + design); bounded self-heal loop
+- `kit review` / `kit heal`: One-gate repo audit (check + design + standards + ADR); bounded self-heal loop
+- `kit adr {check,list,freeze}`: Turn an Architecture Decision Record into a deterministic gate — enforce a `kit-enforce` block (`forbid_pattern` / `require_pattern` / `forbid_import`, incl. transitive) cited back to the ADR. Zero-LLM (prose is never interpreted)
 - `kit scan`: Run external scanners (snyk/trivy/grype/semgrep/osv/socket) → one merged, air-gap-aware verdict
 - `kit supply-chain` / `kit sbom` / `kit gha-audit` / `kit agent-audit`: Install-time triage, SBOM, Actions hardening, agent/MCP/hook audit
 - `kit self-audit`: Deterministic self-check of kit's own source against the audit's bug-classes (also asserts CI-referenced scripts exist)
@@ -419,7 +420,7 @@ release-verification in [`docs/VERIFY.md`](./docs/VERIFY.md). kit's verdicts are
 produced by deterministic code, never an LLM — a CI-enforced contract, see
 [`docs/ZERO_LLM_CONTRACT.md`](./docs/ZERO_LLM_CONTRACT.md).
 
-- `kit doctor`: Deep diagnostics: Node.js version, mise, .env.local, tools in PATH, git hooks
+- `kit doctor`: Deep diagnostics: Node.js version, mise, .env.local, tools in PATH, git hooks, and **OS containment posture** — detects the sandbox *below* the tool boundary (container / seccomp / user-ns, and gVisor / Firecracker fingerprints) and reports it honestly (`unknown` on non-Linux, never a false "not contained"). Set `[governance.containment] require = true` to make it a **fail-closed gate**: doctor fails when containment can't be positively established (including when it can't be determined). kit detects/verifies a sandbox — it never becomes one
 - `kit env`: Inspect environment variables from .env.local (`--show-values`, `--missing`, `--json`)
 - `kit mcp`: Run the MCP server over stdio for AI assistants (auto-detected: no sub-command + non-TTY). Interactively, `kit mcp list|auth|set-token|clear` manages declared servers
 - `kit analyze`: Detect stack + emit draft `CLAUDE.md` / `RULES.md` from git history + framework markers
@@ -532,8 +533,9 @@ Context pointers are non-secret and live in config; the credentials they authent
 
 - `kit check --enforce-tests`: Fail when net-new source files lack a sibling `.test.ts`
 - `kit design`: Static a11y scan (img-alt, button-empty, anchor-no-href, input-no-label) + design-token consistency (raw `#hex` / `px` bypass). `--enforce` to gate, `--json` for machine output
-- `kit review`: Meta-runner: `check` + `design` in one command. Use as a single PR-gate entry point for AI agents
-- `kit baseline freeze`: Snapshot current findings (untested files, a11y, tokens) into `.kit-baseline.json` so pre-existing warnings stay warnings and only net-new findings can fail
+- `kit review`: Meta-runner: `check` + `design` + `standards` + `adr` in one command. Use as a single PR-gate entry point for AI agents
+- `kit adr {check,list,freeze}`: Enforce accepted ADRs' machine-readable `kit-enforce` rules over the repo, cited back to the ADR ("why is this blocked? → ADR-0007"). Rule types: `forbid_pattern`, `require_pattern`, and import-aware `forbid_import` (direct + transitive; an unresolvable relative import is surfaced as a `gap`, never a silent pass). Only `accepted` ADRs gate; prose is never interpreted (zero-LLM). `freeze` baselines existing findings so only NEW ones fail
+- `kit baseline freeze`: Snapshot current findings (untested files, a11y, tokens, standards, ADR violations/gaps) into `.kit-baseline.json` so pre-existing warnings stay warnings and only net-new findings can fail
 - `kit baseline show`: Print current baseline
 
 ### Supply chain
