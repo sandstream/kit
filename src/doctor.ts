@@ -452,6 +452,49 @@ async function checkTriageGates(cwd: string): Promise<DoctorCheck> {
 }
 
 /**
+ * Agent egress-exposure posture. The OpenAI×HuggingFace eval-escape incident (2026-07) turned on
+ * exactly this gap: an agent had an install/exec capability but its egress was NOT scope-bound, so a
+ * package/exec tool reached the open internet. kit warns when the install-gate is wired (the agent
+ * CAN install/run tools) but the exec-broker egress gate (`gate-egress`) is NOT — the escape-hatch
+ * class. Never silent:
+ *   skip  no install/exec gate wired here — nothing with that capability to constrain
+ *   pass  install/exec gate present AND egress is scope-bound (gate-egress wired)
+ *   warn  install/exec gate present but egress is NOT scope-bound — the escape-hatch gap
+ * Pure decision split out for testing.
+ */
+export function agentEgressExposureStatus(g: { installGate: boolean; egressGate: boolean }): {
+  status: DoctorCheckStatus;
+  detail: string;
+} {
+  if (!g.installGate) {
+    return {
+      status: "skip",
+      detail:
+        "no install/exec gate wired here — nothing with an install/exec capability to constrain",
+    };
+  }
+  if (g.egressGate) {
+    return {
+      status: "pass",
+      detail:
+        "install/exec gate present and egress is scope-bound (gate-egress wired) — a spawned install/exec tool cannot reach off-scope hosts",
+    };
+  }
+  return {
+    status: "warn",
+    detail:
+      "agent can install/run tools (install-gate wired) but egress is NOT scope-bound — a package/exec tool could reach the open internet (the OpenAI eval-escape class). Wire it: 'kit agent-config --broker-gate' + declare [scope].egress",
+  };
+}
+
+async function checkAgentEgressExposure(cwd: string): Promise<DoctorCheck> {
+  const { gateLiveness } = await import("./agent-config.js");
+  const live = gateLiveness(cwd);
+  const { status, detail } = agentEgressExposureStatus(live);
+  return { name: "agent egress exposure", status, detail, category: "security" };
+}
+
+/**
  * Keyless-credential posture (Pillar 2 tail — "sign, don't store"). Reports whether any hosts are
  * declared keyless (`[scope].sign`) and whether kit can actually sign for them — never silent:
  *   skip  no keyless hosts declared
@@ -583,6 +626,7 @@ export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorR
   allChecks.push(await checkBrokerScope(cwd));
   allChecks.push(await checkBrokerRuntime(cwd));
   allChecks.push(await checkKeyless(cwd));
+  allChecks.push(await checkAgentEgressExposure(cwd));
   allChecks.push(await checkDeepSkillScanner());
   allChecks.push(await checkTriageGates(cwd));
   allChecks.push(checkControlPlane(cwd));

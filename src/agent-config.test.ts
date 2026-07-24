@@ -989,6 +989,7 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
         everInstalled: true,
         installGate: true,
         envGate: true,
+        egressGate: false,
       });
     });
   });

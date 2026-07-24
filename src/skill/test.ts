@@ -41,10 +41,32 @@ export interface SkillManifest {
    *   - `[...]`     → a bounded tool list
    */
   allowedTools?: string[];
+  /**
+   * agentskills.io invocation control — whether a human may trigger the skill via a
+   * slash command. `undefined` → field absent (spec default: user-invokable).
+   */
+  userInvokable?: boolean;
+  /**
+   * agentskills.io invocation control — whether the AGENT may autonomously invoke the
+   * skill. `undefined` → field absent (spec default: model MAY invoke). `true` means the
+   * model is forbidden from auto-invoking (restrict sensitive ops to user-only).
+   */
+  disableModelInvocation?: boolean;
   /** The markdown body after the frontmatter block (trimmed). */
   body: string;
   /** True when a `---` frontmatter block was found at all. */
   hasFrontmatter: boolean;
+}
+
+/** Parse a frontmatter boolean scalar (`true`/`false`, case-insensitive); undefined otherwise. */
+function parseBool(v: string): boolean | undefined {
+  const s = v
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .toLowerCase();
+  if (s === "true") return true;
+  if (s === "false") return false;
+  return undefined;
 }
 
 /** Split a comma / inline-array / block-list frontmatter value into trimmed items. */
@@ -92,6 +114,10 @@ export function parseSkillManifest(raw: string): SkillManifest {
 
     if (key === "name") manifest.name = unquote(value);
     else if (key === "description") manifest.description = unquote(value);
+    else if (key === "user-invokable" || key === "user_invokable")
+      manifest.userInvokable = parseBool(value);
+    else if (key === "disable-model-invocation" || key === "disable_model_invocation")
+      manifest.disableModelInvocation = parseBool(value);
     else if (key === "allowed-tools" || key === "allowed_tools") {
       // Collect any following `  - item` block-list lines.
       const blockItems: string[] = [];
@@ -192,7 +218,13 @@ export function checkTrigger(m: SkillManifest, siblings: SiblingSkill[] = []): C
  * runtime job (P2), disclaimed separately. Pure.
  */
 export function checkScope(m: SkillManifest): CheckResult {
-  const s = (status: CheckStatus, detail: string): CheckResult => ({ id: "scope", status, detail });
+  const posture = skillInvocationPosture(m);
+  const suffix = posture ? ` [${posture}]` : "";
+  const s = (status: CheckStatus, detail: string): CheckResult => ({
+    id: "scope",
+    status,
+    detail: detail + suffix,
+  });
   if (m.allowedTools === undefined)
     return s(
       "fail",
@@ -203,6 +235,22 @@ export function checkScope(m: SkillManifest): CheckResult {
   if (m.allowedTools.length === 0)
     return s("pass", "declares zero tools (maximally least-privilege)");
   return s("pass", `declares a bounded scope of ${m.allowedTools.length} tool(s)`);
+}
+
+/**
+ * agentskills.io invocation posture — a short, deterministic description of who may
+ * trigger the skill, derived from the `user-invokable` / `disable-model-invocation`
+ * fields. `null` when neither field is present (nothing to report). Advisory: it
+ * enriches the scope detail; it does not change the pass/fail verdict. The higher-risk
+ * posture is "model-invocable" with a broad tool surface — surfaced here so a reviewer
+ * (or `kit triage skill`) can weigh the autonomous-exposure surface.
+ */
+export function skillInvocationPosture(m: SkillManifest): string | null {
+  if (m.userInvokable === undefined && m.disableModelInvocation === undefined) return null;
+  const modelPart =
+    m.disableModelInvocation === true ? "model-invocation disabled" : "model-invocable";
+  const userPart = m.userInvokable === false ? "not user-invokable" : "user-invokable";
+  return `${modelPart}, ${userPart}`;
 }
 
 /** The canonical, snapshot-able facts about a skill module (order-stable). */

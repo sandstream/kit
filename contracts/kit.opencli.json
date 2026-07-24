@@ -240,7 +240,7 @@
     },
     "coverage": {
       "kind": "command",
-      "summary": "Evidence map: which standard's controls kit's deterministic checks auto-verify vs gap/manual/n-a — --standard=asvs|llm-top10|ssdf|agentic-top10|mcp-top10|all (default asvs); --list-standards to enumerate, [coverage].standards to toggle on/off (NOT a compliance attestation; --json for GRC tools)",
+      "summary": "Evidence map: which standard's controls kit's deterministic checks auto-verify vs gap/manual/n-a — --standard=asvs|llm-top10|ssdf|agentic-top10|mcp-top10|aiuc-1|gcp-waf-security|all (default asvs); --list-standards to enumerate, [coverage].standards to toggle on/off (NOT a compliance attestation; --json for GRC tools)",
       "x-kit-args-modeled": false,
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
@@ -959,7 +959,7 @@
     "binary": "kit",
     "summary": "Deterministic, local-first developer-environment manager and fail-closed governance layer for AI agents and humans.",
     "title": "kit",
-    "version": "5.4.1"
+    "version": "5.5.0"
   },
   "opencliVersion": "1.0.0-alpha.12"
 }

@@ -4,7 +4,7 @@ import { writeFile, unlink, mkdir, rmdir, rm } from "node:fs/promises";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runDoctor, triageGateStatus } from "./doctor.js";
+import { runDoctor, triageGateStatus, agentEgressExposureStatus } from "./doctor.js";
 import { loadOrCreateIdentity, identityId } from "./identity.js";
 import { resolveKeyStore } from "./keystore/index.js";
 import {
@@ -463,5 +463,21 @@ describe("triageGateStatus (pure — pre-commit gate posture)", () => {
     assert.equal(triageGateStatus("#!/bin/sh\nkit security scan-staged\n").status, "skip");
     assert.equal(triageGateStatus(null).status, "skip");
     assert.match(triageGateStatus(null).detail, /kit setup --recommended/);
+  });
+});
+
+describe("agentEgressExposureStatus (OpenAI eval-escape gap)", () => {
+  it("skips when no install/exec gate is wired (nothing to constrain)", () => {
+    const r = agentEgressExposureStatus({ installGate: false, egressGate: false });
+    assert.equal(r.status, "skip");
+  });
+  it("passes when install-gate is present AND egress is scope-bound", () => {
+    const r = agentEgressExposureStatus({ installGate: true, egressGate: true });
+    assert.equal(r.status, "pass");
+  });
+  it("WARNS on the escape-hatch gap: install/exec wired but egress not scope-bound", () => {
+    const r = agentEgressExposureStatus({ installGate: true, egressGate: false });
+    assert.equal(r.status, "warn");
+    assert.match(r.detail, /gate-egress|scope-bound|escape/i);
   });
 });

@@ -403,7 +403,8 @@ export interface kitConfig {
    *  auto-installing is a deliberate trust decision. */
   update?: { check?: boolean; auto?: boolean };
   /** `kit coverage` — evidence-map standards toggle. `[coverage].standards` is an
-   *  allow-list of standard keys (asvs, llm-top10, ssdf, agentic-top10, mcp-top10)
+   *  allow-list of standard keys (asvs, llm-top10, ssdf, agentic-top10, mcp-top10,
+   *  aiuc-1, gcp-waf-security)
    *  that `--standard=all` runs and `--list-standards` marks enabled; absent/empty
    *  ⇒ all registered standards are on. */
   coverage?: { standards?: string[] };
