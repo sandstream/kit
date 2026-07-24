@@ -480,4 +480,4 @@ describe("agentEgressExposureStatus (OpenAI eval-escape gap)", () => {
     assert.equal(r.status, "warn");
     assert.match(r.detail, /gate-egress|scope-bound|escape/i);
   });
-})
+});

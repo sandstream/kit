@@ -60,7 +60,10 @@ export interface SkillManifest {
 
 /** Parse a frontmatter boolean scalar (`true`/`false`, case-insensitive); undefined otherwise. */
 function parseBool(v: string): boolean | undefined {
-  const s = v.trim().replace(/^["']|["']$/g, "").toLowerCase();
+  const s = v
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .toLowerCase();
   if (s === "true") return true;
   if (s === "false") return false;
   return undefined;
@@ -244,7 +247,8 @@ export function checkScope(m: SkillManifest): CheckResult {
  */
 export function skillInvocationPosture(m: SkillManifest): string | null {
   if (m.userInvokable === undefined && m.disableModelInvocation === undefined) return null;
-  const modelPart = m.disableModelInvocation === true ? "model-invocation disabled" : "model-invocable";
+  const modelPart =
+    m.disableModelInvocation === true ? "model-invocation disabled" : "model-invocable";
   const userPart = m.userInvokable === false ? "not user-invokable" : "user-invokable";
   return `${modelPart}, ${userPart}`;
 }

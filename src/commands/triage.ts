@@ -743,8 +743,7 @@ export function cmdTriageModel(args: string[]): boolean {
     `${c.bold}kit triage model${c.reset} — ${r.artifact} ${c.dim}(${r.formatRisk})${c.reset}`,
   );
   for (const f of r.findings) {
-    const tag =
-      f.confidence === "high" ? `${c.red}HIGH${c.reset}` : `${c.dim}advisory${c.reset}`;
+    const tag = f.confidence === "high" ? `${c.red}HIGH${c.reset}` : `${c.dim}advisory${c.reset}`;
     console.log(`  [${tag}] ${f.label}`);
     console.log(`      ${c.dim}${f.rationale}${c.reset}`);
   }

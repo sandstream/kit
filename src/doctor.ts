@@ -469,7 +469,8 @@ export function agentEgressExposureStatus(g: { installGate: boolean; egressGate:
   if (!g.installGate) {
     return {
       status: "skip",
-      detail: "no install/exec gate wired here — nothing with an install/exec capability to constrain",
+      detail:
+        "no install/exec gate wired here — nothing with an install/exec capability to constrain",
     };
   }
   if (g.egressGate) {

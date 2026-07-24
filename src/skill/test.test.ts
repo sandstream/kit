@@ -274,4 +274,4 @@ describe("agentskills.io invocation-control fields", () => {
     );
     assert.equal(skillInvocationPosture(m), "model-invocation disabled, not user-invokable");
   });
-})
+});
