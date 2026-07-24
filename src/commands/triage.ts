@@ -7,6 +7,8 @@ import { triageMcpTools, extractToolDefs } from "../mcp-triage.js";
 import { discoverPlugins } from "../agent-sbom.js";
 import { scanPluginManifest, manifestHasHighRisk } from "../plugin-triage.js";
 import { triageVaultConfig } from "../vault-triage.js";
+import { triageModelArtifact } from "../model-artifact-triage.js";
+import { existsSync, statSync } from "node:fs";
 
 export async function cmdTriage(): Promise<boolean> {
   const args = process.argv.slice(3);
@@ -31,6 +33,9 @@ export async function cmdTriage(): Promise<boolean> {
   if (typeArg === "vault-config") {
     return cmdTriageVaultConfig();
   }
+  if (typeArg === "model") {
+    return cmdTriageModel(filtered.slice(1));
+  }
   const type = typeArg as TriageType;
   const target = filtered[1];
 
@@ -47,6 +52,9 @@ export async function cmdTriage(): Promise<boolean> {
       "  kit triage brew <formula>            Evaluate Homebrew formula (resolves upstream repo, then repo-scores)",
     );
     console.log("  kit triage repo <github-url>         Evaluate GitHub repository");
+    console.log(
+      "  kit triage model <path>              Evaluate an untrusted AI artifact (model weights / dataset) before loading",
+    );
     console.log("  kit triage skill <path|name>         Evaluate Claude Code / agent skill");
     console.log(
       "  kit triage skill <path|name> --deep  + SkillSpector (NVIDIA) static Stage 1 (no LLM, no egress) when installed",
@@ -698,4 +706,52 @@ async function cmdTriageCheckSkills(): Promise<boolean> {
   );
   console.error(`Bypass with --no-verify is recorded to ${SKIPPED_COMMITS_LOG}.${c.reset}`);
   return false;
+}
+
+/**
+ * `kit triage model <path>` — deterministic, zero-LLM triage of an untrusted AI
+ * artifact (model weights / dataset) BEFORE loading it into an inference runtime.
+ * Classifies the format's load-time risk (code-exec pickle family = fail; gguf/onnx
+ * loader-hardening + data-only = advisory) and flags unverified provenance. A
+ * `<path>.sha256` or `<path>.sig` sidecar counts as verified provenance. Exits
+ * non-zero on a high-confidence (code-exec) finding.
+ */
+export function cmdTriageModel(args: string[]): boolean {
+  const json = hasFlag(args, "--json");
+  const path = args.find((a) => !a.startsWith("--"));
+  if (!path) {
+    console.error("usage: kit triage model <path> [--json]");
+    return false;
+  }
+  let sizeBytes: number | undefined;
+  if (existsSync(path)) {
+    try {
+      sizeBytes = statSync(path).size;
+    } catch {
+      /* stat is best-effort; classification works from the name alone */
+    }
+  }
+  const provenanceVerified = existsSync(`${path}.sha256`) || existsSync(`${path}.sig`);
+  const r = triageModelArtifact(path, { sizeBytes, provenanceVerified });
+
+  if (json) {
+    console.log(JSON.stringify(r, null, 2));
+    return r.passed;
+  }
+
+  console.log(
+    `${c.bold}kit triage model${c.reset} — ${r.artifact} ${c.dim}(${r.formatRisk})${c.reset}`,
+  );
+  for (const f of r.findings) {
+    const tag =
+      f.confidence === "high" ? `${c.red}HIGH${c.reset}` : `${c.dim}advisory${c.reset}`;
+    console.log(`  [${tag}] ${f.label}`);
+    console.log(`      ${c.dim}${f.rationale}${c.reset}`);
+  }
+  console.log(
+    r.passed
+      ? `${c.green}pass${c.reset} — no code-execution-on-load format (still verify provenance + load in a sandbox)`
+      : `${c.red}fail${c.reset} — code-execution-on-load risk; do not load an untrusted file`,
+  );
+  return r.passed;
 }
