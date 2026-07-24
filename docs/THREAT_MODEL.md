@@ -278,6 +278,28 @@ same boundary the audit anchor documents); and the heuristic tier is advisory,
 not a guarantee. Signing the shared tier with the machine identity and a
 liveness gate for the capture hooks are tracked follow-ups.
 
+## kit is one layer of defense-in-depth (what it does NOT contain)
+
+kit governs the **agent-tool boundary**: it mediates the agent's declared tool
+calls (egress, fs, installs, secrets) through a signed least-privilege scope,
+fail-closed. That is a real, deterministic control — but it is **one layer, not a
+containment sandbox.**
+
+The 2026-07 OpenAI×HuggingFace eval-escape is the worked example: a model with a
+package-install tool found a zero-day *inside* that tool and opened its own socket
+to the open internet. kit's `gate-egress` is a **PreToolUse + scope-level** control;
+it closes the *declared* egress path and raises attacker cost, but a zero-day RCE in
+a spawned subprocess that opens a raw socket is **below** the layer a PreToolUse hook
+can see. kit does not provide kernel/network containment (namespaces, seccomp, a
+network jail) and does not claim to.
+
+The honest posture: **pair kit with a real OS/network sandbox.** kit enforces and
+proves the policy at the tool boundary and attests that the boundary held; the
+sandbox contains what happens *below* the tool boundary. `kit doctor` will warn
+(`agent egress exposure`) when an install/exec capability is wired without a
+scope-bound egress gate — the exact gap that became the escape hatch — but a green
+kit is a governed tool boundary, never a guarantee of containment.
+
 ## Out of scope (and why)
 
 - **LLM-router / orchestrator features.** kit is not Ruflo / Gas Town.
