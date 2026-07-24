@@ -179,9 +179,12 @@ export async function cmdBaseline(): Promise<boolean> {
   baselineSet(baseline, "design", "tokens", design.tokens);
   // All standards dimensions (general + specific + plugins + platform) via the shared helper.
   const standardsTotal = await freezeStandardsBaseline(baseline, process.cwd());
+  // ADR violations/gaps, via the ADR command's shared freezer (kept in one place so it never drifts).
+  const { freezeAdrBaseline } = await import("./adr.js");
+  const adrTotal = freezeAdrBaseline(baseline, process.cwd());
   await saveBaseline(baseline);
   console.log(
-    `${c.green}✓${c.reset} Wrote ${BASELINE_FILE} — ${untested.length} untested file(s), ${design.a11y.length} a11y, ${design.tokens.length} design-token, ${standardsTotal} standards finding(s) frozen.`,
+    `${c.green}✓${c.reset} Wrote ${BASELINE_FILE} — ${untested.length} untested file(s), ${design.a11y.length} a11y, ${design.tokens.length} design-token, ${standardsTotal} standards finding(s), ${adrTotal} ADR finding(s) frozen.`,
   );
   console.log(`  Future runs will gate only on NEW findings.`);
   return true;

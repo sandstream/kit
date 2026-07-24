@@ -9,6 +9,7 @@ import { hasFlag } from "../utils/flags.js";
 import { cmdCheck } from "./check.js";
 import { cmdDesign } from "./design.js";
 import { cmdStandards } from "./standards.js";
+import { adrCheck } from "./adr.js";
 
 export async function cmdReview(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
@@ -26,6 +27,10 @@ export async function cmdReview(): Promise<boolean> {
   if (!jsonMode) console.log(`\n${c.bold}=== standards ===${c.reset}`);
   const standardsOk = await cmdStandards();
   if (!standardsOk) allOk = false;
+
+  if (!jsonMode) console.log(`\n${c.bold}=== adr ===${c.reset}`);
+  const adrOk = await adrCheck();
+  if (!adrOk) allOk = false;
 
   if (!jsonMode) {
     console.log(
