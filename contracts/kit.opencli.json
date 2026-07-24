@@ -7,6 +7,13 @@
       "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
+    "adr": {
+      "kind": "command",
+      "summary": "Enforce architecture decisions (ADR → gate): 'kit adr check' gates the repo on accepted ADRs' deterministic kit-enforce rules, cited to the ADR; 'kit adr list' shows enforced/documented. Zero-LLM (prose is never interpreted).",
+      "x-kit-args-modeled": false,
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
     "agent-audit": {
       "kind": "command",
       "summary": "Audit agent / MCP / hook configs for plaintext secrets + malware-shaped hooks",
@@ -959,7 +966,7 @@
     "binary": "kit",
     "summary": "Deterministic, local-first developer-environment manager and fail-closed governance layer for AI agents and humans.",
     "title": "kit",
-    "version": "5.6.0"
+    "version": "5.7.0"
   },
   "opencliVersion": "1.0.0-alpha.12"
 }

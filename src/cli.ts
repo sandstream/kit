@@ -53,6 +53,7 @@ import {
   cmdTeam,
 } from "./commands/agent.js";
 import { cmdSelfAudit, cmdCoverage, cmdAnalyze } from "./commands/coverage.js";
+import { cmdAdr } from "./commands/adr.js";
 import {
   cmdGateBash,
   cmdGateEnv,
@@ -694,6 +695,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdReview,
     stability: "stable",
     help: "Full repo audit — runs check + design + standards in one gate (for agents / PR checks)",
+  },
+  adr: {
+    handler: cmdAdr,
+    stability: "experimental",
+    help: "Enforce architecture decisions (ADR → gate): 'kit adr check' gates the repo on accepted ADRs' deterministic kit-enforce rules, cited to the ADR; 'kit adr list' shows enforced/documented. Zero-LLM (prose is never interpreted).",
   },
   insight: {
     handler: cmdInsight,
