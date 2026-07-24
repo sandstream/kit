@@ -58,6 +58,24 @@ jobs:
           fi
           echo "Tag $TAG matches package.json version $PKG_VERSION"
 
+      - name: Verify the CHANGELOG documents this version
+        # MUST run before `npm publish`. The release step later in this job also
+        # needs these notes, but it runs AFTER the publish — so if that were the
+        # only check, a missing CHANGELOG section would be caught only once the
+        # version was already burned on npm (published, no release, red job).
+        # Rendering the notes here makes an undocumented release abort while
+        # aborting is still free, and the file is reused verbatim by the release
+        # step so the two can never disagree.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          if ! node scripts/changelog-section.mjs "$VERSION" > /tmp/release-notes.md; then
+            echo "::error::CHANGELOG.md has no section for $VERSION — refusing to publish an undocumented release. Add a '## [$VERSION]' section, then re-tag."
+            exit 1
+          fi
+          echo "CHANGELOG section for $VERSION renders ($(wc -c < /tmp/release-notes.md) bytes of notes)."
+
       - name: Import maintainer public key
         # A fresh runner has an empty GPG keyring, so verify-tag would have
         # nothing to check against. We import the committed PUBLIC key, but we do
@@ -184,10 +202,10 @@ jobs:
         # created no release at all, so every SBOM step silently no-opped and
         # the SBOMs only ever survived as workflow artifacts (which expire).
         #
-        # Notes come from the CHANGELOG section for this version, not the tag
-        # message — `changelog-section.mjs` exits non-zero when the section is
-        # missing, so an undocumented release fails loudly instead of shipping
-        # empty notes. Idempotent: re-running on an existing release reuses it.
+        # Notes are the file rendered by the "Verify the CHANGELOG documents this
+        # version" step near the top of the job — reused verbatim rather than
+        # regenerated, so the pre-publish check and the published notes can never
+        # disagree. Idempotent: re-running on an existing release reuses it.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
@@ -197,7 +215,10 @@ jobs:
             echo "Release $TAG already exists — reusing it."
             exit 0
           fi
-          node scripts/changelog-section.mjs "$VERSION" > /tmp/release-notes.md
+          if [ ! -s /tmp/release-notes.md ]; then
+            echo "::error::/tmp/release-notes.md is missing or empty — the pre-publish CHANGELOG step should have produced it."
+            exit 1
+          fi
           # --verify-tag: refuse to invent a release for a tag that isn't on the
           # remote. Prereleases are flagged so they don't read as stable.
           EXTRA=""
