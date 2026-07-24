@@ -4,11 +4,13 @@
  * kit-research/docs/research/adr-as-enforced-rule-design.md.
  *
  *   kit adr list    every ADR + status + enforced / documented-only
- *   kit adr check   run accepted ADRs' forbid-pattern rules over the repo (default)
+ *   kit adr check   run accepted ADRs' rules over the repo (default): forbid_pattern,
+ *                   require_pattern, and forbid_import (direct + transitive)
  *
  * kit never interprets ADR prose (off-charter); it enforces only the explicit
  * toml block. Only `accepted` ADRs gate; an accepted ADR with no rules is surfaced
- * as "documented, not enforced" — never silently green.
+ * as "documented, not enforced" — never silently green. A transitive forbid_import
+ * that hits an unresolvable relative import is a `gap` (can't prove), not a pass.
  */
 import { readFileSync as read, existsSync as exists } from "node:fs";
 import { relative as rel, join as pathJoin } from "node:path";
@@ -72,16 +74,23 @@ export function cmdAdr(): boolean {
   }));
 
   let violationCount = 0;
+  let gapCount = 0;
   let enforcedCount = 0;
   for (const { adr } of adrs) {
     if (!adrIsEnforced(adr)) continue;
     enforcedCount++;
-    const violations = evaluateAdr(adr, files);
-    for (const v of violations) {
-      violationCount++;
-      console.log(
-        `${c.red}✗${c.reset} ${v.file}:${v.line}  ${v.message}  ${c.dim}(${v.adrId})${c.reset}`,
-      );
+    for (const v of evaluateAdr(adr, files)) {
+      if (v.kind === "gap") {
+        gapCount++;
+        console.log(
+          `${c.yellow}?${c.reset} ${v.file}:${v.line}  ${v.message}  ${c.dim}(${v.adrId})${c.reset}`,
+        );
+      } else {
+        violationCount++;
+        console.log(
+          `${c.red}✗${c.reset} ${v.file}:${v.line}  ${v.message}  ${c.dim}(${v.adrId})${c.reset}`,
+        );
+      }
     }
   }
 
@@ -91,12 +100,13 @@ export function cmdAdr(): boolean {
     );
     return true;
   }
-  if (violationCount === 0) {
+  if (violationCount === 0 && gapCount === 0) {
     console.log(`${c.green}✓ ${enforcedCount} enforced ADR(s) — no violations${c.reset}`);
     return true;
   }
-  console.log(
-    `\n${c.red}${violationCount} ADR violation(s) across ${enforcedCount} enforced ADR(s).${c.reset}`,
-  );
+  const parts: string[] = [];
+  if (violationCount) parts.push(`${violationCount} violation(s)`);
+  if (gapCount) parts.push(`${gapCount} unprovable rule(s) (unresolved imports)`);
+  console.log(`\n${c.red}${parts.join(" + ")} across ${enforcedCount} enforced ADR(s).${c.reset}`);
   return false;
 }

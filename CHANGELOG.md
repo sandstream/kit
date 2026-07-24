@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.8.0] - 2026-07-24
+
+### Added
+
+- **`kit adr` — richer enforce rules (experimental).** Beyond `forbid_pattern`, an accepted
+  ADR's ` ```toml kit-enforce ` block now supports two more deterministic rule types:
+  - **`require_pattern`** — a regex that **must** appear in each matching file; its *absence*
+    gates (e.g. "every `src/web/**` handler must call `withGovernance`").
+  - **`forbid_import`** — an import-statement-aware ban on a module specifier (parses real
+    `import`/`require`/`from`/dynamic-import specifiers, not any line, so `pg-promise` no longer
+    trips a `^pg$` rule). With `transitive = true` it also forbids **reaching** the target
+    through the repo's relative-import graph. A relative import that cannot be resolved within
+    the repo is surfaced as a **`gap`** ("cannot prove") — it fails closed and prints distinctly,
+    never a silent green (no false green).
+
+  New pure exports in `src/adr.ts` (`extractImports`, `resolveRelative`) and a `kind`
+  (`violation` | `gap`) + `rule` discriminator on `AdrViolation`. Still zero-LLM: kit enforces
+  only the explicit rule block, never ADR prose.
+
 ## [5.7.0] - 2026-07-22
 
 ### Added
