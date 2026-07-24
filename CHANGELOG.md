@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.6.0] - 2026-07-22
+
+### Added
+
+- **`kit doctor`: OS-containment posture (defense-in-depth).** Deterministically detects the
+  sandbox *below* the tool boundary from Linux `/proc` (container markers, seccomp mode,
+  no_new_privs, user namespace) and folds it into the posture: `pass` when contained,
+  `warn` when an install/exec gate is wired with **no** OS containment beneath it (pair kit
+  with a sandbox), and honest `skip`/`unknown` on non-Linux — never a false "not contained".
+  New pure `src/containment.ts` (`detectContainment` + `gatherContainmentSignals`).
+  Realizes the containment-as-verified-delegate design: kit detects/verifies a sandbox, it
+  does not become one.
+
 ## [5.5.0] - 2026-07-22
 
 ### Added
