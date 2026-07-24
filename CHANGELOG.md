@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.9.0] - 2026-07-24
+
+### Added
+
+- **Containment enforce-readiness (defense-in-depth).** kit's `kit doctor` containment posture
+  (5.6.0) grows two capabilities, both deterministic and zero-LLM:
+  - **Sandboxed-runtime fingerprints** — `detectContainment` now names **gVisor** (`runsc`) and
+    **Firecracker** microVMs from userspace-visible strings (`/proc/version`, DMI vendor). A
+    *positive* fingerprint names the mechanism (`heuristic` confidence); an *absence* claims
+    nothing — these runtimes are deliberately stealthy, so kit never infers "not sandboxed" from
+    a missing marker (no false green).
+  - **`require containment` — a fail-closed gate.** New `[governance.containment] require = true`
+    turns the advisory posture into a hard requirement: `kit doctor` **fails** (not warns) when a
+    container/seccomp/sandbox layer beneath the tool boundary cannot be *positively* established —
+    **including** when it cannot be determined at all (a required control that cannot be proven
+    present is treated as absent). The containment verdict is written to the sealed audit
+    (`doctor.containment`) when the policy is in force.
+
+  New pure exports in `src/containment.ts` (`detectGvisorMarker`, `detectFirecrackerMarker`,
+  `containmentEnforcement`) and a `[governance.containment]` config section. kit still only
+  **detects and verifies** a sandbox as a delegate — it never becomes one.
+
 ## [5.8.0] - 2026-07-24
 
 ### Added

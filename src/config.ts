@@ -254,6 +254,21 @@ export interface GovernanceConfig {
    * of false-greening on findings alone. Parsed from [governance.scan].
    */
   scan?: GovernanceScanConfig;
+  /**
+   * Containment policy. `require = true` makes OS containment a hard requirement: `kit doctor`
+   * FAILS (not warns) when a container/seccomp/sandbox layer beneath the tool boundary cannot be
+   * positively established — including when it cannot be determined (fail-closed). Parsed from
+   * [governance.containment].
+   */
+  containment?: GovernanceContainmentConfig;
+}
+
+/**
+ * Containment-gate policy.
+ * Parsed from [governance.containment]
+ */
+export interface GovernanceContainmentConfig {
+  require?: boolean;
 }
 
 /**
@@ -579,6 +594,12 @@ const GovernanceConfigSchema = z
     scan: z
       .object({
         required_scanners: z.array(z.string()).optional(),
+      })
+      .passthrough()
+      .optional(),
+    containment: z
+      .object({
+        require: z.boolean().optional(),
       })
       .passthrough()
       .optional(),

@@ -56,6 +56,9 @@ export const DEFAULT_GOVERNANCE: Required<GovernanceConfig> = {
   scan: {
     required_scanners: [],
   },
+  containment: {
+    require: false,
+  },
 };
 
 /**
@@ -96,6 +99,10 @@ export function mergeGovernanceConfig(userConfig?: GovernanceConfig): Required<G
     scan: {
       ...DEFAULT_GOVERNANCE.scan,
       ...userConfig.scan,
+    },
+    containment: {
+      ...DEFAULT_GOVERNANCE.containment,
+      ...userConfig.containment,
     },
   };
 }
