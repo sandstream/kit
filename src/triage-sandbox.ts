@@ -127,8 +127,8 @@ export async function triageNpmSandbox(
   //    can clean up cleanly. --ignore-scripts (+ env var) prevents any
   //    lifecycle script from running while npm resolves/packs the spec.
   const work = await mkdtemp(join(tmpdir(), "kit-triage-"));
-  let tarballPath = "";
-  let tarballSize = 0;
+  let tarballPath: string;
+  let tarballSize: number;
 
   try {
     const { stdout } = await exec("npm", ["pack", spec, "--ignore-scripts", "--json", "--silent"], {

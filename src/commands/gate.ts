@@ -18,7 +18,7 @@
  * `kit agent-config --install-gate`. Pure decision lives in install-gate.ts.
  */
 export async function cmdGateBash(): Promise<boolean> {
-  let raw = "";
+  let raw: string;
   try {
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
@@ -74,7 +74,7 @@ export async function cmdGateBash(): Promise<boolean> {
  * fail-open on unparseable payloads (never break the agent), exit-2 deny on block.
  */
 export async function cmdGateEnv(): Promise<boolean> {
-  let raw = "";
+  let raw: string;
   try {
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
@@ -119,7 +119,7 @@ export async function cmdGateEnv(): Promise<boolean> {
  * (never break the agent on garbage), while the scope decisions themselves stay fail-closed.
  */
 async function readHookPayload(): Promise<unknown | null> {
-  let raw = "";
+  let raw: string;
   try {
     const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) chunks.push(chunk as Buffer);

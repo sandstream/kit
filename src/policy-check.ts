@@ -103,7 +103,7 @@ export async function evaluatePolicy(
 
   // required_scanners — presence is deterministic (mise-first resolution).
   for (const scanner of doc.required_scanners ?? []) {
-    let present = false;
+    let present: boolean;
     try {
       present = Boolean(await resolveToolBin(scanner));
     } catch {

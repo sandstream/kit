@@ -121,7 +121,7 @@ export class ExternalCommandKeyStore implements KeyStore {
         maxBuffer: 1 << 20,
       });
     } catch (e) {
-      throw new Error(`${SIGN_CMD_ENV} failed: ${(e as Error).message}`);
+      throw new Error(`${SIGN_CMD_ENV} failed: ${(e as Error).message}`, { cause: e });
     }
     const b64 = out.toString("utf-8").trim();
     if (!b64) throw new Error(`${SIGN_CMD_ENV} produced no signature on stdout`);

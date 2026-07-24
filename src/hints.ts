@@ -138,7 +138,7 @@ export async function collectHints(
   for (const rule of RULES) {
     if (out.length >= max) break;
     if (alreadyShown(rule.id)) continue;
-    let hit = false;
+    let hit: boolean;
     try {
       hit = await rule.detect(root);
     } catch {

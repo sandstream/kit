@@ -325,7 +325,7 @@ export async function enrollTotp(opts: {
 
   // Guard against silently overwriting an existing enrollment — that
   // would invalidate the user's already-registered authenticator entry.
-  let exists = false;
+  let exists: boolean;
   try {
     await access(filePath);
     exists = true;

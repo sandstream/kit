@@ -82,7 +82,7 @@ export function memoryHooksLiveness(
   markerPath: string = memoryInstallMarkerPath(),
 ): HookLiveness {
   const everInstalled = existsSync(markerPath);
-  let hooks: Record<string, HookGroup[]> = {};
+  let hooks: Record<string, HookGroup[]>;
   try {
     hooks = (readSettings(settingsPath).hooks ?? {}) as Record<string, HookGroup[]>;
   } catch {
@@ -121,6 +121,7 @@ function readSettings(path: string): Settings {
     // statusLine) with only kit's block. Refuse loudly instead of silently clobbering.
     throw new Error(
       `${path} is not valid JSON — refusing to overwrite it (that would drop your other Claude Code settings). Fix or move the file aside, then re-run. Parse error: ${(e as Error).message}`,
+      { cause: e },
     );
   }
 }

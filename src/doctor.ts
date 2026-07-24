@@ -442,7 +442,7 @@ async function checkTriageGates(cwd: string): Promise<DoctorCheck> {
   }
   const { resolveHooksDir } = await import("./hooks.js");
   const hookPath = join(resolveHooksDir(join(cwd, ".git")), "pre-commit");
-  let content: string | null = null;
+  let content: string | null;
   try {
     content = await readFile(hookPath, "utf-8");
   } catch {

@@ -72,6 +72,7 @@ export async function loadBaseline(cwd = process.cwd()): Promise<Baseline> {
   } catch (err) {
     throw new Error(
       `failed to read ${BASELINE_FILE}: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
 }

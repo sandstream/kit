@@ -696,7 +696,7 @@ export function commandExternalAnchor(cmd: string): ExternalTimestampAnchor {
           timeout: 30_000,
         });
       } catch (e) {
-        throw new Error(`external anchor command failed: ${(e as Error).message}`);
+        throw new Error(`external anchor command failed: ${(e as Error).message}`, { cause: e });
       }
       let parsed: unknown;
       try {

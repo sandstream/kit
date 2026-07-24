@@ -122,7 +122,7 @@ export async function patchGitignore(
     return { added: 0, written: false };
   }
   const path = resolve(cwd, ".gitignore");
-  let existing = "";
+  let existing: string;
   try {
     await access(path);
     existing = await readFile(path, "utf-8");

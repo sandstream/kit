@@ -40,6 +40,14 @@ export default tseslint.config(
       // gate on ~80 pre-existing dynamic-boundary anys.
       "@typescript-eslint/no-explicit-any": "warn",
       "no-useless-escape": "warn",
+      // New in eslint 10's recommended set. Both flagged 43 pre-existing sites
+      // (33 dead initializers of the `let x = ""; try { x = ... } catch { x = ... }`
+      // shape, 10 rethrows that dropped the original error); all are fixed, so
+      // these stay at `error` to keep them from creeping back. `preserve-caught-error`
+      // in particular protects debuggability — a rethrow without `{ cause }` throws
+      // the original stack away.
+      "no-useless-assignment": "error",
+      "preserve-caught-error": "error",
       // This is a terminal CLI — regexes legitimately match ANSI/control chars
       // (e.g. \x1b colour-code stripping). Not a bug class here.
       "no-control-regex": "off",

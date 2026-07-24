@@ -78,6 +78,7 @@ export function maybeGunzip(buf: Buffer, maxBytes: number = MAX_DECOMPRESSED_BYT
     if (e instanceof RangeError) {
       throw new Error(
         `backup decompresses beyond the ${Math.round(maxBytes / (1024 * 1024))} MB limit — refusing (possible gzip bomb)`,
+        { cause: e },
       );
     }
     throw e;

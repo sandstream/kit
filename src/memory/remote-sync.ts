@@ -507,7 +507,7 @@ export function maybeSyncNudge(): string | null {
   }
   const marker = join(getMemoryDir(), NUDGE_MARKER);
   if (existsSync(marker)) return null;
-  let worthIt = false;
+  let worthIt: boolean;
   try {
     const p = getMemoryDbPath();
     worthIt = existsSync(p) && statSync(p).size > 64 * 1024; // a non-trivial store

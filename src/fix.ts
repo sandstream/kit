@@ -358,7 +358,7 @@ export async function cmdFix(): Promise<boolean> {
       console.log(`${c.bold}[4/6] Secrets Template${c.reset}`);
       const templatePath = config.secrets?.template;
       if (templatePath && config.secrets?.keys && Object.keys(config.secrets.keys).length > 0) {
-        let templateExists = false;
+        let templateExists: boolean;
         try {
           await access(templatePath);
           templateExists = true;
