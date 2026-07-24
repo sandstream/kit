@@ -13,6 +13,7 @@
   },
   "commands": {
     "add": "stable",
+    "adr": "experimental",
     "agent-audit": "stable",
     "agent-config": "stable",
     "airgap": "stable",
@@ -109,6 +110,7 @@
   ],
   "helpKeys": [
     "add",
+    "adr",
     "agent-audit",
     "agent-config",
     "airgap",

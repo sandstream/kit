@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.7.0] - 2026-07-22
+
+### Added
+
+- **`kit adr` — ADR → gate (experimental).** Turn the machine-readable part of an
+  Architecture Decision Record into a deterministic gate, cited back to the ADR
+  ("why is this blocked? → ADR-0007"). `kit adr check` runs the `forbid-pattern`
+  rules of **accepted** ADRs (a fenced ` ```toml kit-enforce ` block, parsed with the
+  same smol-toml as `.kit.toml`) over the repo and exits non-zero on a violation;
+  `kit adr list` shows each ADR's status and whether it is enforced or
+  documented-only. kit **never interprets ADR prose** (off-charter) — only the
+  explicit rule block gates, and an accepted ADR with no rules is surfaced as
+  "documented, not enforced", never silently green. New pure `src/adr.ts`
+  (`parseAdr` / `evaluateAdr` / `globToRegExp`). Realizes the
+  architecture-canon-in-the-llm-era thesis: the decision becomes an enforced
+  constraint an agent cannot drift past.
+
 ## [5.6.0] - 2026-07-22
 
 ### Added
