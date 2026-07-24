@@ -75,7 +75,7 @@ export class DatabaseManager {
         throw new Error("Database connection test failed");
       }
     } catch (error) {
-      throw new Error(`Failed to connect to database: ${error}`);
+      throw new Error(`Failed to connect to database: ${error}`, { cause: error });
     }
   }
 
@@ -124,7 +124,7 @@ export class DatabaseManager {
         executionTime,
       };
     } catch (error) {
-      throw new Error(`Query failed: ${error}`);
+      throw new Error(`Query failed: ${error}`, { cause: error });
     }
   }
 
@@ -147,7 +147,7 @@ export class DatabaseManager {
     } catch (error) {
       await connection.query("ROLLBACK");
       this.pool.releaseConnection(connection);
-      throw new Error(`Transaction failed: ${error}`);
+      throw new Error(`Transaction failed: ${error}`, { cause: error });
     }
   }
 
@@ -213,7 +213,7 @@ export class DatabaseManager {
           migration.executedAt = new Date().toISOString();
           executedMigrations.push(migration);
         } catch (error) {
-          throw new Error(`Migration ${migration.name} failed: ${error}`);
+          throw new Error(`Migration ${migration.name} failed: ${error}`, { cause: error });
         }
       }
     }

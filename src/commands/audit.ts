@@ -109,7 +109,7 @@ async function cmdAuditVerify(): Promise<boolean> {
     /* default: not required */
   }
   const logPath = await resolveAuditLogPath();
-  let content = "";
+  let content: string;
   try {
     content = await readFile(logPath, "utf-8");
   } catch {
@@ -235,7 +235,7 @@ async function cmdAuditAnchor(): Promise<boolean> {
   const { anchorAuditLog } = await import("../audit-anchor.js");
   const { readFile } = await import("node:fs/promises");
   const logPath = await resolveAuditLogPath();
-  let content = "";
+  let content: string;
   try {
     content = await readFile(logPath, "utf-8");
   } catch {

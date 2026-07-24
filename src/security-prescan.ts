@@ -213,7 +213,7 @@ const REQUIRED_GITIGNORE = [
 
 async function checkGitignoreHoles(repo: string): Promise<PrescanFinding[]> {
   const path = join(repo, ".gitignore");
-  let text = "";
+  let text: string;
   try {
     text = await readFile(path, "utf-8");
   } catch {

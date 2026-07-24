@@ -393,7 +393,7 @@ export async function verifyAttestation(
       };
     }
     // The signature is mathematically valid; now decide AUTHENTICITY.
-    let expectedFp: string | null = null;
+    let expectedFp: string | null;
     if (expectedKey) {
       expectedFp = expectedKeyToFingerprint(expectedKey);
       if (!expectedFp) {

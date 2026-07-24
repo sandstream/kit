@@ -34,7 +34,7 @@ export async function buildHealthCtx(config: kitConfig): Promise<HealthCtx> {
   } catch {
     vercel = undefined;
   }
-  let services: string[] = [];
+  let services: string[];
   try {
     const pkg = JSON.parse(readFileSync(resolve(cwd, "package.json"), "utf8")) as {
       dependencies?: Record<string, string>;

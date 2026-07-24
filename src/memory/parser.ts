@@ -218,7 +218,7 @@ export function indexClaudeTranscripts(db: DatabaseSync): IndexResult {
 
   for (const projectName of readdirSync(projectsDir).sort()) {
     const projectPath = join(projectsDir, projectName);
-    let isDir = false;
+    let isDir: boolean;
     try {
       isDir = statSync(projectPath).isDirectory();
     } catch {

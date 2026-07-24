@@ -52,7 +52,7 @@ export interface SyncOptions {
  */
 function assertIncomingClean(dbPath: string, allowUnsafe: boolean): void {
   if (allowUnsafe || process.env.KIT_MEMORY_ALLOW_UNSAFE === "1") return;
-  let high: { label: string }[] = [];
+  let high: { label: string }[];
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     high = scanDbForInjection(db).filter((f) => f.confidence === "high");
@@ -61,6 +61,7 @@ function assertIncomingClean(dbPath: string, allowUnsafe: boolean): void {
     throw new Error(
       `refusing to merge: could not scan the incoming memory store for injection (${(e as Error).message}). ` +
         "Inspect it, or set KIT_MEMORY_ALLOW_UNSAFE=1 to override.",
+      { cause: e },
     );
   } finally {
     db.close();
