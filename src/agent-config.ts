@@ -497,6 +497,8 @@ export interface GateLiveness {
   installGate: boolean;
   /** PreToolUse env-write-gate (`gate-env`) present. */
   envGate: boolean;
+  /** PreToolUse exec-broker egress gate (`gate-egress`) present. */
+  egressGate: boolean;
 }
 
 /** Machine-local marker recording that kit installed the gates here (gitignored, beside them). */
@@ -531,7 +533,12 @@ export function gateLiveness(
   }
   const has = (suffix: string) =>
     pre.some((g) => g.hooks?.some((h) => h.command?.endsWith(suffix)));
-  return { everInstalled, installGate: has("gate-bash"), envGate: has("gate-env") };
+  return {
+    everInstalled,
+    installGate: has("gate-bash"),
+    envGate: has("gate-env"),
+    egressGate: has("gate-egress"),
+  };
 }
 
 /**
