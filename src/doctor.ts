@@ -11,6 +11,7 @@ import { verifyProfileSignature } from "./profile/sign.js";
 import { verifyPolicy, loadPolicy, getPolicyPath } from "./policy-doc.js";
 import { extractRbac } from "./rbac/policy-schema.js";
 import { tryLoadIdentity, isRevoked } from "./identity.js";
+import type { ContainmentVerdict } from "./containment.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -495,6 +496,53 @@ async function checkAgentEgressExposure(cwd: string): Promise<DoctorCheck> {
 }
 
 /**
+ * OS containment posture (the sandbox BELOW the tool boundary — defense-in-depth). kit
+ * governs the tool boundary; a sandbox contains what happens beneath it. Advisory, never a
+ * hard fail — the sandbox is a complementary layer the operator owns:
+ *   pass  a container / seccomp isolation signal is present
+ *   skip  containment can't be determined (non-Linux / restricted /proc) — NOT "not contained"
+ *   skip  no OS containment, but nothing with an install/exec capability is wired here
+ *   warn  install/exec gate wired AND no OS containment below it — pair kit with a sandbox
+ * Pure decision split out for testing.
+ */
+export function containmentPostureStatus(
+  v: ContainmentVerdict,
+  installGateWired: boolean,
+): { status: DoctorCheckStatus; detail: string } {
+  if (v.mechanism === "unknown") {
+    return {
+      status: "skip",
+      detail: "cannot determine OS containment (non-Linux / restricted /proc) — not a verdict",
+    };
+  }
+  if (v.contained) {
+    return {
+      status: "pass",
+      detail: `running inside ${v.mechanism} isolation (${v.confidence}) — ${v.details.join("; ")}`,
+    };
+  }
+  if (!installGateWired) {
+    return {
+      status: "skip",
+      detail: "no OS containment detected, and no install/exec capability wired here to contain",
+    };
+  }
+  return {
+    status: "warn",
+    detail:
+      "install/exec capability wired with NO OS containment below the tool boundary — kit governs the tool boundary, but pair it with a sandbox (container/seccomp) for the layer beneath (defense-in-depth)",
+  };
+}
+
+async function checkContainment(cwd: string): Promise<DoctorCheck> {
+  const { gatherContainmentSignals, detectContainment } = await import("./containment.js");
+  const { gateLiveness } = await import("./agent-config.js");
+  const verdict = detectContainment(gatherContainmentSignals());
+  const { status, detail } = containmentPostureStatus(verdict, gateLiveness(cwd).installGate);
+  return { name: "OS containment", status, detail, category: "security" };
+}
+
+/**
  * Keyless-credential posture (Pillar 2 tail — "sign, don't store"). Reports whether any hosts are
  * declared keyless (`[scope].sign`) and whether kit can actually sign for them — never silent:
  *   skip  no keyless hosts declared
@@ -627,6 +675,7 @@ export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorR
   allChecks.push(await checkBrokerRuntime(cwd));
   allChecks.push(await checkKeyless(cwd));
   allChecks.push(await checkAgentEgressExposure(cwd));
+  allChecks.push(await checkContainment(cwd));
   allChecks.push(await checkDeepSkillScanner());
   allChecks.push(await checkTriageGates(cwd));
   allChecks.push(checkControlPlane(cwd));

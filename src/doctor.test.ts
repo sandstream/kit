@@ -4,7 +4,12 @@ import { writeFile, unlink, mkdir, rmdir, rm } from "node:fs/promises";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runDoctor, triageGateStatus, agentEgressExposureStatus } from "./doctor.js";
+import {
+  runDoctor,
+  triageGateStatus,
+  agentEgressExposureStatus,
+  containmentPostureStatus,
+} from "./doctor.js";
 import { loadOrCreateIdentity, identityId } from "./identity.js";
 import { resolveKeyStore } from "./keystore/index.js";
 import {
@@ -479,5 +484,37 @@ describe("agentEgressExposureStatus (OpenAI eval-escape gap)", () => {
     const r = agentEgressExposureStatus({ installGate: true, egressGate: false });
     assert.equal(r.status, "warn");
     assert.match(r.detail, /gate-egress|scope-bound|escape/i);
+  });
+});
+
+describe("containmentPostureStatus (sandbox below the tool boundary)", () => {
+  it("skips (not a verdict) when containment is unknown", () => {
+    const r = containmentPostureStatus(
+      { mechanism: "unknown", contained: false, confidence: "none", details: [] },
+      true,
+    );
+    assert.equal(r.status, "skip");
+  });
+  it("passes when contained", () => {
+    const r = containmentPostureStatus(
+      { mechanism: "container", contained: true, confidence: "high", details: ["/.dockerenv"] },
+      true,
+    );
+    assert.equal(r.status, "pass");
+  });
+  it("WARNS when an install/exec gate is wired but there is no OS containment", () => {
+    const r = containmentPostureStatus(
+      { mechanism: "none", contained: false, confidence: "high", details: [] },
+      true,
+    );
+    assert.equal(r.status, "warn");
+    assert.match(r.detail, /sandbox|containment|defense-in-depth/i);
+  });
+  it("skips when no containment AND no install/exec capability wired", () => {
+    const r = containmentPostureStatus(
+      { mechanism: "none", contained: false, confidence: "high", details: [] },
+      false,
+    );
+    assert.equal(r.status, "skip");
   });
 });
