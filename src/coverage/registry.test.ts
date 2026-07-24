@@ -12,7 +12,7 @@ describe("coverage standards registry", () => {
   it("registers the expected standards, asvs first (the default)", () => {
     assert.deepEqual(
       [...COVERAGE_STANDARD_KEYS],
-      ["asvs", "llm-top10", "ssdf", "agentic-top10", "mcp-top10"],
+      ["asvs", "llm-top10", "ssdf", "agentic-top10", "mcp-top10", "aiuc-1", "gcp-waf-security"],
     );
     assert.equal(COVERAGE_STANDARDS[0]?.key, "asvs");
   });
