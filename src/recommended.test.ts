@@ -40,6 +40,7 @@ describe("applyRecommendedHardening", () => {
     assert.ok(pc.includes("security scan-staged"), "pre-commit runs security scan-staged");
     assert.ok(pc.includes("triage check-deps"), "pre-commit runs the dep triage gate");
     assert.ok(pc.includes("triage check-skills"), "pre-commit runs the skill triage gate");
+    assert.ok(pc.includes("adr check"), "pre-commit runs the ADR gate");
 
     // pre-push context-check gate (context was declared).
     assert.ok(existsSync(join(g, "hooks", "pre-push")), "pre-push installed when context declared");

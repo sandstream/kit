@@ -22,7 +22,8 @@ function kitInvocation(): string {
 /**
  * The opinionated "recommended" hardening layered on top of `kit setup`:
  *   - cross-harness memory capture (the Claude Code hooks)
- *   - a pre-commit gate: secret-scan + triage gates for newly-added deps and staged skills
+ *   - a pre-commit gate: secret-scan + triage gates for newly-added deps and staged skills +
+ *     the ADR gate (accepted ADRs' kit-enforce rules; a no-op when there are no ADRs)
  *   - a pre-push context-check gate (only when `[context]` is declared)
  *
  * The triage gates (`kit triage check-deps` / `check-skills`) were always meant to run at
@@ -47,6 +48,7 @@ export async function applyRecommendedHardening(
       `${kit} security scan-staged`,
       `${kit} triage check-deps`,
       `${kit} triage check-skills`,
+      `${kit} adr check`,
     ],
   };
   // The context-check gate only makes sense once a context is declared.

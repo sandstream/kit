@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.10.0] - 2026-07-24
+
+### Added
+
+- **ADR gate adoption — `kit adr check` is now wired into the workflow.** The rule engine shipped
+  in 5.7.0/5.8.0 graduates from a standalone command into the everyday gates, following the
+  `kit standards` pattern:
+  - **`kit review`** now runs an `=== adr ===` stage and fails the review on any ADR violation
+    **or** gap (an unprovable transitive rule is not a pass).
+  - **Recommended pre-commit hook** (`kit setup --recommended`) now includes `kit adr check`
+    alongside the secret-scan and triage gates — a no-op when a repo has no ADRs.
+  - **ADR baseline.** `kit adr freeze` (and `kit baseline freeze`) snapshot current violations/gaps
+    into `.kit-baseline.json` so only **NEW** findings gate; existing ones are frozen. The baseline
+    key deliberately excludes the line number, so an unrelated edit never silently un-freezes a
+    finding. A corrupt baseline fails **open** (gates on everything) and is surfaced, never
+    silently swallowed.
+
+  New embeddable `adrCheck` + `collectAdrFindings` / `freezeAdrBaseline` / `adrFindingKey` exports
+  in `src/commands/adr.ts` (one freezer, shared by both freeze paths, so they never drift). Still
+  zero-LLM.
+
 ## [5.9.0] - 2026-07-24
 
 ### Added
