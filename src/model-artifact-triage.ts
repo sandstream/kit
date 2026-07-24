@@ -37,14 +37,33 @@ export interface ModelArtifactTriage {
  * (Python `pickle` and formats that wrap it). The single high-confidence class.
  */
 const CODE_EXEC_EXTS = new Set([
-  ".pkl", ".pickle", ".pt", ".pth", ".bin", ".ckpt", ".joblib", ".dill", ".npy", ".npz", ".h5", ".pb", ".model",
+  ".pkl",
+  ".pickle",
+  ".pt",
+  ".pth",
+  ".bin",
+  ".ckpt",
+  ".joblib",
+  ".dill",
+  ".npy",
+  ".npz",
+  ".h5",
+  ".pb",
+  ".model",
 ]);
 
 /** Formats with no pickle exec but whose LOADERS have had memory-safety CVEs (verify source + integrity). */
 const LOADER_HARDENING_EXTS = new Set([".gguf", ".ggml", ".onnx"]);
 
 /** Formats designed to carry data only (no code exec) — still untrusted DATA, verify integrity/provenance. */
-const DATA_ONLY_EXTS = new Set([".safetensors", ".parquet", ".arrow", ".jsonl", ".csv", ".tfrecord"]);
+const DATA_ONLY_EXTS = new Set([
+  ".safetensors",
+  ".parquet",
+  ".arrow",
+  ".jsonl",
+  ".csv",
+  ".tfrecord",
+]);
 
 /**
  * Triage a single model/dataset artifact by name (and optional size / known-good hash

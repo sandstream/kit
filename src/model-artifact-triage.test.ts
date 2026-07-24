@@ -8,7 +8,10 @@ describe("triageModelArtifact", () => {
       const r = triageModelArtifact(f, { provenanceVerified: true });
       assert.equal(r.formatRisk, "code-exec", f);
       assert.equal(r.passed, false, f);
-      assert.ok(r.findings.some((x) => x.confidence === "high"), f);
+      assert.ok(
+        r.findings.some((x) => x.confidence === "high"),
+        f,
+      );
     }
   });
 

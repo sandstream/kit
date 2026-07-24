@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.5.0] - 2026-07-22
+
+### Added
+
+- **coverage: AIUC-1 + GCP Well-Architected Security-pillar evidence maps.** Two new
+  toggleable `kit coverage` standards via the existing registry pattern
+  (`--standard=aiuc-1|gcp-waf-security`, `[coverage].standards`). AIUC-1 is a
+  domain-level map that **prepares for** an AIUC-1 audit (SEC/PRIV/ACC auto; SAF/REL/SOC
+  honest gap) — explicitly NOT a certificate/attestation. GCP WAF Security is a
+  principle-level map (zero-trust/shift-left/use-AI-securely auto; design/compliance
+  manual; **use-AI-for-security = n/a by charter** — kit is zero-LLM). Both carry an
+  explicit "confirmed via secondary indexes" caveat.
+- **`kit triage model <path>` — untrusted AI-artifact triage.** Deterministic, zero-LLM
+  triage of model weights / datasets before loading: code-execution-on-load formats
+  (pickle family) FAIL; gguf/onnx loader-hardening + safetensors/parquet data-only are
+  advisory; unknown = untrusted; flags unverified provenance (a `.sha256`/`.sig` sidecar
+  counts) and zero-byte files. (`--json`.)
+- **`kit doctor`: agent egress-exposure posture.** Warns when an install/exec gate is
+  wired but the exec-broker egress gate is NOT — the exact gap behind the 2026-07
+  OpenAI×HuggingFace eval-escape.
+- **`kit skill test`: agentskills.io invocation-control conformance.** Parses
+  `user-invokable` / `disable-model-invocation` and reports the invocation posture in the
+  scope check (advisory; legacy skills unaffected).
+
+### Changed
+
+- **THREAT_MODEL:** new section positioning kit as one layer of defense-in-depth — names
+  what it does NOT contain (kernel/network containment) and says to pair it with an OS
+  sandbox.
+
 ## [5.4.1] - 2026-07-22
 
 ### Security
