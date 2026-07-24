@@ -16,7 +16,10 @@ jobs:
     # exposed (secret lives on the environment, not the repo).
     environment: npm-publish
     permissions:
-      contents: read # checkout
+      # write (not read) because this job creates the GitHub release for the tag
+      # and uploads the SBOMs to it. Scoped to this job only; every other
+      # workflow in the repo stays read-only.
+      contents: write # checkout + create release / upload SBOM assets
       id-token: write # npm provenance via OIDC (SLSA attestation)
       packages: write
       attestations: write # GitHub artifact attestations
@@ -174,6 +177,49 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Create GitHub release
+        # MUST run before the SBOM steps: `anchore/sbom-action` attaches its
+        # output to the tag's release (upload-release-assets defaults to true),
+        # and the final upload step targets it too. Historically this workflow
+        # created no release at all, so every SBOM step silently no-opped and
+        # the SBOMs only ever survived as workflow artifacts (which expire).
+        #
+        # Notes come from the CHANGELOG section for this version, not the tag
+        # message — `changelog-section.mjs` exits non-zero when the section is
+        # missing, so an undocumented release fails loudly instead of shipping
+        # empty notes. Idempotent: re-running on an existing release reuses it.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — reusing it."
+            exit 0
+          fi
+          node scripts/changelog-section.mjs "$VERSION" > /tmp/release-notes.md
+          # --verify-tag: refuse to invent a release for a tag that isn't on the
+          # remote. Prereleases are flagged so they don't read as stable.
+          EXTRA=""
+          case "$VERSION" in *-*) EXTRA="--prerelease" ;; esac
+          # shellcheck disable=SC2086  # EXTRA is a controlled, single-flag value
+          gh release create "$TAG" \
+            --title "kit $VERSION" \
+            --notes-file /tmp/release-notes.md \
+            --verify-tag $EXTRA
+          echo "Created release $TAG"
+
+      - name: Name the SBOM's root component
+        # Without this, syft records the scanned path (".") as the root
+        # component, so the SBOM cannot say which release it describes — a
+        # consumer holding the bare file has no version to go on. syft reads
+        # source.name / source.version from its config file.
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          PKG_NAME="$(node -p "require('./package.json').name")"
+          printf 'source:\n  name: %s\n  version: %s\n' "$PKG_NAME" "$VERSION" > .syft.yaml
+          cat .syft.yaml
+
       - name: Generate GitHub artifact attestation
         # Independent of npm provenance — attaches a signed manifest of the
         # built dist/ tree to the GitHub release for cross-verification.
@@ -193,6 +239,7 @@ jobs:
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           path: .
+          config: .syft.yaml # names the root component (see the step above)
           format: cyclonedx-json
           artifact-name: sbom.cyclonedx.json
           output-file: sbom.cyclonedx.json
@@ -202,18 +249,29 @@ jobs:
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           path: .
+          config: .syft.yaml # names the root component (see the step above)
           format: spdx-json
           artifact-name: sbom.spdx.json
           output-file: sbom.spdx.json
 
       - name: Attach SBOMs to GitHub release
-        # gh release upload skips silently if there's no release for the tag;
-        # downstream we create the release in a later step or via Releases UI.
+        # The release is created earlier in this job, so a failure here is a real
+        # failure — no `|| true`. Previously this swallowed everything and the
+        # SBOMs quietly never reached a release for any version up to 5.10.0.
+        # --clobber makes it idempotent whether or not sbom-action already
+        # uploaded them itself.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
-          # Best-effort SBOM attach; the release may not exist yet (created in a
-          # later step / via the UI), so a missing-release failure must not fail
-          # publish. Opt-out annotation must sit on the same line as `|| true`.
-          gh release upload "$TAG" sbom.cyclonedx.json sbom.spdx.json --clobber || true  # kit-self-audit: allow-continue-on-error
+          gh release upload "$TAG" sbom.cyclonedx.json sbom.spdx.json --clobber
+          # Fail-closed proof: re-read the release and require both assets, so a
+          # silent API no-op can't pass as an attached SBOM.
+          ASSETS="$(gh release view "$TAG" --json assets --jq '[.assets[].name] | join(",")')"
+          for want in sbom.cyclonedx.json sbom.spdx.json; do
+            case "$ASSETS" in
+              *"$want"*) ;;
+              *) echo "::error::$want missing from release $TAG (assets: $ASSETS)"; exit 1 ;;
+            esac
+          done
+          echo "Release $TAG carries: $ASSETS"
