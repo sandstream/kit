@@ -535,11 +535,69 @@ export function containmentPostureStatus(
 }
 
 async function checkContainment(cwd: string): Promise<DoctorCheck> {
-  const { gatherContainmentSignals, detectContainment } = await import("./containment.js");
+  const { gatherContainmentSignals, detectContainment, containmentEnforcement } =
+    await import("./containment.js");
   const { gateLiveness } = await import("./agent-config.js");
   const verdict = detectContainment(gatherContainmentSignals());
+
+  // Is containment a hard requirement? [governance.containment] require = true flips this check
+  // from advisory posture to a fail-closed gate.
+  const required = await containmentRequired(cwd);
+  if (required) {
+    const { status, detail } = containmentEnforcement(verdict, true);
+    await auditContainmentVerdict(cwd, verdict, true, status);
+    return { name: "OS containment", status, detail, category: "security" };
+  }
+
   const { status, detail } = containmentPostureStatus(verdict, gateLiveness(cwd).installGate);
   return { name: "OS containment", status, detail, category: "security" };
+}
+
+/** Read [governance.containment] require from .kit.toml. Best-effort false on any read error. */
+async function containmentRequired(cwd: string): Promise<boolean> {
+  try {
+    const { loadConfig } = await import("./config.js");
+    const { resolve } = await import("node:path");
+    const cfg = await loadConfig(resolve(cwd, ".kit.toml"));
+    return cfg.governance?.containment?.require === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Record the containment verdict to the sealed audit when it is policy-relevant (required).
+ * Best-effort: a missing .kit.toml / audit backend must never abort the doctor check — the
+ * verdict the operator sees is the source of truth, this is the durable evidence of it.
+ */
+async function auditContainmentVerdict(
+  cwd: string,
+  verdict: ContainmentVerdict,
+  required: boolean,
+  status: string,
+): Promise<void> {
+  try {
+    const { loadConfig } = await import("./config.js");
+    const { mergeGovernanceConfigAsync } = await import("./governance.js");
+    const { logAuditEvent } = await import("./audit.js");
+    const { resolve } = await import("node:path");
+    const cfg = await loadConfig(resolve(cwd, ".kit.toml"));
+    const gov = await mergeGovernanceConfigAsync(cfg.governance);
+    await logAuditEvent(gov, {
+      operation: "doctor.containment",
+      environment: gov.environment,
+      success: status === "pass",
+      metadata: {
+        required,
+        mechanism: verdict.mechanism,
+        contained: verdict.contained,
+        confidence: verdict.confidence,
+        status,
+      },
+    });
+  } catch {
+    /* best-effort — the rendered verdict is the source of truth, not this log line */
+  }
 }
 
 /**
