@@ -6,6 +6,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.10.1] - 2026-07-25
+
+A maintenance release. No new commands, no behaviour changes to any gate — the
+user-visible part is better error diagnostics. Its real purpose is to be the
+first release that exercises the repaired publish pipeline end to end.
+
+### Fixed
+
+- **Rethrows now preserve the original error.** Ten `catch` blocks interpolated
+  the caught error's _message_ into a new `Error` but dropped the error itself,
+  so the original stack was lost. Each now passes `{ cause }`. The ones that
+  mattered: `database.ts` swallowed the driver error on all four paths (connect,
+  query, transaction, migration) — a failing migration reported its own name and
+  nothing about _why_ — and the deliberately fail-closed paths in
+  `memory/sync.ts` and `memory/install.ts`, where losing the cause makes a
+  refusal hard to diagnose, which is the opposite of what a fail-closed gate
+  wants. `audit-anchor.ts`, `baseline.ts`, `keystore/command-store.ts`, and
+  `memory/backup.ts` got the same treatment.
+
+### Changed
+
+- **The publish pipeline now produces a GitHub release, and SBOMs that reach
+  it.** Every release through 5.10.0 generated CycloneDX + SPDX SBOMs and then
+  attached them to nothing: the upload was guarded with `|| true` because no
+  release existed, and nothing created one. The SBOMs survived only as workflow
+  artifacts, which expire. The release is now created inside the publish job
+  before the SBOM steps, its notes come from this file's section for the version,
+  and the attach step fails loudly and then verifies both assets are present.
+  Releases for every prior tag (v1.0.1 → v5.10.0) were backfilled by hand.
+- **SBOMs identify themselves.** syft recorded the scanned path (`.`) as the root
+  component, so `metadata.component` read `.@?` and a bare SBOM file could not
+  say which release it described. A generated `.syft.yaml` now sets
+  `source.name` / `source.version` from `package.json`.
+- **An undocumented release aborts before publishing, not after.** The
+  CHANGELOG check initially ran after `npm publish`, so a missing section was
+  caught only once the version was already burned on the registry. It now runs
+  beside the tag/version check, and the ordering is pinned by tests.
+
+### Security
+
+- **eslint 9.39.4 → 10.8.0** (`@eslint/js` → 10.0.1) to clear
+  `GHSA-mh99-v99m-4gvg` — a brace-expansion DoS reaching the tree transitively
+  via `@eslint/config-array → minimatch`. Five high findings, which made
+  `npm audit --audit-level=high` exit non-zero and would have blocked this very
+  release at the publish gate. No smaller fix existed: the advisory range is
+  `<=5.0.7` and the patch landed in `5.0.8`, outside the ranges the intermediate
+  packages ask for. **eslint is a devDependency, so the published tarball is
+  unaffected** — nothing in what you install changed because of this.
+
 ## [5.10.0] - 2026-07-24
 
 ### Added
