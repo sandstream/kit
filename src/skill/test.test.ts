@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   parseSkillManifest,
+  skillInvocationPosture,
   checkContract,
   checkTrigger,
   checkScope,
@@ -245,3 +246,32 @@ describe("testSkill — the folded report", () => {
     assert.ok(DISCLAIMED.some((d) => d.id === "rubric" && /never run by kit/.test(d.reason)));
   });
 });
+
+describe("agentskills.io invocation-control fields", () => {
+  it("parses user-invokable + disable-model-invocation booleans (dash and underscore)", () => {
+    const m = parseSkillManifest(
+      "---\nname: x\ndescription: does a thing well enough\nuser-invokable: false\ndisable-model-invocation: true\n---\nbody",
+    );
+    assert.equal(m.userInvokable, false);
+    assert.equal(m.disableModelInvocation, true);
+    const m2 = parseSkillManifest(
+      "---\nname: x\ndescription: does a thing well enough\nuser_invokable: true\ndisable_model_invocation: false\n---\nbody",
+    );
+    assert.equal(m2.userInvokable, true);
+    assert.equal(m2.disableModelInvocation, false);
+  });
+
+  it("posture is null when neither field is present (no change to legacy skills)", () => {
+    const m = parseSkillManifest("---\nname: x\ndescription: does a thing well enough\n---\nbody");
+    assert.equal(skillInvocationPosture(m), null);
+    assert.equal(m.userInvokable, undefined);
+    assert.equal(m.disableModelInvocation, undefined);
+  });
+
+  it("posture reports model-invocation disabled + not user-invokable", () => {
+    const m = parseSkillManifest(
+      "---\nname: x\ndescription: does a thing well enough\ndisable-model-invocation: true\nuser-invokable: false\n---\nbody",
+    );
+    assert.equal(skillInvocationPosture(m), "model-invocation disabled, not user-invokable");
+  });
+})
