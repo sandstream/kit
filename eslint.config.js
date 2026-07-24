@@ -40,6 +40,15 @@ export default tseslint.config(
       // gate on ~80 pre-existing dynamic-boundary anys.
       "@typescript-eslint/no-explicit-any": "warn",
       "no-useless-escape": "warn",
+      // New in eslint 10's recommended set (this repo moved 9 -> 10 to clear the
+      // brace-expansion DoS advisory, GHSA-mh99-v99m-4gvg). Both are legitimate
+      // signal, but they flag 43 pre-existing sites — 33 of the
+      // `let x = ""; try { x = ... } catch { x = ... }` shape, 10 rethrows
+      // missing `{ cause }`. Surfaced as warnings so the security bump stays a
+      // pure dependency change; the backlog is visible on every lint run and gets
+      // fixed on its own, reviewable pass rather than smuggled in here.
+      "no-useless-assignment": "warn",
+      "preserve-caught-error": "warn",
       // This is a terminal CLI — regexes legitimately match ANSI/control chars
       // (e.g. \x1b colour-code stripping). Not a bug class here.
       "no-control-regex": "off",
