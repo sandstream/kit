@@ -24,6 +24,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   rather than leaving the operator to guess. `--fdpass` is passed to the daemon so it can scan
   files its own uid could not otherwise read (which would otherwise look like a false gap).
 
+### Changed
+
+- **The ClamAV exit-code contract is now empirically verified on all three paths.** 5.11.0
+  shipped with `exit 0` (clean) and `exit 2` (scan error) confirmed against a real host but
+  `exit 1` (malicious) taken from ClamAV's documented spec, because macOS quarantined the EICAR
+  test file before `clamscan` could read it. Scanning a **gzipped** EICAR instead closes that
+  gap: `clamscan --no-summary /tmp/e.gz` → `/tmp/e.gz: Eicar-Test-Signature FOUND`, exit `1`.
+  That output is now a byte-exact test fixture, so the parser is pinned to real observed output
+  rather than an assumption.
+
 ## [5.12.0] - 2026-07-25
 
 ### Added
