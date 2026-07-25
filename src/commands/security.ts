@@ -25,6 +25,7 @@ import {
 } from "../security-policy.js";
 import { clearBumblebeeCache } from "../bumblebee.js";
 import { scanStagedFiles } from "../scan-staged.js";
+import { existsSync } from "node:fs";
 import { scanBuildArtifacts } from "../scan-build.js";
 import { scanTranscripts } from "../scan-transcripts.js";
 import { sampleCosts } from "../cost-monitor.js";
@@ -280,6 +281,10 @@ export async function cmdSecurity(): Promise<boolean> {
     return cmdSecurityScanBuild();
   }
 
+  if (sub === "scan-artifact") {
+    return cmdSecurityScanArtifact();
+  }
+
   if (sub === "scan-transcripts") {
     return cmdSecurityScanTranscripts();
   }
@@ -306,7 +311,7 @@ export async function cmdSecurity(): Promise<boolean> {
 
   if (sub !== "policy") {
     console.error(
-      `${c.red}Usage: kit security policy [init|add <pkg>|check] | scan-staged | scan-build [dir...] | scan-transcripts | costs | check-gitignore [--fix] | verify-pull [--base <ref>] | prescan <path> [--deep] | prescan-diff <baseline.jsonl> <latest.jsonl> | clear-cache${c.reset}`,
+      `${c.red}Usage: kit security policy [init|add <pkg>|check] | scan-staged | scan-build [dir...] | scan-artifact <path> [--recursive] | scan-transcripts | costs | check-gitignore [--fix] | verify-pull [--base <ref>] | prescan <path> [--deep] | prescan-diff <baseline.jsonl> <latest.jsonl> | clear-cache${c.reset}`,
     );
     return false;
   }
@@ -427,6 +432,61 @@ async function cmdSecurityScanStaged(): Promise<boolean> {
   console.error(
     `\n${c.dim}If a finding is a false positive, you can bypass with ${c.bold}git commit --no-verify${c.reset}${c.dim}, but prefer migrating the value to a vault first (${c.bold}kit secrets migrate${c.reset}${c.dim}).${c.reset}`,
   );
+  return false;
+}
+
+/**
+ * `kit security scan-artifact <path> [--recursive] [--json]` — the ingestion gate for an
+ * untrusted file that is about to be trusted (an upload, a downloaded dataset, a vendored
+ * blob). Delegates the byte-level scan to a locally-installed ClamAV — kit ships no engine
+ * and no signatures — and owns the verdict:
+ *   clean      → pass
+ *   malicious  → FAIL (exit non-zero), signature names shown
+ *   gap        → FAIL: a scan that could not complete (or no scanner at all) is NOT a pass
+ * The gap-fails-closed rule is the point: this is an ingestion gate, so "we could not check"
+ * must never read as "it is fine".
+ */
+async function cmdSecurityScanArtifact(): Promise<boolean> {
+  const args = process.argv.slice(4);
+  const json = args.includes("--json");
+  const recursive = args.includes("--recursive") || args.includes("-r");
+  const target = args.find((a) => !a.startsWith("-"));
+  if (!target) {
+    console.error(
+      `${c.red}Usage: kit security scan-artifact <path> [--recursive] [--json]${c.reset}`,
+    );
+    return false;
+  }
+  if (!existsSync(target)) {
+    console.error(
+      `${c.red}✗ scan-artifact: ${target} does not exist — nothing scanned (gap).${c.reset}`,
+    );
+    return false;
+  }
+
+  const { scanFileForMalware } = await import("../malware-scan.js");
+  const r = await scanFileForMalware(target, undefined, { recursive });
+
+  if (json) {
+    console.log(JSON.stringify({ target, recursive, ...r }, null, 2));
+    return r.verdict === "clean";
+  }
+
+  const engine = r.engine ? ` ${c.dim}(via ${r.engine})${c.reset}` : "";
+  if (r.verdict === "clean") {
+    console.log(`${c.green}✓ scan-artifact: ${target} — clean${c.reset}${engine}`);
+    console.log(`  ${c.dim}${r.detail}${c.reset}`);
+    return true;
+  }
+  if (r.verdict === "malicious") {
+    console.error(`${c.red}✗ scan-artifact: ${target} — MALWARE${c.reset}${engine}`);
+    console.error(`  ${c.red}${r.signatures.join(", ")}${c.reset}`);
+    console.error(`  ${c.dim}${r.detail}${c.reset}`);
+    return false;
+  }
+  // scanerror / not-installed → gap, and a gap fails an ingestion gate.
+  console.error(`${c.yellow}? scan-artifact: ${target} — GAP (not a pass)${c.reset}${engine}`);
+  console.error(`  ${c.dim}${r.detail}${c.reset}`);
   return false;
 }
 

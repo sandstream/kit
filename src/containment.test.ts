@@ -7,6 +7,7 @@ import {
   detectGvisorMarker,
   detectFirecrackerMarker,
   containmentEnforcement,
+  cgroupHasGvisorJobController,
 } from "./containment.js";
 
 describe("detectContainment", () => {
@@ -67,6 +68,39 @@ describe("detectGvisorMarker", () => {
     assert.equal(detectGvisorMarker("Linux version 6.1.0-generic (gcc ...)"), false);
     assert.equal(detectGvisorMarker(""), false);
   });
+
+  it("matches the REAL /proc/version from a live gVisor sandbox (runsc 20260721.0)", () => {
+    // Captured verbatim via `sudo runsc do cat /proc/version` on Ubuntu 24.04 (Hetzner KVM).
+    // Keep byte-exact: this fixture is why the fingerprint is verified, not doc-derived.
+    const real = "Linux version 4.19.0-gvisor #1 SMP Sun Jan 10 15:06:54 PST 2016";
+    assert.equal(detectGvisorMarker(real), true);
+    assert.equal(detectFirecrackerMarker(real), false, "must not cross-match Firecracker");
+  });
+
+  it("does not fire on real non-gVisor kernels or the host's DMI product name", () => {
+    // Negative controls captured from real hosts (a plain container kernel, an Ubuntu VM,
+    // and Hetzner's DMI product_name which gVisor passes through into the sandbox).
+    for (const s of [
+      "Linux version 6.18.5 (builder@sandboxing) (gcc (GCC) 15.2.0)",
+      "Linux version 6.8.0-51-generic (buildd@lcy02) #52-Ubuntu SMP",
+      "vServer",
+    ]) {
+      assert.equal(detectGvisorMarker(s), false, `false positive on: ${s}`);
+      assert.equal(detectFirecrackerMarker(s), false, `false positive on: ${s}`);
+    }
+  });
+});
+
+describe("cgroupHasGvisorJobController", () => {
+  it("detects gVisor's synthetic `job` controller (second independent signal)", () => {
+    // Real /proc/self/cgroup from inside runsc release-20260721.0.
+    assert.equal(cgroupHasGvisorJobController("7:pids:/\n6:memory:/\n5:job:/\n"), true);
+  });
+
+  it("does not fire on a real Linux cgroup list, incl. a path segment named job", () => {
+    assert.equal(cgroupHasGvisorJobController("7:pids:/\n6:blkio:/\n"), false);
+    assert.equal(cgroupHasGvisorJobController("0::/user.slice/job/task"), false);
+  });
 });
 
 describe("detectFirecrackerMarker", () => {
@@ -89,6 +123,21 @@ describe("detectContainment — sandboxed runtimes", () => {
     assert.equal(v.mechanism, "firecracker");
     assert.equal(v.contained, true);
   });
+  it("a live gVisor sandbox reports Seccomp: 0 — the gvisor check MUST precede the seccomp check", () => {
+    // The real capture inside runsc showed `Seccomp: 0` and NO NoNewPrivs line at all. If the
+    // seccomp/container branches were evaluated first, a genuine gVisor sandbox would resolve to
+    // mechanism "none" (contained: false) — a false negative on the strongest sandbox there is.
+    // This locks the ordering that prevents it.
+    const v = detectContainment({
+      gvisorMarker: true,
+      seccompMode: 0,
+      noNewPrivs: undefined,
+      cgroupContainer: false,
+    });
+    assert.equal(v.mechanism, "gvisor");
+    assert.equal(v.contained, true);
+  });
+
   it("absence of a fingerprint never downgrades — still resolves via container/seccomp signals", () => {
     // No gvisor/firecracker marker, but a real container signal is present.
     const v = detectContainment({ cgroupContainer: true, seccompMode: 2 });

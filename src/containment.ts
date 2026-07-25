@@ -138,11 +138,34 @@ export function cgroupHasContainer(cgroupContent: string): boolean {
 
 /**
  * gVisor (runsc) fingerprint from a userspace-visible string such as `/proc/version`.
- * gVisor exposes a synthetic /proc; some builds embed "gVisor"/"runsc" in the reported
- * kernel version. A match is a real positive; a non-match is inconclusive (never "not gVisor").
+ * A match is a real positive; a non-match is inconclusive (never "not gVisor").
+ *
+ * VERIFIED against a live gVisor sandbox (runsc release-20260721.0, `runsc do`, Ubuntu
+ * 24.04 / Hetzner KVM host). gVisor reports a synthetic kernel version that carries the
+ * marker in the release field:
+ *
+ *   Linux version 4.19.0-gvisor #1 SMP Sun Jan 10 15:06:54 PST 2016
+ *
+ * Two other real markers were observed and deliberately NOT used as the primary signal:
+ *   - `dmesg` starts with "[    0.000000] Starting gVisor..." — reading it needs the syslog
+ *     syscall / /dev/kmsg, which a hardened sandbox may deny; /proc/version is cheaper and
+ *     always readable.
+ *   - the cgroup list contains a `job` controller (see `cgroupHasGvisorJobController`), which
+ *     is a gVisor invention — used as a SECOND signal so a build whose version string lacks
+ *     the marker is still detected instead of silently degrading to "not contained".
  */
 export function detectGvisorMarker(text: string): boolean {
   return /\b(gvisor|runsc)\b/i.test(text);
+}
+
+/**
+ * Second, independent gVisor signal: gVisor synthesizes a `job` cgroup controller that does
+ * not exist on Linux (verified inside runsc release-20260721.0, whose /proc/self/cgroup had
+ * `5:job:/` alongside the usual pids/memory entries). Anchored to the v1 `N:job:/` shape so a
+ * directory merely NAMED "job" in a real cgroup path cannot trip it.
+ */
+export function cgroupHasGvisorJobController(cgroupContent: string): boolean {
+  return /^\d+:job:/m.test(cgroupContent);
 }
 
 /**
@@ -235,7 +258,10 @@ export function gatherContainmentSignals(): ContainmentSignals {
       readSafe("/sys/class/dmi/id/bios_vendor"),
     ].join(" ");
     const haystack = `${procVersion} ${dmi}`;
-    if (detectGvisorMarker(haystack)) signals.gvisorMarker = true;
+    // Either independent signal is enough: the synthetic kernel-version marker, or the
+    // gVisor-only `job` cgroup controller (so a build without the version marker is still seen).
+    if (detectGvisorMarker(haystack) || cgroupHasGvisorJobController(readSafe("/proc/self/cgroup")))
+      signals.gvisorMarker = true;
     if (detectFirecrackerMarker(haystack)) signals.firecrackerMarker = true;
   } catch {
     /* best-effort */

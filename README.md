@@ -279,7 +279,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit env {list,switch,current,diff}`: Environment routing + drift detection
 - `kit context {check,use,--prompt}`: Lock each CLI to its declared account + project (no wrong-org pushes)
 - `kit triage {npm,pip,docker,repo,skill}`: Pre-install security check
-- `kit security {scan-build,scan-staged,verify-pull,costs,policy}`: Security ops
+- `kit security {scan-build,scan-staged,scan-artifact,verify-pull,costs,policy}`: Security ops; `scan-artifact <path>` is the ingestion gate for an untrusted file/tree (ClamAV delegate — malicious **or** an unverifiable gap both fail)
 - `kit hooks {install,add,sync}`: Git hooks + bypass detector
 - `kit governance` / `kit audit {secrets,verify,anchor,export}`: Policy + audit-log inspection; `anchor`/`verify` seal and check the external HMAC anchor
 - `kit check --attest` (also `kit ci --attest` / `KIT_ATTEST=1`): Opt-in signed receipt of which scanners ran + the verdict; `kit check verify-attestation <file>` verifies it

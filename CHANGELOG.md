@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.13.0] - 2026-07-25
+
+### Added
+
+- **`kit security scan-artifact <path>` — the ingestion gate for an untrusted artifact.**
+  Scans a file (or a tree with `--recursive`) via the ClamAV delegate before you trust an
+  upload, a downloaded dataset, or a vendored blob. `clean` passes; `malicious` fails with the
+  signature names; and a **gap** — scan error, or no scanner installed — **also fails**. That is
+  the point of an ingestion gate: "we could not check" must never read as "it is fine".
+  `--json` for machine consumption.
+- **clamd (daemon) fast path for the malware delegate.** The delegate now prefers `clamdscan`
+  against a resident `clamd`, which already holds the signature DB — milliseconds instead of the
+  ~4 s `clamscan` spends loading 3.6M signatures on every invocation. When the daemon is absent
+  or unreachable kit **falls back to `clamscan`**, so a stopped daemon costs speed, not coverage,
+  and the result reports which `engine` actually produced the verdict (`clamd` | `clamscan`)
+  rather than leaving the operator to guess. `--fdpass` is passed to the daemon so it can scan
+  files its own uid could not otherwise read (which would otherwise look like a false gap).
+
+### Changed
+
+- **The ClamAV exit-code contract is now empirically verified on all three paths.** 5.11.0
+  shipped with `exit 0` (clean) and `exit 2` (scan error) confirmed against a real host but
+  `exit 1` (malicious) taken from ClamAV's documented spec, because macOS quarantined the EICAR
+  test file before `clamscan` could read it. Scanning a **gzipped** EICAR instead closes that
+  gap: `clamscan --no-summary /tmp/e.gz` → `/tmp/e.gz: Eicar-Test-Signature FOUND`, exit `1`.
+  That output is now a byte-exact test fixture, so the parser is pinned to real observed output
+  rather than an assumption.
+- **The gVisor fingerprint is verified against a live sandbox, and gained a second signal.**
+  5.9.0 shipped the gVisor/Firecracker fingerprints as documentation-derived, resolving to
+  `unknown` rather than risk a false claim. Running `runsc do` (gVisor release-20260721.0 on
+  Ubuntu 24.04) settles it:
+  - `/proc/version` reads `Linux version 4.19.0-gvisor #1 SMP …` — the existing marker **does**
+    fire, and is now pinned as a byte-exact fixture with real-host negative controls (a plain
+    container kernel, an Ubuntu VM, and the host DMI `product_name` gVisor passes through).
+  - The sandbox reports **`Seccomp: 0`** and no `NoNewPrivs` line at all. That makes the branch
+    ORDER load-bearing: were seccomp/container evaluated first, a genuine gVisor sandbox would
+    resolve to `none` / not-contained — a false negative on the strongest sandbox available. A
+    test now locks the ordering.
+  - New `cgroupHasGvisorJobController` adds a second, independent signal (gVisor synthesizes a
+    `job` cgroup controller that does not exist on Linux — observed as `5:job:/`), so a build
+    whose version string lacks the marker is still detected instead of degrading to
+    "not contained". Anchored to the `N:job:` shape so a real path segment named `job` cannot
+    trip it.
+  - The `dmesg` marker (`Starting gVisor...`) was also observed but deliberately **not** used as
+    the primary signal — reading it needs the syslog syscall / `/dev/kmsg`, which a hardened
+    sandbox may deny. Documented in the source for the next person.
+
+  Firecracker remains documentation-derived and honestly unverified (no Firecracker host was
+  available; Hetzner Cloud is KVM/QEMU).
+
 ## [5.12.0] - 2026-07-25
 
 ### Added
