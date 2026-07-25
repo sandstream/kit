@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.15.0] - 2026-07-25
+
+### Added
+
+- **`forbid_import` can now follow a dependency across npm package boundaries.** A transitive
+  ADR rule could only see the repo's own relative-import graph, so the most common way an
+  architectural boundary is actually broken was structurally invisible: `src/web` imports an
+  innocent-looking wrapper package, and the wrapper is what pulls in `pg`. Opt in per rule with
+  `follow_packages = true` (requires `transitive = true`):
+
+  ```toml kit-enforce
+  [[forbid_import]]
+  import = "^pg$"
+  paths = "src/web/**/*.ts"
+  transitive = true
+  follow_packages = true
+  message = "the web layer must not reach the DB driver — go through the service layer"
+  ```
+
+  The violation is cited to the file the rule governs, with the dependency path in the message
+  (`via src/web/h.ts → wrapper/lib/index.js → wrapper/lib/db.js`).
+
+  - **Opt-in, and bounded.** Crossing package boundaries is far more expensive than the in-repo
+    walk, so it never happens unless a rule asks. The walk is bounded by package depth
+    (default 3), a hard visited-node cap (default 2000), and the existing visited set.
+  - **Every hop we cannot complete is a `gap`, never a silent pass.** A bare specifier that
+    does not resolve in `node_modules`, a module that resolves but cannot be read, and a walk
+    that hits the depth or node bound all downgrade the result from clean-green to *unproven*
+    and are reported as such. `kit adr freeze` baselines them like any other finding.
+  - **Node builtins stay leaves.** There is no user code behind `node:fs` to walk into, so an
+    unfollowed builtin is not a gap — but a rule that forbids one still gates on the direct
+    match, because the specifier is tested before we ask whether it is followable.
+  - `src/adr.ts` stays **I/O-free**: the `node_modules` resolver is an injected
+    `PackageResolver` (fs-backed implementation in `src/commands/adr.ts`), which is what makes
+    the bounds, the gap paths, and the entry-point resolution unit-testable against a synthetic
+    dependency tree.
+
 ## [5.14.0] - 2026-07-25
 
 ### Added
