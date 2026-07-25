@@ -5,7 +5,7 @@
  *
  *   kit adr list    every ADR + status + enforced / documented-only
  *   kit adr check   run accepted ADRs' rules over the repo (default): forbid_pattern,
- *                   require_pattern, and forbid_import (direct + transitive)
+ *                   require_pattern, and forbid_import (direct, transitive, cross-package)
  *   kit adr freeze  snapshot current violations/gaps into .kit-baseline.json so only
  *                   NEW ones gate (mirrors `kit standards freeze`)
  *
@@ -14,18 +14,166 @@
  * as "documented, not enforced" — never silently green. A transitive forbid_import
  * that hits an unresolvable relative import is a `gap` (can't prove), not a pass.
  *
+ * This file also owns the impure `node_modules` resolver injected into the pure evaluator
+ * so `follow_packages = true` can cross npm package boundaries without src/adr.ts doing I/O.
+ *
  * `adrCheck` is the embeddable gate reused by `kit review` and the pre-commit hook.
  */
-import { readFileSync as read, existsSync as exists } from "node:fs";
-import { relative as rel, join as pathJoin } from "node:path";
+import { readFileSync as read, existsSync as exists, statSync } from "node:fs";
+import { relative as rel, join as pathJoin, dirname, isAbsolute } from "node:path";
 import { c } from "../utils/colors.js";
 import { walkSourceFiles } from "../source-walk.js";
-import { parseAdr, evaluateAdr, adrIsEnforced, type Adr, type AdrViolation } from "../adr.js";
+import {
+  parseAdr,
+  evaluateAdr,
+  adrIsEnforced,
+  type Adr,
+  type AdrViolation,
+  type PackageResolver,
+} from "../adr.js";
 import { baselineSet, type Baseline } from "../baseline.js";
 
 const ADR_DIRS = ["docs/adr", "docs/decisions"];
 const CODE_EXTS = [".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".rb", ".php"];
 const BASELINE_CATEGORY = "adr";
+/** Extensions tried when a specifier omits one (`.json` included: a JSON module is a real edge). */
+const RESOLVE_EXTS = ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json"];
+
+function isFile(p: string): boolean {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** `<path>`, `<path><ext>`, then `<path>/index<ext>` — Node/TS resolution, narrowed to files. */
+function tryFile(base: string): string | null {
+  const bases = [base];
+  const jsExt = base.match(/\.(js|jsx|mjs|cjs)$/);
+  // A `.js` specifier compiled from TS resolves to the `.ts` source (ESM/TS convention).
+  if (jsExt) bases.push(base.slice(0, -jsExt[0].length));
+  for (const b of bases) {
+    for (const ext of RESOLVE_EXTS) if (isFile(b + ext)) return b + ext;
+    for (const ext of RESOLVE_EXTS.slice(1)) {
+      const idx = pathJoin(b, `index${ext}`);
+      if (isFile(idx)) return idx;
+    }
+  }
+  return null;
+}
+
+/** Split a bare specifier into package name + subpath. Null for `#imports` (private mappings). */
+function splitBare(specifier: string): { name: string; sub: string } | null {
+  if (specifier.startsWith("#")) return null;
+  const parts = specifier.split("/");
+  if (specifier.startsWith("@")) {
+    if (parts.length < 2) return null;
+    return { name: parts.slice(0, 2).join("/"), sub: parts.slice(2).join("/") };
+  }
+  return { name: parts[0], sub: parts.slice(1).join("/") };
+}
+
+/** Entry-point candidates from a package.json, most specific first. */
+function entryCandidates(pkg: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const push = (v: unknown): void => {
+    if (typeof v === "string") out.push(v);
+  };
+  const exp = pkg.exports;
+  if (typeof exp === "string") push(exp);
+  else if (exp && typeof exp === "object") {
+    const root = (exp as Record<string, unknown>)["."] ?? exp;
+    if (typeof root === "string") push(root);
+    else if (root && typeof root === "object") {
+      for (const cond of ["import", "module", "require", "node", "default"]) {
+        const v = (root as Record<string, unknown>)[cond];
+        push(v);
+        if (v && typeof v === "object") push((v as Record<string, unknown>).default);
+      }
+    }
+  }
+  push(pkg.module);
+  push(pkg.main);
+  return out;
+}
+
+/** Nearest `node_modules/<name>` walking up from `fromDir`, as Node itself resolves. */
+function findPackageDir(fromDir: string, name: string): string | null {
+  let dir = fromDir;
+  for (;;) {
+    const cand = pathJoin(dir, "node_modules", name);
+    try {
+      if (statSync(cand).isDirectory()) return cand;
+    } catch {
+      /* keep walking up */
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/** A package's declared entry point (exports → module → main → index), or null. */
+function resolvePackageEntry(pkgDir: string): string | null {
+  let manifest: Record<string, unknown>;
+  try {
+    manifest = JSON.parse(read(pathJoin(pkgDir, "package.json"), "utf-8"));
+  } catch {
+    return tryFile(pathJoin(pkgDir, "index")); // no/unreadable manifest → CJS default only
+  }
+  for (const cand of entryCandidates(manifest)) {
+    const hit = tryFile(pathJoin(pkgDir, cand));
+    if (hit) return hit;
+  }
+  return tryFile(pathJoin(pkgDir, "index"));
+}
+
+/** Resolve a bare specifier as imported from `fromDir`, via the nearest `node_modules`. */
+function resolveBare(fromDir: string, specifier: string): string | null {
+  const bare = splitBare(specifier);
+  if (!bare) return null;
+  const pkgDir = findPackageDir(fromDir, bare.name);
+  if (!pkgDir) return null;
+  return bare.sub ? tryFile(pathJoin(pkgDir, bare.sub)) : resolvePackageEntry(pkgDir);
+}
+
+/**
+ * The impure half of the ADR gate: the fs-backed resolver that lets a transitive
+ * `forbid_import` with `follow_packages = true` cross npm package boundaries. Deliberately
+ * conservative — anything it cannot resolve or read returns null, which `evaluateAdr` turns
+ * into a `gap` (unproven), never a pass. Keys are absolute paths; results are memoized so a
+ * fan-in module is stat'ed once per run.
+ */
+export function createNodeModulesResolver(cwd: string): PackageResolver {
+  const resolveCache = new Map<string, string | null>();
+  const readCache = new Map<string, string | null>();
+  return {
+    resolve(fromFile, specifier) {
+      const from = isAbsolute(fromFile) ? fromFile : pathJoin(cwd, fromFile);
+      const key = `${from}\u0000${specifier}`;
+      const hit = resolveCache.get(key);
+      if (hit !== undefined) return hit;
+      const out = specifier.startsWith(".")
+        ? tryFile(pathJoin(dirname(from), specifier))
+        : resolveBare(dirname(from), specifier);
+      resolveCache.set(key, out);
+      return out;
+    },
+    read(key) {
+      const hit = readCache.get(key);
+      if (hit !== undefined) return hit;
+      let out: string | null;
+      try {
+        out = read(key, "utf-8");
+      } catch {
+        out = null;
+      }
+      readCache.set(key, out);
+      return out;
+    },
+  };
+}
 
 function loadAdrs(cwd: string): { adr: Adr; file: string }[] {
   const out: { adr: Adr; file: string }[] = [];
@@ -65,10 +213,13 @@ export function collectAdrFindings(cwd: string): AdrFindings {
   const violations: AdrViolation[] = [];
   const gaps: AdrViolation[] = [];
   let enforcedCount = 0;
+  // One resolver per run: its caches are what make a cross-package walk affordable. Rules
+  // without `follow_packages` never call it, so this costs nothing when nobody opted in.
+  const packages = createNodeModulesResolver(cwd);
   for (const { adr } of adrs) {
     if (!adrIsEnforced(adr)) continue;
     enforcedCount++;
-    for (const v of evaluateAdr(adr, files)) {
+    for (const v of evaluateAdr(adr, files, { packages })) {
       (v.kind === "gap" ? gaps : violations).push(v);
     }
   }

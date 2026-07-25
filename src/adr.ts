@@ -15,6 +15,9 @@
  *                       `transitive = true` also forbids reaching it through the
  *                       repo's relative-import graph; a relative import we cannot
  *                       resolve is surfaced as a *gap* (can't prove), never green.
+ *                       `follow_packages = true` additionally walks ACROSS npm package
+ *                       boundaries (a wrapper dependency that pulls the target in),
+ *                       using an injected resolver so this module stays I/O-free.
  */
 import { parse as parseToml } from "smol-toml";
 
@@ -46,6 +49,13 @@ export type AdrRule =
       paths: string;
       /** Also forbid reaching the target through the relative-import graph. */
       transitive?: boolean;
+      /**
+       * With `transitive`, also cross npm PACKAGE boundaries: follow a bare specifier into
+       * `node_modules`, resolve the package's entry, and keep walking its imports. This is what
+       * catches "web must never reach pg, even through a wrapper dependency". Opt-in because
+       * the walk is far more expensive than the in-repo one, and bounded (depth + node cap).
+       */
+      followPackages?: boolean;
       message?: string;
     };
 
@@ -134,6 +144,7 @@ export function parseAdr(raw: string): Adr | null {
                 import: imp,
                 paths,
                 transitive: r.transitive === true,
+                followPackages: r.follow_packages === true,
                 message: str(r, "message"),
               }
             : null;
@@ -250,12 +261,60 @@ function isRelative(specifier: string): boolean {
   return specifier.startsWith(".");
 }
 
+// Node builtins are true graph leaves: there is no user code behind `node:fs` to walk into,
+// so an unfollowed builtin is NOT a gap. A rule that forbids one still gates on the direct
+// match — the specifier is tested before we ever ask whether it is followable.
+const NODE_BUILTINS = new Set([
+  "assert", "async_hooks", "buffer", "child_process", "cluster", "console", "constants",
+  "crypto", "dgram", "diagnostics_channel", "dns", "domain", "events", "fs", "http", "http2",
+  "https", "inspector", "module", "net", "os", "path", "perf_hooks", "process", "punycode",
+  "querystring", "readline", "repl", "sqlite", "stream", "string_decoder", "sys", "test",
+  "timers", "tls", "trace_events", "tty", "url", "util", "v8", "vm", "worker_threads", "zlib",
+]); // prettier-ignore
+
+/** True for `node:*` and bare builtin specifiers (`fs`, `path/posix`, …). */
+export function isBuiltinSpecifier(specifier: string): boolean {
+  if (specifier.startsWith("node:")) return true;
+  return NODE_BUILTINS.has(specifier.split("/")[0]);
+}
+
+/**
+ * Resolves what the pure in-repo graph cannot: an npm package's entry point and the files
+ * inside it. INJECTED rather than imported so `evaluateAdr` stays a pure function of its
+ * inputs; the fs-backed implementation lives in `src/commands/adr.ts`.
+ */
+export interface PackageResolver {
+  /**
+   * Resolve `specifier` (bare or relative) as imported from `fromFile` to a stable key, or
+   * null when it cannot be resolved. Null is never a pass — the caller emits a `gap`.
+   */
+  resolve(fromFile: string, specifier: string): string | null;
+  /** Source of a key previously returned by `resolve`, or null when unreadable. */
+  read(key: string): string | null;
+}
+
+export interface EvaluateAdrOptions {
+  /** Enables `follow_packages`. Without it such a rule degrades to the in-repo walk. */
+  packages?: PackageResolver;
+  /** Max npm package boundaries one walk may cross before it reports a gap. */
+  maxPackageDepth?: number;
+  /** Hard cap on distinct files one walk may visit before it reports a gap. */
+  maxNodes?: number;
+}
+
+const DEFAULT_MAX_PACKAGE_DEPTH = 3;
+const DEFAULT_MAX_NODES = 2000;
+
 /**
  * Evaluate an accepted ADR's rules over the provided files. Pure — the caller supplies
  * `{ path, content }` for the repo; this never touches disk. A non-accepted ADR (or one
  * with no rules) yields no violations. Line numbers are 1-indexed.
  */
-export function evaluateAdr(adr: Adr, files: { path: string; content: string }[]): AdrViolation[] {
+export function evaluateAdr(
+  adr: Adr,
+  files: { path: string; content: string }[],
+  opts: EvaluateAdrOptions = {},
+): AdrViolation[] {
   if (adr.status !== "accepted") return [];
   const out: AdrViolation[] = [];
   const fileSet = new Set(files.map((f) => f.path));
@@ -271,6 +330,14 @@ export function evaluateAdr(adr: Adr, files: { path: string; content: string }[]
     return refs;
   };
   const contentByPath = new Map(files.map((f) => [f.path, f.content] as const));
+  const walkCtx: WalkCtx = {
+    fileSet,
+    importsOf,
+    contentByPath,
+    packages: opts.packages,
+    maxPackageDepth: opts.maxPackageDepth ?? DEFAULT_MAX_PACKAGE_DEPTH,
+    maxNodes: opts.maxNodes ?? DEFAULT_MAX_NODES,
+  };
 
   for (const rule of adr.rules) {
     let globRe: RegExp;
@@ -301,17 +368,7 @@ export function evaluateAdr(adr: Adr, files: { path: string; content: string }[]
       if (!matcher) continue;
       for (const f of matched) {
         if (rule.transitive) {
-          out.push(
-            ...evalTransitiveImport(
-              adr.id,
-              rule,
-              f.path,
-              matcher,
-              fileSet,
-              importsOf,
-              contentByPath,
-            ),
-          );
+          out.push(...evalTransitiveImport(adr.id, rule, f.path, matcher, walkCtx));
         } else {
           for (const ref of importsOf(f.path, f.content)) {
             if (matcher.test(ref.specifier))
@@ -350,48 +407,120 @@ function v(
   return { adrId, file, line, rule, detail, message, kind };
 }
 
+interface WalkCtx {
+  fileSet: Set<string>;
+  importsOf: (path: string, content: string) => ImportRef[];
+  contentByPath: Map<string, string>;
+  packages?: PackageResolver;
+  maxPackageDepth: number;
+  maxNodes: number;
+}
+
+/** Shorten a package key for the `via` chain: `…/node_modules/pg/index.js` → `pg/index.js`. */
+function chainLabel(key: string): string {
+  const i = key.lastIndexOf("node_modules/");
+  return i < 0 ? key : key.slice(i + "node_modules/".length);
+}
+
+/** What one import edge is: a graph leaf, something we cannot prove, or a node to walk into. */
+type WalkEdge =
+  | { kind: "leaf" }
+  | { kind: "gap"; why: string }
+  | { kind: "follow"; resolved: string; depth: number };
+
 /**
- * Transitive forbid-import: BFS the relative-import graph from `startFile`. A direct or
- * reachable import whose specifier matches → one violation (cited to the start file, with
- * the chain in the message). Any relative import that does not resolve within the repo is
- * surfaced as a `gap` (we cannot prove the target is unreachable) — never silent green.
- * Bare specifiers are leaves: only the matched one gates, unmatched ones are not gaps.
+ * Classify one import edge. Bare specifiers are leaves unless the rule asked to cross package
+ * boundaries AND a resolver was injected; builtins are always leaves. In-repo relative edges
+ * stay on the pure fileSet resolver — everything else (bare specifiers, and any import made
+ * from inside a package) goes through the injected one.
+ */
+function resolveEdge(
+  ctx: WalkCtx,
+  at: { ref: ImportRef; file: string; inRepo: boolean; depth: number; followPkgs: boolean },
+): WalkEdge {
+  const { ref, file, inRepo, depth, followPkgs } = at;
+  const relative = isRelative(ref.specifier);
+  if (!relative && (!followPkgs || isBuiltinSpecifier(ref.specifier))) return { kind: "leaf" };
+  const nextDepth = relative ? depth : depth + 1;
+  if (nextDepth > ctx.maxPackageDepth)
+    return {
+      kind: "gap",
+      why: `package-walk depth ${ctx.maxPackageDepth} reached at "${ref.specifier}" in ${chainLabel(file)}`,
+    };
+  const resolved =
+    inRepo && relative
+      ? resolveRelative(file, ref.specifier, ctx.fileSet)
+      : (ctx.packages?.resolve(file, ref.specifier) ?? null);
+  return resolved === null
+    ? { kind: "gap", why: `unresolved import "${ref.specifier}" in ${chainLabel(file)}` }
+    : { kind: "follow", resolved, depth: nextDepth };
+}
+
+/**
+ * Transitive forbid-import: BFS the import graph from `startFile`. A direct or reachable
+ * import whose specifier matches → one violation (cited to the start file, with the chain in
+ * the message). Anything we cannot follow to the end is surfaced as a `gap` (we cannot prove
+ * the target is unreachable) — never silent green:
+ *
+ *   - an unresolvable relative import inside the repo
+ *   - with `follow_packages`, a bare specifier that does not resolve in `node_modules`,
+ *     a resolved module we cannot read, or a walk that hits the depth / node bound
+ *
+ * Without `follow_packages` (or without an injected resolver) bare specifiers stay leaves:
+ * only a matching one gates, and an unmatched one is not a gap. Node builtins are always
+ * leaves — there is no user code behind them to walk into.
  */
 function evalTransitiveImport(
   adrId: string,
   rule: Extract<AdrRule, { type: "forbid-import" }>,
   startFile: string,
   matcher: RegExp,
-  fileSet: Set<string>,
-  importsOf: (path: string, content: string) => ImportRef[],
-  contentByPath: Map<string, string>,
+  ctx: WalkCtx,
 ): AdrViolation[] {
+  const followPkgs = rule.followPackages === true && ctx.packages !== undefined;
   const seen = new Set<string>([startFile]);
-  const queue: { file: string; chain: string[] }[] = [{ file: startFile, chain: [startFile] }];
+  const queue: { file: string; chain: string[]; depth: number }[] = [
+    { file: startFile, chain: [startFile], depth: 0 },
+  ];
   const gaps: AdrViolation[] = [];
+  const gap = (specifier: string, file: string, line: number, why: string): void => {
+    gaps.push(
+      v(adrId, startFile, file === startFile ? line : 1, "forbid-import", specifier, "gap",
+        `${adrId}: cannot prove — ${why}`), // prettier-ignore
+    );
+  };
+
   while (queue.length) {
-    const { file, chain } = queue.shift()!;
-    const content = contentByPath.get(file);
-    if (content === undefined) continue;
-    for (const ref of importsOf(file, content)) {
+    const { file, chain, depth } = queue.shift()!;
+    const inRepo = ctx.fileSet.has(file);
+    const content = inRepo ? ctx.contentByPath.get(file) : ctx.packages?.read(file);
+    if (content === undefined || content === null) {
+      // In-repo: the file was listed without content (nothing to walk). Out-of-repo: we
+      // resolved a module and then could not read it — that edge is unproven, not clean.
+      if (!inRepo) gap(file, file, 1, `unreadable module ${chainLabel(file)}`);
+      continue;
+    }
+    for (const ref of ctx.importsOf(file, content)) {
       if (matcher.test(ref.specifier)) {
-        const via = chain.length > 1 ? ` (via ${chain.join(" → ")})` : "";
+        const via = chain.length > 1 ? ` (via ${chain.map(chainLabel).join(" → ")})` : "";
         const line = file === startFile ? ref.line : 1;
         const base = rule.message ?? `${adrId} forbids reaching "${ref.specifier}"`;
         return [v(adrId, startFile, line, "forbid-import", ref.specifier, "violation", base + via)];
       }
-      if (isRelative(ref.specifier)) {
-        const resolved = resolveRelative(file, ref.specifier, fileSet);
-        if (resolved === null) {
-          gaps.push(
-            v(adrId, startFile, file === startFile ? ref.line : 1, "forbid-import", ref.specifier, "gap",
-              `${adrId}: cannot prove — unresolved import "${ref.specifier}" in ${file}`), // prettier-ignore
-          );
-        } else if (!seen.has(resolved)) {
-          seen.add(resolved);
-          queue.push({ file: resolved, chain: [...chain, resolved] });
-        }
+      const edge = resolveEdge(ctx, { ref, file, inRepo, depth, followPkgs });
+      if (edge.kind === "leaf") continue;
+      if (edge.kind === "gap") {
+        gap(ref.specifier, file, ref.line, edge.why);
+        continue;
       }
+      if (seen.has(edge.resolved)) continue;
+      if (seen.size >= ctx.maxNodes) {
+        gap(ref.specifier, file, ref.line,
+          `import graph exceeded ${ctx.maxNodes} files — walk truncated at "${ref.specifier}"`); // prettier-ignore
+        continue;
+      }
+      seen.add(edge.resolved);
+      queue.push({ file: edge.resolved, chain: [...chain, edge.resolved], depth: edge.depth });
     }
   }
   // No violation found; surface at most one gap per start file (deduped) so an unresolved

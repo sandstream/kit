@@ -264,7 +264,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit check`: Status of tools, services, secrets, hooks, security, tests
 - `kit fix`: Auto-remediate gaps (tools, gitignore, hooks, .env.template)
 - `kit review` / `kit heal`: One-gate repo audit (check + design + standards + ADR); bounded self-heal loop
-- `kit adr {check,list,freeze}`: Turn an Architecture Decision Record into a deterministic gate — enforce a `kit-enforce` block (`forbid_pattern` / `require_pattern` / `forbid_import`, incl. transitive) cited back to the ADR. Zero-LLM (prose is never interpreted)
+- `kit adr {check,list,freeze}`: Turn an Architecture Decision Record into a deterministic gate — enforce a `kit-enforce` block (`forbid_pattern` / `require_pattern` / `forbid_import`, incl. transitive and across npm package boundaries) cited back to the ADR. Zero-LLM (prose is never interpreted)
 - `kit scan`: Run external scanners (snyk/trivy/grype/semgrep/osv/socket) → one merged, air-gap-aware verdict
 - `kit supply-chain` / `kit sbom` / `kit gha-audit` / `kit agent-audit`: Install-time triage, SBOM, Actions hardening, agent/MCP/hook audit
 - `kit self-audit`: Deterministic self-check of kit's own source against the audit's bug-classes (also asserts CI-referenced scripts exist)
@@ -535,7 +535,7 @@ Context pointers are non-secret and live in config; the credentials they authent
 - `kit check --enforce-tests`: Fail when net-new source files lack a sibling `.test.ts`
 - `kit design`: Static a11y scan (img-alt, button-empty, anchor-no-href, input-no-label) + design-token consistency (raw `#hex` / `px` bypass). `--enforce` to gate, `--json` for machine output
 - `kit review`: Meta-runner: `check` + `design` + `standards` + `adr` in one command. Use as a single PR-gate entry point for AI agents
-- `kit adr {check,list,freeze}`: Enforce accepted ADRs' machine-readable `kit-enforce` rules over the repo, cited back to the ADR ("why is this blocked? → ADR-0007"). Rule types: `forbid_pattern`, `require_pattern`, and import-aware `forbid_import` (direct + transitive; an unresolvable relative import is surfaced as a `gap`, never a silent pass). Only `accepted` ADRs gate; prose is never interpreted (zero-LLM). `freeze` baselines existing findings so only NEW ones fail
+- `kit adr {check,list,freeze}`: Enforce accepted ADRs' machine-readable `kit-enforce` rules over the repo, cited back to the ADR ("why is this blocked? → ADR-0007"). Rule types: `forbid_pattern`, `require_pattern`, and import-aware `forbid_import` (direct + transitive; `follow_packages = true` also walks across npm package boundaries, catching "web must never reach `pg`, even through a wrapper dependency"). Anything the walk cannot follow to the end — an unresolvable import, an unreadable module, a depth/node bound — is surfaced as a `gap`, never a silent pass. Only `accepted` ADRs gate; prose is never interpreted (zero-LLM). `freeze` baselines existing findings so only NEW ones fail
 - `kit baseline freeze`: Snapshot current findings (untested files, a11y, tokens, standards, ADR violations/gaps) into `.kit-baseline.json` so pre-existing warnings stay warnings and only net-new findings can fail
 - `kit baseline show`: Print current baseline
 
