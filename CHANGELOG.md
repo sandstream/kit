@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.11.0] - 2026-07-25
+
+### Added
+
+- **`kit triage model --scan-bytes` — malware-scan delegate (ClamAV).** The byte-level layer
+  beneath the model/dataset format+provenance triage. Connect-don't-copy: kit ships **no**
+  scanning engine and **no** signatures — it invokes a locally-installed ClamAV (`clamscan`) and
+  records the verdict. Contract (verified against ClamAV 1.5.3 on a real host — exit 0/2 paths
+  empirically, exit 1 per ClamAV's documented, stable spec): **exit 0 → clean**, **exit 1 →
+  malicious** (signature names parsed from `<path>: <SIGNATURE> FOUND`), **exit 2/other →
+  scanerror**, **binary absent → not-installed**. A `malicious` result forces an overall
+  **fail**; a `scanerror` / missing scanner is a **gap** — surfaced, never a silent clean
+  (absence of a scan is not a pass). Without `--scan-bytes` the byte layer is skipped (kit does
+  not auto-run a multi-second scan). New pure `interpretClamscan` + `scanFileForMalware` in
+  `src/malware-scan.ts`. Honest limit: kit does not *detect* malware — it records that a verified
+  ClamAV scan ran and what it returned; signature-based AV is known-malware-only.
+
 ## [5.10.1] - 2026-07-25
 
 A maintenance release. No new commands, no behaviour changes to any gate — the

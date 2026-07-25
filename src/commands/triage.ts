@@ -55,6 +55,9 @@ export async function cmdTriage(): Promise<boolean> {
     console.log(
       "  kit triage model <path>              Evaluate an untrusted AI artifact (model weights / dataset) before loading",
     );
+    console.log(
+      "  kit triage model <path> --scan-bytes + byte-level malware scan via a local ClamAV delegate (clean/malicious/gap; never a silent pass)",
+    );
     console.log("  kit triage skill <path|name>         Evaluate Claude Code / agent skill");
     console.log(
       "  kit triage skill <path|name> --deep  + SkillSpector (NVIDIA) static Stage 1 (no LLM, no egress) when installed",
@@ -716,11 +719,12 @@ async function cmdTriageCheckSkills(): Promise<boolean> {
  * `<path>.sha256` or `<path>.sig` sidecar counts as verified provenance. Exits
  * non-zero on a high-confidence (code-exec) finding.
  */
-export function cmdTriageModel(args: string[]): boolean {
+export async function cmdTriageModel(args: string[]): Promise<boolean> {
   const json = hasFlag(args, "--json");
+  const scanBytes = hasFlag(args, "--scan-bytes");
   const path = args.find((a) => !a.startsWith("--"));
   if (!path) {
-    console.error("usage: kit triage model <path> [--json]");
+    console.error("usage: kit triage model <path> [--scan-bytes] [--json]");
     return false;
   }
   let sizeBytes: number | undefined;
@@ -734,9 +738,30 @@ export function cmdTriageModel(args: string[]): boolean {
   const provenanceVerified = existsSync(`${path}.sha256`) || existsSync(`${path}.sig`);
   const r = triageModelArtifact(path, { sizeBytes, provenanceVerified });
 
+  // Optional byte-level layer: delegate to a locally-installed ClamAV. kit records the
+  // verdict; it never becomes the AV. `malicious` forces an overall fail; a scanerror /
+  // missing scanner is a GAP (surfaced, never a silent clean).
+  let scan: import("../malware-scan.js").MalwareScanResult | undefined;
+  if (scanBytes) {
+    if (!existsSync(path)) {
+      scan = {
+        verdict: "scanerror",
+        signatures: [],
+        ranScanner: false,
+        isGap: true,
+        detail: "file does not exist — nothing to scan (gap)",
+      };
+    } else {
+      const { scanFileForMalware } = await import("../malware-scan.js");
+      scan = await scanFileForMalware(path);
+    }
+  }
+
+  const overallPass = r.passed && scan?.verdict !== "malicious";
+
   if (json) {
-    console.log(JSON.stringify(r, null, 2));
-    return r.passed;
+    console.log(JSON.stringify({ ...r, malwareScan: scan ?? null, passed: overallPass }, null, 2));
+    return overallPass;
   }
 
   console.log(
@@ -747,10 +772,26 @@ export function cmdTriageModel(args: string[]): boolean {
     console.log(`  [${tag}] ${f.label}`);
     console.log(`      ${c.dim}${f.rationale}${c.reset}`);
   }
+  if (scan) {
+    const tag =
+      scan.verdict === "malicious"
+        ? `${c.red}MALWARE${c.reset}`
+        : scan.verdict === "clean"
+          ? `${c.green}clean${c.reset}`
+          : `${c.yellow}gap${c.reset}`;
+    console.log(`  [${tag}] byte-scan (ClamAV delegate)`);
+    console.log(`      ${c.dim}${scan.detail}${c.reset}`);
+  } else {
+    console.log(
+      `  ${c.dim}byte-scan: not run (pass --scan-bytes to delegate to a local ClamAV)${c.reset}`,
+    );
+  }
   console.log(
-    r.passed
-      ? `${c.green}pass${c.reset} — no code-execution-on-load format (still verify provenance + load in a sandbox)`
-      : `${c.red}fail${c.reset} — code-execution-on-load risk; do not load an untrusted file`,
+    overallPass
+      ? `${c.green}pass${c.reset} — no code-execution-on-load format${scan?.verdict === "clean" ? " + ClamAV clean" : ""} (still verify provenance + load in a sandbox)`
+      : scan?.verdict === "malicious"
+        ? `${c.red}fail${c.reset} — ClamAV matched a known-malware signature; do not load`
+        : `${c.red}fail${c.reset} — code-execution-on-load risk; do not load an untrusted file`,
   );
-  return r.passed;
+  return overallPass;
 }
