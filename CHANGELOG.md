@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.12.0] - 2026-07-25
+
+### Added
+
+- **`kit coverage --standard=nist-800-53` — NIST SP 800-53 Rev. 5 evidence map.** The
+  accreditation-oriented first slice of the regulated-edition track (#349). Mapped at the
+  **control-family** level (all 20 Rev. 5 families) rather than per-control: 800-53 has ~1000
+  controls, and pretending a local CLI speaks to each would be a false green. A family bucketed
+  `auto` means kit emits deterministic evidence relevant to that family — **never** that every
+  control in it is satisfied.
+  - `auto` (11): AC, AU, CA, CM, IA, PT, RA, SA, SC, SI, SR — each citing the actual kit checks
+    (signed scope + PreToolUse gates, hash-chained audit, profile drift, hardware-rooted
+    identity, merged scanner verdict, triage/SBOM/provenance, OS-containment posture, the
+    ClamAV byte-scan delegate, …).
+  - `manual` (3): IR, PL, PM — kit ships real capability (`kit panic`, the ADR gate,
+    policy-as-code) but no check can verify that a human *program* exists.
+  - `n-a` (6): AT, CP, MA, MP, PE, PS — physical/personnel/organizational by nature and
+    deliberately out of charter, stated rather than quietly claimed.
+
+  Still an evidence map, not an attestation and not an ATO package.
+
+### Fixed
+
+- **Coverage disclaimers no longer emit "control familys".** The shared standard engine
+  pluralized a descriptor's `unit` with a naive `+ "s"`, which broke on units ending in
+  consonant + `y`. New `pluralizeUnit` handles that (and sibilant endings); user-facing text now
+  reads "control families".
+
 ## [5.11.0] - 2026-07-25
 
 ### Added

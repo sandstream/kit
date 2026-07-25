@@ -4,6 +4,7 @@ import {
   buildStandardReport,
   buildStandardEntries,
   formatStandardText,
+  pluralizeUnit,
   type StandardDescriptor,
 } from "./standard.js";
 import { OWASP_LLM_TOP10 } from "./owasp-llm-top10.js";
@@ -100,5 +101,18 @@ describe("standard --verify evidence binding", () => {
     const r = buildStandardReport(SSDF_218A);
     assert.equal(r.summary.autoVerified, undefined);
     for (const e of r.sections.flatMap((s) => s.entries)) assert.equal(e.evidence, undefined);
+  });
+});
+
+describe("pluralizeUnit", () => {
+  it("handles consonant+y, sibilants, and the plain case", () => {
+    assert.equal(pluralizeUnit("control family"), "control families");
+    assert.equal(pluralizeUnit("risk"), "risks");
+    assert.equal(pluralizeUnit("practice"), "practices");
+    assert.equal(pluralizeUnit("control"), "controls");
+    assert.equal(pluralizeUnit("principle"), "principles");
+    assert.equal(pluralizeUnit("class"), "classes");
+    // vowel + y keeps the naive form ("key" → "keys", not "kies")
+    assert.equal(pluralizeUnit("key"), "keys");
   });
 });

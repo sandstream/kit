@@ -120,18 +120,30 @@ export function summarizeStandard(entries: StandardEntry[]): StandardSummary {
   return summary;
 }
 
+/**
+ * Pluralize a descriptor's `unit` for the disclaimer. Naive `+ "s"` produced
+ * "control familys" once a unit ended in a consonant + y, so handle that case
+ * (and an already-sibilant ending) instead of shipping a typo in user-facing text.
+ */
+export function pluralizeUnit(unit: string): string {
+  if (/[^aeiou]y$/i.test(unit)) return `${unit.slice(0, -1)}ies`;
+  if (/(s|x|z|ch|sh)$/i.test(unit)) return `${unit}es`;
+  return `${unit}s`;
+}
+
 /** The honest disclaimer — never says "compliant"/"certified". */
 export function standardDisclaimer(descriptor: StandardDescriptor, summary: StandardSummary): string {
+  const units = pluralizeUnit(descriptor.unit);
   let base =
     `Evidence map, not a compliance attestation: kit auto-verifies ${summary.auto} of the ` +
-    `${summary.total} ${descriptor.label} (${descriptor.version}) ${descriptor.unit}s it maps ` +
+    `${summary.total} ${descriptor.label} (${descriptor.version}) ${units} it maps ` +
     `(${summary.gap} gap, ${summary.manual} manual, ${summary.na} n/a). ` +
     `It does not assess the full standard and is not a substitute for a GRC tool.`;
   if (descriptor.caveat) base += ` ${descriptor.caveat}`;
   if (summary.autoVerified !== undefined) {
     base +=
       ` This run (--verify): ${summary.autoVerified} verified-passing, ${summary.autoFailing} FAILING, ` +
-      `${summary.autoUnrun} not-run of the ${summary.auto} mapped AUTO ${descriptor.unit}s — mapped is not passing.`;
+      `${summary.autoUnrun} not-run of the ${summary.auto} mapped AUTO ${units} — mapped is not passing.`;
   }
   return base;
 }
