@@ -1,3 +1,4 @@
+import type { MemoryClass } from "./class.js";
 /**
  * kit memory — shared types for the local conversation store.
  */
@@ -31,6 +32,11 @@ export interface MessageInput {
   timestamp?: string;
   cwd?: string;
   gitBranch?: string;
+  /**
+   * Sensitivity class for this row (#348). Resolved by the caller from
+   * `[memory] default_class` / KIT_MEMORY_CLASS; absent ⇒ the documented default.
+   */
+  memoryClass?: MemoryClass;
   version?: string;
 }
 

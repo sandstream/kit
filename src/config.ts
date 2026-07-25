@@ -409,7 +409,14 @@ export interface kitConfig {
   policy?: PolicyConfig;
   /** Memory/PAL behavior. `track_findings` (default true): auto-track `kit check`
    *  findings as PAL items for cross-session reminders + auto-close on re-scan. */
-  memory?: { track_findings?: boolean };
+  /**
+   * `default_class` (#348): sensitivity class for memory captured in this project —
+   * `public` | `internal` | `restricted` (default `internal`). Because kit loads the
+   * PROJECT's `.kit.toml`, declaring it here is the per-project override of the default.
+   * A more restrictive memory is never recalled into a less restrictive context; an
+   * INVALID value fails closed to `restricted`. `KIT_MEMORY_CLASS` overrides it.
+   */
+  memory?: { track_findings?: boolean; default_class?: "public" | "internal" | "restricted" };
   /** Update behavior. `check` (default true): surface a newer published kit in
    *  `kit check` + the update banner. (Set false, or KIT_NO_UPDATE_CHECK=1.)
    *  `auto` (default false, opt-in): when a newer kit is found during `kit check`,
@@ -784,6 +791,7 @@ export const kitConfigSchema = z
     memory: z
       .object({
         track_findings: z.boolean().optional(),
+        default_class: z.enum(["public", "internal", "restricted"]).optional(),
       })
       .passthrough()
       .optional(),

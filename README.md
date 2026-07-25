@@ -274,6 +274,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit login --plan`: Show the resolved auth strategy (vault/capture/interactive) per service without logging in
 - `kit secrets {set,migrate,rotate,propagate,onecli,validate}`: Secret lifecycle
 - `kit memory {index,search,stats,suggest,merge,save,threads,share,backup}`: Local-first, cross-harness second brain (per-harness `stats`, project recall, saved copilots) + `kit memory pal` pending-action ledger
+  - **Classified memory** (`[memory] default_class` = `public`\|`internal`\|`restricted`, default `internal`; `KIT_MEMORY_CLASS` overrides): every row carries a sensitivity class, and recall never returns a row **more restrictive than the asking context** — so a note captured in a restricted repo cannot surface while you work in a public one. A row whose class is missing or unrecognized is excluded from **every** context (fail-closed); an *invalid* configured value falls back to `restricted` rather than silently widening disclosure.
 - `kit auth {elevate,setup-totp,status,revoke}`: Elevation gate + TOTP
 - `kit mcp {list,auth,set-token,clear}`: MCP-server orchestrator
 - `kit env {list,switch,current,diff}`: Environment routing + drift detection
