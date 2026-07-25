@@ -15,6 +15,7 @@ import { OWASP_AGENTIC_TOP10 } from "./owasp-agentic-top10.js";
 import { OWASP_MCP_TOP10 } from "./owasp-mcp-top10.js";
 import { AIUC_1 } from "./aiuc-1.js";
 import { GCP_WAF_SECURITY } from "./gcp-waf-security.js";
+import { NIST_800_53 } from "./nist-800-53.js";
 
 export interface CoverageStandard {
   /** CLI selector, e.g. "asvs" | "llm-top10" | "agentic-top10". */
@@ -46,6 +47,7 @@ export const COVERAGE_STANDARDS: readonly CoverageStandard[] = [
   fromDescriptor(OWASP_MCP_TOP10),
   fromDescriptor(AIUC_1),
   fromDescriptor(GCP_WAF_SECURITY),
+  fromDescriptor(NIST_800_53),
 ];
 
 export const COVERAGE_STANDARD_KEYS: readonly string[] = COVERAGE_STANDARDS.map((s) => s.key);

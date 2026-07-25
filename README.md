@@ -268,7 +268,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit scan`: Run external scanners (snyk/trivy/grype/semgrep/osv/socket) → one merged, air-gap-aware verdict
 - `kit supply-chain` / `kit sbom` / `kit gha-audit` / `kit agent-audit`: Install-time triage, SBOM, Actions hardening, agent/MCP/hook audit
 - `kit self-audit`: Deterministic self-check of kit's own source against the audit's bug-classes (also asserts CI-referenced scripts exist)
-- `kit coverage`: OWASP ASVS L2 evidence map showing which controls kit's deterministic checks auto-verify vs gap/manual/n-a (an evidence map, not a compliance attestation; `--json` for GRC tools)
+- `kit coverage [--standard=<key>|all]`: Evidence maps against 8 pinned standards — OWASP **ASVS L2** · **LLM Top 10** · **Agentic Top 10** · **MCP Top 10** · NIST **SSDF 800-218A** · **NIST 800-53 Rev. 5** (control-family level) · **AIUC-1** · **GCP WAF Security** — showing which controls kit's deterministic checks auto-verify vs gap/manual/n-a (evidence maps, **not** compliance attestations; `--list-standards` to enumerate, `--json` for GRC tools)
 - `kit sentinel {run,install,status}`: Autonomous redline watcher (propose/apply guarded fixes)
 - `kit verify-provenance` / `kit ingest`: Verify SLSA provenance offline; ingest external SARIF/OSV
 - `kit login --plan`: Show the resolved auth strategy (vault/capture/interactive) per service without logging in
@@ -551,7 +551,11 @@ Context pointers are non-secret and live in config; the credentials they authent
 
 ### Compliance evidence
 
-`kit coverage` emits a deterministic OWASP ASVS 4.0.3 L2 _evidence map_: it maps kit's own checks and self-audit rules to a vendored, pinned, curated subset of controls and buckets each as auto-verified, gap, manual, or n-a. `--json` (or `--format=json`) emits the structured report for a GRC tool to consume.
+`kit coverage` emits deterministic _evidence maps_: it maps kit's own checks and self-audit rules to a vendored, pinned, curated subset of a standard's controls and buckets each as auto-verified, gap, manual, or n-a. `--json` (or `--format=json`) emits the structured report for a GRC tool to consume.
+
+Eight standards are registered (`--list-standards`; `--standard=<key>`, or `all`): OWASP **ASVS 4.0.3 L2** (default) · **LLM Top 10** · **Agentic Top 10** · **MCP Top 10** · NIST **SSDF 800-218A** · **NIST 800-53 Rev. 5** · **AIUC-1** · **GCP WAF Security**. Toggle the set with `[coverage].standards` in `.kit.toml` (absent ⇒ all on).
+
+The NIST 800-53 map is deliberately at the **control-family** level (20 families, not ~1000 controls): a family bucketed `auto` means kit emits deterministic evidence relevant to it — never that every control in it is satisfied. Physical, personnel, and organizational families (PE/PS/AT/CP/MA/MP) are `n-a` by charter rather than quietly claimed.
 
 It is explicitly **an evidence map, not a compliance attestation**: it never claims "compliant". The goal is to be the deterministic evidence source a GRC tool ingests, not a worse version of one. (`experimental` tier.)
 

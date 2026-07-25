@@ -12,7 +12,16 @@ describe("coverage standards registry", () => {
   it("registers the expected standards, asvs first (the default)", () => {
     assert.deepEqual(
       [...COVERAGE_STANDARD_KEYS],
-      ["asvs", "llm-top10", "ssdf", "agentic-top10", "mcp-top10", "aiuc-1", "gcp-waf-security"],
+      [
+        "asvs",
+        "llm-top10",
+        "ssdf",
+        "agentic-top10",
+        "mcp-top10",
+        "aiuc-1",
+        "gcp-waf-security",
+        "nist-800-53",
+      ],
     );
     assert.equal(COVERAGE_STANDARDS[0]?.key, "asvs");
   });
@@ -42,6 +51,26 @@ describe("coverage standards registry", () => {
         `${key} maps all 10`,
       );
     }
+  });
+
+  it("nist-800-53 maps all 20 Rev.5 control families, honestly bucketed", () => {
+    const d = getCoverageStandard("nist-800-53")?.descriptor;
+    assert.ok(d, "nist-800-53 present");
+    // Rev. 5 defines 20 control families; the map is family-level by design.
+    assert.equal(d?.requirements.length, 20, "20 control families");
+    assert.equal(Object.keys(d?.mapping ?? {}).length, 20, "every family mapped");
+    // Physical/personnel families must stay `na` — claiming coverage there is a false green.
+    for (const family of ["PE", "PS", "AT", "CP", "MA", "MP"]) {
+      assert.equal(d?.mapping[family]?.bucket, "na", `${family} must be na (out of charter)`);
+    }
+    // The families kit genuinely enforces must be `auto` with cited evidence.
+    for (const family of ["AC", "AU", "CM", "IA", "SC", "SI", "SR"]) {
+      assert.equal(d?.mapping[family]?.bucket, "auto", `${family} should be auto`);
+      assert.ok((d?.mapping[family]?.checks.length ?? 0) > 0, `${family} cites evidence`);
+    }
+    // The caveat must state the family-level limit so nobody reads it as per-control coverage.
+    assert.match(d?.caveat ?? "", /FAMILY-level/);
+    assert.match(d?.caveat ?? "", /not an attestation/i);
   });
 
   it("getCoverageStandard resolves known keys and rejects unknown", () => {
