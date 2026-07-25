@@ -33,6 +33,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   gap: `clamscan --no-summary /tmp/e.gz` → `/tmp/e.gz: Eicar-Test-Signature FOUND`, exit `1`.
   That output is now a byte-exact test fixture, so the parser is pinned to real observed output
   rather than an assumption.
+- **The gVisor fingerprint is verified against a live sandbox, and gained a second signal.**
+  5.9.0 shipped the gVisor/Firecracker fingerprints as documentation-derived, resolving to
+  `unknown` rather than risk a false claim. Running `runsc do` (gVisor release-20260721.0 on
+  Ubuntu 24.04) settles it:
+  - `/proc/version` reads `Linux version 4.19.0-gvisor #1 SMP …` — the existing marker **does**
+    fire, and is now pinned as a byte-exact fixture with real-host negative controls (a plain
+    container kernel, an Ubuntu VM, and the host DMI `product_name` gVisor passes through).
+  - The sandbox reports **`Seccomp: 0`** and no `NoNewPrivs` line at all. That makes the branch
+    ORDER load-bearing: were seccomp/container evaluated first, a genuine gVisor sandbox would
+    resolve to `none` / not-contained — a false negative on the strongest sandbox available. A
+    test now locks the ordering.
+  - New `cgroupHasGvisorJobController` adds a second, independent signal (gVisor synthesizes a
+    `job` cgroup controller that does not exist on Linux — observed as `5:job:/`), so a build
+    whose version string lacks the marker is still detected instead of degrading to
+    "not contained". Anchored to the `N:job:` shape so a real path segment named `job` cannot
+    trip it.
+  - The `dmesg` marker (`Starting gVisor...`) was also observed but deliberately **not** used as
+    the primary signal — reading it needs the syslog syscall / `/dev/kmsg`, which a hardened
+    sandbox may deny. Documented in the source for the next person.
+
+  Firecracker remains documentation-derived and honestly unverified (no Firecracker host was
+  available; Hetzner Cloud is KVM/QEMU).
 
 ## [5.12.0] - 2026-07-25
 
