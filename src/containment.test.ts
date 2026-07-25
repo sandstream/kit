@@ -84,6 +84,12 @@ describe("detectGvisorMarker", () => {
       "Linux version 6.18.5 (builder@sandboxing) (gcc (GCC) 15.2.0)",
       "Linux version 6.8.0-51-generic (buildd@lcy02) #52-Ubuntu SMP",
       "vServer",
+      // A real AWS EC2 host (captured from CloudShell): the DMI sys_vendor is "Amazon EC2"
+      // and product_name an instance type. Amazon also OPERATES Firecracker, so this is the
+      // vendor-name false positive worth guarding against explicitly.
+      "Linux version 6.1.175-219.359.amzn2023.x86_64 (mockbuild@ip-10-0-172-126)",
+      "Amazon EC2",
+      "c5a.large",
     ]) {
       assert.equal(detectGvisorMarker(s), false, `false positive on: ${s}`);
       assert.equal(detectFirecrackerMarker(s), false, `false positive on: ${s}`);

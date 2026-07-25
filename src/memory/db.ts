@@ -23,8 +23,9 @@ import { redactSecrets } from "../utils/redactSecrets.js";
 import { secureFile, secureDir } from "../utils/secure-perms.js";
 import { findInjection } from "./injection.js";
 import { evaluateWriteGate, writeGateEnforcing, type WriteGateVerdict } from "./write-gate.js";
+import { DEFAULT_MEMORY_CLASS, disclosableClasses, type MemoryClass } from "./class.js";
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 /** True when text carries a HIGH-confidence prompt-injection pattern — used to
  *  quarantine a message on insert so recall never re-injects it into the prompt. */
@@ -97,7 +98,8 @@ CREATE TABLE IF NOT EXISTS messages (
   cwd TEXT,
   git_branch TEXT,
   version TEXT,
-  quarantined INTEGER NOT NULL DEFAULT 0
+  quarantined INTEGER NOT NULL DEFAULT 0,
+  class TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tool_uses (
@@ -189,7 +191,41 @@ function ensureColumn(db: DatabaseSync, table: string, column: string, decl: str
   }
 }
 
-function migrate(db: DatabaseSync): void {
+/**
+ * Backfill `messages.class` for rows that predate classification (v9, #348).
+ *
+ * Two non-obvious hazards this handles:
+ *
+ * 1. `messages` is the external-content source for the `messages_fts` FTS5 index, and the
+ *    `messages_au` trigger re-indexes `content` on ANY update. A bare
+ *    `UPDATE messages SET class = …` would therefore rewrite the entire FTS index for a
+ *    column FTS does not even index — pure waste on a large store. We drop that one trigger
+ *    for the duration and restore it after.
+ * 2. If the FTS index is already inconsistent with the table (a truncated copy, an
+ *    interrupted write), that trigger raises "database disk image is malformed" — which,
+ *    from inside `openMemoryDb`, would BRICK every kit command that touches memory. So the
+ *    backfill is best-effort: on failure the rows keep a NULL class, and NULL is excluded by
+ *    the recall gate (fail-closed — unclassified never leaks), rather than taking the CLI down.
+ */
+function backfillMessageClass(db: DatabaseSync, defaultClass: MemoryClass): void {
+  const needed = db.prepare("SELECT 1 FROM messages WHERE class IS NULL LIMIT 1").get();
+  if (!needed) return; // nothing to do — the common path on an already-migrated store
+  try {
+    db.exec("DROP TRIGGER IF EXISTS messages_au");
+    db.prepare("UPDATE messages SET class = ? WHERE class IS NULL").run(defaultClass);
+  } catch {
+    /* best-effort: unclassified rows stay NULL and are excluded by the gate (fail-closed) */
+  } finally {
+    // Restore the trigger unconditionally — leaving it dropped would silently stop FTS from
+    // tracking edits, which is a far worse failure than an unbackfilled class column.
+    db.exec(`CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content);
+  INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+END;`);
+  }
+}
+
+function migrate(db: DatabaseSync, defaultClass: MemoryClass): void {
   db.exec("CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL)");
   db.exec(SCHEMA_SQL);
   // v2: pending_actions.verify_passes (N=2 auto-verify confirmation). Add to
@@ -225,6 +261,13 @@ function migrate(db: DatabaseSync): void {
   // (uuid + content SHA-256, never the content itself) so "forgotten" is a checkable,
   // durable claim. The table is created by SCHEMA_SQL above (CREATE IF NOT EXISTS),
   // so existing stores gain it on next open; no column migration needed.
+  // v9: memory classification (#348). `class` labels a row's sensitivity so a more
+  // restrictive memory is never recalled into a less restrictive context. Existing rows
+  // predate classification and are BACKFILLED to the configured default — leaving them NULL
+  // would make every historical row unclassifiable and (fail-closed) invisible, which is a
+  // silent data loss disguised as security. New rows get their class at insert time.
+  ensureColumn(db, "messages", "class", "TEXT");
+  backfillMessageClass(db, defaultClass);
   const row = db.prepare("SELECT version FROM schema_meta LIMIT 1").get() as
     | { version: number }
     | undefined;
@@ -239,14 +282,17 @@ function migrate(db: DatabaseSync): void {
  * Open (creating + migrating if needed) the memory database. Pass ":memory:" for
  * an ephemeral in-process DB (tests). Otherwise defaults to ~/.kit/memory.db.
  */
-export function openMemoryDb(path?: string): DatabaseSync {
+export function openMemoryDb(
+  path?: string,
+  opts: { defaultClass?: MemoryClass } = {},
+): DatabaseSync {
   const dbPath = path ?? getMemoryDbPath();
   if (dbPath !== ":memory:") ensureMemoryDir();
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA foreign_keys = OFF");
-  migrate(db);
+  migrate(db, opts.defaultClass ?? DEFAULT_MEMORY_CLASS);
   if (dbPath !== ":memory:" && existsSync(dbPath)) {
     try {
       secureFile(dbPath); // 0o600 on POSIX, icacls owner-only on Windows — #43
@@ -340,8 +386,8 @@ export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
   const res = db
     .prepare(
       `INSERT OR IGNORE INTO messages
-       (uuid, session_id, parent_uuid, type, role, content, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, timestamp, cwd, git_branch, version, quarantined)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (uuid, session_id, parent_uuid, type, role, content, model, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, timestamp, cwd, git_branch, version, quarantined, class)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       m.uuid,
@@ -360,6 +406,9 @@ export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
       m.gitBranch ?? null,
       m.version ?? null,
       quarantined,
+      // Classify at capture time. An absent input class means the caller did not resolve one;
+      // use the documented default rather than NULL so no row is born unclassifiable.
+      m.memoryClass ?? DEFAULT_MEMORY_CLASS,
     );
   if (Number(res.changes) > 0) {
     db.prepare("UPDATE sessions SET message_count = message_count + 1 WHERE session_id = ?").run(
@@ -501,6 +550,13 @@ export function insertToolUse(db: DatabaseSync, t: ToolUseInput): void {
 }
 
 export interface SearchOptions {
+  /**
+   * Sensitivity ceiling for THIS recall context (#348). Rows more restrictive than this are
+   * excluded; a row with no/unrecognized class is excluded too (it is absent from the
+   * allow-list). Omit to disable class filtering — backwards-compatible for callers that
+   * predate classification.
+   */
+  contextClass?: MemoryClass;
   limit?: number;
   /** Restrict to messages whose cwd is this repo root (or a subdirectory). */
   projectPath?: string;
@@ -576,6 +632,15 @@ export function searchMessages(
     const params: (string | number)[] = [match];
     let where = "messages_fts MATCH ?";
     if (!opts.includeQuarantined) where += " AND m.quarantined = 0";
+    // Class gate (#348): only rows no more restrictive than the declared context. A NULL or
+    // unrecognized class is absent from the allow-list, so it fails the IN test and is
+    // excluded — fail-closed with no special case. No contextClass ⇒ no class filtering
+    // (backwards-compatible for callers that predate classification).
+    if (opts.contextClass) {
+      const allowed = disclosableClasses(opts.contextClass);
+      where += ` AND m.class IN (${allowed.map(() => "?").join(", ")})`;
+      params.push(...allowed);
+    }
     if (opts.projectPath) {
       where += " AND (m.cwd = ? OR m.cwd LIKE ?)";
       params.push(opts.projectPath, `${opts.projectPath}/%`);
@@ -710,6 +775,13 @@ export function recentMessages(db: DatabaseSync, opts: SearchOptions = {}): Sear
   const params: (string | number)[] = [];
   let where = "content IS NOT NULL AND content != ''";
   if (!opts.includeQuarantined) where += " AND quarantined = 0";
+  // Same class gate as searchMessages (#348) — see there for the fail-closed rationale.
+  // Pushed here so the bound values stay in the WHERE clause's positional order.
+  if (opts.contextClass) {
+    const allowed = disclosableClasses(opts.contextClass);
+    where += ` AND class IN (${allowed.map(() => "?").join(", ")})`;
+    params.push(...allowed);
+  }
   if (opts.projectPath) {
     where += " AND (cwd = ? OR cwd LIKE ?)";
     params.push(opts.projectPath, `${opts.projectPath}/%`);

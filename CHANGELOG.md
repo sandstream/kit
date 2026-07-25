@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.14.0] - 2026-07-25
+
+### Added
+
+- **Memory classification — a restrictive memory can no longer be recalled into a less
+  restrictive context (closes #348).** One local store shared across projects and devices meant
+  a note captured in a restricted codebase could surface while working in a public one. Every
+  memory row now carries a **class**: `public` | `internal` | `restricted`.
+  - **Label source** (the decision that unblocked the issue): a config default with a
+    **per-project override**. `[memory] default_class` in `.kit.toml` sets it — and because kit
+    loads the *project's* `.kit.toml`, a project overrides the inherited default just by
+    declaring its own. `KIT_MEMORY_CLASS` overrides both for an ephemeral session.
+  - **The gate:** recall (`searchMessages` / `recentMessages`) accepts a `contextClass` and
+    returns only rows no more restrictive than it. A row whose class is missing or
+    unrecognized is **excluded from every context** — it is simply absent from the allow-list,
+    so fail-closed needs no special case.
+  - **Deliberately asymmetric fail-closed rules:** a *missing* config value is not a security
+    event → the documented default (`internal`); an *invalid* one is (a typo must never
+    silently widen disclosure) → `restricted`, flagged `recognized: false`. A row that cannot
+    be classified at disclosure time → treated as `restricted`.
+  - Schema v9 adds `messages.class` and backfills pre-existing rows to the configured default
+    (leaving them NULL would make historical memory permanently invisible — data loss dressed
+    as security). New rows are classified at insert; none is born unclassifiable.
+  - Policy lives in pure functions (`src/memory/class.ts`) with unit tests that need no DB,
+    plus integration tests proving the gate against a real SQLite store.
+
+### Fixed
+
+- **The v9 backfill can no longer brick `kit memory`.** `messages` is the external-content
+  source for the `messages_fts` index, and its update trigger re-indexes `content` on *any*
+  write — so a plain backfill `UPDATE` would rewrite the whole FTS index for a column FTS does
+  not index, and on a store whose index is already inconsistent it raises
+  `database disk image is malformed`, which from inside `openMemoryDb` would take down every
+  memory command. The backfill now drops that single trigger for its duration, restores it in a
+  `finally`, and is best-effort: on failure rows keep a NULL class and are excluded by the gate
+  (fail-closed) instead of the CLI failing to open the store at all.
+
 ## [5.13.0] - 2026-07-25
 
 ### Added
