@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.13.0] - 2026-07-25
+
+### Added
+
+- **`kit security scan-artifact <path>` — the ingestion gate for an untrusted artifact.**
+  Scans a file (or a tree with `--recursive`) via the ClamAV delegate before you trust an
+  upload, a downloaded dataset, or a vendored blob. `clean` passes; `malicious` fails with the
+  signature names; and a **gap** — scan error, or no scanner installed — **also fails**. That is
+  the point of an ingestion gate: "we could not check" must never read as "it is fine".
+  `--json` for machine consumption.
+- **clamd (daemon) fast path for the malware delegate.** The delegate now prefers `clamdscan`
+  against a resident `clamd`, which already holds the signature DB — milliseconds instead of the
+  ~4 s `clamscan` spends loading 3.6M signatures on every invocation. When the daemon is absent
+  or unreachable kit **falls back to `clamscan`**, so a stopped daemon costs speed, not coverage,
+  and the result reports which `engine` actually produced the verdict (`clamd` | `clamscan`)
+  rather than leaving the operator to guess. `--fdpass` is passed to the daemon so it can scan
+  files its own uid could not otherwise read (which would otherwise look like a false gap).
+
 ## [5.12.0] - 2026-07-25
 
 ### Added
