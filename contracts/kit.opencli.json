@@ -770,10 +770,10 @@
     },
     "review": {
       "kind": "command",
-      "summary": "Full repo audit — runs check + design + standards in one gate (for agents / PR checks)",
+      "summary": "Full repo audit — runs check + design + standards + adr in one gate (for agents / PR checks; --json emits one structured report)",
       "x-kit-args-modeled": false,
       "x-kit-audience": "all",
-      "x-kit-mcp": false,
+      "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
     "run": {

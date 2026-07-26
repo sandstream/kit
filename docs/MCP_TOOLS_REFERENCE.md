@@ -14,7 +14,7 @@ self-documents. The MCP surface exists for shell-less clients.
 ## The canonical loop
 
 ```
-kit_check → kit_fix → kit_triage (before any ungated install) → kit_memory → kit_run
+kit_check → kit_fix → kit_triage (before any ungated install) → kit_memory → kit_review (before merging) → kit_run
 ```
 
 ## Tools
@@ -26,6 +26,7 @@ governance floor (revocation, budget, permissions, expired-secret block).
 | Tool | Kind | Purpose |
 | --- | --- | --- |
 | `kit_check` | read | Run all checks — tools, services, secrets, skills, hooks, security, tests, locks — and return the same verdict `kit check` computes. |
+| `kit_review` | read | Full repo audit in one shot — the check, design, standards, and ADR gates as one structured report (`{ ok, failed, stages }`), from the same core `kit review` renders. `concise: true` omits pass/skip rows (per-stage counts stay). |
 | `kit_fix` | write | Auto-fix what `kit_check` found: install missing tools, generate missing lock files. Returns actions taken. |
 | `kit_triage` | write | Security-triage a dependency **before** installing it (`type`: npm/pip/docker/brew/repo/skill + `target`). A PASS is recorded in the triage log the install gates read, so an MCP-run triage satisfies them identically to a CLI-run one. Refuses in read-only mode — an unrecordable pass could not satisfy the gates anyway. |
 | `kit_memory` | read | Search cross-session conversation memory plus the repo's curated shared decisions (`query`, `limit?`, `global?`). Search-only by design: writes stay on the CLI/indexer path so an MCP client can never inject text into the trusted store. Quarantined rows excluded. A missing store returns empty — it is never created by a read. |
@@ -34,7 +35,7 @@ governance floor (revocation, budget, permissions, expired-secret block).
 | `kit_context` | read | Gather project context (stack, services, env status) for the agent. |
 | `kit_map` | read | Repo map: import-neighborhood slice around seed paths (`paths`, `depth?`, `budget?`, `co_change?`). |
 | `kit_init` | write | Detect the stack and generate `.kit.toml` for a project that has none (`dryRun` to preview). |
-| `kit_standards` | read | Run the dev-standards gate and return structured findings. |
+| `kit_standards` | read | **Deprecated — removed from the MCP surface in kit 6.0.** `kit_review` runs this gate as its standards stage; a scoped run (`--category`) goes via `kit_run`. |
 | `kit_env` | read | **Deprecated — removed from the MCP surface in kit 6.0.** Inspect `.env.local` key status (values redacted). Prefer `kit_context`. |
 | `kit_ci` | read | **Deprecated — removed in kit 6.0.** CI runners always have a shell; run `kit ci` there. |
 | `kit_install` | write | **Deprecated — removed in kit 6.0.** Setup-time provisioning happens in a shell (`kit install`), or via `kit_run`. |

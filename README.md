@@ -901,6 +901,7 @@ For Cline, add the same config to your `cline_mcp_settings.json`.
 | Tool            | Description                                                                                     |
 | --------------- | ----------------------------------------------------------------------------------------------- |
 | `kit_check`     | Run all checks, return structured status JSON                                                   |
+| `kit_review`    | Full repo audit — check + design + standards + ADR gates as one structured report              |
 | `kit_fix`       | Auto-fix issues (install tools, generate lock files)                                            |
 | `kit_triage`    | Security-triage a dependency BEFORE installing it — a pass satisfies the install gate           |
 | `kit_memory`    | Search cross-session memory + the repo's curated shared decisions (search-only)                 |
@@ -909,7 +910,7 @@ For Cline, add the same config to your `cline_mcp_settings.json`.
 | `kit_context`   | Gather project context (stack, services, env status)                                            |
 | `kit_map`       | Repo map: import-neighborhood slice around seed paths                                           |
 | `kit_init`      | Detect the stack and generate `.kit.toml` (dry-run supported)                                   |
-| `kit_standards` | Run the dev-standards gate, return structured findings                                          |
+| `kit_standards` | _Deprecated (leaves in 6.0)_ — `kit_review` runs this gate as its standards stage               |
 | `kit_env`       | _Deprecated (leaves in 6.0)_ — inspect `.env.local` key status; prefer `kit_context`            |
 | `kit_ci`        | _Deprecated (leaves in 6.0)_ — CI runners have a shell; run `kit ci` there                      |
 | `kit_install`   | _Deprecated (leaves in 6.0)_ — setup-time provisioning; use `kit install` or `kit_run`          |

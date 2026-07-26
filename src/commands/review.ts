@@ -1,41 +1,199 @@
 /**
- * `kit review` — meta-runner: check + design + standards in one shot.
- * Convenient single-command gate for AI agents and PR checks. Extracted from
- * cli.ts (5.0-alpha god-module split); orchestrates the now-extracted check,
- * design, and standards clusters, so it moves out only after they do.
+ * `kit review` — meta-runner: check + design + standards + ADR in one shot.
+ * Convenient single-command gate for AI agents and PR checks.
+ *
+ * collectReview is the structured core: it runs every stage's shared gate
+ * (check-run, design, standards-run, adr) and returns one ReviewReport.
+ * cmdReview is a renderer on top; the MCP `kit_review` tool serializes the
+ * same report — the computeCheckVerdict pattern, so the CLI and MCP surfaces
+ * can never diverge on what a review runs or what "green" means.
+ *
+ * Pure read: no PAL sync, attestation, hints, or scanner self-heal — those are
+ * `kit check`'s own CLI extras. `kit review` is the gate, not the fixer.
  */
 import { c } from "../utils/colors.js";
-import { hasFlag } from "../utils/flags.js";
-import { cmdCheck } from "./check.js";
-import { cmdDesign } from "./design.js";
-import { cmdStandards } from "./standards.js";
-import { adrCheck } from "./adr.js";
+import { hasFlag, envTruthy } from "../utils/flags.js";
+import { loadConfig, type kitConfig } from "../config.js";
+import { resolveConfigPath } from "../cli-shared.js";
+import { withGovernance } from "../governance-middleware.js";
+import { runCheckGate, checkRunToJsonChecks } from "../check-run.js";
+import { runStandardsGate } from "../standards-run.js";
+import { runDesignGate } from "./design.js";
+import { runAdrGate } from "./adr.js";
+import type { JsonCheck } from "../cli-checks-shared.js";
+import type { GateOpts } from "../check-security.js";
+
+export type ReviewStageName = "check" | "design" | "standards" | "adr";
+
+export interface ReviewStageReport {
+  stage: ReviewStageName;
+  /** The stage gate's own verdict — authoritative. Findings are presentation:
+   *  a stage can be red on a warn-level row (e.g. an outdated hook), so do not
+   *  re-derive ok from finding statuses. */
+  ok: boolean;
+  summary: { pass: number; fail: number; warn: number; skip: number };
+  findings: JsonCheck[];
+}
+
+export interface ReviewReport {
+  ok: boolean;
+  /** The stages that are NOT ok — for a precise "red because: …" message. */
+  failed: ReviewStageName[];
+  stages: ReviewStageReport[];
+}
+
+export interface CollectReviewOptions {
+  cwd?: string;
+  /** Preloaded config for the check stage (the CLI already has one for governance). */
+  config?: kitConfig;
+  /** Fail (not warn) on net-new design/standards findings and setup gaps (CI posture). */
+  enforce?: boolean;
+  /** Fail (not warn) on untested files — `--enforce-tests`. */
+  enforceTests?: boolean;
+  /** Security gate posture (lenient / fail-on-warning) for the check stage. */
+  gate?: GateOpts;
+}
+
+function summarize(findings: JsonCheck[]): ReviewStageReport["summary"] {
+  const summary = { pass: 0, fail: 0, warn: 0, skip: 0 };
+  for (const f of findings) summary[f.status]++;
+  return summary;
+}
+
+function stageReport(stage: ReviewStageName, ok: boolean, findings: JsonCheck[]): ReviewStageReport {
+  return { stage, ok, summary: summarize(findings), findings };
+}
+
+/** ADR gate result → review findings (one row per live violation/gap, or one summary row). */
+function adrFindings(adr: Awaited<ReturnType<typeof runAdrGate>>): JsonCheck[] {
+  if (adr.adrCount === 0) {
+    return [
+      {
+        name: "adr",
+        status: "skip",
+        detail: "no ADRs found in docs/adr or docs/decisions",
+        category: "adr",
+      },
+    ];
+  }
+  if (adr.enforcedCount === 0) {
+    return [
+      {
+        name: "adr",
+        status: "skip",
+        detail: `${adr.adrCount} ADR(s), none carries an enforce block — documented, not enforced`,
+        category: "adr",
+      },
+    ];
+  }
+  const rows: JsonCheck[] = [
+    ...adr.violations.map((v) => ({
+      name: v.adrId,
+      status: "fail" as const,
+      detail: `${v.file}:${v.line} ${v.message}`,
+      category: "adr",
+    })),
+    ...adr.gaps.map((v) => ({
+      name: v.adrId,
+      status: "warn" as const,
+      detail: `${v.file}:${v.line} ${v.message} (unprovable — unresolved import)`,
+      category: "adr",
+    })),
+  ];
+  if (rows.length === 0) {
+    rows.push({
+      name: "adr",
+      status: "pass",
+      detail:
+        `${adr.enforcedCount} enforced ADR(s) — no new violations` +
+        (adr.suppressed ? ` (${adr.suppressed} baselined)` : ""),
+      category: "adr",
+    });
+  }
+  return rows;
+}
+
+/**
+ * Run every review stage and return the structured report. Read-only; stages run
+ * in the order the CLI always ran them (check → design → standards → adr).
+ */
+export async function collectReview(opts: CollectReviewOptions = {}): Promise<ReviewReport> {
+  const check = await runCheckGate({
+    cwd: opts.cwd,
+    config: opts.config,
+    enforceTests: opts.enforceTests,
+    gate: opts.gate,
+  });
+  const design = await runDesignGate({ cwd: opts.cwd, enforce: opts.enforce });
+  const standards = await runStandardsGate({ cwd: opts.cwd, enforce: opts.enforce });
+  const adr = await runAdrGate(opts.cwd ?? process.cwd());
+
+  const stages: ReviewStageReport[] = [
+    stageReport("check", check.ok, checkRunToJsonChecks(check)),
+    stageReport("design", design.ok, design.checks),
+    stageReport("standards", standards.ok, standards.checks),
+    stageReport("adr", adr.ok, adrFindings(adr)),
+  ];
+  const failed = stages.filter((s) => !s.ok).map((s) => s.stage);
+  return { ok: failed.length === 0, failed, stages };
+}
+
+const ICON: Record<JsonCheck["status"], string> = {
+  pass: `${c.green}✓${c.reset}`,
+  fail: `${c.red}✗${c.reset}`,
+  warn: `${c.yellow}!${c.reset}`,
+  skip: `${c.dim}-${c.reset}`,
+};
 
 export async function cmdReview(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
-  let allOk = true;
-  if (!jsonMode) console.log(`${c.bold}kit review${c.reset} — full repo audit\n`);
+  const enforce = hasFlag(process.argv, "--enforce");
+  const enforceTests = hasFlag(process.argv, "--enforce-tests");
+  const lenient = hasFlag(process.argv, "--lenient") || envTruthy(process.env.KIT_CI_LENIENT);
+  const failOnWarning =
+    hasFlag(process.argv, "--fail-on-warning") ||
+    hasFlag(process.argv, "--strict") ||
+    envTruthy(process.env.KIT_CI_STRICT);
+  const config = await loadConfig(resolveConfigPath());
 
-  if (!jsonMode) console.log(`${c.bold}=== check ===${c.reset}`);
-  const checkOk = await cmdCheck();
-  if (!checkOk) allOk = false;
+  return await withGovernance(
+    config,
+    { operation: "review", operationType: "read", metadata: {} },
+    async () => {
+      if (!jsonMode) console.log(`${c.bold}kit review${c.reset} — full repo audit\n`);
+      const report = await collectReview({
+        config,
+        enforce,
+        enforceTests,
+        gate: { lenient, failOnWarning },
+      });
 
-  if (!jsonMode) console.log(`\n${c.bold}=== design ===${c.reset}`);
-  const designOk = await cmdDesign();
-  if (!designOk) allOk = false;
+      if (jsonMode) {
+        console.log(JSON.stringify(report, null, 2));
+        return report.ok;
+      }
 
-  if (!jsonMode) console.log(`\n${c.bold}=== standards ===${c.reset}`);
-  const standardsOk = await cmdStandards();
-  if (!standardsOk) allOk = false;
+      for (const stage of report.stages) {
+        console.log(`${c.bold}=== ${stage.stage} ===${c.reset}`);
+        for (const f of stage.findings) {
+          console.log(`  ${ICON[f.status]} ${f.name}  ${c.dim}${f.detail}${c.reset}`);
+          if (f.files) for (const file of f.files) console.log(`      ${c.dim}- ${file}${c.reset}`);
+        }
+        const s = stage.summary;
+        const verdict = stage.ok ? `${c.green}✓ ok${c.reset}` : `${c.red}✗ failed${c.reset}`;
+        console.log(
+          `  ${verdict} ${c.dim}(${s.pass} pass · ${s.fail} fail · ${s.warn} warn · ${s.skip} skip)${c.reset}\n`,
+        );
+      }
 
-  if (!jsonMode) console.log(`\n${c.bold}=== adr ===${c.reset}`);
-  const adrOk = await adrCheck();
-  if (!adrOk) allOk = false;
-
-  if (!jsonMode) {
-    console.log(
-      `\n${c.bold}${allOk ? `${c.green}✓ review passed` : `${c.red}✗ review failed`}${c.reset}`,
-    );
-  }
-  return allOk;
+      console.log(
+        `${c.bold}${
+          report.ok
+            ? `${c.green}✓ review passed`
+            : `${c.red}✗ review failed — ${report.failed.join(", ")}`
+        }${c.reset}`,
+      );
+      return report.ok;
+    },
+  );
 }
