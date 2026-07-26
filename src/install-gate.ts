@@ -38,7 +38,12 @@ export interface InstallProbe {
 // long whitespace run (each start position greedily consumes the run, fails, backtracks) —
 // a hot-path DoS on a whitespace-padded command. `scanSegment` trims each segment, so the
 // split output is byte-identical without the padding, and matching is linear.
-const SEGMENT_SPLIT = /&&|\|\||;|\||&|\n/;
+// `&` splits ONLY as a job-control separator — not inside redirections: `2>&1`
+// (preceded by `>`) and `&>` / `&>>` (followed by `>`) are I/O plumbing, and
+// splitting there shears the command into garbage segments ("2>" reached the
+// package matcher and fail-closed legitimate installs). Fixed-length
+// lookaround — no backtracking, so the O(N²) padding note above still holds.
+const SEGMENT_SPLIT = /&&|\|\||;|\||(?<!>)&(?!>)|\n/;
 
 // Leading shell keywords / grouping tokens that precede a real command without
 // changing it. Stripped like PREFIX_BINS so `then npm i evil` / `{ npm i evil; }` /
@@ -751,12 +756,38 @@ function applyMatcher(
   return true;
 }
 
+/**
+ * Drop shell REDIRECTION tokens before matching — they are I/O plumbing, never
+ * package operands (`npm i pkg 2>&1`, `npm init -y >/dev/null`, `pip install x
+ * > log`). Without this, `>/dev/null` / `2>&1` reach the positional matcher,
+ * fail `toName`, and fail-close a legitimate install ("cannot reduce: 2>").
+ * Runs on the UNDEQUOTED tokens: a quoted `">weird"` stays a (bogus) operand
+ * and keeps fail-closing — only bare shell syntax is plumbing.
+ * A bare operator (`>`, `2>`, `<`) consumes its following target token too.
+ */
+const REDIRECT_OP_RE = /^\d*(>>?|<{1,2})(&\d*)?$/; // > >> < << 2> 2>> >& 2>&1 1>&2
+const REDIRECT_WITH_TARGET_RE = /^(\d*(>>?|<{1,2})|&>{1,2})(\/|\.|\w|~|-|"|')/; // >/dev/null 2>file &>log <input
+function stripRedirections(tokens: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (tok === "&>" || tok === "&>>" || REDIRECT_OP_RE.test(tok)) {
+      // `2>&1` / `1>&2` name their target inside the token; every other bare
+      // operator (`>`, `2>`, `<`, `>&`, `&>`) takes the NEXT token as its file
+      // target — consume that as plumbing too.
+      const selfContained = /&\d+$/.test(tok);
+      if (!selfContained) i++;
+      continue;
+    }
+    if (REDIRECT_WITH_TARGET_RE.test(tok)) continue; // operator+target glued in one token
+    out.push(tok);
+  }
+  return out;
+}
+
 /** Match one shell segment against the package-manager matchers, mutating `probe`. */
 function scanSegment(segment: string, probe: InstallProbe): void {
-  const raw = stripInlineComment(segment)
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
+  const raw = stripRedirections(stripInlineComment(segment).trim().split(/\s+/).filter(Boolean))
     .map(dequote)
     .filter(Boolean);
   const tokens = stripCommandPrefix(raw);
