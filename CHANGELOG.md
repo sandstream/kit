@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.21.0] - 2026-07-26
+
+### Added
+
+- **Three stack-aware hint rules.** The deterministic hint engine (one tip per
+  run, shown once, `KIT_NO_HINTS` silences, fail-safe detectors, zero LLM) now
+  also surfaces the right *workflow* at the moment the repo's own state makes
+  it relevant: `.github/workflows/` present but never gha-audited → `kit
+  gha-audit`; a kit-managed repo with sources but no findings baseline → `kit
+  baseline freeze`; agent transcripts on the machine but no memory store →
+  `kit memory index`.
+
+### Fixed
+
+- **The a11y/token scanners no longer flag markup in comments.** A commented
+  `<input type="datetime-local">` example inside a docstring was reported as an
+  unlabeled input, and a hex value in a comment as a token bypass. Comment
+  interiors (slash-star blocks incl. the JSX-wrapped form, HTML comments,
+  `//` lines — URLs preserved) are now blanked newline-preserving before
+  matching, so finding line numbers stay stable. Stripping can only reduce
+  findings, so existing baselines stay valid.
+- **The pinned-versions check is workspace-aware.** `"@repo/ui": "*"`
+  (npm-workspaces convention) and `workspace:`/`file:`/`link:`/`portal:`/
+  `catalog:` protocol refs resolve to the local tree, never the registry —
+  flagging them as unpinned was a false positive, and "pinning" them would be
+  wrong. External `*` and registry ranges still flag exactly as before.
+  (Both fixes from a Turborepo user's false-positive report — sharpen the
+  matching, never loosen the gates.)
+- **Hint tests are host-isolated.** The hints test env now pins
+  `KIT_CLAUDE_DIR` and clears `KIT_MEMORY_DB`, so no test can see the host's
+  real transcripts or memory store.
+
 ## [5.20.0] - 2026-07-26
 
 ### Added
