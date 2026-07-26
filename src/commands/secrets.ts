@@ -199,6 +199,16 @@ export async function cmdSecrets(): Promise<boolean> {
         store: secretsConfig.store,
         template: secretsConfig.template,
       },
+      // Declared effects (scope-needs adoption): kit's OWN direct effect is the
+      // .env.local write plus materializing the named keys — both statically
+      // known here. The vault CLI resolves values in ITS OWN subprocess, whose
+      // network I/O is the CLI's, not kit's — so egress is not kit's to claim
+      // (same reasoning as the MCP kit_secrets site). Under a signed [scope]
+      // these needs must be inside the RoE; without one, behavior is unchanged.
+      scopeNeeds: {
+        fsWrites: [".env.local"],
+        secrets: Object.keys(secretsConfig.keys ?? {}),
+      },
     },
     async () => {
       const { results, written, fromTemplate, skipped } = await generateSecrets(secretsConfig);

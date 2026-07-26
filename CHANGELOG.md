@@ -6,6 +6,61 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.16.0] - 2026-07-26
+
+Two adoption arcs with the same shape: a surface that promised something its
+mechanism did not deliver, made honest — and then gated so the dishonesty
+cannot return.
+
+### Added
+
+- **Agent-centric MCP surface.** Deep research into agent tool exposure
+  (Anthropic context-engineering guidance, MCP schema-cost measurements,
+  CLI-vs-MCP evals) concluded kit's MCP list was wrong in both directions.
+  Fixed a genuine dead end: the install gate blocks untriaged packages with
+  the instruction "run `kit triage` first" — which a shell-less MCP client
+  could not follow, because triage was not exposed.
+  - **`kit_triage`** — security-triage npm/pip/docker/brew/repo/skill targets.
+    A PASS records through the SAME triage-log path the CLI uses, so the
+    pre-commit and install gates recognize an MCP-run triage identically.
+    Refuses in read-only mode (an unrecordable pass could not satisfy the
+    gates anyway — fail-closed).
+  - **`kit_memory`** — search cross-session memory + the repo's curated shared
+    tier. Search-only by design: writes stay on the CLI/indexer path, so an
+    MCP client can never inject foreign text into the trusted store. A missing
+    store returns empty rather than materializing a db on read.
+  - **Server `instructions`** (MCP initialize): agents WITH shell access should
+    prefer the CLI (zero standing context cost; `--help` self-documents);
+    canonical loop `check → fix → triage → memory → run`.
+  - **Deprecated on the MCP surface** (marked, removal in kit 6.0 per the
+    stability policy's notice requirement): `kit_ci`, `kit_install`,
+    `kit_login`, `kit_add`, `kit_env`. `kit_run` remains the escape hatch.
+
+- **Scope-needs adoption — kit now dogfoods its own effect declarations.**
+  `withGovernance` has checked `scopeNeeds` against the signed `[scope]`/RoE
+  since the exec-broker landed — but zero production call sites declared
+  anything, making the check a structural no-op on the whole governed CLI
+  surface (the MCP broker path was already declared). Now:
+  - **`secrets.generate` declares** `fsWrites: [".env.local"]` + the named
+    secret keys it materializes. Vault-CLI subprocess egress is deliberately
+    NOT claimed (its network I/O is the CLI's, not kit's — same reasoning as
+    the MCP site).
+  - **`fix` declares** its statically-known repo writes (`skills-lock.json`,
+    `cli-lock.json`, `.env.template`, `.gitignore`). Tool installs remain
+    infrastructure (mise → `$HOME`), which the project RoE does not govern.
+  - **A drift gate makes silence impossible** (`scope-needs-adoption.test.ts`):
+    every `withGovernance` / `runGovernedBrokered` call site must declare its
+    effects or sit on an explicit reviewed list WITH a reason — an undeclared
+    new site is a build failure, never a silent bypass. The reviewed list is
+    itself checked against real call sites, so it cannot rot. Same pattern as
+    the CLI=MCP guard and the publish-ordering tests.
+
+  Under a signed `[scope]`, the declared needs must be inside the RoE; without
+  one, behavior is unchanged (the floor stays advisory). This is increment 2
+  of the 6.0 plan ("scopeNeeds adoption BEFORE flipping the default") — the
+  first honest field-signal measurement (`kit broker enforce-readiness` on kit
+  itself) is now meaningful, because something actually declares.
+
 ## [5.15.0] - 2026-07-25
 
 ### Added
