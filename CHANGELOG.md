@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.17.0] - 2026-07-26
+
+Agent-surface hygiene, part two of the exposure arc (5.16.0 fixed WHAT is
+exposed; this fixes what each surface COSTS and who it is FOR).
+
+### Added
+
+- **`x-kit-audience` in the OpenCLI contract.** Every command now declares who
+  primarily invokes it: `human` (interactive/setup — 28 commands), `harness`
+  (hook stdin protocols like the PreToolUse gates and the statusline — 5,
+  invoked by the agent harness itself, belonging on no discovery surface),
+  or `all` (35). Subcommands inherit their parent's audience. A contract test
+  enforces the consistency rule the field exists for: **a human/harness
+  command is never MCP-exposed** — with a pinned exception for the three
+  already-deprecated tools (`add`, `install`, `login`) that leave in kit 6.0,
+  at which point the exception list fails its own rot-check and gets deleted.
+
+### Changed
+
+- **The instruction block kit writes into downstream CLAUDE.md/AGENTS.md files
+  is now an index, not an encyclopedia.** Always-loaded instruction files are
+  paid for on every request (measured at +20% inference cost with no success
+  gain for bloated context files — ETH Zurich, arXiv:2602.11988), so each line
+  must survive "would removing it cause mistakes?". The hook-architecture
+  paragraph is gone (the gates teach the agent at exactly the moment they
+  fire, deterministically), the `kit auth elevate` line is gone (the CLI
+  enforces it and says so when hit), and a `kit --help` pointer closes the
+  block — discovery on demand at zero standing cost. Applied to kit's own
+  repo via `kit agent-config` (dogfood).
+
 ## [5.16.0] - 2026-07-26
 
 Two adoption arcs with the same shape: a surface that promised something its

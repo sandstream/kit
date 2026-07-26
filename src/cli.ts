@@ -884,6 +884,64 @@ export const COMMAND_TIERS: Record<string, CommandTier> = Object.fromEntries(
   Object.entries(COMMAND_REGISTRY).map(([verb, d]) => [verb, d.stability]),
 );
 
+/**
+ * Who primarily invokes a command — the exposure-routing signal from the
+ * agent-tool-context research (emitted as `x-kit-audience` in the OpenCLI
+ * contract):
+ *   - "human":   interactive / setup-time / operator actions. Never belongs on
+ *                the MCP surface (a contract test enforces this, modulo the
+ *                three deprecated tools that leave in 6.0).
+ *   - "harness": hook stdin protocols (PreToolUse gates, statusline). Invoked
+ *                by the agent harness itself — never *chosen* by a human or an
+ *                agent, so they belong on no discovery surface at all.
+ *   - "all":     the default — useful to humans, agents, and CI alike.
+ * ("agent" is reserved for future agent-only verbs; nothing qualifies today —
+ * every agent-loop command is also legitimate porcelain.)
+ */
+export type CommandAudience = "human" | "agent" | "harness" | "all";
+
+const AUDIENCE_OVERRIDES: Record<string, CommandAudience> = {
+  // Hook protocols — the harness pipes tool-call JSON on stdin.
+  "gate-bash": "harness",
+  "gate-egress": "harness",
+  "gate-env": "harness",
+  "gate-fs": "harness",
+  statusline: "harness",
+  // Interactive / setup-time / operator surfaces.
+  add: "human",
+  auth: "human",
+  bootstrap: "human",
+  broker: "human", // posture ops (observe→enforce flip) are operator decisions
+  clone: "human",
+  config: "human",
+  "create-plugin": "human",
+  doctor: "human",
+  governance: "human",
+  hooks: "human",
+  identity: "human",
+  insight: "human",
+  install: "human",
+  login: "human",
+  mcp: "human", // configured into the harness by a human; agents never *run* it
+  open: "human",
+  panic: "human",
+  pkg: "human",
+  plugin: "human",
+  profile: "human",
+  setup: "human",
+  skill: "human",
+  skills: "human",
+  status: "human",
+  team: "human",
+  upgrade: "human",
+  whoami: "human",
+  "agent-config": "human",
+};
+
+export const COMMAND_AUDIENCE: Record<string, CommandAudience> = Object.fromEntries(
+  Object.keys(COMMAND_REGISTRY).map((verb) => [verb, AUDIENCE_OVERRIDES[verb] ?? "all"]),
+);
+
 // Top-level help (from the registry) plus help-only sub-command entries.
 export const COMMAND_HELP: Record<string, string> = {
   ...Object.fromEntries(Object.entries(COMMAND_REGISTRY).map(([verb, d]) => [verb, d.help])),

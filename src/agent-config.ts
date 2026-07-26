@@ -28,16 +28,27 @@ export const KIT_BLOCK_END = "<!-- END kit -->";
  *  prose only advises, so each rule migrates out of this block as its gate ships
  *  (statusline → session-start injection; triage → gate-bash; .env secrets →
  *  gate-env; elevation → enforced in the CLI itself). */
+/**
+ * The block kit writes into downstream projects' always-loaded instruction
+ * files (CLAUDE.md / AGENTS.md / ...). Index, not encyclopedia: every request
+ * pays for these tokens, so each line must survive the test "would removing it
+ * cause mistakes?" — commands the agent cannot guess and would otherwise skip.
+ * Everything a hook or the CLI itself enforces gets ZERO prose here (the gate
+ * teaches the agent at exactly the moment it matters, deterministically) —
+ * that's why the old hook-architecture paragraph and the `kit auth elevate`
+ * line are gone. Discovery of the rest is `kit --help`, on demand, at zero
+ * standing cost.
+ */
 export const KIT_INSTRUCTION = `## kit
 
-This project uses [kit](https://github.com/sandstream/kit) to manage tools, secrets, and environment setup. The hard rules are ENFORCED by hooks, not this text: the session-start hook injects the kit statusline (setup score · update mark · open-PAL count) as context, and PreToolUse gates block un-triaged package installs and plaintext secrets aimed at \`.env*\` before they happen. As the agent working here:
+This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, security gates). Hooks enforce the hard rules; what you need to know:
 
-- Run \`kit check\` before starting; if it reports \`fail\`, run \`kit fix\` then re-check.
-- Recall prior decisions with \`kit memory search "<query>"\` (cross-session, cross-agent).
-- Resolve secrets with \`kit secrets\` (vault-backed); put placeholders in \`.env.example\` — the env-gate blocks plaintext \`.env*\` writes.
-- For dependencies outside the install-gate's reach (git repos, URLs, vendored code), run \`kit triage repo <target>\` first.
-- After a batch of edits, run \`kit check --category security\`; halt and surface findings on \`fail\`.
-- Destructive secret ops require \`kit auth elevate\` first (the CLI enforces this).`;
+- Start: \`kit check\` — on \`fail\`, run \`kit fix\`, then re-check.
+- Prior decisions: \`kit memory search "<query>"\` (cross-session, cross-agent).
+- Secrets: \`kit secrets\` (vault-backed); placeholders go in \`.env.example\`, never plaintext in \`.env*\`.
+- Deps the install gate hasn't covered (git repos, URLs, vendored code): \`kit triage repo <target>\` first.
+- After a batch of edits: \`kit check --category security\`; halt and surface findings on \`fail\`.
+- Everything else: \`kit --help\` — the commands are self-documenting.`;
 
 export interface AgentTarget {
   /** Agent/tool name for display. */
