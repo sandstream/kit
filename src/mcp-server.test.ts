@@ -81,7 +81,9 @@ describe("MCP server tool registration", () => {
       assert.ok(names.includes("kit_run"), "kit_run missing");
       assert.ok(names.includes("kit_context"), "kit_context missing");
       assert.ok(names.includes("kit_map"), "kit_map missing");
-      assert.equal(tools.length, 13);
+      assert.ok(names.includes("kit_triage"), "kit_triage missing");
+      assert.ok(names.includes("kit_memory"), "kit_memory missing");
+      assert.equal(tools.length, 15);
     } finally {
       await cleanup();
     }
@@ -820,6 +822,121 @@ describe("kit_map", () => {
       );
       assert.ok(["codeowners", "git", "none"].includes(data.ownerSource));
     } finally {
+      await rm(dir, { recursive: true, force: true });
+      await cleanup();
+    }
+  });
+});
+
+// ─── kit_triage ───────────────────────────────────────────────────────────────
+
+describe("kit_triage tool", () => {
+  it("refuses in read-only mode (the pass could not be recorded, so fail closed)", async () => {
+    const { client, cleanup } = await createTestClient();
+    process.env.KIT_READ_ONLY = "1";
+    try {
+      const result = await client.callTool({
+        name: "kit_triage",
+        arguments: { type: "npm", target: "left-pad" },
+      });
+      assert.equal(result.isError, true);
+      const content = result.content as Array<{ type: string; text: string }>;
+      assert.match(content[0].text, /read-only mode/);
+    } finally {
+      delete process.env.KIT_READ_ONLY;
+      await cleanup();
+    }
+  });
+
+  it("rejects an unknown triage type at the schema layer", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      // "tools" is a CLI-only listing verb, deliberately NOT in the MCP enum —
+      // the schema must refuse it before any triage logic runs. The SDK surfaces
+      // zod validation failures as an error RESULT (not a transport rejection).
+      const result = await client.callTool({
+        name: "kit_triage",
+        arguments: { type: "tools", target: "x" },
+      });
+      assert.equal(result.isError, true);
+      const content = result.content as Array<{ type: string; text: string }>;
+      assert.match(content[0].text, /invalid|enum/i);
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+// ─── kit_memory ───────────────────────────────────────────────────────────────
+
+describe("kit_memory tool", () => {
+  it("returns an empty result — and does NOT create a store — when none exists", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "kit-mcp-memory-"));
+    const prevDir = process.env.KIT_MEMORY_DIR;
+    const prevDb = process.env.KIT_MEMORY_DB;
+    process.env.KIT_MEMORY_DIR = join(dir, "no-store");
+    delete process.env.KIT_MEMORY_DB;
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_memory",
+        arguments: { query: "anything at all", cwd: dir },
+      });
+      const data = parseResult(result) as { messages: unknown[]; shared: unknown[]; note?: string };
+      assert.deepEqual(data.messages, []);
+      assert.deepEqual(data.shared, []);
+      assert.match(data.note ?? "", /no memory store/);
+      // The search must not have materialized a db as a side effect of a read.
+      const { existsSync } = await import("node:fs");
+      assert.equal(
+        existsSync(join(dir, "no-store", "memory.db")),
+        false,
+        "a read-only search created a memory store",
+      );
+    } finally {
+      if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
+      else process.env.KIT_MEMORY_DIR = prevDir;
+      if (prevDb !== undefined) process.env.KIT_MEMORY_DB = prevDb;
+      await rm(dir, { recursive: true, force: true });
+      await cleanup();
+    }
+  });
+
+  it("finds an indexed message scoped to the current project", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "kit-mcp-memory-hit-"));
+    const prevDir = process.env.KIT_MEMORY_DIR;
+    const prevDb = process.env.KIT_MEMORY_DB;
+    process.env.KIT_MEMORY_DIR = join(dir, "store");
+    delete process.env.KIT_MEMORY_DB;
+    const { client, cleanup } = await createTestClient();
+    try {
+      // Seed a store through the real db API (same path the indexer uses).
+      const { openMemoryDb, upsertSession, insertMessage } = await import("./memory/db.js");
+      const db = openMemoryDb();
+      upsertSession(db, { sessionId: "s1", harness: "claude-code", project: dir });
+      insertMessage(db, {
+        uuid: "m1",
+        sessionId: "s1",
+        type: "user",
+        role: "user",
+        content: "we decided to pin the maintainer GPG fingerprint in CI",
+        // Project scoping filters on the message's cwd column — set it to the
+        // "project" dir so the default project-scoped search finds the row.
+        cwd: dir,
+      });
+      db.close();
+
+      const result = await client.callTool({
+        name: "kit_memory",
+        arguments: { query: "maintainer fingerprint", cwd: dir },
+      });
+      const data = parseResult(result) as { messages: Array<{ content: string }> };
+      assert.equal(data.messages.length, 1);
+      assert.match(data.messages[0].content, /GPG fingerprint/);
+    } finally {
+      if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
+      else process.env.KIT_MEMORY_DIR = prevDir;
+      if (prevDb !== undefined) process.env.KIT_MEMORY_DB = prevDb;
       await rm(dir, { recursive: true, force: true });
       await cleanup();
     }
