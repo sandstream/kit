@@ -13,9 +13,10 @@
  * Every detector is fail-safe: a thrown error means "don't hint", never a crash —
  * a tip must never break `kit check` or a session.
  */
-import { existsSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, statSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { getMemoryDir } from "./memory/db.js";
+import { getMemoryDir, getMemoryDbPath } from "./memory/db.js";
+import { getClaudeProjectsDir } from "./memory/parser.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { loadPolicy, verifyPolicy } from "./policy-doc.js";
 import { tryLoadIdentity } from "./identity.js";
@@ -114,6 +115,33 @@ const RULES: HintRule[] = [
       hasAny(root, ["package.json", "requirements.txt", "pyproject.toml"]) &&
       !(await guarddogEnabled(root)) &&
       !!(await resolveToolBin("semgrep")), // only suggest when it can actually run
+  },
+  {
+    id: "gha-unaudited",
+    tip: "you have GitHub Actions workflows — `kit gha-audit` lints them for unpinned actions and pwn-request patterns",
+    detect: (root) => {
+      const dir = resolve(root, ".github", "workflows");
+      if (!existsSync(dir)) return false;
+      return readdirSync(dir).some((f) => f.endsWith(".yml") || f.endsWith(".yaml"));
+    },
+  },
+  {
+    id: "baseline-unfrozen",
+    tip: "no findings baseline yet — `kit baseline freeze` snapshots today's findings so the review/standards gates trip only on NET-NEW ones",
+    detect: (root) =>
+      // Only in a kit-managed repo with source to scan — not any stray folder.
+      existsSync(resolve(root, ".kit.toml")) &&
+      hasAny(root, ["src", "app", "components"]) &&
+      !existsSync(resolve(root, ".kit-baseline.json")),
+  },
+  {
+    id: "memory-unindexed",
+    tip: "agent transcripts found but no cross-session memory — `kit memory index` builds local recall (then `kit memory search`)",
+    detect: () => {
+      if (existsSync(getMemoryDbPath())) return false;
+      const projects = getClaudeProjectsDir();
+      return existsSync(projects) && readdirSync(projects).length > 0;
+    },
   },
   {
     id: "policy-init",
