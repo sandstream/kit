@@ -60,7 +60,11 @@ function summarize(findings: JsonCheck[]): ReviewStageReport["summary"] {
   return summary;
 }
 
-function stageReport(stage: ReviewStageName, ok: boolean, findings: JsonCheck[]): ReviewStageReport {
+function stageReport(
+  stage: ReviewStageName,
+  ok: boolean,
+  findings: JsonCheck[],
+): ReviewStageReport {
   return { stage, ok, summary: summarize(findings), findings };
 }
 

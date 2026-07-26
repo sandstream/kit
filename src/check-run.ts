@@ -66,7 +66,9 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
     : { templateExists: null, keys: [] };
   const skills = config.skills ? await step("skills", () => checkSkills(config.skills!)) : [];
   const hooks =
-    config.hooks && isGitRepository() ? await step("git hooks", () => checkHooks(config.hooks!)) : [];
+    config.hooks && isGitRepository()
+      ? await step("git hooks", () => checkHooks(config.hooks!))
+      : [];
   const webSearch = config.web?.search
     ? await step("web search", () => checkWebSearch(config.web!.search!))
     : null;

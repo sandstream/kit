@@ -84,9 +84,7 @@ describe("checkRunToJsonChecks", () => {
     skills: [{ name: "triage", required: false, installed: false }],
     hooks: [{ hookName: "pre-commit", installed: true, upToDate: false, detail: "outdated" }],
     webSearch: null,
-    security: [
-      { category: "secrets", name: "gitleaks", status: "pass", detail: "clean" },
-    ],
+    security: [{ category: "secrets", name: "gitleaks", status: "pass", detail: "clean" }],
     tests: [{ name: "unit-test coverage", status: "warn", detail: "1 untested" }],
     locks: [{ category: "skills-lock", exists: true, inSync: true, detail: "in sync" }],
   } as CheckRunResult;
