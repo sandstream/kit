@@ -4,6 +4,8 @@
 
 For AI agents and humans. Manages tools, auth, secrets, and project setup. Zero LLM calls, local-first, multi-vault.
 
+**Your standards, not ours.** kit ships zero opinions about your code or architecture — no bundled ruleset, no vendor's "best practice". You declare the standard (`.kit.toml` thresholds, your own plugin rules, architecture decisions as ADRs with enforce blocks); kit enforces the declaration deterministically and proves the checks ran. Taste may change: supersede the ADR, history keeps the why — and `kit baseline freeze` keeps day one honest by gating only net-new findings.
+
 **kit** makes two promises concrete and keeps them across every major since 2.0: `green = honest` is externally _provable_ (kit can emit a signed receipt, anchored to a key its own process cannot recompute, proving which scanners actually ran and that none failed open, verifiable offline), and kit's CLI, config schema, and plugin SDK are frozen, versioned contracts that do not break across a major line. **kit 5.0** turns the provable local floor into a continuous, portable, fail-closed **governance layer for the agent loop** — hardware-rooted identity, an offline-verified control plane, one exec-broker enforcing a signed scope, and a traveling profile you can carry to a fresh host. See [What's new in 5.0](#whats-new-in-50) and [Stability & contracts](#stability--contracts).
 
 🌐 [sandstre.am/kit](https://sandstre.am/kit)
