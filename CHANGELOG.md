@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.19.0] - 2026-07-26
+
+### Fixed
+
+- **The install gate no longer trips on shell redirections.** Found live while
+  verifying the 5.18.0 release: the gate blocked the release-verification
+  install of `sandstream-kit` itself, because the segment splitter cut on the
+  `&` inside stderr-dup redirections (shearing commands into a garbage `2>`
+  segment) and redirect tokens like `>/dev/null` reached the package matcher
+  and fail-closed legitimate installs. `&` now splits only as a job-control
+  separator, and redirections are stripped as I/O plumbing on the undequoted
+  token stream — a *quoted* redirect-shaped operand still fail-closes, a
+  background `&` still separates segments, and a stderr-dup piped into an
+  xargs-driven install keeps its fail-close. Strictly precision, never
+  looseness: all 75 existing bypass-resistance tests pass unchanged.
+
+### Added
+
+- **The hook-skip sentinel ships complete.** The tracked pre-commit hook wrote
+  the ran-sentinel, but the post-commit *detector* — which flags
+  `git commit --no-verify` bypasses to `.kit-skipped-commits.jsonl` — sat
+  untracked in the working tree: half a mechanism. Now tracked, and verified
+  live (it flagged a rebase commit exactly as designed). Plus `mise.toml`
+  pinning node 22 to match `engines.node`.
+
 ## [5.18.0] - 2026-07-26
 
 The surface-audit release: asked "does every user-facing surface show what the
