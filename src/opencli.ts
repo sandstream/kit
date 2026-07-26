@@ -20,7 +20,14 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { COMMANDS, COMMAND_HELP, COMMAND_TIERS, type CommandTier } from "./cli.js";
+import {
+  COMMANDS,
+  COMMAND_HELP,
+  COMMAND_TIERS,
+  COMMAND_AUDIENCE,
+  type CommandTier,
+  type CommandAudience,
+} from "./cli.js";
 import { KIT_MCP_TOOLS } from "./mcp-server.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -36,6 +43,12 @@ export interface OpenCliCommand {
   "x-kit-stability": CommandTier;
   /** True when this verb is also exposed as an MCP tool (`kit_<name>`). */
   "x-kit-mcp": boolean;
+  /**
+   * Who primarily invokes this command: "human" (interactive/setup — never on
+   * the MCP surface), "harness" (hook stdin protocols — on no discovery
+   * surface), "agent", or "all". See COMMAND_AUDIENCE in cli.ts.
+   */
+  "x-kit-audience": CommandAudience;
   /**
    * False = kit's registry does not yet model this command's positional args /
    * flags, so they are intentionally omitted rather than fabricated. Consumers
@@ -74,6 +87,7 @@ export function buildOpenCliDoc(): OpenCliDoc {
     summary: COMMAND_HELP[name] ?? "",
     "x-kit-stability": COMMAND_TIERS[name] ?? "experimental",
     "x-kit-mcp": mcp.has(name),
+    "x-kit-audience": COMMAND_AUDIENCE[name] ?? "all",
     "x-kit-args-modeled": false,
   });
 
@@ -94,6 +108,7 @@ export function buildOpenCliDoc(): OpenCliDoc {
       summary: COMMAND_HELP[key] ?? "",
       "x-kit-stability": parentNode["x-kit-stability"],
       "x-kit-mcp": false,
+      "x-kit-audience": parentNode["x-kit-audience"],
       "x-kit-args-modeled": false,
     };
   }

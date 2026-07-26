@@ -75,6 +75,7 @@ describe("OpenCLI document shape", () => {
       "commands",
       "x-kit-stability",
       "x-kit-mcp",
+      "x-kit-audience",
       "x-kit-args-modeled",
     ]);
     const walk = (c: OpenCliDoc["commands"][string]) => {
@@ -82,5 +83,46 @@ describe("OpenCLI document shape", () => {
       for (const s of Object.values(c.commands ?? {})) walk(s);
     };
     for (const c of Object.values(doc.commands)) walk(c);
+  });
+
+  // Audience ↔ MCP consistency: the exposure layer must respect the audience
+  // annotation. "human" commands are interactive/setup surfaces — they do not
+  // belong on the MCP surface; "harness" commands are hook stdin protocols —
+  // they belong on NO discovery surface. The only tolerated human∩MCP overlap
+  // is the trio already deprecated on the MCP surface, which leaves in kit 6.0
+  // — at which point this exception list empties and gets deleted.
+  it("audience: human/harness commands are never MCP-exposed (modulo the 6.0 deprecations)", () => {
+    const DEPRECATED_MCP_UNTIL_6_0 = new Set(["add", "install", "login"]);
+    const offenders: string[] = [];
+    for (const [name, c] of Object.entries(doc.commands)) {
+      const audience = c["x-kit-audience"];
+      if ((audience === "human" || audience === "harness") && c["x-kit-mcp"]) {
+        if (audience === "human" && DEPRECATED_MCP_UNTIL_6_0.has(name)) continue;
+        offenders.push(`${name} (${audience})`);
+      }
+    }
+    assert.deepEqual(offenders, [], "human/harness-audience commands must not be MCP-exposed");
+    // The exception list must not rot: every entry must still be a real,
+    // MCP-exposed, human-audience command. When 6.0 removes the tools, this
+    // fails and the list (and eventually the whole exception) gets deleted.
+    for (const name of DEPRECATED_MCP_UNTIL_6_0) {
+      const c = doc.commands[name];
+      assert.ok(c, `${name} vanished from the command surface — update the exception list`);
+      assert.equal(
+        c["x-kit-mcp"],
+        true,
+        `${name} is no longer MCP-exposed — remove it from the exception list`,
+      );
+      assert.equal(c["x-kit-audience"], "human");
+    }
+  });
+
+  it("every command carries a valid audience", () => {
+    const valid = new Set(["human", "agent", "harness", "all"]);
+    const walk = (name: string, c: OpenCliDoc["commands"][string]) => {
+      assert.ok(valid.has(c["x-kit-audience"]), `${name}: invalid audience ${c["x-kit-audience"]}`);
+      for (const [sub, s] of Object.entries(c.commands ?? {})) walk(`${name} ${sub}`, s);
+    };
+    for (const [name, c] of Object.entries(doc.commands)) walk(name, c);
   });
 });
