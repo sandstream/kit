@@ -1,0 +1,35 @@
+#!/bin/sh
+# KIT_HOOK_SENTINEL: detect --no-verify skips. If the sentinel
+# is missing OR older than the commit (i.e. wasn't written by this commit's
+# pre-commit pass), record a skip event so the operator and CI can see it.
+__kit_git_dir=${GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}
+__kit_repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ -n "$__kit_git_dir" ] && [ -n "$__kit_repo_root" ]; then
+  __kit_sentinel="$__kit_git_dir/.kit-hook-ran"
+  __kit_head=$(git rev-parse HEAD 2>/dev/null)
+  if [ ! -f "$__kit_sentinel" ]; then
+    __kit_reason="sentinel-missing"
+  else
+    # If the sentinel timestamp pre-dates the commit author time by more
+    # than ~5min, treat as stale (left from an earlier run).
+    __kit_sentinel_ts=$(stat -c %Y "$__kit_sentinel" 2>/dev/null || stat -f %m "$__kit_sentinel" 2>/dev/null)
+    __kit_commit_ts=$(git log -1 --format=%ct HEAD 2>/dev/null)
+    if [ -n "$__kit_sentinel_ts" ] && [ -n "$__kit_commit_ts" ]; then
+      __kit_delta=$(( __kit_commit_ts - __kit_sentinel_ts ))
+      if [ "$__kit_delta" -gt 300 ] || [ "$__kit_delta" -lt -300 ]; then
+        __kit_reason="sentinel-stale"
+      fi
+    fi
+  fi
+  if [ -n "$__kit_reason" ]; then
+    __kit_log="$__kit_repo_root/.kit-skipped-commits.jsonl"
+    __kit_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    printf '{"timestamp":"%s","sha":"%s","reason":"%s","user":"%s"}\n' \
+      "$__kit_ts" "$__kit_head" "$__kit_reason" "${USER:-unknown}" \
+      >> "$__kit_log" 2>/dev/null || true
+    echo "[kit] WARNING: pre-commit hook was skipped ($__kit_reason). Logged to .kit-skipped-commits.jsonl." >&2
+  fi
+  # Clean up sentinel so the next commit starts fresh.
+  rm -f "$__kit_sentinel" 2>/dev/null || true
+fi
+exit 0
