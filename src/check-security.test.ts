@@ -12,6 +12,7 @@ import {
   findJvmProject,
   checkMemoryHooksLiveness,
   checkDeviceIdOverride,
+  unpinnedNodeDeps,
   LOCKFILE_ECOSYSTEMS,
   type SecurityCheckResult,
 } from "./check-security.js";
@@ -529,5 +530,55 @@ describe("lockfile ecosystem coverage (#353)", () => {
     for (const e of LOCKFILE_ECOSYSTEMS) {
       assert.ok(e.manifests.length > 0 && e.lockfiles.length > 0, `${e.name} malformed`);
     }
+  });
+});
+
+// Workspace-aware pinning: internal monorepo packages resolve to the local
+// tree, never the registry — "@repo/x": "*" is npm-workspaces convention, not
+// a floating range, and "pinning" it would actually be wrong (real false
+// positive from a Turborepo user).
+describe("unpinnedNodeDeps", () => {
+  const noMembers = () => false;
+
+  it("flags registry ranges and floating versions", () => {
+    assert.deepStrictEqual(
+      unpinnedNodeDeps({ a: "^1.2.3", b: "~2.0.0", c: ">=3", d: "*", e: "4.x" }, noMembers),
+      ["a@^1.2.3", "b@~2.0.0", "c@>=3", "d@*", "e@4.x"],
+    );
+  });
+
+  it("passes exact versions", () => {
+    assert.deepStrictEqual(unpinnedNodeDeps({ a: "1.2.3", b: "0.0.1-rc.2" }, noMembers), []);
+  });
+
+  it("skips workspace/file/link/portal/catalog protocol refs — local, not floating", () => {
+    assert.deepStrictEqual(
+      unpinnedNodeDeps(
+        {
+          a: "workspace:*",
+          b: "workspace:^",
+          c: "file:../local",
+          d: "link:../local",
+          e: "portal:../local",
+          f: "catalog:default",
+        },
+        noMembers,
+      ),
+      [],
+    );
+  });
+
+  it('skips "*" on internal workspace members but still flags external "*"', () => {
+    const members = new Set(["@repo/ui", "@repo/config"]);
+    assert.deepStrictEqual(
+      unpinnedNodeDeps({ "@repo/ui": "*", "@repo/config": "*", "left-pad": "*" }, (n) =>
+        members.has(n),
+      ),
+      ["left-pad@*"],
+    );
+  });
+
+  it("handles a missing dep map", () => {
+    assert.deepStrictEqual(unpinnedNodeDeps(undefined, noMembers), []);
   });
 });

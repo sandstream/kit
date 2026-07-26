@@ -51,6 +51,28 @@ function walkSources(root: string, exts: string[]): string[] {
   });
 }
 
+/**
+ * Blank out comment interiors — slash-star block comments (which also covers
+ * the JSX-wrapped form), HTML comments (`<!-- … -->`, astro/vue templates),
+ * and `//` line comments (SCSS/TS) — while preserving every newline so finding
+ * line numbers stay stable. Markup mentioned in a comment or docstring is
+ * documentation, not rendered UI, and must not trip the a11y/token scanners
+ * (real case: a commented `<input type="datetime-local">` example flagged as
+ * an unlabeled input).
+ *
+ * Deterministic heuristic, not a parser: `//` preceded by `:` is kept so
+ * `https://…` URLs survive, and comment markers inside string literals are
+ * treated as comments — an accepted precision trade-off for a zero-dependency
+ * line scanner.
+ */
+export function stripComments(source: string): string {
+  const blank = (s: string) => s.replace(/[^\n]/g, " ");
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, blank)
+    .replace(/<!--[\s\S]*?-->/g, blank)
+    .replace(/(^|[^:])\/\/[^\n]*/g, (m, keep: string) => keep + " ".repeat(m.length - keep.length));
+}
+
 interface A11yFinding {
   file: string;
   line: number;
@@ -97,7 +119,8 @@ async function scanA11y(srcRoots: string[]): Promise<A11yFinding[]> {
       } catch {
         continue;
       }
-      const lines = content.split("\n");
+      // Comments/docstrings are documentation, not rendered UI — strip before matching.
+      const lines = stripComments(content).split("\n");
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         for (const rule of A11Y_RULES) {
@@ -137,7 +160,9 @@ async function scanTokenBypass(srcRoots: string[], tokenFiles: string[]): Promis
       } catch {
         continue;
       }
-      const lines = content.split("\n");
+      // Same comment-stripping as the a11y scan: a hex/px value in a comment
+      // is prose, not a token bypass.
+      const lines = stripComments(content).split("\n");
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const hex = line.match(/#[0-9a-f]{3,8}\b/i);
