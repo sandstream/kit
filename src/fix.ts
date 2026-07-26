@@ -231,6 +231,15 @@ export async function cmdFix(): Promise<boolean> {
       operation: "fix",
       operationType: "write",
       metadata: {},
+      // Declared effects (scope-needs adoption): the statically-known repo writes.
+      // Tool installs go through mise into $HOME — infrastructure provisioning the
+      // project [scope] RoE does not govern (mirrors the MCP kit_fix site's
+      // `infrastructure: true`). Git-hook installs resolve their target via
+      // `core.hooksPath` at runtime; they land inside the repo, which the
+      // repo-rooted [scope].fs covers.
+      scopeNeeds: {
+        fsWrites: ["skills-lock.json", "cli-lock.json", ".env.template", ".gitignore"],
+      },
     },
     async () => {
       // Read-only mode: fix installs tools and writes .env.template / .gitignore.
