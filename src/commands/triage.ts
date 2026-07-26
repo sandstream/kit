@@ -437,11 +437,19 @@ interface TriageLogEntry {
   granter: string;
 }
 
-async function recordTriageRun(
+/**
+ * Append a PASS entry to the triage log. Exported so the MCP `kit_triage` tool
+ * records through the SAME path the CLI uses — the pre-commit `check-deps` gate
+ * and the install gate read this log, so an MCP-run triage must satisfy them
+ * identically to a CLI-run one. `cwd` defaults to process.cwd(); the MCP server
+ * passes its per-call working directory.
+ */
+export async function recordTriageRun(
   type: string,
   target: string,
   sandbox: boolean,
   deep = false,
+  cwd?: string,
 ): Promise<void> {
   const { appendFile } = await import("node:fs/promises");
   const { resolve } = await import("node:path");
@@ -455,7 +463,7 @@ async function recordTriageRun(
   };
   try {
     await appendFile(
-      resolve(process.cwd(), TRIAGE_LOG_FILE),
+      resolve(cwd ?? process.cwd(), TRIAGE_LOG_FILE),
       JSON.stringify(entry) + "\n",
       "utf-8",
     );

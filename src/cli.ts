@@ -664,6 +664,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdTriage,
     stability: "stable",
     help: "Security evaluation before installing packages, images, or skills",
+    // MCP-exposed: the install gate blocks untriaged packages and tells the agent
+    // to run `kit triage` — in a shell-less client that instruction was previously
+    // unfollowable. The enforcement layer must never demand an action the exposure
+    // layer cannot perform.
+    mcp: true,
   },
   slopsquat: {
     handler: cmdSlopsquat,
@@ -736,6 +741,9 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdMemory,
     stability: "stable",
     help: "Local conversation memory — index transcripts + show stats",
+    // MCP-exposed (search only): cross-session recall is stateful — exactly the
+    // case where an MCP tool earns its context cost for shell-less clients.
+    mcp: true,
   },
   "gate-bash": {
     handler: cmdGateBash,

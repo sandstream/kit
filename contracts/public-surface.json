@@ -257,8 +257,10 @@
     "kit_install",
     "kit_login",
     "kit_map",
+    "kit_memory",
     "kit_run",
     "kit_secrets",
-    "kit_standards"
+    "kit_standards",
+    "kit_triage"
   ]
 }

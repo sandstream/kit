@@ -579,7 +579,7 @@
       "kind": "group",
       "summary": "Local conversation memory — index transcripts + show stats",
       "x-kit-args-modeled": false,
-      "x-kit-mcp": false,
+      "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
     "open": {
@@ -937,7 +937,7 @@
       "kind": "command",
       "summary": "Security evaluation before installing packages, images, or skills",
       "x-kit-args-modeled": false,
-      "x-kit-mcp": false,
+      "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
     "upgrade": {

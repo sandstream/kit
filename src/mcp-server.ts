@@ -36,6 +36,12 @@ import { isReadOnlyMode } from "./read-only-mode.js";
 import { escapeWorkflowCmd } from "./utils/ci-escape.js";
 import { runGovernedBrokered } from "./governance-middleware.js";
 import type { kitConfig } from "./config.js";
+import { runTriage, type TriageType } from "./triage.js";
+import { recordTriageRun } from "./commands/triage.js";
+import { openMemoryDb, searchMessages, getMemoryDbPath, recordQuery } from "./memory/db.js";
+import { searchShared } from "./memory/shared.js";
+import { getCurrentProjectRoot } from "./memory/project.js";
+import { existsSync } from "node:fs";
 
 const KIT_FILE = ".kit.toml";
 
@@ -58,7 +64,31 @@ export const KIT_MCP_TOOLS: readonly string[] = [
   "kit_run",
   "kit_context",
   "kit_map",
+  "kit_triage",
+  "kit_memory",
 ];
+
+/**
+ * Server-level instructions (MCP `initialize` result). Clients like Claude Code
+ * surface this to route tool selection, so it carries the one decision that
+ * matters most for context economy: an agent WITH shell access should prefer the
+ * CLI (zero standing context cost, `--help` self-documents all 68 commands);
+ * these MCP tools exist for shell-less clients. Kept well under the ~2KB
+ * truncation limit clients apply.
+ */
+const KIT_MCP_INSTRUCTIONS = `kit is a deterministic, local-first dev-environment manager and fail-closed security gate (zero LLM calls).
+
+If you have shell access, prefer running \`kit <command>\` directly — the CLI covers far more than these tools and \`kit <command> --help\` documents everything. These MCP tools exist for shell-less clients.
+
+Typical loop: kit_check (verify env + security) → kit_fix (auto-repair) → kit_triage (REQUIRED before installing any package kit's gate has not already cleared — the gate blocks untriaged installs) → kit_memory (recall prior cross-session decisions before answering project-specific questions) → kit_run (escape hatch for any other kit command).`;
+
+// Deprecation prefix for tools scheduled for removal from the MCP surface in
+// kit 6.0 (the MCP surface is "Evolving" per docs/API_STABILITY_AND_VERSIONING.md
+// — removal requires notice, so they are marked, not dropped). Rationale: setup-
+// time and CI commands are shell contexts by definition; a shell-less MCP client
+// is never the thing provisioning services or running CI. kit_run remains the
+// escape hatch for all of them.
+const DEPRECATED_6_0 = "DEPRECATED — scheduled for removal from the MCP surface in kit 6.0";
 
 function configPath(cwd?: string): string {
   return resolve(cwd ?? process.cwd(), KIT_FILE);
@@ -108,7 +138,10 @@ async function loadConfigForGovernance(cwd?: string): Promise<kitConfig> {
 }
 
 export function createMcpServer(): McpServer {
-  const server = new McpServer({ name: "kit", version: "0.1.0" }, { capabilities: { tools: {} } });
+  const server = new McpServer(
+    { name: "kit", version: "0.1.0" },
+    { capabilities: { tools: {} }, instructions: KIT_MCP_INSTRUCTIONS },
+  );
 
   // One registrar per tool — keeps this composition flat (was a 774-line
   // function). Each register_* attaches its tool to the server.
@@ -125,6 +158,8 @@ export function createMcpServer(): McpServer {
   register_kit_run(server);
   register_kit_context(server);
   register_kit_map(server);
+  register_kit_triage(server);
+  register_kit_memory(server);
 
   return server;
 }
@@ -274,7 +309,7 @@ function register_kit_install(server: McpServer): void {
   // kit_install — install missing tools via mise
   server.tool(
     "kit_install",
-    "Install missing tools defined in .kit.toml using mise.",
+    `${DEPRECATED_6_0}; setup-time provisioning happens in a shell — use \`kit install\` there, or kit_run. Install missing tools defined in .kit.toml using mise.`,
     { cwd: z.string().optional().describe("Working directory") },
     async ({ cwd }) => {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_install");
@@ -329,7 +364,7 @@ function register_kit_login(server: McpServer): void {
   // kit_login — attempt service logins (non-interactive)
   server.tool(
     "kit_login",
-    "Attempt to log in to services defined in .kit.toml. Runs in non-interactive mode — services requiring interactive auth will be skipped.",
+    `${DEPRECATED_6_0}; service auth is interactive/setup-time — use \`kit login\` in a shell. Attempt to log in to services defined in .kit.toml. Runs in non-interactive mode — services requiring interactive auth will be skipped.`,
     { cwd: z.string().optional().describe("Working directory") },
     async ({ cwd }) => {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_login");
@@ -541,7 +576,7 @@ function register_kit_add(server: McpServer): void {
   // kit_add — provision a service (stripe, supabase, etc.)
   server.tool(
     "kit_add",
-    `Provision a service integration for the project. Available services: ${listAvailableServices().join(", ")}. Writes generated secrets to .env.local and returns provisioning result.`,
+    `${DEPRECATED_6_0}; provisioning is setup-time shell work — use \`kit add\` there, or kit_run. Provision a service integration for the project. Available services: ${listAvailableServices().join(", ")}. Writes generated secrets to .env.local and returns provisioning result.`,
     {
       service: z
         .string()
@@ -595,7 +630,7 @@ function register_kit_env(server: McpServer): void {
   // kit_env — inspect environment variables loaded from .env.local
   server.tool(
     "kit_env",
-    "Inspect environment variables from .env.local. Returns each key's set/missing status. Values are redacted by default.",
+    `${DEPRECATED_6_0}; kit_context includes environment status — prefer it. Inspect environment variables from .env.local. Returns each key's set/missing status. Values are redacted by default.`,
     {
       show_values: z
         .boolean()
@@ -714,7 +749,7 @@ function register_kit_init(server: McpServer): void {
 function register_kit_ci(server: McpServer): void {
   server.tool(
     "kit_ci",
-    "Run kit CI checks and return structured results. Use before deploying or merging to validate the environment is correctly configured. Returns pass/fail/warn status for tools, services, secrets, lock files, and security.",
+    `${DEPRECATED_6_0}; CI runners always have a shell — run \`kit ci\` there. Run kit CI checks and return structured results. Use before deploying or merging to validate the environment is correctly configured. Returns pass/fail/warn status for tools, services, secrets, lock files, and security.`,
     {
       cwd: z.string().optional().describe("Project directory (defaults to process.cwd())"),
       format: z
@@ -1006,6 +1041,160 @@ function register_kit_map(server: McpServer): void {
           coChange: co_change ?? false,
         });
         return { content: [{ type: "text" as const, text: JSON.stringify(report, null, 2) }] };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+}
+
+function register_kit_triage(server: McpServer): void {
+  // kit_triage — security-evaluate a package/image/repo/skill BEFORE it is
+  // installed. This closes a dead end: the install gate blocks untriaged
+  // packages with the instruction "run kit triage first", which a shell-less
+  // MCP client could not previously follow. A PASS is recorded through the SAME
+  // triage-log path the CLI uses, so the pre-commit and install gates recognize
+  // an MCP-run triage identically.
+  server.tool(
+    "kit_triage",
+    "Security-triage a dependency BEFORE installing it (registry reputation, repo health, known-compromise catalogs). Required by kit's install gate for anything it has not already cleared. A pass is recorded in the triage log the gates read. Deterministic, zero-LLM.",
+    {
+      type: z
+        .enum(["npm", "pip", "docker", "brew", "repo", "skill"])
+        .describe(
+          "Target kind: npm/pip package, docker image, brew formula, GitHub repo, or agent skill",
+        ),
+      target: z.string().describe("Package name, image ref, owner/repo, or skill path"),
+      cwd: z
+        .string()
+        .optional()
+        .describe(
+          "Working directory (defaults to process.cwd()) — where the triage log is written",
+        ),
+    },
+    async ({ type, target, cwd }) => {
+      // Appends to .kit-triage.jsonl on PASS, so read-only mode refuses it —
+      // an unrecordable pass could not satisfy the gates anyway (fail-closed).
+      if (isReadOnlyMode()) return readOnlyRefusal("kit_triage");
+      try {
+        const result = await runTriage(type as TriageType, target);
+        if (result.passed && target) {
+          await recordTriageRun(type, target, false, false, cwd);
+        }
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  passed: result.passed,
+                  type: result.type,
+                  target: result.target,
+                  verdict: result.passed
+                    ? "TRIAGE PASSED — recorded in the triage log; the install gate will now allow this target"
+                    : "TRIAGE FAILED — do not install; inspect the output below",
+                  output: result.output,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+          isError: !result.passed,
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+}
+
+function register_kit_memory(server: McpServer): void {
+  // kit_memory — search cross-session conversation memory (and the curated
+  // shared tier that travels with the repo). Search-only by design: writes to
+  // the trusted store stay on the CLI/indexer path, so an MCP client can never
+  // inject foreign text into recall. Quarantined (injection-flagged) rows are
+  // excluded, matching the CLI default.
+  server.tool(
+    "kit_memory",
+    "Search kit's local cross-session conversation memory plus the repo's curated shared decisions. Use before answering project-specific questions to recall what was actually said/decided. Read-only search; quarantined rows excluded.",
+    {
+      query: z.string().describe("Search terms"),
+      limit: z.number().int().min(1).max(100).optional().describe("Max raw hits (default 20)"),
+      global: z
+        .boolean()
+        .optional()
+        .describe("Search across all projects instead of only the current one"),
+      cwd: z.string().optional().describe("Project directory (defaults to process.cwd())"),
+    },
+    async ({ query, limit, global: searchGlobal, cwd }) => {
+      try {
+        const root = getCurrentProjectRoot(cwd ?? process.cwd());
+        // No store on this machine → empty result, NOT a freshly-created store:
+        // openMemoryDb would otherwise migrate a new db into existence as a
+        // side effect of a read — wrong for a search tool.
+        if (!existsSync(getMemoryDbPath())) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(
+                  {
+                    messages: [],
+                    shared: [],
+                    note: "no memory store on this machine — run `kit memory index` to build one",
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+          };
+        }
+        const db = openMemoryDb();
+        let hits;
+        try {
+          hits = searchMessages(db, query, {
+            limit: limit ?? 20,
+            projectPath: searchGlobal ? undefined : root,
+          });
+          // Same best-effort recall logging as the CLI (adoption metrics read
+          // it); skipped in read-only mode so the tool stays a pure read there.
+          if (!isReadOnlyMode()) {
+            try {
+              recordQuery(db, {
+                query,
+                hitCount: hits.length,
+                projectPath: searchGlobal ? undefined : root,
+              });
+            } catch {
+              // logging is non-critical
+            }
+          }
+        } finally {
+          db.close();
+        }
+        // Curated shared tier — always project-local, best-effort (parity with CLI).
+        let shared: unknown[] = [];
+        try {
+          shared = searchShared(root, query);
+        } catch {
+          // shared tier never gates raw recall
+        }
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ messages: hits, shared }, null, 2),
+            },
+          ],
+        };
       } catch (err) {
         return {
           content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
