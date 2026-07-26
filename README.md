@@ -829,7 +829,7 @@ See [GOVERNANCE.md](./GOVERNANCE.md) for detailed documentation.
 
 ## AI Assistant Setup
 
-kit exposes its capabilities as an MCP server, making it usable directly by Claude Code, Cursor, Windsurf, Cline, and any other MCP-compatible AI assistant. Once registered, assistants can call `kit_check`, `kit_fix`, `kit_add`, and other tools without leaving their context.
+kit exposes its capabilities as an MCP server, making it usable directly by Claude Code, Cursor, Windsurf, Cline, and any other MCP-compatible AI assistant. Once registered, assistants can call `kit_check`, `kit_fix`, `kit_triage`, and other tools without leaving their context. (An agent **with shell access** should prefer the CLI — zero standing context cost, and `kit <command> --help` self-documents; the MCP surface exists for shell-less clients. The server's `instructions` field tells clients exactly this.)
 
 ### Claude Code
 
@@ -898,15 +898,25 @@ For Cline, add the same config to your `cline_mcp_settings.json`.
 
 ### Available MCP Tools
 
-| Tool          | Description                                                                 |
-| ------------- | --------------------------------------------------------------------------- |
-| `kit_check`   | Run all checks, return structured status JSON                               |
-| `kit_install` | Install missing tools via mise                                              |
-| `kit_login`   | Attempt service logins (non-interactive)                                    |
-| `kit_secrets` | Generate `.env.local` from configured sources                               |
-| `kit_fix`     | Auto-fix issues (install tools, generate lock files)                        |
-| `kit_add`     | Provision a service integration (stripe, supabase, etc.)                    |
-| `kit_env`     | Inspect `.env.local`, list keys with set/missing status and redacted values |
+| Tool            | Description                                                                                     |
+| --------------- | ----------------------------------------------------------------------------------------------- |
+| `kit_check`     | Run all checks, return structured status JSON                                                   |
+| `kit_fix`       | Auto-fix issues (install tools, generate lock files)                                            |
+| `kit_triage`    | Security-triage a dependency BEFORE installing it — a pass satisfies the install gate           |
+| `kit_memory`    | Search cross-session memory + the repo's curated shared decisions (search-only)                 |
+| `kit_secrets`   | Generate `.env.local` from configured sources (returns key names, never values)                 |
+| `kit_run`       | Run a command with the secret-loaded env — escape hatch for every other kit command             |
+| `kit_context`   | Gather project context (stack, services, env status)                                            |
+| `kit_map`       | Repo map: import-neighborhood slice around seed paths                                           |
+| `kit_init`      | Detect the stack and generate `.kit.toml` (dry-run supported)                                   |
+| `kit_standards` | Run the dev-standards gate, return structured findings                                          |
+| `kit_env`       | _Deprecated (leaves in 6.0)_ — inspect `.env.local` key status; prefer `kit_context`            |
+| `kit_ci`        | _Deprecated (leaves in 6.0)_ — CI runners have a shell; run `kit ci` there                      |
+| `kit_install`   | _Deprecated (leaves in 6.0)_ — setup-time provisioning; use `kit install` or `kit_run`          |
+| `kit_login`     | _Deprecated (leaves in 6.0)_ — interactive service auth; use `kit login` in a shell             |
+| `kit_add`       | _Deprecated (leaves in 6.0)_ — service provisioning; use `kit add` or `kit_run`                 |
+
+Full reference: [docs/MCP_TOOLS_REFERENCE.md](docs/MCP_TOOLS_REFERENCE.md) · usage guide: [docs/MCP_TOOLS_GUIDE.md](docs/MCP_TOOLS_GUIDE.md)
 
 ### Example: kit_check response
 

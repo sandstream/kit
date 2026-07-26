@@ -4,6 +4,13 @@
 > Pair this with `docs/THREAT_MODEL.md` (what data flows where) and
 > `docs/DATA_FLOW.md` (exact reads/writes per op).
 
+> **Machine-readable surface:** `contracts/kit.opencli.json` describes every
+> command with its stability tier (`x-kit-stability`), MCP exposure
+> (`x-kit-mcp`), and primary audience (`x-kit-audience`: `human` for
+> interactive/setup commands, `harness` for hook stdin protocols like
+> `gate-*`/`statusline` that neither humans nor agents invoke directly, or
+> `all`). Agents should prefer that contract over parsing this document.
+
 ## Global flags
 
 | Flag                         | Effect                                                                                     |
