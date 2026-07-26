@@ -455,6 +455,50 @@ enforce_runtime = true
     );
   });
 
+  it("observe evidence lands in the GOVERNED project's audit log, not process.cwd()", async () => {
+    // Regression: broker audits used to resolve .kit-audit.jsonl from
+    // process.cwd(), so an op governed by another project's [scope] — an MCP
+    // call with its own cwd, or a test fixture — wrote its observe records
+    // into the HOST repo's log and poisoned `kit broker enforce-readiness`
+    // there (the first real measurement found 23/23 observed ops were test
+    // fixtures). Evidence must follow the project whose scope mediates.
+    const project = mkdtempSync(join(tmpdir(), "kit-broker-proj-"));
+    try {
+      loadOrCreateIdentity();
+      writeFileSync(
+        join(project, PROFILE_FILE),
+        `version = 1\n[scope]\negress = ["api.acme.com"]\n`,
+      );
+      await signProfile(project);
+      delete process.env.KIT_EXEC_BROKER_POLICY;
+
+      // process.cwd() is `sandbox` (see beforeEach) — the governed project differs.
+      const out = await runBrokered(
+        CTX({ egressTargets: ["https://evil.com"] }),
+        async () => "ok",
+        { cwd: project },
+      );
+      assert.equal(out.ok, true, "observe never denies");
+
+      const projLog = join(project, ".kit-audit.jsonl");
+      assert.ok(existsSync(projLog), "observe record written to the governed project");
+      const projEntries = readFileSync(projLog, "utf-8")
+        .split("\n")
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l) as { metadata?: { phase?: string } });
+      assert.ok(
+        projEntries.some((e) => e.metadata?.phase === "observe"),
+        "the observe entry is in the project's log",
+      );
+      assert.ok(
+        !auditLines().some((l) => (l.metadata as { phase?: string })?.phase === "observe"),
+        "no observe entry leaked into process.cwd()'s log",
+      );
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
   it("explicit enforce_runtime = false → runtime OFF (opt out of mediation entirely)", async () => {
     await writeSignedProfile(
       `version = 1\n[scope]\negress = ["api.acme.com"]\nenforce_runtime = false\n`,

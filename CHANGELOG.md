@@ -61,6 +61,21 @@ cannot return.
   first honest field-signal measurement (`kit broker enforce-readiness` on kit
   itself) is now meaningful, because something actually declares.
 
+### Fixed
+
+- **Broker evidence now lands in the governed project's audit log, not
+  `process.cwd()`.** The first real `enforce-readiness` measurement found
+  23/23 observed ops were test fixtures: broker audits resolved
+  `.kit-audit.jsonl` from the process cwd, so an op governed by another
+  project's `[scope]` — an MCP call with its own `cwd`, or a test fixture —
+  wrote its observe records into the host repo's log and poisoned the
+  readiness verdict there. `cwd` now threads through
+  `runBrokered → brokerExec/brokerObserve → audit`, so evidence follows the
+  project whose scope mediates (regression-tested: the polluter suite now
+  leaves the host log untouched). Historical entries are left intact — the
+  log is hash-chained, and deleting lines is tampering by kit's own model; a
+  sanctioned `audit rotate` with anchor re-seal is a named follow-up.
+
 ## [5.15.0] - 2026-07-25
 
 ### Added
