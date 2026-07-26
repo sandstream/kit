@@ -161,8 +161,16 @@ function cmdHelp(subcommand?: string): boolean {
 
   // top-level keys have no space; subcommand keys ("memory index") do.
   const topLevel = Object.keys(COMMAND_HELP).filter((k) => !k.includes(" "));
+  // Audience filter: harness commands are hook stdin protocols (gate-*,
+  // statusline) — the agent harness invokes them; a human browsing help never
+  // does, so by default they are noise. NEVER silently dropped: a counted note
+  // below points at `kit help --all`, and `kit help <cmd>` always resolves them.
+  const showAll = hasFlag(process.argv, "--all");
+  const hidden = showAll ? [] : topLevel.filter((k) => COMMAND_AUDIENCE[k] === "harness");
+  const hiddenSet = new Set(hidden);
+  const shown = topLevel.filter((k) => !hiddenSet.has(k));
   const categorized = new Set(CATEGORIES.flatMap(([, cmds]) => cmds));
-  const uncategorized = topLevel.filter((k) => !categorized.has(k));
+  const uncategorized = shown.filter((k) => !categorized.has(k));
   const groups: [string, string[]][] = uncategorized.length
     ? [...CATEGORIES, ["Other", uncategorized]]
     : CATEGORIES;
@@ -174,7 +182,7 @@ function cmdHelp(subcommand?: string): boolean {
     `${bold}Commands:${reset}  ${dim}(+ = has subcommands; run \`kit <command> --help\`)${reset}`,
   );
   for (const [title, cmds] of groups) {
-    const present = cmds.filter((cmd) => COMMAND_HELP[cmd]);
+    const present = cmds.filter((cmd) => COMMAND_HELP[cmd] && !hiddenSet.has(cmd));
     if (!present.length) continue;
     console.log(`\n  ${dim}${title}${reset}`);
     for (const cmd of present) {
@@ -182,6 +190,11 @@ function cmdHelp(subcommand?: string): boolean {
       const pad = " ".repeat(maxLen - label.length + 2);
       console.log(`  ${green}${label}${reset}${pad}${dim}${COMMAND_HELP[cmd]}${reset}`);
     }
+  }
+  if (hidden.length > 0) {
+    console.log(
+      `\n  ${dim}(+ ${hidden.length} harness hook commands — invoked by the agent harness, not by you. See them with \`kit help --all\`.)${reset}`,
+    );
   }
 
   console.log(`\n${bold}Options:${reset}`);

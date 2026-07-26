@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   COMMANDS,
   COMMAND_HELP,
@@ -98,5 +101,42 @@ describe("deprecation warning", () => {
         true,
       );
     }
+  });
+});
+
+// Audience-filtered help: harness commands (hook stdin protocols) are hidden
+// from the default listing behind a COUNTED note — never silently dropped —
+// and fully visible with --all. `kit help <cmd>` always resolves them.
+describe("kit help audience filter", () => {
+  const CLI = join(dirname(fileURLToPath(import.meta.url)), "cli.js");
+  const run = (...args: string[]) =>
+    spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8" }).stdout;
+
+  const HARNESS = ["gate-bash", "gate-egress", "gate-env", "gate-fs", "statusline"];
+
+  it("hides harness commands by default, with a counted note", () => {
+    const out = run("help");
+    for (const cmd of HARNESS) {
+      assert.ok(
+        !new RegExp(`^\\s*\\x1b\\[32m${cmd}(\\s|\\x1b)`, "m").test(out) &&
+          !new RegExp(`^\\s{2}${cmd}\\s`, "m").test(out),
+        `${cmd} should not be listed in default help`,
+      );
+    }
+    assert.match(out, /5 harness hook commands/, "the hidden set is counted, never silent");
+    assert.match(out, /kit help --all/, "the note says how to reveal them");
+  });
+
+  it("shows harness commands with --all and drops the note", () => {
+    const out = run("help", "--all");
+    for (const cmd of HARNESS) {
+      assert.ok(out.includes(cmd), `${cmd} must be listed under --all`);
+    }
+    assert.ok(!/harness hook commands —/.test(out), "no hidden-note when nothing is hidden");
+  });
+
+  it("kit help <harness-cmd> still resolves directly", () => {
+    const out = run("help", "gate-bash");
+    assert.match(out, /gate-bash — PreToolUse/);
   });
 });
