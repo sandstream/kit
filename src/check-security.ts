@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
+import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { classifyGuardDog } from "./guarddog.js";
 import { depsHashFor, loadGuardDogCache, saveGuardDogCache } from "./guarddog-cache.js";
@@ -727,6 +728,55 @@ async function checkServiceExposure(): Promise<SecurityCheckResult[]> {
   return results;
 }
 
+/** Version specifiers that are local/protocol refs (workspace:, file:, link:,
+ *  portal:, catalog:) — resolved outside the registry, so "floating" is
+ *  meaningless for them. */
+const LOCAL_PROTOCOL_REF = /^(workspace|file|link|portal|catalog):/;
+
+/**
+ * The unpinned rows of one dependency map. Workspace-aware: internal monorepo
+ * packages (declared `"@repo/x": "*"` per npm-workspaces convention, or via the
+ * workspace:/file: protocols) resolve to the local tree, never the registry —
+ * flagging them as "unpinned" was a false positive, and "pinning" them would
+ * actually be wrong. Exported for tests.
+ */
+export function unpinnedNodeDeps(
+  deps: Record<string, string> | undefined,
+  isWorkspaceMember: (name: string) => boolean,
+): string[] {
+  if (!deps) return [];
+  const unpinned: string[] = [];
+  for (const [name, version] of Object.entries(deps)) {
+    if (LOCAL_PROTOCOL_REF.test(version)) continue;
+    if (isWorkspaceMember(name)) continue;
+    // Range specifiers: ^, ~, >, <, >=, <=, *, x
+    if (/^[~^><=*x]|[*x]$/.test(version)) {
+      unpinned.push(`${name}@${version}`);
+    }
+  }
+  return unpinned;
+}
+
+/** Names of this repo's workspace member packages (empty set when none / on error). */
+function workspaceMemberNames(cwd: string): Set<string> {
+  const names = new Set<string>();
+  try {
+    for (const root of resolveWorkspaceRoots(cwd)) {
+      try {
+        const pkg = JSON.parse(readFileSync(resolve(cwd, root, "package.json"), "utf-8")) as {
+          name?: string;
+        };
+        if (pkg.name) names.add(pkg.name);
+      } catch {
+        // unreadable member package.json — skip it, never fail the check
+      }
+    }
+  } catch {
+    // workspace resolution is best-effort; no workspaces ⇒ empty set
+  }
+  return names;
+}
+
 /**
  * Check if dependencies use pinned versions
  */
@@ -737,19 +787,13 @@ async function checkPinnedVersions(): Promise<SecurityCheckResult> {
   try {
     const packageJsonContent = await readFile(resolve(process.cwd(), "package.json"), "utf-8");
     const packageJson = JSON.parse(packageJsonContent);
+    const members = workspaceMemberNames(process.cwd());
+    const isMember = (name: string) => members.has(name);
 
-    const checkDeps = (deps: Record<string, string> | undefined) => {
-      if (!deps) return;
-      for (const [name, version] of Object.entries(deps)) {
-        // Check for range specifiers: ^, ~, >, <, >=, <=, *, x
-        if (/^[~^><=*x]|[*x]$/.test(version)) {
-          unpinned.push(`${name}@${version}`);
-        }
-      }
-    };
-
-    checkDeps(packageJson.dependencies);
-    checkDeps(packageJson.devDependencies);
+    unpinned.push(
+      ...unpinnedNodeDeps(packageJson.dependencies, isMember),
+      ...unpinnedNodeDeps(packageJson.devDependencies, isMember),
+    );
   } catch {
     // No package.json or parse error
   }
