@@ -1,4 +1,12 @@
 #!/usr/bin/env sh
+
+# KIT_HOOK_SENTINEL: record that pre-commit actually ran. The
+# post-commit detector compares the sentinel to HEAD; mismatch or absence
+# means `git commit --no-verify` skipped the gate.
+__kit_git_dir=${GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null)}
+if [ -n "$__kit_git_dir" ]; then
+  date -u +"%Y-%m-%dT%H:%M:%SZ" > "$__kit_git_dir/.kit-hook-ran" 2>/dev/null || true
+fi
 # pre-commit — block internal references in staged content before they land.
 # Term list is resolved outside this repo (see no-internal-leaks.sh header).
 "$(git rev-parse --show-toplevel)/.githooks/no-internal-leaks.sh" --staged || exit 1
