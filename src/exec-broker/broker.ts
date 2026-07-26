@@ -93,6 +93,7 @@ export async function brokerExec<T>(
   context: BrokerContext,
   policy: BrokerPolicy | null | undefined,
   run: (scopedEnv: Record<string, string>) => Promise<T>,
+  cwd?: string,
 ): Promise<BrokerOutcome<T>> {
   // Infrastructure exemption: kit's OWN tool-provisioning is not governed by the project [scope]
   // RoE (it writes to $HOME and fetches from tool hosts by design — see BrokerContext.infrastructure).
@@ -101,12 +102,15 @@ export async function brokerExec<T>(
   // the RoE does not govern this op, so its signature/validity is irrelevant here. Fail-closed
   // auditability still applies (refuse if the pre-exec authorization entry can't be written).
   if (context.infrastructure) {
-    const authorized = await appendAuditEventDirect({
-      operation: context.operation,
-      environment: BROKER_ENV,
-      success: true,
-      metadata: { ...context.metadata, phase: "authorized", exemption: "infrastructure" },
-    });
+    const authorized = await appendAuditEventDirect(
+      {
+        operation: context.operation,
+        environment: BROKER_ENV,
+        success: true,
+        metadata: { ...context.metadata, phase: "authorized", exemption: "infrastructure" },
+      },
+      { cwd },
+    );
     if (!authorized) {
       return {
         ok: false,
@@ -115,11 +119,11 @@ export async function brokerExec<T>(
     }
     try {
       const result = await run(scopeEnv(Object.keys(process.env), process.env));
-      await audit(context, true, undefined, { exemption: "infrastructure" });
+      await audit(context, true, undefined, { exemption: "infrastructure" }, cwd);
       return { ok: true, result };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      await audit(context, false, reason, { exemption: "infrastructure" });
+      await audit(context, false, reason, { exemption: "infrastructure" }, cwd);
       return { ok: false, reason };
     }
   }
@@ -127,7 +131,7 @@ export async function brokerExec<T>(
   // Default-deny when policy is absent. run() is NEVER invoked.
   if (!policy) {
     const reason = "exec-broker: no policy (default-deny)";
-    await audit(context, false, reason);
+    await audit(context, false, reason, undefined, cwd);
     return { ok: false, reason };
   }
 
@@ -138,7 +142,7 @@ export async function brokerExec<T>(
   if (!hasDeclaredEffects(context)) {
     const reason =
       "exec-broker: operation declares no effect contract (egress/fs/env) — cannot mediate (fail-closed)";
-    await audit(context, false, reason);
+    await audit(context, false, reason, undefined, cwd);
     return { ok: false, reason };
   }
 
@@ -154,19 +158,22 @@ export async function brokerExec<T>(
     const reason = `exec-broker: denied (${denials.length} violation${
       denials.length === 1 ? "" : "s"
     })`;
-    await audit(context, false, reason, { denials });
+    await audit(context, false, reason, { denials }, cwd);
     return { ok: false, reason, denials };
   }
 
   // Fail-closed auditability (mirrors withGovernance's destructive gate):
   // persist a pre-exec "authorized" entry and REFUSE to run if it can't be
   // written. The post-exec success log alone is fail-open.
-  const authorized = await appendAuditEventDirect({
-    operation: context.operation,
-    environment: BROKER_ENV,
-    success: true,
-    metadata: { ...context.metadata, phase: "authorized" },
-  });
+  const authorized = await appendAuditEventDirect(
+    {
+      operation: context.operation,
+      environment: BROKER_ENV,
+      success: true,
+      metadata: { ...context.metadata, phase: "authorized" },
+    },
+    { cwd },
+  );
   if (!authorized) {
     return {
       ok: false,
@@ -177,11 +184,11 @@ export async function brokerExec<T>(
   // All gates passed → execute with the scoped env, then audit success/failure.
   try {
     const result = await run(scopedEnv);
-    await audit(context, true, undefined);
+    await audit(context, true, undefined, undefined, cwd);
     return { ok: true, result, scopedEnv };
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    await audit(context, false, reason);
+    await audit(context, false, reason, undefined, cwd);
     return { ok: false, reason };
   }
 }
@@ -198,11 +205,12 @@ async function brokerObserve<T>(
   context: BrokerContext,
   policy: BrokerPolicy | null | undefined,
   run: (scopedEnv: Record<string, string>) => Promise<T>,
+  cwd?: string,
 ): Promise<BrokerOutcome<T>> {
   const wouldDeny = policy
     ? collectDenials(context, policy)
     : ["exec-broker: no policy (default-deny)"];
-  await audit(context, true, undefined, { phase: "observe", wouldDeny });
+  await audit(context, true, undefined, { phase: "observe", wouldDeny }, cwd);
   try {
     const result = await run(scopeEnv(Object.keys(process.env), process.env));
     return { ok: true, result };
@@ -283,8 +291,8 @@ export async function runBrokered<T>(
       // "observe" = dry-run: mediate the same gates but NEVER deny — record would-be denials so an
       // operator can see what default-on would block before flipping to "enforce" (Pillar 3 ladder).
       return signed.runtimeMode === "observe"
-        ? brokerObserve(context, signed.policy, run)
-        : brokerExec(context, signed.policy, run);
+        ? brokerObserve(context, signed.policy, run, opts.cwd)
+        : brokerExec(context, signed.policy, run, opts.cwd);
     }
     // Undeclared op under runtime enforcement/observe → migration passthrough (unchanged behavior).
     try {
@@ -303,27 +311,38 @@ export async function runBrokered<T>(
       return { ok: false, reason: err instanceof Error ? err.message : String(err) };
     }
   }
-  return brokerExec(context, loadBrokerPolicy(opts.policyOverride), run);
+  return brokerExec(context, loadBrokerPolicy(opts.policyOverride), run, opts.cwd);
 }
 
 /**
  * Best-effort audit of a broker decision. A DENY still returns deny even if this
  * append fails (we never fail-open to allow) — but surface the logging failure to
  * stderr, as audit.ts does, so the denial is not silently unlogged.
+ *
+ * `cwd` is the GOVERNED PROJECT's directory: broker evidence belongs to the
+ * project whose [scope] mediates the op, not to whatever process.cwd() happens
+ * to be (an MCP server's cwd, the test runner's repo root, ...). Without this,
+ * observe records from other projects — including test fixtures — pollute the
+ * host repo's .kit-audit.jsonl and poison `kit broker enforce-readiness`, whose
+ * verdict is only as honest as the evidence file it reads.
  */
 async function audit(
   context: BrokerContext,
   success: boolean,
   error: string | undefined,
   extra?: Record<string, unknown>,
+  cwd?: string,
 ): Promise<void> {
-  const logged = await appendAuditEventDirect({
-    operation: context.operation,
-    environment: BROKER_ENV,
-    success,
-    error,
-    metadata: extra ? { ...context.metadata, ...extra } : context.metadata,
-  });
+  const logged = await appendAuditEventDirect(
+    {
+      operation: context.operation,
+      environment: BROKER_ENV,
+      success,
+      error,
+      metadata: extra ? { ...context.metadata, ...extra } : context.metadata,
+    },
+    { cwd },
+  );
   if (!logged) {
     console.error(`[kit] exec-broker: audit append failed for ${context.operation}`);
   }
