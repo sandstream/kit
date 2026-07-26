@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.20.0] - 2026-07-26
+
+### Added
+
+- **`kit review` is a structured verdict, not console output.** The meta-runner
+  was print-and-return-bool: `--json` emitted four concatenated sub-documents
+  (the ADR stage ignored the flag entirely), and nothing machine-readable
+  described the audit as a whole. `collectReview` now runs every stage's shared
+  gate — check (via the new `runCheckGate` collection core), design
+  (`runDesignGate`), standards (`runStandardsGate`), ADR (`runAdrGate`) — and
+  returns one `ReviewReport { ok, failed, stages: [{ stage, ok, summary,
+  findings }] }`. The CLI is a renderer on top; `kit review --json` emits ONE
+  document and exits 1 on red. Same discipline as `computeCheckVerdict`: the
+  collection can no longer fork between surfaces. `kit review` is now a pure
+  read — `kit check` keeps its CLI extras (PAL sync, attestation, hints,
+  scanner self-heal).
+- **`kit_review` MCP tool** — the full audit for shell-less agents, serializing
+  the same `collectReview` report. `concise: true` drops pass/skip rows while
+  per-stage summary counts keep totals honest (nothing silently truncated).
+
+### Deprecated
+
+- **`kit_standards` leaves the MCP surface in kit 6.0** — `kit_review` runs
+  that gate as its standards stage; scoped runs (`--category`) go via
+  `kit_run`. With the five existing deprecations the surface lands at 10 tools
+  after 6.0. Both docs↔surface drift gates updated to pin the six.
+
+### Fixed
+
+- **The hook-skip sentinel's STAMPING half is now tracked.** 5.19.0 shipped the
+  post-commit *detector*, but the pre-commit block that writes the sentinel it
+  reads existed only machine-locally (via `kit fix`) — so a fresh clone logged
+  a false `sentinel-missing` skip on every commit (the 5.18.0 release commit is
+  a recorded example). Both halves now travel with the repo. Plus gitignore
+  hardening: kit's local state files (`.kit-skipped-commits.jsonl`,
+  `.kit-audit.pending`, `.env.local.*`), `.opencode/` alongside the other
+  agent-harness dirs, and `.toml`/extensionless-hook variants of the cloud-sync
+  conflict-copy patterns.
+
 ## [5.19.0] - 2026-07-26
 
 ### Fixed
