@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.18.0] - 2026-07-26
+
+The surface-audit release: asked "does every user-facing surface show what the
+mechanism actually does?", the answer was no in four places. All four fixed,
+each behind a gate so it cannot silently regress.
+
+### Added
+
+- **kit adopts its own ADR gate.** Three accepted ADRs with enforce blocks now
+  gate `kit review` and the pre-commit hook on kit's own repo: ADR-0001
+  (zero-LLM core — no LLM SDK imports in `src/`), ADR-0002 (dependency floor —
+  utility libraries forbidden, a new runtime dep is an ADR-level decision),
+  ADR-0003 (the check path never imports `src/coverage/*` framework mappings,
+  keeping them extractable to a plugin). The engine shipped in 5.7–5.10; this
+  is the adoption — the same arc as scope-needs, closing the last
+  "mechanism without adoption" gap found this session. All three rules
+  canary-verified.
+- **Docs ↔ MCP drift gate** (`docs-mcp-sync.test.ts`). The MCP docs documented
+  a tool set that never shipped (`kit_configure`, `kit_adapter_*`) and missed
+  every real tool added since, including `kit_triage` and `kit_memory`. Both
+  files are rewritten against the real 15-tool surface, and the gate enforces
+  sync in both directions: every `KIT_MCP_TOOLS` entry must appear in the
+  reference and the README, and no doc may mention a `kit_*` tool that does
+  not exist — fiction is a build failure. The reference must also mark exactly
+  the five 6.0-deprecated tools as deprecated.
+
+### Changed
+
+- **`kit help` is audience-filtered.** The five harness commands (`gate-*`,
+  `statusline`) are hook stdin protocols the agent harness invokes — never a
+  browsing human — so the default listing hides them behind a counted note
+  ("+ 5 harness hook commands — see them with `kit help --all`"), never a
+  silent drop. `kit help --all` shows everything; `kit help <cmd>` resolves a
+  harness command directly regardless. Data-layer help parity is untouched.
+- README's MCP section now lists the real tool table with deprecation markers,
+  names `kit_triage` instead of the deprecated `kit_add`, and states the
+  CLI-first rule. `docs/COMMANDS.md` points agents at the OpenCLI contract
+  and documents `x-kit-audience`.
+
 ## [5.17.0] - 2026-07-26
 
 Agent-surface hygiene, part two of the exposure arc (5.16.0 fixed WHAT is
