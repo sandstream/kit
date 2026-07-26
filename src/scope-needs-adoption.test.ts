@@ -52,6 +52,12 @@ const REVIEWED_UNDECLARED: { file: string; operation: string; reason: string }[]
     reason: "pure read — CI rendering of the same checks",
   },
   {
+    file: "src/commands/review.ts",
+    operation: "review",
+    reason:
+      "pure read — the four audit stages (check/design/standards/adr) via collectReview; no egress, writes, or secret exposure",
+  },
+  {
     file: "src/commands/info.ts",
     operation: "health",
     reason:

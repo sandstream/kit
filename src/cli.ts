@@ -712,7 +712,10 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   review: {
     handler: cmdReview,
     stability: "stable",
-    help: "Full repo audit — runs check + design + standards in one gate (for agents / PR checks)",
+    help: "Full repo audit — runs check + design + standards + adr in one gate (for agents / PR checks; --json emits one structured report)",
+    // MCP-exposed: THE one-shot audit for shell-less agents (kit_review),
+    // superseding kit_standards on that surface (deprecated, leaves in 6.0).
+    mcp: true,
   },
   adr: {
     handler: cmdAdr,

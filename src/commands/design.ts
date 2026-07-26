@@ -1,10 +1,35 @@
 /**
  * `kit design` command — extracted from cli.ts (5.0-alpha god-module split).
- * Self-contained (a11y + design-token consistency, baseline-aware). cmdReview
- * (still in cli.ts) calls the exported cmdDesign. Imports only sibling core modules.
+ * Self-contained (a11y + design-token consistency, baseline-aware). runDesignGate
+ * is the structured core; cmdDesign renders it, and `kit review`'s design stage
+ * (collectReview) consumes it directly — same parity discipline as standards-run.
  */
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
+import type { DesignCheckResult } from "../check-design.js";
+
+export interface DesignRunResult {
+  ok: boolean;
+  checks: DesignCheckResult[];
+  baselineIgnored: string | null;
+}
+
+/** The design gate core: baseline-aware a11y + design-token checks, no printing. */
+export async function runDesignGate(
+  opts: { cwd?: string; enforce?: boolean } = {},
+): Promise<DesignRunResult> {
+  const { checkDesign } = await import("../check-design.js");
+  const { loadBaselineForGate, baselineGet } = await import("../baseline.js");
+  const { baseline, ignored } = await loadBaselineForGate(opts.cwd);
+  const checks = await checkDesign({
+    enforce: opts.enforce,
+    baseline: {
+      a11y: baselineGet(baseline, "design", "a11y"),
+      tokens: baselineGet(baseline, "design", "tokens"),
+    },
+  });
+  return { ok: checks.every((r) => r.status !== "fail"), checks, baselineIgnored: ignored };
+}
 
 /**
  * `kit design` — a11y + design-token consistency, baseline-aware.
@@ -12,26 +37,16 @@ import { hasFlag } from "../utils/flags.js";
 export async function cmdDesign(): Promise<boolean> {
   const enforce = hasFlag(process.argv, "--enforce");
   const jsonMode = hasFlag(process.argv, "--json");
-  const { checkDesign } = await import("../check-design.js");
-  const { loadBaselineForGate, baselineGet, BASELINE_FILE } = await import("../baseline.js");
-  const { baseline, ignored: baselineIgnored } = await loadBaselineForGate();
+  const { ok, checks: results, baselineIgnored } = await runDesignGate({ enforce });
   if (baselineIgnored) {
+    const { BASELINE_FILE } = await import("../baseline.js");
     console.error(
       `${c.yellow}!${c.reset} ${BASELINE_FILE} ignored (${baselineIgnored}) — gating on all findings`,
     );
   }
-  const results = await checkDesign({
-    enforce,
-    baseline: {
-      a11y: baselineGet(baseline, "design", "a11y"),
-      tokens: baselineGet(baseline, "design", "tokens"),
-    },
-  });
   if (jsonMode) {
-    console.log(
-      JSON.stringify({ ok: results.every((r) => r.status !== "fail"), checks: results }, null, 2),
-    );
-    return results.every((r) => r.status !== "fail");
+    console.log(JSON.stringify({ ok, checks: results }, null, 2));
+    return ok;
   }
   console.log(`${c.bold}Design${c.reset}`);
   for (const r of results) {
@@ -46,5 +61,5 @@ export async function cmdDesign(): Promise<boolean> {
     console.log(`  ${icon} ${r.name}  ${c.dim}${r.detail}${c.reset}`);
     if (r.files) for (const f of r.files) console.log(`      ${c.dim}- ${f}${c.reset}`);
   }
-  return results.every((r) => r.status !== "fail");
+  return ok;
 }

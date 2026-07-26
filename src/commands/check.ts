@@ -24,14 +24,7 @@ import {
   printSecurityTable,
   printSummary,
 } from "../output.js";
-import { checkTools } from "../check-tools.js";
-import { checkServices } from "../check-services.js";
-import { checkSecrets } from "../check-secrets.js";
-import { checkSkills } from "../check-skills.js";
-import { checkHooks, isGitRepository } from "../check-hooks.js";
-import { checkWebSearch } from "../check-web-search.js";
-import { checkSecurity } from "../check-security.js";
-import { checkLockFiles } from "../check-lock.js";
+import { runCheckGate, checkRunToJsonChecks } from "../check-run.js";
 import { syncSecurityFindings } from "../findings-track.js";
 import { collectHints } from "../hints.js";
 import {
@@ -73,69 +66,29 @@ export async function cmdCheck(): Promise<boolean> {
       const step = <T>(label: string, fn: () => Promise<T>): Promise<T> =>
         live ? runStep(label, fn) : fn();
 
-      const toolResults = config.tools ? await step("tools", () => checkTools(config.tools!)) : [];
-      const serviceResults = config.services
-        ? await step("services", () => checkServices(config.services!))
-        : [];
-      const secretResults = config.secrets
-        ? await step("secrets", () => checkSecrets(config.secrets!))
-        : { templateExists: null, keys: [] };
-      const skillResults = config.skills
-        ? await step("skills", () => checkSkills(config.skills!))
-        : [];
-      const hookResults =
-        config.hooks && isGitRepository()
-          ? await step("git hooks", () => checkHooks(config.hooks!))
-          : [];
-      const webSearchResult = config.web?.search
-        ? await step("web search", () => checkWebSearch(config.web!.search!))
-        : null;
       await autoInstallScanners(config, live); // self-heal missing scanners before scanning
-      const securityResults = await step("security scan", () => checkSecurity());
-      const lockResults = await step("lock files", () => checkLockFiles(config));
-
-      // Test-coverage enforcement (--enforce-tests CLI flag overrides config).
-      // Baseline-aware: pre-existing untested files only warn; net-new fail.
-      const { checkTests } = await import("../check-tests.js");
-      const { loadBaselineForGate, baselineGet, BASELINE_FILE } = await import("../baseline.js");
-      const { baseline, ignored: baselineIgnored } = await loadBaselineForGate();
-      if (baselineIgnored) {
-        // Fail-closed + visible: a corrupt/tampered baseline is ignored (nothing
-        // suppressed) and surfaced as a finding, never a crash of the gate.
-        securityResults.push({
-          category: "secrets",
-          name: "baseline integrity",
-          status: "warn",
-          severity: "low",
-          detail: `${BASELINE_FILE} ignored (${baselineIgnored}) — gating on all findings; re-freeze with 'kit baseline freeze'`,
-        });
-      }
-      const testResults = await step("test coverage", () =>
-        checkTests({
-          enforce: enforceTests,
-          baseline: baselineGet(baseline, "tests", "untested_files"),
-        }),
-      );
-
-      // Single source of truth for the green/ok verdict — the SAME function the
-      // MCP `kit_check` tool uses, so the two surfaces can never disagree. Applies
-      // scanner-health-strict security gating, the informational-service exemption,
-      // and test-coverage in one place.
-      const { computeCheckVerdict } = await import("../check-verdict.js");
-      const verdict = computeCheckVerdict(
-        {
-          tools: toolResults,
-          services: serviceResults,
-          secrets: secretResults.keys,
-          skills: skillResults,
-          hooks: hookResults,
-          security: securityResults,
-          tests: testResults,
-          locks: lockResults,
-        },
-        { lenient, failOnWarning },
-      );
-      const allOk = verdict.ok;
+      // Collection + verdict live in the shared core (check-run.ts) — the SAME
+      // path the MCP `kit_check` tool and `kit review` use, so the surfaces can
+      // never disagree on what runs or what "green" means. The CLI adds its
+      // extras around it: spinners (step), PAL sync, attestation, hints.
+      const run = await runCheckGate({
+        config,
+        enforceTests,
+        gate: { lenient, failOnWarning },
+        step,
+      });
+      const {
+        tools: toolResults,
+        services: serviceResults,
+        secrets: secretResults,
+        skills: skillResults,
+        hooks: hookResults,
+        webSearch: webSearchResult,
+        security: securityResults,
+        tests: testResults,
+        locks: lockResults,
+      } = run;
+      const allOk = run.ok;
 
       // Track security findings in the PAL ledger (cross-session reminders +
       // auto-close on a clean re-scan). Opt out with [memory] track_findings = false.
@@ -150,73 +103,8 @@ export async function cmdCheck(): Promise<boolean> {
       }
 
       if (jsonMode) {
-        const checks: JsonCheck[] = [
-          ...toolResults.map((t) => ({
-            name: t.name,
-            status: (t.ok ? "pass" : "fail") as JsonCheck["status"],
-            detail: t.installed ? `installed ${t.installed}` : "not installed",
-            category: "tools",
-          })),
-          ...serviceResults.map((s) => ({
-            name: s.name,
-            status: (s.authenticated
-              ? "pass"
-              : s.informational
-                ? "warn"
-                : "fail") as JsonCheck["status"],
-            detail: s.informational
-              ? s.output || "manual setup (no CLI login)"
-              : (s.output ?? (s.authenticated ? "authenticated" : "not authenticated")),
-            category: "services",
-          })),
-          ...secretResults.keys.map((s) => ({
-            name: s.name,
-            status: (s.unverified ? "warn" : s.available ? "pass" : "fail") as JsonCheck["status"],
-            detail: s.detail ?? (s.available ? "available" : "missing"),
-            category: "secrets",
-          })),
-          ...skillResults.map((s) => ({
-            name: s.name,
-            status: (s.installed ? "pass" : s.required ? "fail" : "warn") as JsonCheck["status"],
-            detail: s.installed ? "installed" : "not installed",
-            category: "skills",
-          })),
-          ...hookResults.map((h) => ({
-            name: h.hookName,
-            status: (!h.installed ? "fail" : !h.upToDate ? "warn" : "pass") as JsonCheck["status"],
-            detail: h.detail,
-            category: "hooks",
-          })),
-          ...(webSearchResult
-            ? [
-                {
-                  name: webSearchResult.provider,
-                  status: (webSearchResult.healthy ? "pass" : "fail") as JsonCheck["status"],
-                  detail:
-                    webSearchResult.error ?? (webSearchResult.healthy ? "healthy" : "unhealthy"),
-                  category: "web-search",
-                },
-              ]
-            : []),
-          ...lockResults.map((l) => ({
-            name: l.category === "skills-lock" ? "skills-lock.json" : "cli-lock.json",
-            status: (l.inSync ? "pass" : l.exists ? "warn" : "fail") as JsonCheck["status"],
-            detail: l.detail,
-            category: "lock",
-          })),
-          ...securityResults.map((s) => ({
-            name: s.name,
-            status: s.status,
-            detail: s.detail,
-            category: `security/${s.category}`,
-          })),
-          ...testResults.map((t) => ({
-            name: t.name,
-            status: t.status,
-            detail: t.detail,
-            category: "tests",
-          })),
-        ];
+        // One flattening, shared with `kit review`'s check stage (check-run.ts).
+        const checks: JsonCheck[] = checkRunToJsonChecks(run);
 
         const summary = checks.reduce(
           (acc, c) => {

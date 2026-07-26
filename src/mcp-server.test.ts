@@ -69,6 +69,7 @@ describe("MCP server tool registration", () => {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name);
       assert.ok(names.includes("kit_check"), "kit_check missing");
+      assert.ok(names.includes("kit_review"), "kit_review missing");
       assert.ok(names.includes("kit_standards"), "kit_standards missing");
       assert.ok(names.includes("kit_install"), "kit_install missing");
       assert.ok(names.includes("kit_login"), "kit_login missing");
@@ -83,7 +84,7 @@ describe("MCP server tool registration", () => {
       assert.ok(names.includes("kit_map"), "kit_map missing");
       assert.ok(names.includes("kit_triage"), "kit_triage missing");
       assert.ok(names.includes("kit_memory"), "kit_memory missing");
-      assert.equal(tools.length, 15);
+      assert.equal(tools.length, 16);
     } finally {
       await cleanup();
     }
@@ -185,6 +186,81 @@ describe("kit_check", () => {
       assert.ok("secrets" in data);
       assert.ok("security" in data);
       assert.ok("locks" in data);
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
+// ─── kit_review ──────────────────────────────────────────────────────────────
+
+describe("kit_review", () => {
+  let tempDir: string;
+  let originalCwd: string;
+
+  // Review's underlying scanners (design/standards/security) walk process.cwd()
+  // — chdir into an isolated fixture so the audit covers the fixture, not this
+  // repo (same isolation pattern as the kit_fix suite).
+  before(async () => {
+    originalCwd = process.cwd();
+    tempDir = await mkdtemp(join(tmpdir(), "kit-mcp-review-"));
+    await writeFile(join(tempDir, ".gitignore"), GITIGNORE, "utf-8");
+    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
+    process.chdir(tempDir);
+  });
+
+  after(async () => {
+    process.chdir(originalCwd);
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("returns the structured report: ok, failed, and the four stages in order", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({ name: "kit_review", arguments: { cwd: tempDir } });
+      const data = parseResult(result) as {
+        ok: boolean;
+        failed: string[];
+        stages: Array<{ stage: string; ok: boolean; summary: Record<string, number> }>;
+      };
+      assert.ok("ok" in data);
+      assert.ok(Array.isArray(data.failed));
+      assert.deepEqual(
+        data.stages.map((s) => s.stage),
+        ["check", "design", "standards", "adr"],
+      );
+      assert.equal(
+        data.ok,
+        data.stages.every((s) => s.ok),
+      );
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("concise:true strips pass/skip rows but keeps the per-stage counts honest", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_review",
+        arguments: { cwd: tempDir, concise: true },
+      });
+      const data = parseResult(result) as {
+        stages: Array<{
+          stage: string;
+          findings: Array<{ status: string }>;
+          summary: { pass: number; fail: number; warn: number; skip: number };
+        }>;
+      };
+      for (const s of data.stages) {
+        assert.ok(
+          s.findings.every((f) => f.status === "fail" || f.status === "warn"),
+          `${s.stage}: concise mode leaked a ${s.findings.find((f) => f.status !== "fail" && f.status !== "warn")?.status} row`,
+        );
+        // The summary still covers the dropped rows — nothing silently truncated.
+        assert.ok("pass" in s.summary && "skip" in s.summary);
+        assert.equal(s.findings.length, s.summary.fail + s.summary.warn);
+      }
     } finally {
       await cleanup();
     }

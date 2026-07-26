@@ -236,27 +236,41 @@ export function freezeAdrBaseline(baseline: Baseline, cwd: string): number {
   return vKeys.length + gKeys.length;
 }
 
+/** Structured result of the ADR gate — what runAdrGate computes and every surface renders. */
+export interface AdrGateResult {
+  ok: boolean;
+  adrCount: number;
+  enforcedCount: number;
+  /** Net-new (not baseline-frozen) violations / unprovable rules. */
+  violations: AdrViolation[];
+  gaps: AdrViolation[];
+  /** How many findings the baseline suppressed. */
+  suppressed: number;
+  baselineIgnored: string | null;
+}
+
 /**
- * The embeddable ADR gate. Loads the baseline (fail-open on a corrupt file — a baseline only
- * ever SUPPRESSES, so an unreadable one gates on everything), suppresses frozen findings, prints,
- * and returns ok. Shared by `kit adr check`, `kit review`, and the pre-commit hook.
+ * The ADR gate core: loads the baseline (fail-open on a corrupt file — a baseline only
+ * ever SUPPRESSES, so an unreadable one gates on everything), suppresses frozen findings,
+ * and returns the structured verdict. No printing — adrCheck (CLI) and `kit review`'s
+ * ADR stage (collectReview) both consume this, so the surfaces can't diverge.
  */
-export async function adrCheck(cwd = process.cwd()): Promise<boolean> {
+export async function runAdrGate(cwd = process.cwd()): Promise<AdrGateResult> {
   const adrs = loadAdrs(cwd);
   if (adrs.length === 0) {
-    console.log(
-      `${c.dim}No ADRs found in ${ADR_DIRS.join(" or ")}. Add one with a --- frontmatter (id/title/status) and a \`\`\`toml kit-enforce block.${c.reset}`,
-    );
-    return true;
+    return {
+      ok: true,
+      adrCount: 0,
+      enforcedCount: 0,
+      violations: [],
+      gaps: [],
+      suppressed: 0,
+      baselineIgnored: null,
+    };
   }
 
-  const { loadBaselineForGate, baselineGet, BASELINE_FILE } = await import("../baseline.js");
+  const { loadBaselineForGate, baselineGet } = await import("../baseline.js");
   const { baseline, ignored } = await loadBaselineForGate(cwd);
-  if (ignored) {
-    console.log(
-      `${c.yellow}!${c.reset} ${BASELINE_FILE} ignored (${ignored}) — gating on all findings`,
-    );
-  }
   const frozen = new Set([
     ...baselineGet(baseline, BASELINE_CATEGORY, "violations"),
     ...baselineGet(baseline, BASELINE_CATEGORY, "gaps"),
@@ -265,6 +279,47 @@ export async function adrCheck(cwd = process.cwd()): Promise<boolean> {
   const { enforcedCount, violations, gaps } = collectAdrFindings(cwd);
   const liveViolations = violations.filter((v) => !frozen.has(adrFindingKey(v)));
   const liveGaps = gaps.filter((v) => !frozen.has(adrFindingKey(v)));
+  const suppressed = violations.length - liveViolations.length + (gaps.length - liveGaps.length);
+  // No enforced ADR ⇒ nothing to gate (documented, not enforced) — ok by definition.
+  const ok = enforcedCount === 0 || (liveViolations.length === 0 && liveGaps.length === 0);
+  return {
+    ok,
+    adrCount: adrs.length,
+    enforcedCount,
+    violations: liveViolations,
+    gaps: liveGaps,
+    suppressed,
+    baselineIgnored: ignored,
+  };
+}
+
+/**
+ * The embeddable ADR gate, rendered. Prints runAdrGate's verdict and returns ok.
+ * Shared by `kit adr check` and the pre-commit hook (`kit review` renders the
+ * structured result itself via collectReview).
+ */
+export async function adrCheck(cwd = process.cwd()): Promise<boolean> {
+  const {
+    ok,
+    adrCount,
+    enforcedCount,
+    violations: liveViolations,
+    gaps: liveGaps,
+    suppressed,
+    baselineIgnored,
+  } = await runAdrGate(cwd);
+  if (adrCount === 0) {
+    console.log(
+      `${c.dim}No ADRs found in ${ADR_DIRS.join(" or ")}. Add one with a --- frontmatter (id/title/status) and a \`\`\`toml kit-enforce block.${c.reset}`,
+    );
+    return true;
+  }
+  if (baselineIgnored) {
+    const { BASELINE_FILE } = await import("../baseline.js");
+    console.log(
+      `${c.yellow}!${c.reset} ${BASELINE_FILE} ignored (${baselineIgnored}) — gating on all findings`,
+    );
+  }
 
   for (const v of liveViolations) {
     console.log(
@@ -283,9 +338,8 @@ export async function adrCheck(cwd = process.cwd()): Promise<boolean> {
     );
     return true;
   }
-  const suppressed = violations.length - liveViolations.length + (gaps.length - liveGaps.length);
   const suffix = suppressed ? ` ${c.dim}(${suppressed} baselined)${c.reset}` : "";
-  if (liveViolations.length === 0 && liveGaps.length === 0) {
+  if (ok) {
     console.log(
       `${c.green}✓ ${enforcedCount} enforced ADR(s) — no new violations${c.reset}${suffix}`,
     );

@@ -9,14 +9,10 @@ import { checkSecrets } from "./check-secrets.js";
 import { checkSecurity } from "./check-security.js";
 import { checkSkills } from "./check-skills.js";
 import { checkLockFiles } from "./check-lock.js";
-import { checkTests } from "./check-tests.js";
-import { loadBaselineForGate, baselineGet, BASELINE_FILE } from "./baseline.js";
-import { computeCheckVerdict } from "./check-verdict.js";
+import { runCheckGate } from "./check-run.js";
 import { installTools } from "./install.js";
 import { loginServices } from "./login.js";
 import { generateSecrets } from "./secrets.js";
-import { checkWebSearch } from "./check-web-search.js";
-import { checkHooks, isGitRepository } from "./check-hooks.js";
 import {
   readSkillsLock,
   readCliLock,
@@ -52,6 +48,7 @@ const KIT_FILE = ".kit.toml";
 // this list, so the snapshot can never silently drift.
 export const KIT_MCP_TOOLS: readonly string[] = [
   "kit_check",
+  "kit_review",
   "kit_standards",
   "kit_install",
   "kit_login",
@@ -80,7 +77,7 @@ const KIT_MCP_INSTRUCTIONS = `kit is a deterministic, local-first dev-environmen
 
 If you have shell access, prefer running \`kit <command>\` directly — the CLI covers far more than these tools and \`kit <command> --help\` documents everything. These MCP tools exist for shell-less clients.
 
-Typical loop: kit_check (verify env + security) → kit_fix (auto-repair) → kit_triage (REQUIRED before installing any package kit's gate has not already cleared — the gate blocks untriaged installs) → kit_memory (recall prior cross-session decisions before answering project-specific questions) → kit_run (escape hatch for any other kit command).`;
+Typical loop: kit_check (verify env + security) → kit_fix (auto-repair) → kit_triage (REQUIRED before installing any package kit's gate has not already cleared — the gate blocks untriaged installs) → kit_memory (recall prior cross-session decisions before answering project-specific questions) → kit_review (full audit — check + design + standards + ADR — before merging) → kit_run (escape hatch for any other kit command).`;
 
 // Deprecation prefix for tools scheduled for removal from the MCP surface in
 // kit 6.0 (the MCP surface is "Evolving" per docs/API_STABILITY_AND_VERSIONING.md
@@ -146,6 +143,7 @@ export function createMcpServer(): McpServer {
   // One registrar per tool — keeps this composition flat (was a 774-line
   // function). Each register_* attaches its tool to the server.
   register_kit_check(server);
+  register_kit_review(server);
   register_kit_standards(server);
   register_kit_install(server);
   register_kit_login(server);
@@ -171,79 +169,34 @@ export async function startMcpServer(): Promise<void> {
 }
 
 function register_kit_check(server: McpServer): void {
-  // kit_check — run all checks, return structured JSON
+  // kit_check — run all checks, return structured JSON. Collection + verdict come
+  // from the shared core (check-run.ts) — the SAME path `kit check` runs, so the
+  // two surfaces can never disagree on what runs or what "green" means.
   server.tool(
     "kit_check",
     "Run kit check and return structured status for all tools, services, secrets, and security checks.",
     { cwd: z.string().optional().describe("Working directory (defaults to process.cwd())") },
     async ({ cwd }) => {
       try {
-        const config = await loadConfig(configPath(cwd));
-
-        const toolResults = config.tools ? await checkTools(config.tools) : [];
-        const serviceResults = config.services ? await checkServices(config.services) : [];
-        const secretResults = config.secrets
-          ? await checkSecrets(config.secrets)
-          : { templateExists: null, keys: [] };
-        const skillResults = config.skills ? await checkSkills(config.skills) : [];
-        const hookResults = config.hooks && isGitRepository() ? await checkHooks(config.hooks) : [];
-        const webSearchResult = config.web?.search ? await checkWebSearch(config.web.search) : null;
-        const securityResults = await checkSecurity();
-        const lockResults = await checkLockFiles(config);
-        // Include test-coverage in the verdict — the CLI does, and omitting it here
-        // was one half of the CLI-vs-MCP divergence. Baseline-aware, same as `kit check`.
-        const { baseline, ignored: baselineIgnored } = await loadBaselineForGate();
-        if (baselineIgnored) {
-          // Same fail-closed baseline handling as `kit check` — parity so the two
-          // surfaces never disagree on the verdict.
-          securityResults.push({
-            category: "secrets",
-            name: "baseline integrity",
-            status: "warn",
-            severity: "low",
-            detail: `${BASELINE_FILE} ignored (${baselineIgnored}) — gating on all findings; re-freeze with 'kit baseline freeze'`,
-          });
-        }
-        const testResults = await checkTests({
-          baseline: baselineGet(baseline, "tests", "untested_files"),
-        });
-
-        // The SAME verdict rule `kit check` uses (scanner-health-strict security via
-        // gateStatus, informational-service exemption, tests) — no second, divergent
-        // definition of "green" on the MCP surface.
-        const verdict = computeCheckVerdict(
-          {
-            tools: toolResults,
-            services: serviceResults,
-            secrets: secretResults.keys,
-            skills: skillResults,
-            hooks: hookResults,
-            security: securityResults,
-            tests: testResults,
-            locks: lockResults,
-          },
-          {},
-        );
-        const ok = verdict.ok;
-
+        const r = await runCheckGate({ cwd });
         return {
           content: [
             {
               type: "text" as const,
               text: JSON.stringify(
                 {
-                  ok,
-                  dimensions: verdict.dimensions,
-                  failed: verdict.failed,
-                  tools: toolResults,
-                  services: serviceResults,
-                  secrets: secretResults.keys,
-                  skills: skillResults,
-                  hooks: hookResults,
-                  webSearch: webSearchResult,
-                  security: securityResults,
-                  tests: testResults,
-                  locks: lockResults,
+                  ok: r.ok,
+                  dimensions: r.verdict.dimensions,
+                  failed: r.verdict.failed,
+                  tools: r.tools,
+                  services: r.services,
+                  secrets: r.secrets.keys,
+                  skills: r.skills,
+                  hooks: r.hooks,
+                  webSearch: r.webSearch,
+                  security: r.security,
+                  tests: r.tests,
+                  locks: r.locks,
                 },
                 null,
                 2,
@@ -261,13 +214,62 @@ function register_kit_check(server: McpServer): void {
   );
 }
 
+function register_kit_review(server: McpServer): void {
+  // kit_review — the full repo audit (check + design + standards + ADR) as ONE
+  // structured report, via the same collectReview core `kit review` renders.
+  // Replaces kit_standards on the MCP surface (that stage is one of its four).
+  // Read-only: no writes, so no governance/read-only gating.
+  server.tool(
+    "kit_review",
+    "Full repo audit in one shot — runs the check, design, standards, and ADR gates and returns one structured report ({ ok, failed, stages }). The same core `kit review` renders, so the surfaces cannot disagree. Read-only. Use concise:true to omit pass/skip rows (per-stage counts stay).",
+    {
+      cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
+      enforce: z
+        .boolean()
+        .optional()
+        .describe("Fail on net-new design/standards findings AND setup gaps (CI posture)"),
+      concise: z
+        .boolean()
+        .optional()
+        .describe(
+          "Return only fail/warn findings; per-stage summary counts still cover everything",
+        ),
+    },
+    async ({ cwd, enforce, concise }) => {
+      try {
+        const { collectReview } = await import("./commands/review.js");
+        const report = await collectReview({ cwd, enforce });
+        const payload = concise
+          ? {
+              ...report,
+              stages: report.stages.map((s) => ({
+                ...s,
+                findings: s.findings.filter((f) => f.status === "fail" || f.status === "warn"),
+              })),
+            }
+          : report;
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+}
+
 function register_kit_standards(server: McpServer): void {
   // kit_standards — run the dev-standards gate (general + per-language + plugins +
   // platform) and return the SAME { ok, checks, summary } envelope as `kit standards`.
-  // Read-only: no writes, so no governance/read-only gating.
+  // Read-only: no writes, so no governance/read-only gating. Deprecated for 6.0:
+  // kit_review runs this gate as its standards stage (with --category parity via
+  // kit_run for the rare scoped call), so a second standalone tool is surface bloat.
   server.tool(
     "kit_standards",
-    "Run kit standards (deterministic dev-standards gate: complexity/duplication/size + per-language linters + user plugins + container) and return structured findings. Read-only.",
+    `${DEPRECATED_6_0}; kit_review runs this gate as its standards stage — prefer it (or kit_run with \`kit standards --category …\` for a scoped run). Run kit standards (deterministic dev-standards gate: complexity/duplication/size + per-language linters + user plugins + container) and return structured findings. Read-only.`,
     {
       cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
       enforce: z

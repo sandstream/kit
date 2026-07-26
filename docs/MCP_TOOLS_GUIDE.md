@@ -40,6 +40,9 @@ kit_triage  → REQUIRED before installing anything the install gate has not
               MCP-run triage satisfies it identically to a CLI-run one
 kit_memory  → recall prior cross-session decisions before answering
               project-specific questions
+kit_review  → the full audit (check + design + standards + ADR) as one
+              structured report — run before merging; concise:true trims
+              pass/skip rows for context economy
 kit_run     → escape hatch: any other kit command
 ```
 
@@ -64,12 +67,15 @@ kit_run     → escape hatch: any other kit command
 
 ## Deprecations
 
-`kit_ci`, `kit_install`, `kit_login`, `kit_add`, and `kit_env` are marked
-deprecated and leave the MCP surface in kit 6.0 (the stability policy requires
-notice before removal). Their descriptions say so and point to the
-replacement; `kit_run` remains the escape hatch for all of them. Rationale:
+`kit_ci`, `kit_install`, `kit_login`, `kit_add`, `kit_env`, and
+`kit_standards` are marked deprecated and leave the MCP surface in kit 6.0
+(the stability policy requires notice before removal). Their descriptions say
+so and point to the replacement (`kit_review` subsumes `kit_standards` as its
+standards stage); `kit_run` remains the escape hatch for all of them. Rationale:
 CI runners and setup-time provisioning are shell contexts by definition — a
-shell-less MCP client is never the thing running CI or provisioning services.
+shell-less MCP client is never the thing running CI or provisioning services;
+and one audit tool that runs every gate beats a per-gate tool per stage
+(surface economy — each standing tool costs every client context).
 
 ## Drift guarantees
 

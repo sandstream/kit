@@ -1,8 +1,7 @@
 /**
  * `kit standards` + `kit baseline` commands — extracted from cli.ts (5.0-alpha
  * god-module split). freezeStandardsBaseline is shared by `standards freeze` and
- * `baseline freeze` (both here), so it stays module-private. cmdReview stays in
- * cli.ts (it orchestrates cmdCheck + cmdDesign, still inline). Imports only
+ * `baseline freeze` (both here), so it stays module-private. Imports only
  * sibling core modules.
  */
 import { c } from "../utils/colors.js";
