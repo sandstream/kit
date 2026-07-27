@@ -17,6 +17,7 @@ import {
   maxSeverity,
   newestCatalogMtime,
   isCatalogStale,
+  BUMBLEBEE_VERSION,
   type BumblebeeFinding,
 } from "./bumblebee.js";
 
@@ -67,6 +68,16 @@ export interface SecurityCheckResult {
    * didNotRun — it is an honest skip.
    */
   didNotRun?: boolean;
+  /**
+   * An out-of-verdict advisory riding on this result. Some signals must NOT move
+   * pass/fail — catalog age is a function of the wall clock, an upstream release is a
+   * function of someone else's schedule — but they still need to reach a human. A
+   * printed line scrolls out of the terminal; this carries the signal to the PAL
+   * ledger (persistent, cross-session, counted in the statusline) without any
+   * consumer having to string-match the `detail` text. `key` is the stable dedup
+   * identity, so the ledger row auto-closes once the advisory stops being emitted.
+   */
+  advisory?: { key: string; title: string; detail: string };
   /**
    * The self-audit rule id (e.g. "R2-secret-argv") that produced this result.
    * Lets consumers (kit coverage --verify) bind evidence by the stable rule id
@@ -1992,13 +2003,39 @@ async function checkBumblebee(): Promise<SecurityCheckResult> {
   if (newest !== null) {
     const { stale, ageDays } = isCatalogStale(newest, Date.now());
     if (stale) {
+      // Cached-only lookup: whether a newer release EXISTS is the other half of "your
+      // catalogs are old", but it must not put a network call in the check path — the
+      // check's output would then depend on whether a GitHub request succeeded. The
+      // cache is populated by the post-command notice in cli.ts.
+      const { readCachedBumblebeeUpdateSync } = await import("./bumblebee-update.js");
+      const upd = readCachedBumblebeeUpdateSync(BUMBLEBEE_VERSION);
+      // Neither branch promises that a bump yields FRESHER catalogs. Measured against
+      // upstream: every threat_intel catalog is byte-identical between v0.1.1 and
+      // v0.1.2, so the age can be upstream's own data age rather than a lagging pin —
+      // and "bump to refresh the catalogs" would then be a false promise.
+      const suggestion = upd
+        ? `bumblebee ${upd.latest} is available (pinned ${upd.pinned}). Moving BUMBLEBEE_VERSION + TARBALL_CHECKSUMS together in src/bumblebee.ts is the only way to change the bundled catalogs — check the release actually ships newer ones before assuming a bump refreshes them.`
+        : "No newer bumblebee release is known here (the check is cached, suppressed, or upstream has published none), so the age may be upstream's own rather than a lagging pin — a bump only helps if a newer release ships fresher catalogs.";
       return {
         category,
         name,
         status: "pass",
-        detail: `no known exposures (${outcome.packagesScanned} packages); note: threat-intel catalogs are ${ageDays} days old (advisory — not gated)`,
-        suggestion:
-          "Bump BUMBLEBEE_VERSION (and TARBALL_CHECKSUMS) in src/bumblebee.ts to refresh the exposure catalogs.",
+        detail:
+          `no known exposures (${outcome.packagesScanned} packages); note: threat-intel catalogs are ${ageDays} days old (advisory — not gated)` +
+          (upd ? `; bumblebee ${upd.latest} is available upstream (pinned ${upd.pinned})` : ""),
+        suggestion,
+        // Dedup identity excludes ageDays on purpose: the age climbs every single day,
+        // so keying on it would open a NEW ledger row per day instead of keeping one
+        // open item. It does include whether an upstream bump is known, so the row is
+        // replaced (not silently kept stale) when "old catalogs" becomes "old catalogs,
+        // and here is the version to bump to".
+        advisory: {
+          key: upd ? `bumblebee-catalogs-stale:${upd.latest}` : "bumblebee-catalogs-stale",
+          title: upd
+            ? `bumblebee ${upd.latest} available (pinned ${upd.pinned}, catalogs ${ageDays}d old)`
+            : `bumblebee threat-intel catalogs ${ageDays} days old`,
+          detail: suggestion,
+        },
       };
     }
   }

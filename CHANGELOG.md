@@ -6,6 +6,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.22.0] - 2026-07-27
+
+### Added
+
+- **Pinned-scanner release notice, and out-of-verdict advisories now reach the PAL ledger.**
+  kit reported that bumblebee's threat-intel catalogs were N days old but never whether a
+  newer release existed to bump *to* — half a sentence. The other half is now there.
+
+  - **The binary pin stays.** `BUMBLEBEE_VERSION` + `TARBALL_CHECKSUMS` are never
+    auto-updated: fetching an executable whose checksum cannot be verified in advance is
+    the supply-chain attack kit exists to catch. This is a **notice**, and the bump remains
+    a deliberate commit where the two constants move together.
+  - **The real defect it exposes** is that the `threat_intel/` catalogs ship *inside* the
+    pinned tarball, coupling data with a days-scale half-life to a binary with a
+    months-scale one. The notice makes that coupling visible instead of silent.
+  - **Not part of any verdict.** Whether upstream cut a release depends on the network and
+    someone else's schedule, so letting it move pass/fail would make `kit ci --strict`
+    non-deterministic for an unchanged repo — the same reasoning that already keeps catalog
+    *age* out of the verdict. The security check reads a **cache only** and never makes a
+    network call.
+  - **`SecurityCheckResult.advisory`** — a new optional `{ key, title, detail }` for
+    signals that must not move the verdict but must still reach a human. Advisories mostly
+    ride on `pass` results, which is exactly why `actionableFindings` (fail/warn only)
+    could never see them. `advisoryFindings()` bridges them into PAL under their own `adv`
+    source tag, so they reconcile independently of `sec` findings — folding them together
+    would have made each sync close the other's rows every run. The dedup key deliberately
+    excludes the day count, so a climbing age keeps **one** open row instead of opening a
+    new one daily, and the row auto-closes once the advisory stops being emitted.
+  - **Delivery is the point:** a printed line scrolls out of the terminal, so the signal
+    also lands in PAL — persistent, cross-session, and counted in the `kit statusline` ⚠
+    badge the session-start hook injects.
+  - **Measured against upstream, and the wording follows the measurement:** a newer
+    release does NOT imply newer threat intel. All six `threat_intel/*.json` catalogs are
+    byte-identical between upstream v0.1.1 and v0.1.2; what v0.1.2 adds is inventory
+    *coverage* (an `agent-skill` ecosystem for skills.sh / vercel-labs lock files,
+    `homebrew`, and `~/.claude.json` MCP parsing). So neither branch of the suggestion
+    promises a bump will refresh the catalogs — the age can be upstream's own data age
+    rather than a lagging pin, and the previous "bump to refresh the exposure catalogs"
+    wording was a false promise. A *tag* is also not a *release*: the notice reads the
+    releases API and skips drafts/prereleases, so a tagged-but-unreleased version
+    correctly produces silence.
+  - Network posture mirrors kit's own update check exactly, via a now-shared
+    `isAirGapPosture()` so air-gap cannot be honored on one notice path and punched
+    through on another: 3s timeout, 24h cache, and every failure path (suppressed,
+    offline, rate-limited, malformed JSON, unparseable tag) returning null. `KIT_NO_UPDATE_CHECK`,
+    `CI`, `GITHUB_ACTIONS`, `GITLAB_CI` and air-gap all suppress it; the notice prints to
+    **stderr** so it cannot corrupt piped stdout.
+
+
 ## [5.21.0] - 2026-07-26
 
 ### Added

@@ -136,7 +136,7 @@ export const KNOBS: KnobGroup[] = [
       {
         name: "KIT_NO_UPDATE_CHECK",
         kind: "env",
-        desc: "disable the npm update check (reproducible/offline CI)",
+        desc: "disable the outbound version notices — kit's own npm check and the pinned-scanner release check (reproducible/offline CI)",
       },
       {
         name: "KIT_AIRGAP",
