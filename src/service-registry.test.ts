@@ -50,6 +50,27 @@ describe("service-registry", () => {
     });
   });
 
+  describe("posthog — informational analytics service", () => {
+    it("detects posthog by its node SDKs", async () => {
+      const s = await detectServices({ deps: ["posthog-js"], fileExists: noFiles });
+      assert.deepEqual(s, ["posthog"]);
+      const n = await detectServices({ deps: ["posthog-node"], fileExists: noFiles });
+      assert.deepEqual(n, ["posthog"]);
+    });
+
+    it("detects posthog by the python SDK", async () => {
+      const s = await detectServices({ pyText: "posthog==3.5.0", fileExists: noFiles });
+      assert.deepEqual(s, ["posthog"]);
+    });
+
+    it("declares its env keys and no CLI login (informational, like resend)", () => {
+      const def = SERVICE_BY_ID["posthog"];
+      assert.ok(def, "posthog missing from registry");
+      assert.ok(def.login?.startsWith("#"), "no CLI login — must be an informational comment");
+      assert.ok(def.secrets?.includes("NEXT_PUBLIC_POSTHOG_KEY"));
+    });
+  });
+
   describe("new services — keycloak + atlassian", () => {
     it("detects keycloak by a node client dep", async () => {
       const s = await detectServices({ deps: ["keycloak-js"], fileExists: noFiles });

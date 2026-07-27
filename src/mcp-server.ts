@@ -706,7 +706,15 @@ function register_kit_init(server: McpServer): void {
           // File does not exist — proceed
         }
 
-        const stack = await detectStack(workDir);
+        // Same user-defaults merge as the CLI init flow (~/.kit/defaults.toml
+        // [init] services) — the two surfaces must generate the same config.
+        const { applyUserInitDefaults } = await import("./user-defaults.js");
+        const detected = await detectStack(workDir);
+        const {
+          stack,
+          applied: appliedDefaults,
+          unknown: unknownDefaults,
+        } = applyUserInitDefaults(detected);
         const generatedConfig = generateToml(stack);
 
         let written = false;
@@ -723,6 +731,8 @@ function register_kit_init(server: McpServer): void {
               text: JSON.stringify(
                 {
                   detectedStack: stack,
+                  appliedDefaults,
+                  unknownDefaults,
                   generatedConfig,
                   written,
                   alreadyExists,
