@@ -862,6 +862,41 @@ describe("kit_init", () => {
       await cleanup();
     }
   });
+
+  it("merges user init defaults ([init] services) — the same merge the CLI flow applies", async () => {
+    const projectDir = join(tempDir, "defaults-proj");
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      join(projectDir, "package.json"),
+      JSON.stringify({ dependencies: { next: "14.0.0" } }),
+      "utf-8",
+    );
+    const defaultsFile = join(tempDir, "defaults.toml");
+    await writeFile(defaultsFile, `[init]\nservices = ["sentry", "nope-service"]\n`, "utf-8");
+    const prev = process.env.KIT_DEFAULTS_FILE;
+    process.env.KIT_DEFAULTS_FILE = defaultsFile;
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_init",
+        arguments: { cwd: projectDir, dry_run: true },
+      });
+      const data = parseResult(result) as {
+        detectedStack: { services: string[] };
+        appliedDefaults: string[];
+        unknownDefaults: string[];
+        generatedConfig: string;
+      };
+      assert.ok(data.appliedDefaults.includes("sentry"), "sentry default not applied");
+      assert.deepEqual(data.unknownDefaults, ["nope-service"], "unknown id must be reported");
+      assert.ok(data.detectedStack.services.includes("sentry"));
+      assert.match(data.generatedConfig, /sentry/, "generated config must carry the default");
+    } finally {
+      if (prev === undefined) delete process.env.KIT_DEFAULTS_FILE;
+      else process.env.KIT_DEFAULTS_FILE = prev;
+      await cleanup();
+    }
+  });
 });
 
 // ─── kit_map ───────────────────────────────────────────────────────────────

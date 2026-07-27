@@ -51,6 +51,7 @@ import {
   updateSkillsLock,
   updateCliLock,
 } from "../lock.js";
+import { applyUserInitDefaults, userDefaultsPath } from "../user-defaults.js";
 import { cmdInstall } from "./install.js";
 import { cmdLogin } from "./login.js";
 import { cmdSecrets } from "./secrets.js";
@@ -427,7 +428,25 @@ async function generateConfigFile(
 ): Promise<"written" | "abort-error" | "abort-user"> {
   console.log(`${c.yellow}No .kit.toml found.${c.reset}\n`);
 
-  const stack = await runStep("detect project stack", () => detectStack(process.cwd()));
+  const detected = await runStep("detect project stack", () => detectStack(process.cwd()));
+  // Merge the operator's standing preferences (~/.kit/defaults.toml [init]
+  // services) — the SAME merge the MCP kit_init tool applies, so the two
+  // surfaces generate the same config. Unknown ids are surfaced, never silent.
+  const {
+    stack,
+    applied: defaultServices,
+    unknown: unknownDefaults,
+  } = applyUserInitDefaults(detected);
+  if (defaultServices.length > 0) {
+    console.log(
+      `${c.dim}user defaults (${userDefaultsPath()}): +${defaultServices.join(" +")}${c.reset}`,
+    );
+  }
+  for (const u of unknownDefaults) {
+    console.warn(
+      `${c.yellow}!${c.reset} unknown service '${u}' in ${userDefaultsPath()} — skipped (not in kit's service registry)`,
+    );
+  }
 
   if (stack.confidence < 0.3 && nonInteractive) {
     console.error(

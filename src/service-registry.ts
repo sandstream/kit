@@ -149,6 +149,14 @@ export const SERVICE_REGISTRY: ServiceDef[] = [
     secrets: ["SENTRY_DSN", "SENTRY_ORG", "SENTRY_PROJECT", "SENTRY_AUTH_TOKEN"],
   },
   {
+    id: "posthog",
+    deps: ["posthog-js", "posthog-node"],
+    pyDeps: ["posthog"],
+    login: "# posthog — no CLI login; get keys from https://app.posthog.com/settings/project",
+    check: "# posthog — check NEXT_PUBLIC_POSTHOG_KEY is set",
+    secrets: ["NEXT_PUBLIC_POSTHOG_KEY", "NEXT_PUBLIC_POSTHOG_HOST"],
+  },
+  {
     id: "typeorm",
     deps: ["typeorm", "@nestjs/typeorm"],
     login: "# typeorm — no CLI login; configure DATABASE_URL",

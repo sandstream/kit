@@ -126,6 +126,16 @@ export const KNOBS: KnobGroup[] = [
     ],
   },
   {
+    title: "Init & setup",
+    knobs: [
+      {
+        name: "KIT_DEFAULTS_FILE",
+        kind: "env",
+        desc: "path override for ~/.kit/defaults.toml — user-level [init] services kit init always merges in (your standing preferences, e.g. sentry + posthog)",
+      },
+    ],
+  },
+  {
     title: "CI & automation — use with care",
     knobs: [
       {
