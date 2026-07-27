@@ -23,14 +23,23 @@
  * decision (air-gap / CI / opt-out), a 3s timeout, a cached result, and every failure
  * path returning null. A notice must never slow down, break, or leak out of a run.
  *
- * MEASURED CAVEAT (2026-07-27, upstream v0.1.1 vs v0.1.2): a newer release does NOT
- * imply newer threat intel. All six threat_intel/*.json catalogs are byte-identical
- * across those two tags; what v0.1.2 adds is inventory COVERAGE (an `agent-skill`
- * ecosystem for skills.sh / vercel-labs lock files, `homebrew`, and `~/.claude.json`
- * MCP parsing). So this module reports "a newer release exists", never "your catalogs
- * will get fresher" — the catalog age can be upstream's own, not a lagging pin. Also
- * note a *tag* is not a *release*: the notice reads the releases API and skips
- * drafts/prereleases, so a tagged-but-unreleased version correctly produces silence.
+ * MEASURED (2026-07-27, upstream v0.1.1 → v0.1.2): a bump moved the catalogs from 6 to
+ * 11 files and the newest authoring date from 2026-05-18 to 2026-06-18 (65 → 38 days),
+ * adding glassworm, trapdoor-crypto-stealer, mastra-2026-06-17, laravel-lang-2026-05-23
+ * and mini-shai-hulud-redhat-cloud-services. It also widened inventory COVERAGE: an
+ * `agent-skill` ecosystem (skills.sh / vercel-labs lock files), `homebrew` receipts, and
+ * `~/.claude.json` MCP parsing.
+ *
+ * Method note worth keeping, because getting it wrong once cost a wrong conclusion: the
+ * six pre-existing catalogs are byte-identical across those tags, so comparing only the
+ * filenames you already know looks like "nothing changed". `raw.githubusercontent.com`
+ * cannot list a directory — the ADDED files are invisible that way. Compare the actual
+ * release tarball, not a guessed file list.
+ *
+ * So the notice reports "a newer release exists" and leaves whether it ships fresher
+ * catalogs to be checked rather than assumed — sometimes it does, sometimes the age is
+ * upstream's own. Note also that a *tag* is not a *release*: this reads the releases API
+ * and skips drafts/prereleases, so a tagged-but-unreleased version produces silence.
  */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
