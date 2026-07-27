@@ -37,6 +37,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   - **Delivery is the point:** a printed line scrolls out of the terminal, so the signal
     also lands in PAL — persistent, cross-session, and counted in the `kit statusline` ⚠
     badge the session-start hook injects.
+  - **Measured against upstream, and the wording follows the measurement:** a newer
+    release does NOT imply newer threat intel. All six `threat_intel/*.json` catalogs are
+    byte-identical between upstream v0.1.1 and v0.1.2; what v0.1.2 adds is inventory
+    *coverage* (an `agent-skill` ecosystem for skills.sh / vercel-labs lock files,
+    `homebrew`, and `~/.claude.json` MCP parsing). So neither branch of the suggestion
+    promises a bump will refresh the catalogs — the age can be upstream's own data age
+    rather than a lagging pin, and the previous "bump to refresh the exposure catalogs"
+    wording was a false promise. A *tag* is also not a *release*: the notice reads the
+    releases API and skips drafts/prereleases, so a tagged-but-unreleased version
+    correctly produces silence.
   - Network posture mirrors kit's own update check exactly, via a now-shared
     `isAirGapPosture()` so air-gap cannot be honored on one notice path and punched
     through on another: 3s timeout, 24h cache, and every failure path (suppressed,

@@ -22,6 +22,15 @@
  * Network posture mirrors the kit self-update check exactly: one shared suppression
  * decision (air-gap / CI / opt-out), a 3s timeout, a cached result, and every failure
  * path returning null. A notice must never slow down, break, or leak out of a run.
+ *
+ * MEASURED CAVEAT (2026-07-27, upstream v0.1.1 vs v0.1.2): a newer release does NOT
+ * imply newer threat intel. All six threat_intel/*.json catalogs are byte-identical
+ * across those two tags; what v0.1.2 adds is inventory COVERAGE (an `agent-skill`
+ * ecosystem for skills.sh / vercel-labs lock files, `homebrew`, and `~/.claude.json`
+ * MCP parsing). So this module reports "a newer release exists", never "your catalogs
+ * will get fresher" — the catalog age can be upstream's own, not a lagging pin. Also
+ * note a *tag* is not a *release*: the notice reads the releases API and skips
+ * drafts/prereleases, so a tagged-but-unreleased version correctly produces silence.
  */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
