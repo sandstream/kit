@@ -2009,13 +2009,12 @@ async function checkBumblebee(): Promise<SecurityCheckResult> {
       // cache is populated by the post-command notice in cli.ts.
       const { readCachedBumblebeeUpdateSync } = await import("./bumblebee-update.js");
       const upd = readCachedBumblebeeUpdateSync(BUMBLEBEE_VERSION);
-      // Neither branch promises that a bump yields FRESHER catalogs. Measured against
-      // upstream: every threat_intel catalog is byte-identical between v0.1.1 and
-      // v0.1.2, so the age can be upstream's own data age rather than a lagging pin —
-      // and "bump to refresh the catalogs" would then be a false promise.
+      // Neither branch ASSERTS that a bump refreshes the catalogs — it depends on the
+      // release. (v0.1.1 → v0.1.2 did: 6 → 11 catalogs, 65 → 38 days. But the six
+      // pre-existing files were byte-identical, so a bump can also change nothing.)
       const suggestion = upd
-        ? `bumblebee ${upd.latest} is available (pinned ${upd.pinned}). Moving BUMBLEBEE_VERSION + TARBALL_CHECKSUMS together in src/bumblebee.ts is the only way to change the bundled catalogs — check the release actually ships newer ones before assuming a bump refreshes them.`
-        : "No newer bumblebee release is known here (the check is cached, suppressed, or upstream has published none), so the age may be upstream's own rather than a lagging pin — a bump only helps if a newer release ships fresher catalogs.";
+        ? `bumblebee ${upd.latest} is available (pinned ${upd.pinned}). Moving BUMBLEBEE_VERSION + TARBALL_CHECKSUMS together in src/bumblebee.ts is the only way to change the bundled catalogs — compare the release tarball's threat_intel/ to see what it actually adds.`
+        : "No newer bumblebee release is known here (the check is cached, suppressed, or upstream has published none), so this age may be upstream's own rather than a lagging pin.";
       return {
         category,
         name,

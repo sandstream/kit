@@ -52,7 +52,7 @@ export interface EnsureResult {
  * Pinned bumblebee release. Bump deliberately, and update TARBALL_CHECKSUMS to
  * match the release's checksums.txt — the two MUST move together.
  */
-export const BUMBLEBEE_VERSION = "0.1.1";
+export const BUMBLEBEE_VERSION = "0.1.2";
 
 const RELEASE_BASE_URL = "https://github.com/perplexityai/bumblebee/releases/download";
 
@@ -64,14 +64,14 @@ const RELEASE_BASE_URL = "https://github.com/perplexityai/bumblebee/releases/dow
  * kit package itself.
  */
 export const TARBALL_CHECKSUMS: Record<string, string> = {
-  "bumblebee_0.1.1_darwin_amd64.tar.gz":
-    "dd3b2573a974a2786f58215483420fa11cf62b39ff4032693f1440575940dc25",
-  "bumblebee_0.1.1_darwin_arm64.tar.gz":
-    "dc0a620e54e85f998c2280b0323763c342973a25eda475d8036d16b01820a2bf",
-  "bumblebee_0.1.1_linux_amd64.tar.gz":
-    "0ef1c56c85a67c10f7211883c0eb5fb902de705cc30bbca0bc6f4d60941547da",
-  "bumblebee_0.1.1_linux_arm64.tar.gz":
-    "41aad0296bb6c88e746b237ed32eaa3b9b93c48770a51cd66f736f8a4d07a7d1",
+  "bumblebee_0.1.2_darwin_amd64.tar.gz":
+    "ea7f0ea303f712f3073ddb0f9fc0b368692ec1eee581b9a5d069ed986db2b433",
+  "bumblebee_0.1.2_darwin_arm64.tar.gz":
+    "0535aefeb6d1bdc2b4f44e393c5da385c95ac63c7c8f0bcee01b054d688bdab5",
+  "bumblebee_0.1.2_linux_amd64.tar.gz":
+    "53b080cf3ddb692b0c4e5492ef4785b4c54daf1624fcd0fcba3958116a0be8d9",
+  "bumblebee_0.1.2_linux_arm64.tar.gz":
+    "cb641a1023b12cd7b1411ebef5c7d426f7ecd81770a15a85873c5334a0e6b74d",
 };
 
 export interface PlatformTarget {

@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.23.0] - 2026-07-27
+
+### Changed
+
+- **bumblebee pin bumped 0.1.1 → 0.1.2, with the digests verified by download rather than
+  copied.** All four release tarballs were fetched and their SHA-256 recomputed against the
+  release's `checksums.txt` (4/4 match); v0.1.1's published checksums were also confirmed to
+  equal the digests already embedded here, cross-validating the source.
+  - **Threat intel: 6 → 11 catalogs**, newest authoring date 2026-05-18 → 2026-06-18
+    (65 → 38 days, under the 60-day staleness threshold, so the advisory clears). Adds
+    `glassworm`, `trapdoor-crypto-stealer`, `mastra-2026-06-17`, `laravel-lang-2026-05-23`,
+    `mini-shai-hulud-redhat-cloud-services`.
+  - **Inventory coverage** widens into kit's own domain: an `agent-skill` ecosystem
+    (skills.sh / vercel-labs lock files, including the project-local `skills-lock.json` kit
+    already manages), `homebrew` install receipts, and `~/.claude.json` MCP parsing for
+    Claude Code's user- and project-scoped servers.
+
+### Fixed
+
+- **Corrected the 5.22.0 claim that a newer bumblebee release brings no fresher threat
+  intel.** It does here. The error was methodological and is now recorded in
+  `bumblebee-update.ts` so it is not repeated: the six pre-existing catalogs *are*
+  byte-identical across the two tags, and `raw.githubusercontent.com` cannot list a
+  directory — so comparing only the filenames already known makes five ADDED catalogs
+  invisible and looks like "nothing changed". Compare the release tarball, not a guessed
+  file list. The suggestion text no longer asserts either direction: whether a bump
+  refreshes the catalogs depends on the release, so it points at the evidence instead.
+
+
 ## [5.22.0] - 2026-07-27
 
 ### Added
