@@ -35,7 +35,7 @@ export interface UpdateInfo {
  * exported would otherwise let the npm update beacon punch through. Best-effort:
  * a missing/invalid config falls back to the env-only signal.
  */
-async function isAirGapPosture(): Promise<boolean> {
+export async function isAirGapPosture(): Promise<boolean> {
   if (isAirGap()) return true;
   try {
     const [{ loadConfig }, { resolveAirGap }] = await Promise.all([

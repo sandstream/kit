@@ -30,6 +30,25 @@ export function securityFindingToSync(r: SecurityCheckResult): SyncFinding {
 }
 
 /**
+ * Out-of-verdict advisories carried by results of ANY status — including `pass`, which
+ * is where they mostly live, since an advisory that moved the verdict would make the
+ * gate depend on the wall clock or on someone else's release schedule. That is exactly
+ * why `actionableFindings` cannot see them: it filters on fail/warn.
+ */
+export function advisoryFindings(results: SecurityCheckResult[]): SyncFinding[] {
+  return results
+    .filter(
+      (r): r is SecurityCheckResult & { advisory: NonNullable<SecurityCheckResult["advisory"]> } =>
+        r.advisory !== undefined,
+    ) // prettier-ignore
+    .map((r) => ({
+      dedupKey: r.advisory.key,
+      title: r.advisory.title,
+      detail: r.advisory.detail,
+    }));
+}
+
+/**
  * Sync security findings into the PAL ledger (track + auto-close cleared ones).
  * Fail-open: returns the sync counts, or null if the store is unavailable —
  * tracking must never break the calling command.
@@ -47,9 +66,18 @@ export async function syncSecurityFindings(
     const scope = getCurrentProjectRoot();
     const db = openMemoryDb();
     try {
-      return palSyncFindings(db, "sec", actionableFindings(results).map(securityFindingToSync), {
+      const r = palSyncFindings(db, "sec", actionableFindings(results).map(securityFindingToSync), {
         scope,
       });
+      // Advisories reconcile under their OWN source tag. palSyncFindings closes every
+      // row of its tag that is absent from the batch, so folding advisories into "sec"
+      // would make each sync close the other's items on every run.
+      const a = palSyncFindings(db, "adv", advisoryFindings(results), { scope });
+      return {
+        added: r.added + a.added,
+        reopened: r.reopened + a.reopened,
+        closed: [...r.closed, ...a.closed],
+      };
     } finally {
       db.close();
     }

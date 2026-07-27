@@ -388,6 +388,18 @@ async function main(): Promise<void> {
           if (info) printUpdateNotice(info);
         })
         .catch(() => {}); // never fail
+
+      // Pinned-scanner release notice. Same posture as the self-update check (shared
+      // suppression, 3s timeout, cached, never throws) and deliberately NOT a verdict:
+      // it only refreshes the cache the security check reads, and prints when a bump
+      // exists. Never auto-installs — the binary pin is a supply-chain control.
+      import("./bumblebee-update.js")
+        .then(async ({ checkForBumblebeeUpdate, formatBumblebeeNotice }) => {
+          const { BUMBLEBEE_VERSION } = await import("./bumblebee.js");
+          const info = await checkForBumblebeeUpdate(BUMBLEBEE_VERSION);
+          if (info) console.error(`  ${c.dim}╰─${c.reset} ${formatBumblebeeNotice(info)}`);
+        })
+        .catch(() => {}); // never fail
     }
   } catch (err: unknown) {
     const code =
