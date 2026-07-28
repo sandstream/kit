@@ -25,12 +25,17 @@ export interface StatuslineParts {
   update?: string | null;
   /** open PAL ("blocked on you") count */
   pal?: number;
+  /** The ONE next setup command when adoption is incomplete (e.g. "kit init").
+   *  A bare "kit:full 1/6" is true but actionless — the score says something is
+   *  missing without saying what to DO, which is how a new repo stays un-kitted. */
+  next?: string;
 }
 
 /**
- * Render the compact line, e.g. `kit:full 6/6 · ⬆1.34.0 · ⚠2`. Segments are omitted
- * when empty so an up-to-date repo with no PAL items shows just the score (or
- * nothing). Plain ASCII + two glyphs only — safe in any terminal/harness bar.
+ * Render the compact line, e.g. `kit:full 6/6 · ⬆1.34.0 · ⚠2` — or, in an
+ * un-adopted repo, `kit:full 1/6 → kit init`. Segments are omitted when empty so
+ * an up-to-date repo with no PAL items shows just the score (or nothing).
+ * Plain ASCII + three glyphs only — safe in any terminal/harness bar.
  */
 export function formatStatusline(p: StatuslineParts): string {
   const seg: string[] = [];
@@ -45,7 +50,12 @@ export function formatStatusline(p: StatuslineParts): string {
   }
   if (p.update) seg.push(`⬆${p.update}`);
   if (typeof p.pal === "number" && p.pal > 0) seg.push(`⚠${p.pal}`);
-  return seg.join(" · ");
+  const line = seg.join(" · ");
+  // The nudge rides the score segment: only when a score is showing AND incomplete.
+  if (p.next && p.score && p.score.total > 0 && p.score.done < p.score.total) {
+    return `${line} → ${p.next}`;
+  }
+  return line;
 }
 
 /** Cheap, read-only subsystem presence (file-existence only — no shell/network), for
@@ -125,12 +135,15 @@ export async function buildStatuslineText(
     /* no/invalid .kit.toml — statusline still works (mode=full default) */
   }
   const { profile } = resolveMode(opts.modeFlag, config.setup?.mode);
-  const { done, total } = modeScore(profile, quickSubsystems(cwd));
+  const { done, total, gaps } = modeScore(profile, quickSubsystems(cwd));
   const update = readCachedUpdateSync(getKitVersionSync());
   return formatStatusline({
     mode: profile.mode,
     score: { done, total },
     update: update?.latest ?? null,
     pal: await quickPalCount(cwd),
+    // First gap in subsystem order = the natural next step (config → "kit init"
+    // first, so a repo with no .kit.toml is told how to START, not just scored).
+    next: gaps[0]?.next,
   });
 }
