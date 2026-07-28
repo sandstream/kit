@@ -831,6 +831,25 @@ See [GOVERNANCE.md](./GOVERNANCE.md) for detailed documentation.
 
 ## AI Assistant Setup
 
+### The one-line agent bootstrap
+
+The fastest adoption path needs no human setup at all: paste ONE line into the
+repo's `CLAUDE.md` / `AGENTS.md` (or your global agent rules) and the next
+agent session bootstraps kit itself — install, init, verify — and asks the
+human only for what is genuinely theirs (interactive logins):
+
+```markdown
+This project uses kit (github.com/sandstream/kit). If `kit` is missing: `npm i -g sandstream-kit`, then `kit init` (detects the stack, generates .kit.toml, wires agent config + install gates). Start every session with `kit check` and act on its verdict; `kit fix` auto-repairs; interactive steps like `kit login` belong to the human — suggest they run them (in Claude Code: prefix with `!` so the output lands in the session). `kit <command> --help` self-documents.
+```
+
+What the agent does from that line: installs kit globally, runs `kit init`
+(which also writes the managed "use kit" block into the rules file — the
+one-liner retires itself), runs `kit check`, and walks the human through the
+gaps. Trust note: this first install is your trust root — kit can't triage its
+own bootstrap. Releases carry SLSA provenance and cosign-signed images; see
+[docs/VERIFY.md](docs/VERIFY.md) to verify before you paste the line into an
+org-wide template.
+
 kit exposes its capabilities as an MCP server, making it usable directly by Claude Code, Cursor, Windsurf, Cline, and any other MCP-compatible AI assistant. Once registered, assistants can call `kit_check`, `kit_fix`, `kit_triage`, and other tools without leaving their context. (An agent **with shell access** should prefer the CLI — zero standing context cost, and `kit <command> --help` self-documents; the MCP surface exists for shell-less clients. The server's `instructions` field tells clients exactly this.)
 
 ### Claude Code
