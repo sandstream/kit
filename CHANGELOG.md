@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.25.0] - 2026-07-28
+
+### Added
+
+- **The managed block carries its own bootstrap line.** The README one-liner
+  tells an agent how to install kit — but `kit init` replaces it with the
+  managed rules block, which said "Start: `kit check`" and nothing about a
+  missing binary. The teammate who cloned a kit-managed repo got the block,
+  not the line, and their agent met `command not found` and had to guess.
+  The block now opens with: if `kit` is missing (fresh clone/machine),
+  install it, then continue. The docs↔block drift gate shipped in 5.24.0
+  fired on this change exactly as designed and forced the README example to
+  follow; kit-public's own CLAUDE.md updated with it (dogfood). Existing
+  repos pick the line up on their next `kit agent-config` / `kit init` run
+  (the block is idempotent — only the marker-delimited region updates).
+
 ## [5.24.0] - 2026-07-28
 
 The adoption release — three pieces that close the "new project, nothing set
