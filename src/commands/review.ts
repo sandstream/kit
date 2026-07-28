@@ -12,7 +12,7 @@
  * `kit check`'s own CLI extras. `kit review` is the gate, not the fixer.
  */
 import { c } from "../utils/colors.js";
-import { hasFlag, envTruthy } from "../utils/flags.js";
+import { hasFlag, flagValue, envTruthy } from "../utils/flags.js";
 import { loadConfig, type kitConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { withGovernance } from "../governance-middleware.js";
@@ -42,6 +42,8 @@ export interface ReviewReport {
   stages: ReviewStageReport[];
 }
 
+export const REVIEW_STAGES: readonly ReviewStageName[] = ["check", "design", "standards", "adr"];
+
 export interface CollectReviewOptions {
   cwd?: string;
   /** Preloaded config for the check stage (the CLI already has one for governance). */
@@ -52,6 +54,15 @@ export interface CollectReviewOptions {
   enforceTests?: boolean;
   /** Security gate posture (lenient / fail-on-warning) for the check stage. */
   gate?: GateOpts;
+  /** Run only these stages (canonical order is kept regardless of input order).
+   *  THE scoped, read-only path: an agent iterating on standards findings runs
+   *  `stages: ["standards"]` in seconds instead of paying the full audit's
+   *  security scan per loop — and it survives kit_standards' 6.0 removal.
+   *  Undefined ⇒ all four. */
+  stages?: ReviewStageName[];
+  /** Standards-stage scope (general | specific | plugins | platform | <language>),
+   *  passed through to the standards gate — parity with `kit standards --category`. */
+  category?: string;
 }
 
 function summarize(findings: JsonCheck[]): ReviewStageReport["summary"] {
@@ -118,26 +129,42 @@ function adrFindings(adr: Awaited<ReturnType<typeof runAdrGate>>): JsonCheck[] {
 }
 
 /**
- * Run every review stage and return the structured report. Read-only; stages run
- * in the order the CLI always ran them (check → design → standards → adr).
+ * Run the requested review stages (default: all four) and return the structured
+ * report. Read-only; stages run in the order the CLI always ran them
+ * (check → design → standards → adr) regardless of the input order. The report
+ * covers exactly the stages that ran — a scoped run's `ok` says nothing about
+ * the stages it skipped, and the `stages` array shows the scope honestly.
  */
 export async function collectReview(opts: CollectReviewOptions = {}): Promise<ReviewReport> {
-  const check = await runCheckGate({
-    cwd: opts.cwd,
-    config: opts.config,
-    enforceTests: opts.enforceTests,
-    gate: opts.gate,
-  });
-  const design = await runDesignGate({ cwd: opts.cwd, enforce: opts.enforce });
-  const standards = await runStandardsGate({ cwd: opts.cwd, enforce: opts.enforce });
-  const adr = await runAdrGate(opts.cwd ?? process.cwd());
+  const wanted = new Set<ReviewStageName>(opts.stages ?? REVIEW_STAGES);
+  const stages: ReviewStageReport[] = [];
 
-  const stages: ReviewStageReport[] = [
-    stageReport("check", check.ok, checkRunToJsonChecks(check)),
-    stageReport("design", design.ok, design.checks),
-    stageReport("standards", standards.ok, standards.checks),
-    stageReport("adr", adr.ok, adrFindings(adr)),
-  ];
+  if (wanted.has("check")) {
+    const check = await runCheckGate({
+      cwd: opts.cwd,
+      config: opts.config,
+      enforceTests: opts.enforceTests,
+      gate: opts.gate,
+    });
+    stages.push(stageReport("check", check.ok, checkRunToJsonChecks(check)));
+  }
+  if (wanted.has("design")) {
+    const design = await runDesignGate({ cwd: opts.cwd, enforce: opts.enforce });
+    stages.push(stageReport("design", design.ok, design.checks));
+  }
+  if (wanted.has("standards")) {
+    const standards = await runStandardsGate({
+      cwd: opts.cwd,
+      enforce: opts.enforce,
+      category: opts.category,
+    });
+    stages.push(stageReport("standards", standards.ok, standards.checks));
+  }
+  if (wanted.has("adr")) {
+    const adr = await runAdrGate(opts.cwd ?? process.cwd());
+    stages.push(stageReport("adr", adr.ok, adrFindings(adr)));
+  }
+
   const failed = stages.filter((s) => !s.ok).map((s) => s.stage);
   return { ok: failed.length === 0, failed, stages };
 }
@@ -158,6 +185,25 @@ export async function cmdReview(): Promise<boolean> {
     hasFlag(process.argv, "--fail-on-warning") ||
     hasFlag(process.argv, "--strict") ||
     envTruthy(process.env.KIT_CI_STRICT);
+  // --stages check,standards — scoped run (same semantics as the MCP tool's
+  // `stages` param). An unknown name is a refusal, not a silent full run.
+  const stagesFlag = flagValue(process.argv, "--stages");
+  let stages: ReviewStageName[] | undefined;
+  if (stagesFlag) {
+    const parsed = stagesFlag
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const bad = parsed.filter((s) => !REVIEW_STAGES.includes(s as ReviewStageName));
+    if (bad.length > 0) {
+      console.error(
+        `${c.red}✗ unknown stage(s): ${bad.join(", ")}${c.reset}  ${c.dim}(valid: ${REVIEW_STAGES.join(", ")})${c.reset}`,
+      );
+      return false;
+    }
+    stages = parsed as ReviewStageName[];
+  }
+  const category = flagValue(process.argv, "--category");
   const config = await loadConfig(resolveConfigPath());
 
   return await withGovernance(
@@ -170,6 +216,8 @@ export async function cmdReview(): Promise<boolean> {
         enforce,
         enforceTests,
         gate: { lenient, failOnWarning },
+        stages,
+        category,
       });
 
       if (jsonMode) {

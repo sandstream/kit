@@ -69,4 +69,26 @@ describe("collectReview", () => {
     assert.equal(design.ok, true);
     assert.ok(design.findings.every((f) => f.status !== "fail"));
   });
+
+  it("stages scopes the run — only the requested gates appear, canonical order kept", async () => {
+    const scoped = await collectReview({ cwd: process.cwd(), stages: ["adr", "standards"] });
+    assert.deepEqual(
+      scoped.stages.map((s) => s.stage),
+      ["standards", "adr"],
+      "canonical order regardless of input order",
+    );
+    assert.equal(
+      scoped.ok,
+      scoped.stages.every((s) => s.ok),
+      "a scoped ok covers exactly the stages that ran",
+    );
+  });
+
+  it("a standards-only run is the fast lint loop — no check/security stage at all", async () => {
+    const scoped = await collectReview({ cwd: process.cwd(), stages: ["standards"] });
+    assert.deepEqual(
+      scoped.stages.map((s) => s.stage),
+      ["standards"],
+    );
+  });
 });

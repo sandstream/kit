@@ -221,13 +221,24 @@ function register_kit_review(server: McpServer): void {
   // Read-only: no writes, so no governance/read-only gating.
   server.tool(
     "kit_review",
-    "Full repo audit in one shot — runs the check, design, standards, and ADR gates and returns one structured report ({ ok, failed, stages }). The same core `kit review` renders, so the surfaces cannot disagree. Read-only. Use concise:true to omit pass/skip rows (per-stage counts stay).",
+    'Full repo audit in one shot — runs the check, design, standards, and ADR gates and returns one structured report ({ ok, failed, stages }). The same core `kit review` renders, so the surfaces cannot disagree. Read-only. Use stages to scope (e.g. ["standards"] for a fast lint loop — no full security scan), category to scope the standards stage, and concise:true to omit pass/skip rows (per-stage counts stay).',
     {
       cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
       enforce: z
         .boolean()
         .optional()
         .describe("Fail on net-new design/standards findings AND setup gaps (CI posture)"),
+      stages: z
+        .array(z.enum(["check", "design", "standards", "adr"]))
+        .nonempty()
+        .optional()
+        .describe(
+          'Run only these stages (canonical order kept). Omit for the full audit. ["standards"] is the fast, read-only lint loop',
+        ),
+      category: z
+        .string()
+        .optional()
+        .describe("Standards-stage scope: general | specific | plugins | platform | <language>"),
       concise: z
         .boolean()
         .optional()
@@ -235,10 +246,10 @@ function register_kit_review(server: McpServer): void {
           "Return only fail/warn findings; per-stage summary counts still cover everything",
         ),
     },
-    async ({ cwd, enforce, concise }) => {
+    async ({ cwd, enforce, stages, category, concise }) => {
       try {
         const { collectReview } = await import("./commands/review.js");
-        const report = await collectReview({ cwd, enforce });
+        const report = await collectReview({ cwd, enforce, stages, category });
         const payload = concise
           ? {
               ...report,
@@ -269,7 +280,7 @@ function register_kit_standards(server: McpServer): void {
   // kit_run for the rare scoped call), so a second standalone tool is surface bloat.
   server.tool(
     "kit_standards",
-    `${DEPRECATED_6_0}; kit_review runs this gate as its standards stage — prefer it (or kit_run with \`kit standards --category …\` for a scoped run). Run kit standards (deterministic dev-standards gate: complexity/duplication/size + per-language linters + user plugins + container) and return structured findings. Read-only.`,
+    `${DEPRECATED_6_0}; use kit_review with stages: ["standards"] (+ category for scoping) — same gate, same read-only posture, one tool. Run kit standards (deterministic dev-standards gate: complexity/duplication/size + per-language linters + user plugins + container) and return structured findings. Read-only.`,
     {
       cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
       enforce: z

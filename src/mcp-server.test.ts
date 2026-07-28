@@ -238,6 +238,39 @@ describe("kit_review", () => {
     }
   });
 
+  it('stages: ["standards"] runs ONLY that gate — the fast read-only lint loop', async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_review",
+        arguments: { cwd: tempDir, stages: ["standards"] },
+      });
+      const data = parseResult(result) as { stages: Array<{ stage: string }> };
+      assert.deepEqual(
+        data.stages.map((s) => s.stage),
+        ["standards"],
+        "no check/design/adr stage may run on a scoped call",
+      );
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("rejects an unknown stage name at the schema layer", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_review",
+        arguments: { cwd: tempDir, stages: ["lint"] },
+      });
+      assert.equal(result.isError, true);
+      const content = result.content as Array<{ type: string; text: string }>;
+      assert.match(content[0].text, /invalid|enum/i);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it("concise:true strips pass/skip rows but keeps the per-stage counts honest", async () => {
     const { client, cleanup } = await createTestClient();
     try {
