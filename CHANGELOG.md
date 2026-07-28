@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.24.0] - 2026-07-28
+
+The adoption release — three pieces that close the "new project, nothing set
+up, nobody reminded me" loop: one pasted line lets an agent bootstrap kit
+itself, the statusline tells every session in an un-kitted repo what to do
+next, and your standing service preferences apply themselves at init.
+
+### Added
+
+- **User-level init defaults.** `~/.kit/defaults.toml` with `[init] services =
+  ["sentry", "posthog"]` is merged by BOTH init surfaces (the CLI flow and the
+  MCP `kit_init` tool) after stack detection — the operator's standing
+  preferences, declared once, outside any repo (personal taste, not project
+  truth: the generated `.kit.toml` stays the committed source). Fail-safe by
+  construction: missing file is the normal case, malformed toml degrades to no
+  defaults, unknown service ids are REPORTED (CLI warn / `unknownDefaults` in
+  the MCP response), never silently dropped. `KIT_DEFAULTS_FILE` overrides the
+  path (in `kit config knobs`). PostHog joins the service registry as an
+  informational service (the resend pattern: detected via its SDKs, env-key
+  check, no CLI login) so the default is first-class.
+- **Statusline adoption nudge.** `kit:full 1/6` in an un-kitted repo was true
+  but actionless. The statusline — and therefore the SessionStart context line
+  every harness session gets — now appends the ONE next step from the first
+  subsystem gap: `kit:full 1/6 → kit init`, then `→ kit install`,
+  `→ kit secrets`, … as adoption progresses. Complete score keeps today's
+  output.
+- **The one-line agent bootstrap (docs).** Paste one line into
+  `CLAUDE.md`/`AGENTS.md` and the next agent session installs kit, runs
+  `kit init` (which writes the managed rules block — the one-liner retires
+  itself), verifies with `kit check`, and hands the human only the interactive
+  steps. With the honest trust-root note: the first install cannot self-triage
+  — verify provenance (docs/VERIFY.md) before pasting into an org template.
+
 ## [5.23.0] - 2026-07-27
 
 ### Changed
