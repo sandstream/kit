@@ -36,4 +36,35 @@ describe("formatStatusline", () => {
     assert.equal(formatStatusline({ update: "2.0.0" }), "⬆2.0.0");
     assert.equal(formatStatusline({ pal: 3 }), "⚠3");
   });
+
+  // The adoption nudge: a bare "kit:full 1/6" is true but actionless — the line
+  // must say what to DO next, exactly once, and only while incomplete.
+  it("appends the next-step nudge when the score is incomplete", () => {
+    assert.equal(
+      formatStatusline({ mode: "full", score: { done: 1, total: 6 }, next: "kit init" }),
+      "kit:full 1/6 → kit init",
+    );
+  });
+
+  it("nudge rides AFTER the other segments", () => {
+    assert.equal(
+      formatStatusline({
+        mode: "full",
+        score: { done: 2, total: 6 },
+        update: "9.9.9",
+        pal: 1,
+        next: "kit install",
+      }),
+      "kit:full 2/6 · ⬆9.9.9 · ⚠1 → kit install",
+    );
+  });
+
+  it("no nudge when complete, when no score shows, or when next is absent", () => {
+    assert.equal(
+      formatStatusline({ mode: "full", score: { done: 6, total: 6 }, next: "kit init" }),
+      "kit:full 6/6",
+    );
+    assert.equal(formatStatusline({ next: "kit init" }), "");
+    assert.equal(formatStatusline({ mode: "full", score: { done: 1, total: 6 } }), "kit:full 1/6");
+  });
 });
