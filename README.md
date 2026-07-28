@@ -861,6 +861,7 @@ idempotent — re-runs update only the region between them):
 
 This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, security gates). Hooks enforce the hard rules; what you need to know:
 
+- If `kit` is missing (fresh clone/machine): `npm i -g sandstream-kit`, then continue below.
 - Start: `kit check` — on `fail`, run `kit fix`, then re-check.
 - Prior decisions: `kit memory search "<query>"` (cross-session, cross-agent).
 - Secrets: `kit secrets` (vault-backed); placeholders go in `.env.example`, never plaintext in `.env*`.
