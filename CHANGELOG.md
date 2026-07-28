@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.26.0] - 2026-07-28
+
+### Added
+
+- **`kit review` scopes: `--stages` + `--category`.** `collectReview` (and
+  therefore both surfaces — `kit review --stages check,standards --category
+  general` and the `kit_review` MCP tool's `stages`/`category` params) can run
+  a subset of the four gates, canonical order kept regardless of input order.
+  Enum-validated: an unknown stage is a refusal with the valid list, never a
+  silent full run. `stages: ["standards"]` is the fast, read-only lint loop —
+  seconds instead of the full audit's security scan per iteration — and it is
+  the migration path that survives `kit_standards`' 6.0 removal (the
+  deprecation text now names it). The report stays honest under scoping: `ok`
+  covers exactly the stages that ran, and the `stages` array shows the scope.
+
 ## [5.25.0] - 2026-07-28
 
 ### Added
