@@ -850,6 +850,31 @@ own bootstrap. Releases carry SLSA provenance and cosign-signed images; see
 [docs/VERIFY.md](docs/VERIFY.md) to verify before you paste the line into an
 org-wide template.
 
+**Transparent end state** — you should know exactly what a line you paste
+will turn into. When the bootstrap completes, your rules file contains this
+managed block and nothing else has been touched (visible BEGIN/END markers,
+idempotent — re-runs update only the region between them):
+
+```markdown
+<!-- BEGIN kit (managed block — edit outside the markers, not inside) -->
+## kit
+
+This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, security gates). Hooks enforce the hard rules; what you need to know:
+
+- Start: `kit check` — on `fail`, run `kit fix`, then re-check.
+- Prior decisions: `kit memory search "<query>"` (cross-session, cross-agent).
+- Secrets: `kit secrets` (vault-backed); placeholders go in `.env.example`, never plaintext in `.env*`.
+- Deps the install gate hasn't covered (git repos, URLs, vendored code): `kit triage repo <target>` first.
+- After a batch of edits: `kit check --category security`; halt and surface findings on `fail`.
+- Everything else: `kit --help` — the commands are self-documenting.
+<!-- END kit -->
+```
+
+The block is an index, not an encyclopedia — every agent turn pays for these
+tokens, so anything a hook already enforces deterministically carries zero
+prose here. A drift test pins this README example to the `KIT_INSTRUCTION`
+the code actually writes, so the promise can't rot.
+
 kit exposes its capabilities as an MCP server, making it usable directly by Claude Code, Cursor, Windsurf, Cline, and any other MCP-compatible AI assistant. Once registered, assistants can call `kit_check`, `kit_fix`, `kit_triage`, and other tools without leaving their context. (An agent **with shell access** should prefer the CLI — zero standing context cost, and `kit <command> --help` self-documents; the MCP surface exists for shell-less clients. The server's `instructions` field tells clients exactly this.)
 
 ### Claude Code
