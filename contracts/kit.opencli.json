@@ -400,6 +400,22 @@
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
+    "guard": {
+      "kind": "command",
+      "summary": "Install gate for YOUR terminal (observe mode): PATH shims for npm/npx/brew/pip/bun/… log what the gate would decide — install | status | uninstall",
+      "x-kit-args-modeled": false,
+      "x-kit-audience": "all",
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
+    "guard-observe": {
+      "kind": "command",
+      "summary": "Shim protocol (invoked by ~/.kit/shims wrappers, not by you): record what the install gate would decide for a package-manager call",
+      "x-kit-args-modeled": false,
+      "x-kit-audience": "harness",
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
     "heal": {
       "kind": "command",
       "summary": "Loop: auto-fix safe findings, re-scan until green; gate destructive, fail-closed on tamper (--dry-run, --agent)",

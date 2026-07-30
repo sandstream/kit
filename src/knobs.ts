@@ -133,6 +133,11 @@ export const KNOBS: KnobGroup[] = [
         kind: "env",
         desc: "path override for ~/.kit/defaults.toml — user-level [init] services kit init always merges in (your standing preferences, e.g. sentry + posthog)",
       },
+      {
+        name: "KIT_GUARD_BYPASS",
+        kind: "env",
+        desc: "skip the kit guard shim's observation for one call (the real tool always runs either way — v1 is observe-only)",
+      },
     ],
   },
   {
