@@ -88,33 +88,17 @@ describe("OpenCLI document shape", () => {
   // Audience ↔ MCP consistency: the exposure layer must respect the audience
   // annotation. "human" commands are interactive/setup surfaces — they do not
   // belong on the MCP surface; "harness" commands are hook stdin protocols —
-  // they belong on NO discovery surface. The only tolerated human∩MCP overlap
-  // is the trio already deprecated on the MCP surface, which leaves in kit 6.0
-  // — at which point this exception list empties and gets deleted.
-  it("audience: human/harness commands are never MCP-exposed (modulo the 6.0 deprecations)", () => {
-    const DEPRECATED_MCP_UNTIL_6_0 = new Set(["add", "install", "login"]);
+  // they belong on NO discovery surface. 6.0 removed the last tolerated
+  // overlap (the deprecated setup-time tools), so this is now exception-free.
+  it("audience: human/harness commands are never MCP-exposed", () => {
     const offenders: string[] = [];
     for (const [name, c] of Object.entries(doc.commands)) {
       const audience = c["x-kit-audience"];
       if ((audience === "human" || audience === "harness") && c["x-kit-mcp"]) {
-        if (audience === "human" && DEPRECATED_MCP_UNTIL_6_0.has(name)) continue;
         offenders.push(`${name} (${audience})`);
       }
     }
     assert.deepEqual(offenders, [], "human/harness-audience commands must not be MCP-exposed");
-    // The exception list must not rot: every entry must still be a real,
-    // MCP-exposed, human-audience command. When 6.0 removes the tools, this
-    // fails and the list (and eventually the whole exception) gets deleted.
-    for (const name of DEPRECATED_MCP_UNTIL_6_0) {
-      const c = doc.commands[name];
-      assert.ok(c, `${name} vanished from the command surface — update the exception list`);
-      assert.equal(
-        c["x-kit-mcp"],
-        true,
-        `${name} is no longer MCP-exposed — remove it from the exception list`,
-      );
-      assert.equal(c["x-kit-audience"], "human");
-    }
   });
 
   it("every command carries a valid audience", () => {

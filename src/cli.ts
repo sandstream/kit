@@ -543,13 +543,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdInstall,
     stability: "stable",
     help: "Install missing tools via mise",
-    mcp: true,
   },
   login: {
     handler: cmdLogin,
     stability: "stable",
     help: "Guided login to all configured services",
-    mcp: true,
   },
   secrets: {
     handler: cmdSecrets,
@@ -585,7 +583,6 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdAdd,
     stability: "stable",
     help: "Provision a service (kit add --list to see all adapters)",
-    mcp: true,
   },
   audit: { handler: cmdAudit, stability: "stable", help: "View audit log of kit operations" },
   auth: {
@@ -598,7 +595,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     stability: "stable",
     help: "MCP server over stdio (Claude Code/Cursor/Codex); 'kit mcp list|auth|set-token|clear' manages declared servers",
   },
-  env: { handler: cmdEnv, stability: "stable", help: "Show current environment info", mcp: true },
+  env: { handler: cmdEnv, stability: "stable", help: "Show current environment info" },
   doctor: {
     handler: cmdDoctor,
     stability: "stable",
@@ -628,7 +625,6 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdCi,
     stability: "stable",
     help: "CI-native check: GitHub Actions annotations, GitLab JUnit, JSON (--init gitlab|bitbucket scaffolds a pipeline)",
-    mcp: true,
   },
   "self-audit": {
     handler: cmdSelfAudit,
@@ -721,7 +717,6 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdStandards,
     stability: "stable",
     help: "Dev-standards gate: general metrics + per-language linters + user plugins vs the baseline (--category general|specific|plugins|<lang>, --enforce fails CI)",
-    mcp: true,
   },
   review: {
     handler: cmdReview,

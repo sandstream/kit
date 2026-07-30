@@ -61,17 +61,10 @@ describe("docs ↔ MCP surface", () => {
   });
 
   it("the reference marks exactly the deprecated tools as deprecated", () => {
-    // The six 6.0 removals must carry a deprecation marker in the reference,
-    // and no non-deprecated tool may. When 6.0 removes them, the first
-    // assertion's tool list shrinks and this stays green by construction.
-    const DEPRECATED = [
-      "kit_env",
-      "kit_ci",
-      "kit_install",
-      "kit_login",
-      "kit_add",
-      "kit_standards",
-    ];
+    // 6.0 removed the six deprecated tools, so the set is empty: no row may
+    // carry a deprecation marker. When a future removal cycle starts, list the
+    // newly-deprecated tools here again.
+    const DEPRECATED: string[] = [];
     const ref = DOCS[0].text;
     const rows = ref.split("\n").filter((l) => l.startsWith("| `kit_"));
     for (const row of rows) {

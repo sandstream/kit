@@ -4,14 +4,8 @@ import { z } from "zod";
 import { resolve, join, relative } from "node:path";
 import { loadConfig } from "./config.js";
 import { checkTools } from "./check-tools.js";
-import { checkServices } from "./check-services.js";
-import { checkSecrets } from "./check-secrets.js";
-import { checkSecurity } from "./check-security.js";
-import { checkSkills } from "./check-skills.js";
-import { checkLockFiles } from "./check-lock.js";
 import { runCheckGate } from "./check-run.js";
 import { installTools } from "./install.js";
-import { loginServices } from "./login.js";
 import { generateSecrets } from "./secrets.js";
 import {
   readSkillsLock,
@@ -20,8 +14,6 @@ import {
   updateCliLock,
   readkitMeta,
 } from "./lock.js";
-import { provisionService, listAvailableServices } from "./provision.js";
-import { inspectEnv } from "./env-inspect.js";
 import { detectStack } from "./stack-detector.js";
 import { generateToml } from "./toml-generator.js";
 import { writeFile, access } from "node:fs/promises";
@@ -29,7 +21,6 @@ import { executeCommand } from "./run.js";
 import { gatherProjectContext } from "./context.js";
 import { mapReport } from "./commands/repomap.js";
 import { isReadOnlyMode } from "./read-only-mode.js";
-import { escapeWorkflowCmd } from "./utils/ci-escape.js";
 import { runGovernedBrokered } from "./governance-middleware.js";
 import type { kitConfig } from "./config.js";
 import { runTriage, type TriageType } from "./triage.js";
@@ -49,15 +40,9 @@ const KIT_FILE = ".kit.toml";
 export const KIT_MCP_TOOLS: readonly string[] = [
   "kit_check",
   "kit_review",
-  "kit_standards",
-  "kit_install",
-  "kit_login",
   "kit_secrets",
   "kit_fix",
-  "kit_add",
-  "kit_env",
   "kit_init",
-  "kit_ci",
   "kit_run",
   "kit_context",
   "kit_map",
@@ -78,14 +63,6 @@ const KIT_MCP_INSTRUCTIONS = `kit is a deterministic, local-first dev-environmen
 If you have shell access, prefer running \`kit <command>\` directly — the CLI covers far more than these tools and \`kit <command> --help\` documents everything. These MCP tools exist for shell-less clients.
 
 Typical loop: kit_check (verify env + security) → kit_fix (auto-repair) → kit_triage (REQUIRED before installing any package kit's gate has not already cleared — the gate blocks untriaged installs) → kit_memory (recall prior cross-session decisions before answering project-specific questions) → kit_review (full audit — check + design + standards + ADR — before merging) → kit_run (escape hatch for any other kit command).`;
-
-// Deprecation prefix for tools scheduled for removal from the MCP surface in
-// kit 6.0 (the MCP surface is "Evolving" per docs/API_STABILITY_AND_VERSIONING.md
-// — removal requires notice, so they are marked, not dropped). Rationale: setup-
-// time and CI commands are shell contexts by definition; a shell-less MCP client
-// is never the thing provisioning services or running CI. kit_run remains the
-// escape hatch for all of them.
-const DEPRECATED_6_0 = "DEPRECATED — scheduled for removal from the MCP surface in kit 6.0";
 
 function configPath(cwd?: string): string {
   return resolve(cwd ?? process.cwd(), KIT_FILE);
@@ -144,15 +121,9 @@ export function createMcpServer(): McpServer {
   // function). Each register_* attaches its tool to the server.
   register_kit_check(server);
   register_kit_review(server);
-  register_kit_standards(server);
-  register_kit_install(server);
-  register_kit_login(server);
   register_kit_secrets(server);
   register_kit_fix(server);
-  register_kit_add(server);
-  register_kit_env(server);
   register_kit_init(server);
-  register_kit_ci(server);
   register_kit_run(server);
   register_kit_context(server);
   register_kit_map(server);
@@ -261,150 +232,6 @@ function register_kit_review(server: McpServer): void {
           : report;
         return {
           content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
-        };
-      } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-          isError: true,
-        };
-      }
-    },
-  );
-}
-
-function register_kit_standards(server: McpServer): void {
-  // kit_standards — run the dev-standards gate (general + per-language + plugins +
-  // platform) and return the SAME { ok, checks, summary } envelope as `kit standards`.
-  // Read-only: no writes, so no governance/read-only gating. Deprecated for 6.0:
-  // kit_review runs this gate as its standards stage (with --category parity via
-  // kit_run for the rare scoped call), so a second standalone tool is surface bloat.
-  server.tool(
-    "kit_standards",
-    `${DEPRECATED_6_0}; use kit_review with stages: ["standards"] (+ category for scoping) — same gate, same read-only posture, one tool. Run kit standards (deterministic dev-standards gate: complexity/duplication/size + per-language linters + user plugins + container) and return structured findings. Read-only.`,
-    {
-      cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
-      enforce: z
-        .boolean()
-        .optional()
-        .describe("Fail on net-new findings AND setup gaps (CI posture)"),
-      category: z
-        .string()
-        .optional()
-        .describe("Scope: general | specific | plugins | platform | <language>"),
-    },
-    async ({ cwd, enforce, category }) => {
-      try {
-        const { runStandardsGate } = await import("./standards-run.js");
-        const { ok, checks, summary, baselineIgnored } = await runStandardsGate({
-          cwd,
-          enforce,
-          category,
-        });
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({ ok, checks, summary, baselineIgnored }, null, 2),
-            },
-          ],
-        };
-      } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-          isError: true,
-        };
-      }
-    },
-  );
-}
-
-function register_kit_install(server: McpServer): void {
-  // kit_install — install missing tools via mise
-  server.tool(
-    "kit_install",
-    `${DEPRECATED_6_0}; setup-time provisioning happens in a shell — use \`kit install\` there, or kit_run. Install missing tools defined in .kit.toml using mise.`,
-    { cwd: z.string().optional().describe("Working directory") },
-    async ({ cwd }) => {
-      if (isReadOnlyMode()) return readOnlyRefusal("kit_install");
-      try {
-        const config = await loadConfig(configPath(cwd));
-        if (!config.tools || Object.keys(config.tools).length === 0) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({ installed: [], message: "No tools configured" }),
-              },
-            ],
-          };
-        }
-
-        const gov = await runGovernedBrokered(
-          config,
-          {
-            operation: "tools.install",
-            operationType: "write",
-            metadata: { tools: Object.keys(config.tools) },
-            // Infrastructure: mise installs to $HOME + fetches from tool hosts by design — not an
-            // agent project action the [scope] RoE governs. Allowed but audited as an exemption.
-            infrastructure: true,
-          },
-          () => installTools(config.tools!),
-          { cwd: cwd ?? process.cwd() },
-        );
-        if (!gov.ok) return governanceRefusal(gov.reason ?? "denied");
-        const results = gov.result!;
-        const ok = results.every((r) => r.action !== "failed");
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({ ok, results }, null, 2),
-            },
-          ],
-        };
-      } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-          isError: true,
-        };
-      }
-    },
-  );
-}
-
-function register_kit_login(server: McpServer): void {
-  // kit_login — attempt service logins (non-interactive)
-  server.tool(
-    "kit_login",
-    `${DEPRECATED_6_0}; service auth is interactive/setup-time — use \`kit login\` in a shell. Attempt to log in to services defined in .kit.toml. Runs in non-interactive mode — services requiring interactive auth will be skipped.`,
-    { cwd: z.string().optional().describe("Working directory") },
-    async ({ cwd }) => {
-      if (isReadOnlyMode()) return readOnlyRefusal("kit_login");
-      try {
-        // Force non-interactive for MCP context
-        process.env.KIT_NON_INTERACTIVE = "1";
-        const config = await loadConfig(configPath(cwd));
-        if (!config.services || Object.keys(config.services).length === 0) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({ results: [], message: "No services configured" }),
-              },
-            ],
-          };
-        }
-
-        const results = await loginServices(config.services);
-        const ok = results.every((r) => r.action !== "failed");
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({ ok, results }, null, 2),
-            },
-          ],
         };
       } catch (err) {
         return {
@@ -585,110 +412,6 @@ function register_kit_fix(server: McpServer): void {
   );
 }
 
-function register_kit_add(server: McpServer): void {
-  // kit_add — provision a service (stripe, supabase, etc.)
-  server.tool(
-    "kit_add",
-    `${DEPRECATED_6_0}; provisioning is setup-time shell work — use \`kit add\` there, or kit_run. Provision a service integration for the project. Available services: ${listAvailableServices().join(", ")}. Writes generated secrets to .env.local and returns provisioning result.`,
-    {
-      service: z
-        .string()
-        .describe(`Service adapter name (e.g. ${listAvailableServices().slice(0, 3).join(", ")})`),
-      project_name: z
-        .string()
-        .optional()
-        .describe("Project name (used by some adapters for resource naming)"),
-      cwd: z.string().optional().describe("Working directory"),
-    },
-    async ({ service, project_name, cwd }) => {
-      if (isReadOnlyMode()) return readOnlyRefusal("kit_add");
-      try {
-        const workDir = cwd ?? process.cwd();
-        const result = await provisionService(service, workDir, project_name);
-
-        const secretsWritten = result.secrets ? Object.keys(result.secrets) : [];
-        // Extract manual steps from message when provisioning fails due to missing requirements
-        const manualSteps = !result.success && result.message ? [result.message] : [];
-
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
-                {
-                  success: result.success,
-                  secrets_written: secretsWritten,
-                  manual_steps: manualSteps,
-                  message: result.message,
-                  ...(result.error && { error: result.error }),
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-          ...(result.error && { isError: true }),
-        };
-      } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-          isError: true,
-        };
-      }
-    },
-  );
-}
-
-function register_kit_env(server: McpServer): void {
-  // kit_env — inspect environment variables loaded from .env.local
-  server.tool(
-    "kit_env",
-    `${DEPRECATED_6_0}; kit_context includes environment status — prefer it. Inspect environment variables from .env.local. Returns each key's set/missing status. Values are redacted by default.`,
-    {
-      show_values: z
-        .boolean()
-        .optional()
-        .describe("Return actual values (default: false, values are redacted)"),
-      missing_only: z
-        .boolean()
-        .optional()
-        .describe("Return only keys that are not set in .env.local"),
-      cwd: z.string().optional().describe("Working directory"),
-    },
-    async ({ show_values, missing_only, cwd }) => {
-      try {
-        const workDir = cwd ?? process.cwd();
-        let config = {};
-        try {
-          config = await loadConfig(configPath(workDir));
-        } catch {
-          // Works without .kit.toml
-        }
-
-        const result = await inspectEnv(config, {
-          showValues: show_values,
-          missingOnly: missing_only,
-          cwd: workDir,
-        });
-
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(result, null, 2),
-            },
-          ],
-        };
-      } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-          isError: true,
-        };
-      }
-    },
-  );
-}
-
 function register_kit_init(server: McpServer): void {
   // kit_init — detect stack, generate .kit.toml, optionally write it
   server.tool(
@@ -758,147 +481,6 @@ function register_kit_init(server: McpServer): void {
               ),
             },
           ],
-        };
-      } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
-          isError: true,
-        };
-      }
-    },
-  );
-}
-
-function register_kit_ci(server: McpServer): void {
-  server.tool(
-    "kit_ci",
-    `${DEPRECATED_6_0}; CI runners always have a shell — run \`kit ci\` there. Run kit CI checks and return structured results. Use before deploying or merging to validate the environment is correctly configured. Returns pass/fail/warn status for tools, services, secrets, lock files, and security.`,
-    {
-      cwd: z.string().optional().describe("Project directory (defaults to process.cwd())"),
-      format: z
-        .enum(["json", "github", "text"])
-        .optional()
-        .describe("Output format: json (default), github (annotations), text"),
-      fail_on_warning: z
-        .boolean()
-        .optional()
-        .describe("Treat warnings as failures (default: false)"),
-    },
-    async ({ cwd, format = "json", fail_on_warning = false }) => {
-      try {
-        const workDir = cwd ?? process.cwd();
-        const cfgPath = resolve(workDir, ".kit.toml");
-        const config = await loadConfig(cfgPath);
-
-        const toolResults = config.tools ? await checkTools(config.tools) : [];
-        const serviceResults = config.services ? await checkServices(config.services) : [];
-        const secretResults = config.secrets
-          ? await checkSecrets(config.secrets)
-          : { templateExists: null, keys: [] };
-        const skillResults = config.skills ? await checkSkills(config.skills) : [];
-        const securityResults = await checkSecurity();
-        const lockResults = await checkLockFiles(config);
-
-        interface CiCheck {
-          name: string;
-          status: "pass" | "fail" | "warn" | "skip";
-          detail: string;
-          category: string;
-        }
-
-        const checks: CiCheck[] = [
-          ...toolResults.map((t) => ({
-            name: t.name,
-            status: (t.ok ? "pass" : "fail") as CiCheck["status"],
-            detail: t.installed ? `installed ${t.installed}` : "not installed",
-            category: "tools",
-          })),
-          ...serviceResults.map((s) => ({
-            name: s.name,
-            status: (s.authenticated ? "pass" : "fail") as CiCheck["status"],
-            detail: s.output ?? (s.authenticated ? "authenticated" : "not authenticated"),
-            category: "services",
-          })),
-          ...secretResults.keys.map((s) => ({
-            name: s.name,
-            status: (s.available ? "pass" : "fail") as CiCheck["status"],
-            detail: s.detail ?? (s.available ? "available" : "missing"),
-            category: "secrets",
-          })),
-          ...skillResults.map((s) => ({
-            name: s.name,
-            status: (s.installed ? "pass" : s.required ? "fail" : "warn") as CiCheck["status"],
-            detail: s.installed ? "installed" : "not installed",
-            category: "skills",
-          })),
-          ...lockResults.map((l) => ({
-            name: l.category === "skills-lock" ? "skills-lock.json" : "cli-lock.json",
-            status: (l.inSync ? "pass" : l.exists ? "warn" : "fail") as CiCheck["status"],
-            detail: l.detail,
-            category: "lock",
-          })),
-          ...securityResults.map((s) => ({
-            name: s.name,
-            status: s.status as CiCheck["status"],
-            detail: s.detail,
-            category: `security/${s.category}`,
-          })),
-        ];
-
-        const summary = checks.reduce(
-          (acc, c) => {
-            if (c.status === "pass") acc.passed++;
-            else if (c.status === "fail") acc.failed++;
-            else if (c.status === "warn") acc.warnings++;
-            else acc.skipped++;
-            return acc;
-          },
-          { passed: 0, failed: 0, warnings: 0, skipped: 0 },
-        );
-
-        const ok = summary.failed === 0 && (!fail_on_warning || summary.warnings === 0);
-        const result = { ok, checks, summary };
-
-        let text: string;
-        if (format === "github") {
-          const lines: string[] = [];
-          for (const c of checks) {
-            // Escape config-controlled category/name/detail before interpolating into
-            // a GitHub workflow command — raw CR/LF would let a crafted detail string
-            // forge or hide annotation lines (same class escapeWorkflowCmd prevents).
-            const msg = escapeWorkflowCmd(`${c.category}/${c.name}: ${c.detail}`);
-            if (c.status === "fail") lines.push(`::error::${msg}`);
-            else if (c.status === "warn") lines.push(`::warning::${msg}`);
-          }
-          lines.push(
-            `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`,
-          );
-          text = lines.join("\n");
-        } else if (format === "text") {
-          const failures = checks.filter((c) => c.status === "fail");
-          const warnings = checks.filter((c) => c.status === "warn");
-          const lines: string[] = [];
-          if (failures.length)
-            lines.push(
-              "FAILURES:",
-              ...failures.map((f) => `  ✗ [${f.category}] ${f.name}: ${f.detail}`),
-            );
-          if (warnings.length)
-            lines.push(
-              "WARNINGS:",
-              ...warnings.map((w) => `  ! [${w.category}] ${w.name}: ${w.detail}`),
-            );
-          lines.push(
-            `kit ci: ${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings`,
-          );
-          text = lines.join("\n");
-        } else {
-          text = JSON.stringify(result, null, 2);
-        }
-
-        return {
-          content: [{ type: "text" as const, text }],
-          isError: !ok,
         };
       } catch (err) {
         return {

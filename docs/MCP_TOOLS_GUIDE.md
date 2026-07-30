@@ -65,17 +65,18 @@ kit_run     → escape hatch: any other kit command
 - **Secrets never round-trip.** `kit_secrets` returns key names and statuses,
   never values.
 
-## Deprecations
+## The 6.0 surface
 
-`kit_ci`, `kit_install`, `kit_login`, `kit_add`, `kit_env`, and
-`kit_standards` are marked deprecated and leave the MCP surface in kit 6.0
-(the stability policy requires notice before removal). Their descriptions say
-so and point to the replacement (`kit_review` subsumes `kit_standards` as its
-standards stage); `kit_run` remains the escape hatch for all of them. Rationale:
-CI runners and setup-time provisioning are shell contexts by definition — a
-shell-less MCP client is never the thing running CI or provisioning services;
-and one audit tool that runs every gate beats a per-gate tool per stage
-(surface economy — each standing tool costs every client context).
+kit 6.0 completed the deprecation cycle announced in the 5.x line and removed
+the six setup-time/CI tools from the MCP surface (their CLI commands are
+unchanged — only the MCP exposure ended, after notice via deprecation markers
+and docs). Rationale: CI runners and setup-time provisioning are shell
+contexts by definition — a shell-less MCP client is never the thing running CI
+or provisioning services; and one audit tool that runs every gate beats a
+per-gate tool per stage (surface economy — each standing tool costs every
+client context). Migrations: `kit_review` (with `stages`/`category`) covers
+the standards gate; `kit_context` covers env inspection; `kit_run` remains the
+escape hatch for everything else.
 
 ## Drift guarantees
 
@@ -83,8 +84,8 @@ Three tests keep this surface honest:
 
 - `KIT_MCP_TOOLS` ↔ actually-registered tools ↔ the CLI registry's `mcp`
   flags (CLI = MCP, `mcp-server.test.ts`);
-- `x-kit-audience`: a human/harness command is never MCP-exposed, modulo the
-  pinned 6.0 deprecations (`opencli.test.ts`);
+- `x-kit-audience`: a human/harness command is never MCP-exposed, no
+  exceptions (`opencli.test.ts`);
 - this documentation ↔ `KIT_MCP_TOOLS`, in both directions
   (`docs-mcp-sync.test.ts`) — every real tool documented, no fictional tool
   documentable.

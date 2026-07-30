@@ -5,7 +5,7 @@
       "summary": "Provision a service (kit add --list to see all adapters)",
       "x-kit-args-modeled": false,
       "x-kit-audience": "human",
-      "x-kit-mcp": true,
+      "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
     "adr": {
@@ -207,7 +207,7 @@
       "summary": "CI-native check: GitHub Actions annotations, GitLab JUnit, JSON (--init gitlab|bitbucket scaffolds a pipeline)",
       "x-kit-args-modeled": false,
       "x-kit-audience": "all",
-      "x-kit-mcp": true,
+      "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
     "clone": {
@@ -333,7 +333,7 @@
       "summary": "Show current environment info",
       "x-kit-args-modeled": false,
       "x-kit-audience": "all",
-      "x-kit-mcp": true,
+      "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
     "escalate": {
@@ -487,7 +487,7 @@
       "summary": "Install missing tools via mise",
       "x-kit-args-modeled": false,
       "x-kit-audience": "human",
-      "x-kit-mcp": true,
+      "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
     "login": {
@@ -505,7 +505,7 @@
       "summary": "Guided login to all configured services",
       "x-kit-args-modeled": false,
       "x-kit-audience": "human",
-      "x-kit-mcp": true,
+      "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
     "map": {
@@ -1043,7 +1043,7 @@
       "summary": "Dev-standards gate: general metrics + per-language linters + user plugins vs the baseline (--category general|specific|plugins|<lang>, --enforce fails CI)",
       "x-kit-args-modeled": false,
       "x-kit-audience": "all",
-      "x-kit-mcp": true,
+      "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
     "status": {

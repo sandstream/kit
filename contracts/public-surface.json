@@ -251,21 +251,15 @@
     "whoami"
   ],
   "mcpTools": [
-    "kit_add",
     "kit_check",
-    "kit_ci",
     "kit_context",
-    "kit_env",
     "kit_fix",
     "kit_init",
-    "kit_install",
-    "kit_login",
     "kit_map",
     "kit_memory",
     "kit_review",
     "kit_run",
     "kit_secrets",
-    "kit_standards",
     "kit_triage"
   ]
 }
