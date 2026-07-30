@@ -61,6 +61,7 @@ import {
   cmdGateFs,
   runGateFailClosed,
 } from "./commands/gate.js";
+import { cmdGuard, cmdGuardObserve } from "./commands/guard.js";
 import { cmdCi } from "./commands/ci.js";
 import { cmdSentinel } from "./commands/sentinel.js";
 import { cmdStandards, cmdBaseline } from "./commands/standards.js";
@@ -141,6 +142,7 @@ function cmdHelp(subcommand?: string): boolean {
         "scan",
         "security",
         "triage",
+        "guard",
         "supply-chain",
         "sbom",
         "gha-audit",
@@ -773,6 +775,16 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     // case where an MCP tool earns its context cost for shell-less clients.
     mcp: true,
   },
+  guard: {
+    handler: cmdGuard,
+    stability: "experimental",
+    help: "Install gate for YOUR terminal (observe mode): PATH shims for npm/npx/brew/pip/bun/… log what the gate would decide — install | status | uninstall",
+  },
+  "guard-observe": {
+    handler: cmdGuardObserve,
+    stability: "experimental",
+    help: "Shim protocol (invoked by ~/.kit/shims wrappers, not by you): record what the install gate would decide for a package-manager call",
+  },
   "gate-bash": {
     handler: cmdGateBash,
     stability: "experimental",
@@ -934,6 +946,9 @@ const AUDIENCE_OVERRIDES: Record<string, CommandAudience> = {
   "gate-egress": "harness",
   "gate-env": "harness",
   "gate-fs": "harness",
+  // Invoked by the ~/.kit/shims wrappers — a protocol surface like the gates,
+  // never chosen by a human or an agent.
+  "guard-observe": "harness",
   statusline: "harness",
   // Interactive / setup-time / operator surfaces.
   add: "human",

@@ -112,7 +112,14 @@ describe("kit help audience filter", () => {
   const run = (...args: string[]) =>
     spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8" }).stdout;
 
-  const HARNESS = ["gate-bash", "gate-egress", "gate-env", "gate-fs", "statusline"];
+  const HARNESS = [
+    "gate-bash",
+    "gate-egress",
+    "gate-env",
+    "gate-fs",
+    "guard-observe",
+    "statusline",
+  ];
 
   it("hides harness commands by default, with a counted note", () => {
     const out = run("help");
@@ -123,7 +130,7 @@ describe("kit help audience filter", () => {
         `${cmd} should not be listed in default help`,
       );
     }
-    assert.match(out, /5 harness hook commands/, "the hidden set is counted, never silent");
+    assert.match(out, /6 harness hook commands/, "the hidden set is counted, never silent");
     assert.match(out, /kit help --all/, "the note says how to reveal them");
   });
 
