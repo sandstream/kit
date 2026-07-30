@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [5.27.0] - 2026-07-30
+
+### Added
+
+- **`kit guard` — the install gate reaches your own terminal (observe mode).**
+  The agent loop was already gated (PreToolUse `gate-bash` across 11
+  harnesses), but a human typing `npm i x` / `npx y` / `brew install z` in
+  their own shell reached the machine ungated. `kit guard install` writes
+  PATH shims for the install + fetch-and-run family (`npm npx pnpm yarn bun
+  bunx pip pip3 pipx uv uvx brew gem cargo`) that run the SAME hardened
+  parser + triage verdict the agent gate uses, and log what it WOULD decide
+  to `~/.kit/guard-observe.jsonl`. v1 is observe-only by the exec-broker
+  discipline (observe → evidence → enforce, the 7.0 track): a shim never
+  blocks and never breaks the tool — kit missing or crashing means unchanged
+  behavior, non-install subcommands pass silently, `KIT_GUARD_BYPASS=1` skips
+  observation for one call. Shims are marker-tagged (foreign files never
+  clobbered), the shell-rc PATH block is marker-managed and idempotent, and
+  `kit guard status` / `uninstall` complete the loop. Verified end-to-end in
+  a sandbox with the real generated shims.
+
 ## [5.26.0] - 2026-07-28
 
 ### Added
