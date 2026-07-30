@@ -957,12 +957,6 @@ For Cline, add the same config to your `cline_mcp_settings.json`.
 | `kit_context`   | Gather project context (stack, services, env status)                                            |
 | `kit_map`       | Repo map: import-neighborhood slice around seed paths                                           |
 | `kit_init`      | Detect the stack and generate `.kit.toml` (dry-run supported)                                   |
-| `kit_standards` | _Deprecated (leaves in 6.0)_ — `kit_review` runs this gate as its standards stage               |
-| `kit_env`       | _Deprecated (leaves in 6.0)_ — inspect `.env.local` key status; prefer `kit_context`            |
-| `kit_ci`        | _Deprecated (leaves in 6.0)_ — CI runners have a shell; run `kit ci` there                      |
-| `kit_install`   | _Deprecated (leaves in 6.0)_ — setup-time provisioning; use `kit install` or `kit_run`          |
-| `kit_login`     | _Deprecated (leaves in 6.0)_ — interactive service auth; use `kit login` in a shell             |
-| `kit_add`       | _Deprecated (leaves in 6.0)_ — service provisioning; use `kit add` or `kit_run`                 |
 
 Full reference: [docs/MCP_TOOLS_REFERENCE.md](docs/MCP_TOOLS_REFERENCE.md) · usage guide: [docs/MCP_TOOLS_GUIDE.md](docs/MCP_TOOLS_GUIDE.md)
 

@@ -35,12 +35,6 @@ governance floor (revocation, budget, permissions, expired-secret block).
 | `kit_context` | read | Gather project context (stack, services, env status) for the agent. |
 | `kit_map` | read | Repo map: import-neighborhood slice around seed paths (`paths`, `depth?`, `budget?`, `co_change?`). |
 | `kit_init` | write | Detect the stack and generate `.kit.toml` for a project that has none (`dryRun` to preview). |
-| `kit_standards` | read | **Deprecated — removed from the MCP surface in kit 6.0.** Use `kit_review` with `stages: ["standards"]` (+ `category` for scoping) — same gate, same read-only posture, one tool. |
-| `kit_env` | read | **Deprecated — removed from the MCP surface in kit 6.0.** Inspect `.env.local` key status (values redacted). Prefer `kit_context`. |
-| `kit_ci` | read | **Deprecated — removed in kit 6.0.** CI runners always have a shell; run `kit ci` there. |
-| `kit_install` | write | **Deprecated — removed in kit 6.0.** Setup-time provisioning happens in a shell (`kit install`), or via `kit_run`. |
-| `kit_login` | write | **Deprecated — removed in kit 6.0.** Service auth is interactive/setup-time; use `kit login` in a shell. |
-| `kit_add` | write | **Deprecated — removed in kit 6.0.** Provision a service integration; use `kit add` in a shell, or `kit_run`. |
 
 ## Server instructions
 

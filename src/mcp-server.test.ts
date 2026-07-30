@@ -26,11 +26,6 @@ const FIXTURE_MISSING_ENV_SECRET = `
 MISSING_VAR = { source = "env" }
 `;
 
-const FIXTURE_NODE_TOOL = `
-[tools]
-node = "latest"
-`;
-
 /**
  * Create a connected Client + McpServer pair using in-memory transport.
  * Returns the client (already connected) and a cleanup function.
@@ -70,21 +65,15 @@ describe("MCP server tool registration", () => {
       const names = tools.map((t) => t.name);
       assert.ok(names.includes("kit_check"), "kit_check missing");
       assert.ok(names.includes("kit_review"), "kit_review missing");
-      assert.ok(names.includes("kit_standards"), "kit_standards missing");
-      assert.ok(names.includes("kit_install"), "kit_install missing");
-      assert.ok(names.includes("kit_login"), "kit_login missing");
       assert.ok(names.includes("kit_secrets"), "kit_secrets missing");
       assert.ok(names.includes("kit_fix"), "kit_fix missing");
-      assert.ok(names.includes("kit_add"), "kit_add missing");
-      assert.ok(names.includes("kit_env"), "kit_env missing");
       assert.ok(names.includes("kit_init"), "kit_init missing");
-      assert.ok(names.includes("kit_ci"), "kit_ci missing");
       assert.ok(names.includes("kit_run"), "kit_run missing");
       assert.ok(names.includes("kit_context"), "kit_context missing");
       assert.ok(names.includes("kit_map"), "kit_map missing");
       assert.ok(names.includes("kit_triage"), "kit_triage missing");
       assert.ok(names.includes("kit_memory"), "kit_memory missing");
-      assert.equal(tools.length, 16);
+      assert.equal(tools.length, 10);
     } finally {
       await cleanup();
     }
@@ -358,79 +347,6 @@ describe("kit_fix", () => {
   });
 });
 
-// ─── kit_add ───────────────────────────────────────────────────────────────
-
-describe("kit_add", () => {
-  let tempDir: string;
-
-  before(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "kit-mcp-add-"));
-    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
-  });
-
-  after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
-  });
-
-  it("returns success:false and error for unknown service", async () => {
-    const { client, cleanup } = await createTestClient();
-    try {
-      const result = await client.callTool({
-        name: "kit_add",
-        arguments: { service: "nonexistent-service-xyz", cwd: tempDir },
-      });
-      const data = parseResult(result) as { success: boolean; error?: string };
-      assert.equal(data.success, false);
-      assert.ok(
-        data.error?.includes("Unknown service"),
-        `Expected unknown service error, got: ${data.error}`,
-      );
-    } finally {
-      await cleanup();
-    }
-  });
-});
-
-// ─── kit_login ─────────────────────────────────────────────────────────────
-
-describe("kit_login", () => {
-  let tempDir: string;
-
-  before(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "kit-mcp-login-"));
-  });
-
-  after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
-    delete process.env.KIT_NON_INTERACTIVE;
-  });
-
-  it("returns no results when no services configured", async () => {
-    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
-    const { client, cleanup } = await createTestClient();
-    try {
-      const result = await client.callTool({ name: "kit_login", arguments: { cwd: tempDir } });
-      const data = parseResult(result) as { results: unknown[]; message: string };
-      assert.equal(data.results.length, 0);
-      assert.ok(data.message.includes("No services"));
-    } finally {
-      await cleanup();
-    }
-  });
-
-  it("sets KIT_NON_INTERACTIVE to prevent TTY hang", async () => {
-    delete process.env.KIT_NON_INTERACTIVE;
-    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
-    const { client, cleanup } = await createTestClient();
-    try {
-      await client.callTool({ name: "kit_login", arguments: { cwd: tempDir } });
-      assert.equal(process.env.KIT_NON_INTERACTIVE, "1");
-    } finally {
-      await cleanup();
-    }
-  });
-});
-
 // ─── kit_secrets ──────────────────────────────────────────────────────────
 
 describe("kit_secrets", () => {
@@ -613,151 +529,6 @@ describe("kit_run + signed-scope egress mediation", () => {
       const text = (result.content as Array<{ text: string }>)[0].text;
       assert.match(text, /hello/);
     } finally {
-      await cleanup();
-    }
-  });
-});
-
-// ─── kit_install ───────────────────────────────────────────────────────────
-
-describe("kit_install", () => {
-  let tempDir: string;
-
-  before(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "kit-mcp-install-"));
-    await writeFile(join(tempDir, ".gitignore"), GITIGNORE, "utf-8");
-  });
-
-  after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
-  });
-
-  it("returns no-op message when no tools configured", async () => {
-    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
-    const { client, cleanup } = await createTestClient();
-    try {
-      const result = await client.callTool({ name: "kit_install", arguments: { cwd: tempDir } });
-      const data = parseResult(result) as { message: string };
-      assert.ok(data.message.includes("No tools"));
-    } finally {
-      await cleanup();
-    }
-  });
-
-  it("returns ok:true when node is already installed at latest", async () => {
-    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_NODE_TOOL, "utf-8");
-    const { client, cleanup } = await createTestClient();
-    try {
-      const result = await client.callTool({ name: "kit_install", arguments: { cwd: tempDir } });
-      const data = parseResult(result) as {
-        ok: boolean;
-        results: Array<{ name: string; action: string }>;
-      };
-      assert.equal(data.ok, true);
-      const node = data.results.find((r) => r.name === "node");
-      assert.ok(node, "node not in results");
-      assert.equal(node.action, "already_ok");
-    } finally {
-      await cleanup();
-    }
-  });
-});
-
-// ─── kit_env ───────────────────────────────────────────────────────────────
-
-describe("kit_env", () => {
-  let tempDir: string;
-
-  before(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "kit-mcp-env-"));
-    await writeFile(join(tempDir, ".gitignore"), GITIGNORE, "utf-8");
-    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
-  });
-
-  after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
-  });
-
-  it("returns envLocalExists=false when .env.local is missing", async () => {
-    const { client, cleanup } = await createTestClient();
-    try {
-      const result = await client.callTool({ name: "kit_env", arguments: { cwd: tempDir } });
-      const data = parseResult(result) as { ok: boolean; keys: unknown[]; envLocalExists: boolean };
-      assert.equal(data.envLocalExists, false);
-    } finally {
-      await cleanup();
-    }
-  });
-
-  it("returns keys from .env.local with redacted values", async () => {
-    await writeFile(join(tempDir, ".env.local"), "SECRET=sk-abcdefghij\n", "utf-8");
-    const { client, cleanup } = await createTestClient();
-    try {
-      const result = await client.callTool({ name: "kit_env", arguments: { cwd: tempDir } });
-      const data = parseResult(result) as {
-        ok: boolean;
-        keys: Array<{ name: string; set: boolean; redacted?: string; value?: string }>;
-        envLocalExists: boolean;
-      };
-      assert.equal(data.envLocalExists, true);
-      const key = data.keys.find((k) => k.name === "SECRET");
-      assert.ok(key, "SECRET key not found");
-      assert.equal(key.set, true);
-      assert.ok(key.redacted, "value should be redacted by default");
-      assert.equal(key.value, undefined, "raw value should not be exposed by default");
-    } finally {
-      await cleanup();
-    }
-  });
-
-  it("returns actual value when show_values=true", async () => {
-    const { client, cleanup } = await createTestClient();
-    try {
-      const result = await client.callTool({
-        name: "kit_env",
-        arguments: { cwd: tempDir, show_values: true },
-      });
-      const data = parseResult(result) as {
-        keys: Array<{ name: string; value?: string }>;
-      };
-      const key = data.keys.find((k) => k.name === "SECRET");
-      assert.ok(key, "SECRET key not found");
-      assert.equal(key.value, "sk-abcdefghij");
-    } finally {
-      await cleanup();
-    }
-  });
-
-  it("returns only missing keys when missing_only=true", async () => {
-    const configWithMissing = `
-[secrets.keys]
-SECRET = { source = "env" }
-MISSING_KEY = { source = "env" }
-`;
-    await writeFile(join(tempDir, ".kit.toml"), configWithMissing, "utf-8");
-    const { client, cleanup } = await createTestClient();
-    try {
-      const result = await client.callTool({
-        name: "kit_env",
-        arguments: { cwd: tempDir, missing_only: true },
-      });
-      const data = parseResult(result) as {
-        keys: Array<{ name: string; set: boolean }>;
-      };
-      assert.ok(
-        data.keys.every((k) => !k.set),
-        "missing_only should only return unset keys",
-      );
-      assert.ok(
-        data.keys.some((k) => k.name === "MISSING_KEY"),
-        "MISSING_KEY should be in result",
-      );
-      assert.ok(
-        !data.keys.some((k) => k.name === "SECRET"),
-        "SECRET is set — should not appear with missing_only",
-      );
-    } finally {
-      await writeFile(join(tempDir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
       await cleanup();
     }
   });

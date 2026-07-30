@@ -1,7 +1,7 @@
 /**
  * kit standards — the orchestrator shared by the CLI (`kit standards`) and the MCP
- * surface (`kit_standards`), so the two can never disagree on what the gate does or
- * what "green" means (the same CLI-vs-MCP parity discipline as `kit check`).
+ * surface (kit_review's standards stage), so the two can never disagree on what the
+ * gate does or what "green" means (the same CLI-vs-MCP parity discipline as `kit check`).
  *
  * Runs the requested dimensions — general (P1), specific/per-language (P2),
  * plugins (P3), platform (P4) — against the fail-closed baseline and config, and
