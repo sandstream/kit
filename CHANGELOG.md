@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-07-30
+
+The deletion major. 6.0 contains ONE change: the deprecation cycle announced
+across the 5.x line completes, and the six deprecated MCP tools leave the
+surface. No CLI command changes, no config changes, no new capability — if
+you never called those six MCP tools, 6.0 is a no-op upgrade. The major
+number exists because semver requires removals to happen in one.
+
+### Removed
+
+- **Six deprecated MCP tools** (`kit_env`, `kit_ci`, `kit_install`,
+  `kit_login`, `kit_add`, `kit_standards`) are no longer registered — the MCP
+  surface lands at **10 tools**. Their CLI commands are unchanged; only the
+  MCP exposure ends, after notice via runtime deprecation markers (since
+  5.16, kit_standards since 5.20), the reference/README rows, and the guide.
+  Migrations, all shipped before this removal: `kit_review` (with
+  `stages`/`category`) covers the standards gate read-only and scoped;
+  `kit_context` covers env inspection; `kit_fix` covers tool install;
+  `kit_run` remains the escape hatch for setup-time/CI commands (shell
+  contexts by definition). The audience exception list in the contract tests
+  is deleted — human/harness commands are now MCP-free with NO exceptions —
+  and the docs↔surface fiction gate purged the six names from every listing.
+
+### Fixed
+
+- **`READ_ONLY_SAFE` allowlist corrected to the 6.0 truth.** The self-audit
+  R8 completeness gate caught that the read-only MCP allowlist still carried
+  three removed tools and lacked `kit_review`/`kit_map`/`kit_memory` — exactly
+  the drift it exists to catch.
+
 ## [5.27.0] - 2026-07-30
 
 ### Added
