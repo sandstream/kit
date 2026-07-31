@@ -88,11 +88,38 @@ function unquote(v: string): string {
   return v.trim().replace(/^["']|["']$/g, "");
 }
 
+/** True for a YAML block-scalar indicator (`>`, `|`, with optional chomping: `>-`, `|+`). */
+function isBlockScalar(value: string): boolean {
+  return /^\s*[>|][+-]?\s*$/.test(value);
+}
+
 /**
- * Minimal, dependency-free `SKILL.md` parser. Handles a leading `---` frontmatter block
- * with `key: value` scalars and `allowed-tools` in inline (`[a, b]` / `a, b`) or YAML
- * block-list (`- item`) form. Pure. Never throws — malformed input yields a manifest with
- * `hasFrontmatter: false` and the whole text as the body.
+ * Join the indented lines following a block-scalar indicator at `start` into one string.
+ * Folded (`>`) and literal (`|`) both collapse to a single line here: this text is only ever
+ * length-checked and shown to a human, so preserving literal newlines would buy nothing and
+ * risks a spurious "too short" on the first line alone.
+ */
+function readBlockScalar(lines: string[], start: number): string {
+  const out: string[] = [];
+  for (let j = start + 1; j < lines.length; j++) {
+    const l = lines[j];
+    if (l.trim() === "") {
+      out.push("");
+      continue;
+    }
+    // The block ends at the first line that is not indented (i.e. the next key).
+    if (!/^\s/.test(l)) break;
+    out.push(l.trim());
+  }
+  return out.join(" ").trim();
+}
+
+/**
+ * Minimal, dependency-free `SKILL.md` parser. Handles a leading `---` frontmatter block with
+ * `key: value` scalars, `description` in inline OR YAML block-scalar (`>` / `|`) form, and
+ * `allowed-tools` in inline (`[a, b]` / `a, b`) or block-list (`- item`) form. Pure. Never
+ * throws — malformed input yields a manifest with `hasFrontmatter: false` and the whole text
+ * as the body.
  */
 export function parseSkillManifest(raw: string): SkillManifest {
   const text = raw.replace(/\r\n/g, "\n");
@@ -113,7 +140,12 @@ export function parseSkillManifest(raw: string): SkillManifest {
     const value = kv[2];
 
     if (key === "name") manifest.name = unquote(value);
-    else if (key === "description") manifest.description = unquote(value);
+    else if (key === "description")
+      // A description is routinely written as a YAML block scalar (`description: >` folded,
+      // or `|` literal) because it is the longest field. Reading only the same-line value
+      // reported "description missing" for a skill that declared a perfectly good one —
+      // a FALSE finding in a gate, which erodes trust exactly like a missed one.
+      manifest.description = isBlockScalar(value) ? readBlockScalar(lines, i) : unquote(value);
     else if (key === "user-invokable" || key === "user_invokable")
       manifest.userInvokable = parseBool(value);
     else if (key === "disable-model-invocation" || key === "disable_model_invocation")

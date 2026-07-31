@@ -40,6 +40,63 @@ describe("parseSkillManifest", () => {
     assert.ok(m.body.includes("## Intent"));
   });
 
+  // Regression: a description written as a YAML block scalar is the common real-world
+  // shape (it is the longest field). Reading only the same-line value reported
+  // "description missing" for a skill that declared one — a false finding in a gate.
+  // Found by running `kit skill test` against a real published SKILL.md.
+  it("parses a FOLDED (>) block-scalar description", () => {
+    const m = parseSkillManifest(`---
+name: shadowbroker
+description: >
+  Query the OSINT platform for real-time geospatial intelligence,
+  place pins on the map, and generate reports.
+allowed-tools: [Read]
+---
+body`);
+    assert.equal(m.name, "shadowbroker");
+    assert.equal(
+      m.description,
+      "Query the OSINT platform for real-time geospatial intelligence, place pins on the map, and generate reports.",
+      "folded lines join with a space, no leading indent",
+    );
+    assert.deepEqual(m.allowedTools, ["Read"], "the key AFTER the block still parses");
+  });
+
+  it("parses a LITERAL (|) block-scalar description, and chomping indicators", () => {
+    for (const ind of ["|", "|-", ">-", ">+", "|+"]) {
+      const m = parseSkillManifest(`---
+name: x
+description: ${ind}
+  First line.
+  Second line.
+---
+body`);
+      assert.equal(m.description, "First line. Second line.", `indicator ${ind}`);
+    }
+  });
+
+  it("a block scalar ends at the next key, not at the end of frontmatter", () => {
+    const m = parseSkillManifest(`---
+description: >
+  Only this belongs to the description.
+name: after-the-block
+allowed-tools: [Read]
+---
+body`);
+    assert.equal(m.description, "Only this belongs to the description.");
+    assert.equal(m.name, "after-the-block", "a later key is not swallowed by the block");
+  });
+
+  it("an empty block scalar stays absent-ish rather than becoming a bogus description", () => {
+    const m = parseSkillManifest(`---
+name: x
+description: >
+allowed-tools: [Read]
+---
+body`);
+    assert.equal(m.description, "", 'empty, not the literal ">" indicator');
+  });
+
   it("parses a YAML block-list allowed-tools", () => {
     const m = parseSkillManifest(`---
 name: x

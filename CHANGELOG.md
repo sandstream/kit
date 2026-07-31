@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.1.1] - 2026-07-31
+
+### Fixed
+
+- **`kit skill test` no longer reports "description missing" for a description written as a
+  YAML block scalar.** `description: >` (folded) and `description: |` (literal) are the common
+  real-world shape — it is the longest frontmatter field — and the parser read only the
+  same-line value, so a skill that declared a perfectly good description failed both the
+  `contract` and `trigger` checks. That is a **false finding in a gate**, which erodes trust in
+  the verdict exactly as a missed finding does.
+
+  Found by running `kit skill test` against a **real published `SKILL.md`** (a 10.4k-star
+  OSINT project shipping an agent skill), not by reading the parser. Chomping indicators
+  (`>-`, `|+`, …) are handled, the block correctly ends at the next key rather than swallowing
+  it, and an empty block yields an empty string rather than the literal indicator character.
+
+
 ## [6.1.0] - 2026-07-31
 
 ### Added
