@@ -42,6 +42,10 @@ export async function cmdCheck(): Promise<boolean> {
   if (process.argv[3] === "verify-attestation") {
     return cmdVerifyAttestation();
   }
+  // kit check compare <before.json> <after.json> diffs two --json runs.
+  if (process.argv[3] === "compare") {
+    return cmdCompare();
+  }
   const enforceTests = hasFlag(process.argv, "--enforce-tests");
   // Scanner-health strict by default (see cmdCi): a check that could not RUN fails;
   // --lenient / KIT_CI_LENIENT downgrades those to warnings. Finding-warns stay
@@ -236,6 +240,85 @@ export async function cmdCheck(): Promise<boolean> {
     },
   );
 }
+/**
+ * `kit check compare <before.json> <after.json> [--json] [--fail-on-worse]`
+ *
+ * Diffs two `kit check --json` documents. Reads only what it was given — no scan is run, so
+ * the answer is a pure function of the two files. Exit is success by default even when the
+ * diff is bad (this is a report, not a gate); `--fail-on-worse` makes lost coverage, a
+ * disappeared check, or a regression non-zero so CI can hold a line on the *delta* rather
+ * than on the absolute verdict.
+ */
+async function cmdCompare(): Promise<boolean> {
+  const args = process.argv.slice(4);
+  const files = args.filter((a) => !a.startsWith("-"));
+  const jsonMode = hasFlag(args, "--json");
+  const failOnWorse = hasFlag(args, "--fail-on-worse");
+  if (files.length < 2) {
+    console.error(
+      `${c.red}usage: kit check compare <before.json> <after.json> [--json] [--fail-on-worse]${c.reset}`,
+    );
+    console.error(`${c.dim}produce the inputs with: kit check --json > before.json${c.reset}`);
+    return false;
+  }
+  const { readFile } = await import("node:fs/promises");
+  const { diffScans } = await import("../scan-diff.js");
+  const load = async (f: string): Promise<JsonCheckOutput | null> => {
+    try {
+      const parsed = JSON.parse(await readFile(resolve(process.cwd(), f), "utf-8"));
+      // Fail loudly on a document that is not a check run — silently diffing {} against {}
+      // would report "clean", which is the exact false green this command exists to catch.
+      if (!parsed || !Array.isArray(parsed.checks)) {
+        console.error(
+          `${c.red}✗ ${f}: not a kit check --json document (no "checks" array)${c.reset}`,
+        );
+        return null;
+      }
+      return parsed as JsonCheckOutput;
+    } catch (e) {
+      console.error(
+        `${c.red}✗ cannot read ${f}${c.reset} ${c.dim}(${(e as Error).message})${c.reset}`,
+      );
+      return null;
+    }
+  };
+  const [before, after] = await Promise.all([load(files[0]), load(files[1])]);
+  if (!before || !after) return false;
+
+  const diff = diffScans(before, after);
+  if (jsonMode) {
+    console.log(JSON.stringify(diff, null, 2));
+    return failOnWorse ? !diff.worseThanBefore : true;
+  }
+
+  console.log(`${c.bold}kit check compare${c.reset} ${c.dim}${files[0]} → ${files[1]}${c.reset}\n`);
+  const icon: Record<string, string> = {
+    "coverage-lost": `${c.red}?${c.reset}`,
+    disappeared: `${c.red}−${c.reset}`,
+    regressed: `${c.red}✗${c.reset}`,
+    appeared: `${c.yellow}+${c.reset}`,
+    "coverage-gained": `${c.green}+${c.reset}`,
+    improved: `${c.green}↑${c.reset}`,
+    resolved: `${c.green}✓${c.reset}`,
+  };
+  const notable = diff.changes.filter((ch) => ch.kind !== "unchanged");
+  for (const ch of notable) console.log(`  ${icon[ch.kind] ?? " "} ${ch.summary}`);
+  if (notable.length === 0) console.log(`  ${c.dim}no changes${c.reset}`);
+
+  const parts = Object.entries(diff.counts)
+    .filter(([k, n]) => n > 0 && k !== "unchanged")
+    .map(([k, n]) => `${n} ${k}`);
+  console.log(
+    `\n${parts.length ? parts.join(" · ") : "nothing changed"}${c.dim} · ${diff.counts.unchanged} unchanged${c.reset}`,
+  );
+  if (diff.worseThanBefore) {
+    console.log(
+      `${c.red}Worse than before.${c.reset} ${c.dim}Lost coverage ranks above a regression: a check that stopped running makes its finding unknown, not fixed.${c.reset}`,
+    );
+  }
+  return failOnWorse ? !diff.worseThanBefore : true;
+}
+
 async function cmdVerifyAttestation(): Promise<boolean> {
   // kit check verify-attestation [file] [--key <spki|fingerprint>] [--pin]
   const args = process.argv.slice(4);

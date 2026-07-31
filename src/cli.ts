@@ -810,6 +810,8 @@ const GATE_VERBS = new Set(["gate-bash", "gate-env", "gate-egress", "gate-fs"]);
 // dispatch handler or stability tier of their own — merged into COMMAND_HELP below.
 const SUBCOMMAND_HELP: Record<string, string> = {
   "check verify-attestation": "Verify a signed .kit-check-attestation.json receipt",
+  "check compare":
+    "Diff two `kit check --json` runs — what changed, with lost coverage ranked above a regression",
   "airgap verify":
     "Prove zero-egress: assert every scanner that would run air-gapped resolves to a local artifact (no cloud-only, no registry semgrep config)",
   "profile show": "Render the declared project profile with per-line reconciliation marks",

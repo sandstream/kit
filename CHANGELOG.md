@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.1.0] - 2026-07-31
+
+### Added
+
+- **`kit check compare <before.json> <after.json>` — run-to-run scan diff.** A baseline
+  answers "which findings do I already know about"; it could not answer "what changed since
+  Tuesday". Freezing suppresses, it does not compare. Inputs are two existing
+  `kit check --json` documents, so no new persistence format and no scan is run:
+  `kit check --json > before.json`, later `kit check --json > after.json`, then compare.
+
+  - **Lost coverage ranks above a regression, and that is the whole point.** A naive differ
+    reads `fail → skip` as "no longer failing" and calls it an improvement. It is the
+    opposite: the check stopped running, so the finding is *unknown*, not fixed. `coverage-lost`
+    and `disappeared` are first-class buckets sorted above `regressed`, and a check that
+    **could not run** is treated as lost coverage even when its status reads `skip`.
+  - Eight movement kinds (`coverage-lost`, `disappeared`, `regressed`, `appeared`,
+    `coverage-gained`, `improved`, `resolved`, `unchanged`), each with a one-line deterministic
+    summary. Severity movement under an unchanged status counts too — a `high` becoming
+    `critical` is a regression.
+  - **Pure function of the two documents**: no clock, no filesystem, no network in
+    `src/scan-diff.ts`. Same two files always produce the same diff, byte-stable regardless of
+    the order checks appear in either array — which is what makes it usable in a gate.
+  - Reports by default (it is a report, not a gate). **`--fail-on-worse`** exits non-zero on
+    lost coverage, a disappeared check, or a regression, so CI can hold a line on the *delta*
+    rather than on the absolute verdict. `--json` emits the whole diff.
+  - `clean` deliberately does **not** mean "the second run is green" — two identically failing
+    runs diff clean. Documented on the type and covered by a test, because that is exactly the
+    misreading the flag invites.
+  - A document without a `checks` array is **rejected** rather than diffed: silently comparing
+    `{}` against `{}` would report "clean", which is the precise false green this command
+    exists to catch.
+  - Check identity is `${category}:${name}` — deliberately the same key `findings-track.ts`
+    already uses for PAL dedup, so "what changed" and "what is tracked" cannot disagree.
+  - Borrowed shape: OpenAI Codex Security's `scans compare BEFORE AFTER`. The coverage axis is
+    kit's own (kit-research: `codex-security-openai-vs-kit`).
+
+### Fixed
+
+- **`severity` now survives the `--json` projection for security checks.** `JsonCheck` has
+  always declared the field and `checkRunToJsonChecks` silently dropped it, so every
+  machine-readable consumer saw findings with no severity. Passed through now.
+- **`didNotRun` is carried into `--json`** (new optional field on `JsonCheck`). Without it a
+  consumer cannot tell an honest not-applicable skip from a scanner that crashed — i.e. cannot
+  tell "stopped failing" from "stopped looking". Additive; absent unless true.
+
+
 ## [6.0.0] - 2026-07-30
 
 The deletion major. 6.0 contains ONE change: the deprecation cycle announced

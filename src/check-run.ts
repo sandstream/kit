@@ -180,11 +180,16 @@ export function checkRunToJsonChecks(r: CheckRunResult): JsonCheck[] {
       detail: l.detail,
       category: "lock",
     })),
+    // `severity` and `didNotRun` are carried through deliberately: JsonCheck has always
+    // declared severity and this projection silently dropped it, and didNotRun is what lets
+    // a consumer tell "stopped failing" from "stopped looking" (see scan-diff.ts).
     ...r.security.map((s) => ({
       name: s.name,
       status: s.status,
       detail: s.detail,
       category: `security/${s.category}`,
+      ...(s.severity ? { severity: s.severity } : {}),
+      ...(s.didNotRun ? { didNotRun: true as const } : {}),
     })),
     ...r.tests.map((t) => ({
       name: t.name,

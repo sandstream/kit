@@ -286,6 +286,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit hooks {install,add,sync}`: Git hooks + bypass detector
 - `kit governance` / `kit audit {secrets,verify,anchor,export}`: Policy + audit-log inspection; `anchor`/`verify` seal and check the external HMAC anchor
 - `kit check --attest` (also `kit ci --attest` / `KIT_ATTEST=1`): Opt-in signed receipt of which scanners ran + the verdict; `kit check verify-attestation <file>` verifies it
+- `kit check compare <before.json> <after.json>`: Run-to-run diff of two `--json` runs — what actually changed since the last scan, which a baseline cannot tell you (freezing suppresses, it does not compare). **Lost coverage outranks a regression**: `fail → skip` means the check stopped running, so the finding is *unknown*, not fixed — a naive differ would call that an improvement. `--fail-on-worse` gates CI on the delta instead of the absolute verdict
 - `kit config migrate`: Migrate a versioned `.kit.toml` to the current schema (`--dry-run` default, auto-backup, re-validate-or-restore, `--check` for CI)
 - `kit airgap verify`: Prove every scanner that would run in air-gap mode resolves to a local artifact (no egress)
 - `kit --read-only <subcommand>`: Session-wide refusal of all writes
