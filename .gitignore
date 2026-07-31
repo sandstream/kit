@@ -16,7 +16,6 @@ sandstream-kit-*.tgz
 .kit-audit.jsonl
 .kit-triage.jsonl
 .kit-check-attestation.json
-.kit-baseline.json
 .kit-budget.json
 .kit-escalation.txt
 .claude/

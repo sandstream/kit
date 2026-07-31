@@ -410,11 +410,12 @@ if (result.success) {
 
 ## In kit Projects
 
-```toml
-# .kit.toml
-[adapters]
-payment = "stripe/payments"
-database = "supabase/database"
+Adapters ship inside a plugin package, and kit discovers them from the `kitPlugins`
+array in `package.json` (`loadPluginAdapters`). `.kit.toml` has no `[adapters]`
+section — the adapter names a plugin exports are what `kit add` then offers.
+
+```json
+{ "kitPlugins": ["@acme/kit-stripe", "@acme/kit-supabase"] }
 ```
 
 Then use CLI:

@@ -29,6 +29,32 @@ export function envTruthy(value: string | undefined): boolean {
 }
 
 /**
+ * Flags present in argv that are not in `allowed`.
+ *
+ * kit's commands historically read only the flags they know and ignored the rest,
+ * which makes a typo — or a flag that never existed — indistinguishable from a
+ * working one. `kit check --category security` ran the FULL check for as long as it
+ * was documented, in kit's own CLAUDE.md and in a CI workflow, because nothing
+ * rejected it. A flag that silently does nothing is the same class of defect as a
+ * check that silently does not run.
+ *
+ * `--` and everything after it is left alone (pass-through args). `--flag=value` is
+ * compared on the flag part. Bare `-x` short flags are not inspected.
+ */
+export function unknownFlags(argv: readonly string[], allowed: readonly string[]): string[] {
+  const stop = argv.indexOf("--");
+  const scanned = stop < 0 ? argv : argv.slice(0, stop);
+  const allow = new Set(allowed);
+  const bad: string[] = [];
+  for (const token of scanned) {
+    if (!token.startsWith("--") || token === "--") continue;
+    const name = token.includes("=") ? token.slice(0, token.indexOf("=")) : token;
+    if (!allow.has(name) && !bad.includes(name)) bad.push(name);
+  }
+  return bad;
+}
+
+/**
  * Integer value for a flag, or `fallback` when absent / non-numeric.
  * Mirrors the common `const n = idx >= 0 ? parseInt(args[idx+1]) : default` idiom.
  */

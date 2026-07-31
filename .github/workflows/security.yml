@@ -292,6 +292,7 @@ jobs:
         #   R7  unescaped variable in CI/XML/summary output
         #   R9  raw write to the chained audit log (chain break)
         #   R1  unannotated `|| true` in a workflow (fail-open)
+        #   R14 docs claim a command / flag / [section] kit does not have
         # WARNS only (does not gate without --fail-on-warning):
         #   R1  continue-on-error: true; R1b/R2/R4/R8 heuristics
         # ADVISORIES (info, never gate, reported aggregated): R5, R10.

@@ -10,10 +10,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **`self-audit` rule 14 — documented-command integrity.** Every `kit <command>` reference in
-  the repo's markdown is resolved against `contracts/kit.opencli.json`, the committed command
-  contract. A doc naming a command kit does not dispatch is now a **fail**, not something a
-  reader discovers as `Unknown command:` at the terminal.
+- **`kit check --category <dim>` now exists.** It was documented in kit's own README,
+  `CLAUDE.md`, `AGENTS.md`, the `CLAUDE.md` template kit **generates into every user's
+  project** (`agent-config.ts`), the example Codex and pre-commit hooks, a runtime hint kit
+  prints after a check, and the Windows CI workflow — and **nothing parsed it**. Every one of
+  those callers ran the full check. Measured: `kit check` → 40 checks;
+  `kit check --category security` → 40 checks; `kit check --totally-fake-flag` → 40 checks,
+  accepted.
+
+  It now narrows for real (40 → 23 on kit's own repo) across `tools`, `services`, `secrets`,
+  `skills`, `hooks`, `web`, `security`, `locks`, `tests`, and accepts a comma-separated list.
+
+  A narrowed run **cannot be mistaken for a full one**: `CheckRunResult.scope` and the
+  `--json` `scope` field name the dimensions that ran, and the human output prints
+  `partial run — only <dims> ran; this verdict does NOT cover the other dimensions`.
+  Dimensions that did not run are absent, never synthesised as passes. An unrecognised
+  `--category` value is an error, not a fallback to a full run.
+
+- **`kit check` rejects unknown flags.** Every `kit check` form now validates argv against an
+  explicit allowlist and exits non-zero on anything else. A flag that silently does nothing is
+  the same class of defect as a check that silently does not run — and it is how
+  `--category` stayed broken across six majors. `unknownFlags()` in `utils/flags.ts` is the
+  reusable, tested primitive.
+
+- **The test-coverage gate runs in CI.** `--enforce-tests` existed for six majors and was
+  invoked by **zero** workflows. `ci.yml` now runs
+  `kit check --category tests --enforce-tests`, and `.kit-baseline.json` is **committed** (it
+  was gitignored, so the freeze died with the machine and CI saw no baseline at all). The 91
+  pre-existing untested files are frozen; a net-new untested source file fails the build.
+  Verified both ways: frozen → `ok: true`, one new untested file → `ok: false`, exit 1.
+
+  Only the `tests` category was frozen. The 158 typescript-standards and 16 design-token
+  findings a full `kit baseline freeze` also captured were **deliberately dropped from the
+  committed baseline** — freezing those would have suppressed live findings under the guise of
+  progress.
+
+- **`self-audit` rule 14 — documented-claim integrity.** Every claim kit's docs make about
+  kit's own surface is resolved against a machine oracle: `kit <command>` against
+  `contracts/kit.opencli.json`, `--flag` against the flag literals the implementation actually
+  names, and `[section]` against `config.ts` `KNOWN_SECTIONS`. A claim that does not resolve is
+  now a **fail**, not something a reader discovers as `Unknown command:` at the terminal.
 
   This is the R11 pattern (CI script paths must resolve) applied one surface out: docs are
   instructions to humans *and* to agents, and a stale instruction is indistinguishable from a
@@ -25,18 +61,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   (design documents) are exempt with the reason stated in code; those legitimately name
   commands that do not currently exist.
 
-  Verb-only, and the rule's own doc comment says so: flags and TOML config keys are **not**
-  checked, and kit's commands ignore unknown flags rather than rejecting them, so a documented
-  flag that does nothing still reads as working. A pass means "every documented command
-  exists", nothing wider.
+  A `toml` fence is only checked when it says it shows `.kit.toml` — in the fence or in the
+  prose introducing it. `docs/POLICY.md` documents a *policy* file whose `[thresholds]` is
+  correct there and unknown to `.kit.toml`; guessing would fire the gate on correct
+  documentation.
+
+  **Individual TOML keys are deliberately not checked.** `ServiceConfig` carries an index
+  signature, so a user-defined key under `[services.*]` is legal by design and appears nowhere
+  in source — an oracle over source text false-positives there (it flagged README's
+  `project_ref`, which is correct usage). A gate that cries wolf is worse than no gate, so the
+  unsound check was left out rather than shipped.
+
+  Remaining scope limit, stated in the module: the flag oracle is repo-global, not per-command.
+  A real flag documented on the wrong command still passes.
 
 ### Fixed
 
-- **Three documented commands that did not exist.** Found by the rule above on its first run
-  against kit's own tree:
+- **Documented surface that did not exist.** Found by the rule above on its first runs against
+  kit's own tree — 3 commands, 8 flags, 3 config sections:
   - `docs/PERFORMANCE_AND_DIAGNOSTICS.md` documented a metrics feature that was never built —
-    a `metrics` command, a `metrics_enabled` / `metrics_file` config block, and sample output
-    with plausible-looking timings. None of it existed. The section now says so.
+    a `metrics` command, a `[config]` section with `metrics_enabled` / `metrics_file`, eight
+    flags (`--timing`, `--save`, `--save-baseline`, `--compare-baseline`, `--memory-check`,
+    `--stream-output`, `--no-cache`, `--max-parallel`), an `[environments.*]` section (the real
+    one is `[env.*]`), and sample output with plausible-looking timings. It also claimed kit
+    runs its checks in parallel; `check-run.ts` runs nine dimensions sequentially with no
+    `Promise.all`. Rewritten to what is verifiable, including an explicit list of what kit does
+    **not** provide.
+  - `docs/EXAMPLE_PLUGIN_README.md` and `docs/PLUGIN_DOCUMENTATION_STANDARDS.md` told plugin
+    authors to register adapters under `[adapters]` in `.kit.toml`. There is no such section —
+    `loadPluginAdapters` reads the `kitPlugins` array in `package.json`. So the plugin
+    authoring docs were wrong about how to register a plugin.
   - `docs/ZERO_LLM_CONTRACT.md` listed `kit check-security` as one of the deterministic
     verdict surfaces; the real invocation is `kit check --category security`.
 - **A stale command count in prose.** `src/mcp-server.ts` and `docs/MCP_TOOLS_GUIDE.md` both

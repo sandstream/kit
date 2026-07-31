@@ -11,8 +11,8 @@
  * Detection classes mirror the 11 supply-chain/self-hardening lessons kit learned
  * from its own incident history (the commit references in each rule's doc point at
  * the pre-fix positive). Class 11 (CI script-path integrity) is delegated to the
- * pure analyzer in self-audit-ci.ts; class 14 (documented-command integrity) to
- * self-audit-docs.ts.
+ * pure analyzer in self-audit-ci.ts; class 14 (documented-claim integrity — the
+ * commands, flags and config sections kit's own docs promise) to self-audit-docs.ts.
  */
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
@@ -22,7 +22,7 @@ import { dirname } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { walkSourceFiles } from "./source-walk.js";
 import { runCiScriptAudit } from "./self-audit-ci.js";
-import { runDocsCommandAudit } from "./self-audit-docs.js";
+import { runDocsClaimsAudit } from "./self-audit-docs.js";
 import { ruleForSelfAudit } from "./rules/catalog.js";
 
 export type SelfAuditSeverity = "error" | "warn" | "info";
@@ -1039,19 +1039,19 @@ const R13: SelfAuditRule = {
 };
 
 // ---------------------------------------------------------------------------
-// R14 — documented-command integrity (delegated to self-audit-docs)
+// R14 — documented-claim integrity (delegated to self-audit-docs)
 // ---------------------------------------------------------------------------
 
 const R14: SelfAuditRule = {
-  id: "R14-docs-command-drift",
-  name: "documented commands",
-  detectionClass: "docs-command-drift",
+  id: "R14-docs-claims",
+  name: "documented claims",
+  detectionClass: "docs-claims",
   severity: "error",
   enabled: true,
   run(ctx) {
-    // runDocsCommandAudit returns fully-shaped SecurityCheckResult[] with the
-    // self-audit/docs-command-drift category — pass through untouched.
-    return runDocsCommandAudit(ctx.repoRoot);
+    // runDocsClaimsAudit returns fully-shaped SecurityCheckResult[] with the
+    // self-audit/docs-claims category — pass through untouched.
+    return runDocsClaimsAudit(ctx.repoRoot);
   },
 };
 

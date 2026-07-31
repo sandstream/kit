@@ -45,6 +45,12 @@ export interface JsonCheckOutput {
     skipped: number;
     advisories?: number;
   };
+  /**
+   * Present only when the run was narrowed with `--category`: the dimensions that
+   * actually ran. `ok` is then a verdict over THOSE ONLY. Absent means a full run.
+   * A consumer that ignores this field will read a partial green as a full one.
+   */
+  scope?: string[];
 }
 
 /** CI output format for `kit ci` / `kit self-audit`, auto-detected from the host. */

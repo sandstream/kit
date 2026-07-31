@@ -95,10 +95,12 @@ export const stripeAdapter: ServiceAdapter = {
 };
 ```
 
-2. Register in `.kit.toml`:
-```toml
-[adapters]
-payments = "stripe/payments"
+2. Register the plugin package in `package.json` — kit loads adapters from the
+   `kitPlugins` array (`loadPluginAdapters` → `readkitPlugins`). There is no
+   `[adapters]` section in `.kit.toml`:
+
+```json
+{ "kitPlugins": ["@acme/kit-stripe"] }
 ```
 
 ## Configuration

@@ -38,6 +38,61 @@ export interface CheckRunResult {
   security: SecurityCheckResult[];
   tests: TestCheckResult[];
   locks: LockCheckResult[];
+  /**
+   * Non-null when the run was narrowed with `--category`: the dimensions that were
+   * actually run. `ok` is then a verdict over THOSE ONLY — every consumer that
+   * reports a verdict must say so, or a partial green reads as a full one.
+   */
+  scope: CheckCategory[] | null;
+}
+
+/**
+ * The dimensions `runCheckGate` can run, and the accepted values of
+ * `kit check --category`. `security` was documented (and shipped in kit's own
+ * generated CLAUDE.md, in example pre-commit hooks, and in a CI workflow) long
+ * before anything parsed it — the flag was read by no one and the full check ran.
+ */
+export const CHECK_CATEGORIES = [
+  "tools",
+  "services",
+  "secrets",
+  "skills",
+  "hooks",
+  "web",
+  "security",
+  "locks",
+  "tests",
+] as const;
+
+export type CheckCategory = (typeof CHECK_CATEGORIES)[number];
+
+export function isCheckCategory(value: string): value is CheckCategory {
+  return (CHECK_CATEGORIES as readonly string[]).includes(value);
+}
+
+/**
+ * Parse a `--category` value into dimensions. Accepts a comma-separated list.
+ *
+ * Returns `{ categories }` on success, or `{ invalid }` naming every unrecognised
+ * value — the caller reports and exits. An unrecognised category must never fall
+ * back to a full run: that is exactly the silent no-op this flag used to be.
+ * `undefined` in (flag absent) means a full run, expressed as `categories:
+ * undefined`.
+ */
+export function parseCategoryFlag(
+  raw: string | undefined,
+):
+  | { categories: CheckCategory[] | undefined; invalid?: undefined }
+  | { categories?: undefined; invalid: string[] } {
+  if (raw === undefined) return { categories: undefined };
+  const requested = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (requested.length === 0) return { invalid: ["(empty)"] };
+  const invalid = requested.filter((r) => !isCheckCategory(r));
+  if (invalid.length > 0) return { invalid };
+  return { categories: requested as CheckCategory[] };
 }
 
 export interface RunCheckOptions {
@@ -50,6 +105,14 @@ export interface RunCheckOptions {
   gate?: GateOpts;
   /** Progress hook — the CLI wraps each dimension in a spinner; default runs plain. */
   step?: <T>(label: string, fn: () => Promise<T>) => Promise<T>;
+  /**
+   * Run only these dimensions. Undefined/empty = all of them.
+   *
+   * A narrowed run reports a verdict over what it ACTUALLY ran, and sets
+   * `scope` on the result so no consumer can read a partial green as a full one.
+   * Omitted dimensions are absent, never synthesised as passes.
+   */
+  categories?: readonly CheckCategory[];
 }
 
 export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRunResult> {
@@ -57,30 +120,41 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
   const config = opts.config ?? (await loadConfig(resolve(cwd, KIT_FILE)));
   const step = opts.step ?? (<T>(_label: string, fn: () => Promise<T>): Promise<T> => fn());
 
-  const tools = config.tools ? await step("tools", () => checkTools(config.tools!)) : [];
-  const services = config.services
-    ? await step("services", () => checkServices(config.services!))
-    : [];
-  const secrets = config.secrets
-    ? await step("secrets", () => checkSecrets(config.secrets!))
-    : { templateExists: null, keys: [] };
-  const skills = config.skills ? await step("skills", () => checkSkills(config.skills!)) : [];
+  // Narrowing predicate. An empty/absent list means "everything", so the default
+  // path is unchanged and cannot be narrowed by accident.
+  const selected = opts.categories && opts.categories.length > 0 ? opts.categories : null;
+  const wants = (dim: CheckCategory): boolean => selected === null || selected.includes(dim);
+  const scope: CheckCategory[] | null = selected ? [...selected] : null;
+
+  const tools =
+    wants("tools") && config.tools ? await step("tools", () => checkTools(config.tools!)) : [];
+  const services =
+    wants("services") && config.services
+      ? await step("services", () => checkServices(config.services!))
+      : [];
+  const secrets =
+    wants("secrets") && config.secrets
+      ? await step("secrets", () => checkSecrets(config.secrets!))
+      : { templateExists: null, keys: [] };
+  const skills =
+    wants("skills") && config.skills ? await step("skills", () => checkSkills(config.skills!)) : [];
   const hooks =
-    config.hooks && isGitRepository()
+    wants("hooks") && config.hooks && isGitRepository()
       ? await step("git hooks", () => checkHooks(config.hooks!))
       : [];
-  const webSearch = config.web?.search
-    ? await step("web search", () => checkWebSearch(config.web!.search!))
-    : null;
-  const security = await step("security scan", () => checkSecurity());
-  const locks = await step("lock files", () => checkLockFiles(config));
+  const webSearch =
+    wants("web") && config.web?.search
+      ? await step("web search", () => checkWebSearch(config.web!.search!))
+      : null;
+  const security = wants("security") ? await step("security scan", () => checkSecurity()) : [];
+  const locks = wants("locks") ? await step("lock files", () => checkLockFiles(config)) : [];
 
   // Test-coverage is part of the verdict on every surface (omitting it on one
   // was half of the historical CLI-vs-MCP divergence). Baseline-aware; a
   // corrupt/tampered baseline is ignored (nothing suppressed) and surfaced as a
   // finding — fail-closed + visible, never a crash of the gate.
   const { baseline, ignored: baselineIgnored } = await loadBaselineForGate();
-  if (baselineIgnored) {
+  if (baselineIgnored && wants("security")) {
     security.push({
       category: "secrets",
       name: "baseline integrity",
@@ -89,12 +163,14 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
       detail: `${BASELINE_FILE} ignored (${baselineIgnored}) — gating on all findings; re-freeze with 'kit baseline freeze'`,
     });
   }
-  const tests = await step("test coverage", () =>
-    checkTests({
-      enforce: opts.enforceTests,
-      baseline: baselineGet(baseline, "tests", "untested_files"),
-    }),
-  );
+  const tests = wants("tests")
+    ? await step("test coverage", () =>
+        checkTests({
+          enforce: opts.enforceTests,
+          baseline: baselineGet(baseline, "tests", "untested_files"),
+        }),
+      )
+    : [];
 
   const verdict = computeCheckVerdict(
     {
@@ -122,6 +198,7 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
     security,
     tests,
     locks,
+    scope,
   };
 }
 
