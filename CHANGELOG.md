@@ -6,6 +6,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.2.0] - 2026-07-31
+
+### Added
+
+- **`self-audit` rule 14 — documented-command integrity.** Every `kit <command>` reference in
+  the repo's markdown is resolved against `contracts/kit.opencli.json`, the committed command
+  contract. A doc naming a command kit does not dispatch is now a **fail**, not something a
+  reader discovers as `Unknown command:` at the terminal.
+
+  This is the R11 pattern (CI script paths must resolve) applied one surface out: docs are
+  instructions to humans *and* to agents, and a stale instruction is indistinguishable from a
+  live one to the reader. Scanning is restricted to command position — inside code fences and
+  backticked spans — because an unanchored scan matches English prose ("kit is", "kit ships")
+  and buries the signal: 193 hits versus 6.
+
+  `CHANGELOG.md` (historical record), `ROADMAP.md` (planned surface) and `docs/specs/**`
+  (design documents) are exempt with the reason stated in code; those legitimately name
+  commands that do not currently exist.
+
+  Verb-only, and the rule's own doc comment says so: flags and TOML config keys are **not**
+  checked, and kit's commands ignore unknown flags rather than rejecting them, so a documented
+  flag that does nothing still reads as working. A pass means "every documented command
+  exists", nothing wider.
+
+### Fixed
+
+- **Three documented commands that did not exist.** Found by the rule above on its first run
+  against kit's own tree:
+  - `docs/PERFORMANCE_AND_DIAGNOSTICS.md` documented a metrics feature that was never built —
+    a `metrics` command, a `metrics_enabled` / `metrics_file` config block, and sample output
+    with plausible-looking timings. None of it existed. The section now says so.
+  - `docs/ZERO_LLM_CONTRACT.md` listed `kit check-security` as one of the deterministic
+    verdict surfaces; the real invocation is `kit check --category security`.
+- **A stale command count in prose.** `src/mcp-server.ts` and `docs/MCP_TOOLS_GUIDE.md` both
+  claimed 68 commands; the dispatch table has 70. Corrected, and `command-surface.test.ts` now
+  asserts the documented number against `COMMANDS` — a hardcoded count in prose drifts
+  silently, which is precisely the failure mode kit exists to argue against.
+
+  The rule's own oracle got the same treatment: `PRE_DISPATCH_VERBS` (`help`, `version`,
+  `completions` — real commands that `main()` handles before the dispatch table, so the
+  generated contract omits them) is a hardcoded list, and a test asserts it against the live
+  surface in both directions. Without it the rule reported `kit version` and `kit completions`
+  as drift. A constant that exists to catch drift must not be allowed to drift itself.
+
 ## [6.1.1] - 2026-07-31
 
 ### Fixed

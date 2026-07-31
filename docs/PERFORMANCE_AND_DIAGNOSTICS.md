@@ -352,38 +352,15 @@ kit add --all
 
 ## Metrics & Monitoring
 
-### Collect Metrics
+kit does **not** collect or aggregate operation metrics. There is no `metrics`
+command, no `metrics_enabled` / `metrics_file` config, and no metrics store.
 
-Enable metrics collection:
+This section previously documented all three, with sample output. None of it existed
+— see `self-audit`'s `docs-command-drift` rule, which now fails CI on a documented
+command that kit does not dispatch.
 
-```toml
-# .kit.toml
-[config]
-metrics_enabled = true
-metrics_file = ".kit/metrics.json"
-```
-
-### View Metrics
-
-```bash
-kit metrics
-
-# Shows:
-# Operation        Count  Total Time  Avg Time
-# ────────────────────────────────────────────
-# kit setup       12     138.4s    11.5s
-# kit check      156     389.2s     2.5s
-# npm install        12     143.2s    11.9s
-```
-
-### Export for Analysis
-
-```bash
-kit metrics --export=csv > metrics.csv
-
-# Import into spreadsheet for analysis
-# Track trends over time
-```
+For environment diagnostics, use `kit doctor`. kit exposes no timing flag on
+`kit check`.
 
 ## Benchmarking
 
