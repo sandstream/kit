@@ -25,6 +25,13 @@ export interface JsonCheck {
   category: string;
   files?: string[];
   severity?: "critical" | "high" | "medium" | "low";
+  /**
+   * True when the check could NOT run (tool absent, token missing, scan crashed) as opposed
+   * to an honest not-applicable skip. Carried into the machine-readable document because a
+   * consumer that cannot tell those apart will read "stopped failing" where the truth is
+   * "stopped looking" — see `scan-diff.ts`, which ranks lost coverage above a regression.
+   */
+  didNotRun?: boolean;
 }
 
 /** The full `--json` document for check / ci. */

@@ -186,6 +186,14 @@
     },
     "check": {
       "commands": {
+        "compare": {
+          "kind": "command",
+          "summary": "Diff two `kit check --json` runs — what changed, with lost coverage ranked above a regression",
+          "x-kit-args-modeled": false,
+          "x-kit-audience": "all",
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
         "verify-attestation": {
           "kind": "command",
           "summary": "Verify a signed .kit-check-attestation.json receipt",
@@ -1115,7 +1123,7 @@
     "binary": "kit",
     "summary": "Deterministic, local-first developer-environment manager and fail-closed governance layer for AI agents and humans.",
     "title": "kit",
-    "version": "6.0.0"
+    "version": "6.1.0"
   },
   "opencliVersion": "1.0.0-alpha.12"
 }

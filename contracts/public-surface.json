@@ -134,6 +134,7 @@
     "broker enforce",
     "broker enforce-readiness",
     "check",
+    "check compare",
     "check verify-attestation",
     "ci",
     "clone",
