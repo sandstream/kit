@@ -45,6 +45,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   committed baseline** — freezing those would have suppressed live findings under the guise of
   progress.
 
+- **Flag-validation coverage is now measured, not invisible.** `kit check` is the only one of
+  **44** command modules that rejects unknown flags; the other 43 accept anything. Rather than
+  refactor 70 commands blind — each needs its true flag list read off its own source, and
+  getting one wrong breaks a working invocation — `self-audit` now reports the ratio as
+  `self-audit/flag-validation: 43 command modules that accept unknown flags`, one navigable row
+  per module.
+
+  Advisory severity by design: it never gates, and `--fail-on-warning` stays green on kit's own
+  tree, which `cli.test.ts` pins as an invariant. Inflating it to a real warning made the
+  number print but broke that guarantee — the wrong trade, so the visibility was solved by
+  emitting a row per module (the advisory renderer reports row counts) instead of by severity.
+  The number can only go down, and it is now in front of anyone who runs the audit.
+
 - **`self-audit` rule 14 — documented-claim integrity.** Every claim kit's docs make about
   kit's own surface is resolved against a machine oracle: `kit <command>` against
   `contracts/kit.opencli.json`, `--flag` against the flag literals the implementation actually

@@ -9,6 +9,7 @@ import {
   extractDocFlagRefs,
   extractDocTomlSections,
   loadSourceFlagTokens,
+  flagValidationCoverage,
   docExemption,
   loadContractVerbs,
   runDocsClaimsAudit,
@@ -159,16 +160,21 @@ describe("self-audit-docs — runDocsClaimsAudit", () => {
     });
     try {
       const res = runDocsClaimsAudit(root);
-      // One result per claim class: commands, flags, config sections.
-      assert.equal(res.length, 3);
+      // Flag-validation rows (one per non-validating module, or one pass), then one
+      // result per claim class.
       assert.deepEqual(
-        res.map((r) => r.name),
+        res.filter((r) => r.category === "self-audit/docs-claims").map((r) => r.name),
         ["documented commands", "documented flags", "documented config sections"],
       );
-      assert.equal(res[0].status, "pass");
-      assert.match(res[0].detail, /2 `kit <command>` ref\(s\)/);
+      // The synthetic repo has no src/commands, so coverage reports a single pass.
+      const cov = res.filter((r) => r.category === "self-audit/flag-validation");
+      assert.equal(cov.length, 1);
+      assert.equal(cov[0].status, "pass");
+      const commands = res.find((r) => r.name === "documented commands")!;
+      assert.equal(commands.status, "pass");
+      assert.match(commands.detail, /2 `kit <command>` ref\(s\)/);
       // 2 contracted + the 3 pre-dispatch verbs main() special-cases.
-      assert.match(res[0].detail, /5 known/);
+      assert.match(commands.detail, /5 known/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -180,10 +186,10 @@ describe("self-audit-docs — runDocsClaimsAudit", () => {
       "docs/PERF.md": ["# Perf", "", "```bash", "kit metrics --export=csv", "```"].join("\n"),
     });
     try {
-      const res = runDocsClaimsAudit(root);
-      assert.equal(res[0].status, "fail");
-      assert.match(res[0].detail, /kit metrics \(docs\/PERF\.md:4\)/);
-      assert.deepEqual(res[0].files, ["docs/PERF.md"]);
+      const cmds = runDocsClaimsAudit(root).find((r) => r.name === "documented commands")!;
+      assert.equal(cmds.status, "fail");
+      assert.match(cmds.detail, /kit metrics \(docs\/PERF\.md:4\)/);
+      assert.deepEqual(cmds.files, ["docs/PERF.md"]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -198,9 +204,9 @@ describe("self-audit-docs — runDocsClaimsAudit", () => {
       "README.md": "`kit check`",
     });
     try {
-      const res = runDocsClaimsAudit(root);
-      assert.equal(res[0].status, "pass", res[0].detail);
-      assert.match(res[0].detail, /3 doc\(s\) exempt/);
+      const cmds = runDocsClaimsAudit(root).find((r) => r.name === "documented commands")!;
+      assert.equal(cmds.status, "pass", cmds.detail);
+      assert.match(cmds.detail, /3 doc\(s\) exempt/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -210,6 +216,7 @@ describe("self-audit-docs — runDocsClaimsAudit", () => {
     const root = makeRepo({ "README.md": "`kit check`" });
     try {
       const res = runDocsClaimsAudit(root);
+      assert.equal(res.length, 1, "the unverifiable-contract path short-circuits");
       assert.equal(res[0].status, "warn");
       assert.equal(res[0].didNotRun, true);
       assert.match(res[0].detail, /NOT verified/);
@@ -426,5 +433,63 @@ describe("self-audit-docs — runDocsClaimsAudit over the other two classes", ()
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Flag-validation coverage — the systemic gap, measured rather than hidden
+// ---------------------------------------------------------------------------
+
+describe("self-audit-docs — flagValidationCoverage", () => {
+  it("splits command modules by whether they validate argv", () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-flagcov-"));
+    try {
+      mkdirSync(join(root, "src", "commands"), { recursive: true });
+      writeFileSync(
+        join(root, "src", "commands", "good.ts"),
+        'if (unknownFlags(process.argv, ["--json"]).length) return false;',
+        "utf-8",
+      );
+      writeFileSync(
+        join(root, "src", "commands", "lax.ts"),
+        'const j = hasFlag(process.argv, "--json");',
+        "utf-8",
+      );
+      const cov = flagValidationCoverage(root);
+      assert.deepEqual(cov.validating, ["good"]);
+      assert.deepEqual(cov.missing, ["lax"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores test files so a module is judged on its own source", () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-flagcov2-"));
+    try {
+      mkdirSync(join(root, "src", "commands"), { recursive: true });
+      writeFileSync(join(root, "src", "commands", "a.test.ts"), "unknownFlags(", "utf-8");
+      writeFileSync(join(root, "src", "commands", "a.ts"), "nothing here", "utf-8");
+      const cov = flagValidationCoverage(root);
+      assert.deepEqual(cov.validating, []);
+      assert.deepEqual(cov.missing, ["a"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty sets rather than throwing when there is no commands dir", () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-flagcov3-"));
+    try {
+      assert.deepEqual(flagValidationCoverage(root), { validating: [], missing: [] });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("kit's own check command is on the validating side", () => {
+    // The one that motivated the measurement. If this ever regresses, --category can
+    // silently become a no-op again.
+    const cov = flagValidationCoverage(join(import.meta.dirname, ".."));
+    assert.ok(cov.validating.includes("check"), "commands/check.ts must validate its flags");
   });
 });

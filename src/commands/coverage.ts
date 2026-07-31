@@ -325,6 +325,7 @@ function aggregateAdvisories(
   const ADVISORY_LABELS: Record<string, string> = {
     "self-audit/toolchain-pin": "third-party CLI execs",
     "self-audit/env-trust": "env-gated check relaxations",
+    "self-audit/flag-validation": "command modules that accept unknown flags",
   };
   const byClass = new Map<string, number>();
   for (const a of advisories) byClass.set(a.category, (byClass.get(a.category) ?? 0) + 1);

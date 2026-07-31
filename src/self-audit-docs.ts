@@ -1,4 +1,4 @@
-// Class 14 analyzer for `kit self-audit`: documented-command integrity.
+// Class 14 analyzer for `kit self-audit`: documented-claim integrity.
 //
 // kit's docs tell humans AND agents which commands to run. When a command is
 // renamed or dropped but a doc still names it, the reader gets
@@ -13,7 +13,7 @@
 // a module cycle.
 //
 // Pure + deterministic: no network, no LLM. extractDocCommandRefs/docExemption are
-// the testable units; runDocsCommandAudit is the filesystem-bound orchestrator.
+// the testable units; runDocsClaimsAudit is the filesystem-bound orchestrator.
 //
 // Known limitation, found by this rule firing on the fix for its own first finding:
 // a doc cannot state that a command does NOT exist while writing it in command form
@@ -39,10 +39,12 @@
 // checking is left out rather than shipped unsound.
 //
 // Known scope limit that remains: the flag check is repo-global, not per-command. A
-// real flag documented on the wrong command still passes, because kit's commands
-// ignore unknown flags rather than rejecting them — `kit check --profile` runs and
-// silently does nothing (`--profile` belongs to `bootstrap`). Catching that needs
-// per-command flag ownership, which the source does not currently declare.
+// real flag documented on the wrong command still passes — `kit check --profile` used
+// to run and silently do nothing (`--profile` belongs to `bootstrap`). Per-command
+// ownership needs each command to declare its own flags, which is exactly what
+// `flagValidationCoverage` below measures the progress of: as of 6.2.0 one command
+// module validates its flags and the rest accept anything, so that number is reported
+// as a tracked warning rather than left invisible.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -51,6 +53,9 @@ import { KNOWN_SECTIONS } from "./config.js";
 
 /** Category used for every result this analyzer emits. */
 const DOCS_CATEGORY: SecurityCheckResult["category"] = "self-audit/docs-claims";
+
+/** Own category so the advisory renderer can label the count meaningfully. */
+const FLAG_VALIDATION_CATEGORY: SecurityCheckResult["category"] = "self-audit/flag-validation";
 
 /** The committed command contract, relative to repoRoot. */
 const CONTRACT_PATH = "contracts/kit.opencli.json";
@@ -167,6 +172,44 @@ export function extractDocFlagRefs(markdownText: string, file: string): DocComma
     }
   }
   return refs;
+}
+
+/**
+ * Command modules that validate argv against an allowlist, over the total. kit's
+ * commands historically read the flags they knew and ignored the rest, which is how
+ * `kit check --category` stayed a no-op while being documented in eight places
+ * (including the CLAUDE.md kit generates into user projects).
+ *
+ * Reported as a tracked **warning**, not a fail: the honest state is that one command
+ * validates and the rest do not, and each remaining module needs its true flag list
+ * read off its own source before it can reject anything — getting that wrong breaks a
+ * working invocation. Measuring it first is the same observe→enforce ladder kit uses
+ * for runtime gates; the number can only go down, and now it is visible.
+ */
+export function flagValidationCoverage(repoRoot: string): {
+  validating: string[];
+  missing: string[];
+} {
+  const dir = join(repoRoot, "src", "commands");
+  const validating: string[] = [];
+  const missing: string[] = [];
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return { validating, missing };
+  }
+  for (const e of entries) {
+    if (!e.isFile() || !e.name.endsWith(".ts") || e.name.endsWith(".test.ts")) continue;
+    let text;
+    try {
+      text = readFileSync(join(dir, e.name), "utf-8");
+    } catch {
+      continue;
+    }
+    (text.includes("unknownFlags(") ? validating : missing).push(e.name.replace(/\.ts$/, ""));
+  }
+  return { validating: validating.sort(), missing: missing.sort() };
 }
 
 /** How far back to look for the prose that says which TOML file a fence shows. */
@@ -374,42 +417,77 @@ export function runDocsClaimsAudit(repoRoot: string): SecurityCheckResult[] {
     }
   }
 
-  return CLAIM_CLASSES.map((cls) => {
-    const oracle = oracles[cls.name];
-    const unknown: DocCommandRef[] = [];
-    let checked = 0;
+  // One advisory row per module that validates nothing. Row-per-module rather than
+  // one summary row is deliberate: self-audit's advisory renderer reports the row
+  // COUNT per category, so the count becomes the metric itself ("43 command modules
+  // that accept unknown flags") instead of a useless "1 advisory findings", and each
+  // row carries a navigable path.
+  //
+  // severity `low` = advisory: never gates, and `--fail-on-warning` stays green on
+  // kit's own tree, which cli.test.ts pins as an invariant. Inflating this to a real
+  // warning would have broken that guarantee to win visibility — the wrong trade.
+  const coverage = flagValidationCoverage(repoRoot);
+  const total = coverage.validating.length + coverage.missing.length;
+  const flagValidation: SecurityCheckResult[] =
+    coverage.missing.length === 0
+      ? [
+          {
+            category: FLAG_VALIDATION_CATEGORY,
+            name: "flag validation",
+            status: "pass",
+            detail: `all ${total} command module(s) reject unknown flags`,
+          },
+        ]
+      : coverage.missing.map((mod) => ({
+          category: FLAG_VALIDATION_CATEGORY,
+          name: "flag validation",
+          status: "warn" as const,
+          severity: "low" as const,
+          detail:
+            `src/commands/${mod}.ts accepts unknown flags silently ` +
+            `(${coverage.validating.length}/${total} command modules validate)`,
+          files: [`src/commands/${mod}.ts:1`],
+          suggestion: `add unknownFlags(process.argv, ALLOWED) — a flag that silently does nothing is how 'kit check --category' stayed broken across six majors`,
+        }));
 
-    for (const { file, text } of inScope) {
-      for (const ref of cls.extract(text, file)) {
-        checked++;
-        if (!oracle.has(ref.verb)) unknown.push(ref);
+  return flagValidation.concat(
+    CLAIM_CLASSES.map((cls) => {
+      const oracle = oracles[cls.name];
+      const unknown: DocCommandRef[] = [];
+      let checked = 0;
+
+      for (const { file, text } of inScope) {
+        for (const ref of cls.extract(text, file)) {
+          checked++;
+          if (!oracle.has(ref.verb)) unknown.push(ref);
+        }
       }
-    }
 
-    if (unknown.length === 0) {
+      if (unknown.length === 0) {
+        return {
+          category: DOCS_CATEGORY,
+          name: cls.name,
+          status: "pass",
+          detail:
+            `${checked} ${cls.unit} ref(s) across ${inScope.length} doc(s) all resolve ` +
+            `against ${oracle.size} known (${exemptFiles} doc(s) exempt)`,
+        };
+      }
+
       return {
         category: DOCS_CATEGORY,
         name: cls.name,
-        status: "pass",
+        status: "fail",
+        severity: "medium",
         detail:
-          `${checked} ${cls.unit} ref(s) across ${inScope.length} doc(s) all resolve ` +
-          `against ${oracle.size} known (${exemptFiles} doc(s) exempt)`,
+          `${unknown.length} of ${checked} ${cls.unit} ref(s) do not exist: ` +
+          unknown
+            .slice(0, 6)
+            .map((u) => `${cls.render(u.verb)} (${u.file}:${u.line})`)
+            .join(", "),
+        files: [...new Set(unknown.map((u) => u.file))],
+        suggestion: `fix the doc, or implement it — a doc naming something kit does not have misleads humans and agents alike`,
       };
-    }
-
-    return {
-      category: DOCS_CATEGORY,
-      name: cls.name,
-      status: "fail",
-      severity: "medium",
-      detail:
-        `${unknown.length} of ${checked} ${cls.unit} ref(s) do not exist: ` +
-        unknown
-          .slice(0, 6)
-          .map((u) => `${cls.render(u.verb)} (${u.file}:${u.line})`)
-          .join(", "),
-      files: [...new Set(unknown.map((u) => u.file))],
-      suggestion: `fix the doc, or implement it — a doc naming something kit does not have misleads humans and agents alike`,
-    };
-  });
+    }),
+  );
 }
