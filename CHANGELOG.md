@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.3.0] - 2026-08-01
+
+### Added
+
+- **`[memory] default_class` and `KIT_MEMORY_CLASS` are now actually read.** Before this they
+  were inert: `resolveMemoryClass()` had **zero** production call sites, so the documented
+  precedence (`KIT_MEMORY_CLASS` → `[memory] default_class` → `internal`) never ran on real
+  inputs, and both settings did nothing at all. The policy in `memory/class.ts` was complete and
+  unit-tested the whole time — which is precisely why `self-audit` rule 15 landed in 6.2.0, and
+  this is its first finding closed.
+
+  `memory/effective-class.ts` supplies the missing wire (env + the project's `.kit.toml`), and
+  `kit memory stats` now reports which class applies and where it came from:
+
+  ```
+  class      internal (from built-in default)
+             resolved and reported; recall is not yet filtered by class
+  ```
+
+  An unrecognised value fails closed to `restricted` and **says so out loud** in that line,
+  because a typo that silently narrows disclosure is as much a defect as one that widens it.
+
+  **Observe tier, deliberately.** This resolves and reports; it does not yet filter recall.
+  Turning on disclosure filtering changes what an existing store returns — a wrong flip either
+  leaks across projects or silently hides a user's own notes — so it is a separate, explicitly
+  tested step on kit's own observe→enforce ladder rather than a side effect of making the
+  config readable. The `kit memory stats` line states that limit rather than implying more.
+
 ## [6.2.0] - 2026-07-31
 
 ### Added

@@ -16,6 +16,7 @@ import {
   countQuarantined,
   forgetMemory,
 } from "../memory/db.js";
+import { effectiveMemoryClass, formatClassResolution } from "../memory/effective-class.js";
 import { sparkline, fmtTokens } from "../memory/stats.js";
 import { indexAllHarnesses } from "../memory/parser.js";
 import { mergeDb } from "../memory/merge.js";
@@ -770,6 +771,17 @@ async function memStats(): Promise<boolean> {
   console.log(`  size       ${Math.round(s.sizeBytes / 1024)} KB`);
   console.log(
     `             ${c.dim}account-wide /stats may exceed this — sessions on other machines aren't in this DB${c.reset}`,
+  );
+
+  // The class this project resolves to. Reported, not yet enforced: `[memory]
+  // default_class` and KIT_MEMORY_CLASS were read in ZERO places before 6.3.0, so the
+  // first honest step is showing which class applies and where it came from. Recall
+  // filtering is the enforce step and is stated as not-yet-on rather than implied.
+  const cls = await effectiveMemoryClass();
+  const clsDim = cls.recognized ? c.dim : c.yellow;
+  console.log(`  class      ${formatClassResolution(cls)}`);
+  console.log(
+    `             ${clsDim}resolved and reported; recall is not yet filtered by class${c.reset}`,
   );
 
   if (tokensMode) {
