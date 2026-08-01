@@ -54,6 +54,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   resolver unit-tested in isolation with zero production call sites does not make the claim
   true, which is exactly the shape of the memory-class finding below.
 
+- **`self-audit` rule 15 — wiring integrity.** The machine answer to "don't write unfinished
+  code": an exported production function with **no production call site** is reported, split
+  into two tiers because they mean different things —
+
+  - **tested but never called** — built, unit-tested, unreachable. The dangerous shape: it looks
+    finished from every angle a reviewer checks. This is exactly the classified-memory defect
+    (`resolveMemoryClass` had 0 production callers while its tests passed).
+  - **referenced nowhere** — plain dead code, safe to delete.
+
+  kit's own tree: **69**. The oracle is deliberately *not* the test suite — a green unit test is
+  not evidence a feature is reachable, which is the whole lesson. A helper used only inside its
+  own module counts as wired (that is normal code); `_`-prefixed / `…ForTests` seams and the
+  declared adapter-SDK exports are excluded with the reason in code.
+
+  Advisory, one row per finding, same trade as flag-validation: deleting a dead export is safe,
+  but deciding whether an unreachable *control* should be wired or withdrawn is a human call,
+  so it reports and never gates.
+
 - **Flag-validation coverage is now measured, not invisible.** `kit check` is the only one of
   **44** command modules that rejects unknown flags; the other 43 accept anything. Rather than
   refactor 70 commands blind — each needs its true flag list read off its own source, and

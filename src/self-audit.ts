@@ -23,6 +23,7 @@ import type { SecurityCheckResult } from "./check-security.js";
 import { walkSourceFiles } from "./source-walk.js";
 import { runCiScriptAudit } from "./self-audit-ci.js";
 import { runDocsClaimsAudit } from "./self-audit-docs.js";
+import { runWiringAudit } from "./self-audit-wiring.js";
 import { ruleForSelfAudit } from "./rules/catalog.js";
 
 export type SelfAuditSeverity = "error" | "warn" | "info";
@@ -1056,6 +1057,24 @@ const R14: SelfAuditRule = {
 };
 
 // ---------------------------------------------------------------------------
+// R15 — wiring integrity (delegated to self-audit-wiring)
+// ---------------------------------------------------------------------------
+
+const R15: SelfAuditRule = {
+  id: "R15-unwired-code",
+  name: "wiring",
+  detectionClass: "unwired-code",
+  // info: advisory. Deleting a dead export is safe, but deciding whether an
+  // unreachable control should be WIRED or withdrawn is a human call, so this
+  // reports and never gates.
+  severity: "info",
+  enabled: true,
+  run(ctx) {
+    return runWiringAudit(ctx.repoRoot);
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -1075,6 +1094,7 @@ export const SELF_AUDIT_RULES: SelfAuditRule[] = [
   R12,
   R13,
   R14,
+  R15,
 ];
 
 // ---------------------------------------------------------------------------
