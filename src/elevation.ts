@@ -209,17 +209,39 @@ export async function clearElevation(cwd: string = process.cwd()): Promise<void>
 }
 
 /**
+ * Is this marker still within its TTL? The single source of the expiry rule.
+ *
+ * It exists because the rule had THREE implementations that did not agree at the
+ * boundary: `requireElevation` (the enforcer) and `isElevated` both treated
+ * `expires < now` as expired, while `kit auth status` computed validity as
+ * `expires > now`. At the exact expiry millisecond the gate therefore GRANTED while the
+ * status command reported "expired" — a one-millisecond window in which kit's own status
+ * display contradicted its own gate. An unparseable timestamp is expired everywhere
+ * (fail closed).
+ */
+export function elevationIsActive(
+  state: Pick<ElevationState, "expiresAt">,
+  now: number = Date.now(),
+): boolean {
+  const expires = Date.parse(state.expiresAt);
+  if (!Number.isFinite(expires)) return false;
+  return expires >= now;
+}
+
+/** Does `scope` authorize `operation`? `all` covers everything; otherwise exact. */
+export function elevationCoversScope(scope: string, operation: string): boolean {
+  return scope === "all" || scope === operation;
+}
+
+/**
  * Returns true if an unexpired elevation marker exists that covers the
  * requested operation scope.
  */
 export async function isElevated(operation: string, cwd: string = process.cwd()): Promise<boolean> {
   const state = await readElevation(cwd);
   if (!state) return false;
-  const expires = Date.parse(state.expiresAt);
-  if (!Number.isFinite(expires) || expires < Date.now()) {
-    return false;
-  }
-  return state.scope === "all" || state.scope === operation;
+  if (!elevationIsActive(state)) return false;
+  return elevationCoversScope(state.scope, operation);
 }
 
 export function elevationTtlMinutes(): number {
@@ -480,11 +502,13 @@ export async function requireElevation(
       "none",
     );
   }
-  const expires = Date.parse(state.expiresAt);
-  if (!Number.isFinite(expires) || expires < Date.now()) {
+  if (!elevationIsActive(state)) {
     return decide(false, "Elevation marker expired. Run 'kit auth elevate' again.", state.method);
   }
-  if (state.scope !== "all" && state.scope !== operation) {
+  // Kept as two separate checks rather than calling isElevated(): the enforcer must
+  // distinguish "expired" from "wrong scope" to give a usable reason. Both now read the
+  // rule from one place, so the enforcer and the status display cannot drift again.
+  if (!elevationCoversScope(state.scope, operation)) {
     return decide(
       false,
       `Elevation covers scope="${state.scope}" but operation requires "${operation}".`,

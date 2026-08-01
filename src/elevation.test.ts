@@ -16,6 +16,8 @@ import {
   generateBase32Secret,
   buildOtpAuthUri,
   resolveTotpSecret,
+  elevationIsActive,
+  elevationCoversScope,
 } from "./elevation.js";
 import { readFileSync, existsSync } from "node:fs";
 
@@ -466,5 +468,45 @@ describe("isElevated (gate semantics)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// One rule, one implementation. The expiry check existed in three places that did not
+// agree at the boundary: the enforcer (`requireElevation`) and `isElevated` treated
+// `expires < now` as expired, while `kit auth status` computed validity as
+// `expires > now`. At the exact expiry millisecond the gate GRANTED while kit's own
+// status command printed "expired" — a status display contradicting its own gate.
+describe("elevationIsActive / elevationCoversScope — the shared rule", () => {
+  const now = 1_000_000;
+  const at = (ms: number) => ({ expiresAt: new Date(ms).toISOString() });
+
+  it("treats the exact expiry millisecond as still active, and says so once", () => {
+    // The boundary the three copies disagreed on. Which side it lands on matters less
+    // than that every caller now lands on the SAME side.
+    assert.equal(elevationIsActive(at(now), now), true);
+  });
+
+  it("is expired one millisecond past, active one millisecond before", () => {
+    assert.equal(elevationIsActive(at(now - 1), now), false);
+    assert.equal(elevationIsActive(at(now + 1), now), true);
+  });
+
+  it("fails closed on an unparseable timestamp rather than treating it as active", () => {
+    // A corrupt or hand-edited marker must never read as elevation.
+    for (const bad of ["", "not a date", "2026-13-45T99:99:99Z", "Infinity"]) {
+      assert.equal(elevationIsActive({ expiresAt: bad }, now), false, bad);
+    }
+  });
+
+  it("scope `all` covers any operation; anything else is exact", () => {
+    assert.equal(elevationCoversScope("all", "rotate"), true);
+    assert.equal(elevationCoversScope("rotate", "rotate"), true);
+    assert.equal(elevationCoversScope("rotate", "migrate"), false);
+    assert.equal(elevationCoversScope("", "rotate"), false);
+  });
+
+  it("is case-sensitive on scope — no accidental widening", () => {
+    assert.equal(elevationCoversScope("ALL", "rotate"), false);
+    assert.equal(elevationCoversScope("Rotate", "rotate"), false);
   });
 });

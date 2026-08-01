@@ -3,6 +3,7 @@ import {
   grantElevation,
   clearElevation,
   readElevation,
+  elevationIsActive,
   verifyTotp,
   elevationTtlMinutes,
   enrollTotp,
@@ -141,8 +142,10 @@ async function cmdAuthStatus(): Promise<boolean> {
     console.log(`${c.dim}Not elevated.${c.reset}`);
     return true;
   }
-  const expires = Date.parse(state.expiresAt);
-  const valid = Number.isFinite(expires) && expires > Date.now();
+  // The shared predicate, not a second copy: this line used to compute validity as
+  // `expires > now` while the gate used `expires < now` for expiry, so at the exact
+  // expiry millisecond the gate granted and this command printed "expired".
+  const valid = elevationIsActive(state);
   const status = valid
     ? `${c.green}active${c.reset}  ${c.dim}(expires ${state.expiresAt})${c.reset}`
     : `${c.red}expired${c.reset}  ${c.dim}(at ${state.expiresAt})${c.reset}`;
