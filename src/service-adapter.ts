@@ -1,14 +1,5 @@
 // ─── Failure simulation ─────────────────────────────────────────────────────
 
-/**
- * Whether adapters should inject simulated transport failures. On by default so
- * error paths get exercised; set KIT_NO_FAILURE_SIM=1 (the test suite does)
- * to make adapter behavior deterministic and avoid flaky assertions.
- */
-export function simulatedFailuresEnabled(): boolean {
-  return process.env.KIT_NO_FAILURE_SIM !== "1";
-}
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ServiceConfig {

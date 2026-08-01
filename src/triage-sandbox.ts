@@ -19,7 +19,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, mkdtemp, readdir, stat, rm } from "node:fs/promises";
+import { readFile, mkdtemp, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -304,9 +304,4 @@ async function walkAndCheck(dir: string, findings: SandboxFinding[]): Promise<vo
       });
     }
   }
-}
-
-/** Cleanup helper if caller wants to drop the extraction tmpdir. */
-export async function cleanupSandbox(workDir: string): Promise<void> {
-  await rm(workDir, { recursive: true, force: true }).catch(() => {});
 }

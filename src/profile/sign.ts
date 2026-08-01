@@ -35,7 +35,6 @@ import {
   loadProfile,
   canonicalProfileBytes,
   profileFingerprint,
-  type KitProfile,
   type ProfileScope,
 } from "./schema.js";
 
@@ -216,10 +215,4 @@ export async function verifiedScope(
   if (!profile?.scope) return null;
   const v = await verifyProfileSignature(cwd, opts);
   return v.status === "valid" ? profile.scope : null;
-}
-
-/** Convenience: the declared (UNVERIFIED) scope, for display. */
-export async function declaredScope(cwd = process.cwd()): Promise<ProfileScope | null> {
-  const profile: KitProfile | null = await loadProfile(cwd);
-  return profile?.scope ?? null;
 }

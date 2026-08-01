@@ -146,36 +146,6 @@ export async function detect1PasswordMode(): Promise<{ mode: OnePasswordMode; hi
 }
 
 /**
- * List available 1Password vaults
- */
-export async function list1PasswordVaults(): Promise<OnePasswordVault[]> {
-  try {
-    const { stdout } = await exec("op", ["vault", "list", "--format=json"], {
-      timeout: 10000,
-    });
-    const vaults = JSON.parse(stdout) as OnePasswordVault[];
-    return vaults;
-  } catch {
-    return [];
-  }
-}
-
-/**
- * List items in a specific vault
- */
-export async function list1PasswordItems(vaultId: string): Promise<OnePasswordItem[]> {
-  try {
-    const { stdout } = await exec("op", ["item", "list", "--vault", vaultId, "--format=json"], {
-      timeout: 10000,
-    });
-    const items = JSON.parse(stdout) as OnePasswordItem[];
-    return items;
-  } catch {
-    return [];
-  }
-}
-
-/**
  * Generate a reference string for a 1Password item
  * Helps users construct proper ref strings for config
  */

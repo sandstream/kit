@@ -8,6 +8,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [6.3.0] - 2026-08-01
 
+### Removed
+
+- **~1,100 lines of unreachable code, found by rule 15 and deleted.** Every export it flagged as
+  *referenced nowhere* is gone, and the count went **20 → 0**:
+
+  - `src/event-stream.ts` (220 lines) plus its 299-line test — an `EventStream` class with
+    `initializeEventStream` / `getEventStream`, imported by **nothing**. Tested, complete, and
+    unreachable: the module-level version of the shape rule 15 exists to catch. No doc promised
+    it.
+  - `src/validation/` (69 lines) — the whole directory. `validateWebSearchConfig` and
+    `getValidProviderNames` were dead, and removing them orphaned the schema builder they were
+    the only callers of; nothing outside the module used any of it either.
+  - 14 further exports across `migrations.ts` (4 query helpers), `fix.ts`, `onepassword.ts`,
+    `adapters/resend-email.ts`, `utils/promptSelect.ts`, `triage-sandbox.ts`, `revocation.ts`,
+    `secrets-pull.ts`, `service-adapter.ts` and `profile/sign.ts`, plus the types and private
+    helpers the deletions orphaned.
+
+  Checked before deleting, not after: no non-source reference (docs, JSON, workflows, scripts),
+  no dynamic dispatch that could reach them (every `await import()` in the tree takes a static
+  string), and nothing in the declared adapter-SDK public surface. `tsc` then caught each
+  orphaned import in cascade — including one where **the deletion was wrong**: `installTools` is
+  used by the live `cmdFix`, and removing its import broke the build until it was restored.
+  That is the whole reason this was done with the compiler and 3,391 tests as the net rather
+  than by eye.
+
+  Net effect on the tracked numbers: unwired exports **69 → 49**, referenced-nowhere **20 → 0**,
+  untested files **91 → 90**.
+
 ### Added
 
 - **`[memory] default_class` and `KIT_MEMORY_CLASS` are now actually read.** Before this they
