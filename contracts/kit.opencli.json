@@ -449,6 +449,14 @@
           "x-kit-audience": "human",
           "x-kit-mcp": false,
           "x-kit-stability": "stable"
+        },
+        "uninstall": {
+          "kind": "command",
+          "summary": "Remove the configured git hooks (enforcement off until re-installed)",
+          "x-kit-args-modeled": false,
+          "x-kit-audience": "human",
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
         }
       },
       "kind": "group",

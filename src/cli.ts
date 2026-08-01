@@ -893,6 +893,7 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   "auth revoke": "Drop the elevation marker",
   "auth setup-totp": "Enroll TOTP secret (writes ~/.kit/totp-secret 0600)",
   "hooks add": "Install a built-in hook (e.g. secret-scan)",
+  "hooks uninstall": "Remove the configured git hooks (enforcement off until re-installed)",
   "setup --recommended":
     "Opinionated profile: setup + memory hooks + git secret-scan/context-check gates",
   "context check":

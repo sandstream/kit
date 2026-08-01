@@ -168,6 +168,7 @@
     "help",
     "hooks",
     "hooks add",
+    "hooks uninstall",
     "identity",
     "ingest",
     "init",
