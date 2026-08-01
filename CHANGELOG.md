@@ -8,6 +8,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [6.3.0] - 2026-08-01
 
+### Added
+
+- **Tests for four untested security-decision modules — 91 new cases.** Targeted by what a bug
+  in them would cost, not by line count: every one is logic where a defect is an authorization,
+  injection or ledger-integrity bug, and none of them had a single test.
+
+  - **`rbac/policy-schema.ts`** (34 cases) — the RBAC decision engine. Wildcard scope
+    (`secrets:*` must not grant `secretsadmin:read`), that a grant is never treated as a regex,
+    prototype-pollution refusal at all three levels (`__proto__` / `constructor` / `prototype`
+    on the table, as a role name, inside a binding), and the fail-closed contract the resolver
+    depends on: a malformed `[rbac]` table yields `null`, never a partial grant.
+  - **`governance.ts`** (24) — `checkOperationAllowed`, the authorization verdict. The
+    intentional fail-open when governance is disabled, the fail-closed branch for an
+    environment with no access entry, and the deliberate asymmetry that a denied *delete* is
+    always escalatable to approval while a denied *write* is only escalatable in prod.
+  - **`findings-track.ts`** (18) — which findings reach the PAL ledger, and that `dedupKey`
+    excludes volatile values so a re-scan maps to the same row instead of forking a new one.
+  - **`utils/ci-escape.ts`** (15) — the two escapers standing between a config-controlled
+    string and a forged CI annotation or JUnit testcase. Both pin that the escape character
+    itself is escaped **first**, since escaping `%` or `&` last lets the sequence be smuggled
+    through intact.
+
+  Three of these tests were wrong on the first run and the failures were the point:
+  `mergeGovernanceConfig` always spreads all three environments (so the no-access branch is
+  only reachable by a caller assembling config itself — now documented in the test),
+  `"removal"` does not contain `"remove"`, and `advisory.detail` is required rather than
+  optional. Each assertion was corrected to describe the code, not the other way round.
+
+  Untested files **89 → 85**.
+
 ### Fixed
 
 - **A false security claim in the README and in three compliance evidence maps.** kit's Pillar 2
