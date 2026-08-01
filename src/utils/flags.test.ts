@@ -83,3 +83,74 @@ describe("unknownFlags", () => {
     assert.deepEqual(unknownFlags(["compare", "a.json", "b.json"], []), []);
   });
 });
+
+describe("flagInt — boundaries and malformed input", () => {
+  it("reads the --flag=value form as well as the space-separated one", () => {
+    assert.equal(flagInt(["--ttl-minutes=30"], "--ttl-minutes", 5), 30);
+  });
+
+  it("returns 0 for an explicit 0 rather than treating it as absent", () => {
+    // 0 is falsy: a `parsed || fallback` refactor would silently turn
+    // `--retries 0` back into the default and retry when the caller said don't.
+    assert.equal(flagInt(["--retries", "0"], "--retries", 3), 0);
+  });
+
+  it("falls back when the value is empty", () => {
+    // `--ttl-minutes=` yields "" from flagValue, not undefined, so the
+    // NaN guard is the only thing keeping this off the fallback path.
+    assert.equal(flagInt(["--ttl-minutes="], "--ttl-minutes", 5), 5);
+  });
+
+  it("falls back when the flag is the last token with no value", () => {
+    assert.equal(flagInt(["kit", "audit", "--ttl-minutes"], "--ttl-minutes", 5), 5);
+  });
+
+  it("falls back when the next token is another flag instead of a number", () => {
+    // Guards against `--ttl-minutes --json` consuming "--json" as its value.
+    assert.equal(flagInt(["--ttl-minutes", "--json"], "--ttl-minutes", 5), 5);
+    assert.equal(flagInt(["--ttl-minutes", "--json"], "--json", 7), 7);
+  });
+
+  it("does not match a flag whose name merely starts with the requested one", () => {
+    // A prefix match here would make `--ttl-minutes 30` answer a query for `--ttl`.
+    assert.equal(flagInt(["--ttl-minutes", "30"], "--ttl", 5), 5);
+    assert.equal(flagInt(["--ttl-minutes=30"], "--ttl", 5), 5);
+  });
+
+  it("accepts negative values without clamping them", () => {
+    // Documented as-is: there is no lower bound, so callers using the result as a
+    // count or TTL must range-check it themselves.
+    assert.equal(flagInt(["--ttl-minutes", "-1"], "--ttl-minutes", 5), -1);
+  });
+
+  it("truncates rather than rejecting a decimal, and ignores trailing garbage", () => {
+    // parseInt semantics: partial parses succeed. "2.9" and "30abc" are accepted
+    // as 2 and 30 instead of falling back, which hides typo'd values.
+    assert.equal(flagInt(["--ttl-minutes", "2.9"], "--ttl-minutes", 5), 2);
+    assert.equal(flagInt(["--ttl-minutes", "30abc"], "--ttl-minutes", 5), 30);
+  });
+
+  it("reads exponent and hex spellings as their radix-10 prefix", () => {
+    // radix 10 means "1e3" is 1 (not 1000) and "0x10" is 0 (not 16) — silently
+    // wrong values rather than a fallback.
+    assert.equal(flagInt(["--ttl-minutes", "1e3"], "--ttl-minutes", 5), 1);
+    assert.equal(flagInt(["--ttl-minutes", "0x10"], "--ttl-minutes", 5), 0);
+    // "Infinity" has no digit prefix at all, so it does fall back.
+    assert.equal(flagInt(["--ttl-minutes", "Infinity"], "--ttl-minutes", 5), 5);
+  });
+
+  it("takes the first occurrence of a repeated space-separated flag", () => {
+    assert.equal(flagInt(["--ttl-minutes", "1", "--ttl-minutes", "2"], "--ttl-minutes", 5), 1);
+  });
+
+  it("prefers an inline value even when a space-separated one comes first", () => {
+    // flagValue scans for `name=` before consulting indexOf, so the inline form
+    // wins on position-independent precedence.
+    assert.equal(flagInt(["--ttl-minutes", "9", "--ttl-minutes=3"], "--ttl-minutes", 5), 3);
+  });
+
+  it("does not stop at a bare -- the way unknownFlags does", () => {
+    // flagInt has no pass-through boundary: a value after `--` is still read.
+    assert.equal(flagInt(["--", "--ttl-minutes", "30"], "--ttl-minutes", 5), 30);
+  });
+});

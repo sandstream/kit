@@ -130,14 +130,21 @@ export function lineHashes(content: string): string[] | null {
   const lines = content.split("\n").filter((l) => l.trim().length > 0);
   const hashes: string[] = [];
   for (const line of lines) {
-    let obj: { hash?: unknown };
+    let obj: unknown;
     try {
-      obj = JSON.parse(line) as { hash?: unknown };
+      obj = JSON.parse(line);
     } catch {
       return null;
     }
-    if (typeof obj.hash !== "string") return null;
-    hashes.push(obj.hash);
+    // `JSON.parse("null")` SUCCEEDS and yields null, so reading `.hash` off the result
+    // threw a TypeError instead of returning the fail-closed null this function
+    // promises. Every other malformed line (a bare number, a string, an array, a
+    // truncated object) already returned null correctly — only the literal `null` line
+    // escaped, because the property read sat outside the try. #unwired-coverage
+    if (typeof obj !== "object" || obj === null) return null;
+    const hash = (obj as { hash?: unknown }).hash;
+    if (typeof hash !== "string") return null;
+    hashes.push(hash);
   }
   return hashes;
 }
@@ -175,12 +182,18 @@ export function lineSeals(content: string): LineSeal[] | null {
   const lines = content.split("\n").filter((l) => l.trim().length > 0);
   const seals: LineSeal[] = [];
   for (const line of lines) {
-    let obj: { hash?: unknown; kid?: unknown; sig?: unknown };
+    let parsed: unknown;
     try {
-      obj = JSON.parse(line) as typeof obj;
+      parsed = JSON.parse(line);
     } catch {
       return null;
     }
+    // Same defect as lineHashes, and this is the LIVE extractor: `verifyAgainstAnchor`
+    // calls it, so a single `null` line in .kit-audit.jsonl turned a documented
+    // "unparseable" verdict into a thrown TypeError out of the verify path. A crash is
+    // not a verdict.
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const obj = parsed as { hash?: unknown; kid?: unknown; sig?: unknown };
     if (typeof obj.hash !== "string") return null;
     seals.push({
       hash: obj.hash,

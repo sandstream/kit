@@ -8,7 +8,60 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [6.3.0] - 2026-08-01
 
+### Fixed
+
+- **`kit security scan-staged` no longer blocks on test fixtures.** The pre-commit gate flagged
+  kit's own audit-**redaction** test — which has to stage a secret-shaped key to prove the
+  redaction works — and the only way through was `git commit --no-verify`, which switches off the
+  entire hook. A gate that cries wolf teaches people to disable it.
+
+  `check-security.ts`'s repo-wide grep already made this call, with the reasoning written out:
+  fake credentials live in test/fixture files by design, and the authoritative scanners
+  (trufflehog locally, the CI gitleaks job) still scan them and verify live. The two surfaces of
+  the same check simply disagreed, and the disagreeing one was the one that blocked work. The
+  rule now lives in one place (`utils/test-paths.ts`) so they cannot drift again.
+
+  Test-path hits are **reported as advisories, not dropped** — no false green, just no false
+  block. Verified in both directions: the redaction test now reports and exits 0, and a
+  secret-shaped string staged in ordinary source still blocks with exit 1.
+
+- **Three real defects found by covering the unwired exports.** Writing tests for code nothing
+  calls is usually bookkeeping; here it surfaced bugs in live paths, because two of the three
+  functions share their flaw with a wired sibling.
+
+  - **`lineSeals` / `lineHashes` threw instead of failing closed on a `null` log line.**
+    `JSON.parse("null")` *succeeds* and yields `null`, and the `typeof obj.hash` guard sat
+    **outside** the `try` — so a line containing exactly `null` in `.kit-audit.jsonl` escaped as
+    a `TypeError` rather than the fail-closed `null` every other malformed line gets. `lineSeals`
+    is the **live** extractor `verifyAgainstAnchor` calls, so this turned a documented
+    "unparseable" verdict into a thrown exception out of the audit-verify path. **A crash is not
+    a verdict.** Both now guard the parse result; every other malformed shape (bare number,
+    string, array, truncated object) already behaved correctly.
+  - **`wouldRequireApproval` disagreed with the enforcer it predicts.** It gated prod on
+    `production_writes === true` while `requestApproval` gates on bare truthiness, so a
+    hand-edited `production_writes = "yes"` made a dry-run report *no approval needed* and the
+    real call then prompt or deny. It also ignored `enabled` entirely, predicting a prompt for
+    configs where `withGovernance` returns before any approval is requested. Both corrected
+    toward the enforcer: a predictor may over-predict a prompt, never under-predict one.
+  - **`mergeGovernanceConfig()` handed out the shared defaults by reference.** With no config it
+    returned `DEFAULT_GOVERNANCE` itself, so one caller pushing a keyword onto
+    `approval.destructive_operations` changed the destructive-operation gate for every later
+    caller in the process. Now a `structuredClone`; the configured path already returned a fresh
+    object via spreads, so only the no-config path leaked the singleton.
+
 ### Added
+
+- **Every unwired export now has tests — 276 cases across 27 files, ~3,760 lines.** The user's
+  instruction was explicit: delete nothing, cover it. So each export `self-audit` rule 15 reports
+  as having no production call site is now verified rather than merely unused, and three of them
+  turned out to be hiding real bugs (above).
+
+  Run as a 27-agent workflow with file-level ownership so concurrent writes could not collide,
+  append-only against the existing sibling test files. Two assumptions the agents made were
+  wrong and the failures were the point — `ensureMiseActivation` inserts no blank separator line
+  when a profile lacks a trailing newline (the leading `\n` in its block is what prevents
+  gluing, which is the property that actually matters), and the `null`-line expectation had to
+  flip from "throws" to "returns null" once the defect it documented was fixed.
 
 - **Tests for four untested security-decision modules — 91 new cases.** Targeted by what a bug
   in them would cost, not by line count: every one is logic where a defect is an authorization,

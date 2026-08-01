@@ -330,3 +330,141 @@ describe("elevation marker forgery resistance", () => {
     }
   });
 });
+
+describe("isElevated (gate semantics)", () => {
+  // Signs whatever state it is handed, so a *validly signed* marker can carry a
+  // deliberately bad expiresAt / scope. Without this the expiry and scope
+  // branches are unreachable: readElevation rejects unsigned markers first, so
+  // an unsigned "expired" fixture is really only testing signature rejection.
+  async function writeSigned(
+    dir: string,
+    state: { expiresAt: string; scope: string; granter?: string; method?: "yes-prompt" | "totp" },
+  ): Promise<void> {
+    const { writeElevation } = await import("./elevation.js");
+    await writeElevation(
+      {
+        expiresAt: state.expiresAt,
+        scope: state.scope,
+        granter: state.granter ?? "test",
+        method: state.method ?? "yes-prompt",
+      },
+      dir,
+    );
+  }
+
+  const future = () => new Date(Date.now() + 60 * 60_000).toISOString();
+
+  it("returns false in a directory with no marker file at all", async () => {
+    const dir = tmpRepo();
+    try {
+      assert.equal(await isElevated("rotate", dir), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false for a correctly signed but expired marker", async () => {
+    const dir = tmpRepo();
+    try {
+      // Signature is valid — the ONLY reason this must not elevate is the TTL.
+      await writeSigned(dir, { expiresAt: new Date(Date.now() - 1).toISOString(), scope: "all" });
+      assert.notEqual(await readElevation(dir), null, "marker must pass signature check");
+      assert.equal(await isElevated("rotate", dir), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false for a signed marker whose expiresAt is not a parseable date", async () => {
+    const dir = tmpRepo();
+    try {
+      // Fail-closed on garbage: an unparseable timestamp must not be read as
+      // "no expiry", which is how a NaN comparison would otherwise behave.
+      await writeSigned(dir, { expiresAt: "whenever", scope: "all" });
+      assert.equal(await isElevated("rotate", dir), false);
+      await writeSigned(dir, { expiresAt: "", scope: "all" });
+      assert.equal(await isElevated("rotate", dir), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("matches scope exactly — no prefix or case-insensitive widening", async () => {
+    const dir = tmpRepo();
+    try {
+      await writeSigned(dir, { expiresAt: future(), scope: "rotate" });
+      assert.equal(await isElevated("rotate", dir), true);
+      // A narrow grant must not leak into neighbouring operation names.
+      assert.equal(await isElevated("rotate-key", dir), false);
+      assert.equal(await isElevated("rotat", dir), false);
+      assert.equal(await isElevated("Rotate", dir), false);
+      assert.equal(await isElevated("", dir), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats only the exact literal 'all' as the wildcard scope", async () => {
+    const dir = tmpRepo();
+    try {
+      await writeSigned(dir, { expiresAt: future(), scope: "ALL" });
+      // Case variants are not the wildcard; they only cover an operation
+      // literally named "ALL".
+      assert.equal(await isElevated("rotate", dir), false);
+      assert.equal(await isElevated("ALL", dir), true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false for a malformed marker (missing scope, empty, non-JSON)", async () => {
+    const dir = tmpRepo();
+    try {
+      const path = join(dir, ".kit", "elevation.json");
+      mkdirSync(join(dir, ".kit"), { recursive: true });
+
+      writeFileSync(path, JSON.stringify({ expiresAt: future() }));
+      assert.equal(await isElevated("rotate", dir), false);
+
+      writeFileSync(path, "");
+      assert.equal(await isElevated("rotate", dir), false);
+
+      writeFileSync(path, "{not json");
+      assert.equal(await isElevated("rotate", dir), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores KIT_ELEVATED=1 — the CI escape hatch is requireElevation-only", async () => {
+    const dir = tmpRepo();
+    const prev = process.env.KIT_ELEVATED;
+    process.env.KIT_ELEVATED = "1";
+    try {
+      // isElevated is a pure marker query. If it ever started honouring the env
+      // var, a leaked CI variable would silently satisfy any caller that gates
+      // on isElevated instead of requireElevation.
+      assert.equal(await isElevated("rotate", dir), false);
+    } finally {
+      if (prev === undefined) delete process.env.KIT_ELEVATED;
+      else process.env.KIT_ELEVATED = prev;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("is a read-only query: repeatable, and leaves no marker or audit trail", async () => {
+    const dir = tmpRepo();
+    try {
+      await grantElevation("rotate", "yes-prompt", dir);
+      assert.equal(await isElevated("rotate", dir), true);
+      // Unlike consumeElevation, checking does not consume the marker.
+      assert.equal(await isElevated("rotate", dir), true);
+      assert.notEqual(await readElevation(dir), null);
+      // And unlike requireElevation, it emits nothing — so it must never be the
+      // gate in front of a destructive op, which needs the forensic record.
+      assert.equal(existsSync(join(dir, ".kit-audit.jsonl")), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

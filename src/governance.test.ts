@@ -196,6 +196,22 @@ describe("mergeGovernanceConfig", () => {
     ]);
   });
 
+  it("returns a COPY of the defaults, so a caller cannot poison them process-wide", () => {
+    // Before this, the no-config path returned the shared DEFAULT_GOVERNANCE object by
+    // reference: one caller pushing a keyword onto approval.destructive_operations
+    // changed the destructive-operation gate for every later caller in the process.
+    const a = mergeGovernanceConfig();
+    const b = mergeGovernanceConfig();
+    assert.notEqual(a, b, "each call must hand back its own object");
+    a.approval.destructive_operations!.push("POISONED");
+    assert.equal(b.approval.destructive_operations!.includes("POISONED"), false);
+    assert.equal(
+      mergeGovernanceConfig().approval.destructive_operations!.includes("POISONED"),
+      false,
+      "a later call must not see another caller's mutation",
+    );
+  });
+
   it("keeps a default the user did not override", () => {
     const merged = mergeGovernanceConfig({ enabled: true } as never);
     assert.equal(merged.audit.enabled, true);

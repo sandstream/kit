@@ -66,7 +66,12 @@ export const DEFAULT_GOVERNANCE: Required<GovernanceConfig> = {
  */
 export function mergeGovernanceConfig(userConfig?: GovernanceConfig): Required<GovernanceConfig> {
   if (!userConfig) {
-    return DEFAULT_GOVERNANCE;
+    // A COPY, not the shared object. Returning DEFAULT_GOVERNANCE by reference meant any
+    // caller that mutated the result poisoned the defaults for every later caller in the
+    // process — pushing one keyword onto `approval.destructive_operations` changed the
+    // gate for everything downstream. The configured path already returns a fresh object
+    // via spreads, so only the no-config path leaked the singleton.
+    return structuredClone(DEFAULT_GOVERNANCE);
   }
 
   return {

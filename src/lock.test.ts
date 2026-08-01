@@ -280,3 +280,237 @@ describe("checkLockStatus", () => {
     assert.deepEqual(status.missingTools, []);
   });
 });
+
+describe("writekitMeta (write semantics)", () => {
+  afterEach(async () => {
+    const { rm: rmFs } = await import("node:fs/promises");
+    await rmFs(join(tempDir, ".kit"), { recursive: true, force: true });
+  });
+
+  it("creates the .kit directory when it does not exist yet", async () => {
+    const { existsSync } = await import("node:fs");
+    assert.equal(existsSync(join(tempDir, ".kit")), false, "precondition: no .kit dir");
+
+    await writekitMeta({ name: "sandstream/standard", version: "1.0.0" });
+
+    assert.equal(existsSync(join(tempDir, ".kit", "kit.json")), true);
+  });
+
+  it("writes 2-space-indented JSON terminated by a single newline", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const meta = { name: "sandstream/standard", version: "1.2.0" };
+
+    await writekitMeta(meta);
+    const raw = await readFile(join(tempDir, ".kit", "kit.json"), "utf-8");
+
+    // kit.json is committed; the exact formatting is what keeps re-writes from
+    // producing spurious git diffs, so it is part of the contract.
+    assert.equal(raw, JSON.stringify(meta, null, 2) + "\n");
+  });
+
+  it("replaces the whole file instead of merging into existing keys", async () => {
+    const { mkdir, writeFile, readFile } = await import("node:fs/promises");
+    await mkdir(join(tempDir, ".kit"), { recursive: true });
+    await writeFile(
+      join(tempDir, ".kit", "kit.json"),
+      JSON.stringify({ name: "old/kit", version: "0.0.1", legacyField: true }),
+      "utf-8",
+    );
+
+    await writekitMeta({ name: "new/kit", version: "2.0.0" });
+
+    const parsed = JSON.parse(await readFile(join(tempDir, ".kit", "kit.json"), "utf-8"));
+    assert.equal(parsed.name, "new/kit");
+    assert.equal(parsed.version, "2.0.0");
+    // A caller must not be able to rely on stale fields surviving a write —
+    // this is a full overwrite, not a patch.
+    assert.equal("legacyField" in parsed, false);
+  });
+
+  it("escapes quotes in the kit name so a crafted name cannot forge other fields", async () => {
+    const hostileName = 'evil", "version": "9.9.9';
+
+    await writekitMeta({ name: hostileName, version: "1.0.0" });
+    const meta = await readkitMeta();
+
+    assert.ok(meta !== null);
+    // JSON.stringify must keep the injected fragment inside the name string;
+    // if it ever leaked out, a kit name could rewrite the pinned version.
+    assert.equal(meta.name, hostileName);
+    assert.equal(meta.version, "1.0.0");
+  });
+
+  it("persists unexpected extra properties rather than stripping them", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const meta = { name: "sandstream/standard", version: "1.0.0", extra: "kept" };
+
+    await writekitMeta(meta as unknown as Parameters<typeof writekitMeta>[0]);
+
+    const parsed = JSON.parse(await readFile(join(tempDir, ".kit", "kit.json"), "utf-8"));
+    // Documents actual behaviour: there is no schema filter on the way out.
+    assert.equal(parsed.extra, "kept");
+  });
+
+  it("writes relative to the current working directory at call time", async () => {
+    const { existsSync } = await import("node:fs");
+    const { mkdir, rm: rmFs } = await import("node:fs/promises");
+    const nested = join(tempDir, "nested-project");
+    await mkdir(nested, { recursive: true });
+
+    try {
+      process.chdir(nested);
+      await writekitMeta({ name: "nested/kit", version: "1.0.0" });
+
+      assert.equal(existsSync(join(nested, ".kit", "kit.json")), true);
+      // Must land in the project that is current, never in an ancestor.
+      assert.equal(existsSync(join(tempDir, ".kit", "kit.json")), false);
+    } finally {
+      process.chdir(tempDir);
+      await rmFs(nested, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects instead of swallowing the error when .kit is not a directory", async () => {
+    const { writeFile } = await import("node:fs/promises");
+    // .kit already exists as a regular file, so the write cannot succeed.
+    await writeFile(join(tempDir, ".kit"), "not a directory", "utf-8");
+
+    // Failing loudly matters: a silently dropped write would leave the project
+    // unpinned while callers believe the kit version was recorded.
+    await assert.rejects(
+      () => writekitMeta({ name: "sandstream/standard", version: "1.0.0" }),
+      (err: unknown) => err instanceof Error,
+    );
+  });
+});
+
+describe("checkLockStatus (partial, malformed and superset locks)", () => {
+  afterEach(async () => {
+    const { rm: rmFs } = await import("node:fs/promises");
+    await rmFs(join(tempDir, ".kit"), { recursive: true, force: true });
+  });
+
+  it("identifies missing tools when only some are in the CLI lock", async () => {
+    await updateCliLock({ node: { version: "22.0.0", source: "mise" } });
+
+    const status = await checkLockStatus({}, { node: "22", bun: "1" });
+
+    assert.equal(status.cliLockExists, true);
+    assert.equal(status.cliInSync, false);
+    assert.deepEqual(status.missingTools, ["bun"]);
+  });
+
+  it("tracks skills and tools independently when only one lock file exists", async () => {
+    await updateCliLock({ node: { version: "22.0.0", source: "mise" } });
+
+    const status = await checkLockStatus({ "skill-a": "1.0.0" }, { node: "22" });
+
+    // A present CLI lock must not mask a missing skills lock, or `kit check`
+    // would report green while skills are unpinned.
+    assert.equal(status.skillsLockExists, false);
+    assert.equal(status.skillsInSync, false);
+    assert.deepEqual(status.missingSkills, ["skill-a"]);
+    assert.equal(status.cliLockExists, true);
+    assert.equal(status.cliInSync, true);
+    assert.deepEqual(status.missingTools, []);
+  });
+
+  it("reports in sync when the lock holds more entries than the config asks for", async () => {
+    await updateSkillsLock({ "skill-a": "1.0.0", "skill-b": "2.0.0" });
+    await updateCliLock({
+      node: { version: "22.0.0", source: "mise" },
+      deno: { version: "2.0.0", source: "mise" },
+    });
+
+    const status = await checkLockStatus({ "skill-a": "1.0.0" }, { node: "22" });
+
+    // The check is one-directional (config ⊆ lock); leftover lock entries are
+    // not drift and must not be reported as such.
+    assert.equal(status.skillsInSync, true);
+    assert.equal(status.cliInSync, true);
+    assert.deepEqual(status.missingSkills, []);
+    assert.deepEqual(status.missingTools, []);
+  });
+
+  it("reports in sync with empty config once both lock files exist", async () => {
+    await updateSkillsLock({ "skill-a": "1.0.0" });
+    await updateCliLock({ node: { version: "22.0.0", source: "mise" } });
+
+    const status = await checkLockStatus({}, {});
+
+    assert.equal(status.skillsInSync, true);
+    assert.equal(status.cliInSync, true);
+  });
+
+  it("matches by name only, so a version change is not reported as drift", async () => {
+    await updateSkillsLock({ "skill-a": "1.0.0" });
+    await updateCliLock({ node: { version: "22.0.0", source: "mise" } });
+
+    const status = await checkLockStatus({ "skill-a": "9.9.9" }, { node: "99" });
+
+    // Presence check only — versions are never compared. Documented here so a
+    // future version-aware implementation has to change this test on purpose.
+    assert.equal(status.skillsInSync, true);
+    assert.equal(status.cliInSync, true);
+    assert.deepEqual(status.missingSkills, []);
+    assert.deepEqual(status.missingTools, []);
+  });
+
+  it("lists missing skills in config key order", async () => {
+    const status = await checkLockStatus(
+      { "z-skill": "1.0.0", "a-skill": "1.0.0", "m-skill": "1.0.0" },
+      {},
+    );
+
+    // Order is the config's, not sorted — the CLI prints this list verbatim.
+    assert.deepEqual(status.missingSkills, ["z-skill", "a-skill", "m-skill"]);
+  });
+
+  it("treats an unparseable skills lock as absent and reports every skill missing", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(join(tempDir, ".kit"), { recursive: true });
+    await writeFile(join(tempDir, ".kit", "skills-lock.json"), "{ truncated", "utf-8");
+
+    const status = await checkLockStatus({ "skill-a": "1.0.0", "skill-b": "2.0.0" }, {});
+
+    // Fail closed: a corrupt lock must never be read as "everything pinned".
+    assert.equal(status.skillsLockExists, false);
+    assert.equal(status.skillsInSync, false);
+    assert.deepEqual(status.missingSkills, ["skill-a", "skill-b"]);
+  });
+
+  it("treats an unparseable CLI lock as absent and reports every tool missing", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(join(tempDir, ".kit"), { recursive: true });
+    await writeFile(join(tempDir, ".kit", "cli-lock.json"), "not json at all", "utf-8");
+
+    const status = await checkLockStatus({}, { node: "22", bun: "1" });
+
+    assert.equal(status.cliLockExists, false);
+    assert.equal(status.cliInSync, false);
+    assert.deepEqual(status.missingTools, ["node", "bun"]);
+  });
+
+  it("throws when a valid-JSON skills lock has no skills map and skills are configured", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(join(tempDir, ".kit"), { recursive: true });
+    // Parses fine, but has no `skills` key — e.g. a hand-edited or half-written file.
+    await writeFile(join(tempDir, ".kit", "skills-lock.json"), '{"version":1}', "utf-8");
+
+    // Actual behaviour today is a TypeError, not a fail-closed status object.
+    await assert.rejects(() => checkLockStatus({ "skill-a": "1.0.0" }, {}), TypeError);
+  });
+
+  it("does not throw on a skills lock with no skills map when no skills are configured", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(join(tempDir, ".kit"), { recursive: true });
+    await writeFile(join(tempDir, ".kit", "skills-lock.json"), '{"version":1}', "utf-8");
+
+    const status = await checkLockStatus({}, {});
+
+    // The loop never runs, so the missing map goes unnoticed and the lock
+    // counts as existing and in sync.
+    assert.equal(status.skillsLockExists, true);
+    assert.equal(status.skillsInSync, true);
+  });
+});

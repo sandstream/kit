@@ -307,3 +307,125 @@ describe("hasExpiredSecrets / hasSecretWarnings", () => {
     assert.equal(hasSecretWarnings([{ key: "k", expired: false, warning: true }]), true);
   });
 });
+
+describe("hasSecretWarnings", () => {
+  afterEach(() => {
+    delete process.env._KIT_WARN_WINDOW_EXPIRES_AT;
+    delete process.env._KIT_FAR_FUTURE_EXPIRES_AT;
+  });
+
+  it("returns false for an empty list", () => {
+    assert.equal(hasSecretWarnings([]), false);
+  });
+
+  it("returns true when the single entry is flagged as a warning", () => {
+    const expirations: SecretExpiration[] = [
+      {
+        key: "SOON",
+        expiry_date: daysFromNow(3),
+        days_until_expiry: 3,
+        expired: false,
+        warning: true,
+      },
+    ];
+    assert.equal(hasSecretWarnings(expirations), true);
+  });
+
+  it("returns false for an expired secret that is not flagged as a warning", () => {
+    const expirations: SecretExpiration[] = [
+      {
+        key: "DEAD",
+        expiry_date: daysAgo(9),
+        days_until_expiry: -9,
+        expired: true,
+        warning: false,
+      },
+    ];
+    // checkSecretExpiration marks a secret EITHER expired OR warning, never both.
+    // So "no warnings" must not be read as "nothing wrong" — callers have to pair
+    // this with hasExpiredSecrets or an already-expired secret slips through silently.
+    assert.equal(hasSecretWarnings(expirations), false);
+    assert.equal(hasExpiredSecrets(expirations), true);
+  });
+
+  it("finds a warning at any position in the list, not just the first entry", () => {
+    const expirations: SecretExpiration[] = [
+      { key: "FINE_A", expired: false, warning: false },
+      { key: "DEAD", expired: true, warning: false },
+      { key: "FINE_B", expired: false, warning: false },
+      { key: "SOON", expired: false, warning: true },
+    ];
+    // A trailing warning must still be detected; short-circuiting on the first
+    // entry (or only inspecting index 0) would hide it.
+    assert.equal(hasSecretWarnings(expirations), true);
+  });
+
+  it("reads the warning flag only and ignores days_until_expiry", () => {
+    const expirations: SecretExpiration[] = [
+      {
+        key: "MISLABELLED",
+        expiry_date: daysFromNow(1),
+        days_until_expiry: 1,
+        expired: false,
+        // The flag is authoritative: the function must not re-derive urgency
+        // from the day count, or the warn_days_before_expiry threshold that
+        // produced this record would be silently overridden.
+        warning: false,
+      },
+    ];
+    assert.equal(hasSecretWarnings(expirations), false);
+  });
+
+  it("returns a real boolean rather than a truthy value", () => {
+    // Callers use this in `if`/exit-code positions; a non-boolean would still
+    // "work" there but breaks strict comparisons and JSON output.
+    const flagged: SecretExpiration[] = [{ key: "k", expired: false, warning: true }];
+    assert.equal(typeof hasSecretWarnings(flagged), "boolean");
+    assert.equal(typeof hasSecretWarnings([]), "boolean");
+  });
+
+  it("does not mutate the list it is given", () => {
+    const expirations: SecretExpiration[] = [
+      {
+        key: "SOON",
+        expiry_date: daysFromNow(2),
+        days_until_expiry: 2,
+        expired: false,
+        warning: true,
+      },
+      {
+        key: "FINE",
+        expiry_date: daysFromNow(200),
+        days_until_expiry: 200,
+        expired: false,
+        warning: false,
+      },
+    ];
+    const snapshot: SecretExpiration[] = JSON.parse(JSON.stringify(expirations));
+    hasSecretWarnings(expirations);
+    assert.deepEqual(expirations, snapshot);
+  });
+
+  it("returns true for real checkSecretExpiration output inside the warn window", async () => {
+    process.env._KIT_WARN_WINDOW_EXPIRES_AT = daysFromNow(10);
+
+    const result = await checkSecretExpiration(enabledConfig, ["_KIT_WARN_WINDOW"]);
+
+    // End-to-end with the producer, so a change to how `warning` is set is caught
+    // here and not just in hand-built fixtures.
+    assert.equal(result.length, 1);
+    assert.equal(hasSecretWarnings(result), true);
+  });
+
+  it("returns false for real checkSecretExpiration output beyond the warn window", async () => {
+    process.env._KIT_FAR_FUTURE_EXPIRES_AT = daysFromNow(31);
+
+    const result = await checkSecretExpiration(enabledConfig, ["_KIT_FAR_FUTURE"]);
+
+    // 31 days out with warn_days_before_expiry = 30: just past the threshold,
+    // so it is reported but not warned about.
+    assert.equal(result.length, 1);
+    assert.equal(result[0].warning, false);
+    assert.equal(hasSecretWarnings(result), false);
+  });
+});

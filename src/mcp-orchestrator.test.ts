@@ -187,3 +187,105 @@ describe("file-format sanity", () => {
     assert.equal(parsed.sentry.accessToken, "x");
   });
 });
+
+describe("resolveMcpToken — error contract and expiry edges", () => {
+  afterEach(async () => {
+    await reset();
+  });
+
+  it("names the MCP and the exact remediation command when no token is stored", async () => {
+    await reset();
+    // The whole point of throwing here (rather than returning a bad bearer) is a
+    // clear operator message. Pin BOTH halves: the server name must be
+    // interpolated — not a hardcoded example — and the copy-pasteable command
+    // must name the same server, or the error stops being actionable.
+    await assert.rejects(() => resolveMcpToken("acme-internal"), {
+      message: /No MCP token for "acme-internal"/,
+    });
+    await assert.rejects(() => resolveMcpToken("acme-internal"), {
+      message: /kit mcp auth acme-internal/,
+    });
+  });
+
+  it("puts the expiry timestamp in the expired error", async () => {
+    await reset();
+    const expiresAt = new Date(Date.now() - 60_000).toISOString();
+    await setMcpToken("sentry", { accessToken: "x", expiresAt });
+    // Without the timestamp an operator cannot tell a just-lapsed token from one
+    // that died months ago, which changes what they should do about it.
+    await assert.rejects(() => resolveMcpToken("sentry"), {
+      message: new RegExp(expiresAt.replace(/[.+]/g, "\\$&")),
+    });
+  });
+
+  it("resolves a token whose expiresAt is still in the future", async () => {
+    await reset();
+    await setMcpToken("sentry", {
+      accessToken: "live",
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    assert.equal(await resolveMcpToken("sentry"), "live");
+  });
+
+  it("treats an unparseable expiresAt as no expiry and returns the token", async () => {
+    await reset();
+    await setMcpToken("sentry", { accessToken: "abc", expiresAt: "not-a-date" });
+    // Date.parse gives NaN, the Number.isFinite guard is false, so the expiry
+    // check is skipped entirely. This is a FAIL-OPEN branch: a corrupt or
+    // truncated expiresAt makes the token look eternally valid rather than
+    // suspect. Asserted as-is so a deliberate change to fail-closed shows up
+    // here as a failing test instead of passing silently.
+    assert.equal(await resolveMcpToken("sentry"), "abc");
+  });
+
+  it("ignores an empty-string expiresAt (falsy) rather than rejecting it", async () => {
+    await reset();
+    await setMcpToken("sentry", { accessToken: "abc", expiresAt: "" });
+    assert.equal(await resolveMcpToken("sentry"), "abc");
+  });
+
+  it("does not enforce declared scopes — a scope-mismatched token still resolves", async () => {
+    await reset();
+    await setMcpToken("sentry", { accessToken: "narrow", scopes: ["org:read"] });
+    const declared: McpServerConfig = { scopes: ["org:read", "project:write"] };
+    // statusForMcp calls this exact state a problem...
+    assert.equal((await statusForMcp("sentry", declared)).status, "scope-mismatch");
+    // ...but resolveMcpToken hands the bearer over anyway: it never sees the
+    // declared config. Documented, not wished away — callers that need scope
+    // enforcement must consult statusForMcp themselves, and anyone tempted to
+    // rely on resolve* for authorization should see this test first.
+    assert.equal(await resolveMcpToken("sentry"), "narrow");
+  });
+
+  it("matches the server name exactly — a token for another MCP does not satisfy it", async () => {
+    await reset();
+    await setMcpToken("stripe", { accessToken: "stripe-token" });
+    // No prefix/fuzzy fallback: leaking one vendor's bearer into another
+    // vendor's API call would be the worst possible convenience.
+    await assert.rejects(() => resolveMcpToken("sentry"), /No MCP token for "sentry"/);
+    await assert.rejects(() => resolveMcpToken("strip"), /No MCP token for "strip"/);
+    await assert.rejects(() => resolveMcpToken("stripe-eu"), /No MCP token for "stripe-eu"/);
+  });
+
+  it("returns an empty accessToken as-is instead of treating it as missing", async () => {
+    await reset();
+    await setMcpToken("sentry", { accessToken: "" });
+    // An entry exists, so the missing-token guard does not fire and the empty
+    // string is returned — a caller would send `Authorization: Bearer `.
+    // Current behaviour; see notes.
+    assert.equal(await resolveMcpToken("sentry"), "");
+  });
+
+  it("does not throw for names inherited from Object.prototype (current behaviour)", async () => {
+    await reset();
+    // The store is a bare JSON.parse result, so `store[name]` finds inherited
+    // members for these names: `store["__proto__"]` is Object.prototype and
+    // `store["constructor"]` is Object — both truthy, so the `if (!token)`
+    // fail-closed guard is bypassed and `.accessToken` is undefined. The
+    // function's contract says it throws when a token is missing; for these
+    // names it resolves with undefined instead. Asserted as the behaviour that
+    // exists today, and flagged as a real defect in notes.
+    assert.equal(await resolveMcpToken("__proto__"), undefined);
+    assert.equal(await resolveMcpToken("constructor"), undefined);
+  });
+});

@@ -694,3 +694,123 @@ describe("audit anchor - external anchor (command transport, fail-closed)", () =
     assert.match(withExt.message, /external anchor \(tsa\)/);
   });
 });
+
+// `lineHashes` is the v1/v2 (hash-only) extractor. The live seal path uses
+// `lineSeals`/v3, so nothing in production calls this any more — but legacy v1/v2
+// anchor records on disk are still recomputed through `computeAnchorTip` over
+// hash-only input, so its extraction rules (what it accepts, what it rejects, and
+// the ORDER it returns) remain security-relevant. These cases pin them.
+describe("audit anchor - lineHashes (hash-only extractor)", () => {
+  const h = (s: string) => createHash("sha256").update(s).digest("hex");
+  const entry = (op: string, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      operation: op,
+      environment: "dev",
+      success: true,
+      prev: "0".repeat(64),
+      hash: h(op),
+      ...extra,
+    });
+
+  it("returns every entry's hash in file order", () => {
+    const content = [entry("op-0"), entry("op-1"), entry("op-2")].join("\n") + "\n";
+    // Order is load-bearing: computeAnchorTip folds the list sequentially, so a
+    // reordered extraction would produce a different tip for an untouched log.
+    assert.deepEqual(lineHashes(content), [h("op-0"), h("op-1"), h("op-2")]);
+  });
+
+  it("ignores blank lines, whitespace-only lines and CRLF line endings", () => {
+    const crlf = [entry("op-0"), entry("op-1")].join("\r\n") + "\r\n";
+    // \r is JSON whitespace, so a CRLF-written log must not read as unparseable.
+    assert.deepEqual(lineHashes(crlf), [h("op-0"), h("op-1")]);
+    const gappy = `${entry("op-0")}\n\n   \n\t\n${entry("op-1")}`;
+    // Also tolerates a missing trailing newline on the last entry.
+    assert.deepEqual(lineHashes(gappy), [h("op-0"), h("op-1")]);
+  });
+
+  it("returns an empty array - not null - for empty or whitespace-only content", () => {
+    // [] and null mean opposite things to callers: null is "unanchorable, refuse"
+    // (anchorAuditLog throws), [] is "zero entries, anchorable". A fresh/emptied
+    // log must land on [] so it can be sealed at count 0.
+    assert.deepEqual(lineHashes(""), []);
+    assert.deepEqual(lineHashes("\n"), []);
+    assert.deepEqual(lineHashes("\n   \n\t\n"), []);
+  });
+
+  it("returns null when any line is unparseable JSON, including the last", () => {
+    // Fail-closed: one corrupt line invalidates the whole extraction rather than
+    // yielding a short list that would silently anchor a partial log.
+    assert.equal(lineHashes(`{oops\n${entry("op-1")}\n`), null);
+    assert.equal(lineHashes(`${entry("op-0")}\n{oops\n`), null);
+    assert.equal(lineHashes(`${entry("op-0")}\n${entry("op-1")}\ntrailing garbage\n`), null);
+  });
+
+  it("returns null when a line has no hash or a non-string hash", () => {
+    assert.equal(lineHashes(JSON.stringify({ operation: "x" }) + "\n"), null);
+    assert.equal(lineHashes(`{"hash":1}\n`), null);
+    assert.equal(lineHashes(`{"hash":null}\n`), null);
+    assert.equal(lineHashes(`{"hash":true}\n`), null);
+    assert.equal(lineHashes(`{"hash":["aa"]}\n`), null);
+    // A valid-JSON line that is not an object also has no string hash -> null.
+    assert.equal(lineHashes("123\n"), null);
+    assert.equal(lineHashes(`"aa"\n`), null);
+    assert.equal(lineHashes(`[{"hash":"aa"}]\n`), null);
+    // Rejection is all-or-nothing: one bad line kills an otherwise good log.
+    assert.equal(lineHashes(`${entry("op-0")}\n{"hash":1}\n`), null);
+  });
+
+  it("does not validate the hash VALUE - only that it is a string", () => {
+    // This helper is a shape extractor, not a chain checker: an empty or non-hex
+    // hash passes through here and is caught later by the keyless chain check.
+    // Worth pinning because a caller must not treat a non-null return as "valid".
+    assert.deepEqual(lineHashes(`{"hash":""}\n`), [""]);
+    assert.deepEqual(lineHashes(`{"hash":"not hex"}\n`), ["not hex"]);
+  });
+
+  it("preserves duplicate hashes so the count matches the line count", () => {
+    const dup = entry("same");
+    // The anchor stores `count` alongside the tip; de-duplicating here would let a
+    // replayed/duplicated entry shrink the count and defeat the truncation check.
+    assert.deepEqual(lineHashes(`${dup}\n${dup}\n${dup}\n`), [h("same"), h("same"), h("same")]);
+  });
+
+  it("returns null (fail closed) on a bare `null` JSON line rather than throwing", () => {
+    // This case USED to throw: `JSON.parse("null")` succeeds inside the try, and
+    // `obj.hash` was read outside it, so a log line containing exactly `null` escaped
+    // as a TypeError instead of the fail-closed null every other malformed line gets.
+    // `lineSeals` shared the flaw and IS the live extractor `verifyAgainstAnchor`
+    // calls — a crash is not a verdict. Both guard the parse result now.
+    assert.equal(lineHashes("null\n"), null);
+    assert.equal(lineHashes(`${entry("op-0")}\nnull\n`), null);
+    assert.equal(lineSeals("null\n"), null);
+    assert.equal(lineSeals(`${entry("op-0")}\nnull\n`), null);
+  });
+
+  it("agrees with lineSeals, so a legacy v1 anchor still recomputes to anchored-ok", () => {
+    const key = Buffer.alloc(32, 5);
+    const content = [entry("op-0", { kid: "k1", sig: "S1" }), entry("op-1")].join("\n") + "\n";
+    const hashes = lineHashes(content);
+    assert.ok(hashes, "the synthetic log must be parseable"); // also narrows away null
+    // verifyAgainstAnchor recomputes a v<=3 record via lineSeals(...).map(s => s.hash);
+    // if the two extractors ever diverge, every legacy anchor on disk turns into a
+    // spurious tip-mismatch (a false tamper alarm).
+    assert.deepEqual(
+      hashes,
+      lineSeals(content)?.map((s) => s.hash),
+    );
+    const legacy: AnchorRecord = {
+      tip: computeAnchorTip(key, hashes),
+      count: hashes.length,
+      algo: "hmac-sha256",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      // no version / no keyFingerprint => v1 record, hash-only fold
+    };
+    assert.equal(verifyAgainstAnchor(content, legacy, key).status, "anchored-ok");
+    // ...and a v1 tip built from hashes must NOT be accepted for a v3 record:
+    // the v3 fold binds kid/sig, so the same bytes yield a different tip.
+    assert.equal(
+      verifyAgainstAnchor(content, { ...legacy, version: 3 }, key).status,
+      "tip-mismatch",
+    );
+  });
+});
