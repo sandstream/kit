@@ -8,6 +8,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [6.3.0] - 2026-08-01
 
+### Fixed
+
+- **A false security claim in the README and in three compliance evidence maps.** kit's Pillar 2
+  entry stated in the present tense that *"keyless egress signs requests with RFC 9421 HTTP
+  Message Signatures for hosts in `[scope].sign`"*. Measured: the whole `src/keyless/` directory
+  is unreachable — `http-sig.ts` is imported only by `sign-request.ts`, which is imported by
+  nothing; no command exposes it; nothing on the egress path signs a request; and there is no
+  `[scope].sign` field in the profile schema at all.
+
+  The primitives are real and tested, so they stay. What changed is every place that described
+  them as shipped: the README, **`coverage/nist-800-53.ts` (both the IA and SC families)** and
+  **`coverage/owasp-agentic-top10.ts`**, where "keyless egress" was also listed as one of the
+  *checks* backing a control. Evidence you would hand an auditor is the worst possible place for
+  a capability claim that is not wired, which is why this one is called out separately from the
+  dead code below.
+
+  (Care taken not to overclaim in the other direction: "keyless" in `kit audit verify` means a
+  keyless *hash chain* — no identity key — which is a different, working thing that happens to
+  share the word.)
+
+- **A false positive in rule 15, found by reading its own output instead of trusting it.**
+  `buildOpenCliDoc`, `serializeOpenCli`, `collectPublicSurface` and `serializePublicSurface` were
+  reported as unwired. They are called by `scripts/gen-opencli.mjs` and
+  `scripts/gen-public-surface.mjs` via `await import(dist/…)` — reachable, load-bearing, and
+  invisible to a rule that only scanned `src/`. Repo tooling now counts as a call site, with a
+  test pinning it.
+
 ### Removed
 
 - **~1,100 lines of unreachable code, found by rule 15 and deleted.** Every export it flagged as
@@ -35,6 +62,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
   Net effect on the tracked numbers: unwired exports **69 → 49**, referenced-nowhere **20 → 0**,
   untested files **91 → 90**.
+
+- **A further ~2,000 lines: four orphan modules, each a duplicate of something that works or a
+  design that was never wired.** Nothing in the tree imported any of these files.
+
+  - `src/secrets-service.ts` (437 lines) + its test + `src/secrets-model.ts` (91, orphaned by
+    the removal) — a parallel vault service with sharing, revocation, access logs and metrics.
+    `kit secrets` is the real, working implementation; this was an alternative design.
+  - `src/control-plane/` — `applyPolicyBundle` / `fetchPolicyBundle`. `kit policy pull` and
+    `pull-revocations` **do work**, implemented in `commands/policy.ts`; this was a duplicate.
+    Verified by running both subcommands before deleting.
+  - `src/plugin-registry.ts` — a class-based `PluginRegistry` duplicating the live interface in
+    `src/plugins.ts`.
+  - `parsePolicyToml` in `policy-doc.ts`, orphaned by the control-plane removal.
+
+  `src/keyless/` was **kept**: unlike these, it is not a duplicate — it is a real primitive
+  nothing has wired yet, so the fix was to stop claiming it (above) rather than delete it.
+
+  Tracked numbers after this batch: unwired exports **49 → 32**, referenced-nowhere back to
+  **0**, untested files **90 → 89**.
+
+  **Not done, deliberately:** the 32 remaining *tested-but-never-called* exports in live
+  modules. A bulk brace-matching pass over 26 of them corrupted `cost-monitor.ts` (it removed 30
+  functions where 26 were named) and was reverted whole. They are dead weight, not false claims,
+  and the tracked number is a better outcome than a broken tree at the end of a long change.
 
 ### Added
 

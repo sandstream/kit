@@ -87,16 +87,6 @@ export function loadPolicy(root: string): PolicyDoc | null {
   }
 }
 
-/** Parse raw `.kit-policy.toml` TEXT (not a path). Returns null when unparseable. Used by
- *  the control plane to read the incoming bundle's `revision` for rollback protection. */
-export function parsePolicyToml(text: string): PolicyDoc | null {
-  try {
-    return parse(text) as unknown as PolicyDoc;
-  } catch {
-    return null;
-  }
-}
-
 export interface PolicyValidation {
   ok: boolean;
   errors: string[];

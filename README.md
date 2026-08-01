@@ -80,11 +80,12 @@ Four pillars, all additive over 4.x — no stable command removed. Highlights:
   0600 key) and never silently downgrades; `KIT_REQUIRE_HARDWARE_IDENTITY` makes a missing
   hardware backend fail-closed. `kit identity migrate` moves onto hardware and
   revokes the old key in one audited step.
-- **Pillar 2 — control plane + keyless credentials.** `kit policy pull` /
-  `pull-revocations` distribute an org-signed policy, verified and enforced fully
-  offline; `kit policy approve` mints offline signed approval tokens. Keyless
-  egress signs requests with RFC 9421 HTTP Message Signatures for hosts in
-  `[scope].sign` — sign, don't store.
+- **Pillar 2 — control plane.** `kit policy pull` / `pull-revocations` distribute an
+  org-signed policy, verified and enforced fully offline; `kit policy approve` mints
+  offline signed approval tokens. **Keyless egress signing is not shipped:** the RFC 9421
+  HTTP Message Signature primitives exist and are tested (`src/keyless/`), but no command
+  reaches them, there is no `[scope].sign` field in the profile schema, and nothing on the
+  egress path signs a request. This entry previously described it in the present tense.
 - **Pillar 3 — one exec-broker.** A single signed-scope governance floor drives
   the PreToolUse gates (`kit gate-egress` / `gate-fs`), the MCP runtime, and the
   `kit doctor` posture. Runtime mediation is **on by default in observe mode**
