@@ -15,7 +15,7 @@ Per memory `feedback_owasp_2025`, security reviews target the **2025** Top 10
 | Elevation-gate on destructive ops (`requireElevation` / `consumeElevation`) | ✅ shipped |
 | Per-op scope mapping with one-shot consumption for irreversible ops | ✅ shipped (P2.5 `elevation-scopes.ts`) |
 | `[policy.agent_writes]` pre-approval + `KIT_POLICY_HASH` for classifier consumption | ✅ shipped (P1.3 `policy.ts`) |
-| RBAC model + decision-path tests | ✅ shipped (`rbac-model.ts` + `rbac-service.test.ts`) |
+| RBAC model + decision-path tests | ✅ shipped (`rbac/policy-schema.ts` + `rbac/resolve.ts`, with `rbac/policy-schema.test.ts` + `rbac/resolve.test.ts`) |
 
 ## A02 — Cryptographic Failures
 
@@ -23,7 +23,7 @@ Per memory `feedback_owasp_2025`, security reviews target the **2025** Top 10
 |---|---|
 | Token store `~/.kit/mcp-tokens.json` atomic write + mode 0o600 on create | ✅ fixed (security-review caught race window — `edb29f7`) |
 | Parent dir `~/.kit/` chmod 0o700 | ✅ shipped |
-| Secret values never echoed in error messages (`safeText()` truncation + redactSecrets) | ✅ shipped |
+| Secret values never echoed in error messages (`safeStatusLine()` truncation + `redactSecrets()`) | ✅ shipped |
 | TOTP secret at `~/.kit/totp-secret` chmod 0o600 | ✅ shipped (`elevation.ts:enrollTotp`) |
 | Tokens never persisted in plugin code — read from vault per-call | ✅ shipped (every sandstream-kit-plugin-* follows this pattern) |
 | TLS: every fetch uses HTTPS to vendor APIs; no custom `Agent` with `rejectUnauthorized:false` | ✅ verified in P0 audit |
