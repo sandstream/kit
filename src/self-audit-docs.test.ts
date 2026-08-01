@@ -10,6 +10,8 @@ import {
   extractDocTomlSections,
   loadSourceFlagTokens,
   flagValidationCoverage,
+  loadKnownEnvVars,
+  extractDocEnvVars,
   docExemption,
   loadContractVerbs,
   runDocsClaimsAudit,
@@ -164,7 +166,12 @@ describe("self-audit-docs — runDocsClaimsAudit", () => {
       // result per claim class.
       assert.deepEqual(
         res.filter((r) => r.category === "self-audit/docs-claims").map((r) => r.name),
-        ["documented commands", "documented flags", "documented config sections"],
+        [
+          "documented commands",
+          "documented flags",
+          "documented config sections",
+          "documented env vars",
+        ],
       );
       // The synthetic repo has no src/commands, so coverage reports a single pass.
       const cov = res.filter((r) => r.category === "self-audit/flag-validation");
@@ -491,5 +498,81 @@ describe("self-audit-docs — flagValidationCoverage", () => {
     // silently become a no-op again.
     const cov = flagValidationCoverage(join(import.meta.dirname, ".."));
     assert.ok(cov.validating.includes("check"), "commands/check.ts must validate its flags");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Claim class 4: env vars
+// ---------------------------------------------------------------------------
+
+describe("self-audit-docs — extractDocEnvVars (pure)", () => {
+  it("finds a var in a fence and in prose — both are the same claim to a reader", () => {
+    const md = ["Set `KIT_ONE` first.", "```bash", "export KIT_TWO=1", "```"].join("\n");
+    assert.deepEqual(
+      extractDocEnvVars(md, "d.md").map((r) => r.verb),
+      ["KIT_ONE", "KIT_TWO"],
+    );
+  });
+
+  it("drops a trailing-underscore wildcard — it names a family, not a variable", () => {
+    assert.deepEqual(extractDocEnvVars("`KIT_PROVENANCE_`*", "d.md"), []);
+  });
+
+  it("ignores non-KIT env vars", () => {
+    assert.deepEqual(extractDocEnvVars("`NODE_ENV` and `PATH`", "d.md"), []);
+  });
+
+  it("reports the line", () => {
+    assert.deepEqual(extractDocEnvVars(["a", "b", "`KIT_XY`"].join("\n"), "d.md"), [
+      { verb: "KIT_XY", line: 3, file: "d.md" },
+    ]);
+  });
+});
+
+describe("self-audit-docs — loadKnownEnvVars", () => {
+  it("counts process.env reads, destructured env reads, and vars set for children", () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-envvars-"));
+    try {
+      mkdirSync(join(root, "src"), { recursive: true });
+      writeFileSync(
+        join(root, "src", "a.ts"),
+        [
+          "const a = process.env.KIT_DIRECT;",
+          'const b = process.env["KIT_BRACKET"];',
+          // airgap/config.ts reads its vars off a destructured env object.
+          "const c = pick(env.KIT_DESTRUCTURED, x);",
+          // set for a hook / child process
+          'spawn(cmd, { env: { KIT_SET_FOR_CHILD: "1" } });',
+        ].join("\n"),
+        "utf-8",
+      );
+      const known = loadKnownEnvVars(root);
+      for (const v of ["KIT_DIRECT", "KIT_BRACKET", "KIT_DESTRUCTURED", "KIT_SET_FOR_CHILD"]) {
+        assert.ok(known.has(v), `${v} must be recognised`);
+      }
+      assert.equal(known.has("KIT_NEVER_MENTIONED"), false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("excludes test files, so a var only a test names does not count as wired", () => {
+    // This is the KIT_MEMORY_CLASS shape: a pure resolver unit-tested in isolation
+    // with zero production call sites. A test must not make the claim true.
+    const root = mkdtempSync(join(tmpdir(), "kit-envvars2-"));
+    try {
+      mkdirSync(join(root, "src"), { recursive: true });
+      writeFileSync(join(root, "src", "a.test.ts"), "process.env.KIT_ONLY_IN_TEST;", "utf-8");
+      assert.equal(loadKnownEnvVars(root).has("KIT_ONLY_IN_TEST"), false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("kit's own tree knows the hardware mandate var, and not the misspelling", () => {
+    // README, doctor's remediation hint and the NIST evidence map all documented
+    // KIT_REQUIRE_HARDWARE; the variable the code reads is KIT_REQUIRE_HARDWARE_IDENTITY.
+    const known = loadKnownEnvVars(join(import.meta.dirname, ".."));
+    assert.ok(known.has("KIT_REQUIRE_HARDWARE_IDENTITY"));
   });
 });

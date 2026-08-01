@@ -45,6 +45,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   committed baseline** — freezing those would have suppressed live findings under the guise of
   progress.
 
+- **Rule 14 also resolves documented `KIT_*` env vars against the code that reads them.**
+  78 references across 63 docs. A documented switch no code branch on is a *silent
+  false-secure*: the user believes a control is on. The oracle counts a name as known if the
+  implementation reads it via `process.env.X`, via a destructured `env.X` (how
+  `airgap/config.ts` does it), or sets it for a child process — generous on purpose, so only a
+  name the implementation never touches is reported. Test files do **not** count: a pure
+  resolver unit-tested in isolation with zero production call sites does not make the claim
+  true, which is exactly the shape of the memory-class finding below.
+
 - **Flag-validation coverage is now measured, not invisible.** `kit check` is the only one of
   **44** command modules that rejects unknown flags; the other 43 accept anything. Rather than
   refactor 70 commands blind — each needs its true flag list read off its own source, and
@@ -89,6 +98,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   A real flag documented on the wrong command still passes.
 
 ### Fixed
+
+
+- **Two documented security switches that no code read.**
+  - `KIT_REQUIRE_HARDWARE` appeared in the README, in `kit doctor`'s own remediation hint, and
+    in the **NIST 800-53 evidence map** as the way to make a missing hardware key backend
+    fail closed. The variable the implementation reads is `KIT_REQUIRE_HARDWARE_IDENTITY`.
+    Setting the documented one did nothing at all. Corrected in all four places.
+  - `docs/OWASP_2025.md` listed *"Rate-limiter failed OPEN on Redis error → Fail-closed;
+    opt-in `KIT_RATE_LIMIT_FAIL_OPEN=1`"* as **✅ shipped (P0.3)**. kit has no rate limiter —
+    the only match in the tree is a SQL column name — and no `KIT_RATE_LIMIT_FAIL_OPEN`
+    anywhere. Row removed. The sibling rows in that table (`KIT_ELEVATED`, `KIT_PROD_OK`) were
+    checked and do hold.
+
+- **README no longer overstates classified memory.** The README described a working disclosure
+  control: *"every row carries a sensitivity class, and recall never returns a row more
+  restrictive than the asking context — so a note captured in a restricted repo cannot surface
+  while you work in a public one."* Measured: `KIT_MEMORY_CLASS` is read in **0** places,
+  `[memory] default_class` in **0**, `resolveMemoryClass()` has **0** production callers,
+  **0 of 30** `openMemoryDb()` call sites pass a class, no indexer ever sets `memoryClass`, and
+  `contextClass` is never supplied outside `memory/`.
+
+  The class column, the fail-closed resolution and the recall filter are all implemented and
+  unit-tested — nothing connects them, so every row takes the built-in default and the override
+  is inert. The README now states that plainly. **Wiring it is a deliberate change to
+  disclosure semantics and is not attempted here**; the honest description is the fix, and the
+  gate above is what keeps the claim and the code together from now on.
+
 
 - **Documented surface that did not exist.** Found by the rule above on its first runs against
   kit's own tree — 3 commands, 8 flags, 3 config sections:

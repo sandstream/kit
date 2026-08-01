@@ -81,7 +81,7 @@ export const NIST_800_53: StandardDescriptor = {
       bucket: "auto",
       checks: ["kit identity", "cosign", "kit auth", "signed scope"],
       rationale:
-        "Machine identity is a hardware-rooted Ed25519 key where a backend exists (Secure Enclave / TPM / external command), surfaced honestly by `kit doctor` and NEVER silently downgraded — a file-backed key warns, and `KIT_REQUIRE_HARDWARE` makes a missing hardware backend fail-closed. Elevation for destructive operations is TOTP-gated, and keyless egress signs requests with RFC 9421 HTTP Message Signatures (sign, don't store). Human-user authentication to your systems is out of scope for this family in kit's context.",
+        "Machine identity is a hardware-rooted Ed25519 key where a backend exists (Secure Enclave / TPM / external command), surfaced honestly by `kit doctor` and NEVER silently downgraded — a file-backed key warns, and `KIT_REQUIRE_HARDWARE_IDENTITY` makes a missing hardware backend fail-closed. Elevation for destructive operations is TOTP-gated, and keyless egress signs requests with RFC 9421 HTTP Message Signatures (sign, don't store). Human-user authentication to your systems is out of scope for this family in kit's context.",
     },
     IR: {
       bucket: "manual",

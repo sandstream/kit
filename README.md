@@ -77,7 +77,7 @@ Four pillars, all additive over 4.x — no stable command removed. Highlights:
 
 - **Pillar 1 — hardware-rooted identity.** `kit doctor` surfaces which backend
   signs kit's identity (Secure Enclave / TPM / external command vs. a file-backed
-  0600 key) and never silently downgrades; `KIT_REQUIRE_HARDWARE` makes a missing
+  0600 key) and never silently downgrades; `KIT_REQUIRE_HARDWARE_IDENTITY` makes a missing
   hardware backend fail-closed. `kit identity migrate` moves onto hardware and
   revokes the old key in one audited step.
 - **Pillar 2 — control plane + keyless credentials.** `kit policy pull` /
@@ -276,7 +276,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit login --plan`: Show the resolved auth strategy (vault/capture/interactive) per service without logging in
 - `kit secrets {set,migrate,rotate,propagate,onecli,validate}`: Secret lifecycle
 - `kit memory {index,search,stats,suggest,merge,save,threads,share,backup}`: Local-first, cross-harness second brain (per-harness `stats`, project recall, saved copilots) + `kit memory pal` pending-action ledger
-  - **Classified memory** (`[memory] default_class` = `public`\|`internal`\|`restricted`, default `internal`; `KIT_MEMORY_CLASS` overrides): every row carries a sensitivity class, and recall never returns a row **more restrictive than the asking context** — so a note captured in a restricted repo cannot surface while you work in a public one. A row whose class is missing or unrecognized is excluded from **every** context (fail-closed); an *invalid* configured value falls back to `restricted` rather than silently widening disclosure.
+  - **Classified memory** — *partially wired, and this line says so rather than implying more.* Every memory row carries a sensitivity class column, and the disclosure logic is implemented and unit-tested: recall filters to classes no more restrictive than the asking context, a missing or unrecognized class is excluded from **every** context (fail-closed), and an invalid configured value resolves to `restricted` rather than silently widening disclosure. **What is not connected yet:** no call site supplies the per-project class or the recall context, so every row currently takes the built-in default (`internal`) and the configured/environment override is inert. Until that wiring lands, do not rely on this to keep a note out of another project — see the `documented env vars` check in `kit self-audit`, which is what caught it.
 - `kit auth {elevate,setup-totp,status,revoke}`: Elevation gate + TOTP
 - `kit mcp {list,auth,set-token,clear}`: MCP-server orchestrator
 - `kit env {list,switch,current,diff}`: Environment routing + drift detection

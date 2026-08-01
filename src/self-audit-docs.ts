@@ -57,6 +57,77 @@ const DOCS_CATEGORY: SecurityCheckResult["category"] = "self-audit/docs-claims";
 /** Own category so the advisory renderer can label the count meaningfully. */
 const FLAG_VALIDATION_CATEGORY: SecurityCheckResult["category"] = "self-audit/flag-validation";
 
+/**
+ * `KIT_*` env vars a doc presents as a switch the reader sets, that no code branch
+ * reads. Found the hard way: README, `doctor`'s own remediation hint and the NIST
+ * 800-53 evidence map all told users to set `KIT_REQUIRE_HARDWARE` to make a missing
+ * hardware key backend fail closed. The variable the implementation reads is
+ * `KIT_REQUIRE_HARDWARE_IDENTITY`. Setting the documented one did nothing at all —
+ * a silent false-secure in kit's own security surface, which is worse than a missing
+ * feature because the user believes the control is on.
+ *
+ * The oracle is deliberately generous, to stay sound: a name counts as known if the
+ * implementation reads it via `process.env.X`, via a destructured `env.X` (how
+ * `airgap/config.ts` reads its vars), or sets it for a child process/hook. Only a
+ * name the implementation never touches at all is reported.
+ */
+const ENV_READ_PATTERNS = [
+  /process\.env\.([A-Z][A-Z0-9_]{2,60})/g,
+  /process\.env\[["'`]([A-Z][A-Z0-9_]{2,60})/g,
+  /\benv\.([A-Z][A-Z0-9_]{2,60})/g,
+  /["'`](KIT_[A-Z0-9_]{2,60})["'`]\s*[:=,)\]]/g,
+  /\b(KIT_[A-Z0-9_]{2,60})\s*[:=]/g,
+];
+
+/** Collect every `KIT_*` name the implementation reads or sets. */
+export function loadKnownEnvVars(repoRoot: string): Set<string> {
+  const known = new Set<string>();
+  function visit(dir: string): void {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        if (SKIP_DIRS.has(e.name) || e.name.startsWith(".")) continue;
+        visit(join(dir, e.name));
+        continue;
+      }
+      if (!e.name.endsWith(".ts") || e.name.endsWith(".test.ts")) continue;
+      let text;
+      try {
+        text = readFileSync(join(dir, e.name), "utf-8");
+      } catch {
+        continue;
+      }
+      for (const re of ENV_READ_PATTERNS) {
+        for (const m of text.matchAll(re)) known.add(m[1]);
+      }
+    }
+  }
+  visit(join(repoRoot, "src"));
+  return known;
+}
+
+/**
+ * Extract `KIT_*` env-var names a doc names. Scanned everywhere, not just code
+ * spans: `export KIT_X=1` in a fence and "set `KIT_X`" in prose are the same claim
+ * to a reader. A trailing-underscore capture (a `KIT_PROVENANCE_*` wildcard) is
+ * dropped — it names a family, not a variable.
+ */
+export function extractDocEnvVars(markdownText: string, file: string): DocCommandRef[] {
+  const refs: DocCommandRef[] = [];
+  markdownText.split("\n").forEach((line, i) => {
+    for (const m of line.matchAll(/\b(KIT_[A-Z0-9_]{2,60})\b/g)) {
+      if (m[1].endsWith("_")) continue;
+      refs.push({ verb: m[1], line: i + 1, file });
+    }
+  });
+  return refs;
+}
+
 /** The committed command contract, relative to repoRoot. */
 const CONTRACT_PATH = "contracts/kit.opencli.json";
 
@@ -366,6 +437,12 @@ const CLAIM_CLASSES: ClaimClass[] = [
     extract: extractDocTomlSections,
     render: (v) => `[${v}]`,
   },
+  {
+    name: "documented env vars",
+    unit: "`KIT_*`",
+    extract: extractDocEnvVars,
+    render: (v) => v,
+  },
 ];
 
 /**
@@ -399,6 +476,7 @@ export function runDocsClaimsAudit(repoRoot: string): SecurityCheckResult[] {
     "documented commands": verbs,
     "documented flags": loadSourceFlagTokens(repoRoot),
     "documented config sections": new Set(KNOWN_SECTIONS),
+    "documented env vars": loadKnownEnvVars(repoRoot),
   };
 
   const files = findMarkdownFiles(repoRoot);

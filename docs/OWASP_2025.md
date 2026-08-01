@@ -114,7 +114,6 @@ fail-open paths in pre-2026-06 versions; all are now fail-closed:
 
 | Pre-2026-06 (BAD) | Post-2026-06 (FIXED) | Status |
 |---|---|---|
-| Rate-limiter failed OPEN on Redis error | Fail-closed; opt-in `KIT_RATE_LIMIT_FAIL_OPEN=1` with stderr warning + audit | ✅ shipped (P0.3) |
 | `KIT_ELEVATED=1` bypassed gate without audit trail | Every elevation decision audit-logged; if audit-log itself fails, elevation refuses | ✅ shipped (P0.1) |
 | `git commit --no-verify` undetected | Sentinel pair + skipped-commits log + startup banner | ✅ shipped (P0.4) |
 | `KIT_PROD_OK=1` warning fired after credential already loaded | Warning at the read site, before credential resolved | ✅ shipped (P0.2) |
