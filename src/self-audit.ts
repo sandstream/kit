@@ -11,7 +11,8 @@
  * Detection classes mirror the 11 supply-chain/self-hardening lessons kit learned
  * from its own incident history (the commit references in each rule's doc point at
  * the pre-fix positive). Class 11 (CI script-path integrity) is delegated to the
- * pure analyzer in self-audit-ci.ts.
+ * pure analyzer in self-audit-ci.ts; class 14 (documented-claim integrity — the
+ * commands, flags and config sections kit's own docs promise) to self-audit-docs.ts.
  */
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
@@ -21,6 +22,8 @@ import { dirname } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { walkSourceFiles } from "./source-walk.js";
 import { runCiScriptAudit } from "./self-audit-ci.js";
+import { runDocsClaimsAudit } from "./self-audit-docs.js";
+import { runWiringAudit } from "./self-audit-wiring.js";
 import { ruleForSelfAudit } from "./rules/catalog.js";
 
 export type SelfAuditSeverity = "error" | "warn" | "info";
@@ -1037,6 +1040,41 @@ const R13: SelfAuditRule = {
 };
 
 // ---------------------------------------------------------------------------
+// R14 — documented-claim integrity (delegated to self-audit-docs)
+// ---------------------------------------------------------------------------
+
+const R14: SelfAuditRule = {
+  id: "R14-docs-claims",
+  name: "documented claims",
+  detectionClass: "docs-claims",
+  severity: "error",
+  enabled: true,
+  run(ctx) {
+    // runDocsClaimsAudit returns fully-shaped SecurityCheckResult[] with the
+    // self-audit/docs-claims category — pass through untouched.
+    return runDocsClaimsAudit(ctx.repoRoot);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// R15 — wiring integrity (delegated to self-audit-wiring)
+// ---------------------------------------------------------------------------
+
+const R15: SelfAuditRule = {
+  id: "R15-unwired-code",
+  name: "wiring",
+  detectionClass: "unwired-code",
+  // info: advisory. Deleting a dead export is safe, but deciding whether an
+  // unreachable control should be WIRED or withdrawn is a human call, so this
+  // reports and never gates.
+  severity: "info",
+  enabled: true,
+  run(ctx) {
+    return runWiringAudit(ctx.repoRoot);
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -1055,6 +1093,8 @@ export const SELF_AUDIT_RULES: SelfAuditRule[] = [
   R11,
   R12,
   R13,
+  R14,
+  R15,
 ];
 
 // ---------------------------------------------------------------------------

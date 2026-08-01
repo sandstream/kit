@@ -35,7 +35,7 @@ another model asked to be careful.
 ## What the contract does and does not cover
 
 - **Covered (must be deterministic):** everything on the verdict path — `kit check`,
-  `kit check-security`, `kit standards`, the PreToolUse gates (`gate-bash`, `gate-env`),
+  `kit check --category security`, `kit standards`, the PreToolUse gates (`gate-bash`, `gate-env`),
   the memory write-gate and verified-forget, slopsquat scoring, MCP tool-poisoning
   triage, injection detection, secret detection, signature/attestation verification.
 - **Not in scope:** kit does not forbid *you* from using LLMs in your own workflow. kit

@@ -220,7 +220,7 @@ async function checkGitHooks(config: kitConfig): Promise<DoctorCheck[]> {
  * the file-backed 0600 key HONEST rather than silent:
  *   pass  hardware-rooted (Secure Enclave / TPM / external command)
  *   warn  file-backed 0600 key (the working default; no hardware backend active)
- *   fail  hardware REQUIRED (KIT_REQUIRE_HARDWARE / policy) but unavailable —
+ *   fail  hardware REQUIRED (KIT_REQUIRE_HARDWARE_IDENTITY / policy) but unavailable —
  *         fail-closed, the same posture keystoreSign enforces at sign time.
  */
 function checkIdentityKeystore(): DoctorCheck {
@@ -249,7 +249,7 @@ function checkIdentityKeystore(): DoctorCheck {
   return {
     name,
     status: "warn",
-    detail: `file-backed key (0600)${st.kid ? ` (${st.kid})` : ""} — no hardware backend active; migrate with 'kit identity' or require one via KIT_REQUIRE_HARDWARE`,
+    detail: `file-backed key (0600)${st.kid ? ` (${st.kid})` : ""} — no hardware backend active; migrate with 'kit identity' or require one via KIT_REQUIRE_HARDWARE_IDENTITY`,
     category,
   };
 }

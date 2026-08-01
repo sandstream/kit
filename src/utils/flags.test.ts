@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { hasFlag, flagValue, flagInt } from "./flags.js";
+import { hasFlag, flagValue, flagInt, unknownFlags } from "./flags.js";
 
 describe("flag helpers", () => {
   describe("hasFlag", () => {
@@ -45,5 +45,41 @@ describe("flag helpers", () => {
     it("falls back when non-numeric", () => {
       assert.equal(flagInt(["--ttl-minutes", "soon"], "--ttl-minutes", 5), 5);
     });
+  });
+});
+
+describe("unknownFlags", () => {
+  it("returns nothing when every flag is allowed", () => {
+    assert.deepEqual(
+      unknownFlags(["kit", "check", "--json", "--strict"], ["--json", "--strict"]),
+      [],
+    );
+  });
+
+  it("reports a flag that is not allowed", () => {
+    assert.deepEqual(unknownFlags(["kit", "check", "--category", "security"], ["--json"]), [
+      "--category",
+    ]);
+  });
+
+  it("compares the flag part of --flag=value", () => {
+    assert.deepEqual(unknownFlags(["--category=security"], ["--json"]), ["--category"]);
+    assert.deepEqual(unknownFlags(["--json=1"], ["--json"]), []);
+  });
+
+  it("ignores everything after a bare --", () => {
+    assert.deepEqual(unknownFlags(["--json", "--", "--not-mine"], ["--json"]), []);
+  });
+
+  it("does not inspect short flags", () => {
+    assert.deepEqual(unknownFlags(["-v", "-x"], []), []);
+  });
+
+  it("reports each unknown flag once", () => {
+    assert.deepEqual(unknownFlags(["--nope", "--nope"], []), ["--nope"]);
+  });
+
+  it("ignores non-flag tokens including values that look like paths", () => {
+    assert.deepEqual(unknownFlags(["compare", "a.json", "b.json"], []), []);
   });
 });

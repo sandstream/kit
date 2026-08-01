@@ -36,3 +36,11 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # kit's own test-coverage gate, enforced. `.kit-baseline.json` is committed, so
+      # the 91 pre-existing untested files are frozen and only a NET-NEW untested
+      # source file fails this step. Without --enforce-tests the same finding is a
+      # warning nobody reads; the mechanism existed for six majors and ran in zero
+      # workflows. --category tests narrows the run to that one dimension.
+      - name: Test-coverage gate (net-new untested files)
+        run: node dist/cli.js check --category tests --enforce-tests

@@ -8,7 +8,7 @@
  */
 import { resolve } from "node:path";
 import { c } from "../utils/colors.js";
-import { hasFlag, flagValue, envTruthy } from "../utils/flags.js";
+import { hasFlag, flagValue, envTruthy, unknownFlags } from "../utils/flags.js";
 import { loadConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { withGovernance } from "../governance-middleware.js";
@@ -24,7 +24,12 @@ import {
   printSecurityTable,
   printSummary,
 } from "../output.js";
-import { runCheckGate, checkRunToJsonChecks } from "../check-run.js";
+import {
+  runCheckGate,
+  checkRunToJsonChecks,
+  CHECK_CATEGORIES,
+  parseCategoryFlag,
+} from "../check-run.js";
 import { syncSecurityFindings } from "../findings-track.js";
 import { collectHints } from "../hints.js";
 import {
@@ -36,16 +41,65 @@ import {
 } from "../cli-checks-shared.js";
 import { selfUpgrade } from "./upgrade.js";
 
+/**
+ * Flags each `kit check` form accepts. An unlisted `--flag` is rejected rather than
+ * ignored: `kit check --category security` silently ran the FULL check for as long as
+ * it was documented — in kit's own CLAUDE.md and in the Windows CI workflow — because
+ * nothing said no. A flag that quietly does nothing is the same defect class as a
+ * check that quietly does not run.
+ */
+const CHECK_FLAGS = [
+  "--json",
+  "--strict",
+  "--lenient",
+  "--fail-on-warning",
+  "--fail-on-worse",
+  "--enforce-tests",
+  "--category",
+  "--pin",
+  "--key",
+] as const;
+const COMPARE_FLAGS = ["--json", "--fail-on-worse"] as const;
+const VERIFY_FLAGS = ["--json", "--key"] as const;
+
+/** Print the rejection and return false, so every caller fails the same way. */
+function rejectUnknownFlags(form: string, allowed: readonly string[]): boolean {
+  const bad = unknownFlags(process.argv, allowed);
+  if (bad.length === 0) return false;
+  const plural = bad.length > 1 ? "s" : "";
+  console.error(`${c.red}unknown flag${plural} for ${form}: ${bad.join(", ")}${c.reset}`);
+  console.error(`${c.dim}accepted: ${allowed.join(" ")}${c.reset}`);
+  return true;
+}
+
 export async function cmdCheck(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
   // kit check verify-attestation <file> verifies a signed check receipt.
   if (process.argv[3] === "verify-attestation") {
+    if (rejectUnknownFlags("kit check verify-attestation", VERIFY_FLAGS)) return false;
     return cmdVerifyAttestation();
   }
   // kit check compare <before.json> <after.json> diffs two --json runs.
   if (process.argv[3] === "compare") {
+    if (rejectUnknownFlags("kit check compare", COMPARE_FLAGS)) return false;
     return cmdCompare();
   }
+  if (rejectUnknownFlags("kit check", CHECK_FLAGS)) return false;
+
+  // --category narrows which dimensions run. An unrecognised value is an error, not
+  // a silent full run — the previous behaviour, which made the flag a no-op wherever
+  // it was documented.
+  const parsed = parseCategoryFlag(flagValue(process.argv, "--category"));
+  if (parsed.invalid) {
+    const plural = parsed.invalid.length > 1 ? "s" : "";
+    console.error(
+      `${c.red}unknown --category value${plural}: ${parsed.invalid.join(", ")}${c.reset}`,
+    );
+    console.error(`${c.dim}accepted: ${CHECK_CATEGORIES.join(" ")}${c.reset}`);
+    return false;
+  }
+  const categories = parsed.categories;
+
   const enforceTests = hasFlag(process.argv, "--enforce-tests");
   // Scanner-health strict by default (see cmdCi): a check that could not RUN fails;
   // --lenient / KIT_CI_LENIENT downgrades those to warnings. Finding-warns stay
@@ -78,6 +132,7 @@ export async function cmdCheck(): Promise<boolean> {
       const run = await runCheckGate({
         config,
         enforceTests,
+        categories,
         gate: { lenient, failOnWarning },
         step,
       });
@@ -121,7 +176,12 @@ export async function cmdCheck(): Promise<boolean> {
           { passed: 0, failed: 0, warnings: 0, skipped: 0 },
         );
 
-        const output: JsonCheckOutput = { ok: allOk, checks, summary };
+        const output: JsonCheckOutput = {
+          ok: allOk,
+          checks,
+          summary,
+          ...(run.scope ? { scope: run.scope } : {}),
+        };
         await maybeEmitCheckAttestation(
           "check",
           allOk,
@@ -182,6 +242,16 @@ export async function cmdCheck(): Promise<boolean> {
       }
 
       printSummary(toolResults, serviceResults, secretResults.keys, securityResults);
+
+      // A narrowed run must say so next to its verdict. Without this line a
+      // `--category security` pass is visually identical to a full green.
+      if (run.scope) {
+        console.log(
+          `${c.yellow}partial run${c.reset} ${c.dim}— only ${run.scope.join(", ")} ran; ` +
+            `this verdict does NOT cover the other dimensions${c.reset}`,
+        );
+        console.log();
+      }
 
       // Deterministic, marker-gated "smart" tip — surfaces a relevant opt-in
       // capability (unsigned policy, unanchored audit log, missing trivy, …) at

@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -146,4 +147,31 @@ describe("kit help audience filter", () => {
     const out = run("help", "gate-bash");
     assert.match(out, /gate-bash — PreToolUse/);
   });
+});
+
+// A hardcoded command count in prose drifts silently: `mcp-server.ts` and the MCP
+// guide both claimed 68 while the surface had grown to 70, and nothing caught it —
+// in a tool whose whole argument is that prose is not enforcement. These assert the
+// documented number against the live dispatch table.
+describe("documented command count matches the surface", () => {
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const expected = Object.keys(COMMANDS).length;
+
+  const claims: [string, RegExp][] = [
+    ["src/mcp-server.ts", /self-documents all (\d+) commands/],
+    ["docs/MCP_TOOLS_GUIDE.md", /the CLI covers all ~(\d+) commands/],
+  ];
+
+  for (const [rel, re] of claims) {
+    it(`${rel} states ${expected}`, () => {
+      const text = readFileSync(join(repoRoot, rel), "utf-8");
+      const m = text.match(re);
+      assert.ok(m, `${rel} no longer states a command count in the expected form (${re})`);
+      assert.equal(
+        Number(m[1]),
+        expected,
+        `${rel} claims ${m[1]} commands; the dispatch table has ${expected}`,
+      );
+    });
+  }
 });

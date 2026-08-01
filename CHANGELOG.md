@@ -6,6 +6,171 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.2.0] - 2026-07-31
+
+### Added
+
+- **`kit check --category <dim>` now exists.** It was documented in kit's own README,
+  `CLAUDE.md`, `AGENTS.md`, the `CLAUDE.md` template kit **generates into every user's
+  project** (`agent-config.ts`), the example Codex and pre-commit hooks, a runtime hint kit
+  prints after a check, and the Windows CI workflow — and **nothing parsed it**. Every one of
+  those callers ran the full check. Measured: `kit check` → 40 checks;
+  `kit check --category security` → 40 checks; `kit check --totally-fake-flag` → 40 checks,
+  accepted.
+
+  It now narrows for real (40 → 23 on kit's own repo) across `tools`, `services`, `secrets`,
+  `skills`, `hooks`, `web`, `security`, `locks`, `tests`, and accepts a comma-separated list.
+
+  A narrowed run **cannot be mistaken for a full one**: `CheckRunResult.scope` and the
+  `--json` `scope` field name the dimensions that ran, and the human output prints
+  `partial run — only <dims> ran; this verdict does NOT cover the other dimensions`.
+  Dimensions that did not run are absent, never synthesised as passes. An unrecognised
+  `--category` value is an error, not a fallback to a full run.
+
+- **`kit check` rejects unknown flags.** Every `kit check` form now validates argv against an
+  explicit allowlist and exits non-zero on anything else. A flag that silently does nothing is
+  the same class of defect as a check that silently does not run — and it is how
+  `--category` stayed broken across six majors. `unknownFlags()` in `utils/flags.ts` is the
+  reusable, tested primitive.
+
+- **The test-coverage gate runs in CI.** `--enforce-tests` existed for six majors and was
+  invoked by **zero** workflows. `ci.yml` now runs
+  `kit check --category tests --enforce-tests`, and `.kit-baseline.json` is **committed** (it
+  was gitignored, so the freeze died with the machine and CI saw no baseline at all). The 91
+  pre-existing untested files are frozen; a net-new untested source file fails the build.
+  Verified both ways: frozen → `ok: true`, one new untested file → `ok: false`, exit 1.
+
+  Only the `tests` category was frozen. The 158 typescript-standards and 16 design-token
+  findings a full `kit baseline freeze` also captured were **deliberately dropped from the
+  committed baseline** — freezing those would have suppressed live findings under the guise of
+  progress.
+
+- **Rule 14 also resolves documented `KIT_*` env vars against the code that reads them.**
+  78 references across 63 docs. A documented switch no code branch on is a *silent
+  false-secure*: the user believes a control is on. The oracle counts a name as known if the
+  implementation reads it via `process.env.X`, via a destructured `env.X` (how
+  `airgap/config.ts` does it), or sets it for a child process — generous on purpose, so only a
+  name the implementation never touches is reported. Test files do **not** count: a pure
+  resolver unit-tested in isolation with zero production call sites does not make the claim
+  true, which is exactly the shape of the memory-class finding below.
+
+- **`self-audit` rule 15 — wiring integrity.** The machine answer to "don't write unfinished
+  code": an exported production function with **no production call site** is reported, split
+  into two tiers because they mean different things —
+
+  - **tested but never called** — built, unit-tested, unreachable. The dangerous shape: it looks
+    finished from every angle a reviewer checks. This is exactly the classified-memory defect
+    (`resolveMemoryClass` had 0 production callers while its tests passed).
+  - **referenced nowhere** — plain dead code, safe to delete.
+
+  kit's own tree: **69**. The oracle is deliberately *not* the test suite — a green unit test is
+  not evidence a feature is reachable, which is the whole lesson. A helper used only inside its
+  own module counts as wired (that is normal code); `_`-prefixed / `…ForTests` seams and the
+  declared adapter-SDK exports are excluded with the reason in code.
+
+  Advisory, one row per finding, same trade as flag-validation: deleting a dead export is safe,
+  but deciding whether an unreachable *control* should be wired or withdrawn is a human call,
+  so it reports and never gates.
+
+- **Flag-validation coverage is now measured, not invisible.** `kit check` is the only one of
+  **44** command modules that rejects unknown flags; the other 43 accept anything. Rather than
+  refactor 70 commands blind — each needs its true flag list read off its own source, and
+  getting one wrong breaks a working invocation — `self-audit` now reports the ratio as
+  `self-audit/flag-validation: 43 command modules that accept unknown flags`, one navigable row
+  per module.
+
+  Advisory severity by design: it never gates, and `--fail-on-warning` stays green on kit's own
+  tree, which `cli.test.ts` pins as an invariant. Inflating it to a real warning made the
+  number print but broke that guarantee — the wrong trade, so the visibility was solved by
+  emitting a row per module (the advisory renderer reports row counts) instead of by severity.
+  The number can only go down, and it is now in front of anyone who runs the audit.
+
+- **`self-audit` rule 14 — documented-claim integrity.** Every claim kit's docs make about
+  kit's own surface is resolved against a machine oracle: `kit <command>` against
+  `contracts/kit.opencli.json`, `--flag` against the flag literals the implementation actually
+  names, and `[section]` against `config.ts` `KNOWN_SECTIONS`. A claim that does not resolve is
+  now a **fail**, not something a reader discovers as `Unknown command:` at the terminal.
+
+  This is the R11 pattern (CI script paths must resolve) applied one surface out: docs are
+  instructions to humans *and* to agents, and a stale instruction is indistinguishable from a
+  live one to the reader. Scanning is restricted to command position — inside code fences and
+  backticked spans — because an unanchored scan matches English prose ("kit is", "kit ships")
+  and buries the signal: 193 hits versus 6.
+
+  `CHANGELOG.md` (historical record), `ROADMAP.md` (planned surface) and `docs/specs/**`
+  (design documents) are exempt with the reason stated in code; those legitimately name
+  commands that do not currently exist.
+
+  A `toml` fence is only checked when it says it shows `.kit.toml` — in the fence or in the
+  prose introducing it. `docs/POLICY.md` documents a *policy* file whose `[thresholds]` is
+  correct there and unknown to `.kit.toml`; guessing would fire the gate on correct
+  documentation.
+
+  **Individual TOML keys are deliberately not checked.** `ServiceConfig` carries an index
+  signature, so a user-defined key under `[services.*]` is legal by design and appears nowhere
+  in source — an oracle over source text false-positives there (it flagged README's
+  `project_ref`, which is correct usage). A gate that cries wolf is worse than no gate, so the
+  unsound check was left out rather than shipped.
+
+  Remaining scope limit, stated in the module: the flag oracle is repo-global, not per-command.
+  A real flag documented on the wrong command still passes.
+
+### Fixed
+
+
+- **Two documented security switches that no code read.**
+  - `KIT_REQUIRE_HARDWARE` appeared in the README, in `kit doctor`'s own remediation hint, and
+    in the **NIST 800-53 evidence map** as the way to make a missing hardware key backend
+    fail closed. The variable the implementation reads is `KIT_REQUIRE_HARDWARE_IDENTITY`.
+    Setting the documented one did nothing at all. Corrected in all four places.
+  - `docs/OWASP_2025.md` listed *"Rate-limiter failed OPEN on Redis error → Fail-closed;
+    opt-in `KIT_RATE_LIMIT_FAIL_OPEN=1`"* as **✅ shipped (P0.3)**. kit has no rate limiter —
+    the only match in the tree is a SQL column name — and no `KIT_RATE_LIMIT_FAIL_OPEN`
+    anywhere. Row removed. The sibling rows in that table (`KIT_ELEVATED`, `KIT_PROD_OK`) were
+    checked and do hold.
+
+- **README no longer overstates classified memory.** The README described a working disclosure
+  control: *"every row carries a sensitivity class, and recall never returns a row more
+  restrictive than the asking context — so a note captured in a restricted repo cannot surface
+  while you work in a public one."* Measured: `KIT_MEMORY_CLASS` is read in **0** places,
+  `[memory] default_class` in **0**, `resolveMemoryClass()` has **0** production callers,
+  **0 of 30** `openMemoryDb()` call sites pass a class, no indexer ever sets `memoryClass`, and
+  `contextClass` is never supplied outside `memory/`.
+
+  The class column, the fail-closed resolution and the recall filter are all implemented and
+  unit-tested — nothing connects them, so every row takes the built-in default and the override
+  is inert. The README now states that plainly. **Wiring it is a deliberate change to
+  disclosure semantics and is not attempted here**; the honest description is the fix, and the
+  gate above is what keeps the claim and the code together from now on.
+
+
+- **Documented surface that did not exist.** Found by the rule above on its first runs against
+  kit's own tree — 3 commands, 8 flags, 3 config sections:
+  - `docs/PERFORMANCE_AND_DIAGNOSTICS.md` documented a metrics feature that was never built —
+    a `metrics` command, a `[config]` section with `metrics_enabled` / `metrics_file`, eight
+    flags (`--timing`, `--save`, `--save-baseline`, `--compare-baseline`, `--memory-check`,
+    `--stream-output`, `--no-cache`, `--max-parallel`), an `[environments.*]` section (the real
+    one is `[env.*]`), and sample output with plausible-looking timings. It also claimed kit
+    runs its checks in parallel; `check-run.ts` runs nine dimensions sequentially with no
+    `Promise.all`. Rewritten to what is verifiable, including an explicit list of what kit does
+    **not** provide.
+  - `docs/EXAMPLE_PLUGIN_README.md` and `docs/PLUGIN_DOCUMENTATION_STANDARDS.md` told plugin
+    authors to register adapters under `[adapters]` in `.kit.toml`. There is no such section —
+    `loadPluginAdapters` reads the `kitPlugins` array in `package.json`. So the plugin
+    authoring docs were wrong about how to register a plugin.
+  - `docs/ZERO_LLM_CONTRACT.md` listed `kit check-security` as one of the deterministic
+    verdict surfaces; the real invocation is `kit check --category security`.
+- **A stale command count in prose.** `src/mcp-server.ts` and `docs/MCP_TOOLS_GUIDE.md` both
+  claimed 68 commands; the dispatch table has 70. Corrected, and `command-surface.test.ts` now
+  asserts the documented number against `COMMANDS` — a hardcoded count in prose drifts
+  silently, which is precisely the failure mode kit exists to argue against.
+
+  The rule's own oracle got the same treatment: `PRE_DISPATCH_VERBS` (`help`, `version`,
+  `completions` — real commands that `main()` handles before the dispatch table, so the
+  generated contract omits them) is a hardcoded list, and a test asserts it against the live
+  surface in both directions. Without it the rule reported `kit version` and `kit completions`
+  as drift. A constant that exists to catch drift must not be allowed to drift itself.
+
 ## [6.1.1] - 2026-07-31
 
 ### Fixed
