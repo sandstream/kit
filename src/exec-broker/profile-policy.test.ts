@@ -163,4 +163,58 @@ describe("profileBrokerPolicy", () => {
     await signProfile(proj);
     assert.equal((await profileBrokerPolicy(proj)).runtimeMode, "off");
   });
+
+  // An UNREADABLE profile used to return runtimeMode "off". Because runBrokered skips the broker
+  // entirely on "off", corrupting the TOML achieved what tampering with the signature cannot:
+  // mediation switched itself off and the op ran unmediated. These pin the closed door.
+  describe("an unreadable profile default-denies instead of dropping to unmediated", () => {
+    const BROKEN = [
+      ["unparseable TOML", `version = 1\n[scope\negress = [`],
+      ["missing schema version", `[scope]\negress = ["api.acme.com"]\n`],
+      ["unknown key (strict schema)", `version = 1\n[scope]\nnot_a_field = 1\n`],
+      ["wrong type for enforce_runtime", `version = 1\n[scope]\nenforce_runtime = "yes"\n`],
+    ] as const;
+
+    for (const [label, body] of BROKEN) {
+      it(`${label} → runtimeMode enforce with a null policy`, async () => {
+        writeFileSync(join(proj, PROFILE_FILE), body);
+        const r = await profileBrokerPolicy(proj);
+        assert.equal(r.runtimeMode, "enforce", "must NOT be 'off' — that is the fail-open");
+        assert.equal(r.enforceRuntime, true);
+        assert.equal(r.policy, null, "no readable scope grants nothing");
+        assert.equal(r.regime, "active");
+        assert.match(r.detail, /profile unreadable/);
+      });
+    }
+
+    it("signing a broken profile does not rescue it (the bytes still do not parse)", async () => {
+      writeFileSync(join(proj, PROFILE_FILE), `version = 1\n[scope\n`);
+      await assert.rejects(() => signProfile(proj));
+      const r = await profileBrokerPolicy(proj);
+      assert.equal(r.runtimeMode, "enforce");
+      assert.equal(r.policy, null);
+    });
+  });
+
+  it("enforceRuntime always equals runtimeMode === 'enforce' (the documented equivalence)", async () => {
+    const cases = [
+      null, // no profile
+      `version = 1\nname = "x"\n`, // no [scope]
+      `version = 1\n[scope]\negress = ["h.io"]\n`, // default-on → observe
+      `version = 1\n[scope]\nenforce_runtime = "observe"\n`,
+      `version = 1\n[scope]\nenforce_runtime = false\n`,
+      `version = 1\n[scope]\nenforce_runtime = true\n`,
+      `version = 1\n[scope\n`, // unreadable
+    ];
+    for (const body of cases) {
+      rmSync(join(proj, PROFILE_FILE), { force: true });
+      if (body !== null) writeFileSync(join(proj, PROFILE_FILE), body);
+      const r = await profileBrokerPolicy(proj);
+      assert.equal(
+        r.enforceRuntime,
+        r.runtimeMode === "enforce",
+        `${JSON.stringify(body)} → mode ${r.runtimeMode} but enforceRuntime ${r.enforceRuntime}`,
+      );
+    }
+  });
 });

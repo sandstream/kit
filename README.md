@@ -83,9 +83,10 @@ Four pillars, all additive over 4.x — no stable command removed. Highlights:
 - **Pillar 2 — control plane.** `kit policy pull` / `pull-revocations` distribute an
   org-signed policy, verified and enforced fully offline; `kit policy approve` mints
   offline signed approval tokens. **Keyless egress signing is not shipped:** the RFC 9421
-  HTTP Message Signature primitives exist and are tested (`src/keyless/`), but no command
-  reaches them, there is no `[scope].sign` field in the profile schema, and nothing on the
-  egress path signs a request. This entry previously described it in the present tense.
+  HTTP Message Signature primitives exist and are tested (`src/keyless/`), and `[scope].sign`
+  is a real signed field that `kit doctor` reports on (declared vs verified) — but nothing
+  imports `src/keyless/` outside itself, so no request on the egress path is ever signed.
+  This entry previously described it in the present tense.
 - **Pillar 3 — one exec-broker.** A single signed-scope governance floor drives
   the PreToolUse gates (`kit gate-egress` / `gate-fs`), the MCP runtime, and the
   `kit doctor` posture. Runtime mediation is **on by default in observe mode**

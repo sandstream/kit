@@ -32,7 +32,7 @@ import {
   type ProfileDrift,
   type DriftEntry,
 } from "../profile/reconcile.js";
-import { signProfile, verifyProfileSignature } from "../profile/sign.js";
+import { signProfile, verifyProfileSignature, PROFILE_SIG_FILE } from "../profile/sign.js";
 import { exportBundle, importBundle } from "../profile/portable.js";
 import { flagValue } from "../utils/flags.js";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -222,10 +222,10 @@ async function profileSign(jsonMode: boolean): Promise<boolean> {
   }
   const rootedNote = res.rooted ? ` ${c.dim}(hardware-rooted)${c.reset}` : "";
   console.log(
-    `${c.green}✓${c.reset} signed ${c.bold}${res.fingerprint}${c.reset} as ${c.bold}${res.kid}${c.reset}${rootedNote} ${c.dim}→ ${PROFILE_FILE}.sig${c.reset}`,
+    `${c.green}✓${c.reset} signed ${c.bold}${res.fingerprint}${c.reset} as ${c.bold}${res.kid}${c.reset}${rootedNote} ${c.dim}→ ${PROFILE_SIG_FILE}${c.reset}`,
   );
   console.log(
-    `${c.dim}commit ${PROFILE_FILE} + ${PROFILE_FILE}.sig; verifiers check it offline against .kit-policy.signers${c.reset}`,
+    `${c.dim}commit ${PROFILE_FILE} + ${PROFILE_SIG_FILE}; verifiers check it offline against .kit-policy.signers${c.reset}`,
   );
   return true;
 }

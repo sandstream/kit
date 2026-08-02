@@ -319,7 +319,7 @@ async function readAuditLog(cwd: string): Promise<string> {
 async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
   const name = "exec-broker runtime";
   const category = "security";
-  const { runtimeMode, policy, regime } = await profileBrokerPolicy(cwd);
+  const { runtimeMode, policy, regime, detail: policyDetail } = await profileBrokerPolicy(cwd);
   if (runtimeMode === "off") {
     // Default-on: a declared scope mediates in observe by default, so "off" means either no scope is
     // declared here, or the scope explicitly opted OUT with enforce_runtime = false.
@@ -368,11 +368,16 @@ async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
       category,
     };
   }
+  // An UNREADABLE profile lands here too (it default-denies rather than dropping to unmediated), and
+  // there "run kit profile sign" is the wrong instruction — the file does not parse. Carry the
+  // resolver's own detail so the fix matches the actual fault.
+  const unreadable = policyDetail.startsWith("profile unreadable");
   return {
     name,
     status: "fail",
-    detail:
-      "runtime mediation opted in but the scope is unsigned/invalid — governed MCP ops are fail-closed-denied; run 'kit profile sign'",
+    detail: unreadable
+      ? `runtime mediation default-DENIES: ${policyDetail} — fix .kit-profile.toml, then 'kit profile sign'`
+      : "runtime mediation opted in but the scope is unsigned/invalid — governed MCP ops are fail-closed-denied; run 'kit profile sign'",
     category,
   };
 }

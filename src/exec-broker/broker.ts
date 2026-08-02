@@ -94,6 +94,11 @@ export async function brokerExec<T>(
   policy: BrokerPolicy | null | undefined,
   run: (scopedEnv: Record<string, string>) => Promise<T>,
   cwd?: string,
+  /**
+   * Why there is no policy, when the caller knows (e.g. "profile unreadable — …"). Appended to the
+   * default-deny reason so the operator gets an actionable message instead of a bare "no policy".
+   */
+  noPolicyDetail?: string,
 ): Promise<BrokerOutcome<T>> {
   // Infrastructure exemption: kit's OWN tool-provisioning is not governed by the project [scope]
   // RoE (it writes to $HOME and fetches from tool hosts by design — see BrokerContext.infrastructure).
@@ -130,7 +135,9 @@ export async function brokerExec<T>(
 
   // Default-deny when policy is absent. run() is NEVER invoked.
   if (!policy) {
-    const reason = "exec-broker: no policy (default-deny)";
+    const reason = noPolicyDetail
+      ? `exec-broker: no policy (default-deny) — ${noPolicyDetail}`
+      : "exec-broker: no policy (default-deny)";
     await audit(context, false, reason, undefined, cwd);
     return { ok: false, reason };
   }
@@ -292,7 +299,13 @@ export async function runBrokered<T>(
       // operator can see what default-on would block before flipping to "enforce" (Pillar 3 ladder).
       return signed.runtimeMode === "observe"
         ? brokerObserve(context, signed.policy, run, opts.cwd)
-        : brokerExec(context, signed.policy, run, opts.cwd);
+        : brokerExec(
+            context,
+            signed.policy,
+            run,
+            opts.cwd,
+            signed.policy === null ? signed.detail : undefined,
+          );
     }
     // Undeclared op under runtime enforcement/observe → migration passthrough (unchanged behavior).
     try {
