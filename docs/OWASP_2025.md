@@ -67,10 +67,10 @@ Per memory `feedback_owasp_2025`, security reviews target the **2025** Top 10
 | kit control | Status |
 |---|---|
 | `npm audit --audit-level=high` enforced in publish.yml | ✅ shipped |
-| Dependabot for SHA-pinned actions in `.github/workflows/*` | ✅ shipped |
+| Dependabot for SHA-pinned actions in `.github/workflows/*` | ✅ shipped (`.github/dependabot.yml`, `github-actions` ecosystem, weekly, grouped; npm deliberately not enabled — dep changes go through `kit triage`) |
 | Bumblebee deep-scan in CI | ✅ shipped |
 | `kit security policy` validates dep allowlist | ✅ shipped |
-| Quarterly OpenSSF Scorecard run | ✅ shipped (`.github/workflows/scorecard.yml`) |
+| OpenSSF Scorecard run — weekly (Mon 04:17 UTC) + every push to `main` + on branch-protection change | ✅ shipped (`.github/workflows/scorecard.yml`; analysis and SARIF upload are `continue-on-error`, so a Scorecard outage never blocks a merge — and never fails the workflow either, so this is a reporting signal, not a gate) |
 
 ## A07 — Identification & Authentication Failures
 
