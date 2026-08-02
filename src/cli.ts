@@ -355,6 +355,24 @@ async function main(): Promise<void> {
       const handler = COMMANDS[resolved];
       if (handler) {
         emitDeprecationWarning(resolved);
+        // READ-ONLY FLOOR. The 11 in-module guards are honest but were not exhaustive: a sweep
+        // over the claim "read-only mode refuses every mutation" found `identity init` minting a
+        // private key, `policy init` creating the policy doc, `check-gitignore --fix` rewriting
+        // .gitignore and `upgrade` rewriting both lock files — all exit 0, none audited. The
+        // defect was that nothing ENUMERATED the write surface, so refusing here, once, from a
+        // declared table is what makes the claim checkable (see read-only-surface.ts).
+        const { isReadOnlyMode } = await import("./read-only-mode.js");
+        if (isReadOnlyMode()) {
+          const { matchWriteSurface } = await import("./read-only-surface.js");
+          const mutation = matchWriteSurface(process.argv);
+          if (mutation) {
+            const { refuseWrite } = await import("./read-only-mode.js");
+            const refusal = await refuseWrite(mutation.operation, { command: resolved });
+            console.error(`${c.red}✗ ${refusal.reason}${c.reset}`);
+            process.exitCode = 1;
+            return;
+          }
+        }
         // PreToolUse gates must fail CLOSED: an internal fault has to DENY (exit 2), never fall
         // through to the generic catch below (exit 1 = non-blocking = the op would proceed).
         ok = GATE_VERBS.has(resolved)
