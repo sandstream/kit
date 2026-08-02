@@ -312,7 +312,15 @@ export function honestyDisclaimer(summary: CoverageSummary): string {
       `${summary.autoUnrun} not-run of the ${summary.auto} mapped AUTO controls — mapped is not passing.`
     );
   }
-  return base;
+  // UNBOUND run. Without this line a reader sees a green AUTO next to "secrets are not
+  // stored in clear text" and reasonably concludes kit checked it HERE — it checked only
+  // that a check is mapped to it. Same "mapped is not passing" rule as the bound branch,
+  // stated on the surface that omits the evidence rather than only on the one that has it.
+  return (
+    base +
+    ` AUTO here means a check is MAPPED to the control, not that it ran on this machine —` +
+    ` run 'kit coverage --verify' to bind each one to a live result (verified / FAILING / not-run).`
+  );
 }
 
 /**
