@@ -48,7 +48,14 @@ import { selfUpgrade } from "./upgrade.js";
  * nothing said no. A flag that quietly does nothing is the same defect class as a
  * check that quietly does not run.
  */
-const CHECK_FLAGS = [
+// Every flag the check path honors — INCLUDING the ones read by callees, not just the ones this
+// file reads. That distinction is the whole trap: `--attest` is consumed in cli-checks-shared.ts
+// (`emitAttestation`) and `--no-auto-install` in `autoInstallScanners` in the same module, so an
+// allowlist built from this handler's own source rejected two documented, working flags —
+// `kit check --attest` (README "Opt-in signed receipt of which scanners ran + the verdict") exited
+// 1 with "unknown flag" and the check never ran. A false green's mirror image: a gate that refuses
+// to run at all. Anything added here must be verified against the literal the CALLEE reads.
+export const CHECK_FLAGS = [
   "--json",
   "--strict",
   "--lenient",
@@ -58,6 +65,8 @@ const CHECK_FLAGS = [
   "--category",
   "--pin",
   "--key",
+  "--attest", // cli-checks-shared.ts:emitAttestation
+  "--no-auto-install", // cli-checks-shared.ts:autoInstallScanners
 ] as const;
 const COMPARE_FLAGS = ["--json", "--fail-on-worse"] as const;
 const VERIFY_FLAGS = ["--json", "--key"] as const;
