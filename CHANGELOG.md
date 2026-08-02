@@ -10,6 +10,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Three defects found by testing the README's pillars as behaviour, not as prose.** Each pillar
+  claim was run against a temp project and its artifacts, with the oracle being what kit *did* —
+  never the text that made the claim.
+
+  - **A corrupted `.kit-profile.toml` turned runtime mediation off entirely.** Pillar 3 says
+    mediation is on by default in observe mode. It is — but an *unreadable* profile resolved to
+    `runtimeMode: "off"`, and `runBrokered` skips the broker on "off". Tampering with
+    `.kit-profile.sig` was denied while breaking the TOML syntax ran unmediated: the strictly
+    easier attack had the weaker consequence, and the comment on that branch already claimed the
+    opposite ("a broken artifact must not silently disable enforcement"). An unreadable profile
+    now default-denies any op that declares effects, with a reason naming the actual fault, while
+    undeclared ops keep the migration passthrough so a typo cannot brick the runtime and push
+    operators into deleting the profile.
+
+  - **kit could not verify what it had just signed with a hardware key.** `kit profile sign` under
+    `KIT_KEYSTORE=command` printed "signed (hardware-rooted)"; `kit profile verify` one second
+    later on the same machine answered "signer &lt;kid&gt; unknown". The local trust store is built
+    only from `identity.json` and its `.bak` archives, so an operator-fronted key was never
+    written down. Consequence: `exec-broker scope` read "unverifiable → grants nothing", so
+    adopting the hardware backend Pillar 1 recommends silently disabled the mediation Pillar 3
+    promises. A successful sign through a non-file backend now records the signer's **public** key
+    (0600, no private material) as a locally-trusted identity.
+
+  - **`kit identity migrate` revoked nothing.** It wrote a revocation of the old file key signed by
+    the new hardware key, but `isAuthoritativeRevocation` rejects a revoker whose public key is
+    unknown — so the record was inert: the "revoked" key kept signing profiles and policies,
+    `kit identity show` looked healthy and `kit doctor` said nothing. The external key is now a
+    local revocation authority, **and** any backend refuses to sign a key this machine has revoked.
+    The verifiers deliberately do not honor a machine-local revocation of a third party (that would
+    let one host fail-close everyone), which is precisely why the local revocation has to bite on
+    the signing side. `kit doctor` fails and `kit identity show` prints REVOKED.
+
+  Both keystore wrappers are installed inside `resolveKeyStore` rather than at the six
+  `store.sign()` call sites, so the seventh one added gets them too.
+
+- **`kit profile sign` told you to commit a file it does not write.** The message named
+  `.kit-profile.toml.sig`; the file is `.kit-profile.sig`. Following the instruction left the
+  signature uncommitted and every verifier reading the scope as unsigned.
+
 - **`kit security scan-staged` no longer blocks on test fixtures.** The pre-commit gate flagged
   kit's own audit-**redaction** test — which has to stage a secret-shaped key to prove the
   redaction works — and the only way through was `git commit --no-verify`, which switches off the
