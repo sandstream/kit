@@ -44,6 +44,10 @@ import { hardwareRequiredByEnv } from "./keystore/mandate.js";
 const KEY_FILE = "identity.key"; // PKCS8 PEM private key (0600)
 const RECORD_FILE = "identity.json"; // public identity record (0600)
 const REVOCATIONS_FILE = "revocations.jsonl"; // append-only signed revocation records (0600)
+// Public record of an externally-held (operator-fronted) identity. Kept in lockstep with
+// keystore/trust-store.ts, which owns writing it; duplicated as a literal to keep this module
+// import-free of the keystore layer (see readExternalIdentityRecord).
+const EXTERNAL_RECORD_FILE = "identity.external.json";
 
 export interface Identity {
   /** Stable, non-secret id derived from the public key. */
@@ -86,6 +90,32 @@ export function verifySignature(
     return edVerify(null, msg, createPublicKey(publicKeyPem), signature);
   } catch {
     return false; // malformed key/sig → not verified (fail-closed)
+  }
+}
+
+/**
+ * Load the PUBLIC record of an externally-held identity (KIT_KEYSTORE=command → the operator's
+ * TPM/HSM/enclave), written by `src/keystore/trust-store.ts` whenever kit signs with one.
+ *
+ * Read HERE, by filename, rather than by importing the keystore: identity.ts sits at the bottom
+ * of the import graph (keystore/resolve.ts → file-store.ts → identity.ts), so importing upward
+ * would cycle. Same reason `keystore/mandate.ts` is its own zero-import module. Validation
+ * (including the kid==fingerprint binding) lives in the writer's `readExternalIdentity`; the
+ * `add()` helper in localPublicKeys re-checks the binding regardless of who produced the record.
+ */
+function readExternalIdentityRecord(dir?: string): Identity | null {
+  try {
+    const rec = JSON.parse(
+      readFileSync(join(identityDir(dir), EXTERNAL_RECORD_FILE), "utf-8"),
+    ) as Identity;
+    if (!rec || typeof rec.publicKey !== "string" || typeof rec.id !== "string") return null;
+    // Bind kid to the key BEFORE returning: localRevocationAuthorities promotes this record to a
+    // revocation AUTHORITY, and unlike localPublicKeys it has no second binding check. Without
+    // this, a planted record claiming a victim's kid would nominate that kid as a revoker.
+    if (identityId(rec.publicKey) !== rec.id) return null;
+    return rec;
+  } catch {
+    return null;
   }
 }
 
@@ -170,6 +200,7 @@ export function localPublicKeys(dir?: string): Map<string, string> {
     map.set(rec.id, rec.publicKey);
   };
   add(tryLoadIdentity(dir));
+  add(readExternalIdentityRecord(dir));
   try {
     for (const name of readdirSync(base)) {
       if (!name.startsWith(`${RECORD_FILE}.`) || !name.endsWith(".bak")) continue;
@@ -365,8 +396,15 @@ export function isRevokedWith(
  * with). Every key can additionally self-revoke (handled in isAuthoritativeRevocation).
  */
 export function localRevocationAuthorities(dir?: string): Set<string> {
+  const out = new Set<string>();
   const cur = tryLoadIdentity(dir);
-  return new Set<string>(cur ? [cur.id] : []);
+  if (cur) out.add(cur.id);
+  // An externally-held identity is also a local authority. Without this, `kit identity migrate`
+  // wrote a revocation of the file key signed by the new hardware key, `isAuthoritativeRevocation`
+  // saw an unauthorized revoker, and the "revoked" key kept signing and verifying as valid.
+  const ext = readExternalIdentityRecord(dir);
+  if (ext) out.add(ext.id);
+  return out;
 }
 
 /**

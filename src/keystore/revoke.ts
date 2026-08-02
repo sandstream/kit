@@ -39,6 +39,10 @@ export function keystoreRecordRevocation(
   // env OR org-policy mandate: fail closed rather than file-sign the revocation.
   assertHardwareIdentity(res, hardwareRequired(process.cwd()));
   const by = identityId(pub);
+  // NOTE: signing through the resolved store also records the revoker's PUBLIC key locally
+  // (withExternalTrustRecording). That is load-bearing here: isAuthoritativeRevocation refuses a
+  // revocation whose revoker is neither the revoked key itself nor a known local authority, so
+  // without the record this file's output is inert — the "revoked" key keeps verifying as valid.
   const sig = res.store.sign(revocationStatement(kid, now, reason)).toString("base64");
   const rec: RevocationRecord = { kid, reason, ts: now, by, sig };
   appendRevocations([rec], dir);

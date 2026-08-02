@@ -27,6 +27,8 @@ import { FileKeyStore } from "./file-store.js";
 import { ExternalCommandKeyStore } from "./command-store.js";
 import { SecureEnclaveKeyStore } from "./secure-enclave-store.js";
 import { TpmKeyStore } from "./tpm-store.js";
+import { withExternalTrustRecording } from "./trust-store.js";
+import { withRevocationRefusal } from "./revoked-guard.js";
 
 /** Preference order for AUTO mode: strongest (hardware) first, file last. The
  *  operator-fronted "command" backend is preferred when configured — it is the one
@@ -35,7 +37,23 @@ import { TpmKeyStore } from "./tpm-store.js";
 const PREFERENCE: KeyStoreKind[] = ["command", "secure-enclave", "tpm", "file"];
 const VALID_KINDS: KeyStoreKind[] = ["file", "command", "secure-enclave", "tpm"];
 
+/**
+ * Construct a backend, with the two behaviours every signing path must have:
+ *
+ *   - non-file backends record the signer's PUBLIC key into the local trust store on a
+ *     successful sign — otherwise kit cannot verify its own hardware-signed artifacts, and a
+ *     revocation signed by the hardware key is never honored;
+ *   - any backend refuses to sign with a key this machine has revoked, so `kit identity migrate`
+ *     revoking the old file key actually stops that key being used.
+ *
+ * Wrapping here rather than at each of the six `store.sign(...)` call sites is deliberate: the
+ * next call site added gets both properties for free.
+ */
 function makeStore(kind: KeyStoreKind, dir?: string): KeyStore {
+  return withRevocationRefusal(withExternalTrustRecording(makeRawStore(kind, dir), dir), dir);
+}
+
+function makeRawStore(kind: KeyStoreKind, dir?: string): KeyStore {
   switch (kind) {
     case "file":
       return new FileKeyStore(dir);
