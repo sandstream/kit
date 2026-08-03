@@ -555,6 +555,24 @@ Context pointers are non-secret and live in config; the credentials they authent
 - Supply-chain findings auto-append to `.kit-audit.jsonl` (one JSON line per finding) for SIEM ingest
 - Releases ship with SLSA provenance (`npm publish --provenance`), CycloneDX + SPDX SBOMs on every GitHub release, cosign-signed Docker images, and weekly OpenSSF Scorecard
 
+### Shell guard (observe mode)
+
+The agent loop is gated (the PreToolUse install-gate across 11 harnesses), but a
+human typing `npm i x` / `npx y` / `brew install z` in their own terminal reaches
+the machine ungated. `kit guard install` writes PATH shims for the install +
+fetch-and-run family (`npm npx pnpm yarn bun bunx pip pip3 pipx uv uvx brew gem
+cargo`) that run the **same hardened parser + triage verdict** the agent gate
+uses — and log what it WOULD decide to `~/.kit/guard-observe.jsonl`.
+
+v1 is **observe-only** by the exec-broker discipline (observe → evidence →
+enforce): a shim never blocks and never breaks the tool — kit missing or
+crashing means unchanged behavior, non-install subcommands pass silently, and
+`KIT_GUARD_BYPASS=1` skips observation for one call. `kit guard status` shows
+what has passed through and what enforce mode would have stopped; `kit guard
+uninstall` removes everything. Notable: the shims also see the `npx`-spawned
+MCP servers agent harnesses launch **outside** any Bash gate — coverage the
+PreToolUse hook can't reach.
+
 ### Compliance evidence
 
 `kit coverage` emits deterministic _evidence maps_: it maps kit's own checks and self-audit rules to a vendored, pinned, curated subset of a standard's controls and buckets each as auto-verified, gap, manual, or n-a. `--json` (or `--format=json`) emits the structured report for a GRC tool to consume.
