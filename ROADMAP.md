@@ -114,6 +114,18 @@ on repo-level security checks — test structure, not ok". They now `chdir` into
 Any dimension that gains a `cwd` needs a test that would FAIL if the parameter were ignored; a test
 that merely passes `cwd` proves nothing, which is how this survived.
 
+**Done, same class, separate surface:** the exec-broker's unsigned-policy path had the identical
+bug, and there it was fail-OPEN rather than merely wrong-tree. `brokerPolicyPath()` resolved
+`.kit-exec-broker.json` against `process.cwd()` while `brokerExec` measured writes against
+`opts.cwd`, so a server in A mediating B ignored B's policy entirely — and since "no policy file"
+means "not configured", the write ran unmediated with full env. The seven MCP tools NOT behind
+`crossProjectRefusal` (`kit_secrets`, `kit_run`, `kit_triage`, `kit_init`, `kit_context`,
+`kit_map`, `kit_memory`) do thread `cwd` correctly into their own callees — that is why they are
+unguarded, and checking it walked back a suspected gap — but three of them route writes through
+`runBrokered`, which was the hole. Fixed with 10 two-sided tests in
+`src/exec-broker/policy-cwd.test.ts`; mutation-proved (dropping the `cwd` argument fails 6,
+replacing the foreign-tree deny with `if (false)` fails 2).
+
 ### PR 2 — `kit analyze` subcommand (1d)
 Walk git log + scan framework markers (`next.config.*`, `pyproject.toml`,
 `Cargo.toml`, `drizzle.config.*`, etc.) to emit a draft `CLAUDE.md` + `RULES.md`

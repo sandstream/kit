@@ -41,12 +41,25 @@ export const DEFAULT_BROKER_POLICY_FILE = ".kit-exec-broker.json";
 
 /**
  * Resolve the broker policy file path. Precedence: explicit `override` arg →
- * KIT_EXEC_BROKER_POLICY env → repo-local .kit-exec-broker.json under cwd.
+ * KIT_EXEC_BROKER_POLICY env → repo-local .kit-exec-broker.json under `cwd`.
+ *
+ * `cwd` is the GOVERNED PROJECT's directory, not the calling process's. They are the
+ * same thing on the CLI, and different the moment a long-lived process mediates an op
+ * for another tree — the MCP server, which passes a per-call `cwd` to `runBrokered`
+ * from `kit_secrets`, `kit_run` and `kit_triage`. Resolving the repo-local default
+ * against `process.cwd()` instead read the SERVER's policy (or, with no policy there,
+ * none at all) while claiming to mediate the target project: a server launched in A and
+ * asked to write B's `.env.local` ignored B's `.kit-exec-broker.json` entirely and,
+ * because "no policy file" means "not configured", ran the write unmediated with full
+ * env. Fail-OPEN, and the signed-profile path (`profileBrokerPolicy(opts.cwd ?? …)`)
+ * had always taken cwd — only this legacy JSON path had not.
+ *
+ * Defaulting to `process.cwd()` keeps every existing caller's behaviour identical.
  */
-export function brokerPolicyPath(override?: string): string {
+export function brokerPolicyPath(override?: string, cwd?: string): string {
   const chosen = override ?? process.env[BROKER_POLICY_ENV];
   if (chosen && chosen.length > 0) return resolve(chosen);
-  return resolve(process.cwd(), DEFAULT_BROKER_POLICY_FILE);
+  return resolve(cwd ?? process.cwd(), DEFAULT_BROKER_POLICY_FILE);
 }
 
 function isStringArray(v: unknown): v is string[] {
@@ -84,8 +97,8 @@ function validateBrokerPolicy(parsed: unknown): BrokerPolicy | null {
  * Load + parse + validate the broker policy. Returns null on absent, unreadable,
  * malformed, or wrong-typed input so brokerExec default-denies. Never throws.
  */
-export function loadBrokerPolicy(override?: string): BrokerPolicy | null {
-  const path = brokerPolicyPath(override);
+export function loadBrokerPolicy(override?: string, cwd?: string): BrokerPolicy | null {
+  const path = brokerPolicyPath(override, cwd);
   let raw: string;
   try {
     raw = readFileSync(path, "utf-8");
