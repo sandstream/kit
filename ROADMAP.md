@@ -108,11 +108,27 @@ homedir path, `checkServices` and `checkWebSearch` neither. Proof:
 mutation-proved three ways (ignore the argument → 3 fail; revert one sub-check → 3 fail; drop
 `cwd` from one scanner spawn → 1 fail).
 
-**Still open, and why the MCP refusal stays:** `kit_fix` writes, and `cmdFix` takes no `cwd` at
-all — it loads `.kit.toml` from `process.cwd()`, so a cross-project fix would still create B's
-lock files inside A. `kit_review` runs its own collector rather than `runCheckGate` alone. Until
-both are threaded, `crossProjectRefusal` keeps failing closed for all three tools; lifting a
-fail-closed access boundary is its own deliberate change with its own tests.
+**The write path is done too.** `cmdFix(cwd)` resolves the config, the `.gitignore` and the
+relative `[secrets].template` against the governed project, and `lock.ts` had the asymmetry the
+wrong way round — its readers (`readSkillsLock`, `readCliLock`, `readkitMeta`) all took a `cwd`
+while its WRITERS (`writeSkillsLock`, `writeCliLock`, `writekitMeta`, `ensurekitDir`) did not, so
+a caller read its own project's locks and wrote the process's. `installHooks` / `uninstallHooks` /
+`resolveHooksDir` take it as well. Note that fixing `cmdFix` did NOT fix the MCP surface:
+`register_kit_fix` carries its own copy of the lock step (it needs structured actions, not console
+output), so it had to be threaded separately — the CLI-vs-MCP divergence this codebase has been
+bitten by before. Proof: `src/fix-cwd.test.ts`, 6 tests asserting WHERE THE BYTES LANDED in both
+trees; mutation-proved two ways (lock writers ignore `cwd` → 2 fail; `.gitignore` + template
+resolve against the process → 3 fail).
+
+**Still open, and why the MCP refusal stays:** the AUDIT DESTINATION. `withGovernance` takes no
+`cwd`, and neither does `logAuditEvent`, so a cross-project write would file its evidence in the
+calling process's `.kit-audit.jsonl`. `exec-broker/broker.ts`'s own `audit()` docstring already
+explains why that is not cosmetic: foreign-project evidence pollutes the host chain and poisons
+`kit broker enforce-readiness`, "whose verdict is only as honest as the evidence file it reads". A
+write served for B whose proof lands in A is not a write kit can stand behind. `kit_review` also
+runs its own collector rather than `runCheckGate` alone. Until both are threaded,
+`crossProjectRefusal` keeps failing closed for all three tools; lifting a fail-closed access
+boundary is its own deliberate change with its own tests.
 
 Consequence, found with a discriminating probe over the MCP surface: `kit_check({cwd: B})` from a
 server launched in A reported `pass — all .env patterns in .gitignore` for a project B that has no

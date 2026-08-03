@@ -16,8 +16,8 @@ import { kitWrapperPath } from "./kit-wrapper.js";
  * process cwd, so temp-dir tests that pass an absolute throwaway gitDir fall
  * back to `<gitDir>/hooks` even when the kit repo itself sets hooksPath.
  */
-export function resolveHooksDir(gitDir = ".git"): string {
-  const repoRoot = isAbsolute(gitDir) ? dirname(gitDir) : process.cwd();
+export function resolveHooksDir(gitDir = ".git", cwd = process.cwd()): string {
+  const repoRoot = isAbsolute(gitDir) ? dirname(gitDir) : cwd;
   try {
     const hp = execFileSync("git", ["-C", repoRoot, "config", "--get", "core.hooksPath"], {
       encoding: "utf-8",
@@ -27,7 +27,7 @@ export function resolveHooksDir(gitDir = ".git"): string {
   } catch {
     /* not a git repo, hooksPath unset, or git absent — fall back below */
   }
-  return resolve(process.cwd(), gitDir, "hooks");
+  return resolve(cwd, gitDir, "hooks");
 }
 
 /**
@@ -55,6 +55,7 @@ export interface HookInstallResult {
 export async function installHooks(
   config: HooksConfig,
   gitDir = ".git",
+  cwd = process.cwd(),
 ): Promise<HookInstallResult[]> {
   // Read-only mode: hooks are writes to .git/hooks/. Refuse + audit.
   const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
@@ -65,7 +66,7 @@ export async function installHooks(
     return [{ hookName: "read-only-refusal", action: "failed", detail: refusal.reason }];
   }
   const results: HookInstallResult[] = [];
-  const hooksDir = resolveHooksDir(gitDir);
+  const hooksDir = resolveHooksDir(gitDir, cwd);
 
   // Ensure hooks directory exists
   try {
@@ -348,9 +349,10 @@ exit 0
 export async function uninstallHooks(
   hookNames: string[],
   gitDir = ".git",
+  cwd = process.cwd(),
 ): Promise<HookInstallResult[]> {
   const results: HookInstallResult[] = [];
-  const hooksDir = resolveHooksDir(gitDir);
+  const hooksDir = resolveHooksDir(gitDir, cwd);
 
   for (const hookName of hookNames) {
     const hookPath = resolve(hooksDir, hookName);

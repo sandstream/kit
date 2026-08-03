@@ -63,8 +63,8 @@ function getkitDir(cwd?: string): string {
 /**
  * Ensure .kit directory exists
  */
-async function ensurekitDir(): Promise<void> {
-  const dir = getkitDir();
+async function ensurekitDir(cwd?: string): Promise<void> {
+  const dir = getkitDir(cwd);
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true });
   }
@@ -93,9 +93,9 @@ export async function readSkillsLock(cwd?: string): Promise<SkillsLock | null> {
 /**
  * Write skills lock file
  */
-export async function writeSkillsLock(lock: SkillsLock): Promise<void> {
-  await ensurekitDir();
-  const lockPath = resolve(getkitDir(), SKILLS_LOCK_FILE);
+export async function writeSkillsLock(lock: SkillsLock, cwd?: string): Promise<void> {
+  await ensurekitDir(cwd);
+  const lockPath = resolve(getkitDir(cwd), SKILLS_LOCK_FILE);
 
   try {
     const content = JSON.stringify(lock, null, 2) + "\n";
@@ -130,9 +130,9 @@ export async function readCliLock(cwd?: string): Promise<CliLock | null> {
 /**
  * Write CLI lock file
  */
-export async function writeCliLock(lock: CliLock): Promise<void> {
-  await ensurekitDir();
-  const lockPath = resolve(getkitDir(), CLI_LOCK_FILE);
+export async function writeCliLock(lock: CliLock, cwd?: string): Promise<void> {
+  await ensurekitDir(cwd);
+  const lockPath = resolve(getkitDir(cwd), CLI_LOCK_FILE);
 
   try {
     const content = JSON.stringify(lock, null, 2) + "\n";
@@ -167,9 +167,9 @@ export async function readkitMeta(cwd?: string): Promise<kitMeta | null> {
 /**
  * Write kit metadata file
  */
-export async function writekitMeta(meta: kitMeta): Promise<void> {
-  await ensurekitDir();
-  const metaPath = resolve(getkitDir(), KIT_META_FILE);
+export async function writekitMeta(meta: kitMeta, cwd?: string): Promise<void> {
+  await ensurekitDir(cwd);
+  const metaPath = resolve(getkitDir(cwd), KIT_META_FILE);
 
   try {
     const content = JSON.stringify(meta, null, 2) + "\n";
@@ -250,8 +250,9 @@ function parseSkillVersion(
 export async function updateSkillsLock(
   skills: Record<string, string>,
   kit?: string,
+  cwd?: string,
 ): Promise<void> {
-  const existing = await readSkillsLock();
+  const existing = await readSkillsLock(cwd);
 
   const lock: SkillsLock = {
     version: 1,
@@ -278,7 +279,7 @@ export async function updateSkillsLock(
     };
   }
 
-  await writeSkillsLock(lock);
+  await writeSkillsLock(lock, cwd);
 }
 
 /**
@@ -286,8 +287,9 @@ export async function updateSkillsLock(
  */
 export async function updateCliLock(
   tools: Record<string, { version: string; source: CliLockEntry["source"]; auth?: string }>,
+  cwd?: string,
 ): Promise<void> {
-  const existing = await readCliLock();
+  const existing = await readCliLock(cwd);
 
   const lock: CliLock = {
     version: 1,
@@ -309,7 +311,7 @@ export async function updateCliLock(
     };
   }
 
-  await writeCliLock(lock);
+  await writeCliLock(lock, cwd);
 }
 
 /**

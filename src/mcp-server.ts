@@ -107,9 +107,20 @@ function readOnlyRefusal(tool: string): {
  * `checkSkills` reads an absolute homedir path, `checkServices` and `checkWebSearch` neither.
  * `check-security-cwd.test.ts` proves it behaviourally, in both directions.
  *
+ * `kit_fix`'s write path is threaded too, on both surfaces: `cmdFix(cwd)` for the CLI, and the
+ * copy of the lock step inside `register_kit_fix` below — which `cmdFix`'s fix did NOT reach,
+ * because that handler reimplements the step to return structured actions instead of console
+ * output. `lock.ts` had the asymmetry the wrong way round: its readers took a `cwd` and its
+ * WRITERS did not, so a caller read its own project's locks and wrote the process's.
+ * `fix-cwd.test.ts` asserts where the bytes landed, in both trees.
+ *
  * What still blocks lifting the refusal, and why it is not lifted here:
- *   - `kit_fix` WRITES. `cmdFix` takes no `cwd` and loads `.kit.toml` from `process.cwd()`, so a
- *     cross-project fix would still create B's lock files inside A — the original symptom.
+ *   - The AUDIT DESTINATION. `withGovernance` takes no `cwd` and `logAuditEvent` has none either,
+ *     so a cross-project write would be recorded in the calling process's `.kit-audit.jsonl`.
+ *     `exec-broker/broker.ts`'s own `audit()` docstring already names why that matters: evidence
+ *     from other projects pollutes the host repo's chain and poisons
+ *     `kit broker enforce-readiness`, "whose verdict is only as honest as the evidence file it
+ *     reads". A write served for B whose proof lands in A is not a write kit can stand behind.
  *   - `kit_review` runs its own collector, not `runCheckGate` alone.
  *   - Relaxing a fail-closed access boundary is a deliberate decision with its own tests, not a
  *     tail-end edit to a change that was fixing something else.
@@ -416,19 +427,24 @@ function register_kit_fix(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Working directory. Must equal the server process's own cwd (or be omitted): the lock-file writes resolve paths from the process, so a different value is REFUSED rather than written into the wrong project.",
+            "Working directory. Must equal the server process's own cwd (or be omitted): a different value is REFUSED. The lock-file writes now resolve from this argument, but the governance audit trail does not, so a cross-project fix would leave its proof in the wrong project.",
           ),
       },
     },
     async ({ cwd }) => {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_fix");
-      // Worse than a wrong verdict: a wrong-target WRITE. The lock-file helpers resolve from
-      // process.cwd() (see the comment on the lock step below), so cwd=B created B's lock files
-      // inside A. Refuse the mismatch rather than write into the wrong project.
+      // Worse than a wrong verdict: a wrong-target WRITE. The lock-file helpers resolved from
+      // process.cwd(), so cwd=B created B's lock files inside A. Those writes are threaded now
+      // (see the lock step below), but the AUDIT destination is not — `withGovernance` takes no
+      // cwd — so a cross-project fix would still file its evidence in the wrong project. Still
+      // refused, for that reason rather than the original one.
       const scoped = crossProjectRefusal(cwd, "kit_fix");
       if (scoped) return scoped;
       try {
         const config = await loadConfig(configPath(cwd));
+        // One resolution, used by both the broker context and the lock step below — two
+        // independent `cwd ?? process.cwd()` expressions is how they drift apart.
+        const target = cwd ?? process.cwd();
 
         const gov = await runGovernedBrokered(
           config,
@@ -456,19 +472,23 @@ function register_kit_fix(server: McpServer): void {
               }
             }
 
-            // Fix missing lock files (lock functions use process.cwd())
-            const skillsLock = await readSkillsLock();
-            const cliLock = await readCliLock();
+            // Fix missing lock files. This handler carries its OWN copy of the lock step rather
+            // than calling `cmdFix` (it needs structured actions, not console output), which means
+            // threading `cwd` through `cmdFix` did NOT reach here — the same CLI-vs-MCP divergence
+            // this codebase has been bitten by before. Both readers and writers take it now.
+            const skillsLock = await readSkillsLock(target);
+            const cliLock = await readCliLock(target);
 
             if (!skillsLock) {
               const skills: Record<string, string> = {
                 ...config.skills?.required,
                 ...config.skills?.optional,
               };
-              const meta = await readkitMeta();
+              const meta = await readkitMeta(target);
               await updateSkillsLock(
                 skills,
                 meta?.name ? `${meta.name}@${meta.version}` : undefined,
+                target,
               );
               actions.push({
                 name: "skills-lock.json",
@@ -487,7 +507,7 @@ function register_kit_fix(server: McpServer): void {
                   tools[name] = { version, source: "mise" };
                 }
               }
-              await updateCliLock(tools);
+              await updateCliLock(tools, target);
               actions.push({
                 name: "cli-lock.json",
                 action: "generated",
@@ -497,7 +517,7 @@ function register_kit_fix(server: McpServer): void {
 
             return actions;
           },
-          { cwd: cwd ?? process.cwd() },
+          { cwd: target },
         );
         if (!gov.ok) return governanceRefusal(gov.reason ?? "denied");
         const actions = gov.result!;
