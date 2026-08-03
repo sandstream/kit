@@ -60,9 +60,11 @@ export async function installHooks(
   // Read-only mode: hooks are writes to .git/hooks/. Refuse + audit.
   const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
   if (isReadOnlyMode()) {
-    const refusal = await refuseWrite("install-hooks", {
-      hook_count: Object.keys(config).length,
-    });
+    const refusal = await refuseWrite(
+      "install-hooks",
+      { hook_count: Object.keys(config).length },
+      { cwd },
+    );
     return [{ hookName: "read-only-refusal", action: "failed", detail: refusal.reason }];
   }
   const results: HookInstallResult[] = [];

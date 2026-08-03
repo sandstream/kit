@@ -114,16 +114,19 @@ function readOnlyRefusal(tool: string): {
  * WRITERS did not, so a caller read its own project's locks and wrote the process's.
  * `fix-cwd.test.ts` asserts where the bytes landed, in both trees.
  *
- * What still blocks lifting the refusal, and why it is not lifted here:
- *   - The AUDIT DESTINATION. `withGovernance` takes no `cwd` and `logAuditEvent` has none either,
- *     so a cross-project write would be recorded in the calling process's `.kit-audit.jsonl`.
- *     `exec-broker/broker.ts`'s own `audit()` docstring already names why that matters: evidence
- *     from other projects pollutes the host repo's chain and poisons
- *     `kit broker enforce-readiness`, "whose verdict is only as honest as the evidence file it
- *     reads". A write served for B whose proof lands in A is not a write kit can stand behind.
- *   - `kit_review` runs its own collector, not `runCheckGate` alone.
- *   - Relaxing a fail-closed access boundary is a deliberate decision with its own tests, not a
- *     tail-end edit to a change that was fixing something else.
+ * The AUDIT DESTINATION is threaded now too — `withGovernance`, `runGoverned`, `logAuditEvent`
+ * and `refuseWrite` all take a `cwd`, so a governed operation performed for B records its proof
+ * in B's chain rather than polluting the host repo's and poisoning
+ * `kit broker enforce-readiness`, "whose verdict is only as honest as the evidence file it reads"
+ * (`exec-broker/broker.ts`). `fix-cwd.test.ts` asserts the line lands in B and NOT in A.
+ *
+ * What still blocks lifting the refusal:
+ *   - `kit_review` runs its own collector, not `runCheckGate` alone, so its cross-project
+ *     behaviour has not been measured.
+ *   - Nothing measured yet says lifting it for `kit_check` / `kit_fix` is SAFE. Every claim above
+ *     is about a path that is now threaded; none of them is a test of the refusal being removed.
+ *     Relaxing a fail-closed access boundary needs its own change with its own probes — the
+ *     ordinary discipline, not an exception for a boundary that now looks liftable.
  *
  * So this still fails CLOSED: a cross-project call gets an actionable error instead of a verdict
  * about the wrong tree. Nothing that previously worked breaks — a client that launches the server

@@ -120,15 +120,23 @@ bitten by before. Proof: `src/fix-cwd.test.ts`, 6 tests asserting WHERE THE BYTE
 trees; mutation-proved two ways (lock writers ignore `cwd` → 2 fail; `.gitignore` + template
 resolve against the process → 3 fail).
 
-**Still open, and why the MCP refusal stays:** the AUDIT DESTINATION. `withGovernance` takes no
-`cwd`, and neither does `logAuditEvent`, so a cross-project write would file its evidence in the
-calling process's `.kit-audit.jsonl`. `exec-broker/broker.ts`'s own `audit()` docstring already
-explains why that is not cosmetic: foreign-project evidence pollutes the host chain and poisons
+**The audit destination is done too.** `withGovernance`, `runGoverned`, `logAuditEvent` and
+`refuseWrite` all take a `cwd`, so a governed operation performed for B files its proof in B's
+chain. This mattered because `exec-broker/broker.ts`'s own `audit()` docstring already explains
+the cost: foreign-project evidence pollutes the host chain and poisons
 `kit broker enforce-readiness`, "whose verdict is only as honest as the evidence file it reads". A
-write served for B whose proof lands in A is not a write kit can stand behind. `kit_review` also
-runs its own collector rather than `runCheckGate` alone. Until both are threaded,
-`crossProjectRefusal` keeps failing closed for all three tools; lifting a fail-closed access
-boundary is its own deliberate change with its own tests.
+write served for B whose proof lands in A is not a write kit can stand behind. `logAuditEvent`'s
+third parameter became an options bag in the process, which also makes the `companyId` the
+`[governance.audit].remote` row is blocked on reachable — reaching it is still a separate decision
+about where a company id comes from, not something to infer.
+
+**Still open, and why the MCP refusal stays:** `kit_review` runs its own collector rather than
+`runCheckGate` alone, so its cross-project behaviour is unmeasured. And — the more important
+reason — nothing measured so far says that LIFTING the refusal is safe. Every claim above is about
+a path that is now threaded; none of them is a probe of the refusal being removed. That needs its
+own change with its own probes: launch a server in A, call each tool for B, and assert on where
+every byte and every audit line landed. Ordinary discipline, not an exception for a boundary that
+now merely looks liftable.
 
 Consequence, found with a discriminating probe over the MCP surface: `kit_check({cwd: B})` from a
 server launched in A reported `pass — all .env patterns in .gitignore` for a project B that has no

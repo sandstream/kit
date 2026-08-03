@@ -61,14 +61,21 @@ export function activateReadOnlyMode(source: "flag" | "env" | "policy"): void {
 export async function refuseWrite(
   operation: string,
   metadata: Record<string, unknown> = {},
+  opts: { cwd?: string } = {},
 ): Promise<{ ok: false; reason: string }> {
   const reason = `read-only mode active — refusing "${operation}"`;
-  await appendAuditEventDirect({
-    operation: "read-only-mode-refusal",
-    environment: process.env.NODE_ENV ?? "unknown",
-    success: false,
-    metadata: { refused_operation: operation, ...metadata },
-  });
+  // A refusal is evidence, and evidence belongs to the project the write was aimed at. Callers
+  // that know their target pass it; the eleven that operate on the process's own tree pass
+  // nothing and behave exactly as before.
+  await appendAuditEventDirect(
+    {
+      operation: "read-only-mode-refusal",
+      environment: process.env.NODE_ENV ?? "unknown",
+      success: false,
+      metadata: { refused_operation: operation, ...metadata },
+    },
+    { cwd: opts.cwd },
+  );
   return { ok: false, reason };
 }
 

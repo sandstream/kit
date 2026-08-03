@@ -63,7 +63,7 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
       // installHooks). withGovernance never consults read-only, so guard here.
       const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
       if (isReadOnlyMode()) {
-        const refusal = await refuseWrite("fix");
+        const refusal = await refuseWrite("fix", {}, { cwd });
         console.log(`  ${c.yellow}!${c.reset} ${refusal.reason}`);
         return false;
       }
@@ -340,5 +340,7 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
       console.log();
       return manualCount === 0;
     },
+    // Audit the fix in the tree being fixed, not in whatever directory the process sits in.
+    { cwd },
   );
 }

@@ -45,6 +45,7 @@ export async function withGovernance<T>(
   config: kitConfig,
   context: OperationContext,
   operation: () => Promise<T>,
+  opts: { cwd?: string } = {},
 ): Promise<T> {
   const startTime = Date.now();
   const governanceConfig = await mergeGovernanceConfigAsync(config.governance);
@@ -57,13 +58,17 @@ export async function withGovernance<T>(
   // Audit a denied operation with the shared event shape. DRYs the 5 pre-execute
   // deny paths below — each fails closed (audit, then throw).
   const auditDeny = (error: string, extra?: Record<string, unknown>) =>
-    logAuditEvent(governanceConfig, {
-      operation: context.operation,
-      environment: governanceConfig.environment,
-      success: false,
-      error,
-      metadata: extra ? { ...context.metadata, ...extra } : context.metadata,
-    });
+    logAuditEvent(
+      governanceConfig,
+      {
+        operation: context.operation,
+        environment: governanceConfig.environment,
+        success: false,
+        error,
+        metadata: extra ? { ...context.metadata, ...extra } : context.metadata,
+      },
+      { cwd: opts.cwd },
+    );
 
   // 1. Check revocation status
   const revoked = await checkRevocationStatus(config.governance);
@@ -167,12 +172,16 @@ export async function withGovernance<T>(
   // success log alone is fail-open (the op would run unlogged if the audit
   // append failed) — this closes that gap for the operations that matter most.
   if (context.destructive) {
-    const logged = await logAuditEvent(governanceConfig, {
-      operation: context.operation,
-      environment: governanceConfig.environment,
-      success: true,
-      metadata: { ...context.metadata, phase: "authorized" },
-    });
+    const logged = await logAuditEvent(
+      governanceConfig,
+      {
+        operation: context.operation,
+        environment: governanceConfig.environment,
+        success: true,
+        metadata: { ...context.metadata, phase: "authorized" },
+      },
+      { cwd: opts.cwd },
+    );
     if (!logged) {
       throw new Error("audit-log unavailable; refusing destructive operation (fail-closed)");
     }
@@ -188,14 +197,18 @@ export async function withGovernance<T>(
     error = err instanceof Error ? err.message : String(err);
 
     // Log failure
-    await logAuditEvent(governanceConfig, {
-      operation: context.operation,
-      environment: governanceConfig.environment,
-      success: false,
-      duration_ms: Date.now() - startTime,
-      error,
-      metadata: context.metadata,
-    });
+    await logAuditEvent(
+      governanceConfig,
+      {
+        operation: context.operation,
+        environment: governanceConfig.environment,
+        success: false,
+        duration_ms: Date.now() - startTime,
+        error,
+        metadata: context.metadata,
+      },
+      { cwd: opts.cwd },
+    );
 
     throw err;
   }
@@ -203,13 +216,17 @@ export async function withGovernance<T>(
   // 6. Record usage and log success
   await recordUsage(config.governance, context.estimatedTokens || 0);
 
-  await logAuditEvent(governanceConfig, {
-    operation: context.operation,
-    environment: governanceConfig.environment,
-    success: true,
-    duration_ms: Date.now() - startTime,
-    metadata: context.metadata,
-  });
+  await logAuditEvent(
+    governanceConfig,
+    {
+      operation: context.operation,
+      environment: governanceConfig.environment,
+      success: true,
+      duration_ms: Date.now() - startTime,
+      metadata: context.metadata,
+    },
+    { cwd: opts.cwd },
+  );
 
   return result;
 }
@@ -237,6 +254,7 @@ export async function runGoverned<T>(
   config: kitConfig,
   context: OperationContext,
   operation: () => Promise<T>,
+  opts: { cwd?: string } = {},
 ): Promise<GovernedOutcome<T>> {
   const startTime = Date.now();
   const governanceConfig = await mergeGovernanceConfigAsync(config.governance);
@@ -251,13 +269,17 @@ export async function runGoverned<T>(
   }
 
   const auditDeny = (error: string, extra?: Record<string, unknown>) =>
-    logAuditEvent(governanceConfig, {
-      operation: context.operation,
-      environment: governanceConfig.environment,
-      success: false,
-      error,
-      metadata: extra ? { ...context.metadata, ...extra } : context.metadata,
-    });
+    logAuditEvent(
+      governanceConfig,
+      {
+        operation: context.operation,
+        environment: governanceConfig.environment,
+        success: false,
+        error,
+        metadata: extra ? { ...context.metadata, ...extra } : context.metadata,
+      },
+      { cwd: opts.cwd },
+    );
 
   // 1. Revocation
   if (await checkRevocationStatus(config.governance)) {
@@ -307,24 +329,32 @@ export async function runGoverned<T>(
   try {
     const result = await operation();
     await recordUsage(config.governance, context.estimatedTokens || 0);
-    await logAuditEvent(governanceConfig, {
-      operation: context.operation,
-      environment: governanceConfig.environment,
-      success: true,
-      duration_ms: Date.now() - startTime,
-      metadata: context.metadata,
-    });
+    await logAuditEvent(
+      governanceConfig,
+      {
+        operation: context.operation,
+        environment: governanceConfig.environment,
+        success: true,
+        duration_ms: Date.now() - startTime,
+        metadata: context.metadata,
+      },
+      { cwd: opts.cwd },
+    );
     return { ok: true, result };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    await logAuditEvent(governanceConfig, {
-      operation: context.operation,
-      environment: governanceConfig.environment,
-      success: false,
-      duration_ms: Date.now() - startTime,
-      error,
-      metadata: context.metadata,
-    });
+    await logAuditEvent(
+      governanceConfig,
+      {
+        operation: context.operation,
+        environment: governanceConfig.environment,
+        success: false,
+        duration_ms: Date.now() - startTime,
+        error,
+        metadata: context.metadata,
+      },
+      { cwd: opts.cwd },
+    );
     return { ok: false, reason: error };
   }
 }
@@ -354,7 +384,7 @@ export async function runGovernedBrokered<T>(
   const outcome = await runBrokered(
     context,
     async () => {
-      const gov = await runGoverned(config, context, operation);
+      const gov = await runGoverned(config, context, operation, { cwd: opts.cwd });
       // Signal a governance denial (or op error) as a throw so the broker layer
       // surfaces it as a not-ok outcome with the same reason.
       if (!gov.ok) throw new Error(gov.reason ?? "denied");

@@ -195,3 +195,65 @@ describe("cmdFix writes into the project it was given", () => {
     }
   });
 });
+
+describe("a governed operation files its evidence in the governed tree", () => {
+  // `withGovernance` took no `cwd` and `logAuditEvent` resolved `.kit-audit.jsonl` against
+  // `process.cwd()`, so a fix performed FOR B recorded its proof in A. That is not cosmetic:
+  // `exec-broker/broker.ts`'s own `audit()` docstring says foreign-project records pollute the
+  // host repo's chain and poison `kit broker enforce-readiness`, "whose verdict is only as honest
+  // as the evidence file it reads". It was the last thing keeping the MCP cross-project refusal
+  // in place for `kit_fix`.
+  function governedProject(): string {
+    const dir = mkdtempSync(join(tmpdir(), "kit-audit-cwd-"));
+    writeFileSync(
+      join(dir, ".kit.toml"),
+      "version = 1\n\n[governance]\nenabled = true\n\n[governance.audit]\nenabled = true\n",
+    );
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({ name: "ga", version: "1.0.0", private: true }) + "\n",
+    );
+    return dir;
+  }
+
+  it("the audit line lands in B's chain and not in A's", async () => {
+    const A = governedProject();
+    const B = governedProject();
+    try {
+      await inCwd(A, () => cmdFix(B));
+
+      const bLog = join(B, ".kit-audit.jsonl");
+      const aLog = join(A, ".kit-audit.jsonl");
+
+      assert.equal(existsSync(bLog), true, "the governed project must carry the fix's evidence");
+      assert.match(
+        readFileSync(bLog, "utf-8"),
+        /"operation":\s*"fix"/,
+        "B's chain must contain the fix operation",
+      );
+      // The half that fails when the parameter is dropped: A merely hosted the process.
+      assert.equal(
+        existsSync(aLog),
+        false,
+        "A must not have gained an audit entry for an operation performed on B",
+      );
+    } finally {
+      rmSync(A, { recursive: true, force: true });
+      rmSync(B, { recursive: true, force: true });
+    }
+  });
+
+  it("omitting cwd still audits in the process's own tree", async () => {
+    const A = governedProject();
+    try {
+      await inCwd(A, () => cmdFix());
+      assert.equal(
+        existsSync(join(A, ".kit-audit.jsonl")),
+        true,
+        "the default must keep filing evidence where it always did",
+      );
+    } finally {
+      rmSync(A, { recursive: true, force: true });
+    }
+  });
+});
