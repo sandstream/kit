@@ -40,14 +40,19 @@ opencode.json
 .syft.yaml
 
 # ── kit security check-gitignore ── do not edit ──
-.kit/*  # kit local state (elevation, env, runtime)
-!.kit/shared/  # keep curated shared memory tracked (committed by design)
-*.key  # private keys
-id_ed25519  # SSH ed25519 private key
-*.p12  # PKCS#12 bundle (TLS certs + keys)
-*-service-account*.json  # GCP service-account JSON keys
+# kit local state (elevation, env, runtime)
+.kit/*
+# keep curated shared memory tracked (committed by design)
+!.kit/shared/
+# private keys
+*.key
+# SSH ed25519 private key
+id_ed25519
+# PKCS#12 bundle (TLS certs + keys)
+*.p12
+# GCP service-account JSON keys
+*-service-account*.json
 # ── /kit ──
-
 # kit fix — secret-leak prevention
 .env.local.*
 .kit-audit.pending

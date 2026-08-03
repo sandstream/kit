@@ -64,6 +64,148 @@ describe("checkGitignore", () => {
   });
 });
 
+/**
+ * THE ORACLE IS GIT. Everything else in this file asks kit whether kit thinks a pattern is
+ * present, which is exactly the loop that let the real defect live: `--fix` wrote
+ * `.env  # default dotenv file`, the parser stripped the annotation back off, kit reported
+ * 13/13 covered, and `git check-ignore .env` matched nothing — `.gitignore` has no
+ * trailing-comment syntax, so each line was a literal pattern containing " # reason".
+ *
+ * These tests shell out to real git in a real repo. If kit's idea of "ignored" ever drifts from
+ * git's again, this fails, regardless of what kit's own parser believes.
+ */
+describe("patched .gitignore is honored by GIT, not just by kit", () => {
+  function gitRepo(): string {
+    const dir = mkdtempSync(join(tmpdir(), "kit-gi-git-"));
+    execSync("git init -q .", { cwd: dir });
+    return dir;
+  }
+
+  /** True when git itself ignores `path` in `cwd`. `git check-ignore` exits 1 for "not ignored". */
+  function gitIgnores(cwd: string, path: string): boolean {
+    try {
+      execSync(`git check-ignore -q -- ${JSON.stringify(path)}`, { cwd, stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  it("git ignores the files the patched block claims to cover", async () => {
+    const dir = gitRepo();
+    try {
+      writeFileSync(join(dir, ".gitignore"), "node_modules\n");
+      const r = await patchGitignore(dir);
+      assert.ok(r.written, "expected a patch");
+
+      // One representative file per shape kit promises to cover.
+      const shouldBeIgnored = [
+        ".env",
+        ".env.local",
+        ".env.production.local",
+        ".kit/elevation.json",
+        ".kit-audit.jsonl",
+        "server.pem",
+        "server.key",
+        "id_rsa",
+        "id_ed25519",
+        "bundle.p12",
+        "gcp-service-account-prod.json",
+      ];
+      const notIgnored = shouldBeIgnored.filter((p) => !gitIgnores(dir, p));
+      assert.deepEqual(
+        notIgnored,
+        [],
+        `kit claims to cover these but git does not ignore them: ${notIgnored.join(", ")}`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the curated shared-memory tier stays TRACKED (the negation survives)", async () => {
+    // `.kit/*` + `!.kit/shared/` is deliberate: a wholesale `.kit/` would stop git descending
+    // and the negation could never re-include the committed-by-design shared tier.
+    const dir = gitRepo();
+    try {
+      await patchGitignore(dir);
+      assert.equal(gitIgnores(dir, ".kit/elevation.json"), true, "local state must be ignored");
+      assert.equal(
+        gitIgnores(dir, ".kit/shared/memory.jsonl"),
+        false,
+        "curated shared memory must stay tracked",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a pattern carrying an inline comment is NOT counted as present", async () => {
+    // The exact shape kit used to write. git treats the whole line as one literal pattern, so
+    // kit must not read it as coverage — otherwise old broken files keep reporting green.
+    const dir = gitRepo();
+    try {
+      writeFileSync(join(dir, ".gitignore"), "*.pem  # PEM keys / certs\n");
+      assert.equal(gitIgnores(dir, "server.pem"), false, "sanity: git does not honor this line");
+      const r = await checkGitignore(dir);
+      assert.ok(
+        r.missingPatterns.some((m) => m.pattern === "*.pem"),
+        "an inline-commented pattern must count as MISSING, since git ignores nothing",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("re-patching a file written in the OLD broken form repairs it", async () => {
+    // Migration: anyone who already ran --fix has a block full of inert lines. The block is
+    // marker-delimited, so a re-run replaces it — and git must honor the result.
+    const dir = gitRepo();
+    try {
+      writeFileSync(
+        join(dir, ".gitignore"),
+        [
+          "node_modules",
+          "",
+          "# ── kit security check-gitignore ── do not edit ──",
+          ".env  # default dotenv file",
+          "*.pem  # PEM keys / certs",
+          "# ── /kit ──",
+          "",
+        ].join("\n"),
+      );
+      assert.equal(gitIgnores(dir, ".env"), false, "sanity: the old form ignores nothing");
+      const r = await patchGitignore(dir);
+      assert.ok(r.written, "a broken block must be recognised as needing a patch");
+      assert.equal(gitIgnores(dir, ".env"), true);
+      assert.equal(gitIgnores(dir, "server.pem"), true);
+      // Per LINE, never over the whole file: `\s` matches newlines, so a whole-file regex
+      // happily matches "pattern\n# comment" and reports a trailing comment that isn't there.
+      const text = readFileSync(join(dir, ".gitignore"), "utf-8");
+      const offenders = text
+        .split("\n")
+        .filter((l) => l.trim() && !l.trimStart().startsWith("#") && /\s#/.test(l));
+      assert.deepEqual(offenders, [], "a pattern line must not carry a trailing comment");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("patching is idempotent — a second run adds nothing", async () => {
+    const dir = gitRepo();
+    try {
+      await patchGitignore(dir);
+      const first = readFileSync(join(dir, ".gitignore"), "utf-8");
+      const second = await patchGitignore(dir);
+      assert.equal(second.added, 0, "nothing should be missing after a correct patch");
+      assert.equal(second.written, false);
+      assert.equal(readFileSync(join(dir, ".gitignore"), "utf-8"), first);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("patchGitignore", () => {
   it("creates .gitignore when missing", async () => {
     const dir = tmpRepo();
