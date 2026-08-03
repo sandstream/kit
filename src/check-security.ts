@@ -1973,10 +1973,14 @@ async function checkBumblebee(root: string): Promise<SecurityCheckResult> {
     // survives the next CI run and shows up in `kit audit`.
     // WRITE, not a read: bumblebee findings are appended to <root>/.kit-findings.jsonl. Omitting
     // the third argument defaulted it to process.cwd(), so a check run FOR another project
-    // appended that project'''s supply-chain findings to the calling process'''s file. The
-    // behavioural cross-project probe could not catch this — bumblebee is not installed in the
-    // probe environment, so the branch never ran. Found by enumerating writes in the check path
-    // instead, which is the only oracle that works for a path a probe cannot reach.
+    // appended that project's supply-chain findings to the calling process's file.
+    //
+    // Why the cross-project probe could not catch it: NOT because bumblebee is absent — it is
+    // provisioned under ~/.kit/tools/bumblebee/<version>/ and does run (measured: `pass`,
+    // 36 packages, on a clean fixture). The branch is gated on `findings.length > 0`, and a
+    // freshly created temp project has no known exposures, so the write is unreachable from any
+    // fixture that is clean. Found by enumerating the write surface instead. A green probe over a
+    // clean fixture says nothing about the code paths that only a dirty one reaches.
     await logSupplyChainFindings(outcome.findings, profile, root).catch(() => {});
     return {
       category,

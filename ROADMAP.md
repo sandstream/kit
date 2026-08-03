@@ -154,18 +154,23 @@ it used to inherit A's `pass`; `kit_review`'s design stage described B's absent 
 with neither. The probe was run twice — once with the guard in place to confirm the baseline
 refusal, once bypassed to measure what serving actually produced.
 
-**The weakest link, stated where it cannot be missed:** the scanner subprocesses are NOT proven
-against the real tools. trivy, semgrep, osv-scanner and guarddog are absent from CI, so their
-coverage is a chain of two — a source-level guard that every `execFileNoThrow` in
-`check-security.ts` passes `cwd: root`, plus a behavioural test that the option actually relocates
-a child process. That is weaker than running trivy against two trees and observing which one it
-read, and anyone installing those tools should re-run the cross-project probe to close it.
+**The scanner subprocesses are proven for `semgrep`, by inference for the rest.** `semgrep .`
+resolves `.` against the spawned process, so it is the direct test: one tree trips a local rule,
+one is clean, and the verdicts must differ. It does. trivy, osv-scanner and guarddog ship as GitHub
+release binaries and cannot be fetched in this environment (the session's policy answers 403 for
+any repository outside its allowlist), so they rest on a chain of three — every `execFileNoThrow`
+in `check-security.ts` passes `cwd: root`, the option demonstrably relocates a child process, and
+semgrep demonstrably honours it end to end. Anyone with those binaries should re-run the
+cross-project probe; the semgrep test skips loudly rather than silently when the binary is absent.
 
 One write was found only by ENUMERATING the write surface, not by any probe:
 `logSupplyChainFindings` appends bumblebee findings to `<root>/.kit-findings.jsonl` and was called
-without a `cwd`, so a check run for another project appended that project's findings to the
-caller's file. Bumblebee is not installed in the probe environment, so the branch never executed.
-A behavioural probe is not a substitute for reading the writes.
+without a `cwd`. The reason no probe caught it is worth stating exactly, because the first version
+of this note got it wrong: bumblebee IS provisioned here — kit downloads it to
+`~/.kit/tools/bumblebee/<version>/` — and it does run (`pass`, 36 packages, on a clean fixture).
+The write is gated on `findings.length > 0`, and a freshly created temp project has no known
+exposures, so the branch is unreachable from any clean fixture. A green probe over a clean fixture
+says nothing about the paths only a dirty one reaches.
 
 Consequence, found with a discriminating probe over the MCP surface: `kit_check({cwd: B})` from a
 server launched in A reported `pass — all .env patterns in .gitignore` for a project B that has no

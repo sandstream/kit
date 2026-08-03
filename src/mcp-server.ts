@@ -143,18 +143,24 @@ function readOnlyRefusal(tool: string): {
  *   - end to end over the real MCP protocol: the `serves a cross-project cwd` block in
  *     `mcp-server.test.ts`, driving a client against a server whose `process.cwd()` is A.
  *
- * And what it does NOT cover, which is the weakest link in this decision and belongs in the same
- * comment rather than a nicer one: the scanner subprocesses are not proven against the real tools.
- * trivy, semgrep, osv-scanner and guarddog are absent from CI, so their coverage is a chain of two
- * — a source-level guard that every `execFileNoThrow` in `check-security.ts` passes `cwd: root`,
- * plus a behavioural test that the option actually relocates a child process. That is weaker than
- * running trivy against two trees and observing which one it read.
+ *   - a REAL scanner subprocess: `semgrep` is run over two trees, one tripping a local rule and
+ *     one clean, and the verdicts must differ. `semgrep .` resolves "." against the spawned
+ *     process, so this is the direct proof that `cwd: root` is what decides which tree is read.
  *
- * One write was found only by enumerating writes, because no probe here could reach it:
- * `logSupplyChainFindings` appends bumblebee findings to `<root>/.kit-findings.jsonl` and was
- * called without a `cwd`, so a check run FOR another project appended that project's findings to
- * the caller's file. Bumblebee is not installed in the probe environment, so the branch never ran.
- * A behavioural probe is not a substitute for reading the write surface.
+ * What it does NOT cover: trivy, osv-scanner and guarddog are distributed as GitHub release
+ * binaries, and this environment answers 403 for any repository outside the session's allowlist,
+ * so they cannot be fetched here. Their coverage is the chain of three — every `execFileNoThrow`
+ * in `check-security.ts` passes `cwd: root` (source guard), the option demonstrably relocates a
+ * child process, and semgrep demonstrably honours it end to end. Strong by inference, not
+ * measured per tool. Anyone with those binaries installed should re-run the cross-project probe.
+ *
+ * One write was found only by enumerating the write surface, and the reason no probe reached it is
+ * worth stating precisely: `logSupplyChainFindings` appends bumblebee findings to
+ * `<root>/.kit-findings.jsonl` and was called without a `cwd`. Bumblebee IS provisioned here
+ * (under `~/.kit/tools/bumblebee/<version>/`) and does run — but the write is gated on
+ * `findings.length > 0`, and a freshly created temp project has no known exposures, so the branch
+ * is unreachable from any clean fixture. A green probe over a clean fixture says nothing about the
+ * paths only a dirty one reaches.
  */
 
 /** Refusal result for a mutating tool blocked by the governance floor (revocation,

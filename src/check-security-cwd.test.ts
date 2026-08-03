@@ -312,3 +312,75 @@ describe("the scanner-spawn mechanism actually relocates the child process", () 
     }
   });
 });
+
+describe("a REAL scanner subprocess reads the governed tree", () => {
+  /**
+   * The strongest available proof for the scanner path, and the one I wrongly claimed could not be
+   * obtained: `semgrep .` resolves "." against the spawned process, so if `cwd: root` were dropped
+   * it would scan the caller's tree. This runs the actual binary over two trees and asserts the
+   * verdicts differ.
+   *
+   * Skips — loudly — when semgrep is absent, which is the case in CI. A skipped test must never
+   * read as a passed one, so the skip message says what went unverified. trivy, osv-scanner and
+   * guarddog have no equivalent here: they are distributed as GitHub release binaries and this
+   * environment's policy answers 403 for any repository outside the session's allowlist, so they
+   * cannot be fetched. semgrep is installable from PyPI, which is why it is the one covered.
+   */
+  it("semgrep scans the cwd it is handed, not the process's", async (t) => {
+    const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
+    const probe = await execFileNoThrow("semgrep", ["--version"], { timeout: 20_000 });
+    if (!probe.ok) {
+      t.skip("semgrep not installed — the scanner-subprocess path is NOT verified in this run");
+      return;
+    }
+
+    const A = mkdtempSync(join(tmpdir(), "kit-sg-A-"));
+    const B = mkdtempSync(join(tmpdir(), "kit-sg-B-"));
+    const prevCfg = process.env.KIT_SEMGREP_CONFIG;
+    try {
+      for (const d of [A, B]) {
+        writeFileSync(join(d, ".kit.toml"), "version = 1\n");
+        writeFileSync(
+          join(d, "package.json"),
+          JSON.stringify({ name: "sg", version: "1.0.0", private: true }) + "\n",
+        );
+      }
+      // A local ruleset: a registry config would egress, and kit refuses that under air-gap.
+      const rules = join(A, "rules.yml");
+      writeFileSync(
+        rules,
+        [
+          "rules:",
+          "  - id: no-eval",
+          "    pattern: eval(...)",
+          "    message: eval is forbidden",
+          "    languages: [js]",
+          "    severity: ERROR",
+        ].join("\n") + "\n",
+      );
+      process.env.KIT_SEMGREP_CONFIG = rules;
+
+      // A trips the rule; B does not. The process sits in A for both calls.
+      writeFileSync(join(A, "danger.js"), "export const go = (s) => eval(s);\n");
+      writeFileSync(join(B, "safe.js"), "export const go = (s) => s;\n");
+
+      const aboutA = await inCwd(A, () => checkSecurity(A));
+      const aboutB = await inCwd(A, () => checkSecurity(B));
+
+      const semgrepRow = (rs: Awaited<ReturnType<typeof checkSecurity>>): string =>
+        rs.find((r) => /semgrep/i.test(r.name))?.status ?? "absent";
+
+      assert.equal(semgrepRow(aboutA), "fail", "A contains eval() and must fail its own scan");
+      assert.equal(
+        semgrepRow(aboutB),
+        "pass",
+        "B is clean — a fail here means semgrep scanned the caller's tree instead",
+      );
+    } finally {
+      if (prevCfg === undefined) delete process.env.KIT_SEMGREP_CONFIG;
+      else process.env.KIT_SEMGREP_CONFIG = prevCfg;
+      rmSync(A, { recursive: true, force: true });
+      rmSync(B, { recursive: true, force: true });
+    }
+  });
+});
