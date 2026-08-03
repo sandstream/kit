@@ -76,7 +76,7 @@ interface FnWindow {
 
 // A "function start" heuristic that covers kit's style: top-level `function`,
 // `export function`, `async function`, arrow consts assigned a function, and
-// `server.tool(` handler arrows. We don't need exact scoping — we need a bounded
+// `server.registerTool(` handler arrows. We don't need exact scoping — we need a bounded
 // window per logical function so "validator BEFORE sink" / "guard NEAR handler"
 // checks compare lines that actually belong together. Brace-depth tracking from a
 // function-start line until depth returns to its starting level closes the window.
@@ -678,16 +678,19 @@ const GUARD_WINDOW = 12;
 // with none of these (a JSON-assembling stub) is not a mutation risk.
 const MCP_SIDE_EFFECT_RE =
   /\b(?:writeFile|writeFileSync|appendFile|appendFileSync|mkdir|mkdirSync|generateSecrets|loginServices|provisionService|installTools|executeCommand|execFileSync|execFile|execSync|spawnSync|spawn|exec)\s*\(/;
-// Registration of a kit_* MCP tool: `server.tool("kit_...",` (name on the next line).
+// Registration of a kit_* MCP tool: `server.registerTool("kit_...",` (name on the
+// next line). The deprecated `server.tool(` overload is still matched so a tool
+// added through it can never dodge classification (fail-closed).
 const KIT_TOOL_REG_RE = /["'](kit_[a-z_]+)["']/;
 
 /** Every kit_* tool registered in mcp-server.ts, with the line of its registration. */
 export function extractKitTools(file: SourceFile): { name: string; regIdx: number }[] {
   const tools: { name: string; regIdx: number }[] = [];
   for (let i = 0; i < file.lines.length; i++) {
-    // Anchor on the `server.tool(` call, then read the tool name from the next
-    // non-empty line (kit's style puts the name on its own line).
-    if (!/server\.tool\s*\(/.test(file.lines[i])) continue;
+    // Anchor on the `server.registerTool(` call (or the deprecated `server.tool(`),
+    // then read the tool name from the next non-empty line (kit's style puts the
+    // name on its own line).
+    if (!/server\.(?:registerTool|tool)\s*\(/.test(file.lines[i])) continue;
     for (let j = i; j < Math.min(file.lines.length, i + 3); j++) {
       const m = KIT_TOOL_REG_RE.exec(file.lines[j]);
       if (m) {
