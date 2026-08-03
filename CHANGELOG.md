@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.3.1] - 2026-08-03
+
+### Fixed
+
+- **The 6.3.0 first-publish of the adapter SDK and plugins failed provenance
+  validation.** npm's sigstore check requires each workspace `package.json` to
+  carry a `repository.url` matching the provenance source
+  (`https://github.com/sandstream/kit`); the field was empty, so the registry
+  rejected `sandstream-kit-adapter-sdk` with E422 and the eleven plugins never
+  ran (the CLI itself published). All thirteen manifests now declare
+  `repository` (with the monorepo `directory` field); the publish step is
+  idempotent, so this tag completes the set the 6.3.0 tag started.
+
 ## [6.3.0] - 2026-08-01
 
 ### Security

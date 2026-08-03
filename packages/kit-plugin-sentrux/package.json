@@ -5,12 +5,19 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc"
   },
   "devDependencies": {
     "@types/node": "22.19.15",
     "typescript": "5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sandstream/kit.git",
+    "directory": "packages/kit-plugin-sentrux"
   }
 }
