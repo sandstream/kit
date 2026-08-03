@@ -60,6 +60,30 @@ Contributions on any planned item are welcome — open an issue first to coordin
 
 Effort estimates assume one focused developer-day.
 
+### Thread `cwd` through every check dimension (1d)
+`runCheckGate` resolves its `cwd` option only to load `.kit.toml`. All ten dimensions after that
+— `checkSecurity()`, `checkTools()`, `checkServices()`, `checkSecrets()`, `checkSkills()`,
+`checkHooks()`, `checkTests()`, `checkWebSearch()`, `isGitRepository()`, and their callees —
+resolve paths from `process.cwd()`.
+
+Consequence, found with a discriminating probe over the MCP surface: `kit_check({cwd: B})` from a
+server launched in A reported `pass — all .env patterns in .gitignore` for a project B that has no
+`.gitignore` at all. The config came from B, the verdict came from A. `kit_fix` was worse — it
+created B's lock files inside A.
+
+Mitigated, not fixed: `kit_check` / `kit_review` / `kit_fix` now REFUSE a `cwd` that differs from
+the server process's own directory rather than answering about the wrong tree
+(`crossProjectRefusal` in `mcp-server.ts`), and `checkLockFiles` + the three lock readers now take
+a `cwd` so `kit_context` stops reporting the server's lock state as the target project's. The
+remaining nine dimensions still need the parameter before a cross-project call can be *served*
+instead of refused.
+
+Note when doing this: `src/mcp-server.test.ts` had four tests passing `cwd: tempDir` from a process
+sitting in the kit repo — green only because of this bug, with one assertion conceding "ok depends
+on repo-level security checks — test structure, not ok". They now `chdir` into the temp project.
+Any dimension that gains a `cwd` needs a test that would FAIL if the parameter were ignored; a test
+that merely passes `cwd` proves nothing, which is how this survived.
+
 ### PR 2 — `kit analyze` subcommand (1d)
 Walk git log + scan framework markers (`next.config.*`, `pyproject.toml`,
 `Cargo.toml`, `drizzle.config.*`, etc.) to emit a draft `CLAUDE.md` + `RULES.md`

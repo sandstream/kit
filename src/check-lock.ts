@@ -15,14 +15,18 @@ export interface LockCheckResult {
 }
 
 /**
- * Check lock files against config
+ * Check lock files against config.
+ *
+ * `cwd` matters: without it the readers resolved `.kit/` from `process.cwd()`, so the MCP
+ * `kit_context` tool reported the SERVER process's lock state inside an otherwise correctly-scoped
+ * description of a different project — one honest object with one dishonest field in it.
  */
-export async function checkLockFiles(config: kitConfig): Promise<LockCheckResult[]> {
+export async function checkLockFiles(config: kitConfig, cwd?: string): Promise<LockCheckResult[]> {
   const results: LockCheckResult[] = [];
 
   // Check skills lock
   if (config.skills) {
-    const skillsLock = await readSkillsLock();
+    const skillsLock = await readSkillsLock(cwd);
     const configSkills = {
       ...config.skills.required,
       ...config.skills.optional,
@@ -73,7 +77,7 @@ export async function checkLockFiles(config: kitConfig): Promise<LockCheckResult
 
   // Check CLI lock
   if (config.tools) {
-    const cliLock = await readCliLock();
+    const cliLock = await readCliLock(cwd);
     const configToolNames = Object.keys(config.tools);
 
     if (!cliLock) {

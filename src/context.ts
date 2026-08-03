@@ -93,7 +93,7 @@ export async function gatherProjectContext(
   };
 
   // Gather lock file checks
-  const lockResults = await checkLockFiles(config);
+  const lockResults = await checkLockFiles(config, cwd);
   const locks = lockResults.map((l) => ({
     category: l.category,
     exists: l.exists,

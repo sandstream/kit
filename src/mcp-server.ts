@@ -84,6 +84,51 @@ function readOnlyRefusal(tool: string): {
   };
 }
 
+/**
+ * Guard for tools whose BODY is scoped to `process.cwd()`, not to their `cwd` argument.
+ *
+ * `runCheckGate` resolves `opts.cwd` and uses it to load `.kit.toml` — then calls every dimension
+ * without it: `checkSecurity()`, `checkLockFiles(config)`, `checkHooks(...)`, `checkTests(...)`,
+ * `isGitRepository()`. All of those resolve paths from `process.cwd()`, i.e. the directory the MCP
+ * server process was launched in. So `kit_check({cwd: B})` read B's CONFIG and then measured A.
+ *
+ * Verified with a discriminating probe: give A a complete `.gitignore` and B none, then call
+ * `kit_check({cwd: B})` from a server launched in A. It answered
+ * `pass — all .env patterns in .gitignore` for a project that has no .gitignore at all. A client
+ * asking about B got a security pass earned by A. That is the worst shape a gate can fail in.
+ *
+ * The real fix is to thread `cwd` through all ten dimensions and their callees; that is a wide
+ * refactor of kit's most-used path and belongs in its own change (ROADMAP). Until then this fails
+ * CLOSED: a cross-project call gets an actionable error instead of a verdict about the wrong tree.
+ * Nothing that previously worked breaks — a client that launches the server inside the project it
+ * asks about (what Claude Code does) passes a `cwd` equal to `process.cwd()`, or omits it.
+ */
+function crossProjectRefusal(
+  cwd: string | undefined,
+  tool: string,
+): { content: { type: "text"; text: string }[]; isError: true } | null {
+  if (cwd === undefined) return null;
+  if (resolve(cwd) === resolve(process.cwd())) return null;
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify(
+          {
+            ok: false,
+            error: `${tool}: cwd "${resolve(cwd)}" differs from this server's working directory "${resolve(process.cwd())}"`,
+            why: "This tool's checks resolve paths from the server process's working directory, so a verdict for another project would describe THIS one. Refusing rather than returning a green earned by the wrong tree.",
+            fix: "Start the kit MCP server inside the project you want to check (Claude Code does this per-project), or omit cwd, or run `kit check` in that directory.",
+          },
+          null,
+          2,
+        ),
+      },
+    ],
+    isError: true,
+  };
+}
+
 /** Refusal result for a mutating tool blocked by the governance floor (revocation,
  *  budget, permission/approval, expired secrets). Mirrors the CLI's fail-closed deny. */
 function governanceRefusal(reason: string): {
@@ -146,8 +191,17 @@ function register_kit_check(server: McpServer): void {
   server.tool(
     "kit_check",
     "Run kit check and return structured status for all tools, services, secrets, and security checks.",
-    { cwd: z.string().optional().describe("Working directory (defaults to process.cwd())") },
+    {
+      cwd: z
+        .string()
+        .optional()
+        .describe(
+          "Working directory. Must equal the server process's own cwd (or be omitted): the check dimensions resolve paths from the process, so a different value is REFUSED rather than answered for the wrong project.",
+        ),
+    },
     async ({ cwd }) => {
+      const scoped = crossProjectRefusal(cwd, "kit_check");
+      if (scoped) return scoped;
       try {
         const r = await runCheckGate({ cwd });
         return {
@@ -218,6 +272,8 @@ function register_kit_review(server: McpServer): void {
         ),
     },
     async ({ cwd, enforce, stages, category, concise }) => {
+      const scoped = crossProjectRefusal(cwd, "kit_review");
+      if (scoped) return scoped;
       try {
         const { collectReview } = await import("./commands/review.js");
         const report = await collectReview({ cwd, enforce, stages, category });
@@ -316,9 +372,21 @@ function register_kit_fix(server: McpServer): void {
   server.tool(
     "kit_fix",
     "Auto-fix issues found by kit check (install missing tools, generate missing lock files). Returns actions taken.",
-    { cwd: z.string().optional().describe("Working directory") },
+    {
+      cwd: z
+        .string()
+        .optional()
+        .describe(
+          "Working directory. Must equal the server process's own cwd (or be omitted): the lock-file writes resolve paths from the process, so a different value is REFUSED rather than written into the wrong project.",
+        ),
+    },
     async ({ cwd }) => {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_fix");
+      // Worse than a wrong verdict: a wrong-target WRITE. The lock-file helpers resolve from
+      // process.cwd() (see the comment on the lock step below), so cwd=B created B's lock files
+      // inside A. Refuse the mismatch rather than write into the wrong project.
+      const scoped = crossProjectRefusal(cwd, "kit_fix");
+      if (scoped) return scoped;
       try {
         const config = await loadConfig(configPath(cwd));
 
