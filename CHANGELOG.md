@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `kit check`. The fix only exists in the 2.x line, and SDK 1.30.0 is the
   first release whose range (`^1.19.9 || ^2.0.5`) admits it.
 
+## [6.3.1] - 2026-08-03
+
 ### Fixed
 
 - **The 6.3.0 first-publish of the adapter SDK and plugins failed provenance
