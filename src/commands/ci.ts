@@ -8,7 +8,7 @@
 import { resolve } from "node:path";
 import { existsSync, writeFileSync } from "node:fs";
 import { c } from "../utils/colors.js";
-import { hasFlag, envTruthy } from "../utils/flags.js";
+import { hasFlag, envTruthy, flagValue } from "../utils/flags.js";
 import { loadConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { withGovernance } from "../governance-middleware.js";
@@ -61,9 +61,7 @@ export async function cmdCi(): Promise<boolean> {
     return true;
   }
 
-  const formatArg = args.find((a) => a.startsWith("--format="))?.split("=")[1] as
-    | CiFormat
-    | undefined;
+  const formatArg = flagValue(args, "--format") as CiFormat | undefined;
   // Scanner-health STRICT BY DEFAULT (kit's "no false green" floor): a check that
   // could not RUN (tool/token absent, crashed) is marked didNotRun and FAILS the
   // gate — a green means every check actually ran. `--lenient` / KIT_CI_LENIENT

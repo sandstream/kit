@@ -12,7 +12,7 @@
  */
 import { resolve } from "node:path";
 import { c } from "../utils/colors.js";
-import { hasFlag } from "../utils/flags.js";
+import { hasFlag, flagValue } from "../utils/flags.js";
 import { loadConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { isNonInteractive } from "../environment.js";
@@ -44,37 +44,26 @@ async function cmdSecurityPrescan(): Promise<boolean> {
     return false;
   }
   const deep = hasFlag(process.argv, "--deep");
-  const excludeArg = process.argv.find((a) => a.startsWith("--exclude="));
-  const exclude = excludeArg
-    ? excludeArg
-        .slice("--exclude=".length)
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-    : [];
-  const onlyArg = process.argv.find((a) => a.startsWith("--only="));
-  const onlyChecks = onlyArg
-    ? onlyArg
-        .slice("--only=".length)
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-    : undefined;
-  const skipArg = process.argv.find((a) => a.startsWith("--skip="));
-  const skipChecks = skipArg
-    ? skipArg
-        .slice("--skip=".length)
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-    : undefined;
-  const formatArg = process.argv.find((a) => a.startsWith("--format="))?.split("=")[1];
+  // Comma lists via flagValue so `--only a,b` works as well as `--only=a,b`. These read only the
+  // `=` spelling before, which made the conventional space form a silently ignored flag: the token
+  // after it is not `--`-prefixed, so `unknownFlags` skips it too and nothing complains.
+  const commaList = (name: string): string[] | undefined => {
+    const raw = flagValue(process.argv, name);
+    if (raw === undefined) return undefined;
+    return raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  };
+  const exclude = commaList("--exclude") ?? [];
+  const onlyChecks = commaList("--only");
+  const skipChecks = commaList("--skip");
+  const formatArg = flagValue(process.argv, "--format");
   const format: "text" | "json" = formatArg === "json" ? "json" : "text";
   // --vs-baseline=<path> turns prescan into a drift-detector: run once,
   // diff against a baseline JSONL, output ONLY new regressions, exit 1 if any.
   // Designed for cron / systemd-timer / GitHub Actions schedule.
-  const baselineArg = process.argv.find((a) => a.startsWith("--vs-baseline="));
-  const vsBaseline = baselineArg ? baselineArg.slice("--vs-baseline=".length) : undefined;
+  const vsBaseline = flagValue(process.argv, "--vs-baseline");
   const { runPrescan } = await import("../security-prescan.js");
 
   if (format === "text") {
@@ -203,7 +192,7 @@ async function cmdSecurityPrescanDiff(): Promise<boolean> {
     );
     return false;
   }
-  const formatArg = process.argv.find((a) => a.startsWith("--format="))?.split("=")[1];
+  const formatArg = flagValue(process.argv, "--format");
   const format: "text" | "json" = formatArg === "json" ? "json" : "text";
   const { loadReport, diffReports } = await import("../security-prescan.js");
 

@@ -12,7 +12,7 @@
  */
 import { createInterface } from "node:readline/promises";
 import { c } from "../utils/colors.js";
-import { hasFlag } from "../utils/flags.js";
+import { hasFlag, flagValue } from "../utils/flags.js";
 import { loadConfig, type kitConfig, type SecretKeyConfig } from "../config.js";
 import { KIT_FILE, resolveConfigPath } from "../cli-shared.js";
 import { isNonInteractive } from "../environment.js";
@@ -950,12 +950,14 @@ async function cmdSecretsMigrate(): Promise<boolean> {
  */
 async function cmdSecretsVaultMigrate(): Promise<boolean> {
   const args = process.argv.slice(4);
-  const fromArg =
-    args.find((a) => a.startsWith("--from="))?.split("=")[1] ??
-    args[args.indexOf("--from") + 1] ??
-    "";
-  const toArg =
-    args.find((a) => a.startsWith("--to="))?.split("=")[1] ?? args[args.indexOf("--to") + 1] ?? "";
+  // Via flagValue, NOT `args[args.indexOf("--from") + 1]`: `indexOf` returns -1 when the flag is
+  // absent, so `+ 1` indexes args[0] and the FIRST TOKEN silently became the value. Measured:
+  // `kit secrets vault-migrate --to infisical` printed `From: --to` and went on to report
+  // `No keys with source="--to" found` instead of the usage text the `!fromArg` guard below is
+  // there to print. `--dry-run --to infisical` yielded `From: --dry-run` the same way. A missing
+  // required flag must reach that guard, not be filled in with whatever was typed first.
+  const fromArg = flagValue(args, "--from") ?? "";
+  const toArg = flagValue(args, "--to") ?? "";
   const dryRun = hasFlag(args, "--dry-run");
 
   if (hasFlag(args, "--help") || hasFlag(args, "-h") || !fromArg || !toArg) {

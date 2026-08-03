@@ -5,7 +5,7 @@
  * (draft CLAUDE.md / RULES.md from a repo scan). `aggregateAdvisories` collapses
  * info-severity findings and is used only here, so it stays module-private.
  */
-import { hasFlag } from "../utils/flags.js";
+import { hasFlag, flagValue } from "../utils/flags.js";
 import { c } from "../utils/colors.js";
 import { checkSecurity, type SecurityCheckResult } from "../check-security.js";
 import { scanTranscripts } from "../scan-transcripts.js";
@@ -45,9 +45,7 @@ export async function cmdSelfAudit(): Promise<boolean> {
     return true;
   }
 
-  const formatArg = args.find((a) => a.startsWith("--format="))?.split("=")[1] as
-    | CiFormat
-    | undefined;
+  const formatArg = flagValue(args, "--format") as CiFormat | undefined;
   const failOnWarning = hasFlag(args, "--fail-on-warning");
   const jsonMode = hasFlag(args, "--json");
   const format: CiFormat = formatArg ?? (jsonMode ? "json" : detectCiFormat());
@@ -191,7 +189,7 @@ export async function cmdSelfAudit(): Promise<boolean> {
  */
 export async function cmdCoverage(): Promise<boolean> {
   const args = process.argv.slice(2);
-  const formatArg = args.find((a) => a.startsWith("--format="))?.split("=")[1];
+  const formatArg = flagValue(args, "--format");
   const jsonMode = hasFlag(args, "--json") || formatArg === "json";
   const verify = hasFlag(args, "--verify");
 
