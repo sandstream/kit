@@ -22,6 +22,7 @@ export async function runDesignGate(
   const { loadBaselineForGate, baselineGet } = await import("../baseline.js");
   const { baseline, ignored } = await loadBaselineForGate(opts.cwd);
   const checks = await checkDesign({
+    cwd: opts.cwd,
     enforce: opts.enforce,
     baseline: {
       a11y: baselineGet(baseline, "design", "a11y"),

@@ -120,13 +120,18 @@ function readOnlyRefusal(tool: string): {
  * `kit broker enforce-readiness`, "whose verdict is only as honest as the evidence file it reads"
  * (`exec-broker/broker.ts`). `fix-cwd.test.ts` asserts the line lands in B and NOT in A.
  *
- * What still blocks lifting the refusal:
- *   - `kit_review` runs its own collector, not `runCheckGate` alone, so its cross-project
- *     behaviour has not been measured.
- *   - Nothing measured yet says lifting it for `kit_check` / `kit_fix` is SAFE. Every claim above
- *     is about a path that is now threaded; none of them is a test of the refusal being removed.
- *     Relaxing a fail-closed access boundary needs its own change with its own probes — the
- *     ordinary discipline, not an exception for a boundary that now looks liftable.
+ * `kit_review`'s collector is measured too. `collectReview` passes `opts.cwd` to all four stages
+ * so it READ as threaded, but `runDesignGate` handed that `cwd` to the baseline loader and then
+ * called `checkDesign(...)` without it — the source roots and every finding's display path came
+ * from `process.cwd()`. Fixed; `review-cwd.test.ts` covers it. `check`, `standards` and `adr`
+ * were already correct.
+ *
+ * What still blocks lifting the refusal: nothing measured yet says REMOVING it is safe. Every
+ * claim above is that a path is now threaded, which is a different proposition from "a
+ * cross-project call is served correctly end to end". That needs its own change with its own
+ * probes — a real server in A, each tool called for B over stdio, assertions on where every byte
+ * and every audit line landed. Ordinary discipline, not an exception for a boundary that now
+ * merely looks liftable.
  *
  * So this still fails CLOSED: a cross-project call gets an actionable error instead of a verdict
  * about the wrong tree. Nothing that previously worked breaks — a client that launches the server

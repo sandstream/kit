@@ -130,13 +130,27 @@ third parameter became an options bag in the process, which also makes the `comp
 `[governance.audit].remote` row is blocked on reachable — reaching it is still a separate decision
 about where a company id comes from, not something to infer.
 
-**Still open, and why the MCP refusal stays:** `kit_review` runs its own collector rather than
-`runCheckGate` alone, so its cross-project behaviour is unmeasured. And — the more important
-reason — nothing measured so far says that LIFTING the refusal is safe. Every claim above is about
-a path that is now threaded; none of them is a probe of the refusal being removed. That needs its
-own change with its own probes: launch a server in A, call each tool for B, and assert on where
-every byte and every audit line landed. Ordinary discipline, not an exception for a boundary that
-now merely looks liftable.
+**`kit_review`'s collector is measured now, and it had one real gap.** `collectReview` passes
+`opts.cwd` to all four stages, so it read as threaded — but `runDesignGate` passed that `cwd` to
+`loadBaselineForGate` and then called `checkDesign(...)` without it, and `checkDesign` resolved its
+source roots *and* every finding's display path from `process.cwd()`. The baseline came from B
+while the files scanned came from A. A parameter that reaches one collaborator and not the next is
+the same false green as no parameter at all, and reading `collectReview` alone would never show
+it. Fixed, with `src/review-cwd.test.ts` (6 tests) and mutation proof both ways. The `check`,
+`standards` and `adr` stages were already correct: all five standards runners receive the resolved
+`cwd`, and `runAdrGate` threads it to `loadAdrs`.
+
+Worth recording because it cost two false alarms: my first fixtures reported "the two trees are
+identical" for the `adr` and `standards` stages and both times the FIXTURE was wrong, not the code
+— an ADR in MADR heading style that kit's parser (YAML frontmatter with an `id`) correctly
+ignored, and a standards stage whose five rows only measure tool availability, which two temp dirs
+necessarily share. A probe that cannot tell the hypothesis from its negation is not evidence.
+
+**Still open: lifting the refusal itself.** Nothing measured so far says that REMOVING it is safe.
+Every claim above is about a path being threaded, which is a different proposition. That needs its
+own change with its own probes: launch a real MCP server in A, call each tool for B over stdio,
+and assert on where every byte and every audit line landed. Ordinary discipline, not an exception
+for a boundary that now merely looks liftable.
 
 Consequence, found with a discriminating probe over the MCP surface: `kit_check({cwd: B})` from a
 server launched in A reported `pass — all .env patterns in .gitignore` for a project B that has no

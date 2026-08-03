@@ -107,7 +107,7 @@ const A11Y_RULES: Array<{ id: string; pattern: RegExp; description: string }> = 
   },
 ];
 
-async function scanA11y(srcRoots: string[]): Promise<A11yFinding[]> {
+async function scanA11y(srcRoots: string[], root: string): Promise<A11yFinding[]> {
   const findings: A11yFinding[] = [];
   for (const root of srcRoots) {
     if (!(await pathExists(root))) continue;
@@ -126,7 +126,7 @@ async function scanA11y(srcRoots: string[]): Promise<A11yFinding[]> {
         for (const rule of A11Y_RULES) {
           if (rule.pattern.test(line)) {
             findings.push({
-              file: relative(process.cwd(), file),
+              file: relative(root, file),
               line: i + 1,
               rule: rule.id,
               snippet: line.trim().slice(0, 120),
@@ -146,7 +146,11 @@ interface TokenBypass {
   match: string;
 }
 
-async function scanTokenBypass(srcRoots: string[], tokenFiles: string[]): Promise<TokenBypass[]> {
+async function scanTokenBypass(
+  srcRoots: string[],
+  tokenFiles: string[],
+  root: string,
+): Promise<TokenBypass[]> {
   const findings: TokenBypass[] = [];
   for (const root of srcRoots) {
     if (!(await pathExists(root))) continue;
@@ -168,7 +172,7 @@ async function scanTokenBypass(srcRoots: string[], tokenFiles: string[]): Promis
         const hex = line.match(/#[0-9a-f]{3,8}\b/i);
         if (hex) {
           findings.push({
-            file: relative(process.cwd(), file),
+            file: relative(root, file),
             line: i + 1,
             kind: "raw-hex",
             match: hex[0],
@@ -177,7 +181,7 @@ async function scanTokenBypass(srcRoots: string[], tokenFiles: string[]): Promis
         const px = line.match(/\b\d{2,}px\b/);
         if (px && !line.includes("border")) {
           findings.push({
-            file: relative(process.cwd(), file),
+            file: relative(root, file),
             line: i + 1,
             kind: "raw-px",
             match: px[0],
@@ -195,13 +199,19 @@ export async function checkDesign(
     tokenFiles?: string[];
     enforce?: boolean;
     baseline?: { a11y?: string[]; tokens?: string[] };
+    cwd?: string;
   } = {},
 ): Promise<DesignCheckResult[]> {
+  // The GOVERNED project's root. `runDesignGate` accepted a `cwd`, passed it to the baseline
+  // loader, and then called this function without it — so the baseline came from B while the
+  // files scanned came from A. A parameter that reaches one collaborator and not the next is the
+  // same false green as no parameter at all.
+  const root = opts.cwd ?? process.cwd();
   // Monorepo (#249): also scan each workspace's src/app/components — a Turborepo
   // full of tsx under apps/* must not read as "no components found".
   const rootDirs = opts.srcRoots ?? ["src", "app", "components"];
-  const wsDirs = opts.srcRoots ? [] : workspaceSourceDirs(process.cwd(), rootDirs);
-  const srcRoots = [...rootDirs, ...wsDirs].map((d) => resolve(process.cwd(), d));
+  const wsDirs = opts.srcRoots ? [] : workspaceSourceDirs(root, rootDirs);
+  const srcRoots = [...rootDirs, ...wsDirs].map((d) => resolve(root, d));
   const tokenFiles = opts.tokenFiles ?? ["design-tokens", "tokens.ts", "theme.ts"];
   const enforce = opts.enforce ?? false;
   const results: DesignCheckResult[] = [];
@@ -231,7 +241,7 @@ export async function checkDesign(
   }
 
   // A11y
-  const a11y = await scanA11y(srcRoots);
+  const a11y = await scanA11y(srcRoots, root);
   const a11yBaseline = new Set(opts.baseline?.a11y ?? []);
   const newA11y = a11y.filter((f) => !a11yBaseline.has(`${f.file}:${f.rule}`));
 
@@ -262,7 +272,7 @@ export async function checkDesign(
   }
 
   // Design tokens
-  const tokenFindings = await scanTokenBypass(srcRoots, tokenFiles);
+  const tokenFindings = await scanTokenBypass(srcRoots, tokenFiles, root);
   const tokenBaseline = new Set(opts.baseline?.tokens ?? []);
   const newTokens = tokenFindings.filter(
     (f) => !tokenBaseline.has(`${f.file}:${f.kind}:${f.match}`),
@@ -298,10 +308,12 @@ export async function checkDesign(
 }
 
 /** Exposed so `kit baseline freeze` can snapshot these into .kit-baseline.json. */
-export async function collectDesignKeys(): Promise<{ a11y: string[]; tokens: string[] }> {
-  const srcRoots = ["src", "app", "components"].map((d) => resolve(process.cwd(), d));
-  const a11y = await scanA11y(srcRoots);
-  const tokens = await scanTokenBypass(srcRoots, ["design-tokens", "tokens.ts", "theme.ts"]);
+export async function collectDesignKeys(
+  cwd: string = process.cwd(),
+): Promise<{ a11y: string[]; tokens: string[] }> {
+  const srcRoots = ["src", "app", "components"].map((d) => resolve(cwd, d));
+  const a11y = await scanA11y(srcRoots, cwd);
+  const tokens = await scanTokenBypass(srcRoots, ["design-tokens", "tokens.ts", "theme.ts"], cwd);
   return {
     a11y: a11y.map((f) => `${f.file}:${f.rule}`),
     tokens: tokens.map((f) => `${f.file}:${f.kind}:${f.match}`),
