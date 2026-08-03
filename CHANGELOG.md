@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Security
+
+- **`@modelcontextprotocol/sdk` 1.29.0 → 1.30.0, pulling the transitive
+  `@hono/node-server` from 1.19.14 to 2.0.12.** The 1.x line carries
+  GHSA-frvp-7c67-39w9 (CVSS 5.9): on Windows hosts an encoded backslash
+  (`%5C`) in a request path decodes to `\`, which the Windows path resolver
+  treats as a separator, letting `serve-static` escape its root. Kit's MCP
+  server runs over stdio and never serves static files, so no kit code path
+  was exploitable — but the lockfile pin kept `osv-scanner` red on every
+  `kit check`. The fix only exists in the 2.x line, and SDK 1.30.0 is the
+  first release whose range (`^1.19.9 || ^2.0.5`) admits it.
+
 ## [6.3.1] - 2026-08-03
 
 ### Fixed
