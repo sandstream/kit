@@ -129,6 +129,7 @@ export function buildPlaybook(keyName: string): RotationPlaybook {
 }
 
 import { loadConfig } from "./config.js";
+import { flagValue } from "./utils/flags.js";
 import { resolve } from "node:path";
 import { isNonInteractive } from "./environment.js";
 import { writeSecretToBackend } from "./secrets-migrate.js";
@@ -204,8 +205,7 @@ async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Pr
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   // Project ref: --project <ref> flag or SUPABASE_PROJECT_REF env var.
-  const projectIdx = args.indexOf("--project");
-  const projectRef = projectIdx >= 0 ? args[projectIdx + 1] : process.env.SUPABASE_PROJECT_REF;
+  const projectRef = flagValue(args, "--project") ?? process.env.SUPABASE_PROJECT_REF;
   if (!projectRef) {
     console.error(`${c.red}--project <ref> required (or set SUPABASE_PROJECT_REF).${c.reset}`);
     console.error(
@@ -215,9 +215,7 @@ async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Pr
   }
 
   // Rotation mode: explicit --mode, otherwise auto-detect from project state.
-  const modeIdx = args.indexOf("--mode");
-  let mode: "scoped-key-mint" | "jwt-secret-roll" | undefined =
-    modeIdx >= 0 ? (args[modeIdx + 1] as "scoped-key-mint" | "jwt-secret-roll") : undefined;
+  let mode = flagValue(args, "--mode") as "scoped-key-mint" | "jwt-secret-roll" | undefined;
   if (mode !== undefined && mode !== "scoped-key-mint" && mode !== "jwt-secret-roll") {
     console.error(
       `${c.red}Invalid --mode "${mode}" — use "scoped-key-mint" or "jwt-secret-roll".${c.reset}`,
@@ -410,22 +408,22 @@ export async function cmdSecretsRotate(): Promise<boolean> {
     return false;
   }
 
-  const valueIdx = args.indexOf("--value");
-  const explicitValue = valueIdx >= 0 ? args[valueIdx + 1] : undefined;
-  const randomIdx = args.indexOf("--random");
+  const explicitValue = flagValue(args, "--value");
+  // `--random` is an OPTIONAL-value flag: bare means "generate", `--random 32` / `--random=32`
+  // means a length. So presence and value are read separately — `flagValue` alone would treat the
+  // next token as the length even when it is the following flag, and the digit test is what keeps
+  // `--random --dry-run` meaning "generate", not "length --dry-run".
+  // Presence cannot go through `hasFlag`: it compares whole tokens, so `--random=32` would not
+  // register as present at all and the length would be silently dropped.
+  const randomPresent = args.some((a) => a === "--random" || a.startsWith("--random="));
   let randomFlag: number | true | undefined;
-  if (randomIdx >= 0) {
-    const next = args[randomIdx + 1];
-    if (next && /^\d+$/.test(next)) {
-      randomFlag = Number.parseInt(next, 10);
-    } else {
-      randomFlag = true;
-    }
+  if (randomPresent) {
+    const next = flagValue(args, "--random");
+    randomFlag = next && /^\d+$/.test(next) ? Number.parseInt(next, 10) : true;
   }
   const dryRun = args.includes("--dry-run");
   const fromCli = args.includes("--from-cli");
-  const viaIdx = args.indexOf("--via");
-  const via = viaIdx >= 0 ? args[viaIdx + 1] : undefined;
+  const via = flagValue(args, "--via");
 
   // ── Supabase Management API rotation ─────────────────────────────────────
   if (via === "supabase-mgmt-api") {
@@ -518,9 +516,9 @@ export async function cmdSecretsRotate(): Promise<boolean> {
   console.log(`  ${c.green}✓${c.reset} ${writeResult.detail}\n`);
 
   // ── R2: propagate to deploy platforms ────────────────────────────────────
-  const propagateIdx = args.indexOf("--propagate");
-  if (propagateIdx >= 0) {
-    const spec = args[propagateIdx + 1];
+  const propagatePresent = args.some((a) => a === "--propagate" || a.startsWith("--propagate="));
+  if (propagatePresent) {
+    const spec = flagValue(args, "--propagate");
     const targets = spec ? parseTargets(spec) : [];
     if (targets.length === 0) {
       console.error(
@@ -530,20 +528,20 @@ export async function cmdSecretsRotate(): Promise<boolean> {
     }
 
     const propOpts: PropagationOptions = {};
-    const envIdx = args.indexOf("--target-env");
-    if (envIdx >= 0) propOpts.env = args[envIdx + 1] as PropagationOptions["env"];
-    const flyAppIdx = args.indexOf("--fly-app");
-    if (flyAppIdx >= 0) propOpts.flyApp = args[flyAppIdx + 1];
-    const cfWorkerIdx = args.indexOf("--cf-worker");
-    if (cfWorkerIdx >= 0) propOpts.cfWorker = args[cfWorkerIdx + 1];
-    const railwayServiceIdx = args.indexOf("--railway-service");
-    if (railwayServiceIdx >= 0) propOpts.railwayService = args[railwayServiceIdx + 1];
-    const awsRegionIdx = args.indexOf("--aws-region");
-    if (awsRegionIdx >= 0) propOpts.awsRegion = args[awsRegionIdx + 1];
-    const ghRepoIdx = args.indexOf("--github-repo");
-    if (ghRepoIdx >= 0) propOpts.githubRepo = args[ghRepoIdx + 1];
-    const vercelScopeIdx = args.indexOf("--vercel-scope");
-    if (vercelScopeIdx >= 0) propOpts.vercelScope = args[vercelScopeIdx + 1];
+    const targetEnv = flagValue(args, "--target-env");
+    if (targetEnv !== undefined) propOpts.env = targetEnv as PropagationOptions["env"];
+    const flyApp = flagValue(args, "--fly-app");
+    if (flyApp !== undefined) propOpts.flyApp = flyApp;
+    const cfWorker = flagValue(args, "--cf-worker");
+    if (cfWorker !== undefined) propOpts.cfWorker = cfWorker;
+    const railwayService = flagValue(args, "--railway-service");
+    if (railwayService !== undefined) propOpts.railwayService = railwayService;
+    const awsRegion = flagValue(args, "--aws-region");
+    if (awsRegion !== undefined) propOpts.awsRegion = awsRegion;
+    const ghRepo = flagValue(args, "--github-repo");
+    if (ghRepo !== undefined) propOpts.githubRepo = ghRepo;
+    const vercelScope = flagValue(args, "--vercel-scope");
+    if (vercelScope !== undefined) propOpts.vercelScope = vercelScope;
 
     console.log(`${c.bold}Propagation${c.reset}  ${c.dim}→ ${targets.join(", ")}${c.reset}\n`);
     const results = await propagate(plan.key, value, targets, propOpts);

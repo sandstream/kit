@@ -193,3 +193,56 @@ describe("kit secrets vault-migrate requires --from and --to explicitly", () => 
     }
   });
 });
+
+describe("no production command re-introduces the hand-rolled argv pattern", () => {
+  /**
+   * The sweep that made the two spellings agree was ~45 call sites across 13 files. A behavioural
+   * test per flag is not maintainable, and the next command added would not be covered by one
+   * anyway. This is the invariant instead: production code may not extract a flag's VALUE by
+   * indexing past `indexOf("--flag")`. That single pattern is what dropped `--flag=value`
+   * everywhere, and it is what produced the `args[0]` bug in `vault-migrate` when the flag was
+   * absent and `indexOf` returned -1.
+   *
+   * Two legitimate uses are allowed by name, not by shape, so a new one has to be argued for:
+   *   - `indexOf("--")` — the pass-through separator, an index into the argv array rather than a
+   *     flag value (`project.ts` splits the command line on it).
+   *   - `gate.ts` — reads `--format` with an explicit `=`-first, `indexOf`-second pair that was
+   *     already correct before the sweep.
+   */
+  it("no `args[indexOf('--flag') + 1]` value extraction survives outside the allowlist", async () => {
+    const { readFileSync, readdirSync, statSync } = await import("node:fs");
+    const { join: pjoin, resolve: presolve } = await import("node:path");
+
+    const SRC = presolve(import.meta.dirname, "..", "src");
+    const ALLOWED_FILES = new Set(["gate.ts"]);
+
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((entry) => {
+        const full = pjoin(dir, entry);
+        if (statSync(full).isDirectory()) return walk(full);
+        return entry.endsWith(".ts") && !entry.endsWith(".test.ts") ? [full] : [];
+      });
+
+    const offenders: string[] = [];
+    for (const file of walk(SRC)) {
+      const name = file.split("/").pop()!;
+      if (ALLOWED_FILES.has(name) || name === "flags.ts") continue;
+      const lines = readFileSync(file, "utf8").split("\n");
+      lines.forEach((line, i) => {
+        const trimmed = line.trim();
+        // Comments explaining the old pattern are not the pattern.
+        if (trimmed.startsWith("//") || trimmed.startsWith("*")) return;
+        // The `--` separator is an index, not a value.
+        if (/indexOf\(\s*"--"\s*\)/.test(line)) return;
+        if (/indexOf\(\s*"--[a-z][a-z0-9-]*"\s*\)/.test(line)) {
+          offenders.push(`${file.replace(SRC, "src")}:${i + 1}: ${trimmed}`);
+        }
+      });
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      `use flagValue/flagInt instead of a hand-rolled indexOf:\n${offenders.join("\n")}`,
+    );
+  });
+});

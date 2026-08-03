@@ -7,7 +7,7 @@
  */
 import { spawn as spawnChild } from "node:child_process";
 import { c } from "../utils/colors.js";
-import { hasFlag, flagValue } from "../utils/flags.js";
+import { hasFlag, flagValue, flagInt } from "../utils/flags.js";
 import { loadConfig, type kitConfig } from "../config.js";
 import { KIT_FILE, resolveConfigPath } from "../cli-shared.js";
 import { check1PasswordStatus, detect1PasswordMode } from "../onepassword.js";
@@ -97,9 +97,7 @@ export async function cmdLogin(): Promise<boolean> {
   // re-run their login command idempotently anyway).
   const args = process.argv.slice(3);
   const serviceFilter = flagValue(args, "--service");
-  const retryIdx = args.indexOf("--retry-count");
-  const retryCount =
-    retryIdx >= 0 && args[retryIdx + 1] ? Math.max(0, parseInt(args[retryIdx + 1]!, 10) || 0) : 0;
+  const retryCount = Math.max(0, flagInt(args, "--retry-count", 0));
 
   const backendOk = await ensureSecretsBackend(config);
 

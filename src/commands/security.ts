@@ -605,10 +605,8 @@ async function cmdSecurityCosts(): Promise<boolean> {
 async function cmdSecurityVerifyPull(): Promise<boolean> {
   // kit security verify-pull [--base <ref>] [--head <ref>] [--json]
   const args = process.argv.slice(4);
-  const baseIdx = args.indexOf("--base");
-  const headIdx = args.indexOf("--head");
-  const base = baseIdx >= 0 ? args[baseIdx + 1] : "HEAD~1";
-  const head = headIdx >= 0 ? args[headIdx + 1] : "HEAD";
+  const base = flagValue(args, "--base") ?? "HEAD~1";
+  const head = flagValue(args, "--head") ?? "HEAD";
   const jsonMode = hasFlag(args, "--json");
 
   const report = await auditPull(process.cwd(), base, head);

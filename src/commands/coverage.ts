@@ -344,8 +344,10 @@ export async function cmdAnalyze(): Promise<boolean> {
     hasFlag(args, "--claude") || (!hasFlag(args, "--rules") && !hasFlag(args, "--claude"));
   const wantRules =
     hasFlag(args, "--rules") || (!hasFlag(args, "--rules") && !hasFlag(args, "--claude"));
-  const writeFlagIdx = args.indexOf("--write");
-  const writeDir = writeFlagIdx >= 0 ? (args[writeFlagIdx + 1] ?? process.cwd()) : null;
+  // `--write` is an OPTIONAL-value flag: bare means "here", `--write <dir>` / `--write=<dir>`
+  // names a target. Presence is checked on both spellings, since `hasFlag` matches whole tokens.
+  const writePresent = args.some((a) => a === "--write" || a.startsWith("--write="));
+  const writeDir = writePresent ? (flagValue(args, "--write") ?? process.cwd()) : null;
 
   console.log(`${c.bold}${c.cyan}kit analyze${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);

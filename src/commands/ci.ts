@@ -37,10 +37,12 @@ export async function cmdCi(): Promise<boolean> {
   // `kit ci --init <gitlab|bitbucket>` — emit the pipeline snippet that runs
   // `kit ci` on a non-GitHub host. Prints to stdout (copy-paste); `--write`
   // writes the file only when absent (never clobbers an existing pipeline).
-  const initIdx = args.indexOf("--init");
-  if (initIdx !== -1) {
+  // Presence is checked separately from the value: `hasFlag` compares whole tokens, so
+  // `--init=gitlab` would not register at all and the branch would be skipped silently.
+  const initPresent = args.some((a) => a === "--init" || a.startsWith("--init="));
+  if (initPresent) {
     const { pipelineSnippet, isCiHost, CI_HOSTS } = await import("../ci-init.js");
-    const host = args[initIdx + 1] ?? "";
+    const host = flagValue(args, "--init") ?? "";
     if (!isCiHost(host)) {
       console.error(`kit ci --init: host must be one of ${CI_HOSTS.join(", ")}`);
       return false;
