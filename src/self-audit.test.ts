@@ -327,6 +327,26 @@ describe("R8-readonly-guard", () => {
     assert.ok(countStatus(res, "warn") >= 1);
   });
 
+  it("fires on the registerTool form too (SDK ≥1.30 registration)", () => {
+    // Same fail-open shape as above, but registered through the non-deprecated
+    // registerTool API — the extractor must classify both forms.
+    const pre = `function register(server: any) {
+  server.registerTool(
+    "kit_install",
+    {
+      description: "desc",
+      inputSchema: {},
+    },
+    async ({ cwd }) => {
+      const config = await loadConfig(configPath(cwd));
+      return installTools(config);
+    },
+  );
+}`;
+    const res = ruleById("R8-readonly-guard").run(ctxFromText(pre, "mcp-server.ts"));
+    assert.ok(countStatus(res, "warn") >= 1);
+  });
+
   it("does NOT fire on a no-op stub (no side-effect) even if not allowlisted", () => {
     const stub = `function register(server: any) {
   server.tool(

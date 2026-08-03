@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`mcp-server.ts` migrated from the deprecated `server.tool()` overload to
+  `server.registerTool()` (MCP SDK ≥ 1.30).** All ten registrations now pass
+  `{ description, inputSchema }` config objects; the tool surface (names,
+  descriptions, input schemas) is unchanged, verified by a live client
+  round-trip. The R8 self-audit extractor recognizes both registration forms
+  so a tool added through either API can never dodge read-only-guard
+  classification. Closes the TS6387 deprecation warnings introduced by the
+  SDK 1.30.0 bump (#437).
+
 ### Security
 
 - **`@modelcontextprotocol/sdk` 1.29.0 → 1.30.0, pulling the transitive

@@ -200,16 +200,19 @@ function register_kit_check(server: McpServer): void {
   // kit_check — run all checks, return structured JSON. Collection + verdict come
   // from the shared core (check-run.ts) — the SAME path `kit check` runs, so the
   // two surfaces can never disagree on what runs or what "green" means.
-  server.tool(
+  server.registerTool(
     "kit_check",
-    "Run kit check and return structured status for all tools, services, secrets, and security checks.",
     {
-      cwd: z
-        .string()
-        .optional()
-        .describe(
-          "Working directory. Must equal the server process's own cwd (or be omitted): the check dimensions resolve paths from the process, so a different value is REFUSED rather than answered for the wrong project.",
-        ),
+      description:
+        "Run kit check and return structured status for all tools, services, secrets, and security checks.",
+      inputSchema: {
+        cwd: z
+          .string()
+          .optional()
+          .describe(
+            "Working directory. Must equal the server process's own cwd (or be omitted): the check dimensions resolve paths from the process, so a different value is REFUSED rather than answered for the wrong project.",
+          ),
+      },
     },
     async ({ cwd }) => {
       const scoped = crossProjectRefusal(cwd, "kit_check");
@@ -256,32 +259,35 @@ function register_kit_review(server: McpServer): void {
   // structured report, via the same collectReview core `kit review` renders.
   // Replaces kit_standards on the MCP surface (that stage is one of its four).
   // Read-only: no writes, so no governance/read-only gating.
-  server.tool(
+  server.registerTool(
     "kit_review",
-    'Full repo audit in one shot — runs the check, design, standards, and ADR gates and returns one structured report ({ ok, failed, stages }). The same core `kit review` renders, so the surfaces cannot disagree. Read-only. Use stages to scope (e.g. ["standards"] for a fast lint loop — no full security scan), category to scope the standards stage, and concise:true to omit pass/skip rows (per-stage counts stay).',
     {
-      cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
-      enforce: z
-        .boolean()
-        .optional()
-        .describe("Fail on net-new design/standards findings AND setup gaps (CI posture)"),
-      stages: z
-        .array(z.enum(["check", "design", "standards", "adr"]))
-        .nonempty()
-        .optional()
-        .describe(
-          'Run only these stages (canonical order kept). Omit for the full audit. ["standards"] is the fast, read-only lint loop',
-        ),
-      category: z
-        .string()
-        .optional()
-        .describe("Standards-stage scope: general | specific | plugins | platform | <language>"),
-      concise: z
-        .boolean()
-        .optional()
-        .describe(
-          "Return only fail/warn findings; per-stage summary counts still cover everything",
-        ),
+      description:
+        'Full repo audit in one shot — runs the check, design, standards, and ADR gates and returns one structured report ({ ok, failed, stages }). The same core `kit review` renders, so the surfaces cannot disagree. Read-only. Use stages to scope (e.g. ["standards"] for a fast lint loop — no full security scan), category to scope the standards stage, and concise:true to omit pass/skip rows (per-stage counts stay).',
+      inputSchema: {
+        cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
+        enforce: z
+          .boolean()
+          .optional()
+          .describe("Fail on net-new design/standards findings AND setup gaps (CI posture)"),
+        stages: z
+          .array(z.enum(["check", "design", "standards", "adr"]))
+          .nonempty()
+          .optional()
+          .describe(
+            'Run only these stages (canonical order kept). Omit for the full audit. ["standards"] is the fast, read-only lint loop',
+          ),
+        category: z
+          .string()
+          .optional()
+          .describe("Standards-stage scope: general | specific | plugins | platform | <language>"),
+        concise: z
+          .boolean()
+          .optional()
+          .describe(
+            "Return only fail/warn findings; per-stage summary counts still cover everything",
+          ),
+      },
     },
     async ({ cwd, enforce, stages, category, concise }) => {
       const scoped = crossProjectRefusal(cwd, "kit_review");
@@ -313,10 +319,13 @@ function register_kit_review(server: McpServer): void {
 
 function register_kit_secrets(server: McpServer): void {
   // kit_secrets — generate .env.local from config
-  server.tool(
+  server.registerTool(
     "kit_secrets",
-    "Generate .env.local by resolving secrets defined in .kit.toml. Returns the list of written keys.",
-    { cwd: z.string().optional().describe("Working directory") },
+    {
+      description:
+        "Generate .env.local by resolving secrets defined in .kit.toml. Returns the list of written keys.",
+      inputSchema: { cwd: z.string().optional().describe("Working directory") },
+    },
     async ({ cwd }) => {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_secrets");
       try {
@@ -381,16 +390,19 @@ function register_kit_secrets(server: McpServer): void {
 
 function register_kit_fix(server: McpServer): void {
   // kit_fix — auto-fix issues (generate lock files, install tools)
-  server.tool(
+  server.registerTool(
     "kit_fix",
-    "Auto-fix issues found by kit check (install missing tools, generate missing lock files). Returns actions taken.",
     {
-      cwd: z
-        .string()
-        .optional()
-        .describe(
-          "Working directory. Must equal the server process's own cwd (or be omitted): the lock-file writes resolve paths from the process, so a different value is REFUSED rather than written into the wrong project.",
-        ),
+      description:
+        "Auto-fix issues found by kit check (install missing tools, generate missing lock files). Returns actions taken.",
+      inputSchema: {
+        cwd: z
+          .string()
+          .optional()
+          .describe(
+            "Working directory. Must equal the server process's own cwd (or be omitted): the lock-file writes resolve paths from the process, so a different value is REFUSED rather than written into the wrong project.",
+          ),
+      },
     },
     async ({ cwd }) => {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_fix");
@@ -494,15 +506,18 @@ function register_kit_fix(server: McpServer): void {
 
 function register_kit_init(server: McpServer): void {
   // kit_init — detect stack, generate .kit.toml, optionally write it
-  server.tool(
+  server.registerTool(
     "kit_init",
-    "Detect project stack and generate .kit.toml for a project that does not yet have one. Use dryRun:true to preview without writing.",
     {
-      cwd: z.string().optional().describe("Project directory (defaults to process.cwd())"),
-      dry_run: z
-        .boolean()
-        .optional()
-        .describe("Return generated config without writing to disk (default: false)"),
+      description:
+        "Detect project stack and generate .kit.toml for a project that does not yet have one. Use dryRun:true to preview without writing.",
+      inputSchema: {
+        cwd: z.string().optional().describe("Project directory (defaults to process.cwd())"),
+        dry_run: z
+          .boolean()
+          .optional()
+          .describe("Return generated config without writing to disk (default: false)"),
+      },
     },
     async ({ cwd, dry_run }) => {
       // dry_run is a read-only preview; a real write is refused in read-only mode.
@@ -574,14 +589,17 @@ function register_kit_init(server: McpServer): void {
 
 function register_kit_run(server: McpServer): void {
   // kit_run — execute a command with project env vars loaded
-  server.tool(
+  server.registerTool(
     "kit_run",
-    "Execute a command with project environment variables loaded from .env.local. Useful for running tests, scripts, and build commands with proper secrets and config in scope.",
     {
-      command: z
-        .string()
-        .describe("Command to execute (with arguments, e.g., 'pnpm test --watch')"),
-      cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
+      description:
+        "Execute a command with project environment variables loaded from .env.local. Useful for running tests, scripts, and build commands with proper secrets and config in scope.",
+      inputSchema: {
+        command: z
+          .string()
+          .describe("Command to execute (with arguments, e.g., 'pnpm test --watch')"),
+        cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
+      },
     },
     async ({ command, cwd }) => {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_run");
@@ -662,10 +680,15 @@ function register_kit_run(server: McpServer): void {
 
 function register_kit_context(server: McpServer): void {
   // kit_context — gather structured project context for agents
-  server.tool(
+  server.registerTool(
     "kit_context",
-    "Gather comprehensive project context: detected stack, configured tools, services, secrets, and environment. Use this to understand project architecture at a glance.",
-    { cwd: z.string().optional().describe("Project directory (defaults to process.cwd())") },
+    {
+      description:
+        "Gather comprehensive project context: detected stack, configured tools, services, secrets, and environment. Use this to understand project architecture at a glance.",
+      inputSchema: {
+        cwd: z.string().optional().describe("Project directory (defaults to process.cwd())"),
+      },
+    },
     async ({ cwd }) => {
       try {
         const workDir = cwd ?? process.cwd();
@@ -695,26 +718,29 @@ function register_kit_context(server: McpServer): void {
 function register_kit_map(server: McpServer): void {
   // kit_map — deterministic repo-map: the relevant slice around a seed file (read-only). Shares the
   // exact core (mapReport) with the `kit map` CLI, so the two surfaces can't disagree.
-  server.tool(
+  server.registerTool(
     "kit_map",
-    "Deterministic, zero-LLM repo-map: given seed file path(s), return the relevant SLICE of the codebase — files connected within N import hops (both directions) + external packages, each attributed to its owner (CODEOWNERS or git-blame). Optionally budget the slice to the N nearest files and add historical co-change coupling. Use it to load only the part of a growing repo that matters to a task, instead of the whole tree.",
     {
-      paths: z
-        .array(z.string())
-        .min(1)
-        .describe("Seed file path(s) to map around (repo-relative or absolute)"),
-      depth: z.number().int().min(0).optional().describe("Import hops from the seed (default 1)"),
-      budget: z
-        .number()
-        .int()
-        .min(0)
-        .optional()
-        .describe("Keep only the N nearest-to-seed files (0 = unbounded); drops are reported"),
-      co_change: z
-        .boolean()
-        .optional()
-        .describe("Add files that historically change WITH each seed (git history)"),
-      cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
+      description:
+        "Deterministic, zero-LLM repo-map: given seed file path(s), return the relevant SLICE of the codebase — files connected within N import hops (both directions) + external packages, each attributed to its owner (CODEOWNERS or git-blame). Optionally budget the slice to the N nearest files and add historical co-change coupling. Use it to load only the part of a growing repo that matters to a task, instead of the whole tree.",
+      inputSchema: {
+        paths: z
+          .array(z.string())
+          .min(1)
+          .describe("Seed file path(s) to map around (repo-relative or absolute)"),
+        depth: z.number().int().min(0).optional().describe("Import hops from the seed (default 1)"),
+        budget: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Keep only the N nearest-to-seed files (0 = unbounded); drops are reported"),
+        co_change: z
+          .boolean()
+          .optional()
+          .describe("Add files that historically change WITH each seed (git history)"),
+        cwd: z.string().optional().describe("Working directory (defaults to process.cwd())"),
+      },
     },
     async ({ paths, depth, budget, co_change, cwd }) => {
       try {
@@ -743,22 +769,25 @@ function register_kit_triage(server: McpServer): void {
   // MCP client could not previously follow. A PASS is recorded through the SAME
   // triage-log path the CLI uses, so the pre-commit and install gates recognize
   // an MCP-run triage identically.
-  server.tool(
+  server.registerTool(
     "kit_triage",
-    "Security-triage a dependency BEFORE installing it (registry reputation, repo health, known-compromise catalogs). Required by kit's install gate for anything it has not already cleared. A pass is recorded in the triage log the gates read. Deterministic, zero-LLM.",
     {
-      type: z
-        .enum(["npm", "pip", "docker", "brew", "repo", "skill"])
-        .describe(
-          "Target kind: npm/pip package, docker image, brew formula, GitHub repo, or agent skill",
-        ),
-      target: z.string().describe("Package name, image ref, owner/repo, or skill path"),
-      cwd: z
-        .string()
-        .optional()
-        .describe(
-          "Working directory (defaults to process.cwd()) — where the triage log is written",
-        ),
+      description:
+        "Security-triage a dependency BEFORE installing it (registry reputation, repo health, known-compromise catalogs). Required by kit's install gate for anything it has not already cleared. A pass is recorded in the triage log the gates read. Deterministic, zero-LLM.",
+      inputSchema: {
+        type: z
+          .enum(["npm", "pip", "docker", "brew", "repo", "skill"])
+          .describe(
+            "Target kind: npm/pip package, docker image, brew formula, GitHub repo, or agent skill",
+          ),
+        target: z.string().describe("Package name, image ref, owner/repo, or skill path"),
+        cwd: z
+          .string()
+          .optional()
+          .describe(
+            "Working directory (defaults to process.cwd()) — where the triage log is written",
+          ),
+      },
     },
     async ({ type, target, cwd }) => {
       // Appends to .kit-triage.jsonl on PASS, so read-only mode refuses it —
@@ -806,17 +835,20 @@ function register_kit_memory(server: McpServer): void {
   // the trusted store stay on the CLI/indexer path, so an MCP client can never
   // inject foreign text into recall. Quarantined (injection-flagged) rows are
   // excluded, matching the CLI default.
-  server.tool(
+  server.registerTool(
     "kit_memory",
-    "Search kit's local cross-session conversation memory plus the repo's curated shared decisions. Use before answering project-specific questions to recall what was actually said/decided. Read-only search; quarantined rows excluded.",
     {
-      query: z.string().describe("Search terms"),
-      limit: z.number().int().min(1).max(100).optional().describe("Max raw hits (default 20)"),
-      global: z
-        .boolean()
-        .optional()
-        .describe("Search across all projects instead of only the current one"),
-      cwd: z.string().optional().describe("Project directory (defaults to process.cwd())"),
+      description:
+        "Search kit's local cross-session conversation memory plus the repo's curated shared decisions. Use before answering project-specific questions to recall what was actually said/decided. Read-only search; quarantined rows excluded.",
+      inputSchema: {
+        query: z.string().describe("Search terms"),
+        limit: z.number().int().min(1).max(100).optional().describe("Max raw hits (default 20)"),
+        global: z
+          .boolean()
+          .optional()
+          .describe("Search across all projects instead of only the current one"),
+        cwd: z.string().optional().describe("Project directory (defaults to process.cwd())"),
+      },
     },
     async ({ query, limit, global: searchGlobal, cwd }) => {
       try {
