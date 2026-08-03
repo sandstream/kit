@@ -104,7 +104,7 @@
       "commands": {
         "elevate": {
           "kind": "command",
-          "summary": "Mint elevation marker for destructive secret ops (TOTP/yes-prompt)",
+          "summary": "Mint elevation marker for destructive secret ops (TOTP/yes-prompt); --list-scopes to see what each scope unlocks first (--json)",
           "x-kit-args-modeled": false,
           "x-kit-audience": "human",
           "x-kit-mcp": false,

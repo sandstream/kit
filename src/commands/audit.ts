@@ -6,7 +6,7 @@ import { printAuditTable } from "../output.js";
 import { loadConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { c } from "../utils/colors.js";
-import { hasFlag, flagValue } from "../utils/flags.js";
+import { hasFlag, flagValue, flagInt } from "../utils/flags.js";
 
 async function cmdAuditSecrets(): Promise<boolean> {
   const args = process.argv.slice(4); // after "audit secrets"
@@ -314,13 +314,12 @@ export async function cmdAudit(): Promise<boolean> {
     return true;
   }
 
-  // Parse --limit N
-  let limit = 20;
-  const limitIdx = args.indexOf("--limit");
-  if (limitIdx !== -1 && args[limitIdx + 1]) {
-    const parsed = parseInt(args[limitIdx + 1], 10);
-    if (!isNaN(parsed) && parsed > 0) limit = parsed;
-  }
+  // Parse --limit N. Via flagInt, NOT a hand-rolled indexOf: `args.indexOf("--limit")` never
+  // matches the token `--limit=50`, so the `=` form was silently dropped and the command printed
+  // the default 20 entries with exit 0. An operator reviewing an audit trail then reads a
+  // truncated log and has no way to know it was truncated.
+  const parsedLimit = flagInt(args, "--limit", 20);
+  const limit = parsedLimit > 0 ? parsedLimit : 20;
 
   // Parse --operation <name>
   let operationFilter: string | undefined;

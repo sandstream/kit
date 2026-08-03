@@ -906,7 +906,8 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   "audit anchor":
     "Seal the audit log with the machine-local HMAC key (--external also gets a receipt from KIT_EXTERNAL_ANCHOR_CMD — closes the same-UID gap)",
   "audit export": "Emit the audit log for a SIEM (--format cef|syslog|json)",
-  "auth elevate": "Mint elevation marker for destructive secret ops (TOTP/yes-prompt)",
+  "auth elevate":
+    "Mint elevation marker for destructive secret ops (TOTP/yes-prompt); --list-scopes to see what each scope unlocks first (--json)",
   "auth status": "Show active elevation",
   "auth revoke": "Drop the elevation marker",
   "auth setup-totp": "Enroll TOTP secret (writes ~/.kit/totp-secret 0600)",

@@ -506,7 +506,7 @@ Production credentials are gated behind explicit env-switching and short-lived e
 
 - `kit env switch <dev|staging|prod>`: Toggle the active environment marker
 - `kit env current`: Show active env (color-coded), `kit env list` for available
-- `kit auth elevate [--scope <op>] [--ttl-minutes N]`: Mint a TTL'd elevation marker (TOTP or yes-prompt). Required before any destructive secret op.
+- `kit auth elevate [--scope <op>] [--ttl-minutes N]`: Mint a TTL'd elevation marker (TOTP or yes-prompt). Required before any destructive secret op. `--list-scopes` (also `--json`) prints every scope, what it unlocks, and whether it is one-shot — without elevating anything.
 - `kit auth setup-totp`: One-time TOTP enrollment (writes `~/.kit/totp-secret` 0600)
 - `kit auth status`: Show active elevation
 - `kit auth revoke`: Drop the elevation marker early
