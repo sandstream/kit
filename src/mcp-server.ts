@@ -97,11 +97,27 @@ function readOnlyRefusal(tool: string): {
  * `pass — all .env patterns in .gitignore` for a project that has no .gitignore at all. A client
  * asking about B got a security pass earned by A. That is the worst shape a gate can fail in.
  *
- * The real fix is to thread `cwd` through all ten dimensions and their callees; that is a wide
- * refactor of kit's most-used path and belongs in its own change (ROADMAP). Until then this fails
- * CLOSED: a cross-project call gets an actionable error instead of a verdict about the wrong tree.
- * Nothing that previously worked breaks — a client that launches the server inside the project it
- * asks about (what Claude Code does) passes a `cwd` equal to `process.cwd()`, or omits it.
+ * STATUS: the read path is now threaded, and this guard still stands anyway.
+ *
+ * `runCheckGate` passes `cwd` to every dimension that touches the filesystem — `checkSecurity`
+ * (all fifteen sub-checks AND all seven scanner spawns, which resolve `.` against the spawned
+ * process), `checkSecrets`, `checkHooks`, `isGitRepository`, `checkLockFiles`, `checkTests`,
+ * `loadBaselineForGate`, `checkExternalFindings`, `checkGateLiveness`. The other four dimensions
+ * were measured to touch no project path at all: `checkTools` resolves binaries on PATH,
+ * `checkSkills` reads an absolute homedir path, `checkServices` and `checkWebSearch` neither.
+ * `check-security-cwd.test.ts` proves it behaviourally, in both directions.
+ *
+ * What still blocks lifting the refusal, and why it is not lifted here:
+ *   - `kit_fix` WRITES. `cmdFix` takes no `cwd` and loads `.kit.toml` from `process.cwd()`, so a
+ *     cross-project fix would still create B's lock files inside A — the original symptom.
+ *   - `kit_review` runs its own collector, not `runCheckGate` alone.
+ *   - Relaxing a fail-closed access boundary is a deliberate decision with its own tests, not a
+ *     tail-end edit to a change that was fixing something else.
+ *
+ * So this still fails CLOSED: a cross-project call gets an actionable error instead of a verdict
+ * about the wrong tree. Nothing that previously worked breaks — a client that launches the server
+ * inside the project it asks about (what Claude Code does) passes a `cwd` equal to
+ * `process.cwd()`, or omits it.
  */
 function crossProjectRefusal(
   cwd: string | undefined,

@@ -1,4 +1,5 @@
 import { access } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { SecretsConfig, SecretKeyConfig, InfisicalConfig } from "./config.js";
 import { check1PasswordStatus } from "./onepassword.js";
 import { exec } from "./utils/exec.js";
@@ -333,11 +334,15 @@ async function checkAzureSecret(
 
 export async function checkSecrets(
   secrets: SecretsConfig,
+  cwd = process.cwd(),
 ): Promise<{ templateExists: boolean | null; keys: SecretStatus[] }> {
   let templateExists: boolean | null = null;
   if (secrets.template) {
     try {
-      await access(secrets.template);
+      // `template` is a repo-relative path in .kit.toml, so it must resolve against the
+      // GOVERNED project. Bare `access(secrets.template)` resolved it against the calling
+      // process and reported the caller's .env.template as the target's.
+      await access(resolve(cwd, secrets.template));
       templateExists = true;
     } catch {
       templateExists = false;

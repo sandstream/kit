@@ -13,9 +13,13 @@ export interface HookCheckResult {
 /**
  * Check if git hooks are installed and up-to-date
  */
-export async function checkHooks(config: HooksConfig, gitDir = ".git"): Promise<HookCheckResult[]> {
+export async function checkHooks(
+  config: HooksConfig,
+  gitDir = ".git",
+  cwd = process.cwd(),
+): Promise<HookCheckResult[]> {
   const results: HookCheckResult[] = [];
-  const hooksDir = resolve(process.cwd(), gitDir, "hooks");
+  const hooksDir = resolve(cwd, gitDir, "hooks");
 
   for (const [hookName, commands] of Object.entries(config)) {
     if (!commands || commands.length === 0) {
@@ -85,7 +89,7 @@ async function checkHook(
 /**
  * Check if git directory exists
  */
-export function isGitRepository(gitDir = ".git"): boolean {
-  const gitPath = resolve(process.cwd(), gitDir);
+export function isGitRepository(gitDir = ".git", cwd = process.cwd()): boolean {
+  const gitPath = resolve(cwd, gitDir);
   return existsSync(gitPath);
 }

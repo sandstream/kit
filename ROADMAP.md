@@ -90,11 +90,29 @@ opposite of the usual reading, and getting that wrong fails OPEN:
    survived because `checkPolicy` had unit tests proving the decision function correct while nothing
    called it. Tests over the decision function are not evidence of a working control.
 
-### Thread `cwd` through every check dimension (1d)
-`runCheckGate` resolves its `cwd` option only to load `.kit.toml`. All ten dimensions after that
+### Thread `cwd` through every check dimension — READ PATH DONE, write path remains
+`runCheckGate` resolved its `cwd` option only to load `.kit.toml`. All ten dimensions after that
 — `checkSecurity()`, `checkTools()`, `checkServices()`, `checkSecrets()`, `checkSkills()`,
 `checkHooks()`, `checkTests()`, `checkWebSearch()`, `isGitRepository()`, and their callees —
-resolve paths from `process.cwd()`.
+resolved paths from `process.cwd()`.
+
+**Done.** Every dimension that touches the filesystem now takes the governed project's `cwd`:
+`checkSecurity(cwd)` threads it to all fifteen sub-checks *and* to all seven scanner spawns —
+`trivy fs .`, `trivy config .`, `osv-scanner -r .` and `semgrep .` resolve `.` against the
+SPAWNED process, so passing the path alone would have been the exact trap this entry warns about
+below — plus `checkSecrets`, `checkHooks`, `isGitRepository`, `checkTests`, `loadBaselineForGate`,
+`checkExternalFindings` and `checkGateLiveness`. The remaining four were measured to touch no
+project path at all: `checkTools` resolves binaries on PATH, `checkSkills` reads an absolute
+homedir path, `checkServices` and `checkWebSearch` neither. Proof:
+`src/check-security-cwd.test.ts`, 8 tests, each asserting the two trees give DIFFERENT answers;
+mutation-proved three ways (ignore the argument → 3 fail; revert one sub-check → 3 fail; drop
+`cwd` from one scanner spawn → 1 fail).
+
+**Still open, and why the MCP refusal stays:** `kit_fix` writes, and `cmdFix` takes no `cwd` at
+all — it loads `.kit.toml` from `process.cwd()`, so a cross-project fix would still create B's
+lock files inside A. `kit_review` runs its own collector rather than `runCheckGate` alone. Until
+both are threaded, `crossProjectRefusal` keeps failing closed for all three tools; lifting a
+fail-closed access boundary is its own deliberate change with its own tests.
 
 Consequence, found with a discriminating probe over the MCP surface: `kit_check({cwd: B})` from a
 server launched in A reported `pass — all .env patterns in .gitignore` for a project B that has no
