@@ -28,7 +28,7 @@ import { recordTriageRun } from "./commands/triage.js";
 import { openMemoryDb, searchMessages, getMemoryDbPath, recordQuery } from "./memory/db.js";
 import { searchShared } from "./memory/shared.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 
 const KIT_FILE = ".kit.toml";
 
@@ -108,7 +108,19 @@ function crossProjectRefusal(
   tool: string,
 ): { content: { type: "text"; text: string }[]; isError: true } | null {
   if (cwd === undefined) return null;
-  if (resolve(cwd) === resolve(process.cwd())) return null;
+  // Compare REAL paths, not lexical ones: on macOS `/tmp` and `/var` are symlinks
+  // into /private, so process.chdir("/var/…") reports cwd "/private/var/…" while
+  // the caller's argument still says "/var/…" — a lexical compare refuses the
+  // SAME directory. Fail-soft: an unresolvable path falls back to the lexical
+  // form, which can only make the guard stricter, never leak a wrong-tree pass.
+  const real = (p: string): string => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  if (real(cwd) === real(process.cwd())) return null;
   return {
     content: [
       {

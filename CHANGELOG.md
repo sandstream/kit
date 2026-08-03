@@ -8,6 +8,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [6.3.0] - 2026-08-01
 
+### Security
+
+- **The adapter SDK and the eleven first-party plugins are now published to npm.**
+  `packages/` was never in the root tarball, so every workspace was unreachable
+  to anyone who had not cloned the monorepo — while the docs advertised the
+  snyk/wiz plugins as shipped controls and told third-party authors to
+  `npm install sandstream-kit-adapter-sdk`. That name returned 404:
+  unregistered, therefore claimable — a dependency-confusion invitation created
+  by our own documentation. The publish workflow now ships root → adapter-sdk →
+  plugins (peer first), idempotently (an already-published version is skipped,
+  a failed publish is never continue-on-error), with provenance, and a
+  pre-publish gate asserts the SDK stays on its frozen 1.x contract and that
+  every plugin's peer range admits the SDK version being shipped.
+- **`KIT_READ_ONLY=1` let four commands write anyway.** `kit identity init`
+  minted a private key, `kit policy init` wrote policy, `kit security
+  check-gitignore --fix` rewrote .gitignore, and `kit upgrade` rewrote lock
+  files — none refused, none audited. The worst is the first: an operator who
+  locks an agent session down believing every mutation is refused, while the
+  agent mints the signing identity that then attributes audit and policy
+  signatures. All four now refuse with the standard audited denial, and a new
+  read-only surface test enumerates every mutating command against the flag.
+- **`kit_check` answered about the wrong project — and `kit_fix` wrote into it.**
+  The MCP tools' `cwd` argument was used to load `.kit.toml`, but every check
+  dimension resolved paths from the server process's working directory: a
+  client asking about project B got a security verdict earned by project A
+  (proven with a discriminating probe — B had no .gitignore and still "passed"),
+  and `kit_fix` created B's lock files inside A. Cross-project calls now
+  FAIL CLOSED with an actionable error instead of a verdict about the wrong
+  tree; threading `cwd` through all ten dimensions is on ROADMAP as its own
+  change. The guard compares real paths (macOS's `/tmp`/`/var` symlinks made a
+  lexical compare refuse the same directory).
+
+### Fixed
+
+- **`kit auth elevate --list-scopes` escalated instead of listing.** The flag
+  was discarded and the command fell through to an interactive elevation prompt
+  for scope=all — someone asking WHAT SCOPES EXIST was one keypress from
+  granting themselves everything. It now lists every scope with its description
+  and one-shot status (`--json` for machines) and elevates nothing. In the same
+  sweep: `--limit=25` / `--ttl-minutes=60` (the `=`-form) were silently dropped
+  by hand-rolled `indexOf` parsing at two call sites — both parse now.
+- **Every pattern `check-gitignore --fix` wrote was ignored by git — and kit
+  called it pass.** gitignore(5) has no trailing-comment syntax, so the
+  annotated `*.pem  # PEM keys` entries the fixer appended matched nothing;
+  the parser then stripped the same comments and reported the patterns present.
+  Writer and parser agreed with each other and both disagreed with git — a
+  checker that reads its own output as evidence cannot fail. Fixed on all
+  sides: comments go on their own line, presence is verified the way git reads
+  the file, and a regression test pins the round-trip against `git check-ignore`.
+
+### Added
+
+- **Dependabot config for GitHub Actions.** The OWASP A06 row claimed it;
+  `.github/dependabot.yml` did not exist. All 56 workflow `uses:` are pinned to
+  full commit SHAs (the right posture) — but a pinned SHA never moves, so
+  pinning without an update path just trades one supply-chain risk for another.
+  Weekly, grouped into a single PR; npm is deliberately excluded (dependency
+  changes go through `kit triage`, not around it).
+
 ### Fixed
 
 - **Three defects found by testing the README's pillars as behaviour, not as prose.** Each pillar
