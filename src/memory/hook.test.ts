@@ -63,7 +63,9 @@ describe("memory hook — SessionStart recovery", () => {
   });
 
   it("returns empty when there is nothing to recover (fail-open)", () => {
-    assert.equal(sessionStartRecovery(), "");
+    // Isolated root: the default (git toplevel of cwd) is this repo, whose own
+    // .kit/shared/memory.jsonl would make recovery non-empty.
+    assert.equal(sessionStartRecovery({ root: tmp }), "");
   });
 
   it("re-injects this project's recent messages newest-first with a search hint", () => {

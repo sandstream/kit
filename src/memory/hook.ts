@@ -180,10 +180,13 @@ export function consumeSessionEndLog(max = 5): string[] {
  * the most recent messages + open action items from the store. FAIL-OPEN and
  * deterministic: empty string on any error or when there's nothing to recover.
  */
-export function sessionStartRecovery(opts: { limit?: number } = {}): string {
+export function sessionStartRecovery(opts: { limit?: number; root?: string } = {}): string {
   try {
     const db = openMemoryDb();
-    const root = getCurrentProjectRoot();
+    // `root` is injectable for tests — without it, a test running inside a repo that
+    // has its own .kit/shared/memory.jsonl (like this one) recovers THAT repo's
+    // curated decisions and "nothing to recover" can never hold.
+    const root = opts.root ?? getCurrentProjectRoot();
     const recent = recentMessages(db, { projectPath: root, limit: opts.limit ?? 6 });
     const openItems = palList(db, { scope: basename(root) });
     db.close();

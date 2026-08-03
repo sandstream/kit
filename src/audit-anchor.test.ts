@@ -227,9 +227,14 @@ describe("audit anchor - tamper detection", () => {
     const parsed = lines.map((l) => JSON.parse(l));
     parsed[1].operation = "tampered";
     for (const p of parsed) {
-      const { hash: _h, prev: _p, ...rest } = p;
+      // Strip the non-hashed fields exactly like verifyAuditChain does: kid/sig
+      // sit outside the pre-image, and they are present whenever the machine
+      // running the test has a kit identity (append signs best-effort).
+      const { hash: _h, prev: _p, kid: _k, sig: _s, ...rest } = p;
       void _h;
       void _p;
+      void _k;
+      void _s;
       const pre = JSON.stringify({ ...rest, prev });
       const hash = createHash("sha256").update(pre).digest("hex");
       rebuilt.push(JSON.stringify({ ...rest, prev, hash }));
@@ -398,9 +403,14 @@ describe("audit anchor - key rotation (FIX 4)", () => {
     let prev = GENESIS;
     const rebuilt: string[] = [];
     for (const p of parsed) {
-      const { hash: _h, prev: _p, ...rest } = p;
+      // Strip the non-hashed fields exactly like verifyAuditChain does: kid/sig
+      // sit outside the pre-image, and they are present whenever the machine
+      // running the test has a kit identity (append signs best-effort).
+      const { hash: _h, prev: _p, kid: _k, sig: _s, ...rest } = p;
       void _h;
       void _p;
+      void _k;
+      void _s;
       const pre = JSON.stringify({ ...rest, prev });
       const hash = createHash("sha256").update(pre).digest("hex");
       rebuilt.push(JSON.stringify({ ...rest, prev, hash }));
