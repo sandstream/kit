@@ -1,7 +1,13 @@
 // `kit identity` — manage this machine/agent's cryptographic identity (3.0 Phase 0).
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
-import { loadOrCreateIdentity, tryLoadIdentity, rotateIdentity, identityId } from "../identity.js";
+import {
+  loadOrCreateIdentity,
+  tryLoadIdentity,
+  rotateIdentity,
+  identityId,
+  isRevoked,
+} from "../identity.js";
 import {
   activeKeyStoreStatus,
   hardwareRequiredByEnv,
@@ -9,6 +15,7 @@ import {
   policyRequiresHardware,
 } from "../keystore/index.js";
 import { keystoreRecordRevocation } from "../keystore/revoke.js";
+import { hasExternalIdentity } from "../keystore/trust-store.js";
 
 /** `kit identity keystore` — surface the active signing backend, honestly. */
 function identityKeystore(): boolean {
@@ -21,7 +28,10 @@ function identityKeystore(): boolean {
     : `${c.yellow}kit-managed file key (same-UID readable)${c.reset}`;
   console.log(`${c.bold}kit identity keystore${c.reset}`);
   console.log(`  backend        ${c.bold}${st.kind}${c.reset}  (${held})`);
-  console.log(`  key id         ${st.kid ?? c.dim + "none" + c.reset}`);
+  const revoked = st.kid !== null && isRevoked(st.kid);
+  console.log(
+    `  key id         ${st.kid ?? c.dim + "none" + c.reset}${revoked ? `  ${c.red}REVOKED — cannot sign${c.reset}` : ""}`,
+  );
   const byEnv = hardwareRequiredByEnv();
   const byPolicy = policyRequiresHardware(process.cwd());
   const reqLabel = byEnv
@@ -31,6 +41,16 @@ function identityKeystore(): boolean {
       : "no";
   console.log(`  hardware req'd  ${reqLabel}`);
   if (st.hardwareRooted) {
+    // Whether the external key is in the LOCAL trust store decides whether kit can verify the
+    // artifacts it signs with it (profile scope, policy, audit chain). It is recorded on the
+    // first successful signature, so a freshly-configured backend legitimately reads "not yet".
+    console.log(
+      `  locally trusted  ${
+        hasExternalIdentity()
+          ? `${c.green}yes${c.reset} ${c.dim}(recorded in the local trust store — kit can verify what it signs)${c.reset}`
+          : `${c.yellow}not yet${c.reset} ${c.dim}(recorded on the first signature; until then kit reports its own signatures as "signer unknown")${c.reset}`
+      }`,
+    );
     console.log(
       `  ${c.dim}note: kit can't attest this command fronts real hardware — that (non-exportable key + touch/PIN) is the operator's responsibility${c.reset}`,
     );
@@ -134,10 +154,18 @@ export async function cmdIdentity(): Promise<boolean> {
       return true;
     }
     console.log(`${c.bold}kit identity${c.reset}`);
-    console.log(`  id        ${id.id}`);
+    // A revoked key still HAS a record — showing it as if nothing were wrong is how a migrated
+    // machine looked healthy while every signature it tried to make was being refused.
+    const revoked = isRevoked(id.id);
+    console.log(`  id        ${id.id}${revoked ? `  ${c.red}REVOKED${c.reset}` : ""}`);
     console.log(`  algo      ${id.algo}`);
     console.log(`  created   ${id.createdAt}`);
     console.log(`  publicKey ${c.dim}SPKI PEM (kit identity show --public to export)${c.reset}`);
+    if (revoked) {
+      console.log(
+        `  ${c.red}!${c.reset} ${c.dim}this identity is revoked on this machine — kit refuses to sign with it. Activate the successor key (KIT_KEYSTORE=command …) or run 'kit identity rotate'${c.reset}`,
+      );
+    }
     // Self-check: the record's id must match its public key (catches a tampered record).
     if (identityId(id.publicKey) !== id.id) {
       console.log(

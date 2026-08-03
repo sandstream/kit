@@ -109,13 +109,23 @@ describe("MCP server tool registration", () => {
 
 describe("kit_check", () => {
   let tempDir: string;
+  let savedCwd: string;
 
+  // These tests pass `cwd: tempDir` while the test process sat in the kit repo. That used to
+  // "work" only because kit_check's dimensions resolved paths from process.cwd(): the config came
+  // from tempDir and the security/lock/test scan measured the kit repo. One assertion even
+  // conceded it — "ok depends on repo-level security checks — test structure, not ok". kit_check
+  // now REFUSES a cwd that differs from the process, so the tests chdir into the temp project.
+  // They finally describe the project they claim to describe.
   before(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "kit-mcp-check-"));
     await writeFile(join(tempDir, ".gitignore"), GITIGNORE, "utf-8");
+    savedCwd = process.cwd();
+    process.chdir(tempDir);
   });
 
   after(async () => {
+    process.chdir(savedCwd);
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -704,6 +714,78 @@ describe("kit_init", () => {
 });
 
 // ─── kit_map ───────────────────────────────────────────────────────────────
+/**
+ * A cross-project `cwd` used to be answered rather than refused.
+ *
+ * The probe that found it: give project A a complete `.gitignore` and project B none, launch the
+ * server in A, then call `kit_check({cwd: B})`. It replied
+ * `pass — all .env patterns in .gitignore` about a project with no .gitignore at all — a security
+ * pass earned by the wrong tree. `runCheckGate` resolves `cwd` only to load `.kit.toml`; every
+ * dimension after that (`checkSecurity()`, `checkHooks()`, `checkTests()`, `isGitRepository()`)
+ * resolves from `process.cwd()`.
+ *
+ * Until cwd is threaded through all ten dimensions, the tools fail CLOSED. These tests pin both
+ * halves: the mismatch is refused, and the two forms that were always correct still work.
+ */
+describe("process-scoped tools refuse a cross-project cwd", () => {
+  let other: string;
+
+  before(async () => {
+    other = await mkdtemp(join(tmpdir(), "kit-mcp-other-"));
+    await writeFile(join(other, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
+  });
+
+  after(async () => {
+    await rm(other, { recursive: true, force: true });
+  });
+
+  for (const tool of ["kit_check", "kit_review", "kit_fix"]) {
+    it(`${tool} refuses a cwd that is not the server's own`, async () => {
+      const { client, cleanup } = await createTestClient();
+      try {
+        const result = await client.callTool({ name: tool, arguments: { cwd: other } });
+        assert.equal(result.isError, true, `${tool} must report an error`);
+        const data = parseResult(result) as { ok: boolean; error: string; fix: string };
+        assert.equal(data.ok, false);
+        assert.match(data.error, new RegExp(tool));
+        // The message must name BOTH directories — an operator cannot act on "wrong cwd".
+        assert.ok(data.error.includes(other), "names the requested cwd");
+        assert.ok(data.error.includes(process.cwd()), "names the server's cwd");
+        assert.match(data.fix, /omit cwd|kit check/);
+      } finally {
+        await cleanup();
+      }
+    });
+  }
+
+  it("an ABSENT cwd is still fine — the common case must not regress", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({ name: "kit_check", arguments: {} });
+      assert.notEqual(result.isError, true);
+      const data = parseResult(result) as { dimensions: Record<string, boolean> };
+      assert.ok(data.dimensions, "a real verdict, not a refusal");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("a cwd EQUAL to the server's is fine, including a non-normalised spelling", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      // `<cwd>/.` resolves to the same directory — the guard compares resolved paths, not strings,
+      // so a client that appends a separator or a "." is not punished for spelling.
+      const result = await client.callTool({
+        name: "kit_check",
+        arguments: { cwd: join(process.cwd(), ".") },
+      });
+      assert.notEqual(result.isError, true);
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
 describe("kit_map", () => {
   it("returns the relevant import-slice around a seed (deterministic, read-only)", async () => {
     const dir = await mkdtemp(join(tmpdir(), "kit-mcp-map-"));

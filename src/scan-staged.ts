@@ -1,9 +1,19 @@
 import { findSecrets, type SecretFinding } from "./utils/redactSecrets.js";
+import { isTestOrFixturePath } from "./utils/test-paths.js";
 import { exec } from "./utils/exec.js";
 
 export interface StagedHit {
   file: string;
   findings: SecretFinding[];
+  /**
+   * True when the file is test/fixture material. Fake credentials live there by design —
+   * kit's own audit-redaction test MUST contain a secret-shaped key to prove the
+   * redaction works — so these are reported and do NOT block. The repo-wide grep in
+   * check-security.ts already made this call; this gate did not, so it blocked the commit
+   * that added that test, and the only escape was `--no-verify`, which disables the whole
+   * hook. Reported rather than dropped: no false green, just no false block.
+   */
+  advisory?: boolean;
 }
 
 /**
@@ -80,7 +90,7 @@ export async function scanStagedFiles(cwd: string = process.cwd()): Promise<Stag
     }
     const findings = findSecrets(content);
     if (findings.length > 0) {
-      hits.push({ file: path, findings });
+      hits.push({ file: path, findings, ...(isTestOrFixturePath(path) ? { advisory: true } : {}) });
     }
   }
   return hits;

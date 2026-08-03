@@ -80,11 +80,13 @@ Four pillars, all additive over 4.x — no stable command removed. Highlights:
   0600 key) and never silently downgrades; `KIT_REQUIRE_HARDWARE_IDENTITY` makes a missing
   hardware backend fail-closed. `kit identity migrate` moves onto hardware and
   revokes the old key in one audited step.
-- **Pillar 2 — control plane + keyless credentials.** `kit policy pull` /
-  `pull-revocations` distribute an org-signed policy, verified and enforced fully
-  offline; `kit policy approve` mints offline signed approval tokens. Keyless
-  egress signs requests with RFC 9421 HTTP Message Signatures for hosts in
-  `[scope].sign` — sign, don't store.
+- **Pillar 2 — control plane.** `kit policy pull` / `pull-revocations` distribute an
+  org-signed policy, verified and enforced fully offline; `kit policy approve` mints
+  offline signed approval tokens. **Keyless egress signing is not shipped:** the RFC 9421
+  HTTP Message Signature primitives exist and are tested (`src/keyless/`), and `[scope].sign`
+  is a real signed field that `kit doctor` reports on (declared vs verified) — but nothing
+  imports `src/keyless/` outside itself, so no request on the egress path is ever signed.
+  This entry previously described it in the present tense.
 - **Pillar 3 — one exec-broker.** A single signed-scope governance floor drives
   the PreToolUse gates (`kit gate-egress` / `gate-fs`), the MCP runtime, and the
   `kit doctor` posture. Runtime mediation is **on by default in observe mode**
@@ -504,7 +506,7 @@ Production credentials are gated behind explicit env-switching and short-lived e
 
 - `kit env switch <dev|staging|prod>`: Toggle the active environment marker
 - `kit env current`: Show active env (color-coded), `kit env list` for available
-- `kit auth elevate [--scope <op>] [--ttl-minutes N]`: Mint a TTL'd elevation marker (TOTP or yes-prompt). Required before any destructive secret op.
+- `kit auth elevate [--scope <op>] [--ttl-minutes N]`: Mint a TTL'd elevation marker (TOTP or yes-prompt). Required before any destructive secret op. `--list-scopes` (also `--json`) prints every scope, what it unlocks, and whether it is one-shot — without elevating anything.
 - `kit auth setup-totp`: One-time TOTP enrollment (writes `~/.kit/totp-secret` 0600)
 - `kit auth status`: Show active elevation
 - `kit auth revoke`: Drop the elevation marker early

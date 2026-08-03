@@ -123,3 +123,120 @@ describe("checkPolicy", () => {
     assert.equal(r.policyHash, hashPolicy(policy));
   });
 });
+
+describe("currentPolicyHash", () => {
+  /**
+   * Runs `fn` with KIT_POLICY_HASH restored afterwards. Each case owns the env
+   * var outright, so a failure mid-test cannot leak a hash into later tests.
+   */
+  function withEnv(fn: () => void): void {
+    const saved = process.env.KIT_POLICY_HASH;
+    try {
+      fn();
+    } finally {
+      if (saved === undefined) delete process.env.KIT_POLICY_HASH;
+      else process.env.KIT_POLICY_HASH = saved;
+    }
+  }
+
+  it("returns null when KIT_POLICY_HASH is absent", () => {
+    withEnv(() => {
+      _resetPolicyHashForTests();
+      // Absent policy must read as null, not undefined: callers compare against
+      // `null` to decide "no operator-declared scope exists".
+      assert.equal(currentPolicyHash(), null);
+    });
+  });
+
+  it("round-trips the hash that installPolicyHash exported", () => {
+    withEnv(() => {
+      _resetPolicyHashForTests();
+      const policy = { agent_writes: { sentry: ["resolve_issue"] } };
+      installPolicyHash(policy);
+      // The env-exported identity must equal the directly computed one, or a
+      // child process would disagree with its parent about which policy is live.
+      assert.equal(currentPolicyHash(), hashPolicy(policy));
+    });
+  });
+
+  it("reflects a re-install after the policy changes", () => {
+    withEnv(() => {
+      _resetPolicyHashForTests();
+      installPolicyHash({ agent_writes: { sentry: ["resolve_issue"] } });
+      const first = currentPolicyHash();
+      installPolicyHash({ agent_writes: { sentry: ["resolve_issue", "create_release"] } });
+      const second = currentPolicyHash();
+      assert.notEqual(first, second);
+      assert.equal(second?.length, 64);
+    });
+  });
+
+  it("returns null again after installPolicyHash(undefined) clears the scope", () => {
+    withEnv(() => {
+      installPolicyHash({ agent_writes: { sentry: ["resolve_issue"] } });
+      assert.notEqual(currentPolicyHash(), null);
+      installPolicyHash(undefined);
+      // Losing the policy must revoke the identity rather than leave the previous
+      // hash standing — a stale hash would vouch for a scope no longer declared.
+      assert.equal(currentPolicyHash(), null);
+    });
+  });
+
+  it("reads process.env live rather than caching the boot-time value", () => {
+    withEnv(() => {
+      _resetPolicyHashForTests();
+      installPolicyHash({ agent_writes: { sentry: ["resolve_issue"] } });
+      const installed = currentPolicyHash();
+      delete process.env.KIT_POLICY_HASH;
+      // No memoization: if the value were cached at first read, a cleared env
+      // would still report the old hash.
+      assert.equal(currentPolicyHash(), null);
+      process.env.KIT_POLICY_HASH = installed as string;
+      assert.equal(currentPolicyHash(), installed);
+    });
+  });
+
+  it("returns an inherited env value verbatim without validating it", () => {
+    withEnv(() => {
+      // ACTUAL behaviour: the getter is a raw env read — it does not check length,
+      // hex-ness, or that installPolicyHash produced the value. Documented here so a
+      // future change to trust-on-read is a deliberate, test-breaking decision.
+      process.env.KIT_POLICY_HASH = "not-a-sha256";
+      assert.equal(currentPolicyHash(), "not-a-sha256");
+      process.env.KIT_POLICY_HASH = "  0123abc  ";
+      // Whitespace is not trimmed either.
+      assert.equal(currentPolicyHash(), "  0123abc  ");
+    });
+  });
+
+  it("returns an empty string (not null) when KIT_POLICY_HASH is set but empty", () => {
+    withEnv(() => {
+      process.env.KIT_POLICY_HASH = "";
+      // `?? null` only catches null/undefined, so an empty assignment survives as "".
+      // Callers testing `=== null` see "a policy hash exists"; callers testing
+      // truthiness see "none". That divergence is the boundary worth pinning.
+      assert.equal(currentPolicyHash(), "");
+      assert.notEqual(currentPolicyHash(), null);
+    });
+  });
+
+  it("is unaffected by checkPolicy — checking a policy does not install its hash", async () => {
+    const saved = process.env.KIT_POLICY_HASH;
+    try {
+      _resetPolicyHashForTests();
+      const r = await checkPolicy(
+        { agent_writes: { sentry: ["resolve_issue"] } },
+        "sentry",
+        "resolve_issue",
+      );
+      assert.equal(r.approved, true);
+      // checkPolicy computes its own hash for the audit record; only
+      // installPolicyHash may publish one to the environment. If checking ever
+      // started exporting, an out-of-scope check could redefine the live identity.
+      assert.equal(currentPolicyHash(), null);
+    } finally {
+      if (saved === undefined) delete process.env.KIT_POLICY_HASH;
+      else process.env.KIT_POLICY_HASH = saved;
+    }
+  });
+});

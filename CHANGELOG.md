@@ -6,6 +6,235 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.3.0] - 2026-08-01
+
+### Fixed
+
+- **Three defects found by testing the README's pillars as behaviour, not as prose.** Each pillar
+  claim was run against a temp project and its artifacts, with the oracle being what kit *did* —
+  never the text that made the claim.
+
+  - **A corrupted `.kit-profile.toml` turned runtime mediation off entirely.** Pillar 3 says
+    mediation is on by default in observe mode. It is — but an *unreadable* profile resolved to
+    `runtimeMode: "off"`, and `runBrokered` skips the broker on "off". Tampering with
+    `.kit-profile.sig` was denied while breaking the TOML syntax ran unmediated: the strictly
+    easier attack had the weaker consequence, and the comment on that branch already claimed the
+    opposite ("a broken artifact must not silently disable enforcement"). An unreadable profile
+    now default-denies any op that declares effects, with a reason naming the actual fault, while
+    undeclared ops keep the migration passthrough so a typo cannot brick the runtime and push
+    operators into deleting the profile.
+
+  - **kit could not verify what it had just signed with a hardware key.** `kit profile sign` under
+    `KIT_KEYSTORE=command` printed "signed (hardware-rooted)"; `kit profile verify` one second
+    later on the same machine answered "signer &lt;kid&gt; unknown". The local trust store is built
+    only from `identity.json` and its `.bak` archives, so an operator-fronted key was never
+    written down. Consequence: `exec-broker scope` read "unverifiable → grants nothing", so
+    adopting the hardware backend Pillar 1 recommends silently disabled the mediation Pillar 3
+    promises. A successful sign through a non-file backend now records the signer's **public** key
+    (0600, no private material) as a locally-trusted identity.
+
+  - **`kit identity migrate` revoked nothing.** It wrote a revocation of the old file key signed by
+    the new hardware key, but `isAuthoritativeRevocation` rejects a revoker whose public key is
+    unknown — so the record was inert: the "revoked" key kept signing profiles and policies,
+    `kit identity show` looked healthy and `kit doctor` said nothing. The external key is now a
+    local revocation authority, **and** any backend refuses to sign a key this machine has revoked.
+    The verifiers deliberately do not honor a machine-local revocation of a third party (that would
+    let one host fail-close everyone), which is precisely why the local revocation has to bite on
+    the signing side. `kit doctor` fails and `kit identity show` prints REVOKED.
+
+  Both keystore wrappers are installed inside `resolveKeyStore` rather than at the six
+  `store.sign()` call sites, so the seventh one added gets them too.
+
+- **`kit profile sign` told you to commit a file it does not write.** The message named
+  `.kit-profile.toml.sig`; the file is `.kit-profile.sig`. Following the instruction left the
+  signature uncommitted and every verifier reading the scope as unsigned.
+
+- **`kit security scan-staged` no longer blocks on test fixtures.** The pre-commit gate flagged
+  kit's own audit-**redaction** test — which has to stage a secret-shaped key to prove the
+  redaction works — and the only way through was `git commit --no-verify`, which switches off the
+  entire hook. A gate that cries wolf teaches people to disable it.
+
+  `check-security.ts`'s repo-wide grep already made this call, with the reasoning written out:
+  fake credentials live in test/fixture files by design, and the authoritative scanners
+  (trufflehog locally, the CI gitleaks job) still scan them and verify live. The two surfaces of
+  the same check simply disagreed, and the disagreeing one was the one that blocked work. The
+  rule now lives in one place (`utils/test-paths.ts`) so they cannot drift again.
+
+  Test-path hits are **reported as advisories, not dropped** — no false green, just no false
+  block. Verified in both directions: the redaction test now reports and exits 0, and a
+  secret-shaped string staged in ordinary source still blocks with exit 1.
+
+- **Three real defects found by covering the unwired exports.** Writing tests for code nothing
+  calls is usually bookkeeping; here it surfaced bugs in live paths, because two of the three
+  functions share their flaw with a wired sibling.
+
+  - **`lineSeals` / `lineHashes` threw instead of failing closed on a `null` log line.**
+    `JSON.parse("null")` *succeeds* and yields `null`, and the `typeof obj.hash` guard sat
+    **outside** the `try` — so a line containing exactly `null` in `.kit-audit.jsonl` escaped as
+    a `TypeError` rather than the fail-closed `null` every other malformed line gets. `lineSeals`
+    is the **live** extractor `verifyAgainstAnchor` calls, so this turned a documented
+    "unparseable" verdict into a thrown exception out of the audit-verify path. **A crash is not
+    a verdict.** Both now guard the parse result; every other malformed shape (bare number,
+    string, array, truncated object) already behaved correctly.
+  - **`wouldRequireApproval` disagreed with the enforcer it predicts.** It gated prod on
+    `production_writes === true` while `requestApproval` gates on bare truthiness, so a
+    hand-edited `production_writes = "yes"` made a dry-run report *no approval needed* and the
+    real call then prompt or deny. It also ignored `enabled` entirely, predicting a prompt for
+    configs where `withGovernance` returns before any approval is requested. Both corrected
+    toward the enforcer: a predictor may over-predict a prompt, never under-predict one.
+  - **`mergeGovernanceConfig()` handed out the shared defaults by reference.** With no config it
+    returned `DEFAULT_GOVERNANCE` itself, so one caller pushing a keyword onto
+    `approval.destructive_operations` changed the destructive-operation gate for every later
+    caller in the process. Now a `structuredClone`; the configured path already returned a fresh
+    object via spreads, so only the no-config path leaked the singleton.
+
+### Added
+
+- **Every unwired export now has tests — 276 cases across 27 files, ~3,760 lines.** The user's
+  instruction was explicit: delete nothing, cover it. So each export `self-audit` rule 15 reports
+  as having no production call site is now verified rather than merely unused, and three of them
+  turned out to be hiding real bugs (above).
+
+  Run as a 27-agent workflow with file-level ownership so concurrent writes could not collide,
+  append-only against the existing sibling test files. Two assumptions the agents made were
+  wrong and the failures were the point — `ensureMiseActivation` inserts no blank separator line
+  when a profile lacks a trailing newline (the leading `\n` in its block is what prevents
+  gluing, which is the property that actually matters), and the `null`-line expectation had to
+  flip from "throws" to "returns null" once the defect it documented was fixed.
+
+- **Tests for four untested security-decision modules — 91 new cases.** Targeted by what a bug
+  in them would cost, not by line count: every one is logic where a defect is an authorization,
+  injection or ledger-integrity bug, and none of them had a single test.
+
+  - **`rbac/policy-schema.ts`** (34 cases) — the RBAC decision engine. Wildcard scope
+    (`secrets:*` must not grant `secretsadmin:read`), that a grant is never treated as a regex,
+    prototype-pollution refusal at all three levels (`__proto__` / `constructor` / `prototype`
+    on the table, as a role name, inside a binding), and the fail-closed contract the resolver
+    depends on: a malformed `[rbac]` table yields `null`, never a partial grant.
+  - **`governance.ts`** (24) — `checkOperationAllowed`, the authorization verdict. The
+    intentional fail-open when governance is disabled, the fail-closed branch for an
+    environment with no access entry, and the deliberate asymmetry that a denied *delete* is
+    always escalatable to approval while a denied *write* is only escalatable in prod.
+  - **`findings-track.ts`** (18) — which findings reach the PAL ledger, and that `dedupKey`
+    excludes volatile values so a re-scan maps to the same row instead of forking a new one.
+  - **`utils/ci-escape.ts`** (15) — the two escapers standing between a config-controlled
+    string and a forged CI annotation or JUnit testcase. Both pin that the escape character
+    itself is escaped **first**, since escaping `%` or `&` last lets the sequence be smuggled
+    through intact.
+
+  Three of these tests were wrong on the first run and the failures were the point:
+  `mergeGovernanceConfig` always spreads all three environments (so the no-access branch is
+  only reachable by a caller assembling config itself — now documented in the test),
+  `"removal"` does not contain `"remove"`, and `advisory.detail` is required rather than
+  optional. Each assertion was corrected to describe the code, not the other way round.
+
+  Untested files **89 → 85**.
+
+### Fixed
+
+- **A false security claim in the README and in three compliance evidence maps.** kit's Pillar 2
+  entry stated in the present tense that *"keyless egress signs requests with RFC 9421 HTTP
+  Message Signatures for hosts in `[scope].sign`"*. Measured: the whole `src/keyless/` directory
+  is unreachable — `http-sig.ts` is imported only by `sign-request.ts`, which is imported by
+  nothing; no command exposes it; nothing on the egress path signs a request; and there is no
+  `[scope].sign` field in the profile schema at all.
+
+  The primitives are real and tested, so they stay. What changed is every place that described
+  them as shipped: the README, **`coverage/nist-800-53.ts` (both the IA and SC families)** and
+  **`coverage/owasp-agentic-top10.ts`**, where "keyless egress" was also listed as one of the
+  *checks* backing a control. Evidence you would hand an auditor is the worst possible place for
+  a capability claim that is not wired, which is why this one is called out separately from the
+  dead code below.
+
+  (Care taken not to overclaim in the other direction: "keyless" in `kit audit verify` means a
+  keyless *hash chain* — no identity key — which is a different, working thing that happens to
+  share the word.)
+
+- **A false positive in rule 15, found by reading its own output instead of trusting it.**
+  `buildOpenCliDoc`, `serializeOpenCli`, `collectPublicSurface` and `serializePublicSurface` were
+  reported as unwired. They are called by `scripts/gen-opencli.mjs` and
+  `scripts/gen-public-surface.mjs` via `await import(dist/…)` — reachable, load-bearing, and
+  invisible to a rule that only scanned `src/`. Repo tooling now counts as a call site, with a
+  test pinning it.
+
+### Removed
+
+- **~1,100 lines of unreachable code, found by rule 15 and deleted.** Every export it flagged as
+  *referenced nowhere* is gone, and the count went **20 → 0**:
+
+  - `src/event-stream.ts` (220 lines) plus its 299-line test — an `EventStream` class with
+    `initializeEventStream` / `getEventStream`, imported by **nothing**. Tested, complete, and
+    unreachable: the module-level version of the shape rule 15 exists to catch. No doc promised
+    it.
+  - `src/validation/` (69 lines) — the whole directory. `validateWebSearchConfig` and
+    `getValidProviderNames` were dead, and removing them orphaned the schema builder they were
+    the only callers of; nothing outside the module used any of it either.
+  - 14 further exports across `migrations.ts` (4 query helpers), `fix.ts`, `onepassword.ts`,
+    `adapters/resend-email.ts`, `utils/promptSelect.ts`, `triage-sandbox.ts`, `revocation.ts`,
+    `secrets-pull.ts`, `service-adapter.ts` and `profile/sign.ts`, plus the types and private
+    helpers the deletions orphaned.
+
+  Checked before deleting, not after: no non-source reference (docs, JSON, workflows, scripts),
+  no dynamic dispatch that could reach them (every `await import()` in the tree takes a static
+  string), and nothing in the declared adapter-SDK public surface. `tsc` then caught each
+  orphaned import in cascade — including one where **the deletion was wrong**: `installTools` is
+  used by the live `cmdFix`, and removing its import broke the build until it was restored.
+  That is the whole reason this was done with the compiler and 3,391 tests as the net rather
+  than by eye.
+
+  Net effect on the tracked numbers: unwired exports **69 → 49**, referenced-nowhere **20 → 0**,
+  untested files **91 → 90**.
+
+- **A further ~2,000 lines: four orphan modules, each a duplicate of something that works or a
+  design that was never wired.** Nothing in the tree imported any of these files.
+
+  - `src/secrets-service.ts` (437 lines) + its test + `src/secrets-model.ts` (91, orphaned by
+    the removal) — a parallel vault service with sharing, revocation, access logs and metrics.
+    `kit secrets` is the real, working implementation; this was an alternative design.
+  - `src/control-plane/` — `applyPolicyBundle` / `fetchPolicyBundle`. `kit policy pull` and
+    `pull-revocations` **do work**, implemented in `commands/policy.ts`; this was a duplicate.
+    Verified by running both subcommands before deleting.
+  - `src/plugin-registry.ts` — a class-based `PluginRegistry` duplicating the live interface in
+    `src/plugins.ts`.
+  - `parsePolicyToml` in `policy-doc.ts`, orphaned by the control-plane removal.
+
+  `src/keyless/` was **kept**: unlike these, it is not a duplicate — it is a real primitive
+  nothing has wired yet, so the fix was to stop claiming it (above) rather than delete it.
+
+  Tracked numbers after this batch: unwired exports **49 → 32**, referenced-nowhere back to
+  **0**, untested files **90 → 89**.
+
+  **Not done, deliberately:** the 32 remaining *tested-but-never-called* exports in live
+  modules. A bulk brace-matching pass over 26 of them corrupted `cost-monitor.ts` (it removed 30
+  functions where 26 were named) and was reverted whole. They are dead weight, not false claims,
+  and the tracked number is a better outcome than a broken tree at the end of a long change.
+
+### Added
+
+- **`[memory] default_class` and `KIT_MEMORY_CLASS` are now actually read.** Before this they
+  were inert: `resolveMemoryClass()` had **zero** production call sites, so the documented
+  precedence (`KIT_MEMORY_CLASS` → `[memory] default_class` → `internal`) never ran on real
+  inputs, and both settings did nothing at all. The policy in `memory/class.ts` was complete and
+  unit-tested the whole time — which is precisely why `self-audit` rule 15 landed in 6.2.0, and
+  this is its first finding closed.
+
+  `memory/effective-class.ts` supplies the missing wire (env + the project's `.kit.toml`), and
+  `kit memory stats` now reports which class applies and where it came from:
+
+  ```
+  class      internal (from built-in default)
+             resolved and reported; recall is not yet filtered by class
+  ```
+
+  An unrecognised value fails closed to `restricted` and **says so out loud** in that line,
+  because a typo that silently narrows disclosure is as much a defect as one that widens it.
+
+  **Observe tier, deliberately.** This resolves and reports; it does not yet filter recall.
+  Turning on disclosure filtering changes what an existing store returns — a wrong flip either
+  leaks across projects or silently hides a user's own notes — so it is a separate, explicitly
+  tested step on kit's own observe→enforce ladder rather than a side effect of making the
+  config readable. The `kit memory stats` line states that limit rather than implying more.
+
 ## [6.2.0] - 2026-07-31
 
 ### Added

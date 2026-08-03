@@ -50,8 +50,14 @@ export interface kitMeta {
 /**
  * Get the .kit directory path
  */
-function getkitDir(): string {
-  return resolve(process.cwd(), KIT_DIR);
+/**
+ * The project's `.kit/` directory. `cwd` is optional and defaults to `process.cwd()` — but it is
+ * NOT optional in correctness terms for any caller that has a project directory of its own. The MCP
+ * server's `kit_context` reported the SERVER's lock state as if it were the target project's,
+ * because `checkLockFiles` called the readers with no cwd and they resolved from the process.
+ */
+function getkitDir(cwd?: string): string {
+  return resolve(cwd ?? process.cwd(), KIT_DIR);
 }
 
 /**
@@ -67,8 +73,8 @@ async function ensurekitDir(): Promise<void> {
 /**
  * Read skills lock file
  */
-export async function readSkillsLock(): Promise<SkillsLock | null> {
-  const lockPath = resolve(getkitDir(), SKILLS_LOCK_FILE);
+export async function readSkillsLock(cwd?: string): Promise<SkillsLock | null> {
+  const lockPath = resolve(getkitDir(cwd), SKILLS_LOCK_FILE);
 
   if (!existsSync(lockPath)) {
     return null;
@@ -104,8 +110,8 @@ export async function writeSkillsLock(lock: SkillsLock): Promise<void> {
 /**
  * Read CLI lock file
  */
-export async function readCliLock(): Promise<CliLock | null> {
-  const lockPath = resolve(getkitDir(), CLI_LOCK_FILE);
+export async function readCliLock(cwd?: string): Promise<CliLock | null> {
+  const lockPath = resolve(getkitDir(cwd), CLI_LOCK_FILE);
 
   if (!existsSync(lockPath)) {
     return null;
@@ -141,8 +147,8 @@ export async function writeCliLock(lock: CliLock): Promise<void> {
 /**
  * Read kit metadata file
  */
-export async function readkitMeta(): Promise<kitMeta | null> {
-  const metaPath = resolve(getkitDir(), KIT_META_FILE);
+export async function readkitMeta(cwd?: string): Promise<kitMeta | null> {
+  const metaPath = resolve(getkitDir(cwd), KIT_META_FILE);
 
   if (!existsSync(metaPath)) {
     return null;

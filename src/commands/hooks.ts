@@ -2,7 +2,7 @@
 import { loadConfig } from "../config.js";
 import { resolveConfigPath, KIT_FILE } from "../cli-shared.js";
 import { isGitRepository, checkHooks } from "../check-hooks.js";
-import { installHooks } from "../hooks.js";
+import { installHooks, uninstallHooks } from "../hooks.js";
 import { isNonInteractive } from "../environment.js";
 import { promptConfirm } from "../utils/prompt.js";
 import { c } from "../utils/colors.js";
@@ -103,9 +103,47 @@ export async function cmdHooks(): Promise<boolean> {
 
     console.log();
     return allOk;
+  } else if (subcommand === "uninstall") {
+    // `uninstallHooks` has existed and been exported since hooks shipped, with no
+    // caller: kit could install git hooks and had no way to remove them, so the only
+    // route back was deleting files out of .git/hooks by hand. Reported by self-audit
+    // rule 15 as unwired; this is the wire, not a new capability.
+    console.log(`${c.bold}${c.cyan}Uninstalling git hooks...${c.reset}\n`);
+
+    // `installHooks` writes the configured hooks AND the bypass-detector sentinel pair
+    // (`pre-commit` writer + `post-commit` detector). Removing only the configured names
+    // leaves the post-commit detector behind, and with the sentinel writer gone it then
+    // reports every subsequent commit as "bypassed pre-commit (sentinel-missing)" —
+    // forever. Found by running the uninstall and looking at .git/hooks afterwards
+    // rather than trusting the happy-path output.
+    const toRemove = [...new Set([...Object.keys(config.hooks), "pre-commit", "post-commit"])];
+    const results = await uninstallHooks(toRemove);
+    let allOk = true;
+
+    for (const r of results) {
+      const icon = r.action === "failed" ? `${c.red}✗${c.reset}` : `${c.green}✓${c.reset}`;
+      // `uninstallHooks` reuses action "installed" to mean "removed" — render it as
+      // what actually happened rather than leaking that quirk to the operator.
+      const label =
+        r.action === "failed"
+          ? `${c.red}failed${c.reset}`
+          : r.action === "skipped"
+            ? `${c.dim}skipped${c.reset}`
+            : `${c.green}removed${c.reset}`;
+      console.log(`  ${icon} ${r.hookName}  ${label}  ${c.dim}${r.detail}${c.reset}`);
+      if (r.action === "failed") allOk = false;
+    }
+
+    console.log();
+    if (allOk) {
+      console.log(
+        `${c.dim}Enforcement is now off for these hooks — re-install with ${c.reset}${c.bold}kit hooks install${c.reset}${c.dim}.${c.reset}\n`,
+      );
+    }
+    return allOk;
   } else {
     console.error(`Unknown hooks subcommand: ${subcommand}`);
-    console.error(`Usage: kit hooks [install|check|add <name>]`);
+    console.error(`Usage: kit hooks [install|check|uninstall|add <name>]`);
     return false;
   }
 }

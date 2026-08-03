@@ -271,3 +271,137 @@ describe("requestApproval - Remote API flow", () => {
     assert.ok(callCount >= 1, "should have attempted at least one API call");
   });
 });
+
+describe("wouldRequireApproval - defaults, boundaries and fail-closed edges", () => {
+  it("predicts NO approval when config is absent, because governance defaults to off", () => {
+    // DEFAULT_GOVERNANCE.enabled is false, and `withGovernance` returns before any
+    // approval is requested when governance is off — so no prompt can happen and
+    // predicting one would be a lie. This function used to ignore `enabled` and report
+    // true here, disagreeing with the code it exists to predict.
+    assert.equal(wouldRequireApproval(undefined, "db:delete:users", "dev"), false);
+    assert.equal(wouldRequireApproval(undefined, "destroy stack", "dev"), false);
+    assert.equal(wouldRequireApproval(undefined, "read-logs", "prod"), false);
+  });
+
+  it("applies the built-in destructive keywords once governance is enabled", () => {
+    // Enabling governance is the only thing the absent-config case was missing: the
+    // default keyword list (delete/drop/truncate/destroy/remove) is already there.
+    const on: GovernanceConfig = { enabled: true };
+    assert.equal(wouldRequireApproval(on, "db:delete:users", "dev"), true);
+    assert.equal(wouldRequireApproval(on, "truncate audit log", "dev"), true);
+    assert.equal(wouldRequireApproval(on, "destroy stack", "dev"), true);
+  });
+
+  it("gates every prod operation when enabled, because production_writes defaults to true", () => {
+    // Regression guard: flipping the default of production_writes to false would
+    // silently open prod to unapproved operations.
+    assert.equal(wouldRequireApproval({ enabled: true }, "read-logs", "prod"), true);
+  });
+
+  it("predicts no approval when governance is explicitly disabled", () => {
+    const config: GovernanceConfig = { enabled: false };
+    assert.equal(wouldRequireApproval(config, "db:drop", "dev"), false);
+    assert.equal(wouldRequireApproval(config, "read-logs", "prod"), false);
+  });
+
+  it("keeps the default keywords when approval is present but empty", () => {
+    // `approval: {}` is a partial override merged over the defaults, not a reset.
+    const config: GovernanceConfig = { enabled: true, approval: {} };
+    assert.equal(wouldRequireApproval(config, "drop table orders", "dev"), true);
+  });
+
+  it("disables destructive gating when destructive_operations is an explicit empty list", () => {
+    // An explicitly empty array replaces the defaults, so nothing matches by keyword.
+    const config: GovernanceConfig = {
+      enabled: true,
+      approval: { destructive_operations: [], production_writes: false },
+    };
+    assert.equal(wouldRequireApproval(config, "drop table orders", "dev"), false);
+    assert.equal(wouldRequireApproval(config, "destroy everything", "dev"), false);
+  });
+
+  it("matches keywords case-insensitively in both directions", () => {
+    const config: GovernanceConfig = {
+      enabled: true,
+      approval: { destructive_operations: ["DELETE"], production_writes: false },
+    };
+    // Both the configured keyword and the operation are lowercased before comparison,
+    // so an upper-case policy entry must not stop matching a lower-case operation.
+    assert.equal(wouldRequireApproval(config, "db:delete:users", "dev"), true);
+    assert.equal(wouldRequireApproval(config, "DB:DELETE:USERS", "dev"), true);
+  });
+
+  it("matches keywords as bare substrings, with no word boundaries", () => {
+    const config: GovernanceConfig = {
+      enabled: true,
+      approval: { destructive_operations: ["delete", "rm"], production_writes: false },
+    };
+    // "undelete" is not a delete and "confirm" merely contains "rm": naive containment
+    // over-matches rather than under-matches, so it errs towards requiring approval.
+    // Switching to word-boundary matching would turn today's denials into silent allows.
+    assert.equal(wouldRequireApproval(config, "undelete-restore", "dev"), true);
+    assert.equal(wouldRequireApproval(config, "confirm-changes", "dev"), true);
+  });
+
+  it("treats an empty keyword as matching every operation", () => {
+    const config: GovernanceConfig = {
+      enabled: true,
+      approval: { destructive_operations: [""], production_writes: false },
+    };
+    // "".includes("") === true, so a stray empty entry gates everything, including
+    // the empty operation name. Fail-closed, but surprising.
+    assert.equal(wouldRequireApproval(config, "read-config", "dev"), true);
+    assert.equal(wouldRequireApproval(config, "", "dev"), true);
+  });
+
+  it("returns false for an empty operation name when no keyword is empty", () => {
+    const config: GovernanceConfig = {
+      enabled: true,
+      approval: { destructive_operations: ["delete"], production_writes: false },
+    };
+    assert.equal(wouldRequireApproval(config, "", "dev"), false);
+  });
+
+  it("compares the environment exactly, so only the literal string prod is gated", () => {
+    const config: GovernanceConfig = {
+      enabled: true,
+      approval: { destructive_operations: [], production_writes: true },
+    };
+    assert.equal(wouldRequireApproval(config, "update-config", "prod"), true);
+    // Any other spelling of production bypasses the prod gate entirely — a caller
+    // passing "production" or "PROD" gets no approval requirement.
+    assert.equal(wouldRequireApproval(config, "update-config", "production"), false);
+    assert.equal(wouldRequireApproval(config, "update-config", "PROD"), false);
+    assert.equal(wouldRequireApproval(config, "update-config", ""), false);
+  });
+
+  it("agrees with the enforcer on a truthy non-boolean production_writes", () => {
+    // The divergence this pins: `requestApproval` — the code this function predicts —
+    // gates prod on bare truthiness. While the prediction used `=== true`, a
+    // hand-edited TOML value like `production_writes = "yes"` made a dry-run report
+    // "no approval needed" and the real call then prompt or deny. A predictor may
+    // over-predict a prompt; it must never under-predict one.
+    const truthy: GovernanceConfig = {
+      enabled: true,
+      approval: { destructive_operations: [], production_writes: "yes" as unknown as boolean },
+    };
+    assert.equal(wouldRequireApproval(truthy, "update-config", "prod"), true);
+
+    // And a falsy non-boolean still means no prod gate, matching the enforcer again.
+    const falsy: GovernanceConfig = {
+      enabled: true,
+      approval: { destructive_operations: [], production_writes: "" as unknown as boolean },
+    };
+    assert.equal(wouldRequireApproval(falsy, "update-config", "prod"), false);
+  });
+
+  it("requires approval for a destructive prod operation even when production_writes is off", () => {
+    const config: GovernanceConfig = {
+      enabled: true,
+      approval: { destructive_operations: ["drop"], production_writes: false },
+    };
+    // The two conditions are OR'd: turning off production_writes must not disarm
+    // the destructive-keyword check in prod.
+    assert.equal(wouldRequireApproval(config, "db:drop:orders", "prod"), true);
+  });
+});

@@ -58,9 +58,9 @@ export const OWASP_AGENTIC_TOP10: StandardDescriptor = {
     },
     ASI03: {
       bucket: "auto",
-      checks: ["kit secrets", "gate-env", "signed scope", "keyless egress"],
+      checks: ["kit secrets", "gate-env", "signed scope"],
       rationale:
-        "kit keeps credentials in the vault and out of the agent loop, signs least-privilege scope, and uses keyless (RFC 9421) egress so a leaked static token cannot over-operate — directly the identity/privilege-abuse risk.",
+        "kit keeps credentials in the vault and out of the agent loop, and signs a least-privilege scope — directly the identity/privilege-abuse risk. Keyless (RFC 9421) egress is NOT shipped, so a leaked static token is mitigated by vault custody and scope, not by request signing.",
     },
     ASI04: {
       bucket: "auto",

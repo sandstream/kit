@@ -765,3 +765,127 @@ describe("kit profile — malformed .kit-profile.toml fails closed", () => {
     assert.equal(JSON.parse(result.stdout).ok, false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// mcpExposedToolNames() — the CLI-owned MCP tool surface
+//
+// Unlike the rest of this file these are in-process unit tests: the function is
+// a pure derivation over COMMAND_REGISTRY, so no subprocess is needed. Imported
+// dynamically (cli.js only runs main() when it IS the process entry, see
+// isCliEntry()), which keeps this block self-contained.
+// ---------------------------------------------------------------------------
+
+/** The set of verbs an agent may reach over MCP — kit's frozen public surface. */
+const EXPECTED_MCP_TOOLS = [
+  "kit_check",
+  "kit_context",
+  "kit_fix",
+  "kit_init",
+  "kit_map",
+  "kit_memory",
+  "kit_review",
+  "kit_run",
+  "kit_secrets",
+  "kit_triage",
+];
+
+describe("mcpExposedToolNames", () => {
+  it("returns exactly the frozen set of MCP-exposed tool names", async () => {
+    const { mcpExposedToolNames } = await import("./cli.js");
+    // Pinning the literal set (not just "matches KIT_MCP_TOOLS") is the point:
+    // this is the whole surface an MCP client can invoke, snapshotted in
+    // contracts/public-surface.json. Flipping `mcp: true` on another verb
+    // silently widens what a shell-less agent can do, and must fail here.
+    assert.deepEqual(mcpExposedToolNames(), EXPECTED_MCP_TOOLS);
+  });
+
+  it("returns the names in sorted order", async () => {
+    const { mcpExposedToolNames } = await import("./cli.js");
+    const names = mcpExposedToolNames();
+    // Callers (mcp-server.test.ts's CLI = MCP drift guard) compare with
+    // deepEqual against a sorted list, so order is contractual, not incidental:
+    // dropping the .sort() would break the guard rather than the surface.
+    assert.deepEqual(names, [...names].sort());
+  });
+
+  it("emits only kit_-prefixed names with hyphens translated to underscores", async () => {
+    const { mcpExposedToolNames } = await import("./cli.js");
+    for (const name of mcpExposedToolNames()) {
+      // MCP tool names must stay in the [a-z0-9_] shape mcpToolName() produces;
+      // a leaked hyphen (e.g. "kit_supply-chain") is not a valid tool name for
+      // clients that validate it, so the `-` → `_` rewrite must never regress.
+      assert.match(name, /^kit_[a-z0-9_]+$/, `unexpected tool name shape: ${name}`);
+      assert.ok(!name.includes("-"), `tool name must not contain a hyphen: ${name}`);
+    }
+  });
+
+  it("never exposes the same tool name twice", async () => {
+    const { mcpExposedToolNames } = await import("./cli.js");
+    const names = mcpExposedToolNames();
+    // Two registry verbs differing only by `-` vs `_` would collide into one MCP
+    // tool name; the duplicate is the visible symptom of that ambiguity.
+    assert.equal(new Set(names).size, names.length, `duplicate names in ${names.join(", ")}`);
+  });
+
+  it("keeps harness-protocol and operator-only verbs off the MCP surface", async () => {
+    const { mcpExposedToolNames } = await import("./cli.js");
+    const names = new Set(mcpExposedToolNames());
+    // A deny that must stay a deny. The gate-*/guard-observe/statusline verbs are
+    // hook protocols that read tool-call JSON on stdin, and panic/install/login/
+    // config/clone/mcp are operator decisions. None may become agent-callable.
+    for (const verb of [
+      "gate-bash",
+      "gate-egress",
+      "gate-env",
+      "gate-fs",
+      "guard-observe",
+      "statusline",
+      "panic",
+      "install",
+      "login",
+      "config",
+      "clone",
+      "mcp",
+    ]) {
+      assert.ok(
+        !names.has(`kit_${verb.replace(/-/g, "_")}`),
+        `${verb} must not be exposed as an MCP tool`,
+      );
+    }
+  });
+
+  it("only names verbs that exist in the command registry", async () => {
+    const { mcpExposedToolNames, mcpToolName, COMMANDS } = await import("./cli.js");
+    const derivable = new Set(Object.keys(COMMANDS).map((verb) => mcpToolName(verb)));
+    for (const name of mcpExposedToolNames()) {
+      // An MCP tool with no backing CLI verb would be un-dispatchable — the
+      // "CLI = MCP" invariant only holds if every name round-trips to a verb.
+      assert.ok(derivable.has(name), `${name} maps to no registry verb`);
+    }
+  });
+
+  it("exposes no verb that is routed away from agents by COMMAND_AUDIENCE", async () => {
+    const { mcpExposedToolNames, mcpToolName, COMMAND_AUDIENCE } = await import("./cli.js");
+    const exposed = new Set(mcpExposedToolNames());
+    for (const [verb, audience] of Object.entries(COMMAND_AUDIENCE)) {
+      if (!exposed.has(mcpToolName(verb))) continue;
+      // MCP is an agent surface. A "harness" verb is a stdin protocol and a
+      // "human" verb is an interactive/operator surface; either being reachable
+      // over MCP means the two exposure signals disagree.
+      assert.ok(
+        audience !== "harness" && audience !== "human",
+        `MCP-exposed verb ${verb} has non-agent audience "${audience}"`,
+      );
+    }
+  });
+
+  it("returns a fresh array each call, so a caller cannot corrupt the surface", async () => {
+    const { mcpExposedToolNames } = await import("./cli.js");
+    const first = mcpExposedToolNames();
+    first.push("kit_totally_bogus");
+    first.sort();
+    // No memoised array behind the function: a caller that sorts/mutates the
+    // result (the drift guards do exactly that) must not poison later callers.
+    assert.deepEqual(mcpExposedToolNames(), EXPECTED_MCP_TOOLS);
+  });
+});

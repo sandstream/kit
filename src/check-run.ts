@@ -147,7 +147,7 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
       ? await step("web search", () => checkWebSearch(config.web!.search!))
       : null;
   const security = wants("security") ? await step("security scan", () => checkSecurity()) : [];
-  const locks = wants("locks") ? await step("lock files", () => checkLockFiles(config)) : [];
+  const locks = wants("locks") ? await step("lock files", () => checkLockFiles(config, cwd)) : [];
 
   // Test-coverage is part of the verdict on every surface (omitting it on one
   // was half of the historical CLI-vs-MCP divergence). Baseline-aware; a

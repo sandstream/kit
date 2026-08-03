@@ -79,6 +79,7 @@
 | Command                                                 | Purpose                                                         |
 | ------------------------------------------------------- | --------------------------------------------------------------- |
 | `kit auth elevate [--scope <name>] [--ttl-minutes <N>]` | TTY prompt + TOTP → mints elevation marker for destructive ops. |
+| `kit auth elevate --list-scopes [--json]` | Lists every scope, what it unlocks, and whether it is one-shot. Elevates nothing. |
 | `kit auth status`                                       | Show current elevation state.                                   |
 | `kit auth revoke`                                       | Clear elevation marker.                                         |
 | `kit auth setup-totp`                                   | Enroll TOTP secret in `~/.kit/totp-secret`.                     |

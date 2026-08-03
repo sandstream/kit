@@ -104,7 +104,7 @@
       "commands": {
         "elevate": {
           "kind": "command",
-          "summary": "Mint elevation marker for destructive secret ops (TOTP/yes-prompt)",
+          "summary": "Mint elevation marker for destructive secret ops (TOTP/yes-prompt); --list-scopes to see what each scope unlocks first (--json)",
           "x-kit-args-modeled": false,
           "x-kit-audience": "human",
           "x-kit-mcp": false,
@@ -445,6 +445,14 @@
         "add": {
           "kind": "command",
           "summary": "Install a built-in hook (e.g. secret-scan)",
+          "x-kit-args-modeled": false,
+          "x-kit-audience": "human",
+          "x-kit-mcp": false,
+          "x-kit-stability": "stable"
+        },
+        "uninstall": {
+          "kind": "command",
+          "summary": "Remove the configured git hooks (enforcement off until re-installed)",
           "x-kit-args-modeled": false,
           "x-kit-audience": "human",
           "x-kit-mcp": false,
@@ -1123,7 +1131,7 @@
     "binary": "kit",
     "summary": "Deterministic, local-first developer-environment manager and fail-closed governance layer for AI agents and humans.",
     "title": "kit",
-    "version": "6.2.0"
+    "version": "6.3.0"
   },
   "opencliVersion": "1.0.0-alpha.12"
 }

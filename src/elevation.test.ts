@@ -16,6 +16,8 @@ import {
   generateBase32Secret,
   buildOtpAuthUri,
   resolveTotpSecret,
+  elevationIsActive,
+  elevationCoversScope,
 } from "./elevation.js";
 import { readFileSync, existsSync } from "node:fs";
 
@@ -328,5 +330,183 @@ describe("elevation marker forgery resistance", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("isElevated (gate semantics)", () => {
+  // Signs whatever state it is handed, so a *validly signed* marker can carry a
+  // deliberately bad expiresAt / scope. Without this the expiry and scope
+  // branches are unreachable: readElevation rejects unsigned markers first, so
+  // an unsigned "expired" fixture is really only testing signature rejection.
+  async function writeSigned(
+    dir: string,
+    state: { expiresAt: string; scope: string; granter?: string; method?: "yes-prompt" | "totp" },
+  ): Promise<void> {
+    const { writeElevation } = await import("./elevation.js");
+    await writeElevation(
+      {
+        expiresAt: state.expiresAt,
+        scope: state.scope,
+        granter: state.granter ?? "test",
+        method: state.method ?? "yes-prompt",
+      },
+      dir,
+    );
+  }
+
+  const future = () => new Date(Date.now() + 60 * 60_000).toISOString();
+
+  it("returns false in a directory with no marker file at all", async () => {
+    const dir = tmpRepo();
+    try {
+      assert.equal(await isElevated("rotate", dir), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false for a correctly signed but expired marker", async () => {
+    const dir = tmpRepo();
+    try {
+      // Signature is valid — the ONLY reason this must not elevate is the TTL.
+      await writeSigned(dir, { expiresAt: new Date(Date.now() - 1).toISOString(), scope: "all" });
+      assert.notEqual(await readElevation(dir), null, "marker must pass signature check");
+      assert.equal(await isElevated("rotate", dir), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false for a signed marker whose expiresAt is not a parseable date", async () => {
+    const dir = tmpRepo();
+    try {
+      // Fail-closed on garbage: an unparseable timestamp must not be read as
+      // "no expiry", which is how a NaN comparison would otherwise behave.
+      await writeSigned(dir, { expiresAt: "whenever", scope: "all" });
+      assert.equal(await isElevated("rotate", dir), false);
+      await writeSigned(dir, { expiresAt: "", scope: "all" });
+      assert.equal(await isElevated("rotate", dir), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("matches scope exactly — no prefix or case-insensitive widening", async () => {
+    const dir = tmpRepo();
+    try {
+      await writeSigned(dir, { expiresAt: future(), scope: "rotate" });
+      assert.equal(await isElevated("rotate", dir), true);
+      // A narrow grant must not leak into neighbouring operation names.
+      assert.equal(await isElevated("rotate-key", dir), false);
+      assert.equal(await isElevated("rotat", dir), false);
+      assert.equal(await isElevated("Rotate", dir), false);
+      assert.equal(await isElevated("", dir), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats only the exact literal 'all' as the wildcard scope", async () => {
+    const dir = tmpRepo();
+    try {
+      await writeSigned(dir, { expiresAt: future(), scope: "ALL" });
+      // Case variants are not the wildcard; they only cover an operation
+      // literally named "ALL".
+      assert.equal(await isElevated("rotate", dir), false);
+      assert.equal(await isElevated("ALL", dir), true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false for a malformed marker (missing scope, empty, non-JSON)", async () => {
+    const dir = tmpRepo();
+    try {
+      const path = join(dir, ".kit", "elevation.json");
+      mkdirSync(join(dir, ".kit"), { recursive: true });
+
+      writeFileSync(path, JSON.stringify({ expiresAt: future() }));
+      assert.equal(await isElevated("rotate", dir), false);
+
+      writeFileSync(path, "");
+      assert.equal(await isElevated("rotate", dir), false);
+
+      writeFileSync(path, "{not json");
+      assert.equal(await isElevated("rotate", dir), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores KIT_ELEVATED=1 — the CI escape hatch is requireElevation-only", async () => {
+    const dir = tmpRepo();
+    const prev = process.env.KIT_ELEVATED;
+    process.env.KIT_ELEVATED = "1";
+    try {
+      // isElevated is a pure marker query. If it ever started honouring the env
+      // var, a leaked CI variable would silently satisfy any caller that gates
+      // on isElevated instead of requireElevation.
+      assert.equal(await isElevated("rotate", dir), false);
+    } finally {
+      if (prev === undefined) delete process.env.KIT_ELEVATED;
+      else process.env.KIT_ELEVATED = prev;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("is a read-only query: repeatable, and leaves no marker or audit trail", async () => {
+    const dir = tmpRepo();
+    try {
+      await grantElevation("rotate", "yes-prompt", dir);
+      assert.equal(await isElevated("rotate", dir), true);
+      // Unlike consumeElevation, checking does not consume the marker.
+      assert.equal(await isElevated("rotate", dir), true);
+      assert.notEqual(await readElevation(dir), null);
+      // And unlike requireElevation, it emits nothing — so it must never be the
+      // gate in front of a destructive op, which needs the forensic record.
+      assert.equal(existsSync(join(dir, ".kit-audit.jsonl")), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// One rule, one implementation. The expiry check existed in three places that did not
+// agree at the boundary: the enforcer (`requireElevation`) and `isElevated` treated
+// `expires < now` as expired, while `kit auth status` computed validity as
+// `expires > now`. At the exact expiry millisecond the gate GRANTED while kit's own
+// status command printed "expired" — a status display contradicting its own gate.
+describe("elevationIsActive / elevationCoversScope — the shared rule", () => {
+  const now = 1_000_000;
+  const at = (ms: number) => ({ expiresAt: new Date(ms).toISOString() });
+
+  it("treats the exact expiry millisecond as still active, and says so once", () => {
+    // The boundary the three copies disagreed on. Which side it lands on matters less
+    // than that every caller now lands on the SAME side.
+    assert.equal(elevationIsActive(at(now), now), true);
+  });
+
+  it("is expired one millisecond past, active one millisecond before", () => {
+    assert.equal(elevationIsActive(at(now - 1), now), false);
+    assert.equal(elevationIsActive(at(now + 1), now), true);
+  });
+
+  it("fails closed on an unparseable timestamp rather than treating it as active", () => {
+    // A corrupt or hand-edited marker must never read as elevation.
+    for (const bad of ["", "not a date", "2026-13-45T99:99:99Z", "Infinity"]) {
+      assert.equal(elevationIsActive({ expiresAt: bad }, now), false, bad);
+    }
+  });
+
+  it("scope `all` covers any operation; anything else is exact", () => {
+    assert.equal(elevationCoversScope("all", "rotate"), true);
+    assert.equal(elevationCoversScope("rotate", "rotate"), true);
+    assert.equal(elevationCoversScope("rotate", "migrate"), false);
+    assert.equal(elevationCoversScope("", "rotate"), false);
+  });
+
+  it("is case-sensitive on scope — no accidental widening", () => {
+    assert.equal(elevationCoversScope("ALL", "rotate"), false);
+    assert.equal(elevationCoversScope("Rotate", "rotate"), false);
   });
 });

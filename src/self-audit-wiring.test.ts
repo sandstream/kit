@@ -105,6 +105,31 @@ function makeRepo(files: Record<string, string>): string {
 }
 
 describe("self-audit-wiring — readSources", () => {
+  it("counts scripts/ as a caller — the build depends on those exports", () => {
+    // The rule's own first false positives: gen-opencli.mjs and gen-public-surface.mjs
+    // import buildOpenCliDoc / collectPublicSurface from dist, so they are reachable and
+    // load-bearing while appearing nowhere in src. Reported as unwired until this landed.
+    const root = makeRepo({
+      "src/opencli.ts": "export function buildOpenCliDoc() {}",
+      "scripts/gen.mjs": 'const { buildOpenCliDoc } = await import("../dist/opencli.js");',
+    });
+    try {
+      assert.deepEqual(analyzeWiring(root), []);
+      assert.match(readSources(root).scriptText, /buildOpenCliDoc/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("has an empty scriptText when there is no scripts dir", () => {
+    const root = makeRepo({ "src/a.ts": "export function a() {}" });
+    try {
+      assert.equal(readSources(root).scriptText, "");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("splits production from tests and skips node_modules", () => {
     const root = makeRepo({
       "src/a.ts": "export function a() {}",

@@ -149,24 +149,3 @@ export async function handleRevocation(config: GovernanceConfig | undefined): Pr
   // Exit process
   process.exit(1);
 }
-
-/**
- * Get formatted revocation status for display
- */
-export function formatRevocationStatus(status: RevocationStatus): string {
-  if (!status.revoked) {
-    return "✓ Access active";
-  }
-
-  let message = "✗ Access revoked";
-
-  if (status.reason) {
-    message += ` - ${status.reason}`;
-  }
-
-  if (status.timestamp) {
-    message += ` (${new Date(status.timestamp).toLocaleString()})`;
-  }
-
-  return message;
-}

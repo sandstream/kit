@@ -110,6 +110,27 @@ describe("coverage honesty disclaimer", () => {
     }
   });
 
+  it("an UNBOUND run says AUTO means mapped, not run here, and names --verify", () => {
+    // Without this the default output shows a green AUTO next to "secrets are not stored
+    // in clear text" and a reader reasonably concludes kit checked it on THIS machine.
+    // It checked only that a check is mapped to the control.
+    const s = summarize(buildCoverageEntries());
+    assert.equal(s.autoVerified, undefined, "this summary must be the unbound one");
+    const d = honestyDisclaimer(s);
+    assert.match(d, /MAPPED to the control, not that it ran on this machine/);
+    assert.match(d, /kit coverage --verify/);
+  });
+
+  it("a BOUND run reports verified / failing / not-run instead", () => {
+    // The bound branch must not also carry the "run --verify" hint — it IS the verified
+    // run, and telling the reader to do what they just did would be noise.
+    const s = { ...summarize(buildCoverageEntries()), autoVerified: 6, autoFailing: 0, autoUnrun: 1 };
+    const d = honestyDisclaimer(s);
+    assert.match(d, /6 verified-passing, 0 FAILING, 1 not-run/);
+    assert.match(d, /mapped is not passing/);
+    assert.equal(/kit coverage --verify' to bind/.test(d), false);
+  });
+
   it("reports the auto count against the mapped total", () => {
     const s = summarize(buildCoverageEntries());
     const disclaimer = honestyDisclaimer(s);

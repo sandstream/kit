@@ -355,6 +355,24 @@ async function main(): Promise<void> {
       const handler = COMMANDS[resolved];
       if (handler) {
         emitDeprecationWarning(resolved);
+        // READ-ONLY FLOOR. The 11 in-module guards are honest but were not exhaustive: a sweep
+        // over the claim "read-only mode refuses every mutation" found `identity init` minting a
+        // private key, `policy init` creating the policy doc, `check-gitignore --fix` rewriting
+        // .gitignore and `upgrade` rewriting both lock files — all exit 0, none audited. The
+        // defect was that nothing ENUMERATED the write surface, so refusing here, once, from a
+        // declared table is what makes the claim checkable (see read-only-surface.ts).
+        const { isReadOnlyMode } = await import("./read-only-mode.js");
+        if (isReadOnlyMode()) {
+          const { matchWriteSurface } = await import("./read-only-surface.js");
+          const mutation = matchWriteSurface(process.argv);
+          if (mutation) {
+            const { refuseWrite } = await import("./read-only-mode.js");
+            const refusal = await refuseWrite(mutation.operation, { command: resolved });
+            console.error(`${c.red}✗ ${refusal.reason}${c.reset}`);
+            process.exitCode = 1;
+            return;
+          }
+        }
         // PreToolUse gates must fail CLOSED: an internal fault has to DENY (exit 2), never fall
         // through to the generic catch below (exit 1 = non-blocking = the op would proceed).
         ok = GATE_VERBS.has(resolved)
@@ -888,11 +906,13 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   "audit anchor":
     "Seal the audit log with the machine-local HMAC key (--external also gets a receipt from KIT_EXTERNAL_ANCHOR_CMD — closes the same-UID gap)",
   "audit export": "Emit the audit log for a SIEM (--format cef|syslog|json)",
-  "auth elevate": "Mint elevation marker for destructive secret ops (TOTP/yes-prompt)",
+  "auth elevate":
+    "Mint elevation marker for destructive secret ops (TOTP/yes-prompt); --list-scopes to see what each scope unlocks first (--json)",
   "auth status": "Show active elevation",
   "auth revoke": "Drop the elevation marker",
   "auth setup-totp": "Enroll TOTP secret (writes ~/.kit/totp-secret 0600)",
   "hooks add": "Install a built-in hook (e.g. secret-scan)",
+  "hooks uninstall": "Remove the configured git hooks (enforcement off until re-installed)",
   "setup --recommended":
     "Opinionated profile: setup + memory hooks + git secret-scan/context-check gates",
   "context check":

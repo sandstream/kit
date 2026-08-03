@@ -206,8 +206,20 @@ export function wouldRequireApproval(
     return false;
   }
 
+  // Governance off means `withGovernance` returns before any approval is requested, so
+  // predicting `true` here was predicting a prompt that cannot happen. Matches
+  // `checkOperationAllowed`, which short-circuits on the same flag.
+  if (!fullConfig.enabled) {
+    return false;
+  }
+
   return (
     isDestructiveOperation(fullConfig, operation) ||
-    (environment === "prod" && fullConfig.approval.production_writes === true)
+    // Truthiness, NOT `=== true`, deliberately: `requestApproval` — the enforcer this
+    // predicts — gates on bare truthiness. With `=== true` a hand-written TOML value
+    // like `production_writes = "yes"` made the predictor say "no approval needed" while
+    // the real call went on to prompt or deny. A predictor may over-predict a prompt; it
+    // must never under-predict one.
+    (environment === "prod" && Boolean(fullConfig.approval.production_writes))
   );
 }

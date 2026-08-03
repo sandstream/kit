@@ -67,17 +67,37 @@ See `PLUGIN_AUTHORING.md` for creating plugin-based adapters.
 The kit CLI is automatically published to npm when a version tag is pushed:
 
 ```bash
-# 1. Update version in package.json
-npm version patch  # or minor, major
+# 1. Bump the CLI. Do NOT bump the workspaces with it: `sandstream-kit-adapter-sdk` is frozen
+#    on its OWN semver track (README.md, and public-surface.test.ts asserts 1.x), and the
+#    plugins version independently too. An SDK major that tracked the CLI would force every
+#    third-party plugin to bump its peerDependency range on each kit release for no API reason.
+#    Bump a workspace only when its own code changes, as its own semver decision.
+npm version patch --no-git-tag-version  # or minor, major
 
-# 2. The workflow automatically:
-#    - Runs tests
-#    - Builds production artifacts
-#    - Publishes to npm
+# 2. Update CHANGELOG.md (publish.yml verifies the version has an entry), commit, then tag.
+#    The tag must be GPG-signed — publish.yml verifies the signature before it publishes.
+git tag -s vX.Y.Z -m "kit X.Y.Z"
+git push origin main --tags
 
-# 3. Users can then use:
+# 3. The workflow then:
+#    - verifies the tag signature, the tag↔package.json match, the CHANGELOG, that adapter-sdk
+#      is still 1.x, and that every plugin's peer range admits the SDK version being published
+#    - runs tests and builds production artifacts
+#    - publishes `sandstream-kit` to npm with SLSA provenance
+#    - publishes `sandstream-kit-adapter-sdk`, then the 11 first-party plugins — each at its OWN
+#      declared version, skipping any already on the registry, so a re-run completes a partial
+#      release instead of failing on a version that is already there
+#    - creates the GitHub release and attaches the SBOMs
+
+# 4. Users can then use:
 npx sandstream-kit setup
 ```
+
+**Why the plugins are published at all:** `packages/` is not in the root tarball, and
+`plugin-loader.ts` resolves plugins by package name out of the consuming project's
+`node_modules`. An unpublished workspace is therefore unreachable to anyone who has not cloned
+this repo — and leaving a name unregistered that our own docs tell people to `npm install` is a
+dependency-confusion invitation. Owning the name is the defensive position.
 
 ### Signed release tags
 

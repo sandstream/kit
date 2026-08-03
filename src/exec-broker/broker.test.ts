@@ -455,6 +455,50 @@ enforce_runtime = true
     );
   });
 
+  it("a CORRUPTED profile denies the declared op — it does not fall back to unmediated", async () => {
+    // Regression, found by verifying the README's pillar-3 claim behaviourally: an unreadable
+    // profile resolved to runtimeMode "off", and runBrokered skips the broker on "off". So
+    // tampering with `.kit-profile.sig` was denied while breaking the TOML syntax ran free —
+    // the strictly easier attack had the weaker consequence.
+    await writeSignedProfile(`version = 1\n[scope]\negress = ["api.acme.com"]\n`, true);
+    writeFileSync(join(sandbox, PROFILE_FILE), `version = 1\n[scope\negress = [`);
+    let ran = false;
+    const out = await runBrokered(
+      CTX({ egressTargets: ["https://api.acme.com/v1"] }), // IN scope, had the scope been readable
+      async () => {
+        ran = true;
+        return 1;
+      },
+      { cwd: sandbox },
+    );
+    assert.equal(out.ok, false, "an unreadable RoE must not read as 'no RoE'");
+    assert.equal(ran, false, "run() must never be invoked");
+    assert.match(
+      out.reason ?? "",
+      /profile unreadable/,
+      `the deny reason names the actual fault: ${out.reason}`,
+    );
+  });
+
+  it("a corrupted profile still lets an UNDECLARED op through (migration passthrough, not a brick)", async () => {
+    // The counterweight to the test above: fail-closed applies to ops that declare effects. A typo
+    // in the profile must not stop every governed op, or operators will delete the profile — which
+    // turns mediation off for real.
+    await writeSignedProfile(`version = 1\n[scope]\negress = ["api.acme.com"]\n`, true);
+    writeFileSync(join(sandbox, PROFILE_FILE), `version = 1\n[scope\n`);
+    let ran = false;
+    const out = await runBrokered(
+      CTX(),
+      async () => {
+        ran = true;
+        return "ok";
+      },
+      { cwd: sandbox },
+    );
+    assert.equal(out.ok, true);
+    assert.equal(ran, true);
+  });
+
   it("observe evidence lands in the GOVERNED project's audit log, not process.cwd()", async () => {
     // Regression: broker audits used to resolve .kit-audit.jsonl from
     // process.cwd(), so an op governed by another project's [scope] — an MCP

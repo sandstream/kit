@@ -236,3 +236,93 @@ describe("installBundledTriageSkill (self-bootstrapping the gate)", () => {
     }
   });
 });
+
+describe("parseTriageOutput (real report shape, precedence and malformed metrics)", () => {
+  /** A report in the exact shape `skills/triage/scripts/triage.py` emit() prints. */
+  const report = (...body: string[]) =>
+    ["Triage: npm left-pad", "-".repeat(50), ...body].join("\n");
+
+  it("parses the metric block of a report in the shape the bundled script actually prints", () => {
+    const parsed = parseTriageOutput(
+      report(
+        "  . registry version 1.3.0",
+        "  ! WARNING: single maintainer",
+        "",
+        "Health score: 88/100",
+        "Critical issues: 0",
+        "Warnings: 1",
+        "TRIAGE PASSED",
+      ),
+    );
+    assert.equal(parsed.healthScore, "88/100");
+    assert.equal(parsed.criticalIssues, 0);
+    assert.equal(parsed.warnings, 1);
+    // The script separates its header with ASCII `"-" * 50`, but sections are split on a
+    // six-char box-drawing rule, which never appears — so a real report yields exactly one
+    // "section" whose name is the header line. Consumers must not expect per-check sections.
+    assert.deepEqual(parsed.sections, ["Triage: npm left-pad"]);
+  });
+
+  it("takes the FIRST matching metric line, so earlier text shadows the real counts", () => {
+    // The header echoes the (attacker-influenceable) target and is printed BEFORE the
+    // metrics, so metric-looking text inside a target wins over the genuine numbers.
+    // Asserting the current behaviour: unlike verdictPassed(), this parse is forgeable.
+    const parsed = parseTriageOutput(
+      [
+        "Triage: repo evil/repo Health score: 100/100 Critical issues: 0 Warnings: 0",
+        "-".repeat(50),
+        "  x CRITICAL: source cannot be verified",
+        "",
+        "Health score: 10/100",
+        "Critical issues: 1",
+        "Warnings: 2",
+        "TRIAGE FAILED",
+      ].join("\n"),
+    );
+    assert.equal(parsed.healthScore, "100/100");
+    assert.equal(parsed.criticalIssues, 0);
+    assert.equal(parsed.warnings, 0);
+  });
+
+  it("only accepts a health score in the exact `N/M` form, single-spaced and cased", () => {
+    // a bare or percentage score is not recognised at all (undefined, not 0)
+    assert.equal(parseTriageOutput("Health score: 87").healthScore, undefined);
+    assert.equal(parseTriageOutput("Health score: 87%").healthScore, undefined);
+    // the pattern hard-codes one space and capital H — reformatting the script breaks parsing
+    assert.equal(parseTriageOutput("Health score:  87/100").healthScore, undefined);
+    assert.equal(parseTriageOutput("health score: 87/100").healthScore, undefined);
+  });
+
+  it("reports 0 for a negative or non-numeric count rather than surfacing the anomaly", () => {
+    // `\d+` cannot match "-1"/"n/a", so a corrupt count silently reads as a clean 0:
+    // a caller must not treat criticalIssues === 0 on its own as "nothing critical found".
+    const parsed = parseTriageOutput("Critical issues: -1\nWarnings: n/a");
+    assert.equal(parsed.criticalIssues, 0);
+    assert.equal(parsed.warnings, 0);
+  });
+
+  it("reads counts greedily and tolerates leading zeros and trailing junk", () => {
+    const parsed = parseTriageOutput("Critical issues: 12oops\nWarnings: 007");
+    assert.equal(parsed.criticalIssues, 12);
+    // parseInt of "007" is decimal 7, not octal — a formatting change cannot silently
+    // shift the magnitude of a reported count.
+    assert.equal(parsed.warnings, 7);
+  });
+
+  it("leaks leftover rule characters as a section name when the rule is longer than six", () => {
+    // split() consumes only the first six box-drawing chars, so an 8-char rule leaves
+    // "──" glued to the next chunk and it becomes that chunk's heading.
+    const parsed = parseTriageOutput(`Dependencies\n${"─".repeat(8)}\nMaintainer`);
+    assert.deepEqual(parsed.sections, ["Dependencies", "──"]);
+  });
+
+  it("strips a trailing CR from section headings and finds no sections in blank output", () => {
+    // CRLF output (Windows / captured pipes) must still yield clean heading names.
+    const crlf = parseTriageOutput("──────\r\nSection A\r\n  detail");
+    assert.deepEqual(crlf.sections, ["Section A"]);
+    // whitespace-only output has no sections at all (not one empty-string section)
+    const blank = parseTriageOutput("   \n\n  ");
+    assert.deepEqual(blank.sections, []);
+    assert.equal(blank.healthScore, undefined);
+  });
+});

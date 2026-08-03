@@ -112,14 +112,17 @@ export async function profileBrokerPolicy(cwd = process.cwd()): Promise<ProfileP
     }
     scope = profile.scope;
   } catch (err) {
-    // A profile exists but is malformed — a declared-but-broken RoE. Treat as active+deny, never
-    // "none" (a broken artifact must not silently disable enforcement). enforceRuntime is false: the
-    // opt-in flag is unreadable, and the broken profile is surfaced as a hard fail by `kit doctor`.
+    // A profile exists but is malformed — a declared-but-broken RoE. Treat as active + ENFORCE with a
+    // null policy, i.e. default-deny for any op that declares effects. Not "off": `runBrokered`
+    // skips the broker entirely on "off", so returning it would let a syntax error do what tampering
+    // with `.kit-profile.sig` cannot — corrupt the file and the runtime silently runs unmediated.
+    // Undeclared ops still take the migration passthrough, so a typo does not brick everything; it
+    // denies exactly the ops the RoE was there to govern, and `kit doctor` hard-fails on the profile.
     return {
       regime: "active",
       policy: null,
-      enforceRuntime: false,
-      runtimeMode: "off",
+      enforceRuntime: true,
+      runtimeMode: "enforce",
       signHostsDeclared: [],
       signHosts: [],
       detail: `profile unreadable — ${err instanceof Error ? err.message : String(err)} (default-deny)`,

@@ -677,3 +677,129 @@ describe("logAuditEvent return value (fail-closed signal)", () => {
     assert.equal(ok, true);
   });
 });
+
+describe("formatAuditLog — edges, ordering and agent attribution", () => {
+  const base = {
+    timestamp: "2026-03-30T10:00:00.000Z",
+    operation: "check",
+    environment: "dev",
+    success: true,
+  };
+
+  it("prefers agent_name over agent_id when both are present", () => {
+    const out = formatAuditLog([{ ...base, agent_id: "agent-1", agent_name: "Agent One" }]);
+    assert.ok(out.endsWith("by Agent One"));
+    // The raw id must not leak into the display line once a human-readable name exists —
+    // the attribution field is single-valued, not both.
+    assert.ok(!out.includes("agent-1"));
+  });
+
+  it("falls back to agent_id when agent_name is absent", () => {
+    const out = formatAuditLog([{ ...base, agent_id: "agent-1" }]);
+    assert.ok(out.endsWith("by agent-1"));
+  });
+
+  it("attributes to 'unknown' when neither agent_name nor agent_id is present", () => {
+    // An unattributed event must still render, and must render as explicitly unknown
+    // rather than as an empty/blank actor that reads like "nobody did this".
+    const out = formatAuditLog([base]);
+    assert.ok(out.endsWith("by unknown"));
+    assert.ok(!out.includes("undefined"));
+  });
+
+  it("treats an empty agent_name as absent and falls through to agent_id", () => {
+    // "" is falsy, so the || chain skips it. Documents the actual precedence.
+    const out = formatAuditLog([{ ...base, agent_id: "agent-1", agent_name: "" }]);
+    assert.ok(out.endsWith("by agent-1"));
+  });
+
+  it("omits the duration suffix when duration_ms is 0", () => {
+    // 0 is falsy, so a genuinely instantaneous operation renders with no duration at all
+    // rather than "(0ms)". See notes — this is existing behaviour, not necessarily desired.
+    const out = formatAuditLog([{ ...base, duration_ms: 0 }]);
+    assert.ok(!out.includes("0ms"));
+    // The operation is followed straight by the environment — nothing in between.
+    assert.ok(out.includes("check [dev]"));
+  });
+
+  it("omits the duration suffix when duration_ms is absent", () => {
+    const out = formatAuditLog([base]);
+    assert.ok(!out.includes("ms)"));
+    assert.ok(out.includes("check [dev]"));
+  });
+
+  it("emits exactly one line, with no trailing newline, when there is no error or metadata", () => {
+    // Callers concatenate/print this, so a stray blank line would surface in `kit audit`.
+    const out = formatAuditLog([{ ...base, agent_name: "Agent One" }]);
+    assert.equal(out.split("\n").length, 1);
+    assert.ok(!out.endsWith("\n"));
+  });
+
+  it("omits the metadata line when metadata is an empty object", () => {
+    const out = formatAuditLog([{ ...base, metadata: {} }]);
+    assert.ok(!out.includes("Metadata"));
+    assert.equal(out.split("\n").length, 1);
+  });
+
+  it("renders the error line before the metadata line for the same event", () => {
+    // Ordering matters: the error is the headline for a failed op and must not be
+    // pushed below a potentially long metadata blob.
+    const out = formatAuditLog([
+      { ...base, success: false, error: "boom", metadata: { attempt: 2 } },
+    ]);
+    const lines = out.split("\n");
+    assert.equal(lines.length, 3);
+    assert.equal(lines[1], "  Error: boom");
+    assert.equal(lines[2], '  Metadata: {"attempt":2}');
+  });
+
+  it("serialises metadata verbatim as JSON without redacting it", () => {
+    // formatAuditLog performs NO sanitisation of its own — it trusts that redaction
+    // happened at write time. If that trust is ever broken this test is the tripwire.
+    const out = formatAuditLog([{ ...base, metadata: { api_key: "sk-live-abc123" } }]);
+    assert.ok(out.includes('Metadata: {"api_key":"sk-live-abc123"}'));
+  });
+
+  it("preserves input order across multiple events, one block per event", () => {
+    const out = formatAuditLog([
+      { ...base, operation: "first", agent_name: "A" },
+      { ...base, operation: "second", success: false, error: "nope", agent_name: "B" },
+      { ...base, operation: "third", agent_name: "C" },
+    ]);
+    const lines = out.split("\n");
+    // 3 event lines + 1 error line, in the order given — formatAuditLog must not sort
+    // or group, because readAuditLog already hands over chronological order.
+    assert.equal(lines.length, 4);
+    assert.ok(lines[0].includes("first"));
+    assert.ok(lines[1].includes("second"));
+    assert.equal(lines[2], "  Error: nope");
+    assert.ok(lines[3].includes("third"));
+  });
+
+  it("marks success with ✓ and failure with ✗", () => {
+    const ok = formatAuditLog([base]);
+    const bad = formatAuditLog([{ ...base, success: false }]);
+    assert.ok(ok.includes("✓"));
+    assert.ok(!ok.includes("✗"));
+    assert.ok(bad.includes("✗"));
+    assert.ok(!bad.includes("✓"));
+  });
+
+  it("renders an unparseable timestamp as 'Invalid Date' instead of throwing", () => {
+    // Audit lines come off disk as JSON and may be corrupt; display must degrade,
+    // not crash the whole `kit audit` output.
+    const out = formatAuditLog([{ ...base, timestamp: "not-a-timestamp" }]);
+    assert.ok(out.startsWith("Invalid Date "));
+    assert.ok(out.includes("check"));
+  });
+
+  it("keeps a multi-line error on the indented error line without re-indenting", () => {
+    // Documents actual behaviour: only the first physical line carries the "  Error:"
+    // prefix, so an embedded newline breaks the two-space indent convention.
+    const out = formatAuditLog([{ ...base, success: false, error: "line1\nline2" }]);
+    const lines = out.split("\n");
+    assert.equal(lines.length, 3);
+    assert.equal(lines[1], "  Error: line1");
+    assert.equal(lines[2], "line2");
+  });
+});

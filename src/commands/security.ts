@@ -420,12 +420,35 @@ async function cmdSecurityScanStaged(): Promise<boolean> {
   const hits = await scanStagedFiles();
   if (hits.length === 0) return true;
 
-  const total = hits.reduce((sum, h) => sum + h.findings.length, 0);
+  // Test/fixture hits are REPORTED, never blocking: fake credentials live there by
+  // design, and kit's own audit-redaction test has to stage a secret-shaped key to prove
+  // the redaction works. Blocking it left `--no-verify` as the only way through, which
+  // switches off the entire hook — a gate that cries wolf teaches people to disable it.
+  // The repo-wide grep in check-security.ts already drew this line; this gate did not.
+  const blocking = hits.filter((h) => !h.advisory);
+  const advisory = hits.filter((h) => h.advisory);
+
+  if (advisory.length > 0) {
+    console.error(
+      `${c.dim}note: ${advisory.length} test/fixture file(s) contain secret-shaped strings (expected — not blocking):${c.reset}`,
+    );
+    for (const hit of advisory) {
+      const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
+      console.error(`  ${c.dim}· ${hit.file}  ${labels}${c.reset}`);
+    }
+    console.error(
+      `${c.dim}  trufflehog locally and the CI gitleaks job still scan these and verify live.${c.reset}`,
+    );
+  }
+
+  if (blocking.length === 0) return true;
+
+  const total = blocking.reduce((sum, h) => sum + h.findings.length, 0);
   console.error(`${c.red}✗ kit secret-scan blocked the commit${c.reset}`);
   console.error(
-    `${c.dim}Found ${total} potential secret(s) in ${hits.length} staged file(s):${c.reset}`,
+    `${c.dim}Found ${total} potential secret(s) in ${blocking.length} staged file(s):${c.reset}`,
   );
-  for (const hit of hits) {
+  for (const hit of blocking) {
     const labels = hit.findings.map((f) => `${f.label}:${f.preview}`).join(", ");
     console.error(`  ${c.red}•${c.reset} ${hit.file}  ${c.dim}${labels}${c.reset}`);
   }

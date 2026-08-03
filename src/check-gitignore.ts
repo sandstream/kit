@@ -62,17 +62,37 @@ const REQUIRED_PATTERNS: RequiredEntry[] = [
   { pattern: "*-service-account*.json", reason: "GCP service-account JSON keys" },
 ];
 
+/**
+ * Parse `.gitignore` the way GIT parses it — which is emphatically not the way this function
+ * used to.
+ *
+ * It used to strip everything after the first `#` on every line, "matching how our patch helper
+ * writes `pattern  # reason`". Writer and parser agreed with each other and both disagreed with
+ * git: per gitignore(5) only a line whose first non-whitespace character is `#` is a comment,
+ * there is no trailing-comment syntax. So `*.pem  # PEM keys / certs` is a pattern matching a
+ * file literally named `*.pem  # PEM keys / certs`, and every entry `--fix` wrote was inert.
+ *
+ * The loop closed on itself: `--fix` wrote 12 annotated patterns, this parser stripped the
+ * annotations back off, `checkGitignore` reported 13/13 present, and `kit check --category
+ * security` printed ".env gitignored: pass" while `git check-ignore .env` said nothing was
+ * ignored. A checker that reads its own output as evidence can never fail.
+ *
+ * Rules implemented, per gitignore(5): a comment line starts with `#` (leading whitespace
+ * allowed); trailing whitespace is stripped unless backslash-escaped; blank lines are skipped.
+ * An escaped `\#` at the start is a literal `#` pattern.
+ */
 function parseGitignore(text: string): string[] {
-  return text
-    .split("\n")
-    .map((l) => {
-      // Strip inline comments (everything after first unescaped `#`),
-      // matching how our patch helper writes `pattern  # reason`.
-      const hashIdx = l.indexOf("#");
-      const noComment = hashIdx >= 0 ? l.slice(0, hashIdx) : l;
-      return noComment.trim();
-    })
-    .filter((l) => l.length > 0);
+  const out: string[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    if (line.trim().length === 0) continue;
+    if (line.trimStart().startsWith("#")) continue; // whole-line comment
+    // Trailing spaces are not part of the pattern unless escaped ("foo\ " keeps one space).
+    const pattern = line.replace(/(?<!\\)\s+$/, "");
+    if (pattern.length === 0) continue;
+    out.push(pattern.startsWith("\\#") ? pattern.slice(1) : pattern);
+  }
+  return out;
 }
 
 export async function checkGitignore(cwd: string = process.cwd()): Promise<IgnoreCheckResult> {
@@ -134,9 +154,14 @@ export async function patchGitignore(
   // command stays idempotent.
   const MARKER_START = "# ── kit security check-gitignore ── do not edit ──";
   const MARKER_END = "# ── /kit ──";
+  // The reason goes on its OWN line above the pattern. `.gitignore` has no trailing-comment
+  // syntax (gitignore(5): a comment is a line starting with `#`), so the previous
+  // `pattern  # reason` form made every entry a literal pattern matching a filename that
+  // contains " # reason" — 12 patterns written, 0 honored by git, and the checker read its own
+  // annotations back and called it green.
   const block = [
     MARKER_START,
-    ...result.missingPatterns.map((m) => `${m.pattern}  # ${m.reason}`),
+    ...result.missingPatterns.flatMap((m) => [`# ${m.reason}`, m.pattern]),
     MARKER_END,
     "",
   ].join("\n");
@@ -144,7 +169,10 @@ export async function patchGitignore(
   let next: string;
   if (existing.includes(MARKER_START) && existing.includes(MARKER_END)) {
     const before = existing.split(MARKER_START)[0].trimEnd();
-    const after = existing.split(MARKER_END)[1] ?? "";
+    // `block` already ends in a newline and `after` begins with one, so joining them verbatim
+    // adds a blank line on every re-patch — the file grows a little each run, which is how a
+    // tool teaches people not to trust it. Strip the leading newlines from the tail instead.
+    const after = (existing.split(MARKER_END)[1] ?? "").replace(/^\n+/, "");
     next = `${before}\n\n${block}${after}`;
   } else {
     const trimmed = existing.trimEnd();

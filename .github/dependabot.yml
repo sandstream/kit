@@ -1,0 +1,41 @@
+# Dependabot — keeps the SHA-pinned GitHub Actions in .github/workflows/* current.
+#
+# WHY THIS FILE EXISTS: every `uses:` in this repo is pinned to a full 40-char commit SHA
+# (56 of them, zero tag-pinned) — the right posture, and what OpenSSF Scorecard's
+# Pinned-Dependencies check rewards. But a pinned SHA never moves on its own, so without
+# Dependabot the pins silently rot: an upstream security fix to actions/checkout is simply
+# never adopted. Pinning without an update path trades one supply-chain risk for another.
+#
+# docs/OWASP_2025.md (A06) has claimed "Dependabot for SHA-pinned actions" as shipped while
+# this file did not exist, so the claim was false — a behavioural verification sweep caught it.
+# Dependabot version-updates only run from a committed .github/dependabot.yml on the default
+# branch; there is no repo setting that substitutes for it.
+#
+# SCOPE: github-actions only, matching what the OWASP row claims. The npm ecosystem is
+# deliberately NOT enabled here — kit gates its own dependency changes through
+# `kit triage` (see .github/workflows/triage-deps.yml), and an unreviewed flood of npm bumps
+# would arrive around that gate rather than through it. Add an `npm` entry when that
+# interaction has been designed, not before.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    # One PR for all action bumps instead of one per action: with 56 pinned uses across 7
+    # workflows, per-action PRs are the kind of noise that trains maintainers to stop reading
+    # them. A single grouped PR keeps the diff reviewable and CI runs once.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "github-actions"

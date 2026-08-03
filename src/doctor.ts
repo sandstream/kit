@@ -219,6 +219,7 @@ async function checkGitHooks(config: kitConfig): Promise<DoctorCheck[]> {
  * identity and — per the 5.0 design principle — makes any degradation to
  * the file-backed 0600 key HONEST rather than silent:
  *   pass  hardware-rooted (Secure Enclave / TPM / external command)
+ *   fail  the active key is REVOKED on this machine — it can no longer sign anything
  *   warn  file-backed 0600 key (the working default; no hardware backend active)
  *   fail  hardware REQUIRED (KIT_REQUIRE_HARDWARE_IDENTITY / policy) but unavailable —
  *         fail-closed, the same posture keystoreSign enforces at sign time.
@@ -229,6 +230,18 @@ function checkIdentityKeystore(): DoctorCheck {
   const st = activeKeyStoreStatus();
   const required = hardwareRequired();
 
+  // A REVOKED active key outranks everything else here: it cannot sign (the keystore refuses),
+  // so every gate that needs a fresh signature is broken until a successor is activated. Before
+  // this row existed, `kit identity migrate` left the machine reporting a healthy identity while
+  // signing was dead.
+  if (st.kid && isRevoked(st.kid)) {
+    return {
+      name,
+      status: "fail",
+      detail: `active identity ${st.kid} is REVOKED on this machine — signing is refused; activate the successor key (KIT_KEYSTORE=command + KIT_KEYSTORE_SIGN_CMD + KIT_KEYSTORE_PUBKEY) or run 'kit identity rotate'`,
+      category,
+    };
+  }
   if (required && !st.hardwareRooted) {
     return {
       name,
@@ -319,7 +332,7 @@ async function readAuditLog(cwd: string): Promise<string> {
 async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
   const name = "exec-broker runtime";
   const category = "security";
-  const { runtimeMode, policy, regime } = await profileBrokerPolicy(cwd);
+  const { runtimeMode, policy, regime, detail: policyDetail } = await profileBrokerPolicy(cwd);
   if (runtimeMode === "off") {
     // Default-on: a declared scope mediates in observe by default, so "off" means either no scope is
     // declared here, or the scope explicitly opted OUT with enforce_runtime = false.
@@ -368,11 +381,16 @@ async function checkBrokerRuntime(cwd: string): Promise<DoctorCheck> {
       category,
     };
   }
+  // An UNREADABLE profile lands here too (it default-denies rather than dropping to unmediated), and
+  // there "run kit profile sign" is the wrong instruction — the file does not parse. Carry the
+  // resolver's own detail so the fix matches the actual fault.
+  const unreadable = policyDetail.startsWith("profile unreadable");
   return {
     name,
     status: "fail",
-    detail:
-      "runtime mediation opted in but the scope is unsigned/invalid — governed MCP ops are fail-closed-denied; run 'kit profile sign'",
+    detail: unreadable
+      ? `runtime mediation default-DENIES: ${policyDetail} — fix .kit-profile.toml, then 'kit profile sign'`
+      : "runtime mediation opted in but the scope is unsigned/invalid — governed MCP ops are fail-closed-denied; run 'kit profile sign'",
     category,
   };
 }

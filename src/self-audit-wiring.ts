@@ -103,6 +103,34 @@ export function collectExportedFunctions(text: string, file: string): ExportedFn
 interface SourceSet {
   production: { file: string; text: string }[];
   testText: string;
+  /** Repo tooling outside `src` that imports from `dist` — a real call site. */
+  scriptText: string;
+}
+
+/**
+ * Concatenated text of `scripts/*.mjs`. These are genuine callers: `gen-opencli.mjs`
+ * does `const { buildOpenCliDoc, serializeOpenCli } = await import(dist…)`, so the
+ * functions are reachable and load-bearing while appearing nowhere in `src`. Omitting
+ * this made the rule report four exports that the build itself depends on — a
+ * false positive found by reading its own output rather than trusting it.
+ */
+function readScriptText(repoRoot: string): string {
+  const chunks: string[] = [];
+  let entries;
+  try {
+    entries = readdirSync(join(repoRoot, "scripts"), { withFileTypes: true });
+  } catch {
+    return "";
+  }
+  for (const e of entries) {
+    if (!e.isFile() || !/\.(mjs|cjs|js)$/.test(e.name)) continue;
+    try {
+      chunks.push(readFileSync(join(repoRoot, "scripts", e.name), "utf-8"));
+    } catch {
+      continue;
+    }
+  }
+  return chunks.join("\n");
 }
 
 /** Read every `.ts` under `src`, split into production and test text. */
@@ -135,7 +163,11 @@ export function readSources(repoRoot: string): SourceSet {
     }
   }
   visit(join(repoRoot, "src"), "");
-  return { production, testText: testChunks.join("\n") };
+  return {
+    production,
+    testText: testChunks.join("\n"),
+    scriptText: readScriptText(repoRoot),
+  };
 }
 
 /**
@@ -147,7 +179,7 @@ export function readSources(repoRoot: string): SourceSet {
  * production is reported.
  */
 export function analyzeWiring(repoRoot: string): WiringFinding[] {
-  const { production, testText } = readSources(repoRoot);
+  const { production, testText, scriptText } = readSources(repoRoot);
   const sdkExports = loadSdkExports(repoRoot);
   const findings: WiringFinding[] = [];
 
@@ -158,6 +190,8 @@ export function analyzeWiring(repoRoot: string): WiringFinding[] {
       let uses = 0;
       for (const other of production) uses += (other.text.match(re) ?? []).length;
       if (uses - 1 > 0) continue; // called somewhere in production
+      // Repo tooling counts as production: the build depends on it.
+      if (new RegExp(`\\b${fn.name}\\b`).test(scriptText)) continue;
       findings.push({ ...fn, testedOnly: new RegExp(`\\b${fn.name}\\b`).test(testText) });
     }
   }

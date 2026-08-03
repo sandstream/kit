@@ -15,6 +15,8 @@ import {
   countQuarantined,
   fuseByRrf,
   progressiveDisclose,
+  forgetMemory,
+  countTombstones,
 } from "./db.js";
 import type { SearchHit } from "./types.js";
 
@@ -547,5 +549,117 @@ describe("progressiveDisclose (B3)", () => {
     const d = progressiveDisclose([]);
     assert.equal(d.shown, 0);
     assert.equal(d.withheld, 0);
+  });
+});
+
+describe("countTombstones (verified-forget receipts, G1)", () => {
+  const fresh = () => {
+    const db = openMemoryDb(":memory:");
+    upsertSession(db, { sessionId: "s1", harness: "claude-code", project: "/repo" });
+    return db;
+  };
+
+  it("reports zero on a store where nothing has been forgotten", () => {
+    const db = fresh();
+    const n = countTombstones(db);
+    assert.equal(n, 0);
+    // Callers compare/print this directly — a bigint or string from the driver would
+    // break `n === 0` and arithmetic silently.
+    assert.equal(typeof n, "number");
+    db.close();
+  });
+
+  it("counts one receipt per forgotten row", () => {
+    const db = fresh();
+    insertMessage(db, { uuid: "u1", sessionId: "s1", type: "user", content: "first note" });
+    insertMessage(db, { uuid: "u2", sessionId: "s1", type: "user", content: "second note" });
+    assert.equal(countTombstones(db), 0);
+    forgetMemory(db, "u1", "test");
+    assert.equal(countTombstones(db), 1);
+    forgetMemory(db, "u2", "test");
+    assert.equal(countTombstones(db), 2);
+    db.close();
+  });
+
+  it("does not count a forget that found nothing", () => {
+    const db = fresh();
+    insertMessage(db, { uuid: "u1", sessionId: "s1", type: "user", content: "still here" });
+    const proof = forgetMemory(db, "does-not-exist");
+    assert.equal(proof.found, false);
+    // A receipt claims "this row was deleted". No deletion ⇒ no receipt, or the count
+    // would overstate what was actually forgotten.
+    assert.equal(countTombstones(db), 0);
+    db.close();
+  });
+
+  it("counts distinct forgotten uuids, not forget operations — a reused uuid keeps one receipt", () => {
+    const db = fresh();
+    insertMessage(db, { uuid: "u1", sessionId: "s1", type: "user", content: "original content" });
+    forgetMemory(db, "u1", "first reason");
+    assert.equal(countTombstones(db), 1);
+
+    // Same uuid captured again (a re-imported transcript line) and forgotten again.
+    // The receipt table is keyed by uuid and upserts, so the count stays at 1.
+    insertMessage(db, {
+      uuid: "u1",
+      sessionId: "s1",
+      type: "user",
+      content: "replacement content",
+    });
+    const second = forgetMemory(db, "u1", "second reason");
+    assert.equal(second.ok, true);
+    assert.equal(countTombstones(db), 1);
+
+    const tomb = db.prepare("SELECT * FROM memory_tombstones WHERE uuid = 'u1'").get() as Record<
+      string,
+      unknown
+    >;
+    // The single surviving receipt describes the LATEST deletion, not the first one.
+    assert.equal(tomb.content_sha256, second.contentSha256);
+    assert.equal(tomb.reason, "second reason");
+    db.close();
+  });
+
+  it("counts receipts from every session, not just one", () => {
+    const db = fresh();
+    upsertSession(db, { sessionId: "s2", harness: "codex", project: "/other" });
+    insertMessage(db, { uuid: "a1", sessionId: "s1", type: "user", content: "session one note" });
+    insertMessage(db, { uuid: "b1", sessionId: "s2", type: "user", content: "session two note" });
+    forgetMemory(db, "a1");
+    forgetMemory(db, "b1");
+    assert.equal(countTombstones(db), 2);
+    db.close();
+  });
+
+  it("keeps counting a receipt after its session row is deleted", () => {
+    const db = fresh();
+    insertMessage(db, { uuid: "u1", sessionId: "s1", type: "user", content: "forget me" });
+    forgetMemory(db, "u1", "gdpr");
+    db.prepare("DELETE FROM sessions WHERE session_id = 's1'").run();
+    // The receipt is the durable proof that a deletion happened; it must outlive the
+    // session it came from (no FK cascade) or the audit trail can be erased by
+    // dropping a session.
+    assert.equal(countTombstones(db), 1);
+    db.close();
+  });
+
+  it("counts receipts written directly to the table, with no filtering on reason or session", () => {
+    const db = fresh();
+    // A receipt synced in from another machine may carry no session_id and no reason.
+    // It is still a receipt and must be counted.
+    db.prepare(
+      "INSERT INTO memory_tombstones (uuid, content_sha256, session_id, reason) VALUES (?, ?, NULL, NULL)",
+    ).run("remote-1", "0".repeat(64));
+    assert.equal(countTombstones(db), 1);
+    db.close();
+  });
+
+  it("throws rather than reporting zero when the receipts table is missing", () => {
+    const db = fresh();
+    db.exec("DROP TABLE memory_tombstones");
+    // Fail loud: a missing receipts table is store corruption, and must never be
+    // indistinguishable from "nothing has ever been forgotten".
+    assert.throws(() => countTombstones(db));
+    db.close();
   });
 });

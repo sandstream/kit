@@ -3,6 +3,7 @@ import {
   grantElevation,
   clearElevation,
   readElevation,
+  elevationIsActive,
   verifyTotp,
   elevationTtlMinutes,
   enrollTotp,
@@ -11,7 +12,7 @@ import {
 import { isNonInteractive } from "../environment.js";
 import { promptConfirm } from "../utils/prompt.js";
 import { c } from "../utils/colors.js";
-import { hasFlag, flagValue } from "../utils/flags.js";
+import { hasFlag, flagValue, flagInt } from "../utils/flags.js";
 
 export async function cmdAuth(): Promise<boolean> {
   const sub = process.argv[3];
@@ -73,13 +74,48 @@ async function cmdAuthSetupTotp(): Promise<boolean> {
 
 async function cmdAuthElevate(): Promise<boolean> {
   const args = process.argv.slice(4);
-  const scope = flagValue(args, "--scope") ?? "all";
-  const ttlIdx = args.indexOf("--ttl-minutes");
-  if (ttlIdx >= 0 && args[ttlIdx + 1]) {
-    const n = parseInt(args[ttlIdx + 1], 10);
-    if (Number.isFinite(n) && n > 0 && n <= 240) {
-      process.env.KIT_ELEVATION_TTL_MINUTES = String(n);
+
+  // `--list-scopes` must be handled BEFORE anything else. It used to be discarded entirely, and
+  // on a TTY that was worse than a no-op: the flag vanished and the command fell through to an
+  // interactive elevation prompt for scope=all — the broadest scope there is. Someone who typed
+  // it to ASK WHAT SCOPES EXIST was one keypress from granting themselves everything.
+  if (hasFlag(args, "--list-scopes")) {
+    const { listScopes } = await import("../elevation-scopes.js");
+    const scopes = listScopes();
+    if (hasFlag(args, "--json")) {
+      console.log(JSON.stringify(scopes, null, 2));
+      return true;
     }
+    console.log(`${c.bold}${c.cyan}kit auth elevate — scopes${c.reset}`);
+    console.log(`${c.dim}${"─".repeat(50)}${c.reset}`);
+    for (const s of scopes) {
+      const oneShot = s.oneShot
+        ? `${c.yellow}one-shot${c.reset} ${c.dim}(consumed by a single op)${c.reset}`
+        : `${c.dim}reusable for the TTL${c.reset}`;
+      console.log(`  ${c.bold}${s.scope}${c.reset}  ${c.dim}← ${s.key}${c.reset}`);
+      // The description is the whole point of asking: it says what the scope lets through
+      // ("invalidates anon + service_role + all sessions"). Listing scope names alone would
+      // make the operator guess exactly where guessing is most expensive.
+      console.log(`      ${c.dim}${s.description}${c.reset}`);
+      console.log(`      ${oneShot}`);
+    }
+    console.log(
+      `\n${c.dim}Elevate with ${c.bold}kit auth elevate --scope <scope>${c.reset}${c.dim}; omitting --scope grants ${c.bold}all${c.reset}${c.dim}.${c.reset}`,
+    );
+    return true;
+  }
+
+  const scope = flagValue(args, "--scope") ?? "all";
+  // flagInt, not a hand-rolled indexOf: `args.indexOf("--ttl-minutes")` never matches the token
+  // `--ttl-minutes=60`, so the `=` form was silently dropped and the default TTL applied. A
+  // silently-ignored TTL on an elevation grant is a security-relevant surprise in the permissive
+  // direction — the operator asked for a shorter window than they got.
+  const ttl = flagInt(args, "--ttl-minutes", 0);
+  if (ttl > 0 && ttl <= 240) {
+    process.env.KIT_ELEVATION_TTL_MINUTES = String(ttl);
+  } else if (ttl !== 0) {
+    console.error(`${c.red}✗ --ttl-minutes must be between 1 and 240 (got ${ttl})${c.reset}`);
+    return false;
   }
 
   console.log(`${c.bold}${c.cyan}kit auth elevate${c.reset}  ${c.dim}(scope=${scope})${c.reset}`);
@@ -141,8 +177,10 @@ async function cmdAuthStatus(): Promise<boolean> {
     console.log(`${c.dim}Not elevated.${c.reset}`);
     return true;
   }
-  const expires = Date.parse(state.expiresAt);
-  const valid = Number.isFinite(expires) && expires > Date.now();
+  // The shared predicate, not a second copy: this line used to compute validity as
+  // `expires > now` while the gate used `expires < now` for expiry, so at the exact
+  // expiry millisecond the gate granted and this command printed "expired".
+  const valid = elevationIsActive(state);
   const status = valid
     ? `${c.green}active${c.reset}  ${c.dim}(expires ${state.expiresAt})${c.reset}`
     : `${c.red}expired${c.reset}  ${c.dim}(at ${state.expiresAt})${c.reset}`;

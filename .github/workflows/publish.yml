@@ -58,6 +58,43 @@ jobs:
           fi
           echo "Tag $TAG matches package.json version $PKG_VERSION"
 
+      - name: Verify the adapter-SDK contract the plugins are published against
+        # The workspaces are DELIBERATELY NOT in lockstep with the CLI. README.md:574 —
+        # "adapter-sdk@1.0 is frozen on its own semver track, decoupled from kit's version" — and
+        # public-surface.test.ts asserts `/^1\./`. That decoupling is the right call for an SDK
+        # third parties build against: a major that tracked the CLI would force every external
+        # plugin to bump its peerDependency range on each kit release for no API reason.
+        #
+        # So the invariant worth gating is not "same version everywhere", it is:
+        #   1. the SDK major stays 1.x (the frozen public contract), and
+        #   2. every plugin's declared peer range actually admits the SDK version being published,
+        #      because those two are published together in the step below — a plugin that ships
+        #      requiring a peer we did not publish is an install-time failure for the user, not a
+        #      problem the next release can quietly fix.
+        run: |
+          set -euo pipefail
+          SDK_VER="$(node -p "require('./packages/adapter-sdk/package.json').version")"
+          case "$SDK_VER" in
+            1.*) : ;;
+            *) echo "::error::adapter-sdk is $SDK_VER but its public contract is frozen at 1.x (README.md, public-surface.test.ts). Publishing a new major is a deliberate breaking change: update the frozen-major assertion and the compatibility matrix in the same PR."; exit 1 ;;
+          esac
+          BAD=""
+          for dir in $(ls -d packages/kit-plugin-*/ | sed 's:/$::' | sort); do
+            NAME="$(node -p "require('./$dir/package.json').name")"
+            RANGE="$(node -p "const p=require('./$dir/package.json');(p.peerDependencies||{})['sandstream-kit-adapter-sdk']||''")"
+            [ -z "$RANGE" ] && continue
+            # semver.satisfies via npm's own bundled semver — no new dependency.
+            if ! node -e "process.exit(require('semver').satisfies('$SDK_VER','$RANGE')?0:1)" 2>/dev/null; then
+              BAD="$BAD  $NAME requires '$RANGE' but adapter-sdk being published is $SDK_VER"$'\n'
+            fi
+          done
+          if [ -n "$BAD" ]; then
+            echo "::error::plugin peer ranges do not admit the adapter-sdk version being published:"
+            printf '%s' "$BAD"
+            exit 1
+          fi
+          echo "adapter-sdk $SDK_VER satisfies every plugin peer range"
+
       - name: Verify the CHANGELOG documents this version
         # MUST run before `npm publish`. The release step later in this job also
         # needs these notes, but it runs AFTER the publish — so if that were the
@@ -194,6 +231,51 @@ jobs:
         run: npm publish --provenance --access public --tag ${{ steps.disttag.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish the adapter SDK and first-party plugins
+        # WHY THIS EXISTS: `packages/` is not in the root tarball (files: ["dist","README.md",
+        # "skills"]), and plugin-loader.ts resolves plugins by PACKAGE NAME out of the project's
+        # node_modules. So an unpublished workspace is unreachable to every user who has not
+        # cloned the monorepo — while docs/OWASP_2025.md advertised the snyk/wiz plugins as
+        # shipped controls and PLUGIN_AUTHORING.md told third-party authors to run
+        # `npm install --save-dev sandstream-kit-adapter-sdk`. That name returned 404, i.e. it was
+        # unregistered and claimable: a dependency-confusion invitation created by our own docs.
+        # Owning a name you publicly instruct people to install is the defensive position.
+        #
+        # ORDER MATTERS: adapter-sdk first — four plugins (github, railway, supabase, vercel)
+        # declare it as a peerDependency, so publishing them against a missing peer would ship a
+        # broken install. Root package went out in the step above, before either: the CLI is the
+        # primary artifact and must not be held hostage to a plugin failure.
+        #
+        # IDEMPOTENT: each package is skipped when that exact version is already on the registry,
+        # so re-running the job after a partial failure completes the set instead of dying on
+        # EPUBLISHCONFLICT. Never continue-on-error — a publish that silently did not happen is
+        # the false green this repo exists to prevent.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DIST_TAG: ${{ steps.disttag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          publish_ws() {
+            dir="$1"
+            name="$(node -p "require('./$dir/package.json').name")"
+            version="$(node -p "require('./$dir/package.json').version")"
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "· $name@$version already on npm — skipping"
+              return 0
+            fi
+            echo "→ publishing $name@$version (dist-tag $DIST_TAG)"
+            npm publish --workspace "$name" --provenance --access public --tag "$DIST_TAG"
+          }
+
+          # The peer dependency first.
+          publish_ws packages/adapter-sdk
+
+          # Then every other workspace, in a stable (sorted) order so the log is diffable.
+          for dir in $(ls -d packages/*/ | sed 's:/$::' | sort); do
+            [ "$dir" = "packages/adapter-sdk" ] && continue
+            publish_ws "$dir"
+          done
 
       - name: Create GitHub release
         # MUST run before the SBOM steps: `anchore/sbom-action` attaches its

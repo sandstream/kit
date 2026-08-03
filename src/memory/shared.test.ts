@@ -469,3 +469,164 @@ describe("shared memory — rule aging (B2)", () => {
     );
   });
 });
+
+// Separate import (rather than extending the one at the top) so this appended
+// block never has to touch the existing tests' imports.
+import { mkdirSync } from "node:fs";
+
+describe("shared memory — queryArea (area lookup)", () => {
+  const withRoot = (fn: (root: string) => void): void => {
+    const r = mkdtempSync(join(tmpdir(), "kit-qarea-"));
+    try {
+      fn(r);
+    } finally {
+      rmSync(r, { recursive: true, force: true });
+    }
+  };
+
+  /** Write raw JSONL lines straight into the store — no signing, no git, fully hermetic. */
+  const seed = (root: string, lines: string[]): void => {
+    mkdirSync(join(root, ".kit", "shared"), { recursive: true });
+    writeFileSync(getSharedPath(root), lines.join("\n") + "\n");
+  };
+
+  const entry = (over: Partial<SharedEntry> = {}): SharedEntry => ({
+    id: "e1",
+    area: "core",
+    kind: "decision",
+    title: "t",
+    body: "b",
+    refs: [],
+    author: "a",
+    ts: "2026-01-01T00:00:00Z",
+    ...over,
+  });
+
+  it("returns an empty list when the shared store does not exist yet", () => {
+    withRoot((r) => {
+      // A fresh repo has no .kit/shared/memory.jsonl — asking for an area must be a
+      // no-op, not a crash, since callers query before anything was ever promoted.
+      assert.deepEqual(queryArea(r, "core"), []);
+    });
+  });
+
+  it("returns only the entries whose area matches exactly, in file (append) order", () => {
+    withRoot((r) => {
+      seed(r, [
+        JSON.stringify(entry({ id: "a1", area: "stripe", title: "first" })),
+        JSON.stringify(entry({ id: "b1", area: "whatsapp", title: "second" })),
+        JSON.stringify(entry({ id: "b2", area: "whatsapp", title: "third" })),
+      ]);
+      // Order is the store's append order — the surfacing layer relies on it for
+      // "what happened in this area, oldest → newest".
+      assert.deepEqual(
+        queryArea(r, "whatsapp").map((e) => e.title),
+        ["second", "third"],
+      );
+      assert.deepEqual(
+        queryArea(r, "stripe").map((e) => e.id),
+        ["a1"],
+      );
+    });
+  });
+
+  it("matches the area strictly — not by case, prefix, substring or trimmed whitespace", () => {
+    withRoot((r) => {
+      seed(r, [JSON.stringify(entry({ area: "whatsapp" }))]);
+      assert.equal(queryArea(r, "whatsapp").length, 1);
+      // Unlike searchShared (which lowercases the query), queryArea is case-SENSITIVE:
+      // "WhatsApp" is a different area, so a CLI that wants leniency must normalize.
+      assert.deepEqual(queryArea(r, "WhatsApp"), []);
+      assert.deepEqual(queryArea(r, "whats"), []); // no prefix matching
+      assert.deepEqual(queryArea(r, "whatsapp-bot"), []); // no substring matching
+      assert.deepEqual(queryArea(r, " whatsapp"), []); // the argument is never trimmed
+    });
+  });
+
+  it("treats an empty area argument as a literal area, never as 'everything'", () => {
+    withRoot((r) => {
+      seed(r, [
+        JSON.stringify(entry({ id: "n1", area: "" })),
+        JSON.stringify(entry({ id: "n2", area: "core" })),
+      ]);
+      // A missing/blank CLI argument must NOT dump the whole tier; it only matches
+      // an entry literally stored with area "".
+      assert.deepEqual(
+        queryArea(r, "").map((e) => e.id),
+        ["n1"],
+      );
+    });
+  });
+
+  it("skips malformed and blank lines but still returns the valid entries around them", () => {
+    withRoot((r) => {
+      seed(r, [
+        "{ not json",
+        "",
+        "   ",
+        JSON.stringify(entry({ id: "ok1", area: "core" })),
+        '"a bare json string"',
+        JSON.stringify(entry({ id: "ok2", area: "core" })),
+      ]);
+      // A single corrupt line (bad append, merge conflict marker) must not hide the
+      // rest of the area's curated history.
+      assert.deepEqual(
+        queryArea(r, "core").map((e) => e.id),
+        ["ok1", "ok2"],
+      );
+    });
+  });
+
+  it("returns superseded and reversed entries too — lifecycle filtering is the caller's job", () => {
+    withRoot((r) => {
+      seed(r, [
+        JSON.stringify(entry({ id: "old", area: "auth", title: "use RSA" })),
+        JSON.stringify(entry({ id: "new", area: "auth", title: "use Ed25519", supersedes: "old" })),
+        JSON.stringify(entry({ id: "dead", area: "auth", title: "gone", status: "reversed" })),
+      ]);
+      const found = queryArea(r, "auth");
+      // queryArea is deliberately history-complete: callers that want only current
+      // decisions must run effectiveStatus/activeShared themselves.
+      assert.deepEqual(
+        found.map((e) => e.id),
+        ["old", "new", "dead"],
+      );
+      const all = readShared(r);
+      assert.equal(effectiveStatus(found[0]!, all), "superseded");
+    });
+  });
+
+  it("does no signature check — an unsigned or bad-signature entry is still returned", () => {
+    withRoot((r) => {
+      const forged = entry({
+        id: "forged",
+        area: "auth",
+        title: "trust me",
+        kid: "kid_deadbeef",
+        sig: Buffer.from("not-a-signature").toString("base64"),
+      });
+      seed(r, [
+        JSON.stringify(entry({ id: "plain", area: "auth" })), // unsigned
+        JSON.stringify(forged),
+      ]);
+      // Security-relevant: queryArea is a raw read. Anything that AUTO-INJECTS these
+      // into a prompt must pass them through recallSafeShared first — if this ever
+      // starts filtering, that is a behaviour change callers depend on.
+      assert.deepEqual(
+        queryArea(r, "auth").map((e) => e.id),
+        ["plain", "forged"],
+      );
+      assert.equal(verifySharedEntry(queryArea(r, "auth")[1]!, new Map()), "untrusted-signer");
+    });
+  });
+
+  it("throws on a JSON `null` line (documents current behaviour, not a wish)", () => {
+    withRoot((r) => {
+      seed(r, ["null", JSON.stringify(entry({ area: "core" }))]);
+      // readShared skips UNPARSEABLE lines but keeps a parseable `null`, so the
+      // `e.area` read below dereferences null. Pinned as-is: hardening readShared to
+      // drop non-objects would be an improvement, and would require updating this test.
+      assert.throws(() => queryArea(r, "core"), TypeError);
+    });
+  });
+});

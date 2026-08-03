@@ -60,6 +60,60 @@ Contributions on any planned item are welcome — open an issue first to coordin
 
 Effort estimates assume one focused developer-day.
 
+### Wire `[policy.agent_writes]` — an A01 access control, as its own arc (2d)
+`checkPolicy()` exists, is tested, and has **no caller** outside its own module. So
+`[policy.agent_writes]` is parsed, hashed into `KIT_POLICY_HASH` and travels with the repo, but
+gates nothing in kit and emits no `policy-check` audit event. `policy.ts` already says the module
+"deliberately does NOT enforce — it just SURFACES"; what is absent is step 2 of its own documented
+runtime contract, and the OWASP A01 row implied an enforcement that never happened. The rows now say
+so; this is the work to make them say something stronger.
+
+Deliberately NOT bundled into a release PR. It is an access-control surface whose semantics are the
+opposite of the usual reading, and getting that wrong fails OPEN:
+
+1. **Empty list means deny, not allow.** `stripe = []  # all writes still gated` — kit's own
+   example in `src/config.ts`. An implementer who treats an empty allowlist as "no restrictions"
+   inverts the control for every operator who wrote it as a lock.
+2. **Absent vendor vs present-but-empty must stay distinguishable.** `checkPolicy` already returns
+   different reasons (`"no [policy.agent_writes] declared"` vs `"vendor not in [policy.agent_writes]"`);
+   whatever consumes it must not collapse them, because one means "unconfigured" and the other means
+   "configured to refuse".
+3. **Which operations are gated, and what the vendor/op vocabulary is.** Today's example strings
+   (`resolve_issue`, `rotate_jwt`, `env_set`) are illustrative, not a registry. A pre-approval list
+   is worthless if the caller's op name and the operator's spelling can differ silently — the same
+   defect class as the flag allowlist that rejected `--attest`. The op names need a single source
+   both sides read, and an unknown op in the config should be surfaced, not ignored.
+4. **Relationship to elevation must be explicit.** Pre-approval is not a substitute for the
+   elevation gate. Decide whether it can only ever *narrow* (never grant past elevation) — the
+   tightening-only property `hardwareRequired()` already models — and pin it with a test.
+5. **Every branch needs a behavioural test that fails when the wiring is removed.** This defect
+   survived because `checkPolicy` had unit tests proving the decision function correct while nothing
+   called it. Tests over the decision function are not evidence of a working control.
+
+### Thread `cwd` through every check dimension (1d)
+`runCheckGate` resolves its `cwd` option only to load `.kit.toml`. All ten dimensions after that
+— `checkSecurity()`, `checkTools()`, `checkServices()`, `checkSecrets()`, `checkSkills()`,
+`checkHooks()`, `checkTests()`, `checkWebSearch()`, `isGitRepository()`, and their callees —
+resolve paths from `process.cwd()`.
+
+Consequence, found with a discriminating probe over the MCP surface: `kit_check({cwd: B})` from a
+server launched in A reported `pass — all .env patterns in .gitignore` for a project B that has no
+`.gitignore` at all. The config came from B, the verdict came from A. `kit_fix` was worse — it
+created B's lock files inside A.
+
+Mitigated, not fixed: `kit_check` / `kit_review` / `kit_fix` now REFUSE a `cwd` that differs from
+the server process's own directory rather than answering about the wrong tree
+(`crossProjectRefusal` in `mcp-server.ts`), and `checkLockFiles` + the three lock readers now take
+a `cwd` so `kit_context` stops reporting the server's lock state as the target project's. The
+remaining nine dimensions still need the parameter before a cross-project call can be *served*
+instead of refused.
+
+Note when doing this: `src/mcp-server.test.ts` had four tests passing `cwd: tempDir` from a process
+sitting in the kit repo — green only because of this bug, with one assertion conceding "ok depends
+on repo-level security checks — test structure, not ok". They now `chdir` into the temp project.
+Any dimension that gains a `cwd` needs a test that would FAIL if the parameter were ignored; a test
+that merely passes `cwd` proves nothing, which is how this survived.
+
 ### PR 2 — `kit analyze` subcommand (1d)
 Walk git log + scan framework markers (`next.config.*`, `pyproject.toml`,
 `Cargo.toml`, `drizzle.config.*`, etc.) to emit a draft `CLAUDE.md` + `RULES.md`

@@ -1,20 +1,5 @@
 import type { ServiceAdapter, AdapterContext, ProvisionResult } from "./types.js";
 
-interface ResendApiKey {
-  id: string;
-  token: string;
-}
-
-interface ResendDomain {
-  id: string;
-  name: string;
-  status: string;
-}
-
-interface ResendDomainsResponse {
-  data: ResendDomain[];
-}
-
 /**
  * Resend Email Adapter
  *
@@ -75,63 +60,3 @@ export const resendEmailAdapter: ServiceAdapter = {
     };
   },
 };
-
-/**
- * Resend Email Provisioner — creates a scoped API key via the Resend API.
- *
- * Called by resendEmailAdapter.provision() when a master key is available
- * and we want to create a project-scoped key instead of reusing the master.
- *
- * Exported separately so it can be tested without stubbing the adapter.
- */
-export async function provisionResendApiKey(
-  masterKey: string,
-  keyName: string,
-): Promise<{ success: true; key: ResendApiKey } | { success: false; error: string }> {
-  try {
-    const resp = await fetch("https://api.resend.com/api-keys", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${masterKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ name: keyName, permission: "sending_access" }),
-    });
-
-    if (!resp.ok) {
-      const body = await resp.text();
-      return {
-        success: false,
-        error: `Resend API error ${resp.status}: ${body}`,
-      };
-    }
-
-    const key = (await resp.json()) as ResendApiKey;
-    return { success: true, key };
-  } catch (error: unknown) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Network error",
-    };
-  }
-}
-
-/**
- * Fetch the first verified sending domain for the account.
- * Returns null if none exist (use onboarding@resend.dev as fallback).
- */
-export async function fetchFirstVerifiedDomain(apiKey: string): Promise<string | null> {
-  try {
-    const resp = await fetch("https://api.resend.com/domains", {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-
-    if (!resp.ok) return null;
-
-    const data = (await resp.json()) as ResendDomainsResponse;
-    const verified = data.data?.find((d) => d.status === "verified");
-    return verified ? verified.name : null;
-  } catch {
-    return null;
-  }
-}

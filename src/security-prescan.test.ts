@@ -442,3 +442,151 @@ describe("plugin-pattern checks", () => {
     }
   });
 });
+
+describe("renderDiff", () => {
+  function mkFinding(over: {
+    repo?: string;
+    category?: string;
+    severity?: "info" | "low" | "medium" | "high" | "critical";
+    detail?: string;
+    remediation?: string;
+  }) {
+    return {
+      timestamp: "2026-06-09T00:00:00Z",
+      repo: over.repo ?? "/r/a",
+      category: over.category ?? "test",
+      severity: over.severity ?? "medium",
+      detail: over.detail ?? "some detail",
+      ...(over.remediation === undefined ? {} : { remediation: over.remediation }),
+    };
+  }
+
+  it("always emits the three count lines, even for a completely empty diff", () => {
+    const md = renderDiff({ added: [], removed: [], unchanged: [] });
+    assert.match(md, /^# kit prescan diff$/m);
+    assert.match(md, /- \*\*Added \(regressions\)\*\*: 0$/m);
+    assert.match(md, /- \*\*Removed \(fixed\)\*\*: 0$/m);
+    assert.match(md, /- \*\*Unchanged \(persistent\)\*\*: 0$/m);
+  });
+
+  it("reports 'No drift' for an empty diff, wording it as zero carried-over findings", () => {
+    const md = renderDiff({ added: [], removed: [], unchanged: [] });
+    // An entirely empty diff is indistinguishable from "nothing was scanned":
+    // both render the reassuring No-drift block. Pinning the wording so a
+    // future change that distinguishes the two is a deliberate, visible one.
+    assert.match(md, /## No drift/);
+    assert.match(md, /0 finding\(s\) carried over unchanged\. No regressions, no fixes\./);
+  });
+
+  it("suppresses the 'No drift' block whenever anything was added", () => {
+    const md = renderDiff({ added: [mkFinding({})], removed: [], unchanged: [] });
+    // A regression must never be reported under a "No drift" heading — an
+    // operator skimming for that phrase would stop reading.
+    assert.ok(!md.includes("No drift"), md);
+    assert.match(md, /## REGRESSIONS — new findings since baseline \(1\)/);
+  });
+
+  it("suppresses the 'No drift' block whenever anything was removed", () => {
+    const md = renderDiff({ added: [], removed: [mkFinding({})], unchanged: [] });
+    assert.ok(!md.includes("No drift"), md);
+    assert.match(md, /## FIXED — gone since baseline \(1\)/);
+  });
+
+  it("places the regressions section before the fixed section", () => {
+    const md = renderDiff({
+      added: [mkFinding({ category: "new-leak" })],
+      removed: [mkFinding({ category: "old-hole" })],
+      unchanged: [],
+    });
+    const regressionsAt = md.indexOf("## REGRESSIONS");
+    const fixedAt = md.indexOf("## FIXED");
+    assert.ok(regressionsAt >= 0 && fixedAt >= 0, md);
+    // Bad news first: regressions are what the reader must act on.
+    assert.ok(regressionsAt < fixedAt, `REGRESSIONS at ${regressionsAt}, FIXED at ${fixedAt}`);
+  });
+
+  it("preserves the caller's ordering of findings within a section", () => {
+    const md = renderDiff({
+      added: [
+        mkFinding({ detail: "first-detail" }),
+        mkFinding({ detail: "second-detail" }),
+        mkFinding({ detail: "third-detail" }),
+      ],
+      removed: [],
+      unchanged: [],
+    });
+    // renderDiff does no sorting of its own, so diffReports' ordering (and
+    // hence any severity ordering a caller applies) survives to the report.
+    assert.ok(md.indexOf("first-detail") < md.indexOf("second-detail"), md);
+    assert.ok(md.indexOf("second-detail") < md.indexOf("third-detail"), md);
+  });
+
+  it("renders an added finding's severity bare and a removed finding's as 'was <severity>'", () => {
+    const md = renderDiff({
+      added: [mkFinding({ repo: "/r/a", category: "secret-leak", severity: "critical" })],
+      removed: [mkFinding({ repo: "/r/b", category: "gitignore-holes", severity: "low" })],
+      unchanged: [],
+    });
+    assert.match(md, /### \/r\/a — secret-leak \(critical\)/);
+    // The "was" prefix is what tells a reader the severity is historical.
+    assert.match(md, /### \/r\/b — gitignore-holes \(was low\)/);
+  });
+
+  it("includes the remediation hint for added findings as a blockquote", () => {
+    const md = renderDiff({
+      added: [mkFinding({ remediation: "add .env.local to .gitignore" })],
+      removed: [],
+      unchanged: [],
+    });
+    assert.match(md, /^> \*\*Fix\*\*: add \.env\.local to \.gitignore$/m);
+  });
+
+  it("omits the remediation hint for removed findings even when the finding carries one", () => {
+    const md = renderDiff({
+      added: [],
+      removed: [mkFinding({ remediation: "rotate the leaked key" })],
+      unchanged: [],
+    });
+    // Asymmetric on purpose: a finding that is gone needs no fix instructions.
+    // Asserting it so the asymmetry cannot be "tidied away" unnoticed.
+    assert.ok(!md.includes("rotate the leaked key"), md);
+    assert.ok(!md.includes("**Fix**"), md);
+  });
+
+  it("omits a section entirely rather than printing an empty heading", () => {
+    const addedOnly = renderDiff({ added: [mkFinding({})], removed: [], unchanged: [] });
+    assert.ok(!addedOnly.includes("## FIXED"), addedOnly);
+    const removedOnly = renderDiff({ added: [], removed: [mkFinding({})], unchanged: [] });
+    assert.ok(!removedOnly.includes("## REGRESSIONS"), removedOnly);
+  });
+
+  it("emits finding detail verbatim, without escaping markdown", () => {
+    // A detail string is scanner output (file paths, matched patterns) and is
+    // interpolated raw, so it can forge a section heading in the report. This
+    // diff has ZERO removed findings, yet a "## FIXED" heading appears purely
+    // because a detail contained one.
+    const md = renderDiff({
+      added: [mkFinding({ detail: "## FIXED — gone since baseline (99)" })],
+      removed: [],
+      unchanged: [],
+    });
+    assert.match(md, /- \*\*Removed \(fixed\)\*\*: 0$/m);
+    assert.ok(md.includes("## FIXED — gone since baseline (99)"), md);
+  });
+
+  it("counts unchanged findings in the header but never lists them individually", () => {
+    const md = renderDiff({
+      added: [mkFinding({ detail: "added-detail" })],
+      removed: [],
+      unchanged: [
+        mkFinding({ detail: "persistent-detail-one" }),
+        mkFinding({ detail: "persistent-detail-two" }),
+      ],
+    });
+    assert.match(md, /- \*\*Unchanged \(persistent\)\*\*: 2$/m);
+    // Persistent findings are deliberately summarised as a count only — the
+    // diff is about what changed, and listing them would bury the regressions.
+    assert.ok(!md.includes("persistent-detail-one"), md);
+    assert.ok(!md.includes("persistent-detail-two"), md);
+  });
+});

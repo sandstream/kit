@@ -44,7 +44,7 @@ sandstream-kit-plugin-my-service/
     }
   },
   "peerDependencies": {
-    "sandstream-kit-adapter-sdk": ">=0.1.0"
+    "sandstream-kit-adapter-sdk": "^1.0.0"
   }
 }
 ```

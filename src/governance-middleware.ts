@@ -10,6 +10,7 @@ import { logAuditEvent } from "./audit.js";
 import { requestApproval } from "./approval.js";
 import {
   checkSecretExpiration,
+  hasSecretWarnings,
   formatSecretExpirationWarnings,
   hasExpiredSecrets,
 } from "./secret-expiration.js";
@@ -148,6 +149,16 @@ export async function withGovernance<T>(
         expired_secrets: expirations.filter((e) => e.expired).map((e) => e.key),
       });
       throw new Error("Operation blocked: expired secrets detected");
+    }
+
+    // Approaching expiry: WARN, never block. Before this, `hasSecretWarnings` had no
+    // caller at all (self-audit rule 15) and the warning window was silent — a key
+    // expiring in three days produced no output until the day it started blocking
+    // operations, which is the wrong end of the runway to find out. Same observe→enforce
+    // shape as the rest of kit: the enforce half already worked, the observe half was
+    // written and never wired.
+    if (hasSecretWarnings(expirations)) {
+      console.warn("\n" + formatSecretExpirationWarnings(expirations));
     }
   }
 

@@ -81,7 +81,7 @@ export const NIST_800_53: StandardDescriptor = {
       bucket: "auto",
       checks: ["kit identity", "cosign", "kit auth", "signed scope"],
       rationale:
-        "Machine identity is a hardware-rooted Ed25519 key where a backend exists (Secure Enclave / TPM / external command), surfaced honestly by `kit doctor` and NEVER silently downgraded — a file-backed key warns, and `KIT_REQUIRE_HARDWARE_IDENTITY` makes a missing hardware backend fail-closed. Elevation for destructive operations is TOTP-gated, and keyless egress signs requests with RFC 9421 HTTP Message Signatures (sign, don't store). Human-user authentication to your systems is out of scope for this family in kit's context.",
+        "Machine identity is a hardware-rooted Ed25519 key where a backend exists (Secure Enclave / TPM / external command), surfaced honestly by `kit doctor` and NEVER silently downgraded — a file-backed key warns, and `KIT_REQUIRE_HARDWARE_IDENTITY` makes a missing hardware backend fail-closed. Elevation for destructive operations is TOTP-gated. Keyless egress signing (RFC 9421) is NOT shipped: the primitives exist and are tested but no command reaches them, so this family's evidence rests on the identity key and the elevation gate only. Human-user authentication to your systems is out of scope for this family in kit's context.",
     },
     IR: {
       bucket: "manual",
@@ -111,7 +111,7 @@ export const NIST_800_53: StandardDescriptor = {
       bucket: "auto",
       checks: ["gate-egress", "signed scope", "cosign", "kit doctor", "OS containment"],
       rationale:
-        "Boundary protection is enforced, not documented: egress is denied outside the signed scope, keyless requests are signed with RFC 9421, and `kit doctor` reports the OS-CONTAINMENT posture beneath the tool boundary (container/seccomp/user-ns plus gVisor/Firecracker fingerprints) — with `[governance.containment] require = true` turning it into a fail-closed gate, and an honest `unknown` off-Linux rather than a false 'not contained'. Disk-encryption posture covers protection at rest. Network/crypto controls in your production infrastructure are separate.",
+        "Boundary protection is enforced, not documented: egress is denied outside the signed scope, and `kit doctor` reports the OS-CONTAINMENT posture beneath the tool boundary (container/seccomp/user-ns plus gVisor/Firecracker fingerprints) — with `[governance.containment] require = true` turning it into a fail-closed gate, and an honest `unknown` off-Linux rather than a false 'not contained'. Disk-encryption posture covers protection at rest. Network/crypto controls in your production infrastructure are separate.",
     },
     SI: {
       bucket: "auto",
