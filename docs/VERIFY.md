@@ -9,7 +9,7 @@ production-adjacent workflow. Every step is reproducible from public data.
 When `v<N>.<N>.<N>` is tagged on `main`:
 
 1. **npm tarball** — published to `npmjs.com/package/sandstream-kit` with
-   `npm publish --provenance`. SLSA Level 3 build provenance attestation is
+   `npm publish --provenance`. A SLSA build-provenance attestation is
    automatically generated, signed by the GitHub Actions OIDC identity, and
    uploaded to Sigstore's public transparency log.
 2. **GitHub artifact attestation** — independent of npm provenance, attaches
@@ -100,9 +100,23 @@ artifact you scan against.
 | `git tag -v` | Tag-rewrite attacks; ensures the commit you check out is what the maintainer published |
 | SBOM scan | Known-vulnerable transitive deps; license-policy violations |
 
-All four together = SLSA Level 3 supply-chain guarantee. The build is
-reproducible from source, the build platform is signed, and the artifact is
-attested at multiple independent points.
+What these four do NOT add up to is a SLSA level. SLSA levels are defined on the
+build/provenance track: L3 asks for a hardened build platform producing
+non-falsifiable provenance, which `npm publish --provenance` from a GitHub-hosted
+runner does supply — verified for 6.3.1, whose npm attestation carries a
+`slsa.dev/provenance/v1` statement with the GitHub Actions workflow buildType. The
+other three rows are CONSUMER-side verifications. They are worth running, and they
+do not raise a level.
+
+And this paragraph previously claimed "the build is reproducible from source". It is
+not, and SLSA does not ask for it at any level (reproducible builds are explicitly out
+of scope in SLSA v1.0). kit has no reproducible-build proof — no build-timestamp
+normalisation, no rebuild-and-compare in CI. Do not cite kit as reproducible.
+
+Honest summary of what the four buy you: the artifact you install is the one that was
+published (signatures), it was built by this repo's workflow from a signed tag
+(provenance + `git tag -v`), and its dependency tree is enumerated for scanning (SBOM).
+That is a strong chain. It is not a reproducibility claim and not a certified level.
 
 ## What kit explicitly does NOT do
 
