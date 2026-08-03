@@ -1971,7 +1971,13 @@ async function checkBumblebee(root: string): Promise<SecurityCheckResult> {
     const catalogs = describeFindings(outcome.findings);
     // F9: persist every catalog match to the local audit log so the find
     // survives the next CI run and shows up in `kit audit`.
-    await logSupplyChainFindings(outcome.findings, profile).catch(() => {});
+    // WRITE, not a read: bumblebee findings are appended to <root>/.kit-findings.jsonl. Omitting
+    // the third argument defaulted it to process.cwd(), so a check run FOR another project
+    // appended that project'''s supply-chain findings to the calling process'''s file. The
+    // behavioural cross-project probe could not catch this — bumblebee is not installed in the
+    // probe environment, so the branch never ran. Found by enumerating writes in the check path
+    // instead, which is the only oracle that works for a path a probe cannot reach.
+    await logSupplyChainFindings(outcome.findings, profile, root).catch(() => {});
     return {
       category,
       name,

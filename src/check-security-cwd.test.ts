@@ -272,3 +272,43 @@ describe("runCheckGate threads cwd to the dimensions that read the filesystem", 
     }
   });
 });
+
+describe("the scanner-spawn mechanism actually relocates the child process", () => {
+  /**
+   * The source-level guard above proves every scanner spawn PASSES `cwd: root`. It cannot prove
+   * that passing it works, and trivy/semgrep/osv-scanner/guarddog are not installed in CI or in
+   * the environment this was developed in, so `trivy fs .` reading the right tree has no direct
+   * behavioural test.
+   *
+   * This closes that gap without the tools: spawn a stand-in through the SAME helper the scanners
+   * go through and make it report its own working directory. Together the two form a chain —
+   * every spawn passes the argument, and the argument moves the child — which covers
+   * `trivy fs .`, `trivy config .`, `osv-scanner -r .` and `semgrep .` resolving "." in the
+   * governed project rather than the caller's.
+   */
+  it("execFileNoThrow's cwd option lands the child in that directory", async () => {
+    const { execFileNoThrow } = await import("./utils/execFileNoThrow.js");
+    const A = mkdtempSync(join(tmpdir(), "kit-spawn-A-"));
+    const B = mkdtempSync(join(tmpdir(), "kit-spawn-B-"));
+    try {
+      const whereAmI = ["-e", "process.stdout.write(process.cwd())"];
+      const inB = await inCwd(A, () => execFileNoThrow(process.execPath, whereAmI, { cwd: B }));
+      const inherited = await inCwd(A, () => execFileNoThrow(process.execPath, whereAmI));
+
+      // realpath: the OS may report /tmp via a symlink (macOS /private/tmp), and a lexical
+      // compare would fail for the right directory — the same trap `crossProjectRefusal` hit.
+      const { realpathSync } = await import("node:fs");
+      assert.equal(realpathSync(inB.stdout.trim()), realpathSync(B), "cwd: B must move the child");
+      assert.equal(
+        realpathSync(inherited.stdout.trim()),
+        realpathSync(A),
+        "omitting cwd must inherit the parent's, as every existing caller relies on",
+      );
+      // The pair: a helper that ignored the option would put both children in A.
+      assert.notEqual(realpathSync(inB.stdout.trim()), realpathSync(inherited.stdout.trim()));
+    } finally {
+      rmSync(A, { recursive: true, force: true });
+      rmSync(B, { recursive: true, force: true });
+    }
+  });
+});

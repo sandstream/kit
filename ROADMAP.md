@@ -146,11 +146,26 @@ identical" for the `adr` and `standards` stages and both times the FIXTURE was w
 ignored, and a standards stage whose five rows only measure tool availability, which two temp dirs
 necessarily share. A probe that cannot tell the hypothesis from its negation is not evidence.
 
-**Still open: lifting the refusal itself.** Nothing measured so far says that REMOVING it is safe.
-Every claim above is about a path being threaded, which is a different proposition. That needs its
-own change with its own probes: launch a real MCP server in A, call each tool for B over stdio,
-and assert on where every byte and every audit line landed. Ordinary discipline, not an exception
-for a boundary that now merely looks liftable.
+**The refusal is LIFTED**, and only after the end-to-end probe was run rather than because the code
+read correct. A real MCP client was driven against a server whose `process.cwd()` was project A,
+with each tool called for project B: `kit_check` reported B's missing `.gitignore` as `warn` where
+it used to inherit A's `pass`; `kit_review`'s design stage described B's absent `src/`;
+`kit_fix` created B's lock files in B, filed the `"operation":"fix"` audit line in B, and left A
+with neither. The probe was run twice — once with the guard in place to confirm the baseline
+refusal, once bypassed to measure what serving actually produced.
+
+**The weakest link, stated where it cannot be missed:** the scanner subprocesses are NOT proven
+against the real tools. trivy, semgrep, osv-scanner and guarddog are absent from CI, so their
+coverage is a chain of two — a source-level guard that every `execFileNoThrow` in
+`check-security.ts` passes `cwd: root`, plus a behavioural test that the option actually relocates
+a child process. That is weaker than running trivy against two trees and observing which one it
+read, and anyone installing those tools should re-run the cross-project probe to close it.
+
+One write was found only by ENUMERATING the write surface, not by any probe:
+`logSupplyChainFindings` appends bumblebee findings to `<root>/.kit-findings.jsonl` and was called
+without a `cwd`, so a check run for another project appended that project's findings to the
+caller's file. Bumblebee is not installed in the probe environment, so the branch never executed.
+A behavioural probe is not a substitute for reading the writes.
 
 Consequence, found with a discriminating probe over the MCP surface: `kit_check({cwd: B})` from a
 server launched in A reported `pass — all .env patterns in .gitignore` for a project B that has no

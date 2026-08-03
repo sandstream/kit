@@ -28,7 +28,7 @@ import { recordTriageRun } from "./commands/triage.js";
 import { openMemoryDb, searchMessages, getMemoryDbPath, recordQuery } from "./memory/db.js";
 import { searchShared } from "./memory/shared.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync } from "node:fs";
 
 const KIT_FILE = ".kit.toml";
 
@@ -133,48 +133,29 @@ function readOnlyRefusal(tool: string): {
  * and every audit line landed. Ordinary discipline, not an exception for a boundary that now
  * merely looks liftable.
  *
- * So this still fails CLOSED: a cross-project call gets an actionable error instead of a verdict
- * about the wrong tree. Nothing that previously worked breaks — a client that launches the server
- * inside the project it asks about (what Claude Code does) passes a `cwd` equal to
- * `process.cwd()`, or omits it.
+ * LIFTED. The refusal is gone because the paths were threaded AND that was measured end to end —
+ * not because the code now reads correct. What the measurement covers:
+ *
+ *   - readers: `check-security-cwd.test.ts`, `review-cwd.test.ts`. A gets a complete `.gitignore`
+ *     and a component with an a11y violation, B gets neither, and the two answers must DIFFER.
+ *   - writes + audit: `fix-cwd.test.ts`. The locks, the `.gitignore` edit, the generated template
+ *     and the `"operation":"fix"` audit line land in B, and A gains none of them.
+ *   - end to end over the real MCP protocol: the `serves a cross-project cwd` block in
+ *     `mcp-server.test.ts`, driving a client against a server whose `process.cwd()` is A.
+ *
+ * And what it does NOT cover, which is the weakest link in this decision and belongs in the same
+ * comment rather than a nicer one: the scanner subprocesses are not proven against the real tools.
+ * trivy, semgrep, osv-scanner and guarddog are absent from CI, so their coverage is a chain of two
+ * — a source-level guard that every `execFileNoThrow` in `check-security.ts` passes `cwd: root`,
+ * plus a behavioural test that the option actually relocates a child process. That is weaker than
+ * running trivy against two trees and observing which one it read.
+ *
+ * One write was found only by enumerating writes, because no probe here could reach it:
+ * `logSupplyChainFindings` appends bumblebee findings to `<root>/.kit-findings.jsonl` and was
+ * called without a `cwd`, so a check run FOR another project appended that project's findings to
+ * the caller's file. Bumblebee is not installed in the probe environment, so the branch never ran.
+ * A behavioural probe is not a substitute for reading the write surface.
  */
-function crossProjectRefusal(
-  cwd: string | undefined,
-  tool: string,
-): { content: { type: "text"; text: string }[]; isError: true } | null {
-  if (cwd === undefined) return null;
-  // Compare REAL paths, not lexical ones: on macOS `/tmp` and `/var` are symlinks
-  // into /private, so process.chdir("/var/…") reports cwd "/private/var/…" while
-  // the caller's argument still says "/var/…" — a lexical compare refuses the
-  // SAME directory. Fail-soft: an unresolvable path falls back to the lexical
-  // form, which can only make the guard stricter, never leak a wrong-tree pass.
-  const real = (p: string): string => {
-    try {
-      return realpathSync(p);
-    } catch {
-      return resolve(p);
-    }
-  };
-  if (real(cwd) === real(process.cwd())) return null;
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: JSON.stringify(
-          {
-            ok: false,
-            error: `${tool}: cwd "${resolve(cwd)}" differs from this server's working directory "${resolve(process.cwd())}"`,
-            why: "This tool's checks resolve paths from the server process's working directory, so a verdict for another project would describe THIS one. Refusing rather than returning a green earned by the wrong tree.",
-            fix: "Start the kit MCP server inside the project you want to check (Claude Code does this per-project), or omit cwd, or run `kit check` in that directory.",
-          },
-          null,
-          2,
-        ),
-      },
-    ],
-    isError: true,
-  };
-}
 
 /** Refusal result for a mutating tool blocked by the governance floor (revocation,
  *  budget, permission/approval, expired secrets). Mirrors the CLI's fail-closed deny. */
@@ -245,13 +226,11 @@ function register_kit_check(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Working directory. Must equal the server process's own cwd (or be omitted): the check dimensions resolve paths from the process, so a different value is REFUSED rather than answered for the wrong project.",
+            "Project directory to check (defaults to the server process's own). Every dimension that reads the filesystem resolves paths from this argument, including the scanner subprocesses, so a value pointing at another project is answered ABOUT that project.",
           ),
       },
     },
     async ({ cwd }) => {
-      const scoped = crossProjectRefusal(cwd, "kit_check");
-      if (scoped) return scoped;
       try {
         const r = await runCheckGate({ cwd });
         return {
@@ -325,8 +304,6 @@ function register_kit_review(server: McpServer): void {
       },
     },
     async ({ cwd, enforce, stages, category, concise }) => {
-      const scoped = crossProjectRefusal(cwd, "kit_review");
-      if (scoped) return scoped;
       try {
         const { collectReview } = await import("./commands/review.js");
         const report = await collectReview({ cwd, enforce, stages, category });
@@ -435,19 +412,16 @@ function register_kit_fix(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Working directory. Must equal the server process's own cwd (or be omitted): a different value is REFUSED. The lock-file writes now resolve from this argument, but the governance audit trail does not, so a cross-project fix would leave its proof in the wrong project.",
+            "Project directory to fix (defaults to the server process's own). Every write resolves from this argument — the lock files, the .gitignore hardening, the generated .env.template — and so does the governance audit entry, so a fix aimed at another project both acts on it and files its evidence there.",
           ),
       },
     },
     async ({ cwd }) => {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_fix");
-      // Worse than a wrong verdict: a wrong-target WRITE. The lock-file helpers resolved from
-      // process.cwd(), so cwd=B created B's lock files inside A. Those writes are threaded now
-      // (see the lock step below), but the AUDIT destination is not — `withGovernance` takes no
-      // cwd — so a cross-project fix would still file its evidence in the wrong project. Still
-      // refused, for that reason rather than the original one.
-      const scoped = crossProjectRefusal(cwd, "kit_fix");
-      if (scoped) return scoped;
+      // A wrong-target WRITE is worse than a wrong verdict, which is why this handler carried a
+      // cross-project refusal until the write surface was threaded AND measured: the lock files,
+      // the .gitignore edit, the generated template and the governance audit line all have to land
+      // in `cwd`. `fix-cwd.test.ts` asserts each one lands in B and that A gains none of them.
       try {
         const config = await loadConfig(configPath(cwd));
         // One resolution, used by both the broker context and the lock step below — two
