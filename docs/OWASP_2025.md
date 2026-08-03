@@ -14,7 +14,8 @@ Per memory `feedback_owasp_2025`, security reviews target the **2025** Top 10
 | Read-only mode (`--read-only` / `KIT_READ_ONLY=1`) refuses every mutation | ✅ shipped (T.2) |
 | Elevation-gate on destructive ops (`requireElevation` / `consumeElevation`) | ✅ shipped |
 | Per-op scope mapping with one-shot consumption for irreversible ops | ✅ shipped (P2.5 `elevation-scopes.ts`) |
-| `[policy.agent_writes]` pre-approval + `KIT_POLICY_HASH` for classifier consumption | ✅ shipped (P1.3 `policy.ts`) |
+| `KIT_POLICY_HASH` exported for classifier consumption (content-addressed `[policy]` identity) | ✅ shipped (P1.3 `policy.ts`) |
+| `[policy.agent_writes]` pre-approval consulted by kit's own write paths | ⚠️ **not implemented** — the list is parsed, hashed and travels with the repo, but `checkPolicy()` has **no caller** outside its own module, so it gates nothing in kit and emits no `policy-check` audit event. `policy.ts` states the intent ("deliberately does NOT enforce — it just SURFACES"); what is missing is step 2 of its own runtime contract. Wiring it is [on the ROADMAP](../ROADMAP.md); do not read this row as an access control. |
 | RBAC model + decision-path tests | ✅ shipped (`rbac/policy-schema.ts` + `rbac/resolve.ts`, with `rbac/policy-schema.test.ts` + `rbac/resolve.test.ts`) |
 
 ## A02 — Cryptographic Failures
@@ -47,7 +48,7 @@ Per memory `feedback_owasp_2025`, security reviews target the **2025** Top 10
 | kit control | Status |
 |---|---|
 | Trust model + data-flow are explicit docs (`THREAT_MODEL.md`, `DATA_FLOW.md`) | ✅ shipped (T.1) |
-| `[policy.agent_writes]` makes agent-permitted scopes EXPLICIT, not implicit | ✅ shipped (P1.3) |
+| `[policy.agent_writes]` makes agent-permitted scopes EXPLICIT, not implicit | ⚠️ **declarative only** — writing the list records operator intent and changes the exported `KIT_POLICY_HASH`, which an upstream classifier can honor. kit itself consults nothing: no command allows or denies based on it. Explicit as a *declaration*, not as an *enforcement*. |
 | Bypass detection: pre-commit sentinel + post-commit detector log `--no-verify` skips | ✅ shipped (P0.4) |
 | Audit-log fail-closed — every destructive op leaves a forensic trail or refuses | ✅ shipped |
 

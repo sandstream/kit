@@ -23,11 +23,19 @@
  *      loaded config, computes a SHA-256 of the canonical JSON, exports
  *      `KIT_POLICY_HASH=<hex>` to env so child processes / classifiers
  *      see the same identity.
- *   2. Callers that mutate vendor state call `checkPolicy(vendor, op)` —
- *      returns true if the op appears in `agent_writes[vendor]`. False
- *      means the op is gated and requires elevation.
+ *   2. NOT IMPLEMENTED. The intent is that callers mutating vendor state call
+ *      `checkPolicy(vendor, op)` — true if the op appears in `agent_writes[vendor]`,
+ *      false meaning still gated. As of 6.3.0 `checkPolicy` has NO caller outside this
+ *      module and its own tests, so `[policy.agent_writes]` changes no kit decision.
+ *      Verify before trusting this line again:
+ *        grep -rn 'checkPolicy(' src --include=*.ts | grep -v policy.ts | grep -v test
+ *      Wiring it is a deliberate arc, not a patch — see ROADMAP. It is an A01
+ *      access-control surface with non-obvious semantics (an EMPTY vendor list means
+ *      "all writes still gated", the opposite of how an empty allowlist usually reads),
+ *      so it must not be rushed in alongside unrelated work.
  *   3. Every policy check emits an audit event with `policy_scope_matched`
- *      so the forensic trail covers both grants and denials.
+ *      so the forensic trail covers both grants and denials. True of `checkPolicy`
+ *      itself — but since nothing calls it, no such event is ever written in practice.
  *
  * This module deliberately does NOT enforce — it just SURFACES. The
  * existing elevation + read-only gates remain authoritative; the policy

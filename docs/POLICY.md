@@ -56,6 +56,14 @@ agent-write pre-approval** — which vendor operations the operator pre-authoriz
 versioned and signed independently of project config. They are complementary
 layers.
 
+> **`[policy.agent_writes]` is declarative only as of 6.3.0.** The list is parsed and
+> folded into the exported `KIT_POLICY_HASH`, so an upstream classifier reading that hash
+> can honor it — but no kit code path consults the list. `checkPolicy()` has no caller
+> outside its own module, so declaring a vendor op neither allows nor denies anything in
+> kit, and no `policy-check` audit event is written. `.kit-policy.toml` and the
+> elevation / read-only gates are the layers that actually enforce. Wiring the
+> pre-approval is [on the ROADMAP](../ROADMAP.md) as its own arc.
+
 ## Enforcement: `kit policy check`
 
 ```
