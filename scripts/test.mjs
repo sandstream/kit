@@ -56,9 +56,39 @@ if (files.length === 0) {
   process.exit(1);
 }
 
+// A FULL TAP log always lands on disk, in addition to whatever the caller sees on stdout.
+//
+// Why: a run of this suite reported `# fail 1` and the failing test's NAME was unrecoverable,
+// because the invocation was piped through `tail` and everything above the summary was discarded.
+// Four re-runs were green, so the flake could not be re-caught, and an intermittent failure with no
+// name is the shape that teaches people to re-run until green. The detail must not depend on how the
+// caller happened to redirect stdout — so node writes a second, complete report to a file itself.
+//
+// `--test-reporter`/`--test-reporter-destination` are positional PAIRS: spec to stdout for humans,
+// tap to the log for the next time this happens.
+// Naming a reporter REPLACES node's default entirely, and that default is adaptive: `spec` when
+// stdout is a TTY, `tap` when it is piped. Forcing one would silently change the output contract —
+// a `npm test | grep '# fail'` that worked before would stop matching. So the stdout reporter is
+// node's own choice, reproduced, and the file reporter is purely additive.
+const TAP_LOG = ".kit-test-run.tap";
+const stdoutReporter = process.stdout.isTTY ? "spec" : "tap";
 const result = spawnSync(
   process.execPath,
-  ["--test", "--test-timeout=180000", "--test-concurrency=2", ...files],
+  [
+    "--test",
+    "--test-timeout=180000",
+    "--test-concurrency=2",
+    `--test-reporter=${stdoutReporter}`,
+    "--test-reporter-destination=stdout",
+    "--test-reporter=tap",
+    `--test-reporter-destination=${TAP_LOG}`,
+    ...files,
+  ],
   { stdio: "inherit", env },
 );
+if (result.status !== 0) {
+  console.error(
+    `\n[kit] full TAP report written to ${TAP_LOG} — grep '^not ok' for the failing test names.`,
+  );
+}
 process.exit(result.status ?? 1);
