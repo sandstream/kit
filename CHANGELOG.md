@@ -6,7 +6,99 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **`[policy.agent_writes]` now reaches the plugin write surfaces — the last
+  ops with no choke point in kit.** `resolve_issue`, `create_release` and
+  `trigger_deploy` were the three ROADMAP named; the arc registered and gated
+  every mutating plugin surface instead, adding `env_unset` (separate from
+  `env_set` because setting a variable is recoverable by setting it again while
+  deleting one destroys the only copy of a value and takes down whatever reads
+  it), `api_token_revoke`, `webhook_create`, `webhook_delete`, and
+  `scoped_key_revoke` — a third Supabase op that was in neither the
+  elevation-scope split nor the registry, because `secrets-rotate-cli.ts` only
+  ever asks about `--mode`.
+
+  The plugins are standalone zero-dependency packages that must not import
+  kit-core, so the enforcement point cannot be a kit function call. What
+  crosses the boundary is the resolved DECISION, not the config: kit runs every
+  registry op through the one `policyDecision` and exports the refusals as
+  `KIT_POLICY_DENY` (`installPolicyEnv`, called from `main()` beside
+  `installPolicyHash`, and extracted from the boot block so that dropping
+  either install fails a test). The plugin-side guard is a membership test with
+  no rule in it — nothing to collapse, no empty list to misread, no
+  absent-vendor case to get backwards, because all four states resolved before
+  the value was written. Serialising the config instead would have put seven
+  independent copies of the four-state rule in seven packages.
+
+  Two limits, stated rather than implied: the channel is exactly as strong as
+  the `KIT_READ_ONLY` contract and no stronger — a process that never ran kit
+  sees no denials, and absence must mean "no denial" or every repo not using
+  the block goes offline the moment a plugin runs outside a kit invocation — and
+  a plugin-side refusal is not audited, because a plugin has no path to the
+  governed project's log. `enforcePolicy()` still audits the ops kit gates
+  itself.
+
 ### Fixed
+
+- **`kit-plugin-supabase` honored no containment gate at all — including on the
+  JWT-secret roll.** Its three write surfaces (`rollJwtSecret`,
+  `revokeScopedKey`, `mintScopedKey`) had no `assertNotReadOnly()`, while all
+  six sibling plugins did, and `cli.ts` + `THREAT_MODEL.md` both stated that
+  read-only was honored by "every kit-plugin write surface". Measured with
+  `KIT_READ_ONLY=1` set in the process and the client pointed at a local
+  listener: all three sent their request, and the roll — which invalidates
+  every anon, service_role, signed-URL and session token at once — returned a
+  rolled secret. The guard is inline per package because plugins must not
+  import kit-core, so `src/plugin-write-gates.test.ts` now pins all seven
+  copies byte-identical and derives the write surfaces from the plugin sources:
+  any function issuing a mutating request, or building a GraphQL `mutation`
+  routed through a shared transport, must carry both guards, in the documented
+  order, naming an op the registry knows. Exemptions are listed with reasons
+  and asserted to still match something. Mutation-proved seven ways (drop
+  either guard, swap their order, gate the token revoke on `env_set`, add a new
+  ungated mutation through the transport, loosen one plugin's read-only test to
+  `"1"` only, remove the registry row the revoke depends on — 1 fail each).
+
+  The seven changed plugins are bumped to **0.1.1**, and that bump is part of the
+  fix rather than bookkeeping: `publish_ws` in `publish.yml` skips any package
+  whose version is already on npm, so a containment fix left at 0.1.0 would ship
+  to the monorepo and leave every installed copy vulnerable — the same way the
+  scanner plugins existed but were unreachable to anyone who had not cloned the
+  repo until 6.3.1 put them on npm.
+
+- **`unknownPolicyEntries()` reported to nobody.** `config.ts`,
+  `docs/OWASP_2025.md`, ROADMAP and CHANGELOG all described it as surfacing an
+  `[policy.agent_writes]` entry that names an op kit never asks about; it had
+  no production caller. Measured: a repo with `vercel = ["env-set"]` produced a
+  full `kit check` mentioning neither the typo nor its consequence, exit 0 —
+  and the typo INVERTS the operator's intent, because declaring the vendor
+  refuses every op not listed, so a misspelling turns a pre-approval into a
+  blanket denial for that vendor. This is trap 5 of the enforcement arc ("tests
+  over the decision function are not evidence of a working control") recurring
+  one module later. Now the `policy agent-writes` row
+  (`src/check-policy-ops.ts`), wired into `checkSecurity()` rather than
+  `runCheckGate` so `kit ci` and `kit heal` see it too; it names the real ops
+  for the vendor, states the consequence, and on the clean path reports how
+  many of the registry's ops the policy refuses. Mutation-proved: removing the
+  wiring fails only the wiring test while all six function-level tests keep
+  passing, which is precisely why they were not enough.
+
+- **`kit knobs` advertised an op the registry rejected.** The knob description
+  read `sentry = ["resolve_issue"]` while `resolve_issue` was not in
+  `POLICY_OPS`, so kit's own help text described config kit's own checker
+  flags. The drift test written for exactly this class hard-coded `config.ts`;
+  it now scans every source file that mentions the block. The historical
+  examples in `config.ts` / `policy.ts` are cited by op name instead of in the
+  live `vendor = [...]` syntax, because a past example written in the current
+  syntax is indistinguishable from a live one to any scanner.
+
+- **The plugin test suites never ran.** `scripts/test.mjs` collected only the
+  root `dist/`, so 11 compiled test files and 76 tests under
+  `packages/*/dist/` — including every `KIT_READ_ONLY=1` refusal test the
+  plugins do have — had never been executed by `npm test` or CI. They pass;
+  nobody was watching. A containment test that does not run is worse than no
+  test, because it reads as coverage.
 
 - **`docs/VERIFY.md` documented a `gh attestation verify` invocation that
   exits 1.** Both the copy-pasteable block and the CI snippet passed

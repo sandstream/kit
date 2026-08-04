@@ -60,7 +60,7 @@ Contributions on any planned item are welcome — open an issue first to coordin
 
 Effort estimates assume one focused developer-day.
 
-### Wire `[policy.agent_writes]` — ENFORCED + AUDITED for `env_set`; more ops remain
+### Wire `[policy.agent_writes]` — ENFORCED + AUDITED across kit AND the plugin write surfaces
 **The problem, as it stood.** `checkPolicy()` existed, was tested, and had no caller outside its own
 module. `[policy.agent_writes]` was parsed, hashed into `KIT_POLICY_HASH` and travelled with the
 repo — and gated nothing. `policy.ts` said the module "deliberately does NOT enforce — it just
@@ -134,8 +134,67 @@ audit into `process.cwd()` instead of the governed project (3).
    inline it sat inside a function that needs the Supabase Management API to reach, so collapsing
    both modes onto one op would have been caught by nothing. Now it fails a test.
 
-   Still open: `resolve_issue`, `create_release` and `trigger_deploy` live in the plugins and have
-   no choke point in kit — each needs a registry row and an enforcement point in its adapter.
+   ~~Still open: `resolve_issue`, `create_release` and `trigger_deploy` live in the plugins and have
+   no choke point in kit.~~ **Done — and the plugin surface was worse than "no policy gate".**
+
+   The plugins cannot be called from kit-core: they are standalone zero-dependency packages an agent
+   imports directly, and `adapter-sdk` forbids importing kit-core (monorepo coupling + private-package
+   leaks). So the enforcement point cannot be a function call. What crosses the boundary is the
+   DECISION, not the config: kit resolves every registry op through `policyDecision` and exports the
+   ones that came back `denied` as `KIT_POLICY_DENY` (`installPolicyEnv`, called from `main()` beside
+   `installPolicyHash`). The plugin-side guard is then a membership test with no rule in it — nothing
+   to collapse, no empty list to misread, no absent-vendor case to get backwards, because all four
+   states resolved before the value was written. Serialising `[policy.agent_writes]` instead would
+   have put seven independent implementations of the four-state rule in seven packages.
+
+   It is exactly as strong as the `KIT_READ_ONLY` contract and no stronger: a process that never ran
+   kit sees no denials. That is the containment model kit already documents, not a weakening
+   introduced here, and absence must mean "no denial" or every `inert` repo goes offline the moment a
+   plugin runs outside a kit invocation. A plugin-side refusal is NOT audited — a plugin has no path
+   to the governed project's log; `enforcePolicy` still covers the ops kit itself gates.
+
+   Registered and gated: `resolve_issue`, `create_release`, `trigger_deploy`, plus `env_unset`
+   (separate from `env_set`: setting is recoverable by setting again, deleting destroys the only copy
+   of a value and takes down whatever reads it), `api_token_revoke`, `webhook_create`,
+   `webhook_delete`, and `scoped_key_revoke` — a THIRD Supabase op that was in neither the
+   elevation-scope split nor the registry, because `secrets-rotate-cli.ts` only ever asks about
+   `--mode`.
+
+   **Four things this arc found by measuring rather than reading, in order of severity:**
+
+   1. **`kit-plugin-supabase` had no containment guard at all.** Three write surfaces —
+      `rollJwtSecret`, `revokeScopedKey`, `mintScopedKey` — no `assertNotReadOnly`, no policy check.
+      Measured with `KIT_READ_ONLY=1` set and the client pointed at a local listener: all three sent
+      their request and `rollJwtSecret` returned a rolled secret. The op kit's own registry describes
+      as invalidating EVERY existing token was not contained by the gate the agent-containment story
+      rests on, while six sibling plugins were. `cli.ts` even claims read-only is "honored [by] every
+      kit-plugin write surface".
+   2. **`unknownPolicyEntries()` had no production caller.** `config.ts`, `docs/OWASP_2025.md`,
+      ROADMAP and CHANGELOG all described it as reporting to the operator; it reported to nobody.
+      Measured: a repo with `vercel = ["env-set"]` (a typo) produced a full `kit check` with zero
+      mention of it, exit 0 — and the typo silently INVERTS the operator's intent, because the vendor
+      is now declared while its real op is not listed, so propagation is refused. This is trap 5 —
+      "tests over the decision function are not evidence of a working control" — recurring one module
+      after the arc that named it. Now the `policy agent-writes` row in `check-policy-ops.ts`, wired
+      into `checkSecurity()` rather than `runCheckGate` so `kit ci` and `kit heal` see it too.
+   3. **`kit knobs` advertised an op the registry rejected.** The knob description read
+      `sentry = ["resolve_issue"]` while `resolve_issue` was not in `POLICY_OPS` — kit's own help
+      text describing config kit's own checker flags. The drift test written for exactly this class
+      hard-coded `config.ts`, so the same defect reappeared one file over. It now scans every source
+      file that mentions the block.
+   4. **The plugin test suites never ran.** 11 compiled test files, 76 tests — including every
+      `KIT_READ_ONLY=1` refusal test the plugins do have — sat in `packages/*/dist/` while
+      `scripts/test.mjs` collected only the root `dist/`. They pass; nobody was running them. A
+      containment test that does not run is worse than none, because it reads as coverage.
+
+   The gate that makes this class fail loudly: `src/plugin-write-gates.test.ts` derives the write
+   surfaces from the plugin SOURCES rather than a maintained list — any function issuing a mutating
+   request, or building a GraphQL `mutation` routed through a shared transport, must appear in the
+   mapping with both guards in the documented order and an op the registry knows. Exemptions are
+   named with reasons and asserted to still match something. Mutation-proved seven ways: drop the
+   policy guard (1 fail), drop the read-only guard (1), swap their order (1), gate the token revoke on
+   `env_set` instead (1), add a new ungated GraphQL mutation through the transport (1), loosen one
+   plugin's read-only guard to `"1"` only (1), remove the registry row the revoke depends on (1).
 3. ~~Trap 4 is asserted, not proven end to end.~~ **Done, and it turned up a fail-open.** Proving
    "policy narrows and never grants" needs a real gate that still stops an approved op — and the
    obvious candidate did not stop anything. Measured: with elevation satisfied (`KIT_ELEVATED=1`),

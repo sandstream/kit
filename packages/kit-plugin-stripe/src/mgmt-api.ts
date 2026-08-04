@@ -27,6 +27,31 @@ function assertNotReadOnly(operation: string): void {
   }
 }
 
+/**
+ * Policy gate for this plugin's write surfaces.
+ *
+ * kit resolves `[policy.agent_writes]` for the governed project and exports the ops it REFUSES as
+ * `KIT_POLICY_DENY` (`vendor:op`, comma-separated). This is a membership test with no rule in it, so
+ * there is no policy semantic here that can drift from kit's: the four states — including the
+ * `stripe = []` lock and the absent-vendor case that must NOT read as a denial — were all resolved
+ * on kit's side before the value was written.
+ *
+ * Absence of the variable means NO denial. That is the same contract `assertNotReadOnly` lives
+ * under, and it is deliberate: inverting it would refuse every op in every project that does not
+ * use the block, the moment a plugin ran outside a kit invocation.
+ *
+ * Ordered AFTER the read-only guard at every call site, so a locked-down repo answers "read-only"
+ * rather than "your policy is missing an entry".
+ */
+function assertPolicyAllows(vendor: string, op: string): void {
+  const denied = (process.env.KIT_POLICY_DENY ?? "").split(",");
+  if (denied.includes(`${vendor}:${op}`)) {
+    throw new Error(
+      `refused by [policy.agent_writes.${vendor}] — "${op}" is not pre-approved for this project`,
+    );
+  }
+}
+
 export type StripeMode = "test" | "live" | "restricted" | "unknown";
 
 export interface MgmtClientConfig {
@@ -127,6 +152,7 @@ export async function createWebhookEndpoint(
   params: CreateWebhookEndpointParams & { force?: boolean },
 ): Promise<WebhookEndpoint> {
   assertNotReadOnly("stripe/createWebhookEndpoint");
+  assertPolicyAllows("stripe", "webhook_create");
   assertModeForUrl(client, params.url, { force: params.force });
   const body = new URLSearchParams();
   body.set("url", params.url);
@@ -171,6 +197,7 @@ export async function deleteWebhookEndpoint(
   webhookEndpointId: string,
 ): Promise<void> {
   assertNotReadOnly("stripe/deleteWebhookEndpoint");
+  assertPolicyAllows("stripe", "webhook_delete");
   const res = await fetch(
     `${client.baseUrl}/v1/webhook_endpoints/${encodeURIComponent(webhookEndpointId)}`,
     { method: "DELETE", headers: client.headers, signal: AbortSignal.timeout(10_000) },

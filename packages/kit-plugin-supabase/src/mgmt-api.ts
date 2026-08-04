@@ -20,6 +20,38 @@
 
 const DEFAULT_BASE_URL = "https://api.supabase.com";
 
+function assertNotReadOnly(operation: string): void {
+  const v = process.env.KIT_READ_ONLY;
+  if (v === "1" || v === "true") {
+    throw new Error(`read-only mode active — refusing "${operation}"`);
+  }
+}
+
+/**
+ * Policy gate for this plugin's write surfaces.
+ *
+ * kit resolves `[policy.agent_writes]` for the governed project and exports the ops it REFUSES as
+ * `KIT_POLICY_DENY` (`vendor:op`, comma-separated). This is a membership test with no rule in it, so
+ * there is no policy semantic here that can drift from kit's: the four states — including the
+ * `stripe = []` lock and the absent-vendor case that must NOT read as a denial — were all resolved
+ * on kit's side before the value was written.
+ *
+ * Absence of the variable means NO denial. That is the same contract `assertNotReadOnly` lives
+ * under, and it is deliberate: inverting it would refuse every op in every project that does not
+ * use the block, the moment a plugin ran outside a kit invocation.
+ *
+ * Ordered AFTER the read-only guard at every call site, so a locked-down repo answers "read-only"
+ * rather than "your policy is missing an entry".
+ */
+function assertPolicyAllows(vendor: string, op: string): void {
+  const denied = (process.env.KIT_POLICY_DENY ?? "").split(",");
+  if (denied.includes(`${vendor}:${op}`)) {
+    throw new Error(
+      `refused by [policy.agent_writes.${vendor}] — "${op}" is not pre-approved for this project`,
+    );
+  }
+}
+
 export interface MgmtClientConfig {
   baseUrl?: string;
   accessToken?: string;
@@ -153,6 +185,8 @@ export interface RotateResult {
  * when the leak severity warrants a hard cutover.
  */
 export async function rollJwtSecret(client: MgmtClient, projectRef: string): Promise<RotateResult> {
+  assertNotReadOnly("supabase/rollJwtSecret");
+  assertPolicyAllows("supabase", "jwt_secret_roll");
   // Endpoint path used by Supabase Dashboard internally (mirrors
   // "Generate new JWT secret" button in Project Settings → API).
   const res = await fetch(`${client.baseUrl}/v1/projects/${projectRef}/config/jwt-secret/roll`, {
@@ -182,6 +216,8 @@ export async function revokeScopedKey(
   projectRef: string,
   keyId: string,
 ): Promise<{ ok: boolean; detail: string }> {
+  assertNotReadOnly("supabase/revokeScopedKey");
+  assertPolicyAllows("supabase", "scoped_key_revoke");
   const res = await fetch(
     `${client.baseUrl}/v1/projects/${projectRef}/api-keys/${encodeURIComponent(keyId)}`,
     {
@@ -209,6 +245,8 @@ export async function mintScopedKey(
   projectRef: string,
   opts: { name?: string; type?: "secret" | "publishable" } = {},
 ): Promise<RotateResult> {
+  assertNotReadOnly("supabase/mintScopedKey");
+  assertPolicyAllows("supabase", "scoped_key_mint");
   // Supabase requires name to match /^[a-z_][a-z0-9_]*$/ — lowercase
   // alphanumerics + underscores, starts with letter or underscore. We
   // build a unix-timestamp slug so the name is unique without colons,

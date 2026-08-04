@@ -56,13 +56,30 @@ agent-write pre-approval** — which vendor operations the operator pre-authoriz
 versioned and signed independently of project config. They are complementary
 layers.
 
-> **`[policy.agent_writes]` is declarative only as of 6.3.0.** The list is parsed and
-> folded into the exported `KIT_POLICY_HASH`, so an upstream classifier reading that hash
-> can honor it — but no kit code path consults the list. `checkPolicy()` has no caller
-> outside its own module, so declaring a vendor op neither allows nor denies anything in
-> kit, and no `policy-check` audit event is written. `.kit-policy.toml` and the
-> elevation / read-only gates are the layers that actually enforce. Wiring the
-> pre-approval is [on the ROADMAP](../ROADMAP.md) as its own arc.
+> **`[policy.agent_writes]` is ENFORCED as of 6.3.2, and reaches the plugin write surfaces
+> after it.** It was declarative through 6.3.1 — parsed, folded into `KIT_POLICY_HASH`, and
+> consulted by nothing — and this note said so. What it enforces now:
+>
+> - **Inside kit**, at `propagate()`'s choke point and in `secrets-rotate-cli.ts`, deciding via
+>   the single `policyDecision` and writing a `policy-check` audit event for every refusal AND
+>   every grant, with the vendor, op, state and policy hash.
+> - **In the `kit-plugin-*` packages**, which kit-core cannot call: kit resolves the block and
+>   exports the refusals as `KIT_POLICY_DENY`, and each plugin's write surface refuses what is
+>   in it. The plugin never sees the config, only the decision.
+>
+> **It only ever NARROWS.** The block is unsigned config in `.kit.toml`, so anyone who can edit
+> the repo — including an agent — could add a line to it. Declaring an op therefore cannot
+> SATISFY a gate; elevation, read-only and signed approval remain authoritative. `approval.ts`
+> is the grant-shaped mechanism, and it requires an org-authority signature. That is the
+> difference.
+>
+> **Two limits worth knowing before relying on it.** An empty list is a LOCK, not a wildcard:
+> `stripe = []` declares the vendor and pre-approves nothing, so every Stripe op is refused —
+> and by the same rule a typo (`env-set` for `env_set`) turns a pre-approval into a blanket
+> denial for that vendor, which is why `kit check` reports an unrecognised op as the
+> `policy agent-writes` row. And the plugin-side channel is an environment variable, exactly as
+> strong as `KIT_READ_ONLY`: a process that never ran kit sees no denials, and a plugin-side
+> refusal is not audited, because a plugin has no path to the governed project's log.
 
 ## Enforcement: `kit policy check`
 

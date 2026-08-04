@@ -2159,6 +2159,12 @@ export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]
   // must prove it exists.
   results.push(await checkGateLiveness(root));
   results.push(await checkDeviceIdOverride());
+  // `[policy.agent_writes]` posture: an entry naming an op kit never asks about grants nothing while
+  // still declaring the vendor — which refuses that vendor's real ops. Four documents claimed this
+  // was surfaced; nothing called the function that computes it. Wired HERE, not in `runCheckGate`,
+  // so `kit ci` and `kit heal` see it too.
+  const { checkPolicyAgentWrites } = await import("./check-policy-ops.js");
+  results.push(await checkPolicyAgentWrites(root));
 
   // Inbound integration: fold any third-party findings a partner tool emitted to
   // `.kit-scan-results.jsonl` into the verdict. No file → no-op. Can only escalate

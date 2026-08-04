@@ -1,7 +1,7 @@
 {
   "name": "sandstream-kit-plugin-sentry",
-  "version": "0.1.0",
-  "description": "Sentry REST API client for kit \u2014 issue triage, release tagging, project introspection.",
+  "version": "0.1.1",
+  "description": "Sentry REST API client for kit — issue triage, release tagging, project introspection.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
