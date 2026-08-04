@@ -28,6 +28,23 @@ MISSING_VAR = { source = "env" }
 `;
 
 /**
+ * Per-request timeout for every call made through `createTestClient`.
+ *
+ * The SDK's default is 60s of wall clock (`DEFAULT_REQUEST_TIMEOUT_MSEC`), and
+ * several tests below run a FULL `kit check` over the real kit repo — the point of
+ * those tests is precisely that the server's own cwd is served, so they cannot be
+ * pointed at a cheap fixture. Measured on this repo: ~25s for that call with the
+ * file run alone, and 59.8s / >60s for the two of them when the whole suite runs
+ * at `--test-concurrency=2`. Past the line the failure reads
+ * `MCP error -32001: Request timed out` — machine load, not a defect, and it
+ * names a test that passes on a re-run, which is the most expensive kind of red.
+ *
+ * Deliberately below the runner's own `--test-timeout=180000` so a genuine hang is
+ * still bounded, and bounded by node with the request-level error surfacing first.
+ */
+const REQUEST_TIMEOUT_MS = 150_000;
+
+/**
  * Create a connected Client + McpServer pair using in-memory transport.
  * Returns the client (already connected) and a cleanup function.
  */
@@ -36,6 +53,16 @@ async function createTestClient(): Promise<{ client: Client; cleanup: () => Prom
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
   const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
+
+  // Applied here rather than at ~40 call sites: the SDK takes the timeout per
+  // request, so a default set in the harness is what keeps the next real-repo call
+  // from reintroducing the flake. An explicit `options.timeout` still wins.
+  const callTool = client.callTool.bind(client);
+  client.callTool = ((params, resultSchema?, options?) =>
+    callTool(params, resultSchema, {
+      timeout: REQUEST_TIMEOUT_MS,
+      ...options,
+    })) as typeof client.callTool;
 
   await server.connect(serverTransport);
   await client.connect(clientTransport);
