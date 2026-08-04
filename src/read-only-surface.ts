@@ -57,6 +57,14 @@ export interface WriteSurfaceEntry {
  *   - `run` / `triage` / `secrets` / `fix` / `init` — already refused inside their own modules or
  *     via the MCP guards, and they carry richer metadata there than this table can. Listing them
  *     twice would produce two audit entries for one refusal.
+ *
+ *     READ THAT EXCLUSION CAREFULLY, because it was wrong once. "Already refused inside their own
+ *     modules" is a claim about a MODULE, and a module can hold more than one write. `secrets`
+ *     refused the LOCAL secret write (`writeSecretToBackend` → `refuseWrite`) while
+ *     `secrets-propagate.ts` wrote the same secret into a third-party control plane with no
+ *     read-only check at all — measured: with elevation satisfied, `KIT_READ_ONLY=1 kit secrets
+ *     propagate ... --to vercel` reached `spawn vercel`. Fixed at `propagate()`'s own choke point.
+ *     Before excluding a command from this table, enumerate its writes, not its modules.
  */
 export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
   // Mints or rotates a signing key, or records a revocation — the worst thing to allow under a

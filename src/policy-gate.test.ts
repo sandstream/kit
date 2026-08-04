@@ -317,3 +317,114 @@ describe("enforced decisions reach the audit trail", () => {
     }
   });
 });
+
+describe("trap 4, end to end — an APPROVED op is still stopped by a live gate", () => {
+  /**
+   * The gap I flagged when the gate landed: trap 4 was asserted (`policyRefuses` returns null for
+   * an approval, and the reason says so) but never proven against a real gate. "Policy narrows and
+   * never grants" is only meaningful if something still stops an approved op.
+   *
+   * Read-only is that gate. Finding it required fixing it first: measured with `KIT_ELEVATED=1`
+   * satisfying elevation, `KIT_READ_ONLY=1 kit secrets propagate ... --to vercel` reached
+   * `spawn vercel` and failed only because the CLI is absent from this machine. Propagation writes a
+   * secret into a third-party control plane and nothing was refusing it — `read-only-surface.ts`
+   * omits `secrets` because it is "already refused inside their own modules", which was true of the
+   * LOCAL secret write and false of this one.
+   */
+  const READ_ONLY_ENV = "KIT_READ_ONLY";
+
+  async function withReadOnly<T>(fn: () => Promise<T>): Promise<T> {
+    const prev = process.env[READ_ONLY_ENV];
+    process.env[READ_ONLY_ENV] = "1";
+    try {
+      return await fn();
+    } finally {
+      if (prev === undefined) delete process.env[READ_ONLY_ENV];
+      else process.env[READ_ONLY_ENV] = prev;
+    }
+  }
+
+  it("policy approves, read-only refuses anyway — the adapter is never reached", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-policy-ro-"));
+    try {
+      // The op IS pre-approved. If policy granted anything, this would proceed.
+      const policy: PolicyConfig = { agent_writes: { vercel: ["env_set"] } };
+      assert.equal(
+        policyDecision(policy, "vercel", "env_set").state,
+        "approved",
+        "precondition: the op must be policy-approved for this test to mean anything",
+      );
+
+      const results = await withReadOnly(() =>
+        propagate("API_KEY", "s3cret", ["vercel"], { policy, cwd: dir }),
+      );
+
+      assert.equal(results[0]!.ok, false, "an approved op must still be refused under read-only");
+      assert.match(results[0]!.detail, /read-only mode active/);
+      // The discriminator: a spawn failure would say ENOENT / "exit 127". Reaching the adapter at
+      // all is the failure this test exists to catch.
+      assert.doesNotMatch(
+        results[0]!.detail,
+        /ENOENT|exit 1/,
+        "the vendor CLI must not be spawned",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the read-only refusal is audited, in the governed project", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-policy-ro-audit-"));
+    try {
+      await withReadOnly(() =>
+        propagate("API_KEY", "s3cret", ["vercel"], {
+          policy: { agent_writes: { vercel: ["env_set"] } },
+          cwd: dir,
+        }),
+      );
+      const f = join(dir, ".kit-audit.jsonl");
+      assert.equal(existsSync(f), true, "a refused write must leave a record");
+      const rows = readFileSync(f, "utf-8")
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as Record<string, unknown>);
+      const refusal = rows.find((r) => r.operation === "read-only-mode-refusal");
+      assert.ok(refusal, `expected a read-only-mode-refusal entry, got: ${JSON.stringify(rows)}`);
+      assert.equal(
+        (refusal.metadata as Record<string, unknown>).refused_operation,
+        "secrets-propagate",
+      );
+      assert.doesNotMatch(JSON.stringify(rows), /s3cret/, "the refused value must not be recorded");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("read-only refuses BEFORE the policy is consulted — the coarser lock wins", async () => {
+    // Ordering matters for the operator's mental model: under a session-wide lock-down the answer
+    // should be "read-only", not "your policy is missing an entry". So no policy-check entry.
+    const dir = mkdtempSync(join(tmpdir(), "kit-policy-ro-order-"));
+    try {
+      await withReadOnly(() =>
+        propagate("API_KEY", "s3cret", ["vercel"], {
+          policy: { agent_writes: { vercel: [] } }, // would ALSO be denied by policy
+          cwd: dir,
+        }),
+      );
+      const f = join(dir, ".kit-audit.jsonl");
+      const rows = existsSync(f)
+        ? readFileSync(f, "utf-8")
+            .split("\n")
+            .filter(Boolean)
+            .map((l) => JSON.parse(l) as Record<string, unknown>)
+        : [];
+      assert.equal(
+        rows.filter((r) => r.operation === "policy-check").length,
+        0,
+        "read-only short-circuits, so the policy gate should not also file a decision",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

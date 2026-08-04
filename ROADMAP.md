@@ -105,7 +105,7 @@ as a string — denies rather than reading as "no rule". `POLICY_OPS` is the sin
 `unknownPolicyEntries()` surfaces a typo'd `env-set` instead of leaving the operator believing it
 granted something.
 
-Proof: `src/policy-gate.test.ts`, 23 tests grouped by the five traps above; mutation-proved six
+Proof: `src/policy-gate.test.ts`, 26 tests grouped by the five traps above; mutation-proved eight
 ways — remove the wiring in `propagate` (2 fail), make an empty list permissive (5), collapse
 absent-vendor into a denial (5), stop auditing (4), audit every state including the silent ones (1),
 audit into `process.cwd()` instead of the governed project (3).
@@ -121,10 +121,21 @@ audit into `process.cwd()` instead of the governed project (3).
 2. **Ops beyond `env_set`.** Coverage is the six propagation targets. `resolve_issue`,
    `rotate_jwt` and `trigger_deploy` are documented examples with no enforcement point; each needs
    a registry row and a choke point.
-3. **Trap 4 is asserted, not proven end to end.** The tests show `policyRefuses` returns null for
-   an approval and that the reason says so out loud. What is NOT tested is a live case where an
-   approved op still gets stopped by elevation or read-only — that needs one of those gates in the
-   same probe.
+3. ~~Trap 4 is asserted, not proven end to end.~~ **Done, and it turned up a fail-open.** Proving
+   "policy narrows and never grants" needs a real gate that still stops an approved op — and the
+   obvious candidate did not stop anything. Measured: with elevation satisfied (`KIT_ELEVATED=1`),
+   `KIT_READ_ONLY=1 kit secrets propagate API_KEY --value x --to vercel` reached `spawn vercel` and
+   failed only because the CLI is absent from the probe machine. Propagation writes a secret into a
+   third-party control plane and nothing refused it.
+
+   Root cause is a reasoning error in `read-only-surface.ts`, which omits `secrets` because it is
+   "already refused inside their own modules". True of the LOCAL write
+   (`writeSecretToBackend` → `refuseWrite`), false of propagation — one path's guarantee read as the
+   module's. The exclusion comment now says so. Gated at `propagate()`'s choke point, checked once
+   (the lock is session-wide) but reported per target so the operator sees what did not happen, and
+   ordered BEFORE the policy gate so a lock-down answers "read-only" rather than "your policy is
+   missing an entry". Three tests, mutation-proved two ways (remove the gate → 3 fail; let policy
+   run first → 2 fail).
 
 ### Thread `cwd` through every check dimension — READ PATH DONE, write path remains
 `runCheckGate` resolved its `cwd` option only to load `.kit.toml`. All ten dimensions after that

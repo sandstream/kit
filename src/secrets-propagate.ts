@@ -276,6 +276,37 @@ export async function propagate(
   opts: PropagationOptions = {},
 ): Promise<PropagationResult[]> {
   const results: PropagationResult[] = [];
+
+  // READ-ONLY MODE. Propagation writes a secret into a third-party control plane, which is about
+  // as far from read-only as an operation gets — and nothing was stopping it.
+  //
+  // Measured before adding this: with elevation satisfied (`KIT_ELEVATED=1`), `KIT_READ_ONLY=1`
+  // `kit secrets propagate API_KEY --value x --to vercel` reached `spawn vercel` and failed only
+  // because the CLI is absent from the probe machine. With the CLI present it would have written.
+  //
+  // `read-only-surface.ts` deliberately omits `secrets`, on the stated grounds that it is "already
+  // refused inside their own modules". That was true of the LOCAL secret write —
+  // `writeSecretToBackend` calls `refuseWrite` — and false of this one. Propagation is a different
+  // write in the same module, and "the module handles it" was a claim about one path read as a
+  // claim about all of them.
+  //
+  // Checked once rather than per target (the lock is session-wide, not per vendor), but reported as
+  // a row per requested target so the operator sees exactly what did not happen.
+  const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) {
+    const refusal = await refuseWrite(
+      "secrets-propagate",
+      { key: name, targets },
+      { cwd: opts.cwd },
+    );
+    return targets.map((t) => ({
+      target: t,
+      ok: false,
+      detail: refusal.reason,
+      valueInArgv: false,
+    }));
+  }
+
   for (const t of targets) {
     const adapter = ADAPTERS[t];
     if (!adapter) {
