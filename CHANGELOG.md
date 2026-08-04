@@ -4,6 +4,55 @@ All notable changes to kit are documented in this file. This project adheres to 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [6.4.2] - 2026-08-04
+
+### Fixed
+
+- **The bypass banner counted commits that landed nowhere.**
+  `.kit-skipped-commits.jsonl` is append-only and the banner counted its LINES, so
+  a squash-merge — which keeps the change and discards the commit it recorded —
+  left the banner reporting a sha no ref contains, on every `kit` invocation,
+  forever. This repo's own log held three such entries. A warning that cannot go
+  down is a warning nobody reads, and this banner is the only control that makes a
+  `git commit --no-verify` visible after the fact. The count is now the entries the
+  repository still recognises: an entry is set aside only when git can DISPROVE it
+  (the object resolves and no ref contains it), while anything unverifiable — a log
+  carried between clones, an object gc'd away, a directory that is not a repository
+  — stays counted. `rev-list` is asked for `--all HEAD` rather than `--all`, so a
+  detached HEAD (mid-rebase, mid-bisect, exactly when a fresh commit has no branch
+  yet) is not read as orphaned, and set-aside entries are stated in the banner
+  rather than silently dropped. The classification rule sits behind an injected
+  probe; the tests were verified to have teeth by patching the compiled partition
+  back to the old behaviour, which killed 5 of the 10, both end-to-end CLI cases
+  among them. `docs/THREAT_MODEL.md` states the rule under Bypass detection.
+
+- **`hono` is pinned to 4.12.34 through `overrides`.**
+  `@modelcontextprotocol/sdk@1.30.0` resolved `hono` twice — directly and via
+  `@hono/node-server` (`hono: ^4`) — and both landed on 4.12.31, inside the
+  vulnerable range of GHSA-8j4g-w8fx-2239 (ReDoS in the CORS middleware). 1.30.0
+  is the latest SDK, so there was no upstream fix to wait for. An `overrides` entry
+  rather than a direct dependency, because kit never imports hono and the declared
+  runtime surface should not grow to raise a range. Note what this does and does
+  not do: it constrains kit's own tree and its gates (`npm audit` and osv-scanner
+  both clean afterwards); npm ignores a published package's `overrides`, so
+  consumers resolve `^4` themselves and currently land on a patched 4.13.x.
+
+- **The MCP test client inherited a 60s deadline it could not meet.** A full-suite
+  run failed with `MCP error -32001: Request timed out` at 60003ms, while its
+  sibling passed the same run at 59784ms — 216ms inside the same cliff. Both call
+  `kit_check` against the server's own repo, which is the point of the pair, so
+  neither can be pointed at a cheap fixture: each runs a full check that takes
+  ~25-46s alone and longer beside another test file at `--test-concurrency=2`. The
+  test client now supplies a 150s default per request, set in the harness because
+  the SDK takes the timeout per request — so the next real-repo call cannot
+  re-earn the flake — and kept under the runner's own `--test-timeout=180000` so a
+  genuine hang is still bounded. Verified in the failing direction: under load the
+  two tests fail at exactly 150000ms rather than 60000ms.
+
+- Three shared-memory entries: `overrides` over a new dependency for a
+  transitive-only advisory, proving a raised timeout by making it fail at the new
+  number, and pruning-needs-proof for append-only audit logs.
+
 ## [6.4.1] - 2026-08-04
 
 ### Fixed
