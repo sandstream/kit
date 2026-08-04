@@ -6,7 +6,7 @@
  */
 import { resolve } from "node:path";
 import { c } from "../utils/colors.js";
-import { hasFlag, flagValue } from "../utils/flags.js";
+import { hasFlag, flagValue, flagInt } from "../utils/flags.js";
 import { loadConfig } from "../config.js";
 import { KIT_FILE, resolveConfigPath } from "../cli-shared.js";
 import { checkSkills } from "../check-skills.js";
@@ -353,8 +353,10 @@ export async function cmdTeam(): Promise<boolean> {
           return false;
         }
 
-        const limitArg = args.find((a) => a.startsWith("--limit="));
-        const limit = limitArg ? parseInt(limitArg.split("=")[1]) : 50;
+        // flagInt, not a `--limit=`-only find: `kit team audit log --limit 3` printed
+        // `(limit: 50)` — the flag parsed as nothing and the default won, silently. The old
+        // form also had no NaN guard, so `--limit=abc` printed `(limit: NaN)`.
+        const limit = flagInt(args, "--limit", 50);
 
         console.log(`${c.bold}Audit Log${c.reset}  ${c.dim}(limit: ${limit})${c.reset}\n`);
         console.log(`${c.dim}No audit events available${c.reset}`);

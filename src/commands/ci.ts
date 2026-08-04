@@ -8,7 +8,7 @@
 import { resolve } from "node:path";
 import { existsSync, writeFileSync } from "node:fs";
 import { c } from "../utils/colors.js";
-import { hasFlag, envTruthy } from "../utils/flags.js";
+import { hasFlag, envTruthy, flagValue } from "../utils/flags.js";
 import { loadConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { withGovernance } from "../governance-middleware.js";
@@ -37,10 +37,12 @@ export async function cmdCi(): Promise<boolean> {
   // `kit ci --init <gitlab|bitbucket>` — emit the pipeline snippet that runs
   // `kit ci` on a non-GitHub host. Prints to stdout (copy-paste); `--write`
   // writes the file only when absent (never clobbers an existing pipeline).
-  const initIdx = args.indexOf("--init");
-  if (initIdx !== -1) {
+  // Presence is checked separately from the value: `hasFlag` compares whole tokens, so
+  // `--init=gitlab` would not register at all and the branch would be skipped silently.
+  const initPresent = args.some((a) => a === "--init" || a.startsWith("--init="));
+  if (initPresent) {
     const { pipelineSnippet, isCiHost, CI_HOSTS } = await import("../ci-init.js");
-    const host = args[initIdx + 1] ?? "";
+    const host = flagValue(args, "--init") ?? "";
     if (!isCiHost(host)) {
       console.error(`kit ci --init: host must be one of ${CI_HOSTS.join(", ")}`);
       return false;
@@ -61,9 +63,7 @@ export async function cmdCi(): Promise<boolean> {
     return true;
   }
 
-  const formatArg = args.find((a) => a.startsWith("--format="))?.split("=")[1] as
-    | CiFormat
-    | undefined;
+  const formatArg = flagValue(args, "--format") as CiFormat | undefined;
   // Scanner-health STRICT BY DEFAULT (kit's "no false green" floor): a check that
   // could not RUN (tool/token absent, crashed) is marked didNotRun and FAILS the
   // gate — a green means every check actually ran. `--lenient` / KIT_CI_LENIENT

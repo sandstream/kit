@@ -459,8 +459,9 @@ async function sendToRemoteAPI(event: AuditEvent, companyId: string): Promise<vo
 export async function logAuditEvent(
   config: Required<GovernanceConfig>,
   event: Omit<AuditEvent, "timestamp" | "agent_id" | "agent_name">,
-  companyId?: string,
+  opts: { companyId?: string; cwd?: string } = {},
 ): Promise<boolean> {
+  const { companyId, cwd } = opts;
   // Audit disabled by config → nothing to write, nothing to gate on.
   if (!config.audit.enabled) {
     return true;
@@ -493,8 +494,14 @@ export async function logAuditEvent(
   // Write to local JSONL file (hash-chained for tamper-evidence). The boolean
   // return lets fail-closed callers (e.g. destructive ops in withGovernance)
   // refuse to proceed when the local audit append fails.
+  // The GOVERNED project's directory, not the calling process's. A governed operation performed
+  // FOR another tree must file its evidence in that tree: `appendAuditEventDirect` has taken a
+  // `cwd` all along and `exec-broker/broker.ts`'s `audit()` explains why — foreign-project
+  // records pollute the host repo's chain and poison `kit broker enforce-readiness`, "whose
+  // verdict is only as honest as the evidence file it reads". A write served for B whose proof
+  // lands in A is not a write kit can stand behind. An absolute `log_file` still wins, as before.
   const logFile = config.audit.log_file || ".kit-audit.jsonl";
-  const logPath = resolve(process.cwd(), logFile);
+  const logPath = resolve(cwd ?? process.cwd(), logFile);
 
   let wroteLocal = false;
   try {

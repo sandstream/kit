@@ -294,10 +294,10 @@ async function checkMemoryInjection(): Promise<SecurityCheckResult> {
 /**
  * Run npm audit and check for high/critical vulnerabilities
  */
-async function checkNpmAudit(): Promise<SecurityCheckResult> {
+async function checkNpmAudit(root: string): Promise<SecurityCheckResult> {
   try {
     // Check if package.json exists
-    await access(resolve(process.cwd(), "package.json"));
+    await access(resolve(root, "package.json"));
   } catch {
     return {
       category: "dependency",
@@ -312,14 +312,14 @@ async function checkNpmAudit(): Promise<SecurityCheckResult> {
   // (#353). Skip honestly instead — it is not-applicable, not a failure, and those
   // repos' dependency vulnerabilities are still covered by osv-scanner. (No
   // false-green risk: OSV runs regardless.)
-  const hasNpmLock = await access(resolve(process.cwd(), "package-lock.json"))
+  const hasNpmLock = await access(resolve(root, "package-lock.json"))
     .then(() => true)
     .catch(() => false);
   if (!hasNpmLock) {
     const other = (
       await Promise.all(
         (["pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock"] as const).map((f) =>
-          access(resolve(process.cwd(), f))
+          access(resolve(root, f))
             .then(() => f)
             .catch(() => null),
         ),
@@ -393,10 +393,10 @@ async function checkNpmAudit(): Promise<SecurityCheckResult> {
 /**
  * Run pip-audit for Python dependencies
  */
-async function checkPipAudit(): Promise<SecurityCheckResult> {
+async function checkPipAudit(root: string): Promise<SecurityCheckResult> {
   try {
     // Check if requirements.txt exists
-    await access(resolve(process.cwd(), "requirements.txt"));
+    await access(resolve(root, "requirements.txt"));
   } catch {
     return {
       category: "dependency",
@@ -468,9 +468,9 @@ async function checkPipAudit(): Promise<SecurityCheckResult> {
 /**
  * Check if .env files are in .gitignore
  */
-async function checkEnvGitignored(): Promise<SecurityCheckResult> {
+async function checkEnvGitignored(root: string): Promise<SecurityCheckResult> {
   try {
-    const gitignoreContent = await readFile(resolve(process.cwd(), ".gitignore"), "utf-8");
+    const gitignoreContent = await readFile(resolve(root, ".gitignore"), "utf-8");
 
     const envPatterns = [".env", ".env.local", ".env.*.local"];
     const missingPatterns = envPatterns.filter((pattern) => !gitignoreContent.includes(pattern));
@@ -546,10 +546,10 @@ export const LOCKFILE_ECOSYSTEMS: { name: string; manifests: string[]; lockfiles
   { name: "flake.lock", manifests: ["flake.nix"], lockfiles: ["flake.lock"] },
 ];
 
-async function checkLockfilesCommitted(): Promise<SecurityCheckResult[]> {
+async function checkLockfilesCommitted(root: string): Promise<SecurityCheckResult[]> {
   const results: SecurityCheckResult[] = [];
   const present = (f: string): Promise<boolean> =>
-    access(resolve(process.cwd(), f))
+    access(resolve(root, f))
       .then(() => true)
       .catch(() => false);
 
@@ -791,14 +791,14 @@ function workspaceMemberNames(cwd: string): Set<string> {
 /**
  * Check if dependencies use pinned versions
  */
-async function checkPinnedVersions(): Promise<SecurityCheckResult> {
+async function checkPinnedVersions(root: string): Promise<SecurityCheckResult> {
   const unpinned: string[] = [];
 
   // Check package.json
   try {
-    const packageJsonContent = await readFile(resolve(process.cwd(), "package.json"), "utf-8");
+    const packageJsonContent = await readFile(resolve(root, "package.json"), "utf-8");
     const packageJson = JSON.parse(packageJsonContent);
-    const members = workspaceMemberNames(process.cwd());
+    const members = workspaceMemberNames(root);
     const isMember = (name: string) => members.has(name);
 
     unpinned.push(
@@ -811,7 +811,7 @@ async function checkPinnedVersions(): Promise<SecurityCheckResult> {
 
   // Check requirements.txt
   try {
-    const requirementsContent = await readFile(resolve(process.cwd(), "requirements.txt"), "utf-8");
+    const requirementsContent = await readFile(resolve(root, "requirements.txt"), "utf-8");
 
     for (const line of requirementsContent.split("\n")) {
       const trimmed = line.trim();
@@ -968,7 +968,7 @@ export function basicSecretScanFiles(lines: string[]): string[] {
   return [...files];
 }
 
-async function checkSecretsInCode(): Promise<SecurityCheckResult> {
+async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
   try {
     // Check if we're in a git repo
     await exec("git", ["rev-parse", "--git-dir"], { timeout: 5_000 });
@@ -995,7 +995,7 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
       // Git mode is fast and only sees what's actually in the repo's history.
       const { stdout } = await exec(
         trufflehogBin,
-        ["git", `file://${process.cwd()}`, "--json", "--no-update"],
+        ["git", `file://${root}`, "--json", "--no-update"],
         { timeout: 90_000 },
       );
 
@@ -1008,7 +1008,7 @@ async function checkSecretsInCode(): Promise<SecurityCheckResult> {
       // PostHog) are split out with truthful advice — rotating them fixes nothing.
       const readWorktreeFile = (p: string): string | null => {
         try {
-          return readFileSync(resolve(process.cwd(), p), "utf8");
+          return readFileSync(resolve(root, p), "utf8");
         } catch {
           return null;
         }
@@ -1130,7 +1130,7 @@ async function checkSocket(): Promise<SecurityCheckResult> {
  * and `verify` fetches/scans each dependency, so it's too heavy for the default
  * check. Classification (incl. fail-closed on incomplete scans) is in guarddog.ts.
  */
-async function checkGuardDog(): Promise<SecurityCheckResult> {
+async function checkGuardDog(root: string): Promise<SecurityCheckResult> {
   const base = { category: "supply-chain", name: "guarddog (malware)" } as const;
   const envEnabled = ["1", "true", "yes", "on"].includes(
     (process.env.KIT_GUARDDOG ?? "").trim().toLowerCase(),
@@ -1140,7 +1140,7 @@ async function checkGuardDog(): Promise<SecurityCheckResult> {
   let cfgEnabled = false;
   try {
     const { loadConfig } = await import("./config.js");
-    const cfg = await loadConfig(resolve(process.cwd(), ".kit.toml"));
+    const cfg = await loadConfig(resolve(root, ".kit.toml"));
     cfgEnabled = cfg.scan?.guarddog === true;
   } catch {
     // no/invalid config → env var is the only switch
@@ -1165,7 +1165,7 @@ async function checkGuardDog(): Promise<SecurityCheckResult> {
   let target: { ecosystem: string; file: string } | undefined;
   for (const c of candidates) {
     try {
-      await access(resolve(process.cwd(), c.file));
+      await access(resolve(root, c.file));
       target = c;
       break;
     } catch {
@@ -1197,7 +1197,7 @@ async function checkGuardDog(): Promise<SecurityCheckResult> {
   let depsHash: string | null = null;
   if (target.ecosystem === "npm") {
     try {
-      depsHash = depsHashFor(readFileSync(resolve(process.cwd(), target.file), "utf8"));
+      depsHash = depsHashFor(readFileSync(resolve(root, target.file), "utf8"));
     } catch {
       depsHash = null;
     }
@@ -1215,7 +1215,7 @@ async function checkGuardDog(): Promise<SecurityCheckResult> {
   const result = await execFileNoThrow(
     bin,
     [target.ecosystem, "verify", target.file, "--output-format=json"],
-    { timeout: timeoutMs },
+    { timeout: timeoutMs, cwd: root },
   );
   const verdict = classifyGuardDog(result.stdout || result.stderr);
   if (verdict.status === "pass" && depsHash) {
@@ -1229,8 +1229,8 @@ async function checkGuardDog(): Promise<SecurityCheckResult> {
  * Scan Dockerfile and filesystem for CVEs using Trivy.
  * Catches OS-level vulnerabilities that npm audit misses.
  */
-async function checkTrivy(): Promise<SecurityCheckResult> {
-  const hasDockerfile = await access(resolve(process.cwd(), "Dockerfile"))
+async function checkTrivy(root: string): Promise<SecurityCheckResult> {
+  const hasDockerfile = await access(resolve(root, "Dockerfile"))
     .then(() => true)
     .catch(() => false);
   if (!hasDockerfile) {
@@ -1261,7 +1261,7 @@ async function checkTrivy(): Promise<SecurityCheckResult> {
   const result = await execFileNoThrow(
     trivyBin,
     ["fs", ".", "--format", "json", "--severity", "HIGH,CRITICAL", "--quiet"],
-    { timeout: 120_000 },
+    { timeout: 120_000, cwd: root },
   );
 
   if (!result.ok && !result.stdout) {
@@ -1330,9 +1330,9 @@ export function parseTrivyMisconfigCount(stdout: string): number {
  * privileged containers, public buckets, missing healthchecks, …). Runs only
  * when there is IaC to scan; resolves trivy mise-first like the CVE scan.
  */
-async function checkTrivyConfig(): Promise<SecurityCheckResult> {
+async function checkTrivyConfig(root: string): Promise<SecurityCheckResult> {
   const name = "trivy config (IaC)";
-  const cwd = process.cwd();
+  const cwd = root;
   const fileMarkers = [
     "Dockerfile",
     "docker-compose.yml",
@@ -1387,7 +1387,7 @@ async function checkTrivyConfig(): Promise<SecurityCheckResult> {
   const result = await execFileNoThrow(
     trivyBin,
     ["config", ".", "--format", "json", "--severity", "HIGH,CRITICAL", "--quiet"],
-    { timeout: 120_000 },
+    { timeout: 120_000, cwd: root },
   );
   const count = parseTrivyMisconfigCount(result.stdout);
   if (count < 0) {
@@ -1495,8 +1495,8 @@ export function parseTrivyVulnCount(stdout: string): number {
  * locally, or a CI step that caches `~/.m2`). Without it trivy sees only direct
  * deps and silently under-reports, so we warn rather than pass.
  */
-async function checkMavenAudit(): Promise<SecurityCheckResult> {
-  const found = await findJvmProject(process.cwd());
+async function checkMavenAudit(root: string): Promise<SecurityCheckResult> {
+  const found = await findJvmProject(root);
   const name = `trivy fs (${found?.kind ?? "jvm"})`;
   if (!found) {
     return {
@@ -1573,7 +1573,7 @@ async function checkMavenAudit(): Promise<SecurityCheckResult> {
       "HIGH,CRITICAL",
       "--quiet",
     ],
-    { timeout: 180_000 },
+    { timeout: 180_000, cwd: root },
   );
   if (!result.ok && !result.stdout) {
     return {
@@ -1632,7 +1632,7 @@ export function parseOsvVulnCount(stdout: string): number {
  * node it's npm audit, for python pip-audit — so it skips cleanly when absent
  * rather than duplicating those. Resolves mise-first.
  */
-async function checkOsvScanner(): Promise<SecurityCheckResult> {
+async function checkOsvScanner(root: string): Promise<SecurityCheckResult> {
   const name = "osv-scanner (deps)";
   // osv covers ecosystems kit has no dedicated scanner for (go/rust/php/ruby/dart).
   // If none is present, osv legitimately does not apply → an honest skip. If one IS
@@ -1641,7 +1641,7 @@ async function checkOsvScanner(): Promise<SecurityCheckResult> {
   const osvEcosystemPresent = async (): Promise<boolean> => {
     for (const m of ["go.mod", "Cargo.lock", "composer.lock", "Gemfile.lock", "pubspec.lock"]) {
       try {
-        await access(resolve(process.cwd(), m));
+        await access(resolve(root, m));
         return true;
       } catch {
         /* not present */
@@ -1670,6 +1670,7 @@ async function checkOsvScanner(): Promise<SecurityCheckResult> {
   }
   const result = await execFileNoThrow(osvBin, ["--format", "json", "-r", "."], {
     timeout: 120_000,
+    cwd: root,
   });
   const count = parseOsvVulnCount(result.stdout);
   if (count < 0) {
@@ -1708,9 +1709,9 @@ async function checkOsvScanner(): Promise<SecurityCheckResult> {
 /**
  * Check dependency licenses for GPL/AGPL that create legal obligations.
  */
-async function checkLicenses(): Promise<SecurityCheckResult> {
+async function checkLicenses(root: string): Promise<SecurityCheckResult> {
   try {
-    await access(resolve(process.cwd(), "package.json"));
+    await access(resolve(root, "package.json"));
   } catch {
     return {
       category: "supply-chain",
@@ -1754,6 +1755,7 @@ async function checkLicenses(): Promise<SecurityCheckResult> {
   const PROBLEMATIC = ["GPL", "AGPL", "LGPL", "CPAL", "OSL", "EUPL"];
   const result = await execFileNoThrow(runner.cmd, [...runner.baseArgs, "--json", "--production"], {
     timeout: 120_000,
+    cwd: root,
   });
 
   if (!result.ok && !result.stdout) {
@@ -1806,7 +1808,7 @@ async function checkLicenses(): Promise<SecurityCheckResult> {
 /**
  * Run static analysis using Semgrep to catch security anti-patterns in source code.
  */
-async function checkSemgrep(): Promise<SecurityCheckResult> {
+async function checkSemgrep(root: string): Promise<SecurityCheckResult> {
   // Opt-in FIRST: a networked, multi-second SAST scan does not run by default.
   // Not opted in → skipping is honest (green stays "0 unreviewed").
   if (!process.env.KIT_SEMGREP_CONFIG?.trim()) {
@@ -1854,7 +1856,7 @@ async function checkSemgrep(): Promise<SecurityCheckResult> {
   const result = await execFileNoThrow(
     semgrepBin,
     buildSemgrepArgs({ mode: "json", config: semgrepCfg }),
-    { timeout: 120_000 },
+    { timeout: 120_000, cwd: root },
   );
 
   const raw = result.stdout || result.stderr;
@@ -1905,7 +1907,7 @@ async function checkSemgrep(): Promise<SecurityCheckResult> {
  *   KIT_BUMBLEBEE_BIN      use a pre-installed bumblebee instead of downloading
  *   KIT_BUMBLEBEE_CATALOG  override the exposure-catalog directory
  */
-async function checkBumblebee(): Promise<SecurityCheckResult> {
+async function checkBumblebee(root: string): Promise<SecurityCheckResult> {
   const name = "bumblebee (supply-chain)";
   const category = "supply-chain" as const;
 
@@ -1969,7 +1971,17 @@ async function checkBumblebee(): Promise<SecurityCheckResult> {
     const catalogs = describeFindings(outcome.findings);
     // F9: persist every catalog match to the local audit log so the find
     // survives the next CI run and shows up in `kit audit`.
-    await logSupplyChainFindings(outcome.findings, profile).catch(() => {});
+    // WRITE, not a read: bumblebee findings are appended to <root>/.kit-findings.jsonl. Omitting
+    // the third argument defaulted it to process.cwd(), so a check run FOR another project
+    // appended that project's supply-chain findings to the calling process's file.
+    //
+    // Why the cross-project probe could not catch it: NOT because bumblebee is absent — it is
+    // provisioned under ~/.kit/tools/bumblebee/<version>/ and does run (measured: `pass`,
+    // 36 packages, on a clean fixture). The branch is gated on `findings.length > 0`, and a
+    // freshly created temp project has no known exposures, so the write is unreachable from any
+    // fixture that is clean. Found by enumerating the write surface instead. A green probe over a
+    // clean fixture says nothing about the code paths that only a dirty one reaches.
+    await logSupplyChainFindings(outcome.findings, profile, root).catch(() => {});
     return {
       category,
       name,
@@ -2059,7 +2071,20 @@ function describeFindings(findings: BumblebeeFinding[]): string {
 /**
  * Run all security checks
  */
-export async function checkSecurity(): Promise<SecurityCheckResult[]> {
+export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]> {
+  // The GOVERNED project's root, threaded to every sub-check and to every scanner spawn.
+  //
+  // Before this, all fifteen sub-checks resolved paths from `process.cwd()` and none of the seven
+  // scanner spawns passed a `cwd`, so a caller that supplied one got a verdict about the CALLING
+  // process's tree. Measured over MCP: `kit_check({cwd: B})` from a server launched in A answered
+  // `pass — all .env patterns in .gitignore` for a project B that has no `.gitignore` at all.
+  // The config came from B; the verdict came from A. That is the worst shape a gate can fail in.
+  //
+  // Passing the path alone would not have fixed it: `trivy fs .`, `osv-scanner -r .` and
+  // `semgrep .` all resolve "." against the spawned process's cwd, so they would still have read
+  // the caller's tree while the parameter made the call look threaded. Both halves are required,
+  // and the test asserts the OUTCOME differs between two trees rather than that `cwd` was passed.
+  const root = cwd ?? process.cwd();
   const results: SecurityCheckResult[] = [];
 
   const [
@@ -2079,21 +2104,21 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
     guarddogResult,
     ...lockfileResults
   ] = await Promise.all([
-    checkNpmAudit(),
-    checkPipAudit(),
-    checkEnvGitignored(),
-    checkPinnedVersions(),
-    checkSecretsInCode(),
+    checkNpmAudit(root),
+    checkPipAudit(root),
+    checkEnvGitignored(root),
+    checkPinnedVersions(root),
+    checkSecretsInCode(root),
     checkSocket(),
-    checkTrivy(),
-    checkLicenses(),
-    checkSemgrep(),
-    checkBumblebee(),
-    checkTrivyConfig(),
-    checkOsvScanner(),
-    checkMavenAudit(),
-    checkGuardDog(),
-    ...(await checkLockfilesCommitted()),
+    checkTrivy(root),
+    checkLicenses(root),
+    checkSemgrep(root),
+    checkBumblebee(root),
+    checkTrivyConfig(root),
+    checkOsvScanner(root),
+    checkMavenAudit(root),
+    checkGuardDog(root),
+    ...(await checkLockfilesCommitted(root)),
   ]);
 
   results.push(
@@ -2132,14 +2157,14 @@ export async function checkSecurity(): Promise<SecurityCheckResult[]> {
   // Enforcement floor liveness: fail if kit was taught here but a PreToolUse gate
   // has vanished — the agent runs un-gated while kit still reads green. The floor
   // must prove it exists.
-  results.push(await checkGateLiveness());
+  results.push(await checkGateLiveness(root));
   results.push(await checkDeviceIdOverride());
 
   // Inbound integration: fold any third-party findings a partner tool emitted to
   // `.kit-scan-results.jsonl` into the verdict. No file → no-op. Can only escalate
   // (fail/warn), never green the gate — see external-findings.ts.
   const { checkExternalFindings } = await import("./external-findings.js");
-  results.push(...(await checkExternalFindings()));
+  results.push(...(await checkExternalFindings(root)));
 
   // Attach a rule citation (CWE/OWASP) to each finding whose check is mapped in
   // the local rules catalog. Deterministic lookup, no network. Unmapped checks

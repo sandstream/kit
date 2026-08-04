@@ -5,6 +5,7 @@
  * scaffolding in create-plugin.ts — this module is the argv-facing shell.
  */
 
+import { flagValue } from "./utils/flags.js";
 import {
   searchPlugins,
   listPlugins,
@@ -42,8 +43,7 @@ export async function cmdPlugin(): Promise<boolean> {
   try {
     switch (subcommand) {
       case "list": {
-        const tagIndex = args.indexOf("--tag");
-        const tag = tagIndex !== -1 ? args[tagIndex + 1] : undefined;
+        const tag = flagValue(args, "--tag");
 
         const plugins = listPlugins(tag);
         if (plugins.length === 0) {

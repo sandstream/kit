@@ -7,7 +7,7 @@
  */
 import { resolve } from "node:path";
 import { c } from "../utils/colors.js";
-import { hasFlag } from "../utils/flags.js";
+import { hasFlag, flagValue } from "../utils/flags.js";
 import { createPlugin } from "../create-plugin.js";
 import { cloneRepository } from "../clone.js";
 import { executeCommand } from "../run.js";
@@ -56,7 +56,7 @@ export async function cmdClone(): Promise<boolean> {
   const repoUrl = args[1];
   const targetDir = args[2];
   const noSetup = hasFlag(args, "--no-setup");
-  const environment = hasFlag(args, "--env") ? args[args.indexOf("--env") + 1] : "default";
+  const environment = flagValue(args, "--env") ?? "default";
 
   if (!repoUrl) {
     console.error(`${c.red}Usage: kit clone <repo-url> [directory]${c.reset}`);
@@ -154,13 +154,13 @@ export async function cmdRun(): Promise<boolean> {
     return false;
   }
 
-  // Extract environment name if provided (reserved for future use)
-  const envIndex = args.indexOf("--env");
-  if (envIndex !== -1 && envIndex < doubleDashIndex) {
-    // Environment flag parsed but not currently used in env var logic
-    // Can be extended in future to select environment-specific config
-  }
-
+  // `--env <name>` before the `--` is documented in the usage text above and does NOT select an
+  // environment: the block that used to sit here computed the flag's index, compared it against
+  // the separator, and had an empty body — "reserved for future use". Removed rather than left
+  // looking like parsing, because a documented flag whose handler is empty is the same shape as a
+  // flag that silently does nothing. Wiring it means passing the name into `executeCommand`, which
+  // is a behaviour change with its own decision to make.
+  //
   // Extract command and args after --
   const commandArgs = args.slice(doubleDashIndex + 1);
 

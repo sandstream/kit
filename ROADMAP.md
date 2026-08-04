@@ -90,11 +90,87 @@ opposite of the usual reading, and getting that wrong fails OPEN:
    survived because `checkPolicy` had unit tests proving the decision function correct while nothing
    called it. Tests over the decision function are not evidence of a working control.
 
-### Thread `cwd` through every check dimension (1d)
-`runCheckGate` resolves its `cwd` option only to load `.kit.toml`. All ten dimensions after that
+### Thread `cwd` through every check dimension — READ PATH DONE, write path remains
+`runCheckGate` resolved its `cwd` option only to load `.kit.toml`. All ten dimensions after that
 — `checkSecurity()`, `checkTools()`, `checkServices()`, `checkSecrets()`, `checkSkills()`,
 `checkHooks()`, `checkTests()`, `checkWebSearch()`, `isGitRepository()`, and their callees —
-resolve paths from `process.cwd()`.
+resolved paths from `process.cwd()`.
+
+**Done.** Every dimension that touches the filesystem now takes the governed project's `cwd`:
+`checkSecurity(cwd)` threads it to all fifteen sub-checks *and* to all seven scanner spawns —
+`trivy fs .`, `trivy config .`, `osv-scanner -r .` and `semgrep .` resolve `.` against the
+SPAWNED process, so passing the path alone would have been the exact trap this entry warns about
+below — plus `checkSecrets`, `checkHooks`, `isGitRepository`, `checkTests`, `loadBaselineForGate`,
+`checkExternalFindings` and `checkGateLiveness`. The remaining four were measured to touch no
+project path at all: `checkTools` resolves binaries on PATH, `checkSkills` reads an absolute
+homedir path, `checkServices` and `checkWebSearch` neither. Proof:
+`src/check-security-cwd.test.ts`, 8 tests, each asserting the two trees give DIFFERENT answers;
+mutation-proved three ways (ignore the argument → 3 fail; revert one sub-check → 3 fail; drop
+`cwd` from one scanner spawn → 1 fail).
+
+**The write path is done too.** `cmdFix(cwd)` resolves the config, the `.gitignore` and the
+relative `[secrets].template` against the governed project, and `lock.ts` had the asymmetry the
+wrong way round — its readers (`readSkillsLock`, `readCliLock`, `readkitMeta`) all took a `cwd`
+while its WRITERS (`writeSkillsLock`, `writeCliLock`, `writekitMeta`, `ensurekitDir`) did not, so
+a caller read its own project's locks and wrote the process's. `installHooks` / `uninstallHooks` /
+`resolveHooksDir` take it as well. Note that fixing `cmdFix` did NOT fix the MCP surface:
+`register_kit_fix` carries its own copy of the lock step (it needs structured actions, not console
+output), so it had to be threaded separately — the CLI-vs-MCP divergence this codebase has been
+bitten by before. Proof: `src/fix-cwd.test.ts`, 6 tests asserting WHERE THE BYTES LANDED in both
+trees; mutation-proved two ways (lock writers ignore `cwd` → 2 fail; `.gitignore` + template
+resolve against the process → 3 fail).
+
+**The audit destination is done too.** `withGovernance`, `runGoverned`, `logAuditEvent` and
+`refuseWrite` all take a `cwd`, so a governed operation performed for B files its proof in B's
+chain. This mattered because `exec-broker/broker.ts`'s own `audit()` docstring already explains
+the cost: foreign-project evidence pollutes the host chain and poisons
+`kit broker enforce-readiness`, "whose verdict is only as honest as the evidence file it reads". A
+write served for B whose proof lands in A is not a write kit can stand behind. `logAuditEvent`'s
+third parameter became an options bag in the process, which also makes the `companyId` the
+`[governance.audit].remote` row is blocked on reachable — reaching it is still a separate decision
+about where a company id comes from, not something to infer.
+
+**`kit_review`'s collector is measured now, and it had one real gap.** `collectReview` passes
+`opts.cwd` to all four stages, so it read as threaded — but `runDesignGate` passed that `cwd` to
+`loadBaselineForGate` and then called `checkDesign(...)` without it, and `checkDesign` resolved its
+source roots *and* every finding's display path from `process.cwd()`. The baseline came from B
+while the files scanned came from A. A parameter that reaches one collaborator and not the next is
+the same false green as no parameter at all, and reading `collectReview` alone would never show
+it. Fixed, with `src/review-cwd.test.ts` (6 tests) and mutation proof both ways. The `check`,
+`standards` and `adr` stages were already correct: all five standards runners receive the resolved
+`cwd`, and `runAdrGate` threads it to `loadAdrs`.
+
+Worth recording because it cost two false alarms: my first fixtures reported "the two trees are
+identical" for the `adr` and `standards` stages and both times the FIXTURE was wrong, not the code
+— an ADR in MADR heading style that kit's parser (YAML frontmatter with an `id`) correctly
+ignored, and a standards stage whose five rows only measure tool availability, which two temp dirs
+necessarily share. A probe that cannot tell the hypothesis from its negation is not evidence.
+
+**The refusal is LIFTED**, and only after the end-to-end probe was run rather than because the code
+read correct. A real MCP client was driven against a server whose `process.cwd()` was project A,
+with each tool called for project B: `kit_check` reported B's missing `.gitignore` as `warn` where
+it used to inherit A's `pass`; `kit_review`'s design stage described B's absent `src/`;
+`kit_fix` created B's lock files in B, filed the `"operation":"fix"` audit line in B, and left A
+with neither. The probe was run twice — once with the guard in place to confirm the baseline
+refusal, once bypassed to measure what serving actually produced.
+
+**The scanner subprocesses are proven for `semgrep`, by inference for the rest.** `semgrep .`
+resolves `.` against the spawned process, so it is the direct test: one tree trips a local rule,
+one is clean, and the verdicts must differ. It does. trivy, osv-scanner and guarddog ship as GitHub
+release binaries and cannot be fetched in this environment (the session's policy answers 403 for
+any repository outside its allowlist), so they rest on a chain of three — every `execFileNoThrow`
+in `check-security.ts` passes `cwd: root`, the option demonstrably relocates a child process, and
+semgrep demonstrably honours it end to end. Anyone with those binaries should re-run the
+cross-project probe; the semgrep test skips loudly rather than silently when the binary is absent.
+
+One write was found only by ENUMERATING the write surface, not by any probe:
+`logSupplyChainFindings` appends bumblebee findings to `<root>/.kit-findings.jsonl` and was called
+without a `cwd`. The reason no probe caught it is worth stating exactly, because the first version
+of this note got it wrong: bumblebee IS provisioned here — kit downloads it to
+`~/.kit/tools/bumblebee/<version>/` — and it does run (`pass`, 36 packages, on a clean fixture).
+The write is gated on `findings.length > 0`, and a freshly created temp project has no known
+exposures, so the branch is unreachable from any clean fixture. A green probe over a clean fixture
+says nothing about the paths only a dirty one reaches.
 
 Consequence, found with a discriminating probe over the MCP surface: `kit_check({cwd: B})` from a
 server launched in A reported `pass — all .env patterns in .gitignore` for a project B that has no
@@ -113,6 +189,18 @@ sitting in the kit repo — green only because of this bug, with one assertion c
 on repo-level security checks — test structure, not ok". They now `chdir` into the temp project.
 Any dimension that gains a `cwd` needs a test that would FAIL if the parameter were ignored; a test
 that merely passes `cwd` proves nothing, which is how this survived.
+
+**Done, same class, separate surface:** the exec-broker's unsigned-policy path had the identical
+bug, and there it was fail-OPEN rather than merely wrong-tree. `brokerPolicyPath()` resolved
+`.kit-exec-broker.json` against `process.cwd()` while `brokerExec` measured writes against
+`opts.cwd`, so a server in A mediating B ignored B's policy entirely — and since "no policy file"
+means "not configured", the write ran unmediated with full env. The seven MCP tools NOT behind
+`crossProjectRefusal` (`kit_secrets`, `kit_run`, `kit_triage`, `kit_init`, `kit_context`,
+`kit_map`, `kit_memory`) do thread `cwd` correctly into their own callees — that is why they are
+unguarded, and checking it walked back a suspected gap — but three of them route writes through
+`runBrokered`, which was the hole. Fixed with 10 two-sided tests in
+`src/exec-broker/policy-cwd.test.ts`; mutation-proved (dropping the `cwd` argument fails 6,
+replacing the foreign-tree deny with `if (false)` fails 2).
 
 ### PR 2 — `kit analyze` subcommand (1d)
 Walk git log + scan framework markers (`next.config.*`, `pyproject.toml`,

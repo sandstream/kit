@@ -23,8 +23,8 @@ Per memory `feedback_owasp_2025`, security reviews target the **2025** Top 10
 | kit control | Status |
 |---|---|
 | Token store `~/.kit/mcp-tokens.json` atomic write + mode 0o600 on create | ✅ fixed (security-review caught race window — `edb29f7`) |
-| Parent dir `~/.kit/` chmod 0o700 | ✅ shipped |
-| Secret values never echoed in error messages (`safeStatusLine()` truncation + `redactSecrets()`) | ✅ shipped |
+| Parent dir `~/.kit/` chmod 0o700 | ⚠️ **not on every path** — measured 2026-08-03: with `kit identity init` as the FIRST command the dir lands at **0755**. The files inside are 0600, so no secret is world-READABLE, but the directory is world-traversable, which matters on a shared runner. Reproduce: `HOME=$(mktemp -d) kit identity init && stat -c '%a' $HOME/.kit`. |
+| Secret values redacted in error messages (`safeStatusLine()` truncation + `redactSecrets()`) | ✅ shipped, for **26 recognised vendor shapes** (`utils/redactSecrets.ts`). It is a pattern list, not a universal filter: a Postgres/MySQL password, a self-hosted Sentry or Vault token, or an HTTP basic-auth secret matches none of them and would pass through. "Never echoed" was too strong; the truncation in `safeStatusLine()` is the backstop that does not depend on recognising the shape. |
 | TOTP secret at `~/.kit/totp-secret` chmod 0o600 | ✅ shipped (`elevation.ts:enrollTotp`) |
 | Tokens never persisted in plugin code — read from vault per-call | ✅ shipped (every sandstream-kit-plugin-* follows this pattern) |
 | TLS: every fetch uses HTTPS to vendor APIs; no custom `Agent` with `rejectUnauthorized:false` | ✅ verified in P0 audit |
@@ -40,7 +40,7 @@ Per memory `feedback_owasp_2025`, security reviews target the **2025** Top 10
 | GitHub artifact attestation cross-verification | ✅ shipped (`actions/attest-build-provenance` in publish.yml) |
 | CycloneDX + SPDX SBOM published per release | ✅ shipped |
 | GPG-signed tags required by publish.yml | ✅ shipped (T.5) |
-| `sandstream-kit-plugin-snyk` + `sandstream-kit-plugin-wiz` — read-only scanner-result ingestion | ✅ shipped (T.6) |
+| `sandstream-kit-plugin-snyk` + `sandstream-kit-plugin-wiz` — read-only scanner-result ingestion | ✅ shipped (T.6) — **and installable since 6.3.1**: both are on npm (HTTP 200, checked 2026-08-03), alongside `sandstream-kit-adapter-sdk@1.0.0`. Before that release the code existed only in this monorepo, so the control was unreachable to anyone who had not cloned it. |
 | `docs/VERIFY.md` documents the operator-side verification flow | ✅ shipped |
 
 ## A04 — Insecure Design
@@ -81,8 +81,8 @@ Per memory `feedback_owasp_2025`, security reviews target the **2025** Top 10
 | 15-minute default elevation TTL; one-shot scopes for jwt-secret-roll / purge-history / onecli-register | ✅ shipped |
 | `KIT_ELEVATED=1` CI escape hatch emits loud stderr warning + audit event | ✅ shipped |
 | `KIT_PROD_OK=1` warning at the read site (not the consumer site) | ✅ shipped (P0.2) |
-| `KIT_NON_INTERACTIVE=1` emits one-time stderr warning + audit | ✅ shipped (P1.8) |
-| MCP token store separate from raw vault — short-lived bearer not long-term refresh | ✅ shipped (P1.2) |
+| `KIT_NON_INTERACTIVE=1` emits one-time stderr warning + audit | ⚠️ **TTY-conditional, so silent in the case it exists for** — `environment.ts:137,142` guard the warning with `if (process.stdout.isTTY)`. A CI job or agent harness that sets the flag and captures stdout gets no warning and no audit event; only a human at a terminal sees it. Backwards from the intent. |
+| MCP token store separate from raw vault — bearer with vendor-supplied expiry, not a refresh token | ✅ shipped (P1.2), with the limit named: `McpToken.expiresAt` is **optional and best-effort** (`mcp-orchestrator.ts:41`). When the vendor supplies it, kit honours it and `kit mcp status` reports `expired … — re-authorize` (lines 130-138). When the vendor does not, the stored bearer has no lifetime and kit neither mints nor enforces one. "Short-lived" describes the intended token class, not a property kit guarantees. |
 
 ## A08 — Software & Data Integrity Failures
 
@@ -92,7 +92,7 @@ Per memory `feedback_owasp_2025`, security reviews target the **2025** Top 10
 | Signed git tags required to publish | ✅ shipped (T.5) |
 | Pre-commit hook sentinel + post-commit detector log `--no-verify` skips | ✅ shipped (P0.4) |
 | `kit security verify-pull` post-merge audit: new deps, gitignore drops, introduced secrets | ✅ shipped |
-| Audit-log atomic write (tmp + rename) prevents half-written entries | ✅ shipped |
+| Audit-log atomic write (tmp + rename) | ⚠️ **describes the remote QUEUE, not the log** — `audit.ts:436` does tmp+rename for the retry queue; the log line itself is a plain `appendFile` (`audit.ts:93`). A single small append under O_APPEND does not interleave in practice, but two concurrent kit processes can still both read the same tail hash, and "tmp + rename" is not what protects the log. |
 | Vercel `upsertEnvVar` atomic (PATCH fast-path; create-then-delete fallback) | ✅ shipped (P2.4 earlier) |
 
 ## A09 — Security Logging & Monitoring Failures
@@ -101,11 +101,11 @@ Per memory `feedback_owasp_2025`, security reviews target the **2025** Top 10
 |---|---|
 | `.kit-audit.jsonl` append-only; every destructive op logged | ✅ shipped |
 | `.kit-skipped-commits.jsonl` records `git commit --no-verify` events | ✅ shipped |
-| `.kit-scan-results.jsonl` consolidates Bumblebee + Snyk + Wiz findings | ✅ shipped (T.6) |
+| `.kit-scan-results.jsonl` INGESTION contract — kit reads external findings into the verdict | ✅ shipped (`external-findings.ts`: "a tool appends one JSON object per line"; `check-security.ts:2139` folds it in, can only escalate). The Snyk and Wiz plugins emit it. **Nothing in kit writes Bumblebee findings there** — that half was a claim about a producer kit does not control. |
 | `appendAuditEventDirect` fail-closed (caller refuses if audit-log write fails) | ✅ shipped |
-| `[governance.audit].remote = true` opt-in for centralized log shipping with retry-queue | ✅ shipped |
+| `[governance.audit].remote = true` opt-in for centralized log shipping with retry-queue | ⚠️ **the transport exists; nothing reaches it** — `logAuditEvent` guards the remote branch with `if (companyId && …)` and `companyId` is an OPTIONAL third argument that **all 11 production callers omit** (governance-middleware ×7, doctor, memory, broker, gate). So setting the flag ships nothing, in either direction. The POST path, retry queue and tmp+rename parking are implemented and unreachable. Verify: `grep -rn 'logAuditEvent(' src --include=*.ts \| grep -v test`. |
 | Sentry integration (`sandstream-kit-plugin-sentry`) for issue triage + release tagging | ✅ shipped (P1.1) |
-| Cost-monitor anomaly detection with rolling baseline (EMA) | ✅ shipped (P3.1) |
+| Cost-monitor anomaly detection with rolling baseline (EMA) | ⚠️ **algorithm only, not wired** — `detectCostAnomalies` (cost-monitor.ts) has **0 callers** outside its own tests, and no command produces `.kit-cost-baseline.json`. Verify: `grep -rn detectCostAnomalies src --include=*.ts \| grep -v test \| grep -v cost-monitor.ts`. |
 
 ## A10 — Exceptional Conditions (NEW in 2025)
 

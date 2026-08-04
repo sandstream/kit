@@ -27,13 +27,11 @@ export async function cmdAuth(): Promise<boolean> {
 async function cmdAuthSetupTotp(): Promise<boolean> {
   // kit auth setup-totp [--issuer <name>] [--account <user@host>] [--overwrite]
   const args = process.argv.slice(4);
-  const issuerIdx = args.indexOf("--issuer");
-  const accountIdx = args.indexOf("--account");
   const overwrite = hasFlag(args, "--overwrite");
 
-  const issuer = issuerIdx >= 0 ? args[issuerIdx + 1] : "kit";
+  const issuer = flagValue(args, "--issuer") ?? "kit";
   const defaultAccount = `${process.env.USER ?? "user"}@${process.env.HOSTNAME ?? "host"}`;
-  const accountName = accountIdx >= 0 ? args[accountIdx + 1] : defaultAccount;
+  const accountName = flagValue(args, "--account") ?? defaultAccount;
 
   console.log(`${c.bold}${c.cyan}kit auth setup-totp${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);

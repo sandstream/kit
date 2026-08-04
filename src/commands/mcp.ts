@@ -3,7 +3,7 @@ import { startMcpServer } from "../mcp-server.js";
 import { loadConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { c } from "../utils/colors.js";
-import { hasFlag } from "../utils/flags.js";
+import { hasFlag, flagValue } from "../utils/flags.js";
 
 export async function cmdMcp(): Promise<boolean> {
   const sub = process.argv[3];
@@ -84,10 +84,10 @@ export async function cmdMcp(): Promise<boolean> {
       return false;
     }
     const args = process.argv.slice(5);
-    const fromEnvIdx = args.indexOf("--from-env");
+    const fromEnv = flagValue(args, "--from-env");
     let accessToken: string | undefined;
-    if (fromEnvIdx >= 0 && args[fromEnvIdx + 1]) {
-      const envVar = args[fromEnvIdx + 1];
+    if (fromEnv) {
+      const envVar = fromEnv;
       accessToken = process.env[envVar];
       if (!accessToken) {
         console.error(`${c.red}Env var ${envVar} is empty${c.reset}`);

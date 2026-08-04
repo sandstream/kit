@@ -323,18 +323,56 @@ jobs:
           printf 'source:\n  name: %s\n  version: %s\n' "$PKG_NAME" "$VERSION" > .syft.yaml
           cat .syft.yaml
 
-      - name: Generate GitHub artifact attestation
-        # Independent of npm provenance — attaches a signed manifest of the
-        # built dist/ tree to the GitHub release for cross-verification.
-        # timeout-minutes guards against Sigstore (Fulcio/Rekor) hangs, which
-        # once left this step running ~15min; npm publish already succeeded by
-        # here, so a slow attestation must fail fast (continue-on-error) not block.
+      - name: Pack the tarball to attest
+        # ONE subject, and the one that matters: the tarball a consumer actually installs.
+        # `subject-path: dist/**/*` passed 1920 subjects and the action's hard limit is 1024, so
+        # for every release it errored in 327ms with "Too many subjects specified (>1024)" — and
+        # `continue-on-error` turned that into a green step. docs/VERIFY.md step 2 promised a
+        # signed manifest attached to the release; nothing was ever attached, and
+        # `gh attestation verify` would have found no attestation at all. Packing first also makes
+        # the subject digest identical to what npm published, so the GitHub attestation and the
+        # npm provenance describe the same bytes instead of two different views of the build.
         if: always()
+        id: pack
+        run: |
+          set -euo pipefail
+          TARBALL="$(npm pack --silent)"
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+          sha256sum "$TARBALL"
+
+      - name: Generate GitHub artifact attestation
+        # Independent of npm provenance — attaches a signed provenance statement for the published
+        # tarball to this repo's attestation store, verifiable with:
+        #   gh attestation verify <tarball> --repo sandstream/kit
+        # timeout-minutes guards against Sigstore (Fulcio/Rekor) hangs, which once left this step
+        # running ~15min; npm publish already succeeded by here, so a slow attestation must fail
+        # fast (continue-on-error) not block.
+        if: always()
+        id: attest
         timeout-minutes: 5
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         continue-on-error: true # kit-self-audit: allow-continue-on-error
         with:
-          subject-path: "dist/**/*"
+          subject-path: ${{ steps.pack.outputs.tarball }}
+
+      - name: Report the attestation outcome loudly
+        # `continue-on-error` is deliberate — a Sigstore hang must not strand a release whose npm
+        # publish already succeeded. But it also reports the step's conclusion as SUCCESS to the
+        # jobs API while the log says failure, which is how a broken attestation survived every
+        # release unnoticed. This step cannot block; it exists so the failure is impossible to
+        # read as green: an annotation on the run and a line in the job summary.
+        if: always()
+        env:
+          OUTCOME: ${{ steps.attest.outcome }}
+        run: |
+          if [ "$OUTCOME" = "success" ]; then
+            echo "✅ GitHub artifact attestation created for ${{ steps.pack.outputs.tarball }}" \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning title=No GitHub artifact attestation::the attest step did not succeed (outcome=$OUTCOME); this release has npm provenance but NO GitHub attestation — 'gh attestation verify' will find nothing"
+            echo "⚠️ **No GitHub artifact attestation** for this release (attest outcome: \`$OUTCOME\`). npm provenance is unaffected; \`gh attestation verify\` will find nothing." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Generate SBOM (CycloneDX)
         # CycloneDX SBOM is required by EU CRA and US EO 14028 for shipped

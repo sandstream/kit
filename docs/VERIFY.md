@@ -9,11 +9,13 @@ production-adjacent workflow. Every step is reproducible from public data.
 When `v<N>.<N>.<N>` is tagged on `main`:
 
 1. **npm tarball** — published to `npmjs.com/package/sandstream-kit` with
-   `npm publish --provenance`. SLSA Level 3 build provenance attestation is
+   `npm publish --provenance`. A SLSA build-provenance attestation is
    automatically generated, signed by the GitHub Actions OIDC identity, and
    uploaded to Sigstore's public transparency log.
-2. **GitHub artifact attestation** — independent of npm provenance, attaches
-   a signed manifest of the built `dist/` tree to the GitHub release.
+2. **GitHub artifact attestation** — independent of npm provenance, attaches a
+   signed provenance statement for the published tarball to this repo's
+   attestation store. **Not present on releases up to and including 6.3.1** —
+   see the note below before relying on it.
 3. **CycloneDX SBOM** (`sbom.cyclonedx.json`) — full dependency-tree
    inventory in the format US EO 14028 / EU CRA expect.
 4. **SPDX SBOM** (`sbom.spdx.json`) — same, in the SPDX 2.3 format some
@@ -56,6 +58,25 @@ gh attestation verify \
 step in `.github/workflows/publish.yml`. If the binary's hash differs from
 what the workflow built, the command fails.
 
+> **This returns "no attestations found" for every release up to and including
+> 6.3.1, and that is our bug, not a tampering signal.** The step passed
+> `subject-path: dist/**/*` — 1920 files against the action's hard limit of 1024 —
+> so it errored in 327ms with `Too many subjects specified (>1024)` on every
+> release. `continue-on-error: true` (there to stop a Sigstore hang from
+> stranding an already-published release) then reported the step as SUCCESS to
+> the jobs API while the log said failure, so nothing surfaced it. Measured in
+> run `30804371457`, step 20.
+>
+> Fixed for the next release: the step now attests the packed tarball — one
+> subject, and the same bytes npm published — and a following step annotates the
+> run and the job summary whenever the attestation did not happen, so a
+> swallowed failure can no longer read as green.
+>
+> Until then, verify 6.3.1 with the **npm provenance** above (that one is real:
+> its attestation carries a `slsa.dev/provenance/v1` statement with the GitHub
+> Actions workflow buildType) plus the **signed git tag**. Two independent
+> checks, not three.
+
 ### Verify the signed git tag
 
 ```bash
@@ -96,13 +117,27 @@ artifact you scan against.
 | Verification | Catches |
 |---|---|
 | `npm audit signatures` | Tarball tampering after publish; registry compromise |
-| `gh attestation verify` | Cross-checks against the GitHub build — catches divergence between npm-side and source-of-truth |
+| `gh attestation verify` | Cross-checks against the GitHub build — catches divergence between npm-side and source-of-truth. **Nothing to check on ≤6.3.1** (see the note above) |
 | `git tag -v` | Tag-rewrite attacks; ensures the commit you check out is what the maintainer published |
 | SBOM scan | Known-vulnerable transitive deps; license-policy violations |
 
-All four together = SLSA Level 3 supply-chain guarantee. The build is
-reproducible from source, the build platform is signed, and the artifact is
-attested at multiple independent points.
+What these four do NOT add up to is a SLSA level. SLSA levels are defined on the
+build/provenance track: L3 asks for a hardened build platform producing
+non-falsifiable provenance, which `npm publish --provenance` from a GitHub-hosted
+runner does supply — verified for 6.3.1, whose npm attestation carries a
+`slsa.dev/provenance/v1` statement with the GitHub Actions workflow buildType. The
+other three rows are CONSUMER-side verifications. They are worth running, and they
+do not raise a level.
+
+And this paragraph previously claimed "the build is reproducible from source". It is
+not, and SLSA does not ask for it at any level (reproducible builds are explicitly out
+of scope in SLSA v1.0). kit has no reproducible-build proof — no build-timestamp
+normalisation, no rebuild-and-compare in CI. Do not cite kit as reproducible.
+
+Honest summary of what the four buy you: the artifact you install is the one that was
+published (signatures), it was built by this repo's workflow from a signed tag
+(provenance + `git tag -v`), and its dependency tree is enumerated for scanning (SBOM).
+That is a strong chain. It is not a reproducibility claim and not a certified level.
 
 ## What kit explicitly does NOT do
 
@@ -120,20 +155,29 @@ For organizations that pin kit in CI:
 
 ```yaml
 # .github/workflows/kit-pin.yml
-- name: Verify kit attestation
+- name: Verify kit before installing
   env:
     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   run: |
-    npm pack sandstream-kit@$KIT_VERSION
+    set -euo pipefail
+    npm pack "sandstream-kit@$KIT_VERSION"
+    # Gate 1 — npm provenance. Present on every release; blocking.
+    npm audit signatures
+    # Gate 2 — GitHub attestation. Absent on <=6.3.1 (see the note above), so it
+    # ADVISES rather than blocks; make it blocking once you pin a later version.
     gh attestation verify \
       --owner sandstream \
       --repo kit \
-      sandstream-kit-$KIT_VERSION.tgz
-    npm install -g ./sandstream-kit-$KIT_VERSION.tgz
+      "sandstream-kit-$KIT_VERSION.tgz" \
+      || echo "::warning::no GitHub attestation for $KIT_VERSION — npm provenance still verified above"
+    npm install -g "./sandstream-kit-$KIT_VERSION.tgz"
 ```
 
-This ensures the CI runner only installs versions that pass attestation
-verification — refusing tarballs that don't match the published build.
+The npm-provenance gate is the blocking one: the runner installs only a tarball
+whose signature matches the published build. The attestation gate is written
+non-blocking on purpose — pointing a hard gate at something kit did not ship
+until after 6.3.1 would fail every pinned build for a reason that has nothing to
+do with the artifact. Flip the `||` away once your pinned version has one.
 
 ## Reporting verification problems
 

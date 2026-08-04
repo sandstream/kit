@@ -31,11 +31,11 @@ export interface FixResult {
  *
  * Extracted from cli.ts (codebase-review follow-up).
  */
-export async function cmdFix(): Promise<boolean> {
+export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit fix${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
-  const config = await loadConfig(resolve(process.cwd(), ".kit.toml"));
+  const config = await loadConfig(resolve(cwd, ".kit.toml"));
 
   let fixedCount = 0;
   let manualCount = 0;
@@ -63,7 +63,7 @@ export async function cmdFix(): Promise<boolean> {
       // installHooks). withGovernance never consults read-only, so guard here.
       const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
       if (isReadOnlyMode()) {
-        const refusal = await refuseWrite("fix");
+        const refusal = await refuseWrite("fix", {}, { cwd });
         console.log(`  ${c.yellow}!${c.reset} ${refusal.reason}`);
         return false;
       }
@@ -102,8 +102,8 @@ export async function cmdFix(): Promise<boolean> {
 
       // 2. Check and fix missing lock files
       console.log(`${c.bold}[2/6] Lock Files${c.reset}`);
-      const skillsLock = await readSkillsLock();
-      const cliLock = await readCliLock();
+      const skillsLock = await readSkillsLock(cwd);
+      const cliLock = await readCliLock(cwd);
 
       if (!skillsLock || !cliLock) {
         console.log(`${c.dim}Generating missing lock files...${c.reset}\n`);
@@ -118,10 +118,11 @@ export async function cmdFix(): Promise<boolean> {
             Object.assign(skills, config.skills.optional);
           }
 
-          const kitMeta = await readkitMeta();
+          const kitMeta = await readkitMeta(cwd);
           await updateSkillsLock(
             skills,
             kitMeta?.name ? `${kitMeta.name}@${kitMeta.version}` : undefined,
+            cwd,
           );
           console.log(`  ${c.green}✓${c.reset} Generated skills-lock.json`);
           fixedCount++;
@@ -139,7 +140,7 @@ export async function cmdFix(): Promise<boolean> {
             }
           }
 
-          await updateCliLock(tools);
+          await updateCliLock(tools, cwd);
           console.log(`  ${c.green}✓${c.reset} Generated cli-lock.json`);
           fixedCount++;
         }
@@ -181,7 +182,12 @@ export async function cmdFix(): Promise<boolean> {
 
       // 4. Generate .env.template if secrets keys configured but template missing
       console.log(`${c.bold}[4/6] Secrets Template${c.reset}`);
-      const templatePath = config.secrets?.template;
+      // `template` is a repo-relative path in .kit.toml, so both the existence probe and the
+      // write must resolve against the GOVERNED project. Bare `access(templatePath)` /
+      // `writeFile(templatePath)` resolved against the calling process, which is how a fix asked
+      // to repair B could report A's template as present — or create B's template inside A.
+      const templateRel = config.secrets?.template;
+      const templatePath = templateRel ? resolve(cwd, templateRel) : undefined;
       if (templatePath && config.secrets?.keys && Object.keys(config.secrets.keys).length > 0) {
         let templateExists: boolean;
         try {
@@ -223,7 +229,7 @@ export async function cmdFix(): Promise<boolean> {
       //    are ignored. Idempotent: only appends what's missing.
       console.log(`${c.bold}[5/6] .gitignore${c.reset}`);
       try {
-        const gitignorePath = resolve(process.cwd(), ".gitignore");
+        const gitignorePath = resolve(cwd, ".gitignore");
         let current = "";
         try {
           current = await readFile(gitignorePath, "utf-8");
@@ -272,7 +278,7 @@ export async function cmdFix(): Promise<boolean> {
       console.log(`${c.bold}[6/6] Git Hooks${c.reset}`);
       if (config.hooks && Object.keys(config.hooks).length > 0) {
         try {
-          const hookResults = await installHooks(config.hooks);
+          const hookResults = await installHooks(config.hooks, ".git", cwd);
           const installed = hookResults.filter((r) => r.action === "installed");
           const updated = hookResults.filter((r) => r.action === "updated");
           const failed = hookResults.filter((r) => r.action === "failed");
@@ -334,5 +340,7 @@ export async function cmdFix(): Promise<boolean> {
       console.log();
       return manualCount === 0;
     },
+    // Audit the fix in the tree being fixed, not in whatever directory the process sits in.
+    { cwd },
   );
 }

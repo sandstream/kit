@@ -8,7 +8,7 @@ import { resolve, dirname } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { c } from "../utils/colors.js";
-import { hasFlag } from "../utils/flags.js";
+import { hasFlag, flagValue } from "../utils/flags.js";
 import { loadConfig, type kitConfig } from "../config.js";
 import { resolveConfigPath, buildHealthCtx } from "../cli-shared.js";
 import type { SentinelSummary } from "../sentinel.js";
@@ -117,8 +117,7 @@ async function cmdSentinelInstall(): Promise<boolean> {
     process.exitCode = 1;
     return false;
   }
-  const si = process.argv.indexOf("--schedule");
-  const schedule = si >= 0 ? process.argv[si + 1] : undefined;
+  const schedule = flagValue(process.argv, "--schedule");
   await mkdir(dirname(dest), { recursive: true });
   writeFileSync(dest, schedule ? sentinelWorkflow(schedule) : sentinelWorkflow());
   console.log(`${c.green}✓${c.reset} wrote .github/workflows/kit-sentinel.yml`);

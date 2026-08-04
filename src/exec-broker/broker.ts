@@ -23,7 +23,8 @@
 //
 // Zero LLM, zero network. Deterministic + offline.
 
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import { checkFsWriteRealpath } from "./realpath-check.js";
 import type { OperationContext } from "../governance-middleware.js";
 import { appendAuditEventDirect } from "../audit.js";
@@ -277,14 +278,36 @@ function collectDenials(context: BrokerContext, policy: BrokerPolicy): string[] 
  *        unchanged (deliberate — see `pillar3-mcp-runtime-adoption-5.0.md` §5 step 1). This is NOT
  *        the false-green of a JSON policy waving an undeclared op through: that path stays
  *        fail-closed below.
- *   2. Else the unsigned `.kit-exec-broker.json` (nor `KIT_EXEC_BROKER_POLICY`):
- *      - absent → run UNMEDIATED (the original opt-in switch — a fresh install is never gated);
+ *   2. Else the unsigned `.kit-exec-broker.json` (nor `KIT_EXEC_BROKER_POLICY`), resolved under
+ *      the GOVERNED project's `opts.cwd` — not `process.cwd()`:
+ *      - absent → run UNMEDIATED (the original opt-in switch — a fresh install is never gated),
+ *        EXCEPT when `cwd` names a foreign tree and this process is itself brokered, where
+ *        absence is unknown rather than opt-out → default-DENY;
  *      - present but malformed → `loadBrokerPolicy` returns null → `brokerExec` default-DENIES;
  *      - present + valid → full `brokerExec` mediation.
  *
  * This is the drop-in every call site adopts to become broker-aware without changing behavior for
  * users who haven't opted in to EITHER source.
  */
+/**
+ * Is `cwd` a tree other than the one this process runs in? Compares REAL paths, because on
+ * macOS `/tmp` and `/var` are symlinks into `/private`: a lexical compare would call the SAME
+ * directory foreign and start default-denying ordinary same-project calls. An unresolvable
+ * path falls back to the lexical form, and `undefined` is never foreign — omitting `cwd` is
+ * how every existing caller behaves, and must stay a no-op.
+ */
+function foreignCwd(cwd: string | undefined): boolean {
+  if (cwd === undefined) return false;
+  const real = (p: string): string => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  return real(cwd) !== real(process.cwd());
+}
+
 export async function runBrokered<T>(
   context: BrokerContext,
   run: (scopedEnv: Record<string, string>) => Promise<T>,
@@ -316,7 +339,30 @@ export async function runBrokered<T>(
   }
 
   // 2. Unsigned JSON policy (original opt-in via file presence).
-  if (!existsSync(brokerPolicyPath(opts.policyOverride))) {
+  //    Both the presence probe and the load resolve against the GOVERNED project's cwd —
+  //    the same directory `brokerExec` measures fs writes against and `audit` files
+  //    evidence under. Reading the file from one tree while judging another is how a
+  //    caller with a policy got mediated by a caller without one.
+  if (!existsSync(brokerPolicyPath(opts.policyOverride, opts.cwd))) {
+    // Absence means "not configured" — but that is only a safe inference about the tree
+    // this PROCESS lives in. If the process itself is brokered and we are being asked to
+    // mediate a DIFFERENT tree that has no policy, absence is unknown, not permission:
+    // default-deny instead of passing through. Without this the cwd fix above would be a
+    // net loosening in one direction — before it, a server launched in a brokered A had
+    // A's policy (wrongly) applied to B, which denied a cross-project write for the wrong
+    // reason. Same outcome now, honest reason. An unbrokered process is unaffected: no
+    // policy at process.cwd() → passthrough, exactly as before.
+    if (foreignCwd(opts.cwd) && existsSync(brokerPolicyPath(opts.policyOverride))) {
+      return brokerExec(
+        context,
+        null,
+        run,
+        opts.cwd,
+        `no .kit-exec-broker.json in the governed project "${resolve(opts.cwd!)}" while this process ` +
+          `("${process.cwd()}") is itself brokered — refusing to treat a foreign tree's missing policy ` +
+          `as an opt-out, and refusing to judge it by this tree's policy`,
+      );
+    }
     // Not configured → unmediated passthrough (full env, no scoping).
     try {
       return { ok: true, result: await run(scopeEnv(Object.keys(process.env), process.env)) };
@@ -324,7 +370,7 @@ export async function runBrokered<T>(
       return { ok: false, reason: err instanceof Error ? err.message : String(err) };
     }
   }
-  return brokerExec(context, loadBrokerPolicy(opts.policyOverride), run, opts.cwd);
+  return brokerExec(context, loadBrokerPolicy(opts.policyOverride, opts.cwd), run, opts.cwd);
 }
 
 /**

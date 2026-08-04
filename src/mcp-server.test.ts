@@ -1,6 +1,7 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm, mkdir, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -715,48 +716,111 @@ describe("kit_init", () => {
 
 // ─── kit_map ───────────────────────────────────────────────────────────────
 /**
- * A cross-project `cwd` used to be answered rather than refused.
+ * A cross-project `cwd` is SERVED now. It used to be answered wrongly, then refused, and these
+ * tests are what changed the third time.
  *
- * The probe that found it: give project A a complete `.gitignore` and project B none, launch the
- * server in A, then call `kit_check({cwd: B})`. It replied
+ * The probe that found the original defect: give project A a complete `.gitignore` and project B
+ * none, launch the server in A, then call `kit_check({cwd: B})`. It replied
  * `pass — all .env patterns in .gitignore` about a project with no .gitignore at all — a security
- * pass earned by the wrong tree. `runCheckGate` resolves `cwd` only to load `.kit.toml`; every
- * dimension after that (`checkSecurity()`, `checkHooks()`, `checkTests()`, `isGitRepository()`)
- * resolves from `process.cwd()`.
+ * pass earned by the wrong tree. `kit_fix` was worse: it created B's lock files inside A. A
+ * refusal guard stood in for the fix while `cwd` was threaded through the dimensions, the lock
+ * writers, the design scan and the audit destination.
  *
- * Until cwd is threaded through all ten dimensions, the tools fail CLOSED. These tests pin both
- * halves: the mismatch is refused, and the two forms that were always correct still work.
+ * These tests are the ones that justify removing that guard, so they are written to fail if any of
+ * it regresses: the server's `process.cwd()` is the kit repo, `other` is a temp project, and each
+ * assertion is about `other`'s contents specifically — not merely that a call succeeded. A build
+ * that reverted any part of the threading answers about the kit repo instead and fails here.
  */
-describe("process-scoped tools refuse a cross-project cwd", () => {
+describe("process-scoped tools serve a cross-project cwd", () => {
   let other: string;
 
   before(async () => {
     other = await mkdtemp(join(tmpdir(), "kit-mcp-other-"));
     await writeFile(join(other, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
+    // Deliberately NO .gitignore: the kit repo the server runs in has a complete one, so this is
+    // the discriminating fixture. "warn" here means the answer came from `other`; "pass" would
+    // mean it came from the server's own tree.
   });
 
   after(async () => {
     await rm(other, { recursive: true, force: true });
   });
 
-  for (const tool of ["kit_check", "kit_review", "kit_fix"]) {
-    it(`${tool} refuses a cwd that is not the server's own`, async () => {
-      const { client, cleanup } = await createTestClient();
-      try {
-        const result = await client.callTool({ name: tool, arguments: { cwd: other } });
-        assert.equal(result.isError, true, `${tool} must report an error`);
-        const data = parseResult(result) as { ok: boolean; error: string; fix: string };
-        assert.equal(data.ok, false);
-        assert.match(data.error, new RegExp(tool));
-        // The message must name BOTH directories — an operator cannot act on "wrong cwd".
-        assert.ok(data.error.includes(other), "names the requested cwd");
-        assert.ok(data.error.includes(process.cwd()), "names the server's cwd");
-        assert.match(data.fix, /omit cwd|kit check/);
-      } finally {
-        await cleanup();
-      }
-    });
-  }
+  it("kit_check reports the REQUESTED project's gitignore state, not the server's", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({ name: "kit_check", arguments: { cwd: other } });
+      assert.notEqual(result.isError, true, "a cross-project check is served, not refused");
+      const data = parseResult(result) as {
+        security?: { name: string; status: string; detail?: string }[];
+      };
+      const row = (data.security ?? []).find((c) => c.name.includes("gitignore"));
+      assert.ok(row, "the security dimension must report a gitignore row");
+      assert.notEqual(
+        row.status,
+        "pass",
+        `a project with no .gitignore must not get the server repo's pass (got ${row.status}: ${row.detail})`,
+      );
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("kit_review's design stage describes the requested project", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_review",
+        arguments: { cwd: other, stages: ["design"] },
+      });
+      assert.notEqual(result.isError, true);
+      const data = parseResult(result) as {
+        stages: { stage: string; findings: { detail?: string }[] }[];
+      };
+      const design = data.stages.find((s) => s.stage === "design");
+      assert.ok(design, "the design stage must be present");
+      // The kit repo has hundreds of components; `other` has no src/ at all. Reporting the repo's
+      // findings for `other` is the exact false green the guard was standing in for.
+      const text = JSON.stringify(design.findings);
+      assert.doesNotMatch(
+        text,
+        /\.tsx|\.jsx/,
+        `a project with no components must not be described by the server repo's files: ${text}`,
+      );
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("kit_fix writes into the requested project and leaves the server's tree alone", async () => {
+    const { client, cleanup } = await createTestClient();
+    const serverLock = join(process.cwd(), ".kit", "skills-lock.json");
+    const serverLockBefore = existsSync(serverLock)
+      ? await readFile(serverLock, "utf-8")
+      : undefined;
+    try {
+      const result = await client.callTool({ name: "kit_fix", arguments: { cwd: other } });
+      assert.notEqual(result.isError, true);
+
+      assert.equal(
+        existsSync(join(other, ".kit", "skills-lock.json")),
+        true,
+        "the requested project must receive its lock files",
+      );
+      // The negative half, and the one that matters: this test runs inside the kit repo, so a
+      // regression would rewrite the repo's OWN lock file. Compare content, not just presence.
+      const serverLockAfter = existsSync(serverLock)
+        ? await readFile(serverLock, "utf-8")
+        : undefined;
+      assert.equal(
+        serverLockAfter,
+        serverLockBefore,
+        "the server's own lock file must be untouched by a fix aimed elsewhere",
+      );
+    } finally {
+      await cleanup();
+    }
+  });
 
   it("an ABSENT cwd is still fine — the common case must not regress", async () => {
     const { client, cleanup } = await createTestClient();
@@ -764,7 +828,7 @@ describe("process-scoped tools refuse a cross-project cwd", () => {
       const result = await client.callTool({ name: "kit_check", arguments: {} });
       assert.notEqual(result.isError, true);
       const data = parseResult(result) as { dimensions: Record<string, boolean> };
-      assert.ok(data.dimensions, "a real verdict, not a refusal");
+      assert.ok(data.dimensions, "a real verdict");
     } finally {
       await cleanup();
     }
@@ -773,8 +837,9 @@ describe("process-scoped tools refuse a cross-project cwd", () => {
   it("a cwd EQUAL to the server's is fine, including a non-normalised spelling", async () => {
     const { client, cleanup } = await createTestClient();
     try {
-      // `<cwd>/.` resolves to the same directory — the guard compares resolved paths, not strings,
-      // so a client that appends a separator or a "." is not punished for spelling.
+      // `<cwd>/.` resolves to the same directory. This was a guard-era regression test (a lexical
+      // compare refused the same directory spelled differently); it is kept because the spelling
+      // must still resolve correctly now that it is threaded rather than compared.
       const result = await client.callTool({
         name: "kit_check",
         arguments: { cwd: join(process.cwd(), ".") },

@@ -12,7 +12,7 @@
  */
 import { createInterface } from "node:readline/promises";
 import { c } from "../utils/colors.js";
-import { hasFlag } from "../utils/flags.js";
+import { hasFlag, flagValue } from "../utils/flags.js";
 import { loadConfig, type kitConfig, type SecretKeyConfig } from "../config.js";
 import { KIT_FILE, resolveConfigPath } from "../cli-shared.js";
 import { isNonInteractive } from "../environment.js";
@@ -315,10 +315,8 @@ async function cmdSecretsOneCli(): Promise<boolean> {
     );
     return false;
   }
-  const hostIdx = args.indexOf("--host");
-  const pathIdx = args.indexOf("--path");
-  const hostPattern = hostIdx >= 0 ? args[hostIdx + 1] : undefined;
-  const pathPattern = pathIdx >= 0 ? args[pathIdx + 1] : undefined;
+  const hostPattern = flagValue(args, "--host");
+  const pathPattern = flagValue(args, "--path");
 
   if (!hostPattern) {
     console.error(`${c.red}--host required (e.g. api.stripe.com, api.openai.com).${c.reset}`);
@@ -489,18 +487,15 @@ async function readSecretValueFromVault(
 async function cmdSecretsRevokeOld(): Promise<boolean> {
   // kit secrets revoke-old --via supabase-mgmt-api --project <ref> --key-id <id>
   const args = process.argv.slice(4);
-  const viaIdx = args.indexOf("--via");
-  const via = viaIdx >= 0 ? args[viaIdx + 1] : undefined;
+  const via = flagValue(args, "--via");
   if (via !== "supabase-mgmt-api") {
     console.error(
       `${c.red}Usage: kit secrets revoke-old --via supabase-mgmt-api --project <ref> --key-id <id>${c.reset}`,
     );
     return false;
   }
-  const projectIdx = args.indexOf("--project");
-  const projectRef = projectIdx >= 0 ? args[projectIdx + 1] : process.env.SUPABASE_PROJECT_REF;
-  const keyIdIdx = args.indexOf("--key-id");
-  const keyId = keyIdIdx >= 0 ? args[keyIdIdx + 1] : undefined;
+  const projectRef = flagValue(args, "--project") ?? process.env.SUPABASE_PROJECT_REF;
+  const keyId = flagValue(args, "--key-id");
 
   if (!projectRef) {
     console.error(`${c.red}--project <ref> required (or set SUPABASE_PROJECT_REF).${c.reset}`);
@@ -559,9 +554,7 @@ async function cmdSecretsSet(): Promise<boolean> {
   const config = await loadConfig(resolveConfigPath());
 
   // Read value: --value <v> (visible in argv/ps) or --stdin (safer).
-  let value: string | undefined;
-  const valueIdx = args.indexOf("--value");
-  if (valueIdx >= 0) value = args[valueIdx + 1];
+  let value: string | undefined = flagValue(args, "--value");
   if (!value && hasFlag(args, "--stdin")) {
     value = await new Promise<string>((resolve) => {
       let buf = "";
@@ -579,8 +572,7 @@ async function cmdSecretsSet(): Promise<boolean> {
     return false;
   }
 
-  const storeIdx = args.indexOf("--store");
-  const storeOverride = storeIdx >= 0 ? args[storeIdx + 1] : undefined;
+  const storeOverride = flagValue(args, "--store");
   const backendOpts = pickBackendOpts(config.secrets ?? {}, keyName, { envFallback: true });
 
   const result = await setSecretValue(config.secrets, keyName, value, {
@@ -610,8 +602,7 @@ async function cmdSecretsPropagateStandalone(): Promise<boolean> {
     return false;
   }
 
-  const toIdx = args.indexOf("--to");
-  const targetSpec = toIdx >= 0 ? args[toIdx + 1] : undefined;
+  const targetSpec = flagValue(args, "--to");
   if (!targetSpec) {
     console.error(`${c.red}--to <targets> required${c.reset}`);
     return false;
@@ -625,9 +616,7 @@ async function cmdSecretsPropagateStandalone(): Promise<boolean> {
   }
 
   // Read value: --value <v>, --stdin, or interactive masked prompt.
-  let value: string | undefined;
-  const valueIdx = args.indexOf("--value");
-  if (valueIdx >= 0) value = args[valueIdx + 1];
+  let value: string | undefined = flagValue(args, "--value");
   if (!value && hasFlag(args, "--stdin")) {
     value = await new Promise<string>((resolve) => {
       let buf = "";
@@ -654,20 +643,20 @@ async function cmdSecretsPropagateStandalone(): Promise<boolean> {
 
   // Parse propagation options (same flag surface as rotate --propagate).
   const propOpts: PropagationOptions = {};
-  const envIdx = args.indexOf("--target-env");
-  if (envIdx >= 0) propOpts.env = args[envIdx + 1] as PropagationOptions["env"];
-  const flyAppIdx = args.indexOf("--fly-app");
-  if (flyAppIdx >= 0) propOpts.flyApp = args[flyAppIdx + 1];
-  const cfWorkerIdx = args.indexOf("--cf-worker");
-  if (cfWorkerIdx >= 0) propOpts.cfWorker = args[cfWorkerIdx + 1];
-  const railwayServiceIdx = args.indexOf("--railway-service");
-  if (railwayServiceIdx >= 0) propOpts.railwayService = args[railwayServiceIdx + 1];
-  const awsRegionIdx = args.indexOf("--aws-region");
-  if (awsRegionIdx >= 0) propOpts.awsRegion = args[awsRegionIdx + 1];
-  const ghRepoIdx = args.indexOf("--github-repo");
-  if (ghRepoIdx >= 0) propOpts.githubRepo = args[ghRepoIdx + 1];
-  const vercelScopeIdx = args.indexOf("--vercel-scope");
-  if (vercelScopeIdx >= 0) propOpts.vercelScope = args[vercelScopeIdx + 1];
+  const targetEnv = flagValue(args, "--target-env");
+  if (targetEnv !== undefined) propOpts.env = targetEnv as PropagationOptions["env"];
+  const flyApp = flagValue(args, "--fly-app");
+  if (flyApp !== undefined) propOpts.flyApp = flyApp;
+  const cfWorker = flagValue(args, "--cf-worker");
+  if (cfWorker !== undefined) propOpts.cfWorker = cfWorker;
+  const railwayService = flagValue(args, "--railway-service");
+  if (railwayService !== undefined) propOpts.railwayService = railwayService;
+  const awsRegion = flagValue(args, "--aws-region");
+  if (awsRegion !== undefined) propOpts.awsRegion = awsRegion;
+  const ghRepo = flagValue(args, "--github-repo");
+  if (ghRepo !== undefined) propOpts.githubRepo = ghRepo;
+  const vercelScope = flagValue(args, "--vercel-scope");
+  if (vercelScope !== undefined) propOpts.vercelScope = vercelScope;
 
   console.log(`${c.bold}${c.cyan}kit secrets propagate ${keyName}${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
@@ -950,12 +939,14 @@ async function cmdSecretsMigrate(): Promise<boolean> {
  */
 async function cmdSecretsVaultMigrate(): Promise<boolean> {
   const args = process.argv.slice(4);
-  const fromArg =
-    args.find((a) => a.startsWith("--from="))?.split("=")[1] ??
-    args[args.indexOf("--from") + 1] ??
-    "";
-  const toArg =
-    args.find((a) => a.startsWith("--to="))?.split("=")[1] ?? args[args.indexOf("--to") + 1] ?? "";
+  // Via flagValue, NOT `args[args.indexOf("--from") + 1]`: `indexOf` returns -1 when the flag is
+  // absent, so `+ 1` indexes args[0] and the FIRST TOKEN silently became the value. Measured:
+  // `kit secrets vault-migrate --to infisical` printed `From: --to` and went on to report
+  // `No keys with source="--to" found` instead of the usage text the `!fromArg` guard below is
+  // there to print. `--dry-run --to infisical` yielded `From: --dry-run` the same way. A missing
+  // required flag must reach that guard, not be filled in with whatever was typed first.
+  const fromArg = flagValue(args, "--from") ?? "";
+  const toArg = flagValue(args, "--to") ?? "";
   const dryRun = hasFlag(args, "--dry-run");
 
   if (hasFlag(args, "--help") || hasFlag(args, "-h") || !fromArg || !toArg) {

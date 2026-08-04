@@ -172,8 +172,21 @@ in URL paths or query strings.
 | cloudflare | `https://api.cloudflare.com/client/v4/...` | GET/PUT/DELETE |
 | (opt-in) audit | `${KIT_REMOTE_URL}/api/companies/{id}/audit-logs` | POST |
 
-That's the entire egress list. No analytics, no telemetry, no LLM provider,
-no third-party logging service.
+No analytics, no telemetry, no LLM provider, no third-party logging service — those
+remain true.
+
+> **This table is PLUGIN egress, not everything kit can reach.** It said "the exhaustive
+> list" and "the entire egress list", and it is not: kit's own scanner provisioning
+> fetches `https://api.github.com/repos/perplexityai/bumblebee/releases`
+> (`bumblebee-update.ts:51`) and downloads from
+> `https://github.com/perplexityai/bumblebee/releases/download` (`bumblebee.ts:57`) —
+> neither is in the table, and the release-download host is not the `api.github.com`
+> path the github plugin row describes. A reviewer who used this table as an allow-list
+> for an egress-filtered or air-gapped deployment would find `kit check --category
+> security` attempting an undocumented download. Set `KIT_NO_DOWNLOAD` (or supply
+> `KIT_BUMBLEBEE_BIN`) to keep provisioning offline. Treat the table as complete for
+> plugin traffic and incomplete for kit's own toolchain until each provisioning path is
+> enumerated here.
 
 ## File-system writes
 

@@ -134,26 +134,26 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
       : [];
   const secrets =
     wants("secrets") && config.secrets
-      ? await step("secrets", () => checkSecrets(config.secrets!))
+      ? await step("secrets", () => checkSecrets(config.secrets!, cwd))
       : { templateExists: null, keys: [] };
   const skills =
     wants("skills") && config.skills ? await step("skills", () => checkSkills(config.skills!)) : [];
   const hooks =
-    wants("hooks") && config.hooks && isGitRepository()
-      ? await step("git hooks", () => checkHooks(config.hooks!))
+    wants("hooks") && config.hooks && isGitRepository(".git", cwd)
+      ? await step("git hooks", () => checkHooks(config.hooks!, ".git", cwd))
       : [];
   const webSearch =
     wants("web") && config.web?.search
       ? await step("web search", () => checkWebSearch(config.web!.search!))
       : null;
-  const security = wants("security") ? await step("security scan", () => checkSecurity()) : [];
+  const security = wants("security") ? await step("security scan", () => checkSecurity(cwd)) : [];
   const locks = wants("locks") ? await step("lock files", () => checkLockFiles(config, cwd)) : [];
 
   // Test-coverage is part of the verdict on every surface (omitting it on one
   // was half of the historical CLI-vs-MCP divergence). Baseline-aware; a
   // corrupt/tampered baseline is ignored (nothing suppressed) and surfaced as a
   // finding — fail-closed + visible, never a crash of the gate.
-  const { baseline, ignored: baselineIgnored } = await loadBaselineForGate();
+  const { baseline, ignored: baselineIgnored } = await loadBaselineForGate(cwd);
   if (baselineIgnored && wants("security")) {
     security.push({
       category: "secrets",
@@ -166,6 +166,10 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
   const tests = wants("tests")
     ? await step("test coverage", () =>
         checkTests({
+          // `checkTests` already accepted a `cwd` and defaulted it to `process.cwd()`; this call
+          // simply never passed one, so the coverage dimension measured the calling process's
+          // tree while every other dimension was being fixed to measure the governed one.
+          cwd,
           enforce: opts.enforceTests,
           baseline: baselineGet(baseline, "tests", "untested_files"),
         }),
