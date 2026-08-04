@@ -226,9 +226,14 @@ function cmdHelp(subcommand?: string): boolean {
  * Surfaces commits that bypassed the pre-commit hook (`git commit
  * --no-verify`). The post-commit detector installed by `kit hooks
  * install` writes one JSONL line per skip to `.kit-skipped-commits.jsonl`;
- * we read the last few lines and print a red banner on stderr so the next
- * `kit` invocation makes the bypass visible. Suppressed when
- * `KIT_HIDE_HOOK_SKIP_BANNER=1` (useful for ephemeral CI).
+ * we read it and print a red banner on stderr so the next `kit` invocation
+ * makes the bypass visible. Suppressed when `KIT_HIDE_HOOK_SKIP_BANNER=1`
+ * (useful for ephemeral CI).
+ *
+ * The log is append-only, so the count is the number of entries the repository
+ * still recognises, not the number of lines: a squash-merge discards the commit
+ * it recorded, and this banner used to report those forever. Entries that cannot
+ * be checked stay counted — see `skipped-commits.ts` for that direction.
  */
 async function showSkippedCommitBanner(): Promise<void> {
   if (process.env.KIT_HIDE_HOOK_SKIP_BANNER === "1") return;
@@ -239,19 +244,26 @@ async function showSkippedCommitBanner(): Promise<void> {
     const info = await stat(logPath).catch(() => null);
     if (!info) return;
     const content = await readFile(logPath, "utf-8");
-    const lines = content.trim().split("\n").filter(Boolean);
-    if (lines.length === 0) return;
-    const recent = lines.slice(-3);
-    process.stderr.write(
-      `${c.red}[kit] ${lines.length} commit(s) bypassed pre-commit hook — most recent:${c.reset}\n`,
+    const { parseSkippedCommits, partitionSkippedCommits, gitReachabilityProbe } =
+      await import("./skipped-commits.js");
+    const entries = parseSkippedCommits(content);
+    if (entries.length === 0) return;
+    const { live, orphaned } = partitionSkippedCommits(
+      entries,
+      gitReachabilityProbe(process.cwd()),
     );
-    for (const line of recent) {
-      try {
-        const entry = JSON.parse(line) as { timestamp: string; sha: string; reason: string };
-        process.stderr.write(`  ${entry.timestamp}  ${entry.sha.slice(0, 8)}  (${entry.reason})\n`);
-      } catch {
-        /* malformed line — ignore */
-      }
+    // Nothing the repo still contains — the log is history, not a finding.
+    if (live.length === 0) return;
+    process.stderr.write(
+      `${c.red}[kit] ${live.length} commit(s) bypassed pre-commit hook — most recent:${c.reset}\n`,
+    );
+    for (const entry of live.slice(-3)) {
+      process.stderr.write(`  ${entry.timestamp}  ${entry.sha.slice(0, 8)}  (${entry.reason})\n`);
+    }
+    if (orphaned.length > 0) {
+      process.stderr.write(
+        `  ${orphaned.length} earlier entr${orphaned.length === 1 ? "y is" : "ies are"} in no ref (squashed or amended) — not counted.\n`,
+      );
     }
     process.stderr.write(
       `  Review: cat ${SKIPPED_COMMITS_LOG} | jq .\n` + `  Suppress: KIT_HIDE_HOOK_SKIP_BANNER=1\n`,
