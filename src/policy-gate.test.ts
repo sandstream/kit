@@ -27,6 +27,7 @@ import {
   policyRefuses,
   unknownPolicyEntries,
   knownPolicyOps,
+  supabaseRotationOp,
   POLICY_OPS,
 } from "./policy-gate.js";
 import { propagate, ALL_TARGETS } from "./secrets-propagate.js";
@@ -425,6 +426,81 @@ describe("trap 4, end to end — an APPROVED op is still stopped by a live gate"
       );
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("ops beyond env_set — the two Supabase rotation modes are separate", () => {
+  /**
+   * The blast radii are not comparable: `scoped_key_mint` is reversible (old keys keep working),
+   * `jwt_secret_roll` invalidates EVERY existing token — anon, service_role, signed URLs, live
+   * sessions. `elevation-scopes.ts` already treats them as distinct scopes for exactly this reason,
+   * so the policy registry does too. A repo that pre-approved the safe one must not have
+   * pre-approved the other.
+   */
+  it("approving the mint does NOT approve the roll", () => {
+    const policy: PolicyConfig = { agent_writes: { supabase: ["scoped_key_mint"] } };
+    assert.equal(policyDecision(policy, "supabase", "scoped_key_mint").state, "approved");
+    const roll = policyDecision(policy, "supabase", "jwt_secret_roll");
+    assert.equal(roll.state, "denied", "the catastrophic mode must not ride along");
+    assert.match(roll.reason, /jwt_secret_roll/);
+  });
+
+  it("approving the roll does not implicitly approve the mint either", () => {
+    // Symmetry matters: neither op is a superset of the other as far as the policy is concerned.
+    const policy: PolicyConfig = { agent_writes: { supabase: ["jwt_secret_roll"] } };
+    assert.equal(policyDecision(policy, "supabase", "jwt_secret_roll").state, "approved");
+    assert.equal(policyDecision(policy, "supabase", "scoped_key_mint").state, "denied");
+  });
+
+  it("both rotation ops are in the registry, so neither is a silent typo", () => {
+    const known = knownPolicyOps();
+    assert.ok(known.has("supabase:scoped_key_mint"));
+    assert.ok(known.has("supabase:jwt_secret_roll"));
+    // And the name kit's own docs used to suggest is NOT an op — the example was corrected.
+    assert.equal(known.has("supabase:rotate_jwt"), false);
+  });
+
+  it("kit's own documented example names only real ops", async () => {
+    // The examples in `config.ts` / `policy.ts` are what an operator copies. If they named ops the
+    // registry does not know, `unknownPolicyEntries` would flag kit's own documentation — which is
+    // exactly what happened before this arc corrected them (`rotate_jwt`, and `list_projects`,
+    // a READ inside a block called agent_writes).
+    const { readFileSync } = await import("node:fs");
+    const { resolve: presolve } = await import("node:path");
+    const src = readFileSync(presolve(import.meta.dirname, "..", "src", "config.ts"), "utf8");
+    const block = /\[policy\.agent_writes\]([\s\S]{0,400}?)\n \*\n/.exec(src);
+    assert.ok(block, "the config example must still be present to be checked");
+    const documented: Record<string, string[]> = {};
+    for (const m of block[1]!.matchAll(/^\s*\*\s*([a-z0-9-]+)\s*=\s*\[([^\]]*)\]/gm)) {
+      documented[m[1]!] = (m[2] ?? "")
+        .split(",")
+        .map((x) => x.trim().replace(/^"|"$/g, ""))
+        .filter(Boolean);
+    }
+    assert.ok(Object.keys(documented).length > 0, "parsed at least one example vendor");
+    assert.deepEqual(
+      unknownPolicyEntries({ agent_writes: documented }),
+      [],
+      `kit's own example must not name ops the registry rejects: ${JSON.stringify(documented)}`,
+    );
+  });
+});
+
+describe("the --mode to op mapping is pinned", () => {
+  it("each Supabase mode maps to its own op, and the roll is never the default", () => {
+    assert.equal(supabaseRotationOp("scoped-key-mint"), "scoped_key_mint");
+    assert.equal(supabaseRotationOp("jwt-secret-roll"), "jwt_secret_roll");
+    assert.notEqual(
+      supabaseRotationOp("scoped-key-mint"),
+      supabaseRotationOp("jwt-secret-roll"),
+      "collapsing the two modes onto one op would let a mint approval authorise the roll",
+    );
+    // Both must be real registry entries, or the enforcement point would ask about an op the
+    // operator cannot pre-approve and every rotation would be refused with no way to fix it.
+    const known = knownPolicyOps();
+    for (const mode of ["scoped-key-mint", "jwt-secret-roll"] as const) {
+      assert.ok(known.has(`supabase:${supabaseRotationOp(mode)}`), mode);
     }
   });
 });

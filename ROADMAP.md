@@ -105,7 +105,7 @@ as a string — denies rather than reading as "no rule". `POLICY_OPS` is the sin
 `unknownPolicyEntries()` surfaces a typo'd `env-set` instead of leaving the operator believing it
 granted something.
 
-Proof: `src/policy-gate.test.ts`, 26 tests grouped by the five traps above; mutation-proved eight
+Proof: `src/policy-gate.test.ts`, 31 tests grouped by the five traps above; mutation-proved ten
 ways — remove the wiring in `propagate` (2 fail), make an empty list permissive (5), collapse
 absent-vendor into a denial (5), stop auditing (4), audit every state including the silent ones (1),
 audit into `process.cwd()` instead of the governed project (3).
@@ -118,9 +118,24 @@ audit into `process.cwd()` instead of the governed project (3).
    `checkPolicy` now delegates its decision to the same function, so one rule has one
    implementation. Mutation-proved three further ways: stop auditing (4 fail), audit every state
    (1 fail), audit into `process.cwd()` instead of the governed project (3 fail).
-2. **Ops beyond `env_set`.** Coverage is the six propagation targets. `resolve_issue`,
-   `rotate_jwt` and `trigger_deploy` are documented examples with no enforcement point; each needs
-   a registry row and a choke point.
+2. **Ops beyond `env_set` — Supabase rotation done; plugin ops remain.** `scoped_key_mint` and
+   `jwt_secret_roll` are registered SEPARATELY and gated at `secrets-rotate-cli.ts`, because their
+   blast radii are not comparable — the roll invalidates every live token, and
+   `elevation-scopes.ts` already treats them as distinct scopes for the same reason. A repo that
+   pre-approved the reversible mint has not pre-approved the roll.
+
+   Doing this exposed that kit's own documented example was wrong in two ways once the block became
+   enforced: it named `rotate_jwt`, which is not an op, and `list_projects`, which is a READ inside
+   a block called `agent_writes`. Both corrected in `config.ts` and `policy.ts`, and a test now
+   parses the example out of `config.ts` and runs it through `unknownPolicyEntries` — so kit's own
+   documentation cannot drift from the registry again.
+
+   The `--mode` → op mapping was extracted to `supabaseRotationOp()` so it could be mutation-tested:
+   inline it sat inside a function that needs the Supabase Management API to reach, so collapsing
+   both modes onto one op would have been caught by nothing. Now it fails a test.
+
+   Still open: `resolve_issue`, `create_release` and `trigger_deploy` live in the plugins and have
+   no choke point in kit — each needs a registry row and an enforcement point in its adapter.
 3. ~~Trap 4 is asserted, not proven end to end.~~ **Done, and it turned up a fail-open.** Proving
    "policy narrows and never grants" needs a real gate that still stops an approved op — and the
    obvious candidate did not stop anything. Measured: with elevation satisfied (`KIT_ELEVATED=1`),

@@ -10,10 +10,19 @@
  * Format in .kit.toml:
  *
  *   [policy.agent_writes]
- *   sentry = ["resolve_issue", "create_release"]
- *   supabase = ["rotate_jwt", "list_projects"]
- *   vercel = ["env_set", "trigger_deploy"]
- *   stripe = []        # all writes still gated
+ *   vercel = ["env_set"]
+ *   github = ["env_set"]
+ *   supabase = ["scoped_key_mint"]   # NOT jwt_secret_roll — see below
+ *   stripe = []                      # vendor declared, nothing pre-approved: all writes refused
+ *
+ * The op names are not free-form: they must appear in `POLICY_OPS` (`policy-gate.ts`), which is the
+ * single vocabulary the enforcement points read. `kit check` surfaces an entry naming an op kit
+ * never asks about, so a typo cannot sit there looking like a rule. This example used to read
+ * `supabase = ["rotate_jwt", "list_projects"]`, which was wrong in two ways once the block became
+ * enforced: no op is called `rotate_jwt` (the two rotation modes are registered separately, because
+ * pre-approving the reversible `scoped_key_mint` must not pre-approve the roll that invalidates
+ * every live token), and `list_projects` is a READ, which has no business in a block named
+ * `agent_writes`.
  *
  *   [policy]
  *   default_mode = "read-only"   # force --read-only globally for this repo
@@ -27,8 +36,10 @@
  *      enforcement point: it decides via the pure `policyDecision`, records the decision, and
  *      returns only a REFUSAL — because this block is unsigned config, so it may narrow and never
  *      grant. An agent that can edit `.kit.toml` must not be able to self-approve by adding a line.
- *      First enforcement point: `secrets-propagate.ts`, gating all six vendor `env_set` writes at
- *      the single choke point rather than per call site.
+ *      Enforcement points, each at a choke point rather than per call site: `secrets-propagate.ts`
+ *      (all six vendor `env_set` writes) and `secrets-rotate-cli.ts` (Supabase key rotation, where
+ *      the two `--mode` values are SEPARATE ops so pre-approving the reversible mint does not
+ *      pre-approve the roll that invalidates every live token).
  *      Verify what is actually wired, rather than trusting this comment:
  *        grep -rn 'enforcePolicy(' src --include=*.ts | grep -v test
  *   3. Every ENFORCED decision emits a `policy-check` audit event carrying the vendor, op,
@@ -40,10 +51,11 @@
  *      and an approval grants nothing, so a failed write cannot change an outcome, only lose a
  *      record. The failure goes to stderr rather than being swallowed.
  *
- * This module deliberately does NOT enforce — it just SURFACES. The
- * existing elevation + read-only gates remain authoritative; the policy
- * block is the explicit "operator agreed to this scope" signal that
- * upstream classifiers (Claude Code, etc.) can honor.
+ * THIS MODULE still does not enforce — `policy-gate.ts` does. What survives from the original
+ * design is the part that was always right: the existing elevation + read-only gates remain
+ * authoritative, and the policy block is the explicit "operator agreed to this scope" signal that
+ * upstream classifiers (Claude Code, etc.) can honor. What changed is that kit now also refuses on
+ * it, one-directionally.
  */
 
 import { createHash } from "node:crypto";
@@ -100,15 +112,6 @@ export interface PolicyCheckResult {
   policyHash: string | null;
 }
 
-/**
- * Check whether `op` against `vendor` is pre-approved by the policy.
- *
- * Returns `{ approved: false }` when the policy is missing, the vendor
- * isn't declared, or the op isn't in the vendor's allow-list. Callers
- * should treat false as "elevation still required" — this is not a
- * substitute for the elevation gate, just an explicit declaration that
- * the OPERATOR consented to this scope at configuration time.
- */
 /**
  * Check whether `op` against `vendor` is pre-approved, and audit the check.
  *

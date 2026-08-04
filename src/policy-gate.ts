@@ -71,7 +71,41 @@ export const POLICY_OPS: readonly { vendor: string; op: string; description: str
     { vendor: "cloudflare", op: "env_set", description: "set a secret on a Cloudflare Worker" },
     { vendor: "railway", op: "env_set", description: "set a variable on a Railway service" },
     { vendor: "aws-ssm", op: "env_set", description: "put a parameter in AWS SSM Parameter Store" },
+    // Supabase key rotation, registered as TWO ops because their blast radii are not comparable
+    // and pre-approving the reversible one must not pre-approve the catastrophic one. This mirrors
+    // the reasoning already in `elevation-scopes.ts`, where `jwt-secret-roll` needs a DISTINCT
+    // elevation that a marker minted for `scoped-key-mint` cannot satisfy.
+    //
+    // The names mirror the `--mode` values operators actually type, so there is no translation
+    // step between the flag and the policy line — a translation is exactly where the caller's
+    // spelling and the operator's drift apart.
+    {
+      vendor: "supabase",
+      op: "scoped_key_mint",
+      description: "mint a new scoped Supabase key (reversible; old keys keep working)",
+    },
+    {
+      vendor: "supabase",
+      op: "jwt_secret_roll",
+      description:
+        "roll the Supabase JWT secret — invalidates EVERY existing token (anon, service_role, signed URLs, active sessions)",
+    },
   ]);
+
+/**
+ * Map a Supabase `--mode` to its policy op.
+ *
+ * Extracted from `secrets-rotate-cli.ts` so the mapping can be PINNED. Left inline it was a
+ * conditional expression inside a function that needs the Supabase Management API to reach, so a
+ * mutation collapsing both modes onto one op would have been caught by nothing behavioural — the
+ * registry test only proves both names exist, not that the caller picks the right one.
+ *
+ * The distinction is the whole point: `jwt-secret-roll` invalidates every live token, and a repo
+ * that pre-approved the reversible mint must not have pre-approved that.
+ */
+export function supabaseRotationOp(mode: "scoped-key-mint" | "jwt-secret-roll"): string {
+  return mode === "jwt-secret-roll" ? "jwt_secret_roll" : "scoped_key_mint";
+}
 
 /** Every (vendor, op) kit can gate, as `vendor:op`. */
 export function knownPolicyOps(): Set<string> {

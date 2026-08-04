@@ -164,10 +164,19 @@ export interface McpConfig {
  *
  * Example:
  *   [policy.agent_writes]
- *   sentry = ["resolve_issue", "create_release"]
- *   supabase = ["rotate_jwt", "list_projects"]
- *   vercel = ["env_set", "trigger_deploy"]
- *   stripe = []  # all writes still gated
+ *   vercel = ["env_set"]
+ *   github = ["env_set"]
+ *   supabase = ["scoped_key_mint"]   # NOT jwt_secret_roll — see below
+ *   stripe = []                      # vendor declared, nothing pre-approved: all writes refused
+ *
+ * The op names are not free-form: they must appear in `POLICY_OPS` (`policy-gate.ts`), which is the
+ * single vocabulary the enforcement points read. `kit check` surfaces an entry naming an op kit
+ * never asks about, so a typo cannot sit there looking like a rule. This example used to read
+ * `supabase = ["rotate_jwt", "list_projects"]`, which was wrong in two ways once the block became
+ * enforced: no op is called `rotate_jwt` (the two rotation modes are registered separately, because
+ * pre-approving the reversible `scoped_key_mint` must not pre-approve the roll that invalidates
+ * every live token), and `list_projects` is a READ, which has no business in a block named
+ * `agent_writes`.
  */
 export interface PolicyAgentWritesConfig {
   [vendor: string]: string[];
