@@ -12,7 +12,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -30,7 +30,10 @@ function policyAllowingOnly(dir: string): string {
 
 /** Two sibling temp dirs: A = the process's cwd, B = the governed project. */
 function twoProjects(): { base: string; A: string; B: string; cleanup: () => void } {
-  const base = mkdtempSync(join(tmpdir(), "broker-cwd-"));
+  // realpath the temp root: on macOS `tmpdir()` is `/var/...`, a symlink to `/private/var/...`,
+  // and `process.chdir` + `process.cwd()` round-trips through it. Comparing a cwd-derived path
+  // against an unresolved one then fails for the symlink, not for the behaviour under test.
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "broker-cwd-")));
   const A = join(base, "A");
   const B = join(base, "B");
   mkdirSync(A);
