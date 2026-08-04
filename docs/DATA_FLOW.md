@@ -208,7 +208,7 @@ Exhaustive list of paths kit can write:
 Plus the standard `node_modules/`, `dist/`, etc. during build — but those are
 not kit-specific.
 
-## Dependency surface: 120 installed, 9 loaded
+## Dependency surface: 94 installed, 9 loaded
 
 A reader auditing what kit can reach should know the gap between what `npm install`
 puts on disk and what the process ever executes. Both numbers are measured, not
@@ -218,10 +218,14 @@ kit has **four** direct production dependencies:
 
 | Dependency | Transitive closure |
 |---|---|
-| `@modelcontextprotocol/sdk` | **91 packages** |
+| `@modelcontextprotocol/sdk` | **91 packages** (90 of them reachable through nothing else) |
 | `@upstash/redis` | 2 |
 | `smol-toml` | 1 |
 | `zod` | 1 |
+
+Counts re-measured at SDK 1.30.0. They read 120/91 for the 1.29 tree; the install side moved with
+the `@hono/node-server` 1.x → 2.x bump and the loaded side did not. The loaded number is gated
+against `ROADMAP.md` by the guard test, since a count that lives only in prose drifts.
 
 The SDK declares 17 **hard** dependencies (`optionalDependencies: {}`), among them a
 complete HTTP server and OAuth stack — express 5, express-rate-limit, cors, hono,
@@ -230,7 +234,7 @@ the Streamable-HTTP and SSE transports. kit imports exactly `server/mcp.js` and
 `server/stdio.js`: it speaks **stdio**, over a pipe, and never starts a listener.
 
 Traced while booting the server, listing tools and calling two of them, the packages
-actually loaded are **9 of the 120**:
+actually loaded are **9 of the 94**:
 
 ```
 @modelcontextprotocol/sdk   zod   zod-to-json-schema   smol-toml

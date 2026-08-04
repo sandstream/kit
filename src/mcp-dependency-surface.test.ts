@@ -1,8 +1,9 @@
 /**
- * kit installs 120 production packages and LOADS 9 of them.
+ * kit installs 94 production packages and LOADS 9 of them.
  *
  * kit's four direct production dependencies are `@modelcontextprotocol/sdk`, `@upstash/redis`,
- * `smol-toml` and `zod`. The SDK accounts for 91 of the 120 packages in the tree, because it
+ * `smol-toml` and `zod`. 90 of the 94 packages in the tree are reachable ONLY through the SDK
+ * (91 via the SDK in total; the other three direct deps close over 4), because it
  * declares 17 HARD dependencies (`optionalDependencies: {}`) that include a complete HTTP server
  * and OAuth stack — express 5, express-rate-limit, cors, hono, @hono/node-server, raw-body,
  * content-type, eventsource, jose, pkce-challenge — for the Streamable-HTTP and SSE transports.
@@ -214,6 +215,33 @@ describe("kit's MCP server loads none of the SDK's HTTP/OAuth stack", () => {
     assert.ok(
       loaded.has("fast-uri"),
       "fast-uri is reached through ajv — visible only with the CJS half of the trace",
+    );
+  });
+
+  it("the loaded count ROADMAP advertises is the count this test measures", () => {
+    // The numbers in the ROADMAP heading were prose, and prose drifts: it claimed "120 installed,
+    // 9 loaded" for the 1.29 tree and still said 120 after the SDK 1.30 bump moved the install
+    // count to 94. The loaded count did NOT move, which is exactly why it is worth pinning — it is
+    // the number the upstream argument rests on, and a drifted number in a supply-chain argument is
+    // worse than no number.
+    //
+    // Only the LOADED count is gated. The install count depends on the lockfile and on npm's
+    // hoisting, so pinning it would fail on an unrelated dependency bump and teach people to edit
+    // the assertion rather than read it.
+    const loaded = tracePackagesLoaded(
+      [
+        `const { createMcpServer } = await import(${JSON.stringify(SERVER_DIST)});`,
+        "createMcpServer();",
+      ].join("\n"),
+    );
+    const roadmap = readFileSync(resolve(import.meta.dirname, "..", "ROADMAP.md"), "utf-8");
+    const heading =
+      /### Shrink the inherited dependency surface — (\d+) installed, (\d+) loaded/.exec(roadmap);
+    assert.ok(heading, "the ROADMAP heading carrying these numbers must still be findable");
+    assert.equal(
+      Number(heading[2]),
+      loaded.size,
+      `ROADMAP advertises ${heading[2]} loaded packages; the trace measures ${loaded.size} (${[...loaded].sort().join(", ")})`,
     );
   });
 });
