@@ -4,7 +4,7 @@ All notable changes to kit are documented in this file. This project adheres to 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [6.4.1] - 2026-08-04
 
 ### Fixed
 
