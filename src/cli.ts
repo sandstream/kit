@@ -286,15 +286,18 @@ async function main(): Promise<void> {
     activateReadOnlyMode("env");
   }
 
-  // Compute + export KIT_POLICY_HASH so classifiers / agents reading
-  // the env see the same policy identity. Also honors
+  // Compute + export KIT_POLICY_HASH (policy identity, for classifiers / agents reading the env)
+  // and KIT_POLICY_DENY (the resolved refusals, for the plugin packages). Also honors
   // `[policy].default_mode = "read-only"` as a third source for the
   // read-only gate above (after flag + env-var).
   try {
     const cfgForPolicy = await loadConfig(resolveConfigPath()).catch(() => null);
     if (cfgForPolicy?.policy) {
-      const { installPolicyHash } = await import("./policy.js");
-      installPolicyHash(cfgForPolicy.policy);
+      // Both policy env vars in one call: the hash (which policy is in force) and the resolved deny
+      // list the `kit-plugin-*` packages read, since they are standalone zero-dep packages kit-core
+      // never calls and the environment is the only channel that reaches them. See `installPolicyEnv`.
+      const { installPolicyEnv } = await import("./policy-gate.js");
+      await installPolicyEnv(cfgForPolicy.policy);
       if (cfgForPolicy.policy.default_mode === "read-only" && !process.env.KIT_READ_ONLY) {
         const { activateReadOnlyMode } = await import("./read-only-mode.js");
         activateReadOnlyMode("policy");

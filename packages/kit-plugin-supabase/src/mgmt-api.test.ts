@@ -1,6 +1,6 @@
-import { describe, it } from "node:test";
+import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { makeClient } from "./mgmt-api.js";
+import { makeClient, rollJwtSecret, revokeScopedKey, mintScopedKey } from "./mgmt-api.js";
 import { rotateSupabaseKey, previewSupabaseRotation } from "./rotate.js";
 
 describe("makeClient", () => {
@@ -129,5 +129,59 @@ describe("key-mode classification truth table", () => {
     ]);
     assert.equal(r.scoped, true);
     assert.equal(r.legacy, true);
+  });
+});
+
+/**
+ * Containment for the three write surfaces this package exposes.
+ *
+ * These did not exist because the guards did not exist: `rollJwtSecret`, `revokeScopedKey` and
+ * `mintScopedKey` shipped with no read-only check and no policy check, while six sibling plugins had
+ * one. Measured with `KIT_READ_ONLY=1` set and the client pointed at a local listener, all three sent
+ * their request; `rollJwtSecret` — which invalidates every anon, service_role, signed-URL and session
+ * token at once — returned a rolled secret. The requests are asserted to be refused BEFORE any fetch,
+ * which is why an unreachable host is not needed to make these deterministic.
+ */
+describe("write-surface containment", () => {
+  afterEach(() => {
+    delete process.env.KIT_READ_ONLY;
+    delete process.env.KIT_POLICY_DENY;
+  });
+
+  const client = (): ReturnType<typeof makeClient> =>
+    makeClient({ accessToken: "x", baseUrl: "https://127.0.0.1:1" });
+
+  for (const [label, call] of [
+    ["rollJwtSecret", (c: ReturnType<typeof makeClient>) => rollJwtSecret(c, "proj")],
+    ["revokeScopedKey", (c: ReturnType<typeof makeClient>) => revokeScopedKey(c, "proj", "key-id")],
+    [
+      "mintScopedKey",
+      (c: ReturnType<typeof makeClient>) => mintScopedKey(c, "proj", { name: "n" }),
+    ],
+  ] as const) {
+    it(`${label} refuses when KIT_READ_ONLY=1`, async () => {
+      process.env.KIT_READ_ONLY = "1";
+      await assert.rejects(() => call(client()), /read-only mode active/);
+    });
+  }
+
+  it("rollJwtSecret is refused when the project pre-approved only the mint", async () => {
+    // The distinction the registry exists for: `supabase = ["scoped_key_mint"]` resolves to a deny
+    // list containing the roll and the revoke, so pre-approving the reversible op cannot authorise
+    // the one that invalidates every live token.
+    process.env.KIT_POLICY_DENY = "supabase:jwt_secret_roll,supabase:scoped_key_revoke";
+    await assert.rejects(
+      () => rollJwtSecret(client(), "proj"),
+      /refused by \[policy\.agent_writes\.supabase\].*jwt_secret_roll/,
+    );
+    await assert.rejects(
+      () => revokeScopedKey(client(), "proj", "key-id"),
+      /refused by \[policy\.agent_writes\.supabase\].*scoped_key_revoke/,
+    );
+    // …while the mint itself is not refused by policy: it reaches the (unreachable) network.
+    await assert.rejects(
+      () => mintScopedKey(client(), "proj", { name: "n" }),
+      (err: Error) => !/refused by \[policy/.test(err.message),
+    );
   });
 });

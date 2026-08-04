@@ -106,3 +106,70 @@ describe("read-only refusals", () => {
     );
   });
 });
+
+describe("policy refusals", () => {
+  afterEach(() => {
+    delete process.env.KIT_POLICY_DENY;
+    delete process.env.KIT_READ_ONLY;
+  });
+
+  it("updateIssue refuses when the project has not pre-approved resolve_issue", async () => {
+    // The value is what kit exports from `[policy.agent_writes]` after resolving it — the plugin
+    // never sees the config, only the decision. See `policyDenyList` in kit-core.
+    process.env.KIT_POLICY_DENY = "sentry:resolve_issue";
+    const client = makeClient({ token: "x", organizationSlug: "demo" });
+    await assert.rejects(
+      () => updateIssue(client, "ABC-1", { status: "resolved" }),
+      /refused by \[policy\.agent_writes\.sentry\].*resolve_issue/,
+    );
+  });
+
+  it("createRelease refuses when the project has not pre-approved create_release", async () => {
+    process.env.KIT_POLICY_DENY = "sentry:create_release";
+    const client = makeClient({ token: "x", organizationSlug: "demo" });
+    await assert.rejects(
+      () => createRelease(client, { version: "v1.0.0", projects: ["my-proj"] }),
+      /refused by \[policy\.agent_writes\.sentry\].*create_release/,
+    );
+  });
+
+  it("a denial of ONE op does not refuse the other", async () => {
+    // Per-op, not per-vendor: `sentry = ["resolve_issue"]` pre-approves triaging and nothing else,
+    // so the release marker must be the only thing refused. A vendor-level check would collapse
+    // these and make the operator's narrower grant meaningless.
+    process.env.KIT_POLICY_DENY = "sentry:create_release";
+    const client = makeClient({
+      token: "x",
+      host: "https://127.0.0.1:1",
+      organizationSlug: "demo",
+    });
+    // Not refused by policy — it gets as far as the network, which is unreachable here.
+    await assert.rejects(
+      () => updateIssue(client, "ABC-1", { status: "resolved" }),
+      (err: Error) => !/refused by \[policy/.test(err.message),
+    );
+  });
+
+  it("read-only wins over policy, so a locked repo is not told to edit its config", async () => {
+    process.env.KIT_READ_ONLY = "1";
+    process.env.KIT_POLICY_DENY = "sentry:resolve_issue";
+    const client = makeClient({ token: "x", organizationSlug: "demo" });
+    await assert.rejects(
+      () => updateIssue(client, "ABC-1", { status: "resolved" }),
+      /read-only mode active/,
+    );
+  });
+
+  it("an unset deny list refuses nothing — absence is not a denial", async () => {
+    delete process.env.KIT_POLICY_DENY;
+    const client = makeClient({
+      token: "x",
+      host: "https://127.0.0.1:1",
+      organizationSlug: "demo",
+    });
+    await assert.rejects(
+      () => createRelease(client, { version: "v1.0.0", projects: ["p"] }),
+      (err: Error) => !/refused by \[policy/.test(err.message),
+    );
+  });
+});

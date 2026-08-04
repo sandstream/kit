@@ -16,13 +16,14 @@
  *   stripe = []                      # vendor declared, nothing pre-approved: all writes refused
  *
  * The op names are not free-form: they must appear in `POLICY_OPS` (`policy-gate.ts`), which is the
- * single vocabulary the enforcement points read. `kit check` surfaces an entry naming an op kit
- * never asks about, so a typo cannot sit there looking like a rule. This example used to read
- * `supabase = ["rotate_jwt", "list_projects"]`, which was wrong in two ways once the block became
- * enforced: no op is called `rotate_jwt` (the two rotation modes are registered separately, because
- * pre-approving the reversible `scoped_key_mint` must not pre-approve the roll that invalidates
- * every live token), and `list_projects` is a READ, which has no business in a block named
- * `agent_writes`.
+ * single vocabulary the enforcement points read. `kit check` reports an entry naming an op kit never
+ * asks about — the `policy agent-writes` row — so a typo cannot sit there looking like a rule.
+ *
+ * Two names this example used to list under `supabase` were wrong once the block became enforced:
+ * `rotate_jwt`, which is no op at all (the rotation modes are registered separately, because
+ * pre-approving the reversible `scoped_key_mint` must not pre-approve the roll that invalidates every
+ * live token), and `list_projects`, a READ, which has no business in a block named `agent_writes`.
+ * Cited by name rather than as a config line deliberately — see the same note in `config.ts`.
  *
  *   [policy]
  *   default_mode = "read-only"   # force --read-only globally for this repo

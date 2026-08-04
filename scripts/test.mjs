@@ -34,7 +34,23 @@ function collect(dir) {
   return out;
 }
 
-const files = collect("dist");
+// The workspace packages compile to `packages/<pkg>/dist/`, which `collect("dist")` never sees.
+// Measured: 11 compiled plugin test files, 76 tests — including every `KIT_READ_ONLY=1` refusal
+// test the plugin write surfaces have — existed and were never executed by `npm test`, so CI has
+// never run them. They pass; nobody was watching. A containment test that does not run is worth
+// less than no test, because it reads as coverage.
+function collectWorkspaceTests() {
+  const out = [];
+  if (!existsSync("packages")) return out;
+  for (const pkg of readdirSync("packages", { withFileTypes: true })) {
+    if (!pkg.isDirectory()) continue;
+    const dist = join("packages", pkg.name, "dist");
+    if (existsSync(dist)) out.push(...collect(dist));
+  }
+  return out;
+}
+
+const files = [...collect("dist"), ...collectWorkspaceTests()];
 if (files.length === 0) {
   console.error("no dist/**/*.test.js files found");
   process.exit(1);

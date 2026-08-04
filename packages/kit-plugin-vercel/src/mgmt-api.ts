@@ -27,6 +27,31 @@ function assertNotReadOnly(operation: string): void {
   }
 }
 
+/**
+ * Policy gate for this plugin's write surfaces.
+ *
+ * kit resolves `[policy.agent_writes]` for the governed project and exports the ops it REFUSES as
+ * `KIT_POLICY_DENY` (`vendor:op`, comma-separated). This is a membership test with no rule in it, so
+ * there is no policy semantic here that can drift from kit's: the four states — including the
+ * `stripe = []` lock and the absent-vendor case that must NOT read as a denial — were all resolved
+ * on kit's side before the value was written.
+ *
+ * Absence of the variable means NO denial. That is the same contract `assertNotReadOnly` lives
+ * under, and it is deliberate: inverting it would refuse every op in every project that does not
+ * use the block, the moment a plugin ran outside a kit invocation.
+ *
+ * Ordered AFTER the read-only guard at every call site, so a locked-down repo answers "read-only"
+ * rather than "your policy is missing an entry".
+ */
+function assertPolicyAllows(vendor: string, op: string): void {
+  const denied = (process.env.KIT_POLICY_DENY ?? "").split(",");
+  if (denied.includes(`${vendor}:${op}`)) {
+    throw new Error(
+      `refused by [policy.agent_writes.${vendor}] — "${op}" is not pre-approved for this project`,
+    );
+  }
+}
+
 export interface MgmtClientConfig {
   baseUrl?: string;
   token?: string;
@@ -108,6 +133,7 @@ export async function createEnvVar(
   entry: { key: string; value: string; target: VercelEnvTarget[]; type?: "encrypted" | "plain" },
 ): Promise<EnvVar> {
   assertNotReadOnly("vercel/createEnvVar");
+  assertPolicyAllows("vercel", "env_set");
   const res = await fetch(
     `${client.baseUrl}/v10/projects/${encodeURIComponent(projectIdOrName)}/env${client.teamQuery}`,
     {
@@ -134,6 +160,7 @@ export async function deleteEnvVar(
   envId: string,
 ): Promise<void> {
   assertNotReadOnly("vercel/deleteEnvVar");
+  assertPolicyAllows("vercel", "env_unset");
   const res = await fetch(
     `${client.baseUrl}/v9/projects/${encodeURIComponent(projectIdOrName)}/env/${encodeURIComponent(envId)}${client.teamQuery}`,
     { method: "DELETE", headers: client.headers, signal: AbortSignal.timeout(10_000) },
@@ -156,6 +183,7 @@ export async function updateEnvVar(
   patch: { value?: string; target?: VercelEnvTarget[]; type?: "encrypted" | "plain" },
 ): Promise<EnvVar> {
   assertNotReadOnly("vercel/updateEnvVar");
+  assertPolicyAllows("vercel", "env_set");
   const res = await fetch(
     `${client.baseUrl}/v9/projects/${encodeURIComponent(projectIdOrName)}/env/${encodeURIComponent(envId)}${client.teamQuery}`,
     {
@@ -258,6 +286,7 @@ export async function redeployLatest(
   opts: { target?: VercelEnvTarget; name?: string } = {},
 ): Promise<RedeployResult> {
   assertNotReadOnly("vercel/redeployLatest");
+  assertPolicyAllows("vercel", "trigger_deploy");
   // Find the latest deployment for the project.
   const sep = client.teamQuery ? "&" : "?";
   const listRes = await fetch(

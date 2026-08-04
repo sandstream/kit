@@ -101,10 +101,32 @@ mutating operation. Honored by:
 - `writeSecretToBackend()` (`src/secrets-migrate.ts`)
 - `grantElevation()` (`src/elevation.ts`)
 - `installHooks()` (`src/hooks.ts`)
-- Every kit-plugin write surface (vercel/createEnvVar, stripe/createWebhookEndpoint, etc.) via inline `assertNotReadOnly()`
+- `propagate()` (`src/secrets-propagate.ts`) — the LOCAL write was refused inside its own module,
+  but propagation into a third-party control plane was not, and `read-only-surface.ts` excluded
+  `secrets` on the grounds that they "refuse inside their own modules". One path's guarantee, read as
+  the module's.
+- Every kit-plugin write surface, via an inline `assertNotReadOnly()` in each package
+
+That last line was untrue for one package until it was measured. `kit-plugin-supabase` had NO guard
+on any of its three write surfaces — `rollJwtSecret`, `revokeScopedKey`, `mintScopedKey`. With
+`KIT_READ_ONLY=1` set in the process and the client pointed at a local listener, all three sent their
+request; the JWT-secret roll, which invalidates every anon, service_role, signed-URL and session
+token at once, returned a rolled secret. Six sibling plugins had the guard, and the claim above
+covered for the one that did not.
+
+The guard is inline per package because plugins must not import kit-core (`adapter-sdk` explains
+why), which means seven copies of it. `src/plugin-write-gates.test.ts` now pins those copies
+byte-identical, derives the write surfaces from the plugin sources rather than a maintained list, and
+fails when a mutating function — including a GraphQL mutation routed through a shared transport —
+lacks either guard.
 
 Operators who want the strongest guarantee can also set
 `KIT_READ_ONLY=1` in their shell rc; the flag is honored by the same gate.
+
+**What read-only is not.** It is a process-tree contract, not a sandbox. The plugins read
+`KIT_READ_ONLY` (and `KIT_POLICY_DENY`) from the environment, so code that spawns a fresh process
+without them, or that strips them, is not contained. Containment against a hostile agent needs the
+OS-level boundary, not these variables.
 
 ### Elevation gate
 

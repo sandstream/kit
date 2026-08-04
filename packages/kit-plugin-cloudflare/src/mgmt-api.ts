@@ -24,6 +24,31 @@ function assertNotReadOnly(operation: string): void {
   }
 }
 
+/**
+ * Policy gate for this plugin's write surfaces.
+ *
+ * kit resolves `[policy.agent_writes]` for the governed project and exports the ops it REFUSES as
+ * `KIT_POLICY_DENY` (`vendor:op`, comma-separated). This is a membership test with no rule in it, so
+ * there is no policy semantic here that can drift from kit's: the four states — including the
+ * `stripe = []` lock and the absent-vendor case that must NOT read as a denial — were all resolved
+ * on kit's side before the value was written.
+ *
+ * Absence of the variable means NO denial. That is the same contract `assertNotReadOnly` lives
+ * under, and it is deliberate: inverting it would refuse every op in every project that does not
+ * use the block, the moment a plugin ran outside a kit invocation.
+ *
+ * Ordered AFTER the read-only guard at every call site, so a locked-down repo answers "read-only"
+ * rather than "your policy is missing an entry".
+ */
+function assertPolicyAllows(vendor: string, op: string): void {
+  const denied = (process.env.KIT_POLICY_DENY ?? "").split(",");
+  if (denied.includes(`${vendor}:${op}`)) {
+    throw new Error(
+      `refused by [policy.agent_writes.${vendor}] — "${op}" is not pre-approved for this project`,
+    );
+  }
+}
+
 export interface MgmtClientConfig {
   baseUrl?: string;
   apiToken?: string;
@@ -118,6 +143,7 @@ export async function putWorkerSecret(
   params: PutWorkerSecretParams,
 ): Promise<WorkerSecretSummary> {
   assertNotReadOnly("cloudflare/putWorkerSecret");
+  assertPolicyAllows("cloudflare", "env_set");
   const accountId = requireAccountId(client);
   return cfFetch<WorkerSecretSummary>(
     client,
@@ -139,6 +165,7 @@ export async function deleteWorkerSecret(
   secretName: string,
 ): Promise<void> {
   assertNotReadOnly("cloudflare/deleteWorkerSecret");
+  assertPolicyAllows("cloudflare", "env_unset");
   const accountId = requireAccountId(client);
   await cfFetch<unknown>(
     client,
@@ -162,6 +189,7 @@ export async function listApiTokens(client: MgmtClient): Promise<ApiTokenSummary
 
 export async function revokeApiToken(client: MgmtClient, tokenId: string): Promise<void> {
   assertNotReadOnly("cloudflare/revokeApiToken");
+  assertPolicyAllows("cloudflare", "api_token_revoke");
   await cfFetch<unknown>(client, `/user/tokens/${encodeURIComponent(tokenId)}`, {
     method: "DELETE",
   });

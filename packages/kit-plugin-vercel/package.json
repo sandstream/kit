@@ -1,6 +1,6 @@
 {
   "name": "sandstream-kit-plugin-vercel",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "kit plugin: Vercel Management API (env management, project metadata, redeploy triggers).",
   "type": "module",
   "exports": {

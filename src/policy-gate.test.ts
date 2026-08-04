@@ -17,7 +17,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -28,6 +28,10 @@ import {
   unknownPolicyEntries,
   knownPolicyOps,
   supabaseRotationOp,
+  policyDenyList,
+  installPolicyDenyList,
+  installPolicyEnv,
+  POLICY_DENY_ENV,
   POLICY_OPS,
 } from "./policy-gate.js";
 import { propagate, ALL_TARGETS } from "./secrets-propagate.js";
@@ -484,6 +488,139 @@ describe("ops beyond env_set — the two Supabase rotation modes are separate", 
       [],
       `kit's own example must not name ops the registry rejects: ${JSON.stringify(documented)}`,
     );
+  });
+
+  it("EVERY source file that shows an agent_writes line names only real ops", () => {
+    // The test above pinned ONE file by name, and the drift promptly reappeared in another:
+    // `knobs.ts` advertised `sentry = ["resolve_issue"]` in the `kit knobs` help text — the surface
+    // an operator is most likely to copy from — while `resolve_issue` was not in POLICY_OPS at all.
+    // Measured: `unknownPolicyEntries({ agent_writes: { sentry: ["resolve_issue"] } })` returned
+    // that entry, so kit's own help text described config kit's own checker rejects.
+    //
+    // Hard-coding a filename is what let that happen, so this scans every source file for
+    // `<vendor> = [...]` shapes near an agent_writes mention rather than trusting a list.
+    const files = readdirSync(join(import.meta.dirname, "..", "src"))
+      .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+      .map((f) => ({ f, src: readFileSync(join(import.meta.dirname, "..", "src", f), "utf8") }))
+      .filter(({ src }) => src.includes("agent_writes"));
+    assert.ok(
+      files.length >= 3,
+      `expected the block to be documented in several files, saw ${files.length}`,
+    );
+
+    const offenders: string[] = [];
+    for (const { f, src } of files) {
+      const documented: Record<string, string[]> = {};
+      // Both shapes kit's own sources use: a TOML line in a doc comment, and an inline
+      // `(e.g. sentry = ["resolve_issue"])` inside a description string.
+      for (const m of src.matchAll(/([a-z][a-z0-9-]*)\s*=\s*\[([^\]\n]*)\]/g)) {
+        const ops = m[2]!
+          .split(",")
+          .map((x) => x.trim().replace(/^["']|["']$/g, ""))
+          .filter((x) => /^[a-z][a-z0-9_]*$/.test(x));
+        if (ops.length === 0) continue;
+        documented[m[1]!] = [...(documented[m[1]!] ?? []), ...ops];
+      }
+      // Only vendors kit actually gates are in scope — an unrelated `foo = ["bar"]` elsewhere in a
+      // file that happens to mention agent_writes is not a policy example.
+      const vendors = new Set(POLICY_OPS.map((o) => o.vendor));
+      const scoped = Object.fromEntries(
+        Object.entries(documented).filter(([vendor]) => vendors.has(vendor)),
+      );
+      for (const { vendor, op } of unknownPolicyEntries({ agent_writes: scoped })) {
+        offenders.push(`${f}: ${vendor} = ["${op}"]`);
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      `kit's own sources document ops the registry rejects — an operator copying these gets a vendor DECLARED with nothing pre-approved, which refuses that vendor's real ops: ${offenders.join(", ")}`,
+    );
+  });
+});
+
+describe("the deny list that crosses into the plugins", () => {
+  const clearEnv = (): void => {
+    delete process.env[POLICY_DENY_ENV];
+    delete process.env.KIT_POLICY_HASH;
+  };
+
+  it("carries exactly the DENIED ops, and nothing the policy is silent about", () => {
+    // The plugin-side guard is a membership test with no rule in it, which is only safe if what
+    // crosses the boundary is already the decision. `unconfigured` and `inert` must therefore be
+    // ABSENT rather than present-and-false: absence means "no denial", and a plugin cannot
+    // misread an absent entry the way it could misread an empty list.
+    const denied = policyDenyList({
+      agent_writes: { supabase: ["scoped_key_mint"], sentry: ["resolve_issue"] },
+    });
+    assert.deepEqual(denied, [
+      "supabase:jwt_secret_roll",
+      "supabase:scoped_key_revoke",
+      "sentry:create_release",
+    ]);
+    // vercel is not declared at all — unconfigured, no opinion, so none of its ops appear.
+    assert.ok(!denied.some((d) => d.startsWith("vercel:")));
+  });
+
+  it("an empty vendor list denies every op that vendor has — trap 1 across the boundary", () => {
+    const denied = policyDenyList({ agent_writes: { stripe: [] } });
+    assert.deepEqual(denied, ["stripe:webhook_create", "stripe:webhook_delete"]);
+  });
+
+  it("no block at all denies nothing", () => {
+    assert.deepEqual(policyDenyList(undefined), []);
+    assert.deepEqual(policyDenyList({}), []);
+  });
+
+  it("installs the env var, and DELETES it when nothing is denied", () => {
+    clearEnv();
+    try {
+      installPolicyDenyList({ agent_writes: { stripe: [] } });
+      assert.equal(process.env[POLICY_DENY_ENV], "stripe:webhook_create,stripe:webhook_delete");
+      // The stale-inheritance case: a second install with nothing to deny must not leave the
+      // previous project's refusals in the environment, or an approved call fails for reasons the
+      // operator cannot see anywhere in their own config.
+      installPolicyDenyList(undefined);
+      assert.equal(
+        POLICY_DENY_ENV in process.env,
+        false,
+        "a stale deny list from an outer invocation would refuse ops this project never refused",
+      );
+    } finally {
+      clearEnv();
+    }
+  });
+
+  it("installPolicyEnv installs BOTH vars — the boot path has no untested half", async () => {
+    // This is the boot block extracted out of `main()`. Inline there it was unreachable by any test,
+    // so dropping either install would have been caught by nothing — the same reason
+    // `supabaseRotationOp` was extracted.
+    clearEnv();
+    try {
+      await installPolicyEnv({ agent_writes: { supabase: ["scoped_key_mint"] } });
+      assert.match(
+        process.env.KIT_POLICY_HASH ?? "",
+        /^[0-9a-f]{64}$/,
+        "policy identity must travel",
+      );
+      assert.equal(
+        process.env[POLICY_DENY_ENV],
+        "supabase:jwt_secret_roll,supabase:scoped_key_revoke",
+        "the decisions must travel",
+      );
+    } finally {
+      clearEnv();
+    }
+  });
+
+  it("the plugin guard's parse cannot be fooled by a prefix", () => {
+    // `denied.includes()` over a split list, not a substring search: `"supabase:scoped_key_mint"`
+    // must not match `"scoped_key_mint_v2"` or the reverse. This pins the format the plugins parse.
+    const denied = policyDenyList({ agent_writes: { supabase: ["scoped_key_mint"] } });
+    const serialized = denied.join(",");
+    assert.equal(serialized.split(",").includes("supabase:scoped_key_mint"), false);
+    assert.equal(serialized.split(",").includes("supabase:jwt_secret_roll"), true);
+    assert.equal(serialized.split(",").includes("supabase:jwt_secret"), false);
   });
 });
 

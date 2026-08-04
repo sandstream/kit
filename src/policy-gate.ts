@@ -90,6 +90,79 @@ export const POLICY_OPS: readonly { vendor: string; op: string; description: str
       description:
         "roll the Supabase JWT secret — invalidates EVERY existing token (anon, service_role, signed URLs, active sessions)",
     },
+    // The revoke is a THIRD Supabase op, not a mode of the other two. `secrets-rotate-cli.ts` only
+    // ever asks about `--mode`, so this surface — reachable solely through the plugin — was in
+    // neither the elevation-scope split nor this registry. Its blast radius is its own: minting adds
+    // a key and rolling invalidates all of them, while revoking kills ONE key that something is
+    // currently authenticating with.
+    {
+      vendor: "supabase",
+      op: "scoped_key_revoke",
+      description: "revoke one scoped Supabase key — whatever is using that key loses access",
+    },
+    // ── The plugin ops ────────────────────────────────────────────────────────────────────────────
+    //
+    // These gate the write surfaces in `packages/kit-plugin-*`, which no kit-core code path can
+    // reach: the plugins are standalone zero-dependency packages an agent imports directly. The
+    // enforcement point therefore cannot be a kit function call — it is the deny list this module
+    // exports into the environment (`policyDenyList` / `KIT_POLICY_DENY`), read by each plugin's
+    // own guard. See that function for why the DECISION crosses the boundary and the CONFIG does
+    // not.
+    //
+    // `env_unset` is registered SEPARATELY from `env_set` for the same reason the two Supabase
+    // rotation modes are separate: the blast radii are not comparable. Setting a variable is
+    // recoverable by setting it again; deleting one destroys the only copy of a value the operator
+    // may not have anywhere else, and takes the deployment that reads it down until someone finds
+    // it. A repo that pre-approved writing an env var has not pre-approved erasing one.
+    {
+      vendor: "vercel",
+      op: "env_unset",
+      description: "delete an environment variable on a Vercel project",
+    },
+    { vendor: "github", op: "env_unset", description: "delete an Actions secret on a GitHub repo" },
+    { vendor: "fly", op: "env_unset", description: "unset a secret on a Fly app" },
+    {
+      vendor: "cloudflare",
+      op: "env_unset",
+      description: "delete a secret on a Cloudflare Worker",
+    },
+    {
+      vendor: "vercel",
+      op: "trigger_deploy",
+      description: "redeploy the latest production deployment of a Vercel project",
+    },
+    {
+      vendor: "cloudflare",
+      op: "api_token_revoke",
+      description: "revoke a Cloudflare API token — every consumer holding it loses access at once",
+    },
+    {
+      vendor: "stripe",
+      op: "webhook_create",
+      description: "create a Stripe webhook endpoint (a new destination for live event traffic)",
+    },
+    {
+      vendor: "stripe",
+      op: "webhook_delete",
+      description: "delete a Stripe webhook endpoint — events stop being delivered, silently",
+    },
+    // `resolve_issue` covers every issue-state write `sentry/updateIssue` performs: resolve,
+    // unresolve, ignore and reassignment. They are one op rather than four because their blast
+    // radii ARE comparable — all four are reversible, all four need the same `event:write` scope,
+    // and none destroys data. The name is the one kit's own `kit knobs` output has always
+    // advertised, which is what an operator copies; the description is what stops the name from
+    // reading narrower than the op is.
+    {
+      vendor: "sentry",
+      op: "resolve_issue",
+      description:
+        "write an issue's state in Sentry — resolve, unresolve, ignore (mutes alerting) or reassign",
+    },
+    {
+      vendor: "sentry",
+      op: "create_release",
+      description: "create a release marker in Sentry",
+    },
   ]);
 
 /**
@@ -110,6 +183,93 @@ export function supabaseRotationOp(mode: "scoped-key-mint" | "jwt-secret-roll"):
 /** Every (vendor, op) kit can gate, as `vendor:op`. */
 export function knownPolicyOps(): Set<string> {
   return new Set(POLICY_OPS.map((o) => `${o.vendor}:${o.op}`));
+}
+
+/** The env var carrying the resolved denials to processes kit cannot call into. */
+export const POLICY_DENY_ENV = "KIT_POLICY_DENY";
+
+/**
+ * The ops this policy REFUSES, as `vendor:op`, in registry order.
+ *
+ * ── Why a deny LIST and not the config ────────────────────────────────────────────────────────
+ *
+ * The `kit-plugin-*` packages are the enforcement points for the ops above, and they cannot call
+ * this module: they are standalone zero-dependency packages, published on their own, imported
+ * directly by agent code. `adapter-sdk` states the constraint — plugins must not import kit-core,
+ * because that couples the monorepo and leaks private packages — and the read-only gate already
+ * lives with that constraint by crossing the boundary as an ENV VAR.
+ *
+ * The naive way to extend that would be to serialise `[policy.agent_writes]` into the environment
+ * and let each plugin apply the rule. That would put a second implementation of the four-state
+ * decision in seven packages, and every one of them could collapse trap 1 (`stripe = []` is a
+ * lock, not "no restrictions") or trap 2 (absent vendor ≠ present-but-empty) independently. Two
+ * implementations of one access rule is the divergence class that left `kit_fix`'s MCP handler with
+ * a stale copy of the lock step; seven would be worse.
+ *
+ * So what crosses the boundary is the DECISION, not the config. kit resolves every op in the
+ * registry through `policyDecision` — the one implementation — and exports only those that came
+ * back `denied`. The plugin-side guard is then a set-membership test with no rule in it and
+ * therefore nothing to get wrong: there is no empty list to misread, and no absent-vendor case to
+ * collapse, because both already resolved here.
+ *
+ * ── What this is NOT ──────────────────────────────────────────────────────────────────────────
+ *
+ * It is exactly as strong as the `KIT_READ_ONLY` contract and no stronger: a process that never
+ * ran kit, or that strips the variable, sees no denials. That is not a weakening introduced here —
+ * it is the plugin containment model kit already documents, and the alternative (plugins reading
+ * `.kit.toml` themselves) needs a TOML parser in a zero-dependency package and a notion of which
+ * project it belongs to, neither of which a library imported by arbitrary agent code has.
+ *
+ * Absence therefore means "no denial", never "denied" — which is the same narrowing-only semantic
+ * the four states encode. Inverting it (absence = deny) would take every `inert` repo offline the
+ * moment a plugin ran outside a kit invocation.
+ *
+ * One consequence worth stating plainly: a plugin-side refusal is NOT audited. `enforcePolicy`
+ * records decisions into the governed project's log, and a plugin has neither that log nor a path
+ * to it. The refusal is surfaced to its caller as a thrown error; the audit trail covers the ops
+ * kit itself gates.
+ */
+export function policyDenyList(policy: PolicyConfig | undefined): string[] {
+  const out: string[] = [];
+  for (const { vendor, op } of POLICY_OPS) {
+    if (policyDecision(policy, vendor, op).state === "denied") out.push(`${vendor}:${op}`);
+  }
+  return out;
+}
+
+/**
+ * Resolve the denials and export them, so a plugin loaded later in this process tree refuses what
+ * the operator refused. Called from `main()` alongside `installPolicyHash` — the one point where
+ * kit has the governed project's config and has not yet acted on it. Idempotent.
+ *
+ * DELETES the variable when nothing is denied rather than setting it empty: a stale value inherited
+ * from an outer kit invocation in a DIFFERENT project would otherwise refuse ops this project never
+ * refused, and the operator would have no way to see why an approved call failed.
+ */
+export function installPolicyDenyList(policy: PolicyConfig | undefined): void {
+  const denied = policyDenyList(policy);
+  if (denied.length > 0) {
+    process.env[POLICY_DENY_ENV] = denied.join(",");
+  } else {
+    delete process.env[POLICY_DENY_ENV];
+  }
+}
+
+/**
+ * Everything the policy exports into the environment, as ONE call from `main()`.
+ *
+ * Extracted from the boot block for the reason `supabaseRotationOp` was: inline in `main()` it sat
+ * in code no test can reach, so dropping one of the two installs would have been caught by nothing.
+ * Here a mutation that removes either one fails a behavioural test.
+ *
+ * The two vars answer different questions and both have to travel: the HASH identifies which policy
+ * is in force (so an agent can tell whether the rules changed under it), and the DENY LIST carries
+ * the decisions to code kit cannot call into.
+ */
+export async function installPolicyEnv(policy: PolicyConfig | undefined): Promise<void> {
+  const { installPolicyHash } = await import("./policy.js");
+  installPolicyHash(policy);
+  installPolicyDenyList(policy);
 }
 
 /**
