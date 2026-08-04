@@ -100,6 +100,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   nobody was watching. A containment test that does not run is worse than no
   test, because it reads as coverage.
 
+- **`gate-bash` read here-document bodies as commands, and blocked kit's own PR
+  description.** `SEGMENT_SPLIT` includes `\n`, so every line of a here-document
+  was scanned as its own command. Measured: a `gh pr create --body "$(cat <<'EOF'
+  … EOF)"` whose body contained the prose `` `npx tsc --noEmit` `` was refused
+  with `BLOCKED — Triage: npm tsc`, because a backtick in a sentence became a
+  nested command. A false block in a security gate is not a harmless annoyance —
+  it is what teaches people to pass `--no-verify`, and this repo already carries
+  one bypassed-hook record.
+
+  `splitHeredocs()` now separates body from command following what the shell
+  actually does: a body fed to a shell (`bash <<EOF`, `cat <<EOF | bash`) or
+  written to a `*.sh`-shaped file is scanned as a script; anything else is data.
+  The exception that keeps this from being the cheap fix: with an **unquoted**
+  delimiter the shell performs command substitution while building the document,
+  so a substitution in the body really runs and is still gated, while the same
+  body under `<<'EOF'` is inert text. An unterminated here-document is scanned
+  rather than trusted, and the terminator is matched leniently, because absorbing
+  the commands that follow it is the one error direction that could hide a real
+  install.
+
+  Verified by driving the real hook rather than the parser: the exact payload that
+  blocked the PR now exits 0, while `bash <<EOF`, `cat <<EOF | bash`, the
+  unquoted-substitution form, script authoring and the plain install all still
+  exit 2. `src/install-gate-heredoc.test.ts` pins both sides of that table —
+  mutation-proved seven ways, including the cheap fix of treating every body as
+  data (3 fail), dropping the unquoted delimiter's substitutions (2), treating a
+  quoted delimiter as expanding (2), and failing to find the terminator (4).
+
+  Named limitation, previously covered only by accident: a body written to a file
+  without a shell-script extension and executed later is invisible to this gate,
+  as is the easier spelling of the same bypass — a `Write` tool call, which
+  `gate-bash` never sees.
+
 - **`docs/VERIFY.md` documented a `gh attestation verify` invocation that
   exits 1.** Both the copy-pasteable block and the CI snippet passed
   `--owner sandstream --repo kit`; the two flags are alternatives and

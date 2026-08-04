@@ -245,6 +245,103 @@ function pushQuoted(out: string[], quote: string, body: string): void {
   out.push(quote === '"' ? body.replace(/\\([\s\S])/g, "$1") : body);
 }
 
+// A here-document opener. `(?!<)` keeps this off `<<<` (a here-STRING, handled in
+// `nestedCommands` — its operand really is fed to a shell). The delimiter may be quoted or
+// backslash-escaped, which is what decides whether the shell expands anything in the body.
+const HEREDOC_OPENER = /<<(?!<)(-?)\s*(?:'([^']*)'|"([^"]*)"|(\\?)([A-Za-z_][A-Za-z0-9_]*))/g;
+
+// Does this line feed the here-document to something that EXECUTES it? Anchored to command
+// heads (line start, or after a pipe / `;` / `&&` / `||` / `(`) so `bash <<EOF` and
+// `cat <<EOF | bash` match while the `cat` inside `$(cat <<EOF` does not.
+const HEREDOC_SHELL_CONSUMER =
+  /(?:^|[|;&(]|&&|\|\|)\s*(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|ash|fish|eval)\b/;
+
+// `cat > deploy.sh <<'EOF'` — the body is not executed by THIS command, but writing a shell
+// script is the one data-shaped here-document whose body is meant to run later, so it is still
+// scanned. Narrow on purpose: keyed to a shell-script extension, so writing prose to
+// `PR.md` / `notes.txt` stays data.
+const HEREDOC_SCRIPT_TARGET = /(?:^|\s)>{1,2}\s*['"]?([^\s'"|;&]+\.(?:sh|bash|zsh|ksh|dash))['"]?/;
+
+/**
+ * Separate here-document BODIES from the command, because a body is usually data and this gate
+ * used to read every line of it as a command.
+ *
+ * Measured: `gh pr create --body "$(cat <<'EOF' … EOF)"` whose body contained the prose
+ * "`npx tsc --noEmit` clean" was BLOCKED as an untriaged `npm:tsc` install. `SEGMENT_SPLIT`
+ * includes `\n`, so each line of a here-document was scanned as its own command, and a backtick
+ * in prose became a nested command. kit's own gate blocked its own PR description.
+ *
+ * A false block in a security gate is not a harmless inconvenience: it is what teaches people to
+ * pass `--no-verify`, and this repo already carries one bypassed-hook record.
+ *
+ * The rule, which follows what the shell actually does:
+ *
+ * - **Fed to a shell** (`bash <<EOF`, `cat <<EOF | bash`) → the body IS a script. Scanned, as
+ *   before.
+ * - **Written to a `*.sh`-shaped file** → not executed now, but authored to run later. Scanned.
+ * - **Otherwise data.** Not scanned as commands — with one exception that matters: if the
+ *   delimiter is UNQUOTED (`<<EOF`, not `<<'EOF'`), the shell performs command substitution
+ *   while building the document, so `$(npm i evil)` in the body really runs even though `cat`
+ *   only ever sees its output. Those substitutions are returned as `expansions` and still gated.
+ *   A quoted delimiter expands nothing, so an identical body is inert text.
+ *
+ * Unterminated here-document → the body is KEPT (scanned). The parse is unreliable at that point,
+ * and swallowing the rest of the command is the one error direction that could hide a real
+ * install.
+ *
+ * Known and unchanged by this: a body written to a file WITHOUT a shell-script extension and
+ * executed later is not visible to this gate — but neither is the far easier spelling, a Write
+ * tool call, which `gate-bash` never sees at all (`gate-fs` covers writes only where a signed
+ * `[scope].fs` exists). The previous behaviour caught that shape only by accident, untested and
+ * undocumented, at the price of blocking prose.
+ */
+export function splitHeredocs(command: string): { command: string; expansions: string[] } {
+  if (!command.includes("<<")) return { command, expansions: [] };
+  const lines = command.split("\n");
+  const kept: string[] = [];
+  const expansions: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    kept.push(line);
+    const openers = [...line.matchAll(HEREDOC_OPENER)].map((m) => ({
+      delim: m[2] ?? m[3] ?? m[5] ?? "",
+      // `<<'EOF'`, `<<"EOF"` and `<<\EOF` all suppress expansion inside the body.
+      expands: m[2] === undefined && m[3] === undefined && m[4] !== "\\",
+    }));
+    if (openers.length === 0) continue;
+    const isScript = HEREDOC_SHELL_CONSUMER.test(line) || HEREDOC_SCRIPT_TARGET.test(line);
+
+    // Bodies follow the opener line in the order their openers appeared (`cmd <<A <<B`).
+    for (const op of openers) {
+      const body: string[] = [];
+      let terminated = false;
+      while (++i < lines.length) {
+        // Lenient terminator match (trimmed, not column-exact). Being generous here is the safe
+        // direction: failing to FIND the terminator would absorb the commands after the
+        // here-document into the body.
+        if (lines[i]!.trim() === op.delim) {
+          terminated = true;
+          break;
+        }
+        body.push(lines[i]!);
+      }
+      if (isScript || !terminated) {
+        kept.push(...body);
+        if (terminated) kept.push(lines[i]!);
+        continue;
+      }
+      if (op.expands) {
+        const text = body.join("\n");
+        for (const m of text.matchAll(/\$\(([^()]{1,2000})\)/g)) expansions.push(m[1]!);
+        for (const m of text.matchAll(/`([^`]{1,2000})`/g)) expansions.push(m[1]!);
+      }
+      kept.push(lines[i] ?? "");
+    }
+  }
+  return { command: kept.join("\n"), expansions };
+}
+
 function nestedCommands(command: string): string[] {
   const out: string[] = [];
   for (const m of command.matchAll(/\$\(([^()]{1,2000})\)/g)) out.push(m[1]);
@@ -578,7 +675,12 @@ export function parseInstallCommand(command: string): InstallProbe {
   // Scan the command AND any commands hidden in $(…)/backticks/`-c '…'`, bounded
   // so a wrapper (`sh -c '…'`, `$(…)`) can't smuggle an install past the splitter.
   const seen = new Set<string>();
-  const queue: string[] = [command];
+  // Here-document bodies are data unless a shell eats them. Their genuinely-executing parts (an
+  // unquoted delimiter's command substitutions) come back as separate commands to scan. See
+  // `splitHeredocs` — without this, every line of a `gh pr create --body "$(cat <<'EOF' …)"`
+  // was scanned as a command, and prose mentioning `npx tsc` was blocked as an install.
+  const heredocs = splitHeredocs(command);
+  const queue: string[] = [heredocs.command, ...heredocs.expansions];
   // Dequeue with a head cursor, NOT queue.shift(): shift() is O(N) on a large array, and the
   // `seen` cap doesn't bound the array — a command with many identical nested items (e.g.
   // `$(npm i evil)` repeated) enqueues N duplicates that are shifted-and-skipped, giving O(N²)
