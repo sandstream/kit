@@ -57,7 +57,7 @@ versioned and signed independently of project config. They are complementary
 layers.
 
 > **`[policy.agent_writes]` is ENFORCED as of 6.3.2, and reaches the plugin write surfaces
-> after it.** It was declarative through 6.3.1 — parsed, folded into `KIT_POLICY_HASH`, and
+> from 6.4.0.** It was declarative through 6.3.1 — parsed, folded into `KIT_POLICY_HASH`, and
 > consulted by nothing — and this note said so. What it enforces now:
 >
 > - **Inside kit**, at `propagate()`'s choke point and in `secrets-rotate-cli.ts`, deciding via

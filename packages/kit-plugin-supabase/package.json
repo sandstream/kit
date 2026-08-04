@@ -1,6 +1,6 @@
 {
   "name": "sandstream-kit-plugin-supabase",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "kit plugin: Supabase Management API integration (service-role key rotation, project introspection).",
   "type": "module",
   "exports": {
