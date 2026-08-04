@@ -146,6 +146,15 @@ it back. A missing sentinel means `git commit --no-verify` was used; the event
 gets appended to `.kit-skipped-commits.jsonl` and a stderr banner appears on
 the next `kit` invocation.
 
+The log is append-only, so the banner counts the entries the repository still
+recognises rather than the lines in the file: a squash-merge keeps the change
+and discards the commit it recorded, and an entry no ref contains describes a
+bypass that landed nowhere. An entry is set aside only when git can disprove it
+— the object is present and unreachable. Anything unverifiable (a log carried
+between clones, an object gc'd away, a directory that is not a repository)
+stays counted, because a bypass that cannot be checked is not one that can be
+dismissed.
+
 ### Audit-log fail-closed
 
 When `appendAuditEventDirect()` cannot write (disk full, perm error), the
