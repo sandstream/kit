@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`docs/VERIFY.md` documented a `gh attestation verify` invocation that
+  exits 1.** Both the copy-pasteable block and the CI snippet passed
+  `--owner sandstream --repo kit`; the two flags are alternatives and
+  `--repo` wants the full `owner/repo`, so gh 2.96 answers
+  `invalid value provided for repo: kit`. It survived because the
+  surrounding caveat said the attestation did not exist yet, so nobody
+  expected the command to succeed — a broken instruction hiding behind a
+  true caveat. `src/docs-verify-commands.test.ts` now gates the flag
+  grammar in `VERIFY.md`, `README.md` and `publish.yml` (offline and
+  deterministic; a doc test needing Sigstore would be skipped in CI and
+  therefore worthless), mutation-proved by restoring the old form: 2 fail.
+
+### Changed
+
+- **The GitHub artifact attestation is measured, so the docs stop hedging.**
+  `gh attestation verify sandstream-kit-6.3.2.tgz --repo sandstream/kit`
+  exits 0 with exactly one subject, `digest.sha256 = de2f6328…85dd`,
+  `predicateType: https://slsa.dev/provenance/v1`, and a `buildSignerURI` of
+  `publish.yml@refs/tags/v6.3.2` — verified against a tarball whose sha512
+  equals npm's own `dist.integrity`, so the GitHub attestation and the npm
+  provenance describe the same bytes (run `30890753307`). Accordingly:
+  VERIFY.md's caveat is reduced to the fact consumers still need (nothing to
+  verify on ≤6.3.1) and now carries the measurement; the CI snippet's
+  attestation gate is **blocking** again, with the `|| echo "::warning::…"`
+  removed on the grounds that a warning in a CI log is indistinguishable
+  from a passing check to anyone not reading the log; and the OWASP A08 row
+  stops citing "the step is in publish.yml" as evidence — the step was
+  always there and always errored, which is exactly the reasoning that let
+  it survive.
+
 ## [6.3.2] - 2026-08-04
 
 ### Added
