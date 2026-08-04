@@ -202,6 +202,57 @@ unguarded, and checking it walked back a suspected gap — but three of them rou
 `src/exec-broker/policy-cwd.test.ts`; mutation-proved (dropping the `cwd` argument fails 6,
 replacing the foreign-tree deny with `if (false)` fails 2).
 
+### Shrink the inherited dependency surface — 120 installed, 9 loaded
+
+Measured, and guarded by `src/mcp-dependency-surface.test.ts`: kit's four direct production
+dependencies pull in 120 packages, of which `@modelcontextprotocol/sdk` alone accounts for **91**.
+The SDK declares 17 hard dependencies with `optionalDependencies: {}`, including a whole HTTP
+server and OAuth stack (express 5, express-rate-limit, cors, hono, `@hono/node-server`, raw-body,
+content-type, eventsource, jose, pkce-challenge) for the Streamable-HTTP/SSE transports. kit speaks
+stdio and **loads none of them** — traced across both module systems, at startup and during tool
+calls.
+
+Why it is a roadmap item and not just a curiosity: three of the four dependency advisories cleared
+on the `cwd` branch came from that tree, and for a tool whose own pitch is supply-chain governance
+— `kit triage` refuses untriaged installs — shipping ~12 never-executed webserver packages is its
+own thesis pointed at itself. Each bump was correct; none of them touched the cause.
+
+Four options, in the order I'd try them:
+
+1. **Nothing, short term.** They are hard deps with no `optionalDependencies`, so npm installs the
+   set regardless. Bumping is the only immediate answer, and that is what the branch did.
+2. **Ask upstream** (`modelcontextprotocol/typescript-sdk`) to move the HTTP-transport and OAuth
+   dependencies to `optionalDependencies`, or split them into a companion package. This helps every
+   stdio server, which is most of them — the ask is not kit-specific. Draft below. **This cannot be
+   filed from kit's own tooling:** GitHub access is scoped per session, and any repository outside
+   the allowlist answers 403, so a human has to open it.
+3. **Vendor the stdio transport.** It is newline-delimited JSON-RPC over stdin/stdout — small.
+   Dropping the SDK would take the tree from 120 to roughly 29 packages. The cost is real: kit would
+   own protocol conformance and lose `McpServer`'s registration and schema validation, which is a
+   load-bearing dependency swap deserving its own costing, not a snap decision.
+4. **Document and accept** — done: `docs/DATA_FLOW.md` and the A06 rows in `docs/OWASP_2025.md` now
+   carry both numbers and the trace method.
+
+Draft for (2), to be filed by hand:
+
+> **Move the HTTP-transport dependencies to `optionalDependencies`**
+>
+> The SDK declares express, express-rate-limit, cors, hono, `@hono/node-server`, raw-body,
+> content-type and eventsource as hard dependencies, plus jose and pkce-challenge for OAuth. A
+> server that uses only `StdioServerTransport` installs all of them and loads none — verified by
+> tracing ESM resolution and `Module._load` while booting a server, listing tools and calling two:
+> 9 of 120 installed packages load, and none of the twelve above is among them.
+>
+> The cost lands on consumers as CVE noise in code they never execute. In one recent sitting a
+> stdio-only consumer had to clear advisories in `hono` and in `ip-address` (via
+> express-rate-limit) that were unreachable from its own code path, alongside one (`fast-uri`, via
+> ajv) that genuinely was reachable — and telling those apart required tracing, because the
+> dependency graph alone cannot.
+>
+> Moving the HTTP/OAuth set to `optionalDependencies` (or a `@modelcontextprotocol/sdk-http`
+> companion) would let stdio consumers install what they run. Happy to send a PR if the shape is
+> agreed.
+
 ### PR 2 — `kit analyze` subcommand (1d)
 Walk git log + scan framework markers (`next.config.*`, `pyproject.toml`,
 `Cargo.toml`, `drizzle.config.*`, etc.) to emit a draft `CLAUDE.md` + `RULES.md`
