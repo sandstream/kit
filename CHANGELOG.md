@@ -6,6 +6,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.3.2] - 2026-08-04
+
+### Added
+
+- **`[policy.agent_writes]` is now enforced — narrowing-only, wired at the
+  choke point.** `policy-gate.ts` gates all six vendor `env_set` propagation
+  writes at `propagate()`'s single choke point, plus Supabase rotation, where
+  `scoped_key_mint` and `jwt_secret_roll` are separate ops because a roll
+  invalidates every live token and a mint approval must not authorise it. The
+  semantic is deliberately not a grant: the block is unsigned config, so
+  policy may add a denial and never remove one; elevation, read-only and
+  approval stay authoritative. Four distinct states (`inert` /
+  `unconfigured` / `approved` / `denied`) keep "vendor absent" separate from
+  "vendor declared with an empty list" — **a declared vendor block whose list
+  omits the op now refuses**, where the table previously gated nothing. Every
+  enforced decision, refusal and grant alike, writes a `policy-check` audit
+  event carrying the vendor, op, `policy_state` and policy hash into the
+  governed project's log, and `unknownPolicyEntries()` reports config naming
+  an op kit never asks about, so a typo'd `env-set` surfaces instead of
+  silently granting nothing (#442).
+
+### Fixed
+
+- **`KIT_READ_ONLY=1` did not stop `kit secrets propagate`.** Propagation
+  writes a secret into a third-party control plane, and with elevation
+  satisfied, `KIT_READ_ONLY=1 kit secrets propagate API_KEY --value x --to
+  vercel` reached `spawn vercel` — nothing refused it.
+  `read-only-surface.ts` omitted `secrets` because writes are "already
+  refused inside their own modules": true of the local backend write, false
+  of propagation. Now gated at `propagate()`'s choke point, ordered before
+  the policy gate so a locked-down session answers "read-only" rather than
+  "your policy is missing an entry" (#442).
+- **The GitHub artifact attestation never ran — on any release.**
+  `subject-path: dist/**/*` matched 1920 files against the action's hard
+  limit of 1024 subjects, so the attest step errored in 327 ms on every
+  publish, and `continue-on-error: true` reported it to the jobs API as
+  success. The step now packs the tarball first and attests that — one
+  subject, the same bytes npm publishes — and a following step writes the
+  outcome to the run annotations and job summary, so a swallowed failure can
+  no longer read as green. Releases up to and including 6.3.1 carry npm
+  provenance and a signed tag but no GitHub artifact attestation; 6.3.2 is
+  the first release where one can exist (#441).
+- **A governed operation now measures and files evidence in the governed
+  project's tree, not the calling process's.** Five fail-opens closed by
+  threading `cwd` end to end: the exec broker resolved the unsigned policy
+  from `process.cwd()`; `kit check`'s filesystem dimensions scanned the
+  calling tree; `kit fix`'s write path had the asymmetry backwards; audit
+  evidence was filed in the wrong project; and the review design stage
+  measured the calling process's tree instead of the reviewed one (#441).
+- **A value flag means the same thing with a space and with an `=`.** The
+  argv sweep is finished: one guarded idiom for value flags across the CLI
+  (#441).
+- **`policy-cwd.test.ts` compared a `mkdtemp` path against a `cwd`-derived
+  one**, which on macOS resolves through the `/var` → `/private/var` symlink.
+  Green on the Linux runner, red on a maintainer's machine — the temp root is
+  realpath'd so the pair proves the behaviour rather than the platform.
+
 ### Changed
 
 - **`mcp-server.ts` migrated from the deprecated `server.tool()` overload to
@@ -16,6 +73,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   so a tool added through either API can never dodge read-only-guard
   classification. Closes the TS6387 deprecation warnings introduced by the
   SDK 1.30.0 bump (#437).
+- **The MCP server serves a cross-project `cwd`.** The blanket refusal is
+  lifted after measuring the guard it rested on: the cross-project comparison
+  comes from real, symlink-resolved paths, so a governed project can be
+  served from a different working tree without weakening the boundary (#441).
 
 ### Security
 
@@ -28,6 +89,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   was exploitable — but the lockfile pin kept `osv-scanner` red on every
   `kit check`. The fix only exists in the 2.x line, and SDK 1.30.0 is the
   first release whose range (`^1.19.9 || ^2.0.5`) admits it.
+- **`brace-expansion` 5.0.9 (GHSA-rgw5-rvv9-x895) and `fast-uri` 3.1.5
+  (GHSA-7p8r-x3mc-p8w7).** brace-expansion was dev-only, via eslint; fast-uri
+  ships to consumers and is on the live path — `ajv` compiles kit's ten MCP
+  tool schemas on every server start and resolves `$ref` URIs through it
+  (#441).
+- **The inherited dependency surface is measured and guarded: 120 packages
+  installed, 9 loaded.** `@modelcontextprotocol/sdk` accounts for 91 of the
+  120 because it hard-declares a complete HTTP server and OAuth stack for
+  transports kit never uses. kit speaks stdio and loads none of them, traced
+  across both module systems — an ESM resolve hook alone misses CommonJS
+  loads and would have reported a confident wrong answer.
+  `src/mcp-dependency-surface.test.ts` is a guard, not a report: it fails if
+  a future SDK release pulls the HTTP stack into the stdio path (#442).
 
 ## [6.3.1] - 2026-08-03
 
