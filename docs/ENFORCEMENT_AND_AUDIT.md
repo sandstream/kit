@@ -14,6 +14,22 @@ Deterministic, fail-closed, zero-LLM:
 
 - **PreToolUse gates** — `gate-bash`, `gate-env` block un-triaged installs and plaintext-secret
   writes *before* they land.
+
+  `gate-bash` reads the pending command as a shell would, which means it follows installs into
+  `$(…)`, backticks, `sh -c '…'`, process substitution and here-strings. **Here-document bodies are
+  the one place it deliberately stops**: a body is data unless something executes it. Fed to a shell
+  (`bash <<EOF`, `cat <<EOF | bash`), or written to a `*.sh`-shaped file, it is scanned as a script;
+  otherwise it is text. The exception that keeps this honest: with an UNQUOTED delimiter (`<<EOF`,
+  not `<<'EOF'`) the shell performs command substitution while building the document, so `$(…)` in
+  the body really runs and is still gated — a quoted delimiter expands nothing, so the identical
+  body is inert.
+
+  This is a correction, not a design note. Every line of a here-document used to be scanned as its
+  own command, and the gate blocked kit's own PR description because the prose contained
+  `` `npx tsc --noEmit` `` — a false block, which is what teaches people to reach for `--no-verify`.
+  Named limitation: a body written to a file WITHOUT a shell-script extension and executed later is
+  not visible to this gate. Neither is the easier spelling of the same bypass — a `Write` tool call,
+  which `gate-bash` never sees (`gate-fs` covers writes only where a signed `[scope].fs` exists).
 - **Capture-time gates** — the memory write-gate (G1), install-gate, slopsquat scoring (G4).
 - **Commit/CI chokepoints** — `kit triage check-deps` + `kit triage check-skills` (pre-commit,
   wired by `kit setup --recommended`), branch-protected checks.
