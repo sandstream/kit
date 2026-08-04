@@ -323,10 +323,15 @@ unguarded, and checking it walked back a suspected gap — but three of them rou
 `src/exec-broker/policy-cwd.test.ts`; mutation-proved (dropping the `cwd` argument fails 6,
 replacing the foreign-tree deny with `if (false)` fails 2).
 
-### Shrink the inherited dependency surface — 120 installed, 9 loaded
+### Shrink the inherited dependency surface — 94 installed, 9 loaded
 
 Measured, and guarded by `src/mcp-dependency-surface.test.ts`: kit's four direct production
-dependencies pull in 120 packages, of which `@modelcontextprotocol/sdk` alone accounts for **91**.
+dependencies pull in **94** packages, of which **90 are reachable ONLY through**
+`@modelcontextprotocol/sdk` (91 via the SDK in total; without it the other three direct deps bring
+4). Re-measured at SDK 1.30.0 — this section said 120/91 for the 1.29 tree, and the install count
+moved under the `@hono/node-server` 1.x → 2.x bump while the LOADED count did not. The loaded number
+is now asserted against this heading by the guard test, because a count that lives only in prose
+drifts and a drifted number in a supply-chain argument is worse than no number.
 The SDK declares 17 hard dependencies with `optionalDependencies: {}`, including a whole HTTP
 server and OAuth stack (express 5, express-rate-limit, cors, hono, `@hono/node-server`, raw-body,
 content-type, eventsource, jose, pkce-challenge) for the Streamable-HTTP/SSE transports. kit speaks
@@ -342,37 +347,41 @@ Four options, in the order I'd try them:
 
 1. **Nothing, short term.** They are hard deps with no `optionalDependencies`, so npm installs the
    set regardless. Bumping is the only immediate answer, and that is what the branch did.
-2. **Ask upstream** (`modelcontextprotocol/typescript-sdk`) to move the HTTP-transport and OAuth
-   dependencies to `optionalDependencies`, or split them into a companion package. This helps every
-   stdio server, which is most of them — the ask is not kit-specific. Draft below. **This cannot be
-   filed from kit's own tooling:** GitHub access is scoped per session, and any repository outside
-   the allowlist answers 403, so a human has to open it.
+2. ~~**Ask upstream**~~ **Done — the ask already existed, so kit added evidence instead of a
+   duplicate.** [`modelcontextprotocol/typescript-sdk#1924`](https://github.com/modelcontextprotocol/typescript-sdk/issues/1924)
+   ("Optional install of HTTP/SSE transport deps (express, hono) for stdio-only servers", open since
+   2026-04-17) asks for exactly this, with the same three options. Filing the draft that used to sit
+   below would have been a third "+1" on a thread that already had two.
+
+   What kit contributed instead ([comment](https://github.com/modelcontextprotocol/typescript-sdk/issues/1924#issuecomment-5177704605)):
+   the issue and its comment both argue from INSTALL counts, and nobody had shown which packages
+   execute. kit's trace does — 9 of 94 load, all twelve HTTP/OAuth packages installed and none
+   loaded — plus the argument that matters more than disk footprint: of the three advisories kit
+   cleared from that subtree, `hono` and `ip-address` were unreachable while `fast-uri` (via `ajv`)
+   was genuinely on the live path, and only a runtime trace can tell those apart. The SDK's tree is
+   not all dead weight for a stdio consumer, which is why the ask is specifically about the
+   separable HTTP/OAuth set rather than "fewer dependencies".
+
+   A note that was wrong here for a day: this said the issue "cannot be filed from kit's own
+   tooling — any repository outside the allowlist answers 403". Measured before acting on it:
+   `gh issue list --repo modelcontextprotocol/typescript-sdk` exits 0. The 403 belonged to a
+   different constraint (a cloud session's GitHub token is scoped to its one attached repo) and had
+   been copied onto a local-session item where it did not apply. Worth remembering as its own
+   defect class: a limitation recorded without the condition it depends on reads as permanent.
 3. **Vendor the stdio transport.** It is newline-delimited JSON-RPC over stdin/stdout — small.
-   Dropping the SDK would take the tree from 120 to roughly 29 packages. The cost is real: kit would
-   own protocol conformance and lose `McpServer`'s registration and schema validation, which is a
-   load-bearing dependency swap deserving its own costing, not a snap decision.
-4. **Document and accept** — done: `docs/DATA_FLOW.md` and the A06 rows in `docs/OWASP_2025.md` now
+   Dropping the SDK would take the tree from 94 to 4 production packages (the other three direct
+   deps' closure). The cost is real: kit would own protocol conformance and lose `McpServer`'s
+   registration and schema validation, which is a load-bearing dependency swap deserving its own
+   costing, not a snap decision.
+4. **Document and accept** — done: `docs/DATA_FLOW.md` and the A06 rows in `docs/OWASP_2025.md`
    carry both numbers and the trace method.
 
-Draft for (2), to be filed by hand:
-
-> **Move the HTTP-transport dependencies to `optionalDependencies`**
->
-> The SDK declares express, express-rate-limit, cors, hono, `@hono/node-server`, raw-body,
-> content-type and eventsource as hard dependencies, plus jose and pkce-challenge for OAuth. A
-> server that uses only `StdioServerTransport` installs all of them and loads none — verified by
-> tracing ESM resolution and `Module._load` while booting a server, listing tools and calling two:
-> 9 of 120 installed packages load, and none of the twelve above is among them.
->
-> The cost lands on consumers as CVE noise in code they never execute. In one recent sitting a
-> stdio-only consumer had to clear advisories in `hono` and in `ip-address` (via
-> express-rate-limit) that were unreachable from its own code path, alongside one (`fast-uri`, via
-> ajv) that genuinely was reachable — and telling those apart required tracing, because the
-> dependency graph alone cannot.
->
-> Moving the HTTP/OAuth set to `optionalDependencies` (or a `@modelcontextprotocol/sdk-http`
-> companion) would let stdio consumers install what they run. Happy to send a PR if the shape is
-> agreed.
+The measurement, for anyone re-deriving it: a lockfile reachability walk from the four direct
+production deps gives the install counts, and the loaded set needs BOTH module systems traced — a
+`register()`ed ESM `resolve` hook and a `Module._load` patch. An ESM-only tracer reports 5 packages
+and misses `fast-uri`, because `ajv` is CommonJS and reaches it through an internal `require()`. That
+half-blind version was written first and produced a confident wrong answer, which is why the guard
+test asserts it can see `fast-uri` BEFORE any of its absence claims are allowed to mean anything.
 
 ### PR 2 — `kit analyze` subcommand (1d)
 Walk git log + scan framework markers (`next.config.*`, `pyproject.toml`,

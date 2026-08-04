@@ -133,6 +133,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   as is the easier spelling of the same bypass — a `Write` tool call, which
   `gate-bash` never sees.
 
+- **The dependency-surface numbers said 120 installed; the tree is 94.** The
+  count was measured against the SDK 1.29 tree and never re-measured after the
+  1.30 bump moved it (`@hono/node-server` 1.x → 2.x). It had been copied into
+  four places — the ROADMAP heading and body, `docs/DATA_FLOW.md`, the OWASP A06
+  row, and the guard test's own docstring — so the number was wrong everywhere it
+  was cited, including in a draft aimed at an upstream maintainer. Re-measured at
+  1.30.0: **94 production packages, 90 of them reachable only through the MCP
+  SDK, 9 loaded at runtime.** The loaded count did not move, which is why it is
+  now **gated**: `mcp-dependency-surface.test.ts` parses the ROADMAP heading and
+  fails if the advertised number and the trace disagree (mutation-proved by
+  editing the heading to 8 → 1 fail). Only the loaded count is pinned — the
+  install count depends on lockfile hoisting, so pinning it would fail on an
+  unrelated bump and teach people to edit the assertion instead of reading it.
+
+- **The ROADMAP recorded a limitation without its condition.** The upstream ask
+  about the SDK's HTTP/OAuth dependencies was marked "cannot be filed from kit's
+  own tooling — any repository outside the allowlist answers 403". Measured:
+  `gh issue list --repo modelcontextprotocol/typescript-sdk` exits 0. The 403
+  belonged to a different constraint (a cloud session's GitHub token is scoped to
+  its one attached repo) and had been copied onto a local-session item where it
+  never applied — so an actionable item sat parked as impossible. The ask also
+  already existed upstream as
+  [typescript-sdk#1924](https://github.com/modelcontextprotocol/typescript-sdk/issues/1924),
+  so kit contributed its runtime trace to that thread instead of filing a
+  duplicate: the issue and its comment both argue from install counts, and nobody
+  had shown which packages execute.
+
 - **`docs/VERIFY.md` documented a `gh attestation verify` invocation that
   exits 1.** Both the copy-pasteable block and the CI snippet passed
   `--owner sandstream --repo kit`; the two flags are alternatives and
