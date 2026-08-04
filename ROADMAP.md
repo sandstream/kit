@@ -60,16 +60,16 @@ Contributions on any planned item are welcome — open an issue first to coordin
 
 Effort estimates assume one focused developer-day.
 
-### Wire `[policy.agent_writes]` — an A01 access control, as its own arc (2d)
-`checkPolicy()` exists, is tested, and has **no caller** outside its own module. So
-`[policy.agent_writes]` is parsed, hashed into `KIT_POLICY_HASH` and travels with the repo, but
-gates nothing in kit and emits no `policy-check` audit event. `policy.ts` already says the module
-"deliberately does NOT enforce — it just SURFACES"; what is absent is step 2 of its own documented
-runtime contract, and the OWASP A01 row implied an enforcement that never happened. The rows now say
-so; this is the work to make them say something stronger.
+### Wire `[policy.agent_writes]` — ENFORCED + AUDITED for `env_set`; more ops remain
+**The problem, as it stood.** `checkPolicy()` existed, was tested, and had no caller outside its own
+module. `[policy.agent_writes]` was parsed, hashed into `KIT_POLICY_HASH` and travelled with the
+repo — and gated nothing. `policy.ts` said the module "deliberately does NOT enforce — it just
+SURFACES"; what was absent was step 2 of its own documented runtime contract, and the OWASP A01 row
+implied an enforcement that never happened.
 
-Deliberately NOT bundled into a release PR. It is an access-control surface whose semantics are the
-opposite of the usual reading, and getting that wrong fails OPEN:
+This was kept out of a release PR on purpose. It is an access-control surface whose semantics are
+the opposite of the usual reading, and getting that wrong fails OPEN. The five traps, which are now
+the structure of the test file:
 
 1. **Empty list means deny, not allow.** `stripe = []  # all writes still gated` — kit's own
    example in `src/config.ts`. An implementer who treats an empty allowlist as "no restrictions"
@@ -89,6 +89,68 @@ opposite of the usual reading, and getting that wrong fails OPEN:
 5. **Every branch needs a behavioural test that fails when the wiring is removed.** This defect
    survived because `checkPolicy` had unit tests proving the decision function correct while nothing
    called it. Tests over the decision function are not evidence of a working control.
+
+**Done.** `policy-gate.ts` decides, `propagate()` enforces. The semantic chosen, and why: the block
+is UNSIGNED config, so it may only ever NARROW — an agent that can edit `.kit.toml` must not be able
+to self-approve by adding a line. `approval.ts` already holds the grant-shaped mechanism and it
+requires an org-authority signature; that is the difference. So the enforcement point asks one
+question only, "does policy refuse?", and there is deliberately no branch where an approval
+satisfies a gate.
+
+Four states rather than a boolean, so traps 1 and 2 cannot be collapsed by a consumer:
+`inert` (no block) / `unconfigured` (block present, vendor absent — no opinion, because opting in
+must be per-vendor or adding one rule takes every other vendor offline) / `approved` / `denied`
+(vendor declared and op not listed, INCLUDING an empty list). A malformed entry — `vercel = "env_set"`
+as a string — denies rather than reading as "no rule". `POLICY_OPS` is the single op vocabulary and
+`unknownPolicyEntries()` surfaces a typo'd `env-set` instead of leaving the operator believing it
+granted something.
+
+Proof: `src/policy-gate.test.ts`, 31 tests grouped by the five traps above; mutation-proved ten
+ways — remove the wiring in `propagate` (2 fail), make an empty list permissive (5), collapse
+absent-vendor into a denial (5), stop auditing (4), audit every state including the silent ones (1),
+audit into `process.cwd()` instead of the governed project (3).
+
+**What remains, and it is not cosmetic:**
+
+1. ~~Audit the enforced denials.~~ **Done.** `enforcePolicy()` decides via the pure
+   `policyDecision`, then records refusals AND grants with the vendor, op, `policy_state` and
+   policy hash, in the governed project's log. `inert`/`unconfigured` stay silent by design.
+   `checkPolicy` now delegates its decision to the same function, so one rule has one
+   implementation. Mutation-proved three further ways: stop auditing (4 fail), audit every state
+   (1 fail), audit into `process.cwd()` instead of the governed project (3 fail).
+2. **Ops beyond `env_set` — Supabase rotation done; plugin ops remain.** `scoped_key_mint` and
+   `jwt_secret_roll` are registered SEPARATELY and gated at `secrets-rotate-cli.ts`, because their
+   blast radii are not comparable — the roll invalidates every live token, and
+   `elevation-scopes.ts` already treats them as distinct scopes for the same reason. A repo that
+   pre-approved the reversible mint has not pre-approved the roll.
+
+   Doing this exposed that kit's own documented example was wrong in two ways once the block became
+   enforced: it named `rotate_jwt`, which is not an op, and `list_projects`, which is a READ inside
+   a block called `agent_writes`. Both corrected in `config.ts` and `policy.ts`, and a test now
+   parses the example out of `config.ts` and runs it through `unknownPolicyEntries` — so kit's own
+   documentation cannot drift from the registry again.
+
+   The `--mode` → op mapping was extracted to `supabaseRotationOp()` so it could be mutation-tested:
+   inline it sat inside a function that needs the Supabase Management API to reach, so collapsing
+   both modes onto one op would have been caught by nothing. Now it fails a test.
+
+   Still open: `resolve_issue`, `create_release` and `trigger_deploy` live in the plugins and have
+   no choke point in kit — each needs a registry row and an enforcement point in its adapter.
+3. ~~Trap 4 is asserted, not proven end to end.~~ **Done, and it turned up a fail-open.** Proving
+   "policy narrows and never grants" needs a real gate that still stops an approved op — and the
+   obvious candidate did not stop anything. Measured: with elevation satisfied (`KIT_ELEVATED=1`),
+   `KIT_READ_ONLY=1 kit secrets propagate API_KEY --value x --to vercel` reached `spawn vercel` and
+   failed only because the CLI is absent from the probe machine. Propagation writes a secret into a
+   third-party control plane and nothing refused it.
+
+   Root cause is a reasoning error in `read-only-surface.ts`, which omits `secrets` because it is
+   "already refused inside their own modules". True of the LOCAL write
+   (`writeSecretToBackend` → `refuseWrite`), false of propagation — one path's guarantee read as the
+   module's. The exclusion comment now says so. Gated at `propagate()`'s choke point, checked once
+   (the lock is session-wide) but reported per target so the operator sees what did not happen, and
+   ordered BEFORE the policy gate so a lock-down answers "read-only" rather than "your policy is
+   missing an entry". Three tests, mutation-proved two ways (remove the gate → 3 fail; let policy
+   run first → 2 fail).
 
 ### Thread `cwd` through every check dimension — READ PATH DONE, write path remains
 `runCheckGate` resolved its `cwd` option only to load `.kit.toml`. All ten dimensions after that
@@ -201,6 +263,57 @@ unguarded, and checking it walked back a suspected gap — but three of them rou
 `runBrokered`, which was the hole. Fixed with 10 two-sided tests in
 `src/exec-broker/policy-cwd.test.ts`; mutation-proved (dropping the `cwd` argument fails 6,
 replacing the foreign-tree deny with `if (false)` fails 2).
+
+### Shrink the inherited dependency surface — 120 installed, 9 loaded
+
+Measured, and guarded by `src/mcp-dependency-surface.test.ts`: kit's four direct production
+dependencies pull in 120 packages, of which `@modelcontextprotocol/sdk` alone accounts for **91**.
+The SDK declares 17 hard dependencies with `optionalDependencies: {}`, including a whole HTTP
+server and OAuth stack (express 5, express-rate-limit, cors, hono, `@hono/node-server`, raw-body,
+content-type, eventsource, jose, pkce-challenge) for the Streamable-HTTP/SSE transports. kit speaks
+stdio and **loads none of them** — traced across both module systems, at startup and during tool
+calls.
+
+Why it is a roadmap item and not just a curiosity: three of the four dependency advisories cleared
+on the `cwd` branch came from that tree, and for a tool whose own pitch is supply-chain governance
+— `kit triage` refuses untriaged installs — shipping ~12 never-executed webserver packages is its
+own thesis pointed at itself. Each bump was correct; none of them touched the cause.
+
+Four options, in the order I'd try them:
+
+1. **Nothing, short term.** They are hard deps with no `optionalDependencies`, so npm installs the
+   set regardless. Bumping is the only immediate answer, and that is what the branch did.
+2. **Ask upstream** (`modelcontextprotocol/typescript-sdk`) to move the HTTP-transport and OAuth
+   dependencies to `optionalDependencies`, or split them into a companion package. This helps every
+   stdio server, which is most of them — the ask is not kit-specific. Draft below. **This cannot be
+   filed from kit's own tooling:** GitHub access is scoped per session, and any repository outside
+   the allowlist answers 403, so a human has to open it.
+3. **Vendor the stdio transport.** It is newline-delimited JSON-RPC over stdin/stdout — small.
+   Dropping the SDK would take the tree from 120 to roughly 29 packages. The cost is real: kit would
+   own protocol conformance and lose `McpServer`'s registration and schema validation, which is a
+   load-bearing dependency swap deserving its own costing, not a snap decision.
+4. **Document and accept** — done: `docs/DATA_FLOW.md` and the A06 rows in `docs/OWASP_2025.md` now
+   carry both numbers and the trace method.
+
+Draft for (2), to be filed by hand:
+
+> **Move the HTTP-transport dependencies to `optionalDependencies`**
+>
+> The SDK declares express, express-rate-limit, cors, hono, `@hono/node-server`, raw-body,
+> content-type and eventsource as hard dependencies, plus jose and pkce-challenge for OAuth. A
+> server that uses only `StdioServerTransport` installs all of them and loads none — verified by
+> tracing ESM resolution and `Module._load` while booting a server, listing tools and calling two:
+> 9 of 120 installed packages load, and none of the twelve above is among them.
+>
+> The cost lands on consumers as CVE noise in code they never execute. In one recent sitting a
+> stdio-only consumer had to clear advisories in `hono` and in `ip-address` (via
+> express-rate-limit) that were unreachable from its own code path, alongside one (`fast-uri`, via
+> ajv) that genuinely was reachable — and telling those apart required tracing, because the
+> dependency graph alone cannot.
+>
+> Moving the HTTP/OAuth set to `optionalDependencies` (or a `@modelcontextprotocol/sdk-http`
+> companion) would let stdio consumers install what they run. Happy to send a PR if the shape is
+> agreed.
 
 ### PR 2 — `kit analyze` subcommand (1d)
 Walk git log + scan framework markers (`next.config.*`, `pyproject.toml`,

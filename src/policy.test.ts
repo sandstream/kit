@@ -77,7 +77,11 @@ describe("checkPolicy", () => {
       "resolve_issue",
     );
     assert.equal(r.approved, false);
-    assert.match(r.reason, /vendor "sentry" not in/);
+    // Assert the FACTS an operator needs to act — the vendor is named and the block is named —
+    // rather than pinning the sentence. The previous version pinned exact prose and broke when
+    // the decision moved to `policyDecision` with no change in behaviour.
+    assert.match(r.reason, /sentry/);
+    assert.match(r.reason, /\[policy\.agent_writes\]/);
   });
 
   it("denies when op not in vendor's allow-list", async () => {
@@ -87,7 +91,9 @@ describe("checkPolicy", () => {
       "resolve_issue",
     );
     assert.equal(r.approved, false);
-    assert.match(r.reason, /op "resolve_issue" not in/);
+    // The op AND the list it was checked against, so the operator can see what to add.
+    assert.match(r.reason, /resolve_issue/);
+    assert.match(r.reason, /create_release/);
   });
 
   it("denies a prototype-member vendor name (own-property guard)", async () => {
@@ -96,7 +102,8 @@ describe("checkPolicy", () => {
     for (const vendor of ["toString", "constructor", "__proto__", "hasOwnProperty"]) {
       const r = await checkPolicy({ agent_writes: { sentry: ["resolve_issue"] } }, vendor, "x");
       assert.equal(r.approved, false, vendor);
-      assert.match(r.reason, /not in \[policy\.agent_writes\]/);
+      // The message must place the refusal in the policy block, whatever the phrasing.
+      assert.match(r.reason, /\[policy\.agent_writes\]/, vendor);
     }
   });
 
@@ -113,7 +120,9 @@ describe("checkPolicy", () => {
   it("denies with empty allow-list (vendor declared but no ops)", async () => {
     const r = await checkPolicy({ agent_writes: { stripe: [] } }, "stripe", "webhook_create");
     assert.equal(r.approved, false);
-    assert.match(r.reason, /not in \[policy\.agent_writes\.stripe\]/);
+    // An empty list is the trap: it must refuse, and say which vendor's list was empty.
+    assert.match(r.reason, /\[policy\.agent_writes\.stripe\]/);
+    assert.match(r.reason, /empty/);
   });
 
   it("returns policyHash for audit-correlation", async () => {

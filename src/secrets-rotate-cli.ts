@@ -130,6 +130,7 @@ export function buildPlaybook(keyName: string): RotationPlaybook {
 
 import { loadConfig } from "./config.js";
 import { flagValue } from "./utils/flags.js";
+import { enforcePolicy, supabaseRotationOp } from "./policy-gate.js";
 import { resolve } from "node:path";
 import { isNonInteractive } from "./environment.js";
 import { writeSecretToBackend } from "./secrets-migrate.js";
@@ -344,6 +345,20 @@ async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Pr
     }
   }
 
+  // `[policy.agent_writes.supabase]` — narrowing only, same contract as propagation. The op name
+  // mirrors the `--mode` the operator typed, so the two modes are pre-approved separately: a repo
+  // that allows `scoped_key_mint` has NOT allowed the roll that invalidates every live token.
+  const policyOp = supabaseRotationOp(mode);
+  // The config is loaded further down for the vault write; the gate has to run BEFORE the vendor
+  // API call, so it reads its own copy here rather than moving the later load up and changing the
+  // order of unrelated work.
+  const rotatePolicy = (await loadConfig(resolveConfigPath()).catch(() => null))?.policy;
+  const policyRefusal = await enforcePolicy(rotatePolicy, "supabase", policyOp);
+  if (policyRefusal) {
+    console.error(`${c.red}✗ refused by [policy.agent_writes]: ${policyRefusal.reason}${c.reset}`);
+    return false;
+  }
+
   const outcome = await supabase.rotateSupabaseKey({ projectRef, mode });
   if (!outcome.ok || !outcome.result) {
     console.error(`${c.red}✗ ${outcome.error ?? "rotation failed"}${c.reset}`);
@@ -542,6 +557,8 @@ export async function cmdSecretsRotate(): Promise<boolean> {
     if (ghRepo !== undefined) propOpts.githubRepo = ghRepo;
     const vercelScope = flagValue(args, "--vercel-scope");
     if (vercelScope !== undefined) propOpts.vercelScope = vercelScope;
+    // Same gate as `kit secrets propagate` — rotation must not be the way around the policy.
+    if (config.policy) propOpts.policy = config.policy;
 
     console.log(`${c.bold}Propagation${c.reset}  ${c.dim}→ ${targets.join(", ")}${c.reset}\n`);
     const results = await propagate(plan.key, value, targets, propOpts);

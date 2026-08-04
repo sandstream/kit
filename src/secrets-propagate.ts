@@ -19,6 +19,8 @@
  */
 
 import { spawn } from "node:child_process";
+import type { PolicyConfig } from "./config.js";
+import { enforcePolicy } from "./policy-gate.js";
 
 export type PropagationTarget = "vercel" | "github" | "fly" | "cloudflare" | "railway" | "aws-ssm";
 
@@ -56,6 +58,22 @@ export interface PropagationOptions {
   awsRegion?: string;
   /** Optional override path prefix for SSM (default: `/kit/`). */
   awsSsmPrefix?: string;
+  /**
+   * `[policy]` from the project's `.kit.toml`. When present, every target is checked against
+   * `[policy.agent_writes.<target>]` for the `env_set` op BEFORE its adapter runs.
+   *
+   * The check lives inside `propagate` rather than at each call site on purpose: this function is
+   * the single choke point for all six vendor env writes, so a caller that forgets to pass a
+   * context cannot route around the gate. Omitting `policy` leaves behaviour identical to before —
+   * the gate is opt-in by the presence of the config block, not by the caller remembering.
+   */
+  policy?: PolicyConfig;
+  /**
+   * Project directory the policy audit entry belongs to. Defaults to `process.cwd()`, which is
+   * correct for both CLI callers; it exists because a governed operation's evidence must land in
+   * the project it was performed for, not in whatever directory the process happens to occupy.
+   */
+  cwd?: string;
 }
 
 /**
@@ -258,6 +276,37 @@ export async function propagate(
   opts: PropagationOptions = {},
 ): Promise<PropagationResult[]> {
   const results: PropagationResult[] = [];
+
+  // READ-ONLY MODE. Propagation writes a secret into a third-party control plane, which is about
+  // as far from read-only as an operation gets — and nothing was stopping it.
+  //
+  // Measured before adding this: with elevation satisfied (`KIT_ELEVATED=1`), `KIT_READ_ONLY=1`
+  // `kit secrets propagate API_KEY --value x --to vercel` reached `spawn vercel` and failed only
+  // because the CLI is absent from the probe machine. With the CLI present it would have written.
+  //
+  // `read-only-surface.ts` deliberately omits `secrets`, on the stated grounds that it is "already
+  // refused inside their own modules". That was true of the LOCAL secret write —
+  // `writeSecretToBackend` calls `refuseWrite` — and false of this one. Propagation is a different
+  // write in the same module, and "the module handles it" was a claim about one path read as a
+  // claim about all of them.
+  //
+  // Checked once rather than per target (the lock is session-wide, not per vendor), but reported as
+  // a row per requested target so the operator sees exactly what did not happen.
+  const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) {
+    const refusal = await refuseWrite(
+      "secrets-propagate",
+      { key: name, targets },
+      { cwd: opts.cwd },
+    );
+    return targets.map((t) => ({
+      target: t,
+      ok: false,
+      detail: refusal.reason,
+      valueInArgv: false,
+    }));
+  }
+
   for (const t of targets) {
     const adapter = ADAPTERS[t];
     if (!adapter) {
@@ -265,6 +314,20 @@ export async function propagate(
         target: t,
         ok: false,
         detail: `unknown target: ${t}`,
+        valueInArgv: false,
+      });
+      continue;
+    }
+    // `[policy.agent_writes]` — narrowing only. A refusal stops the adapter from ever running;
+    // an approval grants NOTHING (elevation, read-only and approval stay authoritative), which is
+    // why there is no `approved` branch here. The refusal is reported as a normal failed result so
+    // it shows up in the same output the operator already reads, rather than as an exception.
+    const refusal = await enforcePolicy(opts.policy, t, "env_set", { cwd: opts.cwd });
+    if (refusal) {
+      results.push({
+        target: t,
+        ok: false,
+        detail: `refused by [policy.agent_writes]: ${refusal.reason}`,
         valueInArgv: false,
       });
       continue;

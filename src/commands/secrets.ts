@@ -657,6 +657,11 @@ async function cmdSecretsPropagateStandalone(): Promise<boolean> {
   if (ghRepo !== undefined) propOpts.githubRepo = ghRepo;
   const vercelScope = flagValue(args, "--vercel-scope");
   if (vercelScope !== undefined) propOpts.vercelScope = vercelScope;
+  // `[policy.agent_writes]` gates each target inside `propagate`. This command did not otherwise
+  // need the config, so loading it here is what makes the gate reachable at all — an enforcement
+  // point nobody hands the policy to is exactly the inert state this arc exists to fix.
+  const propagateConfig = await loadConfig(resolveConfigPath()).catch(() => null);
+  if (propagateConfig?.policy) propOpts.policy = propagateConfig.policy;
 
   console.log(`${c.bold}${c.cyan}kit secrets propagate ${keyName}${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);

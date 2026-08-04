@@ -208,6 +208,46 @@ Exhaustive list of paths kit can write:
 Plus the standard `node_modules/`, `dist/`, etc. during build — but those are
 not kit-specific.
 
+## Dependency surface: 120 installed, 9 loaded
+
+A reader auditing what kit can reach should know the gap between what `npm install`
+puts on disk and what the process ever executes. Both numbers are measured, not
+estimated; the second is a guard (`src/mcp-dependency-surface.test.ts`).
+
+kit has **four** direct production dependencies:
+
+| Dependency | Transitive closure |
+|---|---|
+| `@modelcontextprotocol/sdk` | **91 packages** |
+| `@upstash/redis` | 2 |
+| `smol-toml` | 1 |
+| `zod` | 1 |
+
+The SDK declares 17 **hard** dependencies (`optionalDependencies: {}`), among them a
+complete HTTP server and OAuth stack — express 5, express-rate-limit, cors, hono,
+`@hono/node-server`, raw-body, content-type, eventsource, jose, pkce-challenge — for
+the Streamable-HTTP and SSE transports. kit imports exactly `server/mcp.js` and
+`server/stdio.js`: it speaks **stdio**, over a pipe, and never starts a listener.
+
+Traced while booting the server, listing tools and calling two of them, the packages
+actually loaded are **9 of the 120**:
+
+```
+@modelcontextprotocol/sdk   zod   zod-to-json-schema   smol-toml
+ajv   ajv-formats   fast-deep-equal   fast-uri   json-schema-traverse
+```
+
+None of the twelve HTTP/OAuth packages load, at startup or during a tool call. That
+is inherited surface rather than executed code — which is exactly the distinction
+that decides how to read a CVE in it. Two of the four advisories cleared on this
+branch (`hono`, `ip-address`) sit in never-loaded code; `fast-uri` does **not** — ajv
+reaches it when compiling the tool schemas.
+
+> The trace needs BOTH an ESM `resolve` hook and a `Module._load` patch. `ajv` is
+> CommonJS, so an ESM-only tracer reports 6 packages, silently omits `fast-uri`, and
+> yields a rigorous-looking wrong answer. The test's sanity gate therefore asserts a
+> CJS-only package is visible *before* it is allowed to assert anything is absent.
+
 ## What's intentionally NOT shown here
 
 - Build-time writes (`dist/`, `*.d.ts`) — not part of operational data flow.
