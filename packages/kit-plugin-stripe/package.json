@@ -1,6 +1,6 @@
 {
   "name": "sandstream-kit-plugin-stripe",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Stripe Management API surface for kit (webhook endpoint rotation + account introspection)",
   "type": "module",
   "main": "dist/index.js",

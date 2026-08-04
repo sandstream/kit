@@ -1,6 +1,6 @@
 {
   "name": "sandstream-kit-plugin-github",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "kit plugin: GitHub REST API (repo + org secrets, deploy keys, workflow runs).",
   "type": "module",
   "exports": {
