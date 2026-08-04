@@ -542,6 +542,8 @@ export async function cmdSecretsRotate(): Promise<boolean> {
     if (ghRepo !== undefined) propOpts.githubRepo = ghRepo;
     const vercelScope = flagValue(args, "--vercel-scope");
     if (vercelScope !== undefined) propOpts.vercelScope = vercelScope;
+    // Same gate as `kit secrets propagate` — rotation must not be the way around the policy.
+    if (config.policy) propOpts.policy = config.policy;
 
     console.log(`${c.bold}Propagation${c.reset}  ${c.dim}→ ${targets.join(", ")}${c.reset}\n`);
     const results = await propagate(plan.key, value, targets, propOpts);

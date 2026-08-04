@@ -60,16 +60,16 @@ Contributions on any planned item are welcome — open an issue first to coordin
 
 Effort estimates assume one focused developer-day.
 
-### Wire `[policy.agent_writes]` — an A01 access control, as its own arc (2d)
-`checkPolicy()` exists, is tested, and has **no caller** outside its own module. So
-`[policy.agent_writes]` is parsed, hashed into `KIT_POLICY_HASH` and travels with the repo, but
-gates nothing in kit and emits no `policy-check` audit event. `policy.ts` already says the module
-"deliberately does NOT enforce — it just SURFACES"; what is absent is step 2 of its own documented
-runtime contract, and the OWASP A01 row implied an enforcement that never happened. The rows now say
-so; this is the work to make them say something stronger.
+### Wire `[policy.agent_writes]` — DONE for `env_set`, audit + more ops remain
+**The problem, as it stood.** `checkPolicy()` existed, was tested, and had no caller outside its own
+module. `[policy.agent_writes]` was parsed, hashed into `KIT_POLICY_HASH` and travelled with the
+repo — and gated nothing. `policy.ts` said the module "deliberately does NOT enforce — it just
+SURFACES"; what was absent was step 2 of its own documented runtime contract, and the OWASP A01 row
+implied an enforcement that never happened.
 
-Deliberately NOT bundled into a release PR. It is an access-control surface whose semantics are the
-opposite of the usual reading, and getting that wrong fails OPEN:
+This was kept out of a release PR on purpose. It is an access-control surface whose semantics are
+the opposite of the usual reading, and getting that wrong fails OPEN. The five traps, which are now
+the structure of the test file:
 
 1. **Empty list means deny, not allow.** `stripe = []  # all writes still gated` — kit's own
    example in `src/config.ts`. An implementer who treats an empty allowlist as "no restrictions"
@@ -89,6 +89,40 @@ opposite of the usual reading, and getting that wrong fails OPEN:
 5. **Every branch needs a behavioural test that fails when the wiring is removed.** This defect
    survived because `checkPolicy` had unit tests proving the decision function correct while nothing
    called it. Tests over the decision function are not evidence of a working control.
+
+**Done.** `policy-gate.ts` decides, `propagate()` enforces. The semantic chosen, and why: the block
+is UNSIGNED config, so it may only ever NARROW — an agent that can edit `.kit.toml` must not be able
+to self-approve by adding a line. `approval.ts` already holds the grant-shaped mechanism and it
+requires an org-authority signature; that is the difference. So the enforcement point asks one
+question only, "does policy refuse?", and there is deliberately no branch where an approval
+satisfies a gate.
+
+Four states rather than a boolean, so traps 1 and 2 cannot be collapsed by a consumer:
+`inert` (no block) / `unconfigured` (block present, vendor absent — no opinion, because opting in
+must be per-vendor or adding one rule takes every other vendor offline) / `approved` / `denied`
+(vendor declared and op not listed, INCLUDING an empty list). A malformed entry — `vercel = "env_set"`
+as a string — denies rather than reading as "no rule". `POLICY_OPS` is the single op vocabulary and
+`unknownPolicyEntries()` surfaces a typo'd `env-set` instead of leaving the operator believing it
+granted something.
+
+Proof: `src/policy-gate.test.ts`, 18 tests grouped by the five traps above; mutation-proved three
+ways — remove the wiring in `propagate` (2 fail), make an empty list permissive (5 fail), collapse
+absent-vendor into a denial (5 fail).
+
+**What remains, and it is not cosmetic:**
+
+1. **Audit the enforced denials.** A policy refusal shows in the command's output but writes no
+   `.kit-audit.jsonl` event. `checkPolicy` in `policy.ts` does the auditing and STILL has no
+   production caller; the enforced path goes through the deliberately side-effect-free
+   `policyDecision`. Reconciling the two is the next increment, and until it lands trap 3's promise
+   of a forensic trail covering grants and denials is only half kept.
+2. **Ops beyond `env_set`.** Coverage is the six propagation targets. `resolve_issue`,
+   `rotate_jwt` and `trigger_deploy` are documented examples with no enforcement point; each needs
+   a registry row and a choke point.
+3. **Trap 4 is asserted, not proven end to end.** The tests show `policyRefuses` returns null for
+   an approval and that the reason says so out loud. What is NOT tested is a live case where an
+   approved op still gets stopped by elevation or read-only — that needs one of those gates in the
+   same probe.
 
 ### Thread `cwd` through every check dimension — READ PATH DONE, write path remains
 `runCheckGate` resolved its `cwd` option only to load `.kit.toml`. All ten dimensions after that

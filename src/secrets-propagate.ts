@@ -19,6 +19,8 @@
  */
 
 import { spawn } from "node:child_process";
+import type { PolicyConfig } from "./config.js";
+import { policyRefuses } from "./policy-gate.js";
 
 export type PropagationTarget = "vercel" | "github" | "fly" | "cloudflare" | "railway" | "aws-ssm";
 
@@ -56,6 +58,16 @@ export interface PropagationOptions {
   awsRegion?: string;
   /** Optional override path prefix for SSM (default: `/kit/`). */
   awsSsmPrefix?: string;
+  /**
+   * `[policy]` from the project's `.kit.toml`. When present, every target is checked against
+   * `[policy.agent_writes.<target>]` for the `env_set` op BEFORE its adapter runs.
+   *
+   * The check lives inside `propagate` rather than at each call site on purpose: this function is
+   * the single choke point for all six vendor env writes, so a caller that forgets to pass a
+   * context cannot route around the gate. Omitting `policy` leaves behaviour identical to before —
+   * the gate is opt-in by the presence of the config block, not by the caller remembering.
+   */
+  policy?: PolicyConfig;
 }
 
 /**
@@ -265,6 +277,20 @@ export async function propagate(
         target: t,
         ok: false,
         detail: `unknown target: ${t}`,
+        valueInArgv: false,
+      });
+      continue;
+    }
+    // `[policy.agent_writes]` — narrowing only. A refusal stops the adapter from ever running;
+    // an approval grants NOTHING (elevation, read-only and approval stay authoritative), which is
+    // why there is no `approved` branch here. The refusal is reported as a normal failed result so
+    // it shows up in the same output the operator already reads, rather than as an exception.
+    const refusal = policyRefuses(opts.policy, t, "env_set");
+    if (refusal) {
+      results.push({
+        target: t,
+        ok: false,
+        detail: `refused by [policy.agent_writes]: ${refusal.reason}`,
         valueInArgv: false,
       });
       continue;

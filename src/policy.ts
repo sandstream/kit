@@ -23,19 +23,22 @@
  *      loaded config, computes a SHA-256 of the canonical JSON, exports
  *      `KIT_POLICY_HASH=<hex>` to env so child processes / classifiers
  *      see the same identity.
- *   2. NOT IMPLEMENTED. The intent is that callers mutating vendor state call
- *      `checkPolicy(vendor, op)` — true if the op appears in `agent_writes[vendor]`,
- *      false meaning still gated. As of 6.3.0 `checkPolicy` has NO caller outside this
- *      module and its own tests, so `[policy.agent_writes]` changes no kit decision.
- *      Verify before trusting this line again:
- *        grep -rn 'checkPolicy(' src --include=*.ts | grep -v policy.ts | grep -v test
- *      Wiring it is a deliberate arc, not a patch — see ROADMAP. It is an A01
- *      access-control surface with non-obvious semantics (an EMPTY vendor list means
- *      "all writes still gated", the opposite of how an empty allowlist usually reads),
- *      so it must not be rushed in alongside unrelated work.
- *   3. Every policy check emits an audit event with `policy_scope_matched`
- *      so the forensic trail covers both grants and denials. True of `checkPolicy`
- *      itself — but since nothing calls it, no such event is ever written in practice.
+ *   2. ENFORCED, as of the policy-gate arc — but by `policy-gate.ts`, not by this module, and
+ *      the distinction matters. `checkPolicy` below is the auditing predicate: it answers
+ *      "is this pre-approved?" and writes a `policy-check` event either way. `policyRefuses`
+ *      in `policy-gate.ts` is the DECISION the enforcement point asks, and it asks only whether
+ *      policy REFUSES — because this block is unsigned config, so it may narrow and never grant.
+ *      An agent that can edit `.kit.toml` must not be able to self-approve by adding a line.
+ *      First enforcement point: `secrets-propagate.ts`, which gates all six vendor `env_set`
+ *      writes at the single choke point rather than per call site.
+ *      Verify what is actually wired, rather than trusting this comment:
+ *        grep -rn 'policyRefuses(' src --include=*.ts | grep -v test
+ *   3. Every policy check emits an audit event with the vendor, op and policy hash, so the
+ *      forensic trail covers both grants and denials. True of `checkPolicy` — but note it is
+ *      still the case that `checkPolicy` ITSELF has no production caller: the enforced path goes
+ *      through the pure `policyDecision`, which deliberately has no side effects so it can be
+ *      tested exhaustively. Auditing the enforced denials is the next increment, and until it
+ *      lands a policy refusal appears in the command's output but not in `.kit-audit.jsonl`.
  *
  * This module deliberately does NOT enforce — it just SURFACES. The
  * existing elevation + read-only gates remain authoritative; the policy
