@@ -1,7 +1,7 @@
-import { describe, it, afterEach } from "node:test";
+import { describe, it, afterEach, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rmSync, existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { rmSync, existsSync, readFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   getMcpToken,
@@ -14,7 +14,30 @@ import {
 } from "./mcp-orchestrator.js";
 import type { McpServerConfig } from "./config.js";
 
-const TOKEN_FILE = join(homedir(), ".kit", "mcp-tokens.json");
+/**
+ * The token store, redirected into a temp dir for the whole file.
+ *
+ * This used to be `join(homedir(), ".kit", "mcp-tokens.json")` — the developer's REAL token store —
+ * and `reset()` below deletes it. So `npm test` destroyed whatever MCP tokens the machine had, on
+ * every run, silently. The path could not be redirected because `mcp-orchestrator.ts` bound it to
+ * `homedir()` in a module-level const; it now resolves per call and honours KIT_MCP_TOKENS_DIR,
+ * which is what makes this containment possible.
+ */
+let TOKEN_DIR: string;
+let TOKEN_FILE: string;
+const prevTokenDir = process.env.KIT_MCP_TOKENS_DIR;
+
+before(() => {
+  TOKEN_DIR = mkdtempSync(join(tmpdir(), "kit-mcp-tokens-"));
+  TOKEN_FILE = join(TOKEN_DIR, "mcp-tokens.json");
+  process.env.KIT_MCP_TOKENS_DIR = TOKEN_DIR;
+});
+
+after(() => {
+  if (prevTokenDir === undefined) delete process.env.KIT_MCP_TOKENS_DIR;
+  else process.env.KIT_MCP_TOKENS_DIR = prevTokenDir;
+  rmSync(TOKEN_DIR, { recursive: true, force: true });
+});
 
 async function reset() {
   if (existsSync(TOKEN_FILE)) rmSync(TOKEN_FILE);

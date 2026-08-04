@@ -57,3 +57,6 @@ id_ed25519
 .env.local.*
 .kit-audit.pending
 .kit-skipped-commits.jsonl
+
+# Full TAP report from `npm test` — written so an intermittent failure keeps its name.
+.kit-test-run.tap

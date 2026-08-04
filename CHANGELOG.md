@@ -4,6 +4,36 @@ All notable changes to kit are documented in this file. This project adheres to 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`npm test` deleted the developer's real MCP tokens.**
+  `src/mcp-orchestrator.test.ts` operated on `~/.kit/mcp-tokens.json` — the actual
+  path, not a fixture — and calls `rmSync` on it before every test and in
+  `afterEach`. It had no choice: `mcp-orchestrator.ts` bound `TOKEN_FILE` to
+  `homedir()` in a module-level `const`, so no test could redirect it. Measured
+  both ways: with a sentinel file at that path, the old code left
+  `No such file or directory` behind and the fixed code leaves the sentinel
+  untouched. The path now resolves per call and honours `KIT_MCP_TOKENS_DIR`,
+  matching `identityDir()` / `KIT_AUDIT_ANCHOR_DIR` / `KIT_MEMORY_DIR`, and the
+  test redirects into a temp dir. Also listed in `kit knobs`.
+
+- **A failing test could lose its own name.** A run of the suite reported
+  `# fail 1` while piped through `tail`, which discarded everything above the
+  summary; four re-runs were green, so the flake was never named. `npm test` now
+  always writes a complete TAP report to `.kit-test-run.tap` (gitignored) in
+  addition to stdout, so the detail no longer depends on how the caller redirected
+  output. Proven by failing a test on purpose and reading the name out of the log
+  while stdout was piped to `tail -1`. The stdout reporter deliberately reproduces
+  node's own adaptive default (`spec` on a TTY, `tap` when piped) rather than
+  forcing one, because naming a reporter replaces that default and would have
+  silently broken `npm test | grep '# fail'`.
+
+  The intermittent failure itself is **still unidentified** — eight clean full runs
+  since. One later run showed 75 failures with whole test files erroring, but that
+  was self-inflicted: `dist/` was rebuilt while the suite was running.
+
 ## [6.4.0] - 2026-08-04
 
 ### Added

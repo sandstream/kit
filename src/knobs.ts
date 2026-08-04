@@ -119,6 +119,11 @@ export const KNOBS: KnobGroup[] = [
         desc: "emit a signed gate-attestation receipt (same as `kit check --attest`)",
       },
       {
+        name: "KIT_MCP_TOKENS_DIR",
+        kind: "env",
+        desc: "relocate the MCP token store (default ~/.kit) — lets tests avoid the real one",
+      },
+      {
         name: "KIT_AUDIT_ANCHOR_DIR",
         kind: "env",
         desc: "relocate the HMAC audit-anchor key + record (default ~/.kit)",
