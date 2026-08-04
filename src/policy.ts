@@ -23,22 +23,22 @@
  *      loaded config, computes a SHA-256 of the canonical JSON, exports
  *      `KIT_POLICY_HASH=<hex>` to env so child processes / classifiers
  *      see the same identity.
- *   2. ENFORCED, as of the policy-gate arc — but by `policy-gate.ts`, not by this module, and
- *      the distinction matters. `checkPolicy` below is the auditing predicate: it answers
- *      "is this pre-approved?" and writes a `policy-check` event either way. `policyRefuses`
- *      in `policy-gate.ts` is the DECISION the enforcement point asks, and it asks only whether
- *      policy REFUSES — because this block is unsigned config, so it may narrow and never grant.
- *      An agent that can edit `.kit.toml` must not be able to self-approve by adding a line.
- *      First enforcement point: `secrets-propagate.ts`, which gates all six vendor `env_set`
- *      writes at the single choke point rather than per call site.
+ *   2. ENFORCED, by `policy-gate.ts` rather than this module. `enforcePolicy()` there is the
+ *      enforcement point: it decides via the pure `policyDecision`, records the decision, and
+ *      returns only a REFUSAL — because this block is unsigned config, so it may narrow and never
+ *      grant. An agent that can edit `.kit.toml` must not be able to self-approve by adding a line.
+ *      First enforcement point: `secrets-propagate.ts`, gating all six vendor `env_set` writes at
+ *      the single choke point rather than per call site.
  *      Verify what is actually wired, rather than trusting this comment:
- *        grep -rn 'policyRefuses(' src --include=*.ts | grep -v test
- *   3. Every policy check emits an audit event with the vendor, op and policy hash, so the
- *      forensic trail covers both grants and denials. True of `checkPolicy` — but note it is
- *      still the case that `checkPolicy` ITSELF has no production caller: the enforced path goes
- *      through the pure `policyDecision`, which deliberately has no side effects so it can be
- *      tested exhaustively. Auditing the enforced denials is the next increment, and until it
- *      lands a policy refusal appears in the command's output but not in `.kit-audit.jsonl`.
+ *        grep -rn 'enforcePolicy(' src --include=*.ts | grep -v test
+ *   3. Every ENFORCED decision emits a `policy-check` audit event carrying the vendor, op,
+ *      `policy_state` and policy hash, in the GOVERNED project's log — so the trail covers grants
+ *      as well as refusals. `inert` and `unconfigured` write nothing on purpose: they are the
+ *      absence of a policy opinion, and recording them would put a line in every repo that does
+ *      not use the block and bury the two states that carry information.
+ *      Not fail-closed on the append, deliberately — a refusal has already stopped the operation
+ *      and an approval grants nothing, so a failed write cannot change an outcome, only lose a
+ *      record. The failure goes to stderr rather than being swallowed.
  *
  * This module deliberately does NOT enforce — it just SURFACES. The
  * existing elevation + read-only gates remain authoritative; the policy
@@ -109,79 +109,44 @@ export interface PolicyCheckResult {
  * substitute for the elevation gate, just an explicit declaration that
  * the OPERATOR consented to this scope at configuration time.
  */
+/**
+ * Check whether `op` against `vendor` is pre-approved, and audit the check.
+ *
+ * The DECISION is delegated to `policyDecision` in `policy-gate.ts` — there must be exactly one
+ * function answering this access question. Two independent implementations of the same rule is the
+ * divergence class that let `kit_fix`'s MCP handler keep a stale copy of the lock step: both looked
+ * right in isolation and only one was fixed.
+ *
+ * `approved: false` means "policy does not pre-approve" and covers three different states —
+ * `inert`, `unconfigured` and `denied`. Callers that need to tell "unconfigured" from
+ * "configured to refuse" apart MUST use `policyDecision`/`enforcePolicy` instead; that distinction
+ * is why the gate returns a four-state union and this function's boolean cannot carry it.
+ *
+ * Pre-approval is not a grant. See the semantics section in `policy-gate.ts`.
+ */
 export async function checkPolicy(
   policy: PolicyConfig | undefined,
   vendor: string,
   op: string,
 ): Promise<PolicyCheckResult> {
+  const { policyDecision } = await import("./policy-gate.js");
+  const decision = policyDecision(policy, vendor, op);
   const policyHash = hashPolicy(policy);
-  if (!policy?.agent_writes) {
-    const result: PolicyCheckResult = {
-      approved: false,
-      reason: "no [policy.agent_writes] declared in .kit.toml",
-      policyHash,
-    };
-    await appendAuditEventDirect({
-      operation: "policy-check",
-      environment: process.env.KIT_ENV ?? process.env.NODE_ENV ?? "unknown",
-      success: false,
-      metadata: { vendor, op, policy_hash: policyHash, reason: result.reason },
-    });
-    return result;
-  }
-  // Own-property guard: a `vendor` of `toString`/`constructor`/`__proto__` would otherwise
-  // resolve to an inherited Object.prototype member (a truthy function) and slip past the
-  // `!allowed` deny — or throw downstream in this authz path. Only an OWN key is a real rule.
-  const allowed = Object.hasOwn(policy.agent_writes, vendor)
-    ? policy.agent_writes[vendor]
-    : undefined;
-  if (!allowed) {
-    const result: PolicyCheckResult = {
-      approved: false,
-      reason: `vendor "${vendor}" not in [policy.agent_writes]`,
-      policyHash,
-    };
-    await appendAuditEventDirect({
-      operation: "policy-check",
-      environment: process.env.KIT_ENV ?? process.env.NODE_ENV ?? "unknown",
-      success: false,
-      metadata: { vendor, op, policy_hash: policyHash, reason: result.reason },
-    });
-    return result;
-  }
-  if (!allowed.includes(op)) {
-    const result: PolicyCheckResult = {
-      approved: false,
-      reason: `op "${op}" not in [policy.agent_writes.${vendor}] (= ${JSON.stringify(allowed)})`,
-      policyHash,
-    };
-    await appendAuditEventDirect({
-      operation: "policy-check",
-      environment: process.env.KIT_ENV ?? process.env.NODE_ENV ?? "unknown",
-      success: false,
-      metadata: {
-        vendor,
-        op,
-        policy_hash: policyHash,
-        allowed_ops: allowed,
-        reason: result.reason,
-      },
-    });
-    return result;
-  }
   const result: PolicyCheckResult = {
-    approved: true,
-    reason: `op "${op}" approved by [policy.agent_writes.${vendor}]`,
+    approved: decision.state === "approved",
+    reason: decision.reason,
     policyHash,
   };
   await appendAuditEventDirect({
     operation: "policy-check",
     environment: process.env.KIT_ENV ?? process.env.NODE_ENV ?? "unknown",
-    success: true,
+    success: result.approved,
     metadata: {
       vendor,
       op,
+      policy_state: decision.state,
       policy_hash: policyHash,
+      reason: decision.reason,
     },
   });
   return result;

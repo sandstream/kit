@@ -60,7 +60,7 @@ Contributions on any planned item are welcome — open an issue first to coordin
 
 Effort estimates assume one focused developer-day.
 
-### Wire `[policy.agent_writes]` — DONE for `env_set`, audit + more ops remain
+### Wire `[policy.agent_writes]` — ENFORCED + AUDITED for `env_set`; more ops remain
 **The problem, as it stood.** `checkPolicy()` existed, was tested, and had no caller outside its own
 module. `[policy.agent_writes]` was parsed, hashed into `KIT_POLICY_HASH` and travelled with the
 repo — and gated nothing. `policy.ts` said the module "deliberately does NOT enforce — it just
@@ -105,17 +105,19 @@ as a string — denies rather than reading as "no rule". `POLICY_OPS` is the sin
 `unknownPolicyEntries()` surfaces a typo'd `env-set` instead of leaving the operator believing it
 granted something.
 
-Proof: `src/policy-gate.test.ts`, 18 tests grouped by the five traps above; mutation-proved three
-ways — remove the wiring in `propagate` (2 fail), make an empty list permissive (5 fail), collapse
-absent-vendor into a denial (5 fail).
+Proof: `src/policy-gate.test.ts`, 23 tests grouped by the five traps above; mutation-proved six
+ways — remove the wiring in `propagate` (2 fail), make an empty list permissive (5), collapse
+absent-vendor into a denial (5), stop auditing (4), audit every state including the silent ones (1),
+audit into `process.cwd()` instead of the governed project (3).
 
 **What remains, and it is not cosmetic:**
 
-1. **Audit the enforced denials.** A policy refusal shows in the command's output but writes no
-   `.kit-audit.jsonl` event. `checkPolicy` in `policy.ts` does the auditing and STILL has no
-   production caller; the enforced path goes through the deliberately side-effect-free
-   `policyDecision`. Reconciling the two is the next increment, and until it lands trap 3's promise
-   of a forensic trail covering grants and denials is only half kept.
+1. ~~Audit the enforced denials.~~ **Done.** `enforcePolicy()` decides via the pure
+   `policyDecision`, then records refusals AND grants with the vendor, op, `policy_state` and
+   policy hash, in the governed project's log. `inert`/`unconfigured` stay silent by design.
+   `checkPolicy` now delegates its decision to the same function, so one rule has one
+   implementation. Mutation-proved three further ways: stop auditing (4 fail), audit every state
+   (1 fail), audit into `process.cwd()` instead of the governed project (3 fail).
 2. **Ops beyond `env_set`.** Coverage is the six propagation targets. `resolve_issue`,
    `rotate_jwt` and `trigger_deploy` are documented examples with no enforcement point; each needs
    a registry row and a choke point.

@@ -17,7 +17,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
+import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import {
+  enforcePolicy,
   policyDecision,
   policyRefuses,
   unknownPolicyEntries,
@@ -195,5 +200,120 @@ describe("trap 5 — the control is WIRED, not merely correct", () => {
       /refused by \[policy\.agent_writes\]/,
       "no policy block must mean no policy gate",
     );
+  });
+});
+
+describe("enforced decisions reach the audit trail", () => {
+  /**
+   * The half of trap 3 that was still missing: a refusal appeared in the command's output and
+   * nowhere else. `enforcePolicy` is the audited enforcement point; `policyDecision` stays pure.
+   *
+   * Each test asserts on the CONTENTS of the governed project's `.kit-audit.jsonl`, and the two
+   * "no policy opinion" states assert the file was not created at all — silence has to be
+   * verified, or "we audit decisions" quietly becomes "we audit some decisions".
+   */
+  function project(): string {
+    return mkdtempSync(join(tmpdir(), "kit-policy-audit-"));
+  }
+
+  function auditLines(dir: string): Record<string, unknown>[] {
+    const f = join(dir, ".kit-audit.jsonl");
+    if (!existsSync(f)) return [];
+    return readFileSync(f, "utf-8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+  }
+
+  it("a DENIAL is recorded with the vendor, op, state and policy hash", async () => {
+    const dir = project();
+    try {
+      const policy: PolicyConfig = { agent_writes: { vercel: [] } };
+      const refusal = await enforcePolicy(policy, "vercel", "env_set", { cwd: dir });
+      assert.notEqual(refusal, null, "the denial must still be returned, not just logged");
+
+      const rows = auditLines(dir).filter((r) => r.operation === "policy-check");
+      assert.equal(rows.length, 1, "exactly one policy-check entry");
+      const meta = rows[0]!.metadata as Record<string, unknown>;
+      assert.equal(rows[0]!.success, false, "a denial is not a successful check");
+      assert.equal(meta.vendor, "vercel");
+      assert.equal(meta.op, "env_set");
+      assert.equal(meta.policy_state, "denied");
+      assert.equal(typeof meta.policy_hash, "string", "the hash correlates the entry to a config");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("an APPROVAL is recorded too — the trail covers grants, not only refusals", async () => {
+    const dir = project();
+    try {
+      const policy: PolicyConfig = { agent_writes: { vercel: ["env_set"] } };
+      const refusal = await enforcePolicy(policy, "vercel", "env_set", { cwd: dir });
+      assert.equal(refusal, null, "an approval must not refuse");
+
+      const rows = auditLines(dir).filter((r) => r.operation === "policy-check");
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0]!.success, true);
+      assert.equal((rows[0]!.metadata as Record<string, unknown>).policy_state, "approved");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("inert and unconfigured write NOTHING — absence of an opinion is not a decision", async () => {
+    const dir = project();
+    try {
+      // No block at all, then a block that says nothing about this vendor. Recording these would
+      // put a line in every repo that does not use the feature, burying the two that matter.
+      await enforcePolicy(undefined, "vercel", "env_set", { cwd: dir });
+      await enforcePolicy({ agent_writes: { github: ["env_set"] } }, "vercel", "env_set", {
+        cwd: dir,
+      });
+      assert.deepEqual(auditLines(dir), [], "no policy opinion must leave no policy entry");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the audit lands in the GOVERNED project, not the process's directory", async () => {
+    const governed = project();
+    const elsewhere = project();
+    const prev = process.cwd();
+    try {
+      process.chdir(elsewhere);
+      await enforcePolicy({ agent_writes: { vercel: [] } }, "vercel", "env_set", { cwd: governed });
+      assert.equal(auditLines(governed).length, 1, "evidence belongs to the governed project");
+      assert.deepEqual(auditLines(elsewhere), [], "the process's own tree must not collect it");
+    } finally {
+      process.chdir(prev);
+      rmSync(governed, { recursive: true, force: true });
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it("propagate's refusal is audited end to end", async () => {
+    // Trap 5 again, one level up: the audit has to happen on the REAL path, not only when
+    // `enforcePolicy` is called directly from a test.
+    const dir = project();
+    const prev = process.cwd();
+    try {
+      process.chdir(dir);
+      const results = await propagate("API_KEY", "s3cret", ["vercel"], {
+        policy: { agent_writes: { vercel: [] } },
+        cwd: dir,
+      });
+      assert.match(results[0]!.detail, /refused by \[policy\.agent_writes\]/);
+      const rows = auditLines(dir).filter((r) => r.operation === "policy-check");
+      assert.equal(rows.length, 1, "the refusal that stopped the write must be on record");
+      assert.doesNotMatch(
+        JSON.stringify(rows),
+        /s3cret/,
+        "the audit entry must not carry the value it refused to write",
+      );
+    } finally {
+      process.chdir(prev);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

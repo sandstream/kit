@@ -138,6 +138,62 @@ export function policyRefuses(
 }
 
 /**
+ * Decide AND record. The enforcement point calls this; `policyDecision` stays pure so it can be
+ * tested exhaustively, and the single side effect lives here at the boundary.
+ *
+ * Returns the refusal (or null), same contract as `policyRefuses` — so a caller cannot accidentally
+ * treat "audited" as "allowed".
+ *
+ * WHICH STATES ARE RECORDED, and why not all four: `denied` and `approved` are decisions the
+ * operator declared and a reviewer will want in the trail — that is trap 3's "covering both grants
+ * and denials". `inert` and `unconfigured` are the ABSENCE of a policy opinion, and recording them
+ * would write a line for every vendor write in every repo that does not use the block, burying the
+ * two states that carry information. Silence here means "the policy had nothing to say", which is
+ * also what the four-state union already tells a reader of the code.
+ *
+ * NOT fail-closed on the audit write, deliberately: a refusal has already stopped the operation
+ * before this runs, and an approval grants nothing, so a failed append cannot change any outcome —
+ * it can only lose a record. The failure is surfaced on stderr rather than swallowed, matching
+ * `exec-broker/broker.ts`'s audit contract.
+ */
+export async function enforcePolicy(
+  policy: PolicyConfig | undefined,
+  vendor: string,
+  op: string,
+  opts: { cwd?: string } = {},
+): Promise<PolicyGateDecision | null> {
+  const decision = policyDecision(policy, vendor, op);
+  if (decision.state === "denied" || decision.state === "approved") {
+    const { appendAuditEventDirect } = await import("./audit.js");
+    const { hashPolicy } = await import("./policy.js");
+    const logged = await appendAuditEventDirect(
+      {
+        operation: "policy-check",
+        environment: process.env.KIT_ENV ?? process.env.NODE_ENV ?? "unknown",
+        // `success` is about the POLICY DECISION, not about the vendor write: an approval is a
+        // successful check, a denial is a refused one. The vendor call's own outcome is audited
+        // separately by whatever wraps it.
+        success: decision.state === "approved",
+        metadata: {
+          vendor,
+          op,
+          policy_state: decision.state,
+          policy_hash: hashPolicy(policy),
+          reason: decision.reason,
+        },
+      },
+      { cwd: opts.cwd },
+    );
+    if (!logged) {
+      console.error(
+        `[kit] policy-check audit append failed for ${vendor}:${op} (decision: ${decision.state})`,
+      );
+    }
+  }
+  return decision.state === "denied" ? decision : null;
+}
+
+/**
  * Entries in `[policy.agent_writes]` that name an op kit never asks about.
  *
  * A typo (`env-set` for `env_set`) or an op from a vendor kit does not gate leaves the operator
