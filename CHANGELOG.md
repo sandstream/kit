@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.5.0] - 2026-08-05
+
 ### Added
 
 - **`kit memory install` now wires Codex lifecycle hooks, not only Claude Code.**
