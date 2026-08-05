@@ -17,6 +17,8 @@ import {
   stripRcBlock,
   appendObservation,
   readObservations,
+  staleShims,
+  refreshShims,
   SHIM_MARKER,
 } from "../guard.js";
 
@@ -26,6 +28,11 @@ export async function cmdGuardObserve(): Promise<boolean> {
   try {
     const [tool, ...rest] = process.argv.slice(3);
     if (!tool) return true;
+    // Self-heal the shim that just called us. `kit guard install` is the only other
+    // path that rewrites shims, and nobody re-runs it after an upgrade — so a fixed
+    // kit would sit next to a broken shim forever (#461 hung silently for hours).
+    // Atomic by construction in writeShim; the caller keeps running the old inode.
+    if (staleShims(guardShimsDir()).includes(tool)) refreshShims([tool], guardShimsDir());
     const command = [tool, ...rest].join(" ");
     const { parseInstallCommand, decideBashGate } = await import("../install-gate.js");
     const probe = parseInstallCommand(command);
@@ -124,6 +131,12 @@ function guardStatus(): boolean {
   for (const o of obs.slice(-5)) {
     const icon = o.wouldBlock ? `${c.yellow}!${c.reset}` : `${c.green}✓${c.reset}`;
     console.log(`  ${icon} ${o.ts}  ${o.command}  ${c.dim}${o.reason}${c.reset}`);
+  }
+  const stale = staleShims(dir);
+  if (stale.length > 0) {
+    console.log(
+      `  ${c.yellow}!${c.reset} ${stale.length} shim(s) predate this kit version (${stale.join(" ")}) — they refresh on next use, or now: kit guard install`,
+    );
   }
   if (shims.length === 0) {
     console.log(`  ${c.dim}install with: kit guard install${c.reset}`);

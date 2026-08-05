@@ -4,6 +4,49 @@ All notable changes to kit are documented in this file. This project adheres to 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A guard shim could ping-pong with another shim manager's shim and never run the
+  tool.** ([#461](https://github.com/sandstream/kit/issues/461))
+  The shim resolved the real tool by scanning `PATH` and skipping exactly one
+  directory: its own. On a machine where the next `PATH` entry belongs to another
+  shim manager (mise, asdf, rtx, pyenv, rbenv), that manager applies the same rule —
+  and when it has no version active for the current directory it falls through to a
+  `PATH` lookup, which lands back in kit's shim, which hands off again. Four
+  `~/.kit/shims/npm` processes were found alive on a dev machine, two of them 5 and
+  7.5 hours old, each burning ~20% CPU and re-spawning `kit guard-observe` about once
+  a second, with the wrapped command never run and no output at all. `sh -x` named
+  the hand-off; the discriminating test was that mise's shim answers immediately once
+  `~/.kit/shims` leaves `PATH`. `KIT_GUARD_BYPASS=1` did not help — it skips the
+  observation, not the hand-off — so the guard's core promise ("never blocks; kit
+  unavailable ⇒ unchanged behavior") was inverted into an indefinite block.
+
+  A hand-off into a shims directory now removes kit's own directory from the
+  exported `PATH` first — every occurrence, trailing slash tolerated — so the
+  receiving manager cannot resolve back into us, and marks the hand-off in a
+  per-tool variable (`KIT_GUARD_ACTIVE_NPM`); if the shim is re-entered anyway it
+  resolves past every shims directory instead of spinning. A hand-off to a real
+  binary is unchanged: `PATH` and the environment are left alone, so what the tool
+  spawns is still observed. The version manager keeps choosing the binary — kit hands
+  off *through* it, never past it, which a test pins with a decoy `npm` further down
+  `PATH`. Measured on the reporting machine with its real mise shims and mise in
+  fall-through mode: the old shim was killed after 8s having printed nothing, the new
+  one answers `11.11.0`; with mise owning node for the directory, both resolve the
+  same `10.9.8`. Six of the guard tests now execute the generated `sh` for real, so
+  this class of hang fails a test instead of hanging a machine.
+
+- **An upgraded kit next to an old shim was still a broken machine.** Shims are files
+  on disk, written once by `kit guard install`, and nobody re-runs that after an
+  upgrade — so the fix above would have reached only new installs. `kit guard-observe`
+  now rewrites the shim that called it when that file does not match the running kit
+  version, and `kit guard status` names any shim that predates it. Shim writes became
+  a rename onto the path instead of a truncate in place: `sh` reads a script as it
+  executes it, so rewriting a shim mid-run would splice the file under the running
+  shell — the rename leaves that process on the old inode. Foreign files at a shim
+  path are still never touched.
+
 ## [6.4.2] - 2026-08-04
 
 ### Fixed

@@ -573,6 +573,15 @@ uninstall` removes everything. Notable: the shims also see the `npx`-spawned
 MCP servers agent harnesses launch **outside** any Bash gate — coverage the
 PreToolUse hook can't reach.
 
+A shim hands the call to the next match on `PATH`, so another shim manager
+(mise, asdf, pyenv, rbenv) still chooses which version runs — but kit drops its
+own directory from `PATH` before handing off into one, because those managers
+re-resolve the tool through `PATH` and would otherwise land back in kit's shim
+forever ([#461](https://github.com/sandstream/kit/issues/461)). Shims also
+self-heal: `kit guard-observe` rewrites the shim that called it when the file
+predates the running kit version, so an upgrade doesn't leave old wrappers
+behind, and `kit guard status` names any that are still stale.
+
 ### Compliance evidence
 
 `kit coverage` emits deterministic _evidence maps_: it maps kit's own checks and self-audit rules to a vendored, pinned, curated subset of a standard's controls and buckets each as auto-verified, gap, manual, or n-a. `--json` (or `--format=json`) emits the structured report for a GRC tool to consume.
