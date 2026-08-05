@@ -164,9 +164,9 @@ describe("Codex memory hook installer", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("merges all Codex hooks and gives SessionEnd its supported timeout", () => {
+  it("merges silent Codex lifecycle hooks and gives SessionEnd its supported timeout", () => {
     const result = installCodexMemoryHooks();
-    assert.deepEqual(result.added.sort(), ["SessionEnd", "SessionStart", "UserPromptSubmit"]);
+    assert.deepEqual(result.added.sort(), ["SessionEnd", "SessionStart"]);
 
     const config = JSON.parse(readFileSync(hooksPath, "utf8"));
     assert.equal(existsSync(`${hooksPath}.bak`), true, "existing Codex config is backed up");
@@ -186,10 +186,10 @@ describe("Codex memory hook installer", () => {
     installCodexMemoryHooks();
     const second = installCodexMemoryHooks();
     assert.deepEqual(second.added, []);
-    assert.equal(second.alreadyPresent.length, 3);
+    assert.equal(second.alreadyPresent.length, 2);
 
     const removed = uninstallCodexMemoryHooks();
-    assert.deepEqual(removed.removed.sort(), ["SessionEnd", "SessionStart", "UserPromptSubmit"]);
+    assert.deepEqual(removed.removed.sort(), ["SessionEnd", "SessionStart"]);
     const config = JSON.parse(readFileSync(hooksPath, "utf8"));
     assert.ok(
       config.hooks.SessionStart.some((group: { hooks: { command: string }[] }) =>
@@ -198,15 +198,36 @@ describe("Codex memory hook installer", () => {
     );
   });
 
+  it("removes legacy noisy prompt hooks while preserving hooks in their group", () => {
+    writeFileSync(
+      hooksPath,
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            {
+              hooks: [
+                { type: "command", command: "some-other-tool" },
+                { type: "command", command: "kit memory hook user-prompt-submit" },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    installCodexMemoryHooks();
+    const config = JSON.parse(readFileSync(hooksPath, "utf8"));
+    const commands = config.hooks.UserPromptSubmit.flatMap(
+      (group: { hooks: { command: string }[] }) => group.hooks.map((hook) => hook.command),
+    );
+    assert.deepEqual(commands, ["some-other-tool"]);
+  });
+
   it("reports Codex liveness from its own durable marker", () => {
     installCodexMemoryHooks();
     assert.deepEqual(codexMemoryHooksLiveness().missing, []);
     writeFileSync(hooksPath, "{}\n");
-    assert.deepEqual(codexMemoryHooksLiveness().missing.sort(), [
-      "SessionEnd",
-      "SessionStart",
-      "UserPromptSubmit",
-    ]);
+    assert.deepEqual(codexMemoryHooksLiveness().missing.sort(), ["SessionEnd", "SessionStart"]);
   });
 
   it("refuses invalid JSON without overwriting it", () => {

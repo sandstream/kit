@@ -33,6 +33,8 @@ import { brokerPolicyPath, loadBrokerPolicy, policyFsRoots, type BrokerPolicy } 
 
 /** Environment label stamped on broker audit entries. */
 const BROKER_ENV = "exec-broker";
+const UNDECLARED_EFFECTS_REASON =
+  "exec-broker: operation declares no effect contract (egress/fs/env) — cannot mediate (fail-closed)";
 
 export interface BrokerContext extends OperationContext {
   /** Network hosts/URLs this operation intends to reach. */
@@ -148,10 +150,8 @@ export async function brokerExec<T>(
   // waved through with trivially-empty gates (the false-green the audit found).
   // A caller with genuinely no effects opts in explicitly via declaredEffects:true.
   if (!hasDeclaredEffects(context)) {
-    const reason =
-      "exec-broker: operation declares no effect contract (egress/fs/env) — cannot mediate (fail-closed)";
-    await audit(context, false, reason, undefined, cwd);
-    return { ok: false, reason };
+    await audit(context, false, UNDECLARED_EFFECTS_REASON, undefined, cwd);
+    return { ok: false, reason: UNDECLARED_EFFECTS_REASON };
   }
 
   // Collect denials across all three gates before deciding.
@@ -216,7 +216,9 @@ async function brokerObserve<T>(
   cwd?: string,
 ): Promise<BrokerOutcome<T>> {
   const wouldDeny = policy
-    ? collectDenials(context, policy)
+    ? hasDeclaredEffects(context)
+      ? collectDenials(context, policy)
+      : [UNDECLARED_EFFECTS_REASON]
     : ["exec-broker: no policy (default-deny)"];
   await audit(context, true, undefined, { phase: "observe", wouldDeny }, cwd);
   try {
@@ -270,14 +272,11 @@ function collectDenials(context: BrokerContext, policy: BrokerPolicy): string[] 
 /**
  * OPT-IN entry point. Policy-source precedence (reconciliation §4 / MCP-runtime adoption):
  *
- *   1. SIGNED profile scope with `[scope].enforce_runtime = true` (the explicit runtime opt-in):
- *      - op DECLARES its effects → mediate against the signed policy (`policy` is null when the
- *        scope is unsigned/tampered, so `brokerExec` default-DENIES — fail-closed);
- *      - op declares NO effects → MIGRATION passthrough. A governed op is only mediated at the
- *        runtime once it honestly declares what it touches; until each op opts in, its behavior is
- *        unchanged (deliberate — see `pillar3-mcp-runtime-adoption-5.0.md` §5 step 1). This is NOT
- *        the false-green of a JSON policy waving an undeclared op through: that path stays
- *        fail-closed below.
+ *   1. SIGNED profile scope with runtime mediation active:
+ *      - `enforce` mediates every op via `brokerExec`; undeclared effects DENY fail-closed unless
+ *        the caller explicitly asserts zero effects (`declaredEffects:true`);
+ *      - `observe` runs unchanged, but records the same would-be denials so readiness cannot turn
+ *        undeclared ops into a false green.
  *   2. Else the unsigned `.kit-exec-broker.json` (nor `KIT_EXEC_BROKER_POLICY`), resolved under
  *      the GOVERNED project's `opts.cwd` — not `process.cwd()`:
  *      - absent → run UNMEDIATED (the original opt-in switch — a fresh install is never gated),
@@ -317,25 +316,17 @@ export async function runBrokered<T>(
   const { profileBrokerPolicy } = await import("./profile-policy.js");
   const signed = await profileBrokerPolicy(opts.cwd ?? process.cwd());
   if (signed.runtimeMode !== "off") {
-    if (hasDeclaredEffects(context)) {
-      // "observe" = dry-run: mediate the same gates but NEVER deny — record would-be denials so an
-      // operator can see what default-on would block before flipping to "enforce" (Pillar 3 ladder).
-      return signed.runtimeMode === "observe"
-        ? brokerObserve(context, signed.policy, run, opts.cwd)
-        : brokerExec(
-            context,
-            signed.policy,
-            run,
-            opts.cwd,
-            signed.policy === null ? signed.detail : undefined,
-          );
-    }
-    // Undeclared op under runtime enforcement/observe → migration passthrough (unchanged behavior).
-    try {
-      return { ok: true, result: await run(scopeEnv(Object.keys(process.env), process.env)) };
-    } catch (err) {
-      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
-    }
+    // "observe" = dry-run: mediate the same gates but NEVER deny — record would-be denials so an
+    // operator can see what default-on would block before flipping to "enforce" (Pillar 3 ladder).
+    return signed.runtimeMode === "observe"
+      ? brokerObserve(context, signed.policy, run, opts.cwd)
+      : brokerExec(
+          context,
+          signed.policy,
+          run,
+          opts.cwd,
+          signed.policy === null ? signed.detail : undefined,
+        );
   }
 
   // 2. Unsigned JSON policy (original opt-in via file presence).

@@ -60,9 +60,16 @@ const CLAUDE_MEMORY_HOOKS: MemoryHookDef[] = [
 // fast path. Codex caps SessionEnd hooks at 3 seconds; the command only launches
 // a detached worker, but use the cap to tolerate slow process startup.
 const CODEX_MEMORY_HOOKS: MemoryHookDef[] = [
-  { event: "UserPromptSubmit", sub: "user-prompt-submit" },
   { event: "SessionEnd", sub: "session-end-codex", timeout: 3 },
   { event: "SessionStart", sub: "session-start" },
+];
+
+// Codex renders every UserPromptSubmit stdout payload in the conversation UI.
+// The reminder is already a durable AGENTS.md rule, so keep its enforcement
+// without repeating noisy hook context after every user message. Kept here for
+// upgrade cleanup: re-running `kit memory install` removes the old wiring.
+const CODEX_RETIRED_MEMORY_HOOKS: MemoryHookDef[] = [
+  { event: "UserPromptSubmit", sub: "user-prompt-submit" },
 ];
 
 export function getClaudeSettingsPath(): string {
@@ -218,13 +225,19 @@ export function installCodexMemoryHooks(path: string = getCodexHooksPath()): {
   alreadyPresent: string[];
   resolved: boolean;
 } {
-  return installHooksAtPath(path, codexMemoryInstallMarkerPath(), CODEX_MEMORY_HOOKS);
+  return installHooksAtPath(
+    path,
+    codexMemoryInstallMarkerPath(),
+    CODEX_MEMORY_HOOKS,
+    CODEX_RETIRED_MEMORY_HOOKS,
+  );
 }
 
 function installHooksAtPath(
   path: string,
   markerPath: string,
   definitions: MemoryHookDef[],
+  retiredDefinitions: MemoryHookDef[] = [],
 ): { added: string[]; alreadyPresent: string[]; resolved: boolean } {
   const s = readSettings(path);
   const hooks = (s.hooks ??= {});
@@ -232,6 +245,7 @@ function installHooksAtPath(
   const resolved = prefix !== "kit";
   const added: string[] = [];
   const alreadyPresent: string[] = [];
+  const retired = removeHookDefinitions(s, retiredDefinitions);
   for (const { event, sub, timeout } of definitions) {
     const groups = (hooks[event] ??= []);
     if (groupsHaveHook(groups, sub)) {
@@ -243,7 +257,7 @@ function installHooksAtPath(
     groups.push({ hooks: [handler] });
     added.push(event);
   }
-  if (added.length) writeSettings(path, s);
+  if (added.length || retired.length) writeSettings(path, s);
   // Durable "installed here" marker for the liveness check (idempotent). After
   // this call the hooks ARE present (added or alreadyPresent), so stamp it.
   try {
@@ -253,6 +267,32 @@ function installHooksAtPath(
     /* best-effort: a missing marker only weakens the liveness check, never breaks install */
   }
   return { added, alreadyPresent, resolved };
+}
+
+/** Remove only kit commands from matching groups, preserving unrelated hooks. */
+function removeHookDefinitions(s: Settings, definitions: MemoryHookDef[]): string[] {
+  const removed: string[] = [];
+  if (!s.hooks) return removed;
+  for (const { event, sub } of definitions) {
+    const groups = s.hooks[event];
+    if (!Array.isArray(groups)) continue;
+    const suffix = hookSuffix(sub);
+    let didRemove = false;
+    const filtered: HookGroup[] = [];
+    for (const group of groups) {
+      const kept = group.hooks?.filter((hook) => {
+        const remove = hook.command.endsWith(suffix);
+        didRemove ||= remove;
+        return !remove;
+      });
+      if (kept?.length) filtered.push({ ...group, hooks: kept });
+    }
+    if (didRemove) {
+      s.hooks[event] = filtered;
+      removed.push(event);
+    }
+  }
+  return removed;
 }
 
 // ── Claude Code status line (the persistent info bar) ────────────────────────
@@ -318,19 +358,7 @@ function uninstallHooksAtPath(
   definitions: MemoryHookDef[],
 ): { removed: string[] } {
   const s = readSettings(path);
-  const removed: string[] = [];
-  if (s.hooks) {
-    for (const { event, sub } of definitions) {
-      const groups = s.hooks[event];
-      if (!Array.isArray(groups)) continue;
-      const suffix = hookSuffix(sub);
-      const filtered = groups.filter((g) => !g.hooks?.some((h) => h.command.endsWith(suffix)));
-      if (filtered.length !== groups.length) {
-        s.hooks[event] = filtered;
-        removed.push(event);
-      }
-    }
-  }
+  const removed = removeHookDefinitions(s, definitions);
   if (removed.length) writeSettings(path, s);
   // Intentional uninstall clears the marker, so the liveness check won't then
   // report the (deliberate) absence as silent tampering.

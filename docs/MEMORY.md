@@ -39,16 +39,18 @@ Codex command hooks require explicit review/trust through `/hooks`; until truste
 Codex skips them. After activation, `SessionEnd` indexes the just-ended harness
 incrementally — you rarely need to `index` again.
 
-## How it works — a few fail-open hooks, nothing more
+## How it works — fail-open lifecycle hooks, nothing more
 
-The entire system is the same three lifecycle events in Claude Code and Codex
-(all **fail-open**: an error
-yields a no-op, so a hook can never block a prompt or break a session):
+Claude Code uses three lifecycle events; Codex uses the two capture/recovery
+events below (all **fail-open**: an error yields a no-op, so a hook can never
+block a prompt or break a session):
 
 - **`UserPromptSubmit`** runs before every message and injects a two-sentence
   reminder that searchable memory exists (plus any open action items). The agent
   decides when to search — memory is _pulled on demand_, never bulk-loaded into
-  context every turn.
+  context every turn. This is installed for Claude Code only: Codex renders hook
+  stdout in the conversation UI, so its durable `AGENTS.md` instruction carries
+  the same reminder without per-message noise.
 - **`SessionEnd`** indexes the just-ended session into the store.
 - **`SessionStart`** (recovery) re-injects "where you left off" for the current
   project — the most recent messages + open action items — so a resumed or
