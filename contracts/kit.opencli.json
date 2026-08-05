@@ -576,7 +576,7 @@
         },
         "index": {
           "kind": "command",
-          "summary": "Index ~/.claude transcripts into the SQLite memory store",
+          "summary": "Index every supported agent transcript into the SQLite memory store",
           "x-kit-args-modeled": false,
           "x-kit-audience": "all",
           "x-kit-mcp": false,
@@ -584,7 +584,7 @@
         },
         "install": {
           "kind": "command",
-          "summary": "Wire UserPromptSubmit + SessionEnd + SessionStart (recovery) hooks into ~/.claude/settings.json",
+          "summary": "Wire UserPromptSubmit + SessionEnd + SessionStart hooks into Claude Code + Codex lifecycle config",
           "x-kit-args-modeled": false,
           "x-kit-audience": "all",
           "x-kit-mcp": false,

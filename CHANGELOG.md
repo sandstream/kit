@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **`kit memory install` now wires Codex lifecycle hooks, not only Claude Code.**
+  It non-destructively merges `UserPromptSubmit`, `SessionStart`, and `SessionEnd`
+  into `~/.codex/hooks.json`, preserves unrelated hooks and metadata, backs up an
+  existing file, and removes only kit-owned handlers on uninstall. New Codex
+  command hooks remain inactive until reviewed through `/hooks`, matching Codex's
+  trust boundary. The Codex `SessionEnd` handler carries its harness through the
+  detached worker so it indexes the just-ended rollout immediately; it does not
+  silently take the old Claude-only fast path. Separate durable markers extend
+  `kit check` / `kit doctor` liveness detection across both harnesses.
+
 ### Fixed
 
 - **A guard shim could ping-pong with another shim manager's shim and never run the

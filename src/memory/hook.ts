@@ -1,5 +1,5 @@
 /**
- * kit memory — Claude Code hook entry points (the "whole system is two hooks").
+ * kit memory — shared Claude Code / Codex lifecycle-hook entry points.
  *
  *  - UserPromptSubmit → a short reminder that searchable memory exists. The agent
  *    pulls on demand (`kit memory search`) instead of pre-loading everything.
@@ -13,6 +13,7 @@ import { existsSync, statSync, writeFileSync, appendFileSync, rmSync, readFileSy
 import { spawn } from "node:child_process";
 import { openMemoryDb, getStats, recentMessages, getMemoryDir, ensureMemoryDir } from "./db.js";
 import { indexClaudeTranscripts, indexAllHarnesses } from "./parser.js";
+import { indexCodexSessions } from "./codex.js";
 import { palList } from "./pal.js";
 import {
   activeShared,
@@ -255,10 +256,10 @@ export function sessionStartRecovery(opts: { limit?: number; root?: string } = {
 }
 
 /**
- * The just-ended session is Claude Code, so we always index that (cheap +
- * incremental). The OTHER harnesses (codex/cursor/gemini/cline/amazon-q/opencode…)
- * have no kit hook, so they'd only get indexed on a manual `kit memory index`.
- * To pick them up automatically WITHOUT walking six extra dirs on every single
+ * The just-ended hook harness is indexed directly (cheap + incremental).
+ * Harnesses without lifecycle hooks (cursor/gemini/cline/amazon-q/opencode…)
+ * would otherwise only get indexed on a manual `kit memory index`. To pick them
+ * up automatically WITHOUT walking every transcript tree on each
  * session end, we sweep all harnesses at most once per interval, debounced by a
  * marker file's mtime. Keeps SessionEnd cheap on the common path.
  */
@@ -393,14 +394,17 @@ export function maybeStartMidSessionIndex(): boolean {
  * session is never lost. The just-ended transcript is already on disk, so the
  * detached worker captures it the same as a synchronous run would.
  */
-export function startDetachedSessionEnd(): boolean {
+export type HookHarness = "claude-code" | "codex";
+
+export function startDetachedSessionEnd(harness: HookHarness = "claude-code"): boolean {
   try {
     const entry = process.argv[1];
     if (!entry) {
-      runSessionEndIndex(); // no entry path to re-exec → at least index inline
+      runSessionEndIndex(harness); // no entry path to re-exec → at least index inline
       return false;
     }
-    const child = spawn(process.execPath, [resolve(entry), "memory", "hook", "session-end-run"], {
+    const workerEvent = harness === "codex" ? "session-end-run-codex" : "session-end-run";
+    const child = spawn(process.execPath, [resolve(entry), "memory", "hook", workerEvent], {
       detached: true,
       stdio: "ignore",
     });
@@ -408,7 +412,7 @@ export function startDetachedSessionEnd(): boolean {
     return true;
   } catch {
     try {
-      runSessionEndIndex(); // fail-safe: capture inline rather than not at all
+      runSessionEndIndex(harness); // fail-safe: capture inline rather than not at all
     } catch {
       /* fail-open: a SessionEnd hook must never throw */
     }
@@ -417,7 +421,7 @@ export function startDetachedSessionEnd(): boolean {
 }
 
 /** Index the just-ended session. Returns count of newly indexed messages (fail-open). */
-export function runSessionEndIndex(): { messages: number } {
+export function runSessionEndIndex(harness: HookHarness = "claude-code"): { messages: number } {
   try {
     const db = openMemoryDb();
     let messages: number;
@@ -427,7 +431,8 @@ export function runSessionEndIndex(): { messages: number } {
       messages = Object.values(all).reduce((sum, r) => sum + r.messages, 0);
       markHarnessSwept();
     } else {
-      messages = indexClaudeTranscripts(db).messages;
+      messages =
+        harness === "codex" ? indexCodexSessions(db).messages : indexClaudeTranscripts(db).messages;
     }
     db.close();
     return { messages };

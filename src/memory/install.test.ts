@@ -1,25 +1,30 @@
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   installMemoryHooks,
+  installCodexMemoryHooks,
   uninstallMemoryHooks,
+  uninstallCodexMemoryHooks,
   installStatusline,
   uninstallStatusline,
   memoryHooksLiveness,
+  codexMemoryHooksLiveness,
 } from "./install.js";
 
 describe("memory hook installer", () => {
   let tmp: string;
   let settingsPath: string;
   const prev = process.env.KIT_CLAUDE_SETTINGS;
+  const prevMarker = process.env.KIT_MEMORY_HOOK_MARKER;
 
   before(() => {
     tmp = mkdtempSync(join(tmpdir(), "kit-install-"));
     settingsPath = join(tmp, "settings.json");
     process.env.KIT_CLAUDE_SETTINGS = settingsPath;
+    process.env.KIT_MEMORY_HOOK_MARKER = join(tmp, "marker");
   });
 
   beforeEach(() => {
@@ -37,6 +42,8 @@ describe("memory hook installer", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_CLAUDE_SETTINGS;
     else process.env.KIT_CLAUDE_SETTINGS = prev;
+    if (prevMarker === undefined) delete process.env.KIT_MEMORY_HOOK_MARKER;
+    else process.env.KIT_MEMORY_HOOK_MARKER = prevMarker;
     rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -121,6 +128,92 @@ describe("memory hook installer", () => {
     );
     assert.ok(ups.includes("some-other-tool"), "unrelated hook survives uninstall");
     assert.ok(!ups.includes("kit memory hook user-prompt-submit"));
+  });
+});
+
+describe("Codex memory hook installer", () => {
+  let tmp: string;
+  let hooksPath: string;
+  const prevHooks = process.env.KIT_CODEX_HOOKS;
+  const prevMarker = process.env.KIT_CODEX_MEMORY_HOOK_MARKER;
+
+  before(() => {
+    tmp = mkdtempSync(join(tmpdir(), "kit-codex-install-"));
+    hooksPath = join(tmp, "hooks.json");
+    process.env.KIT_CODEX_HOOKS = hooksPath;
+    process.env.KIT_CODEX_MEMORY_HOOK_MARKER = join(tmp, "marker");
+  });
+
+  beforeEach(() => {
+    writeFileSync(
+      hooksPath,
+      JSON.stringify({
+        description: "user-owned hooks",
+        hooks: {
+          SessionStart: [{ hooks: [{ type: "command", command: "some-other-tool" }] }],
+        },
+      }),
+    );
+  });
+
+  after(() => {
+    if (prevHooks === undefined) delete process.env.KIT_CODEX_HOOKS;
+    else process.env.KIT_CODEX_HOOKS = prevHooks;
+    if (prevMarker === undefined) delete process.env.KIT_CODEX_MEMORY_HOOK_MARKER;
+    else process.env.KIT_CODEX_MEMORY_HOOK_MARKER = prevMarker;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("merges all Codex hooks and gives SessionEnd its supported timeout", () => {
+    const result = installCodexMemoryHooks();
+    assert.deepEqual(result.added.sort(), ["SessionEnd", "SessionStart", "UserPromptSubmit"]);
+
+    const config = JSON.parse(readFileSync(hooksPath, "utf8"));
+    assert.equal(existsSync(`${hooksPath}.bak`), true, "existing Codex config is backed up");
+    assert.equal(config.description, "user-owned hooks", "top-level metadata survives");
+    assert.ok(
+      config.hooks.SessionStart.some((group: { hooks: { command: string }[] }) =>
+        group.hooks.some((hook) => hook.command === "some-other-tool"),
+      ),
+      "unrelated hook survives",
+    );
+    const sessionEnd = config.hooks.SessionEnd[0].hooks[0];
+    assert.ok(sessionEnd.command.endsWith("memory hook session-end-codex"));
+    assert.equal(sessionEnd.timeout, 3);
+  });
+
+  it("is idempotent and uninstall removes only kit hooks", () => {
+    installCodexMemoryHooks();
+    const second = installCodexMemoryHooks();
+    assert.deepEqual(second.added, []);
+    assert.equal(second.alreadyPresent.length, 3);
+
+    const removed = uninstallCodexMemoryHooks();
+    assert.deepEqual(removed.removed.sort(), ["SessionEnd", "SessionStart", "UserPromptSubmit"]);
+    const config = JSON.parse(readFileSync(hooksPath, "utf8"));
+    assert.ok(
+      config.hooks.SessionStart.some((group: { hooks: { command: string }[] }) =>
+        group.hooks.some((hook) => hook.command === "some-other-tool"),
+      ),
+    );
+  });
+
+  it("reports Codex liveness from its own durable marker", () => {
+    installCodexMemoryHooks();
+    assert.deepEqual(codexMemoryHooksLiveness().missing, []);
+    writeFileSync(hooksPath, "{}\n");
+    assert.deepEqual(codexMemoryHooksLiveness().missing.sort(), [
+      "SessionEnd",
+      "SessionStart",
+      "UserPromptSubmit",
+    ]);
+  });
+
+  it("refuses invalid JSON without overwriting it", () => {
+    const invalid = "{ definitely not json\n";
+    writeFileSync(hooksPath, invalid);
+    assert.throws(() => installCodexMemoryHooks(), /refusing to overwrite/);
+    assert.equal(readFileSync(hooksPath, "utf8"), invalid);
   });
 });
 

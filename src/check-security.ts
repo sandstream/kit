@@ -147,8 +147,8 @@ export async function checkDeviceIdOverride(): Promise<SecurityCheckResult> {
 
 /**
  * R5 — the self-playing loop (memory capture + statusline) depends on hooks in
- * ~/.claude/settings.json. If they were installed here (durable marker present) but
- * have since VANISHED from settings.json, capture is silently OFF — the store looks
+ * Claude Code / Codex lifecycle config. If they were installed here (durable marker
+ * present) but have since VANISHED, capture is silently OFF — the store looks
  * installed but records nothing, a false green. `kit doctor` already flags this; this
  * folds the same liveness into the `kit check` security gate. Skips when never
  * installed (CI / fresh machine) and after a clean `kit memory uninstall` (which
@@ -157,8 +157,8 @@ export async function checkDeviceIdOverride(): Promise<SecurityCheckResult> {
 export async function checkMemoryHooksLiveness(): Promise<SecurityCheckResult> {
   const name = "memory hooks liveness";
   const category = "secrets" as const;
-  const { memoryHooksLiveness } = await import("./memory/install.js");
-  const live = memoryHooksLiveness();
+  const { allMemoryHooksLiveness } = await import("./memory/install.js");
+  const live = allMemoryHooksLiveness();
   if (!live.everInstalled) {
     return { category, name, status: "skip", detail: "memory hooks not installed here" };
   }
@@ -175,7 +175,7 @@ export async function checkMemoryHooksLiveness(): Promise<SecurityCheckResult> {
     name,
     status: "fail",
     severity: "high",
-    detail: `memory capture is silently OFF — installed here but missing from settings.json: ${live.missing.join(", ")}. Run: kit memory install`,
+    detail: `memory capture is silently OFF — installed here but missing from lifecycle config: ${live.missing.join(", ")}. Run: kit memory install`,
   };
 }
 

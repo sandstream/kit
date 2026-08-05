@@ -1,9 +1,9 @@
 /**
- * kit memory — install/remove the two Claude Code hooks in ~/.claude/settings.json.
+ * kit memory — install/remove lifecycle hooks for Claude Code and Codex.
  *
  * Idempotent and non-destructive: merges our hook entries into the existing
  * settings without touching the user's other hooks. Re-running adds nothing.
- * Honors KIT_CLAUDE_SETTINGS for tests.
+ * Honors KIT_CLAUDE_SETTINGS / KIT_CODEX_HOOKS for tests.
  */
 import {
   existsSync,
@@ -18,7 +18,7 @@ import { join, dirname, resolve } from "node:path";
 import { kitWrapperPath } from "../kit-wrapper.js";
 
 /**
- * Absolute invocation of kit for use inside a Claude Code hook. Hooks run in a
+ * Absolute invocation of kit for use inside a lifecycle hook. Hook commands run in a
  * non-login `/bin/sh` whose PATH usually does NOT include the npm global bin
  * (`~/.npm-global/bin`, nvm/volta/pnpm shims, etc.). A bare `kit` there fails
  * with "command not found" and SILENTLY breaks memory capture — the worst
@@ -43,14 +43,36 @@ function kitHookInvocation(): string {
  *  kit was invoked — lets us dedupe + clean up old bare-`kit` entries. */
 const hookSuffix = (sub: string): string => `memory hook ${sub}`;
 
-const MEMORY_HOOKS: { event: string; sub: string }[] = [
+interface MemoryHookDef {
+  event: string;
+  sub: string;
+  timeout?: number;
+}
+
+const CLAUDE_MEMORY_HOOKS: MemoryHookDef[] = [
   { event: "UserPromptSubmit", sub: "user-prompt-submit" },
   { event: "SessionEnd", sub: "session-end" },
   { event: "SessionStart", sub: "session-start" },
 ];
 
+// Codex's SessionEnd must identify its harness so the detached worker indexes
+// the just-ended Codex rollout immediately instead of taking the Claude-only
+// fast path. Codex caps SessionEnd hooks at 3 seconds; the command only launches
+// a detached worker, but use the cap to tolerate slow process startup.
+const CODEX_MEMORY_HOOKS: MemoryHookDef[] = [
+  { event: "UserPromptSubmit", sub: "user-prompt-submit" },
+  { event: "SessionEnd", sub: "session-end-codex", timeout: 3 },
+  { event: "SessionStart", sub: "session-start" },
+];
+
 export function getClaudeSettingsPath(): string {
   return process.env.KIT_CLAUDE_SETTINGS ?? join(homedir(), ".claude", "settings.json");
+}
+
+export function getCodexHooksPath(): string {
+  if (process.env.KIT_CODEX_HOOKS) return process.env.KIT_CODEX_HOOKS;
+  const codexHome = process.env.KIT_CODEX_DIR ?? join(homedir(), ".codex");
+  return join(codexHome, "hooks.json");
 }
 
 /**
@@ -61,6 +83,13 @@ export function getClaudeSettingsPath(): string {
  */
 export function memoryInstallMarkerPath(): string {
   return process.env.KIT_MEMORY_HOOK_MARKER ?? join(homedir(), ".kit", ".memory-hooks-installed");
+}
+
+export function codexMemoryInstallMarkerPath(): string {
+  return (
+    process.env.KIT_CODEX_MEMORY_HOOK_MARKER ??
+    join(homedir(), ".kit", ".memory-hooks-codex-installed")
+  );
 }
 
 export interface HookLiveness {
@@ -81,6 +110,34 @@ export function memoryHooksLiveness(
   settingsPath: string = getClaudeSettingsPath(),
   markerPath: string = memoryInstallMarkerPath(),
 ): HookLiveness {
+  return hooksLivenessAtPath(settingsPath, markerPath, CLAUDE_MEMORY_HOOKS);
+}
+
+export function codexMemoryHooksLiveness(
+  hooksPath: string = getCodexHooksPath(),
+  markerPath: string = codexMemoryInstallMarkerPath(),
+): HookLiveness {
+  return hooksLivenessAtPath(hooksPath, markerPath, CODEX_MEMORY_HOOKS);
+}
+
+/** Aggregate only harnesses installed at least once on this machine. */
+export function allMemoryHooksLiveness(): HookLiveness {
+  const sources = [
+    { name: "Claude Code", live: memoryHooksLiveness() },
+    { name: "Codex", live: codexMemoryHooksLiveness() },
+  ].filter(({ live }) => live.everInstalled);
+  return {
+    everInstalled: sources.length > 0,
+    present: sources.flatMap(({ name, live }) => live.present.map((event) => `${name}:${event}`)),
+    missing: sources.flatMap(({ name, live }) => live.missing.map((event) => `${name}:${event}`)),
+  };
+}
+
+function hooksLivenessAtPath(
+  settingsPath: string,
+  markerPath: string,
+  definitions: MemoryHookDef[],
+): HookLiveness {
   const everInstalled = existsSync(markerPath);
   let hooks: Record<string, HookGroup[]>;
   try {
@@ -90,7 +147,7 @@ export function memoryHooksLiveness(
   }
   const present: string[] = [];
   const missing: string[] = [];
-  for (const { event, sub } of MEMORY_HOOKS) {
+  for (const { event, sub } of definitions) {
     const groups = Array.isArray(hooks[event]) ? hooks[event] : [];
     if (groupsHaveHook(groups, sub)) present.push(event);
     else missing.push(event);
@@ -101,6 +158,7 @@ export function memoryHooksLiveness(
 interface HookCmd {
   type: string;
   command: string;
+  timeout?: number;
 }
 interface HookGroup {
   matcher?: string;
@@ -120,7 +178,7 @@ function readSettings(path: string): Settings {
     // would let writeSettings overwrite the whole file (permissions, env, other hooks,
     // statusLine) with only kit's block. Refuse loudly instead of silently clobbering.
     throw new Error(
-      `${path} is not valid JSON — refusing to overwrite it (that would drop your other Claude Code settings). Fix or move the file aside, then re-run. Parse error: ${(e as Error).message}`,
+      `${path} is not valid JSON — refusing to overwrite it (that would drop your other hook/settings entries). Fix or move the file aside, then re-run. Parse error: ${(e as Error).message}`,
       { cause: e },
     );
   }
@@ -152,28 +210,45 @@ export function installMemoryHooks(path: string = getClaudeSettingsPath()): {
   alreadyPresent: string[];
   resolved: boolean;
 } {
+  return installHooksAtPath(path, memoryInstallMarkerPath(), CLAUDE_MEMORY_HOOKS);
+}
+
+export function installCodexMemoryHooks(path: string = getCodexHooksPath()): {
+  added: string[];
+  alreadyPresent: string[];
+  resolved: boolean;
+} {
+  return installHooksAtPath(path, codexMemoryInstallMarkerPath(), CODEX_MEMORY_HOOKS);
+}
+
+function installHooksAtPath(
+  path: string,
+  markerPath: string,
+  definitions: MemoryHookDef[],
+): { added: string[]; alreadyPresent: string[]; resolved: boolean } {
   const s = readSettings(path);
   const hooks = (s.hooks ??= {});
   const prefix = kitHookInvocation();
   const resolved = prefix !== "kit";
   const added: string[] = [];
   const alreadyPresent: string[] = [];
-  for (const { event, sub } of MEMORY_HOOKS) {
+  for (const { event, sub, timeout } of definitions) {
     const groups = (hooks[event] ??= []);
     if (groupsHaveHook(groups, sub)) {
       alreadyPresent.push(event);
       continue;
     }
-    groups.push({ hooks: [{ type: "command", command: `${prefix} ${hookSuffix(sub)}` }] });
+    const handler: HookCmd = { type: "command", command: `${prefix} ${hookSuffix(sub)}` };
+    if (timeout !== undefined) handler.timeout = timeout;
+    groups.push({ hooks: [handler] });
     added.push(event);
   }
   if (added.length) writeSettings(path, s);
   // Durable "installed here" marker for the liveness check (idempotent). After
   // this call the hooks ARE present (added or alreadyPresent), so stamp it.
   try {
-    const marker = memoryInstallMarkerPath();
-    mkdirSync(dirname(marker), { recursive: true });
-    if (!existsSync(marker)) writeFileSync(marker, new Date().toISOString() + "\n");
+    mkdirSync(dirname(markerPath), { recursive: true });
+    if (!existsSync(markerPath)) writeFileSync(markerPath, new Date().toISOString() + "\n");
   } catch {
     /* best-effort: a missing marker only weakens the liveness check, never breaks install */
   }
@@ -228,25 +303,39 @@ export function uninstallStatusline(path: string = getClaudeSettingsPath()): { r
 export function uninstallMemoryHooks(path: string = getClaudeSettingsPath()): {
   removed: string[];
 } {
+  return uninstallHooksAtPath(path, memoryInstallMarkerPath(), CLAUDE_MEMORY_HOOKS);
+}
+
+export function uninstallCodexMemoryHooks(path: string = getCodexHooksPath()): {
+  removed: string[];
+} {
+  return uninstallHooksAtPath(path, codexMemoryInstallMarkerPath(), CODEX_MEMORY_HOOKS);
+}
+
+function uninstallHooksAtPath(
+  path: string,
+  markerPath: string,
+  definitions: MemoryHookDef[],
+): { removed: string[] } {
   const s = readSettings(path);
-  if (!s.hooks) return { removed: [] };
   const removed: string[] = [];
-  for (const { event, sub } of MEMORY_HOOKS) {
-    const groups = s.hooks[event];
-    if (!Array.isArray(groups)) continue;
-    const suffix = hookSuffix(sub);
-    const filtered = groups.filter((g) => !g.hooks?.some((h) => h.command.endsWith(suffix)));
-    if (filtered.length !== groups.length) {
-      s.hooks[event] = filtered;
-      removed.push(event);
+  if (s.hooks) {
+    for (const { event, sub } of definitions) {
+      const groups = s.hooks[event];
+      if (!Array.isArray(groups)) continue;
+      const suffix = hookSuffix(sub);
+      const filtered = groups.filter((g) => !g.hooks?.some((h) => h.command.endsWith(suffix)));
+      if (filtered.length !== groups.length) {
+        s.hooks[event] = filtered;
+        removed.push(event);
+      }
     }
   }
   if (removed.length) writeSettings(path, s);
   // Intentional uninstall clears the marker, so the liveness check won't then
   // report the (deliberate) absence as silent tampering.
   try {
-    const marker = memoryInstallMarkerPath();
-    if (existsSync(marker)) unlinkSync(marker);
+    if (existsSync(markerPath)) unlinkSync(markerPath);
   } catch {
     /* best-effort */
   }

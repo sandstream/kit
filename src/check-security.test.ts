@@ -123,6 +123,8 @@ describe("checkMemoryHooksLiveness (R5 — self-playing loop gate)", () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-live-"));
     const prevM = process.env.KIT_MEMORY_HOOK_MARKER;
     const prevS = process.env.KIT_CLAUDE_SETTINGS;
+    const prevCodexM = process.env.KIT_CODEX_MEMORY_HOOK_MARKER;
+    const prevCodexS = process.env.KIT_CODEX_HOOKS;
     try {
       const marker = join(dir, "marker");
       if (markerExists) writeFileSync(marker, "2026-01-01T00:00:00Z\n");
@@ -130,12 +132,18 @@ describe("checkMemoryHooksLiveness (R5 — self-playing loop gate)", () => {
       writeFileSync(settingsPath, JSON.stringify(settings));
       process.env.KIT_MEMORY_HOOK_MARKER = marker;
       process.env.KIT_CLAUDE_SETTINGS = settingsPath;
+      process.env.KIT_CODEX_MEMORY_HOOK_MARKER = join(dir, "no-codex-marker");
+      process.env.KIT_CODEX_HOOKS = join(dir, "no-codex-hooks.json");
       fn(await checkMemoryHooksLiveness());
     } finally {
       if (prevM === undefined) delete process.env.KIT_MEMORY_HOOK_MARKER;
       else process.env.KIT_MEMORY_HOOK_MARKER = prevM;
       if (prevS === undefined) delete process.env.KIT_CLAUDE_SETTINGS;
       else process.env.KIT_CLAUDE_SETTINGS = prevS;
+      if (prevCodexM === undefined) delete process.env.KIT_CODEX_MEMORY_HOOK_MARKER;
+      else process.env.KIT_CODEX_MEMORY_HOOK_MARKER = prevCodexM;
+      if (prevCodexS === undefined) delete process.env.KIT_CODEX_HOOKS;
+      else process.env.KIT_CODEX_HOOKS = prevCodexS;
       rmSync(dir, { recursive: true, force: true });
     }
   };
@@ -155,6 +163,38 @@ describe("checkMemoryHooksLiveness (R5 — self-playing loop gate)", () => {
       assert.match(r.detail, /silently OFF/);
       assert.match(r.detail, /SessionEnd|SessionStart/);
     });
+  });
+
+  it("FAILS when Codex was installed but its lifecycle config was stripped", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-live-codex-"));
+    const previous = {
+      claudeMarker: process.env.KIT_MEMORY_HOOK_MARKER,
+      claudeSettings: process.env.KIT_CLAUDE_SETTINGS,
+      codexMarker: process.env.KIT_CODEX_MEMORY_HOOK_MARKER,
+      codexHooks: process.env.KIT_CODEX_HOOKS,
+    };
+    try {
+      process.env.KIT_MEMORY_HOOK_MARKER = join(dir, "no-claude-marker");
+      process.env.KIT_CLAUDE_SETTINGS = join(dir, "no-claude-settings.json");
+      process.env.KIT_CODEX_MEMORY_HOOK_MARKER = join(dir, "codex-marker");
+      process.env.KIT_CODEX_HOOKS = join(dir, "codex-hooks.json");
+      writeFileSync(process.env.KIT_CODEX_MEMORY_HOOK_MARKER, "installed\n");
+      writeFileSync(process.env.KIT_CODEX_HOOKS, "{}\n");
+
+      const result = await checkMemoryHooksLiveness();
+      assert.equal(result.status, "fail");
+      assert.match(result.detail, /Codex:SessionEnd/);
+    } finally {
+      const restore = (key: string, value: string | undefined) => {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      };
+      restore("KIT_MEMORY_HOOK_MARKER", previous.claudeMarker);
+      restore("KIT_CLAUDE_SETTINGS", previous.claudeSettings);
+      restore("KIT_CODEX_MEMORY_HOOK_MARKER", previous.codexMarker);
+      restore("KIT_CODEX_HOOKS", previous.codexHooks);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

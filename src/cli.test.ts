@@ -33,12 +33,19 @@ async function runCli(
   cwd: string,
   env: Record<string, string> = {},
 ): Promise<CliResult> {
+  // Commands such as `kit setup` install lifecycle hooks. Keep those writes in
+  // the disposable fixture instead of touching the developer's real agent config.
+  const agentStateDir = join(cwd, ".kit-test-agent-state");
   try {
     const { stdout, stderr } = await exec(process.execPath, [CLI_PATH, ...args], {
       cwd,
       env: {
         ...process.env,
         // Disable governance to avoid budget state side-effects
+        KIT_CLAUDE_SETTINGS: join(agentStateDir, "claude-settings.json"),
+        KIT_CODEX_HOOKS: join(agentStateDir, "codex-hooks.json"),
+        KIT_MEMORY_HOOK_MARKER: join(agentStateDir, "claude-marker"),
+        KIT_CODEX_MEMORY_HOOK_MARKER: join(agentStateDir, "codex-marker"),
         ...env,
       },
       timeout: 30_000,

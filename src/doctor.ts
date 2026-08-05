@@ -172,10 +172,10 @@ async function checkKitWrapper(): Promise<DoctorCheck | null> {
 }
 
 async function checkMemoryHooks(): Promise<DoctorCheck | null> {
-  const { memoryHooksLiveness } = await import("./memory/install.js");
+  const { allMemoryHooksLiveness } = await import("./memory/install.js");
   const name = "memory hooks";
   const category = "hooks";
-  const live = memoryHooksLiveness();
+  const live = allMemoryHooksLiveness();
   if (!live.everInstalled) return null; // never installed here → nothing to verify
   if (live.missing.length === 0) {
     return { name, status: "pass", detail: `${live.present.length} wired`, category };
@@ -184,7 +184,7 @@ async function checkMemoryHooks(): Promise<DoctorCheck | null> {
   return {
     name,
     status: "fail",
-    detail: `installed but missing from settings.json: ${live.missing.join(", ")} — memory capture is silently off. Run: kit memory install`,
+    detail: `installed but missing from lifecycle config: ${live.missing.join(", ")} — memory capture is silently off. Run: kit memory install`,
     category,
   };
 }
