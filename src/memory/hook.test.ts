@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, statSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, upsertSession, insertMessage } from "./db.js";
@@ -11,6 +11,7 @@ import {
   dueForHarnessSweep,
   dueForMidSessionIndex,
   startDetachedSessionEnd,
+  runSessionEndIndex,
   consumeSessionEndLog,
   logSessionEndEvent,
 } from "./hook.js";
@@ -329,5 +330,68 @@ describe("memory hook — detached SessionEnd", () => {
     } finally {
       process.argv[1] = prevEntry;
     }
+  });
+});
+
+describe("memory hook — harness-aware SessionEnd capture", () => {
+  let tmp: string;
+  const previous = {
+    memoryDir: process.env.KIT_MEMORY_DIR,
+    memoryDb: process.env.KIT_MEMORY_DB,
+    codexDir: process.env.KIT_CODEX_DIR,
+  };
+
+  before(() => {
+    tmp = mkdtempSync(join(tmpdir(), "kit-codex-sessionend-"));
+    process.env.KIT_MEMORY_DIR = join(tmp, "memory");
+    process.env.KIT_MEMORY_DB = join(tmp, "memory", "memory.db");
+    process.env.KIT_CODEX_DIR = join(tmp, "codex");
+    mkdirSync(process.env.KIT_MEMORY_DIR, { recursive: true });
+    // Keep the periodic all-harness sweep on its fast-path interval so this test
+    // proves the explicit Codex branch, not incidental indexAllHarnesses coverage.
+    writeFileSync(join(process.env.KIT_MEMORY_DIR, ".harness-sweep"), "fresh\n");
+
+    const sessions = join(process.env.KIT_CODEX_DIR, "sessions", "2026", "08", "05");
+    mkdirSync(sessions, { recursive: true });
+    const records = [
+      { type: "session_meta", payload: { id: "codex-hook-1", cwd: tmp } },
+      {
+        timestamp: "2026-08-05T10:00:00Z",
+        type: "response_item",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
+      },
+      {
+        timestamp: "2026-08-05T10:00:01Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "hello" }],
+        },
+      },
+    ];
+    writeFileSync(
+      join(sessions, "rollout-codex-hook-1.jsonl"),
+      records.map((record) => JSON.stringify(record)).join("\n") + "\n",
+    );
+  });
+
+  after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      const envKey =
+        key === "memoryDir"
+          ? "KIT_MEMORY_DIR"
+          : key === "memoryDb"
+            ? "KIT_MEMORY_DB"
+            : "KIT_CODEX_DIR";
+      if (value === undefined) delete process.env[envKey];
+      else process.env[envKey] = value;
+    }
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("indexes the just-ended Codex rollout even when the global sweep is not due", () => {
+    assert.deepEqual(runSessionEndIndex("codex"), { messages: 2 });
+    assert.deepEqual(runSessionEndIndex("codex"), { messages: 0 }, "re-run stays incremental");
   });
 });

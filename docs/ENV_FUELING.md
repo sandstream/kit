@@ -48,7 +48,7 @@ plaintext `.env` files.
 
 `kit setup` detects a non-interactive context (CI, an agent runner, no TTY) and
 runs the **core** setup without prompting — it will never silently wire global
-`~/.claude` hooks or git hooks without an explicit yes. Make the choice explicit
+`~/.claude` / `~/.codex` hooks or git hooks without an explicit yes. Make the choice explicit
 in a script:
 
 - `kit setup --recommended` — core + the recommended profile (memory hooks, git

@@ -28,18 +28,21 @@ secret-scanned (see [Shared memory](#shared-memory)).
 
 ```bash
 npm i -g sandstream-kit
-kit memory install          # wire the hooks into ~/.claude/settings.json
-kit memory index            # index ~/.claude transcripts into ~/.kit/memory.db
+kit memory install          # wire Claude Code + Codex lifecycle hooks
+kit memory index            # index every supported harness into ~/.kit/memory.db
 kit memory search "october pricing decision"
 ```
 
-`install` is idempotent and non-destructive (it merges, preserving your other
-hooks). After it runs, the `SessionEnd` hook keeps the store up to date
+`install` is idempotent and non-destructive. It merges into
+`~/.claude/settings.json` and `~/.codex/hooks.json`, preserving other hooks.
+Codex command hooks require explicit review/trust through `/hooks`; until trusted,
+Codex skips them. After activation, `SessionEnd` indexes the just-ended harness
 incrementally — you rarely need to `index` again.
 
 ## How it works — a few fail-open hooks, nothing more
 
-The entire system is a handful of Claude Code hooks (all **fail-open**: an error
+The entire system is the same three lifecycle events in Claude Code and Codex
+(all **fail-open**: an error
 yields a no-op, so a hook can never block a prompt or break a session):
 
 - **`UserPromptSubmit`** runs before every message and injects a two-sentence

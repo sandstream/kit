@@ -864,7 +864,7 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     "Read the recorded observe window (.kit-audit.jsonl) and report whether it's safe to flip exec-broker to enforce: ready | would-block (+ exactly what breaks) | untested (--gate fails CI on any not-ready verdict)",
   "broker enforce":
     "Guided observe→enforce flip: readiness pre-flight (refuses unless ready; --force overrides), set [scope].enforce_runtime = true, re-sign the profile scope, and audit the transition",
-  "memory index": "Index ~/.claude transcripts into the SQLite memory store",
+  "memory index": "Index every supported agent transcript into the SQLite memory store",
   "memory search":
     "Full-text search memory (current project; --global for all; --fresh = recency-aware ranking)",
   "memory stats": "Show what the local memory store contains",
@@ -874,7 +874,7 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   "memory sync":
     "Sync from a memory export or encrypted backup (mergeDb; last-write-wins, file_index excluded)",
   "memory install":
-    "Wire UserPromptSubmit + SessionEnd + SessionStart (recovery) hooks into ~/.claude/settings.json",
+    "Wire UserPromptSubmit + SessionEnd + SessionStart hooks into Claude Code + Codex lifecycle config",
   "memory scan":
     "Scan the memory store for stored secrets, or prompt-injection patterns with --injection (exit 1 on a high-confidence finding)",
   "memory backup": "Encrypted backup of the memory store (AES-256-GCM; KIT_MEMORY_PASSPHRASE)",

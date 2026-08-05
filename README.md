@@ -338,7 +338,7 @@ adapters for the surfaces each agent exposes. Support today, per agent:
 | Agent             | Memory index¹ |    "use kit" rules block²    |         Agent/MCP config audit³         | Perm allowlist⁴ | Auto-capture hooks⁵ | Blocking gate⁶ |
 | :---------------- | :-----------: | :--------------------------: | :-------------------------------------: | :-------------: | :-----------------: | :------------: |
 | **Claude Code**   |      ✅       |        ✅ `CLAUDE.md`        |   ✅ + commands/agents/skills/plugins   |       ✅        |         ✅          |    ✅ hook     |
-| **OpenAI Codex**  |      ✅       |        ✅ `AGENTS.md`        |           ✅ `.codex/config`            |        —        |          —          |    ✅ hook     |
+| **OpenAI Codex**  |      ✅       |        ✅ `AGENTS.md`        |           ✅ `.codex/config`            |        —        |         ✅          |    ✅ hook     |
 | **OpenCode**      |      ✅       |        ✅ `AGENTS.md`        | ✅ `opencode.json` + `.opencode/plugin` |        —        |          —          |   ✅ plugin    |
 | **Cursor**        |      ✅       |      ✅ `.cursorrules`       |          ✅ `.cursor/mcp.json`          |        —        |          —          |    ✅ hook     |
 | **Cline**         |      ✅       |       ✅ `.clinerules`       |                    —                    |        —        |          —          |    ✅ hook     |
@@ -358,7 +358,7 @@ adapters for the surfaces each agent exposes. Support today, per agent:
 2. `kit agent-config` writes the managed "run kit before installs / vault secrets" block into the agent's rules file.
 3. `kit agent-audit` flags plaintext secrets, cleartext/inline-code MCP servers, and malware-shaped hooks in the agent's config. Generic `.mcp.json` / `.claude.json` are scanned for every agent regardless.
 4. kit can pre-authorize its read-only commands so they run without a prompt (Claude Code's `permissions.allow` today).
-5. kit registers lifecycle hooks so memory capture happens automatically (Claude Code `settings.json` hooks today).
+5. `kit memory install` registers lifecycle hooks so capture happens automatically in Claude Code (`~/.claude/settings.json`) and Codex (`~/.codex/hooks.json`). Codex requires review/trust through `/hooks` before new command hooks run.
 6. A **true blocking gate** (deny an un-triaged install before it runs) uses the agent's pre-tool hook — `kit agent-config` wires it by default (`--no-install-gate` opts out) for Claude Code, Codex, Amazon Q, Gemini CLI, and Cursor (exit-2 hook commands); AWS Kiro, Factory Droid, Augment, and Antigravity via their hook/settings files (`.kiro/agents`, `.factory/hooks.json`, `.augment/settings.json`, `.agents/hooks.json`); OpenCode via a generated `.opencode/plugin` that hooks `tool.execute.before` and throws; and Cline via an executable `.clinerules/hooks/PreToolUse` shim that blocks through Cline's `{cancel:true}` stdout contract — **11 agents** in all. The agent-agnostic enforcement floor is **git hooks** (`kit hooks`, pre-commit/pre-push) — they fire in any agent or none. See [#146](https://github.com/sandstream/kit/issues/146).
 7. **Continue** exposes only a declarative tool-permission policy (`~/.continue/permissions.yaml` allow/ask/exclude) with no way to invoke an external command before a tool runs, so a kit blocking-gate adapter isn't possible there — git hooks + the rules-file block remain its floor.
 8. **GitHub Copilot** (VS Code / Visual Studio): the "use kit" rules block is written to `.github/copilot-instructions.md` (wired when a `.vscode/` dir is present or the file already exists). Memory indexing and a blocking install-gate are not yet implemented — they need Copilot's transcript format and a pre-tool-hook surface verified against primary sources first. The git-hook floor + the MCP server (`kit mcp`, added to `.vscode/mcp.json`) apply today.
@@ -604,7 +604,8 @@ As of 2.0, kit's public surfaces are versioned contracts, not just code that hap
 
 `kit memory` gives an agent a local-first, deterministic second brain, it stores
 your raw conversation history and searches it _before answering_, so it pulls
-receipts instead of guessing. SQLite + FTS5, three hooks, no vectors, no model calls.
+receipts instead of guessing. SQLite + FTS5, three lifecycle events per supported
+hook harness, no vectors, no model calls.
 It indexes transcripts from **twelve** coding agents (Claude Code, Codex, Gemini,
 Continue, Cursor, Amazon Q, AWS Kiro, Factory Droid, Aider, Antigravity, Cline, and
 OpenCode), each parsed against the agent's own serialization format, never guessed. A private personal tier (encrypted backup so a
@@ -620,7 +621,7 @@ kit memory area stripe                            # shared: how we built it, sta
 kit memory suggest | your-llm                     # zero-LLM core; pipe a review prompt to YOUR model
 ```
 
-Full reference: [`docs/MEMORY.md`](docs/MEMORY.md). Schema + two-hook design
+Full reference: [`docs/MEMORY.md`](docs/MEMORY.md). Original schema + hook design
 credited to [cloudctx](https://github.com/chadptk1238/cloudctx) (MIT).
 
 ## Lock Files

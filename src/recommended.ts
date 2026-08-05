@@ -1,10 +1,13 @@
 import { resolve } from "node:path";
 import type { kitConfig, HooksConfig } from "./config.js";
-import { installMemoryHooks } from "./memory/install.js";
+import { installMemoryHooks, installCodexMemoryHooks } from "./memory/install.js";
 import { installHooks, type HookInstallResult } from "./hooks.js";
 
 export interface RecommendedResult {
-  memory: { added: string[]; alreadyPresent: string[]; resolved: boolean };
+  memory: {
+    claude: { added: string[]; alreadyPresent: string[]; resolved: boolean };
+    codex: { added: string[]; alreadyPresent: string[]; resolved: boolean };
+  };
   hooks: HookInstallResult[];
 }
 
@@ -21,7 +24,7 @@ function kitInvocation(): string {
 
 /**
  * The opinionated "recommended" hardening layered on top of `kit setup`:
- *   - cross-harness memory capture (the Claude Code hooks)
+ *   - cross-harness memory capture (Claude Code + Codex lifecycle hooks)
  *   - a pre-commit gate: secret-scan + triage gates for newly-added deps and staged skills +
  *     the ADR gate (accepted ADRs' kit-enforce rules; a no-op when there are no ADRs)
  *   - a pre-push context-check gate (only when `[context]` is declared)
@@ -33,14 +36,17 @@ function kitInvocation(): string {
  *
  * Each piece is idempotent and uses the already-hardened installers
  * (absolute-path memory hooks; hooksPath-aware, no-clobber git hooks). It
- * touches GLOBAL `~/.claude` (memory hooks) and the repo's git hooks, so the
+ * touches GLOBAL `~/.claude` / `~/.codex` (memory hooks) and the repo's git hooks, so the
  * caller must surface that to the user first.
  */
 export async function applyRecommendedHardening(
   config: kitConfig,
   gitDir = ".git",
 ): Promise<RecommendedResult> {
-  const memory = installMemoryHooks();
+  const memory = {
+    claude: installMemoryHooks(),
+    codex: installCodexMemoryHooks(),
+  };
 
   const kit = kitInvocation();
   const hookConfig: HooksConfig = {

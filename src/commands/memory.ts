@@ -78,10 +78,13 @@ import { decisionsForPaths, changedPaths } from "../memory/clusters.js";
 import { collectHints } from "../hints.js";
 import {
   installMemoryHooks,
+  installCodexMemoryHooks,
   uninstallMemoryHooks,
+  uninstallCodexMemoryHooks,
   installStatusline,
   uninstallStatusline,
   getClaudeSettingsPath,
+  getCodexHooksPath,
 } from "../memory/install.js";
 import {
   palAdd,
@@ -395,7 +398,7 @@ async function memHelp(): Promise<boolean> {
     "  kit memory pull             Pull + merge your store from your private remote (last-write-wins)",
   );
   console.log(
-    "  kit memory install          Wire the hooks + status line (score + PAL ⚠) into ~/.claude/settings.json (--no-statusline to skip)",
+    "  kit memory install          Wire Claude Code + Codex lifecycle hooks and Claude's status line (--no-statusline to skip)",
   );
   console.log("  kit memory uninstall        Remove the hooks");
   console.log(
@@ -973,7 +976,7 @@ async function memSearch(): Promise<boolean> {
 }
 
 async function memHook(): Promise<boolean> {
-  // Internal: invoked by Claude Code hooks. Fail-open — never block.
+  // Internal: invoked by Claude Code / Codex hooks. Fail-open — never block.
   const event = process.argv[4];
   if (event === "user-prompt-submit") {
     maybeStartMidSessionIndex(); // debounced, detached — keeps recall fresh mid-session
@@ -988,12 +991,22 @@ async function memHook(): Promise<boolean> {
     startDetachedSessionEnd();
     return true;
   }
+  if (event === "session-end-codex") {
+    startDetachedSessionEnd("codex");
+    return true;
+  }
   if (event === "session-end-run") {
     // Internal: the detached SessionEnd worker. No hook is waiting on it, so the
     // (potentially slow / networked) capture can run synchronously here.
     runSessionEndIndex();
     // Opt-in: push this session's memory to your durable store before an
     // (ephemeral) container is reclaimed. Fail-soft; notes go to stderr.
+    const pushed = tryAutoPush(getCurrentProjectRoot());
+    if (pushed.note) console.error(`${c.dim}${pushed.note}${c.reset}`);
+    return true;
+  }
+  if (event === "session-end-run-codex") {
+    runSessionEndIndex("codex");
     const pushed = tryAutoPush(getCurrentProjectRoot());
     if (pushed.note) console.error(`${c.dim}${pushed.note}${c.reset}`);
     return true;
@@ -1048,9 +1061,15 @@ async function memInstall(): Promise<boolean> {
   } else if (w.action === "skipped") {
     console.log(`${c.yellow}!${c.reset} ${w.detail}`);
   }
-  const { added, alreadyPresent, resolved } = installMemoryHooks();
-  for (const e of added) console.log(`${c.green}✓${c.reset} installed ${e} hook`);
-  for (const e of alreadyPresent) console.log(`${c.dim}• ${e} hook already present${c.reset}`);
+  const claude = installMemoryHooks();
+  const codex = installCodexMemoryHooks();
+  for (const e of claude.added)
+    console.log(`${c.green}✓${c.reset} installed Claude Code ${e} hook`);
+  for (const e of claude.alreadyPresent)
+    console.log(`${c.dim}• Claude Code ${e} hook already present${c.reset}`);
+  for (const e of codex.added) console.log(`${c.green}✓${c.reset} installed Codex ${e} hook`);
+  for (const e of codex.alreadyPresent)
+    console.log(`${c.dim}• Codex ${e} hook already present${c.reset}`);
 
   // Also wire the status line (the setup score + open-PAL ⚠ count, visible in the
   // terminal) — unless --no-statusline, and never clobbering a custom statusLine.
@@ -1066,8 +1085,14 @@ async function memInstall(): Promise<boolean> {
       );
   }
 
-  console.log(`${c.dim}settings: ${getClaudeSettingsPath()}${c.reset}`);
-  if (!resolved) {
+  console.log(`${c.dim}Claude settings: ${getClaudeSettingsPath()}${c.reset}`);
+  console.log(`${c.dim}Codex hooks: ${getCodexHooksPath()}${c.reset}`);
+  if (codex.added.length > 0) {
+    console.log(
+      `${c.yellow}!${c.reset} Restart/refresh Codex, open ${c.bold}/hooks${c.reset}, and trust the new hooks; Codex skips unreviewed command hooks.`,
+    );
+  }
+  if (!claude.resolved || !codex.resolved) {
     console.log(
       `${c.yellow}!${c.reset} Could not resolve kit's absolute path — hooks use a bare \`kit\`, ` +
         `which only fires if kit is on the hook shell's PATH (often not the case). ` +
@@ -1078,9 +1103,12 @@ async function memInstall(): Promise<boolean> {
 }
 
 async function memUninstall(): Promise<boolean> {
-  const { removed } = uninstallMemoryHooks();
-  if (removed.length) {
-    for (const e of removed) console.log(`${c.green}✓${c.reset} removed ${e} hook`);
+  const claude = uninstallMemoryHooks();
+  const codex = uninstallCodexMemoryHooks();
+  if (claude.removed.length || codex.removed.length) {
+    for (const e of claude.removed)
+      console.log(`${c.green}✓${c.reset} removed Claude Code ${e} hook`);
+    for (const e of codex.removed) console.log(`${c.green}✓${c.reset} removed Codex ${e} hook`);
   } else {
     console.log(`${c.dim}no kit memory hooks were installed${c.reset}`);
   }
@@ -1091,7 +1119,7 @@ async function memUninstall(): Promise<boolean> {
   // Removing the hooks tears down the self-playing capture loop — a security-relevant
   // event. Audit it (best-effort, fail-open) so a teardown isn't invisible when audit
   // is enabled. A no-op when audit is off (the default), so no surprise files appear.
-  if (removed.length || slRemoved) {
+  if (claude.removed.length || codex.removed.length || slRemoved) {
     try {
       const { logAuditEvent } = await import("../audit.js");
       const { mergeGovernanceConfigAsync } = await import("../governance.js");
@@ -1104,7 +1132,10 @@ async function memUninstall(): Promise<boolean> {
         operation: "memory.hooks.uninstall",
         environment: gov.environment,
         success: true,
-        metadata: { removedHooks: removed, statusline: slRemoved },
+        metadata: {
+          removedHooks: { claude: claude.removed, codex: codex.removed },
+          statusline: slRemoved,
+        },
       });
     } catch {
       // audit is best-effort here — never let it block or fail an uninstall

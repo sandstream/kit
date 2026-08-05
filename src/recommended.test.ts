@@ -8,6 +8,9 @@ import { applyRecommendedHardening } from "./recommended.js";
 describe("applyRecommendedHardening", () => {
   let tmp: string;
   const prev = process.env.KIT_CLAUDE_SETTINGS;
+  const prevCodex = process.env.KIT_CODEX_HOOKS;
+  const prevClaudeMarker = process.env.KIT_MEMORY_HOOK_MARKER;
+  const prevCodexMarker = process.env.KIT_CODEX_MEMORY_HOOK_MARKER;
 
   before(() => {
     tmp = mkdtempSync(join(tmpdir(), "kit-recommended-"));
@@ -17,10 +20,19 @@ describe("applyRecommendedHardening", () => {
       tmp,
       `claude-${Math.random().toString(36).slice(2)}.json`,
     );
+    process.env.KIT_CODEX_HOOKS = join(tmp, `codex-${Math.random().toString(36).slice(2)}.json`);
+    process.env.KIT_MEMORY_HOOK_MARKER = join(tmp, "claude-marker");
+    process.env.KIT_CODEX_MEMORY_HOOK_MARKER = join(tmp, "codex-marker");
   });
   after(() => {
     if (prev === undefined) delete process.env.KIT_CLAUDE_SETTINGS;
     else process.env.KIT_CLAUDE_SETTINGS = prev;
+    if (prevCodex === undefined) delete process.env.KIT_CODEX_HOOKS;
+    else process.env.KIT_CODEX_HOOKS = prevCodex;
+    if (prevClaudeMarker === undefined) delete process.env.KIT_MEMORY_HOOK_MARKER;
+    else process.env.KIT_MEMORY_HOOK_MARKER = prevClaudeMarker;
+    if (prevCodexMarker === undefined) delete process.env.KIT_CODEX_MEMORY_HOOK_MARKER;
+    else process.env.KIT_CODEX_MEMORY_HOOK_MARKER = prevCodexMarker;
     rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -32,8 +44,9 @@ describe("applyRecommendedHardening", () => {
     const g = gitDir();
     const r = await applyRecommendedHardening({ context: { git: { email: "x@y.z" } } }, g);
 
-    // 3 memory hooks (UserPromptSubmit/SessionEnd/SessionStart).
-    assert.equal(r.memory.added.length, 3);
+    // 3 memory hooks per supported lifecycle-hook harness.
+    assert.equal(r.memory.claude.added.length, 3);
+    assert.equal(r.memory.codex.added.length, 3);
 
     // pre-commit secret-scan + triage gates (deps + skills).
     const pc = readFileSync(join(g, "hooks", "pre-commit"), "utf-8");

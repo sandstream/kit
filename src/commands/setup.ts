@@ -372,13 +372,20 @@ export async function cmdSetup(): Promise<boolean> {
   if (recommended) {
     console.log(`\n${c.bold}[+] Recommended hardening${c.reset}`);
     const h = await applyRecommendedHardening(config);
-    for (const e of h.memory.added)
-      console.log(`  ${c.green}✓${c.reset} memory hook ${c.dim}${e}${c.reset}`);
-    if (h.memory.added.length === 0)
+    for (const e of h.memory.claude.added)
+      console.log(`  ${c.green}✓${c.reset} Claude Code memory hook ${c.dim}${e}${c.reset}`);
+    for (const e of h.memory.codex.added)
+      console.log(`  ${c.green}✓${c.reset} Codex memory hook ${c.dim}${e}${c.reset}`);
+    if (h.memory.claude.added.length === 0 && h.memory.codex.added.length === 0)
       console.log(`  ${c.dim}= memory hooks already wired${c.reset}`);
-    if (!h.memory.resolved) {
+    if (!h.memory.claude.resolved || !h.memory.codex.resolved) {
       console.log(
         `  ${c.yellow}!${c.reset} ${c.dim}memory hooks use a bare \`kit\` (kit not resolvable to an absolute path)${c.reset}`,
+      );
+    }
+    if (h.memory.codex.added.length > 0) {
+      console.log(
+        `  ${c.yellow}!${c.reset} ${c.dim}restart/refresh Codex, then open /hooks and trust the new memory hooks${c.reset}`,
       );
     }
     for (const r of h.hooks) {
