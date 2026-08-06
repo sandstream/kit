@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.6.1] - 2026-08-06
+
+### Fixed
+
+- **Repo-shared hook commands no longer bake in the machine that generated them.**
+  `kit agent-config`'s gate-hook command generator wrote the absolute wrapper path
+  (`homedir()`-resolved at write time) into `.claude/settings.json` and
+  `.codex/config.toml`. A hook command produced on one machine (or a `HOME=/root`
+  sandbox) and carried to another fails every gated tool call with an
+  undiagnosed `exit 127`. The generator now emits the wrapper via `"$HOME/.kit/bin/kit"`
+  in these command strings; `expandHomePath` resolves `$HOME`/`${HOME}` on read so
+  drift detection keeps working. `kit agent-config` is also now self-healing: if a
+  gate hook is already wired but its command string doesn't match the desired
+  form, it rewrites it in place instead of only reporting "already wired". Codex's
+  `.codex/config.toml` gate commands are now parsed and included in
+  `kit check`'s gate-liveness diagnostics — previously only `.claude/settings.json`
+  was inspected, so a broken Codex hook passed silently.
+
 ## [6.6.0] - 2026-08-06
 
 ### Added
