@@ -57,10 +57,10 @@ describe("memory hook installer", () => {
     assert.ok(ups.includes("some-other-tool"), "preserves the pre-existing hook");
     const upsHook = ups.find((c: string) => c.endsWith("memory hook user-prompt-submit"));
     assert.ok(upsHook, "wires the user-prompt-submit hook");
-    // Must be an ABSOLUTE invocation (node + cli.js or the ~/.kit/bin wrapper),
-    // not a bare `kit` that the hook shell's PATH can't resolve. The path carries
-    // a separator — "/" on POSIX, "\\" on Windows — so accept either. #43.
-    assert.ok(/[/\\]/.test(upsHook), `hook command must be absolute, got: ${upsHook}`);
+    // Must not be a bare `kit` that the hook shell's PATH can't resolve. When the
+    // wrapper exists, shared hook config uses "$HOME/.kit/bin/kit"; otherwise it
+    // falls back to node + cli.js.
+    assert.ok(!upsHook.startsWith("kit "), `hook command must not be bare kit: ${upsHook}`);
     assert.ok(
       s.hooks.SessionEnd.some((g: { hooks: { command: string }[] }) =>
         g.hooks.some((h) => h.command.endsWith("memory hook session-end")),
@@ -111,7 +111,10 @@ describe("memory hook installer", () => {
     );
     assert.equal(ours.length, 1, "no duplicate UPS hook");
     assert.notEqual(ours[0].hooks[0].command, "kit memory hook user-prompt-submit");
-    assert.ok(/[/\\]/.test(ours[0].hooks[0].command), "legacy hook rewritten to absolute command");
+    assert.ok(
+      !ours[0].hooks[0].command.startsWith("kit "),
+      "legacy hook rewritten away from bare kit",
+    );
     // Uninstall removes the legacy bare entry too (suffix match).
     uninstallMemoryHooks();
     const s2 = JSON.parse(readFileSync(settingsPath, "utf8"));
@@ -252,6 +255,7 @@ describe("Codex memory hook installer", () => {
     const config = JSON.parse(readFileSync(hooksPath, "utf8"));
     const hook = config.hooks.SessionEnd[0].hooks[0];
     assert.notEqual(hook.command, "/root/.kit/bin/kit memory hook session-end-codex");
+    assert.ok(!hook.command.includes("/root/.kit/bin/kit"));
     assert.ok(hook.command.endsWith("memory hook session-end-codex"));
     assert.equal(hook.timeout, 3);
   });

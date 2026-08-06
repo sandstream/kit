@@ -194,14 +194,6 @@ export async function checkGateLiveness(cwd?: string): Promise<SecurityCheckResu
   const category = "exposure" as const;
   const { gateLiveness } = await import("./agent-config.js");
   const live = gateLiveness(cwd);
-  if (!live.everInstalled) {
-    return {
-      category,
-      name,
-      status: "skip",
-      detail: "enforcement gates not installed on this machine",
-    };
-  }
   const missing: string[] = [];
   if (!live.installGate) missing.push("install-gate (gate-bash)");
   if (!live.envGate) missing.push("env-write-gate (gate-env)");
@@ -212,6 +204,14 @@ export async function checkGateLiveness(cwd?: string): Promise<SecurityCheckResu
       status: "fail",
       severity: "high",
       detail: `PreToolUse gate command cannot reliably start — ${live.problems.join("; ")}`,
+    };
+  }
+  if (!live.everInstalled) {
+    return {
+      category,
+      name,
+      status: "skip",
+      detail: "enforcement gates not installed on this machine",
     };
   }
   if (missing.length === 0) {

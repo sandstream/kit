@@ -18,11 +18,15 @@ import { join, dirname, resolve } from "node:path";
 import { kitWrapperPath } from "../kit-wrapper.js";
 
 /**
- * Absolute invocation of kit for use inside a lifecycle hook. Hook commands run in a
+ * Invocation of kit for use inside a lifecycle hook. Hook commands run in a
  * non-login `/bin/sh` whose PATH usually does NOT include the npm global bin
  * (`~/.npm-global/bin`, nvm/volta/pnpm shims, etc.). A bare `kit` there fails
  * with "command not found" and SILENTLY breaks memory capture — the worst
  * failure mode, because the store looks installed but records nothing.
+ *
+ * The wrapper itself is machine-local and contains absolute node/kit paths. Hook
+ * config may be shared with the repo, so it refers to the wrapper through `$HOME`
+ * instead of baking the installer user's home directory.
  *
  * Order of preference:
  *   1. The self-healing wrapper at ~/.kit/bin/kit (created by `memInstall`
@@ -33,7 +37,7 @@ import { kitWrapperPath } from "../kit-wrapper.js";
  */
 function kitHookInvocation(): string {
   const wrapper = kitWrapperPath();
-  if (existsSync(wrapper)) return wrapper;
+  if (existsSync(wrapper)) return '"$HOME/.kit/bin/kit"';
   const entry = process.argv[1];
   if (entry) return `${process.execPath} ${resolve(entry)}`;
   return "kit";
@@ -360,7 +364,7 @@ export function installStatusline(path: string = getClaudeSettingsPath()): {
   const desired = `${prefix} ${STATUSLINE_SUFFIX}`;
   const existing = s.statusLine as { command?: string } | undefined;
   if (existing && typeof existing === "object") {
-    // Already ours → refresh stale absolute paths; someone else's → never clobber it.
+    // Already ours → refresh stale hook paths; someone else's → never clobber it.
     if (!isKitStatusline(existing.command)) return { status: "foreign", resolved };
     if (existing.command === desired) return { status: "already", resolved };
     existing.command = desired;

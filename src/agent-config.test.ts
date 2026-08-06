@@ -51,6 +51,27 @@ function tmpRepo(): string {
   return mkdtempSync(join(tmpdir(), "kit-agentcfg-"));
 }
 
+async function withTempHome<T>(fn: (home: string) => T | Promise<T>): Promise<T> {
+  const prev = process.env.HOME;
+  const home = mkdtempSync(join(tmpdir(), "kit-home-"));
+  process.env.HOME = home;
+  try {
+    return await fn(home);
+  } finally {
+    if (prev === undefined) delete process.env.HOME;
+    else process.env.HOME = prev;
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+function writeFakeWrapper(home: string): string {
+  const wrapper = kitWrapperPath(home);
+  mkdirSync(kitBinDir(home), { recursive: true });
+  writeFileSync(wrapper, '#!/bin/sh\nexec kit "$@"\n');
+  chmodSync(wrapper, 0o755);
+  return wrapper;
+}
+
 describe("upsertKitBlock", () => {
   it("creates a managed block in an empty file", () => {
     const { next, action } = upsertKitBlock("");
@@ -569,6 +590,58 @@ describe("installInstallGate", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it(
+    "writes a HOME-relative wrapper command instead of the installer user's absolute home",
+    { skip: process.platform === "win32" },
+    async () => {
+      await withTempHome(async (home) => {
+        writeFakeWrapper(home);
+        const dir = mkdtempSync(join(tmpdir(), "kit-gate-home-"));
+        try {
+          mkdirSync(join(dir, ".claude"), { recursive: true });
+          const r = await installInstallGate(dir);
+          assert.equal(r.action, "created");
+          const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
+          const command = s.hooks.PreToolUse[0].hooks[0].command;
+          assert.equal(command, '"$HOME/.kit/bin/kit" gate-bash');
+          assert.ok(!command.includes(home), "repo-shared hook must not bake installer HOME");
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      });
+    },
+  );
+
+  it("refreshes an existing stale absolute Claude hook command in-place", async () => {
+    await withTempHome(async (home) => {
+      writeFakeWrapper(home);
+      const dir = mkdtempSync(join(tmpdir(), "kit-gate-stale-"));
+      try {
+        mkdirSync(join(dir, ".claude"), { recursive: true });
+        writeFileSync(
+          join(dir, ".claude", "settings.json"),
+          JSON.stringify({
+            hooks: {
+              PreToolUse: [
+                {
+                  matcher: "Bash",
+                  hooks: [{ type: "command", command: "/root/.kit/bin/kit gate-bash" }],
+                },
+              ],
+            },
+          }),
+        );
+        const r = await installInstallGate(dir);
+        assert.equal(r.action, "updated");
+        const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
+        assert.equal(s.hooks.PreToolUse.length, 1);
+        assert.equal(s.hooks.PreToolUse[0].hooks[0].command, '"$HOME/.kit/bin/kit" gate-bash');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
 });
 
 describe("installBrokerGates (Pillar 3, opt-in)", () => {
@@ -639,28 +712,13 @@ describe("kitGateInvocation / kitGateArgv (prefer the self-healing wrapper)", ()
   // restores the tool PATH a non-login hook shell drops (so triage's python3/git
   // resolve) and is the single place kit refreshes if node moves — one stable path
   // vs. a per-agent node path that can go stale and make the hook fail to spawn.
-  const withHome = (fn: (home: string) => void) => {
-    const prev = process.env.HOME;
-    const home = mkdtempSync(join(tmpdir(), "kit-gatehome-"));
-    process.env.HOME = home;
-    try {
-      fn(home);
-    } finally {
-      if (prev === undefined) delete process.env.HOME;
-      else process.env.HOME = prev;
-      rmSync(home, { recursive: true, force: true });
-    }
-  };
-
   it(
-    "prefers the self-healing wrapper when one is present",
+    "uses a HOME-relative shell command when the self-healing wrapper is present",
     { skip: process.platform === "win32" },
-    () => {
-      withHome((home) => {
-        const wrapper = kitWrapperPath(home);
-        mkdirSync(kitBinDir(home), { recursive: true });
-        writeFileSync(wrapper, '#!/bin/sh\nexec kit "$@"\n');
-        assert.equal(kitGateInvocation(), `${wrapper} gate-bash`);
+    async () => {
+      await withTempHome((home) => {
+        const wrapper = writeFakeWrapper(home);
+        assert.equal(kitGateInvocation(), '"$HOME/.kit/bin/kit" gate-bash');
         assert.deepEqual(kitGateArgv(), [wrapper, "gate-bash"]);
       });
     },
@@ -669,8 +727,8 @@ describe("kitGateInvocation / kitGateArgv (prefer the self-healing wrapper)", ()
   it(
     "falls back to an absolute node+cli when no wrapper exists",
     { skip: process.platform === "win32" },
-    () => {
-      withHome(() => {
+    async () => {
+      await withTempHome(() => {
         // fresh HOME → no ~/.kit/bin/kit → must use the resolved node+cli form, never a bare `kit`
         const inv = kitGateInvocation();
         assert.ok(inv.startsWith(process.execPath), "starts with the absolute node path");
@@ -696,6 +754,7 @@ describe("installInstallGateCodex", () => {
       assert.ok(txt.includes("# my codex config"), "preserves existing content/comments");
       assert.ok(txt.includes("[[hooks.PreToolUse]]"));
       assert.ok(txt.includes("gate-bash"));
+      assert.ok(!txt.includes("/root/.kit/bin/kit"));
       const { parse } = await import("smol-toml");
       const cfg = parse(txt) as { hooks: { PreToolUse: { matcher: string }[] } };
       assert.ok(Array.isArray(cfg.hooks.PreToolUse), "valid TOML, array-of-tables");
@@ -705,6 +764,48 @@ describe("installInstallGateCodex", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it(
+    "writes a HOME-relative Codex hook command instead of baking installer HOME",
+    { skip: process.platform === "win32" },
+    async () => {
+      await withTempHome(async (home) => {
+        writeFakeWrapper(home);
+        const dir = mkdtempSync(join(tmpdir(), "kit-codexgate-home-"));
+        try {
+          mkdirSync(join(dir, ".codex"), { recursive: true });
+          const r = await installInstallGateCodex(dir);
+          assert.equal(r.action, "created");
+          const txt = readFileSync(join(dir, ".codex", "config.toml"), "utf-8");
+          assert.ok(txt.includes(`command = '"$HOME/.kit/bin/kit" gate-bash'`));
+          assert.ok(!txt.includes(home), "repo-shared hook must not bake installer HOME");
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      });
+    },
+  );
+
+  it("refreshes an existing stale absolute Codex hook command in-place", async () => {
+    await withTempHome(async (home) => {
+      writeFakeWrapper(home);
+      const dir = mkdtempSync(join(tmpdir(), "kit-codexgate-stale-"));
+      try {
+        mkdirSync(join(dir, ".codex"), { recursive: true });
+        writeFileSync(
+          join(dir, ".codex", "config.toml"),
+          'model = "gpt-5"\n\n[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = \'/root/.kit/bin/kit gate-bash\'\n',
+        );
+        const r = await installInstallGateCodex(dir);
+        assert.equal(r.action, "updated");
+        const txt = readFileSync(join(dir, ".codex", "config.toml"), "utf-8");
+        assert.ok(txt.includes(`command = '"$HOME/.kit/bin/kit" gate-bash'`));
+        assert.ok(!txt.includes("/root/.kit/bin/kit"));
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   it("skips when no Codex project is present", async () => {
@@ -1157,6 +1258,21 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
     });
   });
 
+  it("Codex config with a stale root hook path is surfaced even without Claude marker", () => {
+    repo((dir: string) => {
+      mkdirSync(join(dir, ".codex"), { recursive: true });
+      writeFileSync(
+        join(dir, ".codex", "config.toml"),
+        '[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = \'/root/.kit/bin/kit gate-bash\'\n',
+      );
+      const live = gateLiveness(dir);
+      assert.equal(live.everInstalled, false);
+      assert.equal(live.installGate, false);
+      assert.equal(live.problems.length, 1);
+      assert.match(live.problems[0], /root\/container path/);
+    });
+  });
+
   it("marker present + both gates wired → all true", () => {
     repo((dir: string) => {
       mark(dir);
@@ -1174,6 +1290,30 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
       });
     });
   });
+
+  it(
+    "marker present + HOME-relative wrapper command → all true",
+    { skip: process.platform === "win32" },
+    async () => {
+      await withTempHome((home) => {
+        writeFakeWrapper(home);
+        repo((dir: string) => {
+          mark(dir);
+          writeFileSync(
+            join(dir, ".claude/settings.json"),
+            settings(['"$HOME/.kit/bin/kit" gate-bash', '"$HOME/.kit/bin/kit" gate-env']),
+          );
+          assert.deepEqual(gateLiveness(dir), {
+            everInstalled: true,
+            installGate: true,
+            envGate: true,
+            egressGate: false,
+            problems: [],
+          });
+        });
+      });
+    },
+  );
 
   it("marker present but env-gate vanished → the silent-degradation case", () => {
     repo((dir: string) => {

@@ -1103,9 +1103,9 @@ async function memInstall(): Promise<boolean> {
   }
   if (!claude.resolved || !codex.resolved) {
     console.log(
-      `${c.yellow}!${c.reset} Could not resolve kit's absolute path — hooks use a bare \`kit\`, ` +
+      `${c.yellow}!${c.reset} Could not resolve kit's hook wrapper — hooks use a bare \`kit\`, ` +
         `which only fires if kit is on the hook shell's PATH (often not the case). ` +
-        `Reinstall kit globally and re-run, or edit the commands in ${getClaudeSettingsPath()} to an absolute path.`,
+        `Reinstall kit globally and re-run, or edit the commands in ${getClaudeSettingsPath()} to "$HOME/.kit/bin/kit".`,
     );
   }
   return true;

@@ -685,8 +685,11 @@ export async function installKitPermissions(
 /**
  * The gate command for a non-login hook shell. Mirrors the memory-hook invocation
  * (`kitHookInvocation`): prefer the self-healing wrapper at the STABLE path
- * `~/.kit/bin/kit`. Two concrete wins over baking `<node> <cli.js>` straight into
- * every agent's config:
+ * `~/.kit/bin/kit`. Repo-shared command strings use `$HOME` rather than baking the
+ * current machine's home directory; the wrapper itself remains machine-local and
+ * may safely contain absolute node/kit paths.
+ *
+ * Two concrete wins over baking `<node> <cli.js>` straight into every agent's config:
  *   1. It restores the tool PATH a non-login hook shell drops (npm-global bin, mise
  *      shims). The gate shells out to `python3` (triage) and `git`; without that
  *      PATH those fail — triage then fail-closes and BLOCKS legitimate installs
@@ -706,7 +709,7 @@ export function kitGateInvocation(): string {
 /** Same stable-wrapper resolution for any kit subcommand baked into a hook. */
 function kitSubcommandInvocation(sub: string): string {
   const wrapper = kitWrapperPath();
-  if (existsSync(wrapper)) return `${wrapper} ${sub}`;
+  if (existsSync(wrapper)) return `"$HOME/.kit/bin/kit" ${sub}`;
   const entry = process.argv[1];
   if (entry) return `${process.execPath} ${resolve(entry)} ${sub}`;
   return `kit ${sub}`; // last resort — relies on PATH
@@ -725,6 +728,9 @@ function commandIncludesSubcommand(command: string, sub: string): boolean {
 function expandHomePath(path: string): string {
   if (path === "~") return homedir();
   if (path.startsWith("~/")) return join(homedir(), path.slice(2));
+  if (path === "$HOME" || path === "${HOME}") return homedir();
+  if (path.startsWith("$HOME/")) return join(homedir(), path.slice("$HOME/".length));
+  if (path.startsWith("${HOME}/")) return join(homedir(), path.slice("${HOME}/".length));
   return path;
 }
 
@@ -806,6 +812,55 @@ interface SettingsHookGroup {
   hooks?: SettingsHookCmd[];
 }
 
+function refreshSettingsGateCommand(
+  groups: SettingsHookGroup[],
+  sub: string,
+  desired: string,
+): { found: boolean; updated: boolean } {
+  let found = false;
+  let updated = false;
+  for (const group of groups) {
+    for (const hook of group.hooks ?? []) {
+      if (typeof hook.command !== "string" || !commandIncludesSubcommand(hook.command, sub)) {
+        continue;
+      }
+      found = true;
+      if (hook.command !== desired) {
+        hook.command = desired;
+        updated = true;
+      }
+    }
+  }
+  return { found, updated };
+}
+
+function replaceTomlGateCommand(content: string, sub: string, desired: string): string {
+  const escapedSub = sub.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const commandLine = new RegExp(
+    `^([ \\t]*command[ \\t]*=[ \\t]*)(["'])([^\\n]*\\b${escapedSub}\\b[^\\n]*)\\2([ \\t]*)$`,
+    "gm",
+  );
+  return content.replace(commandLine, `$1'${desired}'$4`);
+}
+
+function codexGateCommands(cwd: string): string[] {
+  let content: string;
+  try {
+    content = readFileSync(resolve(cwd, ".codex/config.toml"), "utf-8");
+  } catch {
+    return [];
+  }
+  const commands: string[] = [];
+  const commandLine = /^[ \t]*command[ \t]*=[ \t]*(["'])(.*?)\1/gm;
+  for (const match of content.matchAll(commandLine)) {
+    const command = match[2];
+    if (GATE_SUBCOMMANDS.some((sub) => commandIncludesSubcommand(command, sub))) {
+      commands.push(command);
+    }
+  }
+  return commands;
+}
+
 /**
  * Gate liveness — is the deterministic ENFORCEMENT floor actually wired, or has it
  * silently vanished? A gate is only real if it's on the agent's action path; a
@@ -864,18 +919,20 @@ export function gateLiveness(
   } catch {
     pre = []; // missing/unparseable settings → no gates present (surfaced as a problem)
   }
-  const gateCommands = pre
+  const claudeGateCommands = pre
     .flatMap((g) => g.hooks ?? [])
     .map((h) => h.command)
     .filter((cmd): cmd is string => typeof cmd === "string")
     .filter((cmd) => GATE_SUBCOMMANDS.some((sub) => commandIncludesSubcommand(cmd, sub)));
-  const has = (sub: string) => gateCommands.some((cmd) => commandIncludesSubcommand(cmd, sub));
+  const allGateCommands = [...claudeGateCommands, ...codexGateCommands(cwd)];
+  const has = (sub: string) =>
+    claudeGateCommands.some((cmd) => commandIncludesSubcommand(cmd, sub));
   return {
     everInstalled,
     installGate: has("gate-bash"),
     envGate: has("gate-env"),
     egressGate: has("gate-egress"),
-    problems: gateCommands.flatMap((cmd) => hookCommandProblems(cmd)),
+    problems: allGateCommands.flatMap((cmd) => hookCommandProblems(cmd)),
   };
 }
 
@@ -908,13 +965,22 @@ export async function installInstallGate(cwd: string = process.cwd()): Promise<H
 
   const hooks = (settings.hooks ??= {});
   const pre = (hooks.PreToolUse ??= []);
-  const already = pre.some((g) => g.hooks?.some((h) => h.command?.endsWith("gate-bash")));
-  if (already) {
+  const desired = kitGateInvocation();
+  const existing = refreshSettingsGateCommand(pre, "gate-bash", desired);
+  if (existing.found) {
     markGatesInstalled(cwd); // gate present → record it for liveness (idempotent)
+    if (existing.updated) {
+      try {
+        await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+        return { file, action: "updated", detail: "install-gate hook command refreshed" };
+      } catch (err) {
+        return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+      }
+    }
     return { file, action: "unchanged", detail: "install-gate already wired" };
   }
 
-  pre.push({ matcher: "Bash", hooks: [{ type: "command", command: kitGateInvocation() }] });
+  pre.push({ matcher: "Bash", hooks: [{ type: "command", command: desired }] });
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
@@ -954,15 +1020,24 @@ export async function installEnvWriteGate(cwd: string = process.cwd()): Promise<
 
   const hooks = (settings.hooks ??= {});
   const pre = (hooks.PreToolUse ??= []);
-  const already = pre.some((g) => g.hooks?.some((h) => h.command?.endsWith("gate-env")));
-  if (already) {
+  const desired = kitSubcommandInvocation("gate-env");
+  const existing = refreshSettingsGateCommand(pre, "gate-env", desired);
+  if (existing.found) {
     markGatesInstalled(cwd);
+    if (existing.updated) {
+      try {
+        await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+        return { file, action: "updated", detail: "env-write-gate hook command refreshed" };
+      } catch (err) {
+        return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+      }
+    }
     return { file, action: "unchanged", detail: "env-write-gate already wired" };
   }
 
   pre.push({
     matcher: "Write|Edit|NotebookEdit",
-    hooks: [{ type: "command", command: kitSubcommandInvocation("gate-env") }],
+    hooks: [{ type: "command", command: desired }],
   });
   try {
     await mkdir(dirname(path), { recursive: true });
@@ -1006,22 +1081,31 @@ export async function installBrokerGates(cwd: string = process.cwd()): Promise<H
 
   const hooks = (settings.hooks ??= {});
   const pre = (hooks.PreToolUse ??= []);
-  const wired = (sub: string) => pre.some((g) => g.hooks?.some((h) => h.command?.endsWith(sub)));
-  const hasEgress = wired("gate-egress");
-  const hasFs = wired("gate-fs");
-  if (hasEgress && hasFs) {
+  const desiredEgress = kitSubcommandInvocation("gate-egress");
+  const desiredFs = kitSubcommandInvocation("gate-fs");
+  const egress = refreshSettingsGateCommand(pre, "gate-egress", desiredEgress);
+  const fs = refreshSettingsGateCommand(pre, "gate-fs", desiredFs);
+  if (egress.found && fs.found) {
+    if (egress.updated || fs.updated) {
+      try {
+        await writeFile(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+        return { file, action: "updated", detail: "broker gate hook command refreshed" };
+      } catch (err) {
+        return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+      }
+    }
     return { file, action: "unchanged", detail: "broker gates already wired" };
   }
-  if (!hasEgress) {
+  if (!egress.found) {
     pre.push({
       matcher: "Bash",
-      hooks: [{ type: "command", command: kitSubcommandInvocation("gate-egress") }],
+      hooks: [{ type: "command", command: desiredEgress }],
     });
   }
-  if (!hasFs) {
+  if (!fs.found) {
     pre.push({
       matcher: "Write|Edit|NotebookEdit",
-      hooks: [{ type: "command", command: kitSubcommandInvocation("gate-fs") }],
+      hooks: [{ type: "command", command: desiredFs }],
     });
   }
   try {
@@ -1058,11 +1142,21 @@ export async function installInstallGateCodex(
   } catch {
     existing = "";
   }
+  const desired = kitGateInvocation();
   if (existing.includes("gate-bash")) {
+    const next = replaceTomlGateCommand(existing, "gate-bash", desired);
+    if (next !== existing) {
+      try {
+        await writeFile(path, next, "utf-8");
+        return { file, action: "updated", detail: "install-gate hook command refreshed" };
+      } catch (err) {
+        return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };
+      }
+    }
     return { file, action: "unchanged", detail: "install-gate already wired" };
   }
-  // Single-quoted TOML literal — the invocation is an absolute node+path, no single quotes.
-  const block = `\n[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = '${kitGateInvocation()}'\n`;
+  // Single-quoted TOML literal — the invocation has double quotes, but no single quotes.
+  const block = `\n[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = '${desired}'\n`;
   try {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, existing + block, "utf-8");
@@ -1336,8 +1430,19 @@ export async function installInstallGateOpenCode(
   const plugin = `// kit install-gate — blocks un-triaged package installs before they run.
 // Generated by \`kit agent-config --install-gate\`. Delete this file to disable.
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
-const GATE = ${JSON.stringify(kitGateArgv())};
+function gateArgv() {
+  const wrapper = join(homedir(), ".kit", "bin", process.platform === "win32" ? "kit.cmd" : "kit");
+  if (!existsSync(wrapper)) {
+    throw new Error(
+      "kit install-gate cannot start: hook wrapper missing: " + wrapper + "; run kit agent-config",
+    );
+  }
+  return [wrapper, "gate-bash"];
+}
 
 export const kitInstallGate = async () => ({
   "tool.execute.before": async (input, output) => {
@@ -1345,7 +1450,8 @@ export const kitInstallGate = async () => ({
     const command = output?.args?.command;
     if (typeof command !== "string" || command === "") return;
     try {
-      execFileSync(GATE[0], GATE.slice(1), {
+      const gate = gateArgv();
+      execFileSync(gate[0], gate.slice(1), {
         input: JSON.stringify({ tool_input: { command } }),
         stdio: ["pipe", "ignore", "pipe"],
       });

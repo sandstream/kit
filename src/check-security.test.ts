@@ -11,6 +11,7 @@ import {
   jvmProjectKind,
   findJvmProject,
   checkMemoryHooksLiveness,
+  checkGateLiveness,
   checkDeviceIdOverride,
   unpinnedNodeDeps,
   LOCKFILE_ECOSYSTEMS,
@@ -193,6 +194,25 @@ describe("checkMemoryHooksLiveness (R5 — self-playing loop gate)", () => {
       restore("KIT_CLAUDE_SETTINGS", previous.claudeSettings);
       restore("KIT_CODEX_MEMORY_HOOK_MARKER", previous.codexMarker);
       restore("KIT_CODEX_HOOKS", previous.codexHooks);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("checkGateLiveness", () => {
+  it("FAILS when Codex hook config points at a stale root wrapper path", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-live-codex-gate-"));
+    try {
+      mkdirSync(join(dir, ".codex"), { recursive: true });
+      writeFileSync(
+        join(dir, ".codex", "config.toml"),
+        '[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = \'/root/.kit/bin/kit gate-bash\'\n',
+      );
+
+      const result = await checkGateLiveness(dir);
+      assert.equal(result.status, "fail");
+      assert.match(result.detail, /root\/container path/);
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });

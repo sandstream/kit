@@ -12,7 +12,8 @@
  * It prepends the mise shims dir + the npm global bin to PATH (so any tool kit
  * shells out to resolves), then exec's the REAL kit by absolute path
  * (<node> <dist/cli.js>, resolved at write time) so kit itself always runs
- * regardless of the hook shell. Hooks reference this wrapper by absolute path.
+ * regardless of the hook shell. Repo-shared hook config references this wrapper as
+ * `$HOME/.kit/bin/kit`; machine-local hook files may use the absolute wrapper path.
  *
  * Honest + safe: the wrapper carries a marker line and ensureKitWrapper never
  * overwrites a ~/.kit/bin/kit that lacks it (a file the user authored). No
