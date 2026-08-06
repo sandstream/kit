@@ -62,6 +62,51 @@ describe("propagate", () => {
     assert.equal(results[0].valueInArgv, false);
   });
 
+  it("uses Vercel API project writes without leaking the value in result text or URLs", async () => {
+    const priorToken = process.env.VERCEL_TOKEN;
+    const priorFetch = globalThis.fetch;
+    const calls: { url: string; method: string; body?: string }[] = [];
+    process.env.VERCEL_TOKEN = "test-token";
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(input),
+        method: init?.method ?? "GET",
+        body: typeof init?.body === "string" ? init.body : undefined,
+      });
+      if ((init?.method ?? "GET") === "GET") {
+        return new Response(JSON.stringify({ envs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ id: "env_1", key: "API_KEY", target: ["preview"] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    try {
+      const results = await propagate("API_KEY", "super-secret-value", ["vercel"], {
+        env: "preview",
+        vercelProject: "app-stg",
+        vercelTeamId: "team_123",
+      });
+      assert.equal(results[0].ok, true);
+      assert.equal(results[0].valueInArgv, false);
+      assert.equal(results[0].detail.includes("super-secret-value"), false);
+      assert.ok(calls.every((call) => !call.url.includes("super-secret-value")));
+      assert.match(
+        calls[0]?.url ?? "",
+        /\/v9\/projects\/app-stg\/env\?decrypt=false&teamId=team_123$/,
+      );
+      assert.match(calls[1]?.url ?? "", /\/v10\/projects\/app-stg\/env\?teamId=team_123$/);
+    } finally {
+      if (priorToken === undefined) delete process.env.VERCEL_TOKEN;
+      else process.env.VERCEL_TOKEN = priorToken;
+      globalThis.fetch = priorFetch;
+    }
+  });
+
   it("returns a non-ok result with a clear missing-opt message for fly without --fly-app", async () => {
     const results = await propagate("X", "y", ["fly"]);
     assert.equal(results[0].ok, false);

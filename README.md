@@ -59,7 +59,7 @@ Then, in a repo:
 
 ```bash
 kit init           # detect the stack → generate .kit.toml
-kit check          # what's set up vs missing (tools, services, secrets, hooks, security)
+kit check          # what's set up vs missing (tools, services, secrets, hooks, deploy, security)
 kit setup          # install tools (via mise), git hooks, logins, secrets
 kit context check  # lock each CLI to the declared account + project (no wrong-org pushes)
 ```
@@ -265,10 +265,11 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 
 - `kit init`: Auto-detect project stack → generate `.kit.toml`
 - `kit setup`: Full pipeline: install → hooks → login → secrets → check
-- `kit check`: Status of tools, services, secrets, hooks, security, tests
-- `kit fix`: Auto-remediate gaps (tools, gitignore, hooks, .env.template)
+- `kit check`: Status of tools, services, secrets, hooks, deploy env, security, tests
+- `kit fix`: Auto-remediate gaps (tools, gitignore, hooks, .env.template, declared deploy env) and print HITL blocks for auth / DSN setup
 - `kit review` / `kit heal`: One-gate repo audit (check + design + standards + ADR); bounded self-heal loop
 - `kit adr {check,list,freeze}`: Turn an Architecture Decision Record into a deterministic gate — enforce a `kit-enforce` block (`forbid_pattern` / `require_pattern` / `forbid_import`, incl. transitive and across npm package boundaries) cited back to the ADR. Zero-LLM (prose is never interpreted)
+- `.kit/standards.d/*.toml`: Declarative house-rule plugins support `mode = "forbid"` and `mode = "require"`; directory excludes like `scripts/` mean `scripts/**`, with zero-match warnings
 - `kit scan`: Run external scanners (snyk/trivy/grype/semgrep/osv/socket) → one merged, air-gap-aware verdict
 - `kit supply-chain` / `kit sbom` / `kit gha-audit` / `kit agent-audit`: Install-time triage, SBOM, Actions hardening, agent/MCP/hook audit
 - `kit self-audit`: Deterministic self-check of kit's own source against the audit's bug-classes (also asserts CI-referenced scripts exist)
@@ -283,6 +284,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit mcp {list,auth,set-token,clear}`: MCP-server orchestrator
 - `kit env {list,switch,current,diff}`: Environment routing + drift detection
 - `kit context {check,use,--prompt}`: Lock each CLI to its declared account + project (no wrong-org pushes)
+- `[agent_config.user_rules]`: Per-repo opt-in to inject user-level prose from one file/directory into all managed agent rules files, capped by line/byte limits
 - `kit triage {npm,pip,docker,repo,skill}`: Pre-install security check
 - `kit security {scan-build,scan-staged,scan-artifact,verify-pull,costs,policy}`: Security ops; `scan-artifact <path>` is the ingestion gate for an untrusted file/tree (ClamAV delegate — malicious **or** an unverifiable gap both fail)
 - `kit hooks {install,add,sync}`: Git hooks + bypass detector
@@ -357,7 +359,7 @@ adapters for the surfaces each agent exposes. Support today, per agent:
 1. `kit memory index` parses the agent's local transcripts into the shared store.
 2. `kit agent-config` writes the managed "run kit before installs / vault secrets" block into the agent's rules file.
 3. `kit agent-audit` flags plaintext secrets, cleartext/inline-code MCP servers, and malware-shaped hooks in the agent's config. Generic `.mcp.json` / `.claude.json` are scanned for every agent regardless.
-4. kit can pre-authorize its read-only commands so they run without a prompt (Claude Code's `permissions.allow` today).
+4. kit can pre-authorize its read-only commands so they run without a prompt (Claude Code's `permissions.allow` today). Codex has no equivalent command allowlist, so `kit agent-config` writes a personal `codex --profile kit` preset (`approval_policy = "on-request"`, `sandbox_mode = "workspace-write"`) under `$CODEX_HOME` / `~/.codex` instead of committing a repo risk preference.
 5. `kit memory install` registers lifecycle hooks so capture happens automatically in Claude Code (`~/.claude/settings.json`) and Codex (`~/.codex/hooks.json`). Codex requires review/trust through `/hooks` before new command hooks run.
 6. A **true blocking gate** (deny an un-triaged install before it runs) uses the agent's pre-tool hook — `kit agent-config` wires it by default (`--no-install-gate` opts out) for Claude Code, Codex, Amazon Q, Gemini CLI, and Cursor (exit-2 hook commands); AWS Kiro, Factory Droid, Augment, and Antigravity via their hook/settings files (`.kiro/agents`, `.factory/hooks.json`, `.augment/settings.json`, `.agents/hooks.json`); OpenCode via a generated `.opencode/plugin` that hooks `tool.execute.before` and throws; and Cline via an executable `.clinerules/hooks/PreToolUse` shim that blocks through Cline's `{cancel:true}` stdout contract — **11 agents** in all. The agent-agnostic enforcement floor is **git hooks** (`kit hooks`, pre-commit/pre-push) — they fire in any agent or none. See [#146](https://github.com/sandstream/kit/issues/146).
 7. **Continue** exposes only a declarative tool-permission policy (`~/.continue/permissions.yaml` allow/ask/exclude) with no way to invoke an external command before a tool runs, so a kit blocking-gate adapter isn't possible there — git hooks + the rules-file block remain its floor.
@@ -393,8 +395,17 @@ kit fix
 
 Summary
   ✓ Fixed 4 issue(s) automatically
-  ! 1 issue(s) require manual intervention:
-     • Login to stripe: run 'kit login' or 'stripe login'
+  ! 1 issue(s) require human action:
+
+HITL behövs
+Blocker: stripe is not authenticated
+Ägare: provider admin
+Varför agenten inte kan lösa: auth / browser / external account
+Gör detta:
+1. Run `kit login --service stripe` in a normal terminal/browser session, or run `stripe login`.
+2. Run `kit check --category services,secrets`.
+Svara med: stripe configured/authenticated; no secret values pasted
+Agenten fortsätter med: kit check --category services,secrets
 ```
 
 `kit secrets`, resolves each key from the vault and writes `.env.local`:
@@ -446,6 +457,27 @@ migration, to deploy-platform propagation, to destructive history cleanup.
 - `kit secrets revoke-old --via supabase-mgmt-api --key-id <id>`: Revoke a previously-minted scoped key
 - `kit secrets onecli register <KEY> --host <pattern>`: Register with the OneCLI gateway so the agent process never sees the real value
 - `kit secrets purge-history <pattern> --force-history`: Destructive: rewrite git history to scrub a leaked value (wraps `git filter-repo` / `bfg`). Requires elevation + explicit flag.
+
+### Deploy env matrix
+
+Declare deploy-time key names in `.kit.toml`; commit names, never values. `kit check --category deploy` lists remote key names from the platform and diffs them against the declaration. With `VERCEL_TOKEN`, `project` is the active Vercel project name/id selector; without a token, kit falls back to the Vercel CLI and the target `cwd` link. `NEXT_PUBLIC_*` keys are treated as build-time: after setting one, redeploy before expecting the running frontend to see it.
+
+```toml
+[deploy.vercel]
+scope = "example-team" # CLI fallback scope
+team_id = "team_123"   # API selector when VERCEL_TOKEN is present
+environment_specific = ["NEXT_PUBLIC_SITE_URL"]
+
+[deploy.vercel.environments.production]
+project = "app-prod"
+remote_env = "production"
+required = ["NEXT_PUBLIC_SENTRY_DSN", "NEXT_PUBLIC_SENTRY_ENVIRONMENT"]
+
+[deploy.vercel.environments.staging]
+project = "app-stg"
+remote_env = "production" # separate staging project; use "preview" for preview builds
+required = ["NEXT_PUBLIC_SENTRY_DSN", "NEXT_PUBLIC_SENTRY_ENVIRONMENT"]
+```
 
 **Which vault CLIs kit installs.** When you pick a secret backend at `kit init`, kit
 provisions its CLI like any other tool — it adds the CLI to `[tools]`, so `kit setup`
@@ -896,6 +928,7 @@ This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, 
 - Start: `kit check` — on `fail`, run `kit fix`, then re-check.
 - Prior decisions: `kit memory search "<query>"` (cross-session, cross-agent).
 - Secrets: `kit secrets` (vault-backed); placeholders go in `.env.example`, never plaintext in `.env*`.
+- Deploy env: `[deploy]` declares required platform key names; `kit check --category deploy` diffs remote names without reading values.
 - Deps the install gate hasn't covered (git repos, URLs, vendored code): `kit triage repo <target>` first.
 - After a batch of edits: `kit check --category security`; halt and surface findings on `fail`.
 - Everything else: `kit --help` — the commands are self-documenting.

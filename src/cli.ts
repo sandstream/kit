@@ -516,7 +516,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   check: {
     handler: cmdCheck,
     stability: "stable",
-    help: "Check status of all tools, services, secrets, and lock files",
+    help: "Check status of tools, services, secrets, hooks, deploy env, security, tests, and lock files",
     mcp: true,
   },
   health: {
@@ -874,7 +874,7 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   "memory sync":
     "Sync from a memory export or encrypted backup (mergeDb; last-write-wins, file_index excluded)",
   "memory install":
-    "Wire UserPromptSubmit + SessionEnd + SessionStart hooks into Claude Code + Codex lifecycle config",
+    "Wire Claude Code prompt/start/end hooks and silent Codex start/end hooks into lifecycle config",
   "memory scan":
     "Scan the memory store for stored secrets, or prompt-injection patterns with --injection (exit 1 on a high-confidence finding)",
   "memory backup": "Encrypted backup of the memory store (AES-256-GCM; KIT_MEMORY_PASSPHRASE)",
@@ -926,7 +926,7 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   "auth status": "Show active elevation",
   "auth revoke": "Drop the elevation marker",
   "auth setup-totp": "Enroll TOTP secret (writes ~/.kit/totp-secret 0600)",
-  "hooks add": "Install a built-in hook (e.g. secret-scan)",
+  "hooks add": "Install a built-in hook (secret-scan, post-pull-audit, context-check)",
   "hooks uninstall": "Remove the configured git hooks (enforcement off until re-installed)",
   "setup --recommended":
     "Opinionated profile: setup + memory hooks + git secret-scan/context-check gates",

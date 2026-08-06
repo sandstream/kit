@@ -31,11 +31,9 @@ MISSING_VAR = { source = "env" }
  * Per-request timeout for every call made through `createTestClient`.
  *
  * The SDK's default is 60s of wall clock (`DEFAULT_REQUEST_TIMEOUT_MSEC`), and
- * several tests below run a FULL `kit check` over the real kit repo — the point of
- * those tests is precisely that the server's own cwd is served, so they cannot be
- * pointed at a cheap fixture. Measured on this repo: ~25s for that call with the
- * file run alone, and 59.8s / >60s for the two of them when the whole suite runs
- * at `--test-concurrency=2`. Past the line the failure reads
+ * several tests below run a full `kit check` through the MCP protocol. Keep the
+ * default-cwd regression tests pointed at cheap fixtures; using the real kit repo
+ * here makes the suite load-sensitive rather than more correct. Past the line the failure reads
  * `MCP error -32001: Request timed out` — machine load, not a defect, and it
  * names a test that passes on a re-run, which is the most expensive kind of red.
  *
@@ -754,9 +752,10 @@ describe("kit_init", () => {
  * writers, the design scan and the audit destination.
  *
  * These tests are the ones that justify removing that guard, so they are written to fail if any of
- * it regresses: the server's `process.cwd()` is the kit repo, `other` is a temp project, and each
- * assertion is about `other`'s contents specifically — not merely that a call succeeded. A build
- * that reverted any part of the threading answers about the kit repo instead and fails here.
+ * it regresses: the server's `process.cwd()` is the kit repo for the cross-project tests, `other`
+ * is a temp project, and each cross-project assertion is about `other`'s contents specifically —
+ * not merely that a call succeeded. The absent/equal-cwd regressions chdir into `other` on purpose:
+ * they verify default-cwd semantics without paying for a full scan of the kit repo.
  */
 describe("process-scoped tools serve a cross-project cwd", () => {
   let other: string;
@@ -850,6 +849,8 @@ describe("process-scoped tools serve a cross-project cwd", () => {
   });
 
   it("an ABSENT cwd is still fine — the common case must not regress", async () => {
+    const originalCwd = process.cwd();
+    process.chdir(other);
     const { client, cleanup } = await createTestClient();
     try {
       const result = await client.callTool({ name: "kit_check", arguments: {} });
@@ -858,10 +859,13 @@ describe("process-scoped tools serve a cross-project cwd", () => {
       assert.ok(data.dimensions, "a real verdict");
     } finally {
       await cleanup();
+      process.chdir(originalCwd);
     }
   });
 
   it("a cwd EQUAL to the server's is fine, including a non-normalised spelling", async () => {
+    const originalCwd = process.cwd();
+    process.chdir(other);
     const { client, cleanup } = await createTestClient();
     try {
       // `<cwd>/.` resolves to the same directory. This was a guard-era regression test (a lexical
@@ -874,6 +878,7 @@ describe("process-scoped tools serve a cross-project cwd", () => {
       assert.notEqual(result.isError, true);
     } finally {
       await cleanup();
+      process.chdir(originalCwd);
     }
   });
 });

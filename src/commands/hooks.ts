@@ -28,6 +28,27 @@ const BUILTIN_HOOKS: Record<string, { hookName: string; commands: string[]; desc
     },
   };
 
+function printBuiltinHooks(): void {
+  for (const [k, v] of Object.entries(BUILTIN_HOOKS)) {
+    console.log(`  ${c.bold}${k}${c.reset} (git ${v.hookName}) — ${v.description}`);
+  }
+}
+
+function printNoConfiguredHooks(subcommand: string | undefined): void {
+  console.log(
+    `${c.dim}No hooks configured: No [hooks] section configured in ${KIT_FILE}; nothing to install.${c.reset}`,
+  );
+  if (subcommand === "install" || !subcommand) {
+    console.log(
+      `${c.dim}${c.bold}kit hooks install${c.reset}${c.dim} only installs hooks declared in ${KIT_FILE}.${c.reset}`,
+    );
+    console.log(
+      `${c.dim}For kit's built-in hooks, run ${c.reset}${c.bold}kit hooks add <name>${c.reset}${c.dim}:${c.reset}`,
+    );
+    printBuiltinHooks();
+  }
+}
+
 export async function cmdHooks(): Promise<boolean> {
   const subcommand = process.argv[3];
 
@@ -40,7 +61,7 @@ export async function cmdHooks(): Promise<boolean> {
   const config = await loadConfig(resolveConfigPath());
 
   if (!config.hooks || Object.keys(config.hooks).length === 0) {
-    console.log(`${c.dim}No hooks configured in ${KIT_FILE}${c.reset}`);
+    printNoConfiguredHooks(subcommand);
     return true;
   }
 

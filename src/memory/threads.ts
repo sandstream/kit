@@ -12,6 +12,7 @@ import type { DatabaseSync } from "node:sqlite";
 export interface SavedThread {
   name: string;
   session_id: string;
+  harness: string | null;
   summary: string | null;
   project_path: string | null;
   saved_at: string | null;
@@ -37,20 +38,42 @@ export function saveThread(db: DatabaseSync, input: SaveThreadInput): void {
 }
 
 export function listThreads(db: DatabaseSync, opts: { projectPath?: string } = {}): SavedThread[] {
+  const select = `SELECT
+      saved_threads.name,
+      saved_threads.session_id,
+      sessions.harness AS harness,
+      saved_threads.summary,
+      saved_threads.project_path,
+      saved_threads.saved_at
+    FROM saved_threads
+    LEFT JOIN sessions ON sessions.session_id = saved_threads.session_id`;
   if (opts.projectPath) {
     return db
-      .prepare("SELECT * FROM saved_threads WHERE project_path = ? ORDER BY saved_at DESC")
+      .prepare(
+        `${select} WHERE saved_threads.project_path = ? ORDER BY saved_threads.saved_at DESC`,
+      )
       .all(opts.projectPath) as unknown as SavedThread[];
   }
   return db
-    .prepare("SELECT * FROM saved_threads ORDER BY saved_at DESC")
+    .prepare(`${select} ORDER BY saved_threads.saved_at DESC`)
     .all() as unknown as SavedThread[];
 }
 
 export function getThread(db: DatabaseSync, name: string): SavedThread | undefined {
-  return db.prepare("SELECT * FROM saved_threads WHERE name = ?").get(name) as
-    | SavedThread
-    | undefined;
+  return db
+    .prepare(
+      `SELECT
+         saved_threads.name,
+         saved_threads.session_id,
+         sessions.harness AS harness,
+         saved_threads.summary,
+         saved_threads.project_path,
+         saved_threads.saved_at
+       FROM saved_threads
+       LEFT JOIN sessions ON sessions.session_id = saved_threads.session_id
+       WHERE saved_threads.name = ?`,
+    )
+    .get(name) as SavedThread | undefined;
 }
 
 export function removeThread(db: DatabaseSync, name: string): boolean {
@@ -89,4 +112,13 @@ export function resolveThread(
     return listThreads(db, opts)[Number(ref) - 1];
   }
   return getThread(db, ref);
+}
+
+export function resumeCommandsForThread(t: SavedThread): string[] {
+  if (t.harness === "codex") return [`codex resume ${t.session_id}`];
+  if (t.harness === "claude-code") return [`claude --resume ${t.session_id}`];
+  if (t.harness === null) {
+    return [`claude --resume ${t.session_id}`, `codex resume ${t.session_id}`];
+  }
+  return [];
 }

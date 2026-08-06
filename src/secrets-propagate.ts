@@ -46,6 +46,12 @@ export interface PropagationOptions {
   env?: "production" | "preview" | "development";
   /** Vercel scope (team or user). */
   vercelScope?: string;
+  /** Vercel project name/id for Management API writes. */
+  vercelProject?: string;
+  /** Vercel team id for Management API writes. */
+  vercelTeamId?: string;
+  /** Vercel project directory to use for env writes when a monorepo has multiple links. */
+  vercelCwd?: string;
   /** GitHub repo (owner/name). Inferred from `gh repo view` when omitted. */
   githubRepo?: string;
   /** Fly app name. Required for fly. */
@@ -102,20 +108,161 @@ async function spawnWithStdin(
   });
 }
 
+type VercelEnvTarget = "production" | "preview" | "development";
+
+interface VercelEnvVar {
+  id: string;
+  key: string;
+  target: VercelEnvTarget[];
+}
+
+function vercelApiPath(project: string, teamId: string | undefined, suffix: string = ""): string {
+  const params = new URLSearchParams();
+  if (teamId) params.set("teamId", teamId);
+  const query = params.toString();
+  return `https://api.vercel.com/v9/projects/${encodeURIComponent(project)}/env${suffix}${query ? `?${query}` : ""}`;
+}
+
+function vercelCreateApiPath(project: string, teamId: string | undefined): string {
+  const params = new URLSearchParams();
+  if (teamId) params.set("teamId", teamId);
+  const query = params.toString();
+  return `https://api.vercel.com/v10/projects/${encodeURIComponent(project)}/env${query ? `?${query}` : ""}`;
+}
+
+async function vercelJson<T>(url: string, token: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...(init.headers ?? {}),
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Vercel API ${res.status}: ${text.split("\n")[0] ?? ""}`.trim());
+  }
+  return (await res.json()) as T;
+}
+
+async function listVercelEnvVars(
+  token: string,
+  project: string,
+  teamId: string | undefined,
+): Promise<VercelEnvVar[]> {
+  const params = new URLSearchParams({ decrypt: "false" });
+  if (teamId) params.set("teamId", teamId);
+  const body = await vercelJson<{ envs?: VercelEnvVar[] }>(
+    `https://api.vercel.com/v9/projects/${encodeURIComponent(project)}/env?${params.toString()}`,
+    token,
+  );
+  return body.envs ?? [];
+}
+
+async function propagateVercelViaApi(
+  name: string,
+  value: string,
+  opts: PropagationOptions,
+): Promise<PropagationResult> {
+  const token = process.env.VERCEL_TOKEN;
+  const project = opts.vercelProject;
+  if (!token || !project) throw new Error("missing VERCEL_TOKEN or vercelProject");
+
+  const target = opts.env ?? "production";
+  const existing = await listVercelEnvVars(token, project, opts.vercelTeamId);
+  const sameKey = existing.filter((entry) => entry.key === name);
+  const exact = sameKey.find((entry) => entry.target.length === 1 && entry.target[0] === target);
+  if (exact) {
+    await vercelJson<VercelEnvVar>(
+      vercelApiPath(project, opts.vercelTeamId, `/${encodeURIComponent(exact.id)}`),
+      token,
+      { method: "PATCH", body: JSON.stringify({ value }) },
+    );
+    return {
+      target: "vercel",
+      ok: true,
+      detail: `pushed to vercel project=${project} env=${target}`,
+      valueInArgv: false,
+    };
+  }
+
+  await vercelJson<VercelEnvVar>(vercelCreateApiPath(project, opts.vercelTeamId), token, {
+    method: "POST",
+    body: JSON.stringify({ key: name, value, target: [target], type: "encrypted" }),
+  });
+
+  const staleDeleteFailures: string[] = [];
+  for (const stale of sameKey.filter((entry) => entry.target.includes(target))) {
+    try {
+      const res = await fetch(
+        vercelApiPath(project, opts.vercelTeamId, `/${encodeURIComponent(stale.id)}`),
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      if (!res.ok) staleDeleteFailures.push(stale.id);
+    } catch {
+      staleDeleteFailures.push(stale.id);
+    }
+  }
+
+  if (staleDeleteFailures.length > 0) {
+    return {
+      target: "vercel",
+      ok: false,
+      detail: `created new vercel env entry for project=${project} env=${target}, but failed to delete stale id(s): ${staleDeleteFailures.join(", ")}`,
+      valueInArgv: false,
+    };
+  }
+
+  return {
+    target: "vercel",
+    ok: true,
+    detail: `pushed to vercel project=${project} env=${target}`,
+    valueInArgv: false,
+  };
+}
+
 async function propagateVercel(
   name: string,
   value: string,
   opts: PropagationOptions,
 ): Promise<PropagationResult> {
+  if (opts.vercelProject && process.env.VERCEL_TOKEN) {
+    try {
+      return await propagateVercelViaApi(name, value, opts);
+    } catch (err) {
+      return {
+        target: "vercel",
+        ok: false,
+        detail: `vercel API failed: ${err instanceof Error ? err.message : String(err)}`,
+        valueInArgv: false,
+      };
+    }
+  }
+
   const env = opts.env ?? "production";
   // vercel env add accepts the value via stdin when invoked non-interactively
   // and printed to a stream that has no TTY.
   const args = ["env", "add", name, env];
   if (opts.vercelScope) args.push("--scope", opts.vercelScope);
+  if (opts.vercelCwd) args.push("--cwd", opts.vercelCwd);
   // Remove existing first so add doesn't error on duplicate.
   await spawnWithStdin(
     "vercel",
-    ["env", "rm", name, env, "--yes", ...(opts.vercelScope ? ["--scope", opts.vercelScope] : [])],
+    [
+      "env",
+      "rm",
+      name,
+      env,
+      "--yes",
+      ...(opts.vercelScope ? ["--scope", opts.vercelScope] : []),
+      ...(opts.vercelCwd ? ["--cwd", opts.vercelCwd] : []),
+    ],
     "",
   );
   const { code, stderr } = await spawnWithStdin("vercel", args, value);

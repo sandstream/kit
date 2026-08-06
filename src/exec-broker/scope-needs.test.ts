@@ -166,7 +166,11 @@ describe("withGovernance + scopeNeeds (exec-broker proper)", () => {
       await assert.rejects(
         withGovernance(
           makeConfig(),
-          { operation: "cross-project", operationType: "write", scopeNeeds: { egress: ["evil.com"] } },
+          {
+            operation: "cross-project",
+            operationType: "write",
+            scopeNeeds: { egress: ["evil.com"] },
+          },
           async () => "x",
           { cwd: proj },
         ),

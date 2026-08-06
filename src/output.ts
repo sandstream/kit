@@ -5,7 +5,9 @@ import type { SkillCheckResult } from "./check-skills.js";
 import type { SecurityCheckResult } from "./check-security.js";
 import type { LockCheckResult } from "./check-lock.js";
 import type { WebSearchStatus } from "./check-web-search.js";
+import type { DeployCheckResult } from "./check-deploy.js";
 import { safeStatusLine } from "./utils/redactSecrets.js";
+import { formatHitlBlocks, type HitlBlock } from "./hitl.js";
 
 // ANSI color codes
 const c = {
@@ -207,6 +209,45 @@ export function printWebSearchStatus(status: WebSearchStatus | null): void {
   }
 }
 
+export function printDeployTable(results: DeployCheckResult[]): void {
+  if (results.length === 0) return;
+
+  header("Deploy");
+
+  const targetWidth = Math.max(
+    18,
+    ...results.map((r) =>
+      r.provider === "deploy" ? "deploy".length : `${r.provider}/${r.environment}`.length,
+    ),
+  );
+  const projectWidth = Math.max(10, ...results.map((r) => r.project.length)) + 2;
+
+  for (const result of results) {
+    const icon =
+      result.status === "pass"
+        ? CHECK
+        : result.status === "fail"
+          ? CROSS
+          : result.status === "warn"
+            ? WARN
+            : `${c.dim}−${c.reset}`;
+    const target =
+      result.provider === "deploy" ? "deploy" : `${result.provider}/${result.environment}`;
+    const statusColor =
+      result.status === "pass"
+        ? c.green
+        : result.status === "fail"
+          ? c.red
+          : result.status === "warn"
+            ? c.yellow
+            : c.dim;
+    const remote = result.remoteEnv ? ` ${c.dim}[${result.remoteEnv}]${c.reset}` : "";
+    console.log(
+      `  ${icon} ${pad(target, targetWidth)} ${pad(result.project, projectWidth)} ${statusColor}${result.status}${c.reset}${remote}  ${c.gray}${result.detail}${c.reset}`,
+    );
+  }
+}
+
 export function printSecurityTable(results: SecurityCheckResult[]): void {
   if (results.length === 0) return;
 
@@ -338,6 +379,7 @@ export function printSummary(
   services: ServiceStatus[],
   secrets: SecretStatus[],
   security?: SecurityCheckResult[],
+  deploy?: DeployCheckResult[],
 ): void {
   console.log();
 
@@ -347,9 +389,17 @@ export function printSummary(
   const securityOk = security
     ? security.filter((s) => s.status === "pass" || s.status === "skip").length
     : 0;
+  const deployOk = deploy
+    ? deploy.filter((d) => d.status === "pass" || d.status === "skip").length
+    : 0;
 
-  const total = tools.length + services.length + secrets.length + (security?.length || 0);
-  const ok = toolsOk + servicesOk + secretsOk + securityOk;
+  const total =
+    tools.length +
+    services.length +
+    secrets.length +
+    (security?.length || 0) +
+    (deploy?.length || 0);
+  const ok = toolsOk + servicesOk + secretsOk + securityOk + deployOk;
   const allGood = ok === total;
 
   // P5 — separate SETUP GAPS (a tool not installed, a service not logged in, a scanner that
@@ -362,10 +412,14 @@ export function printSummary(
     toolsOk +
     (services.length - servicesOk) +
     (secrets.length - secretsOk) +
+    (deploy?.filter((d) => d.status !== "pass" && d.status !== "skip" && d.didNotRun).length ?? 0) +
     (security?.filter((s) => s.status !== "pass" && s.status !== "skip" && s.didNotRun).length ??
       0);
   const realIssues =
-    security?.filter((s) => s.status !== "pass" && s.status !== "skip" && !s.didNotRun).length ?? 0;
+    (deploy?.filter((d) => d.status !== "pass" && d.status !== "skip" && !d.didNotRun).length ??
+      0) +
+    (security?.filter((s) => s.status !== "pass" && s.status !== "skip" && !s.didNotRun).length ??
+      0);
 
   if (allGood) {
     console.log(`${c.bold}${c.green}All ${total} checks passed ✓${c.reset}`);
@@ -387,5 +441,11 @@ export function printSummary(
       );
   }
 
+  console.log();
+}
+
+export function printHitlBlocks(blocks: HitlBlock[]): void {
+  if (blocks.length === 0) return;
+  console.log(formatHitlBlocks(blocks));
   console.log();
 }

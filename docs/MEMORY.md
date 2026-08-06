@@ -137,7 +137,7 @@ resume list labelled by whatever you happened to type first.
 ```bash
 kit memory save "stripe-migration"     # bookmark the current session
 kit memory threads                     # numbered list of saved copilots (--global for all)
-kit memory resume <name|number>        # prints `claude --resume <session-id>`
+kit memory resume <name|number>        # prints the Claude/Codex resume command
 kit memory forget <name>
 ```
 
@@ -159,9 +159,10 @@ kit setup                              # per repo: reinstall tools + materialize
 ```
 
 A wrong passphrase or a tampered blob fails closed (no plaintext is written). Note
-that live `claude --resume` is machine-bound — the recovered store gives you back
-the searchable _memory_, not the live session. Your **shared** project memory
-recovers for free with `git clone`.
+that live harness resume (`claude --resume`, `codex resume`, etc.) is
+machine-bound — the recovered store gives you back the searchable _memory_, not
+the live session. Your **shared** project memory recovers for free with
+`git clone`.
 
 ## Cross-device sync
 

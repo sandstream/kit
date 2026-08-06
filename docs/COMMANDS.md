@@ -27,7 +27,7 @@
 | `kit init`                                                | Auto-detect project stack → generate `.kit.toml` + lockfiles.                                                                                                                                                                                                                                                                                                        |
 | `kit setup [--mode <name>]`                               | 6-step orchestrator: install → hooks → login → secrets → agent-config → verify, preceded by a network-posture prompt. `--mode` (or `[setup].mode`) selects a preset: `full` (default) · `local` · `airgap` (forces air-gapped posture) · `ci` · `agent` · `review` (read-only) · `minimal`. `--recommended` also wires memory + git secret-scan/context-check gates. |
 | `kit statusline [--mode <name>]`                          | Compact one-line status (mode score · update available · open PAL count) for any agent's info bar — wire into Claude Code `statusLine` or a shell PS1. Fast, read-only, cached.                                                                                                                                                                                      |
-| `kit check`                                               | Verify tools / services / secrets / skills / hooks / security / tests.                                                                                                                                                                                                                                                                                               |
+| `kit check`                                               | Verify tools / services / secrets / skills / hooks / deploy env / security / tests.                                                                                                                                                                                                                                                                                  |
 | `kit check --attest`                                      | Opt-in, fail-soft: write a signed `.kit-check-attestation.json` receipt recording which scanners actually ran + the verdict (HMAC-signed with the machine-local anchor key; never blocks or alters the verdict). Also `kit ci --attest` / `KIT_ATTEST=1`.                                                                                                            |
 | `kit check verify-attestation <file> [--key <k>] [--pin]` | Verify a check receipt. HMAC against the local anchor key is authoritative; an Ed25519 receipt's embedded key is untrusted and reports `unverified-authenticity` unless the key is pinned (TOFU in `~/.kit`) or passed via `--key`.                                                                                                                                  |
 | `kit check compare <before.json> <after.json> [--json] [--fail-on-worse]` | Diff two `kit check --json` runs. **Lost coverage ranks above a regression** — a check that stopped running makes its finding *unknown*, not fixed, so `fail → skip` is never read as an improvement. Pure function of the two files; no scan is run. Reports by default; `--fail-on-worse` exits non-zero on lost coverage, a disappeared check, or a regression. |
@@ -39,7 +39,7 @@
 | `kit login [--service <name>] [--retry-count <N>]`        | Guided login to configured services. Optionally narrow to one service / retry failures with backoff.                                                                                                                                                                                                                                                                 |
 | `kit login --plan [--json]`                               | Read-only: show the resolved auth strategy per service (vault / interactive / capture) + a passkey warning for browser logins that can't be scripted on a fresh machine.                                                                                                                                                                                             |
 | `kit skills`                                              | Check status of agent skills declared in `[skills]` against the registry (clawhub default).                                                                                                                                                                                                                                                                          |
-| `kit fix`                                                 | Auto-remediate common gaps (tools, lockfiles, gitignore, hooks, .env.template).                                                                                                                                                                                                                                                                                      |
+| `kit fix`                                                 | Auto-remediate common gaps (tools, lockfiles, gitignore, hooks, .env.template, declared deploy env values when resolvable from `[secrets.keys]`) and print HITL blocks for auth / DSN / external setup gaps.                                                                                                                                                         |
 | `kit heal [--dry-run] [--agent]`                          | Bounded self-heal loop: auto-fix safe findings, re-scan until green; gates destructive ops, fail-closed on tamper.                                                                                                                                                                                                                                                   |
 | `kit upgrade`                                             | Refresh lockfiles from `.kit.toml`.                                                                                                                                                                                                                                                                                                                                  |
 | `kit doctor`                                              | Diagnostic sweep — config drift + CLI version skew + OS-containment posture (container/seccomp/user-ns + gVisor/Firecracker fingerprints; honest `unknown` off-Linux). `[governance.containment] require = true` makes it a fail-closed gate.                                                                                                                          |
@@ -56,6 +56,31 @@
 | `kit adr [check\|list\|freeze]`                                                        | ADR → gate: enforce accepted ADRs' `kit-enforce` rules (`forbid_pattern` / `require_pattern` / `forbid_import`, incl. transitive and cross-package via `follow_packages`), cited to the ADR. `list` shows status; `freeze` baselines existing findings. Zero-LLM (prose is never interpreted).     |
 | `kit baseline [freeze]`                                                               | Snapshot current acceptable warnings (incl. standards + ADR) to `.kit-baseline.json`.                                                                                                                                                                     |
 | `kit analyze [--write]`                                                               | Mine git history + framework markers → draft `CLAUDE.md` / `RULES.md`.                                                                                                                                                                                    |
+
+### Declarative Standards Plugins
+
+`.kit/standards.d/*.toml` plugins default to forbid-mode: a `match` regex hit is a finding. Directory excludes are subtree globs, so `exclude = ["scripts/"]` excludes `scripts/x.ts`; kit warns when an exclude pattern matches zero source files.
+
+```toml
+[standard]
+id = "no-console"
+title = "No console in shipped code"
+mode = "forbid" # default
+match = 'console\.(log|debug)\('
+exclude = ["scripts/", "fixtures/**"]
+```
+
+Use require-mode when a scoped file must contain a pattern. `scope` selects files by regex; `match` must appear somewhere in the same file. Net-new gating and `kit standards freeze` work the same way as forbid-mode.
+
+```toml
+[standard]
+id = "callable-docs"
+title = "Callables declare their permission model"
+mode = "require"
+scope = 'export const \w+ = onCall'
+match = '@apiPermission'
+severity = "warn"
+```
 
 ## Secrets
 
@@ -93,6 +118,29 @@
 | `kit env current`                | Print active env.                                                                             |
 | `kit env diff --compare <other>` | Drift report between two `.env*` files (values shown as sha256:8 prefixes — never plaintext). |
 
+## Deploy Env
+
+`kit check --category deploy` compares committed deploy env requirements with platform state. The check reads remote key names only, never values. With no `[deploy]` section it is a no-op row that points to the declaration shape.
+
+```toml
+[deploy.vercel]
+scope = "example-team" # CLI fallback scope
+team_id = "team_123"   # API selector when VERCEL_TOKEN is present
+environment_specific = ["NEXT_PUBLIC_SITE_URL"]
+
+[deploy.vercel.environments.production]
+project = "app-prod"
+remote_env = "production"
+required = ["NEXT_PUBLIC_SENTRY_DSN", "NEXT_PUBLIC_SENTRY_ENVIRONMENT"]
+
+[deploy.vercel.environments.staging]
+project = "app-stg"
+remote_env = "production" # separate staging project; use "preview" for preview builds
+required = ["NEXT_PUBLIC_SENTRY_DSN", "NEXT_PUBLIC_SENTRY_ENVIRONMENT"]
+```
+
+`project` is the Vercel project name/id. With `VERCEL_TOKEN`, kit uses the Management API so multiple projects in one repo can be checked without relinking cwd; without a token, it falls back to the Vercel CLI and the target `cwd` link. `NEXT_PUBLIC_*` keys are treated as build-time keys. If `kit fix` can resolve a missing value from `[secrets.keys]`, it pushes it through the existing Vercel propagation adapter and reminds the operator to redeploy.
+
 ## MCP orchestrator
 
 | Command                                                | Purpose                              |
@@ -105,11 +153,25 @@
 
 ## Hooks
 
-| Command                | Purpose                                                                                               |
-| ---------------------- | ----------------------------------------------------------------------------------------------------- |
-| `kit hooks install`    | Install pre-commit / post-commit hooks declared in `[hooks]`. Pulls in bypass-detector sentinel pair. |
-| `kit hooks add <name>` | Add a built-in hook (secret-scan, post-pull-audit).                                                   |
-| `kit hooks sync`       | Reconcile installed hooks with config.                                                                |
+| Command                | Purpose                                                                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kit hooks install`    | Install hooks declared in `[hooks]`. If no `[hooks]` section exists, it explains that nothing was installed and points to `kit hooks add <name>`. |
+| `kit hooks add <name>` | Add a built-in hook (`secret-scan`, `post-pull-audit`, `context-check`) without requiring `[hooks]`.                                              |
+| `kit hooks sync`       | Reconcile installed hooks with config.                                                                                                            |
+
+## Agent Config User Rules
+
+Repo-level prose can still live outside kit markers in `AGENTS.md` / `CLAUDE.md`. For user-level prose that should travel across harnesses, opt in per repo:
+
+```toml
+[agent_config.user_rules]
+enabled = true
+source = "~/.kit/agent-rules.md" # file, or directory of sorted *.md files
+max_lines = 120
+max_bytes = 12000
+```
+
+`kit agent-config` injects the text inside the managed kit block for every detected rules file. Missing config is a no-op. Oversized sources refuse with filename, line count and byte count. Lines that look like deterministic gates produce a warning pointing to `.kit/standards.d/`.
 
 ## Security
 
@@ -222,14 +284,14 @@ Local-first second brain — SQLite + FTS5, deterministic, zero model calls. Ful
 | `kit memory search <query>`                                                 | Full-text recall; defaults to the current project, `--global` across all.                                                                                                                                    |
 | `kit memory stats`                                                          | Sessions / messages / tool-uses / DB size.                                                                                                                                                                   |
 | `kit memory suggest [--limit N] [--json]`                                   | Emit a BYO-LLM review prompt (recent activity + open items) to stdout — pipe to your own model. kit never calls a model.                                                                                     |
-| `kit memory install` / `uninstall`                                          | Wire (or remove) `UserPromptSubmit`, `SessionStart`, and `SessionEnd` in Claude Code (`~/.claude/settings.json`), plus `SessionStart` and `SessionEnd` in Codex (`~/.codex/hooks.json`); Codex hooks require `/hooks` trust.                      |
+| `kit memory install` / `uninstall`                                          | Wire (or remove) Claude Code prompt/start/end hooks plus silent Codex start/end hooks (`~/.codex/hooks.json`); Codex hooks require `/hooks` trust.                                                                                                |
 | `kit memory scan`                                                           | Scan the store for stored secrets (masked; exits 1 if any found).                                                                                                                                            |
 | `kit memory backup <file>` / `restore <file>`                               | Encrypted AES-256-GCM backup/restore (`KIT_MEMORY_PASSPHRASE`).                                                                                                                                              |
 | `kit memory sync init <remote> [--auto]`                                    | Write `~/.kit/sync.toml` (LOCAL, never committed). `--auto` = pull at session start + push at session end via the hooks.                                                                                     |
 | `kit memory push` / `pull`                                                  | Sync the store to/from your PRIVATE remote. Encrypted by default (passphrase or `recipient` public key — `kit memory keygen`); `encrypt = false` opts into a plaintext blob (destination must stay private). |
 | `kit memory keygen`                                                         | X25519 recipient keypair: ephemeral sessions push encrypted with NO secret; only holders of the private key decrypt.                                                                                         |
 | `kit memory pal [list\|add\|done\|snooze\|verify\|import]`                  | Pending-action ledger; auto-closes on verify. Project-scoped (`--global` for all).                                                                                                                           |
-| `kit memory save <name>` / `threads` / `resume <name\|n>` / `forget <name>` | Named copilots — bookmark + resume sessions.                                                                                                                                                                 |
+| `kit memory save <name>` / `threads` / `resume <name\|n>` / `forget <name>` | Named copilots — bookmark + resume sessions; `resume` prints the Claude or Codex command for the saved harness.                                                                                              |
 | `kit memory share …` / `areas` / `area <name>`                              | Shared, area-organized team memory (committed, secret-scanned, reviewed like code).                                                                                                                          |
 
 ## Exit codes

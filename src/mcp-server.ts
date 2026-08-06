@@ -254,6 +254,7 @@ function register_kit_check(server: McpServer): void {
                   skills: r.skills,
                   hooks: r.hooks,
                   webSearch: r.webSearch,
+                  deploy: r.deploy,
                   security: r.security,
                   tests: r.tests,
                   locks: r.locks,

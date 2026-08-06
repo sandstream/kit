@@ -49,6 +49,7 @@ describe("runCheckGate", () => {
       "services",
       "skills",
       "hooks",
+      "deploy",
       "security",
       "tests",
       "locks",
@@ -76,6 +77,7 @@ describe("checkRunToJsonChecks", () => {
         secrets: true,
         skills: true,
         hooks: false,
+        deploy: true,
         security: true,
         tests: true,
         locks: true,
@@ -91,6 +93,16 @@ describe("checkRunToJsonChecks", () => {
     skills: [{ name: "triage", required: false, installed: false }],
     hooks: [{ hookName: "pre-commit", installed: true, upToDate: false, detail: "outdated" }],
     webSearch: null,
+    deploy: [
+      {
+        provider: "vercel",
+        environment: "production",
+        project: "app-prod",
+        status: "warn",
+        detail: "drift: remote key name(s) present in another deploy target but missing here: KEY",
+        drift: ["KEY"],
+      },
+    ],
     security: [{ category: "secrets", name: "gitleaks", status: "pass", detail: "clean" }],
     tests: [{ name: "unit-test coverage", status: "warn", detail: "1 untested" }],
     locks: [{ category: "skills-lock", exists: true, inSync: true, detail: "in sync" }],
@@ -110,8 +122,9 @@ describe("checkRunToJsonChecks", () => {
     assert.equal(byName["pre-commit"].status, "warn");
     assert.equal(byName["gitleaks"].category, "security/secrets");
     assert.equal(byName["skills-lock.json"].status, "pass");
+    assert.equal(byName["vercel/production/app-prod"].status, "warn");
     // webSearch: null contributes no row.
-    assert.equal(rows.length, 9);
+    assert.equal(rows.length, 10);
   });
 });
 
@@ -157,6 +170,7 @@ describe("runCheckGate — category narrowing", () => {
     assert.deepEqual(run.security, [], "security must not run");
     assert.deepEqual(run.locks, [], "locks must not run");
     assert.deepEqual(run.tests, [], "tests must not run");
+    assert.deepEqual(run.deploy, [], "deploy must not run");
   });
 
   it("omitted dimensions are absent from the flattened rows, never synthesised as passes", async () => {
@@ -176,6 +190,7 @@ describe("runCheckGate — category narrowing", () => {
     assert.ok(run.tools.length > 0);
     assert.ok(run.services.length > 0);
     assert.deepEqual(run.security, []);
+    assert.deepEqual(run.deploy, []);
   });
 });
 

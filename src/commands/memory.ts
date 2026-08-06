@@ -104,6 +104,7 @@ import {
   removeThread,
   latestSessionId,
   resolveThread,
+  resumeCommandsForThread,
 } from "../memory/threads.js";
 
 /** Badge appended to a recalled cell that matches a high-confidence injection
@@ -406,7 +407,9 @@ async function memHelp(): Promise<boolean> {
   );
   console.log("  kit memory save <name>      Bookmark the current session as a named copilot");
   console.log("  kit memory threads          List saved copilots (--global for all)");
-  console.log("  kit memory resume <name|n>  Print the resume command for a saved copilot");
+  console.log(
+    "  kit memory resume <name|n>  Print the Claude/Codex resume command for a saved copilot",
+  );
   console.log("  kit memory forget <name>    Remove a saved copilot");
   console.log("  kit memory forget-message <uuid>  Verified-forget a memory row (prove it's gone)");
   console.log(
@@ -1065,9 +1068,13 @@ async function memInstall(): Promise<boolean> {
   const codex = installCodexMemoryHooks();
   for (const e of claude.added)
     console.log(`${c.green}✓${c.reset} installed Claude Code ${e} hook`);
+  for (const e of claude.updated)
+    console.log(`${c.green}✓${c.reset} updated Claude Code ${e} hook command`);
   for (const e of claude.alreadyPresent)
     console.log(`${c.dim}• Claude Code ${e} hook already present${c.reset}`);
   for (const e of codex.added) console.log(`${c.green}✓${c.reset} installed Codex ${e} hook`);
+  for (const e of codex.updated)
+    console.log(`${c.green}✓${c.reset} updated Codex ${e} hook command`);
   for (const e of codex.alreadyPresent)
     console.log(`${c.dim}• Codex ${e} hook already present${c.reset}`);
 
@@ -1077,6 +1084,8 @@ async function memInstall(): Promise<boolean> {
     const sl = installStatusline();
     if (sl.status === "added")
       console.log(`${c.green}✓${c.reset} wired status line ${c.dim}(kit statusline)${c.reset}`);
+    else if (sl.status === "updated")
+      console.log(`${c.green}✓${c.reset} updated status line command`);
     else if (sl.status === "already") console.log(`${c.dim}• status line already wired${c.reset}`);
     else
       console.log(
@@ -1654,7 +1663,10 @@ async function memThreads(): Promise<boolean> {
   const scope = projectPath ? `${c.dim}in ${projectPath}${c.reset}` : `${c.dim}(global)${c.reset}`;
   console.log(`${c.bold}${list.length}${c.reset} saved copilot(s) ${scope}:`);
   list.forEach((t, i) => {
-    console.log(`  ${c.bold}${i + 1}${c.reset}. ${t.name}  ${c.dim}${t.session_id}${c.reset}`);
+    const harness = t.harness ? ` ${c.dim}[${t.harness}]${c.reset}` : "";
+    console.log(
+      `  ${c.bold}${i + 1}${c.reset}. ${t.name}${harness}  ${c.dim}${t.session_id}${c.reset}`,
+    );
   });
   console.log(`${c.dim}resume with: kit memory resume <name|number>${c.reset}`);
   return true;
@@ -1674,8 +1686,16 @@ async function memResume(): Promise<boolean> {
     console.error(`${c.red}no saved copilot '${ref}'${c.reset}`);
     return false;
   }
-  console.log(`${c.bold}${t.name}${c.reset} — run:`);
-  console.log(`  claude --resume ${t.session_id}`);
+  const commands = resumeCommandsForThread(t);
+  console.log(
+    `${c.bold}${t.name}${c.reset}${t.harness ? ` ${c.dim}[${t.harness}]${c.reset}` : ""} — run:`,
+  );
+  if (commands.length === 0) {
+    console.log(`  ${c.dim}no known live-resume command for harness ${t.harness}${c.reset}`);
+    console.log(`  ${c.dim}session id: ${t.session_id}${c.reset}`);
+    return true;
+  }
+  for (const cmd of commands) console.log(`  ${cmd}`);
   return true;
 }
 

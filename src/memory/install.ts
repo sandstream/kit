@@ -215,6 +215,7 @@ function groupsHaveHook(groups: HookGroup[], sub: string): boolean {
 export function installMemoryHooks(path: string = getClaudeSettingsPath()): {
   added: string[];
   alreadyPresent: string[];
+  updated: string[];
   resolved: boolean;
 } {
   return installHooksAtPath(path, memoryInstallMarkerPath(), CLAUDE_MEMORY_HOOKS);
@@ -223,6 +224,7 @@ export function installMemoryHooks(path: string = getClaudeSettingsPath()): {
 export function installCodexMemoryHooks(path: string = getCodexHooksPath()): {
   added: string[];
   alreadyPresent: string[];
+  updated: string[];
   resolved: boolean;
 } {
   return installHooksAtPath(
@@ -238,26 +240,32 @@ function installHooksAtPath(
   markerPath: string,
   definitions: MemoryHookDef[],
   retiredDefinitions: MemoryHookDef[] = [],
-): { added: string[]; alreadyPresent: string[]; resolved: boolean } {
+): { added: string[]; alreadyPresent: string[]; updated: string[]; resolved: boolean } {
   const s = readSettings(path);
   const hooks = (s.hooks ??= {});
   const prefix = kitHookInvocation();
   const resolved = prefix !== "kit";
   const added: string[] = [];
   const alreadyPresent: string[] = [];
+  const updated: string[] = [];
   const retired = removeHookDefinitions(s, retiredDefinitions);
   for (const { event, sub, timeout } of definitions) {
     const groups = (hooks[event] ??= []);
-    if (groupsHaveHook(groups, sub)) {
+    const desired: HookCmd = { type: "command", command: `${prefix} ${hookSuffix(sub)}` };
+    if (timeout !== undefined) desired.timeout = timeout;
+    const upgrade = refreshHookDefinition(groups, sub, desired);
+    if (upgrade === "updated") {
+      updated.push(event);
+      continue;
+    }
+    if (upgrade === "current") {
       alreadyPresent.push(event);
       continue;
     }
-    const handler: HookCmd = { type: "command", command: `${prefix} ${hookSuffix(sub)}` };
-    if (timeout !== undefined) handler.timeout = timeout;
-    groups.push({ hooks: [handler] });
+    groups.push({ hooks: [desired] });
     added.push(event);
   }
-  if (added.length || retired.length) writeSettings(path, s);
+  if (added.length || updated.length || retired.length) writeSettings(path, s);
   // Durable "installed here" marker for the liveness check (idempotent). After
   // this call the hooks ARE present (added or alreadyPresent), so stamp it.
   try {
@@ -266,10 +274,35 @@ function installHooksAtPath(
   } catch {
     /* best-effort: a missing marker only weakens the liveness check, never breaks install */
   }
-  return { added, alreadyPresent, resolved };
+  return { added, alreadyPresent, updated, resolved };
 }
 
 /** Remove only kit commands from matching groups, preserving unrelated hooks. */
+function refreshHookDefinition(
+  groups: HookGroup[],
+  sub: string,
+  desired: HookCmd,
+): "missing" | "current" | "updated" {
+  const suffix = hookSuffix(sub);
+  let found = false;
+  let changed = false;
+  for (const group of groups) {
+    if (!group.hooks) continue;
+    for (const hook of group.hooks) {
+      if (!hook.command.endsWith(suffix)) continue;
+      found = true;
+      if (hook.command !== desired.command || hook.timeout !== desired.timeout) {
+        hook.command = desired.command;
+        if (desired.timeout === undefined) delete hook.timeout;
+        else hook.timeout = desired.timeout;
+        changed = true;
+      }
+    }
+  }
+  if (changed) return "updated";
+  return found ? "current" : "missing";
+}
+
 function removeHookDefinitions(s: Settings, definitions: MemoryHookDef[]): string[] {
   const removed: string[] = [];
   if (!s.hooks) return removed;
@@ -287,8 +320,13 @@ function removeHookDefinitions(s: Settings, definitions: MemoryHookDef[]): strin
       });
       if (kept?.length) filtered.push({ ...group, hooks: kept });
     }
-    if (didRemove) {
-      s.hooks[event] = filtered;
+    const wasEmpty = groups.length === 0;
+    if (didRemove || wasEmpty) {
+      if (filtered.length > 0) {
+        s.hooks[event] = filtered;
+      } else {
+        delete s.hooks[event];
+      }
       removed.push(event);
     }
   }
@@ -310,7 +348,7 @@ function isKitStatusline(cmd: string | undefined): boolean {
   return !!cmd && cmd.trimEnd().endsWith(STATUSLINE_SUFFIX) && cmd.includes("kit");
 }
 
-export type StatuslineInstall = "added" | "already" | "foreign";
+export type StatuslineInstall = "added" | "updated" | "already" | "foreign";
 
 export function installStatusline(path: string = getClaudeSettingsPath()): {
   status: StatuslineInstall;
@@ -319,12 +357,17 @@ export function installStatusline(path: string = getClaudeSettingsPath()): {
   const s = readSettings(path);
   const prefix = kitHookInvocation();
   const resolved = prefix !== "kit";
+  const desired = `${prefix} ${STATUSLINE_SUFFIX}`;
   const existing = s.statusLine as { command?: string } | undefined;
   if (existing && typeof existing === "object") {
-    // Already ours → idempotent no-op; someone else's → never clobber it.
-    return { status: isKitStatusline(existing.command) ? "already" : "foreign", resolved };
+    // Already ours → refresh stale absolute paths; someone else's → never clobber it.
+    if (!isKitStatusline(existing.command)) return { status: "foreign", resolved };
+    if (existing.command === desired) return { status: "already", resolved };
+    existing.command = desired;
+    writeSettings(path, s);
+    return { status: "updated", resolved };
   }
-  s.statusLine = { type: "command", command: `${prefix} ${STATUSLINE_SUFFIX}` };
+  s.statusLine = { type: "command", command: desired };
   writeSettings(path, s);
   return { status: "added", resolved };
 }
@@ -349,7 +392,10 @@ export function uninstallMemoryHooks(path: string = getClaudeSettingsPath()): {
 export function uninstallCodexMemoryHooks(path: string = getCodexHooksPath()): {
   removed: string[];
 } {
-  return uninstallHooksAtPath(path, codexMemoryInstallMarkerPath(), CODEX_MEMORY_HOOKS);
+  return uninstallHooksAtPath(path, codexMemoryInstallMarkerPath(), [
+    ...CODEX_MEMORY_HOOKS,
+    ...CODEX_RETIRED_MEMORY_HOOKS,
+  ]);
 }
 
 function uninstallHooksAtPath(

@@ -27,6 +27,7 @@ describe("standards-plugins — globToRegExp", () => {
   it("handles **, *, and literal segments", () => {
     assert.ok(globToRegExp("**/*.test.ts").test("src/deep/a.test.ts"));
     assert.ok(globToRegExp("scripts/**").test("scripts/x/y.ts"));
+    assert.ok(globToRegExp("scripts/").test("scripts/x.ts"));
     assert.ok(globToRegExp("*.md").test("README.md"));
     assert.ok(!globToRegExp("*.md").test("docs/README.md")); // * doesn't cross /
   });
@@ -68,12 +69,17 @@ match = 'console\\.log'
       );
       writePlugin(
         repo,
+        "badscope.toml",
+        `[standard]\nid = "bad-scope"\ntitle = "x"\nmode = "require"\nscope = "("\nmatch = "x"\n`,
+      );
+      writePlugin(
+        repo,
         "unknownkey.toml",
         `[standard]\nid = "unk"\ntitle = "x"\nmatch = "y"\nbogus = true\n`, // strict schema rejects
       );
       const { plugins, integrity } = loadStandardPlugins(repo, [DEFAULT_PLUGIN_DIR]);
       assert.equal(plugins.length, 0);
-      assert.equal(integrity.length, 4);
+      assert.equal(integrity.length, 5);
       assert.ok(integrity.every((i) => i.status === "warn" && i.dimension === "plugin"));
     } finally {
       rmSync(repo, { recursive: true, force: true });
@@ -116,6 +122,116 @@ describe("standards-plugins — evaluate + gate", () => {
       assert.equal(findings.length, 1);
       assert.equal(findings[0].file, "src/a.ts");
       assert.equal(findings[0].line, 2);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('treats a directory exclude like "scripts/" as the whole subtree', () => {
+    const repo = tmpRepo();
+    try {
+      mkdirSync(join(repo, "src"), { recursive: true });
+      mkdirSync(join(repo, "scripts"), { recursive: true });
+      writeFileSync(join(repo, "src", "a.ts"), "console.log('src');\n");
+      writeFileSync(join(repo, "scripts", "x.ts"), "console.log('script');\n");
+      writePlugin(
+        repo,
+        "nc.toml",
+        `[standard]\nid = "nc"\ntitle = "No console"\nmatch = 'console\\.log'\nexclude = ["scripts/"]\n`,
+      );
+      const { plugins } = loadStandardPlugins(repo, [DEFAULT_PLUGIN_DIR]);
+      const findings = evaluatePluginFindings(repo, plugins[0]);
+      assert.deepEqual(findings, [{ file: "src/a.ts", line: 1 }]);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("warns when an exclude pattern matches zero scanned files", () => {
+    const repo = tmpRepo();
+    try {
+      mkdirSync(join(repo, "src"), { recursive: true });
+      writeFileSync(join(repo, "src", "a.ts"), "const x = 1;\n");
+      writePlugin(
+        repo,
+        "nc.toml",
+        `[standard]\nid = "nc"\ntitle = "No console"\nmatch = 'console\\.log'\nexclude = ["scripts/"]\n`,
+      );
+      const r = checkStandardsPlugins({ cwd: repo, language: "typescript" });
+      assert.ok(
+        r.some((row) => /exclude pattern/.test(row.detail) && /scripts\/\*\*/.test(row.detail)),
+      );
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("require mode fails scoped files that lack the required pattern", () => {
+    const repo = tmpRepo();
+    try {
+      mkdirSync(join(repo, "src"), { recursive: true });
+      writeFileSync(
+        join(repo, "src", "good.ts"),
+        "// @apiPermission\nexport const good = onCall(() => {});\n",
+      );
+      writeFileSync(join(repo, "src", "bad.ts"), "export const bad = onCall(() => {});\n");
+      writeFileSync(join(repo, "src", "other.ts"), "export const other = 1;\n");
+      writePlugin(
+        repo,
+        "perm.toml",
+        `[standard]\nid = "perm"\ntitle = "Callable permission docs"\nmode = "require"\nscope = 'export const \\w+ = onCall'\nmatch = '@apiPermission'\n`,
+      );
+      const r = checkStandardsPlugins({ cwd: repo, language: "typescript" });
+      const plugin = r.find((row) => row.name === "plugin: perm");
+      assert.equal(plugin?.status, "warn");
+      assert.match(plugin?.detail ?? "", /missing required pattern/);
+      assert.deepEqual(plugin?.files, ["src/bad.ts:missing"]);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("require mode passes when every scoped file contains the required pattern", () => {
+    const repo = tmpRepo();
+    try {
+      mkdirSync(join(repo, "src"), { recursive: true });
+      writeFileSync(
+        join(repo, "src", "good.ts"),
+        "// @apiPermission\nexport const good = onCall(() => {});\n",
+      );
+      writePlugin(
+        repo,
+        "perm.toml",
+        `[standard]\nid = "perm"\ntitle = "Callable permission docs"\nmode = "require"\nscope = 'export const \\w+ = onCall'\nmatch = '@apiPermission'\n`,
+      );
+      const r = checkStandardsPlugins({ cwd: repo, language: "typescript" });
+      assert.equal(r.find((row) => row.name === "plugin: perm")?.status, "pass");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("require mode uses the same net-new baseline gate as forbid mode", () => {
+    const repo = tmpRepo();
+    try {
+      mkdirSync(join(repo, "src"), { recursive: true });
+      writeFileSync(join(repo, "src", "bad.ts"), "export const bad = onCall(() => {});\n");
+      writePlugin(
+        repo,
+        "perm.toml",
+        `[standard]\nid = "perm"\ntitle = "Callable permission docs"\nseverity = "fail"\nmode = "require"\nscope = 'export const \\w+ = onCall'\nmatch = '@apiPermission'\n`,
+      );
+      const failing = checkStandardsPlugins({ cwd: repo, language: "typescript" });
+      assert.equal(failing.find((row) => row.name === "plugin: perm")?.status, "fail");
+
+      const frozen = checkStandardsPlugins({
+        cwd: repo,
+        language: "typescript",
+        baseline: [pluginKey("perm", "src/bad.ts", 1)],
+      });
+      const plugin = frozen.find((row) => row.name === "plugin: perm");
+      assert.equal(plugin?.status, "warn");
+      assert.equal(plugin?.severity, "low");
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }

@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.6.0] - 2026-08-06
+
+### Added
+
+- **`kit check --category deploy` verifies declared deploy environment keys against
+  the platform, without reading secret values.** Projects can declare required
+  Vercel env names per environment in `[deploy.vercel.environments.<env>]`; kit
+  lists remote key names, reports missing keys, flags cross-environment drift, and
+  calls out build-time variables such as `NEXT_PUBLIC_*` that need a redeploy after
+  changes. `kit fix` reuses the existing propagate path when a missing value is
+  available from `[secrets.keys]`, and emits a structured human-in-the-loop block
+  when auth, vault access, or provider setup must be completed by a person.
+
+- **Declarative standards plugins can now express required patterns, not only
+  forbidden ones.** `mode = "require"` checks that every scoped file contains a
+  required file-level pattern, while `mode = "forbid"` remains the default
+  line-match behavior. Require rules support the same schema validation,
+  ReDoS-prone regex rejection, severity handling, and net-new baseline gating as
+  forbid rules.
+
+- **Managed agent config now has an explicit opt-in personal profile extension.**
+  `[agent_config.user_rules]` can point at a user-level Markdown file or directory,
+  bounded by line and byte caps, and the same managed text is written to every
+  supported harness file. kit warns when personal prose looks like a deterministic
+  gate that should move into `.kit/standards.d`.
+
+### Changed
+
+- **Standards plugin excludes are more tolerant and louder.** An exclude pattern
+  ending in `/` now means the whole subtree, so `scripts/` matches
+  `scripts/x.ts`; plugins also warn when an exclude or require scope matches zero
+  files in the repo.
+
+- **Agent-facing output is more actionable for setup gaps.** `kit check` and
+  `kit fix` now format auth, secret-backend, scanner-setup, and deploy-provider
+  blockers as human-in-the-loop instructions with owner, reason, exact next steps,
+  verification command, and what the agent should run after the human action.
+
+### Fixed
+
+- **`kit hooks install` no longer dead-ends when `[hooks]` is absent.** The no-op
+  message now points to `kit hooks add <name>` and lists the built-in hook
+  templates, so users can discover `secret-scan`, `post-pull-audit`, and
+  `context-check` from the command that failed to install anything.
+
+- **Hook diagnostics now identify machine-local spawn problems.** Managed agent
+  config and security checks detect bare `kit`, non-absolute executables,
+  stale/root-owned wrapper paths, and malformed managed wrappers before they
+  become repeated harness-level `command not found` or spawn failures.
+
 ## [6.5.0] - 2026-08-05
 
 ### Added

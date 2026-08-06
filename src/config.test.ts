@@ -319,4 +319,65 @@ delete = false
       await unlink(tmpFile);
     }
   });
+
+  it("parses deploy env matrix config", async () => {
+    const tmpFile = join(tmpdir(), `.kit-test-${process.pid}-deploy.toml`);
+    await writeFile(
+      tmpFile,
+      `
+[deploy.vercel]
+scope = "example-team"
+team_id = "team_123"
+environment_specific = ["NEXT_PUBLIC_SITE_URL"]
+
+[deploy.vercel.environments.production]
+project = "app-prod"
+remote_env = "production"
+required = ["NEXT_PUBLIC_SENTRY_DSN"]
+
+[deploy.vercel.environments.staging]
+project = "app-stg"
+cwd = "apps/web"
+required = ["NEXT_PUBLIC_SENTRY_DSN"]
+`,
+      "utf-8",
+    );
+
+    try {
+      const config = await loadConfig(tmpFile);
+      assert.equal(config.deploy?.vercel?.scope, "example-team");
+      assert.equal(config.deploy?.vercel?.team_id, "team_123");
+      assert.equal(config.deploy?.vercel?.environments?.production.remote_env, "production");
+      assert.deepEqual(config.deploy?.vercel?.environments?.staging.required, [
+        "NEXT_PUBLIC_SENTRY_DSN",
+      ]);
+    } finally {
+      await unlink(tmpFile);
+    }
+  });
+
+  it("parses agent-config user rules opt-in", async () => {
+    const tmpFile = join(tmpdir(), `.kit-test-${process.pid}-agent-config.toml`);
+    await writeFile(
+      tmpFile,
+      `
+[agent_config.user_rules]
+enabled = true
+source = "~/.kit/agent-rules.md"
+max_lines = 80
+max_bytes = 8000
+`,
+      "utf-8",
+    );
+
+    try {
+      const config = await loadConfig(tmpFile);
+      assert.equal(config.agent_config?.user_rules?.enabled, true);
+      assert.equal(config.agent_config?.user_rules?.source, "~/.kit/agent-rules.md");
+      assert.equal(config.agent_config?.user_rules?.max_lines, 80);
+      assert.equal(config.agent_config?.user_rules?.max_bytes, 8000);
+    } finally {
+      await unlink(tmpFile);
+    }
+  });
 });

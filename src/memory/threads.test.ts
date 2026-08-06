@@ -8,6 +8,7 @@ import {
   removeThread,
   latestSessionId,
   resolveThread,
+  resumeCommandsForThread,
 } from "./threads.js";
 
 describe("memory threads (named copilots)", () => {
@@ -15,10 +16,12 @@ describe("memory threads (named copilots)", () => {
 
   it("save + list + get; name is the key (re-save updates)", () => {
     const db = fresh();
+    upsertSession(db, { sessionId: "s2", harness: "codex" });
     saveThread(db, { name: "launch", sessionId: "s1", projectPath: "/repo/app-a" });
     saveThread(db, { name: "launch", sessionId: "s2", projectPath: "/repo/app-a" });
     assert.equal(listThreads(db).length, 1);
     assert.equal(getThread(db, "launch")?.session_id, "s2");
+    assert.equal(getThread(db, "launch")?.harness, "codex");
     db.close();
   });
 
@@ -74,5 +77,30 @@ describe("memory threads (named copilots)", () => {
     const list = listThreads(db, { projectPath: "/repo/app-a" });
     assert.equal(resolveThread(db, "1", { projectPath: "/repo/app-a" })?.name, list[0]?.name);
     db.close();
+  });
+
+  it("formats resume commands for Claude Code and Codex sessions", () => {
+    assert.deepEqual(
+      resumeCommandsForThread({
+        name: "c",
+        session_id: "claude-session",
+        harness: "claude-code",
+        summary: null,
+        project_path: null,
+        saved_at: null,
+      }),
+      ["claude --resume claude-session"],
+    );
+    assert.deepEqual(
+      resumeCommandsForThread({
+        name: "x",
+        session_id: "codex-session",
+        harness: "codex",
+        summary: null,
+        project_path: null,
+        saved_at: null,
+      }),
+      ["codex resume codex-session"],
+    );
   });
 });

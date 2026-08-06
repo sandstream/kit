@@ -25,7 +25,7 @@ governance floor (revocation, budget, permissions, expired-secret block).
 
 | Tool | Kind | Purpose |
 | --- | --- | --- |
-| `kit_check` | read | Run all checks — tools, services, secrets, skills, hooks, security, tests, locks — and return the same verdict `kit check` computes. |
+| `kit_check` | read | Run all checks — tools, services, secrets, skills, hooks, deploy env, security, tests, locks — and return the same verdict `kit check` computes. |
 | `kit_review` | read | Full repo audit in one shot — the check, design, standards, and ADR gates as one structured report (`{ ok, failed, stages }`), from the same core `kit review` renders. `stages: ["standards"]` scopes to named gates (the fast, read-only lint loop — no full security scan), `category` scopes the standards stage, `concise: true` omits pass/skip rows (per-stage counts stay). |
 | `kit_fix` | write | Auto-fix what `kit_check` found: install missing tools, generate missing lock files. Returns actions taken. |
 | `kit_triage` | write | Security-triage a dependency **before** installing it (`type`: npm/pip/docker/brew/repo/skill + `target`). A PASS is recorded in the triage log the install gates read, so an MCP-run triage satisfies them identically to a CLI-run one. Refuses in read-only mode — an unrecordable pass could not satisfy the gates anyway. |

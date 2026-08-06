@@ -11,6 +11,7 @@ function green(): VerdictInputs {
     secrets: [{ available: true }],
     skills: [{ required: true, installed: true }],
     hooks: [{ installed: true, upToDate: true }],
+    deploy: [{ status: "pass" }],
     security: [{ category: "dependency", name: "npm audit", status: "pass", detail: "" }],
     tests: [{ status: "pass" }],
     locks: [{ inSync: true }],
@@ -39,6 +40,7 @@ describe("computeCheckVerdict", () => {
       ["secrets", { ...green(), secrets: [{ available: false }] }],
       ["skills", { ...green(), skills: [{ required: true, installed: false }] }],
       ["hooks", { ...green(), hooks: [{ installed: true, upToDate: false }] }],
+      ["deploy", { ...green(), deploy: [{ status: "fail" }] }],
       ["tests", { ...green(), tests: [{ status: "fail" }] }],
       ["locks", { ...green(), locks: [{ inSync: false }] }],
     ];
@@ -96,6 +98,7 @@ describe("computeCheckVerdict", () => {
       secrets: [],
       skills: [],
       hooks: [],
+      deploy: [],
       security: [],
       tests: [],
       locks: [],

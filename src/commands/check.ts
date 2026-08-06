@@ -20,9 +20,11 @@ import {
   printSecretsTable,
   printSkillsTable,
   printWebSearchStatus,
+  printDeployTable,
   printLockTable,
   printSecurityTable,
   printSummary,
+  printHitlBlocks,
 } from "../output.js";
 import {
   runCheckGate,
@@ -40,6 +42,7 @@ import {
   maybeEmitCheckAttestation,
 } from "../cli-checks-shared.js";
 import { selfUpgrade } from "./upgrade.js";
+import { hitlBlocksFromCheckResults } from "../hitl.js";
 
 /**
  * Flags each `kit check` form accepts. An unlisted `--flag` is rejected rather than
@@ -152,6 +155,7 @@ export async function cmdCheck(): Promise<boolean> {
         skills: skillResults,
         hooks: hookResults,
         webSearch: webSearchResult,
+        deploy: deployResults,
         security: securityResults,
         tests: testResults,
         locks: lockResults,
@@ -207,6 +211,7 @@ export async function cmdCheck(): Promise<boolean> {
       printSecretsTable(secretResults.templateExists, secretResults.keys);
       printSkillsTable(skillResults);
       printWebSearchStatus(webSearchResult);
+      printDeployTable(deployResults);
       printLockTable(lockResults);
 
       // Print hooks status if configured
@@ -250,7 +255,16 @@ export async function cmdCheck(): Promise<boolean> {
         console.log();
       }
 
-      printSummary(toolResults, serviceResults, secretResults.keys, securityResults);
+      printSummary(toolResults, serviceResults, secretResults.keys, securityResults, deployResults);
+      printHitlBlocks(
+        hitlBlocksFromCheckResults({
+          config,
+          services: serviceResults,
+          secrets: secretResults.keys,
+          security: securityResults,
+          deploy: deployResults,
+        }),
+      );
 
       // A narrowed run must say so next to its verdict. Without this line a
       // `--category security` pass is visually identical to a full green.
