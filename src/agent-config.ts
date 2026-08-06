@@ -1,8 +1,11 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve, dirname, join } from "node:path";
+import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
+import { existsSync, readdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { resolve, dirname, join, isAbsolute } from "node:path";
 
-import { ensureKitWrapper, kitWrapperPath } from "./kit-wrapper.js";
+import { ensureKitWrapper, kitWrapperPath, WRAPPER_MARKER } from "./kit-wrapper.js";
+import { shellSplit } from "./utils/shellSplit.js";
+import type { kitConfig } from "./config.js";
 
 /**
  * Teach the coding agent to use kit.
@@ -21,6 +24,10 @@ import { ensureKitWrapper, kitWrapperPath } from "./kit-wrapper.js";
 export const KIT_BLOCK_BEGIN =
   "<!-- BEGIN kit (managed block — edit outside the markers, not inside) -->";
 export const KIT_BLOCK_END = "<!-- END kit -->";
+export const USER_RULES_BLOCK_BEGIN = "<!-- BEGIN kit user rules (managed) -->";
+export const USER_RULES_BLOCK_END = "<!-- END kit user rules -->";
+export const USER_RULES_DEFAULT_MAX_LINES = 120;
+export const USER_RULES_DEFAULT_MAX_BYTES = 12_000;
 
 /** The canonical "use kit" instruction. Kept short on purpose — agents read it
  *  every turn, so it states the rules, not the rationale. Rules that have gained a
@@ -47,9 +54,121 @@ This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, 
 - Start: \`kit check\` — on \`fail\`, run \`kit fix\`, then re-check.
 - Prior decisions: \`kit memory search "<query>"\` (cross-session, cross-agent).
 - Secrets: \`kit secrets\` (vault-backed); placeholders go in \`.env.example\`, never plaintext in \`.env*\`.
+- Deploy env: \`[deploy]\` declares required platform key names; \`kit check --category deploy\` diffs remote names without reading values.
 - Deps the install gate hasn't covered (git repos, URLs, vendored code): \`kit triage repo <target>\` first.
 - After a batch of edits: \`kit check --category security\`; halt and surface findings on \`fail\`.
 - Everything else: \`kit --help\` — the commands are self-documenting.`;
+
+export interface UserRulesProfile {
+  source: string;
+  text: string;
+  lineCount: number;
+  byteCount: number;
+  warnings: string[];
+}
+
+export interface UserRulesLoadResult {
+  profile: UserRulesProfile | null;
+  warnings: string[];
+  error?: string;
+}
+
+function countLines(text: string): number {
+  if (text.length === 0) return 0;
+  return text.replace(/\r\n/g, "\n").split("\n").length;
+}
+
+function userRulesLooksGateable(text: string): number {
+  const gateWords =
+    /\b(must|never|always|required|forbid|forbidden|require|shall)\b|\b(ska|måste|alltid|aldrig|förbjud)\b/i;
+  return text
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((line) => gateWords.test(line)).length;
+}
+
+async function readUserRulesSource(source: string, cwd: string): Promise<string> {
+  const expanded = expandHomePath(source);
+  const path = isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+  const info = await stat(path);
+  if (!info.isDirectory()) return readFile(path, "utf-8");
+
+  const entries = await readdir(path, { withFileTypes: true });
+  const mdFiles = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b));
+  const parts: string[] = [];
+  for (const name of mdFiles) {
+    const body = (await readFile(join(path, name), "utf-8")).trim();
+    if (body) parts.push(body);
+  }
+  return parts.join("\n\n");
+}
+
+export async function loadUserRulesProfile(
+  config: kitConfig | undefined,
+  cwd: string = process.cwd(),
+): Promise<UserRulesLoadResult> {
+  const cfg = config?.agent_config?.user_rules;
+  if (!cfg?.enabled) return { profile: null, warnings: [] };
+  if (!cfg.source) {
+    return {
+      profile: null,
+      warnings: [],
+      error: "[agent_config.user_rules] enabled=true requires source",
+    };
+  }
+
+  let text: string;
+  try {
+    text = (await readUserRulesSource(cfg.source, cwd)).trim();
+  } catch (err) {
+    return {
+      profile: null,
+      warnings: [],
+      error: `could not read user rules source ${cfg.source}: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  const lineCount = countLines(text);
+  const byteCount = Buffer.byteLength(text, "utf-8");
+  const maxLines = cfg.max_lines ?? USER_RULES_DEFAULT_MAX_LINES;
+  const maxBytes = cfg.max_bytes ?? USER_RULES_DEFAULT_MAX_BYTES;
+  if (lineCount > maxLines || byteCount > maxBytes) {
+    return {
+      profile: null,
+      warnings: [],
+      error: `user rules source ${cfg.source} is too large (${lineCount} line(s), ${byteCount} byte(s); max ${maxLines} line(s), ${maxBytes} byte(s))`,
+    };
+  }
+
+  const warnings: string[] = [];
+  const gateable = userRulesLooksGateable(text);
+  if (gateable > 0) {
+    warnings.push(
+      `${cfg.source} has ${gateable} gate-like line(s); deterministic house rules belong in .kit/standards.d when possible.`,
+    );
+  }
+
+  return {
+    profile: { source: cfg.source, text, lineCount, byteCount, warnings },
+    warnings,
+  };
+}
+
+export function buildKitInstruction(userRules?: UserRulesProfile | null): string {
+  if (!userRules?.text) return KIT_INSTRUCTION;
+  return `${KIT_INSTRUCTION}
+
+${USER_RULES_BLOCK_BEGIN}
+
+## Personal Profile
+
+${userRules.text}
+
+${USER_RULES_BLOCK_END}`;
+}
 
 export interface AgentTarget {
   /** Agent/tool name for display. */
@@ -131,11 +250,14 @@ export function detectAgentTargets(cwd: string = process.cwd()): AgentTarget[] {
  * - No existing block → append (with a blank-line separator if the file is non-empty).
  * - Existing block → replace just the marker-delimited region, preserving everything else.
  */
-export function upsertKitBlock(content: string): {
+export function upsertKitBlock(
+  content: string,
+  userRules?: UserRulesProfile | null,
+): {
   next: string;
   action: "created" | "updated" | "unchanged";
 } {
-  const block = `${KIT_BLOCK_BEGIN}\n\n${KIT_INSTRUCTION}\n\n${KIT_BLOCK_END}`;
+  const block = `${KIT_BLOCK_BEGIN}\n\n${buildKitInstruction(userRules)}\n\n${KIT_BLOCK_END}`;
   const begin = content.indexOf(KIT_BLOCK_BEGIN);
   const end = content.indexOf(KIT_BLOCK_END);
 
@@ -164,6 +286,10 @@ export interface AgentConfigResult {
   detail: string;
 }
 
+export interface WriteAgentConfigOptions {
+  userRules?: UserRulesProfile | null;
+}
+
 /**
  * Write the managed kit block into each detected agent's rules file.
  * Read-only mode refuses + audits before any write.
@@ -171,6 +297,7 @@ export interface AgentConfigResult {
 export async function writeAgentConfig(
   cwd: string = process.cwd(),
   targets?: AgentTarget[],
+  opts: WriteAgentConfigOptions = {},
 ): Promise<AgentConfigResult[]> {
   const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
   if (isReadOnlyMode()) {
@@ -190,7 +317,7 @@ export async function writeAgentConfig(
       existing = ""; // file absent — will be created
     }
     try {
-      const { next, action } = upsertKitBlock(existing);
+      const { next, action } = upsertKitBlock(existing, opts.userRules);
       if (action === "unchanged") {
         results.push({ agent: t.agent, file: t.file, action, detail: "kit block already current" });
         continue;
@@ -269,7 +396,10 @@ export function mergeAiderRead(existing: string): {
  * so aider actually loads it. Detected via `.aider.conf.yml` /
  * `.aider.chat.history.md` / `.aider.input.history`.
  */
-export async function installAiderRules(cwd: string = process.cwd()): Promise<AgentConfigResult> {
+export async function installAiderRules(
+  cwd: string = process.cwd(),
+  userRules?: UserRulesProfile | null,
+): Promise<AgentConfigResult> {
   const file = "CONVENTIONS.md";
   const { isReadOnlyMode, refuseWrite } = await import("./read-only-mode.js");
   if (isReadOnlyMode()) {
@@ -292,7 +422,7 @@ export async function installAiderRules(cwd: string = process.cwd()): Promise<Ag
   } catch {
     existing = "";
   }
-  const { next, action } = upsertKitBlock(existing);
+  const { next, action } = upsertKitBlock(existing, userRules);
   try {
     if (action !== "unchanged") await writeFile(convPath, next, "utf-8");
   } catch (err) {
@@ -372,6 +502,116 @@ export interface PermissionResult {
   alreadyPresent: number;
   action: "created" | "updated" | "unchanged" | "skipped" | "failed";
   detail?: string;
+}
+
+export const CODEX_KIT_PROFILE_NAME = "kit";
+export const CODEX_PROFILE_BLOCK_BEGIN = "# BEGIN kit (managed Codex profile)";
+export const CODEX_PROFILE_BLOCK_END = "# END kit";
+export const CODEX_KIT_PROFILE_BLOCK = `${CODEX_PROFILE_BLOCK_BEGIN}
+# Personal Codex profile generated by kit. Use: codex --profile ${CODEX_KIT_PROFILE_NAME}
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+${CODEX_PROFILE_BLOCK_END}`;
+
+export interface CodexProfileResult {
+  file: string;
+  profile: string;
+  action: "created" | "updated" | "unchanged" | "skipped" | "failed";
+  detail?: string;
+}
+
+export function codexHomeDir(): string {
+  return process.env.KIT_CODEX_DIR ?? process.env.CODEX_HOME ?? join(homedir(), ".codex");
+}
+
+export function codexKitProfilePath(): string {
+  return join(codexHomeDir(), `${CODEX_KIT_PROFILE_NAME}.config.toml`);
+}
+
+function upsertCodexKitProfileBlock(existing: string): {
+  next: string;
+  action: "created" | "updated" | "unchanged" | "skipped";
+  detail?: string;
+} {
+  const begin = existing.indexOf(CODEX_PROFILE_BLOCK_BEGIN);
+  const end = existing.indexOf(CODEX_PROFILE_BLOCK_END);
+  if (begin !== -1 && end !== -1 && end > begin) {
+    const before = existing.slice(0, begin);
+    const after = existing.slice(end + CODEX_PROFILE_BLOCK_END.length);
+    const next = before + CODEX_KIT_PROFILE_BLOCK + after;
+    return { next, action: next === existing ? "unchanged" : "updated" };
+  }
+
+  // This is a personal profile file. If the operator already declared either
+  // setting outside kit's managed block, do not silently change their risk mode.
+  if (/^\s*(approval_policy|sandbox_mode)\s*=/m.test(existing)) {
+    return {
+      next: existing,
+      action: "skipped",
+      detail: "existing profile owns approval_policy/sandbox_mode; not overwriting",
+    };
+  }
+
+  const sep =
+    existing.length === 0
+      ? ""
+      : existing.endsWith("\n\n")
+        ? ""
+        : existing.endsWith("\n")
+          ? "\n"
+          : "\n\n";
+  return {
+    next: `${existing}${sep}${CODEX_KIT_PROFILE_BLOCK}\n`,
+    action: existing.length === 0 ? "created" : "updated",
+  };
+}
+
+/**
+ * Codex has no Claude-style command allowlist surface. The low-friction,
+ * current Codex-native equivalent is a personal profile selected explicitly by
+ * `codex --profile kit`: workspace-write sandbox, on-request approvals.
+ *
+ * This writes under CODEX_HOME / ~/.codex, never into repo config, because
+ * approval risk tolerance is a personal machine setting.
+ */
+export async function installCodexKitProfile(
+  path: string = codexKitProfilePath(),
+): Promise<CodexProfileResult> {
+  const file = path;
+  const { isReadOnlyMode } = await import("./read-only-mode.js");
+  if (isReadOnlyMode()) {
+    return {
+      file,
+      profile: CODEX_KIT_PROFILE_NAME,
+      action: "skipped",
+      detail: "read-only mode",
+    };
+  }
+
+  let existing = "";
+  try {
+    existing = await readFile(path, "utf-8");
+  } catch {
+    // Missing profile is the normal first-run path.
+  }
+
+  const { next, action, detail } = upsertCodexKitProfileBlock(existing);
+  if (action === "unchanged" || action === "skipped") {
+    return { file, profile: CODEX_KIT_PROFILE_NAME, action, detail };
+  }
+
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, next, "utf-8");
+    return { file, profile: CODEX_KIT_PROFILE_NAME, action };
+  } catch (err) {
+    return {
+      file,
+      profile: CODEX_KIT_PROFILE_NAME,
+      action: "failed",
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 /**
@@ -472,6 +712,85 @@ function kitSubcommandInvocation(sub: string): string {
   return `kit ${sub}`; // last resort — relies on PATH
 }
 
+const GATE_SUBCOMMANDS = ["gate-bash", "gate-env", "gate-egress", "gate-fs"];
+
+function commandIncludesSubcommand(command: string, sub: string): boolean {
+  try {
+    return shellSplit(command).includes(sub);
+  } catch {
+    return command.endsWith(sub) || command.includes(` ${sub}`);
+  }
+}
+
+function expandHomePath(path: string): string {
+  if (path === "~") return homedir();
+  if (path.startsWith("~/")) return join(homedir(), path.slice(2));
+  return path;
+}
+
+function isExecutable(path: string): boolean {
+  if (!existsSync(path)) return false;
+  if (process.platform === "win32") return true;
+  return (statSync(path).mode & 0o111) !== 0;
+}
+
+function managedWrapperProblems(path: string): string[] {
+  let body: string;
+  try {
+    body = readFileSync(path, "utf-8");
+  } catch {
+    return [];
+  }
+  if (!body.includes(WRAPPER_MARKER)) return [];
+  const match = body.match(/exec "([^"]+)" "([^"]+)" "\$@"/);
+  if (!match) {
+    return [`managed kit wrapper is malformed: ${path}. Run: kit agent-config`];
+  }
+  const [, nodePath, cliPath] = match;
+  const problems: string[] = [];
+  if (!isExecutable(nodePath)) {
+    problems.push(`managed kit wrapper points at missing/non-executable node: ${nodePath}`);
+  }
+  if (!existsSync(cliPath)) {
+    problems.push(`managed kit wrapper points at missing kit CLI: ${cliPath}`);
+  }
+  return problems.map((p) => `${p}. Run: kit agent-config`);
+}
+
+function hookCommandProblems(command: string): string[] {
+  let argv: string[];
+  try {
+    argv = shellSplit(command);
+  } catch (err) {
+    return [
+      `cannot parse hook command ${JSON.stringify(command)}: ${err instanceof Error ? err.message : String(err)}. Run: kit agent-config`,
+    ];
+  }
+  if (argv.length === 0) return ["empty hook command. Run: kit agent-config"];
+  let exe = argv[0];
+  if (exe === "exec" && argv[1]) exe = argv[1];
+  if (exe === "kit") {
+    return [
+      "hook command uses bare `kit`; non-login hook shells often lack PATH setup, causing exit 127. Run: kit agent-config",
+    ];
+  }
+  const expanded = expandHomePath(exe);
+  if (!isAbsolute(expanded)) {
+    return [
+      `hook command uses non-absolute executable \`${exe}\`; non-login hook shells may not resolve it. Run: kit agent-config`,
+    ];
+  }
+  if (expanded.startsWith("/root/")) {
+    return [
+      `hook command points at ${expanded}, which looks like a root/container path on this machine. Run: kit agent-config in this repo to rewrite hooks for ${homedir()}`,
+    ];
+  }
+  if (!isExecutable(expanded)) {
+    return [`hook command target missing or not executable: ${expanded}. Run: kit agent-config`];
+  }
+  return managedWrapperProblems(expanded);
+}
+
 export interface HookInstallResult {
   file: string;
   action: "created" | "updated" | "unchanged" | "skipped" | "failed";
@@ -511,6 +830,8 @@ export interface GateLiveness {
   envGate: boolean;
   /** PreToolUse exec-broker egress gate (`gate-egress`) present. */
   egressGate: boolean;
+  /** Hook rows exist but cannot reliably spawn; these produce harness-level code 127 noise. */
+  problems: string[];
 }
 
 /** Machine-local marker recording that kit installed the gates here (gitignored, beside them). */
@@ -534,7 +855,7 @@ export function gateLiveness(
   settingsPath: string = resolve(cwd, ".claude/settings.json"),
 ): GateLiveness {
   const everInstalled = existsSync(gateMarkerPath(cwd));
-  let pre: SettingsHookGroup[] = [];
+  let pre: SettingsHookGroup[];
   try {
     const settings = JSON.parse(readFileSync(settingsPath, "utf-8")) as {
       hooks?: Record<string, SettingsHookGroup[]>;
@@ -543,13 +864,18 @@ export function gateLiveness(
   } catch {
     pre = []; // missing/unparseable settings → no gates present (surfaced as a problem)
   }
-  const has = (suffix: string) =>
-    pre.some((g) => g.hooks?.some((h) => h.command?.endsWith(suffix)));
+  const gateCommands = pre
+    .flatMap((g) => g.hooks ?? [])
+    .map((h) => h.command)
+    .filter((cmd): cmd is string => typeof cmd === "string")
+    .filter((cmd) => GATE_SUBCOMMANDS.some((sub) => commandIncludesSubcommand(cmd, sub)));
+  const has = (sub: string) => gateCommands.some((cmd) => commandIncludesSubcommand(cmd, sub));
   return {
     everInstalled,
     installGate: has("gate-bash"),
     envGate: has("gate-env"),
     egressGate: has("gate-egress"),
+    problems: gateCommands.flatMap((cmd) => hookCommandProblems(cmd)),
   };
 }
 

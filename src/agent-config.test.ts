@@ -1,15 +1,29 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  chmodSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   KIT_BLOCK_BEGIN,
   KIT_BLOCK_END,
+  USER_RULES_BLOCK_BEGIN,
+  USER_RULES_BLOCK_END,
   upsertKitBlock,
   detectAgentTargets,
   writeAgentConfig,
+  loadUserRulesProfile,
   installKitPermissions,
+  installCodexKitProfile,
+  CODEX_KIT_PROFILE_BLOCK,
+  CODEX_KIT_PROFILE_NAME,
   installInstallGate,
   installBrokerGates,
   installInstallGateCodex,
@@ -78,6 +92,73 @@ describe("upsertKitBlock", () => {
     for (let i = 0; i < 3; i++) c = upsertKitBlock(c).next;
     const begins = c.split(KIT_BLOCK_BEGIN).length - 1;
     assert.equal(begins, 1);
+  });
+
+  it("injects opt-in user rules inside the managed block with nested markers", () => {
+    const profile = {
+      source: "rules.md",
+      text: "Shared personal rule.",
+      lineCount: 1,
+      byteCount: 21,
+      warnings: [],
+    };
+    const { next } = upsertKitBlock("# Doc\n", profile);
+    const kitBegin = next.indexOf(KIT_BLOCK_BEGIN);
+    const kitEnd = next.indexOf(KIT_BLOCK_END);
+    const userBegin = next.indexOf(USER_RULES_BLOCK_BEGIN);
+    const userEnd = next.indexOf(USER_RULES_BLOCK_END);
+    assert.ok(kitBegin >= 0 && kitEnd > kitBegin, "kit block present");
+    assert.ok(userBegin > kitBegin && userEnd < kitEnd, "user rules stay inside kit markers");
+    assert.ok(next.includes("Shared personal rule."));
+    assert.equal(upsertKitBlock(next, profile).action, "unchanged");
+  });
+});
+
+describe("loadUserRulesProfile", () => {
+  it("is a clean no-op without opt-in config", async () => {
+    const r = await loadUserRulesProfile({});
+    assert.equal(r.profile, null);
+    assert.deepEqual(r.warnings, []);
+    assert.equal(r.error, undefined);
+  });
+
+  it("refuses oversized user rules with source filename and line count", async () => {
+    const dir = tmpRepo();
+    try {
+      writeFileSync(join(dir, "rules.md"), "one\ntwo\nthree\n");
+      const r = await loadUserRulesProfile(
+        {
+          agent_config: {
+            user_rules: { enabled: true, source: "rules.md", max_lines: 2 },
+          },
+        },
+        dir,
+      );
+      assert.match(r.error ?? "", /rules\.md/);
+      assert.match(r.error ?? "", /3 line/);
+      assert.equal(r.profile, null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("warns when user prose looks like a deterministic standards gate", async () => {
+    const dir = tmpRepo();
+    try {
+      writeFileSync(join(dir, "rules.md"), "Always add a permission comment.\n");
+      const r = await loadUserRulesProfile(
+        {
+          agent_config: {
+            user_rules: { enabled: true, source: "rules.md" },
+          },
+        },
+        dir,
+      );
+      assert.equal(r.profile?.text, "Always add a permission comment.");
+      assert.match(r.warnings[0] ?? "", /\.kit\/standards\.d/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -280,6 +361,46 @@ describe("writeAgentConfig", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("writes the same opt-in user rules to every harness file, idempotently", async () => {
+    const dir = tmpRepo();
+    try {
+      const targets = [
+        { agent: "Claude Code", file: "CLAUDE.md" },
+        { agent: "Codex", file: "AGENTS.md" },
+        { agent: "Cursor", file: ".cursorrules" },
+        { agent: "Cline", file: ".clinerules" },
+      ];
+      const profile = {
+        source: "rules.md",
+        text: "Shared personal rule.",
+        lineCount: 1,
+        byteCount: 21,
+        warnings: [],
+      };
+      const r1 = await writeAgentConfig(dir, targets, { userRules: profile });
+      assert.ok(r1.every((r) => r.action === "created"));
+
+      const bodies = targets.map((t) => readFileSync(join(dir, t.file), "utf-8"));
+      for (const body of bodies) {
+        assert.ok(body.includes(USER_RULES_BLOCK_BEGIN));
+        assert.ok(body.includes("Shared personal rule."));
+        assert.ok(body.includes(USER_RULES_BLOCK_END));
+      }
+      const nested = bodies.map((body) =>
+        body.slice(body.indexOf(USER_RULES_BLOCK_BEGIN), body.indexOf(USER_RULES_BLOCK_END)),
+      );
+      assert.ok(
+        nested.every((body) => body === nested[0]),
+        "same user rules in all targets",
+      );
+
+      const r2 = await writeAgentConfig(dir, targets, { userRules: profile });
+      assert.ok(r2.every((r) => r.action === "unchanged"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("installKitPermissions", () => {
@@ -338,6 +459,58 @@ describe("installKitPermissions", () => {
       const r = await installKitPermissions(dir);
       assert.equal(r.action, "skipped");
       assert.equal(existsSync(join(dir, ".claude", "settings.json")), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installCodexKitProfile", () => {
+  it("writes the personal Codex profile with workspace-write + on-request, idempotently", async () => {
+    const dir = tmpRepo();
+    try {
+      const profile = join(dir, `${CODEX_KIT_PROFILE_NAME}.config.toml`);
+      const r1 = await installCodexKitProfile(profile);
+      assert.equal(r1.action, "created");
+      const txt = readFileSync(profile, "utf-8");
+      assert.ok(txt.includes(CODEX_KIT_PROFILE_BLOCK));
+      const { parse } = await import("smol-toml");
+      const cfg = parse(txt) as { approval_policy: string; sandbox_mode: string };
+      assert.equal(cfg.approval_policy, "on-request");
+      assert.equal(cfg.sandbox_mode, "workspace-write");
+
+      const r2 = await installCodexKitProfile(profile);
+      assert.equal(r2.action, "unchanged");
+      assert.equal(readFileSync(profile, "utf-8"), txt);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves unrelated profile settings when appending the managed block", async () => {
+    const dir = tmpRepo();
+    try {
+      const profile = join(dir, "kit.config.toml");
+      writeFileSync(profile, 'model = "gpt-5"\n');
+      const r = await installCodexKitProfile(profile);
+      assert.equal(r.action, "updated");
+      const txt = readFileSync(profile, "utf-8");
+      assert.ok(txt.startsWith('model = "gpt-5"\n'));
+      assert.ok(txt.includes('sandbox_mode = "workspace-write"'));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not overwrite an operator-owned approval or sandbox setting", async () => {
+    const dir = tmpRepo();
+    try {
+      const profile = join(dir, "kit.config.toml");
+      writeFileSync(profile, 'approval_policy = "never"\n');
+      const r = await installCodexKitProfile(profile);
+      assert.equal(r.action, "skipped");
+      assert.match(r.detail ?? "", /not overwriting/);
+      assert.equal(readFileSync(profile, "utf-8"), 'approval_policy = "never"\n');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -958,6 +1131,12 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
       },
     });
   const mark = (dir: string) => writeFileSync(join(dir, ".claude/.kit-gates-installed"), "x\n");
+  const gateExe = (dir: string) => {
+    const path = join(dir, "kit-hook");
+    writeFileSync(path, "#!/bin/sh\nexit 0\n");
+    chmodSync(path, 0o755);
+    return path;
+  };
 
   function repo(fn: (dir: string) => void) {
     const dir = mkdtempSync(join(tmpdir(), "kit-gatelive-"));
@@ -981,15 +1160,17 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
   it("marker present + both gates wired → all true", () => {
     repo((dir: string) => {
       mark(dir);
+      const kit = gateExe(dir);
       writeFileSync(
         join(dir, ".claude/settings.json"),
-        settings(["~/.kit/bin/kit gate-bash", "~/.kit/bin/kit gate-env"]),
+        settings([`${kit} gate-bash`, `${kit} gate-env`]),
       );
       assert.deepEqual(gateLiveness(dir), {
         everInstalled: true,
         installGate: true,
         envGate: true,
         egressGate: false,
+        problems: [],
       });
     });
   });
@@ -997,11 +1178,13 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
   it("marker present but env-gate vanished → the silent-degradation case", () => {
     repo((dir: string) => {
       mark(dir);
-      writeFileSync(join(dir, ".claude/settings.json"), settings(["~/.kit/bin/kit gate-bash"]));
+      const kit = gateExe(dir);
+      writeFileSync(join(dir, ".claude/settings.json"), settings([`${kit} gate-bash`]));
       const live = gateLiveness(dir);
       assert.equal(live.everInstalled, true);
       assert.equal(live.installGate, true);
       assert.equal(live.envGate, false);
+      assert.deepEqual(live.problems, []);
     });
   });
 
@@ -1013,6 +1196,36 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
       assert.equal(live.everInstalled, true);
       assert.equal(live.installGate, false);
       assert.equal(live.envGate, false);
+      assert.deepEqual(live.problems, []);
+    });
+  });
+
+  it("marker present + stale hook executable → explains exit 127 remediation", () => {
+    repo((dir: string) => {
+      mark(dir);
+      const missing = join(dir, "missing-kit");
+      writeFileSync(
+        join(dir, ".claude/settings.json"),
+        settings([`${missing} gate-bash`, `${missing} gate-env`]),
+      );
+      const live = gateLiveness(dir);
+      assert.equal(live.installGate, true);
+      assert.equal(live.envGate, true);
+      assert.equal(live.problems.length, 2);
+      assert.match(live.problems[0], /target missing or not executable/);
+      assert.match(live.problems[0], /Run: kit agent-config/);
+    });
+  });
+
+  it("marker present + root-owned hook path → explains local repair", () => {
+    repo((dir: string) => {
+      mark(dir);
+      writeFileSync(join(dir, ".claude/settings.json"), settings(["/root/.kit/bin/kit gate-bash"]));
+      const live = gateLiveness(dir);
+      assert.equal(live.installGate, true);
+      assert.equal(live.problems.length, 1);
+      assert.match(live.problems[0], /root\/container path/);
+      assert.match(live.problems[0], /Run: kit agent-config/);
     });
   });
 

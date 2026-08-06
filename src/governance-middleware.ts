@@ -90,7 +90,7 @@ export async function withGovernance<T>(
   //     RoE is a signed artifact; widening it means editing + re-signing the profile), so the
   //     operator is never prompted to approve an operation that will be scope-denied anyway.
   if (context.scopeNeeds) {
-    const scopeDenial = await checkScopeNeeds(context.scopeNeeds);
+    const scopeDenial = await checkScopeNeeds(context.scopeNeeds, opts.cwd);
     if (scopeDenial) {
       await auditDeny(scopeDenial);
       throw new Error(scopeDenial);

@@ -205,6 +205,15 @@ export async function checkGateLiveness(cwd?: string): Promise<SecurityCheckResu
   const missing: string[] = [];
   if (!live.installGate) missing.push("install-gate (gate-bash)");
   if (!live.envGate) missing.push("env-write-gate (gate-env)");
+  if (live.problems.length > 0) {
+    return {
+      category,
+      name,
+      status: "fail",
+      severity: "high",
+      detail: `PreToolUse gate command cannot reliably start — ${live.problems.join("; ")}`,
+    };
+  }
   if (missing.length === 0) {
     return { category, name, status: "pass", detail: "PreToolUse enforcement gates wired" };
   }

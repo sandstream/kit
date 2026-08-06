@@ -44,6 +44,16 @@ describe("generateKitWrapper", () => {
       script.includes('exec "/opt/node22/bin/node" "/usr/lib/kit/dist/cli.js" "$@"'),
       "exec's the real kit by absolute node + cli.js",
     );
+    assert.ok(
+      script.includes(
+        "[kit] hook cannot start: node binary missing or not executable: /opt/node22/bin/node",
+      ),
+      "explains stale node paths instead of surfacing only exit 127",
+    );
+    assert.ok(
+      script.includes("[kit] fix: open a normal terminal in this repo and run: kit agent-config"),
+      "prints the remediation command",
+    );
   });
 
   it("omits the mise shims dir when mise is absent", () => {

@@ -123,4 +123,22 @@ describe("kit hooks uninstall", () => {
       await rm(bare, { recursive: true, force: true });
     }
   });
+
+  it("hooks install explains the config path and points to built-in hooks", async () => {
+    const bare = await mkdtemp(join(tmpdir(), "kit-hooks-bare-"));
+    try {
+      await exec("git", ["init", "-q", "."], { cwd: bare });
+      await writeFile(join(bare, ".kit.toml"), '[tools]\nnode = "22"\n', "utf-8");
+      const r = await kit(["hooks", "install"], bare);
+      assert.equal(r.exitCode, 0, r.stderr);
+      assert.match(r.stdout, /No \[hooks\] section configured/);
+      assert.match(r.stdout, /kit hooks install.*only installs hooks declared/);
+      assert.match(r.stdout, /kit hooks add <name>/);
+      assert.match(r.stdout, /secret-scan/);
+      assert.match(r.stdout, /post-pull-audit/);
+      assert.match(r.stdout, /context-check/);
+    } finally {
+      await rm(bare, { recursive: true, force: true });
+    }
+  });
 });

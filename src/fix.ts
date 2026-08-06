@@ -9,12 +9,16 @@ import {
 
 import { readFile, writeFile, access } from "node:fs/promises";
 import { resolve } from "node:path";
-import { loadConfig } from "./config.js";
+import { loadConfig, type kitConfig } from "./config.js";
 import { withGovernance } from "./governance-middleware.js";
 import { checkTools } from "./check-tools.js";
 import { checkServices } from "./check-services.js";
+import { buildVercelDeployTargets, checkDeploy } from "./check-deploy.js";
+import { resolveViaBackend } from "./secret-backends.js";
+import { propagate } from "./secrets-propagate.js";
 import { installHooks } from "./hooks.js";
 import { c } from "./utils/colors.js";
+import { formatHitlBlocks, hitlBlockForService, type HitlBlock } from "./hitl.js";
 
 export interface FixResult {
   category: "tool" | "service" | "lock" | "secret";
@@ -23,11 +27,164 @@ export interface FixResult {
   detail: string;
 }
 
+function deployManualBlock(input: {
+  blocker: string;
+  reason: string;
+  steps: string[];
+  respondWith: string;
+}): HitlBlock {
+  return {
+    blocker: input.blocker,
+    owner: "developer",
+    reason: input.reason,
+    steps: input.steps,
+    respondWith: input.respondWith,
+    agentContinuesWith: "kit check --category deploy",
+  };
+}
+
+async function fixDeploy(
+  config: kitConfig,
+  cwd: string,
+): Promise<{
+  fixedCount: number;
+  manualActions: HitlBlock[];
+}> {
+  if (!config.deploy) return { fixedCount: 0, manualActions: [] };
+
+  let fixedCount = 0;
+  const manualActions: HitlBlock[] = [];
+  console.log(`${c.bold}[deploy] Deploy Env${c.reset}`);
+
+  const deployResults = await checkDeploy(config.deploy, cwd);
+  for (const row of deployResults.filter((r) => r.status === "fail" && r.didNotRun)) {
+    manualActions.push(
+      deployManualBlock({
+        blocker: `${row.provider} deploy env check did not run for ${row.project}/${row.environment}`,
+        reason: "provider CLI auth / setup",
+        steps: [`Fix provider CLI setup: ${row.detail}.`, "Run `kit check --category deploy`."],
+        respondWith: `${row.provider} deploy env check runs; no secret values pasted`,
+      }),
+    );
+  }
+  const missingRows = deployResults.filter(
+    (r) => r.provider === "vercel" && (r.missing?.length ?? 0) > 0,
+  );
+  if (missingRows.length === 0) {
+    console.log(
+      manualActions.length > 0
+        ? `${c.dim}Deploy env check needs human setup before kit can fix missing keys${c.reset}`
+        : `${c.dim}No missing deploy env key names${c.reset}`,
+    );
+    console.log();
+    return { fixedCount, manualActions };
+  }
+
+  const vercelTargets = config.deploy.vercel
+    ? buildVercelDeployTargets(config.deploy.vercel, cwd)
+    : [];
+  const targetByKey = new Map(
+    vercelTargets.map((target) => [`${target.environment}\0${target.project}`, target]),
+  );
+
+  for (const row of missingRows) {
+    const target = targetByKey.get(`${row.environment}\0${row.project}`);
+    if (!target?.remoteEnv) {
+      manualActions.push(
+        deployManualBlock({
+          blocker: `${row.project}/${row.environment} deploy target is ambiguous`,
+          reason: "deploy config / provider target",
+          steps: [
+            `Add remote_env = "production", "preview", or "development" under [deploy.vercel.environments.${row.environment}], or set ${row.missing?.join(", ")} manually in Vercel.`,
+            "Run `kit check --category deploy`.",
+          ],
+          respondWith: `${row.project}/${row.environment} has an explicit Vercel remote_env or env vars set; no secret values pasted`,
+        }),
+      );
+      continue;
+    }
+
+    for (const key of row.missing ?? []) {
+      const keyConfig = config.secrets?.keys?.[key];
+      if (!keyConfig) {
+        manualActions.push(
+          deployManualBlock({
+            blocker: `${key} has no declared secret source for ${row.project}/${row.environment}`,
+            reason: "secret / deploy config",
+            steps: [
+              `Add ${key} to [secrets.keys] with a vault-backed source, or set it directly in Vercel project ${row.project}.`,
+              row.buildTime?.includes(key)
+                ? `Redeploy ${row.project} after setting build-time key ${key}.`
+                : `Run \`kit check --category deploy\`.`,
+            ],
+            respondWith: `${key} source declared or key set in Vercel; no secret values pasted`,
+          }),
+        );
+        continue;
+      }
+
+      const resolved = await resolveViaBackend(key, keyConfig, config.secrets?.infisical);
+      if (!resolved.resolved || !resolved.value || resolved.managed) {
+        manualActions.push(
+          deployManualBlock({
+            blocker: `${key} value is unavailable for ${row.project}/${row.environment}`,
+            reason: "secret backend auth / setup",
+            steps: [
+              `Make ${key} available through the configured ${keyConfig.source} backend: ${resolved.detail}.`,
+              "Run `kit fix`, then `kit check --category deploy`.",
+            ],
+            respondWith: `${key} available in configured secret backend; no secret values pasted`,
+          }),
+        );
+        continue;
+      }
+
+      const [result] = await propagate(key, resolved.value, ["vercel"], {
+        env: target.remoteEnv,
+        vercelScope: target.scope,
+        vercelProject: target.project,
+        vercelTeamId: target.teamId,
+        vercelCwd: target.cwd,
+        policy: config.policy,
+        cwd,
+      });
+      if (result?.ok) {
+        console.log(
+          `  ${c.green}✓${c.reset} ${key}  ${c.green}pushed${c.reset}  ${c.dim}vercel project=${row.project} env=${target.remoteEnv}${c.reset}`,
+        );
+        if (row.buildTime?.includes(key)) {
+          console.log(
+            `    ${c.yellow}Redeploy required before the built frontend sees ${key}${c.reset}`,
+          );
+        }
+        fixedCount++;
+      } else {
+        manualActions.push(
+          deployManualBlock({
+            blocker: `${key} could not be pushed to ${row.project}/${row.environment}`,
+            reason: "provider CLI auth / setup",
+            steps: [
+              result?.detail ?? "Vercel propagation failed.",
+              `Set ${key} manually in Vercel project ${row.project} for ${target.remoteEnv}.`,
+              "Run `kit check --category deploy`.",
+            ],
+            respondWith: `${key} present in Vercel; no secret values pasted`,
+          }),
+        );
+      }
+    }
+  }
+
+  console.log();
+  return { fixedCount, manualActions };
+}
+
 /**
- * `kit fix` — auto-remediation pipeline. Six steps: install missing
+ * `kit fix` — auto-remediation pipeline. Six core steps: install missing
  * tools, generate lock files, surface unauthenticated services, generate
- * .env.template, harden .gitignore, install git hooks. Returns false when
- * any step requires manual intervention.
+ * .env.template, harden .gitignore, install git hooks. When [deploy] is
+ * configured, it also pushes missing deploy env values that can be resolved
+ * from [secrets.keys]. Returns false when any step requires manual intervention.
  *
  * Extracted from cli.ts (codebase-review follow-up).
  */
@@ -39,7 +196,7 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
 
   let fixedCount = 0;
   let manualCount = 0;
-  const manualActions: string[] = [];
+  const manualActions: HitlBlock[] = [];
 
   return await withGovernance(
     config,
@@ -90,7 +247,14 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
               console.log(
                 `  ${icon} ${r.name}  ${c.red}failed${c.reset}  ${c.dim}${r.detail}${c.reset}`,
               );
-              manualActions.push(`Install ${r.name} manually: ${r.detail}`);
+              manualActions.push({
+                blocker: `${r.name} tool is not installable by kit`,
+                owner: "developer",
+                reason: "local tool setup",
+                steps: [r.detail, "Run `kit check --category tools`."],
+                respondWith: `${r.name} installed or intentionally unavailable`,
+                agentContinuesWith: "kit check --category tools",
+              });
               manualCount++;
             }
           }
@@ -163,14 +327,11 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
             console.log(
               `  ${c.yellow}!${c.reset} ${s.name}  ${c.yellow}not authenticated${c.reset}  ${c.dim}${s.output}${c.reset}`,
             );
-            const loginCmd = config.services[s.name]?.login ?? "";
-            if (loginCmd.trim().startsWith("#")) {
-              // Informational ("#"-prefixed) login — no CLI to run, only docs.
-              manualActions.push(`${s.name}: ${loginCmd.trim().replace(/^#\s*/, "")}`);
-            } else {
-              manualActions.push(`Login to ${s.name}: run 'kit login' or '${loginCmd}'`);
+            const block = hitlBlockForService(s, config);
+            if (block) {
+              manualActions.push(block);
+              manualCount++;
             }
-            manualCount++;
           }
         } else {
           console.log(`${c.dim}All services authenticated${c.reset}`);
@@ -216,7 +377,17 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             console.log(`  ${c.red}✗${c.reset} Failed to write ${templatePath}: ${msg}`);
-            manualActions.push(`Create ${templatePath} manually with ${keyNames.length} keys`);
+            manualActions.push({
+              blocker: `${templatePath} could not be created`,
+              owner: "developer",
+              reason: "local file permission / config",
+              steps: [
+                `Add ${keyNames.length} key placeholder(s).`,
+                "Run `kit check --category secrets`.",
+              ],
+              respondWith: `${templatePath} exists; no secret values pasted`,
+              agentContinuesWith: "kit check --category secrets",
+            });
             manualCount++;
           }
         }
@@ -268,7 +439,14 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         console.log(`  ${c.red}✗${c.reset} .gitignore harden failed: ${msg}`);
-        manualActions.push("Harden .gitignore manually (.env*, *.pem, id_rsa)");
+        manualActions.push({
+          blocker: ".gitignore could not be hardened",
+          owner: "developer",
+          reason: "local file permission / config",
+          steps: ["Add .env*, *.pem, id_rsa, and kit local-state ignores.", "Run `kit check`."],
+          respondWith: ".gitignore hardened",
+          agentContinuesWith: "kit check",
+        });
         manualCount++;
       }
       console.log();
@@ -296,7 +474,14 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
           if (failed.length > 0) {
             for (const f of failed) {
               console.log(`  ${c.red}✗${c.reset} ${f.hookName}: ${f.detail}`);
-              manualActions.push(`Install ${f.hookName} hook manually`);
+              manualActions.push({
+                blocker: `${f.hookName} hook could not be installed`,
+                owner: "developer",
+                reason: "local git hook setup",
+                steps: [f.detail, "Run `kit check --category hooks`."],
+                respondWith: `${f.hookName} hook installed or intentionally skipped`,
+                agentContinuesWith: "kit check --category hooks",
+              });
               manualCount++;
             }
           }
@@ -306,13 +491,25 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
           console.log(`  ${c.red}✗${c.reset} Hooks install failed: ${msg}`);
-          manualActions.push("Run 'kit hooks install' manually");
+          manualActions.push({
+            blocker: "git hooks could not be installed",
+            owner: "developer",
+            reason: "local git hook setup",
+            steps: [`Run \`kit hooks install\`.`, "Run `kit check --category hooks`."],
+            respondWith: "git hooks installed or intentionally skipped",
+            agentContinuesWith: "kit check --category hooks",
+          });
           manualCount++;
         }
       } else {
         console.log(`${c.dim}No hooks configured in .kit.toml${c.reset}`);
       }
       console.log();
+
+      const deployFix = await fixDeploy(config, cwd);
+      fixedCount += deployFix.fixedCount;
+      manualActions.push(...deployFix.manualActions);
+      manualCount += deployFix.manualActions.length;
 
       // Summary
       console.log(`${c.bold}${c.cyan}Summary${c.reset}`);
@@ -323,12 +520,8 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
       }
 
       if (manualCount > 0) {
-        console.log(
-          `  ${c.yellow}!${c.reset} ${manualCount} issue(s) require manual intervention:\n`,
-        );
-        for (const action of manualActions) {
-          console.log(`     ${c.dim}•${c.reset} ${action}`);
-        }
+        console.log(`  ${c.yellow}!${c.reset} ${manualCount} issue(s) require human action:\n`);
+        console.log(formatHitlBlocks(manualActions));
         console.log();
         console.log(
           `${c.dim}Run ${c.reset}${c.bold}kit check${c.reset}${c.dim} to verify status after manual fixes${c.reset}`,

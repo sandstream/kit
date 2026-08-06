@@ -381,17 +381,52 @@ describe("checkSecurity", () => {
   // Bumblebee disabled so tests stay fast/offline (real scan downloads binary, walks machine).
   // Each test reuses a shared result set from a single checkSecurity() call to avoid
   // 5x cost on machines where ollama/etc are installed and respond slowly.
-  let prevBumblebee: string | undefined;
+  const envKeys = [
+    "KIT_AUDIT_ANCHOR",
+    "KIT_BUMBLEBEE",
+    "KIT_CLAUDE_SETTINGS",
+    "KIT_CODEX_HOOKS",
+    "KIT_CODEX_MEMORY_HOOK_MARKER",
+    "KIT_GUARDDOG",
+    "KIT_MEMORY_DB",
+    "KIT_MEMORY_DIR",
+    "KIT_MEMORY_HOOK_MARKER",
+    "KIT_NO_DOWNLOAD",
+    "KIT_SEMGREP_CONFIG",
+  ] as const;
+  const prevEnv = new Map<string, string | undefined>();
+  let root: string;
   let cached: Awaited<ReturnType<typeof checkSecurity>>;
 
   before(async () => {
-    prevBumblebee = process.env.KIT_BUMBLEBEE;
+    root = mkdtempSync(join(tmpdir(), "kit-security-"));
+    const agentState = join(root, ".kit-test-agent-state");
+    mkdirSync(agentState, { recursive: true });
+    writeFileSync(
+      join(root, ".gitignore"),
+      [".env", ".env.local", ".env.*.local", "node_modules"].join("\n") + "\n",
+    );
+    for (const key of envKeys) prevEnv.set(key, process.env[key]);
+    process.env.KIT_AUDIT_ANCHOR = "0";
     process.env.KIT_BUMBLEBEE = "0";
-    cached = await checkSecurity();
+    process.env.KIT_CLAUDE_SETTINGS = join(agentState, "claude-settings.json");
+    process.env.KIT_CODEX_HOOKS = join(agentState, "codex-hooks.json");
+    process.env.KIT_CODEX_MEMORY_HOOK_MARKER = join(agentState, "codex-marker");
+    process.env.KIT_GUARDDOG = "0";
+    process.env.KIT_MEMORY_DB = join(agentState, "memory.db");
+    process.env.KIT_MEMORY_DIR = agentState;
+    process.env.KIT_MEMORY_HOOK_MARKER = join(agentState, "claude-marker");
+    process.env.KIT_NO_DOWNLOAD = "1";
+    delete process.env.KIT_SEMGREP_CONFIG;
+    cached = await checkSecurity(root);
   });
   after(() => {
-    if (prevBumblebee === undefined) delete process.env.KIT_BUMBLEBEE;
-    else process.env.KIT_BUMBLEBEE = prevBumblebee;
+    for (const key of envKeys) {
+      const value = prevEnv.get(key);
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    rmSync(root, { recursive: true, force: true });
   });
 
   it("returns an array of security check results", () => {

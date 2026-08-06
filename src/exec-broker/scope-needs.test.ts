@@ -158,6 +158,30 @@ describe("withGovernance + scopeNeeds (exec-broker proper)", () => {
     );
   });
 
+  it("checks scopeNeeds against opts.cwd, not process.cwd()", async () => {
+    await signScoped();
+    const caller = mkdtempSync(join(tmpdir(), "kit-needs-caller-"));
+    try {
+      process.chdir(caller);
+      await assert.rejects(
+        withGovernance(
+          makeConfig(),
+          {
+            operation: "cross-project",
+            operationType: "write",
+            scopeNeeds: { egress: ["evil.com"] },
+          },
+          async () => "x",
+          { cwd: proj },
+        ),
+        /scope enforcement/,
+      );
+    } finally {
+      process.chdir(proj);
+      rmSync(caller, { recursive: true, force: true });
+    }
+  });
+
   it("is backward compatible: no profile + no scopeNeeds ⇒ unchanged behavior", async () => {
     const result = await withGovernance(
       makeConfig(),

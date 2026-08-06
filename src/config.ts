@@ -99,6 +99,53 @@ export interface WebSearchConfig {
   cx?: string;
 }
 
+export type DeployProvider = "vercel";
+export type VercelDeployEnvironment = "production" | "preview" | "development";
+
+export interface DeployEnvironmentConfig {
+  /** Human/display project name for reports; adapter-specific selectors stay explicit. */
+  project: string;
+  /** Key names that must exist in this deploy target. Values are never committed or read. */
+  required?: string[];
+  /** Keys intentionally present only in this environment, excluded from drift warnings. */
+  environment_specific?: string[];
+  /** Build-time keys; NEXT_PUBLIC_* is always inferred as build-time for frontend safety. */
+  build_time?: string[];
+  /** Vercel target env to query/write. Omit to list project-wide names only. */
+  remote_env?: VercelDeployEnvironment;
+  /** Repo-relative project directory when Vercel linking differs per app/env in a monorepo. */
+  cwd?: string;
+}
+
+export interface DeployVercelConfig {
+  scope?: string;
+  /** Vercel team id for Management API calls; `scope` stays the CLI scope/slug. */
+  team_id?: string;
+  /** Keys intentionally present only in one environment, excluded from drift warnings. */
+  environment_specific?: string[];
+  /** Provider-wide build-time keys in addition to inferred NEXT_PUBLIC_* names. */
+  build_time?: string[];
+  environments?: Record<string, DeployEnvironmentConfig>;
+}
+
+export interface DeployConfig {
+  vercel?: DeployVercelConfig;
+}
+
+export interface AgentConfigUserRulesConfig {
+  enabled?: boolean;
+  /** User-level source. File, or directory of sorted *.md files. Supports ~/ expansion. */
+  source?: string;
+  /** Token budget guard for always-loaded agent prose. Default is owned by agent-config.ts. */
+  max_lines?: number;
+  /** Byte-size guard for always-loaded agent prose. Default is owned by agent-config.ts. */
+  max_bytes?: number;
+}
+
+export interface AgentConfigConfig {
+  user_rules?: AgentConfigUserRulesConfig;
+}
+
 /**
  * Environment-specific access permissions
  * Parsed from [governance.access.dev], [governance.access.staging], [governance.access.prod]
@@ -377,6 +424,10 @@ export interface kitConfig {
   skills?: SkillsConfig;
   governance?: GovernanceConfig;
   hooks?: HooksConfig;
+  /** Declarative deploy env-name matrix per platform/project/environment. */
+  deploy?: DeployConfig;
+  /** Rules-file generation options for `kit agent-config`. */
+  agent_config?: AgentConfigConfig;
   /** Per-project CLI context lock (account+project per tool). */
   context?: ContextConfig;
   /** Install-time supply-chain triage settings (`kit supply-chain`). */
@@ -643,6 +694,48 @@ const WebConfigSchema = z
   .passthrough()
   .optional();
 
+const DeployEnvironmentConfigSchema = z
+  .object({
+    project: z.string(),
+    required: z.array(z.string()).optional(),
+    environment_specific: z.array(z.string()).optional(),
+    build_time: z.array(z.string()).optional(),
+    remote_env: z.enum(["production", "preview", "development"]).optional(),
+    cwd: z.string().optional(),
+  })
+  .passthrough();
+
+const DeployConfigSchema = z
+  .object({
+    vercel: z
+      .object({
+        scope: z.string().optional(),
+        team_id: z.string().optional(),
+        environment_specific: z.array(z.string()).optional(),
+        build_time: z.array(z.string()).optional(),
+        environments: z.record(z.string(), DeployEnvironmentConfigSchema).optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough()
+  .optional();
+
+const AgentConfigSchema = z
+  .object({
+    user_rules: z
+      .object({
+        enabled: z.boolean().optional(),
+        source: z.string().optional(),
+        max_lines: z.number().int().positive().optional(),
+        max_bytes: z.number().int().positive().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough()
+  .optional();
+
 // Known top-level section names — used to detect typos
 // Exported as part of kit's frozen config surface (contracts/public-surface.json).
 // The breaking-change detector snapshots these section names; adding/removing one
@@ -655,6 +748,8 @@ export const KNOWN_SECTIONS = new Set([
   "skills",
   "governance",
   "hooks",
+  "deploy",
+  "agent_config",
   "web",
   "setup",
   "env",
@@ -677,6 +772,8 @@ export const kitConfigSchema = z
     skills: SkillsConfigSchema.optional(),
     governance: GovernanceConfigSchema.optional(),
     hooks: HooksConfigSchema,
+    deploy: DeployConfigSchema,
+    agent_config: AgentConfigSchema,
     context: z
       .object({
         gcloud: z

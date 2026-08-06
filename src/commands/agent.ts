@@ -22,9 +22,11 @@ import {
   writeAgentConfig,
   detectAgentTargets,
   installKitPermissions,
+  installCodexKitProfile,
   installAllInstallGates,
   installBrokerGates,
   installAiderRules,
+  loadUserRulesProfile,
 } from "../agent-config.js";
 
 export async function cmdSkills(): Promise<boolean> {
@@ -117,18 +119,35 @@ export async function cmdAgentConfig(): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit agent-config${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
+  const config = await loadConfig(resolveConfigPath()).catch(
+    () => ({}) as Awaited<ReturnType<typeof loadConfig>>,
+  );
+  const userRules = await loadUserRulesProfile(config);
+  let failed = false;
+  if (userRules.error) {
+    failed = true;
+    console.log(`  ${c.red}✗${c.reset} user rules: ${userRules.error}`);
+  }
+  for (const warning of userRules.warnings) {
+    console.log(`  ${c.yellow}!${c.reset} user rules: ${warning}`);
+  }
+  if (userRules.profile) {
+    console.log(
+      `  ${c.dim}· user rules loaded from ${userRules.profile.source} (${userRules.profile.lineCount} line(s), ${userRules.profile.byteCount} byte(s))${c.reset}`,
+    );
+  }
+
   const targets = detectAgentTargets();
   console.log(
     `${c.dim}Teaching ${targets.map((t) => `${c.reset}${c.bold}${t.agent}${c.reset}${c.dim}`).join(", ")} to use kit ` +
       `(managed block in their rules file).${c.reset}\n`,
   );
 
-  const results = await writeAgentConfig();
+  const results = await writeAgentConfig(process.cwd(), targets, { userRules: userRules.profile });
   // Aider needs a bespoke installer (CONVENTIONS.md + a `read:` entry in
   // .aider.conf.yml — it auto-reads no rules file), so it's not an AGENT_TARGETS row.
-  const aider = await installAiderRules();
+  const aider = await installAiderRules(process.cwd(), userRules.profile);
   if (aider.detail !== "no Aider project detected") results.push(aider);
-  let failed = false;
   for (const r of results) {
     if (r.action === "failed") {
       failed = true;
@@ -149,6 +168,27 @@ export async function cmdAgentConfig(): Promise<boolean> {
     console.log(`\n  ${c.dim}= read-only kit commands already allowed in ${perms.file}${c.reset}`);
   } else if (perms.action === "failed") {
     console.log(`\n  ${c.yellow}!${c.reset} could not update ${perms.file}: ${perms.detail}`);
+  }
+  // Codex does not expose Claude-style command allowlists. Install a personal
+  // profile instead: low-friction workspace automation without committing a risk
+  // preference to the repo.
+  const codexProfile = await installCodexKitProfile();
+  if (codexProfile.action === "created" || codexProfile.action === "updated") {
+    console.log(
+      `\n  ${c.green}✓${c.reset} installed Codex personal profile ${c.dim}${codexProfile.file}${c.reset} ${c.dim}(use: ${c.reset}${c.bold}codex --profile ${codexProfile.profile}${c.reset}${c.dim})${c.reset}`,
+    );
+  } else if (codexProfile.action === "unchanged") {
+    console.log(
+      `\n  ${c.dim}= Codex personal profile already current (${codexProfile.file}; use: codex --profile ${codexProfile.profile})${c.reset}`,
+    );
+  } else if (codexProfile.action === "skipped") {
+    console.log(
+      `\n  ${c.dim}· Codex personal profile skipped: ${codexProfile.detail ?? codexProfile.action}${c.reset}`,
+    );
+  } else if (codexProfile.action === "failed") {
+    console.log(
+      `\n  ${c.yellow}!${c.reset} could not update Codex personal profile ${codexProfile.file}: ${codexProfile.detail}`,
+    );
   }
   // Default-ON: the true blocking gates (PreToolUse hooks) — un-triaged installs
   // and plaintext secrets aimed at .env* are blocked BEFORE they run/land. The
@@ -198,7 +238,7 @@ export async function cmdAgentConfig(): Promise<boolean> {
       `  ${c.dim}· Memory index: Claude Code, Codex, Cursor, Cline, Gemini, Continue, Amazon Q, Kiro, Factory Droid, Aider, Antigravity, OpenCode${c.reset}\n` +
       `  ${c.dim}· "use kit" rules block: Claude Code, Codex, Cursor, Cline, OpenCode${c.reset}\n` +
       `  ${c.dim}· Config/secret audit (kit agent-audit): Claude Code, Codex, Cursor, OpenCode (+ generic .mcp.json)${c.reset}\n` +
-      `  ${c.dim}· Permission allowlist: Claude Code · auto-capture hooks: Claude Code, Codex${c.reset}\n` +
+      `  ${c.dim}· Permission allowlist: Claude Code · personal profile: Codex · auto-capture hooks: Claude Code, Codex${c.reset}\n` +
       `  ${c.dim}· Blocking install-gate: Claude Code, Codex, Amazon Q, Kiro, Factory Droid, Augment, Antigravity, Gemini CLI, Cursor (hooks), OpenCode (plugin), Cline (PreToolUse shim); Continue has no gate surface (#146)${c.reset}\n` +
       `  ${c.dim}The agent-agnostic enforcement floor is git hooks (${c.reset}${c.bold}kit hooks${c.reset}${c.dim}); the rules block only advises.${c.reset}`,
   );

@@ -22,6 +22,7 @@ import { checkWebSearch, type WebSearchStatus } from "./check-web-search.js";
 import { checkSecurity, type SecurityCheckResult, type GateOpts } from "./check-security.js";
 import { checkLockFiles, type LockCheckResult } from "./check-lock.js";
 import { checkTests, type TestCheckResult } from "./check-tests.js";
+import { checkDeploy, type DeployCheckResult } from "./check-deploy.js";
 import { loadBaselineForGate, baselineGet, BASELINE_FILE } from "./baseline.js";
 import { computeCheckVerdict, type CheckVerdict } from "./check-verdict.js";
 import type { JsonCheck } from "./cli-checks-shared.js";
@@ -35,6 +36,7 @@ export interface CheckRunResult {
   skills: SkillCheckResult[];
   hooks: HookCheckResult[];
   webSearch: WebSearchStatus | null;
+  deploy: DeployCheckResult[];
   security: SecurityCheckResult[];
   tests: TestCheckResult[];
   locks: LockCheckResult[];
@@ -59,6 +61,7 @@ export const CHECK_CATEGORIES = [
   "skills",
   "hooks",
   "web",
+  "deploy",
   "security",
   "locks",
   "tests",
@@ -146,6 +149,9 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
     wants("web") && config.web?.search
       ? await step("web search", () => checkWebSearch(config.web!.search!))
       : null;
+  const deploy = wants("deploy")
+    ? await step("deploy config", () => checkDeploy(config.deploy, cwd))
+    : [];
   const security = wants("security") ? await step("security scan", () => checkSecurity(cwd)) : [];
   const locks = wants("locks") ? await step("lock files", () => checkLockFiles(config, cwd)) : [];
 
@@ -183,6 +189,7 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
       secrets: secrets.keys,
       skills,
       hooks,
+      deploy,
       security,
       tests,
       locks,
@@ -199,6 +206,7 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
     skills,
     hooks,
     webSearch,
+    deploy,
     security,
     tests,
     locks,
@@ -255,6 +263,13 @@ export function checkRunToJsonChecks(r: CheckRunResult): JsonCheck[] {
           },
         ]
       : []),
+    ...r.deploy.map((d) => ({
+      name: d.provider === "deploy" ? "deploy" : `${d.provider}/${d.environment}/${d.project}`,
+      status: d.status as JsonCheck["status"],
+      detail: d.detail,
+      category: "deploy",
+      ...(d.didNotRun ? { didNotRun: true as const } : {}),
+    })),
     ...r.locks.map((l) => ({
       name: l.category === "skills-lock" ? "skills-lock.json" : "cli-lock.json",
       status: (l.inSync ? "pass" : l.exists ? "warn" : "fail") as JsonCheck["status"],

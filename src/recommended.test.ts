@@ -44,9 +44,9 @@ describe("applyRecommendedHardening", () => {
     const g = gitDir();
     const r = await applyRecommendedHardening({ context: { git: { email: "x@y.z" } } }, g);
 
-    // 3 memory hooks per supported lifecycle-hook harness.
+    // Claude keeps three hooks; Codex keeps silent lifecycle hooks only.
     assert.equal(r.memory.claude.added.length, 3);
-    assert.equal(r.memory.codex.added.length, 3);
+    assert.equal(r.memory.codex.added.length, 2);
 
     // pre-commit secret-scan + triage gates (deps + skills).
     const pc = readFileSync(join(g, "hooks", "pre-commit"), "utf-8");

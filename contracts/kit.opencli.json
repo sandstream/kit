@@ -204,7 +204,7 @@
         }
       },
       "kind": "group",
-      "summary": "Check status of all tools, services, secrets, and lock files",
+      "summary": "Check status of tools, services, secrets, hooks, deploy env, security, tests, and lock files",
       "x-kit-args-modeled": false,
       "x-kit-audience": "all",
       "x-kit-mcp": true,
@@ -444,7 +444,7 @@
       "commands": {
         "add": {
           "kind": "command",
-          "summary": "Install a built-in hook (e.g. secret-scan)",
+          "summary": "Install a built-in hook (secret-scan, post-pull-audit, context-check)",
           "x-kit-args-modeled": false,
           "x-kit-audience": "human",
           "x-kit-mcp": false,
@@ -584,7 +584,7 @@
         },
         "install": {
           "kind": "command",
-          "summary": "Wire UserPromptSubmit + SessionEnd + SessionStart hooks into Claude Code + Codex lifecycle config",
+          "summary": "Wire Claude Code prompt/start/end hooks and silent Codex start/end hooks into lifecycle config",
           "x-kit-args-modeled": false,
           "x-kit-audience": "all",
           "x-kit-mcp": false,
@@ -1131,7 +1131,7 @@
     "binary": "kit",
     "summary": "Deterministic, local-first developer-environment manager and fail-closed governance layer for AI agents and humans.",
     "title": "kit",
-    "version": "6.5.0"
+    "version": "6.6.0"
   },
   "opencliVersion": "1.0.0-alpha.12"
 }

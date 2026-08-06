@@ -2,7 +2,7 @@
  * kit — the single source of truth for the "is this project green?" verdict.
  *
  * `kit check` (CLI) and `kit_check` (MCP) both need to answer the SAME question:
- * given the tool/service/secret/skill/hook/security/test/lock results, is the
+ * given the tool/service/secret/skill/hook/deploy/security/test/lock results, is the
  * project ok? They used to answer it in two DIFFERENT places with two different
  * rules — the CLI applied the informational-service exemption, scanner-health-strict
  * security gating (`gateStatus`), and test-coverage; the MCP path used a naive
@@ -24,6 +24,7 @@ export interface VerdictInputs {
   secrets: { available: boolean }[];
   skills: { required: boolean; installed: boolean }[];
   hooks: { installed: boolean; upToDate: boolean }[];
+  deploy: { status: "pass" | "fail" | "warn" | "skip" }[];
   security: SecurityCheckResult[];
   tests: { status: "pass" | "fail" | "warn" | "skip" }[];
   locks: { inSync: boolean }[];
@@ -48,6 +49,7 @@ export interface CheckVerdict {
  *  - secrets: every configured key available;
  *  - skills: every REQUIRED skill installed (optional skills don't gate);
  *  - hooks: every git hook installed AND up to date;
+ *  - deploy: no configured deploy target is missing required remote env key names;
  *  - security: every result non-fail under scanner-health-strict `gateStatus`
  *    (a check that could not RUN fails unless `lenient`);
  *  - tests: no test-coverage result is a hard fail;
@@ -62,6 +64,7 @@ export function computeCheckVerdict(input: VerdictInputs, opts: GateOpts = {}): 
     secrets: input.secrets.every((s) => s.available),
     skills: input.skills.filter((s) => s.required).every((s) => s.installed),
     hooks: input.hooks.every((h) => h.installed && h.upToDate),
+    deploy: input.deploy.every((d) => d.status !== "fail"),
     security: input.security.every((s) => gateStatus(s, opts) !== "fail"),
     tests: input.tests.every((t) => t.status !== "fail"),
     locks: input.locks.every((l) => l.inSync),

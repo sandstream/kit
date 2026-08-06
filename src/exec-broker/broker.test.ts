@@ -403,7 +403,7 @@ enforce_runtime = true
     assert.equal(ran, false);
   });
 
-  it("verified scope + op declares NO effects → MIGRATION passthrough (runs, unchanged)", async () => {
+  it("verified enforce scope + undeclared op → denied, never runs", async () => {
     await writeSignedProfile(SIGNED_ENFORCED, true);
     let ran = false;
     const out = await runBrokered(
@@ -414,7 +414,23 @@ enforce_runtime = true
       },
       { cwd: sandbox },
     );
-    assert.equal(out.ok, true, "an undeclared op is not yet mediated at the runtime (migration)");
+    assert.equal(out.ok, false, "enforce mode must not pass an undeclared op");
+    assert.match(out.reason ?? "", /no effect contract/);
+    assert.equal(ran, false);
+  });
+
+  it("verified enforce scope + explicit zero-effects op → runs", async () => {
+    await writeSignedProfile(SIGNED_ENFORCED, true);
+    let ran = false;
+    const out = await runBrokered(
+      CTX({ declaredEffects: true }),
+      async () => {
+        ran = true;
+        return "ok";
+      },
+      { cwd: sandbox },
+    );
+    assert.equal(out.ok, true);
     assert.equal(ran, true);
   });
 
@@ -480,10 +496,9 @@ enforce_runtime = true
     );
   });
 
-  it("a corrupted profile still lets an UNDECLARED op through (migration passthrough, not a brick)", async () => {
-    // The counterweight to the test above: fail-closed applies to ops that declare effects. A typo
-    // in the profile must not stop every governed op, or operators will delete the profile — which
-    // turns mediation off for real.
+  it("a corrupted profile denies an UNDECLARED op instead of falling back to unmediated", async () => {
+    // A malformed declared RoE is not "off". Once a scope exists but cannot be trusted, the runtime
+    // grants nothing until the profile is fixed and re-signed.
     await writeSignedProfile(`version = 1\n[scope]\negress = ["api.acme.com"]\n`, true);
     writeFileSync(join(sandbox, PROFILE_FILE), `version = 1\n[scope\n`);
     let ran = false;
@@ -495,8 +510,9 @@ enforce_runtime = true
       },
       { cwd: sandbox },
     );
-    assert.equal(out.ok, true);
-    assert.equal(ran, true);
+    assert.equal(out.ok, false);
+    assert.equal(ran, false);
+    assert.match(out.reason ?? "", /profile unreadable/);
   });
 
   it("observe evidence lands in the GOVERNED project's audit log, not process.cwd()", async () => {
@@ -633,6 +649,26 @@ describe("runBrokered OBSERVE mode (Pillar 3 default-on ladder — dry-run)", ()
     );
     assert.equal(out.ok, true);
     assert.deepEqual((observeLine()!.metadata as { wouldDeny?: string[] }).wouldDeny, []);
+  });
+
+  it("UNDECLARED op → still RUNS, but records the enforce denial", async () => {
+    await writeObserve(true);
+    let ran = false;
+    const out = await runBrokered(
+      CTX(),
+      async () => {
+        ran = true;
+        return "ok";
+      },
+      { cwd: sandbox },
+    );
+    assert.equal(out.ok, true, "observe must not deny undeclared ops");
+    assert.equal(ran, true);
+    const wouldDeny = (observeLine()!.metadata as { wouldDeny?: string[] }).wouldDeny ?? [];
+    assert.ok(
+      wouldDeny.some((d) => d.includes("no effect contract")),
+      `undeclared observe must not look ready: ${JSON.stringify(wouldDeny)}`,
+    );
   });
 
   it("UNSIGNED observe scope → runs, but records the default-deny that enforce would apply", async () => {

@@ -89,7 +89,7 @@ describe("memory hook installer", () => {
     assert.equal(ours.length, 1);
   });
 
-  it("recognizes a legacy bare-`kit` hook and neither duplicates nor leaves it on uninstall", () => {
+  it("upgrades a legacy bare-`kit` hook and neither duplicates nor leaves it on uninstall", () => {
     // Simulate a settings file written by an older kit (bare command).
     writeFileSync(
       settingsPath,
@@ -101,14 +101,17 @@ describe("memory hook installer", () => {
         },
       }),
     );
-    // Re-install must treat the legacy entry as already present (no duplicate).
+    // Re-install must refresh the legacy entry in-place (no duplicate).
     const res = installMemoryHooks();
     assert.ok(!res.added.includes("UserPromptSubmit"), "must not add a second UPS hook");
+    assert.ok(res.updated.includes("UserPromptSubmit"), "must update the legacy UPS hook");
     const s = JSON.parse(readFileSync(settingsPath, "utf8"));
     const ours = s.hooks.UserPromptSubmit.filter((g: { hooks: { command: string }[] }) =>
       g.hooks.some((h) => h.command.endsWith("memory hook user-prompt-submit")),
     );
     assert.equal(ours.length, 1, "no duplicate UPS hook");
+    assert.notEqual(ours[0].hooks[0].command, "kit memory hook user-prompt-submit");
+    assert.ok(/[/\\]/.test(ours[0].hooks[0].command), "legacy hook rewritten to absolute command");
     // Uninstall removes the legacy bare entry too (suffix match).
     uninstallMemoryHooks();
     const s2 = JSON.parse(readFileSync(settingsPath, "utf8"));
@@ -164,9 +167,9 @@ describe("Codex memory hook installer", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("merges all Codex hooks and gives SessionEnd its supported timeout", () => {
+  it("merges silent Codex lifecycle hooks and gives SessionEnd its supported timeout", () => {
     const result = installCodexMemoryHooks();
-    assert.deepEqual(result.added.sort(), ["SessionEnd", "SessionStart", "UserPromptSubmit"]);
+    assert.deepEqual(result.added.sort(), ["SessionEnd", "SessionStart"]);
 
     const config = JSON.parse(readFileSync(hooksPath, "utf8"));
     assert.equal(existsSync(`${hooksPath}.bak`), true, "existing Codex config is backed up");
@@ -186,10 +189,11 @@ describe("Codex memory hook installer", () => {
     installCodexMemoryHooks();
     const second = installCodexMemoryHooks();
     assert.deepEqual(second.added, []);
-    assert.equal(second.alreadyPresent.length, 3);
+    assert.deepEqual(second.updated, []);
+    assert.equal(second.alreadyPresent.length, 2);
 
     const removed = uninstallCodexMemoryHooks();
-    assert.deepEqual(removed.removed.sort(), ["SessionEnd", "SessionStart", "UserPromptSubmit"]);
+    assert.deepEqual(removed.removed.sort(), ["SessionEnd", "SessionStart"]);
     const config = JSON.parse(readFileSync(hooksPath, "utf8"));
     assert.ok(
       config.hooks.SessionStart.some((group: { hooks: { command: string }[] }) =>
@@ -198,15 +202,97 @@ describe("Codex memory hook installer", () => {
     );
   });
 
+  it("removes legacy noisy prompt hooks while preserving hooks in their group", () => {
+    writeFileSync(
+      hooksPath,
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            {
+              hooks: [
+                { type: "command", command: "some-other-tool" },
+                { type: "command", command: "kit memory hook user-prompt-submit" },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    installCodexMemoryHooks();
+    const config = JSON.parse(readFileSync(hooksPath, "utf8"));
+    const commands = config.hooks.UserPromptSubmit.flatMap(
+      (group: { hooks: { command: string }[] }) => group.hooks.map((hook) => hook.command),
+    );
+    assert.deepEqual(commands, ["some-other-tool"]);
+  });
+
+  it("upgrades stale absolute Codex hook paths in-place", () => {
+    writeFileSync(
+      hooksPath,
+      JSON.stringify({
+        hooks: {
+          SessionEnd: [
+            {
+              hooks: [
+                {
+                  type: "command",
+                  command: "/root/.kit/bin/kit memory hook session-end-codex",
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    const result = installCodexMemoryHooks();
+    assert.deepEqual(result.added, ["SessionStart"]);
+    assert.deepEqual(result.updated, ["SessionEnd"]);
+    const config = JSON.parse(readFileSync(hooksPath, "utf8"));
+    const hook = config.hooks.SessionEnd[0].hooks[0];
+    assert.notEqual(hook.command, "/root/.kit/bin/kit memory hook session-end-codex");
+    assert.ok(hook.command.endsWith("memory hook session-end-codex"));
+    assert.equal(hook.timeout, 3);
+  });
+
+  it("removes empty retired prompt-hook events from Codex config", () => {
+    writeFileSync(
+      hooksPath,
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [
+            { hooks: [{ type: "command", command: "kit memory hook user-prompt-submit" }] },
+          ],
+        },
+      }),
+    );
+
+    installCodexMemoryHooks();
+    const config = JSON.parse(readFileSync(hooksPath, "utf8"));
+    assert.equal(config.hooks.UserPromptSubmit, undefined);
+  });
+
+  it("cleans up already-empty retired prompt-hook events from Codex config", () => {
+    writeFileSync(
+      hooksPath,
+      JSON.stringify({
+        hooks: {
+          UserPromptSubmit: [],
+        },
+      }),
+    );
+
+    installCodexMemoryHooks();
+    const config = JSON.parse(readFileSync(hooksPath, "utf8"));
+    assert.equal(config.hooks.UserPromptSubmit, undefined);
+  });
+
   it("reports Codex liveness from its own durable marker", () => {
     installCodexMemoryHooks();
     assert.deepEqual(codexMemoryHooksLiveness().missing, []);
     writeFileSync(hooksPath, "{}\n");
-    assert.deepEqual(codexMemoryHooksLiveness().missing.sort(), [
-      "SessionEnd",
-      "SessionStart",
-      "UserPromptSubmit",
-    ]);
+    assert.deepEqual(codexMemoryHooksLiveness().missing.sort(), ["SessionEnd", "SessionStart"]);
   });
 
   it("refuses invalid JSON without overwriting it", () => {
@@ -242,6 +328,20 @@ describe("status-line installer", () => {
     assert.ok(s.statusLine.command.endsWith("statusline"));
     // second run is a no-op
     assert.equal(installStatusline().status, "already");
+  });
+
+  it("updates a stale kit statusLine command in-place", () => {
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        statusLine: { type: "command", command: "/root/.kit/bin/kit statusline" },
+      }),
+    );
+    const result = installStatusline();
+    assert.equal(result.status, "updated");
+    const s = JSON.parse(readFileSync(settingsPath, "utf8"));
+    assert.notEqual(s.statusLine.command, "/root/.kit/bin/kit statusline");
+    assert.ok(s.statusLine.command.endsWith("statusline"));
   });
 
   it("never clobbers a user's existing custom statusLine", () => {

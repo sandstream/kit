@@ -7,7 +7,7 @@
  */
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, readFile, mkdir, access } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, mkdir, access, chmod } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
@@ -36,6 +36,7 @@ async function runCli(
   // Commands such as `kit setup` install lifecycle hooks. Keep those writes in
   // the disposable fixture instead of touching the developer's real agent config.
   const agentStateDir = join(cwd, ".kit-test-agent-state");
+  await mkdir(agentStateDir, { recursive: true });
   try {
     const { stdout, stderr } = await exec(process.execPath, [CLI_PATH, ...args], {
       cwd,
@@ -46,6 +47,7 @@ async function runCli(
         KIT_CODEX_HOOKS: join(agentStateDir, "codex-hooks.json"),
         KIT_MEMORY_HOOK_MARKER: join(agentStateDir, "claude-marker"),
         KIT_CODEX_MEMORY_HOOK_MARKER: join(agentStateDir, "codex-marker"),
+        KIT_MEMORY_DB: join(agentStateDir, "memory.db"),
         ...env,
       },
       timeout: 30_000,
@@ -114,6 +116,65 @@ store = "env"
 [secrets.keys]
 BUILD_TARGET = { source = "config", value = "production" }
 `;
+
+const FIXTURE_MANUAL_SERVICES = `# Services that need human-in-the-loop setup
+[services.stripe]
+login = "stripe login"
+check = "kit-definitely-missing-auth-check"
+
+[services.sentry]
+login = "# sentry - no CLI login; get DSN from https://sentry.io"
+check = "# sentry - check SENTRY_DSN is set"
+
+[secrets]
+store = "env"
+template = ".env.template"
+
+[secrets.keys]
+SENTRY_DSN = { source = "env" }
+SENTRY_AUTH_TOKEN = { source = "env" }
+`;
+
+const FIXTURE_DEPLOY_MISSING = `
+[deploy.vercel.environments.production]
+project = "app-prod"
+required = ["NEXT_PUBLIC_SENTRY_DSN", "NEXT_PUBLIC_SENTRY_ENVIRONMENT"]
+`;
+
+const FIXTURE_DEPLOY_FIX = `
+[secrets.keys]
+NEXT_PUBLIC_SENTRY_ENVIRONMENT = { source = "config", value = "super-secret-env-value" }
+
+[deploy.vercel.environments.production]
+project = "app-prod"
+required = ["NEXT_PUBLIC_SENTRY_ENVIRONMENT"]
+remote_env = "production"
+`;
+
+async function installFakeVercel(
+  dir: string,
+  scriptBody: string,
+): Promise<{ binDir: string; env: Record<string, string> }> {
+  const binDir = join(dir, "bin");
+  await mkdir(binDir, { recursive: true });
+  const vercelPath = join(binDir, "vercel");
+  await writeFile(vercelPath, scriptBody, "utf-8");
+  await chmod(vercelPath, 0o755);
+  const misePath = join(binDir, "mise");
+  await writeFile(
+    misePath,
+    `#!/bin/sh
+if [ "$1" = "which" ] && [ "$2" = "vercel" ]; then
+  printf '%s\\n' '${vercelPath}'
+  exit 0
+fi
+exit 1
+`,
+    "utf-8",
+  );
+  await chmod(misePath, 0o755);
+  return { binDir, env: { PATH: `${binDir}:${process.env.PATH ?? ""}`, VERCEL_TOKEN: "" } };
+}
 
 // ---------------------------------------------------------------------------
 // Error handling
@@ -244,6 +305,43 @@ describe("kit check", () => {
     assert.ok(result.stdout.length > 0, "should produce non-empty output");
   });
 
+  it("prints HITL blocks for service auth and DSN/secret setup gaps", async () => {
+    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_MANUAL_SERVICES, "utf-8");
+
+    const result = await runCli(["check", "--category", "services,secrets"], tempDir);
+
+    assert.equal(result.exitCode, 1, `stdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stdout, /HITL behövs/);
+    assert.match(result.stdout, /Blocker: stripe is not authenticated/);
+    assert.match(result.stdout, /Blocker: sentry requires manual provider configuration/);
+    assert.match(
+      result.stdout,
+      /Blocker: 2 env secrets unavailable: SENTRY_DSN, SENTRY_AUTH_TOKEN/,
+    );
+    assert.match(result.stdout, /Agenten fortsätter med: kit check --category services,secrets/);
+  });
+
+  it("checks declared deploy env names without printing remote values", async () => {
+    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_DEPLOY_MISSING, "utf-8");
+    const { env } = await installFakeVercel(
+      tempDir,
+      `#!/bin/sh
+if [ "$1" = "env" ] && [ "$2" = "ls" ]; then
+  printf '%s\\n' '[{"key":"NEXT_PUBLIC_SENTRY_DSN","value":"super-secret-dsn-value"}]'
+  exit 0
+fi
+exit 0
+`,
+    );
+
+    const result = await runCli(["check", "--category", "deploy"], tempDir, env);
+
+    assert.equal(result.exitCode, 1, `stdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stdout, /Deploy/);
+    assert.match(result.stdout, /NEXT_PUBLIC_SENTRY_ENVIRONMENT/);
+    assert.doesNotMatch(result.stdout, /super-secret-dsn-value/);
+  });
+
   it("exits 0 with node at latest (always installed)", async () => {
     await writeFile(join(tempDir, ".kit.toml"), FIXTURE_NODE_TOOL, "utf-8");
     // Initialize lock files first so the lock check doesn't fail
@@ -315,6 +413,61 @@ describe("kit fix", () => {
       result.stdout.includes("nothing") || result.stdout.includes("exist"),
       "should note that nothing needed fixing",
     );
+  });
+
+  it("prints human handoff for auth and DSN configuration", async () => {
+    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_MANUAL_SERVICES, "utf-8");
+
+    const result = await runCli(["fix"], tempDir);
+
+    assert.equal(result.exitCode, 1, `stdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stdout, /require human action/);
+    assert.match(result.stdout, /HITL behövs/);
+    assert.match(result.stdout, /Blocker: stripe is not authenticated/);
+    assert.match(result.stdout, /Ägare: provider admin/);
+    assert.match(
+      result.stdout,
+      /Varför agenten inte kan lösa: auth \/ browser \/ external account/,
+    );
+    assert.match(result.stdout, /Gör detta:/);
+    assert.match(
+      result.stdout,
+      /Svara med: stripe configured\/authenticated; no secret values pasted/,
+    );
+    assert.match(result.stdout, /kit login --service stripe/);
+    assert.match(result.stdout, /provider UI \/ external account \/ secret/);
+    assert.match(result.stdout, /SENTRY_DSN, SENTRY_AUTH_TOKEN/);
+    assert.match(result.stdout, /kit secrets set <KEY> --stdin/);
+    assert.match(result.stdout, /Agenten fortsätter med: kit check --category services,secrets/);
+  });
+
+  it("pushes missing deploy env values from declared secrets without echoing values", async () => {
+    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_DEPLOY_FIX, "utf-8");
+    const logPath = join(tempDir, "vercel.log");
+    const { env } = await installFakeVercel(
+      tempDir,
+      `#!/bin/sh
+if [ "$1" = "env" ] && [ "$2" = "ls" ]; then
+  printf '%s\\n' '[]'
+  exit 0
+fi
+printf '%s\\n' "$*" >> '${logPath}'
+cat >/dev/null
+exit 0
+`,
+    );
+
+    const result = await runCli(["fix"], tempDir, env);
+
+    assert.equal(result.exitCode, 0, `stdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    assert.match(result.stdout, /NEXT_PUBLIC_SENTRY_ENVIRONMENT/);
+    assert.match(result.stdout, /Redeploy required/);
+    assert.doesNotMatch(result.stdout, /super-secret-env-value/);
+
+    const log = await readFile(logPath, "utf-8");
+    assert.match(log, /env rm NEXT_PUBLIC_SENTRY_ENVIRONMENT production/);
+    assert.match(log, /env add NEXT_PUBLIC_SENTRY_ENVIRONMENT production/);
+    assert.doesNotMatch(log, /super-secret-env-value/);
   });
 });
 

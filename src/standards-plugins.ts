@@ -11,8 +11,15 @@
  *   title = "No console.* in shipped code"
  *   applies_to = ["typescript"]     # language gate (omit ⇒ all languages)
  *   severity = "warn"               # warn | fail  (fail = author opts into gating)
+ *   mode = "forbid"                 # forbid | require  (omit ⇒ forbid)
  *   match = 'console\.(log|debug)\('
- *   exclude = ["scripts/", "test fixtures"]   # glob patterns, matched on the rel path
+ *   exclude = ["scripts/", "fixtures/**"]     # glob patterns; trailing / means subtree
+ *
+ *   # Require-mode example: every file containing `scope` must also contain `match`.
+ *   # Still deterministic and zero-LLM: regex over repo files, no plugin code.
+ *   # mode = "require"
+ *   # scope = 'export const \w+ = onCall'
+ *   # match = '@apiPermission'
  *
  * Security / determinism (reusing patterns already shipped):
  *   - Schema-validated at load; a malformed plugin FAILS CLOSED — it is ignored and
@@ -61,6 +68,18 @@ const DEFAULT_PLUGIN_EXTS = [
 /** Longest line a plugin regex is run against — bounds a pathological (ReDoS) pattern. */
 const MAX_LINE_LEN = 2000;
 
+const PLUGIN_SKIP_DIRS = [
+  "node_modules",
+  "dist",
+  "build",
+  "out",
+  ".next",
+  ".git",
+  "coverage",
+  "vendor",
+  "target",
+];
+
 const pluginSchema = z
   .object({
     standard: z
@@ -73,6 +92,8 @@ const pluginSchema = z
         applies_to: z.array(z.string()).optional(),
         kind: z.enum(["general", "specific"]).optional(),
         severity: z.enum(["warn", "fail"]).optional(),
+        mode: z.enum(["forbid", "require"]).optional(),
+        scope: z.string().min(1).optional(),
         match: z.string().min(1),
         exclude: z.array(z.string()).optional(),
         include_tests: z.boolean().optional(),
@@ -87,6 +108,9 @@ export interface StandardPluginSpec {
   title: string;
   appliesTo?: string[];
   severity: "warn" | "fail";
+  mode: "forbid" | "require";
+  /** Require-mode scope regex: files with at least one scope match must contain `match`. */
+  scope?: string;
   match: string;
   exclude: string[];
   includeTests: boolean;
@@ -167,13 +191,32 @@ export function loadStandardPlugins(cwd: string, dirs: string[]): LoadPluginsRes
         );
         continue;
       }
+      if (s.scope) {
+        try {
+          new RegExp(s.scope);
+        } catch (e) {
+          integrity.push(integrityWarn(rel, `invalid scope regex (${(e as Error).message})`));
+          continue;
+        }
+        if (hasReDoSRisk(s.scope)) {
+          integrity.push(
+            integrityWarn(
+              rel,
+              `scope regex is ReDoS-prone (nested quantifier) — rejected: ${s.scope}`,
+            ),
+          );
+          continue;
+        }
+      }
       plugins.push({
         id: s.id,
         title: s.title,
         appliesTo: s.applies_to,
         severity: s.severity ?? "warn",
+        mode: s.mode ?? "forbid",
+        scope: s.scope,
         match: s.match,
-        exclude: s.exclude ?? [],
+        exclude: (s.exclude ?? []).map(normalizeGlobPattern),
         includeTests: s.include_tests ?? false,
         exts: s.exts ?? DEFAULT_PLUGIN_EXTS,
         source: rel,
@@ -198,16 +241,21 @@ export function loadStandardPlugins(cwd: string, dirs: string[]): LoadPluginsRes
   return { plugins: [...byId.values()], integrity };
 }
 
+function normalizeGlobPattern(glob: string): string {
+  return glob.endsWith("/") ? `${glob}**` : glob;
+}
+
 /** Minimal glob → RegExp: supports `**`, `*`, `?` and literal path segments. */
 export function globToRegExp(glob: string): RegExp {
   let re = "";
-  for (let i = 0; i < glob.length; i++) {
-    const ch = glob[i];
+  const normalized = normalizeGlobPattern(glob);
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized[i];
     if (ch === "*") {
-      if (glob[i + 1] === "*") {
+      if (normalized[i + 1] === "*") {
         re += ".*";
         i++;
-        if (glob[i + 1] === "/") i++; // `**/` matches zero or more dirs
+        if (normalized[i + 1] === "/") i++; // `**/` matches zero or more dirs
       } else {
         re += "[^/]*";
       }
@@ -220,10 +268,6 @@ export function globToRegExp(glob: string): RegExp {
     }
   }
   return new RegExp(`^${re}$`);
-}
-
-function isExcluded(relFile: string, patterns: RegExp[]): boolean {
-  return patterns.some((re) => re.test(relFile));
 }
 
 /** Length of an UNBOUNDED quantifier token at position i, else 0. `*`, `+`, `{n,}` are unbounded
@@ -295,29 +339,65 @@ export interface PluginFinding {
   line: number;
 }
 
+export interface PluginEvaluation {
+  findings: PluginFinding[];
+  warnings: StandardsCheckResult[];
+}
+
+function pluginWarn(spec: StandardPluginSpec, reason: string): StandardsCheckResult {
+  return {
+    category: "standards",
+    dimension: "plugin",
+    name: `plugin: ${spec.id}`,
+    status: "warn",
+    severity: "low",
+    detail: reason,
+  };
+}
+
+function lineMatches(lines: string[], re: RegExp): boolean {
+  for (const line of lines) {
+    if (line.length > MAX_LINE_LEN) continue;
+    if (re.test(line)) return true;
+  }
+  return false;
+}
+
 /** Run one plugin's regex over the applicable source files. Pure w.r.t. the repo. */
-export function evaluatePluginFindings(cwd: string, spec: StandardPluginSpec): PluginFinding[] {
-  const re = new RegExp(spec.match);
-  const excludes = spec.exclude.map(globToRegExp);
+export function evaluatePlugin(cwd: string, spec: StandardPluginSpec): PluginEvaluation {
+  const matchRe = new RegExp(spec.match);
+  const scopeRe = spec.scope ? new RegExp(spec.scope) : null;
+  const excludes = spec.exclude.map((pattern) => ({
+    pattern,
+    re: globToRegExp(pattern),
+    matches: 0,
+  }));
   const findings: PluginFinding[] = [];
+  const warnings: StandardsCheckResult[] = [];
   const files = walkSourceFiles(cwd, {
     exts: spec.exts,
     includeTests: spec.includeTests,
-    skipDirs: [
-      "node_modules",
-      "dist",
-      "build",
-      "out",
-      ".next",
-      ".git",
-      "coverage",
-      "vendor",
-      "target",
-    ],
+    skipDirs: PLUGIN_SKIP_DIRS,
   });
+
+  if (excludes.length > 0) {
+    const excludeUniverse = walkSourceFiles(cwd, {
+      exts: spec.exts,
+      includeTests: true,
+      skipDirs: PLUGIN_SKIP_DIRS,
+    });
+    for (const file of excludeUniverse) {
+      const rel = relative(cwd, file);
+      for (const ex of excludes) {
+        if (ex.re.test(rel)) ex.matches++;
+      }
+    }
+  }
+
+  let scopedFiles = 0;
   for (const file of files) {
     const rel = relative(cwd, file);
-    if (isExcluded(rel, excludes)) continue;
+    if (excludes.some((ex) => ex.re.test(rel))) continue;
     let content: string;
     try {
       content = readFileSync(file, "utf8");
@@ -325,13 +405,53 @@ export function evaluatePluginFindings(cwd: string, spec: StandardPluginSpec): P
       continue;
     }
     const lines = content.split("\n");
+    if (spec.mode === "require") {
+      const inScope = scopeRe ? lineMatches(lines, scopeRe) : true;
+      if (!inScope) continue;
+      scopedFiles++;
+      if (!lineMatches(lines, matchRe)) findings.push({ file: rel, line: 1 });
+      continue;
+    }
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (line.length > MAX_LINE_LEN) continue;
-      if (re.test(line)) findings.push({ file: rel, line: i + 1 });
+      if (matchRe.test(line)) findings.push({ file: rel, line: i + 1 });
     }
   }
-  return findings;
+
+  const unmatchedExcludes = excludes.filter((ex) => ex.matches === 0).map((ex) => ex.pattern);
+  if (files.length > 0 && unmatchedExcludes.length > 0) {
+    warnings.push(
+      pluginWarn(spec, `exclude pattern(s) matched zero files: ${unmatchedExcludes.join(", ")}`),
+    );
+  }
+  if (spec.mode === "require" && scopeRe && files.length > 0 && scopedFiles === 0) {
+    warnings.push(pluginWarn(spec, `scope regex matched zero files: ${spec.scope}`));
+  }
+
+  return { findings, warnings };
+}
+
+/** Back-compatible convenience wrapper used by tests and baseline collection. */
+export function evaluatePluginFindings(cwd: string, spec: StandardPluginSpec): PluginFinding[] {
+  return evaluatePlugin(cwd, spec).findings;
+}
+
+function pluginPassDetail(spec: StandardPluginSpec): string {
+  return spec.mode === "require"
+    ? `${spec.title} — required pattern present in scoped files`
+    : `${spec.title} — no matches`;
+}
+
+function pluginFreshDetail(spec: StandardPluginSpec, fresh: number, total: number): string {
+  return spec.mode === "require"
+    ? `${spec.title} — ${fresh} file(s) missing required pattern (${total} total)`
+    : `${spec.title} — ${fresh} new match(es) (${total} total)`;
+}
+
+function pluginFileLabel(spec: StandardPluginSpec, f: PluginFinding): string {
+  return spec.mode === "require" ? `${f.file}:missing` : `${f.file}:${f.line}`;
 }
 
 export interface CheckPluginsOptions {
@@ -360,7 +480,9 @@ export function checkStandardsPlugins(opts: CheckPluginsOptions): StandardsCheck
     if (spec.appliesTo && spec.appliesTo.length > 0 && !spec.appliesTo.includes(opts.language)) {
       continue;
     }
-    const findings = evaluatePluginFindings(cwd, spec);
+    const evaluation = evaluatePlugin(cwd, spec);
+    results.push(...evaluation.warnings);
+    const findings = evaluation.findings;
     const fresh = findings.filter((f) => !seen.has(pluginKey(spec.id, f.file, f.line)));
     const name = `plugin: ${spec.id}`;
     const gates = enforce || spec.severity === "fail";
@@ -370,7 +492,7 @@ export function checkStandardsPlugins(opts: CheckPluginsOptions): StandardsCheck
         dimension: "plugin",
         name,
         status: "pass",
-        detail: `${spec.title} — no matches`,
+        detail: pluginPassDetail(spec),
       });
     } else if (fresh.length === 0) {
       results.push({
@@ -388,8 +510,8 @@ export function checkStandardsPlugins(opts: CheckPluginsOptions): StandardsCheck
         name,
         status: gates ? "fail" : "warn",
         severity: gates ? "high" : "medium",
-        detail: `${spec.title} — ${fresh.length} new match(es) (${findings.length} total)`,
-        files: fresh.slice(0, 10).map((f) => `${f.file}:${f.line}`),
+        detail: pluginFreshDetail(spec, fresh.length, findings.length),
+        files: fresh.slice(0, 10).map((f) => pluginFileLabel(spec, f)),
       });
     }
   }
