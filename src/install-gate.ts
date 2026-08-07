@@ -796,6 +796,38 @@ function hasExecCallFlag(tokens: string[]): boolean {
 }
 
 /**
+ * npm packages whose real payload is an arbitrary third-party repo fetched at
+ * install time (a `<tool> add <owner>/<repo>` argument), not the package's own
+ * code. Triaging the wrapper package name alone says nothing about that
+ * payload — the same fetch-and-execute blind spot `create-*` already closes
+ * for `npm create foo`, one level deeper. Bare npm name, no scope/version.
+ * Extend this allowlist as more such installers are identified.
+ */
+const REPO_FETCHER_PACKAGES = new Set(["skills"]);
+
+/** `owner/repo` shape — no npm scope (`@scope/name`), no scheme, no protocol. */
+function ownerRepoArg(tok: string): string | null {
+  if (tok.startsWith("@")) return null; // npm scope, not a repo
+  return /^[\w.-]+\/[\w.-]+$/.test(tok) ? tok : null;
+}
+
+/**
+ * When a RUNNER's fetched package is a known repo-fetcher, find the repo
+ * argument among the args passed THROUGH to it (`skills add mattpocock/skills`)
+ * and return it as a `github:` ref — additive to the wrapper package's own npm
+ * ref, so both the installer AND its payload get triaged.
+ */
+function repoFetcherRef(pkgArg: string, throughArgs: string[]): string | null {
+  const bare = npmName(pkgArg);
+  if (!bare || !REPO_FETCHER_PACKAGES.has(bare)) return null;
+  for (const tok of throughArgs) {
+    const repo = ownerRepoArg(tok);
+    if (repo) return `github:${repo}`;
+  }
+  return null;
+}
+
+/**
  * The packages a matched invocation actually FETCHES.
  *  - pkgFlagOnly (uv run) / exec -c call: the positional is a LOCAL script or shell string —
  *    only `--with`/`--package` flags fetch; the string is recursed elsewhere.
@@ -854,6 +886,13 @@ function applyMatcher(
       const ver = m.scheme === "npm" ? npmVersion(arg) : pipVersion(arg);
       probe.refs.push(`${m.scheme}:${name}${ver}`);
     } else probe.unverifiable.push(arg); // fail-closed: can't reduce to a ref
+  }
+  // A RUNNER fetching a known repo-installer package also triages the repo it
+  // was told to fetch — the args after the package name are what's PASSED
+  // THROUGH to it, exactly where an `add <owner>/<repo>` argument lives.
+  if (m.single && m.scheme === "npm" && targets.length > 0) {
+    const repoRef = repoFetcherRef(targets[0], pos.slice(start + 1));
+    if (repoRef) probe.refs.push(repoRef);
   }
   return true;
 }

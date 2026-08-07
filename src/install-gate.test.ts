@@ -295,6 +295,25 @@ describe("parseInstallCommand — bypass resistance (security)", () => {
     assert.deepEqual(refs("npm i express"), ["npm:express"]);
   });
 
+  it("a known repo-fetcher RUNNER also triages the repo it was told to fetch", () => {
+    const refs = (c: string) => parseInstallCommand(c).refs;
+    assert.deepEqual(refs("npx skills@latest add mattpocock/skills -g -a codex -s * -y --copy"), [
+      "npm:skills@latest",
+      "github:mattpocock/skills",
+    ]);
+    assert.deepEqual(refs("npx skills add owner/repo"), ["npm:skills", "github:owner/repo"]);
+    // no repo-shaped arg → just the wrapper package, unchanged behavior
+    assert.deepEqual(refs("npx skills list"), ["npm:skills"]);
+  });
+
+  it("the repo-fetcher check is scoped to the allowlist — no false positives elsewhere", () => {
+    const refs = (c: string) => parseInstallCommand(c).refs;
+    // an unrelated npx tool taking an owner/repo-shaped positional is NOT treated as a fetch
+    assert.deepEqual(refs("npx cowsay hello/world"), ["npm:cowsay"]);
+    // an npm SCOPE (@scope/name) after the package must never be misread as owner/repo
+    assert.deepEqual(refs("npx skills add @scope/name"), ["npm:skills"]);
+  });
+
   it("an npm alias/protocol spec is fail-closed, not triaged as the innocent name (B2)", () => {
     // `lodash-x@npm:express@4` INSTALLS express but names lodash-x — must NOT triage lodash-x.
     for (const cmd of [
