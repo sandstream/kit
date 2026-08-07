@@ -6,7 +6,7 @@ tool-by-tool reference lives in [MCP_TOOLS_REFERENCE.md](MCP_TOOLS_REFERENCE.md)
 this guide covers how to wire it up and how the surface is meant to be used.
 
 **The CLI-first rule.** An agent with shell access should run `kit <command>`
-directly: the CLI covers all ~70 commands, costs zero standing context, and
+directly: the CLI covers all ~71 commands, costs zero standing context, and
 `kit <command> --help` self-documents. The server's own `instructions` field
 (sent in the MCP `initialize` result) says exactly this, so well-behaved
 clients route accordingly. The MCP tools exist for clients that cannot shell

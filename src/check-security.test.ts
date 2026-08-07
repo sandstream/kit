@@ -11,15 +11,17 @@ import {
   jvmProjectKind,
   findJvmProject,
   checkMemoryHooksLiveness,
+  checkMemoryInjection,
   checkGateLiveness,
   checkDeviceIdOverride,
   unpinnedNodeDeps,
   LOCKFILE_ECOSYSTEMS,
   type SecurityCheckResult,
 } from "./check-security.js";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { openMemoryDb } from "./memory/db.js";
 
 describe("gateStatus — scanner-health strict by default", () => {
   const r = (over: Partial<SecurityCheckResult>): SecurityCheckResult => ({
@@ -194,6 +196,32 @@ describe("checkMemoryHooksLiveness (R5 — self-playing loop gate)", () => {
       restore("KIT_CLAUDE_SETTINGS", previous.claudeSettings);
       restore("KIT_CODEX_MEMORY_HOOK_MARKER", previous.codexMarker);
       restore("KIT_CODEX_HOOKS", previous.codexHooks);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("checkMemoryInjection", () => {
+  it("scans read-only without chmodding the machine-local memory directory", async () => {
+    if (process.platform === "win32") return;
+
+    const dir = mkdtempSync(join(tmpdir(), "kit-memory-security-"));
+    const dbPath = join(dir, "memory.db");
+    const prevDb = process.env.KIT_MEMORY_DB;
+    try {
+      const db = openMemoryDb(dbPath);
+      db.close();
+      chmodSync(dir, 0o755);
+
+      process.env.KIT_MEMORY_DB = dbPath;
+      const result = await checkMemoryInjection();
+
+      assert.equal(result.status, "skip");
+      assert.equal(statSync(dir).mode & 0o777, 0o755);
+    } finally {
+      if (prevDb === undefined) delete process.env.KIT_MEMORY_DB;
+      else process.env.KIT_MEMORY_DB = prevDb;
+      chmodSync(dir, 0o700);
       rmSync(dir, { recursive: true, force: true });
     }
   });

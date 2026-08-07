@@ -33,6 +33,7 @@ import { cmdBroker } from "./commands/broker.js";
 import { cmdBootstrap } from "./commands/bootstrap.js";
 import { cmdSkill } from "./commands/skill.js";
 import { cmdMap } from "./commands/repomap.js";
+import { cmdBrowser } from "./commands/browser.js";
 import {
   cmdStatus,
   cmdHealth,
@@ -669,6 +670,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     stability: "experimental",
     help: "Evidence map: which standard's controls kit's deterministic checks auto-verify vs gap/manual/n-a — --standard=asvs|llm-top10|ssdf|agentic-top10|mcp-top10|aiuc-1|gcp-waf-security|all (default asvs); --list-standards to enumerate, [coverage].standards to toggle on/off (NOT a compliance attestation; --json for GRC tools)",
   },
+  browser: {
+    handler: cmdBrowser,
+    stability: "experimental",
+    help: "Browser-verification diagnostics: select Playwright/system Chrome/CDP strategy from [browser] without guessing (doctor|status|cdp-url|playwright-env; --json)",
+  },
   identity: {
     handler: cmdIdentity,
     stability: "experimental",
@@ -864,6 +870,11 @@ const SUBCOMMAND_HELP: Record<string, string> = {
     "Read the recorded observe window (.kit-audit.jsonl) and report whether it's safe to flip exec-broker to enforce: ready | would-block (+ exactly what breaks) | untested (--gate fails CI on any not-ready verdict)",
   "broker enforce":
     "Guided observe→enforce flip: readiness pre-flight (refuses unless ready; --force overrides), set [scope].enforce_runtime = true, re-sign the profile scope, and audit the transition",
+  "browser doctor":
+    "Diagnose browser-verification readiness from [browser], selecting Playwright, system Chrome, CDP, or a blocker (--json)",
+  "browser status": "Print the selected browser strategy and top-level verdict (--json)",
+  "browser cdp-url": "Print the detected Chrome DevTools Protocol URL, if one is configured or reachable (--json)",
+  "browser playwright-env": "Print shell exports for browser test runners (--json emits the same env object)",
   "memory index": "Index every supported agent transcript into the SQLite memory store",
   "memory search":
     "Full-text search memory (current project; --global for all; --fresh = recency-aware ranking)",

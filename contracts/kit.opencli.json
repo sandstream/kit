@@ -184,6 +184,48 @@
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
+    "browser": {
+      "commands": {
+        "cdp-url": {
+          "kind": "command",
+          "summary": "Print the detected Chrome DevTools Protocol URL, if one is configured or reachable (--json)",
+          "x-kit-args-modeled": false,
+          "x-kit-audience": "all",
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "doctor": {
+          "kind": "command",
+          "summary": "Diagnose browser-verification readiness from [browser], selecting Playwright, system Chrome, CDP, or a blocker (--json)",
+          "x-kit-args-modeled": false,
+          "x-kit-audience": "all",
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "playwright-env": {
+          "kind": "command",
+          "summary": "Print shell exports for browser test runners (--json emits the same env object)",
+          "x-kit-args-modeled": false,
+          "x-kit-audience": "all",
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
+        "status": {
+          "kind": "command",
+          "summary": "Print the selected browser strategy and top-level verdict (--json)",
+          "x-kit-args-modeled": false,
+          "x-kit-audience": "all",
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        }
+      },
+      "kind": "group",
+      "summary": "Browser-verification diagnostics: select Playwright/system Chrome/CDP strategy from [browser] without guessing (doctor|status|cdp-url|playwright-env; --json)",
+      "x-kit-args-modeled": false,
+      "x-kit-audience": "all",
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
     "check": {
       "commands": {
         "compare": {
@@ -1131,7 +1173,7 @@
     "binary": "kit",
     "summary": "Deterministic, local-first developer-environment manager and fail-closed governance layer for AI agents and humans.",
     "title": "kit",
-    "version": "6.6.0"
+    "version": "6.6.1"
   },
   "opencliVersion": "1.0.0-alpha.12"
 }

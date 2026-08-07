@@ -132,6 +132,21 @@ export interface DeployConfig {
   vercel?: DeployVercelConfig;
 }
 
+export interface BrowserConfig {
+  /** Repo-relative app directory, informational for diagnostics and future test runners. */
+  app?: string;
+  /** Shell command a human/CI uses to start the app server. kit does not run it in doctor. */
+  start?: string;
+  /** Shell command for a browser-verification build. Not run by doctor. */
+  build?: string;
+  /** Playwright spec path for browser verification. */
+  routes?: string;
+  /** App-server port. Required when [browser] is declared. */
+  port?: number;
+  /** Optional Chrome DevTools Protocol endpoint. Env KIT_BROWSER_CDP_URL wins. */
+  cdp_url?: string;
+}
+
 export interface AgentConfigUserRulesConfig {
   enabled?: boolean;
   /** User-level source. File, or directory of sorted *.md files. Supports ~/ expansion. */
@@ -426,6 +441,8 @@ export interface kitConfig {
   hooks?: HooksConfig;
   /** Declarative deploy env-name matrix per platform/project/environment. */
   deploy?: DeployConfig;
+  /** Browser-verification capability declaration; kit owns local browser diagnostics. */
+  browser?: BrowserConfig;
   /** Rules-file generation options for `kit agent-config`. */
   agent_config?: AgentConfigConfig;
   /** Per-project CLI context lock (account+project per tool). */
@@ -749,6 +766,7 @@ export const KNOWN_SECTIONS = new Set([
   "governance",
   "hooks",
   "deploy",
+  "browser", // [browser] — browser-verification app/server/browser declaration
   "agent_config",
   "web",
   "setup",
@@ -773,6 +791,17 @@ export const kitConfigSchema = z
     governance: GovernanceConfigSchema.optional(),
     hooks: HooksConfigSchema,
     deploy: DeployConfigSchema,
+    browser: z
+      .object({
+        app: z.string().optional(),
+        start: z.string().optional(),
+        build: z.string().optional(),
+        routes: z.string().optional(),
+        port: z.number().int().positive().optional(),
+        cdp_url: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
     agent_config: AgentConfigSchema,
     context: z
       .object({

@@ -34,8 +34,8 @@ without needing to know kit internals.
 
 ## Consequences
 
-- Do not build `kit grill`, `kit to-spec`, `kit to-tickets`, `kit implement`, or
-  similar workflow commands in kit core.
+- Do not add core workflow commands named `grill`, `to-spec`, `to-tickets`,
+  `implement`, or similar.
 - Do build deterministic support for skills: source adapters, triage, pinning,
   lock verification, placement, liveness checks, `kit skill test`, profile
   declarations, and machine-readable receipts.

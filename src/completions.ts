@@ -21,6 +21,7 @@ const COMMANDS = [
   "doctor",
   "env",
   "ci",
+  "browser",
   "mcp",
   "whoami",
   "version",
@@ -100,6 +101,10 @@ _kit_completions() {
           ;;
         ci)
           COMPREPLY=( \$(compgen -W "--format= --fail-on-warning --json --non-interactive" -- "\$cur") )
+          return 0
+          ;;
+        browser)
+          COMPREPLY=( \$(compgen -W "doctor status cdp-url playwright-env --json" -- "\$cur") )
           return 0
           ;;
         completions)
@@ -190,6 +195,9 @@ ${adapters}
             '--format=[Output format]:format:(github gitlab json text)' \\
             '--fail-on-warning[Treat warnings as failures]'
           ;;
+        browser)
+          _arguments '2: :(doctor status cdp-url playwright-env)' '--json[Machine-readable output]'
+          ;;
         completions)
           _arguments '2: :(bash zsh fish)'
           ;;
@@ -238,6 +246,9 @@ complete -c kit -n "__fish_seen_subcommand_from secrets" -a "sync" -d "Push secr
 # kit env <subcommand>
 complete -c kit -n "__fish_seen_subcommand_from env" -a "list" -d "List configured environments"
 
+# kit browser <subcommand>
+complete -c kit -n "__fish_seen_subcommand_from browser" -a "doctor status cdp-url playwright-env" -d "Browser verification diagnostics"
+
 # kit ci flags
 complete -c kit -n "__fish_seen_subcommand_from ci" -l format -a "github gitlab json text" -d "Output format"
 complete -c kit -n "__fish_seen_subcommand_from ci" -l fail-on-warning -d "Treat warnings as failures"
@@ -278,6 +289,7 @@ function getCommandDesc(cmd: string): string {
     doctor: "Deep diagnostics",
     env: "Environment info",
     ci: "CI-native check",
+    browser: "Browser verification diagnostics",
     mcp: "Start MCP server",
     whoami: "Show agent identity",
     version: "Print version",

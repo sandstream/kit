@@ -33,6 +33,10 @@
 | `kit check compare <before.json> <after.json> [--json] [--fail-on-worse]` | Diff two `kit check --json` runs. **Lost coverage ranks above a regression** — a check that stopped running makes its finding *unknown*, not fixed, so `fail → skip` is never read as an improvement. Pure function of the two files; no scan is run. Reports by default; `--fail-on-worse` exits non-zero on lost coverage, a disappeared check, or a regression. |
 | `kit config migrate [--dry-run] [--check] [--force]`      | Migrate `.kit.toml` to the current schema `version` (`CONFIG_SCHEMA_VERSION`). `--dry-run` (default) prints the plan + value diff and writes nothing; a real run backs up to `.kit.toml.backup`, re-validates, and restores on any failure; `--check` exits non-zero on a stale config (CI). v0→v1 only stamps the version (baseline no-op).                         |
 | `kit coverage [--standard=<key>\|all] [--list-standards] [--json]` | **Evidence maps** that bucket kit's checks/rules per control as auto-verified / gap / manual / n-a, across 8 pinned standards: ASVS 4.0.3 L2 (default), OWASP LLM/Agentic/MCP Top 10, NIST SSDF 800-218A, NIST 800-53 Rev. 5 (control-family level), AIUC-1, GCP WAF Security. Evidence, **not** a compliance attestation (never claims "compliant"); `--json` for GRC tools. `experimental`. |
+| `kit browser doctor [--json]`                         | Diagnose browser-verification readiness from `[browser]`, selecting project Playwright, system Chrome, CDP, or a blocker with one human action. `experimental`.                                                                                                                                                                                                   |
+| `kit browser status [--json]`                         | Short status/strategy summary for browser verification.                                                                                                                                                                                                                                                                                                           |
+| `kit browser cdp-url [--json]`                        | Print the selected Chrome DevTools Protocol URL when one is configured or reachable.                                                                                                                                                                                                                                                                               |
+| `kit browser playwright-env [--json]`                 | Print shell exports (`KIT_BROWSER_STRATEGY`, `KIT_BROWSER_CDP_URL`, `PLAYWRIGHT_BROWSERS_PATH`) for browser test runners.                                                                                                                                                                                                                                          |
 | `kit health [--json]`                                     | Deep environment health diagnostics — granular pass/fail across tools, services, and config (more detail than `check`).                                                                                                                                                                                                                                              |
 | `kit status [--json]`                                     | Adoption checklist — which subsystems are set up (config, vault, tools, gitignore hygiene, dependency policy, agent-config, memory, hooks) + the next step for each gap.                                                                                                                                                                                             |
 | `kit install`                                             | Install missing tools declared in `[tools]` via mise.                                                                                                                                                                                                                                                                                                                |
@@ -44,6 +48,20 @@
 | `kit upgrade`                                             | Refresh lockfiles from `.kit.toml`.                                                                                                                                                                                                                                                                                                                                  |
 | `kit doctor`                                              | Diagnostic sweep — config drift + CLI version skew + OS-containment posture (container/seccomp/user-ns + gVisor/Firecracker fingerprints; honest `unknown` off-Linux). `[governance.containment] require = true` makes it a fail-closed gate.                                                                                                                          |
 | `kit clone <url>`                                         | Clone + setup in one step (skip setup with `--no-setup`).                                                                                                                                                                                                                                                                                                            |
+
+### Browser declaration
+
+`kit browser` reads only `.kit.toml` and local machine facts. Repo declares the
+app-server contract; kit owns browser strategy and diagnostics.
+
+```toml
+[browser]
+app = "apps/frontend"
+start = "npm --workspace apps/frontend run start"
+build = "npm --workspace apps/frontend run build"
+routes = "apps/frontend/e2e/static-routes.spec.ts"
+port = 3107
+```
 
 ## Code quality + reviews
 

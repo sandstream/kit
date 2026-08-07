@@ -14,7 +14,7 @@
  */
 import { DatabaseSync } from "node:sqlite";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import type { MemoryStats, MessageInput, SearchHit, SessionInput, ToolUseInput } from "./types.js";
@@ -58,8 +58,7 @@ export function getMemoryDbPath(): string {
   return process.env.KIT_MEMORY_DB ?? join(getMemoryDir(), "memory.db");
 }
 
-export function ensureMemoryDir(): void {
-  const dir = getMemoryDir();
+export function ensureMemoryDir(dir = getMemoryDir()): void {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
@@ -287,7 +286,7 @@ export function openMemoryDb(
   opts: { defaultClass?: MemoryClass } = {},
 ): DatabaseSync {
   const dbPath = path ?? getMemoryDbPath();
-  if (dbPath !== ":memory:") ensureMemoryDir();
+  if (dbPath !== ":memory:") ensureMemoryDir(dirname(dbPath));
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA busy_timeout = 5000");
@@ -314,6 +313,15 @@ export function openMemoryDb(
     }
   }
   return db;
+}
+
+/**
+ * Open the memory DB for scanner/read paths only. This deliberately does not
+ * create, chmod, or migrate ~/.kit: sandboxed checks must not fail because a
+ * read-only verification tried to mutate machine-local memory state.
+ */
+export function openMemoryDbReadOnly(path: string = getMemoryDbPath()): DatabaseSync {
+  return new DatabaseSync(path, { readOnly: true });
 }
 
 /** Has this file already been indexed at exactly this mtime + size? (incremental index) */

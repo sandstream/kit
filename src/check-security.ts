@@ -240,18 +240,18 @@ export async function checkGateLiveness(cwd?: string): Promise<SecurityCheckResu
  * If the store can't be opened/scanned that is a scanner-health failure (`didNotRun`,
  * fails strict by default) — never a silent pass. No store → honest skip.
  */
-async function checkMemoryInjection(): Promise<SecurityCheckResult> {
+export async function checkMemoryInjection(): Promise<SecurityCheckResult> {
   const name = "memory injection";
   const category = "secrets" as const;
   const { existsSync } = await import("node:fs");
-  const { getMemoryDbPath, openMemoryDb } = await import("./memory/db.js");
+  const { getMemoryDbPath, openMemoryDbReadOnly } = await import("./memory/db.js");
   const path = getMemoryDbPath();
   if (!existsSync(path)) {
     return { category, name, status: "skip", detail: "no memory store to scan" };
   }
   let db: import("node:sqlite").DatabaseSync;
   try {
-    db = openMemoryDb(path);
+    db = openMemoryDbReadOnly(path);
   } catch (e) {
     return {
       category,
@@ -259,7 +259,7 @@ async function checkMemoryInjection(): Promise<SecurityCheckResult> {
       status: "warn",
       severity: "high",
       didNotRun: true,
-      detail: `could not open memory store to scan for injection: ${(e as Error).message}`,
+      detail: `could not read memory store to scan for injection: ${(e as Error).message}`,
     };
   }
   try {
