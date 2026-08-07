@@ -37,7 +37,7 @@ export async function cmdGuardObserve(): Promise<boolean> {
     const { parseInstallCommand, decideBashGate } = await import("../install-gate.js");
     const probe = parseInstallCommand(command);
     if (!probe.isInstall) return true; // non-install invocation — no signal, no noise
-    const verdict = await decideBashGate(command);
+    const verdict = await decideBashGate(command, undefined, process.cwd());
     appendObservation({
       ts: new Date().toISOString(),
       cwd: process.cwd(),

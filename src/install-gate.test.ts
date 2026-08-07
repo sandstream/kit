@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   parseInstallCommand,
   decideBashGate,
@@ -85,6 +88,15 @@ describe("parseInstallCommand — detection", () => {
     assert.deepEqual(refs("npx create-react-app"), ["npm:create-react-app"]);
     assert.deepEqual(refs("npx -y cowsay"), ["npm:cowsay"]);
     assert.deepEqual(refs("bunx vite"), ["npm:vite"]);
+  });
+
+  it("a plain npx/bunx positional is tracked as a local-.bin shadow candidate", () => {
+    assert.deepEqual(parseInstallCommand("npx tsc --noEmit").runnerBinCandidates, ["tsc"]);
+    assert.deepEqual(parseInstallCommand("bunx vite build").runnerBinCandidates, ["vite"]);
+    // a -p/--package REPLACE target is not locally shadowable — npx always fetches it
+    assert.deepEqual(parseInstallCommand("npx -p evil cowsay").runnerBinCandidates, []);
+    // installer-style adds are not runner shadow candidates either
+    assert.deepEqual(parseInstallCommand("npm install tsc").runnerBinCandidates, []);
   });
 
   it("pip / pip3 / pipx / uv / python -m pip", () => {
@@ -804,5 +816,57 @@ describe("decideBashGate — decision", () => {
   it("local-only install neither blocks nor triages", async () => {
     const v = await decideBashGate("pip install -e .", fakeDeps());
     assert.equal(v.block, false);
+  });
+});
+
+describe("decideBashGate — local node_modules/.bin shadowing (npx tsc case)", () => {
+  it("skips triage for a plain `npx <name>` when a local .bin/<name> exists", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-localbin-"));
+    try {
+      mkdirSync(join(dir, "node_modules", ".bin"), { recursive: true });
+      writeFileSync(join(dir, "node_modules", ".bin", "tsc"), "#!/bin/sh\n");
+      let triaged = false;
+      const deps: GateDeps = {
+        runTriage: async (type, target) => {
+          triaged = true;
+          return { type, target, passed: false, output: "TRIAGE FAILED" };
+        },
+      };
+      const v = await decideBashGate("npx tsc --noEmit", deps, dir);
+      assert.equal(triaged, false, "must not triage a locally-shadowed binary at all");
+      assert.equal(v.block, false);
+      assert.equal(v.checked.length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still triages when no local .bin/<name> exists at cwd", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-localbin-"));
+    try {
+      const v = await decideBashGate("npx tsc --noEmit", fakeDeps(["tsc"]), dir);
+      assert.equal(v.block, true, "no local shadow — the (unrelated, abandoned) registry tsc is still gated");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("without a cwd argument, behavior is unchanged (always triages)", async () => {
+    const v = await decideBashGate("npx tsc --noEmit", fakeDeps(["tsc"]));
+    assert.equal(v.block, true);
+  });
+
+  it("does not shadow a `-p`/--package replace-flag target — only the plain positional", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-localbin-"));
+    try {
+      mkdirSync(join(dir, "node_modules", ".bin"), { recursive: true });
+      // A local `cowsay` binary exists, but `-p evil` REPLACES the fetched package —
+      // npx fetches `evil` regardless of what's in .bin, so it must still be gated.
+      writeFileSync(join(dir, "node_modules", ".bin", "evil"), "#!/bin/sh\n");
+      const v = await decideBashGate("npx -p evil cowsay", fakeDeps(["evil"]), dir);
+      assert.equal(v.block, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

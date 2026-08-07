@@ -44,7 +44,7 @@ export async function cmdGateBash(): Promise<boolean> {
   if (!command) {
     return true; // no shell command in this tool call → allow
   }
-  const verdict = await decideBashGate(command);
+  const verdict = await decideBashGate(command, undefined, process.cwd());
   if (verdict.block) {
     // Cline blocks via a stdout JSON {cancel:true} contract (HookOutputSchema),
     // NOT exit 2 — so `--format cline` emits that and exits 0; every other agent

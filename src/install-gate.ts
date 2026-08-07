@@ -19,6 +19,8 @@
  * honest scope limit, documented as such. Within scope it is FAIL-CLOSED: an
  * install whose target we cannot reduce to a clean registry name is blocked.
  */
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { gateInstall, type GateVerdict, type GateDeps } from "./triage-gate.js";
 
 export interface InstallProbe {
@@ -28,6 +30,17 @@ export interface InstallProbe {
   refs: string[];
   /** Covered-ecosystem install args we could not reduce to a clean ref (fail-closed → block). */
   unverifiable: string[];
+  /**
+   * Bare npm names behind a `npm:<name>[@version]` ref that came from a plain
+   * `npx <name>`-shaped RUNNER invocation (no `-p`/`--package`/`--spec`/`--from`
+   * replace-flag). npx resolves a plain positional from a LOCAL
+   * `node_modules/.bin/<name>` before ever touching the registry — a ref here is
+   * only a real fetch when no such local binary exists. `decideBashGate` uses
+   * this + `cwd` to drop the ref instead of triaging an irrelevant registry
+   * package (a local `typescript` devDependency's `tsc` vs. npm's unrelated,
+   * abandoned `tsc` package is the motivating case).
+   */
+  runnerBinCandidates: string[];
 }
 
 /** Shell operators that separate independent commands in one Bash string. */
@@ -669,7 +682,12 @@ const MATCHERS: Matcher[] = [
  * target is neither a clean name nor a local path is `unverifiable` (→ block).
  */
 export function parseInstallCommand(command: string): InstallProbe {
-  const probe: InstallProbe = { isInstall: false, refs: [], unverifiable: [] };
+  const probe: InstallProbe = {
+    isInstall: false,
+    refs: [],
+    unverifiable: [],
+    runnerBinCandidates: [],
+  };
   if (!command || typeof command !== "string") return probe;
 
   // Scan the command AND any commands hidden in $(…)/backticks/`-c '…'`, bounded
@@ -706,6 +724,7 @@ export function parseInstallCommand(command: string): InstallProbe {
   // De-dup (npm i a a, or a && a).
   probe.refs = [...new Set(probe.refs)];
   probe.unverifiable = [...new Set(probe.unverifiable)];
+  probe.runnerBinCandidates = [...new Set(probe.runnerBinCandidates)];
   return probe;
 }
 
@@ -894,6 +913,21 @@ function applyMatcher(
     const repoRef = repoFetcherRef(targets[0], pos.slice(start + 1));
     if (repoRef) probe.refs.push(repoRef);
   }
+  // A plain `npx <name> …` positional (no -p/--package/--spec/--from replace-flag,
+  // no `exec -c`) is what resolveTargets took targets[0] FROM — npx resolves that
+  // exact shape from a local node_modules/.bin before the registry. Track it as a
+  // candidate for the local-binary skip in `decideBashGate`.
+  if (
+    m.single &&
+    m.scheme === "npm" &&
+    !m.pkgFlagOnly &&
+    targets.length > 0 &&
+    replacePackageFlags(tokens).length === 0 &&
+    !hasExecCallFlag(tokens)
+  ) {
+    const bare = npmName(targets[0]);
+    if (bare) probe.runnerBinCandidates.push(bare);
+  }
   return true;
 }
 
@@ -951,12 +985,33 @@ export interface BashGateVerdict {
   checked: GateVerdict[];
 }
 
+/** Does `<cwd>/node_modules/.bin/<name>` exist? Exactly what a plain `npx <name>`
+ *  resolves to before ever touching the registry. */
+function hasLocalBin(cwd: string, name: string): boolean {
+  if (existsSync(join(cwd, "node_modules", ".bin", name))) return true;
+  return process.platform === "win32" && existsSync(join(cwd, "node_modules", ".bin", `${name}.cmd`));
+}
+
+/** True when `ref` (`npm:<name>[@version]`) names exactly `bare` — not merely a prefix
+ *  (`npm:tsc-x` must not match `bare = "tsc"`). The version suffix always starts `@`,
+ *  and a bare scoped name (`@scope/pkg`) never collides with that. */
+function refIsBareName(ref: string, bare: string): boolean {
+  const prefix = `npm:${bare}`;
+  return ref === prefix || ref.startsWith(`${prefix}@`);
+}
+
 /**
  * Decide whether a Bash command should be blocked: triage every in-scope install
  * target via `gateInstall`. Fail-closed — any blocked target, or any
- * unverifiable in-scope arg, blocks the whole command.
+ * unverifiable in-scope arg, blocks the whole command. `cwd` (when known) drops a
+ * plain `npx <name>` ref that a local `node_modules/.bin/<name>` shadows — npx
+ * runs that local binary, never touching the registry package of the same name.
  */
-export async function decideBashGate(command: string, deps?: GateDeps): Promise<BashGateVerdict> {
+export async function decideBashGate(
+  command: string,
+  deps?: GateDeps,
+  cwd?: string,
+): Promise<BashGateVerdict> {
   const probe = parseInstallCommand(command);
   if (!probe.isInstall) {
     return { block: false, reason: "no in-scope package install detected", checked: [] };
@@ -968,8 +1023,12 @@ export async function decideBashGate(command: string, deps?: GateDeps): Promise<
       checked: [],
     };
   }
+  const shadowed = cwd
+    ? probe.runnerBinCandidates.filter((name) => hasLocalBin(cwd, name))
+    : [];
+  const refs = probe.refs.filter((ref) => !shadowed.some((name) => refIsBareName(ref, name)));
   const checked: GateVerdict[] = [];
-  for (const ref of probe.refs) {
+  for (const ref of refs) {
     const v = deps ? await gateInstall(ref, deps) : await gateInstall(ref);
     checked.push(v);
     if (v.decision === "blocked") {
