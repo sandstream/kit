@@ -21,6 +21,46 @@ build-and-governance pipeline that takes a skill from any source, governs it
 In one line: **kit is a source-agnostic, target-agnostic skill build and governance
 layer. Marketplaces and runtimes are just endpoints.**
 
+## Operating split: kit and workflow skills
+
+External workflow skills, including `mattpocock/skills`, sit **above** kit. They
+teach the agent how to work: grill an idea, model a domain, write a spec, split
+tickets, run TDD, diagnose a bug, review a diff, or hand work to another session.
+kit sits **below** them as the deterministic floor: the commands, receipts, locks,
+and gates those workflows call when they need facts or enforcement.
+
+The split is intentionally asymmetric:
+
+| Belongs in kit | Belongs in workflow skills |
+| --- | --- |
+| Deterministic pass/fail checks | Interviews, coaching, and planning |
+| Secret, policy, supply-chain, audit, and hook gates | Spec, ticket, and handoff prose |
+| Lockfiles, hashes, signatures, receipts, and drift checks | Design judgement and domain modeling |
+| Cross-runtime placement and liveness verification | TDD/debug/review process discipline |
+| Machine-readable context (`--json`, OpenCLI, MCP tools) | Choosing when to call kit |
+
+Deletion test: if moving a behavior out of kit would reintroduce unverifiable
+security or setup work across many skills, it belongs in kit. If moving it into
+kit would require a model-shaped judgement or freeze a team's working style, it
+belongs in a skill.
+
+Workflow skills should use kit as a small, stable interface:
+
+```text
+start:       kit context --json
+recall:      kit memory search <topic>
+preflight:   kit check --category services,secrets,hooks
+new deps:    kit triage / kit pkg
+secrets:     kit secrets set <KEY> --stdin
+repo slice:  kit map <path> --json
+finish:      kit check --category security,tests,standards
+large diff:  kit review --json
+durable why: kit memory share --area <area> --kind decision|convention|abandoned|idea
+```
+
+This keeps `mattpocock/skills` style workflows compatible with kit without
+vendoring those workflows into kit core.
+
 ## Layers (and the two meanings of "plugin")
 
 Three layers, top is closest to the running agent:
