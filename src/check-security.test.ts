@@ -18,10 +18,18 @@ import {
   LOCKFILE_ECOSYSTEMS,
   type SecurityCheckResult,
 } from "./check-security.js";
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openMemoryDb } from "./memory/db.js";
+import { insertMessage, openMemoryDb, upsertSession } from "./memory/db.js";
 
 describe("gateStatus — scanner-health strict by default", () => {
   const r = (over: Partial<SecurityCheckResult>): SecurityCheckResult => ({
@@ -202,7 +210,7 @@ describe("checkMemoryHooksLiveness (R5 — self-playing loop gate)", () => {
 });
 
 describe("checkMemoryInjection", () => {
-  it("scans read-only without chmodding the machine-local memory directory", async () => {
+  it("scans read-only when WAL sidecars cannot be created", async () => {
     if (process.platform === "win32") return;
 
     const dir = mkdtempSync(join(tmpdir(), "kit-memory-security-"));
@@ -210,14 +218,26 @@ describe("checkMemoryInjection", () => {
     const prevDb = process.env.KIT_MEMORY_DB;
     try {
       const db = openMemoryDb(dbPath);
+      upsertSession(db, { sessionId: "s1", harness: "codex" });
+      insertMessage(db, {
+        uuid: "m1",
+        sessionId: "s1",
+        type: "user",
+        content: "ordinary note",
+      });
+      db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
       db.close();
-      chmodSync(dir, 0o755);
+      rmSync(`${dbPath}-wal`, { force: true });
+      rmSync(`${dbPath}-shm`, { force: true });
+      chmodSync(dir, 0o500);
 
       process.env.KIT_MEMORY_DB = dbPath;
       const result = await checkMemoryInjection();
 
-      assert.equal(result.status, "skip");
-      assert.equal(statSync(dir).mode & 0o777, 0o755);
+      assert.equal(result.status, "pass");
+      assert.equal(statSync(dir).mode & 0o777, 0o500);
+      assert.equal(existsSync(`${dbPath}-wal`), false);
+      assert.equal(existsSync(`${dbPath}-shm`), false);
     } finally {
       if (prevDb === undefined) delete process.env.KIT_MEMORY_DB;
       else process.env.KIT_MEMORY_DB = prevDb;

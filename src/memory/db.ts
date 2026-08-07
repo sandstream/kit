@@ -15,6 +15,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import type { MemoryStats, MessageInput, SearchHit, SessionInput, ToolUseInput } from "./types.js";
@@ -321,7 +322,26 @@ export function openMemoryDb(
  * read-only verification tried to mutate machine-local memory state.
  */
 export function openMemoryDbReadOnly(path: string = getMemoryDbPath()): DatabaseSync {
-  return new DatabaseSync(path, { readOnly: true });
+  if (path === ":memory:") return new DatabaseSync(path);
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    db.prepare("SELECT name FROM sqlite_master LIMIT 1").get();
+    return db;
+  } catch (err) {
+    try {
+      db.close();
+    } catch {
+      /* best-effort close */
+    }
+    const sidecarsMissing = !existsSync(`${path}-wal`) && !existsSync(`${path}-shm`);
+    if (sidecarsMissing && /unable to open database file/i.test((err as Error).message)) {
+      const uri = pathToFileURL(path);
+      uri.searchParams.set("mode", "ro");
+      uri.searchParams.set("immutable", "1");
+      return new DatabaseSync(uri.href);
+    }
+    throw err;
+  }
 }
 
 /** Has this file already been indexed at exactly this mtime + size? (incremental index) */
