@@ -3,7 +3,7 @@
  * Wraps the Python triage script and integrates with kit's check-security system.
  */
 
-import { access, cp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -35,21 +35,64 @@ const KIT_VERSION = (() => {
   }
 })();
 
+/** Write `content` to `destPath` via a same-directory tmp file + rename — atomic on the
+ *  same filesystem, so a concurrent reader of `destPath` (another process mid-`runTriage`)
+ *  always sees either the complete old file or the complete new one, never a partial write.
+ *  The tmp name carries pid AND a random suffix — pid alone collides between concurrent
+ *  calls in the SAME process (e.g. several awaited in one `Promise.all`), where one
+ *  caller's rename would steal the tmp file out from under another's. */
+async function writeFileAtomic(destPath: string, content: string | Buffer): Promise<void> {
+  const unique = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+  const tmp = resolve(dirname(destPath), `.${basenameOf(destPath)}.kit-tmp-${unique}`);
+  try {
+    await writeFile(tmp, content);
+    await rename(tmp, destPath);
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+function basenameOf(p: string): string {
+  return p.split("/").pop() ?? p;
+}
+
 /**
  * Self-bootstrap the gate: copy the triage skill kit ships with into
  * ~/.claude/skills/triage. Copying kit's OWN bundled, provenance-published asset
  * is not a third-party install, so it does not itself need triage. Returns true
  * if the script is in place afterwards.
+ *
+ * `runTriage` executes `scripts/triage.py` directly, and a kit self-upgrade
+ * mid-session (this session did several) makes `installedSkillIsCurrent()` false
+ * on every subsequent triage call until the copy refreshes — so a burst of
+ * concurrent triage calls (e.g. several MCP servers starting at once, each
+ * spawning its own `kit guard-observe`/`gate-bash` subprocess) can all try to
+ * refresh it simultaneously. A plain recursive `cp` truncates-then-writes each
+ * file in place; a concurrent `python3 scripts/triage.py` reading that same file
+ * mid-copy sees a partial script and crashes — a transient, unreproducible
+ * "TRIAGE FAILED" with no real verdict behind it. The two files that matter (the
+ * executed script + the version marker that gates whether it needs refreshing)
+ * are written via `writeFileAtomic` — as is SKILL.md: `cp()`'s own overwrite path
+ * unlinks the destination before writing, which throws ENOENT when two concurrent
+ * calls both try to unlink the copy the other just removed (found by testing this
+ * fix under real concurrency, not theorized).
  */
 export async function installBundledTriageSkill(
   targetDir: string = TRIAGE_SKILL_DIR,
 ): Promise<boolean> {
   try {
-    await mkdir(dirname(targetDir), { recursive: true });
-    await cp(BUNDLED_TRIAGE_SKILL, targetDir, { recursive: true });
+    const scriptsDir = resolve(targetDir, "scripts");
+    await mkdir(scriptsDir, { recursive: true });
+    const skillDoc = await readFile(resolve(BUNDLED_TRIAGE_SKILL, "SKILL.md"));
+    await writeFileAtomic(resolve(targetDir, "SKILL.md"), skillDoc);
+    const script = await readFile(resolve(BUNDLED_TRIAGE_SKILL, "scripts/triage.py"));
+    await writeFileAtomic(resolve(scriptsDir, "triage.py"), script);
     await access(resolve(targetDir, "scripts/triage.py"));
-    // Stamp the version so a later kit upgrade knows to refresh this copy.
-    await writeFile(resolve(targetDir, ".kit-skill-version"), KIT_VERSION, "utf-8");
+    // Stamp the version LAST — until this lands, installedSkillIsCurrent() stays
+    // false and a concurrent caller re-attempts the refresh instead of trusting a
+    // half-updated copy (script renamed, marker not yet current).
+    await writeFileAtomic(resolve(targetDir, ".kit-skill-version"), KIT_VERSION);
     return true;
   } catch {
     return false;

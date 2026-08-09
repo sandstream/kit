@@ -1,8 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, access, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, readdir, access, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   runTriage,
   parseTriageOutput,
@@ -231,6 +232,37 @@ describe("installBundledTriageSkill (self-bootstrapping the gate)", () => {
       // the freshly-installed script carries the current version-resolver logic
       const py = await readFile(resolve(target, "scripts/triage.py"), "utf8");
       assert.match(py, /_resolve_npm_spec/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("concurrent refreshes of an already-installed copy never corrupt triage.py", async () => {
+    // Regression for the MCP-startup-burst false positives: several agents starting at
+    // once each spawn their own guard-observe/gate-bash subprocess, and after a kit
+    // self-upgrade EVERY one of them finds the installed copy stale and refreshes it
+    // simultaneously. A plain recursive `cp` truncates-then-writes in place, so a
+    // concurrent `python3 scripts/triage.py` could read a partial file mid-copy.
+    const dir = await mkdtemp(join(tmpdir(), "kit-triage-"));
+    const target = resolve(dir, ".claude/skills/triage");
+    try {
+      await installBundledTriageSkill(target); // seed a first, already-current copy
+      const results = await Promise.all(
+        Array.from({ length: 8 }, () => installBundledTriageSkill(target)),
+      );
+      assert.deepEqual(results, results.map(() => true));
+      const py = await readFile(resolve(target, "scripts/triage.py"), "utf8");
+      const testFileDir = dirname(fileURLToPath(import.meta.url));
+      const source = await readFile(
+        resolve(testFileDir, "..", "skills/triage/scripts/triage.py"),
+        "utf8",
+      );
+      assert.equal(py, source, "must be byte-identical to the bundled source — never partial");
+      // no leftover .kit-tmp-<pid> file from any of the 9 concurrent writers
+      const leftovers = (await readdir(resolve(target, "scripts"))).filter((f) =>
+        f.includes(".kit-tmp-"),
+      );
+      assert.deepEqual(leftovers, []);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
