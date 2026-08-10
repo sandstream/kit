@@ -4,7 +4,7 @@
 // also differs across shells), and invoke `node --test`. No external dep.
 import { spawnSync } from "node:child_process";
 import { readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 const env = {
   ...process.env,
@@ -53,6 +53,24 @@ function collectWorkspaceTests() {
 const files = [...collect("dist"), ...collectWorkspaceTests()];
 if (files.length === 0) {
   console.error("no dist/**/*.test.js files found");
+  process.exit(1);
+}
+
+// This repo can live in a synced folder (iCloud Drive), where a conflicted file gains a
+// ` 2` twin. A twin under dist/ is a STALE compiled test: it runs old assertions against
+// new code, so it can fail a correct change or pass a broken one. Refuse to report a
+// verdict we can't trust — a clean rebuild deletes them (clean-dist wipes dist/).
+// Imported dynamically: it lives in dist/, so the friendly "run npm run build first"
+// check above must get to run before this resolves.
+const { isSyncDuplicateName } = await import("../dist/utils/sync-duplicate.js");
+const stale = files.filter((f) => isSyncDuplicateName(basename(f)));
+if (stale.length > 0) {
+  console.error(
+    `refusing to run: ${stale.length} cloud-sync duplicate test file(s) under dist/ —\n` +
+      stale.map((f) => `  ${f}`).join("\n") +
+      `\nThese are stale copies of compiled tests; their assertions no longer match src/.` +
+      `\nFix: npm run build   (clean-dist removes dist/ first)`,
+  );
   process.exit(1);
 }
 
