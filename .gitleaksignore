@@ -1,0 +1,10 @@
+# gitleaks fingerprint allowlist — one line per accepted historical finding.
+# Format: <commit>:<path>:<rule>:<line>. Scoped to a single commit by construction, so
+# it can never wave through a NEW occurrence of the same string.
+#
+# d9f55af briefly held GitHub's own documented example PAT as a literal in
+# src/check-security.ts, in the allowlist of doc sample tokens the secrets classifier
+# recognises. The literal was replaced with its SHA-256 digest in the following commit
+# (the working tree is clean), but the blob stays in history. The token is GitHub's
+# published, long-dead documentation sample — nothing to rotate.
+d9f55afc26db3ed604946b44edf224c293405d3f:src/check-security.ts:github-pat:944

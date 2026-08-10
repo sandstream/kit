@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, access, readdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
@@ -940,8 +941,18 @@ const PLACEHOLDER_SECRETS = new Set([
   "xxx",
   "xxxx",
 ]);
-/** Sample tokens published in vendors' own docs — famous, dead, and everywhere. */
-const DOC_SAMPLE_SECRETS = new Set(["ghp_16C7e42F292c6912E7710c838347Ae178B4a1234"]);
+/**
+ * Sample tokens published in vendors' own docs — famous, dead, and everywhere.
+ *
+ * Held as SHA-256 digests, not literals: a literal sample PAT in a non-test source file
+ * is itself a `github-pat` hit for this repo's gitleaks job (it fired on exactly that,
+ * and it was right to). Digests keep the allowlist auditable — recompute with
+ * `printf %s '<token>' | shasum -a 256` — without shipping token-shaped bytes.
+ *   868034cf… = GitHub's documented example PAT (docs.github.com REST auth examples).
+ */
+const DOC_SAMPLE_SECRET_DIGESTS = new Set([
+  "868034cf6e8877d082cf2e61a4964c04affcbfd6abf8a8d0339ce3298636fa57",
+]);
 const LOOPBACK_HOST_RE = /^(localhost|127(?:\.\d{1,3}){3}|\[?::1\]?|0\.0\.0\.0)$/i;
 const RESERVED_HOST_RE = /\.(internal|local|localdomain|localhost|test|invalid|example)$/i;
 const EXAMPLE_DOMAIN_RE = /^(?:[a-z0-9-]+\.)*example\.(?:com|org|net)$/i;
@@ -951,7 +962,7 @@ const URI_CREDENTIAL_RE = /^[a-z][a-z0-9+.-]*:\/\/(?:([^:@/\s]+)(?::([^@/\s]*))?
 export function isExampleCredential(f: TrufflehogFinding): boolean {
   if (f.verified) return false; // a VERIFIED-LIVE credential is never waved through
   const raw = f.raw.trim();
-  if (DOC_SAMPLE_SECRETS.has(raw)) return true;
+  if (DOC_SAMPLE_SECRET_DIGESTS.has(createHash("sha256").update(raw).digest("hex"))) return true;
 
   const m = URI_CREDENTIAL_RE.exec(raw);
   if (!m) return false;

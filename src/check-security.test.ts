@@ -29,6 +29,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { insertMessage, openMemoryDb, upsertSession } from "./memory/db.js";
 
@@ -348,6 +349,19 @@ describe("example credentials (test fixtures / docs placeholders)", () => {
   const uri = (raw: string, verified = false) =>
     JSON.stringify({ DetectorName: "Postgres", Verified: verified, Raw: raw });
 
+  // The NEGATIVE fixtures below must look like a live credential — routable host, a
+  // high-entropy secret — or they'd prove nothing. Writing them as literals seeds this
+  // repo's own git history with exactly the strings its secrets gate is built to flag
+  // (it happened: three such literals turned the gate's own verdict back to warn). So
+  // they're derived at run time: deterministic, high-entropy, and never a token-shaped
+  // byte sequence in a committed file. `entropic("x")` is only a stable random-looking
+  // string — the value never mattered, only its shape.
+  const entropic = (seed: string, len: number) =>
+    createHash("sha256").update(`kit-fixture:${seed}`).digest("hex").slice(0, len);
+  const REAL_SHAPED_URI = `postgresql://svc_api:${entropic("pg", 12)}@db.acme-prod.io:5432`;
+  const REAL_SHAPED_IP_URI = `postgres://reporting:${entropic("ip", 10)}@10.4.2.9:5432`;
+  const REAL_SHAPED_PAT = `ghp_${entropic("pat", 36)}`;
+
   it("treats an unreachable host as an example credential", () => {
     // Unqualified single-label hosts (compose/k8s service names), loopback, and the
     // reserved dev suffixes cannot name a service on the public internet.
@@ -387,9 +401,9 @@ describe("example credentials (test fixtures / docs placeholders)", () => {
 
   it("leaves a real-looking credential on a routable host as a finding to review", () => {
     for (const raw of [
-      "postgresql://svc_api:8Fh2kdlsPQzR@db.acme-prod.io:5432",
-      "postgres://reporting:Xk29fjMs01@10.4.2.9:5432", // routable-shaped IP, real-shaped secret
-      "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
+      REAL_SHAPED_URI,
+      REAL_SHAPED_IP_URI, // routable-shaped IP, real-shaped secret
+      REAL_SHAPED_PAT, // a PAT that is not a published doc sample
     ]) {
       assert.strictEqual(isExampleCredential({ verified: false, raw }), false, raw);
     }
@@ -410,7 +424,7 @@ describe("example credentials (test fixtures / docs placeholders)", () => {
     const stdout = [
       uri("postgresql://user:pass@host:5432"),
       uri("postgres://app:S3cr3tPassw0rd@db.internal:5432"),
-      uri("postgresql://svc_api:8Fh2kdlsPQzR@db.acme-prod.io:5432"),
+      uri(REAL_SHAPED_URI),
     ].join("\n");
     assert.deepStrictEqual(classifyTrufflehogFindings(stdout), {
       verified: 0,
