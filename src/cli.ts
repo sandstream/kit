@@ -511,7 +511,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   statusline: {
     handler: cmdStatusline,
     stability: "stable",
-    help: "Compact one-line status (mode score · update · open PAL) for any agent's info bar — wire into Claude Code statusLine / a shell PS1",
+    help: "Compact one-line status (mode score · update · open PAL) for Claude Code statusLine / a shell PS1; Codex gets it via SessionStart context",
   },
   whoami: { handler: cmdWhoami, stability: "stable", help: "Show current agent / user identity" },
   check: {

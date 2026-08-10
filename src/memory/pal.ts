@@ -176,6 +176,12 @@ export interface PalListOptions {
    * nag your durable device. `kit memory pal list --all` sets this.
    */
   allDevices?: boolean;
+  /**
+   * Release abandoned claims before listing open work. Default true for normal
+   * read-write surfaces; read-only status surfaces disable this so they can render
+   * from sandboxed agents without mutating the memory store.
+   */
+  reapStale?: boolean;
 }
 
 /** A claim older than this with no release is treated as abandoned (the claimer
@@ -207,7 +213,7 @@ export function palList(db: DatabaseSync, opts: PalListOptions = {}): PendingAct
   const status = opts.status ?? "open";
   // Before listing the open work, resurface anything a crashed claimer abandoned —
   // otherwise a stale claim hides a blocked-on-you item from every default surface.
-  if (status === "open") reapStaleClaims(db);
+  if (status === "open" && opts.reapStale !== false) reapStaleClaims(db);
   const where: string[] = ["status = ?"];
   const params: unknown[] = [status];
   if (opts.scope !== undefined) {

@@ -51,6 +51,7 @@ interface MemoryHookDef {
   event: string;
   sub: string;
   timeout?: number;
+  statusMessage?: string;
 }
 
 const CLAUDE_MEMORY_HOOKS: MemoryHookDef[] = [
@@ -64,8 +65,17 @@ const CLAUDE_MEMORY_HOOKS: MemoryHookDef[] = [
 // fast path. Codex caps SessionEnd hooks at 3 seconds; the command only launches
 // a detached worker, but use the cap to tolerate slow process startup.
 const CODEX_MEMORY_HOOKS: MemoryHookDef[] = [
-  { event: "SessionEnd", sub: "session-end-codex", timeout: 3 },
-  { event: "SessionStart", sub: "session-start" },
+  {
+    event: "SessionEnd",
+    sub: "session-end-codex",
+    timeout: 3,
+    statusMessage: "kit memory: saving session",
+  },
+  {
+    event: "SessionStart",
+    sub: "session-start",
+    statusMessage: "kit memory: loading session context",
+  },
 ];
 
 // Codex renders every UserPromptSubmit stdout payload in the conversation UI.
@@ -170,6 +180,7 @@ interface HookCmd {
   type: string;
   command: string;
   timeout?: number;
+  statusMessage?: string;
 }
 interface HookGroup {
   matcher?: string;
@@ -253,10 +264,11 @@ function installHooksAtPath(
   const alreadyPresent: string[] = [];
   const updated: string[] = [];
   const retired = removeHookDefinitions(s, retiredDefinitions);
-  for (const { event, sub, timeout } of definitions) {
+  for (const { event, sub, timeout, statusMessage } of definitions) {
     const groups = (hooks[event] ??= []);
     const desired: HookCmd = { type: "command", command: `${prefix} ${hookSuffix(sub)}` };
     if (timeout !== undefined) desired.timeout = timeout;
+    if (statusMessage !== undefined) desired.statusMessage = statusMessage;
     const upgrade = refreshHookDefinition(groups, sub, desired);
     if (upgrade === "updated") {
       updated.push(event);
@@ -295,10 +307,16 @@ function refreshHookDefinition(
     for (const hook of group.hooks) {
       if (!hook.command.endsWith(suffix)) continue;
       found = true;
-      if (hook.command !== desired.command || hook.timeout !== desired.timeout) {
+      if (
+        hook.command !== desired.command ||
+        hook.timeout !== desired.timeout ||
+        hook.statusMessage !== desired.statusMessage
+      ) {
         hook.command = desired.command;
         if (desired.timeout === undefined) delete hook.timeout;
         else hook.timeout = desired.timeout;
+        if (desired.statusMessage === undefined) delete hook.statusMessage;
+        else hook.statusMessage = desired.statusMessage;
         changed = true;
       }
     }

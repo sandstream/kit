@@ -289,11 +289,11 @@ export async function cmdGovernance(): Promise<boolean> {
 }
 
 /**
- * `kit statusline` — one compact, fast, read-only line for ANY harness's info bar
- * (Claude Code statusLine, a shell PS1, …): setup score for the active mode + an
- * "update available" mark + the open PAL count. Agent-agnostic; never blocks
- * (cached update only, file-presence subsystem checks). Assembly lives in
- * statusline.ts so the memory SessionStart hook injects the SAME line as context.
+ * `kit statusline` — one compact, fast, read-only line for visible bars that can
+ * run a command (Claude Code statusLine, a shell PS1, …): setup score for the
+ * active mode + an "update available" mark + the open PAL count. Codex does not
+ * expose that visible bar hook; its memory SessionStart hook injects the SAME text
+ * as context instead.
  */
 export async function cmdStatusline(): Promise<boolean> {
   process.env.KIT_NO_UPDATE_CHECK = "1"; // never let the post-command notice pollute the single line

@@ -6,6 +6,7 @@ import { existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   openMemoryDb,
+  openMemoryDbReadOnly,
   getStats,
   getMemoryDbPath,
   searchMessages,
@@ -163,7 +164,20 @@ export async function cmdMemory(): Promise<boolean> {
 async function memPal(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
   const action = process.argv[4] && !process.argv[4].startsWith("--") ? process.argv[4] : "list";
-  const db = openMemoryDb();
+  if (action === "list" && !existsSync(getMemoryDbPath())) {
+    if (jsonMode) console.log("[]");
+    else console.log(`${c.dim}no open action items${c.reset}`);
+    return true;
+  }
+  let readOnly = false;
+  let db: ReturnType<typeof openMemoryDb>;
+  try {
+    db = openMemoryDb();
+  } catch (err) {
+    if (action !== "list") throw err;
+    db = openMemoryDbReadOnly();
+    readOnly = true;
+  }
   try {
     if (action === "list") {
       // Canonical scope = ABSOLUTE project root (same as the auto-tracker writes —
@@ -171,7 +185,11 @@ async function memPal(): Promise<boolean> {
       const scope = hasFlag(process.argv, "--global") ? undefined : getCurrentProjectRoot();
       // Device-coupled by default: only THIS device's items (+ legacy rows) show,
       // so an ephemeral session's items don't nag here. --all opts back in.
-      const items = palList(db, { scope, allDevices: hasFlag(process.argv, "--all") });
+      const items = palList(db, {
+        scope,
+        allDevices: hasFlag(process.argv, "--all"),
+        reapStale: !readOnly,
+      });
       if (jsonMode) {
         console.log(JSON.stringify(items));
         return true;

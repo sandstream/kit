@@ -151,6 +151,21 @@ describe("PAL — pending actions", () => {
     db.close();
   });
 
+  it("palList can skip stale-claim reaping for read-only status surfaces", () => {
+    const db = fresh();
+    const id = palAdd(db, { title: "read-only view" });
+    palClaim(db, id, "agent-a");
+    db.prepare("UPDATE pending_actions SET claimed_at=datetime('now','-48 hours') WHERE id=?").run(
+      id,
+    );
+
+    assert.equal(palList(db, { reapStale: false }).length, 0);
+    assert.equal(palList(db, { status: "claimed" })[0]?.id, id);
+
+    assert.equal(palList(db).length, 1);
+    db.close();
+  });
+
   it("a claimed item can still be marked done by its claimer", () => {
     const db = fresh();
     const id = palAdd(db, { title: "x" });

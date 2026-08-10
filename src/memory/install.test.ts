@@ -170,7 +170,7 @@ describe("Codex memory hook installer", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("merges silent Codex lifecycle hooks and gives SessionEnd its supported timeout", () => {
+  it("merges Codex lifecycle hooks with UI status messages and SessionEnd timeout", () => {
     const result = installCodexMemoryHooks();
     assert.deepEqual(result.added.sort(), ["SessionEnd", "SessionStart"]);
 
@@ -186,6 +186,12 @@ describe("Codex memory hook installer", () => {
     const sessionEnd = config.hooks.SessionEnd[0].hooks[0];
     assert.ok(sessionEnd.command.endsWith("memory hook session-end-codex"));
     assert.equal(sessionEnd.timeout, 3);
+    assert.equal(sessionEnd.statusMessage, "kit memory: saving session");
+    const sessionStart = config.hooks.SessionStart.flatMap(
+      (group: { hooks: { command: string; statusMessage?: string }[] }) => group.hooks,
+    ).find((hook: { command: string }) => hook.command.endsWith("memory hook session-start"));
+    assert.ok(sessionStart);
+    assert.equal(sessionStart.statusMessage, "kit memory: loading session context");
   });
 
   it("is idempotent and uninstall removes only kit hooks", () => {
@@ -258,6 +264,7 @@ describe("Codex memory hook installer", () => {
     assert.ok(!hook.command.includes("/root/.kit/bin/kit"));
     assert.ok(hook.command.endsWith("memory hook session-end-codex"));
     assert.equal(hook.timeout, 3);
+    assert.equal(hook.statusMessage, "kit memory: saving session");
   });
 
   it("removes empty retired prompt-hook events from Codex config", () => {

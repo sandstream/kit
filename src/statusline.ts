@@ -1,9 +1,9 @@
 /**
- * Agent-agnostic status-line emitter. `kit statusline` prints ONE compact, fast,
+ * Agent-agnostic status-line text. `kit statusline` prints ONE compact, fast,
  * read-only line — setup score for the active mode + an "update available" mark +
- * the open pending-action (PAL) count — that any harness can surface in its info
- * bar (Claude Code `statusLine`, a shell PS1, etc.), with the `kit agent-config`
- * "use kit" block as the universal fallback for harnesses without a native bar.
+ * the open pending-action (PAL) count. Claude Code can show it visibly via
+ * `statusLine`; shells can use it in PS1; Codex gets the same text injected as
+ * SessionStart context because it does not expose the same visible statusLine hook.
  *
  * The formatter is pure (fixture-tested); the assembly (`buildStatuslineText`) does
  * only cheap, cached, never-blocking reads (no network on the hot path — see
@@ -32,10 +32,11 @@ export interface StatuslineParts {
 }
 
 /**
- * Render the compact line, e.g. `kit:full 6/6 · ⬆1.34.0 · ⚠2` — or, in an
- * un-adopted repo, `kit:full 1/6 → kit init`. Segments are omitted when empty so
+ * Render the compact line, e.g. `kit:full 6/6 · update:1.34.0 · actions:2` — or, in an
+ * un-adopted repo, `kit:full 1/6 · setup next:kit init`. Segments are omitted when empty so
  * an up-to-date repo with no PAL items shows just the score (or nothing).
- * Plain ASCII + three glyphs only — safe in any terminal/harness bar.
+ * Keep segments label-first so status bars that render dot-separated chunks as
+ * visual pills stay understandable without a legend.
  */
 export function formatStatusline(p: StatuslineParts): string {
   const seg: string[] = [];
@@ -48,14 +49,13 @@ export function formatStatusline(p: StatuslineParts): string {
   } else if (p.mode) {
     seg.push(`kit:${p.mode}`);
   }
-  if (p.update) seg.push(`⬆${p.update}`);
-  if (typeof p.pal === "number" && p.pal > 0) seg.push(`⚠${p.pal}`);
-  const line = seg.join(" · ");
   // The nudge rides the score segment: only when a score is showing AND incomplete.
   if (p.next && p.score && p.score.total > 0 && p.score.done < p.score.total) {
-    return `${line} → ${p.next}`;
+    seg.push(`setup next:${p.next}`);
   }
-  return line;
+  if (p.update) seg.push(`update:${p.update}`);
+  if (typeof p.pal === "number" && p.pal > 0) seg.push(`actions:${p.pal}`);
+  return seg.join(" · ");
 }
 
 /** Cheap, read-only subsystem presence (file-existence only — no shell/network), for
@@ -101,16 +101,18 @@ export function quickSubsystems(cwd: string): SubsystemStatus[] {
 /** Open-PAL ("blocked on you") count — cheap, 0 on any error. Memory modules are
  *  dynamically imported so the sqlite dependency stays off other commands' startup.
  *  Scoped to the CURRENT project (same definition as `kit memory pal list`) so the
- *  statusline ⚠ and the list can never disagree — an unscoped count once showed
- *  ⚠156 (mostly dead temp-dir scopes) while the list correctly showed 0. */
+ *  statusline action count and the list can never disagree — an unscoped count once
+ *  showed 156 actions (mostly dead temp-dir scopes) while the list correctly showed 0. */
 export async function quickPalCount(cwd?: string): Promise<number> {
   try {
-    const { openMemoryDb } = await import("./memory/db.js");
+    const { existsSync } = await import("node:fs");
+    const { getMemoryDbPath, openMemoryDbReadOnly } = await import("./memory/db.js");
     const { palList } = await import("./memory/pal.js");
     const { getCurrentProjectRoot } = await import("./memory/project.js");
-    const db = openMemoryDb();
+    if (!existsSync(getMemoryDbPath())) return 0;
+    const db = openMemoryDbReadOnly();
     try {
-      return palList(db, { scope: getCurrentProjectRoot(cwd) }).length;
+      return palList(db, { scope: getCurrentProjectRoot(cwd), reapStale: false }).length;
     } finally {
       db.close();
     }
