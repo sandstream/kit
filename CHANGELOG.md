@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Secret findings you have reviewed can now be accepted by name — `.kit-secretsignore`.**
+  Git history is immutable, so a test fixture or doc placeholder committed once is a
+  finding forever, and `secrets scan` sat at `warn` permanently. A warning with no
+  reachable green state is one nobody reads, which is how a real finding gets missed.
+  Entries are `<commit>:<file>:<detector>`, one per line. Two properties keep it safe:
+  an entry names a single commit, so it can never wave through a future occurrence of
+  the same string, and a **verified-live** finding is never ignorable no matter what is
+  listed. See `docs/COMMANDS.md` → "Secret findings".
+
+### Fixed
+
+- **The secrets scan now classifies example credentials instead of asking you to
+  re-review them every run.** Findings whose own value proves they name nothing real —
+  an unreachable host (loopback, a bare compose/k8s service name, `.internal`,
+  `example.com`) or a placeholder secret (`pass`, `password`, `changeme`, a vendor's
+  published doc sample) — are counted in their own bucket rather than as reviewable
+  findings. Keyed strictly on the value, never the file path: a real credential pasted
+  into a test file is still flagged, and a verified-live finding is never waved through.
+- **`npm test` refuses to run when build output holds cloud-sync duplicates.** In a
+  synced checkout (iCloud Drive), a conflicted file gains a ` 2` twin; under `dist/`
+  that twin is a stale compiled test running old assertions against new code — it can
+  fail a correct change, or pass a broken one. The runner now names the files and stops
+  instead of reporting a verdict it cannot trust.
+
 ## [6.6.1] - 2026-08-06
 
 ### Fixed

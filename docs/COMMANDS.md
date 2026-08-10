@@ -207,6 +207,34 @@ max_bytes = 12000
 | `kit security prescan <path> [--deep] [--format=json] [--vs-baseline=<p>]` | Multi-repo baseline sweep (secrets, gitignore, branch-protect; `--deep` adds CVE / workflow-drift / bumblebee). |
 | `kit security prescan-diff <baseline.jsonl> <latest.jsonl>`                | Diff two prescan reports — surface new regressions + fixed findings.                                            |
 
+### Secret findings: what is classified, and what you accept
+
+`kit check --category security` runs trufflehog over git history and splits the results
+so the verdict can reach green without hiding anything:
+
+| Bucket                   | Meaning                                                                                              | Your action                                        |
+| ------------------------ | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| verified-live            | trufflehog reached the provider and the credential works.                                            | **Rotate now.** Fails the gate, always.            |
+| public-by-design         | A client key that ships in bundles on purpose (Firebase web config, Sentry DSN, PostHog).             | Check key restrictions; rotation fixes nothing.    |
+| example                  | The value proves it names nothing real: unreachable host (loopback, a bare service name, `.internal`, `example.com`) or a placeholder secret (`pass`, `password`, `changeme`, a vendor's doc sample). | None — classified automatically, no config needed. |
+| accepted (`.kit-secretsignore`) | A finding you read and accepted, named by commit.                                              | Add an entry only after confirming it names nothing real. |
+| unverified               | Everything else: secret-shaped, unconfirmed.                                                         | Review.                                            |
+
+`.kit-secretsignore` holds one accepted finding per line as
+`<commit>:<file>:<detector>` (`#` comments allowed; `file` may be `*` when trufflehog
+reports no path; the commit may be abbreviated to ≥7 hex):
+
+```
+# fixture literals from a commit that has since been fixed forward
+d9f55afc26db3ed604946b44edf224c293405d3f:src/check-security.test.ts:Postgres
+```
+
+History is immutable, so a fixture committed once is a finding forever — which is why
+the file exists. Two properties make it safe to have: an entry names **one commit**, so
+it cannot wave through a future occurrence of the same string, and a **verified-live**
+finding is never ignorable regardless of what is listed. Prefer fixing forward (derive
+fixture credentials at run time) so nothing new accumulates.
+
 ## Supply chain + scanners
 
 | Command                                                                                            | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |

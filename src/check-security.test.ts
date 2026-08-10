@@ -9,6 +9,9 @@ import {
   parseTrivyVulnCount,
   classifyTrufflehogFindings,
   isExampleCredential,
+  parseSecretsIgnore,
+  isIgnoredFinding,
+  type TrufflehogFinding,
   jvmProjectKind,
   findJvmProject,
   checkMemoryHooksLiveness,
@@ -321,7 +324,13 @@ describe("classifyTrufflehogFindings (verified vs unverified vs public-by-design
 
   it("ignores the trufflehog info log line (no DetectorName)", () => {
     const out = classifyTrufflehogFindings('{"level":"info","msg":"starting"}\n');
-    assert.deepStrictEqual(out, { verified: 0, unverified: 0, publicByDesign: 0, example: 0 });
+    assert.deepStrictEqual(out, {
+      verified: 0,
+      unverified: 0,
+      publicByDesign: 0,
+      example: 0,
+      ignored: 0,
+    });
   });
 
   it("splits verified-live from unverified findings", () => {
@@ -336,12 +345,19 @@ describe("classifyTrufflehogFindings (verified vs unverified vs public-by-design
       unverified: 2,
       publicByDesign: 0,
       example: 0,
+      ignored: 0,
     });
   });
 
   it("counts an unparseable DetectorName line conservatively as unverified", () => {
     const out = classifyTrufflehogFindings('{"DetectorName":"X" broken json');
-    assert.deepStrictEqual(out, { verified: 0, unverified: 1, publicByDesign: 0, example: 0 });
+    assert.deepStrictEqual(out, {
+      verified: 0,
+      unverified: 1,
+      publicByDesign: 0,
+      example: 0,
+      ignored: 0,
+    });
   });
 });
 
@@ -417,6 +433,7 @@ describe("example credentials (test fixtures / docs placeholders)", () => {
       unverified: 0,
       publicByDesign: 0,
       example: 0,
+      ignored: 0,
     });
   });
 
@@ -431,6 +448,7 @@ describe("example credentials (test fixtures / docs placeholders)", () => {
       unverified: 1,
       publicByDesign: 0,
       example: 2,
+      ignored: 0,
     });
   });
 });
@@ -452,11 +470,18 @@ describe("public-by-design client keys (#250)", () => {
       unverified: 0,
       publicByDesign: 1,
       example: 0,
+      ignored: 0,
     });
     // Same AIza key WITHOUT Firebase context could be a privileged server key —
     // stays a normal unverified finding.
     const without = classifyTrufflehogFindings(fbLine, () => `const key = "${AIZA}"`);
-    assert.deepStrictEqual(without, { verified: 0, unverified: 1, publicByDesign: 0, example: 0 });
+    assert.deepStrictEqual(without, {
+      verified: 0,
+      unverified: 1,
+      publicByDesign: 0,
+      example: 0,
+      ignored: 0,
+    });
     // Unreadable/deleted file ⇒ never downgrade on missing evidence.
     const unreadable = classifyTrufflehogFindings(fbLine, () => null);
     assert.deepStrictEqual(unreadable, {
@@ -464,6 +489,7 @@ describe("public-by-design client keys (#250)", () => {
       unverified: 1,
       publicByDesign: 0,
       example: 0,
+      ignored: 0,
     });
   });
 
@@ -475,7 +501,13 @@ describe("public-by-design client keys (#250)", () => {
       SourceMetadata: { Data: { Git: { file: "src/firebase.ts" } } },
     });
     const out = classifyTrufflehogFindings(liveLine, () => fbConfig);
-    assert.deepStrictEqual(out, { verified: 1, unverified: 0, publicByDesign: 0, example: 0 });
+    assert.deepStrictEqual(out, {
+      verified: 1,
+      unverified: 0,
+      publicByDesign: 0,
+      example: 0,
+      ignored: 0,
+    });
   });
 
   it("Sentry DSN and PostHog project keys are public-by-design by shape alone", () => {
@@ -490,7 +522,94 @@ describe("public-by-design client keys (#250)", () => {
       Raw: "phc_" + "a".repeat(43),
     });
     const out = classifyTrufflehogFindings([dsn, phc].join("\n"), () => null);
-    assert.deepStrictEqual(out, { verified: 0, unverified: 0, publicByDesign: 2, example: 0 });
+    assert.deepStrictEqual(out, {
+      verified: 0,
+      unverified: 0,
+      publicByDesign: 2,
+      example: 0,
+      ignored: 0,
+    });
+  });
+});
+
+describe(".kit-secretsignore (explicitly accepted historical findings)", () => {
+  const SHA = "d9f55afc26db3ed604946b44edf224c293405d3f";
+  const OTHER = "465d436312695591fe47df09b8944cd18779a401";
+  const finding = (over: Partial<TrufflehogFinding> = {}): TrufflehogFinding => ({
+    verified: false,
+    raw: "postgresql://svc_api:8f0a1c2d3e4f@db.acme-prod.io:5432",
+    file: "src/check-security.test.ts",
+    detector: "Postgres",
+    commit: SHA,
+    ...over,
+  });
+
+  it("parses entries and drops comments, blanks, and malformed lines", () => {
+    const entries = parseSecretsIgnore(
+      [
+        "# a comment",
+        "",
+        "   ",
+        `${SHA}:src/check-security.test.ts:Postgres`,
+        `  ${SHA}:*:Github  `, // surrounding whitespace is trimmed
+        "deadb:too-short-commit:Postgres", // < 7 hex ⇒ too ambiguous to accept
+        "not-hex-at-all:src/x.ts:Postgres",
+        "missing-fields",
+      ].join("\n"),
+    );
+    assert.deepStrictEqual(entries, [
+      { commit: SHA, file: "src/check-security.test.ts", detector: "Postgres" },
+      { commit: SHA, file: "*", detector: "Github" },
+    ]);
+  });
+
+  it("ignores a listed finding, and only in the commit it names", () => {
+    const entries = parseSecretsIgnore(`${SHA}:src/check-security.test.ts:Postgres`);
+    assert.strictEqual(isIgnoredFinding(finding(), entries), true);
+    // Same secret, same file, same detector — different commit ⇒ still a finding.
+    assert.strictEqual(isIgnoredFinding(finding({ commit: OTHER }), entries), false);
+    // Same commit + file, different detector ⇒ still a finding.
+    assert.strictEqual(isIgnoredFinding(finding({ detector: "Github" }), entries), false);
+  });
+
+  it("accepts an abbreviated commit and a `*` file for findings trufflehog can't place", () => {
+    const entries = parseSecretsIgnore(`${SHA.slice(0, 8)}:*:Postgres`);
+    assert.strictEqual(isIgnoredFinding(finding({ file: undefined }), entries), true);
+    assert.strictEqual(
+      isIgnoredFinding(finding({ commit: OTHER, file: undefined }), entries),
+      false,
+    );
+  });
+
+  it("never ignores a VERIFIED-LIVE finding, even one that is listed", () => {
+    const entries = parseSecretsIgnore(`${SHA}:src/check-security.test.ts:Postgres`);
+    assert.strictEqual(isIgnoredFinding(finding({ verified: true }), entries), false);
+  });
+
+  it("counts ignored findings in their own bucket, leaving unlisted ones to review", () => {
+    const line = (over: Record<string, unknown>) =>
+      JSON.stringify({
+        DetectorName: "Postgres",
+        Verified: false,
+        Raw: "postgresql://svc_api:8f0a1c2d3e4f@db.acme-prod.io:5432",
+        SourceMetadata: { Data: { Git: { commit: SHA, file: "src/check-security.test.ts" } } },
+        ...over,
+      });
+    const stdout = [
+      line({}),
+      line({ SourceMetadata: { Data: { Git: { commit: OTHER, file: "src/other.ts" } } } }),
+    ].join("\n");
+    const entries = parseSecretsIgnore(`${SHA}:src/check-security.test.ts:Postgres`);
+    assert.deepStrictEqual(
+      classifyTrufflehogFindings(stdout, () => null, entries),
+      {
+        verified: 0,
+        unverified: 1,
+        publicByDesign: 0,
+        example: 0,
+        ignored: 1,
+      },
+    );
   });
 });
 

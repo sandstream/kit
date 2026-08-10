@@ -882,6 +882,63 @@ export interface TrufflehogFinding {
   verified: boolean;
   raw: string;
   file?: string;
+  detector?: string;
+  commit?: string;
+}
+
+/** One accepted historical finding from `.kit-secretsignore`. */
+export interface SecretsIgnoreEntry {
+  commit: string;
+  file: string;
+  detector: string;
+}
+
+/**
+ * Parse `.kit-secretsignore` — one accepted historical finding per line, as
+ * `<commit>:<file>:<detector>`, with `#` comments and blank lines ignored.
+ *
+ * Why a file and not a config flag: a repo's history is immutable, so a fixture that
+ * was committed once is a finding forever. Without a way to accept it by name, the
+ * secrets check sits at warn permanently and stops being read — the failure mode this
+ * whole classifier exists to prevent. Unlike a blanket path or regex allowlist, an
+ * entry names ONE commit, so it cannot wave through a future occurrence of the same
+ * string. (kit's own file records the fixture literals from d9f55af.)
+ *
+ * `file` may be `*` for the findings trufflehog reports without a path. Commits must be
+ * at least 7 hex chars — anything shorter is too ambiguous to accept, and malformed
+ * lines are dropped rather than guessed at. Pure.
+ */
+export function parseSecretsIgnore(text: string): SecretsIgnoreEntry[] {
+  const entries: SecretsIgnoreEntry[] = [];
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const parts = trimmed.split(":");
+    if (parts.length !== 3) continue;
+    const [commit, file, detector] = parts.map((p) => p.trim());
+    if (!/^[0-9a-f]{7,40}$/i.test(commit) || !file || !detector) continue;
+    entries.push({ commit: commit.toLowerCase(), file, detector });
+  }
+  return entries;
+}
+
+/**
+ * True when a finding is explicitly accepted by `.kit-secretsignore`.
+ *
+ * A VERIFIED-LIVE finding is never ignorable: if trufflehog reached the provider and
+ * the credential still works, no file entry may silence it. Matching is exact on file
+ * (or `*`) and detector, and prefix-based on the commit so an abbreviated sha works.
+ */
+export function isIgnoredFinding(f: TrufflehogFinding, entries: SecretsIgnoreEntry[]): boolean {
+  if (f.verified) return false; // a live credential is never waved through
+  if (!f.commit) return false; // nothing to scope an acceptance to
+  const commit = f.commit.toLowerCase();
+  return entries.some(
+    (e) =>
+      commit.startsWith(e.commit) &&
+      (e.file === "*" || e.file === f.file) &&
+      e.detector.toLowerCase() === (f.detector ?? "").toLowerCase(),
+  );
 }
 
 /**
@@ -980,38 +1037,45 @@ export function isExampleCredential(f: TrufflehogFinding): boolean {
 export function classifyTrufflehogFindings(
   stdout: string,
   readFile: (path: string) => string | null = () => null,
+  ignores: SecretsIgnoreEntry[] = [],
 ): {
   verified: number;
   unverified: number;
   publicByDesign: number;
   example: number;
+  ignored: number;
 } {
   let verified = 0;
   let unverified = 0;
   let publicByDesign = 0;
   let example = 0;
+  let ignored = 0;
   for (const line of stdout.trim().split("\n")) {
     if (!line.includes('"DetectorName"')) continue;
     try {
       const j = JSON.parse(line) as {
+        DetectorName?: string;
         Verified?: boolean;
         Raw?: string;
-        SourceMetadata?: { Data?: { Git?: { file?: string } } };
+        SourceMetadata?: { Data?: { Git?: { file?: string; commit?: string } } };
       };
       const finding: TrufflehogFinding = {
         verified: j.Verified === true,
         raw: j.Raw ?? "",
         file: j.SourceMetadata?.Data?.Git?.file,
+        detector: j.DetectorName,
+        commit: j.SourceMetadata?.Data?.Git?.commit,
       };
       if (finding.verified) verified++;
       else if (isPublicByDesign(finding, readFile)) publicByDesign++;
       else if (isExampleCredential(finding)) example++;
+      else if (isIgnoredFinding(finding, ignores)) ignored++;
       else unverified++;
     } catch {
       unverified++;
     }
   }
-  return { verified, unverified, publicByDesign, example };
+  return { verified, unverified, publicByDesign, example, ignored };
 }
 
 /**
@@ -1100,9 +1164,19 @@ async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
           return null;
         }
       };
-      const { verified, unverified, publicByDesign, example } = classifyTrufflehogFindings(
+      // Accepted historical findings, if the repo keeps a .kit-secretsignore. Absent
+      // file ⇒ no acceptances, which is the correct default for a repo that has never
+      // reviewed one.
+      let ignores: SecretsIgnoreEntry[] = [];
+      try {
+        ignores = parseSecretsIgnore(readFileSync(resolve(root, ".kit-secretsignore"), "utf8"));
+      } catch {
+        // no ignore file (or unreadable) — treat every finding on its own merits
+      }
+      const { verified, unverified, publicByDesign, example, ignored } = classifyTrufflehogFindings(
         stdout,
         readWorktreeFile,
+        ignores,
       );
       const pbdNote =
         publicByDesign > 0
@@ -1114,13 +1188,15 @@ async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
         example > 0
           ? `; ${example} example credential(s) (unreachable host / placeholder secret — fixtures & docs), no rotation needed`
           : "";
+      const ignoredNote =
+        ignored > 0 ? `; ${ignored} accepted historical finding(s) via .kit-secretsignore` : "";
 
       if (verified > 0) {
         return {
           category: "secrets",
           name: "secrets scan",
           status: "fail",
-          detail: `${verified} VERIFIED-LIVE secret(s) in git history -rotate now; run: trufflehog git file://.${pbdNote}${exampleNote}`,
+          detail: `${verified} VERIFIED-LIVE secret(s) in git history -rotate now; run: trufflehog git file://.${pbdNote}${exampleNote}${ignoredNote}`,
           severity: "critical",
         };
       }
@@ -1129,7 +1205,7 @@ async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
           category: "secrets",
           name: "secrets scan",
           status: "warn",
-          detail: `${unverified} unverified secret-shaped string(s) in git history (0 verified-live) — review for test/example data: trufflehog git file://.${pbdNote}${exampleNote}`,
+          detail: `${unverified} unverified secret-shaped string(s) in git history (0 verified-live) — review for test/example data: trufflehog git file://.${pbdNote}${exampleNote}${ignoredNote}`,
           severity: "medium",
         };
       }
@@ -1138,7 +1214,7 @@ async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
         category: "secrets",
         name: "secrets scan",
         status: "pass",
-        detail: `no committed secrets (trufflehog git)${pbdNote}${exampleNote}`,
+        detail: `no committed secrets (trufflehog git)${pbdNote}${exampleNote}${ignoredNote}`,
       };
     } catch {
       return {
