@@ -6,7 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.6.2] - 2026-08-10
+
 ### Added
+
+- **`kit browser doctor` — verification-readiness diagnostics.** Reports which browser
+  strategy a repo actually gets (Playwright, system Chrome, CDP) or the blocker standing
+  in the way, plus `kit browser status`, `kit browser cdp-url`, and
+  `kit browser playwright-env` for wiring test runners. `--json` on each.
 
 - **Secret findings you have reviewed can now be accepted by name — `.kit-secretsignore`.**
   Git history is immutable, so a test fixture or doc placeholder committed once is a
@@ -31,6 +38,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   that twin is a stale compiled test running old assertions against new code — it can
   fail a correct change, or pass a broken one. The runner now names the files and stops
   instead of reporting a verdict it cannot trust.
+- **A skill installer's actual payload is now triaged, not just its wrapper.**
+  `npx skills@latest add <owner>/<repo>` triaged only the npm wrapper, passed, then
+  cloned an untriaged third-party repo into `~/.agents/skills` globally — the same
+  fetch-and-execute blind spot `create-*` already closes, one level deeper. When a
+  fetched package is a known repo fetcher, its `owner/repo` argument is now triaged too.
+- **The gate no longer triages a registry package `npx` would never fetch.**
+  `npx tsc --noEmit` was 23% of kit guard's would-block observations, gating npm's
+  unrelated abandoned `tsc` package — but npx resolves the plain positional from local
+  `node_modules/.bin` first, so nothing is fetched. A plain `npx <name>` / `bunx <name>`
+  whose binary exists locally is now dropped; a `-p`/`--package`/`--from` target is
+  still always gated, because npx fetches that one unconditionally.
+- **Concurrent agent startups no longer produce phantom `TRIAGE FAILED` verdicts.**
+  The bundled triage skill was refreshed with an in-place truncate-then-write, so
+  several agents starting at once could read a half-written `triage.py` and crash with
+  no real verdict behind it. The refresh is now atomic (write to a temp file, rename).
+- **The memory store opens read-only when its WAL sidecars cannot be created.** The
+  fallback was keyed on one SQLite error string, so a build that words the identical
+  precondition differently ("attempt to write a readonly database") never took it, and
+  `checkMemoryInjection` returned warn instead of pass. It now keys on the actual
+  precondition — sidecars missing — not on the wording.
+- **`kit statusline` help distinguishes setup gaps from open action items**, and states
+  that Codex receives the same line via SessionStart context rather than a status bar.
 
 ## [6.6.1] - 2026-08-06
 
