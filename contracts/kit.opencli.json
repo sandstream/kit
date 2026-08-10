@@ -1114,7 +1114,7 @@
     },
     "statusline": {
       "kind": "command",
-      "summary": "Compact one-line status (mode score · update · open PAL) for any agent's info bar — wire into Claude Code statusLine / a shell PS1",
+      "summary": "Compact one-line status (mode score · update · open PAL) for Claude Code statusLine / a shell PS1; Codex gets it via SessionStart context",
       "x-kit-args-modeled": false,
       "x-kit-audience": "harness",
       "x-kit-mcp": false,
