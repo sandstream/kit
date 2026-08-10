@@ -123,7 +123,11 @@ export async function diagnoseBrowser(
     checks.push(
       deps.existsSync(appPath)
         ? { name: "app path", status: "pass", detail: config.app }
-        : { name: "app path", status: "warn", detail: `${config.app} does not exist from repo root.` },
+        : {
+            name: "app path",
+            status: "warn",
+            detail: `${config.app} does not exist from repo root.`,
+          },
     );
   }
 
@@ -172,7 +176,8 @@ export async function diagnoseBrowser(
     });
     actions.push({
       label: "Install Playwright Chromium",
-      reason: "Project Playwright exists; missing browser binaries are a setup blocker, not a cue to guess another test path.",
+      reason:
+        "Project Playwright exists; missing browser binaries are a setup blocker, not a cue to guess another test path.",
       command: "npx playwright install chromium",
     });
     return result("blocker", "none", checks, actions);
@@ -219,7 +224,8 @@ export async function diagnoseBrowser(
   });
   actions.push({
     label: "Start Chrome with CDP",
-    reason: "No project Playwright browser, no system Chrome headless path, and no reachable CDP endpoint.",
+    reason:
+      "No project Playwright browser, no system Chrome headless path, and no reachable CDP endpoint.",
     command: chromeCdpCommand(deps.platform),
   });
   return result("blocker", "none", checks, actions);
@@ -318,14 +324,21 @@ function hasChromiumCache(cachePath: string, deps: Required<BrowserProbeDeps>): 
   }
 }
 
-function probeSystemChrome(env: NodeJS.ProcessEnv, deps: Required<BrowserProbeDeps>): string | undefined {
+function probeSystemChrome(
+  env: NodeJS.ProcessEnv,
+  deps: Required<BrowserProbeDeps>,
+): string | undefined {
   const macCandidates = [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
   ];
-  const mac = deps.platform === "darwin" ? findFirstExisting(macCandidates, deps.existsSync) : undefined;
+  const mac =
+    deps.platform === "darwin" ? findFirstExisting(macCandidates, deps.existsSync) : undefined;
   if (mac) return mac;
-  return deps.findOnPath(["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"], env.PATH);
+  return deps.findOnPath(
+    ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
+    env.PATH,
+  );
 }
 
 async function probeCdp(
@@ -337,11 +350,15 @@ async function probeCdp(
   if (fromEnv) return { url: fromEnv, source: "env" };
   const fromConfig = config?.cdp_url?.trim();
   if (fromConfig) return { url: fromConfig, source: "config" };
-  if (await deps.probeUrl(`${LOCAL_CDP_URL}/json/version`)) return { url: LOCAL_CDP_URL, source: "localhost" };
+  if (await deps.probeUrl(`${LOCAL_CDP_URL}/json/version`))
+    return { url: LOCAL_CDP_URL, source: "localhost" };
   return {};
 }
 
-function findFirstExisting(candidates: readonly string[], exists: (path: string) => boolean): string | undefined {
+function findFirstExisting(
+  candidates: readonly string[],
+  exists: (path: string) => boolean,
+): string | undefined {
   return candidates.find((candidate) => exists(candidate));
 }
 

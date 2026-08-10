@@ -989,7 +989,9 @@ export interface BashGateVerdict {
  *  resolves to before ever touching the registry. */
 function hasLocalBin(cwd: string, name: string): boolean {
   if (existsSync(join(cwd, "node_modules", ".bin", name))) return true;
-  return process.platform === "win32" && existsSync(join(cwd, "node_modules", ".bin", `${name}.cmd`));
+  return (
+    process.platform === "win32" && existsSync(join(cwd, "node_modules", ".bin", `${name}.cmd`))
+  );
 }
 
 /** True when `ref` (`npm:<name>[@version]`) names exactly `bare` — not merely a prefix
@@ -1023,9 +1025,7 @@ export async function decideBashGate(
       checked: [],
     };
   }
-  const shadowed = cwd
-    ? probe.runnerBinCandidates.filter((name) => hasLocalBin(cwd, name))
-    : [];
+  const shadowed = cwd ? probe.runnerBinCandidates.filter((name) => hasLocalBin(cwd, name)) : [];
   const refs = probe.refs.filter((ref) => !shadowed.some((name) => refIsBareName(ref, name)));
   const checked: GateVerdict[] = [];
   for (const ref of refs) {

@@ -22,7 +22,10 @@ describe("browser diagnostics", () => {
   });
 
   it("fails declared browser config without an app-server port", async () => {
-    const result = await diagnoseBrowser({ routes: "e2e/routes.spec.ts" }, { deps: noMachineDeps, env: {}, cwd: "/repo" });
+    const result = await diagnoseBrowser(
+      { routes: "e2e/routes.spec.ts" },
+      { deps: noMachineDeps, env: {}, cwd: "/repo" },
+    );
     assert.equal(result.status, "fail");
     assert.equal(result.strategy, "none");
     assert.match(result.checks.map((check) => check.name).join(","), /app port/);
@@ -103,7 +106,11 @@ describe("browser diagnostics", () => {
     const result = await diagnoseBrowser(
       { port: 3107 },
       {
-        deps: { ...noMachineDeps, findOnPath: () => "/usr/bin/google-chrome", probeUrl: async () => true },
+        deps: {
+          ...noMachineDeps,
+          findOnPath: () => "/usr/bin/google-chrome",
+          probeUrl: async () => true,
+        },
         env: {},
         cwd: "/repo",
       },

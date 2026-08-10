@@ -250,7 +250,10 @@ describe("installBundledTriageSkill (self-bootstrapping the gate)", () => {
       const results = await Promise.all(
         Array.from({ length: 8 }, () => installBundledTriageSkill(target)),
       );
-      assert.deepEqual(results, results.map(() => true));
+      assert.deepEqual(
+        results,
+        results.map(() => true),
+      );
       const py = await readFile(resolve(target, "scripts/triage.py"), "utf8");
       const testFileDir = dirname(fileURLToPath(import.meta.url));
       const source = await readFile(

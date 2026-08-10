@@ -20,11 +20,15 @@ export async function cmdBrowser(): Promise<boolean> {
   }
 
   if (!["doctor", "status", "cdp-url", "playwright-env"].includes(sub)) {
-    console.error(`${c.red}usage: kit browser <doctor|status|cdp-url|playwright-env> [--json]${c.reset}`);
+    console.error(
+      `${c.red}usage: kit browser <doctor|status|cdp-url|playwright-env> [--json]${c.reset}`,
+    );
     return false;
   }
 
-  const config = existsSync(resolveConfigPath()) ? await loadConfig(resolveConfigPath()) : undefined;
+  const config = existsSync(resolveConfigPath())
+    ? await loadConfig(resolveConfigPath())
+    : undefined;
   const diagnosis = await diagnoseBrowser(config?.browser);
   const jsonMode = hasFlag(process.argv, "--json");
 
@@ -35,14 +39,20 @@ export async function cmdBrowser(): Promise<boolean> {
   }
 
   if (sub === "status") {
-    if (jsonMode) console.log(JSON.stringify({ status: diagnosis.status, strategy: diagnosis.strategy }, null, 2));
+    if (jsonMode)
+      console.log(
+        JSON.stringify({ status: diagnosis.status, strategy: diagnosis.strategy }, null, 2),
+      );
     else renderStatus(diagnosis);
     return resultOk(diagnosis.status);
   }
 
   if (sub === "cdp-url") {
     const cdpUrl = diagnosis.cdp_url ?? (await resolveBrowserCdpUrl(config?.browser));
-    if (jsonMode) console.log(JSON.stringify({ cdp_url: cdpUrl ?? null, strategy: diagnosis.strategy }, null, 2));
+    if (jsonMode)
+      console.log(
+        JSON.stringify({ cdp_url: cdpUrl ?? null, strategy: diagnosis.strategy }, null, 2),
+      );
     else if (cdpUrl) console.log(cdpUrl);
     else renderCdpBlocker(diagnosis);
     return Boolean(cdpUrl);
@@ -58,12 +68,22 @@ export async function cmdBrowser(): Promise<boolean> {
 function printUsage(): void {
   console.log(`${c.bold}kit browser${c.reset}`);
   console.log("");
-  console.log(`  ${c.cyan}kit browser doctor [--json]${c.reset}          Diagnose browser-verification readiness`);
-  console.log(`  ${c.cyan}kit browser status [--json]${c.reset}          One-line strategy/status summary`);
-  console.log(`  ${c.cyan}kit browser cdp-url [--json]${c.reset}         Print detected Chrome DevTools URL`);
-  console.log(`  ${c.cyan}kit browser playwright-env [--json]${c.reset}  Print shell exports for test runners`);
+  console.log(
+    `  ${c.cyan}kit browser doctor [--json]${c.reset}          Diagnose browser-verification readiness`,
+  );
+  console.log(
+    `  ${c.cyan}kit browser status [--json]${c.reset}          One-line strategy/status summary`,
+  );
+  console.log(
+    `  ${c.cyan}kit browser cdp-url [--json]${c.reset}         Print detected Chrome DevTools URL`,
+  );
+  console.log(
+    `  ${c.cyan}kit browser playwright-env [--json]${c.reset}  Print shell exports for test runners`,
+  );
   console.log("");
-  console.log(`${c.dim}Declare [browser] in ${KIT_FILE}; kit owns local browser diagnostics, not app start.${c.reset}`);
+  console.log(
+    `${c.dim}Declare [browser] in ${KIT_FILE}; kit owns local browser diagnostics, not app start.${c.reset}`,
+  );
 }
 
 function renderDoctor(diagnosis: BrowserDoctorResult): void {
@@ -112,7 +132,10 @@ function renderPlaywrightEnv(env: BrowserDoctorResult["env"]): void {
   }
 }
 
-function firstCheck(diagnosis: BrowserDoctorResult, status: BrowserVerdictStatus): BrowserCheck | undefined {
+function firstCheck(
+  diagnosis: BrowserDoctorResult,
+  status: BrowserVerdictStatus,
+): BrowserCheck | undefined {
   return diagnosis.checks.find((check) => check.status === status);
 }
 

@@ -845,7 +845,11 @@ describe("decideBashGate — local node_modules/.bin shadowing (npx tsc case)", 
     const dir = mkdtempSync(join(tmpdir(), "kit-localbin-"));
     try {
       const v = await decideBashGate("npx tsc --noEmit", fakeDeps(["tsc"]), dir);
-      assert.equal(v.block, true, "no local shadow — the (unrelated, abandoned) registry tsc is still gated");
+      assert.equal(
+        v.block,
+        true,
+        "no local shadow — the (unrelated, abandoned) registry tsc is still gated",
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

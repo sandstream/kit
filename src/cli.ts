@@ -873,8 +873,10 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   "browser doctor":
     "Diagnose browser-verification readiness from [browser], selecting Playwright, system Chrome, CDP, or a blocker (--json)",
   "browser status": "Print the selected browser strategy and top-level verdict (--json)",
-  "browser cdp-url": "Print the detected Chrome DevTools Protocol URL, if one is configured or reachable (--json)",
-  "browser playwright-env": "Print shell exports for browser test runners (--json emits the same env object)",
+  "browser cdp-url":
+    "Print the detected Chrome DevTools Protocol URL, if one is configured or reachable (--json)",
+  "browser playwright-env":
+    "Print shell exports for browser test runners (--json emits the same env object)",
   "memory index": "Index every supported agent transcript into the SQLite memory store",
   "memory search":
     "Full-text search memory (current project; --global for all; --fresh = recency-aware ranking)",

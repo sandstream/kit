@@ -51,7 +51,11 @@ describe("cmdBrowser", () => {
   });
 
   it("cdp-url prints configured URL from [browser]", async () => {
-    writeFileSync(join(dir, ".kit.toml"), `[browser]\nport = 3107\ncdp_url = "http://127.0.0.1:9333"\n`, "utf-8");
+    writeFileSync(
+      join(dir, ".kit.toml"),
+      `[browser]\nport = 3107\ncdp_url = "http://127.0.0.1:9333"\n`,
+      "utf-8",
+    );
     setArgs("cdp-url");
     assert.equal(await cmdBrowser(), true);
     assert.equal(logs.join("\n"), "http://127.0.0.1:9333");
@@ -67,7 +71,11 @@ describe("cmdBrowser", () => {
   });
 
   it("playwright-env prints shell exports", async () => {
-    writeFileSync(join(dir, ".kit.toml"), `[browser]\nport = 3107\ncdp_url = "http://127.0.0.1:9333"\n`, "utf-8");
+    writeFileSync(
+      join(dir, ".kit.toml"),
+      `[browser]\nport = 3107\ncdp_url = "http://127.0.0.1:9333"\n`,
+      "utf-8",
+    );
     setArgs("playwright-env");
     assert.equal(await cmdBrowser(), true);
     assert.match(logs.join("\n"), /export KIT_BROWSER_STRATEGY='[^']+'/);
