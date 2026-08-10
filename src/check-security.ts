@@ -902,6 +902,70 @@ export function isPublicByDesign(
   return false;
 }
 
+/**
+ * Example credentials: unverified findings whose OWN VALUE proves they never named a
+ * real account — test fixtures, `docker-compose` dev defaults, doc placeholders. They
+ * are permanent by design (a redaction test needs a secret-shaped string to redact),
+ * so leaving them in the reviewable bucket means a warn that can never go down, which
+ * trains the reader to ignore the whole line. Reported in their own bucket instead.
+ *
+ * Two deterministic, value-only signals — never the file path. A real credential
+ * pasted into a test file still gets flagged; only the value can wave one through:
+ *
+ *   1. UNREACHABLE HOST — loopback, an unqualified single-label host (a compose/k8s
+ *      service name like `db` or `postgres`), or a reserved suffix (`.internal`,
+ *      `.local`, `.test`, `.invalid`, `example.com`). None can name a service on the
+ *      public internet, so the pair cannot be a live credential anywhere off-host.
+ *   2. PLACEHOLDER SECRET — the password/token is a dictionary stand-in (`pass`,
+ *      `password`, `changeme`, …), or the literal sample token from a vendor's own
+ *      docs. Nobody's live secret is the word "password".
+ *
+ * Conservative by construction: a real-shaped secret on a routable host is NOT an
+ * example, and a VERIFIED-LIVE finding is never one whatever its shape.
+ */
+const PLACEHOLDER_SECRETS = new Set([
+  "pass",
+  "passwd",
+  "password",
+  "pw",
+  "secret",
+  "changeme",
+  "change-me",
+  "example",
+  "mypassword",
+  "yourpassword",
+  "your_password",
+  "your-password",
+  "<password>",
+  "xxx",
+  "xxxx",
+]);
+/** Sample tokens published in vendors' own docs — famous, dead, and everywhere. */
+const DOC_SAMPLE_SECRETS = new Set(["ghp_16C7e42F292c6912E7710c838347Ae178B4a1234"]);
+const LOOPBACK_HOST_RE = /^(localhost|127(?:\.\d{1,3}){3}|\[?::1\]?|0\.0\.0\.0)$/i;
+const RESERVED_HOST_RE = /\.(internal|local|localdomain|localhost|test|invalid|example)$/i;
+const EXAMPLE_DOMAIN_RE = /^(?:[a-z0-9-]+\.)*example\.(?:com|org|net)$/i;
+/** `scheme://[user[:secret]@]host[:port]` — the shape every URI-credential detector emits. */
+const URI_CREDENTIAL_RE = /^[a-z][a-z0-9+.-]*:\/\/(?:([^:@/\s]+)(?::([^@/\s]*))?@)?([^/?#\s]+)/i;
+
+export function isExampleCredential(f: TrufflehogFinding): boolean {
+  if (f.verified) return false; // a VERIFIED-LIVE credential is never waved through
+  const raw = f.raw.trim();
+  if (DOC_SAMPLE_SECRETS.has(raw)) return true;
+
+  const m = URI_CREDENTIAL_RE.exec(raw);
+  if (!m) return false;
+  const [, , secret, hostPort] = m;
+  if (secret !== undefined && PLACEHOLDER_SECRETS.has(secret.toLowerCase())) return true;
+
+  const host = hostPort.replace(/:\d+$/, "").toLowerCase();
+  if (LOOPBACK_HOST_RE.test(host)) return true;
+  if (RESERVED_HOST_RE.test(host) || EXAMPLE_DOMAIN_RE.test(host)) return true;
+  // Unqualified single-label host — a compose/k8s service name, not a public DNS name.
+  // Bracketed IPv6 and dotted names are excluded by the dot/colon check.
+  return !host.includes(".") && !host.includes(":");
+}
+
 export function classifyTrufflehogFindings(
   stdout: string,
   readFile: (path: string) => string | null = () => null,
@@ -909,10 +973,12 @@ export function classifyTrufflehogFindings(
   verified: number;
   unverified: number;
   publicByDesign: number;
+  example: number;
 } {
   let verified = 0;
   let unverified = 0;
   let publicByDesign = 0;
+  let example = 0;
   for (const line of stdout.trim().split("\n")) {
     if (!line.includes('"DetectorName"')) continue;
     try {
@@ -928,12 +994,13 @@ export function classifyTrufflehogFindings(
       };
       if (finding.verified) verified++;
       else if (isPublicByDesign(finding, readFile)) publicByDesign++;
+      else if (isExampleCredential(finding)) example++;
       else unverified++;
     } catch {
       unverified++;
     }
   }
-  return { verified, unverified, publicByDesign };
+  return { verified, unverified, publicByDesign, example };
 }
 
 /**
@@ -1022,7 +1089,7 @@ async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
           return null;
         }
       };
-      const { verified, unverified, publicByDesign } = classifyTrufflehogFindings(
+      const { verified, unverified, publicByDesign, example } = classifyTrufflehogFindings(
         stdout,
         readWorktreeFile,
       );
@@ -1030,13 +1097,19 @@ async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
         publicByDesign > 0
           ? `; ${publicByDesign} public-by-design client key(s) (Firebase web config / DSN) — verify API-key restrictions + security rules, rotation not applicable`
           : "";
+      // Example credentials are counted, not hidden: a reader can still see how many
+      // there are, but they don't hold the line at warn forever (see isExampleCredential).
+      const exampleNote =
+        example > 0
+          ? `; ${example} example credential(s) (unreachable host / placeholder secret — fixtures & docs), no rotation needed`
+          : "";
 
       if (verified > 0) {
         return {
           category: "secrets",
           name: "secrets scan",
           status: "fail",
-          detail: `${verified} VERIFIED-LIVE secret(s) in git history -rotate now; run: trufflehog git file://.${pbdNote}`,
+          detail: `${verified} VERIFIED-LIVE secret(s) in git history -rotate now; run: trufflehog git file://.${pbdNote}${exampleNote}`,
           severity: "critical",
         };
       }
@@ -1045,7 +1118,7 @@ async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
           category: "secrets",
           name: "secrets scan",
           status: "warn",
-          detail: `${unverified} unverified secret-shaped string(s) in git history (0 verified-live) — review for test/example data: trufflehog git file://.${pbdNote}`,
+          detail: `${unverified} unverified secret-shaped string(s) in git history (0 verified-live) — review for test/example data: trufflehog git file://.${pbdNote}${exampleNote}`,
           severity: "medium",
         };
       }
@@ -1054,7 +1127,7 @@ async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
         category: "secrets",
         name: "secrets scan",
         status: "pass",
-        detail: `no committed secrets (trufflehog git)${pbdNote}`,
+        detail: `no committed secrets (trufflehog git)${pbdNote}${exampleNote}`,
       };
     } catch {
       return {

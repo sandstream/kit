@@ -8,6 +8,7 @@ import {
   parseOsvVulnCount,
   parseTrivyVulnCount,
   classifyTrufflehogFindings,
+  isExampleCredential,
   jvmProjectKind,
   findJvmProject,
   checkMemoryHooksLiveness,
@@ -319,7 +320,7 @@ describe("classifyTrufflehogFindings (verified vs unverified vs public-by-design
 
   it("ignores the trufflehog info log line (no DetectorName)", () => {
     const out = classifyTrufflehogFindings('{"level":"info","msg":"starting"}\n');
-    assert.deepStrictEqual(out, { verified: 0, unverified: 0, publicByDesign: 0 });
+    assert.deepStrictEqual(out, { verified: 0, unverified: 0, publicByDesign: 0, example: 0 });
   });
 
   it("splits verified-live from unverified findings", () => {
@@ -333,12 +334,90 @@ describe("classifyTrufflehogFindings (verified vs unverified vs public-by-design
       verified: 1,
       unverified: 2,
       publicByDesign: 0,
+      example: 0,
     });
   });
 
   it("counts an unparseable DetectorName line conservatively as unverified", () => {
     const out = classifyTrufflehogFindings('{"DetectorName":"X" broken json');
-    assert.deepStrictEqual(out, { verified: 0, unverified: 1, publicByDesign: 0 });
+    assert.deepStrictEqual(out, { verified: 0, unverified: 1, publicByDesign: 0, example: 0 });
+  });
+});
+
+describe("example credentials (test fixtures / docs placeholders)", () => {
+  const uri = (raw: string, verified = false) =>
+    JSON.stringify({ DetectorName: "Postgres", Verified: verified, Raw: raw });
+
+  it("treats an unreachable host as an example credential", () => {
+    // Unqualified single-label hosts (compose/k8s service names), loopback, and the
+    // reserved dev suffixes cannot name a service on the public internet.
+    for (const raw of [
+      "postgres://user:supersecret@host:5432",
+      "postgres://app:S3cr3tPassw0rd@db:5432",
+      "postgresql://kit:password@postgres:5432",
+      "postgres://app:S3cr3tPassw0rd@db.internal:5432",
+      "postgresql://admin:hunter2@cache.local:6379",
+      "postgres://u:p@localhost:5432",
+      "postgresql://u:p@127.0.0.1:5432",
+      "postgres://svc:t0ps3cret@db.example.com:5432",
+    ]) {
+      assert.strictEqual(isExampleCredential({ verified: false, raw }), true, raw);
+    }
+  });
+
+  it("treats a placeholder password on a real host as an example credential", () => {
+    for (const raw of [
+      "postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech:5432",
+      "postgresql://user:password@db.acme-prod.io:5432",
+      "postgres://user:changeme@db.acme-prod.io:5432",
+    ]) {
+      assert.strictEqual(isExampleCredential({ verified: false, raw }), true, raw);
+    }
+  });
+
+  it("recognises GitHub's own documentation sample token", () => {
+    assert.strictEqual(
+      isExampleCredential({
+        verified: false,
+        raw: "ghp_16C7e42F292c6912E7710c838347Ae178B4a1234",
+      }),
+      true,
+    );
+  });
+
+  it("leaves a real-looking credential on a routable host as a finding to review", () => {
+    for (const raw of [
+      "postgresql://svc_api:8Fh2kdlsPQzR@db.acme-prod.io:5432",
+      "postgres://reporting:Xk29fjMs01@10.4.2.9:5432", // routable-shaped IP, real-shaped secret
+      "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
+    ]) {
+      assert.strictEqual(isExampleCredential({ verified: false, raw }), false, raw);
+    }
+  });
+
+  it("never waves through a VERIFIED-LIVE credential, however placeholder-shaped", () => {
+    const raw = "postgresql://user:pass@host:5432";
+    assert.strictEqual(isExampleCredential({ verified: true, raw }), false);
+    assert.deepStrictEqual(classifyTrufflehogFindings(uri(raw, true)), {
+      verified: 1,
+      unverified: 0,
+      publicByDesign: 0,
+      example: 0,
+    });
+  });
+
+  it("counts example credentials in their own bucket, not as unverified", () => {
+    const stdout = [
+      uri("postgresql://user:pass@host:5432"),
+      uri("postgres://app:S3cr3tPassw0rd@db.internal:5432"),
+      uri("postgresql://svc_api:8Fh2kdlsPQzR@db.acme-prod.io:5432"),
+    ].join("\n");
+    assert.deepStrictEqual(classifyTrufflehogFindings(stdout), {
+      verified: 0,
+      unverified: 1,
+      publicByDesign: 0,
+      example: 2,
+    });
   });
 });
 
@@ -354,14 +433,24 @@ describe("public-by-design client keys (#250)", () => {
 
   it("Firebase web config = public-by-design ONLY with co-occurring config context", () => {
     const withContext = classifyTrufflehogFindings(fbLine, () => fbConfig);
-    assert.deepStrictEqual(withContext, { verified: 0, unverified: 0, publicByDesign: 1 });
+    assert.deepStrictEqual(withContext, {
+      verified: 0,
+      unverified: 0,
+      publicByDesign: 1,
+      example: 0,
+    });
     // Same AIza key WITHOUT Firebase context could be a privileged server key —
     // stays a normal unverified finding.
     const without = classifyTrufflehogFindings(fbLine, () => `const key = "${AIZA}"`);
-    assert.deepStrictEqual(without, { verified: 0, unverified: 1, publicByDesign: 0 });
+    assert.deepStrictEqual(without, { verified: 0, unverified: 1, publicByDesign: 0, example: 0 });
     // Unreadable/deleted file ⇒ never downgrade on missing evidence.
     const unreadable = classifyTrufflehogFindings(fbLine, () => null);
-    assert.deepStrictEqual(unreadable, { verified: 0, unverified: 1, publicByDesign: 0 });
+    assert.deepStrictEqual(unreadable, {
+      verified: 0,
+      unverified: 1,
+      publicByDesign: 0,
+      example: 0,
+    });
   });
 
   it("a VERIFIED-LIVE AIza key is never waved through as public-by-design", () => {
@@ -372,7 +461,7 @@ describe("public-by-design client keys (#250)", () => {
       SourceMetadata: { Data: { Git: { file: "src/firebase.ts" } } },
     });
     const out = classifyTrufflehogFindings(liveLine, () => fbConfig);
-    assert.deepStrictEqual(out, { verified: 1, unverified: 0, publicByDesign: 0 });
+    assert.deepStrictEqual(out, { verified: 1, unverified: 0, publicByDesign: 0, example: 0 });
   });
 
   it("Sentry DSN and PostHog project keys are public-by-design by shape alone", () => {
@@ -387,7 +476,7 @@ describe("public-by-design client keys (#250)", () => {
       Raw: "phc_" + "a".repeat(43),
     });
     const out = classifyTrufflehogFindings([dsn, phc].join("\n"), () => null);
-    assert.deepStrictEqual(out, { verified: 0, unverified: 0, publicByDesign: 2 });
+    assert.deepStrictEqual(out, { verified: 0, unverified: 0, publicByDesign: 2, example: 0 });
   });
 });
 
