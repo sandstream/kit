@@ -320,6 +320,15 @@ export function openMemoryDb(
  * Open the memory DB for scanner/read paths only. This deliberately does not
  * create, chmod, or migrate ~/.kit: sandboxed checks must not fail because a
  * read-only verification tried to mutate machine-local memory state.
+ *
+ * A WAL-mode db opened `{ readOnly: true }` still needs to touch the `-wal`/
+ * `-shm` sidecars for a consistent read; if they're missing AND the directory
+ * can't create them (read-only dir — a locked-down sandbox, or a store shipped
+ * without its sidecars), SQLite refuses. The exact message varies by SQLite
+ * build/version — this session's observed "attempt to write a readonly
+ * database" alongside the originally-handled "unable to open database file" —
+ * so the retry is keyed on the meaningful precondition (sidecars absent), not
+ * message-sniffing a string libsqlite doesn't guarantee.
  */
 export function openMemoryDbReadOnly(path: string = getMemoryDbPath()): DatabaseSync {
   if (path === ":memory:") return new DatabaseSync(path);
@@ -334,7 +343,7 @@ export function openMemoryDbReadOnly(path: string = getMemoryDbPath()): Database
       /* best-effort close */
     }
     const sidecarsMissing = !existsSync(`${path}-wal`) && !existsSync(`${path}-shm`);
-    if (sidecarsMissing && /unable to open database file/i.test((err as Error).message)) {
+    if (sidecarsMissing) {
       const uri = pathToFileURL(path);
       uri.searchParams.set("mode", "ro");
       uri.searchParams.set("immutable", "1");
