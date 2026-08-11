@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `/root/…` hook path is no longer called stale on a machine whose home IS `/root`.**
+  The gate-liveness diagnostic returned on the `/root/` prefix alone, before reaching the
+  executability check, so on a root container — where agents commonly run — kit reported a
+  hook command as unable to "reliably start" while that same path started fine, and advised
+  rewriting hooks for `/root` when `/root` is where they already pointed. `kit check` failed
+  on it, which made `kit setup` exit 1. The 6.6.1 case the check exists for is unchanged: a
+  path generated in a root sandbox and carried to a normal account, where `/root` is not home
+  and the file is unreachable. A genuinely broken `/root` path on a root machine is still
+  caught, by the executability check the early return used to skip.
+- **Two tests stated a claim that depended on who ran them.** Three gate-liveness tests
+  asserted the `/root` behaviour while inheriting the runner's `$HOME`, and the WAL-sidecar
+  fallback test established its precondition with `chmod 0o500` without checking whether it
+  took — root writes through `0500`, so the precondition silently did not exist and the test
+  reported that as the fallback being broken. The gate-liveness tests now pin `$HOME` to name
+  the machine they describe, and the WAL test probes with a real write and skips loudly when
+  the mode does not deny. Verified the skip does not mask: as a non-root user the guard does
+  not fire and the test runs and passes.
+
 ## [6.6.2] - 2026-08-10
 
 ### Added
