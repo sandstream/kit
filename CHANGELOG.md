@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.6.3] - 2026-08-11
+
 ### Fixed
 
 - **A `/root/…` hook path is no longer called stale on a machine whose home IS `/root`.**
