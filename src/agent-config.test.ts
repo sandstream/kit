@@ -1239,6 +1239,25 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
     return path;
   };
 
+  /**
+   * `homedir()` reads $HOME on POSIX, which is what lets these tests state which MACHINE
+   * they describe instead of inheriting whichever one runs them. That distinction is the
+   * point for every `/root/…` case below: the same hook path is unreachable from a normal
+   * account and native on a root container, so a check that cannot tell those apart is
+   * wrong on one of them — and a test that does not pin $HOME silently changes its claim
+   * depending on who runs it.
+   */
+  const withHome = (home: string, fn: () => void) => {
+    const prev = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      fn();
+    } finally {
+      if (prev === undefined) delete process.env.HOME;
+      else process.env.HOME = prev;
+    }
+  };
+
   function repo(fn: (dir: string) => void) {
     const dir = mkdtempSync(join(tmpdir(), "kit-gatelive-"));
     try {
@@ -1265,11 +1284,16 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
         join(dir, ".codex", "config.toml"),
         '[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n[[hooks.PreToolUse.hooks]]\ntype = "command"\ncommand = \'/root/.kit/bin/kit gate-bash\'\n',
       );
-      const live = gateLiveness(dir);
-      assert.equal(live.everInstalled, false);
-      assert.equal(live.installGate, false);
-      assert.equal(live.problems.length, 1);
-      assert.match(live.problems[0], /root\/container path/);
+      // "stale" means unreachable from THIS machine's account, so the machine has to be
+      // stated — see the withHome pair below. Inheriting the runner's $HOME made this
+      // assertion depend on who ran it, passing for a normal user and failing as root.
+      withHome("/home/someone", () => {
+        const live = gateLiveness(dir);
+        assert.equal(live.everInstalled, false);
+        assert.equal(live.installGate, false);
+        assert.equal(live.problems.length, 1);
+        assert.match(live.problems[0], /root\/container path/);
+      });
     });
   });
 
@@ -1357,15 +1381,40 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
     });
   });
 
-  it("marker present + root-owned hook path → explains local repair", () => {
+  it("marker present + FOREIGN root hook path (home is not /root) → explains local repair", () => {
     repo((dir: string) => {
       mark(dir);
       writeFileSync(join(dir, ".claude/settings.json"), settings(["/root/.kit/bin/kit gate-bash"]));
-      const live = gateLiveness(dir);
-      assert.equal(live.installGate, true);
-      assert.equal(live.problems.length, 1);
-      assert.match(live.problems[0], /root\/container path/);
-      assert.match(live.problems[0], /Run: kit agent-config/);
+      withHome("/home/someone", () => {
+        const live = gateLiveness(dir);
+        assert.equal(live.installGate, true);
+        assert.equal(live.problems.length, 1);
+        assert.match(live.problems[0], /root\/container path/);
+        assert.match(live.problems[0], /Run: kit agent-config/);
+      });
+    });
+  });
+
+  it("when /root IS home, a /root path is judged on whether it runs — not on its prefix", () => {
+    repo((dir: string) => {
+      mark(dir);
+      // Deliberately a path that does not exist, because that keeps this test independent
+      // of whether the suite can write under /root. What it pins is WHICH verdict is
+      // reached: with the prefix branch returning unconditionally the answer was
+      // "root/container path" (wrong on a root container — the path is native there, and
+      // the advice to "rewrite hooks for /root" pointed where they already pointed); now
+      // the prefix is not itself disqualifying and the executability check decides. The
+      // two messages differ, so this distinguishes the fix from the bug.
+      writeFileSync(
+        join(dir, ".claude/settings.json"),
+        settings(["/root/.kit/bin/absent gate-bash"]),
+      );
+      withHome("/root", () => {
+        const live = gateLiveness(dir);
+        assert.equal(live.problems.length, 1);
+        assert.match(live.problems[0], /missing or not executable/);
+        assert.doesNotMatch(live.problems[0], /root\/container path/);
+      });
     });
   });
 

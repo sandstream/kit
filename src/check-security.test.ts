@@ -215,7 +215,7 @@ describe("checkMemoryHooksLiveness (R5 — self-playing loop gate)", () => {
 });
 
 describe("checkMemoryInjection", () => {
-  it("scans read-only when WAL sidecars cannot be created", async () => {
+  it("scans read-only when WAL sidecars cannot be created", async (t) => {
     if (process.platform === "win32") return;
 
     const dir = mkdtempSync(join(tmpdir(), "kit-memory-security-"));
@@ -236,6 +236,27 @@ describe("checkMemoryInjection", () => {
       rmSync(`${dbPath}-shm`, { force: true });
       chmodSync(dir, 0o500);
 
+      // The mode bits are the INTENT; whether they deny this process is a separate fact.
+      // root carries CAP_DAC_OVERRIDE and writes through 0500 regardless — and agents
+      // commonly run as root in a container — so without this probe the test asserted a
+      // read-only fallback whose precondition had silently not been established, and
+      // reported that as a FAILURE of the fallback. A precondition that did not take is
+      // "cannot measure here", not "the code is wrong": kit's own rule about a check that
+      // could not run, applied to kit's own suite.
+      let denied = false;
+      try {
+        writeFileSync(join(dir, ".write-probe"), "x");
+        rmSync(join(dir, ".write-probe"), { force: true });
+      } catch {
+        denied = true;
+      }
+      if (!denied) {
+        t.skip(
+          "0500 does not deny writes to this process (running as root?) — the WAL-sidecar fallback is NOT verified in this run",
+        );
+        return;
+      }
+
       process.env.KIT_MEMORY_DB = dbPath;
       const result = await checkMemoryInjection();
 
@@ -255,6 +276,12 @@ describe("checkMemoryInjection", () => {
 describe("checkGateLiveness", () => {
   it("FAILS when Codex hook config points at a stale root wrapper path", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-live-codex-gate-"));
+    // "STALE" is the whole claim, and staleness is relative to the machine reading the
+    // config: a /root wrapper path is unreachable from a normal account and native on a
+    // root container. $HOME is what `homedir()` reads, so pinning it here states which of
+    // the two machines this test is about instead of inheriting whichever one runs it.
+    const prevHome = process.env.HOME;
+    process.env.HOME = "/home/someone";
     try {
       mkdirSync(join(dir, ".codex"), { recursive: true });
       writeFileSync(
@@ -266,6 +293,8 @@ describe("checkGateLiveness", () => {
       assert.equal(result.status, "fail");
       assert.match(result.detail, /root\/container path/);
     } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
       rmSync(dir, { recursive: true, force: true });
     }
   });
