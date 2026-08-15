@@ -383,6 +383,34 @@ and misses `fast-uri`, because `ajv` is CommonJS and reaches it through an inter
 half-blind version was written first and produced a confident wrong answer, which is why the guard
 test asserts it can see `fast-uri` BEFORE any of its absence claims are allowed to mean anything.
 
+### Read the anchor record — N working trees currently give N green verdicts ([#470](https://github.com/sandstream/kit/issues/470))
+`kit audit verify` answers for ONE working tree. Two real worktrees of this repo on the same commit
+each report `✓ audit chain intact  1 entries`, exit 0 — two greens, neither of which is the whole
+story, and no way to ask what the agents did to this repo today. That is not a defect in the `cwd`
+arc above; it is that arc being right. `logAuditEvent` resolves against the governed project, and a
+worktree IS a distinct working tree, so it correctly gets its own chain.
+
+What survives the model was measured too, so this entry stays scoped: worktrees share the `.git`
+common dir, so installed hooks fire in every one of them (an agent cannot create itself an ungated
+worktree), and `.kit.toml` is tracked, so policy cannot drift and the narrowing-only semantic still
+denies self-approval.
+
+**The union data already exists.** `~/.kit/audit-anchor.json` keys the HMAC tip PER LOG PATH and is
+shared across every tree on the machine — an index of every audit log kit has ever sealed here, 15
+of them on the machine where this was measured. Nothing reads it that way: `audit anchor` seals the
+`cwd` log, and the only reader outside `audit-anchor.ts` looks up a single path (`hints.ts:96`). So
+the fix is a reader, not a gate — `audit verify --all` iterating the record, reporting **missing**
+and **stalled** as distinct outcomes, because most of those 15 are short-lived test temp dirs and
+alarming on both would make the command unreadable.
+
+Second, smaller half: `elevation.ts` calls `appendAuditEventDirect` WITHOUT `cwd`, a call site the
+`cwd` arc missed. It matters more than its size — `KIT_ELEVATED=1` is documented as the escape hatch
+that "gets audit-logged loudly". The record is written; it lands in one of N logs no command reads
+together. "Loudly" is a claim about a reader, and the reader is the weak link.
+
+Found while researching agent session managers that give every session its own worktree, which turns
+"N working trees on one machine" from an edge case into the normal case.
+
 ### PR 2 — `kit analyze` subcommand (1d)
 Walk git log + scan framework markers (`next.config.*`, `pyproject.toml`,
 `Cargo.toml`, `drizzle.config.*`, etc.) to emit a draft `CLAUDE.md` + `RULES.md`
