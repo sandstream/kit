@@ -94,11 +94,41 @@ Two constraints to respect when the switch happens:
 - **Self-hosted runners are not supported.** The job runs on `ubuntu-latest`
   (GitHub-hosted), which is.
 
+**`scripts/trusted-publishing-wizard.sh` walks all of it.** It derives the package list from
+this repo rather than carrying a copy (a hardcoded list drifts the moment someone adds a
+plugin, and a *missed* package is the one failure this migration must not have: no token and
+no trusted publisher means that package's publish step fails), records what you confirm in
+`.kit/trusted-publishing.state` so you can stop and resume, refuses to remove the token until
+every package is recorded, and ends by pointing at a prerelease as the only honest test. Run
+it from the repo root:
+
+```bash
+./scripts/trusted-publishing-wizard.sh
+```
+
+It cannot verify the npmjs.com side for you — `npm access` on npm 11.19.0 covers
+status/collaborators/grant/revoke and has no read or write path for a trusted publisher, so
+the setting exists only in the web UI. What the wizard verifies is everything else: the
+workflow file, the npm client floor, the environment's existence, and the package list.
+
 Once every package is configured, the workflow change is a deletion: drop the
-`NODE_AUTH_TOKEN`/`NPM_TOKEN` env from both publish steps, and drop `--provenance` — with
-trusted publishing from GitHub Actions, provenance is generated automatically. `id-token:
-write` is already granted. Keep a read-only granular token only if a private dependency
-ever needs installing.
+`NODE_AUTH_TOKEN`/`NPM_TOKEN` env from both publish steps (npm uses the token whenever it is
+present, so OIDC only takes over once that env is gone — the two cannot both be in effect).
+`id-token: write` is already granted. Keep a read-only granular token only if a private
+dependency ever needs installing.
+
+`--provenance` stays. Provenance is automatic under trusted publishing, so the flag is a
+no-op there and leaving it in states the intent explicitly; if the first OIDC publish ever
+rejects it, dropping it is a one-line follow-up. That is a deliberate choice not to change two
+things at once in the release path.
+
+**Prove it with a prerelease, not with the next real version.** publish.yml routes any version
+containing a hyphen to the `next` dist-tag, so `latest` does not move. Bump to
+`X.Y.Z-rc.1`, give it its own `## [X.Y.Z-rc.1]` CHANGELOG section (the job refuses to publish
+a version the changelog does not document, and it checks that *before* publishing), tag the
+release commit signed, and push. If one package fails with 404/403, its trusted publisher is
+missing or its fields do not match — the workspace loop is idempotent, so fix that package and
+re-run the job; the ones already published are skipped.
 
 Verify the first OIDC release the same way as any other: `npm view sandstream-kit version`,
 install the published tarball and run its binary, and confirm both SBOMs are attached to the

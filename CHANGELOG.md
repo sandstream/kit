@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **`scripts/trusted-publishing-wizard.sh` — the npm OIDC migration, walked.** The
+  registry side of trusted publishing can only be done in a browser, one package at a time:
+  npm allows exactly one trusted publisher per package, and `npm access` on 11.19.0 covers
+  status/collaborators/grant/revoke with no read or write path for the setting. So the wizard
+  is honest about what it cannot verify and rigorous about the rest. It derives the package
+  list from the repo rather than carrying a copy — a hardcoded list drifts the moment someone
+  adds a plugin, and a *missed* package is the one failure this migration must not have, since
+  no token plus no trusted publisher means that package's publish step fails. Progress is
+  recorded in `.kit/trusted-publishing.state`, so it is resumable across sessions; the
+  token-removal stage refuses to run until every package is confirmed; and the final stage
+  points at a prerelease (routed to `next`, so `latest` cannot move) as the only honest test.
+  Its `publish.yml` edit is fail-closed — it removes the parent `env:` when the token was its
+  only child, refuses if any *executing* line still references `NPM_TOKEN`, and lists the
+  comment lines that still describe the token so the prose is fixed in the same PR.
+- **A dialect gate for that script (`src/wizard-script.test.ts`).** Nothing in this repo lints
+  shell — `lint` and `format:check` are TypeScript-only and CI has no shellcheck — so a
+  committed wizard could be broken in ways no gate notices until the human runs it, during a
+  credential migration, once. Two such bugs were found by hand while writing it and are now
+  pinned: `mapfile` (a bash 4 builtin; macOS ships bash 3.2.57 and the publishing machine is a
+  Mac) and `sed -E '…+?…'` (POSIX ERE has no lazy quantifier — macOS sed exits with
+  "repetition-operator operand invalid"). Both parse fine to the eye and to `bash -n`. The
+  gate was mutation-tested by reintroducing each.
+
 ### Fixed
 
 - **A second gate that could not fail: the security-headers step.** `security.yml` read
