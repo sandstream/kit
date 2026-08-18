@@ -560,16 +560,35 @@ function register_kit_init(server: McpServer): void {
           // File does not exist — proceed
         }
 
-        // Same user-defaults merge as the CLI init flow (~/.kit/defaults.toml
-        // [init] services) — the two surfaces must generate the same config.
-        const { applyUserInitDefaults } = await import("./user-defaults.js");
+        // Same service resolution as the CLI init flow — the two surfaces must generate
+        // the same config. There is no prompt on this surface, so the operator's known
+        // services are never applied here; they come back as an `offered` gap for the
+        // agent to put to the user and answer with a follow-up call.
+        const { resolveInitServices } = await import("./user-defaults.js");
         const detected = await detectStack(workDir);
         const {
           stack,
+          offered: offeredServices,
           applied: appliedDefaults,
           unknown: unknownDefaults,
-        } = applyUserInitDefaults(detected);
-        const generatedConfig = generateToml(stack);
+        } = resolveInitServices(detected);
+        // `gaps` is the point of this response for an agent caller: the fields kit
+        // refused to invent, each with the command that settles it. Without them the
+        // caller sees a short config and no reason for what is absent.
+        const { toml: generatedConfig, gaps: configGaps } = generateToml(stack);
+        const gaps =
+          offeredServices.length > 0
+            ? [
+                {
+                  path: "services",
+                  owner: "agent" as const,
+                  why: "known services that nothing in this repo references",
+                  candidates: offeredServices,
+                  fix: `kit init --services ${[...stack.services, ...offeredServices].join(",")}`,
+                },
+                ...configGaps,
+              ]
+            : configGaps;
 
         let written = false;
 
@@ -588,6 +607,7 @@ function register_kit_init(server: McpServer): void {
                   appliedDefaults,
                   unknownDefaults,
                   generatedConfig,
+                  gaps,
                   written,
                   alreadyExists,
                   message: alreadyExists
