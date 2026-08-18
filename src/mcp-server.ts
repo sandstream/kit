@@ -5,6 +5,8 @@ import { resolve, join, relative } from "node:path";
 import { loadConfig } from "./config.js";
 import { checkTools } from "./check-tools.js";
 import { runCheckGate } from "./check-run.js";
+import { summarizeCheckRun, fullCheckPayload } from "./check-mcp-summary.js";
+import { writeCheckDetail } from "./check-detail-store.js";
 import { installTools } from "./install.js";
 import { generateSecrets } from "./secrets.js";
 import {
@@ -226,7 +228,7 @@ function register_kit_check(server: McpServer): void {
     "kit_check",
     {
       description:
-        "Run kit check and return structured status for all tools, services, secrets, and security checks.",
+        "Run kit check and return the verdict plus every non-passing check: { ok, scope, dimensions, failed, findings, counts, passesOmitted, detail }. Passing rows are omitted from the response (they are the bulk of it and answer a question nobody asked) — a skip or a didNotRun is NEVER omitted, because lost coverage is not a pass. The complete run is written to detail.path; read that file only when the summary is not enough. Pass detail:true to get the full document inline instead.",
       inputSchema: {
         cwd: z
           .string()
@@ -234,34 +236,31 @@ function register_kit_check(server: McpServer): void {
           .describe(
             "Project directory to check (defaults to the server process's own). Every dimension that reads the filesystem resolves paths from this argument, including the scanner subprocesses, so a value pointing at another project is answered ABOUT that project.",
           ),
+        detail: z
+          .boolean()
+          .optional()
+          .describe(
+            "Return the complete run inline (every passing check included). Costs several times the summary in context and is rarely what a check → fix → check loop needs; prefer reading detail.path from the summary.",
+          ),
       },
     },
-    async ({ cwd }) => {
+    async ({ cwd, detail }) => {
       try {
         const r = await runCheckGate({ cwd });
+        const full = fullCheckPayload(r);
+        if (detail) {
+          return { content: [{ type: "text" as const, text: JSON.stringify(full, null, 2) }] };
+        }
+        // Written BEFORE the response is built: a reference the agent cannot resolve is worse
+        // than a verbose answer, so a failed write falls back to the full payload rather than
+        // pointing at a file that is not there.
+        const ref = writeCheckDetail(cwd ?? process.cwd(), full, Date.now());
+        const payload = ref ? summarizeCheckRun(r, ref) : full;
         return {
           content: [
             {
               type: "text" as const,
-              text: JSON.stringify(
-                {
-                  ok: r.ok,
-                  dimensions: r.verdict.dimensions,
-                  failed: r.verdict.failed,
-                  tools: r.tools,
-                  services: r.services,
-                  secrets: r.secrets.keys,
-                  skills: r.skills,
-                  hooks: r.hooks,
-                  webSearch: r.webSearch,
-                  deploy: r.deploy,
-                  security: r.security,
-                  tests: r.tests,
-                  locks: r.locks,
-                },
-                null,
-                2,
-              ),
+              text: JSON.stringify(payload, null, 2),
             },
           ],
         };
