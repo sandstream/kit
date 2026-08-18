@@ -592,6 +592,32 @@ jobs:
     }
   });
 
+  it("FAILS a condition ending in any status-blind sink, not just tee", () => {
+    // kit's own security.yml carried `if grep -rE "…" src/ | head -1; then`. `head` exits 0
+    // on empty input, so the condition was ALWAYS true: "Security headers configured" printed
+    // unconditionally and the ::warning:: branch was unreachable. Same class as the tee case,
+    // different sink — the rule has to name the class, not the one instance that was found.
+    for (const sink of ["head -1", "tail -1", "wc -l", "sort", "uniq", "cat", "tr -d x"]) {
+      const dir = workflow(`name: security
+on: [push]
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if grep -rE "Content-Security-Policy" src/ | ${sink}; then
+            echo ok
+          fi
+`);
+      try {
+        const res = ruleById("R1-fail-open-ci").run({ repoRoot: dir, sources: [], pkgJson: {} });
+        assert.equal(countStatus(res, "fail"), 1, sink);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   it("does not accept pipefail that only appears in a comment", () => {
     // The first version of this check walked back looking for the word, and this step's own
     // explanatory comment satisfied it — documented, not enforced, which is the exact disease.

@@ -249,11 +249,29 @@ jobs:
           done
           echo "GDPR scan complete (warnings only)"
       - name: Security headers in code
+        # This step could not fail. It read `if grep -rE "…" src/ packages/ | head -1; then`,
+        # and `head` exits 0 on empty input, so the condition was ALWAYS true: "Security
+        # headers configured" printed unconditionally and the ::warning:: branch was
+        # unreachable. Same class as the publish.yml tag-signature gate fixed in 6.6.4 (a
+        # condition decided by the pipe's last command); self-audit R1-fail-open-ci now flags
+        # it, and found this one.
+        #
+        # Made honest rather than merely correct: kit is a CLI + MCP (stdio) tool, the same
+        # "no HTTP surface" that skips Stage 3 DAST above, so a missing CSP is not a finding
+        # here — a permanently-expected warning would just train people to ignore warnings.
+        # The check is therefore gated on a surface actually existing, and fires the day one
+        # lands. Measured when written: every one of these server patterns matches 0 lines in
+        # src/ and packages/.
         run: |
-          if grep -rE "Content-Security-Policy|Strict-Transport-Security|X-Frame-Options" src/ packages/ 2>/dev/null | head -1; then
+          set -o pipefail
+          if ! grep -rqE "createServer|express\(|fastify\(|Bun\.serve|\.listen\(" src/ packages/ 2>/dev/null; then
+            echo "No HTTP surface in src/ or packages/ — header check N/A (same reason Stage 3 DAST is skipped)"
+            exit 0
+          fi
+          if grep -rqE "Content-Security-Policy|Strict-Transport-Security|X-Frame-Options" src/ packages/; then
             echo "Security headers configured"
           else
-            echo "::warning::No security headers found in src/ or packages/ — required for web-facing code"
+            echo "::warning::HTTP surface found in src/ or packages/ but no security headers — required for web-facing code"
           fi
 
   # kit self-check (uses kit check-security)

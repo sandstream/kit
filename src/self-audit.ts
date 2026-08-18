@@ -229,6 +229,13 @@ function listWorkflowFiles(repoRoot: string): string[] {
   }
 }
 
+/** Commands whose exit status says nothing about the check that fed them: pass-throughs and
+ *  formatters. `head` and `tail` exit 0 on empty input, `wc`/`sort`/`uniq`/`tr`/`cat`/`tee`
+ *  effectively always do — so a condition ENDING in one of these is decided by the sink, not
+ *  by the check. `grep -q` is deliberately absent: there, the pipe's last command IS the
+ *  question being asked. */
+const STATUS_BLIND_SINK = /\|\s*(tee|cat|head|tail|wc|sort|uniq|tr)\b[^|]*$/;
+
 /** Does the `run:` block containing line `i` set pipefail? Walk back to the step boundary
  *  (`- name:` / `- run:` / `- uses:`) — with pipefail the pipeline reports the first failure,
  *  so a piped condition is no longer fail-open. */
@@ -287,16 +294,17 @@ const R1: SelfAuditRule = {
             detail: `workflow step uses '|| true', swallowing failures (fail-open): ${trimmed}`,
           });
         }
-        // A CONDITION piped into a pass-through sink takes its status from that sink, not
-        // from the check: `if ! git verify-tag "$TAG" 2>&1 | tee log; then` reads tee's
-        // always-zero exit, so the gate never fires. This shipped in kit's own publish.yml
-        // and let an UNSIGNED tag publish 6.6.3. GitHub's default step shell is `bash -e {0}`
+        // A CONDITION whose pipeline ENDS in a status-blind sink takes its verdict from that
+        // sink, not from the check. Two instances shipped in kit's own workflows: publish.yml
+        // read `if ! git verify-tag … | tee log` (tee always exits 0) and let an UNSIGNED tag
+        // publish 6.6.3; security.yml read `if grep -rE "…" src/ | head -1` (head exits 0 on
+        // empty input), so its header check printed "configured" unconditionally. GitHub's default step shell is `bash -e {0}`
         // — pipefail is NOT on unless the step sets it (or the step declares `shell: bash`),
         // so the fix is pipefail or no pipe at all. Only pass-through sinks are flagged: an
         // `if cmd | grep -q x` is deliberately asking about grep.
         if (
           /\bif\s+!?\s*\S/.test(trimmed) &&
-          /\|\s*(tee|cat)\b/.test(trimmed) &&
+          STATUS_BLIND_SINK.test(trimmed) &&
           !annotated &&
           !stepSetsPipefail(lines, i)
         ) {
