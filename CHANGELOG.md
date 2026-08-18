@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A second gate that could not fail: the security-headers step.** `security.yml` read
+  `if grep -rE "Content-Security-Policy|…" src/ packages/ | head -1; then` — `head` exits 0 on
+  empty input, so the condition was always true, `Security headers configured` printed
+  unconditionally, and the `::warning::` branch was unreachable. Measured against a
+  guaranteed-absent pattern before fixing. Same class as the 6.6.4 tag-signature gate, and
+  found by the rule that fix installed.
+- **`R1-fail-open-ci` now names the class instead of the instance.** It flagged a condition
+  piped into `tee` or `cat`; it now flags any condition whose pipeline ENDS in a status-blind
+  sink (`tee`, `cat`, `head`, `tail`, `wc`, `sort`, `uniq`, `tr`). `grep -q` stays allowed —
+  there the pipe's last command IS the question. Adding the rule made kit's own self-audit
+  fail on `security.yml`, which is how the second instance surfaced.
+
+### Changed
+
+- **The security-headers check is now honest, not merely correct.** kit is a CLI + MCP (stdio)
+  tool — the same "no HTTP surface" that skips Stage 3 DAST — so a missing CSP is not a
+  finding here, and a permanently-expected warning would only train people to ignore warnings.
+  The check is gated on an HTTP surface actually existing (`createServer`, `express(`,
+  `fastify(`, `Bun.serve`, `.listen(` — each matching 0 lines when written) and fires the day
+  one lands. All three branches were driven in a fixture tree; the two that mattered had never
+  been reachable.
+
 ## [6.6.4] - 2026-08-18
 
 ### Added
