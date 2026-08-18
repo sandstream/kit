@@ -526,7 +526,7 @@
     },
     "init": {
       "kind": "command",
-      "summary": "Detect stack, generate .kit.toml, and run full setup (--no-setup: config + lock files only; merges ~/.kit/defaults.toml [init] services)",
+      "summary": "Detect stack, generate .kit.toml, and run full setup (--no-setup: config + lock files only; offers ~/.kit/defaults.toml [init] known_services, --services a,b answers without a prompt)",
       "x-kit-args-modeled": false,
       "x-kit-audience": "all",
       "x-kit-mcp": true,

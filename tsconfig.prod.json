@@ -1,4 +1,5 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["src/**/*.test.ts", "**/* [0-9].ts", "**/* [0-9].tsx"]
+  "//conflict-copies": "See tsconfig.json — cloud-sync duplicates are gated by scripts/check-conflict-copies.mjs, not by a glob that cannot express them.",
+  "exclude": ["src/**/*.test.ts"]
 }

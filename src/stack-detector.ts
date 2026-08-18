@@ -129,7 +129,11 @@ function detectPackageManager(pkg: PackageJson, cwd: string): Promise<string> {
   return (async () => {
     if (await fileExists(join(cwd, "pnpm-lock.yaml"))) return "pnpm";
     if (await fileExists(join(cwd, "yarn.lock"))) return "yarn";
+    // Both bun lockfiles: `bun.lockb` (binary, ≤1.1) and `bun.lock` (text, the
+    // default since 1.2). Knowing only the old name made every current bun repo
+    // look like npm.
     if (await fileExists(join(cwd, "bun.lockb"))) return "bun";
+    if (await fileExists(join(cwd, "bun.lock"))) return "bun";
     return "npm";
   })();
 }

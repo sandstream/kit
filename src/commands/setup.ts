@@ -25,6 +25,7 @@ import { hasFlag, flagValue } from "../utils/flags.js";
 import { isNonInteractive } from "../environment.js";
 import { promptConfirm } from "../utils/prompt.js";
 import { promptSelect } from "../utils/promptSelect.js";
+import { promptMultiSelect } from "../utils/promptMultiSelect.js";
 import { isGitRepository } from "../check-hooks.js";
 import { checkGitignore, patchGitignore } from "../check-gitignore.js";
 import {
@@ -37,7 +38,12 @@ import { runStep } from "../output.js";
 import { detectStack } from "../stack-detector.js";
 import { scanPlaintextSecrets } from "../scan-plaintext.js";
 import { detectSecretStore, vaultMeta } from "../vault-meta.js";
-import { generateToml, parseEnvTemplateKeys, type SecretsStore } from "../toml-generator.js";
+import {
+  generateToml,
+  parseEnvTemplateKeys,
+  type SecretsStore,
+  type InitGap,
+} from "../toml-generator.js";
 import {
   gatherLive,
   suggestContextToml,
@@ -51,7 +57,7 @@ import {
   updateSkillsLock,
   updateCliLock,
 } from "../lock.js";
-import { applyUserInitDefaults, userDefaultsPath } from "../user-defaults.js";
+import { resolveInitServices, userDefaultsPath } from "../user-defaults.js";
 import { cmdInstall } from "./install.js";
 import { cmdLogin } from "./login.js";
 import { cmdSecrets } from "./secrets.js";
@@ -424,6 +430,30 @@ export async function cmdSetup(): Promise<boolean> {
 }
 
 /**
+ * Report the fields kit refused to invent, and the command that settles each.
+ *
+ * This is the visible half of the no-guessing rule: a shorter .kit.toml is only an
+ * improvement if what is missing from it is stated plainly. Silence would just move
+ * the surprise from "wrong line in the config" to "check behaves oddly later".
+ */
+function printInitGaps(gaps: InitGap[]): void {
+  if (gaps.length === 0) return;
+  console.log(
+    `${c.yellow}!${c.reset} ${gaps.length} field(s) kit will not infer ${c.dim}— nothing was guessed:${c.reset}\n`,
+  );
+  for (const gap of gaps) {
+    const who = gap.owner === "human" ? `${c.dim}(needs you)${c.reset}` : "";
+    console.log(`  ${c.bold}${gap.path}${c.reset} ${who}`);
+    console.log(`    ${c.dim}${gap.why}${c.reset}`);
+    if (gap.candidates?.length) {
+      console.log(`    ${c.dim}found: ${gap.candidates.join(", ")}${c.reset}`);
+    }
+    console.log(`    ${c.cyan}${gap.fix}${c.reset}`);
+  }
+  console.log();
+}
+
+/**
  * Generate a `.kit.toml` when none exists: detect stack, surface plaintext
  * secrets, pick a secret backend, preview, and write. Returns "written" on
  * success, "abort-error" when config can't be generated (low-confidence +
@@ -436,24 +466,46 @@ async function generateConfigFile(
   console.log(`${c.yellow}No .kit.toml found.${c.reset}\n`);
 
   const detected = await runStep("detect project stack", () => detectStack(process.cwd()));
-  // Merge the operator's standing preferences (~/.kit/defaults.toml [init]
-  // services) — the SAME merge the MCP kit_init tool applies, so the two
-  // surfaces generate the same config. Unknown ids are surfaced, never silent.
-  const {
-    stack,
-    applied: defaultServices,
-    unknown: unknownDefaults,
-  } = applyUserInitDefaults(detected);
-  if (defaultServices.length > 0) {
+  // Services: detection decides, the operator's known-services list only decides what we
+  // ASK about (~/.kit/defaults.toml [init] known_services). `--services a,b` answers on the
+  // command line — `--services ""` means none, which is why the flag's presence is tested
+  // rather than its truthiness.
+  const servicesFlag = hasFlag(process.argv, "--services")
+    ? (flagValue(process.argv, "--services") ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : undefined;
+  let selection = resolveInitServices(detected, servicesFlag);
+  if (selection.legacyKey) {
     console.log(
-      `${c.dim}user defaults (${userDefaultsPath()}): +${defaultServices.join(" +")}${c.reset}`,
+      `${c.dim}${userDefaultsPath()}: [init] services is now a candidate list — rename it to known_services. It no longer adds services to every project.${c.reset}`,
     );
   }
-  for (const u of unknownDefaults) {
+  for (const u of selection.unknown) {
     console.warn(
-      `${c.yellow}!${c.reset} unknown service '${u}' in ${userDefaultsPath()} — skipped (not in kit's service registry)`,
+      `${c.yellow}!${c.reset} unknown service '${u}' — skipped (not in kit's service registry)`,
     );
   }
+
+  // Offer the known-but-absent ones to whoever is here to answer. At a terminal that is a
+  // prompt; anywhere else `promptMultiSelect` returns null and they stay a gap, because
+  // "nobody answered" must not become "yes".
+  if (selection.offered.length > 0 && !nonInteractive) {
+    const picked = await promptMultiSelect("Which services does this project use?", [
+      ...selection.detected.map((s) => ({
+        value: s,
+        label: s,
+        hint: "found in this repo",
+        preselected: true,
+      })),
+      ...selection.offered.map((s) => ({ value: s, label: s, hint: "you use it elsewhere" })),
+    ]);
+    if (picked) selection = resolveInitServices(detected, picked);
+    console.log();
+  }
+
+  const { stack } = selection;
 
   if (stack.confidence < 0.3 && nonInteractive) {
     console.error(
@@ -511,14 +563,23 @@ async function generateConfigFile(
   // ── Secret-backend choice (interactive) ────────────────────────────────
   // Respect a backend the repo is already bound to (.infisical.json / doppler.yaml);
   // it becomes the default (and the non-interactive choice) instead of 1Password.
+  // Order of authority: an explicit --store flag, then a binding the repo already
+  // carries (.infisical.json / doppler.yaml), then a human at a real terminal. If
+  // none of those produced an answer the store stays UNDEFINED and `[secrets]` is
+  // not written — kit does not pick a vault on the user's behalf. It used to
+  // default to 1Password, and because `promptSelect` returns its `recommended`
+  // option when stdin is not a TTY, that default was applied silently to everyone
+  // running `kit init` from an agent or a CI job: op:// refs into a vault they
+  // never used, plus the op CLI in [tools] where `kit triage` blocks it.
+  const flagStore = flagValue(process.argv, "--store") as SecretsStore | undefined;
   const detectedStore = await detectSecretStore(async (p) => existsSync(resolve(process.cwd(), p)));
-  let chosenStore: SecretsStore = detectedStore ?? "1password";
-  if (detectedStore) {
+  let chosenStore: SecretsStore | undefined = flagStore ?? detectedStore ?? undefined;
+  if (!flagStore && detectedStore) {
     console.log(
       `  ${c.green}✓${c.reset} Detected ${c.bold}${detectedStore}${c.reset} config in repo — using it as the secret backend.\n`,
     );
   }
-  if (!nonInteractive) {
+  if (!nonInteractive && !flagStore) {
     const opts = [
       { value: "1password", label: "1Password", hint: "interactive signin via op CLI" },
       { value: "infisical", label: "Infisical", hint: "self-hosted or cloud, token-based" },
@@ -544,9 +605,13 @@ async function generateConfigFile(
   // Seed [secrets.keys] from an existing .env example so the project's real
   // secret contract isn't lost to just the detected services' template keys.
   let extraSecretKeys: string[] = [];
+  let envTemplateFile: string | undefined;
   for (const f of [".env.example", ".env.template", ".env.sample"]) {
     const p = resolve(process.cwd(), f);
     if (existsSync(p)) {
+      // Record WHICH file it was: `template` used to be hardcoded to
+      // `.env.template`, pointing kit at a path most repos don't have.
+      envTemplateFile = f;
       extraSecretKeys = parseEnvTemplateKeys(readFileSync(p, "utf-8"));
       if (extraSecretKeys.length > 0) {
         console.log(
@@ -557,10 +622,34 @@ async function generateConfigFile(
     }
   }
 
-  const tomlContent = generateToml(stack, {
-    secretsStore: chosenStore,
+  // package.json scripts become the candidate list on the setup.verify gap — kit
+  // shows what it found and refuses to pick, because only a reader of the repo
+  // knows which script is safe to run as a gate.
+  let packageScripts: string[] = [];
+  try {
+    const pkgPath = resolve(process.cwd(), "package.json");
+    if (existsSync(pkgPath)) {
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as {
+        scripts?: Record<string, string>;
+      };
+      packageScripts = Object.keys(pkg.scripts ?? {});
+    }
+  } catch {
+    // Unreadable/!JSON package.json: no candidates, gap still reported.
+  }
+
+  const { toml: tomlContent, gaps } = generateToml(stack, {
+    ...(chosenStore ? { secretsStore: chosenStore } : {}),
     hasDockerfile,
     extraSecretKeys,
+    ...(envTemplateFile ? { envTemplateFile } : {}),
+    ...(flagValue(process.argv, "--verify")
+      ? { verify: flagValue(process.argv, "--verify") as string }
+      : {}),
+    ...(flagValue(process.argv, "--install")
+      ? { install: flagValue(process.argv, "--install") as string }
+      : {}),
+    ...(packageScripts.length ? { packageScripts } : {}),
   });
 
   // Show diff preview
@@ -585,6 +674,22 @@ async function generateConfigFile(
 
   await writeFile(configPath, tomlContent, "utf-8");
   console.log(`  ${c.green}✓${c.reset} Generated ${c.bold}.kit.toml${c.reset}\n`);
+  printInitGaps([
+    // Nobody was here to be asked which of the operator's known services this project
+    // uses, so they were left out and reported instead of quietly added.
+    ...(selection.offered.length > 0
+      ? [
+          {
+            path: "services",
+            owner: "agent" as const,
+            why: `you use these elsewhere but nothing in this repo references them`,
+            candidates: selection.offered,
+            fix: `kit init --services ${[...selection.detected, ...selection.offered].join(",")}`,
+          },
+        ]
+      : []),
+    ...gaps,
+  ]);
 
   // Close the loop on the vault choice: tell the user exactly what `kit setup`
   // will provision and what they still have to do themselves (login is their
@@ -760,10 +865,17 @@ export async function cmdInit(): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit init${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
+  // A missing TTY counts as non-interactive. It was previously derived from flags
+  // alone, so `kit init` run from an agent, a hook or CI took the INTERACTIVE
+  // branch — and `promptSelect` answers with its `recommended` option when stdin
+  // is not a TTY. Every prompt was therefore auto-answered with kit's own default
+  // and never shown to anybody. Prompts are for questions a person is present to
+  // answer; where nobody is, the answer must be "unknown", not "kit's favourite".
   const nonInteractive =
     hasFlag(process.argv, "--non-interactive") ||
     hasFlag(process.argv, "--yes") ||
-    hasFlag(process.argv, "-y");
+    hasFlag(process.argv, "-y") ||
+    !process.stdin.isTTY;
 
   const configPath = resolveConfigPath();
 

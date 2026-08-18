@@ -703,7 +703,7 @@ describe("kit_init", () => {
     }
   });
 
-  it("merges user init defaults ([init] services) — the same merge the CLI flow applies", async () => {
+  it("OFFERS the operator's known services as a gap instead of writing them in", async () => {
     const projectDir = join(tempDir, "defaults-proj");
     await mkdir(projectDir, { recursive: true });
     await writeFile(
@@ -726,11 +726,27 @@ describe("kit_init", () => {
         appliedDefaults: string[];
         unknownDefaults: string[];
         generatedConfig: string;
+        gaps: { path: string; candidates?: string[]; fix: string }[];
       };
-      assert.ok(data.appliedDefaults.includes("sentry"), "sentry default not applied");
+      // This surface has no prompt, so a known service cannot be confirmed here. It used
+      // to be written in regardless — which is how a [services.posthog] block and three
+      // POSTHOG keys reached a repo with no PostHog in it. Now it comes back as a question.
+      assert.deepEqual(data.appliedDefaults, [], "nothing applied without an answer");
+      assert.ok(
+        !data.detectedStack.services.includes("sentry"),
+        "an unreferenced service must not enter the stack",
+      );
+      assert.doesNotMatch(
+        data.generatedConfig,
+        /sentry/,
+        "generated config must not carry an unconfirmed service",
+      );
       assert.deepEqual(data.unknownDefaults, ["nope-service"], "unknown id must be reported");
-      assert.ok(data.detectedStack.services.includes("sentry"));
-      assert.match(data.generatedConfig, /sentry/, "generated config must carry the default");
+
+      const servicesGap = data.gaps.find((g) => g.path === "services");
+      assert.ok(servicesGap, `expected a services gap, got: ${JSON.stringify(data.gaps)}`);
+      assert.deepEqual(servicesGap.candidates, ["sentry"]);
+      assert.match(servicesGap.fix, /kit init --services/, "the gap must name how to answer it");
     } finally {
       if (prev === undefined) delete process.env.KIT_DEFAULTS_FILE;
       else process.env.KIT_DEFAULTS_FILE = prev;

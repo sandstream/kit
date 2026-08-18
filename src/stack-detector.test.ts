@@ -15,6 +15,25 @@ async function makeProject(dir: string, files: Record<string, string>): Promise<
 }
 
 describe("detectStack", () => {
+  it("detects bun from the text lockfile bun 1.2+ writes, not just the old bun.lockb", async () => {
+    // bun replaced the binary `bun.lockb` with a text `bun.lock` in 1.2, and kit only
+    // knew the old name — so every current bun repo fell through to npm. The damage
+    // was downstream: with no package manager detected, `kit init` reported "install
+    // command unknown" for a repo that plainly states it, and an earlier version of
+    // the generator answered `npm install` in a bun workspace.
+    const dir = join(tmpdir(), `kit-detect-${process.pid}-bun-text-lock`);
+    await makeProject(dir, {
+      "package.json": JSON.stringify({ dependencies: { react: "19.0.0" } }),
+      "bun.lock": "",
+    });
+    try {
+      const stack = await detectStack(dir);
+      assert.ok(stack.tools.bun, `expected bun in tools: ${JSON.stringify(stack.tools)}`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("detects Next.js project", async () => {
     const dir = join(tmpdir(), `kit-detect-${process.pid}-nextjs`);
     await makeProject(dir, {

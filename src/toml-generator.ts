@@ -2,39 +2,36 @@ import type { DetectedStack } from "./stack-detector.js";
 import { VAULT_META } from "./vault-meta.js";
 import { SERVICE_BY_ID } from "./service-registry.js";
 
-const FRAMEWORK_SETUP: Record<
-  string,
-  { install: string; dev?: string; migrate?: string; verify?: string }
-> = {
-  nextjs: { install: "pnpm install", dev: "pnpm dev", verify: "pnpm build" },
-  remix: { install: "pnpm install", dev: "pnpm dev", verify: "pnpm build" },
-  astro: { install: "pnpm install", dev: "pnpm dev", verify: "pnpm build" },
-  sveltekit: { install: "pnpm install", dev: "pnpm dev", verify: "pnpm build" },
-  nestjs: { install: "pnpm install", dev: "pnpm start:dev", verify: "pnpm build" },
-  express: { install: "pnpm install", dev: "pnpm dev", verify: "pnpm build" },
-  react: { install: "pnpm install", dev: "pnpm dev", verify: "pnpm build" },
-  fastapi: { install: "uv sync", dev: "uv run uvicorn main:app --reload", verify: "uv run pytest" },
-  django: {
-    install: "uv sync",
-    migrate: "uv run python manage.py migrate",
-    verify: "uv run python manage.py check",
-  },
-  flask: { install: "uv sync", dev: "uv run flask run", verify: "uv run pytest" },
-  gin: { install: "go mod download", dev: "go run .", verify: "go build ./..." },
-  echo: { install: "go mod download", dev: "go run .", verify: "go build ./..." },
-  fiber: { install: "go mod download", dev: "go run .", verify: "go build ./..." },
-  laravel: {
-    install: "composer install",
-    migrate: "php artisan migrate",
-    verify: "php artisan test",
-  },
-  symfony: { install: "composer install", verify: "php bin/console lint:all" },
-  // native mobile
-  "react-native": { install: "pnpm install", dev: "pnpm start", verify: "pnpm tsc --noEmit" },
-  flutter: { install: "flutter pub get", dev: "flutter run", verify: "flutter analyze" },
-  ios: { install: "pod install", verify: "swift build" },
-  android: { install: "./gradlew dependencies", verify: "./gradlew build" },
-};
+/**
+ * A field kit deliberately did NOT write, because the repo does not prove it.
+ *
+ * The rule this type exists to enforce: a generated value that is merely plausible is
+ * worse than an absent one. An absent line is a question; a plausible line looks like a
+ * decision somebody made, so nobody re-reads it. Every wrong line in the .kit.toml this
+ * generator used to produce — a vault the user does not use, a `pnpm build` verify that
+ * would have deployed a backend, an `.env.template` that does not exist — was plausible.
+ *
+ * `owner` says who can close the gap, which is the only distinction that matters at the
+ * point of use: an "agent" gap is one a reader of the repo can settle (which script is
+ * the safe gate, which vault this developer runs); a "human" gap needs authority an agent
+ * must not assume — credentials, vault sign-in, anything that writes to a remote.
+ */
+export interface InitGap {
+  /** Dotted config path that was left out, e.g. `setup.verify`. */
+  path: string;
+  owner: "agent" | "human";
+  /** What evidence was missing — phrased so the reader can go look for it. */
+  why: string;
+  /** Concrete options kit found but will not choose between. */
+  candidates?: string[];
+  /** The exact command that closes the gap. */
+  fix: string;
+}
+
+export interface GeneratedConfig {
+  toml: string;
+  gaps: InitGap[];
+}
 
 /**
  * Security scanners kit installs by default, keyed by mise tool ref → version.
@@ -64,6 +61,30 @@ export const DEFAULT_STANDARDS_TOOLS: Record<string, string> = {
   "npm:jscpd": "latest",
   "aqua:boyter/scc": "latest",
 };
+
+/**
+ * Install commands a LANGUAGE determines on its own — no framework, lockfile or
+ * package-manager choice involved. `go mod download` is not a guess about a Go repo;
+ * it is what Go is.
+ *
+ * Deliberately short. Java (gradle vs maven), Python (uv vs poetry vs pip), Node
+ * (npm vs pnpm vs yarn vs bun) and the mobile toolchains all have a real choice in
+ * them, so they are resolved from a detected tool or left as a gap.
+ */
+const INSTALL_BY_LANGUAGE: Record<string, string> = {
+  go: "go mod download",
+  rust: "cargo fetch",
+  php: "composer install",
+  ruby: "bundle install",
+};
+
+/** Package managers, in the order a detected tool settles the install command. */
+const INSTALL_BY_TOOL: [tool: string, command: string][] = [
+  ["pnpm", "pnpm install"],
+  ["yarn", "yarn install"],
+  ["bun", "bun install"],
+  ["uv", "uv sync"],
+];
 
 function lines(...parts: (string | null | undefined)[]): string {
   return parts.filter(Boolean).join("\n");
@@ -118,11 +139,20 @@ export function parseEnvTemplateKeys(content: string): string[] {
   return keys;
 }
 
+/**
+ * Render `[secrets]`, or report the gap that stops us.
+ *
+ * There is no default store, on purpose. Defaulting to one wrote `op://Dev/Project/KEY`
+ * refs into repos whose owner runs Infisical: refs shaped exactly like real ones, pointing
+ * at nothing, in a file that reads as configured. Which vault a developer uses is not
+ * knowable from their code — so it is asked for, never assumed.
+ */
 function secretsSection(
   services: string[],
-  store: SecretsStore = "1password",
-  extraKeys: string[] = [],
-): string {
+  store: SecretsStore | undefined,
+  extraKeys: string[],
+  envTemplateFile: string | undefined,
+): { section: string; gaps: InitGap[] } {
   const allKeys: string[] = [];
   const seen = new Set<string>();
   const add = (k: string): void => {
@@ -138,7 +168,23 @@ function secretsSection(
   // Keys from an existing .env.example the project already documents (deduped
   // against service-template keys) — so a project's real secret contract is kept.
   extraKeys.forEach(add);
-  if (allKeys.length === 0) return "";
+  if (allKeys.length === 0) return { section: "", gaps: [] };
+
+  if (!store) {
+    return {
+      section: "",
+      gaps: [
+        {
+          path: "secrets.store",
+          owner: "agent",
+          why:
+            `${allKeys.length} secret key(s) are in play but no vault binding was found ` +
+            `(.infisical.json, doppler.yaml, existing op:// refs: none)`,
+          fix: `kit init --store <infisical|1password|doppler|vault|aws-sm|gcp-sm|azure-kv|bitwarden|env>`,
+        },
+      ],
+    };
+  }
 
   const keyLines = allKeys.map((k) => {
     let src: string;
@@ -184,40 +230,56 @@ function secretsSection(
         `# project_id = "..."   # run \`infisical login && infisical init\` to bind this repo`
       : "";
 
-  return lines(
-    `[secrets]`,
-    `store = "${store}"`,
-    `template = ".env.template"`,
-    ``,
-    `[secrets.keys]`,
-    keyLines.join("\n"),
-    bindingBlock || undefined,
-  );
+  return {
+    section: lines(
+      `[secrets]`,
+      `store = "${store}"`,
+      // Only ever point at a file that exists. The old hardcoded `.env.template`
+      // sent kit to a path most repos do not have.
+      envTemplateFile ? `template = "${envTemplateFile}"` : undefined,
+      ``,
+      `[secrets.keys]`,
+      keyLines.join("\n"),
+      bindingBlock || undefined,
+    ),
+    gaps: [],
+  };
 }
 
-function setupSection(stack: DetectedStack): string {
-  const frameworkSetup = stack.framework ? FRAMEWORK_SETUP[stack.framework] : null;
+/**
+ * Render `[setup]`, plus a gap for every command kit refuses to invent.
+ *
+ * `verify` is ALWAYS a gap. It is the one command kit runs as a gate, and nothing in a
+ * repo declares which script is safe to run for that purpose: in the repo that prompted
+ * this, `build` began with `convex deploy`, so the generated `verify` would have deployed
+ * a backend on every `kit setup`. Reading the scripts and choosing is a judgement, and
+ * judgements belong to whoever can read the repo — not to a table keyed by framework name.
+ */
+function setupSection(
+  stack: DetectedStack,
+  opts: { verify?: string; install?: string; packageScripts?: string[] },
+): { section: string; gaps: InitGap[] } {
+  const gaps: InitGap[] = [];
 
-  // Detect package manager from tools
-  let installCmd: string;
-  if (stack.tools.pnpm) installCmd = "pnpm install";
-  else if (stack.tools.yarn) installCmd = "yarn install";
-  else if (stack.tools.bun) installCmd = "bun install";
-  else if (stack.tools.uv) installCmd = "uv sync";
-  else if (stack.language === "go") installCmd = "go mod download";
-  else if (stack.language === "rust") installCmd = "cargo fetch";
-  else if (stack.language === "php") installCmd = "composer install";
-  else if (stack.language === "dart") installCmd = frameworkSetup?.install ?? "dart pub get";
-  else if (stack.language === "swift") installCmd = frameworkSetup?.install ?? "swift build";
-  else if (stack.language === "kotlin") installCmd = frameworkSetup?.install ?? "./gradlew build";
-  else if (stack.language === "ruby") installCmd = frameworkSetup?.install ?? "bundle install";
-  else if (stack.language === "java")
-    installCmd = frameworkSetup?.install ?? (stack.tools.java ? "./gradlew build" : "mvn install");
-  else if (stack.language === "csharp" || stack.language === "fsharp")
-    installCmd = frameworkSetup?.install ?? "dotnet restore";
-  else if (stack.language === "c" || stack.language === "cpp")
-    installCmd = frameworkSetup?.install ?? "cmake -B build && cmake --build build";
-  else installCmd = frameworkSetup?.install ?? "npm install";
+  let installCmd: string | null = opts.install ?? null;
+  if (!installCmd) {
+    for (const [tool, command] of INSTALL_BY_TOOL) {
+      if (stack.tools[tool]) {
+        installCmd = command;
+        break;
+      }
+    }
+  }
+  installCmd ??= INSTALL_BY_LANGUAGE[stack.language] ?? null;
+
+  if (!installCmd) {
+    gaps.push({
+      path: "setup.install",
+      owner: "agent",
+      why: `no lockfile or package manager was detected for ${stack.language}, and the install command is a choice (npm/pnpm/yarn/bun, uv/poetry/pip, gradle/maven)`,
+      fix: `kit init --install "<command>"`,
+    });
+  }
 
   // First detected service that declares a migrate command wins. Registry order
   // puts supabase before prisma before drizzle, preserving the old precedence.
@@ -229,19 +291,29 @@ function setupSection(stack: DetectedStack): string {
       break;
     }
   }
-  if (!migrateCmd && frameworkSetup?.migrate) migrateCmd = frameworkSetup.migrate;
 
-  const verifyCmd = frameworkSetup?.verify ?? null;
+  if (!opts.verify) {
+    gaps.push({
+      path: "setup.verify",
+      owner: "agent",
+      why: "nothing in the repo says which command is safe to run as a gate — a build script may deploy",
+      ...(opts.packageScripts?.length ? { candidates: opts.packageScripts } : {}),
+      fix: `kit init --verify "<command>"`,
+    });
+  }
 
-  const parts: string[] = [`[setup]`, `install = "${installCmd}"`];
+  const parts: string[] = [];
+  if (installCmd) parts.push(`install = "${installCmd}"`);
   if (migrateCmd) parts.push(`migrate = "${migrateCmd}"`);
-  if (verifyCmd) parts.push(`verify = "${verifyCmd}"`);
+  if (opts.verify) parts.push(`verify = "${opts.verify}"`);
 
-  return parts.join("\n");
+  return { section: parts.length ? `[setup]\n${parts.join("\n")}` : "", gaps };
 }
 
 /**
- * Generate a .kit.toml string from a detected stack profile.
+ * Generate a .kit.toml from a detected stack, plus the list of fields that were left
+ * out because the repo does not prove them. The caller decides what to do with the
+ * gaps — print them for a human, hand them to an agent, or fail a CI run.
  */
 export function generateToml(
   stack: DetectedStack,
@@ -249,8 +321,16 @@ export function generateToml(
     secretsStore?: SecretsStore;
     hasDockerfile?: boolean;
     extraSecretKeys?: string[];
+    /** Name of the env template that actually exists in the repo. */
+    envTemplateFile?: string;
+    /** Supplied by `--verify` or by an agent that read the repo. */
+    verify?: string;
+    /** Supplied by `--install` when no lockfile settles the package manager. */
+    install?: string;
+    /** package.json scripts, offered as candidates on the verify gap. */
+    packageScripts?: string[];
   } = {},
-): string {
+): GeneratedConfig {
   // Merge service tools into tools map
   const tools = { ...stack.tools };
   for (const svc of stack.services) {
@@ -290,6 +370,9 @@ export function generateToml(
   // leaving the CLI absent and `kit secrets` failing key-by-key — fix that by
   // wiring the CLI in here. Cloud secret managers (no `miseTool`) ship their CLI
   // through the cloud env, so they're guided at login but not provisioned.
+  // No store chosen means no vault CLI: kit will not install a vault the user
+  // never asked for (a defaulted `1password` entry here is what `kit triage`
+  // blocked, taking the whole setup run down with it).
   const vaultTool =
     options.secretsStore &&
     VAULT_META[options.secretsStore as Exclude<SecretsStore, "env">]?.miseTool;
@@ -308,16 +391,24 @@ export function generateToml(
 
   const toolsSec = toolsSection(tools);
   const servicesSec = servicesSection(stack.services);
-  const secretsSec = secretsSection(
+  const secrets = secretsSection(
     stack.services,
-    options.secretsStore ?? "1password",
+    options.secretsStore,
     options.extraSecretKeys ?? [],
+    options.envTemplateFile,
   );
-  const setupSec = setupSection(stack);
+  const setup = setupSection(stack, {
+    ...(options.verify ? { verify: options.verify } : {}),
+    ...(options.install ? { install: options.install } : {}),
+    ...(options.packageScripts ? { packageScripts: options.packageScripts } : {}),
+  });
 
-  const parts = [header, toolsSec, servicesSec, secretsSec, setupSec].filter(
-    (s) => s.trim().length > 0,
-  );
+  // One blank line between sections, regardless of whether a section renderer
+  // happened to end with a newline of its own — `[services.x]` used to butt
+  // straight up against `[secrets]`, which parses fine and reads badly.
+  const parts = [header, toolsSec, servicesSec, secrets.section, setup.section]
+    .map((s) => s.trimEnd())
+    .filter((s) => s.length > 0);
 
-  return parts.join("\n") + "\n";
+  return { toml: parts.join("\n\n") + "\n", gaps: [...secrets.gaps, ...setup.gaps] };
 }
