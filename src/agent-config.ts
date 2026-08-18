@@ -786,7 +786,15 @@ function hookCommandProblems(command: string): string[] {
       `hook command uses non-absolute executable \`${exe}\`; non-login hook shells may not resolve it. Run: kit agent-config`,
     ];
   }
-  if (expanded.startsWith("/root/")) {
+  // A `/root/…` path is suspicious only when `/root` is NOT this machine's home. That is
+  // the case this check was added for: a hook command generated in a root sandbox, carried
+  // to a normal account, where the path is unreachable and every gated tool call dies with
+  // exit 127. When HOME really IS /root — a root container, which is where agents commonly
+  // run — the same path is native and works, so returning here reported a command that
+  // starts fine as one that "cannot reliably start", and told the operator to rewrite hooks
+  // for /root when /root is exactly where they already pointed. Falling through leaves the
+  // `isExecutable` check below, which still catches a genuinely broken /root path.
+  if (expanded.startsWith("/root/") && homedir() !== "/root") {
     return [
       `hook command points at ${expanded}, which looks like a root/container path on this machine. Run: kit agent-config in this repo to rewrite hooks for ${homedir()}`,
     ];
