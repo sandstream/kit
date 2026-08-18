@@ -1,5 +1,6 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mkdtemp, writeFile, rm, mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -131,6 +132,117 @@ describe("MCP server tool registration", () => {
   });
 });
 
+// ─── kit_check output cost ─────────────────────────────────────────────────
+
+describe("kit_check response is summarized, and the reference resolves", () => {
+  // Why this suite exists: one full kit_check response measured ~9.8 KB against a ~7.4 KB
+  // standing surface paid once per session. The response is the term that dominates, because
+  // an agent in a check → fix → check loop pays it every iteration. Passing rows are the bulk
+  // of it and answer a question nobody asked — but a summary that can hide lost coverage would
+  // buy those tokens with the exact failure kit exists to prevent, so that is what these
+  // assertions pin down.
+  let dir: string;
+  let savedCwd: string;
+
+  before(async () => {
+    dir = await mkdtemp(join(tmpdir(), "kit-mcp-summary-"));
+    await writeFile(join(dir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
+    savedCwd = process.cwd();
+    process.chdir(dir);
+  });
+
+  after(async () => {
+    process.chdir(savedCwd);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("answers with the verdict, findings and counts — not the dimension arrays", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({ name: "kit_check", arguments: { cwd: dir } });
+      const data = parseResult(result) as Record<string, unknown>;
+      assert.equal(data.summarized, true);
+      for (const key of ["ok", "dimensions", "failed", "findings", "counts", "passesOmitted"]) {
+        assert.ok(key in data, `summary must carry ${key}`);
+      }
+      for (const key of ["tools", "services", "secrets", "skills", "hooks", "locks"]) {
+        assert.ok(!(key in data), `${key} belongs in the detail document, not the response`);
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("every finding it reports is a non-pass, and no pass survives", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({ name: "kit_check", arguments: { cwd: dir } });
+      const data = parseResult(result) as {
+        findings: { status: string; didNotRun?: boolean }[];
+        counts: { passed: number };
+        passesOmitted: number;
+      };
+      for (const f of data.findings) {
+        assert.ok(f.status !== "pass" || f.didNotRun === true, `a pass leaked: ${f.status}`);
+      }
+      // The passes are still accounted for — omitted is not the same as unmeasured.
+      assert.equal(data.passesOmitted, data.counts.passed);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("detail.path exists and parses to the complete run", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({ name: "kit_check", arguments: { cwd: dir } });
+      const data = parseResult(result) as { detail?: { path: string } };
+      assert.ok(data.detail?.path, "a summary must hand back a reference");
+      // The rule that makes offloading safe: the pointer resolves. Reading it IS the assertion.
+      const full = JSON.parse(readFileSync(data.detail.path, "utf-8")) as Record<string, unknown>;
+      for (const key of ["tools", "services", "secrets", "skills", "hooks", "security", "locks"]) {
+        assert.ok(key in full, `detail document must carry ${key}`);
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("detail:true returns the complete run inline instead", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_check",
+        arguments: { cwd: dir, detail: true },
+      });
+      const data = parseResult(result) as Record<string, unknown>;
+      assert.ok("tools" in data && "security" in data);
+      assert.ok(!("summarized" in data), "the full document must not claim to be a summary");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("costs materially fewer characters than the full document", async () => {
+    const { client, cleanup } = await createTestClient();
+    try {
+      const summary = await client.callTool({ name: "kit_check", arguments: { cwd: dir } });
+      const full = await client.callTool({
+        name: "kit_check",
+        arguments: { cwd: dir, detail: true },
+      });
+      const size = (r: typeof summary) =>
+        (r.content as Array<{ text: string }>).reduce((n, c) => n + c.text.length, 0);
+      assert.ok(
+        size(summary) < size(full),
+        `summary ${size(summary)} chars should be smaller than full ${size(full)} chars`,
+      );
+    } finally {
+      await cleanup();
+    }
+  });
+});
+
 // ─── kit_check ─────────────────────────────────────────────────────────────
 
 describe("kit_check", () => {
@@ -159,7 +271,10 @@ describe("kit_check", () => {
     await writeFile(join(tempDir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
     const { client, cleanup } = await createTestClient();
     try {
-      const result = await client.callTool({ name: "kit_check", arguments: { cwd: tempDir } });
+      const result = await client.callTool({
+        name: "kit_check",
+        arguments: { cwd: tempDir, detail: true },
+      });
       // ok depends on repo-level security checks — test structure, not ok
       const data = parseResult(result) as { ok: boolean; tools: unknown[]; secrets: unknown[] };
       assert.equal(data.tools.length, 0);
@@ -173,7 +288,10 @@ describe("kit_check", () => {
     await writeFile(join(tempDir, ".kit.toml"), FIXTURE_CONFIG_SECRET, "utf-8");
     const { client, cleanup } = await createTestClient();
     try {
-      const result = await client.callTool({ name: "kit_check", arguments: { cwd: tempDir } });
+      const result = await client.callTool({
+        name: "kit_check",
+        arguments: { cwd: tempDir, detail: true },
+      });
       const data = parseResult(result) as { secrets: Array<{ name: string; available: boolean }> };
       // The secret itself is correct regardless of security check results
       assert.equal(data.secrets[0].name, "APP_KEY");
@@ -187,7 +305,10 @@ describe("kit_check", () => {
     await writeFile(join(tempDir, ".kit.toml"), FIXTURE_MISSING_ENV_SECRET, "utf-8");
     const { client, cleanup } = await createTestClient();
     try {
-      const result = await client.callTool({ name: "kit_check", arguments: { cwd: tempDir } });
+      const result = await client.callTool({
+        name: "kit_check",
+        arguments: { cwd: tempDir, detail: true },
+      });
       const data = parseResult(result) as {
         ok: boolean;
         secrets: Array<{ name: string; available: boolean }>;
@@ -204,7 +325,10 @@ describe("kit_check", () => {
     await writeFile(join(tempDir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
     const { client, cleanup } = await createTestClient();
     try {
-      const result = await client.callTool({ name: "kit_check", arguments: { cwd: tempDir } });
+      const result = await client.callTool({
+        name: "kit_check",
+        arguments: { cwd: tempDir, detail: true },
+      });
       const data = parseResult(result) as Record<string, unknown>;
       assert.ok("ok" in data);
       assert.ok("tools" in data);
@@ -793,11 +917,13 @@ describe("process-scoped tools serve a cross-project cwd", () => {
     try {
       const result = await client.callTool({ name: "kit_check", arguments: { cwd: other } });
       assert.notEqual(result.isError, true, "a cross-project check is served, not refused");
+      // Read from `findings`, the summarized default: a non-passing row must survive
+      // summarization, so this doubles as the check that the offload cannot hide a failure.
       const data = parseResult(result) as {
-        security?: { name: string; status: string; detail?: string }[];
+        findings?: { name: string; status: string; detail?: string }[];
       };
-      const row = (data.security ?? []).find((c) => c.name.includes("gitignore"));
-      assert.ok(row, "the security dimension must report a gitignore row");
+      const row = (data.findings ?? []).find((c) => c.name.includes("gitignore"));
+      assert.ok(row, "the findings must report a gitignore row");
       assert.notEqual(
         row.status,
         "pass",
