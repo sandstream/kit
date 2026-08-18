@@ -537,6 +537,104 @@ jobs:
   });
 });
 
+describe("R1-fail-open-ci — a gate whose status comes from the wrong command", () => {
+  const workflow = (body: string): string => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-r1-pipe-"));
+    const wf = join(dir, ".github", "workflows");
+    mkdirSync(wf, { recursive: true });
+    writeFileSync(join(wf, "publish.yml"), body);
+    return dir;
+  };
+
+  it("FAILS a condition piped into tee — the pipeline reports tee, not the check", () => {
+    // This shipped in kit's own publish.yml: `git verify-tag` exits 1 on an unsigned tag,
+    // but the `if !` read tee's status (always 0), so the signature gate never fired and an
+    // unsigned v6.6.3 published. GitHub's default step shell is `bash -e {0}` — no pipefail.
+    const dir = workflow(`name: publish
+on: [push]
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if ! git verify-tag "$TAG" 2>&1 | tee /tmp/tag-verify.log; then
+            exit 1
+          fi
+`);
+    try {
+      const res = ruleById("R1-fail-open-ci").run({ repoRoot: dir, sources: [], pkgJson: {} });
+      const fail = res.find((r) => r.status === "fail");
+      assert.equal(fail?.severity, "high");
+      assert.match(String(fail?.detail), /pipe|pipefail/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts the same line when the step sets pipefail", () => {
+    const dir = workflow(`name: publish
+on: [push]
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          set -euo pipefail
+          if ! git verify-tag "$TAG" 2>&1 | tee /tmp/tag-verify.log; then
+            exit 1
+          fi
+`);
+    try {
+      const res = ruleById("R1-fail-open-ci").run({ repoRoot: dir, sources: [], pkgJson: {} });
+      assert.equal(countStatus(res, "fail"), 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not accept pipefail that only appears in a comment", () => {
+    // The first version of this check walked back looking for the word, and this step's own
+    // explanatory comment satisfied it — documented, not enforced, which is the exact disease.
+    const dir = workflow(`name: publish
+on: [push]
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          # pipefail matters here because the verdict is an exit status
+          if ! git verify-tag "$TAG" 2>&1 | tee /tmp/tag-verify.log; then
+            exit 1
+          fi
+`);
+    try {
+      const res = ruleById("R1-fail-open-ci").run({ repoRoot: dir, sources: [], pkgJson: {} });
+      assert.equal(countStatus(res, "fail"), 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves a condition that WANTS the last command's status alone", () => {
+    // `if cmd | grep -q x` is asking about grep, which is the whole point of the pipe.
+    const dir = workflow(`name: publish
+on: [push]
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if npm ls --json | grep -q evil; then exit 1; fi
+`);
+    try {
+      const res = ruleById("R1-fail-open-ci").run({ repoRoot: dir, sources: [], pkgJson: {} });
+      assert.equal(countStatus(res, "fail"), 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("R11-script-paths", () => {
   it("delegates to runCiScriptAudit: fails on a missing script ref", () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-r11-"));

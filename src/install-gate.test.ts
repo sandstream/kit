@@ -874,3 +874,106 @@ describe("decideBashGate — local node_modules/.bin shadowing (npx tsc case)", 
     }
   });
 });
+
+describe("parseInstallCommand — install-script approval is a grant, not a read", () => {
+  // Both spellings MEASURED on npm 11.19.0: the namespaced `npm install-scripts
+  // approve|deny|ls|prune` (what the client's own warning tells you to run) and the flat
+  // `npm approve-scripts` alias the docs describe.
+  const probe = (cmd: string) => parseInstallCommand(cmd);
+
+  it("`npm approve-scripts <pkg>` gates each named package", () => {
+    // npm skips a dependency's install scripts unless package.json's `allowScripts` names
+    // it. Approving is the moment that dependency gains arbitrary code execution at install
+    // time — the exact decision this gate exists to hold — so the operand is triaged.
+    assert.deepEqual(probe("npm approve-scripts sharp").refs, ["npm:sharp"]);
+    assert.deepEqual(probe("npm approve-scripts canvas sharp").refs, ["npm:canvas", "npm:sharp"]);
+    assert.equal(probe("npm approve-scripts sharp").isInstall, true);
+  });
+
+  it("`npm install-scripts approve <pkg>` gates the same way", () => {
+    assert.deepEqual(probe("npm install-scripts approve sharp").refs, ["npm:sharp"]);
+    assert.equal(probe("npm install-scripts approve sharp").isInstall, true);
+  });
+
+  it("carries the pinned version npm writes into the allowScripts key", () => {
+    assert.deepEqual(probe("npm approve-scripts sharp@0.33.5").refs, ["npm:sharp@0.33.5"]);
+  });
+
+  it("`--all` / `-a` approves everything pending — nothing to triage, so fail-closed", () => {
+    for (const cmd of [
+      "npm approve-scripts --all",
+      "npm install-scripts approve --all",
+      "npm install-scripts approve -a",
+    ]) {
+      const p = probe(cmd);
+      assert.equal(p.isInstall, true, cmd);
+      assert.deepEqual(p.refs, [], cmd);
+      assert.deepEqual(p.unverifiable, ["approve-scripts-all"], cmd);
+    }
+  });
+
+  it("a bare approve is an interactive grant → fail-closed", () => {
+    const p = probe("npm approve-scripts");
+    assert.equal(p.isInstall, true);
+    assert.deepEqual(p.unverifiable, ["approve-scripts-interactive"]);
+  });
+
+  it("the read-only faces are never gated", () => {
+    // Blocking review would push an agent straight to `--all`, the opposite of what this
+    // gate wants. `--dry-run` writes nothing; ls reports; deny and prune only REMOVE grants.
+    for (const cmd of [
+      "npm approve-scripts --allow-scripts-pending",
+      "npm approve-scripts --allow-scripts-pending --json",
+      "npm install-scripts ls",
+      "npm install-scripts deny sharp",
+      "npm install-scripts deny --all",
+      "npm install-scripts prune",
+      "npm install-scripts approve --all --dry-run",
+      "npm deny-scripts sharp",
+    ]) {
+      const p = probe(cmd);
+      assert.equal(p.isInstall, false, cmd);
+      assert.deepEqual(p.unverifiable, [], cmd);
+      assert.deepEqual(p.refs, [], cmd);
+    }
+  });
+
+  it("`pnpm approve-builds` grants the same execution, interactively → fail-closed", () => {
+    const p = probe("pnpm approve-builds");
+    assert.equal(p.isInstall, true);
+    assert.deepEqual(p.unverifiable, ["approve-builds-interactive"]);
+  });
+});
+
+describe("decideBashGate — approval of install scripts", () => {
+  it("BLOCKS approving a package that does not triage PASS", async () => {
+    const v = await decideBashGate("npm approve-scripts evil-pkg", fakeDeps(["evil-pkg"]));
+    assert.equal(v.block, true);
+    assert.match(v.reason, /evil-pkg/);
+  });
+
+  it("BLOCKS the namespaced spelling too", async () => {
+    const v = await decideBashGate("npm install-scripts approve evil-pkg", fakeDeps(["evil-pkg"]));
+    assert.equal(v.block, true);
+  });
+
+  it("allows approving a package that triages PASS", async () => {
+    const v = await decideBashGate("npm approve-scripts sharp", fakeDeps());
+    assert.equal(v.block, false);
+    assert.equal(v.checked.length, 1);
+  });
+
+  it("BLOCKS `--all` without triaging anything", async () => {
+    let called = false;
+    const deps: GateDeps = {
+      runTriage: async (type, target) => {
+        called = true;
+        return { type, target, passed: true, output: "" };
+      },
+    };
+    const v = await decideBashGate("npm approve-scripts --all", deps);
+    assert.equal(v.block, true);
+    assert.equal(called, false, "nothing named → nothing to triage; block outright");
+    assert.match(v.reason, /cannot reduce to a triage target/);
+  });
+});

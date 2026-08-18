@@ -74,6 +74,10 @@ export const SECURITY_RULES: Record<string, RuleRef> = {
     "A06:2021 Vulnerable and Outdated Components",
   ),
   "pinned versions": cwe(1104, "Use of Unmaintained Third Party Components"),
+  // npm v12's `allowScripts` records which dependencies may run install scripts; an
+  // unreviewed or outlived grant is exactly functionality pulled in from a sphere the
+  // project no longer controls.
+  "install-script grants": cwe(829, "Inclusion of Functionality from Untrusted Control Sphere"),
   "package-lock.json": owasp(
     "A08",
     "A08_2021-Software_and_Data_Integrity_Failures",

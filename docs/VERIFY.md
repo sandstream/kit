@@ -104,6 +104,19 @@ Import the maintainer's public key once:
 gh api /users/sandstream/gpg_keys --jq '.[0].raw_key' | gpg --import
 ```
 
+> **`v6.6.3` is unsigned — known, and not retroactively fixable.** The publish job's
+> signature gate ran its check inside a pipe (`if ! git verify-tag … | tee …`), so the
+> pipeline reported `tee`'s always-zero exit and the gate never fired; `v6.6.3` was tagged
+> with `git tag -a` and published anyway, with every GPG pin around it intact and useless.
+> `git tag -v v6.6.3` therefore prints `error: no signature found`. Re-signing would mean
+> force-pushing a published tag, which re-triggers the publish workflow against a version
+> already on the registry — so the tag stands as it is and this note records why. The gate
+> was fixed in 6.6.4 (`set -o pipefail` plus a redirect instead of the pipe), is asserted by
+> `src/publish-workflow.test.ts`, and the pattern is now caught repo-wide by self-audit
+> `R1-fail-open-ci`. `v6.6.4` onward is signed; verify it as above. Every other control on
+> `v6.6.3` — npm provenance, the registry signature, both SBOMs — is unaffected and
+> verifiable.
+
 ### Verify the SBOM (auditor-only)
 
 ```bash

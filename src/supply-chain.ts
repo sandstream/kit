@@ -4,7 +4,7 @@
  *
  *  - install-scripts : deps that run pre/post/install scripts (the classic malware
  *                      execution vector) — surfaced so they can be reviewed / run
- *                      with `--ignore-scripts`.
+ *                      with `--ignore-scripts` (npm's own default since v11).
  *  - lockfile-drift  : a declared dependency missing from the lockfile, or a package
  *                      resolved from a NON-registry source (http/git/github tarball).
  *  - dep-confusion   : a dependency under one of your declared internal scopes that
@@ -196,7 +196,11 @@ export function runSupplyChain(cwd: string, internalScopes: string[] = []): Secu
           "warn",
           `${scripts.length} dep(s) run install scripts: ${scripts.slice(0, 8).join(", ")}${scripts.length > 8 ? "…" : ""}`,
           "medium",
-          "review them; install with `npm ci --ignore-scripts` where possible",
+          // Skipping IS npm's default now, so "install with --ignore-scripts" is no longer
+          // advice — it describes what already happens. The work is the review: list what is
+          // pending, then grant pinned. Those grants are audited by the "install-script
+          // grants" check in check-security.ts.
+          "review with `npm install-scripts ls`, then grant pinned per package (`npm install-scripts approve <pkg>`) — never `--all`",
         ),
   );
 

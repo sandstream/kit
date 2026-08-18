@@ -40,6 +40,23 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
+      - name: Install an npm that can do trusted publishing
+        # npm is retiring 2FA-bypass granular access tokens as a publishing credential: from
+        # ~January 2027 such a token can only read private packages and STAGE a publish for
+        # human 2FA approval. The migration target is trusted publishing — an OIDC exchange
+        # with NO long-lived secret — and it exists only in npm >= 11.5.1 (node >= 22.14.0).
+        # setup-node ships npm 10.9.x for node 22, so the client in this job would have no
+        # OIDC exchange to make. Installed here so the prerequisite is already true when the
+        # registry-side switch lands (13 per-package configs on npmjs.com — docs/RELEASING.md).
+        #
+        # Measured on npm 11.19.0 against this repo before wiring: `npm ci` and
+        # `npm publish --dry-run` both behave identically, and npm >= 11's skip-install-scripts
+        # default costs nothing here (esbuild's postinstall is the only one in the tree, and
+        # the build + tests pass without it). Asserted by src/publish-workflow.test.ts.
+        run: |
+          npm i -g npm@^11.5.1
+          npm --version
+
       - name: Install dependencies
         # npm ci uses package-lock.json exactly — no version drift.
         run: npm ci
@@ -158,9 +175,17 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
+          # pipefail because this step's verdict IS an exit status: piping the check into
+          # anything makes the pipeline report the LAST command. `if ! git verify-tag … | tee`
+          # read tee's always-zero status, so this gate never fired and an unsigned v6.6.3
+          # published. GitHub's default step shell is `bash -e {0}` — no pipefail — hence both
+          # the flag and the redirect below. Asserted by src/publish-workflow.test.ts, and the
+          # pattern is now caught repo-wide by self-audit R1-fail-open-ci.
+          set -o pipefail
           # The maintainer public key was imported + trusted in the previous
           # step, so git verify-tag can now check the signature chain.
-          if ! git verify-tag "$TAG" 2>&1 | tee /tmp/tag-verify.log; then
+          if ! git verify-tag "$TAG" > /tmp/tag-verify.log 2>&1; then
+            cat /tmp/tag-verify.log
             if grep -q 'no signature found' /tmp/tag-verify.log; then
               echo "::error::Tag $TAG is not GPG-signed. Sign with: git tag -s $TAG"
               exit 1

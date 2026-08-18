@@ -1,7 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   findInstallScripts,
+  runSupplyChain,
   findLockDrift,
   findNonRegistryResolved,
   findDepConfusion,
@@ -102,5 +106,35 @@ describe("parseLockPkgs", () => {
     });
     assert.equal(pkgs.length, 1);
     assert.equal(pkgs[0].name, "x");
+  });
+});
+
+describe("runSupplyChain — install-scripts remediation names the review commands", () => {
+  it("points at `npm install-scripts ls`, not at --ignore-scripts", () => {
+    // `--ignore-scripts` is npm's DEFAULT now: skipping is what already happens, so telling
+    // someone to skip is no longer advice. What they have to do is review the pending list and
+    // grant pinned — the grants kit then audits as "install-script grants".
+    const dir = mkdtempSync(join(tmpdir(), "kit-sc-scripts-"));
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({ name: "x", dependencies: { esbuild: "0.28.1" } }),
+    );
+    writeFileSync(
+      join(dir, "package-lock.json"),
+      JSON.stringify({
+        lockfileVersion: 3,
+        packages: {
+          "node_modules/esbuild": {
+            version: "0.28.1",
+            resolved: "https://registry.npmjs.org/esbuild/-/esbuild-0.28.1.tgz",
+            hasInstallScript: true,
+          },
+        },
+      }),
+    );
+    const r = runSupplyChain(dir).find((x) => x.name === "install-scripts");
+    assert.equal(r?.status, "warn");
+    assert.match(String(r?.suggestion), /npm install-scripts ls/);
+    assert.doesNotMatch(String(r?.suggestion), /--ignore-scripts/);
   });
 });
