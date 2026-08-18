@@ -1,4 +1,5 @@
 import * as readline from "node:readline/promises";
+import { askQuestion } from "./askQuestion.js";
 
 export interface MultiSelectOption {
   value: string;
@@ -60,6 +61,8 @@ export function parseMultiSelectAnswer(
 /**
  * Interactive multiple-choice prompt.
  *
+ * `io` exists so the question can be driven in a test; production passes nothing.
+ *
  * Returns `null` — never a default — when stdin is not a TTY. That is the whole point of
  * this helper existing next to `promptSelect`, which answers with its `recommended` option
  * in the same situation. That convention silently decided a secret backend for every
@@ -70,28 +73,43 @@ export function parseMultiSelectAnswer(
  * Input format: comma/space separated numbers or value names ("1,3" / "sentry posthog"),
  * empty input accepts the preselected set, and "none" selects nothing.
  */
+export interface PromptIO {
+  /** Read side. Its `isTTY` decides whether the question can be put at all. */
+  input: NodeJS.ReadableStream & { isTTY?: boolean };
+  output: NodeJS.WritableStream;
+}
+
 export async function promptMultiSelect(
   question: string,
   options: MultiSelectOption[],
+  io: PromptIO = { input: process.stdin, output: process.stdout },
 ): Promise<string[] | null> {
-  if (!process.stdin.isTTY) return null;
+  if (!io.input.isTTY) return null;
   if (options.length === 0) return [];
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const rl = readline.createInterface({ input: io.input, output: io.output });
   try {
-    process.stdout.write(`\n${question}\n`);
+    io.output.write(`\n${question}\n`);
     options.forEach((opt, idx) => {
       const tick = opt.preselected ? "x" : " ";
       const hint = opt.hint ? `  — ${opt.hint}` : "";
-      process.stdout.write(`  [${idx + 1}] (${tick}) ${opt.label}${hint}\n`);
+      io.output.write(`  [${idx + 1}] (${tick}) ${opt.label}${hint}\n`);
     });
 
-    const answer = await rl.question(
+    const answer = await askQuestion(
+      rl,
       `Select (numbers or names, "none" for none) [enter = keep ticked]: `,
     );
+    if (answer === null) {
+      // Ctrl+D or a closed input. Same statement as no TTY — nobody answered — so it reads
+      // as null and the caller keeps the detected set, rather than ending `kit init` on a
+      // stack trace at the moment the user tried to back out.
+      io.output.write(`\nNo answer — leaving the offered services out.\n`);
+      return null;
+    }
     const { picked, unknown } = parseMultiSelectAnswer(answer, options);
     for (const token of unknown) {
-      process.stdout.write(`Ignoring unknown choice "${token}".\n`);
+      io.output.write(`Ignoring unknown choice "${token}".\n`);
     }
     return picked;
   } finally {

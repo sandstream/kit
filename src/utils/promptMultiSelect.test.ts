@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { PassThrough } from "node:stream";
 import {
   parseMultiSelectAnswer,
   promptMultiSelect,
@@ -134,5 +135,68 @@ describe("promptMultiSelect", () => {
     // Order matters: the no-TTY answer is null even when the list is empty (which at a TTY
     // would answer []), so "unanswered" and "answered with nothing" stay distinguishable.
     assert.equal(await withoutTTY(() => promptMultiSelect("Which services?", [])), null);
+  });
+});
+
+describe("promptMultiSelect at a TTY", () => {
+  /** A fake terminal: `input` claims isTTY so the question is actually put. */
+  function fakeTTY() {
+    const input = Object.assign(new PassThrough(), { isTTY: true });
+    const output = new PassThrough();
+    let printed = "";
+    output.on("data", (chunk: Buffer) => {
+      printed += chunk.toString();
+    });
+    return { input, output, printed: () => printed };
+  }
+
+  async function ask(typed: string | null, options = OPTIONS) {
+    const io = fakeTTY();
+    const answered = promptMultiSelect("Which services?", options, io);
+    // The question is written synchronously before readline waits, but the answer must land
+    // after that — one macrotask is enough and keeps the test free of timers.
+    await new Promise((r) => setImmediate(r));
+    if (typed === null) io.input.end();
+    else io.input.write(`${typed}\n`);
+    return { picked: await answered, printed: io.printed() };
+  }
+
+  it("prints the question, the numbering and the ticks", async () => {
+    const { printed } = await ask("");
+    assert.match(printed, /Which services\?/);
+    assert.match(printed, /\[1\] \(x\) postgres {2}— found in this repo/);
+    assert.match(printed, /\[2\] \( \) redis/);
+    assert.match(printed, /\[3\] \( \) sentry {2}— you use it elsewhere/);
+  });
+
+  it("resolves what the user typed", async () => {
+    assert.deepEqual((await ask("2, sentry")).picked, ["redis", "sentry"]);
+  });
+
+  it("bare enter keeps the ticked set", async () => {
+    assert.deepEqual((await ask("")).picked, ["postgres"]);
+  });
+
+  it("'none' answers with nothing — an answer, not a non-answer", async () => {
+    assert.deepEqual((await ask("none")).picked, []);
+  });
+
+  it("names the tokens it ignored", async () => {
+    const { picked, printed } = await ask("1 mongodb 3x");
+    assert.deepEqual(picked, ["postgres"]);
+    assert.match(printed, /Ignoring unknown choice "mongodb"/);
+    assert.match(printed, /Ignoring unknown choice "3x"/);
+  });
+
+  it("Ctrl+D (closed input) returns null instead of throwing", async () => {
+    // Regression: the rejected readline question used to escape as an AbortError and end
+    // `kit init` on a node stack trace at the exact moment the user tried to back out.
+    const { picked, printed } = await ask(null);
+    assert.equal(picked, null);
+    assert.match(printed, /No answer — leaving the offered services out/);
+  });
+
+  it("answers [] for an empty option list without asking", async () => {
+    assert.deepEqual((await ask("", [])).picked, []);
   });
 });
