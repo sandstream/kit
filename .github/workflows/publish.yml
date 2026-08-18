@@ -175,9 +175,17 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
+          # pipefail because this step's verdict IS an exit status: piping the check into
+          # anything makes the pipeline report the LAST command. `if ! git verify-tag … | tee`
+          # read tee's always-zero status, so this gate never fired and an unsigned v6.6.3
+          # published. GitHub's default step shell is `bash -e {0}` — no pipefail — hence both
+          # the flag and the redirect below. Asserted by src/publish-workflow.test.ts, and the
+          # pattern is now caught repo-wide by self-audit R1-fail-open-ci.
+          set -o pipefail
           # The maintainer public key was imported + trusted in the previous
           # step, so git verify-tag can now check the signature chain.
-          if ! git verify-tag "$TAG" 2>&1 | tee /tmp/tag-verify.log; then
+          if ! git verify-tag "$TAG" > /tmp/tag-verify.log 2>&1; then
+            cat /tmp/tag-verify.log
             if grep -q 'no signature found' /tmp/tag-verify.log; then
               echo "::error::Tag $TAG is not GPG-signed. Sign with: git tag -s $TAG"
               exit 1

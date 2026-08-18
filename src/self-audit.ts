@@ -229,6 +229,23 @@ function listWorkflowFiles(repoRoot: string): string[] {
   }
 }
 
+/** Does the `run:` block containing line `i` set pipefail? Walk back to the step boundary
+ *  (`- name:` / `- run:` / `- uses:`) — with pipefail the pipeline reports the first failure,
+ *  so a piped condition is no longer fail-open. */
+function stepSetsPipefail(lines: string[], i: number): boolean {
+  for (let j = i; j >= 0; j--) {
+    const l = lines[j];
+    // A `set -o pipefail` (or `set -euo pipefail`) that actually RUNS. Prose mentioning
+    // pipefail must not count: this very step's comment explains the flag, and an earlier
+    // version of this helper read that comment as the fix being present — the same
+    // "documented, not enforced" failure the rule exists to catch.
+    if (/^\s*#/.test(l)) continue;
+    if (/(^|[\s;&|])set\s+-[a-zA-Z]*o\s+pipefail\b/.test(l)) return true;
+    if (/^\s*-\s+(name|run|uses):/.test(l) && j !== i) return false;
+  }
+  return false;
+}
+
 const R1: SelfAuditRule = {
   id: "R1-fail-open-ci",
   name: "fail-open in CI workflows",
@@ -268,6 +285,27 @@ const R1: SelfAuditRule = {
             status: "fail",
             severity: "high",
             detail: `workflow step uses '|| true', swallowing failures (fail-open): ${trimmed}`,
+          });
+        }
+        // A CONDITION piped into a pass-through sink takes its status from that sink, not
+        // from the check: `if ! git verify-tag "$TAG" 2>&1 | tee log; then` reads tee's
+        // always-zero exit, so the gate never fires. This shipped in kit's own publish.yml
+        // and let an UNSIGNED tag publish 6.6.3. GitHub's default step shell is `bash -e {0}`
+        // — pipefail is NOT on unless the step sets it (or the step declares `shell: bash`),
+        // so the fix is pipefail or no pipe at all. Only pass-through sinks are flagged: an
+        // `if cmd | grep -q x` is deliberately asking about grep.
+        if (
+          /\bif\s+!?\s*\S/.test(trimmed) &&
+          /\|\s*(tee|cat)\b/.test(trimmed) &&
+          !annotated &&
+          !stepSetsPipefail(lines, i)
+        ) {
+          findings.push({
+            file: sf,
+            line: i + 1,
+            status: "fail",
+            severity: "high",
+            detail: `condition takes its exit status from the pipe's last command, not the check (add 'set -o pipefail' or drop the pipe): ${trimmed}`,
           });
         }
         // `continue-on-error: true` is fail-open (WARN) unless explicitly opted-out.

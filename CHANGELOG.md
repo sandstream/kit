@@ -29,6 +29,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   configurations that migration needs and the two constraints (`workflow_call` breaks npm's
   validation; self-hosted runners are unsupported).
 
+### Fixed
+
+- **The publish job's tag-signature gate was fail-open, and `v6.6.3` shipped unsigned.**
+  The step read `if ! git verify-tag "$TAG" 2>&1 | tee /tmp/tag-verify.log; then` — `git`
+  exits 1 on an unsigned tag, but a pipeline reports its LAST command, and `tee` always
+  exits 0. GitHub's default step shell is `bash -e {0}`, which does not set `pipefail`, so
+  the condition was never true: the gate could not fail, and every GPG control around it
+  (the pinned `MAINTAINER_KEY_FPR`, the single-key keyring check, the ownertrust import) was
+  intact and useless. `v6.6.3` was tagged with `git tag -a` and published; `git tag -v
+  v6.6.3` prints `error: no signature found`. Re-signing it would mean force-pushing a
+  published tag, which re-triggers the publish workflow against a version already on the
+  registry, so the tag stands and `docs/VERIFY.md` records why. Fixed with `set -o pipefail`
+  and a redirect instead of the pipe; `src/publish-workflow.test.ts` asserts the verdict
+  cannot come from a pass-through sink, and both assertions were mutation-tested by
+  reintroducing the pipe.
+
+- **Self-audit `R1-fail-open-ci` now catches the class, not just `|| true`.** A condition
+  piped into a pass-through sink (`tee`, `cat`) takes its status from the sink, so the rule
+  flags it unless the step actually sets `pipefail`. "Actually" is load-bearing: the first
+  implementation walked back looking for the word and was satisfied by the fixed step's own
+  explanatory comment — documented rather than enforced, the same disease the rule exists to
+  catch. A pipe whose last command IS the question (`if cmd | grep -q x`) is left alone.
+
 ### Changed
 
 - **The install gate holds install-script approval, not just installs.** `npm approve-scripts

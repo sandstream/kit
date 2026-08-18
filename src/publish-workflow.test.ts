@@ -45,6 +45,30 @@ function atLeast(found: readonly number[], min: readonly number[]): boolean {
   return true;
 }
 
+describe("publish.yml — the signature gate cannot fail open", () => {
+  it("takes the tag verdict from git verify-tag, not from a pipe", () => {
+    // Shipped as `if ! git verify-tag "$TAG" 2>&1 | tee /tmp/tag-verify.log; then`. git exits
+    // 1 on an unsigned tag; the pipeline reported tee's zero, so the gate never fired and an
+    // unsigned v6.6.3 published with every GPG pin around it intact and useless. The default
+    // step shell is `bash -e {0}` — pipefail is not on unless the step asks for it.
+    const verify = EXECUTED.match(/if !\s*git verify-tag[^\n]*/);
+    assert.ok(verify, "publish.yml no longer verifies the tag signature");
+    assert.doesNotMatch(
+      verify[0],
+      /\|\s*(tee|cat)\b/,
+      "the verdict must not come from a pass-through sink",
+    );
+  });
+
+  it("sets pipefail in that step regardless", () => {
+    const step = EXECUTED.slice(
+      EXECUTED.indexOf("Verify tag is GPG-signed"),
+      EXECUTED.indexOf("if !", EXECUTED.indexOf("Verify tag is GPG-signed")),
+    );
+    assert.match(step, /set -o pipefail|set -euo pipefail/);
+  });
+});
+
 describe("publish.yml — trusted-publishing prerequisites", () => {
   it("installs an npm that has the OIDC exchange (>= 11.5.1)", () => {
     const m = EXECUTED.match(/npm (?:i|install) -g npm@\^?(\d+)\.(\d+)\.(\d+)/);
