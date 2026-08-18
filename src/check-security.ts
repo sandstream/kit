@@ -778,6 +778,160 @@ export function unpinnedNodeDeps(
   return unpinned;
 }
 
+/**
+ * npm does not run a dependency's `preinstall`/`install`/`postinstall`/`prepare` unless
+ * package.json's `allowScripts` names it, so that field IS the record of which dependencies
+ * were granted install-time code execution. Shapes measured on npm 11.19.0 — the docs
+ * describe `{pkg: "1.2.3"}`, the client writes the version into the KEY:
+ *
+ *   npm install-scripts approve esbuild                          -> {"esbuild@0.28.1": true}
+ *   npm install-scripts approve esbuild --no-allow-scripts-pin   -> {"esbuild": true}
+ *   npm install-scripts deny esbuild                             -> {"esbuild": false}
+ *
+ * A grant is only as good as the review behind it, and two shapes outlive their review: a
+ * bare-name key also covers the release nobody has seen yet, and a grant left behind after
+ * the dependency is dropped is a standing permission for a name an attacker can
+ * re-introduce (`npm install-scripts prune` is what clears those). Pure; exported for tests.
+ */
+export interface AllowScriptsAudit {
+  /** Keys pinned to one exact version — the reviewed shape. */
+  pinned: string[];
+  /** Bare-name or range keys: admit versions nobody reviewed. */
+  unpinned: string[];
+  /** Granted, but no longer a declared dependency. */
+  stale: string[];
+  /** Explicit `false` — a denial, not a grant (npm keeps denials winning). */
+  denied: string[];
+  /** Set when the field is not the object map npm writes — the audit could NOT run. */
+  shapeError?: string;
+}
+
+/** An exact npm version (`1.2.3`, `1.2.3-rc.1`) — anything else admits more than one release. */
+const EXACT_NPM_VERSION = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)*$/;
+
+const ALLOW_SCRIPTS_SHAPE =
+  "npm writes an object mapping `<pkg>` or `<pkg>@<spec>` to true (granted) or false (denied)";
+
+/** Split an allowScripts key into package name + version spec. The spec is whatever follows
+ *  the LAST `@`, so a scoped name (`@scope/pkg`) survives with no spec at all. */
+function splitAllowScriptsKey(key: string): { name: string; spec: string } {
+  const at = key.lastIndexOf("@");
+  if (at <= 0) return { name: key, spec: "" };
+  return { name: key.slice(0, at), spec: key.slice(at + 1) };
+}
+
+export function auditAllowScripts(field: unknown, declared: Set<string>): AllowScriptsAudit {
+  const out: AllowScriptsAudit = { pinned: [], unpinned: [], stale: [], denied: [] };
+  if (Array.isArray(field)) {
+    out.shapeError = `allowScripts is an array — ${ALLOW_SCRIPTS_SHAPE}`;
+    return out;
+  }
+  if (typeof field !== "object" || field === null) {
+    out.shapeError = `allowScripts is a ${typeof field} — ${ALLOW_SCRIPTS_SHAPE}`;
+    return out;
+  }
+  for (const [key, value] of Object.entries(field as Record<string, unknown>)) {
+    if (value === false) {
+      out.denied.push(key);
+      continue;
+    }
+    // `true` is what the client writes. A string is tolerated because the docs describe a
+    // range-valued form; anything else is a shape we refuse to guess at, because reading an
+    // unknown allowlist as "no grants" would report the most dangerous state as the safest.
+    if (value !== true && typeof value !== "string") {
+      out.shapeError = `allowScripts["${key}"] is a ${typeof value} — ${ALLOW_SCRIPTS_SHAPE}`;
+      return out;
+    }
+    const { name, spec } = splitAllowScriptsKey(key);
+    if (!declared.has(name)) {
+      out.stale.push(key);
+      continue;
+    }
+    if (EXACT_NPM_VERSION.test(spec)) out.pinned.push(key);
+    else out.unpinned.push(key);
+  }
+  return out;
+}
+
+/** The check around `auditAllowScripts`. Root package.json only — that is the manifest npm
+ *  consults for the project's grants. */
+export async function checkAllowScripts(root: string): Promise<SecurityCheckResult> {
+  const name = "install-script grants";
+  const rule = ruleForCheck(name);
+  const base = { category: "supply-chain", name, rule } as const;
+  let pkg: {
+    allowScripts?: unknown;
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+    optionalDependencies?: Record<string, string>;
+  };
+  try {
+    pkg = JSON.parse(await readFile(resolve(root, "package.json"), "utf-8"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { ...base, status: "skip", detail: "no package.json" };
+    }
+    return {
+      ...base,
+      status: "warn",
+      didNotRun: true,
+      severity: "medium",
+      detail: `package.json could not be read: ${(err as Error).message}`,
+    };
+  }
+  if (pkg.allowScripts === undefined) {
+    return {
+      ...base,
+      status: "skip",
+      detail: "no install-script grant declared (npm skips dependency install scripts by default)",
+    };
+  }
+  const declared = new Set([
+    ...Object.keys(pkg.dependencies ?? {}),
+    ...Object.keys(pkg.devDependencies ?? {}),
+    ...Object.keys(pkg.optionalDependencies ?? {}),
+  ]);
+  const audit = auditAllowScripts(pkg.allowScripts, declared);
+  if (audit.shapeError) {
+    return {
+      ...base,
+      status: "warn",
+      didNotRun: true,
+      severity: "medium",
+      detail: audit.shapeError,
+      suggestion:
+        "rewrite the field with `npm install-scripts approve <pkg>` so npm owns its shape",
+    };
+  }
+  const problems: string[] = [];
+  if (audit.unpinned.length > 0) {
+    problems.push(
+      `${audit.unpinned.length} unpinned grant(s): ${audit.unpinned.join(", ")} — covers releases nobody reviewed`,
+    );
+  }
+  if (audit.stale.length > 0) {
+    problems.push(
+      `${audit.stale.length} stale grant(s): ${audit.stale.join(", ")} — no longer a declared dependency`,
+    );
+  }
+  if (problems.length > 0) {
+    return {
+      ...base,
+      status: "warn",
+      severity: "medium",
+      detail: problems.join("; "),
+      suggestion:
+        "re-approve pinned (`npm install-scripts approve <pkg>` writes <pkg>@<version> by default), and clear the outlived ones with `npm install-scripts prune`",
+    };
+  }
+  const denied = audit.denied.length > 0 ? ` · ${audit.denied.length} denied` : "";
+  return {
+    ...base,
+    status: "pass",
+    detail: `${audit.pinned.length} grant(s), every one pinned to an exact version${denied}`,
+  };
+}
+
 /** Names of this repo's workspace member packages (empty set when none / on error). */
 function workspaceMemberNames(cwd: string): Set<string> {
   const names = new Set<string>();
@@ -2271,6 +2425,7 @@ export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]
     osvResult,
     mavenResult,
     guarddogResult,
+    allowScriptsResult,
     ...lockfileResults
   ] = await Promise.all([
     checkNpmAudit(root),
@@ -2287,6 +2442,7 @@ export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]
     checkOsvScanner(root),
     checkMavenAudit(root),
     checkGuardDog(root),
+    checkAllowScripts(root),
     ...(await checkLockfilesCommitted(root)),
   ]);
 
@@ -2305,6 +2461,7 @@ export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]
     osvResult,
     mavenResult,
     guarddogResult,
+    allowScriptsResult,
   );
   results.push(...lockfileResults);
 

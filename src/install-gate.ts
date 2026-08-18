@@ -548,6 +548,11 @@ interface Matcher {
   /** A RUNNER (npx/create/exec/uvx…): only the FIRST non-flag arg is the fetched
    *  package; the rest are arguments passed to it. Installers gate every arg. */
   single?: boolean;
+  /** A GRANT verb (npm v12 `approve-scripts`, pnpm `approve-builds`) names no package in
+   *  its `--all` / interactive forms, so the benign bare-reinstall read is wrong: those
+   *  hand install-time code execution to packages nobody triaged. Returns the fail-closed
+   *  reason to record instead. */
+  zeroTargetReason?: (tokens: string[]) => string;
   /** Gate ONLY the `--package`/`--with`/… flag packages, never a positional — for
    *  commands whose positional is a local script/command, not a fetched package
    *  (`uv run --with evil script.py`: gate `evil`, not `script.py`). Not an install
@@ -617,6 +622,33 @@ const MATCHERS: Matcher[] = [
       // yarn 1 global add / yarn global install
       if (bin === "yarn" && t[1] === "global" && /^(add|install)$/.test(t[2] ?? "")) return 3;
       return -1;
+    },
+  },
+  // `npm approve-scripts <pkg>` / `npm install-scripts approve <pkg>` (and pnpm's
+  // `approve-builds`) is not a fetch — it is the moment an already-installed dependency GAINS
+  // install-time code execution. npm skips
+  // preinstall/install/postinstall/prepare for anything absent from package.json's
+  // `allowScripts`, so approving is the trust decision this gate exists to hold. Gate the
+  // named operand exactly like an install target; the `--all` and interactive forms name
+  // nothing and fail closed (see `zeroTargetReason`).
+  {
+    scheme: "npm",
+    toName: npmName,
+    argStart: (t) => {
+      if (t[0] === "npm") {
+        if (t[1] === "approve-scripts") return 2;
+        // `npm install-scripts approve <pkg>` — the spelling the client's own skip warning
+        // tells you to run. `deny`/`ls`/`prune` never grant, and are short-circuited before
+        // the matchers run (see `isApprovalNoop`).
+        if (t[1] === "install-scripts" && t[2] === "approve") return 3;
+        return -1;
+      }
+      return t[0] === "pnpm" && t[1] === "approve-builds" ? 2 : -1;
+    },
+    zeroTargetReason: (t) => {
+      if (t[0] === "pnpm") return "approve-builds-interactive";
+      const all = t.includes("--all") || t.includes("-a");
+      return all ? "approve-scripts-all" : "approve-scripts-interactive";
     },
   },
   // package runners that fetch + execute immediately (high risk): npx/bunx <pkg>,
@@ -875,6 +907,13 @@ function applyMatcher(
   const targets = resolveTargets(m, pos.slice(start), tokens);
 
   if (targets.length === 0) {
+    // A grant verb with no named operand approves whatever npm has pending — there is no
+    // name to triage, so this is fail-closed, never the benign bare-reinstall read below.
+    if (m.zeroTargetReason) {
+      probe.isInstall = true;
+      probe.unverifiable.push(m.zeroTargetReason(tokens));
+      return true;
+    }
     // `echo evil | xargs npm i` feeds the package on stdin, leaving zero visible args while
     // still installing → fail-closed when this segment is an xargs target.
     if (raw.some((t) => binBase(t) === "xargs")) {
@@ -960,6 +999,17 @@ function stripRedirections(tokens: string[]): string[] {
   return out;
 }
 
+/** The faces of npm's approval flow that hand out nothing: `--allow-scripts-pending` and
+ *  `--dry-run` write no grant, and `install-scripts ls|deny|prune` report or REMOVE grants.
+ *  Flags live in `tokens` (never in the compacted positionals), the verb in `pos`. */
+function isApprovalNoop(tokens: string[], pos: string[]): boolean {
+  if (pos[0] !== "npm") return false;
+  const readOnly = tokens.includes("--allow-scripts-pending") || tokens.includes("--dry-run");
+  if (pos[1] === "approve-scripts") return readOnly;
+  if (pos[1] === "install-scripts") return pos[2] !== "approve" || readOnly;
+  return false;
+}
+
 /** Match one shell segment against the package-manager matchers, mutating `probe`. */
 function scanSegment(segment: string, probe: InstallProbe): void {
   const raw = stripRedirections(stripInlineComment(segment).trim().split(/\s+/).filter(Boolean))
@@ -973,6 +1023,11 @@ function scanSegment(segment: string, probe: InstallProbe): void {
 
   const pos = compactPositionals(tokens);
   if (pos.length === 0) return;
+
+  // Reviewing, denying and pruning grants write no permission at all. Blocking the review
+  // step would push an agent straight to `--all` — the opposite of what this gate wants — so
+  // those faces are never an install.
+  if (isApprovalNoop(tokens, pos)) return;
 
   for (const m of MATCHERS) {
     if (applyMatcher(m, pos, tokens, raw, probe)) break; // one matcher per segment

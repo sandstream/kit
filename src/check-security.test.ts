@@ -19,6 +19,8 @@ import {
   checkGateLiveness,
   checkDeviceIdOverride,
   unpinnedNodeDeps,
+  auditAllowScripts,
+  checkAllowScripts,
   LOCKFILE_ECOSYSTEMS,
   type SecurityCheckResult,
 } from "./check-security.js";
@@ -974,5 +976,127 @@ describe("unpinnedNodeDeps", () => {
 
   it("handles a missing dep map", () => {
     assert.deepStrictEqual(unpinnedNodeDeps(undefined, noMembers), []);
+  });
+});
+
+describe("auditAllowScripts — npm's install-script grants", () => {
+  // Shapes MEASURED against npm 11.19.0, not read off the docs page (which describes
+  // `{pkg: "1.2.3"}`; the client actually writes the version into the KEY):
+  //   npm install-scripts approve esbuild            -> {"esbuild@0.28.1": true}
+  //   npm install-scripts approve esbuild --no-allow-scripts-pin -> {"esbuild": true}
+  //   npm install-scripts deny esbuild               -> {"esbuild": false}
+  const declared = new Set(["sharp", "canvas", "@scope/pkg"]);
+
+  it("a version-pinned key is the reviewed shape", () => {
+    const a = auditAllowScripts({ "sharp@0.33.5": true }, declared);
+    assert.deepStrictEqual(a.pinned, ["sharp@0.33.5"]);
+    assert.deepStrictEqual(a.unpinned, []);
+    assert.deepStrictEqual(a.stale, []);
+    assert.strictEqual(a.shapeError, undefined);
+  });
+
+  it("keeps a scoped name intact — only the version suffix is a version", () => {
+    const a = auditAllowScripts({ "@scope/pkg@1.2.3": true }, declared);
+    assert.deepStrictEqual(a.pinned, ["@scope/pkg@1.2.3"]);
+    assert.deepStrictEqual(a.stale, []);
+  });
+
+  it("a bare-name grant carries to every future version (--no-allow-scripts-pin)", () => {
+    // The point of the field is that a review happened. A bare name grants the next
+    // release too — including the compromised one nobody has seen yet.
+    const a = auditAllowScripts({ sharp: true }, declared);
+    assert.deepStrictEqual(a.unpinned, ["sharp"]);
+    assert.deepStrictEqual(a.pinned, []);
+  });
+
+  it("a RANGE key is unpinned too — it admits unreviewed releases", () => {
+    assert.deepStrictEqual(auditAllowScripts({ "sharp@^0.33.0": true }, declared).unpinned, [
+      "sharp@^0.33.0",
+    ]);
+    assert.deepStrictEqual(auditAllowScripts({ "canvas@1 || 2": true }, declared).unpinned, [
+      "canvas@1 || 2",
+    ]);
+  });
+
+  it("`false` is a denial, never counted as a grant", () => {
+    const a = auditAllowScripts({ evil: false, "also-evil@1.0.0": false }, declared);
+    assert.deepStrictEqual(a.denied, ["evil", "also-evil@1.0.0"]);
+    assert.deepStrictEqual(a.unpinned, []);
+    assert.deepStrictEqual(a.stale, []);
+  });
+
+  it("a grant for a package the manifest no longer depends on is stale", () => {
+    const a = auditAllowScripts({ "left-pad@1.3.0": true }, declared);
+    assert.deepStrictEqual(a.stale, ["left-pad@1.3.0"]);
+    assert.deepStrictEqual(a.pinned, []);
+  });
+
+  it("a shape npm does not write is reported, never read as empty", () => {
+    // Silently treating an unparseable allowlist as "no grants" would report the most
+    // dangerous state as the safest one.
+    assert.match(String(auditAllowScripts(["sharp"], declared).shapeError), /array/i);
+    assert.ok(auditAllowScripts("sharp", declared).shapeError);
+    assert.ok(auditAllowScripts({ sharp: 3 }, declared).shapeError);
+  });
+});
+
+describe("checkAllowScripts — the check around the audit", () => {
+  const withPkg = (pkg: unknown): string => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-allowscripts-"));
+    writeFileSync(join(dir, "package.json"), JSON.stringify(pkg));
+    return dir;
+  };
+
+  it("skips a repo with no package.json", async () => {
+    const r = await checkAllowScripts(mkdtempSync(join(tmpdir(), "kit-allowscripts-none-")));
+    assert.strictEqual(r.status, "skip");
+  });
+
+  it("skips when no grant has been declared — npm v12's default state", async () => {
+    const r = await checkAllowScripts(withPkg({ name: "x", dependencies: { sharp: "0.33.5" } }));
+    assert.strictEqual(r.status, "skip");
+    assert.match(r.detail, /no install-script grant/i);
+  });
+
+  it("passes when every grant is exact-version and still a dependency", async () => {
+    const r = await checkAllowScripts(
+      withPkg({
+        name: "x",
+        dependencies: { sharp: "0.33.5" },
+        allowScripts: { "sharp@0.33.5": true },
+      }),
+    );
+    assert.strictEqual(r.status, "pass");
+  });
+
+  it("WARNs on an unpinned grant and names it", async () => {
+    const r = await checkAllowScripts(
+      withPkg({ name: "x", dependencies: { sharp: "0.33.5" }, allowScripts: { sharp: true } }),
+    );
+    assert.strictEqual(r.status, "warn");
+    assert.strictEqual(r.severity, "medium");
+    assert.match(r.detail, /sharp/);
+    assert.match(String(r.suggestion), /install-scripts approve/);
+  });
+
+  it("WARNs on a stale grant", async () => {
+    const r = await checkAllowScripts(
+      withPkg({ name: "x", dependencies: {}, allowScripts: { "left-pad@1.3.0": true } }),
+    );
+    assert.strictEqual(r.status, "warn");
+    assert.match(r.detail, /left-pad/);
+  });
+
+  it("an unparseable allowlist is didNotRun — the audit could not run", async () => {
+    const r = await checkAllowScripts(withPkg({ name: "x", allowScripts: ["sharp"] }));
+    assert.strictEqual(r.status, "warn");
+    assert.strictEqual(r.didNotRun, true);
+  });
+
+  it("cites the rule it enforces", async () => {
+    const r = await checkAllowScripts(
+      withPkg({ name: "x", dependencies: { sharp: "1.0.0" }, allowScripts: { sharp: true } }),
+    );
+    assert.match(String(r.rule?.id), /CWE-829/);
   });
 });

@@ -6,6 +6,84 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.6.4] - 2026-08-18
+
+### Added
+
+- **`kit check` audits npm's install-script grants.** npm no longer runs a dependency's
+  `preinstall`/`install`/`postinstall`/`prepare` unless `package.json`'s `allowScripts` names
+  it, which makes that field the standing record of which dependencies were handed
+  install-time code execution. The new `install-script grants` check (CWE-829) reads it and
+  flags the two shapes that outlive their review: a **bare-name or range key**, which also
+  covers the release nobody has seen yet, and a **stale grant** for a package the manifest no
+  longer depends on — a standing permission for a name an attacker can re-introduce
+  (`npm install-scripts prune` clears those). A field shape npm does not write is reported as
+  `didNotRun` rather than read as "no grants", because treating an unparseable allowlist as
+  empty would report the most dangerous state as the safest one. The shapes were measured
+  against npm 11.19.0, not taken from the docs page, which describes `{pkg: "1.2.3"}` while
+  the client actually writes the version into the key: `{"esbuild@0.28.1": true}` pinned,
+  `{"esbuild": true}` unpinned, `{"esbuild": false}` denied.
+
+- **`docs/RELEASING.md`** — how a release is cut, what the publish job refuses to publish,
+  and the migration off a long-lived npm token, including the 13 per-package trusted-publisher
+  configurations that migration needs and the two constraints (`workflow_call` breaks npm's
+  validation; self-hosted runners are unsupported).
+
+### Changed
+
+- **The install gate holds install-script approval, not just installs.** `npm approve-scripts
+  <pkg>` and `npm install-scripts approve <pkg>` are the moment an already-installed
+  dependency gains arbitrary code execution — the exact decision the gate exists to hold —
+  and neither was matched, so an agent in auto-mode could grant it unchecked. Both spellings
+  now triage the named package like an install target; `--all` / `-a` and the bare
+  interactive form name nothing and fail closed; `pnpm approve-builds` is covered the same
+  way. The read-only faces are deliberately never blocked — `install-scripts ls`, `deny`,
+  `prune`, `--dry-run` and `--allow-scripts-pending` hand out no permission, and blocking the
+  review step would push an agent straight to `--all`.
+
+- **The supply-chain check's install-script advice names the review, not the skip.** It said
+  "install with `npm ci --ignore-scripts` where possible"; skipping is npm's own default now,
+  so that described what already happens. It now points at `npm install-scripts ls` and a
+  per-package pinned grant, never `--all`.
+
+- **The publish job installs `npm@^11.5.1` before anything else.** npm's OIDC trusted
+  publishing — the migration target now that 2FA-bypass tokens lose direct publish rights
+  (~January 2027) — exists only in npm ≥ 11.5.1 on node ≥ 22.14.0, and `actions/setup-node`
+  ships npm 10.9.x for node 22. Verified against this repo on npm 11.19.0 before wiring:
+  `npm ci` and `npm publish --dry-run` behave identically, and npm's skip-install-scripts
+  default costs nothing here (esbuild's postinstall is the only one in the tree; build and
+  tests pass without it). `src/publish-workflow.test.ts` asserts the step exists, clears the
+  version floor, and precedes every publish — a comment cannot fail CI, and a publish job
+  runs only on a tag push, the worst moment to learn the client is too old.
+
+- **`kit init` generates only what the repo proves — and asks about the rest.** The
+  operator's `~/.kit/defaults.toml [init] services` were appended to every new project, so a
+  repo with no PostHog got a `[services.posthog]` block and three POSTHOG keys, and the
+  framework table handed `verify = "pnpm build"` to repos that use npm. A plausible generated
+  value is worse than an absent one: an absent line is a question, a plausible line looks
+  like a decision somebody made, so nobody re-reads it. `known_services` is now a menu —
+  detected services are written, known-but-absent ones come back as `offered` and are put to
+  whoever can answer — `generateToml` returns `{ toml, gaps }` where every declined field
+  carries the command that settles it, and the old `services` key still reads with a rename
+  notice. `promptMultiSelect` returns `null` rather than a default when nobody is there,
+  which is why it exists beside `promptSelect`, whose "answer with the recommended option"
+  convention had been silently choosing a secret backend on every agent and CI run. Also:
+  `bun.lock` now counts as bun (the 1.2 rename to the text lockfile made every current bun
+  repo detect as npm), and the build refuses to run on cloud-sync conflict copies instead of
+  hiding them behind a `tsconfig` exclude that never matched.
+
+- **`kit_check` over MCP answers the question and offloads the rest.** The standing MCP
+  surface is paid once per session (7,788 chars); a `kit_check` response is paid on every
+  call, and an agent in a check → fix → check loop calls it repeatedly. The response is now
+  the verdict plus every non-passing row — 9,799 → 3,210 chars, **67% off per call** — with
+  the complete run written to `.kit/runs/check-<stamp>.json` and returned as `detail.path`
+  (`detail: true` still returns the whole document inline). Two invariants bound the saving:
+  only `pass` rows may be omitted, so a `skip` or `didNotRun` always survives and omitted
+  passes stay counted; and `scope` is carried verbatim, so a `--category`-narrowed green
+  cannot read as a whole-repo green. A failed detail write returns no reference at all — a
+  verbose answer beats a dangling pointer. `scripts/measure-mcp-output.mjs` reproduces both
+  numbers.
+
 ## [6.6.3] - 2026-08-13
 
 ### Fixed

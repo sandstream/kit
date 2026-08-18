@@ -40,6 +40,23 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
+      - name: Install an npm that can do trusted publishing
+        # npm is retiring 2FA-bypass granular access tokens as a publishing credential: from
+        # ~January 2027 such a token can only read private packages and STAGE a publish for
+        # human 2FA approval. The migration target is trusted publishing — an OIDC exchange
+        # with NO long-lived secret — and it exists only in npm >= 11.5.1 (node >= 22.14.0).
+        # setup-node ships npm 10.9.x for node 22, so the client in this job would have no
+        # OIDC exchange to make. Installed here so the prerequisite is already true when the
+        # registry-side switch lands (13 per-package configs on npmjs.com — docs/RELEASING.md).
+        #
+        # Measured on npm 11.19.0 against this repo before wiring: `npm ci` and
+        # `npm publish --dry-run` both behave identically, and npm >= 11's skip-install-scripts
+        # default costs nothing here (esbuild's postinstall is the only one in the tree, and
+        # the build + tests pass without it). Asserted by src/publish-workflow.test.ts.
+        run: |
+          npm i -g npm@^11.5.1
+          npm --version
+
       - name: Install dependencies
         # npm ci uses package-lock.json exactly — no version drift.
         run: npm ci

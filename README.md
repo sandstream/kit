@@ -436,7 +436,9 @@ TRIAGE PASSED
 
 Trust model documented in [`docs/THREAT_MODEL.md`](./docs/THREAT_MODEL.md);
 data flow per command in [`docs/DATA_FLOW.md`](./docs/DATA_FLOW.md);
-release-verification in [`docs/VERIFY.md`](./docs/VERIFY.md). kit's verdicts are
+release-verification in [`docs/VERIFY.md`](./docs/VERIFY.md); how a release is cut, and
+the migration off a long-lived npm token, in
+[`docs/RELEASING.md`](./docs/RELEASING.md). kit's verdicts are
 produced by deterministic code, never an LLM — a CI-enforced contract, see
 [`docs/ZERO_LLM_CONTRACT.md`](./docs/ZERO_LLM_CONTRACT.md).
 
