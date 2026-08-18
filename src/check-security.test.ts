@@ -21,6 +21,7 @@ import {
   unpinnedNodeDeps,
   auditAllowScripts,
   checkAllowScripts,
+  grantsTriageCoverage,
   LOCKFILE_ECOSYSTEMS,
   type SecurityCheckResult,
 } from "./check-security.js";
@@ -1098,5 +1099,124 @@ describe("checkAllowScripts — the check around the audit", () => {
       withPkg({ name: "x", dependencies: { sharp: "1.0.0" }, allowScripts: { sharp: true } }),
     );
     assert.match(String(r.rule?.id), /CWE-829/);
+  });
+});
+
+describe("checkAllowScripts — the triage cross-check in the verdict", () => {
+  const repo = (pkg: unknown, ledger?: string): string => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-grants-triage-"));
+    writeFileSync(join(dir, "package.json"), JSON.stringify(pkg));
+    if (ledger !== undefined) writeFileSync(join(dir, ".kit-triage.jsonl"), ledger);
+    return dir;
+  };
+  const fresh = (target: string) =>
+    JSON.stringify({ type: "npm", target, timestamp: new Date().toISOString(), sandbox: false });
+
+  it("an untriaged grant outranks a shape finding — severity high", async () => {
+    const r = await checkAllowScripts(
+      repo(
+        { name: "x", dependencies: { evil: "1.0.0" }, allowScripts: { "evil@1.0.0": true } },
+        `${fresh("sharp")}\n`,
+      ),
+    );
+    assert.strictEqual(r.status, "warn");
+    assert.strictEqual(r.severity, "high");
+    assert.match(r.detail, /evil@1\.0\.0/);
+    assert.match(r.detail, /never triaged|no triage/i);
+  });
+
+  it("a pinned grant backed by a fresh triage passes", async () => {
+    const r = await checkAllowScripts(
+      repo(
+        { name: "x", dependencies: { sharp: "0.33.5" }, allowScripts: { "sharp@0.33.5": true } },
+        `${fresh("sharp")}\n`,
+      ),
+    );
+    assert.strictEqual(r.status, "pass");
+  });
+
+  it("says the cross-check did not run when there is no ledger", async () => {
+    // Rather than reporting every grant as untriaged on the strength of an absent file.
+    const r = await checkAllowScripts(
+      repo({
+        name: "x",
+        dependencies: { sharp: "0.33.5" },
+        allowScripts: { "sharp@0.33.5": true },
+      }),
+    );
+    assert.strictEqual(r.status, "pass");
+    assert.match(r.detail, /triage cross-check did not run|no \.kit-triage\.jsonl/i);
+  });
+
+  it("a torn ledger line does not fail the check", async () => {
+    const r = await checkAllowScripts(
+      repo(
+        { name: "x", dependencies: { sharp: "0.33.5" }, allowScripts: { "sharp@0.33.5": true } },
+        `{"type":"npm","target":"sha\n${fresh("sharp")}\n`,
+      ),
+    );
+    assert.strictEqual(r.status, "pass");
+  });
+});
+
+describe("grantsTriageCoverage — was the granted package ever triaged?", () => {
+  const day = 86_400_000;
+  const now = Date.parse("2026-08-18T12:00:00.000Z");
+  const entry = (target: string, daysAgo: number, type = "npm") => ({
+    type,
+    target,
+    timestamp: new Date(now - daysAgo * day).toISOString(),
+  });
+
+  it("a grant for a package with a fresh npm triage PASS is covered", () => {
+    const c = grantsTriageCoverage(["sharp@0.33.5"], [entry("sharp", 1)], now);
+    assert.deepStrictEqual(c.untriaged, []);
+    assert.deepStrictEqual(c.stale, []);
+    assert.strictEqual(c.ledgerMissing, undefined);
+  });
+
+  it("a grant with no entry at all is the strongest finding", () => {
+    // Install-script execution handed to a package nothing ever evaluated.
+    const c = grantsTriageCoverage(["evil@1.0.0"], [entry("sharp", 1)], now);
+    assert.deepStrictEqual(c.untriaged, ["evil@1.0.0"]);
+    assert.deepStrictEqual(c.stale, []);
+  });
+
+  it("separates an OLD triage from no triage — they are not the same claim", () => {
+    const c = grantsTriageCoverage(["sharp@0.33.5"], [entry("sharp", 30)], now);
+    assert.deepStrictEqual(c.stale, ["sharp@0.33.5"]);
+    assert.deepStrictEqual(c.untriaged, []);
+  });
+
+  it("matches the bare name on both sides — a version suffix is not identity", () => {
+    // The ledger records `rest` from `npm:<rest>`, so a triage of `sharp@0.33.5` and a
+    // grant keyed `sharp` are the same package.
+    assert.deepStrictEqual(
+      grantsTriageCoverage(["sharp"], [entry("sharp@0.33.5", 1)], now).untriaged,
+      [],
+    );
+    assert.deepStrictEqual(
+      grantsTriageCoverage(["@scope/pkg@1.2.3"], [entry("@scope/pkg", 1)], now).untriaged,
+      [],
+    );
+  });
+
+  it("a pip or brew entry does not cover an npm grant", () => {
+    const c = grantsTriageCoverage(["sharp"], [entry("sharp", 1, "pip")], now);
+    assert.deepStrictEqual(c.untriaged, ["sharp"]);
+  });
+
+  it("no ledger means the cross-check did NOT run — never that nothing was triaged", () => {
+    // Most repos have never run `kit triage`. Reporting every grant as untriaged there
+    // would be a confident claim built on an absent file.
+    const c = grantsTriageCoverage(["sharp"], null, now);
+    assert.strictEqual(c.ledgerMissing, true);
+    assert.deepStrictEqual(c.untriaged, []);
+    assert.deepStrictEqual(c.stale, []);
+  });
+
+  it("ignores an unparseable ledger line instead of throwing", () => {
+    const c = grantsTriageCoverage(["sharp"], [entry("sharp", 1)], now);
+    assert.deepStrictEqual(c.untriaged, []);
   });
 });
