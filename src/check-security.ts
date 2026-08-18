@@ -12,6 +12,7 @@ import { classifyGuardDog } from "./guarddog.js";
 import { depsHashFor, loadGuardDogCache, saveGuardDogCache } from "./guarddog-cache.js";
 import { buildSemgrepArgs, semgrepConfig, isAirGap, isLocalSemgrepConfig } from "./scanners.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
+import { TRIAGE_MAX_AGE_DAYS } from "./commands/triage.js";
 import {
   ensureBumblebee,
   runScan,
@@ -853,6 +854,83 @@ export function auditAllowScripts(field: unknown, declared: Set<string>): AllowS
   return out;
 }
 
+/** One line of `.kit-triage.jsonl` — the log `kit triage` appends a PASS to, and the
+ *  pre-commit `check-deps` gate reads. Only the fields this check needs. */
+export interface TriageLogRow {
+  type: string;
+  target: string;
+  timestamp: string;
+}
+
+/** Did anything ever evaluate the package we granted install-script execution to?
+ *
+ * The allowScripts audit can only see the SHAPE of a grant. This asks the question that
+ * shape cannot answer: an unpinned grant for a package kit triaged yesterday is a different
+ * risk from a pinned grant for a package nothing has ever looked at.
+ *
+ * `ledger === null` means the log does not exist — most repos have never run `kit triage` —
+ * and is reported as "the cross-check did not run", never as "nothing was triaged". A
+ * confident finding built on an absent file is exactly the failure mode this codebase keeps
+ * finding in itself. Pure; exported for tests.
+ */
+export interface TriageCoverage {
+  /** Granted, with no matching triage entry at all. */
+  untriaged: string[];
+  /** Granted and triaged, but every entry is older than the freshness window. */
+  stale: string[];
+  /** No ledger to consult — the cross-check could not run. */
+  ledgerMissing?: boolean;
+}
+
+export function grantsTriageCoverage(
+  grantKeys: string[],
+  ledger: TriageLogRow[] | null,
+  now: number,
+  maxAgeDays: number = TRIAGE_MAX_AGE_DAYS,
+): TriageCoverage {
+  if (ledger === null) return { untriaged: [], stale: [], ledgerMissing: true };
+  const cutoff = now - maxAgeDays * 86_400_000;
+  // The ledger records `rest` from an `npm:<rest>` ref, so an entry may carry a version
+  // while the grant key does not (or the reverse). Identity is the NAME.
+  const npmEntries = ledger
+    .filter((row) => row.type === "npm")
+    .map((row) => ({ name: splitAllowScriptsKey(row.target).name, at: Date.parse(row.timestamp) }))
+    .filter((row) => Number.isFinite(row.at));
+  const out: TriageCoverage = { untriaged: [], stale: [] };
+  for (const key of grantKeys) {
+    const { name } = splitAllowScriptsKey(key);
+    const matches = npmEntries.filter((row) => row.name === name);
+    if (matches.length === 0) {
+      out.untriaged.push(key);
+      continue;
+    }
+    if (!matches.some((row) => row.at >= cutoff)) out.stale.push(key);
+  }
+  return out;
+}
+
+/** Read `.kit-triage.jsonl`, tolerating a damaged line rather than failing the check.
+ *  Returns null when the log does not exist — see `grantsTriageCoverage`. */
+async function readTriageLedger(root: string): Promise<TriageLogRow[] | null> {
+  let text: string;
+  try {
+    text = await readFile(resolve(root, ".kit-triage.jsonl"), "utf-8");
+  } catch {
+    return null;
+  }
+  const rows: TriageLogRow[] = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const row = JSON.parse(line) as TriageLogRow;
+      if (typeof row.type === "string" && typeof row.target === "string") rows.push(row);
+    } catch {
+      // a torn append is not a reason to fail the check — skip the line
+    }
+  }
+  return rows;
+}
+
 /** The check around `auditAllowScripts`. Root package.json only — that is the manifest npm
  *  consults for the project's grants. */
 export async function checkAllowScripts(root: string): Promise<SecurityCheckResult> {
@@ -903,7 +981,24 @@ export async function checkAllowScripts(root: string): Promise<SecurityCheckResu
         "rewrite the field with `npm install-scripts approve <pkg>` so npm owns its shape",
     };
   }
+  // The shape audit says how BROAD each grant is. The triage cross-check says whether
+  // anything ever evaluated the package it was granted to — a pinned grant for a package
+  // nothing has looked at is worse than an unpinned grant for one kit cleared yesterday,
+  // so it carries the higher severity.
+  const grants = [...audit.pinned, ...audit.unpinned];
+  const coverage = grantsTriageCoverage(grants, await readTriageLedger(root), Date.now());
+
   const problems: string[] = [];
+  if (coverage.untriaged.length > 0) {
+    problems.push(
+      `${coverage.untriaged.length} grant(s) never triaged: ${coverage.untriaged.join(", ")} — install-script execution granted to a package nothing evaluated`,
+    );
+  }
+  if (coverage.stale.length > 0) {
+    problems.push(
+      `${coverage.stale.length} grant(s) whose triage is older than ${TRIAGE_MAX_AGE_DAYS} days: ${coverage.stale.join(", ")}`,
+    );
+  }
   if (audit.unpinned.length > 0) {
     problems.push(
       `${audit.unpinned.length} unpinned grant(s): ${audit.unpinned.join(", ")} — covers releases nobody reviewed`,
@@ -914,21 +1009,30 @@ export async function checkAllowScripts(root: string): Promise<SecurityCheckResu
       `${audit.stale.length} stale grant(s): ${audit.stale.join(", ")} — no longer a declared dependency`,
     );
   }
+  // Reported when the log is absent so a green row cannot be mistaken for "every grant is
+  // triaged" — the check ran, one of its questions could not be asked.
+  const crossCheck = coverage.ledgerMissing
+    ? " · triage cross-check did not run (no .kit-triage.jsonl in this repo)"
+    : "";
   if (problems.length > 0) {
     return {
       ...base,
       status: "warn",
-      severity: "medium",
-      detail: problems.join("; "),
+      // An untriaged grant is a different class from a too-broad one: nothing has evaluated
+      // the code that will run.
+      severity: coverage.untriaged.length > 0 ? "high" : "medium",
+      detail: problems.join("; ") + crossCheck,
       suggestion:
-        "re-approve pinned (`npm install-scripts approve <pkg>` writes <pkg>@<version> by default), and clear the outlived ones with `npm install-scripts prune`",
+        coverage.untriaged.length > 0
+          ? "triage before granting: `kit triage npm <pkg>`, then re-approve pinned (`npm install-scripts approve <pkg>`); clear outlived grants with `npm install-scripts prune`"
+          : "re-approve pinned (`npm install-scripts approve <pkg>` writes <pkg>@<version> by default), and clear the outlived ones with `npm install-scripts prune`",
     };
   }
   const denied = audit.denied.length > 0 ? ` · ${audit.denied.length} denied` : "";
   return {
     ...base,
     status: "pass",
-    detail: `${audit.pinned.length} grant(s), every one pinned to an exact version${denied}`,
+    detail: `${audit.pinned.length} grant(s), every one pinned to an exact version${denied}${crossCheck}`,
   };
 }
 

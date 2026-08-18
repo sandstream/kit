@@ -425,7 +425,11 @@ async function readMcpPins(
 }
 
 const TRIAGE_LOG_FILE = ".kit-triage.jsonl";
-const TRIAGE_MAX_AGE_DAYS = 7;
+/** A triage PASS counts as current for this long. Exported so every consumer reads ONE
+ *  number: `check-deps` gates new manifest entries on it, and the "install-script grants"
+ *  security check asks the same freshness question about a package granted install scripts.
+ *  Two copies of a policy window drift, and the drift is silent. */
+export const TRIAGE_MAX_AGE_DAYS = 7;
 
 interface TriageLogEntry {
   timestamp: string;

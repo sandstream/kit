@@ -8,6 +8,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **The `install-script grants` check now asks whether the granted package was ever
+  triaged.** #475 deferred this on the grounds that no triage ledger existed to consult. That
+  was wrong: `.kit-triage.jsonl` has been there all along — `kit triage` appends a PASS to it
+  and the pre-commit `check-deps` gate reads it. The shape audit can only say how BROAD a
+  grant is; this asks the question shape cannot answer, and the answers rank differently. A
+  pinned grant for a package nothing has ever evaluated now warns at **high**, above an
+  unpinned grant for one kit cleared yesterday. A grant whose only triage is older than the
+  freshness window is reported separately, because "reviewed a month ago" and "never reviewed"
+  are not the same claim. `TRIAGE_MAX_AGE_DAYS` is now exported and imported rather than
+  copied, so `check-deps` and this check cannot drift to different windows.
+
+  When the log is absent — most repos have never run `kit triage` — the row says the
+  cross-check *did not run* instead of reporting every grant as untriaged. A confident finding
+  built on an absent file is the failure mode this codebase keeps catching in itself. A torn
+  append is skipped rather than allowed to fail the check.
+
 - **`scripts/trusted-publishing-wizard.sh` — the npm OIDC migration, walked.** The
   registry side of trusted publishing can only be done in a browser, one package at a time:
   npm allows exactly one trusted publisher per package, and `npm access` on 11.19.0 covers
