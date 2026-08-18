@@ -629,7 +629,9 @@ async function generateConfigFile(
   try {
     const pkgPath = resolve(process.cwd(), "package.json");
     if (existsSync(pkgPath)) {
-      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as { scripts?: Record<string, string> };
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as {
+        scripts?: Record<string, string>;
+      };
       packageScripts = Object.keys(pkg.scripts ?? {});
     }
   } catch {

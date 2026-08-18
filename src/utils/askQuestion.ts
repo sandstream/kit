@@ -17,10 +17,7 @@ import type * as readline from "node:readline/promises";
  * Shared by `promptSelect` and `promptMultiSelect` on purpose: two copies of this rule would
  * drift, and the drift would be one prompt crashing where its sibling recovers.
  */
-export async function askQuestion(
-  rl: readline.Interface,
-  prompt: string,
-): Promise<string | null> {
+export async function askQuestion(rl: readline.Interface, prompt: string): Promise<string | null> {
   try {
     return await new Promise<string | null>((resolve, reject) => {
       rl.once("close", () => resolve(null));

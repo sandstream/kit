@@ -69,11 +69,17 @@ describe("promptSelect", () => {
 
   it("returns the recommended option without asking when there is no TTY", async () => {
     const input = new PassThrough(); // no isTTY
-    assert.equal(await promptSelect("Secret backend?", BACKENDS, { input, output: new PassThrough() }), "1password");
+    assert.equal(
+      await promptSelect("Secret backend?", BACKENDS, { input, output: new PassThrough() }),
+      "1password",
+    );
   });
 
   it("returns empty string for an empty option list", async () => {
     const input = Object.assign(new PassThrough(), { isTTY: true });
-    assert.equal(await promptSelect("Secret backend?", [], { input, output: new PassThrough() }), "");
+    assert.equal(
+      await promptSelect("Secret backend?", [], { input, output: new PassThrough() }),
+      "",
+    );
   });
 });

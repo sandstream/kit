@@ -102,7 +102,10 @@ describe("parseMultiSelectAnswer", () => {
   });
 
   it("an empty option list turns every token into unknown", () => {
-    assert.deepEqual(parseMultiSelectAnswer("1 redis", []), { picked: [], unknown: ["1", "redis"] });
+    assert.deepEqual(parseMultiSelectAnswer("1 redis", []), {
+      picked: [],
+      unknown: ["1", "redis"],
+    });
   });
 });
 
