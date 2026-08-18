@@ -12,11 +12,8 @@
     "sourceMap": true,
     "noUnusedLocals": true
   },
+  "//conflict-copies": "Cloud-sync duplicates (`triage 2.ts` next to `triage.ts`) are NOT excluded here, on purpose. A `**/* [0-9].ts` exclude looks like it handles them and does nothing: tsconfig globs support only *, ? and **/, never [0-9] character classes — so it was fake protection for as long as it sat here. Excluding them is also the wrong goal; the copy is gitignored junk that should be deleted, not compiled-around. `scripts/check-conflict-copies.mjs` runs first in `npm run build` and fails with the paths and an rm command.",
   "include": [
     "src"
-  ],
-  "exclude": [
-    "**/* [0-9].ts",
-    "**/* [0-9].tsx"
   ]
 }
