@@ -6,16 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-## [6.6.5-rc.1] - 2026-08-19
-
-A prerelease with one job: prove that publishing works over OIDC now that the npm token is
-gone. It routes to the `next` dist-tag, so `latest` cannot move — nothing that came before
-this could verify the switch, because the only honest test of a publishing credential is a
-publish.
-
-Its contents are the accumulated `[Unreleased]` work below, which will be listed in full
-under `6.6.5` when that ships. Nothing in this prerelease is meant to be installed by anyone
-who is not testing the release path.
+## [6.6.5] - 2026-08-19
 
 ### Changed
 
@@ -110,6 +101,14 @@ who is not testing the release path.
   `fastify(`, `Bun.serve`, `.listen(` — each matching 0 lines when written) and fires the day
   one lands. All three branches were driven in a fixture tree; the two that mattered had never
   been reachable.
+
+## [6.6.5-rc.1] - 2026-08-19
+
+Prerelease of 6.6.5, published to the `next` dist-tag so the OIDC publishing path could be
+proven before `latest` moved. Nothing before it could verify the switch: the only honest test
+of a publishing credential is a publish. Its contents are the 6.6.5 entries above, minus the
+token-restriction change — that was done after this prerelease shipped, and because it
+shipped.
 
 ## [6.6.4] - 2026-08-18
 
