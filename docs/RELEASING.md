@@ -63,11 +63,27 @@ Two constraints keep it working:
 `--provenance` stays on the publish commands. Provenance is automatic under trusted
 publishing, so the flag is a no-op there and states the intent explicitly.
 
-**Still open:** npm's per-package "Publishing access" is set to *require two-factor
-authentication OR a granular access token with bypass 2fa enabled*. Switching each package to
-*disallow bypass 2fa tokens* is what turns "we also have OIDC" into "only OIDC can publish".
-Do that after a release has actually gone out over OIDC — it is the setting that removes the
-fallback.
+**Token publishing is disallowed** (2026-08-19, after 6.6.5-rc.1 proved the OIDC path). Every
+package's "Publishing access" is set to *require two-factor authentication and disallow bypass
+2fa tokens*, which is what turns "we also have OIDC" into "only OIDC can publish". Each
+setting was read back from its own settings page.
+
+Consequences worth knowing before the next release:
+
+- **There is no token fallback left.** If a package's trusted publisher is misconfigured, its
+  publish step fails and the fix is to correct the publisher in npm's UI — not to publish with
+  a token. The workspace loop is idempotent, so re-running the job after the fix completes the
+  set.
+- **The CLI path for these settings needs TOTP.** `npm access set mfa=publish <pkg>` sets the
+  same thing without the web UI, but it returns `EOTP` and `--otp=<code>` needs an
+  authenticator app. A security-key-only account cannot use it, and npm does not offer adding
+  TOTP alongside an existing security key — only disabling 2FA and re-enrolling, which is not
+  worth doing for this.
+- **npm's step-up 2FA is flaky under repetition.** Expect saves to hang on "Verifying…" or
+  return "Something went wrong. Please try again later." Nothing half-saves; re-select the
+  radio and submit again. Select the value FIRST and submit only when you are ready to touch
+  the key — the prompt expires in about a minute, and `Update Package Settings` does nothing at
+  all if the radio has not actually changed.
 
 ## Background: why the migration happened
 
