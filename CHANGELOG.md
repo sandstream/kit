@@ -19,6 +19,17 @@ who is not testing the release path.
 
 ### Changed
 
+- **Token publishing is now disallowed on all 13 packages.** With 6.6.5-rc.1 proving the OIDC
+  path, every package's npm "Publishing access" moved to *require two-factor authentication and
+  disallow bypass 2fa tokens* — the setting that turns "we also have OIDC" into "only OIDC can
+  publish". Each was read back from its own settings page. There is no token fallback left, so
+  a misconfigured trusted publisher now fails that package's publish step and is fixed in npm's
+  UI rather than worked around; the workspace loop is idempotent, so re-running completes the
+  set. `docs/RELEASING.md` records the operational cost: npm's step-up 2FA is flaky under
+  repetition, `Update Package Settings` is a no-op unless the radio actually changed, and the
+  CLI equivalent (`npm access set mfa=publish`) needs a TOTP code that a security-key-only
+  account cannot produce.
+
 - **Publishing runs on trusted publishing (OIDC); the npm token is gone.** All 13 packages
   now carry a GitHub Actions trusted publisher naming `sandstream/kit`, `publish.yml` and the
   `npm-publish` environment, with the single permission `npm publish` — not staged publish,
