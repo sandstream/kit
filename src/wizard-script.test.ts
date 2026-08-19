@@ -65,6 +65,28 @@ describe("trusted-publishing wizard — runs in the shell it will be run in", ()
     assert.deepEqual(offenders, [], "macOS sed rejects `+?`/`*?` — restructure the expression");
   });
 
+  it("refuses to run without a tty instead of answering its own questions", () => {
+    // Run from Claude Code's `!` shell (no controlling tty), every `read` got EOF
+    // instantly: 18 stages flew past, all 13 y/N prompts defaulted to no, 13 browser
+    // tabs opened, and the wizard reported "still to do by hand" for everything it had
+    // just asked about. A wizard whose questions answer themselves is worse than one
+    // that will not start — it looks like a run that happened.
+    const r = spawnSync("bash", [WIZARD], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+      cwd: REPO_ROOT,
+      timeout: 20_000,
+    });
+    assert.notEqual(r.status, 0, "must exit non-zero when stdin is not a tty");
+    const output = `${r.stdout}${r.stderr}`;
+    assert.match(output, /terminal|tty/i, "must say WHY it refused");
+    assert.doesNotMatch(
+      output,
+      /opening https/,
+      "must refuse before opening any browser tab — the tabs were the visible damage",
+    );
+  });
+
   it("is executable", () => {
     accessSync(WIZARD, constants.X_OK);
   });

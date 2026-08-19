@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Publishing runs on trusted publishing (OIDC); the npm token is gone.** All 13 packages
+  now carry a GitHub Actions trusted publisher naming `sandstream/kit`, `publish.yml` and the
+  `npm-publish` environment, with the single permission `npm publish` — not staged publish,
+  because the job publishes directly and least privilege is the point. `NODE_AUTH_TOKEN` is
+  removed from both publish steps, which is what actually switches the credential: npm prefers
+  a token whenever one is present, so the two cannot both be in effect. That also makes a
+  re-added token a SILENT downgrade back to the credential npm is retiring, so
+  `src/publish-workflow.test.ts` now fails if any executing line in the workflow carries one.
+  The environment is no longer merely the guard around a secret — it is part of the credential,
+  since npm only mints one for runs that reach it.
+
+  Two things worth knowing for the next package, both learned the hard way: npm requires
+  step-up 2FA (security key) per save and does **not** keep the session elevated, so it is one
+  key tap per package and a timed-out prompt loses that save (nothing half-saves — retrying is
+  free); and driving the UI quickly trips Cloudflare's bot check, which only a human can clear.
+
 ### Added
 
 - **The `install-script grants` check now asks whether the granted package was ever

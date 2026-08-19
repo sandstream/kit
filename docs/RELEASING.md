@@ -42,14 +42,34 @@ Each of these fails the release rather than shipping something unverifiable:
 A prerelease version (any `-` identifier) publishes under the `next` dist-tag, so `latest`
 only ever moves on a stable release.
 
-## Credentials: today
+## Credentials: trusted publishing (no npm token)
 
-The publish steps authenticate with `NODE_AUTH_TOKEN` from the `NPM_TOKEN` secret, which is
-scoped to the **`npm-publish` environment** rather than the repository. The token is
-therefore released only after that environment's required-reviewer rule passes; configure
-those reviewers in Settings → Environments, or the human gate does not exist.
+There is no npm token in this repository any more. All 13 packages carry a GitHub Actions
+trusted publisher naming `sandstream/kit`, the workflow file `publish.yml`, and the
+environment `npm-publish`, with the single permission `npm publish` (not staged publish —
+least privilege). The job exchanges its OIDC identity for a short-lived credential, so the
+environment is part of the credential rather than merely the guard around a secret:
+configure required reviewers on `npm-publish` in Settings → Environments, or the human gate
+does not exist.
 
-## Credentials: the migration to trusted publishing
+Two constraints keep it working:
+
+- **Keep the publish job triggered directly by the tag push.** npm's validation reads the
+  *calling* workflow's name, so putting the publish behind `workflow_call` breaks the check.
+- **Never re-add `NODE_AUTH_TOKEN`.** npm prefers a token whenever one is present, so adding
+  one silently moves publishing back onto the credential npm is retiring.
+  `src/publish-workflow.test.ts` fails if any executing line in the workflow carries one.
+
+`--provenance` stays on the publish commands. Provenance is automatic under trusted
+publishing, so the flag is a no-op there and states the intent explicitly.
+
+**Still open:** npm's per-package "Publishing access" is set to *require two-factor
+authentication OR a granular access token with bypass 2fa enabled*. Switching each package to
+*disallow bypass 2fa tokens* is what turns "we also have OIDC" into "only OIDC can publish".
+Do that after a release has actually gone out over OIDC — it is the setting that removes the
+fallback.
+
+## Background: why the migration happened
 
 npm is retiring 2FA-bypass granular access tokens as a publishing credential:
 
@@ -68,9 +88,9 @@ that step exists, pins a high-enough version, and runs before any publish — a 
 fail CI, and a publish job runs only on a tag push, the worst moment to discover a too-old
 client.
 
-**The remaining work is registry-side and manual.** Each package is configured
-individually on npmjs.com, and each can have exactly one trusted publisher at a time, so
-this is 13 configurations:
+**The registry-side work is done** (2026-08-19): every package below was configured and its
+saved connection read back from its own settings page. The list is kept because a NEW package
+needs the same treatment before its first release — no token exists to fall back on.
 
 | Package | | |
 | --- | --- | --- |
@@ -80,19 +100,19 @@ this is 13 configurations:
 | `sandstream-kit-plugin-stripe` | `sandstream-kit-plugin-supabase` | `sandstream-kit-plugin-vercel` |
 | `sandstream-kit-plugin-wiz` | | |
 
-For each: Settings → Publishing access → add a GitHub Actions trusted publisher with
-repository `sandstream/kit`, workflow `publish.yml`, and environment **`npm-publish`**.
-Naming the environment is the part worth not skipping: it means only the reviewer-gated job
-can mint a credential, where today the environment only protects the secret.
+For each (and for any new package): its npm page → Settings → Trusted Publisher → GitHub
+Actions, then `Organization or user` = `sandstream`, `Repository` = `kit`,
+`Workflow filename` = `publish.yml` (filename only, no path), `Environment name` =
+`npm-publish`, `Allowed actions` = `npm publish` only. Naming the environment is the part
+worth not skipping: it is what limits credential minting to the reviewer-gated job.
 
-Two constraints to respect when the switch happens:
+npm requires step-up 2FA (security key) to save each one, and it does NOT keep the session
+elevated — expect one key tap per package, and expect a save to be lost if the prompt times
+out. Nothing half-saves, so a retry is free. Rapid automation of the UI also trips
+Cloudflare's bot check, which only a human can clear.
 
-- **Do not move the publish behind `workflow_call`.** npm's validation reads the *calling*
-  workflow's name, not the one that actually runs `npm publish`, so a reusable-workflow
-  indirection breaks the check. `publish.yml` is triggered directly by the tag push today —
-  keep it that way.
-- **Self-hosted runners are not supported.** The job runs on `ubuntu-latest`
-  (GitHub-hosted), which is.
+Self-hosted runners are not supported by trusted publishing; this job runs on
+`ubuntu-latest`, which is.
 
 **`scripts/trusted-publishing-wizard.sh` walks all of it.** It derives the package list from
 this repo rather than carrying a copy (a hardcoded list drifts the moment someone adds a
@@ -111,16 +131,11 @@ status/collaborators/grant/revoke and has no read or write path for a trusted pu
 the setting exists only in the web UI. What the wizard verifies is everything else: the
 workflow file, the npm client floor, the environment's existence, and the package list.
 
-Once every package is configured, the workflow change is a deletion: drop the
-`NODE_AUTH_TOKEN`/`NPM_TOKEN` env from both publish steps (npm uses the token whenever it is
-present, so OIDC only takes over once that env is gone — the two cannot both be in effect).
-`id-token: write` is already granted. Keep a read-only granular token only if a private
-dependency ever needs installing.
-
-`--provenance` stays. Provenance is automatic under trusted publishing, so the flag is a
-no-op there and leaving it in states the intent explicitly; if the first OIDC publish ever
-rejects it, dropping it is a one-line follow-up. That is a deliberate choice not to change two
-things at once in the release path.
+The workflow change that followed was a deletion: `NODE_AUTH_TOKEN` is gone from both publish
+steps, and `id-token: write` was already granted. Keep a read-only granular token only if a
+private dependency ever needs installing. If the first OIDC publish ever rejects
+`--provenance`, dropping that flag is a one-line follow-up — kept deliberately so the release
+path changed one thing, not two.
 
 **Prove it with a prerelease, not with the next real version.** publish.yml routes any version
 containing a hyphen to the `next` dist-tag, so `latest` does not move. Bump to

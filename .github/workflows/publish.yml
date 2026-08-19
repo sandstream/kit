@@ -8,12 +8,16 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # Protected environment gate: NPM_TOKEN is a secret SCOPED to this environment,
-    # so it is released only after the environment's required-reviewer / branch
-    # rules pass. This is the primary defense against "anyone who can push a v* tag
-    # ships to npm" — configure required reviewers on the `npm-publish` environment
-    # in repo Settings → Environments. Without that config the token is never
-    # exposed (secret lives on the environment, not the repo).
+    # Protected environment gate. There is no npm token here any more: all 13 packages
+    # have a GitHub Actions trusted publisher naming this repo, THIS workflow file, and
+    # THIS environment, so npm mints a short-lived credential from the job's OIDC identity
+    # and only for runs that reach this environment. That makes the environment part of the
+    # credential rather than merely the guard around a secret — configure required reviewers
+    # on `npm-publish` in Settings → Environments, or the human gate does not exist.
+    #
+    # The npm side is what enforces the workflow name and environment; keep this job
+    # triggered directly by the tag push. Behind `workflow_call`, npm's validation reads the
+    # CALLING workflow's name and the check breaks. See docs/RELEASING.md.
     environment: npm-publish
     permissions:
       # write (not read) because this job creates the GitHub release for the tag
@@ -246,16 +250,22 @@ jobs:
         run: npm publish --dry-run --tag ${{ steps.disttag.outputs.tag }}
 
       - name: Publish to npm with provenance
-        # --provenance generates an SLSA build provenance attestation signed
-        # by the GitHub Actions OIDC identity. Consumers can verify with:
+        # No NODE_AUTH_TOKEN: the credential comes from this job's OIDC identity, exchanged
+        # against the package's trusted publisher. npm PREFERS a token whenever one is
+        # present, so re-adding it would silently move publishing back onto the credential
+        # npm is retiring — src/publish-workflow.test.ts fails if any executing line carries
+        # one.
+        #
+        # --provenance stays: provenance is automatic under trusted publishing, so the flag
+        # is a no-op there and states the intent explicitly. Generates an SLSA build
+        # provenance attestation signed by the GitHub Actions OIDC identity. Consumers can
+        # verify with:
         #   npm audit signatures
         # or
         #   npm view sandstream-kit --json | jq '.dist'
         # --tag routes prereleases to `next` (see the resolve step) so they never
         # clobber `latest`.
         run: npm publish --provenance --access public --tag ${{ steps.disttag.outputs.tag }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish the adapter SDK and first-party plugins
         # WHY THIS EXISTS: `packages/` is not in the root tarball (files: ["dist","README.md",
@@ -277,7 +287,6 @@ jobs:
         # EPUBLISHCONFLICT. Never continue-on-error — a publish that silently did not happen is
         # the false green this repo exists to prevent.
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           DIST_TAG: ${{ steps.disttag.outputs.tag }}
         run: |
           set -euo pipefail
