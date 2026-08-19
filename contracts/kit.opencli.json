@@ -1173,7 +1173,7 @@
     "binary": "kit",
     "summary": "Deterministic, local-first developer-environment manager and fail-closed governance layer for AI agents and humans.",
     "title": "kit",
-    "version": "6.6.4"
+    "version": "6.6.5-rc.1"
   },
   "opencliVersion": "1.0.0-alpha.12"
 }
