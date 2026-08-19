@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.6.5-rc.1] - 2026-08-19
+
+A prerelease with one job: prove that publishing works over OIDC now that the npm token is
+gone. It routes to the `next` dist-tag, so `latest` cannot move — nothing that came before
+this could verify the switch, because the only honest test of a publishing credential is a
+publish.
+
+Its contents are the accumulated `[Unreleased]` work below, which will be listed in full
+under `6.6.5` when that ships. Nothing in this prerelease is meant to be installed by anyone
+who is not testing the release path.
+
 ### Changed
 
 - **Publishing runs on trusted publishing (OIDC); the npm token is gone.** All 13 packages

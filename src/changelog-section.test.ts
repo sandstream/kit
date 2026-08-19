@@ -86,7 +86,13 @@ describe("changelog-section", () => {
 
   it("covers every published version currently in the CHANGELOG", () => {
     const changelog = readFileSync(join(REPO_ROOT, "CHANGELOG.md"), "utf8");
-    const versions = [...changelog.matchAll(/^## \[?(\d+\.\d+\.\d+)\]?/gm)].map((m) => m[1]);
+    // The prerelease suffix is part of the version, not noise after it: `## [6.6.5-rc.1]`
+    // used to capture as `6.6.5`, so this test looked for a section that does not exist and
+    // failed on the repo's first prerelease heading. publish.yml renders notes for the exact
+    // version in package.json, hyphen and all — parse the same shape it will ask for.
+    const versions = [...changelog.matchAll(/^## \[?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\]?/gm)].map(
+      (m) => m[1],
+    );
     assert.ok(versions.length > 0, "no versions parsed out of CHANGELOG.md");
     for (const v of versions) {
       const r = run([v]);
