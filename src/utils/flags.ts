@@ -64,3 +64,62 @@ export function flagInt(argv: readonly string[], name: string, fallback: number)
   const n = Number.parseInt(raw, 10);
   return Number.isNaN(n) ? fallback : n;
 }
+
+/**
+ * Flags kit honors for EVERY command, wherever they appear in argv.
+ *
+ * A command's own allowlist must accept these on top of its own flags, or the
+ * unknown-flag rejection turns a documented global into a hard failure. That is
+ * not hypothetical: `kit check --read-only` and `kit check --non-interactive`
+ * — both listed in the "Global flags" table of docs/COMMANDS.md — exited 1 with
+ * "unknown flag for kit check" and the check never ran, because CHECK_FLAGS was
+ * built from the check path's own flag literals only.
+ *
+ * `--env` is honored globally too (config.ts:resolveActiveEnvironment reads
+ * `--env=<name>` straight off process.argv) even though the COMMANDS.md table
+ * predates it. `--help` is intercepted in cli.ts before dispatch, but it is
+ * listed so a command allowlist never rejects what the user can legally type.
+ */
+export const GLOBAL_FLAGS = [
+  "--read-only",
+  "--readonly",
+  "--non-interactive",
+  "--env",
+  "--help",
+  "--version",
+] as const;
+
+/**
+ * The globals that may legally appear BEFORE the command word
+ * (`kit --read-only check`, the form README.md and docs/THREAT_MODEL.md
+ * document). `--version` / `--help` are excluded: as the first token they mean
+ * the top-level version/help command, and cli.ts dispatches them as such.
+ */
+const GLOBAL_PREFIX_FLAGS = ["--read-only", "--readonly", "--non-interactive"] as const;
+
+function isGlobalPrefixFlag(token: string): boolean {
+  return (GLOBAL_PREFIX_FLAGS as readonly string[]).includes(token) || token.startsWith("--env=");
+}
+
+/**
+ * Split leading global flags off the front of argv.
+ *
+ * `kit --read-only check verify-attestation` must reach cmdCheck with the same
+ * POSITIONAL shape as `kit check verify-attestation` — command modules read
+ * subcommands off raw indices (`process.argv[3] === "verify-attestation"`), so a
+ * flag sitting in front of the command word shifts every one of them. Before
+ * this split, `command = args[0]` was `--read-only` and kit answered "Unknown
+ * command: --read-only" (exit 1) for the exact invocation its own README
+ * documents.
+ *
+ * The flags are not dropped — callers re-append them after the positionals, so
+ * `hasFlag(process.argv, "--read-only")` and every allowlist still see them.
+ */
+export function splitLeadingGlobalFlags(args: readonly string[]): {
+  leading: string[];
+  rest: string[];
+} {
+  let i = 0;
+  while (i < args.length && isGlobalPrefixFlag(args[i])) i++;
+  return { leading: args.slice(0, i), rest: args.slice(i) };
+}

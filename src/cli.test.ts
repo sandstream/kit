@@ -1049,3 +1049,91 @@ describe("mcpExposedToolNames", () => {
     assert.deepEqual(mcpExposedToolNames(), EXPECTED_MCP_TOOLS);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Global flags: dispatch position + typo rejection
+// ---------------------------------------------------------------------------
+
+describe("global flags before the command word", () => {
+  let tempDir: string;
+
+  before(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "kit-globalflags-"));
+    await writeFile(join(tempDir, ".kit.toml"), FIXTURE_EMPTY, "utf-8");
+  });
+
+  after(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("`kit --read-only check` runs the check instead of 'Unknown command'", async () => {
+    // README.md and docs/THREAT_MODEL.md both document this exact form. It used to
+    // activate read-only mode and then refuse to dispatch, because `--read-only`
+    // WAS args[0] — kit rejected its own documented security-control invocation.
+    const result = await runCli(["--read-only", "check"], tempDir);
+    const output = `${result.stdout}${result.stderr}`;
+    assert.ok(!output.includes("Unknown command"), `kit refused to dispatch:\n${output}`);
+    assert.ok(output.includes("read-only mode active"), "read-only mode should still activate");
+  });
+
+  it("`kit check --read-only` is not rejected as an unknown flag", async () => {
+    const result = await runCli(["check", "--read-only"], tempDir);
+    const output = `${result.stdout}${result.stderr}`;
+    assert.ok(!output.includes("unknown flag"), `global flag rejected:\n${output}`);
+  });
+
+  it("`kit check --non-interactive` is not rejected as an unknown flag", async () => {
+    const result = await runCli(["check", "--non-interactive"], tempDir);
+    const output = `${result.stdout}${result.stderr}`;
+    assert.ok(!output.includes("unknown flag"), `global flag rejected:\n${output}`);
+  });
+
+  it("a genuinely unknown flag is still rejected", async () => {
+    const result = await runCli(["check", "--not-a-real-flag"], tempDir);
+    const output = `${result.stdout}${result.stderr}`;
+    assert.equal(result.exitCode, 1);
+    assert.ok(output.includes("unknown flag"), "the rejection must survive the widened allowlist");
+  });
+});
+
+describe("kit upgrade rejects a typo'd flag instead of doing something else", () => {
+  let tempDir: string;
+  const LOCK = `{
+  "tools": {
+    "node": { "version": "22", "source": "mise", "installedAt": "2020-01-01T00:00:00.000Z" }
+  }
+}
+`;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "kit-upgradeflag-"));
+    await writeFile(join(tempDir, ".kit.toml"), '[tools]\nnode = "22"\n', "utf-8");
+    await mkdir(join(tempDir, ".kit"), { recursive: true });
+    await writeFile(join(tempDir, ".kit", "cli-lock.json"), LOCK, "utf-8");
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("`--self.` exits 1 and never touches the lock file", async () => {
+    // The reported failure: a trailing period missed hasFlag's exact match, so the
+    // self-upgrade silently became the lock-file path — it rewrote every
+    // installedAt to "now", installed nothing, and printed a success line.
+    const result = await runCli(["upgrade", "--self."], tempDir);
+    const output = `${result.stdout}${result.stderr}`;
+    assert.equal(result.exitCode, 1, `expected rejection, got:\n${output}`);
+    assert.ok(output.includes("unknown flag"), `no rejection printed:\n${output}`);
+    const lock = await readFile(join(tempDir, ".kit", "cli-lock.json"), "utf-8");
+    assert.ok(
+      lock.includes("2020-01-01T00:00:00.000Z"),
+      "a rejected invocation must not rewrite installedAt",
+    );
+  });
+
+  it("plain `kit upgrade` still updates the lock files", async () => {
+    const result = await runCli(["upgrade"], tempDir);
+    const output = `${result.stdout}${result.stderr}`;
+    assert.ok(output.includes("Updated lock files"), `the happy path regressed:\n${output}`);
+  });
+});

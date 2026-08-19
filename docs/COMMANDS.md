@@ -17,8 +17,14 @@
 | ---------------------------- | ------------------------------------------------------------------------------------------ |
 | `--read-only` / `--readonly` | Activate session-wide refusal of every mutating op. Also honored as `KIT_READ_ONLY=1` env. |
 | `--non-interactive`          | Skip all confirmation prompts. Required in CI / agent contexts.                            |
+| `--env=<name>`               | Select the environment overlay (`[env.<name>]` in `.kit.toml`). Also honored as `KIT_ENV`. |
 | `--version` / `-v`           | Print kit version + exit.                                                                  |
 | `--help` / `-h`              | Print top-level help + exit.                                                               |
+
+`--read-only`, `--readonly`, `--non-interactive` and `--env=<name>` may be
+written before or after the command word — `kit --read-only check` and
+`kit check --read-only` are equivalent. Every command accepts them; a command
+that rejects unknown flags allows these on top of its own.
 
 ## Core lifecycle
 

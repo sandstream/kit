@@ -8,7 +8,7 @@
  */
 import { resolve } from "node:path";
 import { c } from "../utils/colors.js";
-import { hasFlag, flagValue, envTruthy, unknownFlags } from "../utils/flags.js";
+import { hasFlag, flagValue, envTruthy, unknownFlags, GLOBAL_FLAGS } from "../utils/flags.js";
 import { loadConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { withGovernance } from "../governance-middleware.js";
@@ -70,9 +70,14 @@ export const CHECK_FLAGS = [
   "--key",
   "--attest", // cli-checks-shared.ts:emitAttestation
   "--no-auto-install", // cli-checks-shared.ts:autoInstallScanners
+  // Honored for every command by cli.ts / config.ts, not by the check path itself.
+  // Omitting them made `kit check --read-only` and `kit check --non-interactive`
+  // — both in the "Global flags" table of docs/COMMANDS.md — exit 1 without
+  // running the check: the same false-red as the `--attest` regression above.
+  ...GLOBAL_FLAGS,
 ] as const;
-const COMPARE_FLAGS = ["--json", "--fail-on-worse"] as const;
-const VERIFY_FLAGS = ["--json", "--key"] as const;
+const COMPARE_FLAGS = ["--json", "--fail-on-worse", ...GLOBAL_FLAGS] as const;
+const VERIFY_FLAGS = ["--json", "--key", ...GLOBAL_FLAGS] as const;
 
 /** Print the rejection and return false, so every caller fails the same way. */
 function rejectUnknownFlags(form: string, allowed: readonly string[]): boolean {

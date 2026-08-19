@@ -1,6 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { hasFlag, flagValue, flagInt, unknownFlags } from "./flags.js";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import {
+  hasFlag,
+  flagValue,
+  flagInt,
+  unknownFlags,
+  GLOBAL_FLAGS,
+  splitLeadingGlobalFlags,
+} from "./flags.js";
 
 describe("flag helpers", () => {
   describe("hasFlag", () => {
@@ -152,5 +161,83 @@ describe("flagInt — boundaries and malformed input", () => {
   it("does not stop at a bare -- the way unknownFlags does", () => {
     // flagInt has no pass-through boundary: a value after `--` is still read.
     assert.equal(flagInt(["--", "--ttl-minutes", "30"], "--ttl-minutes", 5), 30);
+  });
+});
+
+describe("GLOBAL_FLAGS", () => {
+  /**
+   * The ORACLE is docs/COMMANDS.md's "Global flags" table, not a second copy of
+   * the list: `kit check --read-only` shipped broken precisely because the only
+   * thing asserting the allowlist was the allowlist. If a global is documented,
+   * a command allowlist must accept it.
+   */
+  function documentedGlobals(): string[] {
+    const root = resolve(import.meta.dirname, "..", "..");
+    const doc = readFileSync(resolve(root, "docs", "COMMANDS.md"), "utf-8");
+    const start = doc.indexOf("## Global flags");
+    assert.ok(start >= 0, "docs/COMMANDS.md no longer has a '## Global flags' section");
+    const section = doc.slice(start, doc.indexOf("\n## ", start + 1));
+    const flags = new Set<string>();
+    for (const m of section.matchAll(/`(--[a-z][a-z0-9-]*)`/g)) flags.add(m[1]);
+    return [...flags];
+  }
+
+  it("the oracle itself finds something (a regex that matches nothing reads as full coverage)", () => {
+    const found = documentedGlobals();
+    assert.ok(found.length >= 4, `the docs scan found only ${found.length} global flags`);
+    assert.ok(found.includes("--read-only"), "expected the scan to see --read-only");
+  });
+
+  it("every flag documented as global is in GLOBAL_FLAGS", () => {
+    const allowed = new Set<string>(GLOBAL_FLAGS);
+    const missing = documentedGlobals().filter((f) => !allowed.has(f));
+    assert.deepEqual(missing, [], `documented as global but rejectable by a command: ${missing}`);
+  });
+
+  it("includes --env, which config.ts honors globally off raw argv", () => {
+    // resolveActiveEnvironment() reads `--env=<name>` from process.argv for every
+    // command, so a command allowlist that omits it rejects a working flag.
+    assert.ok((GLOBAL_FLAGS as readonly string[]).includes("--env"));
+  });
+});
+
+describe("splitLeadingGlobalFlags", () => {
+  it("moves a leading global off the front so the command word is positional 0", () => {
+    const { leading, rest } = splitLeadingGlobalFlags(["--read-only", "check"]);
+    assert.deepEqual(leading, ["--read-only"]);
+    assert.deepEqual(rest, ["check"]);
+  });
+
+  it("preserves subcommand positions (the reason raw argv indices break)", () => {
+    const { rest } = splitLeadingGlobalFlags(["--read-only", "check", "verify-attestation"]);
+    // commands/check.ts reads process.argv[3] === "verify-attestation"
+    assert.equal(rest[1], "verify-attestation");
+  });
+
+  it("takes several leading globals, including --env=<name>", () => {
+    const { leading, rest } = splitLeadingGlobalFlags([
+      "--non-interactive",
+      "--env=prod",
+      "secrets",
+    ]);
+    assert.deepEqual(leading, ["--non-interactive", "--env=prod"]);
+    assert.deepEqual(rest, ["secrets"]);
+  });
+
+  it("stops at the command word — a global AFTER it is the command's to see", () => {
+    const { leading, rest } = splitLeadingGlobalFlags(["check", "--read-only"]);
+    assert.deepEqual(leading, []);
+    assert.deepEqual(rest, ["check", "--read-only"]);
+  });
+
+  it("leaves --version / --help alone: as token 0 they ARE the command", () => {
+    assert.deepEqual(splitLeadingGlobalFlags(["--version"]).rest, ["--version"]);
+    assert.deepEqual(splitLeadingGlobalFlags(["--help"]).rest, ["--help"]);
+  });
+
+  it("does not eat a command-specific flag it has never heard of", () => {
+    const { leading, rest } = splitLeadingGlobalFlags(["--nope", "check"]);
+    assert.deepEqual(leading, []);
+    assert.deepEqual(rest, ["--nope", "check"]);
   });
 });
