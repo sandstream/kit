@@ -203,6 +203,25 @@ finish() {
 # prerelease as the only honest test.
 # ──────────────────────────────────────────────────────────────────────────
 
+# Refuse to run where the questions would answer themselves. Every `read` in the
+# library returns immediately on EOF (they end in `|| true`, so a closed stdin is not
+# an error), which means a wizard started without a controlling terminal races through
+# every stage, takes the y/N default on each one, opens a browser tab per package, and
+# then reports everything as still-to-do. That is indistinguishable from a run that
+# happened, which is the worst thing a migration script can look like.
+#
+# This is not hypothetical: it is what happened the first time this script was run —
+# from an agent shell (Claude Code's `!` prefix), which has no tty. Same root cause as
+# gpg's pinentry failing there with "not a tty".
+if [[ ! -t 0 ]]; then
+  printf 'This wizard needs a real terminal: its stdin is not a tty, so every prompt\n' >&2
+  printf 'would read EOF and answer itself.\n\n' >&2
+  printf 'Open Terminal (or iTerm) and run it there:\n' >&2
+  printf '  cd %s\n' "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" >&2
+  printf '  ./scripts/trusted-publishing-wizard.sh\n' >&2
+  exit 1
+fi
+
 STATE_FILE="${STATE_FILE:-.kit/trusted-publishing.state}"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$REPO_ROOT"

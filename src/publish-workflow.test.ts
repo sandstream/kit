@@ -45,6 +45,27 @@ function atLeast(found: readonly number[], min: readonly number[]): boolean {
   return true;
 }
 
+describe("publish.yml — publishes over OIDC, not a long-lived token", () => {
+  it("references no npm token in any executing line", () => {
+    // All 13 packages now have a GitHub Actions trusted publisher (repo sandstream/kit,
+    // workflow publish.yml, environment npm-publish, permission `npm publish`), verified on
+    // each package's settings page. npm prefers NODE_AUTH_TOKEN whenever it is present, so
+    // OIDC only takes effect once that env is gone — the two cannot both be in effect, which
+    // makes a re-added token a SILENT downgrade back to the credential npm is retiring
+    // (direct publishing dies ~Jan 2027). Hence a gate rather than a comment.
+    const offenders = EXECUTED.split("\n").filter((l) => /NPM_TOKEN|NODE_AUTH_TOKEN/.test(l));
+    assert.deepEqual(
+      offenders,
+      [],
+      "publish.yml must not carry an npm token: trusted publishing is the credential now",
+    );
+  });
+
+  it("still asks for the OIDC identity it publishes with", () => {
+    assert.match(WORKFLOW, /id-token:\s*write/);
+  });
+});
+
 describe("publish.yml — the signature gate cannot fail open", () => {
   it("takes the tag verdict from git verify-tag, not from a pipe", () => {
     // Shipped as `if ! git verify-tag "$TAG" 2>&1 | tee /tmp/tag-verify.log; then`. git exits
