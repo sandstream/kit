@@ -385,8 +385,17 @@ export interface EnvOverride {
  */
 export interface ContextConfig {
   gcloud?: { account?: string; project?: string; config?: string; region?: string };
-  vercel?: { team?: string; project?: string };
-  github?: { org?: string; remote?: string };
+  /**
+   * `user` is the IDENTITY the CLI must be logged in as — declared and asserted like
+   * `gcloud.account` already was. Reporting an identity without comparing it is how a session
+   * ran as a personal account with read-only rights on the production environment and read a
+   * FILTERED variable list as a complete one, with `kit check` green throughout (#503).
+   */
+  vercel?: { team?: string; project?: string; user?: string };
+  /** `user` is the logged-in gh account, as distinct from `org` (the remote's owner). */
+  github?: { org?: string; remote?: string; user?: string };
+  /** Convex has no profiles: `~/.convex/config.json` is global and `convex login` overwrites it. */
+  convex?: { account?: string };
   gitlab?: { group?: string; remote?: string };
   bitbucket?: { workspace?: string; remote?: string };
   /** SSH identity this repo must push/deploy with. Declare any of these. */
@@ -815,13 +824,22 @@ export const kitConfigSchema = z
           .passthrough()
           .optional(),
         vercel: z
-          .object({ team: z.string().optional(), project: z.string().optional() })
+          .object({
+            team: z.string().optional(),
+            project: z.string().optional(),
+            user: z.string().optional(),
+          })
           .passthrough()
           .optional(),
         github: z
-          .object({ org: z.string().optional(), remote: z.string().optional() })
+          .object({
+            org: z.string().optional(),
+            remote: z.string().optional(),
+            user: z.string().optional(),
+          })
           .passthrough()
           .optional(),
+        convex: z.object({ account: z.string().optional() }).passthrough().optional(),
         gitlab: z
           .object({ group: z.string().optional(), remote: z.string().optional() })
           .passthrough()
