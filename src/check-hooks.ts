@@ -19,7 +19,11 @@ export async function checkHooks(
   cwd = process.cwd(),
 ): Promise<HookCheckResult[]> {
   const results: HookCheckResult[] = [];
-  const hooksDir = resolve(cwd, gitDir, "hooks");
+  // The SAME resolver the writer uses. Hardcoding `<gitDir>/hooks` here meant that with an
+  // external `core.hooksPath`, kit installed to one directory and reported on another: the
+  // declared hooks read as "not installed" while they were installed and firing (#496).
+  const { resolveHooksDir } = await import("./hooks.js");
+  const hooksDir = resolveHooksDir(gitDir, cwd);
 
   for (const [hookName, commands] of Object.entries(config)) {
     if (!commands || commands.length === 0) {

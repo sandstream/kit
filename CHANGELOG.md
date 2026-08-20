@@ -8,6 +8,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit check` now reports the git-hook floor: where it is, and whether it can fail.** README
+  calls git hooks the agent-agnostic enforcement floor, and nothing reported on them — there was
+  a row for memory hooks and one for the PreToolUse gates, none for these. Two measured states
+  were therefore invisible (#496, #497):
+
+  - **The floor can live outside the repo.** `resolveHooksDir()` honors `core.hooksPath`, which
+    is correct (installing into `.git/hooks` while git reads elsewhere is a silent no-op) — but
+    only the WRITER used it. `check-hooks.ts` and `kit hooks add`'s own already-installed
+    pre-check hardcoded `<gitDir>/hooks`, so with an external `core.hooksPath` kit installed to
+    one directory and reported on another. Both readers now use the same resolver, so writer and
+    reader can no longer disagree. Measured consequence of the silence: a checkout copied from
+    another inherits its absolute `core.hooksPath`, so its hooks live in the other clone's tree
+    — deleting that unrelated directory let a staged fake credential commit cleanly, exit 0.
+  - **A dangling `core.hooksPath` means every hook is OFF**, and now fails the gate instead of
+    reading like a repo that never wired hooks.
+
+  New `git hook floor` row: `fail` for a gone directory or an unarmed gate, `warn` when the floor
+  resolves outside the repo, `pass` naming the hooks actually wired, and `skip` when the repo has
+  no kit-managed hooks — kit does not claim a floor nobody asked for. `kit hooks add` also prints
+  the resolved directory when it is external, instead of a bare `✓ installed`.
+
 - **`kit audit verify --all` — the union view over every audit log this machine sealed.**
   `kit audit verify` answers for one working tree, correctly: a git worktree IS a distinct
   working tree, so it gets its own chain. On a machine running several — the normal case
@@ -82,6 +103,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **`kit hooks add context-check` installed a gate that could not fail.** With no `[context]`
+  block there is nothing to compare the live CLI state against, so the pre-push hook passed every
+  push while reporting `✓ installed` — the false green kit exists to refuse (#497). It now
+  refuses, points at `kit context check` (which prints a ready-to-paste block from the live CLI
+  state), and takes `--force` for someone about to declare the block. The installed hook runs
+  `kit context check --require-declaration`, so a `[context]` block that disappears later fails
+  the push instead of passing it; the bare command still exits 0, since a repo may legitimately
+  have no lock and a read-only report should not invent one.
+
+- **Every hook printed secret-scan's test recipe.** `kit hooks add post-pull-audit` and
+  `context-check` both told you to stage a fake credential and commit — advice that exercises
+  nothing for a post-merge or pre-push gate. Each built-in now prints how to exercise itself.
+
 - **`triage`'s pip score is no longer higher than npm's for running fewer probes.** The
   score is a flat penalty count (`100 - 45*critical - 12*warning`), so it fell out of how
   many probes an ecosystem HAS: `pip opensandbox-server` printed 100/100 next to
@@ -112,7 +146,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `ensureMiseActivation` — the appender — has no production caller at all (it sits in
   self-audit's unwired-code advisory). `kit doctor` reports the gap and prints the line. The
   claim is corrected rather than the feature quietly invented: writing to a user's shell
-  profile needs its own consent design.
+  profile needs its own consent design. `fix.ts` carried the same shape of false claim —
+  git-hook installs "land inside the repo, which the repo-rooted `[scope].fs` covers" — which
+  holds only while `core.hooksPath` is unset or repo-relative; an absolute one puts the write
+  outside the repo. Both are now corrected.
 
 - **`self-audit`'s flag-validation row now measures verbs, not file text.** It grepped
   `src/commands/*.ts` for the string `unknownFlags(`, which measured the shape of the fix:

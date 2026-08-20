@@ -208,8 +208,11 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
       // Tool installs go through mise into $HOME — infrastructure provisioning the
       // project [scope] RoE does not govern (mirrors the MCP kit_fix site's
       // `infrastructure: true`). Git-hook installs resolve their target via
-      // `core.hooksPath` at runtime; they land inside the repo, which the
-      // repo-rooted [scope].fs covers.
+      // `core.hooksPath` at runtime. They land inside the repo ONLY when hooksPath is unset or
+      // repo-relative: an absolute hooksPath pointing at another checkout puts the write
+      // outside the repo, i.e. outside what a repo-rooted [scope].fs covers (measured in #496).
+      // `kit check`'s "git hook floor" row reports that case; declaring the resolved directory
+      // here would need a dynamic scopeNeeds, which this static declaration cannot express.
       scopeNeeds: {
         fsWrites: ["skills-lock.json", "cli-lock.json", ".env.template", ".gitignore"],
       },
