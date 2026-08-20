@@ -302,9 +302,13 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
             { version: string; source: "mise" | "npm" | "pip" | "manual"; auth?: string }
           > = {};
           if (config.tools) {
-            for (const [name, version] of Object.entries(config.tools)) {
-              tools[name] = { version, source: "mise" };
-            }
+            // Measured, not assumed. Both lock writers used to record the DECLARED string as the
+            // version and hardcode `source: "mise"`, so a lock entry read
+            // `{"vercel":{"version":"latest","source":"mise"}}` for a binary in
+            // /opt/homebrew/bin that mise does not manage — and `kit check` called it in sync
+            // (#500). `resolveLockEntries` reads the resolved version and classifies the path.
+            const { resolveLockEntries } = await import("./tool-inventory.js");
+            Object.assign(tools, await resolveLockEntries(config.tools));
           }
 
           await updateCliLock(tools, cwd);

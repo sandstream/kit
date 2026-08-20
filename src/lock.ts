@@ -35,6 +35,14 @@ export interface CliLock {
 export interface CliLockEntry {
   version: string;
   source: "mise" | "npm" | "pip" | "manual";
+  /**
+   * The installer kit actually measured, when it has no name in `source`'s four-value
+   * vocabulary (`brew`, `system`, `cargo`, `kit-shim`, …). Added because the lock said `mise`
+   * for `/opt/homebrew/bin/vercel` and had no way to say otherwise (#500).
+   */
+  sourceDetail?: string;
+  /** The resolved executable the version was read from — the evidence behind the entry. */
+  path?: string;
   auth?: string;
   installedAt: string;
 }
@@ -286,7 +294,16 @@ export async function updateSkillsLock(
  * Update CLI lock with installed tools
  */
 export async function updateCliLock(
-  tools: Record<string, { version: string; source: CliLockEntry["source"]; auth?: string }>,
+  tools: Record<
+    string,
+    {
+      version: string;
+      source: CliLockEntry["source"];
+      sourceDetail?: string;
+      path?: string;
+      auth?: string;
+    }
+  >,
   cwd?: string,
 ): Promise<void> {
   const existing = await readCliLock(cwd);
@@ -306,6 +323,8 @@ export async function updateCliLock(
     lock.tools[name] = {
       version: info.version,
       source: info.source,
+      sourceDetail: info.sourceDetail,
+      path: info.path,
       auth: info.auth,
       installedAt: new Date().toISOString(),
     };

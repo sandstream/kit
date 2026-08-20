@@ -1136,6 +1136,14 @@
       "x-kit-mcp": false,
       "x-kit-stability": "experimental"
     },
+    "tools": {
+      "kind": "command",
+      "summary": "Inventory the CLIs on this machine — path, installer, installed version, and (with --latest) how far behind each one is",
+      "x-kit-args-modeled": false,
+      "x-kit-audience": "all",
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
     "triage": {
       "kind": "command",
       "summary": "Security evaluation before installing packages, images, or skills",

@@ -96,13 +96,32 @@ export function printToolsTable(tools: ToolStatus[]): void {
   const nameWidth = Math.max(12, ...tools.map((t) => t.name.length)) + 2;
 
   for (const tool of tools) {
-    const icon = tool.ok ? CHECK : CROSS;
+    // Currency is its own axis: a tool can satisfy its pin and still be six majors old, which
+    // is exactly what `✓ vercel 53.1.1 (need latest)` hid (#500). `behind` shows as a warning
+    // icon; `unknown` says why it could not be checked rather than borrowing the pass icon.
+    const drift = tool.currency;
+    const icon = !tool.ok
+      ? CROSS
+      : drift?.drift === "behind"
+        ? `${c.yellow}!${c.reset}`
+        : drift?.drift === "unknown"
+          ? `${c.dim}−${c.reset}`
+          : CHECK;
     const name = pad(tool.name, nameWidth);
     const version = tool.installed
       ? `${c.dim}${tool.installed}${c.reset}`
       : `${c.red}not installed${c.reset}`;
     const required = `${c.gray}(need ${tool.required})${c.reset}`;
-    console.log(`  ${icon} ${name} ${version}  ${required}`);
+    const note =
+      drift?.drift === "behind"
+        ? `  ${c.yellow}${drift.installed} → ${drift.latest} available${c.reset}`
+        : drift?.drift === "ahead"
+          ? `  ${c.dim}ahead of ${drift.latest}${c.reset}`
+          : drift?.drift === "unknown"
+            ? `  ${c.dim}currency unchecked: ${drift.reason}${c.reset}`
+            : "";
+    const from = tool.source ? `  ${c.gray}[${tool.source}]${c.reset}` : "";
+    console.log(`  ${icon} ${name} ${version}  ${required}${from}${note}`);
   }
 }
 

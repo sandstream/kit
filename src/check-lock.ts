@@ -91,13 +91,25 @@ export async function checkLockFiles(config: kitConfig, cwd?: string): Promise<L
     } else {
       const missing: string[] = [];
       const authRequired: string[] = [];
+      // Provenance drift: the lock claims an installer, the PATH winner comes from another one.
+      // The old check compared names only, so a lock saying `mise` for /opt/homebrew/bin/vercel
+      // reported `in sync` (#500). A lock whose purpose is provenance has to be checked on it.
+      const drifted: string[] = [];
+      const { describeTool } = await import("./tool-inventory.js");
+      const { provenanceMismatch } = await import("./tool-provenance.js");
 
       for (const toolName of configToolNames) {
-        if (!cliLock.tools[toolName]) {
+        const entry = cliLock.tools[toolName];
+        if (!entry) {
           missing.push(toolName);
-        } else if (cliLock.tools[toolName].auth) {
-          authRequired.push(toolName);
+          continue;
         }
+        if (entry.auth) authRequired.push(toolName);
+        const facts = await describeTool(toolName);
+        if (!facts.provenance) continue; // not installed here — nothing measured to contradict
+        const recorded = entry.sourceDetail ?? entry.source;
+        const verdict = provenanceMismatch(recorded, facts.provenance);
+        if (verdict.mismatch) drifted.push(`${toolName}: ${verdict.reason}`);
       }
 
       const authDetails =
@@ -108,16 +120,24 @@ export async function checkLockFiles(config: kitConfig, cwd?: string): Promise<L
               .join(", ")})`
           : "";
 
+      const driftDetail =
+        drifted.length > 0
+          ? ` — provenance drift: ${drifted.join("; ")} (re-run \`kit fix\` to re-record)`
+          : "";
       results.push({
         category: "cli-lock",
         exists: true,
-        inSync: missing.length === 0,
+        // Drift counts against sync: the lock is a provenance record, and a record that names
+        // the wrong installer is not in sync with the machine it describes.
+        inSync: missing.length === 0 && drifted.length === 0,
         missing,
         authRequired,
         detail:
-          missing.length === 0
+          missing.length === 0 && drifted.length === 0
             ? `all tools locked${authDetails}`
-            : `${missing.length} tool(s) not in lock file${authDetails}`,
+            : missing.length > 0
+              ? `${missing.length} tool(s) not in lock file${authDetails}${driftDetail}`
+              : `${drifted.length} tool(s) with wrong recorded provenance${authDetails}${driftDetail}`,
       });
     }
   }

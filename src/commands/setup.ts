@@ -942,9 +942,10 @@ export async function cmdInit(): Promise<boolean> {
         { version: string; source: "mise" | "npm" | "pip" | "manual"; auth?: string }
       > = {};
       if (config.tools) {
-        for (const [name, version] of Object.entries(config.tools)) {
-          tools[name] = { version, source: "mise" };
-        }
+        // See fix.ts: the version and source are measured, not the declared string and a
+        // hardcoded "mise" (#500).
+        const { resolveLockEntries } = await import("../tool-inventory.js");
+        Object.assign(tools, await resolveLockEntries(config.tools));
       }
 
       await updateCliLock(tools);
