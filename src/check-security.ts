@@ -182,6 +182,36 @@ export async function checkMemoryHooksLiveness(): Promise<SecurityCheckResult> {
 }
 
 /**
+ * Git-hook floor — WHERE it is and whether it can fail.
+ *
+ * README calls git hooks the agent-agnostic enforcement floor, and nothing reported on them:
+ * `kit check` had a row for memory hooks and for the PreToolUse gates, none for these. Two
+ * measured states were therefore invisible (#496, #497): a floor resolved OUTSIDE the repo
+ * through an absolute `core.hooksPath` (deleting that unrelated directory removed the gate,
+ * exit 0, no warning), and `context-check` installed with no `[context]` block, which passes
+ * every push. Skips when the repo has no kit-managed hooks — kit does not claim a floor nobody
+ * asked for.
+ */
+export async function checkGitHookFloor(cwd?: string): Promise<SecurityCheckResult> {
+  const name = "git hook floor";
+  const category = "exposure" as const;
+  const root = cwd ?? process.cwd();
+  const { describeHookFloor, judgeHookFloor } = await import("./hook-floor.js");
+  let config;
+  try {
+    const { loadConfig } = await import("./config.js");
+    const { resolve } = await import("node:path");
+    config = await loadConfig(resolve(root, ".kit.toml"));
+  } catch {
+    config = undefined;
+  }
+  const verdict = judgeHookFloor(describeHookFloor(root, config));
+  return verdict.severity
+    ? { category, name, status: verdict.status, severity: verdict.severity, detail: verdict.detail }
+    : { category, name, status: verdict.status, detail: verdict.detail };
+}
+
+/**
  * Gate liveness — the enforcement floor must prove it exists. If kit installed the
  * PreToolUse gates on THIS machine (machine-local marker present) but a gate has
  * since vanished from `.claude/settings.json`, the agent runs UN-gated while kit
@@ -2588,6 +2618,8 @@ export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]
   // has vanished — the agent runs un-gated while kit still reads green. The floor
   // must prove it exists.
   results.push(await checkGateLiveness(root));
+  // The git-hook floor: where it resolves to, and whether an installed gate can actually fail.
+  results.push(await checkGitHookFloor(root));
   results.push(await checkDeviceIdOverride());
   // `[policy.agent_writes]` posture: an entry naming an op kit never asks about grants nothing while
   // still declaring the vendor — which refuses that vendor's real ops. Four documents claimed this

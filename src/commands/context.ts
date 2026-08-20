@@ -23,6 +23,19 @@ async function cmdContextCheck(): Promise<boolean> {
     return findings.every((f) => f.status !== "mismatch");
   }
   if (!config.context) {
+    // The hook path passes --require-declaration: for a gate someone installed on purpose,
+    // "nothing declared" is not a pass, it is a check that could not run (#497). The bare
+    // command keeps exiting 0 — it is a read-only report, and a repo may legitimately have no
+    // lock — so only the caller that asked for enforcement gets the strict answer.
+    if (hasFlag(process.argv, "--require-declaration")) {
+      console.error(
+        `${c.red}✗ no [context] block in .kit.toml, so there is nothing to verify — refusing to report a context lock that does not exist.${c.reset}`,
+      );
+      console.error(
+        `${c.dim}Run 'kit context check' without --require-declaration for a ready-to-paste block, or remove the context-check hook.${c.reset}`,
+      );
+      return false;
+    }
     console.log(
       `${c.dim}No [context] declared in .kit.toml — each CLI is unlocked from its account + project.${c.reset}`,
     );

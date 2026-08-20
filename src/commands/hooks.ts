@@ -22,7 +22,9 @@ const BUILTIN_HOOKS: Record<string, { hookName: string; commands: string[]; desc
     },
     "context-check": {
       hookName: "pre-push",
-      commands: ["kit context check"],
+      // --require-declaration: without a [context] block the check has nothing to compare
+      // against, and a push gate that always passes is worse than no gate (#497).
+      commands: ["kit context check --require-declaration"],
       description:
         "Block a push when the live CLI context (account/project) does not match .kit.toml [context]. Stops pushes to the wrong org/project.",
     },
@@ -194,6 +196,27 @@ async function cmdHooksAdd(): Promise<boolean> {
     return false;
   }
 
+  // A gate that cannot fail must not be installed silently. `kit context check` with no
+  // [context] block has nothing to compare the live CLI state against, so the pre-push hook
+  // passed unconditionally while reporting `✓ installed` (#497) — the false green kit exists
+  // to refuse. --force installs anyway, for someone who is about to add the block.
+  if (name === "context-check") {
+    const { hasFlag } = await import("../utils/flags.js");
+    const cfg = await loadConfig(resolveConfigPath()).catch(() => null);
+    if (!cfg?.context && !hasFlag(process.argv, "--force")) {
+      console.error(
+        `${c.red}✗ refusing to install context-check: no [context] block in ${KIT_FILE}.${c.reset}`,
+      );
+      console.error(
+        `${c.dim}The hook runs \`kit context check\`, which has nothing to compare against without one — it would pass every push and report a gate you do not have.${c.reset}`,
+      );
+      console.error(
+        `${c.dim}Run ${c.bold}kit context check${c.reset}${c.dim} first: it prints a ready-to-paste [context] block from the live CLI state. Then re-run this. Or ${c.bold}--force${c.reset}${c.dim} to install it now and declare the block after.${c.reset}`,
+      );
+      return false;
+    }
+  }
+
   console.log(
     `${c.bold}${c.cyan}kit hooks add ${name}${c.reset}  ${c.dim}(git ${builtin.hookName})${c.reset}`,
   );
@@ -238,13 +261,40 @@ async function cmdHooksAdd(): Promise<boolean> {
   console.log(
     `  ${c.green}✓${c.reset} ${builtin.hookName}  ${c.green}${r.action}${c.reset}  ${c.dim}${r.detail}${c.reset}`,
   );
-  console.log(
-    `\n${c.dim}Test by staging a file with a fake credential (e.g. ${c.bold}sk_${"test"}_${"A".repeat(20)}${c.reset}${c.dim}) and running ${c.bold}git commit${c.reset}${c.dim} — the commit should be blocked.${c.reset}\n`,
-  );
+  // Where it landed, when that is not inside the repo. `✓ installed` with no path is what let a
+  // floor live in another clone's tree unnoticed (#496).
+  const { describeHookFloor } = await import("../hook-floor.js");
+  const floor = describeHookFloor(process.cwd());
+  if (floor.external) {
+    console.log(
+      `\n  ${c.yellow}!${c.reset} written to ${c.bold}${floor.dir}${c.reset} ${c.dim}— OUTSIDE this repo (core.hooksPath).` +
+        ` Hooks fire, but deleting that directory silently removes the gate.${c.reset}` +
+        `\n    ${c.dim}keep the floor in the repo with:${c.reset} git config --unset core.hooksPath`,
+    );
+  }
+
+  // Per-hook test recipe. Every hook used to print secret-scan's, which tells you to stage a
+  // credential and commit — advice that exercises nothing for a pre-push or post-merge gate.
+  console.log(`\n${c.dim}${TEST_HINTS[name]}${c.reset}\n`);
   return true;
 }
 
+/** How to actually exercise each built-in hook, so the hint matches the hook. */
+const TEST_HINTS: Record<string, string> = {
+  "secret-scan": `Test: stage a file containing sk_${"test"}_${"A".repeat(20)} and run git commit — the commit should be blocked.`,
+  "post-pull-audit":
+    "Test: merge or pull a branch that adds a dependency — the audit runs after the merge and reports new deps, gitignore drops and introduced secrets.",
+  "context-check":
+    "Test: temporarily change one value in [context] (e.g. github.org) and run `kit context check` — it must exit 1 naming the mismatch. Restore it afterwards.",
+};
+
+/**
+ * The directory the install will actually write to — `resolveHooksDir()`, not
+ * `<repo>/.git/hooks`. The already-installed pre-check below reads this; when it hardcoded
+ * `.git/hooks` and `core.hooksPath` pointed elsewhere, the check looked at an empty directory
+ * and every run reported a fresh "installed" for a hook that was already there (#496).
+ */
 async function ensureHooksDir(): Promise<{ hooksDir: string }> {
-  const { resolve } = await import("node:path");
-  return { hooksDir: resolve(process.cwd(), ".git", "hooks") };
+  const { resolveHooksDir } = await import("../hooks.js");
+  return { hooksDir: resolveHooksDir(".git", process.cwd()) };
 }
