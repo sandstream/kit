@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **`kit tools list` — the inventory that did not exist**, and the measurement three surfaces
+  were missing (#500). Per tool: the resolved path, the installer that owns it (classified from
+  the path, never assumed), the installed version, and with `--latest` how far behind it is.
+  Covers the declared `[tools]` **and** the undeclared CLIs an agent decides from — `gh`, `op`,
+  `jq`, `mise`, `docker`, `gcloud`, `kubectl`, `supabase`, `stripe`, `psql`, … — which were
+  invisible precisely because nothing declared them.
+
+  Measured on the machine that filed the report, first run: `trivy 0.72.0 → 0.74.0`,
+  `trufflehog 3.95.9 → 3.97.0`, `gh 2.96.0 → 2.97.0`, `mise 2026.6.11 → 2026.8.9`,
+  `npm 10.9.8 → 12.0.2`, `op 2.34.0 → 2.39.0`. Cold 12s, warm 4s.
+
+- **`latest` is now checked against the installer that would satisfy it.** `versionSatisfies`
+  answered `if (required === "latest") return true;`, so `✓ vercel 53.1.1 (need latest)` printed
+  while the registry had 59.1.4 — six majors. The tools table now shows the installer in brackets
+  and, for a `latest` pin, `!` with `53.1.1 → 59.1.4 available`. A pin of `any` / `present` / `*`
+  asserts presence only, and says so, for repos that genuinely mean "whatever is installed".
+
+  Lookups are per-installer (`npm view`, `mise latest`, `brew info --json=v2`, `pip index`),
+  cached per machine in `~/.kit/tool-latest.json` with a TTL (`KIT_TOOL_LATEST_TTL_H`, default
+  24h), so the gate makes no network call once warm. A failed lookup is **not** cached — a flaky
+  network must not become a day-long policy.
+
+### Fixed
+
+- **`cli-lock.json` recorded a provenance it never measured, and the check called it `in sync`.**
+  Both writers did the same thing:
+
+  ```ts
+  tools[name] = { version, source: "mise" };   // version = the DECLARED string
+  ```
+
+  so an entry read `{"vercel":{"version":"latest","source":"mise"}}` for a binary in
+  `/opt/homebrew/bin` that mise does not manage, and the lock check compared **names only**.
+  Now the version is the resolved one, the source is classified from the path, `sourceDetail`
+  carries installers the lock's four-value vocabulary cannot name (`brew`, `system`, `cargo`,
+  `kit-shim`), and a recorded source that contradicts the PATH winner fails the row with
+  `provenance drift: vercel: lock says mise, but /opt/homebrew/bin/vercel comes from brew`.
+
+- **An unrunnable currency check now reports why, instead of passing.** Air-gap makes no outbound
+  call and says so; an installer kit cannot query (`system`, `cargo`, `go`, a kit PATH shim) says
+  which; a timeout or an unparseable answer says that. Same rule as the scanners: coverage that
+  could not run is UNKNOWN, never clean.
+
+- **Prefixed declarations were reported as not installed.** `[tools]` carries backend prefixes
+  (`aqua:aquasecurity/trivy`, `npm:@socketsecurity/cli`), and the probe used the raw declaration
+  rather than the executable name — the same false statement as the one above, pointed the other
+  way.
+
 ### Fixed
 
 - **The install-gate's refusal described its own machinery instead of the hazard it caught.**

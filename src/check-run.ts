@@ -130,7 +130,15 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
   const scope: CheckCategory[] | null = selected ? [...selected] : null;
 
   const tools =
-    wants("tools") && config.tools ? await step("tools", () => checkTools(config.tools!)) : [];
+    wants("tools") && config.tools
+      ? await step("tools", async () => {
+          // Currency from the cache only: the gate reports drift it already knows about and
+          // never makes the network a dependency of `kit check` (#500, requirement 6).
+          const { cachedCurrencyChecker } = await import("./tool-inventory.js");
+          const { resolveToolBin } = await import("./utils/resolveTool.js");
+          return checkTools(config.tools!, resolveToolBin, await cachedCurrencyChecker());
+        })
+      : [];
   const services =
     wants("services") && config.services
       ? await step("services", () => checkServices(config.services!))

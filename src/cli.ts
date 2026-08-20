@@ -76,6 +76,7 @@ import { cmdMcp } from "./commands/mcp.js";
 import { cmdHooks } from "./commands/hooks.js";
 import { cmdPlugin } from "./plugins-cli.js";
 import { cmdTriage } from "./commands/triage.js";
+import { cmdTools } from "./commands/tools.js";
 import { cmdSlopsquat } from "./commands/slopsquat.js";
 import { cmdMemory } from "./commands/memory.js";
 import { escapeWorkflowCmd, xmlEscape } from "./utils/ci-escape.js";
@@ -762,6 +763,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     // unfollowable. The enforcement layer must never demand an action the exposure
     // layer cannot perform.
     mcp: true,
+  },
+  tools: {
+    handler: cmdTools,
+    stability: "experimental",
+    help: "Inventory the CLIs on this machine — path, installer, installed version, and (with --latest) how far behind each one is",
   },
   slopsquat: {
     handler: cmdSlopsquat,

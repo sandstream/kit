@@ -580,6 +580,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   statusline: ["--broker-gate", "--help", "--limit", "--mode", "--no-install-gate"],
   "supply-chain": ["--attest", "--json", "--mode", "--no-auto-install", "--non-interactive"],
   team: ["--broker-gate", "--help", "--limit", "--mode", "--no-install-gate", "--role"],
+  tools: ["--json", "--latest"],
   triage: [
     "--cached",
     "--deep",

@@ -26,6 +26,15 @@ written before or after the command word — `kit --read-only check` and
 `kit check --read-only` are equivalent. Every command accepts them; a command
 that rejects unknown flags allows these on top of its own.
 
+**`[tools]` pins say what they check.** An exact pin (`bun = "1.3.10"`) is a prefix match on
+the installed version. `latest` now means *current*: kit resolves the newest version the tool's
+own installer would give and reports drift — `!` with `53.1.1 → 59.1.4 available` in the tools
+table — instead of passing because the binary answered `--version`, which is how
+`✓ vercel 53.1.1 (need latest)` stood for six majors. When the newest version cannot be
+determined (air-gap, an installer with no registry kit can query, a lookup that timed out) the
+row is `−  currency unchecked: <reason>` — never a pass. A pin of `any`, `present` or `*`
+asserts presence only, and says so.
+
 **Unknown flags are rejected.** Every command validates its flags at dispatch
 against a declared table (`src/flag-surface.ts`), prints what it accepts, and
 exits 1 — a flag that silently does nothing is indistinguishable from a working
@@ -355,6 +364,7 @@ Deterministic, zero-LLM code map: load only the relevant slice of a growing repo
 
 | Command                      | Purpose                                                                                                                |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `kit tools list [--latest] [--json]` | Inventory the CLIs on this machine: resolved path, the installer that owns it (measured from the path, never assumed), installed version, and — with `--latest` — how far behind each one is. Covers the declared `[tools]` **and** the undeclared CLIs an agent decides from (`gh`, `op`, `docker`, `gcloud`, `kubectl`, `psql`, …). An installer kit cannot query (`system`, `cargo`, a kit PATH shim) reports `unchecked` **with the reason**; air-gap reports `unchecked`, never a version it did not verify. Answers are cached per machine (`~/.kit/tool-latest.json`, TTL `KIT_TOOL_LATEST_TTL_H`, default 24h), so the normal path makes no network call. `KIT_TOOLS_PATHS=1` prints paths. |
 | `kit map <path...>`          | The files connected to the seed(s) within `--depth` import hops (both directions) + external packages. TS/JS + Python. |
 | `kit map <path> --depth N`   | Widen the neighborhood (default 1).                                                                                    |
 | `kit map <path> --budget N`  | Keep only the N nearest-to-seed files; every drop is logged (never silent truncation).                                 |
