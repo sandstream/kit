@@ -55,6 +55,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **`triage`'s pip score is no longer higher than npm's for running fewer probes.** The
+  score is a flat penalty count (`100 - 45*critical - 12*warning`), so it fell out of how
+  many probes an ecosystem HAS: `pip opensandbox-server` printed 100/100 next to
+  `npm deepsec`'s 88/100, and that 88 existed only because the npm path looked for
+  something the pip path never did (maintainer count, newness). A reader comparing the two
+  numbers in the same CLI concluded the Python package was the safer one.
+
+  Absence is now printed rather than scored, the same `didNotRun` rule kit applies
+  everywhere else: the pip path declares `maintainer count` as unavailable (PyPI's JSON API
+  publishes no maintainer list), and the report carries `Probes declared unavailable: N`
+  plus a `Coverage: PARTIAL — …` line, so a 100 with a skipped probe can no longer read as
+  a 100 with everything clean. A declared gap does not withhold `TRIAGE PASSED` — it is an
+  unknown, not a finding.
+
+  Two probes that were absent rather than impossible now run: **pip newness** (PyPI has no
+  `created` field, but the oldest release file's upload time is the first publish — warns
+  under 30 days, as npm does) and **npm license** (the pip path had warned on a missing
+  license since it was written; the npm path never looked). After this the two paths run the
+  same probe set except maintainer count.
+
+- **`author: unknown` for nearly every modern Python package.** `info.author` is `null`
+  under PEP 621 (`authors = [{name=…, email=…}]`); the value lands in `info.author_email`.
+  Attribution is what settles a look-alike-repo provenance question cheaply, so it now falls
+  back — measured: `author: unknown` → `author: OpenSandbox Team <…@alibaba-inc.com>`.
+
 - **A third test that reported a verdict its environment could not support.** The
   `writeCheckDetail` failed-write test forced its precondition with `chmod 0o500` without
   checking whether the mode denied *this* process — root mkdirs straight through it, so the

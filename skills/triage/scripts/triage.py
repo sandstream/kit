@@ -8,7 +8,13 @@ Usage:
 kit (src/triage.ts) shells to this script and reads its STDOUT:
   - the line "TRIAGE PASSED" must be present for kit to treat the target as safe;
   - "Health score: N/100", "Critical issues: N", "Warnings: N" are parsed for the
-    structured summary.
+    structured summary;
+  - "Probes declared unavailable: N" and, when N > 0, a "Coverage: PARTIAL -- ..." line
+    report probes this ecosystem's registry cannot answer. The score is a flat penalty
+    count, so it falls out of how many probes an ecosystem HAS: a pip 100/100 ran one
+    fewer probe than an npm 100/100 (PyPI publishes no maintainer list). Absence is
+    printed rather than scored, matching kit's `didNotRun` rule that coverage which
+    could not run is UNKNOWN, never clean.
 
 Design contract (matches kit's watertight gate):
   - Deterministic. No LLM, no randomness. Same input + same upstream state => same verdict.
@@ -24,7 +30,8 @@ Scope (what a PASS DOES and does NOT mean):
   - PASS means the SPECIFIC target — including a pinned version or dist-tag (`name@1.2.3`,
     `name@next`, `name==1.2.3`) — EXISTS and clears the health checks: not-found, deprecated,
     or yanked is a CRITICAL; newness / abandonment / single-maintainer / no-license are
-    warnings. A pinned version is triaged directly, so a clean `latest` never vouches for a
+    warnings. npm and pip run the same probe set except maintainer count, which the pip
+    path declares as unavailable instead of leaving unmentioned. A pinned version is triaged directly, so a clean `latest` never vouches for a
     yanked or malicious pinned version.
   - PASS is NOT a malware verdict. This gate does no typosquat, install-script, or behavioral
     analysis. Deep malware detection is GuardDog (opt-in, separate + heavier: `KIT_GUARDDOG=1`
@@ -92,6 +99,7 @@ class Report:
         self.criticals = []
         self.warnings = []
         self.facts = []
+        self.notrun = []
 
     def critical(self, m):
         self.criticals.append(m)
@@ -101,6 +109,19 @@ class Report:
 
     def fact(self, m):
         self.facts.append(m)
+
+    def notchecked(self, probe, why):
+        """Record a probe that this ecosystem's registry cannot answer.
+
+        The score is a flat penalty count (100 - 45*crit - 12*warn), so it falls out of how
+        many probes an ecosystem HAS, not out of how safe the package is: before this, a pip
+        package scored 100/100 while the npm path scored 88 for the same package shape, purely
+        because npm exposes maintainer count and PyPI does not. Rather than let a number that
+        ran fewer checks read as the cleaner one, absence is printed -- the same `didNotRun`
+        semantics kit uses everywhere else, where coverage that could not run is UNKNOWN, not
+        clean.
+        """
+        self.notrun.append((probe, why))
 
     def emit(self):
         score = max(0, 100 - 45 * len(self.criticals) - 12 * len(self.warnings))
@@ -115,10 +136,23 @@ class Report:
             print(f"  ! WARNING: {w}")
         for c in self.criticals:
             print(f"  x CRITICAL: {c}")
+        for probe, why in self.notrun:
+            print(f"  ~ NOT CHECKED: {probe} -- {why}")
         print()
         print(f"Health score: {score}/100")
         print(f"Critical issues: {len(self.criticals)}")
         print(f"Warnings: {len(self.warnings)}")
+        # Counts only what this path DECLARED it cannot answer -- never a completeness
+        # claim about the probe set itself, which is documented per type above.
+        print(f"Probes declared unavailable: {len(self.notrun)}")
+        if self.notrun:
+            # Without this line a 100/100 with a skipped probe is indistinguishable from a
+            # 100/100 with everything green -- which is the defect (#489).
+            probes = ", ".join(probe for probe, _ in self.notrun)
+            print(
+                f"Coverage: PARTIAL -- {len(self.notrun)} probe(s) cannot run for this "
+                f"ecosystem ({probes}); the score covers only what was checked"
+            )
         if not self.criticals:
             print("TRIAGE PASSED")
         else:
@@ -272,6 +306,11 @@ def triage_npm(rep):
         rep.warn(f"no publish in {last_days} days -- possibly abandoned")
     if len(maint) <= 1:
         rep.warn("single maintainer -- bus-factor / takeover risk")
+    # License parity with the pip path, which has warned on a missing license since it was
+    # written. Comparability breaks in both directions: an npm 100 must not be a 100 that
+    # never looked at the terms.
+    if not (meta.get("license") or data.get("license")):
+        rep.warn("no declared license -- review terms before use")
 
 
 def _split_pip_spec(target):
@@ -394,13 +433,41 @@ def triage_pip(rep):
     if any(f.get("yanked") for f in files):
         rep.critical(f"version {ver} is YANKED")
     tag = f" (latest {latest})" if ver != latest else ""
-    rep.fact(f"triaged {ver}{tag}, {len(releases)} releases, author: {info.get('author') or 'unknown'}")
+    # `info.author` is null for every PEP 621 package: `authors = [{name=..., email=...}]`
+    # lands in `author_email` instead, so the old fallback printed "author: unknown" for
+    # essentially all modern Python packages -- and attribution is what settles a
+    # look-alike-repo provenance question cheaply.
+    author = info.get("author") or info.get("author_email") or "unknown"
+    rep.fact(f"triaged {ver}{tag}, {len(releases)} releases, author: {author}")
     last_iso = files[0].get("upload_time_iso_8601") if files else None
     last_days = _days_since(last_iso)
     if last_days is not None and last_days > ABANDONED_DAYS:
         rep.warn(f"no release in {last_days} days -- possibly abandoned")
     if not info.get("license") and not (info.get("classifiers") or []):
         rep.warn("no declared license -- review terms before use")
+
+    # Newness parity with the npm path. PyPI has no "created" field, but every release file
+    # carries its upload time, so first-publish is the OLDEST one -- the probe was absent,
+    # not impossible.
+    first_days = None
+    for rel_files in releases.values():
+        for f in rel_files or []:
+            d = _days_since(f.get("upload_time_iso_8601") or f.get("upload_time"))
+            if d is not None and (first_days is None or d > first_days):
+                first_days = d
+    if first_days is not None:
+        rep.fact(f"first published {first_days} days ago")
+        if first_days < NEW_DAYS:
+            rep.warn(f"package is very new ({first_days} days) -- limited track record")
+
+    # The one npm probe PyPI cannot answer. `info.maintainer` / `maintainer_email` are
+    # free-text and usually empty, and the JSON API publishes no maintainer list at all, so
+    # a count here would be invented. Declared instead of silently skipped.
+    rep.notchecked(
+        "maintainer count",
+        "PyPI's JSON API publishes no maintainer list (info.maintainer is free-text and "
+        "usually empty), so bus-factor / account-takeover risk was NOT assessed",
+    )
 
 
 def _owner_repo(target):
