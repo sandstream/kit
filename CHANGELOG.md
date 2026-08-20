@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The install-gate's refusal described its own machinery instead of the hazard it caught.**
+  A blocked `git commit -m "… \`deployment:env:view\` …"` was reported as a false positive; the
+  gate was right. Backticks inside DOUBLE quotes are command substitution, so the shell runs the
+  token and splices its output into the argument — measured, the words silently vanish:
+
+  ```
+  $ bash -c 'echo "... the permission `deployment:env:view` ..."'
+  bash: deployment:env:view: command not found
+  ... the permission  ...
+  ```
+
+  The refusal named a triage target and offered `kit triage` / `kit pkg`, both nonsense for that
+  command, so the operator concluded kit had mis-parsed a commit message and routed around it with
+  `-F` — hiding a command that would have committed a message with a hole in it. The refusal now
+  names the substitution, says single quotes are literal, and points at `git commit -F <file>`;
+  the triage advice is appended only when the block really is about an install target. Fail-closed
+  behaviour is unchanged (#501).
+
 ## [6.7.0] - 2026-08-20
 
 ### Added
