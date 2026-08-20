@@ -4,7 +4,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { loadConfig } from "./config.js";
-import { hasFlag, splitLeadingGlobalFlags } from "./utils/flags.js";
+import { hasFlag, splitLeadingGlobalFlags, GLOBAL_FLAGS } from "./utils/flags.js";
 import { generateCompletions } from "./completions.js";
 import { checkForUpdate, printUpdateNotice } from "./update-check.js";
 import { SKIPPED_COMMITS_LOG } from "./hooks.js";
@@ -400,6 +400,26 @@ async function main(): Promise<void> {
             return;
           }
         }
+        // FLAG FLOOR. Two command modules validated their flags and 43 did not, and a flag that
+        // silently does nothing is indistinguishable from a working one: `kit check --category
+        // security` ran the FULL check for six majors, and `kit upgrade --self.` rewrote every
+        // lock-file timestamp while installing nothing and printing success. Sweeping 43 handlers
+        // would fix today and rot tomorrow — the defect is that nothing enumerated which flags a
+        // command accepts, so this refuses once, here, from the declared table (flag-surface.ts),
+        // exactly as the read-only floor above does for the write surface. A verb missing from the
+        // table is UNVALIDATED, not unrestricted: it is skipped here and reported by self-audit.
+        const { flagsForCommand } = await import("./flag-surface.js");
+        const allowedFlags = flagsForCommand(resolved);
+        if (allowedFlags !== null) {
+          const { rejectUnknownFlags } = await import("./utils/flags.js");
+          if (
+            rejectUnknownFlags(`kit ${resolved}`, [...allowedFlags, ...GLOBAL_FLAGS], process.argv)
+          ) {
+            process.exitCode = 1;
+            return;
+          }
+        }
+
         // PreToolUse gates must fail CLOSED: an internal fault has to DENY (exit 2), never fall
         // through to the generic catch below (exit 1 = non-blocking = the op would proceed).
         ok = GATE_VERBS.has(resolved)

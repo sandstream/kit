@@ -257,28 +257,44 @@ export function extractDocFlagRefs(markdownText: string, file: string): DocComma
  * working invocation. Measuring it first is the same observe→enforce ladder kit uses
  * for runtime gates; the number can only go down, and now it is visible.
  */
+/**
+ * Flag-validation coverage, measured over VERBS against the declared flag surface.
+ *
+ * It used to grep `src/commands/*.ts` for the string `unknownFlags(`, which measured the
+ * shape of the fix rather than the property: a module with many handlers could contain one
+ * guard and leave its other verbs open, and two verbs (`fix`, `plugin`) do not live under
+ * `src/commands` at all, so no amount of grepping there could see them.
+ *
+ * The property is "every command rejects flags it does not accept". Since the floor lives at
+ * dispatch and reads `src/flag-surface.ts` (the same shape as the read-only floor reading
+ * `read-only-surface.ts`), coverage is: every verb in COMMAND_REGISTRY has an entry in that
+ * table. A verb without one is skipped by the floor — unvalidated, which is exactly what
+ * this row must report.
+ */
 export function flagValidationCoverage(repoRoot: string): {
   validating: string[];
   missing: string[];
 } {
-  const dir = join(repoRoot, "src", "commands");
   const validating: string[] = [];
   const missing: string[] = [];
-  let entries;
+  let cli: string;
+  let surface: string;
   try {
-    entries = readdirSync(dir, { withFileTypes: true });
+    cli = readFileSync(join(repoRoot, "src", "cli.ts"), "utf-8");
   } catch {
     return { validating, missing };
   }
-  for (const e of entries) {
-    if (!e.isFile() || !e.name.endsWith(".ts") || e.name.endsWith(".test.ts")) continue;
-    let text;
-    try {
-      text = readFileSync(join(dir, e.name), "utf-8");
-    } catch {
-      continue;
-    }
-    (text.includes("unknownFlags(") ? validating : missing).push(e.name.replace(/\.ts$/, ""));
+  try {
+    surface = readFileSync(join(repoRoot, "src", "flag-surface.ts"), "utf-8");
+  } catch {
+    surface = "";
+  }
+  const tabled = new Set<string>();
+  for (const m of surface.matchAll(/^ {2}(?:"([^"]+)"|([a-z][a-z0-9]*)):/gm)) {
+    tabled.add(m[1] ?? m[2]);
+  }
+  for (const m of cli.matchAll(/["']?([a-z][a-z0-9-]*)["']?\s*:\s*\{\s*handler\s*:/g)) {
+    (tabled.has(m[1]) ? validating : missing).push(m[1]);
   }
   return { validating: validating.sort(), missing: missing.sort() };
 }
@@ -643,19 +659,19 @@ export function runDocsClaimsAudit(repoRoot: string): SecurityCheckResult[] {
             category: FLAG_VALIDATION_CATEGORY,
             name: "flag validation",
             status: "pass",
-            detail: `all ${total} command module(s) reject unknown flags`,
+            detail: `all ${total} command verb(s) reject unknown flags`,
           },
         ]
-      : coverage.missing.map((mod) => ({
+      : coverage.missing.map((verb) => ({
           category: FLAG_VALIDATION_CATEGORY,
           name: "flag validation",
           status: "warn" as const,
           severity: "low" as const,
           detail:
-            `src/commands/${mod}.ts accepts unknown flags silently ` +
-            `(${coverage.validating.length}/${total} command modules validate)`,
-          files: [`src/commands/${mod}.ts:1`],
-          suggestion: `add unknownFlags(process.argv, ALLOWED) — a flag that silently does nothing is how 'kit check --category' stayed broken across six majors`,
+            `kit ${verb} accepts unknown flags silently — no entry in the declared flag surface ` +
+            `(${coverage.validating.length}/${total} command verbs validate)`,
+          files: ["src/flag-surface.ts:1"],
+          suggestion: `run 'node scripts/derive-command-flags.mjs --emit' — a flag that silently does nothing is how 'kit check --category' stayed broken across six majors`,
         }));
 
   return flagValidation.concat(

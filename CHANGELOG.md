@@ -28,6 +28,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   Exit codes stay `[0, 1]`: `public-surface.ts` declares that set for every stable command,
   so the missing/stalled distinction is carried by the report, not by a third code.
 
+- **Every command now rejects flags it does not accept** (43 of 45 modules did not, #488).
+  The class is not theoretical: `kit check --category security` ran the FULL check for six
+  majors because nothing rejected the flag, and `kit upgrade --self.` — one trailing period
+  — fell through to the lock-file branch, rewrote every `installedAt`, installed nothing and
+  printed the success line.
+
+  Sweeping 43 handlers would have fixed today and rotted tomorrow, so the shape is the one
+  `read-only-surface.ts` already uses for the write surface: a declared table
+  (`src/flag-surface.ts`, 71 verbs) and one refusal at dispatch. The table is GENERATED from
+  the source (`node scripts/derive-command-flags.mjs --emit`) — every `--flag` literal in a
+  command's own module, the literals its direct imports hand to an argv reader, and every
+  flag `docs/COMMANDS.md` documents for that verb — and `flag-surface.test.ts` fails when it
+  drifts, so a new flag cannot land unlisted. Depth-1 is deliberate: an allowlist built from
+  a handler file alone rejected `kit check --attest` and `--no-auto-install`, both documented
+  and both read one import away. `GLOBAL_FLAGS` are unioned in by the guard, so a global can
+  never be missing per verb. Everything after `--` is passed through untouched.
+
+  The sets err toward accepting: over-accepting leaves a working invocation working, while
+  under-accepting breaks one. The guard catches what does NOTHING, not spelling.
+
+- **`kit add --list` lists the adapters.** kit documented it in two places and read it
+  nowhere: `argv[3]` took the flag as the service NAME, so kit's own documented invocation
+  printed `Provisioning --list…` and then `Unknown service: --list`. `--list` now exits 0
+  after listing; bare `kit add` still exits 1, since a forgotten argument is not a completed
+  provision. A test pins that kit never prints an invocation its own flag floor would reject
+  — that is what found this one.
+
 - **`self-audit` now checks documentation in both directions.** The existing docs-claims
   rules prove no doc names something kit lacks; they are structurally incapable of catching
   the reverse, because an undocumented command has no doc reference to check. The new
@@ -79,6 +106,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   under PEP 621 (`authors = [{name=…, email=…}]`); the value lands in `info.author_email`.
   Attribution is what settles a look-alike-repo provenance question cheaply, so it now falls
   back — measured: `author: unknown` → `author: OpenSandbox Team <…@alibaba-inc.com>`.
+
+- **A comment promised a flag that never existed.** `mise-path.ts` said `kit setup
+  --activate-mise` appends the mise-shims PATH line; no code reads that flag, and
+  `ensureMiseActivation` — the appender — has no production caller at all (it sits in
+  self-audit's unwired-code advisory). `kit doctor` reports the gap and prints the line. The
+  claim is corrected rather than the feature quietly invented: writing to a user's shell
+  profile needs its own consent design.
+
+- **`self-audit`'s flag-validation row now measures verbs, not file text.** It grepped
+  `src/commands/*.ts` for the string `unknownFlags(`, which measured the shape of the fix:
+  a module with several handlers could contain one guard and leave its other verbs open, and
+  two verbs (`fix`, `plugin`) do not live under `src/commands` at all, so no grep there could
+  ever see them. Coverage is now "every verb in `COMMAND_REGISTRY` has an entry in the
+  declared flag surface" — 71/71, and a verb without one is reported as unvalidated.
 
 - **A third test that reported a verdict its environment could not support.** The
   `writeCheckDetail` failed-write test forced its precondition with `chmod 0o500` without

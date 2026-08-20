@@ -107,9 +107,14 @@ export async function cmdDoctor(): Promise<boolean> {
 }
 
 export async function cmdAdd(): Promise<boolean> {
-  const serviceName = process.argv[3];
+  // `--list` is documented twice in kit's own help ("kit add --list  # List all available
+  // adapters", and the command's one-line help) and was read by nothing: argv[3] took the
+  // flag as the SERVICE NAME, so the invocation kit printed tried to provision a service
+  // called "--list" and failed with "Unknown service: --list". Listing is what it says.
+  const positional = process.argv[3];
+  const serviceName = positional?.startsWith("--") ? undefined : positional;
 
-  if (!serviceName) {
+  if (!serviceName || hasFlag(process.argv, "--list")) {
     console.log(`${c.bold}${c.cyan}Available services:${c.reset}\n`);
 
     const services = listAvailableServices();
@@ -122,10 +127,13 @@ export async function cmdAdd(): Promise<boolean> {
     }
 
     console.log();
-    console.log(`${c.dim}Usage: kit add <service>${c.reset}`);
+    console.log(`${c.dim}Usage: kit add <service>  ·  kit add --list${c.reset}`);
     console.log(`${c.dim}Example: kit add stripe/payments${c.reset}`);
     console.log();
-    return false;
+    // `--list` asked for exactly this output, so it succeeded. Bare `kit add` is a usage
+    // error that happens to be helpful, and keeps exiting 1 — a script that forgets the
+    // service argument must not read as a completed provision.
+    return hasFlag(process.argv, "--list");
   }
 
   console.log(`${c.bold}${c.cyan}Provisioning ${serviceName}...${c.reset}\n`);
