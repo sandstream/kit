@@ -4,7 +4,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { loadConfig } from "./config.js";
-import { hasFlag } from "./utils/flags.js";
+import { hasFlag, splitLeadingGlobalFlags } from "./utils/flags.js";
 import { generateCompletions } from "./completions.js";
 import { checkForUpdate, printUpdateNotice } from "./update-check.js";
 import { SKIPPED_COMMITS_LOG } from "./hooks.js";
@@ -280,8 +280,19 @@ async function showSkippedCommitBanner(): Promise<void> {
  */
 
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-  const command = args[0];
+  // Global flags may precede the command word (`kit --read-only check`, the form
+  // README.md:299 and docs/THREAT_MODEL.md:98 document). Move them behind the
+  // positionals — and rewrite process.argv to match — so command modules that
+  // read subcommands off raw indices (`process.argv[3]`) see the same shape they
+  // would for `kit check ...`. Without this the flag WAS the command and kit
+  // answered "Unknown command: --read-only".
+  const rawArgs = process.argv.slice(2);
+  const { leading: leadingGlobals, rest: positional } = splitLeadingGlobalFlags(rawArgs);
+  const args = leadingGlobals.length > 0 ? [...positional, ...leadingGlobals] : rawArgs;
+  if (leadingGlobals.length > 0) {
+    process.argv = [...process.argv.slice(0, 2), ...args];
+  }
+  const command = positional[0];
   const nonInteractive =
     hasFlag(args, "--non-interactive") ||
     process.env.CI === "true" ||
@@ -326,12 +337,12 @@ async function main(): Promise<void> {
     let ok: boolean;
 
     // --version / --help flags before the switch
-    if (args[0] === "--version" || args[0] === "-v") {
+    if (positional[0] === "--version" || positional[0] === "-v") {
       ok = cmdVersion();
       process.exitCode = ok ? 0 : 1;
       return;
     }
-    if (args[0] === "--help" || args[0] === "-h") {
+    if (positional[0] === "--help" || positional[0] === "-h") {
       ok = cmdHelp();
       process.exitCode = 0;
       return;
@@ -352,9 +363,9 @@ async function main(): Promise<void> {
     if (command === "version") {
       ok = cmdVersion();
     } else if (command === "help") {
-      ok = cmdHelp(args[1]);
+      ok = cmdHelp(positional[1]);
     } else if (command === "completions") {
-      const shell = args[1];
+      const shell = positional[1];
       const script = generateCompletions(shell);
       if (!script) {
         console.error(`Unknown shell: ${shell}. Use: bash, zsh, fish`);

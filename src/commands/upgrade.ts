@@ -8,7 +8,7 @@
  * four are exported. Imports only sibling core modules, never cli.ts.
  */
 import { c } from "../utils/colors.js";
-import { hasFlag } from "../utils/flags.js";
+import { hasFlag, unknownFlags, GLOBAL_FLAGS } from "../utils/flags.js";
 import { loadConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { readkitMeta, updateSkillsLock, updateCliLock } from "../lock.js";
@@ -98,9 +98,27 @@ export async function selfUpgrade(): Promise<boolean> {
   }
 }
 
+/**
+ * Every flag `kit upgrade` honors. `--self` is the only one the command reads;
+ * the globals are honored by cli.ts / config.ts for every command.
+ */
+export const UPGRADE_FLAGS = ["--self", ...GLOBAL_FLAGS] as const;
+
 export async function cmdUpgrade(): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit upgrade${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
+
+  // A typo'd flag must not silently become a DIFFERENT operation. `kit upgrade
+  // --self.` (trailing period) missed the exact-match in hasFlag, fell through
+  // to the lock-file path, and rewrote every `installedAt` in .kit/cli-lock.json
+  // to "now" while installing nothing — reported as a successful upgrade.
+  const bad = unknownFlags(process.argv, UPGRADE_FLAGS);
+  if (bad.length > 0) {
+    const plural = bad.length > 1 ? "s" : "";
+    console.error(`${c.red}unknown flag${plural} for kit upgrade: ${bad.join(", ")}${c.reset}`);
+    console.error(`${c.dim}accepted: ${UPGRADE_FLAGS.join(" ")}${c.reset}`);
+    return false;
+  }
 
   if (hasFlag(process.argv, "--self")) {
     return await selfUpgrade();

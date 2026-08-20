@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { CHECK_FLAGS } from "./check.js";
+import { GLOBAL_FLAGS } from "../utils/flags.js";
 
 /**
  * The allowlist behind `kit check`'s unknown-flag rejection must cover every flag the check path
@@ -71,5 +72,20 @@ describe("kit check flag allowlist", () => {
   it("lists no flag twice, and every entry is a long flag", () => {
     assert.equal(new Set(CHECK_FLAGS).size, CHECK_FLAGS.length, "duplicate entry in CHECK_FLAGS");
     for (const f of CHECK_FLAGS) assert.match(f, /^--[a-z][a-z0-9-]*$/, f);
+  });
+});
+
+describe("kit check accepts the documented global flags", () => {
+  /**
+   * `--read-only` and `--non-interactive` are honored by cli.ts for every command
+   * and are in docs/COMMANDS.md's global table, but CHECK_FLAGS was built from the
+   * check path's own literals — so `kit check --read-only` exited 1 with "unknown
+   * flag" and the security check never ran. Same class as the `--attest` break
+   * above: a gate that refuses to run is a false red.
+   */
+  it("CHECK_FLAGS is a superset of GLOBAL_FLAGS", () => {
+    const allowed = new Set<string>(CHECK_FLAGS);
+    const missing = (GLOBAL_FLAGS as readonly string[]).filter((f) => !allowed.has(f));
+    assert.deepEqual(missing, [], `globals kit check would reject: ${missing.join(", ")}`);
   });
 });
