@@ -55,6 +55,34 @@ export function unknownFlags(argv: readonly string[], allowed: readonly string[]
 }
 
 /**
+ * Print the rejection for unknown flags and report whether anything was rejected.
+ *
+ * One formatting for every command, so the two-line shape an operator learns from
+ * `kit upgrade --self.` ("unknown flag for kit upgrade: --self." / "accepted: ...") is the
+ * same shape they get from every other verb. `commands/check.ts` had this function
+ * privately; it lives here now because the dispatch-level floor and the per-command guards
+ * must fail identically — a different message per layer reads as a different defect.
+ *
+ * Returns true when it rejected, so callers can `if (rejectUnknownFlags(...)) return false;`.
+ * Writes to stderr: a rejection must not land in a `--json` consumer's stdout.
+ */
+export function rejectUnknownFlags(
+  form: string,
+  allowed: readonly string[],
+  argv: readonly string[] = process.argv,
+  write: (msg: string) => void = (m) => process.stderr.write(`${m}\n`),
+): boolean {
+  const bad = unknownFlags(argv, allowed);
+  if (bad.length === 0) return false;
+  write(`unknown flag${bad.length > 1 ? "s" : ""} for ${form}: ${bad.join(", ")}`);
+  // Deduped: the caller unions its own list with GLOBAL_FLAGS, which overlap for any command
+  // that reads a global itself (`--non-interactive` appeared twice), and a list that repeats
+  // itself reads as a bug in the tool the operator is already confused by.
+  write(`accepted: ${[...new Set(allowed)].join(" ")}`);
+  return true;
+}
+
+/**
  * Integer value for a flag, or `fallback` when absent / non-numeric.
  * Mirrors the common `const n = idx >= 0 ? parseInt(args[idx+1]) : default` idiom.
  */

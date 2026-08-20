@@ -26,6 +26,14 @@ written before or after the command word — `kit --read-only check` and
 `kit check --read-only` are equivalent. Every command accepts them; a command
 that rejects unknown flags allows these on top of its own.
 
+**Unknown flags are rejected.** Every command validates its flags at dispatch
+against a declared table (`src/flag-surface.ts`), prints what it accepts, and
+exits 1 — a flag that silently does nothing is indistinguishable from a working
+one, which is how `kit check --category security` ran the *full* check for six
+majors and how `kit upgrade --self.` (one trailing period) rewrote lock-file
+timestamps while installing nothing. Everything after a `--` separator is passed
+through untouched (`kit run -- pnpm test --watch`).
+
 ## Core lifecycle
 
 | Command                                                   | Purpose                                                                                                                                                                                                                                                                                                                                                              |
@@ -336,7 +344,7 @@ scope/RoE, so a profile can move to a fresh host without trusting the transport.
 | `kit ci [--strict] [--attest]`      | One-shot CI gate (check + design + tests). Scanner-health gate: a crashed / missing / token-less scanner can no longer exit 0 (default warns); `--strict` / `KIT_CI_STRICT=1` (or `[governance.scan].required_scanners`) hard-fails any non-running scanner. |
 | `kit context [--format json]`       | Print kit context for agent introspection.                                                                                                                                                                                                                   |
 | `kit create-plugin <name>`          | Scaffold a new adapter.                                                                                                                                                                                                                                      |
-| `kit add <service>`                 | Add service to `.kit.toml`.                                                                                                                                                                                                                                  |
+| `kit add <service>` · `kit add --list` | Add service to `.kit.toml`; `--list` prints every available adapter (so does bare `kit add`, which exits 1 as a usage error).                                                                                                                               |
 | `kit version`                       | Print kit version + exit.                                                                                                                                                                                                                                    |
 | `kit completions <bash\|zsh\|fish>` | Output shell completion script for the given shell.                                                                                                                                                                                                          |
 

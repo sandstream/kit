@@ -456,20 +456,30 @@ describe("self-audit-docs — runDocsClaimsAudit over the other two classes", ()
 // ---------------------------------------------------------------------------
 
 describe("self-audit-docs — flagValidationCoverage", () => {
-  it("splits command modules by whether they validate argv", () => {
+  /** A minimal repo: a cli.ts with a COMMAND_REGISTRY and a flag-surface table. */
+  function fixture(verbs: string[], tabled: string[]): string {
     const root = mkdtempSync(join(tmpdir(), "kit-flagcov-"));
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(
+      join(root, "src", "cli.ts"),
+      `const COMMAND_REGISTRY = {\n${verbs
+        .map((v) => `  ${/-/.test(v) ? `"${v}"` : v}: { handler: cmd${v}, stability: "stable" },`)
+        .join("\n")}\n};`,
+      "utf-8",
+    );
+    writeFileSync(
+      join(root, "src", "flag-surface.ts"),
+      `export const COMMAND_FLAGS: Record<string, readonly string[]> = {\n${tabled
+        .map((v) => `  ${/-/.test(v) ? `"${v}"` : v}: ["--json"],`)
+        .join("\n")}\n};`,
+      "utf-8",
+    );
+    return root;
+  }
+
+  it("splits verbs by whether the declared flag surface covers them", () => {
+    const root = fixture(["good", "lax"], ["good"]);
     try {
-      mkdirSync(join(root, "src", "commands"), { recursive: true });
-      writeFileSync(
-        join(root, "src", "commands", "good.ts"),
-        'if (unknownFlags(process.argv, ["--json"]).length) return false;',
-        "utf-8",
-      );
-      writeFileSync(
-        join(root, "src", "commands", "lax.ts"),
-        'const j = hasFlag(process.argv, "--json");',
-        "utf-8",
-      );
       const cov = flagValidationCoverage(root);
       assert.deepEqual(cov.validating, ["good"]);
       assert.deepEqual(cov.missing, ["lax"]);
@@ -478,21 +488,36 @@ describe("self-audit-docs — flagValidationCoverage", () => {
     }
   });
 
-  it("ignores test files so a module is judged on its own source", () => {
-    const root = mkdtempSync(join(tmpdir(), "kit-flagcov2-"));
+  it("covers hyphenated verbs — they are quoted keys in both files", () => {
+    const root = fixture(["gha-audit", "self-audit"], ["gha-audit"]);
     try {
-      mkdirSync(join(root, "src", "commands"), { recursive: true });
-      writeFileSync(join(root, "src", "commands", "a.test.ts"), "unknownFlags(", "utf-8");
-      writeFileSync(join(root, "src", "commands", "a.ts"), "nothing here", "utf-8");
       const cov = flagValidationCoverage(root);
-      assert.deepEqual(cov.validating, []);
-      assert.deepEqual(cov.missing, ["a"]);
+      assert.deepEqual(cov.validating, ["gha-audit"]);
+      assert.deepEqual(cov.missing, ["self-audit"]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
-  it("returns empty sets rather than throwing when there is no commands dir", () => {
+  it("reports every verb as missing when the table is absent, never as covered", () => {
+    // Fail-open here would report a repo with no flag surface at all as fully validated.
+    const root = mkdtempSync(join(tmpdir(), "kit-flagcov-nosurface-"));
+    try {
+      mkdirSync(join(root, "src"), { recursive: true });
+      writeFileSync(
+        join(root, "src", "cli.ts"),
+        "const COMMAND_REGISTRY = {\n  status: { handler: cmdStatus },\n};",
+        "utf-8",
+      );
+      const cov = flagValidationCoverage(root);
+      assert.deepEqual(cov.validating, []);
+      assert.deepEqual(cov.missing, ["status"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty sets rather than throwing when there is no cli.ts", () => {
     const root = mkdtempSync(join(tmpdir(), "kit-flagcov3-"));
     try {
       assert.deepEqual(flagValidationCoverage(root), { validating: [], missing: [] });
@@ -501,11 +526,13 @@ describe("self-audit-docs — flagValidationCoverage", () => {
     }
   });
 
-  it("kit's own check command is on the validating side", () => {
-    // The one that motivated the measurement. If this ever regresses, --category can
-    // silently become a no-op again.
+  it("kit's own surface is fully covered — no verb accepts unknown flags silently", () => {
+    // The measurement that produced #488: 2/45 modules validated. It is now a property of
+    // every verb, and `kit check --category` cannot silently become a no-op again.
     const cov = flagValidationCoverage(join(import.meta.dirname, ".."));
-    assert.ok(cov.validating.includes("check"), "commands/check.ts must validate its flags");
+    assert.deepEqual(cov.missing, []);
+    assert.ok(cov.validating.includes("check"));
+    assert.ok(cov.validating.includes("upgrade"));
   });
 });
 

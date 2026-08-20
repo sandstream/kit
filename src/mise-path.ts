@@ -4,8 +4,15 @@
  * kit installs tools via mise, but their shims are only reachable as bare commands
  * if mise's shims dir is on the shell's PATH. `eval "$(mise activate)"` is fragile
  * (no-ops if mise itself isn't on PATH yet when the profile runs), so kit prefers
- * putting the shims dir directly on PATH. Pure helpers here; `kit doctor` reports a
- * gap and `kit setup --activate-mise` appends the line (idempotent, consented).
+ * putting the shims dir directly on PATH. Pure helpers here; `kit doctor` reports the gap and
+ * prints the line to add.
+ *
+ * `ensureMiseActivation` below is the appender and has NO production caller — it appears in
+ * self-audit's unwired-code advisory. This comment used to say `kit setup --activate-mise`
+ * appends the line; no such flag is read anywhere, so an operator following it got nothing
+ * (before the flag floor) or a rejection (after it). Wiring it means writing to the user's
+ * shell profile, which needs its own consent design, so the claim is corrected rather than
+ * the feature quietly invented.
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
