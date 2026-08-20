@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [6.7.0] - 2026-08-20
+
 ### Added
 
 - **`kit check` now reports the git-hook floor: where it is, and whether it can fail.** README
