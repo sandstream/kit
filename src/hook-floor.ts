@@ -86,15 +86,16 @@ export function describeHookFloor(cwd = process.cwd(), config?: kitConfig): Hook
   const exists = existsSync(dir);
   const installed: string[] = [];
   if (exists) {
-    let entries: string[] = [];
+    let entries: string[];
     try {
       entries = readdirSync(dir);
     } catch {
+      // Unreadable hooks dir: report nothing installed rather than guessing.
       entries = [];
     }
     for (const [file, builtin] of Object.entries(BUILTIN_HOOK_FILES)) {
       if (!entries.includes(file)) continue;
-      let body = "";
+      let body: string;
       try {
         body = readFileSync(resolve(dir, file), "utf-8");
       } catch {
