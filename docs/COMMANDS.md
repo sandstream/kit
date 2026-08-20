@@ -182,6 +182,7 @@ required = ["NEXT_PUBLIC_SENTRY_DSN", "NEXT_PUBLIC_SENTRY_ENVIRONMENT"]
 | `kit hooks install`    | Install hooks declared in `[hooks]`. If no `[hooks]` section exists, it explains that nothing was installed and points to `kit hooks add <name>`. |
 | `kit hooks add <name>` | Add a built-in hook (`secret-scan`, `post-pull-audit`, `context-check`) without requiring `[hooks]`.                                              |
 | `kit hooks sync`       | Reconcile installed hooks with config.                                                                                                            |
+| `kit hooks uninstall`  | Remove the configured git hooks. **Enforcement is off until re-installed** — git hooks are the agent-agnostic floor, so this disables the gate that fires in any agent or none. |
 
 ## Agent Config User Rules
 
@@ -298,12 +299,38 @@ fixture credentials at run time) so nothing new accumulates.
 | `kit team member remove <email>`                      | Remove a team member.                                                                                                                                                                                                                                                 |
 | `kit team audit log [--limit=<N>]`                    | View team audit logs.                                                                                                                                                                                                                                                 |
 
+## Exec-broker runtime posture
+
+Graduating the exec-broker from observe to enforce is evidence-driven: the readiness verdict is
+computed from the recorded observe window, and the flip refuses unless that verdict says `ready`.
+
+| Command | Purpose |
+| ------- | ------- |
+| `kit broker enforce-readiness [--gate]` | Read the recorded observe window (`.kit-audit.jsonl`) and report whether flipping to enforce is safe: `ready` \| `would-block` (+ exactly what breaks) \| `untested`. `--gate` fails CI on any not-ready verdict. |
+| `kit broker enforce [--force]` | Guided observe→enforce flip: readiness pre-flight (refuses unless `ready`; `--force` overrides), sets `[scope].enforce_runtime = true`, re-signs the profile scope, and audits the transition. |
+
+## Traveling profile
+
+The declared project profile (`.kit-profile.toml`) plus an offline-verifiable signature over its
+scope/RoE, so a profile can move to a fresh host without trusting the transport.
+
+| Command | Purpose |
+| ------- | ------- |
+| `kit profile show` | Render the declared profile with per-line reconciliation marks. |
+| `kit profile freeze` | Snapshot the discovered toolchain into `.kit-profile.toml` (preserves operator-authored workflows/plugins/scope/gates). |
+| `kit profile check [--gate]` | Report declared-vs-discovered drift. `--gate` fails CI on any drift; honest skip when no profile is declared. |
+| `kit profile sign` | Sign the profile (scope/RoE) into `.kit-profile.sig` via your identity/keystore — offline-verifiable. |
+| `kit profile verify [--key <pin>]` | Verify `.kit-profile.sig` offline: `--key` pin → local identity → org `.kit-policy.signers`. |
+| `kit profile export [--out <file>]` | Export a portable signed bundle (profile + signature + signer key) to `--out` or stdout. |
+| `kit profile import <bundle>` | Import a bundle on a fresh host — integrity-verified offline, fail-closed on tamper/revoked. Authoritative only once the signer is anchored. |
+
 ## Misc
 
 | Command                             | Purpose                                                                                                                                                                                                                                                      |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `kit open <service>`                | Open service dashboard in browser (stripe, vercel, etc.).                                                                                                                                                                                                    |
 | `kit run <cmd>`                     | Arbitrary command runner (audit-logged).                                                                                                                                                                                                                     |
+| `kit insight [--json]`              | Deterministic lifecycle insight — what is loaded but never called (e.g. MCP servers), from the transcript index. Experimental. |
 | `kit escalate`                      | Collect failures + format for manual handoff.                                                                                                                                                                                                                |
 | `kit ci [--strict] [--attest]`      | One-shot CI gate (check + design + tests). Scanner-health gate: a crashed / missing / token-less scanner can no longer exit 0 (default warns); `--strict` / `KIT_CI_STRICT=1` (or `[governance.scan].required_scanners`) hard-fails any non-running scanner. |
 | `kit context [--format json]`       | Print kit context for agent introspection.                                                                                                                                                                                                                   |
@@ -345,6 +372,7 @@ Local-first second brain — SQLite + FTS5, deterministic, zero model calls. Ful
 | `kit memory pal [list\|add\|done\|snooze\|verify\|import]`                  | Pending-action ledger; auto-closes on verify. Project-scoped (`--global` for all).                                                                                                                           |
 | `kit memory save <name>` / `threads` / `resume <name\|n>` / `forget <name>` | Named copilots — bookmark + resume sessions; `resume` prints the Claude or Codex command for the saved harness.                                                                                              |
 | `kit memory share …` / `areas` / `area <name>`                              | Shared, area-organized team memory (committed, secret-scanned, reviewed like code).                                                                                                                          |
+| `kit memory context`                                                        | Push-surface the active decisions for the area(s) whose files you are touching (deterministic, path→cluster). |
 
 ## Exit codes
 

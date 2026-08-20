@@ -27,12 +27,29 @@ describe("writeCheckDetail", () => {
     assert.equal(ref.path, join(cwd, RUNS_DIR, "check-1000.json"));
   });
 
-  it("returns null instead of a dangling reference when the write fails", () => {
+  it("returns null instead of a dangling reference when the write fails", (t) => {
     const cwd = tmpProject();
     // A .kit that cannot be written into: mkdir of .kit/runs fails, so there is no file.
     mkdirSync(join(cwd, ".kit"));
     chmodSync(join(cwd, ".kit"), 0o500);
     try {
+      // The mode bits are the INTENT; whether they deny THIS process is a separate fact.
+      // root carries CAP_DAC_OVERRIDE and mkdirs straight through 0500, so without this
+      // probe the precondition silently does not exist and the test reports a working
+      // write path as a broken one. Same guard, same reason, as the WAL-sidecar test in
+      // check-security.test.ts: a check that could not run must not report a verdict.
+      let denied = false;
+      try {
+        mkdirSync(join(cwd, ".kit", ".write-probe"));
+      } catch {
+        denied = true;
+      }
+      if (!denied) {
+        t.skip(
+          "0500 does not deny writes to this process (running as root?) — the failed-write path is NOT verified in this run",
+        );
+        return;
+      }
       assert.equal(writeCheckDetail(cwd, { ok: true }, 1000), null);
     } finally {
       chmodSync(join(cwd, ".kit"), 0o700);
