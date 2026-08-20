@@ -85,6 +85,83 @@ async function resolveAuditLogPath(): Promise<string> {
 }
 
 /**
+ * `kit audit verify --all` - the union view over every audit log this machine has
+ * sealed, not just the one in `cwd`.
+ *
+ * Why it exists: `kit audit verify` is correct for one working tree, and a git
+ * worktree is a distinct working tree, so N trees produce N green verdicts and no
+ * whole-machine answer (#470). `~/.kit/audit-anchor.json` already keyed the tip per
+ * log path across every tree; nothing enumerated it.
+ *
+ * `missing` (log path gone) and `stalled` (log there, entries past its seal) print as
+ * distinct outcomes and only the second one counts toward the verdict: most anchored
+ * paths on a dev machine are short-lived test temp dirs, and a report that alarms on
+ * those is a report nobody reads.
+ */
+async function cmdAuditVerifyAll(strict: boolean, jsonMode: boolean): Promise<boolean> {
+  const { listAnchoredLogs, tryReadAuditAnchorKey, anchorRecordPath } =
+    await import("../audit-anchor.js");
+  const { verifyAnchoredLogs, readLogForUnion } = await import("../audit-anchor-all.js");
+
+  const inputs = await listAnchoredLogs();
+  const key = await tryReadAuditAnchorKey();
+  const report = await verifyAnchoredLogs(inputs, key, readLogForUnion, { strict });
+
+  if (jsonMode) {
+    console.log(JSON.stringify({ anchorRecord: anchorRecordPath(), ...report }, null, 2));
+    return report.ok;
+  }
+
+  console.log(`${c.bold}${c.cyan}kit audit verify --all${c.reset}`);
+  console.log(`${c.dim}${anchorRecordPath()}${c.reset}`);
+  console.log(`${c.dim}${"─".repeat(50)}${c.reset}`);
+
+  if (inputs.length === 0) {
+    // Not a pass dressed up as one: an empty record means nothing has ever been
+    // sealed here, so there is no evidence either way.
+    console.warn(
+      `${c.yellow}! this machine has sealed no audit log yet — nothing to verify (run 'kit audit anchor' in a repo)${c.reset}`,
+    );
+    return true;
+  }
+
+  // Findings first, attrition last: the ordering IS the readability fix.
+  const order = ["failed", "stalled", "verified", "missing"] as const;
+  for (const outcome of order) {
+    for (const r of report.results.filter((x) => x.outcome === outcome)) {
+      const icon =
+        outcome === "failed"
+          ? `${c.red}✗`
+          : outcome === "stalled"
+            ? `${c.yellow}!`
+            : outcome === "verified"
+              ? `${c.green}✓`
+              : `${c.dim}·`;
+      const label = outcome.padEnd(8);
+      console.log(
+        `  ${icon} ${label}${c.reset} ${r.logPath}\n      ${c.dim}${r.detail}: ${r.message}${c.reset}`,
+      );
+    }
+  }
+
+  const k = report.counts;
+  const summary = `${inputs.length} anchored log(s): ${k.verified} verified · ${k.stalled} stalled · ${k.missing} missing · ${k.failed} failed`;
+  console.log();
+  if (report.ok && k.stalled === 0) {
+    console.log(`${c.green}✓ ${summary}${c.reset}`);
+  } else if (report.ok) {
+    // Exits 0 by the same policy `decideAnchorVerdict` applies to one tree: an
+    // unsealed tail warns, and fails under --strict / require_anchor.
+    console.warn(
+      `${c.yellow}! ${summary}${c.reset}  ${c.dim}(stalled seals warn; --strict makes them fail)${c.reset}`,
+    );
+  } else {
+    console.error(`${c.red}✗ ${summary}${c.reset}`);
+  }
+  return report.ok;
+}
+
+/**
  * `kit audit verify` - verify the keyless hash chain, then the external HMAC
  * anchor (key + sealed count) when one exists. See audit-anchor.ts for the
  * threat boundary (only a reader of the 0600 key can forge; a same-UID attacker
@@ -107,6 +184,11 @@ async function cmdAuditVerify(): Promise<boolean> {
     requireAnchor = config.governance?.audit?.require_anchor === true;
   } catch {
     /* default: not required */
+  }
+  // The union view answers for the machine, so it must run BEFORE this function
+  // resolves a cwd-relative log — "no log here" is not an answer to "--all".
+  if (hasFlag(args, "--all")) {
+    return cmdAuditVerifyAll(strictFlag || requireAnchor, hasFlag(args, "--json"));
   }
   const logPath = await resolveAuditLogPath();
   let content: string;
