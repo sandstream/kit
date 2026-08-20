@@ -313,6 +313,23 @@ export async function readAnchorRecord(
 }
 
 /**
+ * Every log path this machine has sealed, with its record — the union view's oracle.
+ *
+ * The store keys the tip PER LOG PATH and lives in the home dir, so it already spans
+ * every working tree on the machine; until `kit audit verify --all` nothing enumerated
+ * it (see audit-anchor-all.ts and #470). Sorted so the report is stable across runs
+ * and therefore diffable in CI.
+ */
+export async function listAnchoredLogs(
+  dir?: string,
+): Promise<Array<{ logPath: string; record: AnchorRecord }>> {
+  const store = await readStore(dir);
+  return Object.keys(store)
+    .sort()
+    .map((logPath) => ({ logPath, record: store[logPath] }));
+}
+
+/**
  * True when this machine has sealed ANY audit log. Used by `kit audit verify`
  * to fail closed: once anchoring is in use, a log that presents as unanchored
  * (e.g. a project config repointed `log_file` at a forged, never-anchored file)

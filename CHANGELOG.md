@@ -8,6 +8,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`kit audit verify --all` — the union view over every audit log this machine sealed.**
+  `kit audit verify` answers for one working tree, correctly: a git worktree IS a distinct
+  working tree, so it gets its own chain. On a machine running several — the normal case
+  under a worktree-per-session agent harness — that produced N green verdicts and no
+  whole-machine answer. The data was already on disk and unread: `~/.kit/audit-anchor.json`
+  keys the HMAC tip per log path and is shared by every tree (15 paths on the machine that
+  filed #470); the only reader outside `audit-anchor.ts` looked up one path.
+
+  Four outcomes, because collapsing them is what makes such a report unreadable: `verified`;
+  `stalled` (the log is there but its seal no longer covers it — an unsealed tail, or a
+  rotated anchor key); `missing` (the log path is gone — a temp dir or deleted clone, which
+  is most of those 15 paths and never a finding); `failed` (chain break, truncation, tip
+  mismatch, or a seal that could not be checked at all). Exit 1 on any `failed`; a `stalled`
+  seal warns and fails under `--strict` / `[governance.audit].require_anchor` — deliberately
+  the same policy `decideAnchorVerdict` already applies to a single tree, since the same
+  evidence must not verify green in one command and red in the other. `--json` for machines.
+
+  Exit codes stay `[0, 1]`: `public-surface.ts` declares that set for every stable command,
+  so the missing/stalled distinction is carried by the report, not by a third code.
+
 - **`self-audit` now checks documentation in both directions.** The existing docs-claims
   rules prove no doc names something kit lacks; they are structurally incapable of catching
   the reverse, because an undocumented command has no doc reference to check. The new
