@@ -37,6 +37,15 @@ export async function cmdGateBash(): Promise<boolean> {
   } catch {
     return true; // unparseable hook payload → do not block (avoid breaking the agent)
   }
+  // "Triage it first" is the right next step for a blocked PACKAGE, and nonsense for a refusal
+  // about shell semantics — a double-quoted backtick is command substitution, not a package to
+  // triage. Appending it there is what made a correct block read as a mis-parse (#501), so the
+  // advice follows the reason instead of being stapled to every refusal.
+  const triageAdvice = (reason: string, lead = " — "): string =>
+    /COMMAND SUBSTITUTION/.test(reason)
+      ? ""
+      : `${lead}Triage it first: \`kit triage …\`, or install via \`kit pkg <eco>:<name>\`.`;
+
   // Agent-agnostic command extraction (Claude/Codex/Amazon Q/Gemini tool_input.command,
   // Cursor top-level command, Cline preToolUse.parameters.command) — shared pure helper.
   const { decideBashGate, extractCommandFromHookPayload } = await import("../install-gate.js");
@@ -53,7 +62,7 @@ export async function cmdGateBash(): Promise<boolean> {
       console.log(
         JSON.stringify({
           cancel: true,
-          errorMessage: `kit install-gate: ${verdict.reason} — triage first (kit triage …) or install via kit pkg <eco>:<name>`,
+          errorMessage: `kit install-gate: ${verdict.reason}${triageAdvice(verdict.reason)}`,
         }),
       );
       return true;
@@ -61,7 +70,7 @@ export async function cmdGateBash(): Promise<boolean> {
     const { writeSync } = await import("node:fs");
     writeSync(
       2,
-      `kit install-gate: BLOCKED — ${verdict.reason}\nTriage it first: \`kit triage …\`, or install via \`kit pkg <eco>:<name>\`.\n`,
+      `kit install-gate: BLOCKED — ${verdict.reason}${triageAdvice(verdict.reason, "\n")}\n`,
     );
     process.exit(2); // PreToolUse deny
   }

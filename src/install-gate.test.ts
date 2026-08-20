@@ -7,6 +7,7 @@ import {
   parseInstallCommand,
   decideBashGate,
   extractCommandFromHookPayload,
+  explainUnverifiable,
 } from "./install-gate.js";
 import type { GateDeps } from "./triage-gate.js";
 import type { TriageType } from "./triage.js";
@@ -974,6 +975,60 @@ describe("decideBashGate — approval of install scripts", () => {
     const v = await decideBashGate("npm approve-scripts --all", deps);
     assert.equal(v.block, true);
     assert.equal(called, false, "nothing named → nothing to triage; block outright");
+    assert.match(v.reason, /cannot reduce to a triage target/);
+  });
+});
+
+/**
+ * A refusal that misdescribes what it caught trains people to route around the gate.
+ *
+ * Reported as a false positive: `git commit -m "… \`deployment:env:view\` …"` blocked with
+ * "cannot reduce to a triage target … run `kit triage`". The gate was RIGHT — backticks inside
+ * double quotes are command substitution, so the shell runs the token and splices its output in,
+ * silently deleting the words:
+ *
+ *     $ bash -c 'echo "... the permission `deployment:env:view` ..."'
+ *     bash: deployment:env:view: command not found
+ *     ... the permission  ...
+ *
+ * but the message talked about triage targets, so the operator concluded kit had mis-parsed a
+ * commit message and reached for `-F`, hiding a command that would have committed a hole. These
+ * tests pin the wording that names the hazard, and pin that ordinary install refusals keep the
+ * triage advice — the fix must not blunt the common case.
+ */
+describe("install-gate — the refusal names the hazard (#501)", () => {
+  it("explains a backtick substitution instead of naming a triage target", () => {
+    const msg = explainUnverifiable(["indirect-bin:`deployment:env:view`"]);
+    assert.ok(msg, "a substitution token must get its own explanation");
+    assert.match(msg, /COMMAND SUBSTITUTION/);
+    assert.match(msg, /single quotes are literal/);
+    assert.match(msg, /git commit -F/);
+    assert.doesNotMatch(msg, /triage/i, "triage is nonsense advice for shell quoting");
+  });
+
+  it("explains $( ) substitution too", () => {
+    const msg = explainUnverifiable(["indirect-bin:$(which npm)"]);
+    assert.ok(msg);
+    assert.match(msg, /COMMAND SUBSTITUTION/);
+    // No backtick-specific aside when the form is $( ).
+    assert.doesNotMatch(msg, /backticks substitute inside double quotes/);
+  });
+
+  it("leaves every other unverifiable reason to the generic wording", () => {
+    assert.equal(explainUnverifiable(["indirect-bin:$PM"]), null);
+    assert.equal(explainUnverifiable([]), null);
+  });
+
+  it("the blocked verdict carries the hazard, not the machinery", async () => {
+    const v = await decideBashGate("`deployment:env:view` install foo");
+    assert.equal(v.block, true);
+    assert.match(v.reason, /COMMAND SUBSTITUTION/);
+    assert.doesNotMatch(v.reason, /cannot reduce to a triage target/);
+  });
+
+  it("a bare-variable indirection still gets the generic refusal", async () => {
+    const v = await decideBashGate("$PM install evil");
+    assert.equal(v.block, true);
     assert.match(v.reason, /cannot reduce to a triage target/);
   });
 });
