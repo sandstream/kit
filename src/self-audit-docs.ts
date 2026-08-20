@@ -455,6 +455,136 @@ const CLAIM_CLASSES: ClaimClass[] = [
  * and counted, so a pass line states what was actually verified rather than implying
  * full coverage.
  */
+/**
+ * The complete set of commands kit CLAIMS TO HAVE — the union of two oracles, because
+ * each alone has a blind spot that hides a real gap:
+ *
+ *   - `contracts/kit.opencli.json` lists 71 top-level verbs and NO subcommands, so on its
+ *     own it cannot see that `kit hooks uninstall` is undocumented.
+ *   - `COMMAND_HELP` in cli.ts lists subcommands but omits some top-level verbs, so on its
+ *     own it cannot see that `kit insight` is undocumented.
+ *
+ * Measured: the contract-only view reported 1 gap, the help-only view reported 9, and
+ * neither was a superset of the other. A union is the only honest oracle here.
+ *
+ * `x-kit-audience: "harness"` verbs are EXCLUDED, and that exclusion is read from the
+ * contract rather than hardcoded: `gate-bash`, `gate-env`, `gate-fs` and `gate-egress` are
+ * invoked by hook wiring, never typed by a human, so requiring them in human documentation
+ * would manufacture busywork rather than catch anything.
+ */
+export function loadCommandSurface(repoRoot: string): { verb: string; harness: boolean }[] {
+  const out = new Map<string, boolean>();
+  let contract: Record<string, { "x-kit-audience"?: string }> = {};
+  try {
+    const raw = readFileSync(join(repoRoot, CONTRACT_PATH), "utf-8");
+    const parsed: unknown = JSON.parse(raw);
+    const commands = (parsed as { commands?: unknown })?.commands;
+    if (commands && typeof commands === "object") {
+      contract = commands as Record<string, { "x-kit-audience"?: string }>;
+    }
+  } catch {
+    contract = {};
+  }
+  const isHarness = (verb: string): boolean =>
+    contract[verb.split(" ")[0]]?.["x-kit-audience"] === "harness";
+
+  for (const verb of Object.keys(contract)) out.set(verb, isHarness(verb));
+
+  // COMMAND_HELP keys, read as text so this stays a static audit with no import cycle.
+  try {
+    const cli = readFileSync(join(repoRoot, "src/cli.ts"), "utf-8");
+    const block = cli.slice(cli.indexOf("COMMAND_HELP"));
+    for (const m of block.matchAll(/^ {2}"([a-z][a-z0-9 :._-]*)":/gm)) {
+      out.set(m[1], isHarness(m[1]));
+    }
+  } catch {
+    /* contract alone still yields a usable, smaller surface */
+  }
+
+  return [...out].map(([verb, harness]) => ({ verb, harness }));
+}
+
+/**
+ * Does any doc invoke `verb`? Brace form counts: `kit hooks {install,add,sync}` documents
+ * `hooks install`. Without that, the repo's own house style would read as 40+ false gaps.
+ */
+function docsMentionCommand(corpus: string, verb: string): boolean {
+  if (corpus.includes(`kit ${verb}`)) return true;
+  const parts = verb.split(" ");
+  if (parts.length < 2) return false;
+  const sub = parts
+    .slice(1)
+    .join(" ")
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`kit\\s+${parts[0]}\\s*\\{[^}]*\\b${sub}\\b`).test(corpus);
+}
+
+/**
+ * THE INVERSE GATE. `documented commands` proves no doc names something kit lacks; this
+ * proves kit ships nothing a reader cannot find. Both directions are needed for "kit is
+ * what kit says it is" — the existing gate could not have caught an undocumented
+ * enforcement off-switch, because nothing in the docs pointed at it to be checked.
+ *
+ * Requiring the invocable form (`kit profile import`) rather than a prose mention is
+ * deliberate and symmetric with the sibling rule, which extracts `kit <command>` refs: a
+ * command a reader cannot see how to type is not documented.
+ */
+export function undocumentedCommands(repoRoot: string): SecurityCheckResult {
+  const surface = loadCommandSurface(repoRoot);
+  const inScope = surface.filter((c) => !c.harness);
+  if (inScope.length === 0) {
+    return {
+      category: DOCS_CATEGORY,
+      name: "undocumented commands",
+      status: "warn",
+      severity: "medium",
+      detail: "could not read the command surface — coverage NOT verified",
+      didNotRun: true,
+      suggestion: "regenerate the contract (npm run build) so the inverse audit can run",
+    };
+  }
+
+  const corpus = findMarkdownFiles(repoRoot)
+    .filter((f) => !docExemption(f))
+    .map((f) => {
+      try {
+        return readFileSync(join(repoRoot, f), "utf-8");
+      } catch {
+        return "";
+      }
+    })
+    .join("\n");
+
+  const missing = inScope.filter((c) => !docsMentionCommand(corpus, c.verb)).map((c) => c.verb);
+  const harnessCount = surface.length - inScope.length;
+
+  if (missing.length === 0) {
+    return {
+      category: DOCS_CATEGORY,
+      name: "undocumented commands",
+      status: "pass",
+      detail:
+        `all ${inScope.length} human-facing command(s) appear in the docs ` +
+        `(${harnessCount} harness-audience excluded)`,
+    };
+  }
+
+  return {
+    category: DOCS_CATEGORY,
+    name: "undocumented commands",
+    status: "fail",
+    severity: "medium",
+    detail:
+      `${missing.length} of ${inScope.length} command(s) appear in no doc: ` +
+      missing
+        .slice(0, 10)
+        .map((v) => `kit ${v}`)
+        .join(", "),
+    suggestion:
+      "document it, or mark it harness-audience in the contract if no human should type it",
+  };
+}
+
 export function runDocsClaimsAudit(repoRoot: string): SecurityCheckResult[] {
   const verbs = loadContractVerbs(repoRoot);
   if (!verbs) {
@@ -567,5 +697,9 @@ export function runDocsClaimsAudit(repoRoot: string): SecurityCheckResult[] {
         suggestion: `fix the doc, or implement it — a doc naming something kit does not have misleads humans and agents alike`,
       };
     }),
+    // Appended last on purpose: `flagValidation` occupies res[0] and a test pins that
+    // position. Prepending this row displaced it and failed a test about node_modules
+    // skipping — an unrelated rule broken by an ordering assumption.
+    [undocumentedCommands(repoRoot)],
   );
 }

@@ -15,6 +15,8 @@ import {
   docExemption,
   loadContractVerbs,
   runDocsClaimsAudit,
+  undocumentedCommands,
+  loadCommandSurface,
   PRE_DISPATCH_VERBS,
 } from "./self-audit-docs.js";
 import { COMMANDS, COMMAND_HELP } from "./cli.js";
@@ -171,6 +173,7 @@ describe("self-audit-docs — runDocsClaimsAudit", () => {
           "documented flags",
           "documented config sections",
           "documented env vars",
+          "undocumented commands",
         ],
       );
       // The synthetic repo has no src/commands, so coverage reports a single pass.
@@ -253,7 +256,12 @@ describe("self-audit-docs — runDocsClaimsAudit", () => {
     });
     try {
       const res = runDocsClaimsAudit(root);
-      assert.equal(res[0].status, "pass", res[0].detail);
+      // By name, not by position: this test is about node_modules being skipped, and a
+      // positional assertion made it fail when an unrelated row was added first.
+      const flags = res.find((r) => r.category === "self-audit/flag-validation")!;
+      assert.equal(flags.status, "pass", flags.detail);
+      const cmds = res.find((r) => r.name === "documented commands")!;
+      assert.equal(cmds.status, "pass", cmds.detail);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -574,5 +582,136 @@ describe("self-audit-docs — loadKnownEnvVars", () => {
     // KIT_REQUIRE_HARDWARE; the variable the code reads is KIT_REQUIRE_HARDWARE_IDENTITY.
     const known = loadKnownEnvVars(join(import.meta.dirname, ".."));
     assert.ok(known.has("KIT_REQUIRE_HARDWARE_IDENTITY"));
+  });
+});
+
+/**
+ * The INVERSE gate. Its siblings prove no doc names something kit lacks; these prove kit
+ * ships nothing a reader cannot find. The distinction matters because the forward gate is
+ * structurally incapable of catching this class: an undocumented command has, by
+ * definition, no doc reference to check.
+ */
+describe("self-audit-docs — undocumentedCommands (the inverse gate)", () => {
+  const CONTRACT_WITH_HARNESS = JSON.stringify({
+    opencliVersion: "0.1",
+    commands: {
+      check: { kind: "command", "x-kit-audience": "all" },
+      "gate-fs": { kind: "command", "x-kit-audience": "harness" },
+    },
+  });
+
+  it("passes when every human-facing command appears in a doc", () => {
+    const root = makeRepo({
+      "contracts/kit.opencli.json": CONTRACT,
+      "README.md": "Run `kit check` then `kit fix`.",
+    });
+    try {
+      const r = undocumentedCommands(root);
+      assert.equal(r.status, "pass");
+      assert.match(r.detail, /all 2 human-facing command\(s\)/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("FAILS naming a command that exists but no doc mentions", () => {
+    const root = makeRepo({
+      "contracts/kit.opencli.json": CONTRACT,
+      "README.md": "Run `kit check`.", // `kit fix` deliberately absent
+    });
+    try {
+      const r = undocumentedCommands(root);
+      assert.equal(r.status, "fail");
+      assert.match(r.detail, /kit fix/);
+      assert.match(r.detail, /1 of 2/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("counts the brace form, so the repo's own house style is not 40 false gaps", () => {
+    // `kit hooks {install,add,sync}` is how README documents a subcommand family. A
+    // literal-only matcher would report every one of them as undocumented.
+    const root = makeRepo({
+      "contracts/kit.opencli.json": JSON.stringify({
+        opencliVersion: "0.1",
+        commands: { hooks: { kind: "command", "x-kit-audience": "human" } },
+      }),
+      "src/cli.ts":
+        'const COMMAND_HELP = {\n  "hooks install": "x",\n  "hooks uninstall": "y",\n};',
+      "README.md": "Use `kit hooks {install,uninstall}` to manage them.",
+    });
+    try {
+      assert.equal(undocumentedCommands(root).status, "pass");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("excludes harness-audience commands, read from the contract not a hardcoded list", () => {
+    // `gate-fs` is invoked by hook wiring, never typed by a human. Requiring it in human
+    // docs would manufacture busywork; the exclusion has to come from the contract so a
+    // newly added gate verb inherits it without editing this rule.
+    const root = makeRepo({
+      "contracts/kit.opencli.json": CONTRACT_WITH_HARNESS,
+      "README.md": "Run `kit check`.", // gate-fs deliberately undocumented
+    });
+    try {
+      const r = undocumentedCommands(root);
+      assert.equal(r.status, "pass");
+      assert.match(r.detail, /1 harness-audience excluded/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("sees a SUBCOMMAND the contract cannot express — the union oracle's whole point", () => {
+    // Measured on the real tree: the contract lists top-level verbs only, so a
+    // contract-only oracle reported 1 gap while the help-map oracle reported 9, and
+    // neither was a superset. `kit hooks uninstall` — an enforcement off-switch — is
+    // invisible to the contract alone.
+    const root = makeRepo({
+      "contracts/kit.opencli.json": JSON.stringify({
+        opencliVersion: "0.1",
+        commands: { hooks: { kind: "command", "x-kit-audience": "human" } },
+      }),
+      "src/cli.ts": 'const COMMAND_HELP = {\n  "hooks uninstall": "Remove the hooks",\n};',
+      "README.md": "Use `kit hooks` for git hooks.",
+    });
+    try {
+      const r = undocumentedCommands(root);
+      assert.equal(r.status, "fail");
+      assert.match(r.detail, /kit hooks uninstall/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("cannot verify => didNotRun, rather than a green with no oracle", () => {
+    const root = makeRepo({ "README.md": "no contract, no cli.ts" });
+    try {
+      const r = undocumentedCommands(root);
+      assert.equal(r.status, "warn");
+      assert.equal(r.didNotRun, true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loadCommandSurface unions both oracles and marks harness verbs", () => {
+    const root = makeRepo({
+      "contracts/kit.opencli.json": CONTRACT_WITH_HARNESS,
+      "src/cli.ts": 'const COMMAND_HELP = {\n  "check --json": "x",\n  "memory context": "y",\n};',
+    });
+    try {
+      const s = loadCommandSurface(root);
+      const verbs = s.map((c) => c.verb);
+      assert.ok(verbs.includes("check"), "contract verb present");
+      assert.ok(verbs.includes("memory context"), "help-map subcommand present");
+      assert.equal(s.find((c) => c.verb === "gate-fs")?.harness, true);
+      assert.equal(s.find((c) => c.verb === "check")?.harness, false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

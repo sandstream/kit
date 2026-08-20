@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **`self-audit` now checks documentation in both directions.** The existing docs-claims
+  rules prove no doc names something kit lacks; they are structurally incapable of catching
+  the reverse, because an undocumented command has no doc reference to check. The new
+  `undocumented commands` rule closes that half: every human-facing command must appear in
+  at least one non-exempt doc, in invocable form. It found 13 — `kit broker` and its two
+  subcommands, all seven `kit profile` subcommands, `kit insight`, `kit memory context`,
+  and `kit hooks uninstall`, the off-switch for the git-hook enforcement floor, whose
+  installers were documented while it was not.
+
+  The oracle is the **union** of two sources, because each alone hides a real gap: the
+  committed contract lists top-level verbs and no subcommands (so it cannot see
+  `kit hooks uninstall`), while `COMMAND_HELP` lists subcommands but omits some top-level
+  verbs (so it cannot see `kit insight`). Measured: contract-only reported 1 gap,
+  help-only reported 9, neither a superset of the other. `x-kit-audience: "harness"` verbs
+  — the `gate-*` commands invoked by hook wiring, never typed by a human — are excluded,
+  and that exclusion is read from the contract rather than hardcoded, so a new gate verb
+  inherits it. Brace form counts, so `kit hooks {install,add,sync}` documents each member.
+
+  **Known limit:** the same inverse check is not possible for flags. No machine-readable
+  inventory of the flags kit *accepts* exists — `contracts/kit.opencli.json` carries
+  `x-kit-args-modeled: false` on all 71 commands, and the flag oracle used by the forward
+  rule is a scrape of source literals that also contains flags kit passes to subprocesses
+  (`--severity` for trivy, `--name-only` for git). Answering "which flags are
+  undocumented" needs argument modeling in the contract first.
+
+### Fixed
+
+- **A third test that reported a verdict its environment could not support.** The
+  `writeCheckDetail` failed-write test forced its precondition with `chmod 0o500` without
+  checking whether the mode denied *this* process — root mkdirs straight through it, so the
+  failure path was never exercised and the test reported a working write path as broken. It
+  now probes with a real `mkdir` and skips loudly when the mode does not deny, the same
+  guard applied to the WAL-sidecar test in 6.6.3. Verified pre-existing on a clean tree
+  before touching it.
+
+### Documentation
+
+- **The 13 commands above are now in `docs/COMMANDS.md`**, with two new sections —
+  exec-broker runtime posture (`broker enforce-readiness` / `enforce`) and the traveling
+  profile (`profile show/freeze/check/sign/verify/export/import`) — plus `kit hooks
+  uninstall`, `kit memory context` and `kit insight` in the tables they belong to. Text is
+  taken from each command's own help string rather than written from the outside.
+
+
 ## [6.6.5] - 2026-08-19
 
 ### Changed
