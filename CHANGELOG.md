@@ -8,6 +8,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- **`[context]` can declare the IDENTITY a repo must use, and kit asserts it** (#503). `kit check`
+  printed `✓ vercel authenticated <account>` and compared it to nothing, while `kit context check`
+  asserted only ids read from repo-local files — so a CLI answering as the wrong account was
+  green. New fields: `vercel.user`, `github.user` (distinct from `github.org`, which is the
+  remote's owner) and `convex.account`. They behave exactly like `git.email`: declared → asserted,
+  mismatch → red and non-zero, unreadable → `unknown` rather than a mismatch, since "cannot tell"
+  and "wrong account" are different findings.
+
+  What the gap cost, measured: a session whose CLI was logged in as a personal account with
+  read-only rights on the production environment read a FILTERED variable list as a complete one.
+  `env ls` showed four variables and looked whole (the ones that also existed in preview), the
+  production-only ones were invisible, and `env pull --environment=production` failed as though
+  the variable did not exist. Two contradictory conclusions were drawn before a web UI settled it.
+
+  A mismatch now also names the mechanism that scopes an identity to a repo, because a global
+  login is what produces a wrong one: `vercel -Q <dir>` / `VERCEL_TOKEN`, `gh auth switch`,
+  `gcloud config configurations activate`, `AWS_PROFILE`, stripe project profiles — and for
+  convex, that it has **no** profiles (`~/.convex/config.json` is global and `convex login`
+  overwrites it), so the isolation is `CONVEX_DEPLOY_KEY` / `CONVEX_DEPLOYMENT` per repo.
+
+  And it says the part that turns a wrong identity into wrong conclusions out loud: *anything you
+  already read as this identity may have been a PARTIAL view — permissions filter listings
+  silently.*
+
+  `kit context check`'s ready-to-paste block offers the detected identities, hedged (`⚠ the gh
+  account logged in NOW — VERIFY it is right for THIS repo`), since the live identity is exactly
+  what the lock exists to question. A value kit could not resolve to a real identity is reported
+  but never offered as something to declare.
+
+### Added
+
 - **`kit tools list` — the inventory that did not exist**, and the measurement three surfaces
   were missing (#500). Per tool: the resolved path, the installer that owns it (classified from
   the path, never assumed), the installed version, and with `--latest` how far behind it is.

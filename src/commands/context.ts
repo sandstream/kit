@@ -86,6 +86,26 @@ async function cmdContextCheck(): Promise<boolean> {
     console.log(
       `\n${c.red}${mismatches.length} mismatch(es) — you are NOT locked to the declared account/project. Do not run outward/destructive commands until this is green.${c.reset}`,
     );
+    // An identity mismatch is not fixed by logging in again — a global login is what produced
+    // it. Name the per-tool mechanism that scopes an identity to a repo (#503).
+    const { identityRemediation } = await import("../context-lock.js");
+    const seen = new Set<string>();
+    for (const f of mismatches) {
+      if (f.field !== "user" && f.field !== "account") continue;
+      const hint = identityRemediation(f.tool);
+      if (hint && !seen.has(hint)) {
+        seen.add(hint);
+        console.log(`  ${c.dim}${hint}${c.reset}`);
+      }
+    }
+    // A wrong identity does not merely mean "wrong account": the output of everything you ran
+    // as it may have been a filtered subset, which is how this defect cost two wrong
+    // conclusions in a row.
+    if (mismatches.some((f) => f.field === "user" || f.field === "account")) {
+      console.log(
+        `  ${c.yellow}Anything you already read as this identity may have been a PARTIAL view — permissions filter listings silently.${c.reset}`,
+      );
+    }
   }
   // Mismatch = non-zero exit so this can gate a hook / agent before acting.
   // Unknown (tool absent / unreadable) does not block.

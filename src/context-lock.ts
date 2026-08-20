@@ -31,12 +31,13 @@ export interface ContextFinding {
 export interface LiveContext {
   gcloud?: { account: string | null; project: string | null };
   git?: { email: string | null };
-  github?: { org: string | null; remote: string | null };
+  github?: { org: string | null; remote: string | null; user?: string | null };
   gitlab?: { group: string | null; remote: string | null };
   bitbucket?: { workspace: string | null; remote: string | null };
   ssh?: { identity: string | null; fingerprint: string | null; host_alias: string | null };
   npm?: { registry: string | null };
-  vercel?: { orgId: string | null; projectId: string | null };
+  vercel?: { orgId: string | null; projectId: string | null; user?: string | null };
+  convex?: { account: string | null };
   keycloak?: { realm: string | null };
   auth0?: { tenant: string | null };
   clerk?: { env: string | null };
@@ -87,6 +88,27 @@ const FIELD_SPECS: {
     field: "remote",
     declared: (d) => d.github?.remote,
     live: (l) => l.github?.remote ?? null,
+  },
+  {
+    // The IDENTITY the CLI is logged in as. Declared, therefore asserted — the whole point of
+    // #503: kit printed `authenticated <account>` and compared it to nothing, so a session with
+    // read-only rights on production read a filtered env list as a complete one.
+    tool: "vercel",
+    field: "user",
+    declared: (d) => d.vercel?.user,
+    live: (l) => l.vercel?.user ?? null,
+  },
+  {
+    tool: "github",
+    field: "user",
+    declared: (d) => d.github?.user,
+    live: (l) => l.github?.user ?? null,
+  },
+  {
+    tool: "convex",
+    field: "account",
+    declared: (d) => d.convex?.account,
+    live: (l) => l.convex?.account ?? null,
   },
   {
     tool: "gitlab",
@@ -186,7 +208,9 @@ export function compareContext(declared: ContextConfig, live: LiveContext): Cont
 export function suggestContextToml(live: LiveContext): string {
   const out: string[] = [];
   const emit = (header: string, rows: [string, string | null | undefined, string][]): void => {
-    const present = rows.filter(([, v]) => v);
+    // A parenthetical note ("(logged in, identity not in config)") is honest as a LIVE reading
+    // and useless as a declaration — asserting it would compare a sentence. Report, don't pin.
+    const present = rows.filter(([, v]) => v && !v.startsWith("("));
     if (present.length === 0) return;
     out.push(header);
     for (const [k, v, note] of present) {
@@ -198,6 +222,13 @@ export function suggestContextToml(live: LiveContext): string {
   emit("[context.github]", [
     ["org", live.github?.org, "from origin remote — authoritative"],
     ["remote", live.github?.remote, ""],
+    // Identity is the currently-logged-in account, which is exactly what the lock exists to
+    // question — hedged, like the ambient gcloud values below (#503).
+    [
+      "user",
+      live.github?.user,
+      "⚠ the gh account logged in NOW — VERIFY it is right for THIS repo",
+    ],
   ]);
   emit("[context.gitlab]", [
     ["group", live.gitlab?.group, "from origin remote — authoritative"],
@@ -210,6 +241,18 @@ export function suggestContextToml(live: LiveContext): string {
   emit("[context.vercel]", [
     ["team", live.vercel?.orgId, "orgId from .vercel/project.json — authoritative"],
     ["project", live.vercel?.projectId, "projectId"],
+    [
+      "user",
+      live.vercel?.user,
+      "⚠ the vercel account logged in NOW — VERIFY it is right for THIS repo",
+    ],
+  ]);
+  emit("[context.convex]", [
+    [
+      "account",
+      live.convex?.account,
+      "⚠ global ~/.convex/config.json — convex has no profiles, so this is machine-wide",
+    ],
   ]);
   emit("[context.gcloud]", [
     [
@@ -375,10 +418,22 @@ export async function gatherLive(cwd: string = process.cwd()): Promise<LiveConte
   try {
     const raw = await readFile(resolve(cwd, ".vercel", "project.json"), "utf8");
     const j = JSON.parse(raw) as { orgId?: string; projectId?: string };
-    live.vercel = { orgId: j.orgId ?? null, projectId: j.projectId ?? null };
+    live.vercel = { orgId: j.orgId ?? null, projectId: j.projectId ?? null, user: null };
   } catch {
-    live.vercel = { orgId: null, projectId: null };
+    live.vercel = { orgId: null, projectId: null, user: null };
   }
+
+  // Identities. Each is one command that reads what the CLI would act as; unreadable (not
+  // logged in, tool absent) yields null, which reports as `unknown` rather than a mismatch —
+  // "cannot tell" and "wrong account" are different findings.
+  live.vercel.user = normaliseIdentity(await run("vercel", ["whoami"]));
+  live.github = {
+    ...(live.github ?? { org: null, remote: null }),
+    user: normaliseIdentity(await run("gh", ["api", "user", "-q", ".login"])),
+  };
+  // Convex has no profile mechanism: ~/.convex/config.json is global and `convex login`
+  // overwrites it, so the file IS the machine-wide identity. Read it rather than shelling out.
+  live.convex = { account: readConvexAccount() };
 
   // App-service auth identity from the app's env — the "live" realm/tenant the app
   // would actually authenticate against. Only set when the env names it (so an
@@ -393,6 +448,73 @@ export async function gatherLive(cwd: string = process.cwd()): Promise<LiveConte
   if (clerkEnv) live.clerk = { env: clerkEnv };
 
   return live;
+}
+
+/**
+ * How to switch identity for a tool, per tool.
+ *
+ * Requirement 3 of #503: pointing at "log in again" is the wrong advice, because a global login
+ * is what produced the wrong identity in the first place. Each of these is the mechanism that
+ * scopes an identity to a repo — and where a tool HAS none, saying so is the useful answer.
+ */
+export function identityRemediation(tool: string): string | null {
+  switch (tool) {
+    case "vercel":
+      return "vercel: use a per-profile config dir (`vercel -Q .vercel-profile <cmd>`, or VERCEL_TOKEN / `--token` for one command). A global `vercel login` is what makes one identity leak across repos.";
+    case "github":
+      return "gh: `gh auth login` stores multiple accounts; `gh auth switch --user <login>` picks one per shell.";
+    case "convex":
+      return "convex has NO profiles — ~/.convex/config.json is global and `convex login` overwrites it. Isolate per repo with CONVEX_DEPLOY_KEY / CONVEX_DEPLOYMENT in the repo's env instead.";
+    case "gcloud":
+      return "gcloud: `gcloud config configurations activate <name>` (or CLOUDSDK_ACTIVE_CONFIG_NAME) scopes account+project per repo.";
+    case "aws":
+      return "aws: AWS_PROFILE per repo.";
+    case "stripe":
+      return "stripe: `stripe config --list` / project profiles (`--project-name`).";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Last non-empty line, trimmed — CLIs print notices before the answer (`vercel whoami` emits a
+ * "Retrieving…" line, `gh` can print an upgrade notice). Empty or error output becomes null so a
+ * failed read never reads as an identity.
+ */
+export function normaliseIdentity(out: string | null): string | null {
+  if (!out) return null;
+  const lines = out
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !/^[>!]|error|not authenticated/i.test(l));
+  const last = lines[lines.length - 1];
+  return last && last.length <= 200 ? last : null;
+}
+
+/** The Convex account from its global config, or null when there is none to read. */
+export function readConvexAccount(home: string = homedir()): string | null {
+  for (const rel of [
+    [".convex", "config.json"],
+    [".convex", "auth.json"],
+  ]) {
+    try {
+      const raw = readFileSync(resolve(home, ...rel), "utf8");
+      const j = JSON.parse(raw) as {
+        email?: string;
+        account?: string;
+        accessToken?: unknown;
+        teams?: unknown;
+      };
+      const id = j.email ?? j.account ?? null;
+      if (typeof id === "string" && id.length > 0) return id;
+      // A config with a token but no readable identity is still evidence of a login; saying
+      // "logged in, identity unreadable" beats claiming nothing is there.
+      if (j.accessToken) return "(logged in, identity not in config)";
+    } catch {
+      /* next candidate */
+    }
+  }
+  return null;
 }
 
 /**
