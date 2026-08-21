@@ -82,10 +82,13 @@ export function emitGithubAnnotations(checks: JsonCheck[]): void {
 export function emitGitlabJunit(checks: JsonCheck[], allOk: boolean): void {
   const failures = checks.filter((c) => c.status === "fail");
   const warnings = checks.filter((c) => c.status === "warn");
+  const skipped = checks.filter(
+    (c) => c.status !== "fail" && c.status !== "warn" && c.status !== "pass",
+  );
   const lines: string[] = [
     `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<testsuites name="kit-ci" tests="${checks.length}" failures="${failures.length}" errors="0">`,
-    `  <testsuite name="kit" tests="${checks.length}" failures="${failures.length}">`,
+    `<testsuites name="kit-ci" tests="${checks.length}" failures="${failures.length}" errors="0" skipped="${skipped.length}">`,
+    `  <testsuite name="kit" tests="${checks.length}" failures="${failures.length}" skipped="${skipped.length}">`,
   ];
   for (const ch of checks) {
     lines.push(`    <testcase name="${xmlEscape(ch.name)}" classname="${xmlEscape(ch.category)}">`);
@@ -93,6 +96,11 @@ export function emitGitlabJunit(checks: JsonCheck[], allOk: boolean): void {
       lines.push(`      <failure message="${xmlEscape(ch.detail)}"/>`);
     } else if (ch.status === "warn") {
       lines.push(`      <system-out>${xmlEscape(ch.detail)}</system-out>`);
+    } else if (ch.status !== "pass") {
+      // JUnit reads an empty testcase as PASSED, so a skipped check used to render green:
+      // 24 of 26 checks in a directory where nothing applied (#517). `<skipped>` is the
+      // element that exists for exactly this, and the reason goes with it.
+      lines.push(`      <skipped message="${xmlEscape(ch.detail)}"/>`);
     }
     lines.push(`    </testcase>`);
   }
@@ -103,7 +111,7 @@ export function emitGitlabJunit(checks: JsonCheck[], allOk: boolean): void {
   writeFileSync("kit-report.xml", xml, "utf8");
   if (!allOk || warnings.length > 0) {
     console.log(
-      `CI report written to kit-report.xml (${failures.length} failures, ${warnings.length} warnings)`,
+      `CI report written to kit-report.xml (${failures.length} failures, ${warnings.length} warnings, ${skipped.length} skipped)`,
     );
   }
 }
