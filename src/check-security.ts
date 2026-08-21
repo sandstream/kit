@@ -2658,9 +2658,8 @@ export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]
   // variable with a secret value is inlined into the bundle at build time and shipped to every
   // visitor without ever being committed. The bundle scanner already existed and was reachable
   // only from `kit security scan-build`, so no automatic verdict ever looked at build output.
-  const { checkClientExposedNames, checkBuiltBundleSecrets } = await import(
-    "./check-client-exposure.js"
-  );
+  const { checkClientExposedNames, checkBuiltBundleSecrets } =
+    await import("./check-client-exposure.js");
   // The GOVERNED project's config, from the threaded root — not the calling process's.
   let clientAllow: Record<string, string> = {};
   let declaredKeyNames: string[] = [];
