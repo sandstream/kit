@@ -817,7 +817,6 @@ async function cmdSecurityClearCache(): Promise<boolean> {
   return true;
 }
 
-
 /**
  * `kit security advisories [--accept]`
  *
@@ -864,7 +863,8 @@ export async function cmdSecurityAdvisories(): Promise<boolean> {
       `${c.green}✓${c.reset} ${ADVISORY_BASELINE_FILE} now records ${outcome.advisories.length} known advisory(ies)`,
     );
     if (added.length > 0) console.log(`  ${c.yellow}+${added.length} newly accepted${c.reset}`);
-    if (stale.length > 0) console.log(`  ${c.green}-${stale.length} pruned (no longer apply)${c.reset}`);
+    if (stale.length > 0)
+      console.log(`  ${c.green}-${stale.length} pruned (no longer apply)${c.reset}`);
     console.log(
       `\n${c.dim}Commit the file. Review sees dependency debt as a data diff, not a code change.${c.reset}`,
     );
@@ -877,17 +877,23 @@ export async function cmdSecurityAdvisories(): Promise<boolean> {
   if (added.length > 0) {
     console.log(`\n${c.red}NEW since the baseline (${added.length}):${c.reset}`);
     for (const a of added) {
-      console.log(`  ${a.severity.padEnd(9)} ${a.package}  ${a.id}  ${c.dim}${a.title.slice(0, 60)}${c.reset}`);
+      console.log(
+        `  ${a.severity.padEnd(9)} ${a.package}  ${a.id}  ${c.dim}${a.title.slice(0, 60)}${c.reset}`,
+      );
     }
   }
   if (stale.length > 0) {
-    console.log(`\n${c.yellow}No longer apply (${stale.length}) — the file may only shrink:${c.reset}`);
+    console.log(
+      `\n${c.yellow}No longer apply (${stale.length}) — the file may only shrink:${c.reset}`,
+    );
     for (const s2 of stale) console.log(`  ${s2.id}  ${c.dim}${s2.package}${c.reset}`);
   }
   if (added.length === 0 && stale.length === 0) {
     console.log(`\n${c.green}✓ baseline matches the audit exactly${c.reset}`);
   } else {
-    console.log(`\n${c.dim}Record the current state deliberately: ${c.reset}${c.bold}kit security advisories --accept${c.reset}`);
+    console.log(
+      `\n${c.dim}Record the current state deliberately: ${c.reset}${c.bold}kit security advisories --accept${c.reset}`,
+    );
   }
   // Reporting, not gating: `kit check --category security` is the gate.
   return true;
