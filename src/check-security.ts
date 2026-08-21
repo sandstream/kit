@@ -2645,6 +2645,12 @@ export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]
   // so `kit ci` and `kit heal` see it too.
   const { checkPolicyAgentWrites } = await import("./check-policy-ops.js");
   results.push(await checkPolicyAgentWrites(root));
+  // What this run's directory covers. Run from a workspace root holding several repos side by
+  // side, every manifest-dependent scanner skips truthfully and the summary read "All 25 checks
+  // passed" — while the tree one level down had 30 known dependency vulnerabilities. The skips
+  // were honest; the missing row was the one saying the code lives somewhere kit did not look.
+  const { checkScanScope } = await import("./check-nested-projects.js");
+  results.push(await checkScanScope(root));
 
   // Inbound integration: fold any third-party findings a partner tool emitted to
   // `.kit-scan-results.jsonl` into the verdict. No file → no-op. Can only escalate

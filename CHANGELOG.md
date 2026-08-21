@@ -120,6 +120,31 @@
   `kit audit` shows both, and prints `—` for entries written before the fields existed rather than
   guessing.
 
+- **`kit ci` rendered a skipped check as a failure on GitHub and as a pass on GitLab** (#517).
+  Two surfaces, two opposite lies, one missing case.
+
+  The step-summary icon was `pass ? ✅ : warn ? ⚠️ : ❌` — no branch for `skip` — so a run in a
+  directory that is not a project printed twenty-plus ❌ rows above a footer reading
+  *"2 passed, 1 failed, 1 warnings"*: the table and the tally contradicted each other in the same
+  output, because the summary counted skips and the footer never printed them. Three of those red
+  rows were worse than misleading — `socket scan` is **excluded by design** (cloud-only),
+  `bumblebee` was **switched off by the operator** via `KIT_BUMBLEBEE`, and SAST/guarddog are
+  **opt-in** — so kit's own documented design read as broken.
+
+  The GitLab JUnit writer emitted a *bare* `<testcase>` for a skip, and JUnit reads an empty
+  testcase as PASSED. Measured on the same run: `tests="26" failures="1"`, zero `<skipped>` tags,
+  24 empty testcases — 24 checks that never ran, reported green.
+
+  Now: skips get their own icon (`➖`) with the reason they already carried, the footer reads
+  `N passed, N failed, N warnings, N skipped` so the rows add up, the table is ordered
+  failures → warnings → passes → skips (twenty always-red rows at the top is how a report becomes
+  unread), and JUnit emits `<skipped message="…"/>` with a `skipped=` count on the suite.
+
+  Skips still do not gate: `allOk` remains `failed === 0 && (!failOnWarning || warnings === 0)`.
+  Only what the report *says* changed. The machine-read surface was already correct — annotations
+  only ever fired for `fail`/`warn` — which is the worse way round, since the human is the one
+  who concludes "twenty things are broken here".
+
 ### Changed
 
 - **A scanner that finds nothing now says what it looked for** (#525).
@@ -229,30 +254,49 @@
   The banner now says `N entries came from a rebase/cherry-pick replay — not counted.` rather than
   silently reporting a smaller number than the log is long.
 
-- **`kit ci` rendered a skipped check as a failure on GitHub and as a pass on GitLab** (#517).
-  Two surfaces, two opposite lies, one missing case.
+- **A skipped scanner was counted as a passing one in the verdict line** (#521).
 
-  The step-summary icon was `pass ? ✅ : warn ? ⚠️ : ❌` — no branch for `skip` — so a run in a
-  directory that is not a project printed twenty-plus ❌ rows above a footer reading
-  *"2 passed, 1 failed, 1 warnings"*: the table and the tally contradicted each other in the same
-  output, because the summary counted skips and the footer never printed them. Three of those red
-  rows were worse than misleading — `socket scan` is **excluded by design** (cloud-only),
-  `bumblebee` was **switched off by the operator** via `KIT_BUMBLEBEE`, and SAST/guarddog are
-  **opt-in** — so kit's own documented design read as broken.
+  Run from a workspace root that holds several repos side by side — `web/`, `illithid/` — every
+  manifest-dependent scanner skipped truthfully ("no package.json found") and the summary printed:
 
-  The GitLab JUnit writer emitted a *bare* `<testcase>` for a skip, and JUnit reads an empty
-  testcase as PASSED. Measured on the same run: `tests="26" failures="1"`, zero `<skipped>` tags,
-  24 empty testcases — 24 checks that never ran, reported green.
+  ```
+  All 25 checks passed ✓
+  ```
 
-  Now: skips get their own icon (`➖`) with the reason they already carried, the footer reads
-  `N passed, N failed, N warnings, N skipped` so the rows add up, the table is ordered
-  failures → warnings → passes → skips (twenty always-red rows at the top is how a report becomes
-  unread), and JUnit emits `<skipped message="…"/>` with a `skipped=` count on the suite.
+  Fifteen of those twenty-five had never run. The same command one directory down, where the code
+  actually lives, reported **30 known dependency vulnerabilities (high)**, 22 unpinned dependencies
+  and 18 secret-shaped strings in git history. The green line was covering all of it.
 
-  Skips still do not gate: `allOk` remains `failed === 0 && (!failOnWarning || warnings === 0)`.
-  Only what the report *says* changed. The machine-read surface was already correct — annotations
-  only ever fired for `fail`/`warn` — which is the worse way round, since the human is the one
-  who concludes "twenty things are broken here".
+  `printSummary` counted `status === "pass" || status === "skip"` as OK and then declared "All N
+  checks passed" whenever that count reached the total. This is the same defect class as #517 — a
+  check that could not run rendering as success — one level up, in the line most people read
+  instead of the rows. Now there are three states rather than two:
+
+  ```
+  All 26 checks passed ✓                              (everything ran, everything passed)
+  10 passed  ·  15 could not run                      (everything that ran passed)
+  10/26 passed  ·  15 could not run  ·  1 real issue  (something to act on)
+  ```
+
+  A run with no applicable checks at all now says `no checks applied here` instead of "All 0 checks
+  passed ✓". Skips still do not gate — they are counted and named, not failed.
+
+- **A directory with no manifest is not a directory with nothing to scan** (#521).
+
+  New `scan scope` check, enumerated in every security run, because each individual skip was true
+  and the missing row was the one stating the consequence — that the verdict described an empty
+  directory while the code sat one level down:
+
+  - no manifest here, projects below → **warn (high)**, naming them: *"no manifest here — this
+    verdict covers none of 3 project(s) below: illithid, web, web-corrupt-backup"*;
+  - a root manifest declaring workspaces → **pass**: *"12 nested package(s) covered via
+    workspaces"* — a root-level scan genuinely does cover those;
+  - a root manifest without workspaces, siblings below → **warn (medium)**: they are separate
+    projects and were not scanned;
+  - an ordinary single project → **pass**, quietly.
+
+  The three passing cases carry as much weight as the warning one: a check that warns on every
+  monorepo gets switched off within a week, and then the case it was written for goes unnoticed too.
 
 ## [6.8.0] - 2026-08-21
 
