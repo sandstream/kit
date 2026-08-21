@@ -154,6 +154,56 @@
 
 ## [6.8.0] - 2026-08-21
 
+- **What reaches the browser is now checked** (#523).
+
+  kit covered credentials that were *committed* (trufflehog over history, the staged-file scan) and
+  `.env` hygiene. Neither sees the leak that costs the most: a `VITE_*` or `NEXT_PUBLIC_*` variable
+  holding a real secret is inlined into the bundle at build time and shipped to every visitor —
+  without ever being committed. `.gitignore` does not protect against it and history scanning cannot
+  see it.
+
+  Two checks, both deterministic:
+
+  **`client-exposed env names`** — a client-exposed prefix plus a secret-shaped name is a leak by
+  construction, because the framework will inline it. Nine prefixes (`VITE_`, `NEXT_PUBLIC_`,
+  `PUBLIC_`, `REACT_APP_`, `EXPO_PUBLIC_`, `NUXT_PUBLIC_`, `GATSBY_`, `VUE_APP_`, `STORYBOOK_`)
+  against `SECRET|TOKEN|PASSWORD|CREDENTIAL|PRIVATE|_KEY|API_KEY`. Names that are secret-shaped and
+  public by design are excused — `..._ANON_KEY`, `..._PUBLISHABLE_KEY`, `..._SITE_KEY`, a Sentry
+  DSN, a client id, a measurement id, a VAPID public key. That list is what makes the check keepable:
+  `KEY` alone matches `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, the
+  two most common client env vars there are, both meant to be published.
+
+  Anything else fails, with the escape hatch spelled out in the suggestion:
+
+  ```toml
+  [scan.client_exposed_allow]
+  VITE_DEMO_SECRET_KEY = "demo tenant, rotated nightly"
+  ```
+
+  The reason is required — an entry without one is reported, because "somebody allowed this once" is
+  not something anyone can audit later. Only names are read from `.env*` files; the values are
+  dropped at the parse, since the prefix decides exposure and nothing downstream needs the content.
+
+  **`built bundle secrets`** — the built output is scanned for real credential shapes, which catches
+  the case the name check cannot: a key hardcoded in source that never went through env at all. The
+  scanner for this already existed (`scanBuildArtifacts`) and was reachable only from
+  `kit security scan-build`, so no automatic verdict had ever looked at build output — where the
+  leak actually lands.
+
+  Scoped so it stays usable, both limits measured rather than guessed: it requires a client framework
+  (kit's own `dist/` is a Node CLI, and scanning it produced 73 "credential shapes" — every one a
+  test fixture or one of kit's own detection patterns), and it looks in workspace packages, not just
+  the root (a real repo declares `workspaces` at the root and ships from `apps/web`, so a root-only
+  check called it "nothing builds for a browser"). Compiled tests, mocks and fixtures are excluded
+  and the count of what was set aside is printed. An unbuilt project reports *"present but not built
+  — run the build, then re-check"* rather than passing.
+
+  Verified against a real Vite workspace (`apps/web/dist` — pass) and against a planted leak: the
+  name check fails on `VITE_STRIPE_SECRET_KEY` while leaving `VITE_API_URL` and
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY` alone, and the bundle check finds an `sk_live_…` inlined into
+  `dist/assets/index-abc.js` at critical severity, telling the operator to rotate first — removing
+  it from the build does not un-publish what already shipped.
+
 ### Fixed
 
 - **Regenerating `flag-surface.ts` produced a 512-line diff over identical content** (#525).

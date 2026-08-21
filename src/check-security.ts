@@ -2653,6 +2653,27 @@ export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]
     await import("./check-nested-projects.js");
   const scope = await scanScopeFacts(root);
   results.push(await checkScanScope(root, scope));
+
+  // What reaches the browser. Committed-secret scanning cannot see this: a VITE_/NEXT_PUBLIC_
+  // variable with a secret value is inlined into the bundle at build time and shipped to every
+  // visitor without ever being committed. The bundle scanner already existed and was reachable
+  // only from `kit security scan-build`, so no automatic verdict ever looked at build output.
+  const { checkClientExposedNames, checkBuiltBundleSecrets } = await import(
+    "./check-client-exposure.js"
+  );
+  // The GOVERNED project's config, from the threaded root — not the calling process's.
+  let clientAllow: Record<string, string> = {};
+  let declaredKeyNames: string[] = [];
+  try {
+    const { loadConfig } = await import("./config.js");
+    const cfg = await loadConfig(resolve(root, ".kit.toml"));
+    clientAllow = cfg?.scan?.client_exposed_allow ?? {};
+    declaredKeyNames = Object.keys(cfg?.secrets?.keys ?? {});
+  } catch {
+    /* no config here — the check still reads .env* names */
+  }
+  results.push(await checkClientExposedNames(root, clientAllow, declaredKeyNames));
+  results.push(await checkBuiltBundleSecrets(root));
   // Inbound integration: fold any third-party findings a partner tool emitted to
   // `.kit-scan-results.jsonl` into the verdict. No file → no-op. Can only escalate
   // (fail/warn), never green the gate — see external-findings.ts.
