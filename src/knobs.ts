@@ -164,6 +164,17 @@ export const KNOBS: KnobGroup[] = [
         desc: "air-gap mode: no outbound network; cloud-only scanners are dropped",
       },
       {
+        name: "KIT_TOOL_LATEST_TTL_H",
+        kind: "env",
+        desc: "hours a tool's latest-version answer stays cached in ~/.kit/tool-latest.json (default 24). The gate itself never calls a registry — it reads this cache and says so when it is cold",
+      },
+      {
+        name: "KIT_WRAPPER_ALLOW_DEV",
+        kind: "env",
+        desc: "let ~/.kit/bin/kit point at a kit checkout instead of the installed kit. Every hook on the machine then execs a build artifact that `npm run build` deletes — for kit development only",
+        danger: true,
+      },
+      {
         name: "KIT_NO_HINTS",
         kind: "env",
         desc: "silence the 💡 contextual tips",
