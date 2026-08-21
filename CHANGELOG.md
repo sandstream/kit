@@ -2,6 +2,37 @@
 
 ### Added
 
+- **Fail on NEW dependency debt, not on the debt you already have** (#524).
+
+  A repo with thirty known advisories cannot adopt a gate that fails on all thirty — it gets
+  disabled the same afternoon. `kit check --category security` now carries an `advisory baseline`
+  check that freezes today's debt in a data file and fails the moment something new appears.
+
+  - **The repo's own package manager does the auditing** — npm, pnpm, yarn or bun, whichever the
+    committed lockfile names. No new tool to install, and no cloud service handed the manifest.
+  - **The known list is data, not code** (`.kit/advisories.json`): GHSA id → package, severity,
+    title, sorted, with no timestamp, so a dependency bump is a small readable diff in review rather
+    than a code change.
+  - **The file may only shrink.** A baseline entry that no longer applies is a finding of its own.
+    Without that rule the list silently accumulates dead ids and the gate stops meaning anything;
+    with it, fixing a vulnerability and pruning its line belong in the same commit.
+  - **Remaining debt is summarised per severity** on every run — *"no new advisories (npm); known
+    debt: 1 critical, 3 high, 4 moderate"* — so the size is visible without opening the file.
+
+  `kit security advisories` reports the current state; `--accept` writes the baseline, adding and
+  pruning in one step. Opt-in by construction: with no baseline committed the check skips, naming
+  the command that adopts it. It also skips under an air-gap posture rather than pretending the
+  registry answered, and an audit that could not run fails as `didNotRun` rather than reporting a
+  clean result.
+
+  The parser is shape-tolerant because the four managers bury the same three facts at different
+  depths. That mattered more than expected: bun puts the **package name in the object key** and in
+  no field at all, so a field-only parser found zero advisories in a repo that has twenty-eight —
+  and would have reported "no new advisories" over a critical deserialization type-confusion in
+  `seroval`. Reading keys blindly is the opposite failure, since npm nests everything under a
+  `vulnerabilities` key, so structural keys are excluded and a key only counts when it looks like a
+  package name. Verified against real output from both, plus pnpm's `advisories` map.
+
 - **What reaches the browser is now checked** (#523).
 
   kit covered credentials that were *committed* (trufflehog over history, the staged-file scan) and
