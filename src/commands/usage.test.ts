@@ -1,4 +1,12 @@
 /**
+ * Note on what is NOT tested here: the interactive TTY path (alternate screen, number-key tab
+ * switching, restore on `q`/Ctrl-C/EOF) is verified by hand through a pty, because `script` — the
+ * portable way to get a pty from a test — hangs when its own stdin is not a terminal, which would
+ * hang CI rather than gate it. That path is where the real bug was: an earlier build entered the
+ * alternate screen, let readline swallow the keypress, and never restored it, leaving the shell
+ * apparently dead. The restore now runs from `process.once("exit")` and from SIGINT/SIGTERM, so it
+ * cannot be skipped by an early return.
+ *
  * The renderer pads around ANSI escapes, so the box geometry is arithmetic that can be wrong — and
  * was: the first build produced rows of 63, 70 and 80 visible columns because the header padding
  * counted escape bytes and six tabs overflowed the frame. A report that looks broken does not get

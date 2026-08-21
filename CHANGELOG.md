@@ -123,6 +123,13 @@
   size the claim without knowing which applied. The fallback path already stated its bound
   explicitly and is unchanged.
 
+  The interactive view uses raw stdin directly rather than `readline`, which swallowed the
+  keypress, and restores the terminal from `process.once("exit")` plus SIGINT/SIGTERM handlers
+  using `writeSync` — a buffered write is lost when the process exits immediately after it, and a
+  view that leaves the terminal in the alternate screen with raw mode on makes the operator's shell
+  look dead. Verified through a pty: `q`, Esc, Ctrl-C, SIGINT and SIGTERM all give the screen
+  back.
+
 ### Fixed
 
 - **Regenerating `flag-surface.ts` produced a 512-line diff over identical content** (#525).

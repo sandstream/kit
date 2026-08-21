@@ -369,10 +369,38 @@ export async function cmdUsage(): Promise<boolean> {
     return true;
   }
 
-  const { createInterface } = await import("node:readline");
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  // Raw stdin directly, no readline: readline consumes the data events this needs, and it adds
+  // nothing when the only input is a single keystroke. Measured through a pty, the readline
+  // version swallowed the keypress and never restored the screen.
+  //
+  // The restore is registered BEFORE the alternate screen is entered, and runs on exit and on a
+  // signal as well as on `q`. A view that leaves the terminal in the alternate screen with raw
+  // mode still on is worse than no view: the operator's shell looks dead.
+  const { writeSync } = await import("node:fs");
+  let restored = false;
+  const restore = (): void => {
+    if (restored) return;
+    restored = true;
+    process.stdin.setRawMode?.(false);
+    process.stdin.pause();
+    // writeSync, not process.stdout.write: on the Ctrl-C path the process exits immediately after
+    // this call, and a buffered write is lost — measured, with the terminal left in the alternate
+    // screen. The bytes that give the operator their shell back must not be queued.
+    writeSync(1, "\x1b[?1049l");
+  };
+  process.once("exit", restore);
+  process.once("SIGINT", () => {
+    restore();
+    process.exit(130);
+  });
+  process.once("SIGTERM", () => {
+    restore();
+    process.exit(143);
+  });
+
   process.stdin.setRawMode?.(true);
-  process.stdout.write("\x1b[?1049h"); // alternate screen: leave the scrollback intact
+  process.stdin.resume();
+  process.stdout.write("\x1b[?1049h");
 
   const draw = (): void => {
     process.stdout.write("\x1b[2J\x1b[H");
@@ -381,23 +409,25 @@ export async function cmdUsage(): Promise<boolean> {
   draw();
 
   await new Promise<void>((resolve) => {
+    const finish = (): void => {
+      process.stdin.off("data", onKey);
+      process.stdin.off("end", finish);
+      restore();
+      resolve();
+    };
     const onKey = (buf: Buffer): void => {
       const k = buf.toString();
-      if (k === "q" || k === "\x03" || k === "\x1b") return void finish();
+      // q, Ctrl-C, Esc — and Ctrl-D, because a terminal that only answers to one key is a trap.
+      if (k === "q" || k === "\x03" || k === "\x1b" || k === "\x04") return void finish();
       const n = Number.parseInt(k, 10);
       if (!Number.isNaN(n) && n >= 1 && n <= TABS.length) {
         tab = TABS[n - 1];
         draw();
       }
     };
-    const finish = (): void => {
-      process.stdin.off("data", onKey);
-      process.stdin.setRawMode?.(false);
-      process.stdout.write("\x1b[?1049l"); // restore the primary screen
-      rl.close();
-      resolve();
-    };
     process.stdin.on("data", onKey);
+    // EOF: stdin closed under us (a pty test, a wrapper, a closed pipe). Leave rather than hang.
+    process.stdin.once("end", finish);
   });
 
   // Print the tab the operator left on, so the terminal keeps a record of what they looked at.
