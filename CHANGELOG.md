@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`kit config migrate` deleted every comment in `.kit.toml`, and the dry run did not say so**
+  (#513). It re-serialised from the parsed object, so on the v0 → v1 step — whose entire job is to
+  stamp `version = 1` — kit's own config went from 8 comment lines to 0, and a one-line change
+  produced a 36-line diff. The parsed data was identical, so the backup-and-re-validate safety
+  path passed and flagged nothing. What was lost was policy reasoning: why those scanners are
+  declared, why the refs are `aqua:`-scheme-qualified, which values `environment` accepts.
+
+  An add-only migration is now applied as a **text edit** — the added key is inserted above the
+  first table (top-level keys must precede it or TOML scopes them into it) and the rest of the
+  file is untouched. Anything more structural returns null from the patcher rather than being
+  forced through an edit that cannot express it, and then the run is **refused** while comments
+  exist unless `--allow-comment-loss` is passed, naming how many lines are at stake.
+
+  `--dry-run` now says which path would be taken — *"Applied as a text edit: comments and
+  formatting are preserved"* or the count that would be deleted. A preview that omits the
+  destructive half of a change is worse than no preview.
+
 ### Added
 
 - **Config drift is reported, both kinds** (#511). A `.kit.toml` falls behind in two ways and

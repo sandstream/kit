@@ -148,6 +148,50 @@ export function planConfigMigration(
   }
 }
 
+/**
+ * Apply a migration by EDITING THE SOURCE TEXT, when the change is only added top-level keys.
+ *
+ * `stringify(migrated)` re-serialises from the parsed object, so every comment in the file is
+ * deleted. Measured on kit's own config, migrating v0 -> v1 — a step whose entire job is to stamp
+ * `version = 1`: 8 comment lines became 0, and a one-line change produced a 36-line diff (#513).
+ * The data was identical, so re-validation passed and nothing flagged the loss.
+ *
+ * `.kit.toml` is where a repo declares its policy, and the comments are where the WHY lives —
+ * why these scanners, why scheme-qualified refs, which values a field accepts. A routine
+ * maintenance command must not convert reviewable policy into bare data.
+ *
+ * Returns null when the diff is anything more than added top-level scalars, so a future migration
+ * that renames or moves keys does NOT get silently patched by a text edit that cannot express it.
+ * The caller then falls back to serialising — loudly.
+ */
+export function patchConfigText(original: string, diff: readonly ConfigDiffEntry[]): string | null {
+  const additions = diff.filter((d) => d.before === undefined && d.after !== undefined);
+  if (additions.length !== diff.length || additions.length === 0) return null;
+  // Only top-level scalars: a dotted path is a nested table, which needs placement rules a
+  // line insert cannot get right.
+  if (additions.some((d) => d.path.includes("."))) return null;
+
+  // Insert before the first table header so the keys stay top-level (TOML scopes everything
+  // after a `[table]` to that table), keeping the original text byte-for-byte otherwise.
+  const lines = original.split("\n");
+  const firstTable = lines.findIndex((l) => /^\s*\[/.test(l));
+  const rendered = additions.map((d) => `${d.path} = ${d.after}`);
+  if (firstTable < 0) {
+    const body = original.endsWith("\n") ? original : `${original}\n`;
+    return `${body}${rendered.join("\n")}\n`;
+  }
+  const head = lines.slice(0, firstTable);
+  // Trim trailing blank lines from the head so the inserted block does not float.
+  while (head.length > 0 && head[head.length - 1].trim() === "") head.pop();
+  const before = head.length > 0 ? [...head, ""] : [];
+  return [...before, ...rendered, "", ...lines.slice(firstTable)].join("\n");
+}
+
+/** Comment lines in a TOML source — used to report what a serialising migration would delete. */
+export function countCommentLines(toml: string): number {
+  return toml.split("\n").filter((l) => /^\s*#/.test(l) || /\s#/.test(l)).length;
+}
+
 export interface ConfigDiffEntry {
   path: string;
   before: string | undefined;

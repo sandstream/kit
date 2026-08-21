@@ -8,6 +8,7 @@
 // on disk.
 import { readFile, writeFile, access } from "node:fs/promises";
 import { parse, stringify } from "smol-toml";
+import { patchConfigText, countCommentLines } from "../config-migrate.js";
 import { CONFIG_SCHEMA_VERSION, kitConfigSchema } from "../config.js";
 import {
   detectConfigVersion,
@@ -41,6 +42,11 @@ export interface MigrateFileOptions {
   dryRun?: boolean;
   check?: boolean;
   force?: boolean;
+  /**
+   * Accept losing comments when a migration cannot be applied as a text edit. Off by default:
+   * a routine command must not silently delete the reasoning in a policy file (#513).
+   */
+  allowCommentLoss?: boolean;
 }
 
 export interface MigrateStep {
@@ -159,6 +165,16 @@ export async function migrateConfigFile(
 
   // --dry-run: report the plan + diff, write nothing.
   if (opts.dryRun) {
+    // Say HOW it would be applied. The preview used to show `+ version = 1` while the real run
+    // rewrote the file and deleted every comment — a preview that omits the destructive half of
+    // a change is worse than none (#513).
+    const asTextEdit = patchConfigText(content, diff) !== null;
+    const comments = countCommentLines(content);
+    const how = asTextEdit
+      ? " Applied as a text edit: comments and formatting are preserved."
+      : comments > 0
+        ? ` This change cannot be applied as a text edit, so the file would be re-serialised and ${comments} comment line(s) WOULD BE DELETED — the real run refuses unless you pass --allow-comment-loss.`
+        : " Applied by re-serialising the file (no comments to lose).";
     return {
       status: "dry-run",
       ok: true,
@@ -167,7 +183,7 @@ export async function migrateConfigFile(
       steps,
       diff,
       wrote: false,
-      message: `Would migrate v${fromVersion} -> v${CONFIG_SCHEMA_VERSION} (${steps.length} step(s)). Nothing written (--dry-run).`,
+      message: `Would migrate v${fromVersion} -> v${CONFIG_SCHEMA_VERSION} (${steps.length} step(s)). Nothing written (--dry-run).${how}`,
     };
   }
 
@@ -179,7 +195,14 @@ export async function migrateConfigFile(
     diff,
     backupPath: `${configPath}.backup`,
   };
-  return performMigration(configPath, content, result.migrated, base, opts.force === true);
+  return performMigration(
+    configPath,
+    content,
+    result.migrated,
+    base,
+    opts.force === true,
+    opts.allowCommentLoss === true,
+  );
 }
 
 /**
@@ -215,6 +238,7 @@ async function performMigration(
   migrated: RawConfig,
   base: MigrationBase,
   force: boolean,
+  allowCommentLoss = false,
 ): Promise<MigrateFileOutcome> {
   const err = (message: string): MigrateFileOutcome => ({
     ...base,
@@ -229,11 +253,27 @@ async function performMigration(
     return err(`Backup ${backupPath} already exists. Re-run with --force to overwrite it.`);
   }
 
+  // Prefer editing the SOURCE TEXT: `stringify(migrated)` re-serialises from the parsed object
+  // and deletes every comment — 8 comment lines became 0 on kit's own config for a migration
+  // whose only job was to stamp `version = 1` (#513). Comments in .kit.toml are where the why
+  // lives, so a routine maintenance command must not silently drop them.
   let migratedToml: string;
-  try {
-    migratedToml = stringify(migrated);
-  } catch (e) {
-    return err(`Could not serialize migrated config: ${(e as Error).message}`);
+  const patched = patchConfigText(original, base.diff ?? []);
+  if (patched !== null) {
+    migratedToml = patched;
+  } else {
+    const lost = countCommentLines(original);
+    if (lost > 0 && !allowCommentLoss) {
+      return err(
+        `this migration cannot be applied as a text edit, and re-serialising would delete ${lost} comment line(s) from ${configPath}. ` +
+          `Re-run with --allow-comment-loss to accept that (the original is kept at ${backupPath}), or apply the change by hand.`,
+      );
+    }
+    try {
+      migratedToml = stringify(migrated);
+    } catch (e) {
+      return err(`Could not serialize migrated config: ${(e as Error).message}`);
+    }
   }
 
   await writeFile(backupPath, original, "utf-8");
@@ -280,8 +320,14 @@ async function cmdConfigMigrate(): Promise<boolean> {
   const dryRun = hasFlag(process.argv, "--dry-run");
   const check = hasFlag(process.argv, "--check");
   const force = hasFlag(process.argv, "--force");
+  const allowCommentLoss = hasFlag(process.argv, "--allow-comment-loss");
 
-  const outcome = await migrateConfigFile(resolveConfigPath(), { dryRun, check, force });
+  const outcome = await migrateConfigFile(resolveConfigPath(), {
+    dryRun,
+    check,
+    force,
+    allowCommentLoss,
+  });
 
   switch (outcome.status) {
     case "already-current":
@@ -413,6 +459,9 @@ export async function cmdConfig(): Promise<boolean> {
     );
     console.log(
       `  ${c.cyan}kit config migrate --force${c.reset}     Overwrite an existing ${KIT_FILE}.backup`,
+    );
+    console.log(
+      `  ${c.cyan}kit config migrate --allow-comment-loss${c.reset}  Accept losing comments when the change cannot be applied as a text edit`,
     );
     console.log(
       `  ${c.cyan}kit config recommend${c.reset}           What this repo would gain, writing nothing (\`--json\`)`,
