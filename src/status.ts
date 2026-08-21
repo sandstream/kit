@@ -90,6 +90,28 @@ export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusI
       ignore.missingPatterns.length === 0 ? undefined : "run `kit security check-gitignore --fix`",
   });
 
+  // Schema currency. `kit config migrate --check` has answered this since versioning landed —
+  // and nothing called it, so `✓ .kit.toml present` was the only thing the checklist said about
+  // the config, and "present" is not "current" (#511). Measured on kit's own repo: v0 while the
+  // schema was v1, unreported. `--check` semantics exactly: behind ⇒ not ok, no write.
+  try {
+    const { planConfigMigration } = await import("./config-migrate.js");
+    const plan = planConfigMigration(cwd);
+    if (plan !== null) {
+      items.push({
+        key: "config-schema",
+        label: "config schema",
+        ok: plan.current,
+        detail: plan.current
+          ? `v${plan.toVersion}, current`
+          : `v${plan.fromVersion}, current is v${plan.toVersion}`,
+        hint: plan.current ? undefined : "run `kit config migrate`",
+      });
+    }
+  } catch {
+    // an unreadable/malformed config is already reported by the rows above
+  }
+
   // Supply chain — is there a dependency allowlist to enforce on install?
   const hasAllowlist = existsSync(join(cwd, ALLOWLIST_FILE));
   items.push({
