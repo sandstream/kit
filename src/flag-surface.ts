@@ -180,7 +180,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--with-migrate",
     "--yes",
   ],
-  config: ["--check", "--dry-run", "--force", "--help", "--json"],
+  config: ["--allow-comment-loss", "--check", "--dry-run", "--force", "--help", "--json"],
   context: ["--format", "--json", "--prompt", "--require-declaration"],
   coverage: [
     "--attest",
