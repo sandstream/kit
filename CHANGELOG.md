@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The install-gate recognised one repo-argument form; the tool publishes two** (#507).
+  `ownerRepoArg` matched `^[\w.-]+/[\w.-]+$` — one slash, no scheme — so the payload of a
+  repo-fetching installer was triaged only when the argument happened to be written as
+  `owner/repo`. Measured against 6.7.0, with `npm install left-pad` still blocking as a control:
+
+  ```
+  npx skills add cursor/plugins                                   → BLOCKED
+  npx skills add https://github.com/cursor/plugins --skill unslop → allowed
+  npx skills add github.com/cursor/plugins                        → allowed
+  npx skills add git@github.com:cursor/plugins.git                → allowed
+  ```
+
+  And the bypass ran through the form the tool's own help recommends — `skills add --help` lists
+  both `vercel-labs/agent-skills` and `https://github.com/vercel-labs/agent-skills`, so this was
+  never a latent edge case. The argument is now normalised BEFORE matching (any scheme, an
+  optional `user@`, a host segment, scp-style `git@host:owner/repo`, a trailing `.git`, and a
+  deeper `…/tree/main/sub` path all reduce to `owner/repo`) rather than the pattern being
+  widened, which would have started matching npm scopes and file paths. `@scope/name` is still
+  not a repo, and neither is a filesystem path — `./local/path/file.txt` used to reduce to
+  `./local`, which the table test caught.
+
+- **The pip maintainer count was declared unavailable on a claim that was wrong.** The previous
+  entry said PyPI publishes no maintainer list. Measured, it does: `requests` carries
+  `maintainer_email = "Ian Stapleton Cordasco <…>, Nate Prewitt <…>"`. Two things still keep it
+  from being npm's number, and both are now in the output rather than in a comment: PEP 621
+  leaves `maintainer` null so the value hides in `maintainer_email` (and sometimes only in
+  `author_email` — `opensandbox-server` had exactly that), and PyPI's list is **self-declared
+  package metadata** while npm's is the registry's own record of who may publish. So the probe
+  runs, reports `N declared maintainer(s) in <field> (self-declared package metadata)`, and when
+  it warns it says outright that this is *not registry publish rights* and *not comparable to
+  npm's maintainer count*. A package that names nobody still declares the probe unavailable —
+  with an accurate reason this time.
+
+  Consequence, measured: `pip opensandbox-server` goes from `100/100` with a partial-coverage
+  note to `88/100` with a single-maintainer warning — the same reason npm's packages scored 88.
+  Counting is bracket-aware, so `"Cordasco, Ian <one@example>"` is one maintainer, not two.
+
 ### Added
 
 - **`[context]` can declare the IDENTITY a repo must use, and kit asserts it** (#503). `kit check`

@@ -47,6 +47,7 @@ function pypiPackage(opts: {
   lastReleaseDaysAgo: number;
   authorEmail?: string | null;
   author?: string | null;
+  maintainerEmail?: string | null;
   license?: string;
 }): unknown {
   const older = `0.0.1`;
@@ -55,6 +56,8 @@ function pypiPackage(opts: {
       version: opts.version,
       author: opts.author ?? null,
       author_email: opts.authorEmail ?? null,
+      maintainer: null,
+      maintainer_email: opts.maintainerEmail ?? null,
       license: opts.license ?? "Apache-2.0",
       classifiers: ["License :: OSI Approved :: Apache Software License"],
     },
@@ -160,7 +163,11 @@ describe("triage ecosystem parity (real triage.py against a local registry)", ()
     }
   };
 
-  it("a clean pip package cannot print 100/100 without saying what it did not check", async (t) => {
+  it("a single declared maintainer warns, and says the number is not npm's", async (t) => {
+    // Was: this fixture scored 100/100 with a PARTIAL-coverage note, because the maintainer
+    // probe was declared unavailable on the claim that PyPI publishes no maintainer list.
+    // Measured wrong — `author_email` names one here, so the probe RUNS, warns, and the score
+    // drops for the same reason npm's did. What must not come back is presenting it as parity.
     routes.set(
       "/pypi/opensandbox-server/json",
       pypiPackage({
@@ -173,14 +180,13 @@ describe("triage ecosystem parity (real triage.py against a local registry)", ()
     const out = await runTriage("pip", "opensandbox-server", t);
     if (out === null) return;
 
-    assert.match(out, /Health score: 100\/100/);
-    assert.match(out, /Probes declared unavailable: 1/);
-    assert.match(out, /Coverage: PARTIAL/);
-    assert.match(out, /NOT CHECKED: maintainer count/);
-    assert.match(out, /bus-factor \/ account-takeover risk was NOT assessed/);
+    assert.match(out, /Health score: 88\/100/);
+    assert.match(out, /single declared maintainer in author_email/);
+    assert.match(out, /not comparable to npm's maintainer count/);
+    assert.match(out, /Probes declared unavailable: 0/);
     assert.ok(
       out.split("\n").includes("TRIAGE PASSED"),
-      "declared coverage gaps must not withhold PASS — they are unknowns, not findings",
+      "a warning is not a critical — the package still passes",
     );
   });
 
@@ -217,7 +223,10 @@ describe("triage ecosystem parity (real triage.py against a local registry)", ()
 
     assert.match(out, /first published 4 days ago/);
     assert.match(out, /package is very new \(4 days\) -- limited track record/);
-    assert.match(out, /Health score: 88\/100/);
+    // Two warnings now: newness AND a single declared maintainer (author_email names one).
+    // 100 - 12 - 12 = 76. The old 88 encoded a maintainer probe that did not run.
+    assert.match(out, /Health score: 76\/100/);
+    assert.match(out, /single declared maintainer/);
   });
 
   it("an npm package with the same shape scores the same as pip on the shared probes", async (t) => {
@@ -297,5 +306,94 @@ describe("triage ecosystem parity (real triage.py against a local registry)", ()
     assert.match(out, /CRITICAL: package 'no-such-package-xyz' not found on PyPI/);
     assert.ok(out.split("\n").includes("TRIAGE FAILED"));
     assert.doesNotMatch(out, /TRIAGE PASSED/);
+  });
+  /**
+   * The maintainer count, corrected.
+   *
+   * The first pass declared this probe unavailable on the claim that "PyPI publishes no maintainer
+   * list". Measured, that was wrong: `requests` carries
+   * `maintainer_email = "Ian Stapleton Cordasco <…>, Nate Prewitt <…>"`, which is countable.
+   * Two things still make it NOT npm's number, and both are asserted here: PEP 621 leaves
+   * `maintainer` null so the value hides in `maintainer_email` (and sometimes only in
+   * `author_email`), and PyPI's list is self-declared metadata inside the package while npm's is
+   * the registry's own record of who may publish. So the count is reported for what it is, or the
+   * probe is declared unavailable when the package names nobody — never presented as parity.
+   */
+  describe("pip maintainer count (self-declared, not publish rights)", () => {
+    it("counts two comma-separated maintainers out of maintainer_email", async (t) => {
+      routes.set(
+        "/pypi/two-maintainers/json",
+        pypiPackage({
+          version: "2.32.0",
+          firstReleaseDaysAgo: 4000,
+          lastReleaseDaysAgo: 30,
+          authorEmail: "Kenneth Reitz <me@example.test>",
+          maintainerEmail: "Ian Cordasco <a@example.test>, Nate Prewitt <b@example.test>",
+        }),
+      );
+      const out = await runTriage("pip", "two-maintainers", t);
+      if (out === null) return;
+      assert.match(out, /2 declared maintainer\(s\) in maintainer_email/);
+      assert.doesNotMatch(out, /single declared maintainer/);
+      assert.match(out, /Probes declared unavailable: 0/);
+    });
+
+    it("falls back to author_email, warns, and refuses to claim npm parity", async (t) => {
+      routes.set(
+        "/pypi/one-maintainer/json",
+        pypiPackage({
+          version: "0.2.2",
+          firstReleaseDaysAgo: 200,
+          lastReleaseDaysAgo: 20,
+          authorEmail: "Solo Dev <solo@example.test>",
+          maintainerEmail: null,
+        }),
+      );
+      const out = await runTriage("pip", "one-maintainer", t);
+      if (out === null) return;
+      assert.match(out, /1 declared maintainer\(s\) in author_email/);
+      assert.match(out, /single declared maintainer in author_email/);
+      // The caveat is the point: this number is not npm's.
+      assert.match(out, /not registry publish rights/);
+      assert.match(out, /not comparable to npm's maintainer count/);
+      assert.match(out, /Health score: 88\/100/);
+    });
+
+    it("counts by email brackets, so a comma inside a display name is not a second maintainer", async (t) => {
+      routes.set(
+        "/pypi/comma-name/json",
+        pypiPackage({
+          version: "1.0.0",
+          firstReleaseDaysAgo: 900,
+          lastReleaseDaysAgo: 40,
+          maintainerEmail: "Cordasco, Ian <only@example.test>",
+        }),
+      );
+      const out = await runTriage("pip", "comma-name", t);
+      if (out === null) return;
+      assert.match(out, /1 declared maintainer\(s\)/);
+      assert.doesNotMatch(out, /2 declared maintainer/);
+    });
+
+    it("declares the probe unavailable — with an accurate reason — when nobody is named", async (t) => {
+      routes.set(
+        "/pypi/anonymous-pkg/json",
+        pypiPackage({
+          version: "1.0.0",
+          firstReleaseDaysAgo: 900,
+          lastReleaseDaysAgo: 40,
+          author: null,
+          authorEmail: null,
+          maintainerEmail: null,
+        }),
+      );
+      const out = await runTriage("pip", "anonymous-pkg", t);
+      if (out === null) return;
+      assert.match(out, /NOT CHECKED: maintainer count/);
+      assert.match(out, /neither maintainer_email nor author_email names anyone/);
+      // The old wording claimed PyPI has no such field at all. It does; this package has none.
+      assert.doesNotMatch(out, /publishes no maintainer list/);
+      assert.match(out, /Coverage: PARTIAL/);
+    });
   });
 });

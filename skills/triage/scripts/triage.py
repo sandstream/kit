@@ -30,8 +30,10 @@ Scope (what a PASS DOES and does NOT mean):
   - PASS means the SPECIFIC target — including a pinned version or dist-tag (`name@1.2.3`,
     `name@next`, `name==1.2.3`) — EXISTS and clears the health checks: not-found, deprecated,
     or yanked is a CRITICAL; newness / abandonment / single-maintainer / no-license are
-    warnings. npm and pip run the same probe set except maintainer count, which the pip
-    path declares as unavailable instead of leaving unmentioned. A pinned version is triaged directly, so a clean `latest` never vouches for a
+    warnings. npm and pip run the same probe set; the maintainer count differs in KIND rather
+    than presence -- npm reads the registry's publisher list, pip reads self-declared package
+    metadata (`maintainer_email`, falling back to `author_email`) and says so, or declares the
+    probe unavailable when the package names nobody. A pinned version is triaged directly, so a clean `latest` never vouches for a
     yanked or malicious pinned version.
   - PASS is NOT a malware verdict. This gate does no typosquat, install-script, or behavioral
     analysis. Deep malware detection is GuardDog (opt-in, separate + heavier: `KIT_GUARDDOG=1`
@@ -395,6 +397,27 @@ def _resolve_pip_spec(spec, release_keys):
     return cands[-1] if cands else None
 
 
+def _declared_maintainers(info):
+    """Count the maintainers a PyPI package DECLARES, or (None, reason) when it declares none.
+
+    Reads `maintainer_email` first (its purpose), falling back to `author_email` (what PEP 621
+    actually fills in). Counting is bracket-aware: display names may contain commas
+    ("Cordasco, Ian <x@y>"), so `<...>` pairs are counted when present and only a bracket-free
+    value is split on commas. Returns (count, field_name) or (None, None).
+    """
+    for field in ("maintainer_email", "author_email", "maintainer", "author"):
+        raw = (info.get(field) or "").strip()
+        if not raw:
+            continue
+        brackets = re.findall(r"<[^<>@\s]+@[^<>\s]+>", raw)
+        if brackets:
+            return len(brackets), field
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+        if parts:
+            return len(parts), field
+    return None, None
+
+
 def triage_pip(rep):
     pkg, spec = _split_pip_spec(rep.target)
     url = f"{PYPI_INDEX}/pypi/{urllib.parse.quote(pkg)}/json"
@@ -460,14 +483,33 @@ def triage_pip(rep):
         if first_days < NEW_DAYS:
             rep.warn(f"package is very new ({first_days} days) -- limited track record")
 
-    # The one npm probe PyPI cannot answer. `info.maintainer` / `maintainer_email` are
-    # free-text and usually empty, and the JSON API publishes no maintainer list at all, so
-    # a count here would be invented. Declared instead of silently skipped.
-    rep.notchecked(
-        "maintainer count",
-        "PyPI's JSON API publishes no maintainer list (info.maintainer is free-text and "
-        "usually empty), so bus-factor / account-takeover risk was NOT assessed",
-    )
+    # Maintainer count. The earlier claim here -- "PyPI publishes no maintainer list" -- was
+    # wrong, and measured wrong: requests carries
+    #   maintainer_email = "Ian Stapleton Cordasco <...>, Nate Prewitt <...>"
+    # which is countable. Two caveats decide how it is reported:
+    #   1. same trap as `author`: `maintainer` is null under PEP 621 and the value lives in
+    #      `maintainer_email`; opensandbox-server had maintainer_email null with one entry in
+    #      author_email, so a counter must weigh both and be able to answer "don't know";
+    #   2. the SEMANTICS differ from npm's. npm's list is the registry's own -- who may publish.
+    #      PyPI's is self-declared metadata inside the package. Two names in a field are not
+    #      evidence of two accounts with publish rights, so this must not be presented as npm's
+    #      number.
+    count, source = _declared_maintainers(info)
+    if count is None:
+        rep.notchecked(
+            "maintainer count",
+            "neither maintainer_email nor author_email names anyone for this package, and "
+            "PyPI's JSON API does not expose registry publish rights -- bus-factor / "
+            "account-takeover risk was NOT assessed",
+        )
+    else:
+        rep.fact(f"{count} declared maintainer(s) in {source} (self-declared package metadata)")
+        if count <= 1:
+            rep.warn(
+                f"single declared maintainer in {source} -- bus-factor risk. NOTE: this is "
+                "self-declared metadata, not registry publish rights; PyPI does not expose who "
+                "may publish, so it is not comparable to npm's maintainer count"
+            )
 
 
 def _owner_repo(target):

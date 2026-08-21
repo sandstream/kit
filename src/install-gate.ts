@@ -856,10 +856,59 @@ function hasExecCallFlag(tokens: string[]): boolean {
  */
 const REPO_FETCHER_PACKAGES = new Set(["skills"]);
 
-/** `owner/repo` shape — no npm scope (`@scope/name`), no scheme, no protocol. */
-function ownerRepoArg(tok: string): string | null {
+/**
+ * Reduce every spelling of a repo argument to `owner/repo`, or null when the token is not one.
+ *
+ * The gate recognised ONE form and the tool documents two. `skills add --help` lists both
+ * `vercel-labs/agent-skills` and `https://github.com/vercel-labs/agent-skills`, and measured
+ * against 6.7.0 the short form was BLOCKED while every equivalent form went through:
+ *
+ *     npx skills add cursor/plugins                        → BLOCKED
+ *     npx skills add https://github.com/cursor/plugins     → allowed
+ *     npx skills add github.com/cursor/plugins             → allowed
+ *     npx skills add git@github.com:cursor/plugins.git     → allowed
+ *
+ * So the bypass ran through the invocation the tool's own help recommends. The fix normalises
+ * BEFORE matching rather than widening the pattern: a looser regex would start matching npm
+ * scopes and file paths, and the defect was never that the pattern was too strict — it was that
+ * one form was implemented and its equivalents were not.
+ *
+ * Deliberately kept out: `@scope/name` (an npm package, not a repo) and anything that does not
+ * reduce to exactly two path segments after the host.
+ */
+export function ownerRepoArg(tok: string): string | null {
+  if (!tok || tok.startsWith("-")) return null;
   if (tok.startsWith("@")) return null; // npm scope, not a repo
-  return /^[\w.-]+\/[\w.-]+$/.test(tok) ? tok : null;
+  // A filesystem path is not a repo reference. Without this, `./local/path/file.txt` reduced to
+  // `./local` — caught by the table test, and exactly the kind of over-eager match that
+  // widening the regex would have produced everywhere.
+  if (/^[./~]/.test(tok)) return null;
+
+  let t = tok.trim();
+  // scp-style SSH: git@host:owner/repo(.git) — the colon separates host from path.
+  const scp = /^[\w.-]+@([\w.-]+):(.+)$/.exec(t);
+  if (scp) {
+    t = scp[2];
+  } else {
+    // Any scheme (https, http, ssh, git, git+ssh) plus optional user@host, then the path.
+    t = t.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").replace(/^[\w.-]+@/, "");
+    // A leading host segment: something with a dot (github.com, gitlab.example.com) or
+    // localhost, optionally with a port. Bare `owner/repo` has neither and is left alone.
+    t = t.replace(/^(?:localhost|[\w-]+(?:\.[\w-]+)+)(?::\d+)?\//, "");
+  }
+
+  t = t
+    .replace(/\.git$/, "")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+  const parts = t.split("/").filter(Boolean);
+  // Exactly two segments. A deeper URL (…/tree/main/sub) still names the repo it fetches, so
+  // the first two win; a single segment is not a repo reference.
+  if (parts.length < 2) return null;
+  const [owner, repo] = parts;
+  if (owner.startsWith("@")) return null;
+  if (owner === "." || owner === ".." || repo === "." || repo === "..") return null;
+  return /^[\w.-]+$/.test(owner) && /^[\w.-]+$/.test(repo) ? `${owner}/${repo}` : null;
 }
 
 /**

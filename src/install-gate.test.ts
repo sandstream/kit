@@ -8,6 +8,7 @@ import {
   decideBashGate,
   extractCommandFromHookPayload,
   explainUnverifiable,
+  ownerRepoArg,
 } from "./install-gate.js";
 import type { GateDeps } from "./triage-gate.js";
 import type { TriageType } from "./triage.js";
@@ -1030,5 +1031,81 @@ describe("install-gate — the refusal names the hazard (#501)", () => {
     const v = await decideBashGate("$PM install evil");
     assert.equal(v.block, true);
     assert.match(v.reason, /cannot reduce to a triage target/);
+  });
+});
+
+/**
+ * The gate recognised one argument form; the tool documents two.
+ *
+ * `skills add --help` lists both `vercel-labs/agent-skills` and
+ * `https://github.com/vercel-labs/agent-skills`. Measured against 6.7.0: the short form was
+ * BLOCKED and every equivalent spelling went through — so the bypass ran through the invocation
+ * the tool's own help recommends (#507). The fix normalises before matching; a looser regex
+ * would start matching npm scopes and file paths, and the defect was never strictness.
+ */
+describe("install-gate — repo argument forms (#507)", () => {
+  it("reduces every equivalent spelling to owner/repo", () => {
+    const cases: Array<[string, string | null]> = [
+      ["cursor/plugins", "cursor/plugins"],
+      ["https://github.com/cursor/plugins", "cursor/plugins"],
+      ["http://github.com/cursor/plugins", "cursor/plugins"],
+      ["github.com/cursor/plugins", "cursor/plugins"],
+      ["https://github.com/cursor/plugins.git", "cursor/plugins"],
+      ["git@github.com:cursor/plugins.git", "cursor/plugins"],
+      ["git@github.com:cursor/plugins", "cursor/plugins"],
+      ["ssh://git@github.com/cursor/plugins.git", "cursor/plugins"],
+      ["git+https://github.com/cursor/plugins.git", "cursor/plugins"],
+      ["https://gitlab.example.com/cursor/plugins", "cursor/plugins"],
+      ["https://github.com/cursor/plugins/", "cursor/plugins"],
+      // A deeper URL still names the repo that gets fetched.
+      ["https://github.com/cursor/plugins/tree/main/unslop", "cursor/plugins"],
+    ];
+    for (const [input, expected] of cases) {
+      assert.equal(ownerRepoArg(input), expected, input);
+    }
+  });
+
+  it("still refuses what is not a repo reference", () => {
+    for (const input of [
+      "@scope/name", // npm scope
+      "left-pad", // bare npm name
+      "https://github.com/cursor", // one segment
+      "github.com", // host only
+      "--skill", // a flag
+      "", // nothing
+      "./local/path/file.txt", // a filesystem path, not a repo
+      "../sibling/repo",
+      "~/notes/file.md",
+      "/abs/path/thing",
+    ]) {
+      assert.equal(ownerRepoArg(input), null, input);
+    }
+  });
+
+  it("every form yields the same github: ref through the real parser", () => {
+    const forms = [
+      "npx skills add cursor/plugins",
+      "npx skills add cursor/plugins --skill unslop",
+      "npx skills add https://github.com/cursor/plugins --skill unslop",
+      "npx skills add github.com/cursor/plugins",
+      "npx skills add git@github.com:cursor/plugins.git",
+      "npx skills add ssh://git@github.com/cursor/plugins.git",
+      "npx skills add https://github.com/cursor/plugins/tree/main/unslop",
+    ];
+    for (const cmd of forms) {
+      const probe = parseInstallCommand(cmd);
+      assert.ok(
+        probe.refs.some((r) => String(r).includes("github:cursor/plugins")),
+        `${cmd} — the repo payload must be triaged, not just the wrapper package`,
+      );
+    }
+  });
+
+  it("an npm scope passed to the fetcher does not become a repo ref", () => {
+    const probe = parseInstallCommand("npx skills add @scope/name");
+    assert.equal(
+      probe.refs.some((r) => String(r).startsWith("github:")),
+      false,
+    );
   });
 });
