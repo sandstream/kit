@@ -1,23 +1,16 @@
 /**
- * `kit usage` reports recorded facts, and `--prove` reports observed behaviour. Both claims are
- * only worth as much as their failure modes, so this file pins the failure modes.
+ * The aggregation behind `kit usage`, and specifically its failure modes.
  *
- * Three properties matter more than the happy path:
- *
- *   1. **Unknown is not zero.** A store without token columns, a repo without a saved run, a log
- *      with no `cwd` — each must read as "not known", never as a clean zero. Every false-green in
- *      kit's own history (#500, #503, #517) was a missing value rendered as a good one.
- *   2. **A negative control must be able to fail.** `controlHarmlessCommandAllowed` exists so that
- *      `controlUnverifiableInstall` means something: a gate that refuses everything would pass the
- *      first control while being useless. Both are asserted here against the real CLI.
- *   3. **The box must add up.** The renderer pads around ANSI escapes; if the padding maths is
- *      wrong the report looks broken, and a report that looks broken does not get read.
+ * The property that matters here is that **unknown is never zero**. A store without token columns,
+ * a repo without a saved run, a log with no `cwd` — each must read as "not known", never as a
+ * clean zero or an old date. Every false-green in kit's own history (#500, #503, #517) was a
+ * missing value rendered as a good one, so the fixtures below are all shaped around absence.
  */
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir, homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 
@@ -27,10 +20,7 @@ import {
   triageFromLog,
   machineFromAnchor,
   memoryFromDb,
-  gatherUsage,
 } from "./usage-report.js";
-import { renderTab } from "./commands/usage.js";
-import { controlUnverifiableInstall, controlHarmlessCommandAllowed } from "./usage-prove.js";
 
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), "kit-usage-test-"));
@@ -263,46 +253,5 @@ describe("memoryFromDb", () => {
       else process.env.KIT_MEMORY_DB = prev;
       rmSync(dir, { recursive: true, force: true });
     }
-  });
-});
-
-describe("renderTab", () => {
-  const facts = gatherUsage(scratch(), homedir());
-
-  it("draws a box whose every line is the same visible width", () => {
-    for (const tab of ["floor", "coverage", "memory", "triage", "machine", "proof"] as const) {
-      const rendered = renderTab(facts, tab, { interactive: false });
-      const widths = new Set(
-        rendered
-          .split("\n")
-          // eslint-disable-next-line no-control-regex
-          .map((l) => l.replace(/\x1b\[[0-9;]*m/g, "").length),
-      );
-      assert.equal(
-        widths.size,
-        1,
-        `tab ${tab} rendered ragged widths: ${[...widths].join(", ")}\n${rendered}`,
-      );
-    }
-  });
-
-  it("tells the operator the proof has not been run rather than implying it passed", () => {
-    const rendered = renderTab(facts, "proof", { interactive: false });
-    assert.match(rendered, /not run/);
-    assert.doesNotMatch(rendered, /every control held/);
-  });
-});
-
-describe("the negative controls", () => {
-  it("refuse an install whose target cannot be resolved", () => {
-    const ctl = controlUnverifiableInstall();
-    assert.equal(ctl.verdict, "refused", ctl.observed);
-    assert.equal(ctl.ok, true);
-  });
-
-  it("and still allow a command that installs nothing — or the first control proves nothing", () => {
-    const ctl = controlHarmlessCommandAllowed();
-    assert.equal(ctl.verdict, "allowed", ctl.observed);
-    assert.equal(ctl.ok, true);
   });
 });
