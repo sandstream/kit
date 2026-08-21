@@ -31,6 +31,34 @@ import {
   maybeEmitCheckAttestation,
 } from "../cli-checks-shared.js";
 
+/** Icon per check status. `skip` is its own state — it is neither a pass nor a failure (#517). */
+export function statusIcon(status: string): string {
+  switch (status) {
+    case "pass":
+      return "✅";
+    case "warn":
+      return "⚠️";
+    case "fail":
+      return "❌";
+    default:
+      return "➖";
+  }
+}
+
+/** Report order: what must be acted on first, what could not run last. */
+export function statusRank(status: string): number {
+  switch (status) {
+    case "fail":
+      return 0;
+    case "warn":
+      return 1;
+    case "pass":
+      return 2;
+    default:
+      return 3;
+  }
+}
+
 export async function cmdCi(): Promise<boolean> {
   const args = process.argv.slice(2);
 
@@ -207,12 +235,22 @@ export async function cmdCi(): Promise<boolean> {
             "## kit CI Report",
             `| Status | Check | Detail |`,
             `|--------|-------|--------|`,
-            ...checks.map(
-              (c) =>
-                `| ${c.status === "pass" ? "✅" : c.status === "warn" ? "⚠️" : "❌"} | \`${mdCell(`${c.category}/${c.name}`)}\` | ${mdCell(c.detail)} |`,
-            ),
+            // A skip has its own icon. Without one, every not-applicable check rendered ❌ —
+            // a run in a directory that is not a project showed 20+ red rows above a footer
+            // saying "1 failed", and the deliberate exclusions (Socket cloud-only, a
+            // KIT_BUMBLEBEE=0 opt-out, opt-in SAST) read as kit's own design being broken
+            // (#517). Failures first, then warnings, then skips: twenty always-red rows at the
+            // top is how a report becomes unread.
+            ...[...checks]
+              .sort((a, b) => statusRank(a.status) - statusRank(b.status))
+              .map(
+                (c) =>
+                  `| ${statusIcon(c.status)} | \`${mdCell(`${c.category}/${c.name}`)}\` | ${mdCell(c.detail)} |`,
+              ),
             ``,
-            `**${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings**`,
+            // Skipped belongs in the tally: the rows and the count must add up, or the report
+            // contradicts itself in the same output.
+            `**${summary.passed} passed, ${summary.failed} failed, ${summary.warnings} warnings, ${summary.skipped} skipped**`,
           ];
           await import("node:fs/promises").then(({ appendFile }) =>
             appendFile(process.env.GITHUB_STEP_SUMMARY!, lines.join("\n") + "\n"),
