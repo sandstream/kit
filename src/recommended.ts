@@ -39,6 +39,120 @@ function kitInvocation(): string {
  * touches GLOBAL `~/.claude` / `~/.codex` (memory hooks) and the repo's git hooks, so the
  * caller must surface that to the user first.
  */
+/**
+ * The recommended posture as a REPORT — what a repo would gain, with nothing written.
+ *
+ * `applyRecommendedHardening` knew this and was reachable only from `kit setup`, so the only way
+ * to ask "what would I get?" was to let it write to `~/.claude`, `~/.codex` and the repo's git
+ * hooks (#511). A repo that already exists needs the read-only half: a long-lived `.kit.toml`
+ * silently keeps whatever posture it was set up with, and nothing said which sections kit has
+ * learned since.
+ *
+ * Each row states what it BUYS, not just that it is missing — a checklist of absent features is
+ * how a report gets ignored. Pure given (config, probes), so the tests do not need a machine in
+ * any particular state.
+ */
+export interface RecommendationRow {
+  key: string;
+  /** Present already, or worth adopting. */
+  adopted: boolean;
+  label: string;
+  /** One line: what declaring/installing this buys. */
+  buys: string;
+  /** The command that adopts it, when it is not adopted. */
+  how?: string;
+}
+
+export interface RecommendProbes {
+  /** Memory capture hooks wired in the agent lifecycle configs. */
+  memoryHooks: boolean;
+  /** kit-managed git hooks present in the resolved hooks dir. */
+  gitHooks: string[];
+}
+
+export function recommendPosture(config: kitConfig, probes: RecommendProbes): RecommendationRow[] {
+  const rows: RecommendationRow[] = [];
+
+  rows.push({
+    key: "memory-hooks",
+    adopted: probes.memoryHooks,
+    label: "cross-harness memory capture",
+    buys: "transcripts from every agent land in one local store, so a later session can recall what was decided instead of re-deriving it",
+    how: probes.memoryHooks ? undefined : "kit memory install",
+  });
+
+  rows.push({
+    key: "secret-scan",
+    adopted: probes.gitHooks.includes("secret-scan"),
+    label: "pre-commit secret scan",
+    buys: "a staged credential is refused before it becomes git history, which is immutable",
+    how: probes.gitHooks.includes("secret-scan") ? undefined : "kit hooks add secret-scan",
+  });
+
+  rows.push({
+    key: "post-pull-audit",
+    adopted: probes.gitHooks.includes("post-pull-audit"),
+    label: "post-merge audit",
+    buys: "after a pull, new dependencies, dropped gitignore rules and introduced secrets are surfaced rather than inherited silently",
+    how: probes.gitHooks.includes("post-pull-audit") ? undefined : "kit hooks add post-pull-audit",
+  });
+
+  const hasContext = config.context !== undefined;
+  rows.push({
+    key: "context",
+    adopted: hasContext,
+    label: "[context] CLI lock",
+    buys: "each CLI is pinned to the account + project this repo must use, so a tool answering as the wrong identity is a red row instead of a filtered result set that looks complete",
+    how: hasContext ? undefined : "kit context check  (prints a ready-to-paste block)",
+  });
+
+  rows.push({
+    key: "context-check-hook",
+    // Only meaningful once [context] exists — the gate has nothing to compare against otherwise,
+    // which is why `kit hooks add context-check` now refuses without it.
+    adopted: probes.gitHooks.includes("context-check"),
+    label: "pre-push context check",
+    buys: "a push to the wrong org/project is blocked before it leaves the machine",
+    how: hasContext
+      ? probes.gitHooks.includes("context-check")
+        ? undefined
+        : "kit hooks add context-check"
+      : "declare [context] first — the gate has nothing to compare against without it",
+  });
+
+  rows.push({
+    key: "policy-agent-writes",
+    adopted: config.policy?.agent_writes !== undefined,
+    label: "[policy.agent_writes]",
+    buys: "vendor writes an agent may perform are declared and narrowed at kit's choke points and inside the plugins; an empty list is a lock, not a wildcard",
+    how:
+      config.policy?.agent_writes !== undefined
+        ? undefined
+        : "add [policy.agent_writes] to .kit.toml (see docs/POLICY.md)",
+  });
+
+  rows.push({
+    key: "deploy-env",
+    adopted: config.deploy !== undefined,
+    label: "[deploy] env key names",
+    buys: "`kit check --category deploy` diffs the env key NAMES your platform has against the ones this repo declares — never reading a value",
+    how: config.deploy !== undefined ? undefined : "add [deploy] to .kit.toml",
+  });
+
+  rows.push({
+    key: "audit-anchor",
+    adopted: config.governance?.audit?.require_anchor === true,
+    label: "[governance.audit] require_anchor",
+    buys: "an unanchored or rewritten audit log fails the gate instead of reading as verified — tamper-evidence you can prove rather than assume",
+    how:
+      config.governance?.audit?.require_anchor === true
+        ? undefined
+        : "set [governance.audit] require_anchor = true",
+  });
+
+  return rows;
+}
+
 export async function applyRecommendedHardening(
   config: kitConfig,
   gitDir = ".git",

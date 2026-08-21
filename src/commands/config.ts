@@ -325,11 +325,67 @@ function cmdConfigKnobs(): boolean {
   return true;
 }
 
+/**
+ * `kit config recommend` — the recommended posture as a report, writing nothing.
+ *
+ * The knowledge lived in `applyRecommendedHardening()`, reachable only from `kit setup`, which
+ * APPLIES it — touching `~/.claude`, `~/.codex` and the repo's git hooks. So the only way to ask
+ * "what would this give me?" was to let it happen (#511). A repo that already exists needs the
+ * read-only half: a long-lived config keeps whatever posture it was set up with, and nothing said
+ * which sections kit has learned since.
+ */
+async function cmdConfigRecommend(): Promise<boolean> {
+  const jsonMode = hasFlag(process.argv, "--json");
+  let config;
+  try {
+    const { loadConfig } = await import("../config.js");
+    config = await loadConfig(resolveConfigPath());
+  } catch {
+    console.error(`${c.red}No readable ${KIT_FILE} — run \`kit init\` first.${c.reset}`);
+    return false;
+  }
+
+  const { recommendPosture } = await import("../recommended.js");
+  const { allMemoryHooksLiveness } = await import("../memory/install.js");
+  const { describeHookFloor } = await import("../hook-floor.js");
+
+  const live = allMemoryHooksLiveness();
+  const rows = recommendPosture(config, {
+    memoryHooks: live.everInstalled && live.missing.length === 0,
+    gitHooks: describeHookFloor(process.cwd(), config).installed,
+  });
+
+  if (jsonMode) {
+    console.log(JSON.stringify({ recommendations: rows }, null, 2));
+    return true;
+  }
+
+  console.log(
+    `${c.bold}${c.cyan}kit config recommend${c.reset}  ${c.dim}(nothing is written)${c.reset}`,
+  );
+  console.log(`${c.dim}${"─".repeat(60)}${c.reset}`);
+  const width = Math.max(...rows.map((r) => r.label.length)) + 2;
+  for (const r of rows) {
+    const icon = r.adopted ? `${c.green}✓${c.reset}` : `${c.yellow}○${c.reset}`;
+    console.log(`  ${icon} ${r.label.padEnd(width)}${c.dim}${r.buys}${c.reset}`);
+    if (!r.adopted && r.how) console.log(`    ${c.dim}→ ${r.how}${c.reset}`);
+  }
+  const missing = rows.filter((r) => !r.adopted).length;
+  console.log();
+  console.log(
+    missing === 0
+      ? `${c.green}✓ every recommended piece is in place.${c.reset}`
+      : `${c.dim}${missing} of ${rows.length} not adopted. \`kit setup\` applies the hook/memory pieces; the [section] ones are yours to declare.${c.reset}`,
+  );
+  return true;
+}
+
 export async function cmdConfig(): Promise<boolean> {
   const sub = process.argv[3];
 
   if (sub === "migrate") return cmdConfigMigrate();
   if (sub === "knobs") return cmdConfigKnobs();
+  if (sub === "recommend") return cmdConfigRecommend();
 
   // Default / help: show the current config version + available subcommands.
   if (!sub || sub === "--help" || sub === "-h") {
@@ -357,6 +413,9 @@ export async function cmdConfig(): Promise<boolean> {
     );
     console.log(
       `  ${c.cyan}kit config migrate --force${c.reset}     Overwrite an existing ${KIT_FILE}.backup`,
+    );
+    console.log(
+      `  ${c.cyan}kit config recommend${c.reset}           What this repo would gain, writing nothing (\`--json\`)`,
     );
     console.log(
       `  ${c.cyan}kit config knobs${c.reset}               List power-user env vars + ${KIT_FILE} fields (--json)`,

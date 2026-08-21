@@ -11,6 +11,9 @@
 // v0->v1 migration stamps version=1 and changes no other field. The point is the
 // FRAMEWORK, which is real and extensible — a future field rename is one row.
 import { CONFIG_SCHEMA_VERSION } from "./config.js";
+import { readFileSync } from "node:fs";
+import { join as joinPath } from "node:path";
+import { parse as parseToml } from "smol-toml";
 
 /** A parsed-but-untyped config object (smol-toml output / Zod input). */
 export type RawConfig = Record<string, unknown>;
@@ -117,6 +120,32 @@ export function migrateConfig(
     steps,
     changed: steps.length > 0,
   };
+}
+
+/**
+ * Read-only: is the config file on disk behind the current schema?
+ *
+ * `kit config migrate --check` answered this and nothing called it, so `kit status` said
+ * `✓ .kit.toml present` and never that "present" is not "current" (#511). This is the same
+ * detection with no write path at all, so a status row can ask cheaply. Returns null when there
+ * is no readable config — an absent or malformed config is reported by other rows.
+ */
+export function planConfigMigration(
+  cwd: string = process.cwd(),
+): { fromVersion: number; toVersion: number; current: boolean; steps: number } | null {
+  try {
+    const raw = parseToml(readFileSync(joinPath(cwd, ".kit.toml"), "utf-8")) as RawConfig;
+    const fromVersion = detectConfigVersion(raw);
+    const steps = planMigrations(fromVersion, CONFIG_SCHEMA_VERSION);
+    return {
+      fromVersion,
+      toVersion: CONFIG_SCHEMA_VERSION,
+      current: steps.length === 0,
+      steps: steps.length,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export interface ConfigDiffEntry {

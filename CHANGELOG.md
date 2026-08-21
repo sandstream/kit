@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Config drift is reported, both kinds** (#511). A `.kit.toml` falls behind in two ways and
+  neither reached the operator.
+
+  **Schema drift had a detector and no caller.** `kit config migrate --check` has answered
+  *"Config is at v0; current is v1"* since versioning landed, and `kit status` said only
+  `✓ .kit.toml present` — "present" is not "current". Measured on kit's own repo: the config was
+  v0 while the schema was v1, and nothing said so. `kit status` now carries a `config schema` row
+  (`○ config schema  v0, current is v1  → run kit config migrate`) via a new read-only
+  `planConfigMigration()` that answers without a write path.
+
+  **Feature drift had no detector at all.** A long-lived config does not know about the sections
+  kit has learned since — `[context]`, `[policy.agent_writes]`, `[deploy]`,
+  `[governance.audit] require_anchor`. `applyRecommendedHardening()` knew the recommended posture
+  but was reachable only from `kit setup`, which APPLIES it (touching `~/.claude`, `~/.codex` and
+  the repo's git hooks), so asking "what would I get?" meant letting it happen. New
+  `kit config recommend [--json]` reports it and writes nothing.
+
+  Each row says what the piece **buys**, not merely that it is absent — a checklist of missing
+  features is how a report gets ignored. And the pre-push context gate points at declaring
+  `[context]` first rather than at installing a gate that cannot fail, matching the refusal added
+  in #497.
+
+  Deliberately **not** a new `kit rebase` verb: `rebase` means something specific and different to
+  every git user, and both halves of this were a missing reader rather than a missing command.
+  Auto-migrating on load is also out — a config that changes shape underneath a session is worse
+  than one that is behind, and the schema version exists so the change is explicit and reviewable.
+
 ### Fixed
 
 - **The machine-wide wrapper pointed at whichever kit wrote it** (#509). `~/.kit/bin/kit` is what

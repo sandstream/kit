@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gatherStatus } from "./status.js";
 import { openMemoryDb, insertMessage } from "./memory/db.js";
+import { CONFIG_SCHEMA_VERSION } from "./config.js";
 import { KIT_BLOCK_BEGIN } from "./agent-config.js";
 
 describe("kit status", () => {
@@ -54,7 +55,10 @@ describe("kit status", () => {
     mkdirSync(proj, { recursive: true });
     writeFileSync(
       join(proj, ".kit.toml"),
-      `[tools]\nnode = "22"\n\n[secrets]\nstore = "1password"\n`,
+      // The version stamp is part of being configured: the new `config schema` row reports a
+      // config that predates the current schema, and this fixture is meant to be a repo with
+      // nothing outstanding. Written from the constant so the fixture cannot rot behind it.
+      `version = ${CONFIG_SCHEMA_VERSION}\n\n[tools]\nnode = "22"\n\n[secrets]\nstore = "1password"\n`,
     );
     writeFileSync(join(proj, "CLAUDE.md"), `# Project\n\n${KIT_BLOCK_BEGIN}\nuse kit\n`);
     writeFileSync(
