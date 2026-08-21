@@ -60,3 +60,6 @@ id_ed25519
 
 # Full TAP report from `npm test` — written so an intermittent failure keeps its name.
 .kit-test-run.tap
+
+# kit config migration leaves this behind; git history is the real backup
+.kit.toml.backup
