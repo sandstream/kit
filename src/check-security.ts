@@ -2649,9 +2649,10 @@ export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]
   // side, every manifest-dependent scanner skips truthfully and the summary read "All 25 checks
   // passed" — while the tree one level down had 30 known dependency vulnerabilities. The skips
   // were honest; the missing row was the one saying the code lives somewhere kit did not look.
-  const { checkScanScope } = await import("./check-nested-projects.js");
-  results.push(await checkScanScope(root));
-
+  const { checkScanScope, scanScopeFacts, escalateManifestSkips } =
+    await import("./check-nested-projects.js");
+  const scope = await scanScopeFacts(root);
+  results.push(await checkScanScope(root, scope));
   // Inbound integration: fold any third-party findings a partner tool emitted to
   // `.kit-scan-results.jsonl` into the verdict. No file → no-op. Can only escalate
   // (fail/warn), never green the gate — see external-findings.ts.
@@ -2661,7 +2662,11 @@ export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]
   // Attach a rule citation (CWE/OWASP) to each finding whose check is mapped in
   // the local rules catalog. Deterministic lookup, no network. Unmapped checks
   // pass through unchanged.
-  return results.map((r) => {
+  // A manifest-absence skip is an honest not-applicable in a normal project and a coverage hole
+  // when kit is standing in the wrong directory — same words, different meaning. Resolved here,
+  // once, from the scope facts rather than by each scanner guessing, and applied last so it also
+  // covers results appended after the scanners ran.
+  return escalateManifestSkips(results, scope).map((r) => {
     const rule = ruleForCheck(r.name);
     return rule ? { ...r, rule } : r;
   });

@@ -115,6 +115,67 @@ async function declaresWorkspaces(root: string): Promise<boolean> {
   }
 }
 
+export interface ScanScope {
+  /** Does the directory kit ran in have a manifest of its own? */
+  rootManifest: boolean;
+  /** Project directories found below it, relative paths. */
+  nested: string[];
+  /** Does the root manifest declare workspaces, so a root-level scan covers the children? */
+  workspaces: boolean;
+}
+
+/** The facts, gathered once: the row below and the skip escalation both read them. */
+export async function scanScopeFacts(root: string): Promise<ScanScope> {
+  const [rootManifest, nested] = await Promise.all([hasManifest(root), findNestedProjects(root)]);
+  return {
+    rootManifest,
+    nested,
+    workspaces: rootManifest ? await declaresWorkspaces(root) : false,
+  };
+}
+
+/**
+ * True when kit was pointed at a directory that has no project of its own while projects sit below
+ * it — the "I looked in the wrong place" case, as distinct from "there is nothing to scan".
+ */
+export function lookedInTheWrongPlace(scope: ScanScope): boolean {
+  return !scope.rootManifest && scope.nested.length > 0;
+}
+
+/** Skip reasons that mean "no manifest at this path", i.e. exactly what a wrong directory produces. */
+const MANIFEST_ABSENCE =
+  /^no (package\.json|requirements\.txt|lockfiles|Maven\/Gradle|package\.json \/ requirements\.txt)/i;
+
+/**
+ * Turn "nothing to scan" into "looked in the wrong place".
+ *
+ * A scanner that skips because this path has no manifest is telling the truth, and the sum of those
+ * truths was a green verdict over a directory whose code lived one level down. When the scope facts
+ * say kit is in the wrong place, those skips are no longer honest not-applicables: they are checks
+ * that did not cover the code. They become warnings naming where the code is.
+ *
+ * Only in that case. In an ordinary project, or a workspace root that genuinely covers its
+ * children, a manifest-absence skip stays a skip — a check that warns everywhere gets switched off,
+ * and then the case it was written for goes unnoticed too.
+ */
+export function escalateManifestSkips(
+  results: SecurityCheckResult[],
+  scope: ScanScope,
+): SecurityCheckResult[] {
+  if (!lookedInTheWrongPlace(scope)) return results;
+  const where = scope.nested.slice(0, 3).join(", ");
+  return results.map((r) =>
+    r.status === "skip" && MANIFEST_ABSENCE.test(r.detail)
+      ? {
+          ...r,
+          status: "warn" as const,
+          severity: r.severity ?? ("medium" as const),
+          detail: `${r.detail} — but ${scope.nested.length} project(s) below do (${where}); this scan looked in the wrong place`,
+        }
+      : r,
+  );
+}
+
 const NAME = "scan scope";
 
 function say(
@@ -134,8 +195,11 @@ function say(
  *   - a root manifest without workspaces: the children are separate projects, not covered;
  *   - no root manifest at all: this verdict covers an empty directory. This is the false green.
  */
-export async function checkScanScope(root: string): Promise<SecurityCheckResult> {
-  const [rootManifest, nested] = await Promise.all([hasManifest(root), findNestedProjects(root)]);
+export async function checkScanScope(
+  root: string,
+  facts?: ScanScope,
+): Promise<SecurityCheckResult> {
+  const { rootManifest, nested, workspaces } = facts ?? (await scanScopeFacts(root));
 
   if (nested.length === 0) {
     return say(
@@ -146,7 +210,7 @@ export async function checkScanScope(root: string): Promise<SecurityCheckResult>
 
   const list = nested.slice(0, 4).join(", ") + (nested.length > 4 ? `, +${nested.length - 4}` : "");
 
-  if (rootManifest && (await declaresWorkspaces(root))) {
+  if (rootManifest && workspaces) {
     return say("pass", `${nested.length} nested package(s) covered via workspaces: ${list}`);
   }
 

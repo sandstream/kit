@@ -18,7 +18,15 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { checkScanScope, findNestedProjects } from "./check-nested-projects.js";
+import {
+  checkScanScope,
+  findNestedProjects,
+  scanScopeFacts,
+  escalateManifestSkips,
+  lookedInTheWrongPlace,
+  type ScanScope,
+} from "./check-nested-projects.js";
+import type { SecurityCheckResult } from "./check-security.js";
 
 function tree(spec: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-scope-"));
@@ -130,5 +138,89 @@ describe("findNestedProjects", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * "There is nothing to scan" and "I looked in the wrong place" are the same sentence from a
+ * scanner's point of view and opposite facts from the operator's. Each individual skip was true;
+ * the sum of them was a green verdict over an empty directory. So the meaning is resolved once,
+ * from the scope facts, and only in the wrong-place case.
+ */
+describe("escalateManifestSkips", () => {
+  const skip = (name: string, detail: string): SecurityCheckResult => ({
+    category: "dependency",
+    name,
+    status: "skip",
+    detail,
+  });
+  const wrongPlace: ScanScope = {
+    rootManifest: false,
+    nested: ["web", "illithid"],
+    workspaces: false,
+  };
+  const ordinary: ScanScope = { rootManifest: true, nested: [], workspaces: false };
+
+  it("turns a manifest-absence skip into a warning that says where the code is", () => {
+    const out = escalateManifestSkips(
+      [skip("npm audit", "no package.json found"), skip("osv-scanner", "no lockfiles to scan")],
+      wrongPlace,
+    );
+    assert.deepEqual(
+      out.map((r) => r.status),
+      ["warn", "warn"],
+    );
+    for (const r of out) {
+      assert.match(r.detail, /looked in the wrong place/);
+      assert.match(r.detail, /web/);
+      assert.equal(r.severity, "medium");
+    }
+  });
+
+  it("leaves a skip that is genuinely not applicable alone", () => {
+    // Socket is cloud-only and excluded by design; SAST is opt-in. Neither is about a manifest, and
+    // rewriting them would make the report noise in exactly the repos that are set up correctly.
+    const out = escalateManifestSkips(
+      [
+        skip("socket scan", "Socket is cloud-only — excluded from kit's local-first check"),
+        skip("semgrep SAST", "SAST opt-in: set KIT_SEMGREP_CONFIG"),
+      ],
+      wrongPlace,
+    );
+    assert.deepEqual(
+      out.map((r) => r.status),
+      ["skip", "skip"],
+    );
+  });
+
+  it("changes nothing in an ordinary project", () => {
+    const input = [skip("pip-audit", "no requirements.txt found")];
+    assert.deepEqual(escalateManifestSkips(input, ordinary), input);
+    assert.equal(lookedInTheWrongPlace(ordinary), false);
+  });
+
+  it("changes nothing for a workspace root that genuinely covers its children", async () => {
+    const dir = tree({
+      "package.json": JSON.stringify({ workspaces: ["packages/*"] }),
+      "packages/a/package.json": "{}",
+    });
+    try {
+      const facts = await scanScopeFacts(dir);
+      assert.equal(lookedInTheWrongPlace(facts), false, "a root manifest exists — kit is in place");
+      const input = [skip("npm audit", "no package.json found")];
+      assert.deepEqual(escalateManifestSkips(input, facts), input);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not touch a result that already passed or failed", () => {
+    const pass: SecurityCheckResult = {
+      category: "dependency",
+      name: "pinned versions",
+      status: "pass",
+      detail: "no package.json found but irrelevant",
+    };
+    assert.equal(escalateManifestSkips([pass], wrongPlace)[0].status, "pass");
   });
 });
