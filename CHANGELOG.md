@@ -201,6 +201,34 @@
   download count, every repository link must be the one real repository, each plugin must be findable
   by the name a person would type, and regeneration must be byte-identical.
 
+- **A rebase is not a bypass** (#522).
+
+  Every `git rebase` produced one "commit(s) bypassed pre-commit hook — (sentinel-missing)" entry
+  per replayed commit. Four false positives came out of a single day of rebasing branches, on
+  commits whose pre-commit hook HAD run — on the original. A false positive in a security banner is
+  worse than no banner: it teaches the operator to skip the line, and then the real `--no-verify`
+  scrolls past unread.
+
+  Git replays commits without running pre-commit, but it *does* run post-commit for each replayed
+  commit, so the sentinel is absent and the commit looked bypassed. Measured while fixing it: during
+  a replay the post-commit hook sees `rebase-merge/` and `CHERRY_PICK_HEAD` present, an ordinary
+  commit sees neither, and `GIT_REFLOG_ACTION` is not exported to post-commit at all — so the state
+  is unambiguous exactly where the decision is made. The event is now recorded as `replayed` and
+  prints nothing. It is still recorded: the log is an audit trail, and "this commit was replayed" is
+  a fact worth keeping — it just is not a finding.
+
+  **Entries written before this fix are re-classified too**, so the four already in a log stop being
+  counted without anyone editing an append-only file. The witness is the reflog, which records the
+  operation that created each sha. Only messages that *create* a commit count — `rebase (pick)`,
+  `(squash)`, `(fixup)`, `(reword)`, `cherry-pick`, `am` — and deliberately not `rebase (finish)`,
+  which names the branch tip afterwards and would therefore excuse a genuine `--no-verify` commit
+  that happened to be that tip. That would turn a false positive into a false negative, which is the
+  one direction this must never take. A reflog that has expired answers "unknown", and an unknown
+  entry stays counted.
+
+  The banner now says `N entries came from a rebase/cherry-pick replay — not counted.` rather than
+  silently reporting a smaller number than the log is long.
+
 - **`kit ci` rendered a skipped check as a failure on GitHub and as a pass on GitLab** (#517).
   Two surfaces, two opposite lies, one missing case.
 

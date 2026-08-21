@@ -214,13 +214,27 @@ if [ -n "$__kit_git_dir" ] && [ -n "$__kit_repo_root" ]; then
       fi
     fi
   fi
+  # A rebase, cherry-pick or am REPLAYS a commit whose pre-commit hook already ran on the
+  # original. Git runs post-commit for each replayed commit but not pre-commit, so the sentinel is
+  # missing and the commit looks bypassed. Measured: four false positives in one day of rebasing
+  # branches. A false positive in a security banner is worse than no banner — it teaches the
+  # operator to ignore the line. During a replay the post-commit hook can see the state
+  # unambiguously (rebase-merge/ and CHERRY_PICK_HEAD both present; GIT_REFLOG_ACTION is NOT
+  # exported here, so it cannot be used), so the event is recorded as a replay and stays silent.
+  if [ -d "$__kit_git_dir/rebase-merge" ] || [ -d "$__kit_git_dir/rebase-apply" ] ||
+     [ -f "$__kit_git_dir/CHERRY_PICK_HEAD" ] || [ -f "$__kit_git_dir/MERGE_HEAD" ]; then
+    if [ -n "$__kit_reason" ]; then __kit_reason="replayed"; fi
+    __kit_quiet=1
+  fi
   if [ -n "$__kit_reason" ]; then
     __kit_log="$__kit_repo_root/${SKIPPED_COMMITS_LOG}"
     __kit_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     printf '{"timestamp":"%s","sha":"%s","reason":"%s","user":"%s"}\\n' \\
       "$__kit_ts" "$__kit_head" "$__kit_reason" "\${USER:-unknown}" \\
       >> "$__kit_log" 2>/dev/null || true
-    echo "[kit] WARNING: pre-commit hook was skipped ($__kit_reason). Logged to ${SKIPPED_COMMITS_LOG}." >&2
+    if [ -z "$__kit_quiet" ]; then
+      echo "[kit] WARNING: pre-commit hook was skipped ($__kit_reason). Logged to ${SKIPPED_COMMITS_LOG}." >&2
+    fi
   fi
   # Clean up sentinel so the next commit starts fresh.
   rm -f "$__kit_sentinel" 2>/dev/null || true

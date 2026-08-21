@@ -251,17 +251,26 @@ async function showSkippedCommitBanner(): Promise<void> {
       await import("./skipped-commits.js");
     const entries = parseSkippedCommits(content);
     if (entries.length === 0) return;
-    const { live, orphaned } = partitionSkippedCommits(
+    const { live, orphaned, replayed } = partitionSkippedCommits(
       entries,
       gitReachabilityProbe(process.cwd()),
     );
-    // Nothing the repo still contains — the log is history, not a finding.
+    // Nothing the repo still contains, or nothing but replays — the log is history, not a finding.
+    // A rebase replays commits without pre-commit (git runs post-commit for each), so a day of
+    // rebasing used to produce a red banner about commits whose hook had run on the original.
     if (live.length === 0) return;
     process.stderr.write(
       `${c.red}[kit] ${live.length} commit(s) bypassed pre-commit hook — most recent:${c.reset}\n`,
     );
     for (const entry of live.slice(-3)) {
       process.stderr.write(`  ${entry.timestamp}  ${entry.sha.slice(0, 8)}  (${entry.reason})\n`);
+    }
+    if (replayed.length > 0) {
+      // Named, not hidden: the operator should be able to see why the number is smaller than the
+      // log is long, without opening the file.
+      process.stderr.write(
+        `  ${replayed.length} entr${replayed.length === 1 ? "y" : "ies"} came from a rebase/cherry-pick replay — not counted.\n`,
+      );
     }
     if (orphaned.length > 0) {
       process.stderr.write(

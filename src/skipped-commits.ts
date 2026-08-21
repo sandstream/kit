@@ -15,6 +15,19 @@
  */
 import { execFileSync } from "node:child_process";
 
+/**
+ * Reflog messages that mean "this sha was created by replaying an existing commit".
+ *
+ * Deliberately NOT `rebase (finish)` or `rebase (start)`: those name where the branch ended up, so
+ * matching them would excuse a genuine `--no-verify` commit that happened to be the tip when
+ * someone rebased. `revert` is absent too — a revert is an ordinary commit and runs the hooks.
+ */
+export const CREATING_REPLAY_MESSAGE =
+  // The word boundary sits inside each alternative on purpose: `\b` after `\)` never matches,
+  // since both `)` and the `:` that follows are non-word characters — the first version of this
+  // regex silently matched nothing at all, and the test caught it.
+  /^(rebase(\s+-i)?\s+\((pick|squash|fixup|reword|edit)\)|cherry-pick\b|am\b)/;
+
 export interface SkippedCommitEntry {
   timestamp: string;
   sha: string;
@@ -31,6 +44,18 @@ export interface ReachabilityProbe {
   resolves(sha: string): boolean;
   /** Does at least one ref reach it? */
   containedByAnyRef(sha: string): boolean;
+  /**
+   * Was this commit CREATED by a replay (rebase pick/squash/fixup/reword, cherry-pick, am)?
+   *
+   * Answered from the reflog, which records the operation that produced each sha. Only the
+   * messages that create a commit count: `rebase (finish)` names the branch tip afterwards, so a
+   * genuine `--no-verify` commit at the tip of a branch someone then rebased would be excused by
+   * it — downgrading a real bypass, which is the one error this must not make.
+   *
+   * Unknown answers `false`: a reflog expires (30–90 days), and an entry we cannot classify stays
+   * counted, the same direction the rest of this module takes.
+   */
+  createdByReplay(sha: string): boolean;
 }
 
 /**
@@ -38,6 +63,13 @@ export interface ReachabilityProbe {
  * shell hook appending under `|| true`, so a truncated line must not blind the banner
  * to the entries around it.
  */
+/**
+ * Reasons the post-commit detector writes for a replay rather than a bypass. Recorded rather than
+ * dropped: the log is an audit trail, and "this commit was replayed" is a fact worth keeping — it
+ * just is not a finding.
+ */
+export const REPLAY_REASONS = new Set(["replayed"]);
+
 export function parseSkippedCommits(content: string): SkippedCommitEntry[] {
   const entries: SkippedCommitEntry[] = [];
   for (const line of content.split("\n")) {
@@ -67,15 +99,26 @@ export function parseSkippedCommits(content: string): SkippedCommitEntry[] {
 export function partitionSkippedCommits(
   entries: SkippedCommitEntry[],
   probe: ReachabilityProbe,
-): { live: SkippedCommitEntry[]; orphaned: SkippedCommitEntry[] } {
+): {
+  live: SkippedCommitEntry[];
+  orphaned: SkippedCommitEntry[];
+  replayed: SkippedCommitEntry[];
+} {
   const live: SkippedCommitEntry[] = [];
   const orphaned: SkippedCommitEntry[] = [];
+  const replayed: SkippedCommitEntry[] = [];
   for (const entry of entries) {
+    // A replay is not a bypass, whether the hook already knew that when it wrote the line (newer
+    // installs) or the reflog can still prove it (entries written before the hook was fixed).
+    if (REPLAY_REASONS.has(entry.reason) || probe.createdByReplay(entry.sha)) {
+      replayed.push(entry);
+      continue;
+    }
     if (probe.containedByAnyRef(entry.sha)) live.push(entry);
     else if (probe.resolves(entry.sha)) orphaned.push(entry);
     else live.push(entry);
   }
-  return { live, orphaned };
+  return { live, orphaned, replayed };
 }
 
 /**
@@ -124,11 +167,33 @@ export function gitReachabilityProbe(cwd: string): ReachabilityProbe {
     return value;
   };
 
+  // Shas the reflog says were CREATED by a replay. One walk, cached: `git reflog --all` is a
+  // single call, and the alternative is one call per logged entry.
+  let replayed: Set<string> | null = null;
+  const replayedSet = (): Set<string> => {
+    if (replayed) return replayed;
+    const out = git(["reflog", "--all", "--format=%H %gs"]) ?? "";
+    const set = new Set<string>();
+    for (const line of out.split("\n")) {
+      const space = line.indexOf(" ");
+      if (space <= 0) continue;
+      const sha = line.slice(0, space);
+      const message = line.slice(space + 1);
+      if (CREATING_REPLAY_MESSAGE.test(message)) set.add(sha);
+    }
+    replayed = set;
+    return replayed;
+  };
+
   return {
     resolves: (sha) => fullSha(sha) !== null,
     containedByAnyRef: (sha) => {
       const full = fullSha(sha);
       return full !== null && reachableSet().has(full);
+    },
+    createdByReplay: (sha) => {
+      const full = fullSha(sha);
+      return full !== null && replayedSet().has(full);
     },
   };
 }

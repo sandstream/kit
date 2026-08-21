@@ -23,6 +23,7 @@ import {
   partitionSkippedCommits,
   gitReachabilityProbe,
   type ReachabilityProbe,
+  CREATING_REPLAY_MESSAGE as CREATING_REPLAY_MESSAGE_FOR_TEST,
 } from "./skipped-commits.js";
 import { SKIPPED_COMMITS_LOG } from "./hooks.js";
 
@@ -36,11 +37,16 @@ function entry(sha: string, reason = "sentinel-missing") {
   return { timestamp: "2026-08-04T10:00:00Z", sha, reason };
 }
 
-/** A probe answering from two explicit sets — no git, so the rule is what is tested. */
-function probeFrom(resolvable: string[], contained: string[]): ReachabilityProbe {
+/** A probe answering from explicit sets — no git, so the rule is what is tested. */
+function probeFrom(
+  resolvable: string[],
+  contained: string[],
+  replayed: string[] = [],
+): ReachabilityProbe {
   return {
     resolves: (sha) => resolvable.includes(sha),
     containedByAnyRef: (sha) => contained.includes(sha),
+    createdByReplay: (sha) => replayed.includes(sha),
   };
 }
 
@@ -239,5 +245,96 @@ describe("the CLI banner reflects the partition", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * A rebase is not a bypass.
+ *
+ * Every `git rebase` replays commits without running pre-commit — git runs post-commit for each
+ * one, the sentinel is absent, and the detector recorded "sentinel-missing". Measured: four false
+ * positives from one day of rebasing branches, on commits whose pre-commit hook HAD run, on the
+ * original. A false positive in a security banner is worse than no banner: it teaches the operator
+ * to skip the line, and then the real `--no-verify` scrolls past unread.
+ *
+ * The classification has two sources, and the second one is what fixes a log that already has
+ * false entries in it: the hook now writes `replayed` when it can see the rebase state, and the
+ * reflog can still prove it for lines written before that fix.
+ *
+ * The negative case below is the one that must never regress: `rebase (finish)` names the branch
+ * tip AFTER a rebase, so matching it would excuse a genuine `--no-verify` commit that happened to
+ * be that tip — turning a false positive into a false negative, in the wrong direction.
+ */
+describe("a replayed commit is not a bypass", () => {
+  const C = "c".repeat(40);
+
+  it("sets aside an entry the hook already recorded as a replay", () => {
+    const { live, replayed } = partitionSkippedCommits(
+      [entry(A, "replayed"), entry(B)],
+      probeFrom([A, B], [A, B]),
+    );
+    assert.deepEqual(
+      live.map((e) => e.sha),
+      [B],
+      "only the genuine bypass may be counted",
+    );
+    assert.deepEqual(
+      replayed.map((e) => e.sha),
+      [A],
+    );
+  });
+
+  it("sets aside an older entry the reflog can still prove was replayed", () => {
+    // Written before the hook knew about rebases: reason is the old one, and only the reflog
+    // distinguishes it.
+    const { live, replayed } = partitionSkippedCommits(
+      [entry(A), entry(B)],
+      probeFrom([A, B], [A, B], [A]),
+    );
+    assert.deepEqual(
+      live.map((e) => e.sha),
+      [B],
+    );
+    assert.deepEqual(
+      replayed.map((e) => e.sha),
+      [A],
+    );
+  });
+
+  it("keeps counting a bypass the reflog cannot excuse", () => {
+    const { live, replayed, orphaned } = partitionSkippedCommits(
+      [entry(C)],
+      probeFrom([C], [C], []),
+    );
+    assert.deepEqual(
+      live.map((e) => e.sha),
+      [C],
+    );
+    assert.equal(replayed.length, 0);
+    assert.equal(orphaned.length, 0);
+  });
+
+  it("only messages that CREATE a commit count as a replay", () => {
+    // The regex lives in the module; this asserts the property through the git-backed probe's
+    // contract by way of the documented list. `rebase (finish)` and `revert` must not qualify.
+    const creating = [
+      "rebase (pick): add thing",
+      "rebase -i (squash): fold",
+      "rebase (fixup): tidy",
+      "rebase (reword): message",
+      "cherry-pick: port fix",
+      "am: apply patch",
+    ];
+    const notCreating = [
+      "rebase (finish): returning to refs/heads/feature",
+      "rebase (start): checkout main",
+      "checkout: moving from main to feature",
+      "commit: ordinary work",
+      "commit (amend): fixed",
+      "revert: undo a thing",
+      "merge main: Fast-forward",
+    ];
+    for (const m of creating) assert.match(m, CREATING_REPLAY_MESSAGE_FOR_TEST, m);
+    for (const m of notCreating) assert.doesNotMatch(m, CREATING_REPLAY_MESSAGE_FOR_TEST, m);
   });
 });
