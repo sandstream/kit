@@ -206,6 +206,21 @@ export async function checkGitHookFloor(cwd?: string): Promise<SecurityCheckResu
     config = undefined;
   }
   const verdict = judgeHookFloor(describeHookFloor(root, config));
+  // The wrapper is the other half of the same floor: the hooks resolve through it, so a hook
+  // directory full of correct hooks says nothing if the wrapper's entrypoint is gone (#509).
+  const { describeWrapper, judgeWrapper } = await import("./hook-floor.js");
+  const wrapper = judgeWrapper(describeWrapper());
+  if (wrapper.status === "fail" || (wrapper.status === "warn" && verdict.status === "pass")) {
+    return wrapper.severity
+      ? {
+          category,
+          name: "git hook floor",
+          status: wrapper.status,
+          severity: wrapper.severity,
+          detail: wrapper.detail,
+        }
+      : { category, name: "git hook floor", status: wrapper.status, detail: wrapper.detail };
+  }
   return verdict.severity
     ? { category, name, status: verdict.status, severity: verdict.severity, detail: verdict.detail }
     : { category, name, status: verdict.status, detail: verdict.detail };

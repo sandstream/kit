@@ -8,6 +8,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **The machine-wide wrapper pointed at whichever kit wrote it** (#509). `~/.kit/bin/kit` is what
+  every kit hook in every repo execs, and `ensureKitWrapper()` baked in `process.argv[1]` — so one
+  `kit hooks add` run from a development checkout aimed the whole machine's enforcement floor at
+  `…/dist/cli.js`, a path `npm run build` deletes on its first step. Measured: a session in an
+  unrelated repo failed with `kit CLI entrypoint missing: …/kit-public/dist/cli.js` and kept going
+  **ungated**, because a hook that cannot start is reported non-blocking.
+
+  Four properties made it worse than a stale path, and the fix addresses each: a repo-local
+  command had a machine-wide effect; a dev build is transient *by design*; it failed open; and it
+  was silent in both directions.
+
+  Now: an **installed** kit wins over a checkout when the wrapper is written (probing the usual
+  global bin dirs), `KIT_WRAPPER_ALLOW_DEV=1` still wins over that so an explicit dev pin is not
+  silently overridden, and a checkout with no install to fall back on is written but **loud**
+  — refusing outright would leave the hooks with no wrapper at all. The result line names the
+  entrypoint instead of just saying "refreshed".
+
+  `kit check`'s `git hook floor` row now also judges the wrapper, since the hooks resolve through
+  it: a **missing** entrypoint fails high (every hook on the machine is dead, and it fails open),
+  and an entrypoint inside a git working tree warns (it works until the next build).
+
+  Both new env knobs are registered in `kit config knobs`: `KIT_WRAPPER_ALLOW_DEV` (marked
+  dangerous) and `KIT_TOOL_LATEST_TTL_H`, which had been missing since it was introduced.
+
+### Fixed
+
 - **The install-gate recognised one repo-argument form; the tool publishes two** (#507).
   `ownerRepoArg` matched `^[\w.-]+/[\w.-]+$` — one slash, no scheme — so the payload of a
   repo-fetching installer was triaged only when the argument happened to be written as

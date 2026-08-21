@@ -30,6 +30,8 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve, sep } from "node:path";
 import { resolveHooksDir } from "./hooks.js";
+import { pathInWorkingTree } from "./kit-wrapper.js";
+import { homedir } from "node:os";
 import type { kitConfig } from "./config.js";
 
 /** The kit-managed built-in hooks, keyed by the git hook file they install into. */
@@ -182,4 +184,95 @@ export function judgeHookFloor(report: HookFloorReport): HookFloorVerdict {
     status: "pass",
     detail: `${report.installed.length} kit hook(s) wired in ${where}: ${report.installed.join(", ")}`,
   };
+}
+
+/**
+ * The OTHER half of the floor: the machine-wide wrapper every hook goes through.
+ *
+ * `~/.kit/bin/kit` used to be written with whatever entrypoint happened to be running, so one
+ * `kit hooks add` from a checkout aimed every hook on the machine at `…/dist/cli.js` — a path
+ * `npm run build` deletes on its first step. Measured: a session in an unrelated repo failed with
+ * "kit CLI entrypoint missing" and continued UNGATED, because a hook that cannot start is
+ * non-blocking (#509). Reporting the hook directory (above) while saying nothing about the
+ * wrapper leaves half the floor unmeasured.
+ */
+export interface WrapperReport {
+  path: string;
+  /** Present and kit-managed. */
+  managed: boolean;
+  /** The entrypoint it execs, when it could be read. */
+  entry: string | null;
+  /** The entrypoint does not exist — every hook on this machine is dead until it returns. */
+  entryMissing: boolean;
+  /** The entrypoint is inside a git working tree, i.e. a build artifact rather than an install. */
+  entryInWorkingTree: boolean;
+}
+
+/** Read the wrapper and the state of what it points at. */
+export function describeWrapper(home = homedir()): WrapperReport {
+  const path = resolve(home, ".kit", "bin", "kit");
+  const empty: WrapperReport = {
+    path,
+    managed: false,
+    entry: null,
+    entryMissing: false,
+    entryInWorkingTree: false,
+  };
+  let body: string;
+  try {
+    body = readFileSync(path, "utf-8");
+  } catch {
+    return empty;
+  }
+  if (!body.includes("kit-managed wrapper")) return { ...empty, managed: false };
+  // The generated wrapper's last line is `exec "<node>" "<cli>" "$@"`.
+  const m = /^exec\s+"([^"]+)"\s+"([^"]+)"/m.exec(body);
+  const entry = m?.[2] ?? null;
+  return {
+    path,
+    managed: true,
+    entry,
+    entryMissing: entry !== null && !existsSync(entry),
+    entryInWorkingTree: entry !== null && pathInWorkingTree(entry),
+  };
+}
+
+/**
+ * Verdict for the wrapper. A missing entrypoint is the loud case: every kit hook on the machine
+ * is dead, in every repo, and it fails open. A working-tree entrypoint is the latent one — it
+ * works right now and breaks on the next build.
+ */
+export function judgeWrapper(r: WrapperReport): HookFloorVerdict {
+  if (!r.managed) {
+    return { status: "skip", detail: `no kit-managed wrapper at ${r.path}` };
+  }
+  if (r.entry === null) {
+    return {
+      status: "warn",
+      severity: "medium",
+      detail: `${r.path} is kit-managed but its exec target could not be read — refresh it with 'kit agent-config'`,
+    };
+  }
+  if (r.entryMissing) {
+    return {
+      status: "fail",
+      severity: "high",
+      detail:
+        `the wrapper every kit hook goes through points at ${r.entry}, which does not exist — ` +
+        `EVERY kit hook on this machine is dead until it returns, and a hook that cannot start ` +
+        `is non-blocking, so sessions run ungated. Refresh it from the installed kit: ` +
+        `'kit agent-config' (or 'kit memory install') run from the global binary.`,
+    };
+  }
+  if (r.entryInWorkingTree) {
+    return {
+      status: "warn",
+      severity: "medium",
+      detail:
+        `the wrapper points at ${r.entry}, inside a git working tree — a build that cleans ` +
+        `dist/ will disarm every kit hook on this machine until it finishes. Re-run ` +
+        `'kit agent-config' from the installed kit to pin the install instead.`,
+    };
+  }
+  return { status: "pass", detail: `wrapper → ${r.entry}` };
 }

@@ -152,6 +152,103 @@ function defaultMiseShimsDir(home: string): string | undefined {
 }
 
 /**
+ * Where a wrapper entrypoint may point, ranked.
+ *
+ * `~/.kit/bin/kit` is the machine-wide wrapper every kit hook in every repo goes through, and it
+ * used to be written with whatever entrypoint happened to be running (`process.argv[1]`). One
+ * `kit hooks add` from a development checkout therefore aimed the whole machine's enforcement
+ * floor at `…/kit-public/dist/cli.js` — a path `npm run build` DELETES on its first step. Measured
+ * consequence (#509): a session in an unrelated repo failed with
+ *
+ *     PreToolUse:Bash hook error … kit CLI entrypoint missing: …/kit-public/dist/cli.js
+ *
+ * and continued UNGATED, because a hook that cannot start is non-blocking.
+ *
+ * So: prefer an INSTALLED kit, whose path is stable by construction, and treat a working-tree
+ * path as the last resort it is.
+ */
+export interface EntryCandidates {
+  /** The entrypoint of the kit process doing the writing (`process.argv[1]`). */
+  running?: string;
+  /** Global npm bin dirs to look for an installed `kit` in. */
+  globalBins: string[];
+  exists: (p: string) => boolean;
+  /** True when `p` sits inside a git working tree — i.e. a checkout, not an install. */
+  inWorkingTree: (p: string) => boolean;
+  /** Opt-in to pinning the wrapper at a checkout anyway. */
+  allowDev?: boolean;
+}
+
+export interface EntryChoice {
+  path: string;
+  source: "installed" | "running";
+  /** Set when the chosen path is a working tree the wrapper should not normally pin. */
+  warning?: string;
+}
+
+/**
+ * Pick the entrypoint to bake into the wrapper. Pure — every branch is testable without a
+ * machine that has (or lacks) a global install.
+ */
+export function chooseWrapperEntry(c: EntryCandidates): EntryChoice | null {
+  const installed = c.globalBins.map((bin) => join(bin, "kit")).find((p) => c.exists(p));
+  const running = c.running;
+  const runningIsCheckout = running !== undefined && c.inWorkingTree(running);
+
+  // Explicit opt-in wins: KIT_WRAPPER_ALLOW_DEV means "pin the checkout on purpose", so the
+  // installed-kit preference must not quietly override the request.
+  if (c.allowDev && running !== undefined && runningIsCheckout) {
+    return {
+      path: running,
+      source: "running",
+      warning: `pinned to a working tree by request (KIT_WRAPPER_ALLOW_DEV): ${running} — a build that cleans dist/ will disarm every kit hook on this machine`,
+    };
+  }
+  // Otherwise an installed kit wins over a checkout: same tool, stable path.
+  if (installed && (runningIsCheckout || running === undefined)) {
+    return { path: installed, source: "installed" };
+  }
+  if (running === undefined) {
+    return installed ? { path: installed, source: "installed" } : null;
+  }
+  if (!runningIsCheckout) {
+    return { path: running, source: "running" };
+  }
+  // A checkout with no installed kit to fall back on: write it, but say what it means. Refusing
+  // outright would leave the hooks with no wrapper at all, which is worse.
+  return {
+    path: running,
+    source: "running",
+    warning:
+      `no installed kit found, so the wrapper points at a working tree: ${running}. ` +
+      `A build that cleans dist/ will disarm every kit hook on this machine until it finishes. ` +
+      `Install kit globally (npm i -g sandstream-kit) and re-run to fix this.`,
+  };
+}
+
+/** Global npm bin dirs worth probing, most specific first. */
+export function defaultGlobalBins(home: string): string[] {
+  return [
+    join(home, ".npm-global", "bin"),
+    join(home, ".npm", "bin"),
+    "/usr/local/bin",
+    "/opt/homebrew/bin",
+  ];
+}
+
+/** Is `p` inside a git working tree? Walks up looking for `.git`. */
+export function pathInWorkingTree(p: string, exists: (q: string) => boolean = existsSync): boolean {
+  let dir = dirname(resolve(p));
+  for (let i = 0; i < 40; i++) {
+    if (exists(join(dir, ".git"))) return true;
+    const up = dirname(dir);
+    if (up === dir) return false;
+    dir = up;
+  }
+  return false;
+}
+
+/**
  * Create or refresh ~/.kit/bin/kit. Idempotent (no write when already current),
  * 0755, and never clobbers an unmanaged file at that path. Returns what it did.
  */
@@ -159,14 +256,28 @@ export function ensureKitWrapper(opts: EnsureWrapperOpts = {}): EnsureWrapperRes
   const home = opts.home ?? homedir();
   const path = kitWrapperPath(home);
 
-  const cliEntry = opts.cliPath ?? (process.argv[1] ? resolve(process.argv[1]) : undefined);
-  if (!cliEntry) {
+  // An explicit cliPath (tests, callers that know better) wins. Otherwise prefer an INSTALLED
+  // kit over the running entrypoint — see chooseWrapperEntry and #509.
+  const choice = opts.cliPath
+    ? { path: resolve(opts.cliPath), source: "running" as const, warning: undefined }
+    : chooseWrapperEntry({
+        running: process.argv[1] ? resolve(process.argv[1]) : undefined,
+        globalBins: defaultGlobalBins(home),
+        exists: existsSync,
+        inWorkingTree: (p) => pathInWorkingTree(p),
+        allowDev: ["1", "true", "yes"].includes(
+          (process.env.KIT_WRAPPER_ALLOW_DEV ?? "").trim().toLowerCase(),
+        ),
+      });
+  if (!choice) {
     return {
       path,
       action: "skipped",
       detail: "could not resolve kit's cli.js path — wrapper not written",
     };
   }
+  const cliEntry = choice.path;
+  if (choice.warning) console.error(`[kit] wrapper: ${choice.warning}`);
 
   const spec: WrapperSpec = {
     nodePath: opts.nodePath ?? process.execPath,
@@ -195,14 +306,22 @@ export function ensureKitWrapper(opts: EnsureWrapperOpts = {}): EnsureWrapperRes
     writeFileSync(path, desired, "utf-8");
     chmodSync(path, 0o755);
     ensureCmdShim(home, spec);
-    return { path, action: "updated", detail: "refreshed node/cli/PATH" };
+    return {
+      path,
+      action: "updated",
+      detail: `refreshed node/cli/PATH → ${cliEntry}${choice.source === "installed" ? " (installed kit)" : ""}`,
+    };
   }
 
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, desired, "utf-8");
   chmodSync(path, 0o755);
   ensureCmdShim(home, spec);
-  return { path, action: "written", detail: "created self-healing wrapper" };
+  return {
+    path,
+    action: "written",
+    detail: `created self-healing wrapper → ${cliEntry}${choice.source === "installed" ? " (installed kit)" : ""}`,
+  };
 }
 
 /**
