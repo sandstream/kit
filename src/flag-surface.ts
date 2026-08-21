@@ -592,6 +592,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--scan-bytes",
     "--tools",
   ],
+  usage: ["--deep", "--help", "--json", "--prove", "--tab"],
   upgrade: ["--self"],
   "verify-provenance": ["--bundle", "--identity", "--issuer", "--offline", "--trusted-root"],
   whoami: ["--attest", "--json", "--mode", "--no-auto-install", "--non-interactive"],

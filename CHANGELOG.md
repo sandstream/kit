@@ -2,6 +2,39 @@
 
 ### Added
 
+- **`kit usage` — what kit knows, and proof that the floor still works** (#519).
+
+  Six tabs, switchable in the terminal with the number keys: **Floor** (audited operations and
+  refusals per operation), **Coverage** (the enumerated checks of the last saved run — pass, warn,
+  fail, and *what could not run, with each reason*), **Memory** (the store you own: its path, its
+  size on disk, messages and sessions, tokens generated vs context re-read, and the per-project
+  breakdown), **Triage** (what was checked before it was installed), **Machine** (every repo this
+  machine has sealed an audit log in) and **Proof**.
+
+  It is deliberately not a token-savings or money report. There is no counterfactual for "what
+  would this have cost without kit", and a saved-you-N number without one is invented — the same
+  rule the rest of kit is built on. What is measurable is the reliability axis, and the twelve
+  could-not-run rows are as much the product as the twenty-one that passed: an agent asked "is
+  this safe?" improvises a subset, answers with no denominator, and leaves no record of what it
+  skipped.
+
+  **`kit usage --prove` is the part that is not a dashboard.** Counting recorded activity proves a
+  gate existed, not that it still works, so the Proof tab runs the floor against inputs it must
+  refuse — on your machine, offline, in a throwaway directory that is removed afterwards:
+
+  - an install whose target cannot be resolved (`$PM install x`) must be blocked (exit 2);
+  - a command that installs nothing must still be allowed — otherwise the first control proves
+    nothing, since a gate that refuses everything is an outage;
+  - a staged credential must fail `git commit` in a temp repo with kit's own hook installed;
+  - a clean commit must still go through;
+  - and with `--deep`, two consecutive runs must produce an identical verdict set.
+
+  A control that cannot be set up reports `inconclusive` with its reason. It never reports a pass
+  it did not observe.
+
+  `--json` for the whole set, `--tab <name>` for one; a non-TTY prints every tab rather than
+  silently handing a piped reader one sixth of the report.
+
 - **`kit config sections` and a generated `docs/CONFIGURATION.md`** (#527).
 
   `.kit.toml` has 23 sections. Six of the most-used — `[tools]`, `[services]`, `[secrets]`,

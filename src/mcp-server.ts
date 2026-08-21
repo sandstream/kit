@@ -56,7 +56,7 @@ export const KIT_MCP_TOOLS: readonly string[] = [
  * Server-level instructions (MCP `initialize` result). Clients like Claude Code
  * surface this to route tool selection, so it carries the one decision that
  * matters most for context economy: an agent WITH shell access should prefer the
- * CLI (zero standing context cost, `--help` self-documents all 72 commands);
+ * CLI (zero standing context cost, `--help` self-documents all 73 commands);
  * these MCP tools exist for shell-less clients. Kept well under the ~2KB
  * truncation limit clients apply.
  */
