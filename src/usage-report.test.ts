@@ -15,6 +15,8 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 
 import {
+  standardsFromRuns,
+  keysFromConfigAndRun,
   coverageFromRuns,
   floorFromLogs,
   triageFromLog,
@@ -251,6 +253,148 @@ describe("memoryFromDb", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_DB;
       else process.env.KIT_MEMORY_DB = prev;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * Standards coverage, and the one distinction anyone showing this to a client will be asked about:
+ * a control kit MAPS to a check is a claim; a control whose check actually ran and passed is
+ * evidence. Reporting only the first is how a coverage map becomes marketing.
+ */
+describe("standardsFromRuns", () => {
+  function runWith(security: unknown[]): string {
+    const dir = scratch();
+    mkdirSync(join(dir, ".kit", "runs"), { recursive: true });
+    writeFileSync(join(dir, ".kit", "runs", "check-9000.json"), JSON.stringify({ security }));
+    return dir;
+  }
+
+  it("scores every registered standard against the saved run's security rows", () => {
+    const dir = runWith([
+      { category: "dependency", name: "npm audit", status: "pass", detail: "" },
+      { category: "secrets", name: "secrets scan", status: "pass", detail: "" },
+    ]);
+    try {
+      const st = standardsFromRuns(dir);
+      assert.ok(st.standards.length >= 8, `expected the whole registry: ${st.standards.length}`);
+      assert.equal(st.at, new Date(9000).toISOString());
+      for (const s2 of st.standards) {
+        assert.ok(s2.verified <= s2.auto, `${s2.key}: verified must not exceed mapped`);
+        assert.equal(
+          s2.total,
+          s2.auto + s2.gap + s2.manual + s2.na,
+          `${s2.key}: buckets must add up`,
+        );
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("claims nothing when no run has been saved", () => {
+    const dir = scratch();
+    try {
+      const st = standardsFromRuns(dir);
+      assert.deepEqual(st.standards, []);
+      assert.equal(
+        st.at,
+        null,
+        "no run means no date — a coverage map with no evidence is a claim",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * The keys tab answers "are my keys exposed" — and must answer it without ever handling a key.
+ * Every unknown is reported as unknown: a repo with no saved run has UNKNOWN resolution, not zero
+ * resolved, because "0 resolved" and "not measured" would look identical while meaning opposite
+ * things.
+ */
+describe("keysFromConfigAndRun", () => {
+  it("counts declared keys by source, reads names only", () => {
+    const dir = scratch();
+    try {
+      writeFileSync(
+        join(dir, ".kit.toml"),
+        [
+          "[secrets.keys]",
+          'STRIPE_SECRET_KEY = { source = "1password" }',
+          'DATABASE_URL = { source = "1password" }',
+          'PORT = { source = "env" }',
+        ].join("\n"),
+      );
+      const k = keysFromConfigAndRun(dir);
+      assert.equal(k.declared, 3);
+      assert.deepEqual(k.bySource, [
+        ["1password", 2],
+        ["env", 1],
+      ]);
+      assert.equal(k.available, null, "no run — resolution is unknown, not zero");
+      assert.equal(k.history, null);
+      assert.equal(k.envIgnored, null);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads resolution and history out of the saved run", () => {
+    const dir = scratch();
+    try {
+      writeFileSync(join(dir, ".kit.toml"), '[secrets.keys]\nA = { source = "env" }\n');
+      mkdirSync(join(dir, ".kit", "runs"), { recursive: true });
+      writeFileSync(
+        join(dir, ".kit", "runs", "check-9000.json"),
+        JSON.stringify({
+          secrets: [
+            { name: "A", available: true },
+            { name: "B", available: false },
+          ],
+          security: [
+            {
+              category: "secrets",
+              name: "secrets scan",
+              status: "warn",
+              detail:
+                "4 unverified secret-shaped string(s) in git history (0 verified-live) — review: 27 example credential(s) (fixtures), no rotation needed; 2 accepted historical finding(s) via .kit-secretsignore",
+            },
+            { category: "exposure", name: "gitignore coverage", status: "pass", detail: "" },
+          ],
+        }),
+      );
+      const k = keysFromConfigAndRun(dir);
+      assert.equal(k.available, 1);
+      assert.deepEqual(k.missing, ["B"]);
+      assert.deepEqual(k.history, {
+        verifiedLive: 0,
+        unverified: 4,
+        examples: 27,
+        accepted: 2,
+      });
+      assert.equal(k.envIgnored, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports history as unknown when the row's wording does not parse", () => {
+    // The counts live only in the row's prose. A wording change must yield null, never a wrong
+    // number that someone then acts on.
+    const dir = scratch();
+    try {
+      mkdirSync(join(dir, ".kit", "runs"), { recursive: true });
+      writeFileSync(
+        join(dir, ".kit", "runs", "check-9000.json"),
+        JSON.stringify({
+          security: [{ name: "secrets scan", status: "pass", detail: "all good, nothing to see" }],
+        }),
+      );
+      assert.equal(keysFromConfigAndRun(dir).history, null);
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });

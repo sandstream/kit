@@ -22,7 +22,16 @@ import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import type { UsageFacts } from "../usage-report.js";
 
-const TABS = ["floor", "coverage", "memory", "triage", "machine", "proof"] as const;
+const TABS = [
+  "floor",
+  "coverage",
+  "standards",
+  "keys",
+  "memory",
+  "triage",
+  "machine",
+  "proof",
+] as const;
 type Tab = (typeof TABS)[number];
 
 const WIDTH = 66;
@@ -206,6 +215,122 @@ function projectLabel(key: string): string {
   return tail.length > 30 ? tail.slice(-30) : tail;
 }
 
+function renderStandards(f: UsageFacts): string[] {
+  const st = f.standards;
+  if (st.standards.length === 0) {
+    return [
+      line(`${c.dim}no saved check run — run \`kit check\` once${c.reset}`),
+      line(""),
+      line(`${c.dim}A coverage map without a run behind it is a claim. These numbers${c.reset}`),
+      line(`${c.dim}are scored against real check results or they are not shown.${c.reset}`),
+    ];
+  }
+  const out = [
+    line(
+      `${c.bold}${st.standards.length}${c.reset} standards mapped`,
+      st.at ? `${c.dim}${st.at.slice(0, 16).replace("T", " ")}${c.reset}` : "",
+    ),
+    line(""),
+    line(
+      `${c.dim}${"standard".padEnd(18)}${"verified".padStart(9)}${"mapped".padStart(8)}${"gap".padStart(6)}${"manual".padStart(8)}${c.reset}`,
+    ),
+  ];
+  for (const s2 of st.standards) {
+    out.push(
+      line(
+        `  ${s2.key.slice(0, 16).padEnd(16)}` +
+          `${c.green}${String(s2.verified).padStart(9)}${c.reset}` +
+          `${String(s2.auto).padStart(8)}` +
+          `${c.yellow}${String(s2.gap).padStart(6)}${c.reset}` +
+          `${c.dim}${String(s2.manual).padStart(8)}${c.reset}`,
+      ),
+    );
+  }
+  out.push(line(""));
+  // The distinction a client asks about, spelled out rather than left to the column names.
+  out.push(line(`${c.dim}verified = the mapped check ran and passed. mapped − verified${c.reset}`));
+  out.push(line(`${c.dim}is claimed coverage with no evidence behind it yet.${c.reset}`));
+  return out;
+}
+
+function renderKeys(f: UsageFacts): string[] {
+  const k = f.keys;
+  const out: string[] = [];
+
+  if (k.declared === 0) {
+    out.push(line(`${c.dim}no [secrets.keys] declared in .kit.toml${c.reset}`));
+  } else {
+    out.push(
+      line(
+        `${c.bold}${k.declared}${c.reset} keys declared`,
+        k.available === null
+          ? `${c.dim}resolution unknown — no saved run${c.reset}`
+          : `${c.bold}${k.available}${c.reset} resolved`,
+      ),
+    );
+    out.push(
+      line(
+        `${c.dim}by source${c.reset}`,
+        `${c.dim}${k.bySource.map(([s2, n]) => `${s2} ${n}`).join(" · ") || "—"}${c.reset}`,
+      ),
+    );
+    if (k.missing.length > 0) {
+      out.push(line(""));
+      out.push(
+        line(
+          `${c.red}unresolved${c.reset}`,
+          `${c.dim}${k.missing.slice(0, 3).join(", ")}${k.missing.length > 3 ? ` +${k.missing.length - 3}` : ""}${c.reset}`,
+        ),
+      );
+    }
+  }
+
+  out.push(line(""));
+  if (k.history === null) {
+    out.push(line(`${c.dim}history: not read (no secrets-scan row in the last run)${c.reset}`));
+  } else {
+    const h = k.history;
+    out.push(line(`${c.dim}in git history${c.reset}`));
+    out.push(
+      line(
+        `  ${h.verifiedLive > 0 ? c.red : c.green}verified live${c.reset}`,
+        `${String(h.verifiedLive).padStart(5)}  ${c.dim}${h.verifiedLive > 0 ? "rotate now" : "none"}${c.reset}`,
+      ),
+    );
+    out.push(
+      line(
+        `  ${c.yellow}unverified${c.reset}`,
+        `${String(h.unverified).padStart(5)}  ${c.dim}review${c.reset}`,
+      ),
+    );
+    out.push(
+      line(
+        `  ${c.dim}examples/fixtures${c.reset}`,
+        `${String(h.examples).padStart(5)}  ${c.dim}no rotation${c.reset}`,
+      ),
+    );
+    out.push(
+      line(
+        `  ${c.dim}accepted${c.reset}`,
+        `${String(h.accepted).padStart(5)}  ${c.dim}.kit-secretsignore${c.reset}`,
+      ),
+    );
+  }
+
+  out.push(line(""));
+  out.push(
+    line(
+      k.envIgnored === null
+        ? `${c.dim}.env coverage: unknown in the last run${c.reset}`
+        : k.envIgnored
+          ? `${c.green}✓${c.reset} ${c.dim}.env patterns are gitignored${c.reset}`
+          : `${c.red}✗${c.reset} ${c.dim}.env is NOT fully gitignored${c.reset}`,
+    ),
+  );
+  out.push(line(`${c.dim}Names only — this report never reads a key's value.${c.reset}`));
+  return out;
+}
+
 function renderMemory(f: UsageFacts): string[] {
   const m = f.memory;
   if (!m.path) return [line(`${c.dim}no memory store on this machine${c.reset}`)];
@@ -293,6 +418,8 @@ function renderProof(f: UsageFacts): string[] {
 }
 
 const RENDER: Record<Tab, (f: UsageFacts) => string[]> = {
+  standards: renderStandards,
+  keys: renderKeys,
   memory: renderMemory,
   proof: renderProof,
   coverage: renderCoverage,
@@ -302,6 +429,8 @@ const RENDER: Record<Tab, (f: UsageFacts) => string[]> = {
 };
 
 const TITLE: Record<Tab, string> = {
+  standards: "Standards",
+  keys: "Keys",
   memory: "Memory",
   proof: "Proof",
   coverage: "Coverage",
@@ -321,15 +450,33 @@ export function renderTab(facts: UsageFacts, tab: Tab, opts: { interactive: bool
     ...RENDER[tab](facts),
     line(""),
   ];
-  // Six tabs do not fit in bracket notation, and a wrapped tab row breaks the box. Numbers and
-  // separators only, so the row stays inside WIDTH on an 80-column terminal.
-  const tabRow = TABS.map((t, i) =>
+  // Eight tabs do not fit on one 66-column row, and `line()` truncates — which would silently hide
+  // the tabs past the cut, i.e. hide a whole dimension of the report. So the row wraps instead,
+  // packed greedily, and every tab stays reachable.
+  const labels = TABS.map((t, i) =>
     t === tab
       ? `${c.bold}${i + 1} ${TITLE[t]}${c.reset}`
       : `${c.dim}${i + 1} ${TITLE[t]}${c.reset}`,
-  ).join(`${c.dim} · ${c.reset}`);
+  );
+  const sep = `${c.dim} · ${c.reset}`;
+  const tabRows: string[] = [];
+  let current = "";
+  for (const label of labels) {
+    const candidate = current ? `${current}${sep}${label}` : label;
+    if (plain(candidate).length > WIDTH - 4 && current) {
+      tabRows.push(current);
+      current = label;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) tabRows.push(current);
   lines.push(rule());
-  lines.push(line(tabRow, opts.interactive ? `${c.dim}q ✕${c.reset}` : ""));
+  tabRows.forEach((row, i) =>
+    lines.push(
+      line(row, i === tabRows.length - 1 && opts.interactive ? `${c.dim}q ✕${c.reset}` : ""),
+    ),
+  );
   lines.push(`${c.dim}╰${"─".repeat(WIDTH + 2)}╯${c.reset}`);
   return lines.join("\n");
 }

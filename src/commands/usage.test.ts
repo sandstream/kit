@@ -29,7 +29,16 @@ describe("renderTab", () => {
   const facts = gatherUsage(mkdtempSync(join(tmpdir(), "kit-usage-render-")), homedir());
 
   it("draws a box whose every line is the same visible width", () => {
-    for (const tab of ["floor", "coverage", "memory", "triage", "machine", "proof"] as const) {
+    for (const tab of [
+      "floor",
+      "coverage",
+      "standards",
+      "keys",
+      "memory",
+      "triage",
+      "machine",
+      "proof",
+    ] as const) {
       const rendered = renderTab(facts, tab, { interactive: false });
       const widths = new Set(
         rendered
@@ -49,5 +58,30 @@ describe("renderTab", () => {
     const rendered = renderTab(facts, "proof", { interactive: false });
     assert.match(rendered, /not run/);
     assert.doesNotMatch(rendered, /every control held/);
+  });
+});
+
+/**
+ * Eight tabs do not fit on one 66-column row, and `line()` truncates. Truncating the tab row would
+ * hide the tabs past the cut — i.e. hide whole dimensions of the report behind a key nobody knows
+ * to press — so the row wraps instead. Every tab must remain reachable, which is what this asserts.
+ */
+describe("the tab row", () => {
+  it("keeps every tab visible by wrapping rather than truncating", () => {
+    const facts = gatherUsage(mkdtempSync(join(tmpdir(), "kit-usage-tabs-")), homedir());
+    const rendered = renderTab(facts, "floor", { interactive: false });
+    const plain = rendered.replace(/\x1b\[[0-9;]*m/g, "");
+    for (const label of [
+      "1 Floor",
+      "2 Coverage",
+      "3 Standards",
+      "4 Keys",
+      "5 Memory",
+      "6 Triage",
+      "7 Machine",
+      "8 Proof",
+    ]) {
+      assert.ok(plain.includes(label), `${label} must be reachable:\n${plain}`);
+    }
   });
 });

@@ -32,8 +32,30 @@
   A control that cannot be set up reports `inconclusive` with its reason. It never reports a pass
   it did not observe.
 
+  Two further tabs answer the questions a client asks. **Standards** scores all eight mapped
+  standards (ASVS L2, LLM Top 10, SSDF, Agentic Top 10, MCP Top 10, AIUC-1, GCP WAF Security, NIST
+  800-53) against the last saved run, and separates the two numbers that are usually conflated:
+
+  ```
+  standard           verified  mapped   gap  manual
+    asvs                    4       7     2       3
+    nist-800-53             4      11     0       3
+  ```
+
+  A control kit *maps* to a check is a claim; a control whose check actually **ran and passed** is
+  evidence. `mapped − verified` is claimed coverage with nothing behind it yet, and reporting only
+  the first number is how a coverage map becomes marketing.
+
+  **Keys** answers "are my keys exposed" without ever handling a key: how many `[secrets.keys]` are
+  declared and by which backend, which the last run could not resolve, what the history scan found
+  split into verified-live / unverified / fixtures / accepted, and whether `.env` is gitignored.
+  Names only — the module never reads a value. A repo with no saved run reports resolution as
+  *unknown*, not as zero resolved, because those look identical and mean opposite things.
+
   `--json` for the whole set, `--tab <name>` for one; a non-TTY prints every tab rather than
-  silently handing a piped reader one sixth of the report.
+  silently handing a piped reader one eighth of the report. Eight tabs no longer fit on one row, so
+  the tab row wraps instead of truncating — a truncated row would hide whole dimensions of the
+  report behind a key nobody knows to press.
 
 - **`kit config sections` and a generated `docs/CONFIGURATION.md`** (#527).
 

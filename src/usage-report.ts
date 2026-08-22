@@ -93,10 +93,56 @@ export interface MemoryFacts {
   syncConfigured: boolean;
 }
 
+export interface StandardsFacts {
+  /** When the run these numbers come from happened; null when nothing has been saved. */
+  at: string | null;
+  standards: Array<{
+    key: string;
+    label: string;
+    version: string;
+    total: number;
+    /** Controls kit maps to a check of its own. */
+    auto: number;
+    /** Of those, the ones whose check actually RAN and passed. This is the evidence number. */
+    verified: number;
+    failing: number;
+    unrun: number;
+    /** Mapped to a check kit does not have yet. */
+    gap: number;
+    /** Covered by a human procedure, not by a check. */
+    manual: number;
+    na: number;
+  }>;
+}
+
+export interface KeysFacts {
+  /** Declared in `[secrets.keys]` — names only; no value is read anywhere in this module. */
+  declared: number;
+  /** How the declared keys are resolved (env, vault, op, …), most common first. */
+  bySource: Array<[string, number]>;
+  /** Keys the last run could resolve, and the names it could not. Null when no run is saved. */
+  available: number | null;
+  missing: string[];
+  /**
+   * What the history scan found, parsed from the saved run's `secrets scan` row. Null when that row
+   * is absent or its wording changed — a number kit cannot read is reported as unknown, not zero.
+   */
+  history: {
+    verifiedLive: number;
+    unverified: number;
+    examples: number;
+    accepted: number;
+  } | null;
+  /** Whether `.env*` is covered by .gitignore, per the saved run. Null when the row is absent. */
+  envIgnored: boolean | null;
+}
+
 export interface UsageFacts {
   /** Present only after `--prove`: live negative controls against the floor. */
   proof?: import("./usage-prove.js").ProofResult;
   coverage: CoverageFacts;
+  standards: StandardsFacts;
+  keys: KeysFacts;
   memory: MemoryFacts;
   floor: FloorFacts;
   triage: TriageFacts;
@@ -333,9 +379,175 @@ export function memoryFromDb(windowDays = 7): MemoryFacts {
   }
 }
 
+/** The security rows of the newest saved run — the evidence every standard is scored against. */
+function securityRowsFromRuns(cwd: string): { at: string | null; rows: unknown[] } {
+  const dir = join(cwd, ".kit", "runs");
+  let files: string[];
+  try {
+    files = readdirSync(dir)
+      .filter((f) => f.startsWith("check-") && f.endsWith(".json"))
+      .sort();
+  } catch {
+    return { at: null, rows: [] };
+  }
+  const newest = files[files.length - 1];
+  if (!newest) return { at: null, rows: [] };
+  try {
+    const parsed = JSON.parse(readFileSync(join(dir, newest), "utf-8")) as Record<string, unknown>;
+    const stamp = /check-(\d+)\.json/.exec(newest)?.[1];
+    const security = Array.isArray(parsed.security) ? parsed.security : [];
+    return { at: stamp ? new Date(Number(stamp)).toISOString() : null, rows: security };
+  } catch {
+    return { at: null, rows: [] };
+  }
+}
+
+/**
+ * Standards coverage, scored against the last saved run rather than a fresh scan.
+ *
+ * The distinction that matters to anyone who has to show this to a client is `auto` vs `verified`:
+ * a control kit MAPS to a check is a claim, and a control whose check actually ran and passed is
+ * evidence. Reporting only the first is how a coverage map becomes marketing. Nothing here scans,
+ * so the tab is honest about being as old as the run it read.
+ */
+export function standardsFromRuns(cwd: string): StandardsFacts {
+  const { at, rows } = securityRowsFromRuns(cwd);
+  const facts: StandardsFacts = { at, standards: [] };
+  if (rows.length === 0) return facts;
+
+  try {
+    // Synchronous require: this module is imported by one command and must not pull the coverage
+    // engine into every kit invocation.
+    const req = createRequire(import.meta.url);
+    const { COVERAGE_STANDARDS } = req(
+      "./coverage/registry.js",
+    ) as typeof import("./coverage/registry.js");
+    const { buildStandardReport } = req(
+      "./coverage/standard.js",
+    ) as typeof import("./coverage/standard.js");
+    const { buildCoverageReport } = req(
+      "./coverage/coverage.js",
+    ) as typeof import("./coverage/coverage.js");
+
+    for (const std of COVERAGE_STANDARDS) {
+      const summary =
+        std.kind === "asvs"
+          ? buildCoverageReport(rows as never).summary
+          : buildStandardReport(std.descriptor!, rows as never).summary;
+      facts.standards.push({
+        key: std.key,
+        label: std.label,
+        version: std.version,
+        total: summary.total,
+        auto: summary.auto,
+        verified: summary.autoVerified ?? 0,
+        failing: summary.autoFailing ?? 0,
+        unrun: summary.autoUnrun ?? 0,
+        gap: summary.gap,
+        manual: summary.manual,
+        na: summary.na,
+      });
+    }
+  } catch {
+    /* coverage engine unavailable — an empty list, never invented numbers */
+  }
+  return facts;
+}
+
+/**
+ * Declared keys and their exposure, from config and the saved run.
+ *
+ * Names only. This function never reads a value, and nothing it returns could carry one — the
+ * question "are my keys exposed" must be answerable without handling the keys.
+ */
+export function keysFromConfigAndRun(cwd: string): KeysFacts {
+  const facts: KeysFacts = {
+    declared: 0,
+    bySource: [],
+    available: null,
+    missing: [],
+    history: null,
+    envIgnored: null,
+  };
+
+  // [secrets.keys] — parsed with the same TOML reader the rest of kit uses.
+  try {
+    const req = createRequire(import.meta.url);
+    const { parse } = req("smol-toml") as typeof import("smol-toml");
+    const cfg = parse(readFileSync(join(cwd, ".kit.toml"), "utf-8")) as {
+      secrets?: { keys?: Record<string, { source?: string }> };
+    };
+    const keys = cfg.secrets?.keys ?? {};
+    facts.declared = Object.keys(keys).length;
+    const counts = new Map<string, number>();
+    for (const decl of Object.values(keys)) {
+      const source = typeof decl?.source === "string" ? decl.source : "(unspecified)";
+      counts.set(source, (counts.get(source) ?? 0) + 1);
+    }
+    facts.bySource = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  } catch {
+    /* no config, or not parseable — declared stays 0 */
+  }
+
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    const dir = join(cwd, ".kit", "runs");
+    const newest = readdirSync(dir)
+      .filter((f) => f.startsWith("check-") && f.endsWith(".json"))
+      .sort()
+      .pop();
+    if (newest)
+      parsed = JSON.parse(readFileSync(join(dir, newest), "utf-8")) as Record<string, unknown>;
+  } catch {
+    /* no run saved */
+  }
+  if (!parsed) return facts;
+
+  const secrets = Array.isArray(parsed.secrets)
+    ? (parsed.secrets as Array<Record<string, unknown>>)
+    : null;
+  if (secrets) {
+    facts.available = secrets.filter((r) => r.available === true).length;
+    facts.missing = secrets
+      .filter((r) => r.available !== true && typeof r.name === "string")
+      .map((r) => String(r.name));
+  }
+
+  const security = Array.isArray(parsed.security)
+    ? (parsed.security as Array<Record<string, unknown>>)
+    : [];
+  const scan = security.find((r) => r.name === "secrets scan");
+  if (scan && typeof scan.detail === "string") {
+    // The counts live only in the row's prose, so they are read back out of it. A wording change
+    // yields null rather than a wrong number — the row itself is still shown in `kit check`.
+    const n = (re: RegExp): number | null => {
+      const m = re.exec(scan.detail as string);
+      return m ? Number(m[1]) : null;
+    };
+    const verifiedLive = n(/(\d+) VERIFIED-LIVE/i) ?? 0;
+    const unverified = n(/(\d+) unverified secret-shaped/i);
+    const examples = n(/(\d+) example credential/i) ?? 0;
+    const accepted = n(/(\d+) accepted historical/i) ?? 0;
+    if (unverified !== null || verifiedLive > 0) {
+      facts.history = { verifiedLive, unverified: unverified ?? 0, examples, accepted };
+    }
+  }
+
+  const gitignore = security.find(
+    (r) => typeof r.name === "string" && /gitignore/i.test(String(r.name)),
+  );
+  if (gitignore && typeof gitignore.status === "string") {
+    facts.envIgnored = gitignore.status === "pass";
+  }
+
+  return facts;
+}
+
 export function gatherUsage(cwd: string = process.cwd(), home = homedir()): UsageFacts {
   return {
     coverage: coverageFromRuns(cwd),
+    standards: standardsFromRuns(cwd),
+    keys: keysFromConfigAndRun(cwd),
     memory: memoryFromDb(),
     floor: floorFromLogs(cwd),
     triage: triageFromLog(cwd),
