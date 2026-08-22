@@ -9,6 +9,7 @@
  */
 
 import { exec } from "./utils/exec.js";
+import { OFFICIAL_PLUGINS } from "./plugin-registry.generated.js";
 
 /**
  * Plugin metadata as it appears in the registry
@@ -32,8 +33,14 @@ export interface PluginMetadata {
   kitVersion: string;
   /** Array of tags for categorization */
   tags: string[];
-  /** Date published (ISO 8601) */
-  published: string;
+  /**
+   * Date published (ISO 8601), when a source for it exists.
+   *
+   * Optional because kit has no offline source for it: the previous hand-written registry filled
+   * this in with a made-up date, alongside made-up ratings and download counts. A field kit cannot
+   * substantiate is absent, not estimated.
+   */
+  published?: string;
   /** Download count in last 30 days */
   downloads?: number;
   /** Average rating (0-5 stars) */
@@ -47,94 +54,28 @@ export interface PluginMetadata {
  */
 export interface PluginRegistry {
   version: string;
-  updated: string;
+  /**
+   * When the registry was last updated, when that is knowable.
+   *
+   * Optional because the previous value was `new Date().toISOString()` evaluated at import — the
+   * registry claimed to be current every time it was read, which is the same thing as claiming
+   * nothing.
+   */
+  updated?: string;
   plugins: PluginMetadata[];
 }
 
 /**
- * Local default registry embedded in kit
- * This provides a foundation registry of official plugins
+ * kit's default plugin registry.
+ *
+ * Generated from the plugin packages that actually exist (see plugin-registry.generated.ts). The
+ * hand-written table this replaces listed five of eleven shipped plugins, named npm packages that
+ * were never published, pointed every repository link at a 404, and carried invented ratings and
+ * download counts that `kit plugin list` rendered as `★★★★◆ 4.8`.
  */
 export const DEFAULT_REGISTRY: PluginRegistry = {
-  version: "1.0.0",
-  updated: new Date().toISOString(),
-  plugins: [
-    {
-      name: "stripe/payments",
-      description: "Stripe payment processing and billing adapter",
-      version: "1.0.0",
-      author: "Sandstream",
-      license: "MIT",
-      repository: "https://github.com/sandstream/kit-stripe",
-      package: "@kit/plugins/stripe",
-      kitVersion: ">=0.1.0",
-      tags: ["payments", "adapter", "official"],
-      published: "2026-04-15T00:00:00Z",
-      downloads: 1250,
-      rating: 4.8,
-      install: "npm install @kit/plugins/stripe",
-    },
-    {
-      name: "supabase/database",
-      description: "PostgreSQL database via Supabase with real-time APIs",
-      version: "1.0.0",
-      author: "Sandstream",
-      license: "MIT",
-      repository: "https://github.com/sandstream/kit-supabase",
-      package: "@kit/plugins/supabase",
-      kitVersion: ">=0.1.0",
-      tags: ["database", "adapter", "official"],
-      published: "2026-04-15T00:00:00Z",
-      downloads: 1890,
-      rating: 4.9,
-      install: "npm install @kit/plugins/supabase",
-    },
-    {
-      name: "vercel/hosting",
-      description: "Vercel serverless deployment platform",
-      version: "1.0.0",
-      author: "Sandstream",
-      license: "MIT",
-      repository: "https://github.com/sandstream/kit-vercel",
-      package: "@kit/plugins/vercel",
-      kitVersion: ">=0.1.0",
-      tags: ["hosting", "adapter", "official"],
-      published: "2026-04-15T00:00:00Z",
-      downloads: 2340,
-      rating: 4.7,
-      install: "npm install @kit/plugins/vercel",
-    },
-    {
-      name: "railway/hosting",
-      description: "Railway infrastructure platform deployment",
-      version: "1.0.0",
-      author: "Sandstream",
-      license: "MIT",
-      repository: "https://github.com/sandstream/kit-railway",
-      package: "@kit/plugins/railway",
-      kitVersion: ">=0.1.0",
-      tags: ["hosting", "adapter", "official"],
-      published: "2026-04-15T00:00:00Z",
-      downloads: 890,
-      rating: 4.6,
-      install: "npm install @kit/plugins/railway",
-    },
-    {
-      name: "flyio/hosting",
-      description: "Fly.io container deployment platform",
-      version: "1.0.0",
-      author: "Sandstream",
-      license: "MIT",
-      repository: "https://github.com/sandstream/kit-flyio",
-      package: "@kit/plugins/flyio",
-      kitVersion: ">=0.1.0",
-      tags: ["hosting", "adapter", "official"],
-      published: "2026-04-15T00:00:00Z",
-      downloads: 650,
-      rating: 4.5,
-      install: "npm install @kit/plugins/flyio",
-    },
-  ],
+  version: "2.0.0",
+  plugins: OFFICIAL_PLUGINS,
 };
 
 /**

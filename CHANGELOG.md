@@ -8,6 +8,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **The plugin registry advertised packages that do not exist, and ratings nobody measured** (#528).
+
+  `kit plugin list` printed this:
+
+  ```
+  stripe/payments 1.0.0 ★★★★◆ 4.8
+    Install: npm install @kit/plugins/stripe
+  ```
+
+  Checked against npm and GitHub, every claim on that line was false:
+
+  | Claimed | Actual |
+  | --- | --- |
+  | `@kit/plugins/stripe` | no such package — the real one is `sandstream-kit-plugin-stripe`, so the install command could not work |
+  | version `1.0.0` | the published packages are `0.1.0` / `0.2.0` |
+  | `github.com/sandstream/kit-stripe` | HTTP 404 |
+  | `★★★★◆ 4.8`, `1250 downloads` | invented — no source exists for either |
+  | `updated: <now>` | `new Date().toISOString()` at import, so the registry always claimed to be current |
+
+  And it listed **five of eleven** shipped plugins, so `kit plugin search cloudflare` answered *"No
+  plugins found matching: cloudflare"* about a package published on npm at that moment. Six plugins
+  — cloudflare, github, sentrux, sentry, snyk, wiz — were undiscoverable through kit's own discovery
+  surface.
+
+  The registry is now **generated** from each plugin package's own manifest: real npm name, real
+  version, real description, one real repository URL. `rating`, `downloads` and `published` are
+  omitted, and their fields made optional — the display code already treats them as optional, so
+  absent means unshown rather than estimated. `updated` is gone for the same reason.
+
+  Six tests hold it there: every shipped package must be listed, every entry must match the manifest
+  it names (package, version, and a runnable install command), no entry may carry a rating or
+  download count, every repository link must be the one real repository, each plugin must be findable
+  by the name a person would type, and regeneration must be byte-identical.
+
+### Fixed
+
 - **`kit ci` rendered a skipped check as a failure on GitHub and as a pass on GitLab** (#517).
   Two surfaces, two opposite lies, one missing case.
 

@@ -18,10 +18,21 @@ describe("Plugin Registry", () => {
       assert(results[0].name.includes("stripe"));
     });
 
-    it("should find plugins by description", () => {
+    it("should find plugins by description or tag", () => {
       const results = searchPlugins("payment");
       assert(results.length > 0);
-      assert(results.some((p) => p.description.toLowerCase().includes("payment")));
+      // The stripe plugin's own description says "Stripe Management API surface", so the hit comes
+      // from its `payments` tag. Both are legitimate routes to a plugin, and asserting the
+      // description alone encoded the old registry's invented copy ("payment processing and
+      // billing adapter") rather than what the package says about itself.
+      assert(
+        results.some(
+          (p) =>
+            p.description.toLowerCase().includes("payment") ||
+            p.tags.some((t) => t.includes("payment")) ||
+            p.name.includes("stripe"),
+        ),
+      );
     });
 
     it("should find plugins by tag", () => {
@@ -38,7 +49,7 @@ describe("Plugin Registry", () => {
     it("should rank results by relevance", () => {
       const results = searchPlugins("stripe");
       // Exact name match should come first
-      assert(results[0].name === "stripe/payments" || results[0].name.includes("stripe"));
+      assert(results[0].name.includes("stripe"));
     });
 
     it("should be case-insensitive", () => {
@@ -67,13 +78,14 @@ describe("Plugin Registry", () => {
       assert.equal(results.length, 0);
     });
 
-    it("should sort by download count", () => {
-      const sorted = listPlugins();
-      for (let i = 0; i < sorted.length - 1; i++) {
-        const current = sorted[i].downloads ?? 0;
-        const next = sorted[i + 1].downloads ?? 0;
-        assert(current >= next, "should be sorted by downloads descending");
-      }
+    it("lists in a stable order, since there is no popularity to sort by", () => {
+      // The old order was "downloads descending" over invented download counts. With those gone,
+      // the only honest ordering is a deterministic one — the same list every run, so a diff of the
+      // output means something changed.
+      const first = listPlugins().map((p) => p.name);
+      const second = listPlugins().map((p) => p.name);
+      assert.deepEqual(first, second);
+      assert.ok(first.length >= 11, `every shipped plugin must be listed: ${first.length}`);
     });
 
     it("should be case-insensitive for tags", () => {
@@ -85,14 +97,14 @@ describe("Plugin Registry", () => {
 
   describe("getPluginInfo", () => {
     it("should find plugin by exact name", () => {
-      const plugin = getPluginInfo("stripe/payments");
+      const plugin = getPluginInfo("stripe");
       assert(plugin !== null);
-      assert.equal(plugin?.name, "stripe/payments");
+      assert.equal(plugin?.name, "stripe");
     });
 
     it("should be case-insensitive", () => {
-      const lower = getPluginInfo("stripe/payments");
-      const upper = getPluginInfo("STRIPE/PAYMENTS");
+      const lower = getPluginInfo("stripe");
+      const upper = getPluginInfo("STRIPE");
       assert.equal(lower?.name, upper?.name);
     });
 
@@ -102,7 +114,7 @@ describe("Plugin Registry", () => {
     });
 
     it("should return complete metadata", () => {
-      const plugin = getPluginInfo("stripe/payments");
+      const plugin = getPluginInfo("stripe");
       assert(plugin);
       assert(plugin.name);
       assert(plugin.description);
@@ -112,8 +124,13 @@ describe("Plugin Registry", () => {
       assert(plugin.repository);
       assert(plugin.kitVersion);
       assert(Array.isArray(plugin.tags));
-      assert(plugin.published);
       assert(plugin.install);
+      // NOT `published`, `rating` or `downloads`: the registry is generated from each package's own
+      // manifest, and kit has no local source for any of those three. The table this replaced filled
+      // them in — a made-up date, `rating: 4.8`, `downloads: 1250` — and `kit plugin list` printed
+      // the stars as fact.
+      assert.equal(plugin.published, undefined);
+      assert.equal(plugin.rating, undefined);
     });
   });
 
@@ -121,8 +138,12 @@ describe("Plugin Registry", () => {
     it("should return all unique tags", () => {
       const tags = getAllTags();
       assert(tags.length > 0);
-      assert(tags.includes("adapter"));
+      // Not "adapter": the old registry put that tag on all five entries regardless of what the
+      // plugin did — half of these are read-only ingestion or management-API surfaces. Tags now
+      // come from each package's own keywords, so the assertion is about tags that are true.
       assert(tags.includes("official"));
+      assert(tags.includes("hosting"));
+      assert(tags.includes("security"));
     });
 
     it("should return sorted tags", () => {
@@ -203,7 +224,10 @@ describe("Plugin Registry", () => {
     it("should have valid plugin metadata", () => {
       for (const plugin of DEFAULT_REGISTRY.plugins) {
         assert(plugin.name, "plugin must have name");
-        assert(plugin.name.includes("/"), "plugin name must be provider/service");
+        // The id is the plugin's real id (`stripe`), not an invented provider/service pair. There
+        // was no source for the second half: the entry called `stripe/payments` describes a
+        // package whose own description is "Stripe Management API surface".
+        assert.match(plugin.name, /^[a-z0-9-]+$/, "plugin id must match its package suffix");
         assert(plugin.description, "plugin must have description");
         assert(plugin.version, "plugin must have version");
         assert(plugin.author, "plugin must have author");
@@ -212,13 +236,27 @@ describe("Plugin Registry", () => {
         assert(plugin.kitVersion, "plugin must have kitVersion");
         assert(Array.isArray(plugin.tags), "tags must be array");
         assert(plugin.tags.length > 0, "plugin must have at least one tag");
-        assert(plugin.published, "plugin must have published date");
+        // NOT a publish date: kit has no offline source for one, and the table this replaced
+        // filled it in with a made-up 2026-04-15 for every entry. What must hold instead is that
+        // the install command names the package the plugin is actually published as.
+        assert.equal(plugin.published, undefined, "no publish date kit cannot source");
         assert(plugin.install, "plugin must have install command");
+        assert.equal(
+          plugin.install,
+          `npm install ${plugin.package}`,
+          `${plugin.name}: the printed install command must be runnable`,
+        );
       }
     });
 
-    it("should have at least 5 plugins", () => {
-      assert(DEFAULT_REGISTRY.plugins.length >= 5, "registry should have at least 5 plugins");
+    it("lists every plugin that ships, not a subset", () => {
+      // The old registry had five entries for eleven shipped packages, so `kit plugin search
+      // cloudflare` answered "No plugins found" about a package published on npm. "At least 5" is
+      // what let that pass; the count now follows the packages.
+      assert(
+        DEFAULT_REGISTRY.plugins.length >= 11,
+        `expected every shipped plugin: ${DEFAULT_REGISTRY.plugins.length}`,
+      );
     });
 
     it("should have 'official' tag for all built-in plugins", () => {
@@ -250,9 +288,11 @@ describe("Plugin Registry", () => {
       assert(payments.length > 0);
     });
 
-    it("should have adapter tag", () => {
-      const adapters = listPlugins("adapter");
-      assert(adapters.length > 0);
+    it("should have a security category", () => {
+      // snyk, wiz and sentrux are read-only scan-ingestion plugins — a category the old
+      // five-entry registry had no room for.
+      const security = listPlugins("security");
+      assert(security.length >= 3, `expected the ingestion plugins: ${security.length}`);
     });
   });
 
@@ -276,11 +316,11 @@ describe("Plugin Registry", () => {
 
     it("should allow filtering by category then searching", () => {
       const hosting = listPlugins("hosting");
-      const railwayInHosting = hosting.find((p) => p.name === "railway/hosting");
+      const railwayInHosting = hosting.find((p) => p.name === "railway");
       assert(railwayInHosting);
 
       const railwayBySearch = searchPlugins("railway");
-      assert(railwayBySearch.some((p) => p.name === "railway/hosting"));
+      assert(railwayBySearch.some((p) => p.name === "railway"));
     });
   });
 });
