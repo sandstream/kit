@@ -271,6 +271,10 @@ export async function cmdSecurity(): Promise<boolean> {
     return cmdSecurityScanBuild();
   }
 
+  if (sub === "advisories") {
+    return cmdSecurityAdvisories();
+  }
+
   if (sub === "scan-artifact") {
     return cmdSecurityScanArtifact();
   }
@@ -301,7 +305,7 @@ export async function cmdSecurity(): Promise<boolean> {
 
   if (sub !== "policy") {
     console.error(
-      `${c.red}Usage: kit security policy [init|add <pkg>|check] | scan-staged | scan-build [dir...] | scan-artifact <path> [--recursive] | scan-transcripts | costs | check-gitignore [--fix] | verify-pull [--base <ref>] | prescan <path> [--deep] | prescan-diff <baseline.jsonl> <latest.jsonl> | clear-cache${c.reset}`,
+      `${c.red}Usage: kit security policy [init|add <pkg>|check] | scan-staged | scan-build [dir...] | advisories [--accept] | scan-artifact <path> [--recursive] | scan-transcripts | costs | check-gitignore [--fix] | verify-pull [--base <ref>] | prescan <path> [--deep] | prescan-diff <baseline.jsonl> <latest.jsonl> | clear-cache${c.reset}`,
     );
     return false;
   }
@@ -810,5 +814,87 @@ async function cmdSecurityClearCache(): Promise<boolean> {
   } else {
     console.log(`  ${c.dim}nothing to remove at ${result.path}${c.reset}\n`);
   }
+  return true;
+}
+
+/**
+ * `kit security advisories [--accept]`
+ *
+ * Shows what the repo's own package manager reports, split into new debt, known debt and baseline
+ * entries that no longer apply. `--accept` writes the baseline: it is the deliberate act of
+ * recording "we ship with these", and it PRUNES as well as adds, because a list that only grows
+ * stops meaning anything.
+ */
+export async function cmdSecurityAdvisories(): Promise<boolean> {
+  const {
+    ADVISORY_BASELINE_FILE,
+    detectAuditRunner,
+    readBaseline,
+    runAudit,
+    diffAgainstBaseline,
+    describeRemaining,
+    writeBaseline,
+  } = await import("../advisory-baseline.js");
+
+  const root = process.cwd();
+  const accept = hasFlag(process.argv, "--accept");
+
+  const runner = await detectAuditRunner(root);
+  if (!runner) {
+    console.error(
+      `${c.red}No lockfile found — nothing to audit. Install dependencies first.${c.reset}`,
+    );
+    return false;
+  }
+
+  console.log(`${c.dim}Auditing with ${runner.command.join(" ")}${c.reset}\n`);
+  const outcome = runAudit(root, runner);
+  if (outcome.error) {
+    console.error(`${c.red}Audit could not run: ${outcome.error}${c.reset}`);
+    return false;
+  }
+
+  const baseline = (await readBaseline(root)) ?? { advisories: {} };
+  const { added, stale, remaining } = diffAgainstBaseline(outcome.advisories, baseline);
+
+  if (accept) {
+    await writeBaseline(root, outcome.advisories);
+    console.log(
+      `${c.green}✓${c.reset} ${ADVISORY_BASELINE_FILE} now records ${outcome.advisories.length} known advisory(ies)`,
+    );
+    if (added.length > 0) console.log(`  ${c.yellow}+${added.length} newly accepted${c.reset}`);
+    if (stale.length > 0)
+      console.log(`  ${c.green}-${stale.length} pruned (no longer apply)${c.reset}`);
+    console.log(
+      `\n${c.dim}Commit the file. Review sees dependency debt as a data diff, not a code change.${c.reset}`,
+    );
+    return true;
+  }
+
+  console.log(`${c.bold}${outcome.advisories.length}${c.reset} advisory(ies) reported`);
+  console.log(`${c.dim}known debt:${c.reset} ${describeRemaining(remaining)}`);
+
+  if (added.length > 0) {
+    console.log(`\n${c.red}NEW since the baseline (${added.length}):${c.reset}`);
+    for (const a of added) {
+      console.log(
+        `  ${a.severity.padEnd(9)} ${a.package}  ${a.id}  ${c.dim}${a.title.slice(0, 60)}${c.reset}`,
+      );
+    }
+  }
+  if (stale.length > 0) {
+    console.log(
+      `\n${c.yellow}No longer apply (${stale.length}) — the file may only shrink:${c.reset}`,
+    );
+    for (const s2 of stale) console.log(`  ${s2.id}  ${c.dim}${s2.package}${c.reset}`);
+  }
+  if (added.length === 0 && stale.length === 0) {
+    console.log(`\n${c.green}✓ baseline matches the audit exactly${c.reset}`);
+  } else {
+    console.log(
+      `\n${c.dim}Record the current state deliberately: ${c.reset}${c.bold}kit security advisories --accept${c.reset}`,
+    );
+  }
+  // Reporting, not gating: `kit check --category security` is the gate.
   return true;
 }

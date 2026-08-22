@@ -490,6 +490,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--yes",
   ],
   security: [
+    "--accept",
     "--base",
     "--deep",
     "--exclude",

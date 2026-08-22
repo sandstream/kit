@@ -2654,6 +2654,12 @@ export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]
   const scope = await scanScopeFacts(root);
   results.push(await checkScanScope(root, scope));
 
+  // New dependency debt, as distinct from the debt this repo already ships. A gate that fails on
+  // all 30 existing advisories gets disabled the same afternoon; one that fails only on the 31st
+  // survives. Opt-in: without a committed baseline there is nothing to compare against.
+  const { checkAdvisoryBaseline } = await import("./check-advisory-baseline.js");
+  results.push(await checkAdvisoryBaseline(root));
+
   // What reaches the browser. Committed-secret scanning cannot see this: a VITE_/NEXT_PUBLIC_
   // variable with a secret value is inlined into the bundle at build time and shipped to every
   // visitor without ever being committed. The bundle scanner already existed and was reachable
