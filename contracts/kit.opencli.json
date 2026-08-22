@@ -1160,6 +1160,14 @@
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
+    "usage": {
+      "kind": "command",
+      "summary": "Tabbed report of what kit has recorded — coverage with its denominator, refusals, memory, triage — plus --prove, which runs the floor against inputs it must refuse",
+      "x-kit-args-modeled": false,
+      "x-kit-audience": "all",
+      "x-kit-mcp": false,
+      "x-kit-stability": "stable"
+    },
     "verify-provenance": {
       "kind": "command",
       "summary": "Verify a release's SLSA provenance bundle offline (Ed25519 + SHA256 / cosign)",

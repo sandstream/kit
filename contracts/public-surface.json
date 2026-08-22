@@ -82,6 +82,7 @@
     "tools": "experimental",
     "triage": "stable",
     "upgrade": "stable",
+    "usage": "stable",
     "verify-provenance": "stable",
     "whoami": "stable"
   },
@@ -259,6 +260,7 @@
     "tools",
     "triage",
     "upgrade",
+    "usage",
     "verify-provenance",
     "version",
     "whoami"

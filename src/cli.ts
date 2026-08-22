@@ -34,6 +34,7 @@ import { cmdBootstrap } from "./commands/bootstrap.js";
 import { cmdSkill } from "./commands/skill.js";
 import { cmdMap } from "./commands/repomap.js";
 import { cmdBrowser } from "./commands/browser.js";
+import { cmdUsage } from "./commands/usage.js";
 import {
   cmdStatus,
   cmdHealth,
@@ -546,6 +547,13 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     help: "Compact one-line status (mode score · update · open PAL) for Claude Code statusLine / a shell PS1; Codex gets it via SessionStart context",
   },
   whoami: { handler: cmdWhoami, stability: "stable", help: "Show current agent / user identity" },
+  usage: {
+    handler: cmdUsage,
+    stability: "stable",
+    // Not MCP-exposed: this is a boxed terminal view for a human, and every exposed tool costs
+    // standing context in every agent session. The frozen ten stay ten.
+    help: "Tabbed report of what kit has recorded — coverage with its denominator, refusals, memory, triage — plus --prove, which runs the floor against inputs it must refuse",
+  },
   check: {
     handler: cmdCheck,
     stability: "stable",

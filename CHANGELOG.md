@@ -2,6 +2,61 @@
 
 ### Added
 
+- **`kit usage` — what kit knows, and proof that the floor still works** (#519).
+
+  Six tabs, switchable in the terminal with the number keys: **Floor** (audited operations and
+  refusals per operation), **Coverage** (the enumerated checks of the last saved run — pass, warn,
+  fail, and *what could not run, with each reason*), **Memory** (the store you own: its path, its
+  size on disk, messages and sessions, tokens generated vs context re-read, and the per-project
+  breakdown), **Triage** (what was checked before it was installed), **Machine** (every repo this
+  machine has sealed an audit log in) and **Proof**.
+
+  It is deliberately not a token-savings or money report. There is no counterfactual for "what
+  would this have cost without kit", and a saved-you-N number without one is invented — the same
+  rule the rest of kit is built on. What is measurable is the reliability axis, and the twelve
+  could-not-run rows are as much the product as the twenty-one that passed: an agent asked "is
+  this safe?" improvises a subset, answers with no denominator, and leaves no record of what it
+  skipped.
+
+  **`kit usage --prove` is the part that is not a dashboard.** Counting recorded activity proves a
+  gate existed, not that it still works, so the Proof tab runs the floor against inputs it must
+  refuse — on your machine, offline, in a throwaway directory that is removed afterwards:
+
+  - an install whose target cannot be resolved (`$PM install x`) must be blocked (exit 2);
+  - a command that installs nothing must still be allowed — otherwise the first control proves
+    nothing, since a gate that refuses everything is an outage;
+  - a staged credential must fail `git commit` in a temp repo with kit's own hook installed;
+  - a clean commit must still go through;
+  - and with `--deep`, two consecutive runs must produce an identical verdict set.
+
+  A control that cannot be set up reports `inconclusive` with its reason. It never reports a pass
+  it did not observe.
+
+  Two further tabs answer the questions a client asks. **Standards** scores all eight mapped
+  standards (ASVS L2, LLM Top 10, SSDF, Agentic Top 10, MCP Top 10, AIUC-1, GCP WAF Security, NIST
+  800-53) against the last saved run, and separates the two numbers that are usually conflated:
+
+  ```
+  standard           verified  mapped   gap  manual
+    asvs                    4       7     2       3
+    nist-800-53             4      11     0       3
+  ```
+
+  A control kit *maps* to a check is a claim; a control whose check actually **ran and passed** is
+  evidence. `mapped − verified` is claimed coverage with nothing behind it yet, and reporting only
+  the first number is how a coverage map becomes marketing.
+
+  **Keys** answers "are my keys exposed" without ever handling a key: how many `[secrets.keys]` are
+  declared and by which backend, which the last run could not resolve, what the history scan found
+  split into verified-live / unverified / fixtures / accepted, and whether `.env` is gitignored.
+  Names only — the module never reads a value. A repo with no saved run reports resolution as
+  *unknown*, not as zero resolved, because those look identical and mean opposite things.
+
+  `--json` for the whole set, `--tab <name>` for one; a non-TTY prints every tab rather than
+  silently handing a piped reader one eighth of the report. Eight tabs no longer fit on one row, so
+  the tab row wraps instead of truncating — a truncated row would hide whole dimensions of the
+  report behind a key nobody knows to press.
+
 - **`kit config sections` and a generated `docs/CONFIGURATION.md`** (#527).
 
   `.kit.toml` has 23 sections. Six of the most-used — `[tools]`, `[services]`, `[secrets]`,
@@ -89,6 +144,13 @@
   larger one than kit's own pattern list used by `scan-staged` and `scan-build`, and a reader cannot
   size the claim without knowing which applied. The fallback path already stated its bound
   explicitly and is unchanged.
+
+  The interactive view uses raw stdin directly rather than `readline`, which swallowed the
+  keypress, and restores the terminal from `process.once("exit")` plus SIGINT/SIGTERM handlers
+  using `writeSync` — a buffered write is lost when the process exits immediately after it, and a
+  view that leaves the terminal in the alternate screen with raw mode on makes the operator's shell
+  look dead. Verified through a pty: `q`, Esc, Ctrl-C, SIGINT and SIGTERM all give the screen
+  back.
 
 ### Fixed
 
