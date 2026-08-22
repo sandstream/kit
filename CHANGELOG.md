@@ -120,56 +120,6 @@
   `kit audit` shows both, and prints `—` for entries written before the fields existed rather than
   guessing.
 
-- **`kit ci` rendered a skipped check as a failure on GitHub and as a pass on GitLab** (#517).
-  Two surfaces, two opposite lies, one missing case.
-
-  The step-summary icon was `pass ? ✅ : warn ? ⚠️ : ❌` — no branch for `skip` — so a run in a
-  directory that is not a project printed twenty-plus ❌ rows above a footer reading
-  *"2 passed, 1 failed, 1 warnings"*: the table and the tally contradicted each other in the same
-  output, because the summary counted skips and the footer never printed them. Three of those red
-  rows were worse than misleading — `socket scan` is **excluded by design** (cloud-only),
-  `bumblebee` was **switched off by the operator** via `KIT_BUMBLEBEE`, and SAST/guarddog are
-  **opt-in** — so kit's own documented design read as broken.
-
-  The GitLab JUnit writer emitted a *bare* `<testcase>` for a skip, and JUnit reads an empty
-  testcase as PASSED. Measured on the same run: `tests="26" failures="1"`, zero `<skipped>` tags,
-  24 empty testcases — 24 checks that never ran, reported green.
-
-  Now: skips get their own icon (`➖`) with the reason they already carried, the footer reads
-  `N passed, N failed, N warnings, N skipped` so the rows add up, the table is ordered
-  failures → warnings → passes → skips (twenty always-red rows at the top is how a report becomes
-  unread), and JUnit emits `<skipped message="…"/>` with a `skipped=` count on the suite.
-
-  Skips still do not gate: `allOk` remains `failed === 0 && (!failOnWarning || warnings === 0)`.
-  Only what the report *says* changed. The machine-read surface was already correct — annotations
-  only ever fired for `fail`/`warn` — which is the worse way round, since the human is the one
-  who concludes "twenty things are broken here".
-
-- **`kit ci` rendered a skipped check as a failure on GitHub and as a pass on GitLab** (#517).
-  Two surfaces, two opposite lies, one missing case.
-
-  The step-summary icon was `pass ? ✅ : warn ? ⚠️ : ❌` — no branch for `skip` — so a run in a
-  directory that is not a project printed twenty-plus ❌ rows above a footer reading
-  *"2 passed, 1 failed, 1 warnings"*: the table and the tally contradicted each other in the same
-  output, because the summary counted skips and the footer never printed them. Three of those red
-  rows were worse than misleading — `socket scan` is **excluded by design** (cloud-only),
-  `bumblebee` was **switched off by the operator** via `KIT_BUMBLEBEE`, and SAST/guarddog are
-  **opt-in** — so kit's own documented design read as broken.
-
-  The GitLab JUnit writer emitted a *bare* `<testcase>` for a skip, and JUnit reads an empty
-  testcase as PASSED. Measured on the same run: `tests="26" failures="1"`, zero `<skipped>` tags,
-  24 empty testcases — 24 checks that never ran, reported green.
-
-  Now: skips get their own icon (`➖`) with the reason they already carried, the footer reads
-  `N passed, N failed, N warnings, N skipped` so the rows add up, the table is ordered
-  failures → warnings → passes → skips (twenty always-red rows at the top is how a report becomes
-  unread), and JUnit emits `<skipped message="…"/>` with a `skipped=` count on the suite.
-
-  Skips still do not gate: `allOk` remains `failed === 0 && (!failOnWarning || warnings === 0)`.
-  Only what the report *says* changed. The machine-read surface was already correct — annotations
-  only ever fired for `fail`/`warn` — which is the worse way round, since the human is the one
-  who concludes "twenty things are broken here".
-
 ### Changed
 
 - **A scanner that finds nothing now says what it looked for** (#525).
@@ -201,6 +151,8 @@
   view that leaves the terminal in the alternate screen with raw mode on makes the operator's shell
   look dead. Verified through a pty: `q`, Esc, Ctrl-C, SIGINT and SIGTERM all give the screen
   back.
+
+## [6.8.0] - 2026-08-21
 
 ### Fixed
 
@@ -340,7 +292,30 @@
   that requiring kit to run where `.kit.toml` lives would not have helped here: the workspace root
   in the report has its own `.kit.toml`.
 
-## [6.8.0] - 2026-08-21
+- **`kit ci` rendered a skipped check as a failure on GitHub and as a pass on GitLab** (#517).
+  Two surfaces, two opposite lies, one missing case.
+
+  The step-summary icon was `pass ? ✅ : warn ? ⚠️ : ❌` — no branch for `skip` — so a run in a
+  directory that is not a project printed twenty-plus ❌ rows above a footer reading
+  *"2 passed, 1 failed, 1 warnings"*: the table and the tally contradicted each other in the same
+  output, because the summary counted skips and the footer never printed them. Three of those red
+  rows were worse than misleading — `socket scan` is **excluded by design** (cloud-only),
+  `bumblebee` was **switched off by the operator** via `KIT_BUMBLEBEE`, and SAST/guarddog are
+  **opt-in** — so kit's own documented design read as broken.
+
+  The GitLab JUnit writer emitted a *bare* `<testcase>` for a skip, and JUnit reads an empty
+  testcase as PASSED. Measured on the same run: `tests="26" failures="1"`, zero `<skipped>` tags,
+  24 empty testcases — 24 checks that never ran, reported green.
+
+  Now: skips get their own icon (`➖`) with the reason they already carried, the footer reads
+  `N passed, N failed, N warnings, N skipped` so the rows add up, the table is ordered
+  failures → warnings → passes → skips (twenty always-red rows at the top is how a report becomes
+  unread), and JUnit emits `<skipped message="…"/>` with a `skipped=` count on the suite.
+
+  Skips still do not gate: `allOk` remains `failed === 0 && (!failOnWarning || warnings === 0)`.
+  Only what the report *says* changed. The machine-read surface was already correct — annotations
+  only ever fired for `fail`/`warn` — which is the worse way round, since the human is the one
+  who concludes "twenty things are broken here".
 
 ### Fixed
 
