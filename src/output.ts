@@ -411,12 +411,15 @@ export function printSummary(
   const toolsOk = tools.filter((t) => t.ok).length;
   const servicesOk = services.filter((s) => s.authenticated).length;
   const secretsOk = secrets.filter((s) => s.available).length;
-  const securityOk = security
-    ? security.filter((s) => s.status === "pass" || s.status === "skip").length
-    : 0;
-  const deployOk = deploy
-    ? deploy.filter((d) => d.status === "pass" || d.status === "skip").length
-    : 0;
+  // A skip is NOT a pass. Counting them together produced "All 25 checks passed ✓" on a tree where
+  // 15 checks never ran and the code one directory down had 30 known vulnerabilities — the same
+  // defect class as #517 (a skipped CI check rendering as success), one level up in the verdict
+  // line itself. Skips still do not GATE: they are counted and named, not failed.
+  const securityOk = security ? security.filter((s) => s.status === "pass").length : 0;
+  const deployOk = deploy ? deploy.filter((d) => d.status === "pass").length : 0;
+  const securitySkipped = security ? security.filter((s) => s.status === "skip").length : 0;
+  const deploySkipped = deploy ? deploy.filter((d) => d.status === "skip").length : 0;
+  const skipped = securitySkipped + deploySkipped;
 
   const total =
     tools.length +
@@ -425,7 +428,11 @@ export function printSummary(
     (security?.length || 0) +
     (deploy?.length || 0);
   const ok = toolsOk + servicesOk + secretsOk + securityOk + deployOk;
-  const allGood = ok === total;
+  // Three states, not two: everything ran and passed; everything that ran passed but some could
+  // not run; something is actually wrong. Collapsing the middle state into the first is what made
+  // a directory with 15 non-runs read as "All 25 checks passed".
+  const problems = total - ok - skipped;
+  const allGood = problems === 0;
 
   // P5 — separate SETUP GAPS (a tool not installed, a service not logged in, a scanner that
   // couldn't run) from REAL issues (an actual finding a check produced). On a fresh clone the
@@ -446,10 +453,23 @@ export function printSummary(
     (security?.filter((s) => s.status !== "pass" && s.status !== "skip" && !s.didNotRun).length ??
       0);
 
-  if (allGood) {
+  if (total === 0) {
+    // "All 0 checks passed" is the emptiest possible false green.
+    console.log(`${c.dim}no checks applied here${c.reset}`);
+  } else if (allGood && skipped === 0) {
     console.log(`${c.bold}${c.green}All ${total} checks passed ✓${c.reset}`);
+  } else if (allGood) {
+    // Everything that ran passed — but not everything ran, and the count says which is which.
+    console.log(
+      `${c.bold}${c.green}${ok} passed${c.reset}${c.dim}  ·  ${c.reset}${c.dim}${skipped} could not run${c.reset}`,
+    );
+    console.log();
+    console.log(
+      `${c.dim}${skipped} of ${total} check(s) did not run — this verdict covers the other ${ok}. Each row above carries its reason.${c.reset}`,
+    );
   } else {
     const parts = [`${c.bold}${ok}/${total} passed${c.reset}`];
+    if (skipped > 0) parts.push(`${c.dim}${skipped} could not run${c.reset}`);
     if (setupGaps > 0)
       parts.push(`${c.yellow}${setupGaps} setup gap${setupGaps === 1 ? "" : "s"}${c.reset}`);
     if (realIssues > 0)

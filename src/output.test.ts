@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { runStep, fmtDuration } from "./output.js";
+import { runStep, fmtDuration, printSummary } from "./output.js";
+import type { SecurityCheckResult } from "./check-security.js";
 
 function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, "");
@@ -69,5 +70,83 @@ describe("runStep", () => {
     }
     assert.ok(threw, "runStep re-throws the underlying error");
     assert.match(cap.text(), /✗.*security scan/);
+  });
+});
+
+/**
+ * The verdict line must not add skips to passes.
+ *
+ * Measured before this was fixed: a workspace root holding `web/` and `illithid/` side by side
+ * printed "All 25 checks passed ✓" while 15 of the 25 had never run, and the same command one
+ * directory down reported 30 known dependency vulnerabilities (high). Every skip was individually
+ * truthful; the summary that added them up was not. Same defect class as #517 — a check that could
+ * not run rendering as success — one level up, in the line most people read instead of the rows.
+ *
+ * So these are arithmetic properties: the printed numbers must account for every check, and the
+ * words "All … passed" may appear only when everything actually ran.
+ */
+describe("printSummary", () => {
+  const sec = (name: string, status: SecurityCheckResult["status"]): SecurityCheckResult => ({
+    category: "dependency",
+    name,
+    status,
+    detail: status === "skip" ? "no package.json found" : "",
+  });
+
+  it("never claims everything passed when something could not run", () => {
+    const cap = captureStdout();
+    try {
+      printSummary([], [], [], [sec("a", "pass"), sec("b", "skip"), sec("c", "skip")]);
+    } finally {
+      cap.restore();
+    }
+    const text = cap.text();
+    assert.doesNotMatch(text, /All \d+ checks passed/, `false green:\n${text}`);
+    assert.match(text, /1 passed/);
+    assert.match(text, /2 could not run/);
+    // And it must say what the verdict does cover, since that is the number a reader acts on.
+    assert.match(text, /2 of 3 check\(s\) did not run/);
+  });
+
+  it("still says all passed when everything actually ran", () => {
+    const cap = captureStdout();
+    try {
+      printSummary([], [], [], [sec("a", "pass"), sec("b", "pass")]);
+    } finally {
+      cap.restore();
+    }
+    assert.match(cap.text(), /All 2 checks passed/);
+  });
+
+  it("accounts for every check when there are findings as well as non-runs", () => {
+    const cap = captureStdout();
+    try {
+      printSummary(
+        [],
+        [],
+        [],
+        [sec("a", "pass"), sec("b", "skip"), sec("c", "warn"), sec("d", "fail")],
+      );
+    } finally {
+      cap.restore();
+    }
+    const text = cap.text();
+    const m = /(\d+)\/(\d+) passed/.exec(text);
+    assert.ok(m, `expected an n/total line:\n${text}`);
+    assert.equal(Number(m[1]), 1);
+    assert.equal(Number(m[2]), 4);
+    assert.match(text, /1 could not run/);
+    assert.match(text, /2 real issues/, "a warn and a fail are both findings, not non-runs");
+  });
+
+  it("does not report an empty directory as a clean sweep", () => {
+    const cap = captureStdout();
+    try {
+      printSummary([], [], [], []);
+    } finally {
+      cap.restore();
+    }
+    assert.doesNotMatch(cap.text(), /All 0 checks passed/);
+    assert.match(cap.text(), /no checks applied/);
   });
 });

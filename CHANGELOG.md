@@ -152,6 +152,8 @@
   look dead. Verified through a pty: `q`, Esc, Ctrl-C, SIGINT and SIGTERM all give the screen
   back.
 
+## [6.8.0] - 2026-08-21
+
 ### Fixed
 
 - **Regenerating `flag-surface.ts` produced a 512-line diff over identical content** (#525).
@@ -229,6 +231,67 @@
   The banner now says `N entries came from a rebase/cherry-pick replay — not counted.` rather than
   silently reporting a smaller number than the log is long.
 
+- **A skipped scanner was counted as a passing one in the verdict line** (#521).
+
+  Run from a workspace root that holds several repos side by side — `web/`, `illithid/` — every
+  manifest-dependent scanner skipped truthfully ("no package.json found") and the summary printed:
+
+  ```
+  All 25 checks passed ✓
+  ```
+
+  Fifteen of those twenty-five had never run. The same command one directory down, where the code
+  actually lives, reported **30 known dependency vulnerabilities (high)**, 22 unpinned dependencies
+  and 18 secret-shaped strings in git history. The green line was covering all of it.
+
+  `printSummary` counted `status === "pass" || status === "skip"` as OK and then declared "All N
+  checks passed" whenever that count reached the total. This is the same defect class as #517 — a
+  check that could not run rendering as success — one level up, in the line most people read
+  instead of the rows. Now there are three states rather than two:
+
+  ```
+  All 26 checks passed ✓                              (everything ran, everything passed)
+  10 passed  ·  15 could not run                      (everything that ran passed)
+  10/26 passed  ·  15 could not run  ·  1 real issue  (something to act on)
+  ```
+
+  A run with no applicable checks at all now says `no checks applied here` instead of "All 0 checks
+  passed ✓". Skips still do not gate — they are counted and named, not failed.
+
+- **A directory with no manifest is not a directory with nothing to scan** (#521).
+
+  New `scan scope` check, enumerated in every security run, because each individual skip was true
+  and the missing row was the one stating the consequence — that the verdict described an empty
+  directory while the code sat one level down:
+
+  - no manifest here, projects below → **warn (high)**, naming them: *"no manifest here — this
+    verdict covers none of 3 project(s) below: illithid, web, web-corrupt-backup"*;
+  - a root manifest declaring workspaces → **pass**: *"12 nested package(s) covered via
+    workspaces"* — a root-level scan genuinely does cover those;
+  - a root manifest without workspaces, siblings below → **warn (medium)**: they are separate
+    projects and were not scanned;
+  - an ordinary single project → **pass**, quietly.
+
+  The three passing cases carry as much weight as the warning one: a check that warns on every
+  monorepo gets switched off within a week, and then the case it was written for goes unnoticed too.
+
+
+
+  And in that wrong-directory case the individual skips are no longer left as honest
+  not-applicables. "No manifest at this path" and "I looked in the wrong place" are the same
+  sentence from a scanner's point of view and opposite facts from the operator's, so each
+  manifest-absence skip becomes a warning that says where the code actually is:
+
+  ```
+  ! npm audit     warn  no package.json found — but 3 project(s) below do (illithid, web,
+                        web-corrupt-backup); this scan looked in the wrong place   [medium]
+  ```
+
+  Only in that case. `socket scan` (cloud-only, excluded by design) and opt-in SAST stay skips, and
+  an ordinary project or a workspace root that genuinely covers its children is untouched. Note
+  that requiring kit to run where `.kit.toml` lives would not have helped here: the workspace root
+  in the report has its own `.kit.toml`.
+
 - **`kit ci` rendered a skipped check as a failure on GitHub and as a pass on GitLab** (#517).
   Two surfaces, two opposite lies, one missing case.
 
@@ -253,8 +316,6 @@
   Only what the report *says* changed. The machine-read surface was already correct — annotations
   only ever fired for `fail`/`warn` — which is the worse way round, since the human is the one
   who concludes "twenty things are broken here".
-
-## [6.8.0] - 2026-08-21
 
 ### Fixed
 
