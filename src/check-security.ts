@@ -1517,7 +1517,10 @@ async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
         category: "secrets",
         name: "secrets scan",
         status: "pass",
-        detail: `no committed secrets (trufflehog git)${pbdNote}${exampleNote}${ignoredNote}`,
+        // Name the detector, not just the outcome: this path's coverage is trufflehog's set over
+        // full history, which is a different (much larger) bound than kit's own pattern list used
+        // by scan-staged and scan-build. A reader cannot size "no committed secrets" without it.
+        detail: `no committed secrets (trufflehog detector set, full history)${pbdNote}${exampleNote}${ignoredNote}`,
       };
     } catch {
       return {

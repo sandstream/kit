@@ -279,3 +279,43 @@ describe("flag floor — kit never prints an invocation it would reject", () => 
     assert.match(r.stdout, /Available services:/);
   });
 });
+
+/**
+ * Regenerating must be a no-op — byte for byte, not just fact for fact.
+ *
+ * The drift test above compares FACTS: every flag the source reads must appear in the table. It
+ * passed while `--emit` wrote the same data in a different shape, one verb per line where Prettier
+ * wants one flag per line. Running the documented regeneration command therefore produced a
+ * 512-line diff over identical content — and I read that diff as the generator having narrowed the
+ * accepted flags of 70+ verbs, reported it as a defect, and wrote it into two PR bodies and a
+ * shared-memory entry before measuring the content. It was formatting.
+ *
+ * So the property is stronger than "the facts agree": the generator's output must be exactly what
+ * is committed. A regeneration that cannot be run without producing noise is a regeneration nobody
+ * runs, and a generated file nobody dares regenerate is a hardcoded table wearing a generator's
+ * hat.
+ */
+describe("regeneration is byte-identical", () => {
+  it("emits exactly the committed file", async () => {
+    const mod = (await import(
+      pathToFileURL(join(REPO_ROOT, "scripts", "derive-command-flags.mjs")).href
+    )) as {
+      deriveFlagSurface: (depth?: number) => { surface: Record<string, string[]> };
+      emit: (surface: Record<string, string[]>) => string;
+    };
+    const { surface } = mod.deriveFlagSurface();
+    const generated = mod.emit(surface);
+    const committed = readFileSync(join(REPO_ROOT, "src", "flag-surface.ts"), "utf-8");
+
+    if (generated !== committed) {
+      // Point at the first divergence: a whole-file diff in an assertion message is unreadable.
+      const g = generated.split("\n");
+      const c = committed.split("\n");
+      const i = g.findIndex((line, idx) => line !== c[idx]);
+      assert.fail(
+        `line ${i + 1} differs — run \`node scripts/derive-command-flags.mjs --emit\`\n` +
+          `  generated: ${JSON.stringify(g[i])}\n  committed: ${JSON.stringify(c[i])}`,
+      );
+    }
+  });
+});

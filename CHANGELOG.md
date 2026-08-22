@@ -8,6 +8,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- **Regenerating `flag-surface.ts` produced a 512-line diff over identical content** (#525).
+
+  `scripts/derive-command-flags.mjs --emit` wrote one verb per line; Prettier reformats that to one
+  flag per line. So running the documented regeneration command reflowed the whole file without
+  changing a single fact — and I read that diff as the generator having narrowed the accepted flags
+  of 70+ verbs, reported it as a defect, and repeated it in two PR bodies and a shared-memory entry
+  before comparing either side's content. Measured properly: **0 of 72 verbs differ.**
+
+  `emit()` now produces Prettier's shape (width-based, same `printWidth` of 100), so regeneration is
+  byte-identical, and a test compares the generated string against the committed file and names the
+  first differing line. A generated file nobody dares regenerate is a hardcoded table wearing a
+  generator's hat.
+
+### Changed
+
+- **A scanner that finds nothing now says what it looked for** (#525).
+
+  Some tables have to be hardcoded — nothing in a repository can tell you what a Stripe key looks
+  like. What must never be hidden is where such a table ends. "No credential patterns found" reads
+  as "there are no credentials"; the true statement is "none of the shapes kit knows". So the
+  denominator is part of the claim:
+
+  ```
+  ✓ scan-build: no matches for 25 known credential shapes — a shape outside that set is not detected
+  ✓ scan-artifact: file.js — no matches for 25 known credential shapes
+  ```
+
+  The count is `SECRET_SHAPE_COUNT`, derived from the pattern list rather than written down: a
+  hardcoded count is a claim that rots the first time someone adds a pattern. While adding it, a
+  grep for `label:` said 29 and the derived count said 25 — the grep had counted the interface field
+  and a doc line, which is the argument for deriving it in one datum.
+
+  `secrets scan`'s clean line now names its detector too — *"no committed secrets (trufflehog
+  detector set, full history)"* — because that path's bound is trufflehog's set over history, a much
+  larger one than kit's own pattern list used by `scan-staged` and `scan-build`, and a reader cannot
+  size the claim without knowing which applied. The fallback path already stated its bound
+  explicitly and is unchanged.
+
+### Fixed
+
 - **`kit ci` rendered a skipped check as a failure on GitHub and as a pass on GitLab** (#517).
   Two surfaces, two opposite lies, one missing case.
 

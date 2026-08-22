@@ -27,6 +27,7 @@ import { clearBumblebeeCache } from "../bumblebee.js";
 import { scanStagedFiles } from "../scan-staged.js";
 import { existsSync } from "node:fs";
 import { scanBuildArtifacts } from "../scan-build.js";
+import { SECRET_SHAPE_COUNT } from "../utils/redactSecrets.js";
 import { scanTranscripts } from "../scan-transcripts.js";
 import { sampleCosts } from "../cost-monitor.js";
 import { checkGitignore, patchGitignore, findCommittedSensitive } from "../check-gitignore.js";
@@ -486,7 +487,9 @@ async function cmdSecurityScanArtifact(): Promise<boolean> {
 
   const engine = r.engine ? ` ${c.dim}(via ${r.engine})${c.reset}` : "";
   if (r.verdict === "clean") {
-    console.log(`${c.green}✓ scan-artifact: ${target} — clean${c.reset}${engine}`);
+    console.log(
+      `${c.green}✓ scan-artifact: ${target} — no matches for ${SECRET_SHAPE_COUNT} known credential shapes${c.reset}${engine}`,
+    );
     console.log(`  ${c.dim}${r.detail}${c.reset}`);
     return true;
   }
@@ -507,7 +510,11 @@ async function cmdSecurityScanBuild(): Promise<boolean> {
   const extras = process.argv.slice(4).filter((a) => !a.startsWith("--"));
   const hits = await scanBuildArtifacts(process.cwd(), extras.length > 0 ? extras : undefined);
   if (hits.length === 0) {
-    console.log(`${c.green}✓ scan-build: no credential patterns in build artifacts.${c.reset}`);
+    // The denominator belongs in the claim: "no patterns found" reads as "no secrets there", and
+    // the honest statement is "none of the shapes kit knows".
+    console.log(
+      `${c.green}✓ scan-build: no matches for ${SECRET_SHAPE_COUNT} known credential shapes${c.reset}${c.dim} — a shape outside that set is not detected${c.reset}`,
+    );
     return true;
   }
   const total = hits.reduce((sum, h) => sum + h.findings.length, 0);
