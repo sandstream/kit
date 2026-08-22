@@ -374,6 +374,7 @@ export function printAuditTable(events: import("./audit.js").AuditEvent[]): void
   const envWidth = Math.max(6, ...events.map((e) => e.environment.length)) + 2;
   const actorWidth =
     Math.max(8, ...events.map((e) => (e.agent_name ?? e.agent_id ?? "unknown").length)) + 2;
+  const repoWidth = Math.max(4, ...events.map((e) => (e.repo ?? "—").length)) + 2;
 
   for (const event of events) {
     const icon = event.success ? CHECK : CROSS;
@@ -382,9 +383,14 @@ export function printAuditTable(events: import("./audit.js").AuditEvent[]): void
     const env = pad(`[${event.environment}]`, envWidth + 2);
     const actor = pad(event.agent_name ?? event.agent_id ?? "unknown", actorWidth);
     const duration = event.duration_ms != null ? `${c.dim}${event.duration_ms}ms${c.reset}` : "";
+    // Where it happened, and whether it was a test. Both were missing for every one of the 7 199
+    // entries in kit's own log, which is why nobody could tell operator activity from the suite's.
+    // Entries written before those fields existed print an em dash rather than a guess.
+    const repo = pad(event.repo ?? "—", repoWidth);
+    const marker = event.test ? `${c.dim}test${c.reset}` : "    ";
 
     console.log(
-      `  ${icon} ${c.dim}${ts}${c.reset}  ${op}  ${c.gray}${env}${c.reset}  ${actor}  ${duration}`,
+      `  ${icon} ${c.dim}${ts}${c.reset}  ${op}  ${c.gray}${env}${c.reset}  ${actor}  ${c.dim}${repo}${c.reset}  ${marker}  ${duration}`,
     );
 
     if (event.error) {
