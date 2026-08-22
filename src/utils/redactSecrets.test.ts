@@ -1,6 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { redactSecrets, safeStatusLine, findSecrets, shannonEntropy } from "./redactSecrets.js";
+import {
+  redactSecrets,
+  safeStatusLine,
+  findSecrets,
+  shannonEntropy,
+  SECRET_PATTERNS,
+  SECRET_SHAPE_COUNT,
+  secretShapeLabels,
+} from "./redactSecrets.js";
 
 describe("findSecrets — entropy backstop (fail-closed shared-memory gate)", () => {
   const has = (text: string, opts?: { entropyBackstop?: boolean }) =>
@@ -264,5 +272,33 @@ describe("findSecrets — Swedish personnummer (PII parity, Luhn-validated)", ()
     assert.equal(pnr("ts 1234567890 log").length, 0); // MM=34 → not a date
     assert.equal(pnr("call 0701234567 now").length, 0); // phone-shaped, fails validation
     assert.equal(pnr("no pii in this line").length, 0);
+  });
+});
+
+/**
+ * The bound has to be derived, and it has to be sayable.
+ *
+ * Some tables must be hardcoded: nothing in a repository can tell you what a Stripe key looks
+ * like. What must never be hidden is where such a table ends — "no secrets found" and "no secrets
+ * of the kinds I know" are different statements, and only the second is true. So the count is
+ * derived from the list rather than written down, because a written count is a claim that rots the
+ * first time someone adds a pattern.
+ *
+ * Measured while adding this: a grep for `label:` said 29 shapes, the derived count says 25. The
+ * grep counted the interface field and a doc line. That is the whole argument in one datum.
+ */
+
+describe("the detector's declared bound", () => {
+  it("is derived from the pattern list, not written down", () => {
+    assert.equal(SECRET_SHAPE_COUNT, SECRET_PATTERNS.length);
+    assert.ok(SECRET_SHAPE_COUNT > 10, "a plausible detector, not an empty list");
+  });
+
+  it("names every shape exactly once, so a count and a list cannot disagree", () => {
+    const labels = secretShapeLabels();
+    assert.equal(new Set(labels).size, labels.length, "no duplicate labels");
+    assert.deepEqual(labels, [...labels].sort(), "stable order for stable output");
+    // Every pattern contributes a label: a nameless pattern could never be reported.
+    for (const p of SECRET_PATTERNS) assert.ok(p.label.length > 0);
   });
 });

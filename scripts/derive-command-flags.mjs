@@ -263,12 +263,30 @@ const GENERATED_HEADER = `/**
 
 `;
 
-function emit(surface) {
-  const lines = [GENERATED_HEADER, "export const COMMAND_FLAGS: Record<string, readonly string[]> = {"];
+export function emit(surface) {
+  // The header already ends in a newline; `join("\n")` would add a second one, and Prettier
+  // collapses it — one more way a no-op regeneration produced a diff.
+  const lines = [
+    GENERATED_HEADER.replace(/\n+$/, ""),
+    "",
+    "export const COMMAND_FLAGS: Record<string, readonly string[]> = {",
+  ];
   for (const verb of Object.keys(surface).sort()) {
     const flags = surface[verb];
     const key = /^[a-z][a-z0-9]*$/.test(verb) ? verb : JSON.stringify(verb);
-    lines.push(`  ${key}: [${flags.map((f) => JSON.stringify(f)).join(", ")}],`);
+    const inline = `  ${key}: [${flags.map((f) => JSON.stringify(f)).join(", ")}],`;
+    // Emit what Prettier would emit. This file is generated AND committed, so a regeneration that
+    // is content-identical must also be diff-identical. The single-line form gets reflowed to one
+    // flag per line, turning a no-op regeneration into a 512-line diff — which was misread as
+    // catastrophic data loss, and reported as such. Prettier's rule is width-based (printWidth
+    // 100), so the same threshold is applied here rather than guessed at.
+    if (inline.length <= 100) {
+      lines.push(inline);
+    } else {
+      lines.push(`  ${key}: [`);
+      for (const f of flags) lines.push(`    ${JSON.stringify(f)},`);
+      lines.push(`  ],`);
+    }
   }
   lines.push("};", "");
   lines.push(`/**
