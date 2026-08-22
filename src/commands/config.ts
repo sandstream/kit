@@ -431,6 +431,10 @@ export async function cmdConfig(): Promise<boolean> {
 
   if (sub === "migrate") return cmdConfigMigrate();
   if (sub === "knobs") return cmdConfigKnobs();
+  if (sub === "sections") {
+    return cmdConfigSections();
+  }
+
   if (sub === "recommend") return cmdConfigRecommend();
 
   // Default / help: show the current config version + available subcommands.
@@ -469,10 +473,79 @@ export async function cmdConfig(): Promise<boolean> {
     console.log(
       `  ${c.cyan}kit config knobs${c.reset}               List power-user env vars + ${KIT_FILE} fields (--json)`,
     );
+    console.log(
+      `  ${c.cyan}kit config sections${c.reset}            Every ${KIT_FILE} section, what it buys, and which this repo declares (--json)`,
+    );
     return true;
   }
 
   console.error(`${c.red}Unknown config subcommand: ${sub}${c.reset}`);
   console.error(`Run \`kit config\` to see subcommands.`);
   return false;
+}
+
+/**
+ * `kit config sections [--json]`
+ *
+ * The answer to "what can I configure?" — every `.kit.toml` section with what it buys, which ones
+ * this repo already declares, and the smallest example for the ones it does not. Before this, the
+ * question had no answer surface: six of the 23 sections carried no description in the type, two
+ * appeared in no document, and `kit config knobs` covered four.
+ */
+export async function cmdConfigSections(): Promise<boolean> {
+  const { CONFIG_SECTIONS } = await import("../config-surface.js");
+  const wantJson = hasFlag(process.argv, "--json");
+
+  // What this repo already declares, so the list separates "yours" from "available".
+  let declared = new Set<string>();
+  try {
+    const { parse } = await import("smol-toml");
+    const { readFile } = await import("node:fs/promises");
+    const raw = await readFile(resolveConfigPath(), "utf-8");
+    declared = new Set(Object.keys(parse(raw) as Record<string, unknown>));
+  } catch {
+    /* no config here — everything reads as available */
+  }
+
+  const names = Object.keys(CONFIG_SECTIONS).sort();
+
+  if (wantJson) {
+    console.log(
+      JSON.stringify(
+        names.map((name) => ({
+          section: name,
+          declared: declared.has(name),
+          ...CONFIG_SECTIONS[name],
+        })),
+        null,
+        2,
+      ),
+    );
+    return true;
+  }
+
+  console.log(
+    `${c.bold}${c.cyan}.kit.toml sections${c.reset}  ${c.dim}(${names.length} available · ${declared.size} declared here)${c.reset}`,
+  );
+  console.log(`${c.dim}${"─".repeat(72)}${c.reset}`);
+  for (const name of names) {
+    const s2 = CONFIG_SECTIONS[name];
+    const mark = declared.has(name) ? `${c.green}✓${c.reset}` : `${c.dim}○${c.reset}`;
+    console.log(`\n  ${mark} ${c.bold}[${name}]${c.reset}  ${c.dim}${s2.purpose}${c.reset}`);
+    console.log(`      ${c.dim}buys:${c.reset} ${s2.buys}`);
+    if (!declared.has(name)) {
+      for (const line of s2.example.split("\n")) console.log(`      ${c.dim}${line}${c.reset}`);
+    }
+    const refs = [
+      s2.command ? `${c.bold}${s2.command}${c.reset}` : "",
+      s2.docs ? `${c.dim}${s2.docs}${c.reset}` : "",
+    ]
+      .filter(Boolean)
+      .join(`${c.dim}  ·  ${c.reset}`);
+    if (refs) console.log(`      ${refs}`);
+  }
+  console.log(
+    `\n${c.dim}Full reference: docs/CONFIGURATION.md (generated from the same table).${c.reset}`,
+  );
+  return true;
 }

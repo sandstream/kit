@@ -1,12 +1,41 @@
-# Changelog
-
-All notable changes to kit are documented in this file. This project adheres to [Semantic Versioning](https://semver.org/).
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/).
-
 ## [Unreleased]
 
 ### Added
+
+- **`kit config sections` and a generated `docs/CONFIGURATION.md`** (#527).
+
+  `.kit.toml` has 23 sections. Six of the most-used — `[tools]`, `[services]`, `[secrets]`,
+  `[skills]`, `[governance]`, `[hooks]` — carried no description anywhere in the type; `[mcp]` and
+  `[supply_chain]` appeared in **no document at all**; the rest were explained in passing across
+  thirty-odd files. `kit config knobs` listed 30 knobs covering four sections. So "what can I
+  configure, and where do I change it?" had no answer surface — not in the docs, not from the CLI.
+
+  `src/config-surface.ts` now declares every section with three things and nothing else: what it
+  **is**, what declaring it **buys** (the reason to bother, not a restatement of the name), and the
+  smallest example that does something real — plus the command that sets it up and the document that
+  goes deeper, where those exist.
+
+  ```
+  $ kit config sections
+  .kit.toml sections  (23 available · 7 declared here)
+
+    ○ [context]  The account and project each CLI must be pointed at, per tool.
+        buys: A tool answering as the wrong org becomes a red row instead of a filtered
+              result set that looks complete — and a pre-push hook can block the
+              wrong-project push outright.
+        [context.gcloud]
+        account = "me@example.com"
+        project = "acme-prod"
+        kit context check
+  ```
+
+  `docs/CONFIGURATION.md` is **generated** from the same table, and the test fails in **both**
+  directions: a section in `kitConfig` with no entry (the operator cannot discover what nobody
+  described) and an entry for a section kit no longer has (the reader is sent to configure something
+  kit will ignore). Unlike the flag surface, over-documenting is an error too. Regeneration is
+  byte-identical, with a test that names the first differing line — the lesson from #525.
+
+  `kit config recommend` remains the "what should I change" surface; this is the reference behind it.
 
 - **Audit entries now say where they happened, and whether they were a test** (#526).
 
@@ -36,21 +65,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `kit audit` shows both, and prints `—` for entries written before the fields existed rather than
   guessing.
 
-### Fixed
-
-- **Regenerating `flag-surface.ts` produced a 512-line diff over identical content** (#525).
-
-  `scripts/derive-command-flags.mjs --emit` wrote one verb per line; Prettier reformats that to one
-  flag per line. So running the documented regeneration command reflowed the whole file without
-  changing a single fact — and I read that diff as the generator having narrowed the accepted flags
-  of 70+ verbs, reported it as a defect, and repeated it in two PR bodies and a shared-memory entry
-  before comparing either side's content. Measured properly: **0 of 72 verbs differ.**
-
-  `emit()` now produces Prettier's shape (width-based, same `printWidth` of 100), so regeneration is
-  byte-identical, and a test compares the generated string against the committed file and names the
-  first differing line. A generated file nobody dares regenerate is a hardcoded table wearing a
-  generator's hat.
-
 ### Changed
 
 - **A scanner that finds nothing now says what it looked for** (#525).
@@ -77,6 +91,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   explicitly and is unchanged.
 
 ### Fixed
+
+- **Regenerating `flag-surface.ts` produced a 512-line diff over identical content** (#525).
+
+  `scripts/derive-command-flags.mjs --emit` wrote one verb per line; Prettier reformats that to one
+  flag per line. So running the documented regeneration command reflowed the whole file without
+  changing a single fact — and I read that diff as the generator having narrowed the accepted flags
+  of 70+ verbs, reported it as a defect, and repeated it in two PR bodies and a shared-memory entry
+  before comparing either side's content. Measured properly: **0 of 72 verbs differ.**
+
+  `emit()` now produces Prettier's shape (width-based, same `printWidth` of 100), so regeneration is
+  byte-identical, and a test compares the generated string against the committed file and names the
+  first differing line. A generated file nobody dares regenerate is a hardcoded table wearing a
+  generator's hat.
 
 - **The plugin registry advertised packages that do not exist, and ratings nobody measured** (#528).
 
@@ -111,8 +138,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   it names (package, version, and a runnable install command), no entry may carry a rating or
   download count, every repository link must be the one real repository, each plugin must be findable
   by the name a person would type, and regeneration must be byte-identical.
-
-### Fixed
 
 - **`kit ci` rendered a skipped check as a failure on GitHub and as a pass on GitLab** (#517).
   Two surfaces, two opposite lies, one missing case.
