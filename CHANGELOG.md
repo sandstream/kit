@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- **Audit entries now say where they happened, and whether they were a test** (#526).
+
+  kit's own log had **7 199 events and not one carried a location**. Every entry named a key and an
+  operation, and no place — so the 4 053 `policy-check` events, almost all of them the test suite
+  exercising the gate, could not be separated from an operator's. `kit usage` had to print *"operator
+  and test activity cannot be told apart in these totals"* instead of a number. The evidence existed
+  and was unusable.
+
+  Two fields, and the choice of fields is the point:
+
+  - **`repo`** — `owner/repo` from the origin remote, or the working tree's directory name when
+    there is no remote. Deliberately **not** the absolute cwd: this log is exportable
+    (`kit audit export`, the Remote push), and an absolute path carries the operator's username and,
+    in a consultancy tree, client names. `owner/repo` is what the repository already publishes in
+    its own remote, so it adds no exposure while still telling two trees apart. A test asserts no
+    home path can appear in a serialised entry.
+  - **`test`** — stamped at write time from `NODE_TEST_CONTEXT` (which node:test sets and spawned
+    CLIs inherit) or `KIT_TEST=1`. After the fact there is nothing left to distinguish a
+    test-generated event by, so it has to be recorded when it happens.
+
+  Resolution is cached per directory: the append path handles thousands of events, and a `git` spawn
+  per event would not be acceptable. A directory whose identity cannot be determined caches that
+  too, so a non-git tree does not re-spawn git on every event. An explicitly supplied `repo` is
+  never overwritten — the broker files evidence on another tree's behalf and knows its own answer.
+
+  `kit audit` shows both, and prints `—` for entries written before the fields existed rather than
+  guessing.
+
 ### Fixed
 
 - **`kit ci` rendered a skipped check as a failure on GitHub and as a pass on GitLab** (#517).

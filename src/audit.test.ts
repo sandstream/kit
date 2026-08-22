@@ -1,8 +1,9 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFile, unlink } from "node:fs/promises";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import {
   logAuditEvent,
@@ -11,6 +12,8 @@ import {
   appendAuditEventDirect,
   verifyAuditChain,
   verifyAuditSignatures,
+  repoIdentity,
+  isTestRun,
 } from "./audit.js";
 import { loadOrCreateIdentity, localPublicKeys } from "./identity.js";
 import type { GovernanceConfig } from "./config.js";
@@ -801,5 +804,122 @@ describe("formatAuditLog — edges, ordering and agent attribution", () => {
     assert.equal(lines.length, 3);
     assert.equal(lines[1], "  Error: line1");
     assert.equal(lines[2], "line2");
+  });
+});
+
+/**
+ * An audit entry that cannot say WHERE it happened cannot be attributed.
+ *
+ * kit's own log had 7 199 events and not one carried a location. Every entry named a key and an
+ * operation, and no place — so the 4 053 `policy-check` events (almost all of them the test suite
+ * exercising the gate) could not be separated from an operator's, and `kit usage` had to print
+ * "operator and test activity cannot be told apart" instead of a number. The evidence was there and
+ * unusable.
+ *
+ * Two fields fix that, and the choice of fields is the interesting part:
+ *
+ *   - `repo` as `owner/repo`, NOT the absolute cwd. This log is exportable (`kit audit export`, the
+ *     Remote push), and an absolute path carries the operator's username and, in a consultancy
+ *     tree, client names. `owner/repo` is what the repository already publishes in its own remote,
+ *     so it adds no exposure while still telling two trees apart.
+ *   - `test` stamped at write time, because after the fact there is nothing left to distinguish a
+ *     test-generated event by.
+ */
+
+function gitRepo(remote?: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "kit-attr-"));
+  spawnSync("git", ["init", "-q", "-b", "main", dir]);
+  if (remote) spawnSync("git", ["-C", dir, "remote", "add", "origin", remote]);
+  return dir;
+}
+
+describe("repoIdentity", () => {
+  it("reduces every remote form to owner/repo", () => {
+    for (const [remote, expected] of [
+      ["git@github.com:acme/widget.git", "acme/widget"],
+      ["https://github.com/acme/widget.git", "acme/widget"],
+      ["https://github.com/acme/widget", "acme/widget"],
+      ["ssh://git@gitlab.example.com:2222/acme/widget.git", "acme/widget"],
+    ] as const) {
+      const dir = gitRepo(remote);
+      try {
+        assert.equal(repoIdentity(dir), expected, remote);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("falls back to the working tree's name when there is no remote", () => {
+    const dir = gitRepo();
+    try {
+      assert.equal(repoIdentity(dir), basename(dir));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("answers nothing outside a git tree, rather than inventing a name", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-attr-plain-"));
+    try {
+      assert.equal(repoIdentity(dir), undefined);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("isTestRun", () => {
+  it("recognises node:test, which spawned CLIs inherit", () => {
+    assert.equal(isTestRun({ NODE_TEST_CONTEXT: "child-v8" }), true);
+    assert.equal(isTestRun({ KIT_TEST: "1" }), true);
+    assert.equal(isTestRun({}), false);
+    // Not every truthy-looking value: an explicit opt-out must stay opted out.
+    assert.equal(isTestRun({ KIT_TEST: "0" }), false);
+  });
+});
+
+describe("appended events carry their attribution", () => {
+  it("stamps repo and test, and never the absolute path", async () => {
+    const dir = gitRepo("git@github.com:acme/widget.git");
+    try {
+      const ok = await appendAuditEventDirect(
+        { operation: "policy-check", environment: "test", success: false },
+        { cwd: dir },
+      );
+      assert.equal(ok, true);
+      const logPath = join(dir, ".kit-audit.jsonl");
+      assert.ok(existsSync(logPath), "the event must land in the governed tree");
+      const entry = JSON.parse(readFileSync(logPath, "utf-8").trim().split("\n")[0]) as Record<
+        string,
+        unknown
+      >;
+
+      assert.equal(entry.repo, "acme/widget");
+      // This suite IS a test run, so the marker must be set — that is the whole point of the field.
+      assert.equal(entry.test, true);
+      // The exposure rule: no absolute path anywhere in the serialised entry.
+      const raw = readFileSync(logPath, "utf-8");
+      assert.doesNotMatch(raw, /\/(Users|home)\//, "an exported log must not carry a home path");
+      assert.doesNotMatch(raw, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves an explicitly supplied repo alone — the broker knows its own answer", async () => {
+    const dir = gitRepo("git@github.com:acme/widget.git");
+    try {
+      await appendAuditEventDirect(
+        { operation: "broker-write", environment: "test", success: true, repo: "other/tree" },
+        { cwd: dir },
+      );
+      const entry = JSON.parse(
+        readFileSync(join(dir, ".kit-audit.jsonl"), "utf-8").trim().split("\n")[0],
+      ) as Record<string, unknown>;
+      assert.equal(entry.repo, "other/tree");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

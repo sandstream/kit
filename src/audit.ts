@@ -1,5 +1,6 @@
 import { appendFile, readFile, writeFile, rename } from "node:fs/promises";
-import { resolve } from "node:path";
+import { resolve, basename } from "node:path";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { GovernanceConfig } from "./config.js";
 import { identityId, verifySignature } from "./identity.js";
@@ -29,6 +30,66 @@ function redactAuditValue(v: unknown): unknown {
     return out;
   }
   return v;
+}
+
+/**
+ * Repo identity per working tree, resolved once.
+ *
+ * The append path is hot — 4 000+ refusals in this repo's own log — so a `git` spawn per event is
+ * not acceptable. Resolved on first use per directory and cached for the process; a tree whose
+ * identity cannot be determined caches `undefined` too, so a non-git directory does not re-spawn
+ * git on every event.
+ */
+const repoIdentityCache = new Map<string, string | undefined>();
+
+export function repoIdentity(cwd: string): string | undefined {
+  if (repoIdentityCache.has(cwd)) return repoIdentityCache.get(cwd);
+  let identity: string | undefined;
+  try {
+    const remote = execFileSync("git", ["-C", cwd, "remote", "get-url", "origin"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2_000,
+    }).trim();
+    // Any remote form reduces to owner/repo: https, ssh, scp-style, with or without .git.
+    const m = /([^/:]+)\/([^/]+?)(?:\.git)?$/.exec(remote);
+    if (m) identity = `${m[1]}/${m[2]}`;
+  } catch {
+    /* no remote, or not a git tree */
+  }
+  if (!identity) {
+    try {
+      const top = execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 2_000,
+      }).trim();
+      if (top) identity = basename(top);
+    } catch {
+      /* not a git tree at all */
+    }
+  }
+  repoIdentityCache.set(cwd, identity);
+  return identity;
+}
+
+/** True when this process is a test run — node:test sets NODE_TEST_CONTEXT, and it is inherited by spawned CLIs. */
+export function isTestRun(env: NodeJS.ProcessEnv = process.env): boolean {
+  return typeof env.NODE_TEST_CONTEXT === "string" || env.KIT_TEST === "1";
+}
+
+/**
+ * Stamp the two attribution fields onto an event, without overwriting what a caller set explicitly
+ * (the broker files evidence on another tree's behalf and knows its own answer).
+ */
+function withAttribution(event: AuditEvent, cwd: string): AuditEvent {
+  const stamped: AuditEvent = { ...event };
+  if (stamped.repo === undefined) {
+    const repo = repoIdentity(cwd);
+    if (repo) stamped.repo = repo;
+  }
+  if (stamped.test === undefined && isTestRun()) stamped.test = true;
+  return stamped;
 }
 
 function redactAuditEvent(event: AuditEvent): AuditEvent {
@@ -278,6 +339,32 @@ const RETRY_BACKOFF_MS = [250, 1_000, 4_000];
 
 export interface AuditEvent {
   timestamp: string;
+  /**
+   * The repository the operation ran in, as `owner/repo` from the origin remote, or the working
+   * tree's directory name when there is no remote.
+   *
+   * Deliberately NOT the absolute cwd. This log is exportable (`kit audit export`, the Remote
+   * push), and an absolute path carries the operator's username and, in a consultancy tree, client
+   * names — `/Users/<name>/Development/<client>/…`. `owner/repo` is information the repository
+   * already publishes in its own remote, so recording it adds no new exposure while still telling
+   * two trees apart.
+   *
+   * Why this exists: kit's own log had 7 199 events and not one of them said WHERE. Every entry was
+   * attributable to a key and to an operation, and to no place — so operator activity could not be
+   * separated from the test suite's, and no per-actor or per-repo number could be built on top. A
+   * verdict about "how much did the floor refuse" was unanswerable in the one repo that had the
+   * most evidence.
+   */
+  repo?: string;
+  /**
+   * True when the process was a test run.
+   *
+   * kit's own 4 053 `policy-check` events are almost entirely the suite exercising the gate. Left
+   * unmarked they inflate every count that reads the log, which is why `kit usage` had to print
+   * "operator and test activity cannot be told apart" instead of a number. Marked at write time,
+   * because after the fact there is nothing to distinguish them by.
+   */
+  test?: true;
   agent_id?: string;
   agent_name?: string;
   operation: string;
@@ -305,12 +392,12 @@ export async function appendAuditEventDirect(
 ): Promise<boolean> {
   // Redact at construction so EVERY sink — chain write, remote push, pending queue —
   // sees the redacted event, not just the on-disk chain.
-  const auditEvent: AuditEvent = redactAuditEvent({
-    timestamp: new Date().toISOString(),
-    ...event,
-  });
+  const auditEvent: AuditEvent = redactAuditEvent(
+    withAttribution({ timestamp: new Date().toISOString(), ...event }, opts.cwd ?? process.cwd()),
+  );
   const logFile = opts.logFile ?? ".kit-audit.jsonl";
-  const logPath = resolve(opts.cwd ?? process.cwd(), logFile);
+  const dir = opts.cwd ?? process.cwd();
+  const logPath = resolve(dir, logFile);
   try {
     const wroteHash = await appendChained(logPath, auditEvent);
     // Best-effort external HMAC anchor advance. Fail-soft by contract: never
@@ -467,12 +554,17 @@ export async function logAuditEvent(
     return true;
   }
 
-  const auditEvent: AuditEvent = {
-    timestamp: new Date().toISOString(),
-    agent_id: config.agent.id,
-    agent_name: config.agent.name,
-    ...event,
-  };
+  const auditEvent: AuditEvent = withAttribution(
+    {
+      timestamp: new Date().toISOString(),
+      agent_id: config.agent.id,
+      agent_name: config.agent.name,
+      ...event,
+    },
+    // The GOVERNED tree, matching where the log itself lands a few lines below: an event filed in
+    // B's chain must say B, not the host process's directory.
+    cwd ?? process.cwd(),
+  );
 
   // When include_secrets is false (the default), strip secrets two ways: by KEY NAME
   // (sanitizeMetadata drops keys like `password`) AND by VALUE — redact known credential
