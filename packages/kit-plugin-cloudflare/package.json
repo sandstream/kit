@@ -2,6 +2,13 @@
   "name": "sandstream-kit-plugin-cloudflare",
   "version": "0.2.0",
   "description": "Cloudflare Workers secret + API token surface for kit",
+  "keywords": [
+    "kit-plugin",
+    "secrets",
+    "hosting",
+    "cloudflare",
+    "workers"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

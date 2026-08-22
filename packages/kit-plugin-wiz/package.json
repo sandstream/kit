@@ -2,6 +2,13 @@
   "name": "sandstream-kit-plugin-wiz",
   "version": "0.1.0",
   "description": "Wiz issue-graph ingestion for kit (read-only).",
+  "keywords": [
+    "kit-plugin",
+    "security",
+    "scanning",
+    "ingestion",
+    "read-only"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
