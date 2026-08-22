@@ -2,6 +2,56 @@
 
 ### Added
 
+- **What reaches the browser is now checked** (#523).
+
+  kit covered credentials that were *committed* (trufflehog over history, the staged-file scan) and
+  `.env` hygiene. Neither sees the leak that costs the most: a `VITE_*` or `NEXT_PUBLIC_*` variable
+  holding a real secret is inlined into the bundle at build time and shipped to every visitor —
+  without ever being committed. `.gitignore` does not protect against it and history scanning cannot
+  see it.
+
+  Two checks, both deterministic:
+
+  **`client-exposed env names`** — a client-exposed prefix plus a secret-shaped name is a leak by
+  construction, because the framework will inline it. Nine prefixes (`VITE_`, `NEXT_PUBLIC_`,
+  `PUBLIC_`, `REACT_APP_`, `EXPO_PUBLIC_`, `NUXT_PUBLIC_`, `GATSBY_`, `VUE_APP_`, `STORYBOOK_`)
+  against `SECRET|TOKEN|PASSWORD|CREDENTIAL|PRIVATE|_KEY|API_KEY`. Names that are secret-shaped and
+  public by design are excused — `..._ANON_KEY`, `..._PUBLISHABLE_KEY`, `..._SITE_KEY`, a Sentry
+  DSN, a client id, a measurement id, a VAPID public key. That list is what makes the check keepable:
+  `KEY` alone matches `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, the
+  two most common client env vars there are, both meant to be published.
+
+  Anything else fails, with the escape hatch spelled out in the suggestion:
+
+  ```toml
+  [scan.client_exposed_allow]
+  VITE_DEMO_SECRET_KEY = "demo tenant, rotated nightly"
+  ```
+
+  The reason is required — an entry without one is reported, because "somebody allowed this once" is
+  not something anyone can audit later. Only names are read from `.env*` files; the values are
+  dropped at the parse, since the prefix decides exposure and nothing downstream needs the content.
+
+  **`built bundle secrets`** — the built output is scanned for real credential shapes, which catches
+  the case the name check cannot: a key hardcoded in source that never went through env at all. The
+  scanner for this already existed (`scanBuildArtifacts`) and was reachable only from
+  `kit security scan-build`, so no automatic verdict had ever looked at build output — where the
+  leak actually lands.
+
+  Scoped so it stays usable, both limits measured rather than guessed: it requires a client framework
+  (kit's own `dist/` is a Node CLI, and scanning it produced 73 "credential shapes" — every one a
+  test fixture or one of kit's own detection patterns), and it looks in workspace packages, not just
+  the root (a real repo declares `workspaces` at the root and ships from `apps/web`, so a root-only
+  check called it "nothing builds for a browser"). Compiled tests, mocks and fixtures are excluded
+  and the count of what was set aside is printed. An unbuilt project reports *"present but not built
+  — run the build, then re-check"* rather than passing.
+
+  Verified against a real Vite workspace (`apps/web/dist` — pass) and against a planted leak: the
+  name check fails on `VITE_STRIPE_SECRET_KEY` while leaving `VITE_API_URL` and
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY` alone, and the bundle check finds an `sk_live_…` inlined into
+  `dist/assets/index-abc.js` at critical severity, telling the operator to rotate first — removing
+  it from the build does not un-publish what already shipped.
+
 - **`kit usage` — what kit knows, and proof that the floor still works** (#519).
 
   Six tabs, switchable in the terminal with the number keys: **Floor** (audited operations and
@@ -151,8 +201,6 @@
   view that leaves the terminal in the alternate screen with raw mode on makes the operator's shell
   look dead. Verified through a pty: `q`, Esc, Ctrl-C, SIGINT and SIGTERM all give the screen
   back.
-
-## [6.8.0] - 2026-08-21
 
 ### Fixed
 
@@ -317,24 +365,7 @@
   only ever fired for `fail`/`warn` — which is the worse way round, since the human is the one
   who concludes "twenty things are broken here".
 
-### Fixed
-
-- **`kit config migrate` deleted every comment in `.kit.toml`, and the dry run did not say so**
-  (#513). It re-serialised from the parsed object, so on the v0 → v1 step — whose entire job is to
-  stamp `version = 1` — kit's own config went from 8 comment lines to 0, and a one-line change
-  produced a 36-line diff. The parsed data was identical, so the backup-and-re-validate safety
-  path passed and flagged nothing. What was lost was policy reasoning: why those scanners are
-  declared, why the refs are `aqua:`-scheme-qualified, which values `environment` accepts.
-
-  An add-only migration is now applied as a **text edit** — the added key is inserted above the
-  first table (top-level keys must precede it or TOML scopes them into it) and the rest of the
-  file is untouched. Anything more structural returns null from the patcher rather than being
-  forced through an edit that cannot express it, and then the run is **refused** while comments
-  exist unless `--allow-comment-loss` is passed, naming how many lines are at stake.
-
-  `--dry-run` now says which path would be taken — *"Applied as a text edit: comments and
-  formatting are preserved"* or the count that would be deleted. A preview that omits the
-  destructive half of a change is worse than no preview.
+## [6.8.0] - 2026-08-21
 
 ### Added
 
@@ -365,7 +396,75 @@
   Auto-migrating on load is also out — a config that changes shape underneath a session is worse
   than one that is behind, and the schema version exists so the change is explicit and reviewable.
 
+- **`[context]` can declare the IDENTITY a repo must use, and kit asserts it** (#503). `kit check`
+  printed `✓ vercel authenticated <account>` and compared it to nothing, while `kit context check`
+  asserted only ids read from repo-local files — so a CLI answering as the wrong account was
+  green. New fields: `vercel.user`, `github.user` (distinct from `github.org`, which is the
+  remote's owner) and `convex.account`. They behave exactly like `git.email`: declared → asserted,
+  mismatch → red and non-zero, unreadable → `unknown` rather than a mismatch, since "cannot tell"
+  and "wrong account" are different findings.
+
+  What the gap cost, measured: a session whose CLI was logged in as a personal account with
+  read-only rights on the production environment read a FILTERED variable list as a complete one.
+  `env ls` showed four variables and looked whole (the ones that also existed in preview), the
+  production-only ones were invisible, and `env pull --environment=production` failed as though
+  the variable did not exist. Two contradictory conclusions were drawn before a web UI settled it.
+
+  A mismatch now also names the mechanism that scopes an identity to a repo, because a global
+  login is what produces a wrong one: `vercel -Q <dir>` / `VERCEL_TOKEN`, `gh auth switch`,
+  `gcloud config configurations activate`, `AWS_PROFILE`, stripe project profiles — and for
+  convex, that it has **no** profiles (`~/.convex/config.json` is global and `convex login`
+  overwrites it), so the isolation is `CONVEX_DEPLOY_KEY` / `CONVEX_DEPLOYMENT` per repo.
+
+  And it says the part that turns a wrong identity into wrong conclusions out loud: *anything you
+  already read as this identity may have been a PARTIAL view — permissions filter listings
+  silently.*
+
+  `kit context check`'s ready-to-paste block offers the detected identities, hedged (`⚠ the gh
+  account logged in NOW — VERIFY it is right for THIS repo`), since the live identity is exactly
+  what the lock exists to question. A value kit could not resolve to a real identity is reported
+  but never offered as something to declare.
+
+- **`kit tools list` — the inventory that did not exist**, and the measurement three surfaces
+  were missing (#500). Per tool: the resolved path, the installer that owns it (classified from
+  the path, never assumed), the installed version, and with `--latest` how far behind it is.
+  Covers the declared `[tools]` **and** the undeclared CLIs an agent decides from — `gh`, `op`,
+  `jq`, `mise`, `docker`, `gcloud`, `kubectl`, `supabase`, `stripe`, `psql`, … — which were
+  invisible precisely because nothing declared them.
+
+  Measured on the machine that filed the report, first run: `trivy 0.72.0 → 0.74.0`,
+  `trufflehog 3.95.9 → 3.97.0`, `gh 2.96.0 → 2.97.0`, `mise 2026.6.11 → 2026.8.9`,
+  `npm 10.9.8 → 12.0.2`, `op 2.34.0 → 2.39.0`. Cold 12s, warm 4s.
+
+- **`latest` is now checked against the installer that would satisfy it.** `versionSatisfies`
+  answered `if (required === "latest") return true;`, so `✓ vercel 53.1.1 (need latest)` printed
+  while the registry had 59.1.4 — six majors. The tools table now shows the installer in brackets
+  and, for a `latest` pin, `!` with `53.1.1 → 59.1.4 available`. A pin of `any` / `present` / `*`
+  asserts presence only, and says so, for repos that genuinely mean "whatever is installed".
+
+  Lookups are per-installer (`npm view`, `mise latest`, `brew info --json=v2`, `pip index`),
+  cached per machine in `~/.kit/tool-latest.json` with a TTL (`KIT_TOOL_LATEST_TTL_H`, default
+  24h), so the gate makes no network call once warm. A failed lookup is **not** cached — a flaky
+  network must not become a day-long policy.
+
 ### Fixed
+
+- **`kit config migrate` deleted every comment in `.kit.toml`, and the dry run did not say so**
+  (#513). It re-serialised from the parsed object, so on the v0 → v1 step — whose entire job is to
+  stamp `version = 1` — kit's own config went from 8 comment lines to 0, and a one-line change
+  produced a 36-line diff. The parsed data was identical, so the backup-and-re-validate safety
+  path passed and flagged nothing. What was lost was policy reasoning: why those scanners are
+  declared, why the refs are `aqua:`-scheme-qualified, which values `environment` accepts.
+
+  An add-only migration is now applied as a **text edit** — the added key is inserted above the
+  first table (top-level keys must precede it or TOML scopes them into it) and the rest of the
+  file is untouched. Anything more structural returns null from the patcher rather than being
+  forced through an edit that cannot express it, and then the run is **refused** while comments
+  exist unless `--allow-comment-loss` is passed, naming how many lines are at stake.
+
+  `--dry-run` now says which path would be taken — *"Applied as a text edit: comments and
+  formatting are preserved"* or the count that would be deleted. A preview that omits the
+  destructive half of a change is worse than no preview.
 
 - **The machine-wide wrapper pointed at whichever kit wrote it** (#509). `~/.kit/bin/kit` is what
   every kit hook in every repo execs, and `ensureKitWrapper()` baked in `process.argv[1]` — so one
@@ -390,8 +489,6 @@
 
   Both new env knobs are registered in `kit config knobs`: `KIT_WRAPPER_ALLOW_DEV` (marked
   dangerous) and `KIT_TOOL_LATEST_TTL_H`, which had been missing since it was introduced.
-
-### Fixed
 
 - **The install-gate recognised one repo-argument form; the tool publishes two** (#507).
   `ownerRepoArg` matched `^[\w.-]+/[\w.-]+$` — one slash, no scheme — so the payload of a
@@ -430,63 +527,6 @@
   note to `88/100` with a single-maintainer warning — the same reason npm's packages scored 88.
   Counting is bracket-aware, so `"Cordasco, Ian <one@example>"` is one maintainer, not two.
 
-### Added
-
-- **`[context]` can declare the IDENTITY a repo must use, and kit asserts it** (#503). `kit check`
-  printed `✓ vercel authenticated <account>` and compared it to nothing, while `kit context check`
-  asserted only ids read from repo-local files — so a CLI answering as the wrong account was
-  green. New fields: `vercel.user`, `github.user` (distinct from `github.org`, which is the
-  remote's owner) and `convex.account`. They behave exactly like `git.email`: declared → asserted,
-  mismatch → red and non-zero, unreadable → `unknown` rather than a mismatch, since "cannot tell"
-  and "wrong account" are different findings.
-
-  What the gap cost, measured: a session whose CLI was logged in as a personal account with
-  read-only rights on the production environment read a FILTERED variable list as a complete one.
-  `env ls` showed four variables and looked whole (the ones that also existed in preview), the
-  production-only ones were invisible, and `env pull --environment=production` failed as though
-  the variable did not exist. Two contradictory conclusions were drawn before a web UI settled it.
-
-  A mismatch now also names the mechanism that scopes an identity to a repo, because a global
-  login is what produces a wrong one: `vercel -Q <dir>` / `VERCEL_TOKEN`, `gh auth switch`,
-  `gcloud config configurations activate`, `AWS_PROFILE`, stripe project profiles — and for
-  convex, that it has **no** profiles (`~/.convex/config.json` is global and `convex login`
-  overwrites it), so the isolation is `CONVEX_DEPLOY_KEY` / `CONVEX_DEPLOYMENT` per repo.
-
-  And it says the part that turns a wrong identity into wrong conclusions out loud: *anything you
-  already read as this identity may have been a PARTIAL view — permissions filter listings
-  silently.*
-
-  `kit context check`'s ready-to-paste block offers the detected identities, hedged (`⚠ the gh
-  account logged in NOW — VERIFY it is right for THIS repo`), since the live identity is exactly
-  what the lock exists to question. A value kit could not resolve to a real identity is reported
-  but never offered as something to declare.
-
-### Added
-
-- **`kit tools list` — the inventory that did not exist**, and the measurement three surfaces
-  were missing (#500). Per tool: the resolved path, the installer that owns it (classified from
-  the path, never assumed), the installed version, and with `--latest` how far behind it is.
-  Covers the declared `[tools]` **and** the undeclared CLIs an agent decides from — `gh`, `op`,
-  `jq`, `mise`, `docker`, `gcloud`, `kubectl`, `supabase`, `stripe`, `psql`, … — which were
-  invisible precisely because nothing declared them.
-
-  Measured on the machine that filed the report, first run: `trivy 0.72.0 → 0.74.0`,
-  `trufflehog 3.95.9 → 3.97.0`, `gh 2.96.0 → 2.97.0`, `mise 2026.6.11 → 2026.8.9`,
-  `npm 10.9.8 → 12.0.2`, `op 2.34.0 → 2.39.0`. Cold 12s, warm 4s.
-
-- **`latest` is now checked against the installer that would satisfy it.** `versionSatisfies`
-  answered `if (required === "latest") return true;`, so `✓ vercel 53.1.1 (need latest)` printed
-  while the registry had 59.1.4 — six majors. The tools table now shows the installer in brackets
-  and, for a `latest` pin, `!` with `53.1.1 → 59.1.4 available`. A pin of `any` / `present` / `*`
-  asserts presence only, and says so, for repos that genuinely mean "whatever is installed".
-
-  Lookups are per-installer (`npm view`, `mise latest`, `brew info --json=v2`, `pip index`),
-  cached per machine in `~/.kit/tool-latest.json` with a TTL (`KIT_TOOL_LATEST_TTL_H`, default
-  24h), so the gate makes no network call once warm. A failed lookup is **not** cached — a flaky
-  network must not become a day-long policy.
-
-### Fixed
-
 - **`cli-lock.json` recorded a provenance it never measured, and the check called it `in sync`.**
   Both writers did the same thing:
 
@@ -510,8 +550,6 @@
   (`aqua:aquasecurity/trivy`, `npm:@socketsecurity/cli`), and the probe used the raw declaration
   rather than the executable name — the same false statement as the one above, pointed the other
   way.
-
-### Fixed
 
 - **The install-gate's refusal described its own machinery instead of the hazard it caught.**
   A blocked `git commit -m "… \`deployment:env:view\` …"` was reported as a false positive; the

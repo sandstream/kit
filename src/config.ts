@@ -469,6 +469,12 @@ export interface kitConfig {
      *  registered scanners on (backwards-compatible); `kit scan --list-delegates`
      *  shows on/off. kit delegates DETECTION here, never its verdict. */
     delegates?: string[];
+    /**
+     * Client-exposed env names (VITE_*, NEXT_PUBLIC_*, …) that are secret-shaped by name but
+     * genuinely safe to publish, each mapped to the REASON. The reason is required: an allowlist
+     * entry without one records that somebody allowed it, which nobody can audit later.
+     */
+    client_exposed_allow?: Record<string, string>;
   };
   /**
    * No-egress / air-gapped posture (declarative; see docs/AIR_GAP.md). Equivalent
