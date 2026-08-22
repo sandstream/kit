@@ -5,9 +5,15 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { installHooks, uninstallHooks, resolveHooksDir } from "./hooks.js";
+import { installHooks, uninstallHooks, resolveHooksDir, SKIPPED_COMMITS_LOG } from "./hooks.js";
 import { checkHooks, isGitRepository } from "./check-hooks.js";
 import type { HooksConfig } from "./config.js";
+import { spawnSync } from "node:child_process";
+import {
+  parseSkippedCommits,
+  partitionSkippedCommits,
+  gitReachabilityProbe,
+} from "./skipped-commits.js";
 
 describe("installHooks", () => {
   const testGitDir = join(tmpdir(), `.test-git-${process.pid}`);
@@ -503,6 +509,126 @@ describe("uninstallHooks — result contract and destructive edges", () => {
       if (prior === undefined) delete process.env.KIT_READ_ONLY;
       else process.env.KIT_READ_ONLY = prior;
       await rm(base, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * The bypass detector must tell a rebase apart from a `--no-verify`.
+ *
+ * Git replays commits during a rebase without running pre-commit, but it DOES run post-commit for
+ * each replayed commit — so the sentinel is absent and the detector recorded "sentinel-missing" on
+ * a commit whose hook had already run, on the original. Four false positives came out of one day of
+ * rebasing branches. A false positive in a security banner is worse than no banner: it teaches the
+ * operator to skip the line, and the real bypass scrolls past unread.
+ *
+ * Driven through real git rather than by inspecting the script text, because the property is about
+ * what git does to the hook, not about what the hook says. Measured while writing this: during a
+ * replay the post-commit hook sees `rebase-merge/` and `CHERRY_PICK_HEAD` present, while an
+ * ordinary commit sees neither, and `GIT_REFLOG_ACTION` is not exported to post-commit at all.
+ */
+describe("bypass detector vs rebase", () => {
+  const git = (cwd: string, ...args: string[]): string => {
+    const r = spawnSync("git", args, { cwd, encoding: "utf-8", timeout: 60_000 });
+    return (r.stdout ?? "") + (r.stderr ?? "");
+  };
+
+  async function repoWithDetector(): Promise<string | null> {
+    const dir = await mkdtemp(join(tmpdir(), "kit-rebase-detect-"));
+    if (spawnSync("git", ["init", "-q", "-b", "main", dir]).status !== 0) return null;
+    git(dir, "config", "user.email", "t@kit.local");
+    git(dir, "config", "user.name", "t");
+    await writeFile(join(dir, ".kit.toml"), '[tools]\nnode = "22"\n', "utf-8");
+    // installHooks writes the sentinel pair regardless of what the config declares, which is the
+    // point: the bypass detector is not opt-in.
+    await installHooks({} as HooksConfig, join(dir, ".git"), dir);
+    return dir;
+  }
+
+  it("records a replayed commit as a replay, and a real --no-verify as a bypass", async () => {
+    const dir = await repoWithDetector();
+    if (!dir) return; // no git here: nothing to assert, and nothing claimed
+    try {
+      await writeFile(join(dir, "a.txt"), "x\n", "utf-8");
+      git(dir, "add", "-A");
+      git(dir, "commit", "-q", "-m", "base");
+      git(dir, "checkout", "-q", "-b", "feature");
+      await writeFile(join(dir, "b.txt"), "y\n", "utf-8");
+      git(dir, "add", "-A");
+      git(dir, "commit", "-q", "-m", "feature work");
+      git(dir, "checkout", "-q", "main");
+      await writeFile(join(dir, "c.txt"), "z\n", "utf-8");
+      git(dir, "add", "-A");
+      git(dir, "commit", "-q", "-m", "main work");
+      git(dir, "checkout", "-q", "feature");
+
+      const rebaseOut = git(dir, "rebase", "main");
+      assert.doesNotMatch(
+        rebaseOut,
+        /pre-commit hook was skipped/,
+        `a rebase must not warn about a bypass:\n${rebaseOut}`,
+      );
+
+      const logPath = join(dir, SKIPPED_COMMITS_LOG);
+      const afterRebase = parseSkippedCommits(await readFile(logPath, "utf-8").catch(() => ""));
+      assert.ok(afterRebase.length > 0, "the replay is still recorded — the log is an audit trail");
+      assert.ok(
+        afterRebase.every((e) => e.reason === "replayed"),
+        `every rebase entry must be labelled a replay: ${JSON.stringify(afterRebase)}`,
+      );
+
+      // And the thing the detector exists for still works.
+      await writeFile(join(dir, "d.txt"), "w\n", "utf-8");
+      git(dir, "add", "-A");
+      const bypassOut = git(dir, "commit", "-q", "--no-verify", "-m", "bypassed");
+      assert.match(bypassOut, /pre-commit hook was skipped/, "a real --no-verify must still warn");
+
+      const all = parseSkippedCommits(await readFile(logPath, "utf-8"));
+      const genuine = all.filter((e) => e.reason !== "replayed");
+      assert.equal(genuine.length, 1, `exactly one genuine bypass: ${JSON.stringify(all)}`);
+
+      // The report must count the one and excuse the other.
+      const { live, replayed } = partitionSkippedCommits(all, gitReachabilityProbe(dir));
+      assert.equal(live.length, 1, "one bypass counted");
+      assert.equal(replayed.length, all.length - 1, "the replays set aside");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("excuses an entry written before the fix, using the reflog as the witness", async () => {
+    const dir = await repoWithDetector();
+    if (!dir) return;
+    try {
+      await writeFile(join(dir, "a.txt"), "x\n", "utf-8");
+      git(dir, "add", "-A");
+      git(dir, "commit", "-q", "-m", "base");
+      git(dir, "checkout", "-q", "-b", "feature");
+      await writeFile(join(dir, "b.txt"), "y\n", "utf-8");
+      git(dir, "add", "-A");
+      git(dir, "commit", "-q", "-m", "feature work");
+      git(dir, "checkout", "-q", "main");
+      await writeFile(join(dir, "c.txt"), "z\n", "utf-8");
+      git(dir, "add", "-A");
+      git(dir, "commit", "-q", "-m", "main work");
+      git(dir, "checkout", "-q", "feature");
+      git(dir, "rebase", "main");
+
+      // Rewrite the log the way the old hook would have written it: no replay label at all.
+      const sha = git(dir, "rev-parse", "HEAD").trim();
+      await writeFile(
+        join(dir, SKIPPED_COMMITS_LOG),
+        JSON.stringify({ timestamp: "2026-08-20T09:00:00Z", sha, reason: "sentinel-missing" }) +
+          "\n",
+        "utf-8",
+      );
+
+      const entries = parseSkippedCommits(await readFile(join(dir, SKIPPED_COMMITS_LOG), "utf-8"));
+      const { live, replayed } = partitionSkippedCommits(entries, gitReachabilityProbe(dir));
+      assert.equal(live.length, 0, "the reflog proves this sha was created by a rebase pick");
+      assert.equal(replayed.length, 1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });
