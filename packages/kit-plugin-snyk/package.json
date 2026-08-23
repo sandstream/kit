@@ -1,6 +1,6 @@
 {
   "name": "sandstream-kit-plugin-snyk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Snyk scan-result ingestion for kit (read-only).",
   "keywords": [
     "kit-plugin",

@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [6.9.0] - 2026-08-23
+
 ### Added
 
 - **Fail on NEW dependency debt, not on the debt you already have** (#524).

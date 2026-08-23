@@ -1,6 +1,6 @@
 {
   "name": "sandstream-kit-plugin-fly",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Fly.io app-secret rotation via flyctl GraphQL API",
   "keywords": [
     "kit-plugin",

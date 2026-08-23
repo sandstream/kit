@@ -24,7 +24,7 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
   {
     name: "cloudflare",
     description: "Cloudflare Workers secret + API token surface for kit",
-    version: "0.2.0",
+    version: "0.2.1",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
@@ -36,7 +36,7 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
   {
     name: "fly",
     description: "Fly.io app-secret rotation via flyctl GraphQL API",
-    version: "0.2.0",
+    version: "0.2.1",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
@@ -48,7 +48,7 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
   {
     name: "github",
     description: "kit plugin: GitHub REST API (repo + org secrets, deploy keys, workflow runs).",
-    version: "0.2.0",
+    version: "0.2.1",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
@@ -60,7 +60,7 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
   {
     name: "railway",
     description: "kit adapter plugin for Railway deployment platform",
-    version: "0.1.0",
+    version: "0.1.1",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
@@ -72,7 +72,7 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
   {
     name: "sentrux",
     description: "Sentrux architecture-scan ingestion for kit (read-only).",
-    version: "0.1.0",
+    version: "0.1.1",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
@@ -85,7 +85,7 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
     name: "sentry",
     description:
       "Sentry REST API client for kit — issue triage, release tagging, project introspection.",
-    version: "0.2.0",
+    version: "0.2.1",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
@@ -97,7 +97,7 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
   {
     name: "snyk",
     description: "Snyk scan-result ingestion for kit (read-only).",
-    version: "0.1.0",
+    version: "0.1.1",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
@@ -110,7 +110,7 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
     name: "stripe",
     description:
       "Stripe Management API surface for kit (webhook endpoint rotation + account introspection)",
-    version: "0.2.0",
+    version: "0.2.1",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
@@ -123,7 +123,7 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
     name: "supabase",
     description:
       "kit plugin: Supabase Management API integration (service-role key rotation, project introspection).",
-    version: "0.2.0",
+    version: "0.2.1",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
@@ -136,7 +136,7 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
     name: "vercel",
     description:
       "kit plugin: Vercel Management API (env management, project metadata, redeploy triggers).",
-    version: "0.2.0",
+    version: "0.2.1",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
@@ -148,7 +148,7 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
   {
     name: "wiz",
     description: "Wiz issue-graph ingestion for kit (read-only).",
-    version: "0.1.0",
+    version: "0.1.1",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
