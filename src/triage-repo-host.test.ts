@@ -188,3 +188,116 @@ describe("triage repo: the target must name a repo this probe can actually check
     assert.match(out, /TRIAGE FAILED/);
   });
 });
+
+/**
+ * A 403 and a 429 are not the same problem, and the old code sent both to one message:
+ * "GitHub API rate-limited -- cannot verify (set GITHUB_TOKEN and retry)".
+ *
+ * Measured in a sandbox where a token IS set and an egress proxy answers 403 for
+ * api.github.com: that advice sends the operator in a circle, and it cascades — `kit install`
+ * refuses the scanners declared in kit's own `.kit.toml` because triage cannot verify them,
+ * so `kit check` then reports "trivy not installed" and suggests `kit install`, which is the
+ * command that just refused. Quota exhaustion is a header fact, so it is reported as one
+ * instead of assumed.
+ */
+describe("triage repo: 403 is not automatically the rate limit", () => {
+  let server: Server;
+  let base = "";
+  let respond: (res: import("node:http").ServerResponse) => void = () => {};
+
+  before(async () => {
+    server = createServer((_req, res) => respond(res));
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const addr = server.address();
+    if (addr === null || typeof addr === "string") throw new Error("no fixture port");
+    base = `http://127.0.0.1:${addr.port}`;
+  });
+
+  after(async () => {
+    await new Promise<void>((r) => server.close(() => r()));
+  });
+
+  const run = async (
+    token: string,
+    t: { skip: (m: string) => void },
+  ): Promise<string | null> => {
+    try {
+      const { stdout } = await exec("python3", [TRIAGE_PY, "repo", "owner/repo"], {
+        env: { ...process.env, KIT_GITHUB_API: base, GITHUB_TOKEN: token, GH_TOKEN: "" },
+        timeout: 30_000,
+      });
+      return stdout;
+    } catch (err) {
+      const e = err as { code?: string | number };
+      if (e.code === "ENOENT") {
+        t.skip("python3 not installed — triage.py's own behaviour is NOT verified in this run");
+        return null;
+      }
+      throw err;
+    }
+  };
+
+  it("403 with quota REMAINING and a token set says so, and does not blame the rate limit", async (t) => {
+    respond = (res) => {
+      res.writeHead(403, { "content-type": "application/json", "x-ratelimit-remaining": "4999" });
+      res.end(JSON.stringify({ message: "Forbidden" }));
+    };
+    const out = await run("a-token-is-set", t);
+    if (out === null) return;
+    assert.match(out, /403 with quota remaining/);
+    assert.match(out, /A token IS set/);
+    // The regression: never tell someone to set the token they already set.
+    assert.doesNotMatch(out, /set GITHUB_TOKEN and retry/);
+    assert.match(out, /TRIAGE FAILED/);
+  });
+
+  it("403 with quota EXHAUSTED is the rate limit, and says to wait", async (t) => {
+    respond = (res) => {
+      res.writeHead(403, { "content-type": "application/json", "x-ratelimit-remaining": "0" });
+      res.end(JSON.stringify({ message: "rate limit exceeded" }));
+    };
+    const out = await run("a-token-is-set", t);
+    if (out === null) return;
+    assert.match(out, /rate limit reached/);
+    assert.match(out, /wait for the window to reset/);
+  });
+
+  it("429 is the rate limit regardless of headers", async (t) => {
+    respond = (res) => {
+      res.writeHead(429, { "content-type": "application/json" });
+      res.end(JSON.stringify({ message: "Too Many Requests" }));
+    };
+    const out = await run("", t);
+    if (out === null) return;
+    assert.match(out, /rate limit reached/);
+    assert.match(out, /set GITHUB_TOKEN to raise the limit/);
+  });
+
+  it("403 with no token still suggests setting one — the original advice, kept where it fits", async (t) => {
+    respond = (res) => {
+      res.writeHead(403, { "content-type": "application/json" });
+      res.end(JSON.stringify({ message: "Forbidden" }));
+    };
+    const out = await run("", t);
+    if (out === null) return;
+    assert.match(out, /no token was sent/);
+    assert.match(out, /set GITHUB_TOKEN/);
+  });
+
+  it("a fail-closed refusal is still a refusal — no 403 shape yields a pass", async (t) => {
+    for (const [code, hdr] of [
+      [403, "4999"],
+      [403, "0"],
+      [429, "0"],
+    ] as const) {
+      respond = (res) => {
+        res.writeHead(code, { "content-type": "application/json", "x-ratelimit-remaining": hdr });
+        res.end("{}");
+      };
+      const out = await run("tok", t);
+      if (out === null) return;
+      assert.match(out, /TRIAGE FAILED/, `${code}/${hdr} must not pass`);
+      assert.doesNotMatch(out, /TRIAGE PASSED/);
+    }
+  });
+});

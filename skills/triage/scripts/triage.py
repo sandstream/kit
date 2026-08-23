@@ -572,6 +572,37 @@ def _owner_repo(target):
     return f"{owner}/{repo}", None
 
 
+def _forbidden_reason(e, token_sent):
+    """Explain a 403/429 from the GitHub API without guessing.
+
+    Quota exhaustion is a header fact (`x-ratelimit-remaining: 0`), so it is reported as one.
+    Anything else 403 is *forbidden*, which is a different problem with a different fix, and
+    telling the operator to set a token they have already set sends them in a circle.
+    """
+    hdrs = getattr(e, "headers", None)
+    remaining = None
+    if hdrs is not None:
+        try:
+            remaining = hdrs.get("x-ratelimit-remaining")
+        except Exception:
+            remaining = None
+    exhausted = remaining is not None and str(remaining).strip() == "0"
+
+    if e.code == 429 or exhausted:
+        hint = "wait for the window to reset" if token_sent else "set GITHUB_TOKEN to raise the limit"
+        return f"GitHub API rate limit reached -- cannot verify ({hint})"
+    if token_sent:
+        return (
+            "GitHub API returned 403 with quota remaining -- cannot verify. A token IS set, so "
+            "this is not the rate limit: check its scopes/SSO authorization, or whether a proxy "
+            "or firewall is intercepting api.github.com"
+        )
+    return (
+        "GitHub API returned 403 and no token was sent -- cannot verify (set GITHUB_TOKEN; if one "
+        "is already set, check its scopes/SSO or a proxy intercepting api.github.com)"
+    )
+
+
 def triage_repo(rep):
     or_, refusal = _owner_repo(rep.target)
     if refusal:
@@ -587,7 +618,11 @@ def triage_repo(rep):
         if e.code == 404:
             rep.critical(f"repo '{or_}' not found (or private)")
         elif e.code in (403, 429):
-            rep.critical("GitHub API rate-limited -- cannot verify (set GITHUB_TOKEN and retry)")
+            # 403 and 429 are NOT the same thing, and the old single message told every
+            # caller to "set GITHUB_TOKEN and retry" — wrong advice when a token is already
+            # set and the 403 came from a proxy, an SSO requirement, or a scope gap. GitHub
+            # sends the quota in headers, so exhaustion is checkable rather than assumed.
+            rep.critical(_forbidden_reason(e, token_sent=bool(token)))
         else:
             rep.critical(f"GitHub API returned HTTP {e.code} (cannot verify)")
         return
