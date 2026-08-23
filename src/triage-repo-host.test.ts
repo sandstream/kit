@@ -368,3 +368,128 @@ describe("triage repo: 403 is not automatically the rate limit", () => {
     }
   });
 });
+
+/**
+ * `Probes declared unavailable: 0` while ZERO probes ran is the false-green shape kit rejects
+ * everywhere else — the field #489 added to report un-run coverage said none was un-run. The
+ * repo probe is entirely API-backed, so when the API cannot answer, five checks are UNKNOWN and
+ * the report has to say which.
+ *
+ * Deliberately NOT fixed with a git fallback: deriving dates or the license means cloning, and
+ * `kit triage repo` runs BEFORE you fetch a repo. A triage that fetches in order to judge
+ * whether you should fetch inverts the order it exists to enforce.
+ */
+describe("triage repo: unreachable API is missing coverage, and says so", () => {
+  let server: Server;
+  let base = "";
+  let respond: (res: import("node:http").ServerResponse) => void = () => {};
+
+  before(async () => {
+    server = createServer((_req, res) => respond(res));
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const addr = server.address();
+    if (addr === null || typeof addr === "string") throw new Error("no fixture port");
+    base = `http://127.0.0.1:${addr.port}`;
+  });
+
+  after(async () => {
+    await new Promise<void>((r) => server.close(() => r()));
+  });
+
+  const run = async (t: { skip: (m: string) => void }): Promise<string | null> => {
+    try {
+      const { stdout } = await exec("python3", [TRIAGE_PY, "repo", "owner/repo"], {
+        env: { ...process.env, KIT_GITHUB_API: base, GITHUB_TOKEN: "", GH_TOKEN: "" },
+        timeout: 30_000,
+      });
+      return stdout;
+    } catch (err) {
+      const e = err as { code?: string | number };
+      if (e.code === "ENOENT") {
+        t.skip("python3 not installed — triage.py's own behaviour is NOT verified in this run");
+        return null;
+      }
+      throw err;
+    }
+  };
+
+  const NAMED = ["popularity", "license", "archived/disabled", "repo age", "recent activity"];
+
+  for (const code of [403, 429, 500] as const) {
+    it(`HTTP ${code}: names all five unknown probes and still fails closed`, async (t) => {
+      respond = (res) => {
+        res.writeHead(code, { "content-type": "application/json" });
+        res.end("{}");
+      };
+      const out = await run(t);
+      if (out === null) return;
+      assert.match(out, /Probes declared unavailable: 5/);
+      for (const probe of NAMED) {
+        assert.ok(out.includes(`NOT CHECKED: ${probe}`), `${probe} not declared for ${code}`);
+      }
+      // A TRANSIENT gap: the source was unreachable this run. It must not borrow the
+      // structural wording, which would tell a reader the data is never knowable.
+      assert.match(out, /could not run in this run/);
+      assert.doesNotMatch(out, /cannot run for this ecosystem/);
+      // Declaring the gap must not soften the verdict.
+      assert.match(out, /TRIAGE FAILED/);
+      assert.doesNotMatch(out, /TRIAGE PASSED/);
+    });
+  }
+
+  it("404 is a definite answer, NOT missing coverage — nothing is declared unavailable", async (t) => {
+    // The discriminating case: this proves the wiring is per-outcome and not blanket. The API
+    // replied that no such repo exists, so nothing is unknown.
+    respond = (res) => {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ message: "Not Found" }));
+    };
+    const out = await run(t);
+    if (out === null) return;
+    assert.match(out, /not found \(or private\)/);
+    assert.match(out, /Probes declared unavailable: 0/);
+    assert.doesNotMatch(out, /NOT CHECKED/);
+    assert.match(out, /TRIAGE FAILED/);
+  });
+
+  it("a successful lookup declares nothing unavailable", async (t) => {
+    respond = (res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          stargazers_count: 26000,
+          license: { spdx_id: "Apache-2.0" },
+          archived: false,
+          disabled: false,
+          pushed_at: new Date(Date.now() - 86_400_000).toISOString(),
+          created_at: new Date(Date.now() - 2000 * 86_400_000).toISOString(),
+        }),
+      );
+    };
+    const out = await run(t);
+    if (out === null) return;
+    assert.match(out, /Probes declared unavailable: 0/);
+    assert.doesNotMatch(out, /NOT CHECKED/);
+    assert.match(out, /TRIAGE PASSED/);
+  });
+
+  it("a connection failure is also missing coverage, not a clean bill", async (t) => {
+    // Point at a closed port: URLError, not an HTTP status.
+    try {
+      const { stdout } = await exec("python3", [TRIAGE_PY, "repo", "owner/repo"], {
+        env: { ...process.env, KIT_GITHUB_API: "http://127.0.0.1:1", GITHUB_TOKEN: "" },
+        timeout: 30_000,
+      });
+      assert.match(stdout, /could not reach GitHub/);
+      assert.match(stdout, /Probes declared unavailable: 5/);
+      assert.match(stdout, /TRIAGE FAILED/);
+    } catch (err) {
+      const e = err as { code?: string | number };
+      if (e.code === "ENOENT") {
+        t.skip("python3 not installed — triage.py's own behaviour is NOT verified in this run");
+        return;
+      }
+      throw err;
+    }
+  });
+});
