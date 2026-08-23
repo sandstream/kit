@@ -9,6 +9,8 @@ import {
   triageGateStatus,
   agentEgressExposureStatus,
   containmentPostureStatus,
+  triageRegistryStatus,
+  TRIAGE_ENDPOINTS,
 } from "./doctor.js";
 import { loadOrCreateIdentity, identityId } from "./identity.js";
 import { resolveKeyStore } from "./keystore/index.js";
@@ -516,5 +518,109 @@ describe("containmentPostureStatus (sandbox below the tool boundary)", () => {
       false,
     );
     assert.equal(r.status, "skip");
+  });
+});
+
+/**
+ * `kit triage` is the one part of kit that needs network, so which hosts it points at decides
+ * whether the gate can evaluate anything. Three postures are legitimate; two of them were
+ * indistinguishable without reading env vars by hand, and the third (public defaults on a host
+ * that blocks them) only announced itself when `kit install` refused.
+ *
+ * The row is pure and does no I/O: `kit doctor` is offline by design and adding egress to it
+ * would break that quietly. So it never claims reachability — it makes the CONFIGURATION
+ * visible early, which is the part that was missing.
+ */
+describe("triageRegistryStatus (pure — which hosts the triage gate points at)", () => {
+  const NO_ENV: Record<string, string | undefined> = {};
+
+  it("public defaults on every probe: pass, and names them", () => {
+    const r = triageRegistryStatus(NO_ENV);
+    assert.equal(r.status, "pass");
+    assert.match(r.detail, /public defaults for all 4 probes/);
+    assert.match(r.detail, /npm, pypi, repo, docker/);
+  });
+
+  it("never claims reachability — it cannot, and saying so is the point", () => {
+    // A caption that reads as a verdict is how "configured" becomes "working".
+    for (const env of [NO_ENV, { KIT_GITHUB_API: "https://ghe.corp.internal/api/v3" }]) {
+      assert.match(triageRegistryStatus(env).detail, /does not probe reachability/);
+    }
+  });
+
+  it("all four redirected: pass, reported as the mirrored posture", () => {
+    const r = triageRegistryStatus({
+      KIT_NPM_REGISTRY: "https://npm.corp.internal",
+      KIT_PYPI_INDEX: "https://pypi.corp.internal",
+      KIT_GITHUB_API: "https://ghe.corp.internal/api/v3",
+      KIT_DOCKER_REGISTRY: "https://registry.corp.internal",
+    });
+    assert.equal(r.status, "pass");
+    assert.match(r.detail, /all 4 probes redirected/);
+    assert.match(r.detail, /mirrored posture/);
+  });
+
+  it("a mixed posture counts both sides rather than rounding to one", () => {
+    const r = triageRegistryStatus({ KIT_GITHUB_API: "https://ghe.corp.internal/api/v3" });
+    assert.equal(r.status, "pass");
+    assert.match(r.detail, /1\/4 redirected/);
+    assert.match(r.detail, /3 on public defaults \(npm, pypi, docker\)/);
+  });
+
+  it("air_gap declared with probes still on defaults is a contradiction: warn, naming the fix", () => {
+    const r = triageRegistryStatus(
+      { KIT_GITHUB_API: "https://ghe.corp.internal/api/v3" },
+      { enabled: true },
+    );
+    assert.equal(r.status, "warn");
+    assert.match(r.detail, /\[air_gap\] enabled but 3\/4 probe\(s\) still point at public defaults/);
+    assert.match(r.detail, /npm, pypi, docker/);
+    // The remediation must name both levers, not just one.
+    assert.match(r.detail, /KIT_NPM_REGISTRY \/ \[air_gap\]\.npm_registry/);
+  });
+
+  it("air_gap declared and fully mirrored is consistent: pass, not warn", () => {
+    const r = triageRegistryStatus(NO_ENV, {
+      enabled: true,
+      npm_registry: "https://npm.corp.internal",
+      pypi_index: "https://pypi.corp.internal",
+      github_api: "https://ghe.corp.internal/api/v3",
+      docker_registry: "https://registry.corp.internal",
+    });
+    assert.equal(r.status, "pass");
+    assert.match(r.detail, /all 4 probes redirected/);
+  });
+
+  it("env overrides the config file, per docs/AIR_GAP.md", () => {
+    const r = triageRegistryStatus(
+      { KIT_GITHUB_API: "https://from-env.internal" },
+      { github_api: "https://from-config.internal" },
+    );
+    assert.match(r.detail, /repo→from-env\.internal/);
+    assert.doesNotMatch(r.detail, /from-config/);
+  });
+
+  it("prints the host only — a mirror URL may carry credentials, and this output gets pasted", () => {
+    const r = triageRegistryStatus({
+      KIT_NPM_REGISTRY: "https://svc-account:s3cr3t-token-value@npm.corp.internal/repo/path",
+    });
+    assert.match(r.detail, /npm→npm\.corp\.internal/);
+    assert.doesNotMatch(r.detail, /s3cr3t/);
+    assert.doesNotMatch(r.detail, /svc-account/);
+    assert.doesNotMatch(r.detail, /repo\/path/);
+  });
+
+  it("a trailing slash is the same host, not a redirect", () => {
+    const withSlashes = Object.fromEntries(
+      TRIAGE_ENDPOINTS.map((e) => [e.env, `${e.dflt}/`]),
+    ) as Record<string, string>;
+    const r = triageRegistryStatus(withSlashes);
+    assert.match(r.detail, /public defaults for all 4 probes/);
+  });
+
+  it("an unparseable override is reported, never silently treated as the default", () => {
+    const r = triageRegistryStatus({ KIT_GITHUB_API: "not a url" });
+    assert.match(r.detail, /1\/4 redirected/);
+    assert.match(r.detail, /repo→\(unparseable\)/);
   });
 });
