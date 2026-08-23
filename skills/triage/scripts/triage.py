@@ -512,22 +512,70 @@ def triage_pip(rep):
             )
 
 
+# Hosts whose repos this probe can actually verify. It answers via the GitHub
+# API, so any other host cannot be checked here and must SAY so — never have its
+# hostname promoted to an "owner", which produced a confident 404 about a repo
+# that never existed (kit#532).
+_REPO_HOSTS = ("github.com",)
+
+# Hosts that are not github.com but whose paths still begin with `owner/repo` of a
+# real GitHub repo. Refusing these would be technically true and practically wrong:
+# a piped installer is usually cited by its raw URL, and that URL names the repo
+# unambiguously. Anything not listed here is still refused.
+_REPO_PATH_HOSTS = ("raw.githubusercontent.com", "codeload.github.com")
+
+
 def _owner_repo(target):
+    """Reduce a repo reference to `owner/repo`.
+
+    Returns `(owner_repo, None)` on success and `(None, reason)` on refusal. The
+    two refusals are kept apart on purpose: an unsupported host is a different
+    finding from a string with no owner/repo shape, and collapsing them is what
+    made a non-GitHub URL look like a missing GitHub repo.
+
+    Accepts the shorthand plus every equivalent spelling of the same repo:
+    `owner/repo`, `[https://][www.]github.com/owner/repo[/tree/main][.git]`,
+    and `git@github.com:owner/repo[.git]`.
+    """
     t = target.strip()
-    t = t.replace("https://", "").replace("http://", "")
-    t = t.replace("github.com/", "")
-    if t.endswith(".git"):
-        t = t[:-4]
+    # scp-style `git@host:owner/repo` -> `host/owner/repo`, so one path below fits both.
+    scp = re.match(r"^[\w.+-]+@([\w.-]+):(.+)$", t)
+    if scp:
+        t = f"{scp.group(1)}/{scp.group(2)}"
+    else:
+        t = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", t)
+    t = t.split("?")[0].split("#")[0]
+
     parts = [p for p in t.split("/") if p]
-    if len(parts) >= 2:
-        return f"{parts[0]}/{parts[1]}"
-    return None
+    if not parts:
+        return None, f"could not parse owner/repo from '{target}'"
+
+    if parts[0].lower().startswith("www."):
+        parts[0] = parts[0][4:]
+    # A dotted first segment is a hostname, not an owner: GitHub usernames are
+    # alphanumeric + hyphen and never contain a dot, so this split is unambiguous.
+    if "." in parts[0]:
+        host = parts.pop(0).lower()
+        if host not in _REPO_HOSTS and host not in _REPO_PATH_HOSTS:
+            return None, (
+                f"'{target}' is not a github.com repo URL -- this probe verifies repos "
+                f"through the GitHub API and cannot check {host}"
+            )
+
+    if len(parts) < 2:
+        return None, f"could not parse owner/repo from '{target}'"
+    owner, repo = parts[0], parts[1]
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    if not owner or not repo:
+        return None, f"could not parse owner/repo from '{target}'"
+    return f"{owner}/{repo}", None
 
 
 def triage_repo(rep):
-    or_ = _owner_repo(rep.target)
-    if not or_:
-        rep.critical(f"could not parse owner/repo from '{rep.target}'")
+    or_, refusal = _owner_repo(rep.target)
+    if refusal:
+        rep.critical(refusal)
         return
     headers = {}
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
