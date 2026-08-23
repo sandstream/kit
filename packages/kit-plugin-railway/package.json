@@ -1,6 +1,6 @@
 {
   "name": "sandstream-kit-plugin-railway",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "kit adapter plugin for Railway deployment platform",
   "keywords": [
     "kit-plugin",
