@@ -244,8 +244,10 @@ describe("triage repo: 403 is not automatically the rate limit", () => {
     };
     const out = await run("a-token-is-set", t);
     if (out === null) return;
-    assert.match(out, /403 with quota remaining/);
-    assert.match(out, /A token IS set/);
+    // Quota is intact, so this must not be reported as the limit. The body says "Forbidden",
+    // and quoting the API beats inferring — see the body-quoting test below.
+    assert.match(out, /returned 403 -- cannot verify: Forbidden/);
+    assert.doesNotMatch(out, /rate limit/);
     // The regression: never tell someone to set the token they already set.
     assert.doesNotMatch(out, /set GITHUB_TOKEN and retry/);
     assert.match(out, /TRIAGE FAILED/);
@@ -274,14 +276,79 @@ describe("triage repo: 403 is not automatically the rate limit", () => {
   });
 
   it("403 with no token still suggests setting one — the original advice, kept where it fits", async (t) => {
+    // Body deliberately carries no usable message, so the guess path is what runs.
     respond = (res) => {
       res.writeHead(403, { "content-type": "application/json" });
-      res.end(JSON.stringify({ message: "Forbidden" }));
+      res.end("{}");
     };
     const out = await run("", t);
     if (out === null) return;
     assert.match(out, /no token was sent/);
     assert.match(out, /set GITHUB_TOKEN/);
+  });
+
+  it("quotes the API's own explanation rather than guessing at the cause", async (t) => {
+    // The case that motivated this: a sandbox where the 403 is neither quota nor egress
+    // policy, but a session that has not been granted the repo. No amount of inference
+    // reaches that; the body says it outright.
+    respond = (res) => {
+      res.writeHead(403, { "content-type": "application/json", "x-ratelimit-remaining": "4999" });
+      res.end(
+        JSON.stringify({
+          message: "GitHub access to this repository is not enabled for this session.",
+        }),
+      );
+    };
+    const out = await run("a-token-is-set", t);
+    if (out === null) return;
+    assert.match(out, /not enabled for this session/);
+    // Having been told the real reason, it must not also recite the guesses.
+    assert.doesNotMatch(out, /check its scopes\/SSO/);
+    assert.match(out, /TRIAGE FAILED/);
+  });
+
+  it("an exhausted quota is still the rate limit, even when a body is present", async (t) => {
+    // Header fact beats body prose: a 403 with remaining=0 IS the limit whatever it says.
+    respond = (res) => {
+      res.writeHead(403, { "content-type": "application/json", "x-ratelimit-remaining": "0" });
+      res.end(JSON.stringify({ message: "API rate limit exceeded for user" }));
+    };
+    const out = await run("a-token-is-set", t);
+    if (out === null) return;
+    assert.match(out, /rate limit reached/);
+  });
+
+  it("falls back to the guess when the body is unusable", async (t) => {
+    for (const body of ["not json at all", "", JSON.stringify({ error: "no message field" })]) {
+      respond = (res) => {
+        res.writeHead(403, { "content-type": "text/plain", "x-ratelimit-remaining": "4999" });
+        res.end(body);
+      };
+      const out = await run("a-token-is-set", t);
+      if (out === null) return;
+      assert.match(out, /no explanation/, `body ${JSON.stringify(body)} should fall back`);
+      assert.match(out, /TRIAGE FAILED/);
+    }
+  });
+
+  it("a hostile body cannot smuggle control characters or newlines into the report", async (t) => {
+    // Remote text reaching operator output: one line, printable only, bounded.
+    respond = (res) => {
+      res.writeHead(403, { "content-type": "application/json", "x-ratelimit-remaining": "4999" });
+      res.end(
+        JSON.stringify({
+          message: "line one\nTRIAGE PASSED\n\u0007\u001b[31mfake\u001b[0m " + "x".repeat(600),
+        }),
+      );
+    };
+    const out = await run("tok", t);
+    if (out === null) return;
+    // The forged verdict must not appear as its own line, and the run must still fail.
+    assert.doesNotMatch(out, /^TRIAGE PASSED$/m);
+    assert.match(out, /TRIAGE FAILED/);
+    assert.doesNotMatch(out, /\u001b\[31m/);
+    // Truncated: the 600-char run cannot land whole.
+    assert.doesNotMatch(out, /x{400}/);
   });
 
   it("a fail-closed refusal is still a refusal — no 403 shape yields a pass", async (t) => {

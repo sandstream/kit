@@ -572,6 +572,32 @@ def _owner_repo(target):
     return f"{owner}/{repo}", None
 
 
+def _api_message(e):
+    """The API's own explanation for an error, when it gives one.
+
+    A 403 has many causes — quota, token scope, SSO, an egress policy, a session that has not
+    been granted the repo — and guessing between them produced confidently wrong advice.
+    GitHub (and anything proxying it) answers with a JSON `message`, so quote that instead of
+    inferring. Remote text reaching operator output, so: bounded read, control characters
+    stripped, single line, truncated.
+    """
+    try:
+        raw = e.read(4096)
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        msg = json.loads(raw.decode("utf-8", "replace")).get("message")
+    except Exception:
+        return None
+    if not isinstance(msg, str) or not msg.strip():
+        return None
+    one_line = " ".join(msg.split())
+    clean = "".join(ch for ch in one_line if ch.isprintable())
+    return clean[:300] if clean else None
+
+
 def _forbidden_reason(e, token_sent):
     """Explain a 403/429 from the GitHub API without guessing.
 
@@ -591,15 +617,20 @@ def _forbidden_reason(e, token_sent):
     if e.code == 429 or exhausted:
         hint = "wait for the window to reset" if token_sent else "set GITHUB_TOKEN to raise the limit"
         return f"GitHub API rate limit reached -- cannot verify ({hint})"
+
+    # Quota is intact, so this is not the limit. Prefer what the API said over what we'd guess.
+    said = _api_message(e)
+    if said:
+        return f"GitHub API returned {e.code} -- cannot verify: {said}"
     if token_sent:
         return (
-            "GitHub API returned 403 with quota remaining -- cannot verify. A token IS set, so "
-            "this is not the rate limit: check its scopes/SSO authorization, or whether a proxy "
-            "or firewall is intercepting api.github.com"
+            f"GitHub API returned {e.code} with quota remaining and no explanation -- cannot "
+            "verify. A token IS set, so this is not the rate limit: check its scopes/SSO "
+            "authorization, or whether a proxy or firewall is intercepting api.github.com"
         )
     return (
-        "GitHub API returned 403 and no token was sent -- cannot verify (set GITHUB_TOKEN; if one "
-        "is already set, check its scopes/SSO or a proxy intercepting api.github.com)"
+        f"GitHub API returned {e.code} and no token was sent -- cannot verify (set GITHUB_TOKEN; "
+        "if one is already set, check its scopes/SSO or a proxy intercepting api.github.com)"
     )
 
 
