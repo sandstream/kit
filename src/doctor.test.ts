@@ -573,7 +573,10 @@ describe("triageRegistryStatus (pure — which hosts the triage gate points at)"
       { enabled: true },
     );
     assert.equal(r.status, "warn");
-    assert.match(r.detail, /\[air_gap\] enabled but 3\/4 probe\(s\) still point at public defaults/);
+    assert.match(
+      r.detail,
+      /\[air_gap\] enabled but 3\/4 probe\(s\) still point at public defaults/,
+    );
     assert.match(r.detail, /npm, pypi, docker/);
     // The remediation must name both levers, not just one.
     assert.match(r.detail, /KIT_NPM_REGISTRY \/ \[air_gap\]\.npm_registry/);

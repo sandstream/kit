@@ -468,7 +468,12 @@ export function triageGateStatus(hookContent: string | null): {
  * configuration visible BEFORE `kit install` refuses, which is when this used to surface.
  */
 export const TRIAGE_ENDPOINTS = [
-  { probe: "npm", env: "KIT_NPM_REGISTRY", cfg: "npm_registry", dflt: "https://registry.npmjs.org" },
+  {
+    probe: "npm",
+    env: "KIT_NPM_REGISTRY",
+    cfg: "npm_registry",
+    dflt: "https://registry.npmjs.org",
+  },
   { probe: "pypi", env: "KIT_PYPI_INDEX", cfg: "pypi_index", dflt: "https://pypi.org" },
   { probe: "repo", env: "KIT_GITHUB_API", cfg: "github_api", dflt: "https://api.github.com" },
   {

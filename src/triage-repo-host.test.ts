@@ -217,10 +217,7 @@ describe("triage repo: 403 is not automatically the rate limit", () => {
     await new Promise<void>((r) => server.close(() => r()));
   });
 
-  const run = async (
-    token: string,
-    t: { skip: (m: string) => void },
-  ): Promise<string | null> => {
+  const run = async (token: string, t: { skip: (m: string) => void }): Promise<string | null> => {
     try {
       const { stdout } = await exec("python3", [TRIAGE_PY, "repo", "owner/repo"], {
         env: { ...process.env, KIT_GITHUB_API: base, GITHUB_TOKEN: token, GH_TOKEN: "" },
