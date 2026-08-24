@@ -213,6 +213,14 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--with-migrate",
     "--yes",
   ],
+  decisions: [
+    "--assumed",
+    "--confidence",
+    "--decision",
+    "--json",
+    "--unreviewed",
+    "--would-have-asked",
+  ],
   design: ["--enforce", "--json"],
   doctor: [
     "--auto",

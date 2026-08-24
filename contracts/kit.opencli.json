@@ -344,6 +344,14 @@
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
+    "decisions": {
+      "kind": "command",
+      "summary": "Decision ledger (the review surface when nobody reads the diff): 'kit decisions add' records a choice made where the spec was silent, 'list' shows them, 'verify' is the gate's verdict. kit requires the artifact and checks its SHAPE — never its content.",
+      "x-kit-args-modeled": false,
+      "x-kit-audience": "all",
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
     "design": {
       "kind": "command",
       "summary": "Check design quality (a11y, design tokens) against the baseline",

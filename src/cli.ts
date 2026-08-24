@@ -56,6 +56,7 @@ import {
 } from "./commands/agent.js";
 import { cmdSelfAudit, cmdCoverage, cmdAnalyze } from "./commands/coverage.js";
 import { cmdAdr } from "./commands/adr.js";
+import { cmdDecisions } from "./commands/decisions.js";
 import {
   cmdGateBash,
   cmdGateEnv,
@@ -158,7 +159,17 @@ function cmdHelp(subcommand?: string): boolean {
     ["Agents & memory", ["memory", "agent-config", "mcp", "skills", "context", "hooks"]],
     [
       "Governance & access",
-      ["governance", "audit", "auth", "team", "escalate", "identity", "panic", "policy"],
+      [
+        "governance",
+        "audit",
+        "decisions",
+        "auth",
+        "team",
+        "escalate",
+        "identity",
+        "panic",
+        "policy",
+      ],
     ],
     ["Packages & services", ["pkg", "add", "plugin", "create-plugin", "run", "open", "ci"]],
     ["Meta", ["whoami", "version", "completions", "help"]],
@@ -818,6 +829,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     // MCP-exposed: THE one-shot audit for shell-less agents (kit_review),
     // superseding kit_standards on that surface (deprecated, leaves in 6.0).
     mcp: true,
+  },
+  decisions: {
+    handler: cmdDecisions,
+    stability: "experimental",
+    help: "Decision ledger (the review surface when nobody reads the diff): 'kit decisions add' records a choice made where the spec was silent, 'list' shows them, 'verify' is the gate's verdict. kit requires the artifact and checks its SHAPE — never its content.",
   },
   adr: {
     handler: cmdAdr,

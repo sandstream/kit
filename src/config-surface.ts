@@ -168,6 +168,13 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
     docs: "docs/MEMORY.md",
     command: "kit memory",
   },
+  decisions: {
+    purpose:
+      "Whether a run must leave a decision ledger — the choices it made where the spec was silent.",
+    buys: "The review surface that survives when nobody reads the diff: kit requires the artifact and verifies its shape, and fails a governed run that recorded nothing.",
+    example: "[decisions]\nrequire = true",
+    command: "kit decisions",
+  },
   update: {
     purpose: "Whether kit surfaces a newer published version, and whether it may self-update.",
     buys: "A pinned fleet stays pinned, and an operator who wants the banner keeps it — the choice is in the repo rather than in each shell.",

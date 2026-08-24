@@ -8,7 +8,7 @@ code in either direction.
 Everything below lives in `.kit.toml` at the project root. `kit config sections` prints the same
 list in the terminal, marking which ones this repo already declares.
 
-kit accepts **23 sections**.
+kit accepts **24 sections**.
 
 | Section | What it configures | Set up with |
 | --- | --- | --- |
@@ -17,6 +17,7 @@ kit accepts **23 sections**.
 | [`[browser]`](#browser) | Browser-verification capability declaration. | `kit browser` |
 | [`[context]`](#context) | The account and project each CLI must be pointed at, per tool. | `kit context check` |
 | [`[coverage]`](#coverage) | Which standards the evidence map scores against. | `kit coverage --list-standards` |
+| [`[decisions]`](#decisions) | Whether a run must leave a decision ledger — the choices it made where the spec was silent. | `kit decisions` |
 | [`[deploy]`](#deploy) | Required platform env-var NAMES per project and environment. | `kit check --category deploy` |
 | [`[env]`](#env) | Per-environment overrides of any section above. | — |
 | [`[governance]`](#governance) | Whether agent operations are audited, under which environment, and the access/approval rules around them. | `kit governance` |
@@ -102,6 +103,19 @@ standards = ["asvs", "ssdf"]
 ```
 
 Set up with `kit coverage --list-standards`. Fuller treatment: [`docs/STANDARDS.md`](STANDARDS.md).
+
+## decisions
+
+Whether a run must leave a decision ledger — the choices it made where the spec was silent.
+
+**What it buys.** The review surface that survives when nobody reads the diff: kit requires the artifact and verifies its shape, and fails a governed run that recorded nothing.
+
+```toml
+[decisions]
+require = true
+```
+
+Set up with `kit decisions`.
 
 ## deploy
 

@@ -513,6 +513,13 @@ export interface kitConfig {
    * INVALID value fails closed to `restricted`. `KIT_MEMORY_CLASS` overrides it.
    */
   memory?: { track_findings?: boolean; default_class?: "public" | "internal" | "restricted" };
+  /**
+   * Decision ledger (`kit decisions`). `require = true` turns the per-run ledger into a gate: a
+   * governed run that recorded no decisions leaves no review surface, and `kit check` fails it as
+   * a check that did not run. kit verifies the SHAPE of the entries and never their content —
+   * writing them is model work, scoring them would re-create the incentive the ledger removes.
+   */
+  decisions?: { require?: boolean };
   /** Update behavior. `check` (default true): surface a newer published kit in
    *  `kit check` + the update banner. (Set false, or KIT_NO_UPDATE_CHECK=1.)
    *  `auto` (default false, opt-in): when a newer kit is found during `kit check`,
@@ -794,6 +801,15 @@ export const KNOWN_SECTIONS = new Set([
   "air_gap", // [air_gap] — no-egress / offline config (#85)
   "policy", // [policy] — governance: default_mode gate + agent_writes pre-approvals
   "mcp", // [mcp] — MCP server config (consumed by kit mcp)
+  // These three were MISSING, and the omission was not cosmetic: `loadConfig` warns
+  // "unknown section [x] (likely a typo)" for anything absent here, so a repo that declared
+  // `[supply_chain]` or `[coverage]` — both real, both honoured — got that warning on every kit
+  // invocation. A warning that fires on correct configuration trains the operator to ignore the
+  // one that fires on a genuine typo. `config-surface.test.ts` now pins this set to the declared
+  // surface in both directions.
+  "supply_chain", // [supply_chain] — install-time triage settings (kit supply-chain)
+  "coverage", // [coverage] — control-coverage evidence (kit coverage)
+  "decisions", // [decisions] — require a per-run decision ledger (kit decisions)
 ]);
 
 export const kitConfigSchema = z
@@ -958,6 +974,7 @@ export const kitConfigSchema = z
       })
       .passthrough()
       .optional(),
+    decisions: z.object({ require: z.boolean().optional() }).passthrough().optional(),
     update: z
       .object({
         check: z.boolean().optional(),

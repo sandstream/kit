@@ -52,8 +52,27 @@ function toResultSeverity(label: string | null): SecurityCheckResult["severity"]
   }
 }
 
+/**
+ * The renderable security categories, in display order.
+ *
+ * A LIST, not a bare union, because `printSecurityTable` renders by iterating it: a category that
+ * exists in the type but not in the list is a row that gates the build and is never printed. That
+ * is the false green in miniature, and deriving the type FROM the list makes it unrepresentable
+ * rather than merely tested. `self-audit/*` is deliberately outside it — those results have their
+ * own table.
+ */
+export const SECURITY_CATEGORIES = [
+  "dependency",
+  "exposure",
+  "supply-chain",
+  "secrets",
+  "governance",
+] as const;
+
+export type SecurityCategory = (typeof SECURITY_CATEGORIES)[number] | `self-audit/${string}`;
+
 export interface SecurityCheckResult {
-  category: "dependency" | "exposure" | "supply-chain" | "secrets" | `self-audit/${string}`;
+  category: SecurityCategory;
   name: string;
   status: "pass" | "fail" | "warn" | "skip";
   detail: string;
@@ -2667,18 +2686,26 @@ export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]
   const { checkClientExposedNames, checkBuiltBundleSecrets } =
     await import("./check-client-exposure.js");
   // The GOVERNED project's config, from the threaded root — not the calling process's.
-  let clientAllow: Record<string, string> = {};
-  let declaredKeyNames: string[] = [];
+  let governed: import("./config.js").kitConfig | null = null;
   try {
     const { loadConfig } = await import("./config.js");
-    const cfg = await loadConfig(resolve(root, ".kit.toml"));
-    clientAllow = cfg?.scan?.client_exposed_allow ?? {};
-    declaredKeyNames = Object.keys(cfg?.secrets?.keys ?? {});
+    governed = await loadConfig(resolve(root, ".kit.toml"));
   } catch {
-    /* no config here — the check still reads .env* names */
+    /* no config here — the checks below still work from what is on disk */
   }
+  const clientAllow: Record<string, string> = governed?.scan?.client_exposed_allow ?? {};
+  const declaredKeyNames: string[] = Object.keys(governed?.secrets?.keys ?? {});
   results.push(await checkClientExposedNames(root, clientAllow, declaredKeyNames));
   results.push(await checkBuiltBundleSecrets(root));
+
+  // The decisions a run made where the spec was silent. Once nobody reads the diff, that list —
+  // not the diff — is the review surface, and kit had no artifact for it. Required only when the
+  // repo says so (`[decisions] require`), because a gate nobody opted into is a gate that gets
+  // switched off; verified whenever a ledger exists, because a ledger kit cannot read is worse
+  // than none. kit checks the SHAPE and never the content: writing the entries is model work, and
+  // scoring them would re-create the incentive the auditor separation exists to remove.
+  const { checkDecisionLedger } = await import("./check-decision-ledger.js");
+  results.push(await checkDecisionLedger(root, governed?.decisions?.require === true));
   // Inbound integration: fold any third-party findings a partner tool emitted to
   // `.kit-scan-results.jsonl` into the verdict. No file → no-op. Can only escalate
   // (fail/warn), never green the gate — see external-findings.ts.

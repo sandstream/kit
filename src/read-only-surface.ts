@@ -86,6 +86,8 @@ export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
     flag: "--fix",
     operation: "check-gitignore-fix",
   },
+  // Appends to the per-run decision ledger. `list` / `verify` read; only `add` writes.
+  { command: "decisions", subcommand: "add", operation: "decisions-add" },
   // Rewrites the lock files (cli-lock.json, skills-lock.json).
   { command: "upgrade", operation: "upgrade" },
 ];
