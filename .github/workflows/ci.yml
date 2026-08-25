@@ -44,3 +44,20 @@ jobs:
       # workflows. --category tests narrows the run to that one dimension.
       - name: Test-coverage gate (net-new untested files)
         run: node dist/cli.js check --category tests --enforce-tests
+
+      # kit's own ADR gate, enforced. Measured before wiring it: three accepted ADRs
+      # carry four deterministic `kit-enforce` rules, they catch real violations (an
+      # `openai` import, a `lodash` import, a coverage-registry import from the check
+      # path each exit 1), and nothing in this repo ran them. Not pre-commit, not
+      # pre-push, not CI — `kit check` does not include the ADR stage, only
+      # `kit review` does, and no workflow called either. The rules were armed and
+      # never fired for a month: enforcement that happens only when a human remembers
+      # to type the command is documentation with a CLI.
+      #
+      # Hard fail, not a warning: the gate is clean today (0 violations), so failing
+      # closed costs nothing now and means something the first time it does not. Only
+      # `status: accepted` ADRs gate, prose is never interpreted, and an accepted ADR
+      # with no enforce block is reported as "documented, not enforced", never green.
+      # `ci-adr-gate.test.ts` pins this step's existence — deleting it fails the suite.
+      - name: ADR gate (accepted ADRs' kit-enforce rules)
+        run: node dist/cli.js adr check
