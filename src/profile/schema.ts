@@ -1,8 +1,5 @@
 /**
  * kit project profile — the versioned, traveling setup declaration (Pillar 4, 5.0).
- *
- * Design: `kit-research/docs/research/pillar4-traveling-profile-5.0.md`.
- *
  * kit's setup-state is today scattered across ≥6 files (`.kit.toml`, `.kit-baseline.json`,
  * `skills-lock.json`, `.mcp.json`/`.claude.json`, `.kit-policy.*`) with nothing binding,
  * versioning, or auditing it as a whole. The profile is a single versioned DECLARATION of
@@ -86,7 +83,7 @@ export interface ProfileScope {
    *                   audit trail so an operator can see what default-on would block before it does;
    *   - absent/false → the runtime is unchanged.
    * Being inside `[scope]`, this flag is covered by the signature — it cannot be changed without
-   * re-signing. See `pillar3-runtime-default-on-5.0.md` for the off → observe → enforce ladder.
+   * re-signing. Follows the off → observe → enforce runtime ladder.
    */
   enforce_runtime?: boolean | "observe";
 }

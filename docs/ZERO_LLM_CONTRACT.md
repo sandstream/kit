@@ -9,17 +9,17 @@ tool, and kit enforces it mechanically so it cannot quietly erode.
 
 ## Why the verdict path must be LLM-free
 
-The 2024–2026 research frontier converges on one uncomfortable result: **LLM-side
+The 2024–2026 security literature converges on one uncomfortable result: **LLM-side
 judgments do not hold against an adaptive adversary.**
 
 - **LLM-as-a-Judge is an under-explored attack surface.** The first Systematization of
-  Knowledge on the security of LLM-as-a-Judge systems (arXiv:2603.29403, *verified 3-0*
-  in kit's own gap analysis) screened 863 works, kept 45, and concludes the security
-  risks "remain largely unexplored" — finding that judges can be both **attacked**
-  (targets of manipulation) and **weaponized** (instruments of attack).
+  Knowledge on the security of LLM-as-a-Judge systems (arXiv:2603.29403) screened
+  863 works, kept 45, and concludes the security risks "remain largely unexplored" —
+  finding that judges can be both **attacked** (targets of manipulation) and
+  **weaponized** (instruments of attack).
 - **Probabilistic injection defenses collapse under adaptive attack.** A meta-analysis
-  and top-venue replications (USENIX Security '26; gap analysis §1.1, *verified 3-0*)
-  put adaptive attack success **>85–90%** against state-of-the-art defenses.
+  and top-venue replications (USENIX Security '26) put adaptive attack success
+  **>85–90%** against state-of-the-art defenses.
 
 The implication is direct: **a security pipeline whose verdict is an LLM has a
 compromisable trust anchor.** If the thing that decides "is this safe?" can itself be
@@ -28,9 +28,9 @@ verdicts are deterministic — regexes, parsers, hashes, signature checks, capab
 rules — and an attacker cannot argue with a hash.
 
 This is the same architectural conclusion reached independently by DeepMind's CaMeL and
-the NSA's MCP security guidance (gap analysis §3): the reliable remedy is a
-deterministic, out-of-band, fail-closed control at the tool/action boundary — *not*
-another model asked to be careful.
+the NSA's MCP security guidance: the reliable remedy is a deterministic, out-of-band,
+fail-closed control at the tool/action boundary — *not* another model asked to be
+careful.
 
 ## What the contract does and does not cover
 
@@ -65,5 +65,3 @@ have to take on faith.
 
 - `docs/THREAT_MODEL.md` — kit's threat model and trust boundaries.
 - `docs/LOCAL_FIRST_GATE.md` — the local-first, fail-closed gate model.
-- kit-research `docs/research/agent-security-gap-analysis.md` §2.3 — the LLM-as-Judge
-  evidence behind this contract (verified pass).

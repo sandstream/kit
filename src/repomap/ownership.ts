@@ -5,8 +5,6 @@
  * to route to. Primary source is a committed **CODEOWNERS** file (pure, deterministic — no I/O here);
  * a git-blame fallback lives in the command layer for repos without one. Matching follows GitHub's
  * CODEOWNERS rules closely enough for the common patterns: gitignore-style globs, last match wins.
- *
- * Design: `kit-research/docs/research/pillar4-repo-map-5.0.md`.
  */
 
 export interface CodeownersRule {

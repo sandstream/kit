@@ -2,9 +2,8 @@
  * kit — slopsquat risk score (G4).
  *
  * Package hallucination / slopsquatting is a measured, persistent, model-agnostic
- * supply-chain surface (gap analysis §1.2, verified 3-0: USENIX'25 19.7%, 2026
- * frontier cohort still 4.62–6.10%, 53 cross-model names registrable despite
- * registry defenses). kit's install-gate already blocks *un-triaged* installs; this
+ * supply-chain surface: studies have found hallucinated package names across model
+ * cohorts, and some names remain registrable despite registry defenses. kit's install-gate already blocks *un-triaged* installs; this
  * adds the missing piece — a DETERMINISTIC, calibrated risk SCORE from registry
  * metadata (existence + age + release count), not just a 200/404 existence check,
  * because an attacker who pre-registers a hallucinated name makes 404 → 200.

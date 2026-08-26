@@ -1,15 +1,13 @@
 /**
  * kit memory — capture-time WRITE-GATE (G1).
  *
- * The gap analysis (kit-research docs/research/agent-security-gap-analysis.md §2.1,
- * verified 3-0) found that WRITE-GATE VALIDATION is an industry-wide blind spot in
- * agent memory: rows are stored first and inspected later, so a poisoned or malformed
- * line lands in the store before anything vets it. This module is the deterministic,
- * fail-closed authorization a memory row must pass BEFORE it is persisted — the
- * "Write Authorization" primitive, reusing kit's existing R7 injection detector and
+ * Agent memory systems often store rows first and inspect them later, so a poisoned or
+ * malformed line can land in the store before anything vets it. This module is the
+ * deterministic, fail-closed authorization a memory row must pass BEFORE it is persisted —
+ * the "Write Authorization" primitive, reusing kit's existing R7 injection detector and
  * (G2) its plaintext-secret pattern detector (no LLM in the verdict path). Flagging a
- * secret-bearing row keeps a credential from being persisted and later re-injected
- * into a prompt via recall — the stdout→context leak the gap analysis §2.2 measures.
+ * secret-bearing row keeps a credential from being persisted and later re-injected into a
+ * prompt via recall.
  *
  * Two modes, secure-by-default (warn), matching the warn→enforce ramp `kit standards`
  * uses:
@@ -100,8 +98,7 @@ export function evaluateWriteGate(
   }
 
   // 4. Secret (G2) — a plaintext credential that would otherwise be persisted and
-  //    could ride back into a later prompt via recall (the stdout→context leak the
-  //    gap analysis §2.2 measures). Reuses kit's pattern detector; the detail carries
+  //    could ride back into a later prompt via recall. Reuses kit's pattern detector; the detail carries
   //    only a masked label/preview, never the raw secret. Skipped when capture-time
   //    redaction already masked it (findSecrets then finds nothing).
   const secrets = content ? findSecrets(content) : [];

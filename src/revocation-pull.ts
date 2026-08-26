@@ -1,20 +1,20 @@
 /**
  * kit control plane (Pillar 2) — `kit policy pull-revocations`: fetch signed identity-key
  * revocations from a self-hostable source and MONOTONE-merge the authoritative ones into the local
- * append-only log (`revocations.jsonl`). Design: `pillar2-control-plane-5.0.md` §4.3.
+ * append-only log (`revocations.jsonl`).
  *
  * The identity-key revocation log (identity.ts) is consumed offline by policy verification, RBAC,
  * and shared-memory trust via `isRevokedWith`. Today it is local/append-only; this makes org
  * revocations DISTRIBUTABLE without adding any trust: every record carries its own Ed25519
  * signature, so kit verifies each one against the LOCAL org trust anchor before merging.
  *
- * Safe by construction (the confirmed §6 decisions):
- *   - **Add-only / monotone (§6.4):** merges via `appendRevocations`, which only appends new records
+ * Safe by construction:
+ *   - **Add-only / monotone:** merges via `appendRevocations`, which only appends new records
  *     (dedup by kid+ts+sig) — a pulled list can ADD revocations, NEVER "un-revoke" one. Omitting a
  *     kid from the source cannot resurrect a revoked key.
  *   - **Fail-closed authority:** only records that are AUTHORITATIVE (valid signature by an org
  *     trust-anchor signer, or a self-revoke) are merged; everything else is dropped and counted.
- *   - **No root-trust-from-the-network (§6.1):** the authority set is the LOCAL `.kit-policy.signers`
+ *   - **No root-trust-from-the-network:** the authority set is the LOCAL `.kit-policy.signers`
  *     anchor, never the source's; no local anchor ⇒ fail closed ("no-anchor").
  *   - **`file://` / local path only; manual trigger; offline** — air-gap is never affected.
  *

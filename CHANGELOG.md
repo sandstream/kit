@@ -2066,7 +2066,7 @@ shipped.
   - Check identity is `${category}:${name}` — deliberately the same key `findings-track.ts`
     already uses for PAL dedup, so "what changed" and "what is tracked" cannot disagree.
   - Borrowed shape: OpenAI Codex Security's `scans compare BEFORE AFTER`. The coverage axis is
-    kit's own (kit-research: `codex-security-openai-vs-kit`).
+    kit's own deterministic scanner health model.
 
 ### Fixed
 
@@ -2443,7 +2443,7 @@ cannot return.
 
 ### Added
 
-- **Agent-centric MCP surface.** Deep research into agent tool exposure
+- **Agent-centric MCP surface.** Agent tool-exposure analysis
   (Anthropic context-engineering guidance, MCP schema-cost measurements,
   CLI-vs-MCP evals) concluded kit's MCP list was wrong in both directions.
   Fixed a genuine dead end: the install gate blocks untriaged packages with
@@ -3086,7 +3086,7 @@ NaN).toISOString()` threw `RangeError` (and in `rotateSecret`, after the key was
   cannot attribute. Off by default; `--runtime` opts in. Honest coverage limit surfaced:
   verdicts cover _observed_ runs, not all runs; denial-based "control held" evidence and
   egress/fs target-scope adherence are later increments. `rubric` stays OUT forever (LLM —
-  delegated). Design: kit-research skill-test-p2-runtime-adherence note.
+  delegated).
 
 ## [5.1.0] - 2026-07-16
 
@@ -3105,7 +3105,7 @@ NaN).toISOString()` threw `RangeError` (and in `rotateSecret`, after the key was
   run: proving a skill _refrains from_ forbidden actions and _stays within_ its declared
   scope at **runtime** needs the exec-broker (a later phase), and grading whether the
   output is _good_ is an LLM judgement that kit **delegates** to an eval harness and never
-  runs. Design: kit-research skills-as-software-modules note.
+  runs.
 - **`kit bootstrap` (experimental) — one-command cold start for an ephemeral
   environment.** Composes `setup` → `identity init` → `policy pull` → `profile import`
   → `memory restore` behind one idempotent, non-interactive verb, driven by a single
@@ -3428,7 +3428,7 @@ is additive and every new gate is opt-in or degrades honestly.
 ### Security — PII parity: detect a Swedish personnummer at rest
 
 - **`findSecrets` now detects a Swedish personnummer (Luhn-validated).** kit's patterns
-  were secret-focused and caught no PII (the ruvnet/AIDefence research flagged the gap).
+  were secret-focused and caught no PII (the ruvnet/AIDefence comparison flagged the gap).
   A personnummer carries a Luhn check digit, so detection is high-precision — it validates
   the check digit and a plausible date rather than matching a bare 10/12-digit run, so a
   timestamp/id/phone number doesn't trip it. Matched values are masked (never echoed), so
@@ -3456,7 +3456,7 @@ is additive and every new gate is opt-in or degrades honestly.
   rows and names the one-command fix (`kit memory scan --injection --quarantine`, which
   excludes them from recall so the flag clears). It WARNS by default — the scanner can't
   tell a message _discussing_ an injection from a poisoned one, so a hard fail would turn
-  every security researcher's gate permanently red — and ESCALATES to a fail under
+  every security reviewer's gate permanently red — and ESCALATES to a fail under
   `--fail-on-warning` / strict CI. Fail-closed (`didNotRun`) if the store can't be
   opened/scanned; honest skip when there is no store. `src/memory/scan.ts`,
   `src/check-security.ts`.
@@ -3468,7 +3468,7 @@ is additive and every new gate is opt-in or degrades honestly.
   `.kit-scan-results.jsonl` — `{source, severity, title?, id?, package?}` — and
   `kit check --category security` ingests it: `critical`/`high` **fail** the gate
   (like `npm audit`), `medium`/`low` **warn**, grouped per source. This is the inbound
-  integration contract from the research: partners connect _to_ kit's stable surface;
+  integration contract: partners connect _to_ kit's stable surface;
   kit's core needs no per-partner code (the `kit-plugin-snyk`/`-wiz`/`-sentrux` plugins
   already write this file — nothing consumed it into the verdict until now).
   No-false-green: ingestion can only add/escalate findings, never emit a `pass`, and a
@@ -3682,7 +3682,7 @@ hooks) across the coding-agent ecosystem, shipping only where the transcript pat
 format, and block contract are verified — and naming the rest as honest
 limitations rather than faking coverage.
 
-- **Six more agents onboarded (research-driven).** kit now indexes memory and/or
+- **Six more agents onboarded (evidence-driven).** kit now indexes memory and/or
   enforces installs for a much wider agent set. Every surface below was verified
   against the agent's own format before shipping; unverifiable surfaces are
   documented as limitations, not stubbed.
@@ -3728,8 +3728,8 @@ limitations rather than faking coverage.
   it), and **Augment** (`.augment-guidelines`). AGENTS.md detection also now
   recognizes **AWS Kiro** (`.kiro/`) and **Factory Droid** (`.factory/`), which read
   the root `AGENTS.md` (the Linux-Foundation cross-tool standard) — so a Kiro- or
-  Droid-only project gets its kit block wired. Deeper coverage (memory indexing)
-  for these agents is tracked in kit-research `agent-coverage.md`.
+  Droid-only project gets its kit block wired. Deeper coverage for these agents
+  is tracked by parser tests and release notes.
 
 ### Fixed
 
@@ -4012,7 +4012,7 @@ limitations rather than faking coverage.
   These recurring asks are candidates for a memory rule — record them with
   `kit memory share` or in a rules file (CLAUDE.md / AGENTS.md) instead of re-typing.
   Zero-LLM, local, no ML — kit finds the pattern; you decide the rule. `--json`
-  supported. Idea from headroom's `learn` (kit-research), done the kit way.
+  supported. Pattern inspired by recurring-instruction mining, done the kit way.
 
 ### Fixed
 

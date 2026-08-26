@@ -1,8 +1,8 @@
 /**
  * kit — agent-toolchain SBOM (G5).
  *
- * The LLM supply-chain research agenda (Wang et al., arXiv:2404.12736 / ACM TOSEM
- * 34(5), doi:10.1145/3708531; verified 3-0 in kit's gap analysis §2.5) names an SBOM
+ * The LLM supply-chain literature (Wang et al., arXiv:2404.12736 / ACM TOSEM
+ * 34(5), doi:10.1145/3708531) names an SBOM
  * for the AI/LLM *toolchain* as an unrealized transparency/security opportunity: the
  * pieces an agent actually loads — skills, MCP servers, plugins — are supply-chain
  * components too, but no lockfile lists them, so today's SBOM can't see them.

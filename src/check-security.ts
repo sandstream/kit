@@ -300,7 +300,7 @@ export async function checkGateLiveness(cwd?: string): Promise<SecurityCheckResu
  *
  * It WARNS (not hard-fail) because the scanner cannot tell "a message DISCUSSING an
  * injection" from "a poisoned message" — a hard fail would turn every security
- * researcher's gate permanently red. The warn names the one-command remediation
+ * reviewer's gate permanently red. The warn names the one-command remediation
  * (`kit memory scan --injection --quarantine`, which excludes the rows from recall so
  * the warn clears), and it ESCALATES to a fail under `--fail-on-warning` / strict CI.
  * If the store can't be opened/scanned that is a scanner-health failure (`didNotRun`,

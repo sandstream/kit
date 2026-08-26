@@ -2,10 +2,9 @@
  * kit — MCP server triage (G3).
  *
  * Tool poisoning — malicious instructions hidden in an MCP tool's metadata
- * (description / parameter docs) — is the top MCP client-side vulnerability, and
- * deployed clients largely lack static tool-metadata validation (gap analysis §1.3,
- * verified 3-0; NSA MCP CSI). A "rug pull" is the same server silently changing a
- * tool definition after you trusted it.
+ * (description / parameter docs) — is a top MCP client-side vulnerability, and deployed
+ * clients need static tool-metadata validation (NSA MCP CSI). A "rug pull" is the same
+ * server silently changing a tool definition after you trusted it.
  *
  * This is the deterministic, zero-LLM remedy every MCP paper leads with:
  *   1. static metadata analysis — run kit's R7 injection detector over every tool

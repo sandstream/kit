@@ -13,8 +13,7 @@
  * bucket, ranked above finding changes, and a check that could not run (`didNotRun`) is
  * treated as lost coverage even when its status reads `skip`.
  *
- * Borrowed shape: OpenAI Codex Security's `scans compare BEFORE AFTER`
- * (kit-research/docs/research/codex-security-openai-vs-kit.md). The coverage axis is kit's.
+ * Borrowed shape: OpenAI Codex Security's `scans compare BEFORE AFTER`. The coverage axis is kit's.
  */
 import type { JsonCheck, JsonCheckOutput } from "./cli-checks-shared.js";
 

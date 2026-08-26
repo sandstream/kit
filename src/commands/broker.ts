@@ -1,8 +1,5 @@
 /**
  * `kit broker` — the exec-broker runtime-posture surface (Pillar 3, observe→enforce adoption).
- *
- * Design: `kit-research/docs/research/exec-broker-enforce-adoption.md`.
- *
  * The runtime ladder is **off → observe → enforce**. observe runs the same gates but never
  * denies — it records each would-be denial to `.kit-audit.jsonl` (`metadata.phase === "observe"`,
  * `metadata.wouldDeny: string[]`). enforce requires `[scope].enforce_runtime = true` in the

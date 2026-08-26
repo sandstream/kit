@@ -6,8 +6,6 @@
  * into that signal: parse `git log --name-only`, count how often each file pair appears in the same
  * commit, and surface a seed's top co-changed files. Pure (the command does the git I/O, feeds the
  * text here); deterministic given the history window.
- *
- * Design: `kit-research/docs/research/pillar4-repo-map-5.0.md`.
  */
 
 /** Unit-separator that precedes each commit's hash in our `git log --format` (robust block split). */

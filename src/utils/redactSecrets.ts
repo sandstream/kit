@@ -301,7 +301,7 @@ function findEntropyKvSecrets(text: string): SecretFinding[] {
   return out;
 }
 
-// PII parity (from the ruvnet/AIDefence research): kit's patterns are secret-focused
+// PII parity (from the ruvnet/AIDefence comparison): kit's patterns are secret-focused
 // and detect no PII. A Swedish personnummer is the highest-value, most-relevant PII to
 // catch at rest in the memory store — and it is high-PRECISION because it carries a Luhn
 // check digit, so we validate rather than match a bare 10/12-digit run (which would flag

@@ -1,8 +1,5 @@
 /**
  * `kit skill test` P2b — attribute recorded tool calls to a skill's runs (transcript).
- *
- * Design: `kit-research/docs/research/skill-test-p2-runtime-adherence.md`.
- *
  * kit never runs a skill (zero-LLM). It reads what the agent already recorded: the memory
  * index normalizes every transcript into `tool_uses` (one row per call, ordered by `id`).
  * A skill run is a SPAN — a `Skill` tool call opens it (`tool_input` carries the slug), and

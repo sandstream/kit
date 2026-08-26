@@ -1,8 +1,5 @@
 /**
  * `kit profile` — the versioned, traveling project profile surface (Pillar 4 step 3).
- *
- * Design: `kit-research/docs/research/pillar4-traveling-profile-5.0.md`.
- *
  * Three subcommands over the schema (`profile/schema.ts`) + drift core
  * (`profile/reconcile.ts`):
  *   - `show`   — render the declared profile with per-line reconciliation marks.

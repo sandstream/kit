@@ -2,12 +2,11 @@
  * kit control plane (Pillar 2) — `kit policy pull`: fetch an org-signed policy from a self-hostable
  * source and APPLY it only if it verifies OFFLINE against the LOCAL trust anchor.
  *
- * Design: `kit-research/docs/research/pillar2-control-plane-5.0.md` (MVP, §4.1). This is a
- * "dumb pipe, smart verifier": the source ships bytes (`.kit-policy.toml` + `.kit-policy.sig`);
+ * This is a "dumb pipe, smart verifier": the source ships bytes (`.kit-policy.toml` + `.kit-policy.sig`);
  * kit verifies them with the existing `verifyPolicy` before anything is written. Deliberately
  * SMALL and safe:
  *
- *   - **No root-trust-from-the-network (§6.1):** the trust anchor `.kit-policy.signers` is NEVER
+ *   - **No root-trust-from-the-network:** the trust anchor `.kit-policy.signers` is NEVER
  *     pulled. It must already exist LOCALLY (committed / bootstrapped out of band). A pull with no
  *     local anchor fails closed — a pulled policy that only this machine could verify is not "org
  *     distribution", and letting the fetch carry the root of trust would make the chain only as
@@ -16,7 +15,7 @@
  *     LOCAL anchor and run through `verifyPolicy`; only `status === "valid"` writes to the project.
  *     Anything else keeps the existing policy untouched. Revocations are still consulted (they come
  *     from the identity store, not the staged dir), so a revoked org signer is rejected.
- *   - **`file://` / local path source only (§6.2):** no new network client in the MVP; a git remote
+ *   - **`file://` / local path source only:** no new network client in the MVP; a git remote
  *     is a follow-up. Air-gap stays green because pull is manual and never runs during verification.
  *
  * Deterministic, local-only, no telemetry, no egress.

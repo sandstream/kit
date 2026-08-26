@@ -1,8 +1,5 @@
 /**
  * exec-broker — observe→enforce readiness (E1, pure core).
- *
- * Design: `kit-research/docs/research/exec-broker-enforce-adoption.md`.
- *
  * The observe (dry-run) rung of the Pillar 3 ladder records, per operation, the denials that
  * enforce mode WOULD apply — an audit event with `metadata.phase === "observe"` and
  * `metadata.wouldDeny: string[]` (empty ⇒ the op would pass under enforce). This module reads

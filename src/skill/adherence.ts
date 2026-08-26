@@ -1,8 +1,5 @@
 /**
  * `kit skill test` P2 — runtime scope-adherence & negative-controls core (pure).
- *
- * Design: `kit-research/docs/research/skill-test-p2-runtime-adherence.md`.
- *
  * P1 shipped the four STATIC module checks and disclaimed two of the deterministic
  * seven — negative controls and scope adherence — because proving them needs the skill
  * to actually RUN. A `SKILL.md` is instructions for an LLM agent, so kit must never run

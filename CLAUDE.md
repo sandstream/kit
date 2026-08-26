@@ -26,7 +26,7 @@ This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, 
 - No internal session IDs, private dashboard/console links, or paths under
   another customer's project in public bodies.
 - Findings that could be a real security leak in a named third-party repo go to
-  the private `sandstream/kit-research` repo, never a public kit issue.
+  a private security channel, never a public kit issue.
 
 ## Architecture decisions are a gate, and `kit check` does not run it
 

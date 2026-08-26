@@ -1,7 +1,7 @@
 /**
- * kit exec-broker — conservative network-target extraction (Pillar 3 step 4).
+ * kit exec-broker — conservative network-target extraction.
  *
- * Design: `pillar3-exec-broker-5.0.md` §3.3 / §6.2 — the egress-gate inspects a pending Bash
+ * The egress-gate inspects a pending Bash
  * command for its network targets. Two passes, both deliberately CONSERVATIVE (a false positive
  * would wrongly deny legitimate work, so we only extract high-confidence targets):
  *

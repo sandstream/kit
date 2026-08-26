@@ -1,8 +1,5 @@
 /**
  * kit project profile — declared-vs-discovered drift (Pillar 4 step 2).
- *
- * Design: `kit-research/docs/research/pillar4-traveling-profile-5.0.md` §4.3.
- *
  * The profile (`schema.ts`) DECLARES the intended toolchain; this module measures how far
  * the actual project has drifted from that declaration. Split in two:
  *

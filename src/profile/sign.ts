@@ -1,8 +1,5 @@
 /**
  * kit project profile — signed scope/RoE (Pillar 4 step 5).
- *
- * Design: `kit-research/docs/research/pillar4-traveling-profile-5.0.md` §4.4.
- *
  * The profile's `[scope]` section (egress allowlist, fs-scope, secret-scope) is only meaningful
  * as a security boundary if it is CRYPTOGRAPHICALLY ATTRIBUTABLE and offline-verifiable — a
  * hand-editable file can't gate an autonomous agent. So the profile reuses, verbatim, the

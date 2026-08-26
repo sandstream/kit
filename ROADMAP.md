@@ -408,7 +408,7 @@ Second, smaller half: `elevation.ts` calls `appendAuditEventDirect` WITHOUT `cwd
 that "gets audit-logged loudly". The record is written; it lands in one of N logs no command reads
 together. "Loudly" is a claim about a reader, and the reader is the weak link.
 
-Found while researching agent session managers that give every session its own worktree, which turns
+Found while comparing agent session managers that give every session its own worktree, which turns
 "N working trees on one machine" from an edge case into the normal case.
 
 ### PR 2 — `kit analyze` subcommand (1d)

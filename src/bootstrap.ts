@@ -1,6 +1,6 @@
 /**
  * `kit bootstrap` — pure planning + receipt core for cold-starting an ephemeral
- * environment (design: kit-research/docs/research/kit-bootstrap-design.md).
+ * environment.
  *
  * This module is the DECISION half: given the seed the platform injected (env vars
  * + flags) it produces the ordered step plan and the fail-mode of each step, and it

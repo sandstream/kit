@@ -1,7 +1,6 @@
 /**
  * `kit adr` — ADR → gate. Enforce the machine-readable `kit-enforce` block of an
- * accepted Architecture Decision Record, cited back to the ADR. Design:
- * kit-research/docs/research/adr-as-enforced-rule-design.md.
+ * accepted Architecture Decision Record, cited back to the ADR.
  *
  *   kit adr list    every ADR + status + enforced / documented-only
  *   kit adr check   run accepted ADRs' rules over the repo (default): forbid_pattern,

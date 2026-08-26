@@ -1,12 +1,11 @@
 /**
  * kit exec-broker — declared operation needs vs the signed scope, for the governance floor.
  *
- * Design: `pillar3-exec-broker-5.0.md` §3.4 / §6.4, unified onto the canonical exec-broker per
- * `pillar3-broker-reconciliation-5.0.md` (R4). An operation running under `withGovernance`
- * DECLARES what it is about to touch — hosts, write paths, secret env keys — and this module
- * answers whether the signed `[scope]`/RoE grants it. It is the governance-floor counterpart to
- * the PreToolUse gates: both read the SAME signed source (`profileBrokerPolicy`) and use the
- * SAME pure decisions (`decisions.ts`), so there is one broker, not two.
+ * An operation running under `withGovernance` DECLARES what it is about to touch — hosts,
+ * write paths, secret env keys — and this module answers whether the signed `[scope]`/RoE
+ * grants it. It is the governance-floor counterpart to the PreToolUse gates: both read the
+ * SAME signed source (`profileBrokerPolicy`) and use the SAME pure decisions (`decisions.ts`),
+ * so there is one broker, not two.
  *
  * Opt-in semantics, mirrored from the PreToolUse gates but adapted to a floor that runs for
  * EVERY governed op:

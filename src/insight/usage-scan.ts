@@ -1,6 +1,5 @@
 /**
- * Deterministic tool-usage scanner — the "used" signal for Pillar 4's
- * loaded-but-unused insight (`pillar4-insight-loop-5.0.md`).
+ * Deterministic tool-usage scanner — the "used" signal for loaded-vs-used insight.
  *
  * Zero-LLM, pure counting: kit's memory index already normalizes every agent's
  * transcript into the `tool_uses` table (one row per tool call, cross-agent), so

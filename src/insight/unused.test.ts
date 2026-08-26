@@ -45,11 +45,11 @@ describe("computeUnused", () => {
 
   it("judges skills used/unused from the skill-usage map (exact slug), unused ⇒ prune candidate", () => {
     const report = computeUnused(
-      { skills: [{ name: "deep-research" }, { name: "pdf-process" }], mcpServers: [] },
+      { skills: [{ name: "doc-review" }, { name: "pdf-process" }], mcpServers: [] },
       [],
-      new Map([["deep-research", 4]]),
+      new Map([["doc-review", 4]]),
     );
-    const dr = report.findings.find((f) => f.name === "deep-research");
+    const dr = report.findings.find((f) => f.name === "doc-review");
     const pdf = report.findings.find((f) => f.name === "pdf-process");
     assert.equal(dr?.verdict, "used");
     assert.equal(dr?.refs, 4);

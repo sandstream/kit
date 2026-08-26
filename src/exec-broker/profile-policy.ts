@@ -1,8 +1,5 @@
 /**
  * kit exec-broker — the SIGNED policy source (reconciliation R2).
- *
- * Design: `kit-research/docs/research/pillar3-broker-reconciliation-5.0.md`.
- *
  * The exec-broker's original policy source is an UNSIGNED `.kit-exec-broker.json` (`policy.ts`).
  * This bridges the SIGNED, offline-verified profile scope (`[scope]`/RoE from Pillar 4) into a
  * `BrokerPolicy`, so the one canonical broker can be driven by a cryptographically attributable

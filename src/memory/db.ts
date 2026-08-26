@@ -479,9 +479,9 @@ export interface ForgetProof {
 /**
  * VERIFIED-FORGET (G1): hard-delete a memory row and PROVE it is gone.
  *
- * The gap analysis (§2.1, verified 3-0) found post-deletion verification is an
- * industry-wide blind spot: systems delete but never check. This does the delete
- * inside a transaction (FTS is auto-purged by the messages_ad trigger), records a
+ * Post-deletion verification matters because a delete that is never checked can produce a
+ * false sense of erasure. This does the delete inside a transaction (FTS is auto-purged by
+ * the messages_ad trigger), records a
  * content-hash tombstone (never the content — the store is secret-dense), then
  * READS BACK three independent facts: the row is absent, the FTS index is
  * internally consistent (integrity-check), and the tombstone exists. It fails
