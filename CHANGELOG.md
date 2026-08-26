@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### Added
+
+- **AISLE nano-analyzer ingestion plugin.** `sandstream-kit-plugin-aisle` reads
+  AISLE nano-analyzer `triage.json` / `summary.json` output and writes validated
+  findings to `.kit-scan-results.jsonl`, so `kit check --category security` can
+  gate AI-discovered findings through the existing external-findings contract.
+  Only `VALID` findings emit by default; rejected triage can be recorded
+  deliberately for audit receipts.
+
 ## [6.9.0] - 2026-08-23
 
 ### Added
