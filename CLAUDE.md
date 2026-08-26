@@ -27,3 +27,20 @@ This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, 
   another customer's project in public bodies.
 - Findings that could be a real security leak in a named third-party repo go to
   the private `sandstream/kit-research` repo, never a public kit issue.
+
+## Architecture decisions are a gate, and `kit check` does not run it
+
+`docs/adr` holds five ADRs. The three accepted ones carry a `kit-enforce` block, which
+makes them four deterministic rules — not prose:
+
+- **ADR-0001** no model-client import anywhere in `src/**` (the zero-LLM core).
+- **ADR-0002** no new runtime dependency from the forbidden list — stdlib otherwise.
+- **ADR-0003** the check path imports no coverage-framework mappings.
+
+`node dist/cli.js adr check` runs them and **fails CI hard** on a violation. `kit check`
+does **not** include the ADR stage — only `kit review` (check + design + standards + adr)
+does. So before opening a PR that adds a dependency, moves an import, or touches
+`src/check*.ts`, run `kit review`, not `kit check` alone.
+
+Adding one of those imports is an ADR-level decision, not a code change: amend or supersede
+the ADR in the same PR, or the gate will refuse the code and cite the ADR that refused it.
