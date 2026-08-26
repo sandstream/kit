@@ -1,8 +1,5 @@
 /**
  * `kit triage skill` — SkillSpector (NVIDIA) delegate, Stage-1 ONLY: deterministic, NO LLM, NO egress.
- *
- * Design: `kit-research/docs/research/pillar-triage-skill-delegate-5.0.md`.
- *
  * kit does NOT reimplement NVIDIA's 68-pattern agent-skill scanner — it ORCHESTRATES it, the same way
  * `kit check` orchestrates bumblebee/trivy/semgrep. We run SkillSpector's STATIC Stage 1 (regex + AST
  * + offline OSV) and normalize its SARIF into kit's `SecurityCheckResult`, ATTRIBUTED to the source.

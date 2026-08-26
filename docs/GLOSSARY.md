@@ -86,6 +86,6 @@ output. Grouped by area; kit-specific meaning noted where it matters.
 | **gate** | A deterministic, fail-closed check on the action path (PreToolUse `gate-bash`/`gate-env`) or at review time (`kit check`). |
 | **warn → enforce** | The secure-by-default ramp: a new gate warns first, then fails once `--enforce` / an env flag is set. |
 | **no false green** | kit's core ethos — green must be *earned*; an un-runnable check fails. |
-| **G1–G6** | The six buildout gaps from the deep-research gap analysis (write-gate, secrets, MCP triage, slopsquat, SBOM, zero-LLM contract). |
+| **G1–G6** | The six hardening gap IDs behind the current buildout (write-gate, secrets, MCP triage, slopsquat, SBOM, zero-LLM contract). |
 
 *Missing one? Add a row and send a PR — this file is meant to grow.*

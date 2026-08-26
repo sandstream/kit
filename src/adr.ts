@@ -1,7 +1,7 @@
 /**
  * kit — ADR → gate. Turn the machine-readable part of an Architecture Decision
  * Record into a deterministic gate, cited back to the ADR ("why is this blocked?
- * → ADR-0007"). Design: kit-research/docs/research/adr-as-enforced-rule-design.md.
+ * → ADR-0007").
  *
  * kit does NOT interpret ADR prose (that needs an LLM — off-charter). It enforces
  * only an explicit ` ```toml kit-enforce ` block (parsed with the same smol-toml as

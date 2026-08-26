@@ -4,7 +4,7 @@
  * within `--depth` import hops (both directions), plus the external packages they pull in. Lets an
  * agent load a slice of a growing repo instead of the whole tree. `--json` emits the slice for a tool.
  *
- * Design: `kit-research/docs/research/pillar4-repo-map-5.0.md`. Deterministic and offline.
+ * Deterministic and offline.
  */
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";

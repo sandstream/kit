@@ -1,10 +1,10 @@
 /**
  * Repo-map — pure code-graph core (Pillar 4, deterministic / zero-LLM).
  *
- * Design: `kit-research/docs/research/pillar4-repo-map-5.0.md`. This module is the extraction-agnostic
- * graph half: given files and their resolved import targets, build an import graph and compute the
- * minimal relevant SLICE around a set of seed files — so an agent loads a slice of a growing repo,
- * not the whole tree. Pure and deterministic (sorted output); no I/O, no model, no embeddings.
+ * This module is the extraction-agnostic graph half: given files and their resolved import targets,
+ * build an import graph and compute the minimal relevant SLICE around a set of seed files — so an
+ * agent loads a slice of a growing repo, not the whole tree. Pure and deterministic (sorted output);
+ * no I/O, no model, no embeddings.
  */
 
 export type RepoNodeKind = "file" | "external";

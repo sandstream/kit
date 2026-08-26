@@ -101,15 +101,15 @@ describe("scanToolUsage", () => {
 describe("tallySkillUsage", () => {
   it("counts skill slugs from Skill tool_input, skipping malformed/blank", () => {
     const counts = tallySkillUsage([
-      '{"skill":"deep-research","args":"x"}',
-      '{"skill":"deep-research"}',
+      '{"skill":"doc-review","args":"x"}',
+      '{"skill":"doc-review"}',
       '{"skill":"artifact-design"}',
       '{"skill":"  "}',
       "{not json",
       '{"noskill":true}',
       null,
     ]);
-    assert.equal(counts.get("deep-research"), 2);
+    assert.equal(counts.get("doc-review"), 2);
     assert.equal(counts.get("artifact-design"), 1);
     assert.equal(counts.size, 2);
   });
@@ -127,11 +127,11 @@ describe("scanSkillUsage", () => {
     add("Skill", '{"skill":"triage"}');
     add("Skill", '{"skill":"triage"}');
     add("Bash", "{}"); // not a skill call — ignored
-    add("Skill", '{"skill":"deep-research"}');
+    add("Skill", '{"skill":"doc-review"}');
 
     const counts = scanSkillUsage(db);
     assert.equal(counts.get("triage"), 2);
-    assert.equal(counts.get("deep-research"), 1);
+    assert.equal(counts.get("doc-review"), 1);
     assert.equal(counts.size, 2);
     db.close();
   });

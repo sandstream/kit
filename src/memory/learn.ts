@@ -4,8 +4,8 @@
  *
  * Zero-LLM, local, no ML: kit *finds* the pattern by counting verbatim-normalized
  * user messages; *you* decide the rule (record it via `kit memory share` or your
- * rules file). Idea borrowed from headroom's `learn` (kit-research), done the kit
- * way — pure counting over the local store, no model call.
+ * rules file). Pattern inspired by recurring-instruction mining — pure counting over
+ * the local store, no model call.
  *
  * The signal: a user who says the same thing 3+ times (across sessions, or over
  * and over in one) is telling you something that belongs in memory instead of

@@ -1,6 +1,6 @@
 /**
  * `kit skill test --runtime` — gate-deny evidence from `.kit-audit.jsonl` (denial-based
- * negative controls). Design: `kit-research/docs/research/skill-test-p2-runtime-adherence.md`.
+ * negative controls).
  *
  * A forbidden action that a gate DENIED never runs, so it is not in the transcript's
  * `tool_uses` — it lands in the hash-chained audit log as a `gate-egress`/`gate-fs` deny.

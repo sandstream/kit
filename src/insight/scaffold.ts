@@ -1,8 +1,7 @@
 /**
- * Repeat→codify scaffold for Pillar 4's insight loop
- * (`pillar4-insight-loop-5.0.md`, step 4). `memory learn` already FINDS recurring
- * instructions deterministically (learnRecurring — pure counting, no ML); this
- * turns a found LearnCandidate into a skill-DRAFT skeleton the operator reviews.
+ * Repeat→codify scaffold for the insight loop. `memory learn` already FINDS recurring
+ * instructions deterministically (learnRecurring — pure counting, no ML); this turns a found
+ * LearnCandidate into a skill-DRAFT skeleton the operator reviews.
  *
  * Deterministic + pure (candidate → text): the *detection* and the *skeleton* are
  * core/free. Only the eventual filling-in of the skill body may be model-assisted,

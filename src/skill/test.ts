@@ -1,8 +1,5 @@
 /**
  * `kit skill test` — deterministic module-discipline linter for a `SKILL.md` (P1).
- *
- * Design: `kit-research/docs/research/skills-as-software-modules.md`.
- *
  * Thesis: an agent skill is becoming a software MODULE, so it inherits the module
  * lifecycle — a declared contract, trigger discipline, a least-privilege scope, and CI
  * regression. Six of the seven SE practices in the note are deterministic (kit's

@@ -5,9 +5,6 @@
  * sandbox contains what happens beneath it (the OpenAI eval-escape happened there).
  * kit must NOT become a sandbox — it DETECTS and VERIFIES one as a delegate, and
  * folds the fact into its posture. Deterministic, zero-LLM, read-only.
- *
- * Design: kit-research/docs/research/containment-delegate-design.md.
- *
  * Honest semantics: `contained: true` only on a positive signal; `unknown` when the
  * signals can't be read (non-Linux, restricted /proc) — never a false "not contained"
  * (absence of evidence is not evidence of absence).

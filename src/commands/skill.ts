@@ -11,8 +11,6 @@
  * install?" via the SkillSpector delegate). It answers "engineered like a module?" — a
  * different question, same zero-LLM, fail-closed discipline. It NEVER runs the skill, and
  * it NEVER grades output quality (that is an LLM eval harness, disclaimed in the output).
- *
- * Design: `kit-research/docs/research/skills-as-software-modules.md`.
  */
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";

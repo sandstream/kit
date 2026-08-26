@@ -7,8 +7,6 @@
  * fuel degrades). It is a COMPOSITION of shipped commands (setup / identity / policy
  * pull / profile import / memory restore) behind one verb + a receipt — no new
  * capability, and no secret is ever fetched, stored, or logged here.
- *
- * Design: kit-research/docs/research/kit-bootstrap-design.md.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";

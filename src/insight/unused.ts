@@ -1,8 +1,7 @@
 /**
- * Loaded-vs-used correlation for Pillar 4's insight loop
- * (`pillar4-insight-loop-5.0.md`). Pure + deterministic: given the loaded
- * toolchain (agent-sbom.discoverAgentToolchain) and the used signal
- * (usage-scan.scanToolUsage), decide which loaded MCP servers were never called.
+ * Loaded-vs-used correlation for the insight loop. Pure + deterministic: given the loaded
+ * toolchain (agent-sbom.discoverAgentToolchain) and the used signal (usage-scan.scanToolUsage),
+ * decide which loaded MCP servers were never called.
  *
  * Honesty rules (no false green):
  * - MCP servers correlate cleanly (a call is `mcp__<server>__<tool>`), so they get

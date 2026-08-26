@@ -1041,7 +1041,7 @@ export const COMMAND_TIERS: Record<string, CommandTier> = Object.fromEntries(
 
 /**
  * Who primarily invokes a command — the exposure-routing signal from the
- * agent-tool-context research (emitted as `x-kit-audience` in the OpenCLI
+ * agent-tool-context analysis (emitted as `x-kit-audience` in the OpenCLI
  * contract):
  *   - "human":   interactive / setup-time / operator actions. Never belongs on
  *                the MCP surface (a contract test enforces this, modulo the
