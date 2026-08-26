@@ -15,8 +15,8 @@ import { fileURLToPath } from "node:url";
  *
  * `actions/setup-node` with `node-version: "22"` ships npm 10.9.x, so the client
  * in this job has no OIDC exchange to make. That is a prerequisite the repo can
- * assert about itself today, before the registry-side switch (which is 13
- * per-package configurations on npmjs.com — see docs/RELEASING.md), so the
+ * assert about itself today, before the registry-side switch (which is
+ * per-package configuration on npmjs.com — see docs/RELEASING.md), so the
  * migration cannot arrive to find the runner too old.
  *
  * The gate is here rather than in prose because a comment cannot fail CI, and a
@@ -47,9 +47,10 @@ function atLeast(found: readonly number[], min: readonly number[]): boolean {
 
 describe("publish.yml — publishes over OIDC, not a long-lived token", () => {
   it("references no npm token in any executing line", () => {
-    // All 13 packages now have a GitHub Actions trusted publisher (repo sandstream/kit,
-    // workflow publish.yml, environment npm-publish, permission `npm publish`), verified on
-    // each package's settings page. npm prefers NODE_AUTH_TOKEN whenever it is present, so
+    // The packages that shipped before sandstream-kit-plugin-aisle have a GitHub Actions
+    // trusted publisher (repo sandstream/kit, workflow publish.yml, environment npm-publish,
+    // permission `npm publish`), verified on each package's settings page. npm prefers
+    // NODE_AUTH_TOKEN whenever it is present, so
     // OIDC only takes effect once that env is gone — the two cannot both be in effect, which
     // makes a re-added token a SILENT downgrade back to the credential npm is retiring
     // (direct publishing dies ~Jan 2027). Hence a gate rather than a comment.

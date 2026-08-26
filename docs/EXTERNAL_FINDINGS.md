@@ -61,3 +61,20 @@ kit check --category security   # → "external: my-gate  fail  1 finding(s) (1 
 
 That's the whole integration. See also `docs/PLUGIN_DEVELOPMENT.md` for packaging this
 as a distributable `kit-plugin-*`.
+
+## AISLE nano-analyzer
+
+AISLE's public nano-analyzer writes `triage.json` and `summary.json` under its
+output directory. The `sandstream-kit-plugin-aisle` package consumes those local
+files and appends validated findings to `.kit-scan-results.jsonl`:
+
+```ts
+import { ingestAisleNanoOutputDir } from "sandstream-kit-plugin-aisle";
+
+await ingestAisleNanoOutputDir("./aisle-results");
+```
+
+Only `VALID` triage verdicts are emitted by default. If the nano output lacks
+per-finding severity, the adapter falls back to the file-level summary severity,
+then `high`, so a validated zero-day candidate fails the kit gate instead of
+becoming a silent note.

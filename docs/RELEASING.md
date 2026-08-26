@@ -7,8 +7,8 @@ not build — see [`docs/VERIFY.md`](./VERIFY.md).
 ## What a release is
 
 One tag. `.github/workflows/publish.yml` triggers on `v*` and builds **the tree that tag
-points at**, publishing 13 packages: the `sandstream-kit` CLI, `sandstream-kit-adapter-sdk`,
-and the eleven `sandstream-kit-plugin-*` workspaces.
+points at**, publishing 14 packages: the `sandstream-kit` CLI, `sandstream-kit-adapter-sdk`,
+and the twelve `sandstream-kit-plugin-*` workspaces.
 
 Because the tag's tree is what ships, the tag goes on the commit whose `package.json` and
 `CHANGELOG.md` describe the release — not on whatever `main` happens to be. When feature
@@ -44,11 +44,14 @@ only ever moves on a stable release.
 
 ## Credentials: trusted publishing (no npm token)
 
-There is no npm token in this repository any more. All 13 packages carry a GitHub Actions
-trusted publisher naming `sandstream/kit`, the workflow file `publish.yml`, and the
-environment `npm-publish`, with the single permission `npm publish` (not staged publish —
-least privilege). The job exchanges its OIDC identity for a short-lived credential, so the
-environment is part of the credential rather than merely the guard around a secret:
+There is no npm token in this repository any more. The packages that shipped before
+`sandstream-kit-plugin-aisle` carry a GitHub Actions trusted publisher naming
+`sandstream/kit`, the workflow file `publish.yml`, and the environment `npm-publish`,
+with the single permission `npm publish` (not staged publish — least privilege).
+`sandstream-kit-plugin-aisle` needs the same npm-side Trusted Publisher setup before
+the first release that includes it. The job exchanges its OIDC identity for a
+short-lived credential, so the environment is part of the credential rather than
+merely the guard around a secret:
 configure required reviewers on `npm-publish` in Settings → Environments, or the human gate
 does not exist.
 
@@ -104,9 +107,10 @@ that step exists, pins a high-enough version, and runs before any publish — a 
 fail CI, and a publish job runs only on a tag push, the worst moment to discover a too-old
 client.
 
-**The registry-side work is done** (2026-08-19): every package below was configured and its
-saved connection read back from its own settings page. The list is kept because a NEW package
-needs the same treatment before its first release — no token exists to fall back on.
+**The registry-side work is done for the pre-AISLE packages** (2026-08-19): every
+package below was configured and its saved connection read back from its own settings
+page. The list is kept because a NEW package needs the same treatment before its first
+release — no token exists to fall back on.
 
 | Package | | |
 | --- | --- | --- |
@@ -115,6 +119,10 @@ needs the same treatment before its first release — no token exists to fall ba
 | `sandstream-kit-plugin-sentrux` | `sandstream-kit-plugin-sentry` | `sandstream-kit-plugin-snyk` |
 | `sandstream-kit-plugin-stripe` | `sandstream-kit-plugin-supabase` | `sandstream-kit-plugin-vercel` |
 | `sandstream-kit-plugin-wiz` | | |
+
+`sandstream-kit-plugin-aisle` is intentionally not in the verified list yet. Configure
+its npm Trusted Publisher before the release that first publishes it, then move it into
+the verified table in that same release-prep PR.
 
 For each (and for any new package): its npm page → Settings → Trusted Publisher → GitHub
 Actions, then `Organization or user` = `sandstream`, `Repository` = `kit`,
