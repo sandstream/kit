@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [6.10.0] - 2026-08-26
+
 ### Added
 
 - **AISLE nano-analyzer ingestion plugin.** `sandstream-kit-plugin-aisle` reads
@@ -8,6 +10,11 @@
   gate AI-discovered findings through the existing external-findings contract.
   Only `VALID` findings emit by default; rejected triage can be recorded
   deliberately for audit receipts.
+
+### Changed
+
+- **Public provenance cleanup.** Removed internal provenance breadcrumbs from
+  public docs, comments, fixture names, and shared memory.
 
 ## [6.9.0] - 2026-08-23
 
