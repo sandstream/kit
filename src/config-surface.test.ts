@@ -23,6 +23,7 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { CONFIG_SECTIONS, configSectionNames } from "./config-surface.js";
+import { KNOWN_SECTIONS } from "./config.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -154,5 +155,33 @@ describe("docs/CONFIGURATION.md", () => {
         `CONFIGURATION.md links to docs/${target}, which does not exist`,
       );
     }
+  });
+});
+
+/**
+ * The THIRD list, which nothing was checking.
+ *
+ * A section is declared in three places: the `kitConfig` type, `CONFIG_SECTIONS` (this file's
+ * subject), and `KNOWN_SECTIONS` in config.ts — the typo detector `loadConfig` warns from. The
+ * first two were pinned to each other; the third was not, and it had drifted: `[supply_chain]` and
+ * `[coverage]` are real sections kit reads and honours, and declaring either printed
+ *
+ *     Warning: unknown section [coverage] in .kit.toml (known: …)
+ *
+ * on every single kit invocation in that repo. A warning that fires on correct configuration is
+ * worse than no warning: it teaches the operator to ignore the one that fires on a genuine typo.
+ *
+ * Pinned in BOTH directions, like the surface test above — an entry here that is not a real
+ * section sends the reader looking for something kit will ignore.
+ */
+describe("KNOWN_SECTIONS (config.ts) and the declared surface", () => {
+  it("are the same set of sections", () => {
+    const surface = Object.keys(CONFIG_SECTIONS).sort();
+    const known = [...KNOWN_SECTIONS].sort();
+    assert.deepEqual(
+      known,
+      surface,
+      "a section kit honours must not warn as a typo, and a section it warns about must be real",
+    );
   });
 });

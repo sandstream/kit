@@ -2,7 +2,7 @@ import type { ToolStatus } from "./check-tools.js";
 import type { ServiceStatus } from "./check-services.js";
 import type { SecretStatus } from "./check-secrets.js";
 import type { SkillCheckResult } from "./check-skills.js";
-import type { SecurityCheckResult } from "./check-security.js";
+import { SECURITY_CATEGORIES, type SecurityCheckResult } from "./check-security.js";
 import type { LockCheckResult } from "./check-lock.js";
 import type { WebSearchStatus } from "./check-web-search.js";
 import type { DeployCheckResult } from "./check-deploy.js";
@@ -281,7 +281,10 @@ export function printSecurityTable(results: SecurityCheckResult[]): void {
     byCategory[result.category].push(result);
   }
 
-  const categories = ["dependency", "exposure", "supply-chain", "secrets"] as const;
+  // The single list the result type is derived from, so a new category cannot exist in the type
+  // and be missing here — a row that gates the build and never prints is the false green in
+  // miniature.
+  const categories = SECURITY_CATEGORIES;
 
   for (const category of categories) {
     const items = byCategory[category];
