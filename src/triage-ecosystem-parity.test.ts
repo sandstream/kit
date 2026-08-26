@@ -296,6 +296,10 @@ describe("triage ecosystem parity (real triage.py against a local registry)", ()
     // flat penalty count. What must never happen again is that being invisible.
     assert.match(pipOut, /Health score: 100\/100/);
     assert.match(pipOut, /Coverage: PARTIAL/);
+    // A STRUCTURAL gap: PyPI cannot answer this, ever. It must not be worded as a source that
+    // merely happened to be unreachable, or a reader concludes a retry would fix it.
+    assert.match(pipOut, /cannot run for this ecosystem/);
+    assert.doesNotMatch(pipOut, /could not run in this run/);
     assert.match(pipOut, /maintainer count/);
   });
 
@@ -394,6 +398,7 @@ describe("triage ecosystem parity (real triage.py against a local registry)", ()
       // The old wording claimed PyPI has no such field at all. It does; this package has none.
       assert.doesNotMatch(out, /publishes no maintainer list/);
       assert.match(out, /Coverage: PARTIAL/);
+      assert.match(out, /cannot run for this ecosystem/);
     });
   });
 });

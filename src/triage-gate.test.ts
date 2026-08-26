@@ -95,6 +95,49 @@ describe("triage-gate — watertight gate (fail-closed)", () => {
     assert.match(v.reason, /typosquat/);
   });
 
+  // ─── the refusal has to name the cause, not restate the target ──────────────────────
+  //
+  // `triage.py` opens with `Triage: <type> <target>`, so picking the first non-empty line
+  // restated the header the caller already prints and dropped the reason. A blocked install
+  // read `triage did not pass (repo X): Triage: repo X` — a tautology — while
+  // "set GITHUB_TOKEN and retry" sat two lines below. Measured on kit's own repo: `kit install`
+  // refused BOTH declared scanners that way, so the remediation `kit check` suggests
+  // ("run kit install") was a dead end that never said what to remedy.
+
+  const REAL_OUTPUT = [
+    "Triage: repo https://github.com/aquasecurity/trivy",
+    "--------------------------------------------------",
+    "  x CRITICAL: GitHub API rate-limited -- cannot verify (set GITHUB_TOKEN and retry)",
+    "",
+    "Health score: 55/100",
+    "TRIAGE FAILED",
+  ].join("\n");
+
+  it("names the CRITICAL cause, not the header it was handed", async () => {
+    const v = await gateInstall("aqua:aquasecurity/trivy", triageStub(false, REAL_OUTPUT));
+    assert.equal(v.decision, "blocked");
+    assert.match(v.reason, /set GITHUB_TOKEN and retry/);
+    // The regression: the header must not be what the operator is shown as the reason.
+    assert.doesNotMatch(v.reason, /: Triage: repo/);
+  });
+
+  it("falls back to the WARNING line when there is no CRITICAL", async () => {
+    const v = await gateInstall(
+      "aqua:aquasecurity/trivy",
+      triageStub(false, "Triage: repo x/y\n----\n  ! WARNING: single maintainer\nTRIAGE FAILED"),
+    );
+    assert.match(v.reason, /single maintainer/);
+    assert.doesNotMatch(v.reason, /: Triage: repo/);
+  });
+
+  it("still returns something when the output is only a header", async () => {
+    // Must never return less than the old behaviour did.
+    const v = await gateInstall("aqua:aquasecurity/trivy", triageStub(false, "Triage: repo x/y"));
+    assert.equal(v.decision, "blocked");
+    assert.match(v.reason, /did not pass/);
+    assert.ok(v.reason.length > 0);
+  });
+
   it("unmappable ref → blocked (cannot verify)", async () => {
     const v = await gateInstall("some-random-tool", triageStub(true));
     assert.equal(v.decision, "blocked");

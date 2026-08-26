@@ -112,8 +112,15 @@ class Report:
     def fact(self, m):
         self.facts.append(m)
 
-    def notchecked(self, probe, why):
-        """Record a probe that this ecosystem's registry cannot answer.
+    def notchecked(self, probe, why, transient=False):
+        """Record a probe that did not run.
+
+        `transient=False` (the default) means this ecosystem's registry structurally cannot
+        answer it — a permanent property, which is the #489 case. `transient=True` means the
+        probe could normally run but its source was unreachable in THIS run. Collapsing the two
+        would tell a reader that a repo's popularity is never knowable, when the truth is that
+        the API was unreachable this time; the distinction is the whole point of declaring at
+        all, so it survives into the summary line.
 
         The score is a flat penalty count (100 - 45*crit - 12*warn), so it falls out of how
         many probes an ecosystem HAS, not out of how safe the package is: before this, a pip
@@ -123,7 +130,7 @@ class Report:
         semantics kit uses everywhere else, where coverage that could not run is UNKNOWN, not
         clean.
         """
-        self.notrun.append((probe, why))
+        self.notrun.append((probe, why, transient))
 
     def emit(self):
         score = max(0, 100 - 45 * len(self.criticals) - 12 * len(self.warnings))
@@ -138,7 +145,7 @@ class Report:
             print(f"  ! WARNING: {w}")
         for c in self.criticals:
             print(f"  x CRITICAL: {c}")
-        for probe, why in self.notrun:
+        for probe, why, _transient in self.notrun:
             print(f"  ~ NOT CHECKED: {probe} -- {why}")
         print()
         print(f"Health score: {score}/100")
@@ -150,10 +157,18 @@ class Report:
         if self.notrun:
             # Without this line a 100/100 with a skipped probe is indistinguishable from a
             # 100/100 with everything green -- which is the defect (#489).
-            probes = ", ".join(probe for probe, _ in self.notrun)
+            probes = ", ".join(probe for probe, _, _ in self.notrun)
+            # "cannot run for this ecosystem" is a permanent claim. Do not make it about a
+            # source that merely happened to be unreachable — a retry may well fix that one.
+            all_transient = all(transient for _, _, transient in self.notrun)
+            scope = (
+                "could not run in this run (source unreachable; retrying may resolve them)"
+                if all_transient
+                else "cannot run for this ecosystem"
+            )
             print(
-                f"Coverage: PARTIAL -- {len(self.notrun)} probe(s) cannot run for this "
-                f"ecosystem ({probes}); the score covers only what was checked"
+                f"Coverage: PARTIAL -- {len(self.notrun)} probe(s) {scope} "
+                f"({probes}); the score covers only what was checked"
             )
         if not self.criticals:
             print("TRIAGE PASSED")
@@ -512,22 +527,157 @@ def triage_pip(rep):
             )
 
 
+# Hosts whose repos this probe can actually verify. It answers via the GitHub
+# API, so any other host cannot be checked here and must SAY so — never have its
+# hostname promoted to an "owner", which produced a confident 404 about a repo
+# that never existed (kit#532).
+_REPO_HOSTS = ("github.com",)
+
+# Hosts that are not github.com but whose paths still begin with `owner/repo` of a
+# real GitHub repo. Refusing these would be technically true and practically wrong:
+# a piped installer is usually cited by its raw URL, and that URL names the repo
+# unambiguously. Anything not listed here is still refused.
+_REPO_PATH_HOSTS = ("raw.githubusercontent.com", "codeload.github.com")
+
+
 def _owner_repo(target):
+    """Reduce a repo reference to `owner/repo`.
+
+    Returns `(owner_repo, None)` on success and `(None, reason)` on refusal. The
+    two refusals are kept apart on purpose: an unsupported host is a different
+    finding from a string with no owner/repo shape, and collapsing them is what
+    made a non-GitHub URL look like a missing GitHub repo.
+
+    Accepts the shorthand plus every equivalent spelling of the same repo:
+    `owner/repo`, `[https://][www.]github.com/owner/repo[/tree/main][.git]`,
+    and `git@github.com:owner/repo[.git]`.
+    """
     t = target.strip()
-    t = t.replace("https://", "").replace("http://", "")
-    t = t.replace("github.com/", "")
-    if t.endswith(".git"):
-        t = t[:-4]
+    # scp-style `git@host:owner/repo` -> `host/owner/repo`, so one path below fits both.
+    scp = re.match(r"^[\w.+-]+@([\w.-]+):(.+)$", t)
+    if scp:
+        t = f"{scp.group(1)}/{scp.group(2)}"
+    else:
+        t = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", t)
+    t = t.split("?")[0].split("#")[0]
+
     parts = [p for p in t.split("/") if p]
-    if len(parts) >= 2:
-        return f"{parts[0]}/{parts[1]}"
-    return None
+    if not parts:
+        return None, f"could not parse owner/repo from '{target}'"
+
+    if parts[0].lower().startswith("www."):
+        parts[0] = parts[0][4:]
+    # A dotted first segment is a hostname, not an owner: GitHub usernames are
+    # alphanumeric + hyphen and never contain a dot, so this split is unambiguous.
+    if "." in parts[0]:
+        host = parts.pop(0).lower()
+        if host not in _REPO_HOSTS and host not in _REPO_PATH_HOSTS:
+            return None, (
+                f"'{target}' is not a github.com repo URL -- this probe verifies repos "
+                f"through the GitHub API and cannot check {host}"
+            )
+
+    if len(parts) < 2:
+        return None, f"could not parse owner/repo from '{target}'"
+    owner, repo = parts[0], parts[1]
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    if not owner or not repo:
+        return None, f"could not parse owner/repo from '{target}'"
+    return f"{owner}/{repo}", None
+
+
+def _api_message(e):
+    """The API's own explanation for an error, when it gives one.
+
+    A 403 has many causes — quota, token scope, SSO, an egress policy, a session that has not
+    been granted the repo — and guessing between them produced confidently wrong advice.
+    GitHub (and anything proxying it) answers with a JSON `message`, so quote that instead of
+    inferring. Remote text reaching operator output, so: bounded read, control characters
+    stripped, single line, truncated.
+    """
+    try:
+        raw = e.read(4096)
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        msg = json.loads(raw.decode("utf-8", "replace")).get("message")
+    except Exception:
+        return None
+    if not isinstance(msg, str) or not msg.strip():
+        return None
+    one_line = " ".join(msg.split())
+    clean = "".join(ch for ch in one_line if ch.isprintable())
+    return clean[:300] if clean else None
+
+
+def _forbidden_reason(e, token_sent):
+    """Explain a 403/429 from the GitHub API without guessing.
+
+    Quota exhaustion is a header fact (`x-ratelimit-remaining: 0`), so it is reported as one.
+    Anything else 403 is *forbidden*, which is a different problem with a different fix, and
+    telling the operator to set a token they have already set sends them in a circle.
+    """
+    hdrs = getattr(e, "headers", None)
+    remaining = None
+    if hdrs is not None:
+        try:
+            remaining = hdrs.get("x-ratelimit-remaining")
+        except Exception:
+            remaining = None
+    exhausted = remaining is not None and str(remaining).strip() == "0"
+
+    if e.code == 429 or exhausted:
+        hint = "wait for the window to reset" if token_sent else "set GITHUB_TOKEN to raise the limit"
+        return f"GitHub API rate limit reached -- cannot verify ({hint})"
+
+    # Quota is intact, so this is not the limit. Prefer what the API said over what we'd guess.
+    said = _api_message(e)
+    if said:
+        return f"GitHub API returned {e.code} -- cannot verify: {said}"
+    if token_sent:
+        return (
+            f"GitHub API returned {e.code} with quota remaining and no explanation -- cannot "
+            "verify. A token IS set, so this is not the rate limit: check its scopes/SSO "
+            "authorization, or whether a proxy or firewall is intercepting api.github.com"
+        )
+    return (
+        f"GitHub API returned {e.code} and no token was sent -- cannot verify (set GITHUB_TOKEN; "
+        "if one is already set, check its scopes/SSO or a proxy intercepting api.github.com)"
+    )
+
+
+# What the GitHub API answers for a repo, and therefore what is UNKNOWN when it cannot be
+# reached. Naming them individually rather than saying "the API failed" is the point: a reader
+# has to be able to see WHICH coverage is missing, and `Probes declared unavailable: 0` while
+# zero probes ran is the same false-green shape kit rejects everywhere else.
+_REPO_API_PROBES = (
+    ("popularity", "stargazers_count comes only from the GitHub API"),
+    ("license", "license.spdx_id comes only from the GitHub API"),
+    ("archived/disabled", "repo lifecycle state comes only from the GitHub API"),
+    ("repo age", "created_at comes only from the GitHub API"),
+    ("recent activity", "pushed_at comes only from the GitHub API"),
+)
+
+
+def _declare_repo_probes_unavailable(rep):
+    """Mark every API-backed repo probe as not run.
+
+    Deliberately NOT paired with a git fallback. Deriving dates or the license would mean
+    cloning, and `kit triage repo` exists to be run BEFORE you fetch a repo — a triage that
+    fetches in order to judge whether you should fetch inverts the order it enforces. So the
+    honest answer is that this coverage is missing, not a substitute for it.
+    """
+    for probe, why in _REPO_API_PROBES:
+        rep.notchecked(probe, why, transient=True)
 
 
 def triage_repo(rep):
-    or_ = _owner_repo(rep.target)
-    if not or_:
-        rep.critical(f"could not parse owner/repo from '{rep.target}'")
+    or_, refusal = _owner_repo(rep.target)
+    if refusal:
+        rep.critical(refusal)
         return
     headers = {}
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
@@ -537,14 +687,23 @@ def triage_repo(rep):
         data, _ = _get_json(f"{GITHUB_API}/repos/{or_}", headers=headers)
     except urllib.error.HTTPError as e:
         if e.code == 404:
+            # A definite answer, not a coverage gap: the API replied that there is no such
+            # repo. Nothing is left unknown, so no probe is declared unavailable here.
             rep.critical(f"repo '{or_}' not found (or private)")
-        elif e.code in (403, 429):
-            rep.critical("GitHub API rate-limited -- cannot verify (set GITHUB_TOKEN and retry)")
+            return
+        if e.code in (403, 429):
+            # 403 and 429 are NOT the same thing, and the old single message told every
+            # caller to "set GITHUB_TOKEN and retry" — wrong advice when a token is already
+            # set and the 403 came from a proxy, an SSO requirement, or a scope gap. GitHub
+            # sends the quota in headers, so exhaustion is checkable rather than assumed.
+            rep.critical(_forbidden_reason(e, token_sent=bool(token)))
         else:
             rep.critical(f"GitHub API returned HTTP {e.code} (cannot verify)")
+        _declare_repo_probes_unavailable(rep)
         return
     except (urllib.error.URLError, TimeoutError, OSError):
         rep.critical("could not reach GitHub (offline?) -- cannot verify")
+        _declare_repo_probes_unavailable(rep)
         return
 
     rep.fact(f"{or_}: {data.get('stargazers_count', 0)} stars, "

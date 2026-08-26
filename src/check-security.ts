@@ -1310,13 +1310,33 @@ const PLACEHOLDER_SECRETS = new Set([
  * `printf %s '<token>' | shasum -a 256` — without shipping token-shaped bytes.
  *   868034cf… = GitHub's documented example PAT (docs.github.com REST auth examples).
  */
+/**
+ * SHA-256 of strings that are documentation samples, not credentials — honoured by BOTH the
+ * trufflehog path (`isExampleCredential`) and the degraded basic scan (`basicSecretScanFiles`).
+ *
+ * A digest, deliberately, and not a path or file entry: it waves through exactly one known
+ * string and nothing else in the file that contains it, and any edit to the string re-flags it.
+ * `.kit-secretsignore` is the mechanism for accepting a *real* historical finding by commit;
+ * this is for text that was never a secret in the first place.
+ */
 const DOC_SAMPLE_SECRET_DIGESTS = new Set([
   "868034cf6e8877d082cf2e61a4964c04affcbfd6abf8a8d0339ce3298636fa57",
+  // CHANGELOG.md — the `[scan.client_exposed_allow]` example for the 6.9.0 bundle check. The
+  // "value" is the English reason the variable is allowed, inside a ```toml block.
+  "fe84d3b8aa71ba34eb2fc31c7c958bc961514b50eef8803748491cf06b8db8bc",
 ]);
 const LOOPBACK_HOST_RE = /^(localhost|127(?:\.\d{1,3}){3}|\[?::1\]?|0\.0\.0\.0)$/i;
 const RESERVED_HOST_RE = /\.(internal|local|localdomain|localhost|test|invalid|example)$/i;
 const EXAMPLE_DOMAIN_RE = /^(?:[a-z0-9-]+\.)*example\.(?:com|org|net)$/i;
-/** `scheme://[user[:secret]@]host[:port]` — the shape every URI-credential detector emits. */
+/**
+ * Matches a URI credential: a scheme, an optional user and secret in the userinfo position,
+ * then host and optional port — the shape every URI-credential detector emits.
+ *
+ * Described in prose rather than shown as a literal on purpose. A literal example of that
+ * shape in a comment is itself matched by kit's own staged-secret scan, so it blocked every
+ * commit touching this file until the author reached for `--no-verify`. Please do not
+ * "improve" this back into an inline example.
+ */
 const URI_CREDENTIAL_RE = /^[a-z][a-z0-9+.-]*:\/\/(?:([^:@/\s]+)(?::([^@/\s]*))?@)?([^/?#\s]+)/i;
 
 export function isExampleCredential(f: TrufflehogFinding): boolean {
@@ -1417,6 +1437,14 @@ export function basicSecretScanFiles(lines: string[]): string[] {
     const value = content.match(VALUE_RE)?.[1] ?? "";
     if (/^[A-Z][A-Z0-9_]+$/.test(value)) continue; // env-var name, not a secret
     if (TEMPLATE_VALUE.test(value)) continue; // substitution syntax, not a literal
+    // A known documentation sample. The trufflehog path already skips these via
+    // `isExampleCredential`; without the same check here the degraded path warns forever on
+    // text that is not a secret, and `.kit-secretsignore` cannot clear it because that file
+    // names findings by commit+detector, neither of which a working-tree grep has. A warning
+    // with no reachable green state is one nobody reads (README).
+    if (DOC_SAMPLE_SECRET_DIGESTS.has(createHash("sha256").update(value.trim()).digest("hex"))) {
+      continue;
+    }
     files.add(file);
   }
   return [...files];

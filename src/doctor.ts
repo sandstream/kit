@@ -451,6 +451,123 @@ export function triageGateStatus(hookContent: string | null): {
   };
 }
 
+/**
+ * The four hosts the triage gate queries, and how each is redirected.
+ *
+ * `kit triage` is the one part of kit that needs network (docs/AIR_GAP.md), so "which of these
+ * am I pointed at" decides whether the gate can evaluate anything at all. Three postures are
+ * legitimate and were previously indistinguishable without reading env vars by hand:
+ *
+ *   connected   public defaults — the gate reaches the real registries
+ *   mirrored    redirected at internal mirrors / GitHub Enterprise — the air-gap posture
+ *   restricted  public defaults on a host that blocks them — looks like `connected`, behaves
+ *               like nothing works, and only announces itself when an install is refused
+ *
+ * This row cannot tell `connected` from `restricted` (it does no I/O — `kit doctor` is offline
+ * by design and stays that way), so it never claims reachability. What it does is make the
+ * configuration visible BEFORE `kit install` refuses, which is when this used to surface.
+ */
+export const TRIAGE_ENDPOINTS = [
+  {
+    probe: "npm",
+    env: "KIT_NPM_REGISTRY",
+    cfg: "npm_registry",
+    dflt: "https://registry.npmjs.org",
+  },
+  { probe: "pypi", env: "KIT_PYPI_INDEX", cfg: "pypi_index", dflt: "https://pypi.org" },
+  { probe: "repo", env: "KIT_GITHUB_API", cfg: "github_api", dflt: "https://api.github.com" },
+  {
+    probe: "docker",
+    env: "KIT_DOCKER_REGISTRY",
+    cfg: "docker_registry",
+    dflt: "https://hub.docker.com",
+  },
+] as const;
+
+/** Host only, never the full URL: an internal mirror may carry credentials in userinfo, and
+ *  doctor output gets pasted into issues. */
+function endpointHost(url: string): string {
+  try {
+    return new URL(url).host || "(no host)";
+  } catch {
+    return "(unparseable)";
+  }
+}
+
+type AirGapConfig = {
+  enabled?: boolean;
+  npm_registry?: string;
+  pypi_index?: string;
+  github_api?: string;
+  docker_registry?: string;
+};
+
+/**
+ * Pure decision, split out for testing (same idiom as `triageGateStatus`).
+ * Env wins over the config file, matching docs/AIR_GAP.md.
+ */
+export function triageRegistryStatus(
+  env: Record<string, string | undefined>,
+  airGap?: AirGapConfig,
+): { status: DoctorCheckStatus; detail: string } {
+  const resolved = TRIAGE_ENDPOINTS.map((e) => {
+    const configured = env[e.env] || airGap?.[e.cfg];
+    const value = (configured || e.dflt).replace(/\/+$/, "");
+    return { probe: e.probe, env: e.env, cfg: e.cfg, value, redirected: value !== e.dflt };
+  });
+
+  const redirected = resolved.filter((r) => r.redirected);
+  const defaults = resolved.filter((r) => !r.redirected);
+  const names = (rs: typeof resolved) => rs.map((r) => r.probe).join(", ");
+  const arrows = (rs: typeof resolved) =>
+    rs.map((r) => `${r.probe}→${endpointHost(r.value)}`).join(", ");
+
+  // A declared air-gap with probes still on public defaults is a contradiction worth naming:
+  // the posture says no egress, the gate will attempt it anyway (and fail closed if blocked).
+  if (airGap?.enabled === true && defaults.length > 0) {
+    const fixes = defaults.map((r) => `${r.env} / [air_gap].${r.cfg}`).join(", ");
+    return {
+      status: "warn",
+      detail:
+        `[air_gap] enabled but ${defaults.length}/${resolved.length} probe(s) still point at ` +
+        `public defaults (${names(defaults)}) — triage will egress for them, or fail closed ` +
+        `if that egress is blocked. Redirect them: ${fixes}`,
+    };
+  }
+
+  if (redirected.length === resolved.length) {
+    return {
+      status: "pass",
+      detail: `all ${resolved.length} probes redirected (${arrows(redirected)}) — mirrored posture; this row does not probe reachability`,
+    };
+  }
+
+  if (redirected.length > 0) {
+    return {
+      status: "pass",
+      detail:
+        `${redirected.length}/${resolved.length} redirected (${arrows(redirected)}); ` +
+        `${defaults.length} on public defaults (${names(defaults)}) — this row does not probe reachability`,
+    };
+  }
+
+  return {
+    status: "pass",
+    detail:
+      `public defaults for all ${resolved.length} probes (${names(defaults)}) — the triage gate ` +
+      `must reach them; if installs are being refused with "cannot verify", redirect the ` +
+      `relevant KIT_* var. This row does not probe reachability`,
+  };
+}
+
+async function checkTriageRegistries(config: kitConfig): Promise<DoctorCheck> {
+  return {
+    name: "triage registries",
+    category: "security",
+    ...triageRegistryStatus(process.env, config.air_gap),
+  };
+}
+
 async function checkTriageGates(cwd: string): Promise<DoctorCheck> {
   const name = "triage pre-commit gates";
   const category = "security";
@@ -754,6 +871,7 @@ export async function runDoctor(config: kitConfig, cwd: string): Promise<DoctorR
   allChecks.push(await checkContainment(cwd));
   allChecks.push(await checkDeepSkillScanner());
   allChecks.push(await checkTriageGates(cwd));
+  allChecks.push(await checkTriageRegistries(config));
   allChecks.push(checkControlPlane(cwd));
 
   const passed = allChecks.filter((c) => c.status === "pass").length;

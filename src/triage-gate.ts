@@ -94,13 +94,30 @@ export interface GateDeps {
 const defaultDeps: GateDeps = { runTriage };
 
 /** First non-empty line of triage output, for a compact block reason. */
+/**
+ * The line a blocked operator needs, which is NOT the first one.
+ *
+ * `triage.py` opens with `Triage: <type> <target>` — so taking the first non-empty line
+ * restated the header the caller already prints, and dropped the actual cause. A blocked
+ * `kit install` therefore read `triage did not pass (repo X): Triage: repo X`, a tautology,
+ * while the reason ("GitHub API rate-limited -- cannot verify (set GITHUB_TOKEN and retry)")
+ * sat two lines below and was discarded. The remediation the check suggests is unreachable
+ * if the refusal will not say what to remedy.
+ *
+ * Prefer the first CRITICAL, then the first WARNING, then any line that is not the header or
+ * a rule; fall back to the first non-empty line so this can never return less than before.
+ */
 function firstLine(output: string): string {
-  return (
-    output
-      .split("\n")
-      .map((l) => l.trim())
-      .find(Boolean) ?? "no triage output"
-  );
+  const lines = output
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const critical = lines.find((l) => l.includes("CRITICAL:"));
+  if (critical) return critical.replace(/^x\s+/, "");
+  const warning = lines.find((l) => l.includes("WARNING:"));
+  if (warning) return warning.replace(/^!\s+/, "");
+  const substantive = lines.find((l) => !/^Triage:/.test(l) && !/^[-─=]+$/.test(l));
+  return substantive ?? lines[0] ?? "no triage output";
 }
 
 /**

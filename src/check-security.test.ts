@@ -864,6 +864,35 @@ describe("basicSecretScanFiles — degraded-path false-positive filter", () => {
     assert.deepStrictEqual(files, ["src/leak.ts"]);
   });
 
+  it("skips a known documentation sample, by digest — the same list trufflehog's path uses", () => {
+    // kit's own CHANGELOG carries this inside a ```toml block: the `[scan.client_exposed_allow]`
+    // example for the 6.9.0 bundle check, whose "value" is the English reason the variable is
+    // allowed. It is in git forever, so on any machine without trufflehog the scan sat at `warn`
+    // permanently — and `.kit-secretsignore` could not clear it, because that file names findings
+    // by commit+detector and a working-tree grep has neither.
+    const files = basicSecretScanFiles([
+      hit("CHANGELOG.md", `VITE_DEMO_SECRET_KEY = "demo tenant, rotated nightly"`),
+    ]);
+    assert.deepStrictEqual(files, []);
+  });
+
+  it("the allowlist is content-exact — one edited character re-flags the file", () => {
+    // The guard against a digest entry becoming a blanket file exclusion. Same file, same
+    // shape, one word changed: it must come back.
+    const files = basicSecretScanFiles([
+      hit("CHANGELOG.md", `VITE_DEMO_SECRET_KEY = "demo tenant, rotated nightlyy"`),
+    ]);
+    assert.deepStrictEqual(files, ["CHANGELOG.md"]);
+  });
+
+  it("an allowlisted sample does not excuse a real secret elsewhere in the same file", () => {
+    const files = basicSecretScanFiles([
+      hit("CHANGELOG.md", `VITE_DEMO_SECRET_KEY = "demo tenant, rotated nightly"`),
+      hit("CHANGELOG.md", `api_key = "eeeeeeeeeeeeeeeeeeeeeeeeeeee"`),
+    ]);
+    assert.deepStrictEqual(files, ["CHANGELOG.md"]);
+  });
+
   it("dedupes multiple hits in one file and ignores malformed grep lines", () => {
     const files = basicSecretScanFiles([
       hit("src/a.ts", `password = "cccccccccccccccccccccccc"`),
