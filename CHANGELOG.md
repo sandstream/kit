@@ -7,6 +7,10 @@
   failure can continue to GitHub release/SBOM recovery instead of stopping on
   `EPUBLISHCONFLICT`.
 
+- **Container CVE drift.** Runtime Docker image now upgrades Alpine OpenSSL packages
+  before removing npm, so the Trivy gate does not stay red while the floating
+  `node:22-alpine` image lags fixed Alpine patch packages.
+
 ## [6.10.0] - 2026-08-26
 
 ### Added
