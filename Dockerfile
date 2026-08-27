@@ -31,10 +31,11 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-# Install dumb-init for proper signal handling.
+# Install dumb-init for proper signal handling, and pull fixed OpenSSL patch
+# levels from Alpine repositories when the floating Node image lags them.
 # Remove bundled npm (ships with a vulnerable picomatch and isn't needed at
 # runtime — kit CLI shells out to `node`, never `npm`). Saves ~30MB.
-RUN apk add --no-cache dumb-init \
+RUN apk add --no-cache --upgrade dumb-init libcrypto3 libssl3 \
  && rm -rf /usr/local/lib/node_modules/npm \
  && rm -f /usr/local/bin/npm /usr/local/bin/npx
 

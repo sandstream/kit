@@ -159,7 +159,7 @@ jobs:
         run: docker build -t kit:${{ github.sha }} .
       - name: Trivy scan (HIGH+CRITICAL — gating)
         # scanners: vuln — only CVE scan. Secret scanning handled by gitleaks.
-        # Image is clean of HIGH/CRITICAL after npm removal + picomatch bump.
+        # Image is clean of HIGH/CRITICAL after runtime apk upgrades + npm removal.
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: kit:${{ github.sha }}
