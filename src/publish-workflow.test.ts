@@ -131,3 +131,20 @@ describe("publish.yml — trusted-publishing prerequisites", () => {
     );
   });
 });
+
+describe("publish.yml — publish steps are rerunnable after partial failures", () => {
+  it("skips the root package when the exact version already exists on npm", () => {
+    const start = EXECUTED.indexOf("Publish to npm with provenance");
+    const end = EXECUTED.indexOf("Publish the adapter SDK and first-party plugins");
+    assert.ok(start >= 0, "publish.yml no longer has the root npm publish step");
+    assert.ok(end > start, "publish.yml root publish step is no longer before workspace publish");
+
+    const step = EXECUTED.slice(start, end);
+    const lookup = step.indexOf('npm view "$name@$version" version');
+    const publish = step.indexOf('npm publish --provenance --access public --tag "$DIST_TAG"');
+
+    assert.ok(lookup >= 0, "root publish must check whether name@version already exists");
+    assert.ok(publish > lookup, "root publish must check npm before publishing");
+    assert.match(step, /already on npm/);
+  });
+});

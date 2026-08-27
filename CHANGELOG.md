@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+### Fixed
+
+- **Publish workflow partial reruns.** Root npm publish now skips an already-published
+  exact version, matching workspace publish behavior, so a rerun after a later-step
+  failure can continue to GitHub release/SBOM recovery instead of stopping on
+  `EPUBLISHCONFLICT`.
+
 ## [6.10.0] - 2026-08-26
 
 ### Added

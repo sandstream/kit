@@ -8,8 +8,8 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # Protected environment gate. There is no npm token here any more: all 13 packages
-    # have a GitHub Actions trusted publisher naming this repo, THIS workflow file, and
+    # Protected environment gate. There is no npm token here any more: every published package
+    # has a GitHub Actions trusted publisher naming this repo, THIS workflow file, and
     # THIS environment, so npm mints a short-lived credential from the job's OIDC identity
     # and only for runs that reach this environment. That makes the environment part of the
     # credential rather than merely the guard around a secret — configure required reviewers
@@ -51,7 +51,7 @@ jobs:
         # with NO long-lived secret — and it exists only in npm >= 11.5.1 (node >= 22.14.0).
         # setup-node ships npm 10.9.x for node 22, so the client in this job would have no
         # OIDC exchange to make. Installed here so the prerequisite is already true when the
-        # registry-side switch lands (13 per-package configs on npmjs.com — docs/RELEASING.md).
+        # registry-side switch lands (one per published package on npmjs.com — docs/RELEASING.md).
         #
         # Measured on npm 11.19.0 against this repo before wiring: `npm ci` and
         # `npm publish --dry-run` both behave identically, and npm >= 11's skip-install-scripts
@@ -265,7 +265,22 @@ jobs:
         #   npm view sandstream-kit --json | jq '.dist'
         # --tag routes prereleases to `next` (see the resolve step) so they never
         # clobber `latest`.
-        run: npm publish --provenance --access public --tag ${{ steps.disttag.outputs.tag }}
+        #
+        # IDEMPOTENT: the root package is skipped when that exact version is
+        # already on the registry. That lets a partial release rerun continue to
+        # the workspace / GitHub-release recovery steps instead of dying on
+        # EPUBLISHCONFLICT after npm already burned the version.
+        env:
+          DIST_TAG: ${{ steps.disttag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "· $name@$version already on npm — skipping root publish"
+            exit 0
+          fi
+          npm publish --provenance --access public --tag "$DIST_TAG"
 
       - name: Publish the adapter SDK and first-party plugins
         # WHY THIS EXISTS: `packages/` is not in the root tarball (files: ["dist","README.md",
