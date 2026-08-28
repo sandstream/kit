@@ -18,6 +18,7 @@ import {
   checkMemoryInjection,
   checkGateLiveness,
   checkDeviceIdOverride,
+  checkLicenses,
   unpinnedNodeDeps,
   auditAllowScripts,
   checkAllowScripts,
@@ -642,6 +643,59 @@ describe(".kit-secretsignore (explicitly accepted historical findings)", () => {
         ignored: 1,
       },
     );
+  });
+});
+
+describe("license check npx fallback", () => {
+  it("uses an isolated npm cache so a broken user cache does not make the scan red", async () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-license-root-"));
+    const bin = join(root, "bin");
+    const project = join(root, "project");
+    const badCache = join(root, "root-owned-npm-cache");
+    mkdirSync(bin, { recursive: true });
+    mkdirSync(project, { recursive: true });
+    mkdirSync(badCache, { recursive: true });
+    writeFileSync(join(project, "package.json"), JSON.stringify({ name: "x", version: "1.0.0" }));
+
+    writeFileSync(join(bin, "license-checker"), "#!/bin/sh\nexit 127\n");
+    chmodSync(join(bin, "license-checker"), 0o755);
+    writeFileSync(
+      join(bin, "npx"),
+      [
+        "#!/bin/sh",
+        'if [ "$1" = "--version" ]; then echo "10.0.0"; exit 0; fi',
+        'if [ -z "$NPM_CONFIG_CACHE" ]; then echo "missing isolated cache" >&2; exit 7; fi',
+        'if [ "$NPM_CONFIG_CACHE" = "$BAD_NPM_CACHE" ]; then echo "used broken user cache" >&2; exit 13; fi',
+        'case "$*" in',
+        '  *license-checker*--json*--production*) printf \'%s\\n\' \'{ "left-pad@1.3.0": { "licenses": "MIT" } }\'; exit 0 ;;',
+        "esac",
+        'echo "unexpected args: $*" >&2',
+        "exit 2",
+      ].join("\n") + "\n",
+    );
+    chmodSync(join(bin, "npx"), 0o755);
+
+    const prevPath = process.env.PATH;
+    const prevNpmCache = process.env.NPM_CONFIG_CACHE;
+    const prevBadCache = process.env.BAD_NPM_CACHE;
+    try {
+      process.env.PATH = [bin, "/usr/bin", "/bin"].join(":");
+      process.env.NPM_CONFIG_CACHE = badCache;
+      process.env.BAD_NPM_CACHE = badCache;
+
+      const result = await checkLicenses(project);
+
+      assert.equal(result.status, "pass");
+      assert.equal(result.detail, "no problematic licenses found");
+    } finally {
+      if (prevPath === undefined) delete process.env.PATH;
+      else process.env.PATH = prevPath;
+      if (prevNpmCache === undefined) delete process.env.NPM_CONFIG_CACHE;
+      else process.env.NPM_CONFIG_CACHE = prevNpmCache;
+      if (prevBadCache === undefined) delete process.env.BAD_NPM_CACHE;
+      else process.env.BAD_NPM_CACHE = prevBadCache;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

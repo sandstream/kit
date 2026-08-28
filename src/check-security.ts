@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, access, readdir } from "node:fs/promises";
+import { readFile, access, readdir, mkdtemp, rm } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { resolve } from "node:path";
-import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
@@ -2231,7 +2231,7 @@ async function checkOsvScanner(root: string): Promise<SecurityCheckResult> {
 /**
  * Check dependency licenses for GPL/AGPL that create legal obligations.
  */
-async function checkLicenses(root: string): Promise<SecurityCheckResult> {
+export async function checkLicenses(root: string): Promise<SecurityCheckResult> {
   try {
     await access(resolve(root, "package.json"));
   } catch {
@@ -2246,7 +2246,7 @@ async function checkLicenses(root: string): Promise<SecurityCheckResult> {
   // Try direct binary first (fast). If absent, fall back to `npx --yes
   // license-checker` so we don't force users to `npm install -g`.
   // npx first-run can fetch the package, so allow generous timeout.
-  let runner: { cmd: string; baseArgs: string[] } | null = null;
+  let runner: { cmd: string; baseArgs: string[]; isolatedNpmCache?: boolean } | null = null;
   // Resolve mise-first so a `mise use -g` license-checker is found even when mise
   // isn't activated; otherwise fall back to npx (below).
   const licenseCheckerBin = (await resolveToolBin("license-checker")) ?? "license-checker";
@@ -2254,9 +2254,11 @@ async function checkLicenses(root: string): Promise<SecurityCheckResult> {
   if (direct.ok) {
     runner = { cmd: licenseCheckerBin, baseArgs: [] };
   } else {
-    const npxAvailable = await execFileNoThrow("npx", ["--version"], { timeout: 5_000 });
+    const npxAvailable = await withIsolatedNpmCache((env) =>
+      execFileNoThrow("npx", ["--version"], { timeout: 5_000, env }),
+    );
     if (npxAvailable.ok) {
-      runner = { cmd: "npx", baseArgs: ["--yes", "license-checker"] };
+      runner = { cmd: "npx", baseArgs: ["--yes", "license-checker"], isolatedNpmCache: true };
     }
   }
 
@@ -2275,17 +2277,22 @@ async function checkLicenses(root: string): Promise<SecurityCheckResult> {
   }
 
   const PROBLEMATIC = ["GPL", "AGPL", "LGPL", "CPAL", "OSL", "EUPL"];
-  const result = await execFileNoThrow(runner.cmd, [...runner.baseArgs, "--json", "--production"], {
-    timeout: 120_000,
-    cwd: root,
-  });
+  const runLicenseChecker = (env?: NodeJS.ProcessEnv) =>
+    execFileNoThrow(runner.cmd, [...runner.baseArgs, "--json", "--production"], {
+      timeout: 120_000,
+      cwd: root,
+      env,
+    });
+  const result = runner.isolatedNpmCache
+    ? await withIsolatedNpmCache(runLicenseChecker)
+    : await runLicenseChecker();
 
   if (!result.ok && !result.stdout) {
     return {
       category: "supply-chain",
       name: "license check",
       status: "warn",
-      detail: "license check failed",
+      detail: licenseFailureDetail(result),
       severity: "low",
     };
   }
@@ -2321,10 +2328,24 @@ async function checkLicenses(root: string): Promise<SecurityCheckResult> {
       category: "supply-chain",
       name: "license check",
       status: "warn",
-      detail: "license check failed",
+      detail: licenseFailureDetail(result),
       severity: "low",
     };
   }
+}
+
+async function withIsolatedNpmCache<T>(fn: (env: NodeJS.ProcessEnv) => Promise<T>): Promise<T> {
+  const cacheDir = await mkdtemp(join(tmpdir(), "kit-npm-cache-"));
+  try {
+    return await fn({ ...process.env, NPM_CONFIG_CACHE: cacheDir, npm_config_cache: cacheDir });
+  } finally {
+    await rm(cacheDir, { recursive: true, force: true });
+  }
+}
+
+function licenseFailureDetail(result: { stderr: string; stdout: string }): string {
+  const firstLine = (result.stderr || result.stdout).trim().split("\n")[0]?.trim();
+  return firstLine ? `license check failed: ${firstLine.slice(0, 200)}` : "license check failed";
 }
 
 /**
