@@ -30,6 +30,8 @@ import {
   SHIM_MARKER,
   RC_BEGIN,
   RC_END,
+  guardPathWinners,
+  gitCloneObservation,
 } from "./guard.js";
 
 // kit guard v1 (observe): the shim's contract is FAIL-OPEN by construction —
@@ -205,6 +207,53 @@ describe("observation log", () => {
   });
 });
 
+describe("guard PATH effectiveness (#538)", () => {
+  it("reports when another PATH entry wins before kit's shim", () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-guard-path-"));
+    try {
+      const kitShims = join(root, "kit", "shims");
+      const otherBin = join(root, "other", "bin");
+      mkdirSync(kitShims, { recursive: true });
+      mkdirSync(otherBin, { recursive: true });
+      writeShim("npm", kitShims);
+      writeFileSync(join(otherBin, "npm"), "#!/bin/sh\n", { mode: 0o755 });
+
+      const displaced = guardPathWinners(kitShims, `${otherBin}:${kitShims}`, ["npm"])[0];
+      assert.equal(displaced.installed, true);
+      assert.equal(displaced.kitWins, false);
+      assert.equal(displaced.winner, join(otherBin, "npm"));
+
+      const covered = guardPathWinners(kitShims, `${kitShims}:${otherBin}`, ["npm"])[0];
+      assert.equal(covered.kitWins, true);
+      assert.equal(covered.winner, join(kitShims, "npm"));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("guard git clone observation (#537)", () => {
+  it("observes clone as repo intake but does not mark it a hard block", () => {
+    const obs = gitCloneObservation("git", [
+      "-c",
+      "protocol.version=2",
+      "clone",
+      "--depth",
+      "1",
+      "https://github.com/acme/tool.git",
+    ]);
+    assert.ok(obs);
+    assert.equal(obs.ref, "github:acme/tool");
+    assert.match(obs.reason, /observe-only/);
+    assert.match(obs.reason, /kit triage repo https:\/\/github\.com\/acme\/tool\.git/);
+  });
+
+  it("ignores non-clone git commands", () => {
+    assert.equal(gitCloneObservation("git", ["status"]), null);
+    assert.equal(gitCloneObservation("npm", ["clone", "https://github.com/acme/tool"]), null);
+  });
+});
+
 // #461: the shim hands off to the next `npm` on PATH. When that next entry belongs
 // to ANOTHER shim manager (mise/asdf/pyenv/rbenv), that manager re-resolves `npm`
 // through PATH — with kit's shims still first — and the two shims ping-pong
@@ -239,7 +288,7 @@ function runShim(
     // on the hand-off's side effects (marker leakage, PATH surgery), not merely that
     // something ran.
     const reporter = (tag: string) =>
-      `#!/bin/sh\necho "${tag} npm $*"\necho "MARKER=\${KIT_GUARD_ACTIVE_NPM:-unset}"\necho "PATH=\$PATH"\n`;
+      `#!/bin/sh\necho "${tag} npm $*"\necho "MARKER=\${KIT_GUARD_ACTIVE_NPM:-unset}"\necho "PATH=$PATH"\n`;
     if (!opts.noRealNpm) {
       const realDir = competing === "owns-tool" ? installBin : sysBin;
       writeFileSync(join(realDir, "npm"), reporter("REAL"), { mode: 0o755 });
@@ -256,7 +305,7 @@ function runShim(
         `#!/bin/sh
 _oi="\${IFS}"
 IFS=:
-for _d in \$PATH; do
+for _d in $PATH; do
   IFS="\${_oi}"
   [ -n "\${_d}" ] || continue
   [ "\${_d}" = "${otherShims}" ] && continue
@@ -360,7 +409,7 @@ describe("hand-off when another shim manager owns the tool (#461)", () => {
 
 describe("coverage roster", () => {
   it("the fetch-and-run family is on the roster — npx-shaped tools above all", () => {
-    for (const t of ["npx", "bunx", "pipx", "uvx", "npm", "bun", "brew", "pip"]) {
+    for (const t of ["npx", "bunx", "pipx", "uvx", "npm", "bun", "brew", "pip", "git"]) {
       assert.ok(GUARD_TOOLS.includes(t), `${t} missing from GUARD_TOOLS`);
     }
     assert.ok(!existsSync("/nonexistent"), "sanity");

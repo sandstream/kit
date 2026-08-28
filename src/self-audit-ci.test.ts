@@ -4,7 +4,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractScriptRefs, resolveNpmScript, runCiScriptAudit } from "./self-audit-ci.js";
+import {
+  OPERATOR_RUN_MARKER,
+  extractScriptRefs,
+  resolveNpmScript,
+  runCiScriptAudit,
+  unreferencedScripts,
+} from "./self-audit-ci.js";
 
 // Repo root: this compiled test lives at dist/self-audit-ci.test.js, so the repo
 // root is one directory up from dist/.
@@ -87,6 +93,7 @@ describe("runCiScriptAudit", () => {
     assert.equal(results.length, 1);
     assert.equal(results[0].status, "pass");
     assert.match(results[0].detail, /refs across \d+ workflows all resolve/);
+    assert.match(results[0].detail, /scripts referenced or declared operator-run/);
   });
 
   it("reports exactly one fail for a missing referenced script", () => {
@@ -128,6 +135,87 @@ describe("runCiScriptAudit", () => {
       const fails = results.filter((r) => r.status === "fail");
       assert.equal(fails.length, 1);
       assert.equal(fails[0].name, "nonexistent");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports an unreferenced script as an advisory, not a failure", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-ci-audit-inverse-"));
+    try {
+      mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
+      mkdirSync(join(dir, "scripts"), { recursive: true });
+      writeFileSync(
+        join(dir, ".github", "workflows", "ci.yml"),
+        "jobs:\n  x:\n    steps:\n      - run: npm run check\n",
+      );
+      writeFileSync(
+        join(dir, "package.json"),
+        JSON.stringify({ name: "tmp", scripts: { check: "node scripts/live.mjs" } }),
+      );
+      writeFileSync(join(dir, "scripts", "live.mjs"), "console.log('live');\n");
+      writeFileSync(join(dir, "scripts", "dead.mjs"), "console.log('dead');\n");
+
+      const results = runCiScriptAudit(dir);
+      const inverse = results.find((r) => r.name === "unreferenced script");
+      assert.equal(inverse?.status, "warn");
+      assert.equal(inverse?.severity, "low");
+      assert.match(inverse!.detail, /scripts\/dead\.mjs/);
+      assert.deepEqual(inverse?.files, ["scripts/dead.mjs"]);
+      assert.equal(
+        results.some((r) => r.status === "fail"),
+        false,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not warn for an unreferenced operator-run script with the marker", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-ci-audit-operator-"));
+    try {
+      mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
+      mkdirSync(join(dir, "scripts"), { recursive: true });
+      writeFileSync(
+        join(dir, ".github", "workflows", "ci.yml"),
+        "jobs:\n  x:\n    steps:\n      - run: npm run check\n",
+      );
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { check: "echo ok" } }));
+      writeFileSync(
+        join(dir, "scripts", "manual.sh"),
+        `#!/usr/bin/env bash\n# ${OPERATOR_RUN_MARKER}\n`,
+      );
+
+      const results = runCiScriptAudit(dir);
+      assert.deepEqual(
+        results.filter((r) => r.name === "unreferenced script"),
+        [],
+      );
+      assert.equal(results.length, 1);
+      assert.match(results[0].detail, /1 scripts referenced or declared operator-run/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("unreferencedScripts treats docs/source refs as live and skips self-refs", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-ci-audit-scan-"));
+    try {
+      mkdirSync(join(dir, "scripts"), { recursive: true });
+      mkdirSync(join(dir, "docs"), { recursive: true });
+      mkdirSync(join(dir, "src"), { recursive: true });
+      writeFileSync(join(dir, "scripts", "doc-live.mjs"), "// Usage: scripts/doc-live.mjs\n");
+      writeFileSync(join(dir, "scripts", "src-live.mjs"), "console.log('src-live');\n");
+      writeFileSync(join(dir, "scripts", "lonely.mjs"), "console.log('lonely');\n");
+      writeFileSync(join(dir, "docs", "RUN.md"), "Run `node scripts/doc-live.mjs`.\n");
+      writeFileSync(join(dir, "src", "caller.ts"), 'const script = "src-live.mjs";\n');
+
+      const report = unreferencedScripts(dir);
+      assert.deepEqual(
+        report.unreferenced.map((s) => s.path),
+        ["scripts/lonely.mjs"],
+      );
+      assert.equal(report.total, 3);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

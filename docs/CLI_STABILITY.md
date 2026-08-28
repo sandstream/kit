@@ -38,9 +38,12 @@ document — [`contracts/kit.opencli.json`](../contracts/kit.opencli.json) — g
 from the same `COMMAND_REGISTRY` source of truth (`scripts/gen-opencli.mjs`, drift-tested
 by `opencli.test.ts`). It's an "OpenAPI for CLIs" description so an external agent or tool
 can learn kit's commands without scraping `--help`; each command carries `x-kit-stability`
-and `x-kit-mcp`, and `x-kit-args-modeled: false` marks that per-flag argument metadata is
-not modeled yet (absent args/flags must not be read as "takes none"). Treated as an output
-format, not a dependency — the spec is pre-1.0.
+and `x-kit-mcp`. Each command also carries `x-kit-args-modeled: true` plus
+`x-kit-accepted-flags`, the dispatch-level long-flag allowlist generated from
+`src/flag-surface.ts` and kit's global flags. Standard OpenCLI `args` / `flags`
+objects are still omitted because kit does not yet model positional args or flag
+type/arity/choice metadata; absent standard args/flags must not be read as "takes
+none". Treated as an output format, not a dependency — the spec is pre-1.0.
 
 ## Stable command promise
 

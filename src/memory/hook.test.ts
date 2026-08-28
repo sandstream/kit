@@ -14,6 +14,7 @@ import {
   runSessionEndIndex,
   consumeSessionEndLog,
   logSessionEndEvent,
+  agingNoticeForPaths,
 } from "./hook.js";
 import { getCurrentProjectRoot } from "./project.js";
 import { shareEntry } from "./shared.js";
@@ -235,6 +236,90 @@ describe("memory hook — recentDecisions (shared curated tier)", () => {
       assert.deepEqual(recentDecisions(empty, 3), []);
     } finally {
       rmSync(empty, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("memory hook — shared aging notice", () => {
+  it("surfaces aged derived/inferred entries only for touched areas (#550)", () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-aging-hook-"));
+    try {
+      mkdirSync(join(root, ".kit", "shared"), { recursive: true });
+      writeFileSync(
+        join(root, ".kit", "shared", "clusters.json"),
+        JSON.stringify({ memory: ["src/memory/**"], cli: ["src/cli.ts"] }),
+      );
+      shareEntry(
+        root,
+        {
+          area: "memory",
+          kind: "decision",
+          title: "derived old rule",
+          body: "",
+          provenance: "derived",
+        },
+        "2025-01-01T00:00:00Z",
+      );
+      shareEntry(
+        root,
+        {
+          area: "cli",
+          kind: "decision",
+          title: "other old rule",
+          body: "",
+          provenance: "inferred",
+        },
+        "2025-01-01T00:00:00Z",
+      );
+      shareEntry(
+        root,
+        {
+          area: "memory",
+          kind: "decision",
+          title: "operator-owned old rule",
+          body: "",
+          provenance: "operator",
+        },
+        "2025-01-01T00:00:00Z",
+      );
+
+      const text = agingNoticeForPaths(
+        root,
+        ["src/memory/hook.ts"],
+        new Date("2026-08-01T00:00:00Z"),
+      );
+      assert.match(text, /1 stale, 0 aging/);
+      assert.match(text, /memory/);
+      assert.doesNotMatch(text, /cli/);
+      assert.match(text, /kit memory area memory --stale/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("stays quiet for legacy/operator entries and untouched areas (#550)", () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-aging-hook-"));
+    try {
+      mkdirSync(join(root, ".kit", "shared"), { recursive: true });
+      writeFileSync(
+        join(root, ".kit", "shared", "clusters.json"),
+        JSON.stringify({ memory: ["src/memory/**"] }),
+      );
+      shareEntry(
+        root,
+        { area: "memory", kind: "decision", title: "legacy old rule", body: "" },
+        "2025-01-01T00:00:00Z",
+      );
+      assert.equal(
+        agingNoticeForPaths(root, ["src/memory/hook.ts"], new Date("2026-08-01T00:00:00Z")),
+        "",
+      );
+      assert.equal(
+        agingNoticeForPaths(root, ["src/commands/memory.ts"], new Date("2026-08-01T00:00:00Z")),
+        "",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

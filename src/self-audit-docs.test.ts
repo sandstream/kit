@@ -7,6 +7,7 @@ import { join } from "node:path";
 import {
   extractDocCommandRefs,
   extractDocFlagRefs,
+  loadContractFlagSurface,
   extractDocTomlSections,
   loadSourceFlagTokens,
   flagValidationCoverage,
@@ -153,7 +154,14 @@ function makeRepo(files: Record<string, string>): string {
 
 const CONTRACT = JSON.stringify({
   opencliVersion: "0.1",
-  commands: { check: { kind: "command" }, fix: { kind: "command" } },
+  commands: {
+    check: {
+      kind: "command",
+      "x-kit-args-modeled": true,
+      "x-kit-accepted-flags": ["--category", "--json", "--read-only", "--strict"],
+    },
+    fix: { kind: "command", "x-kit-args-modeled": true, "x-kit-accepted-flags": [] },
+  },
 });
 
 describe("self-audit-docs — runDocsClaimsAudit", () => {
@@ -299,8 +307,8 @@ describe("self-audit-docs — extractDocFlagRefs (pure)", () => {
   it("finds flags on a kit invocation", () => {
     const md = ["```bash", "kit check --json --strict", "```"].join("\n");
     assert.deepEqual(
-      extractDocFlagRefs(md, "d.md").map((r) => r.verb),
-      ["--json", "--strict"],
+      extractDocFlagRefs(md, "d.md").map((r) => `${r.command} ${r.flag}`),
+      ["check --json", "check --strict"],
     );
   });
 
@@ -312,16 +320,59 @@ describe("self-audit-docs — extractDocFlagRefs (pure)", () => {
 
   it("normalises --flag=value to --flag", () => {
     assert.deepEqual(
-      extractDocFlagRefs("`kit check --category=security`", "d.md").map((r) => r.verb),
-      ["--category"],
+      extractDocFlagRefs("`kit check --category=security`", "d.md").map(
+        (r) => `${r.command} ${r.flag}`,
+      ),
+      ["check --category"],
     );
   });
 
   it("reports the line the flag appears on", () => {
     const md = ["# T", "", "```", "kit doctor --save-baseline", "```"].join("\n");
     assert.deepEqual(extractDocFlagRefs(md, "p.md"), [
-      { verb: "--save-baseline", line: 4, file: "p.md" },
+      { command: "doctor", flag: "--save-baseline", line: 4, file: "p.md" },
     ]);
+  });
+
+  it("attributes leading global flags to the command they modify", () => {
+    assert.deepEqual(extractDocFlagRefs("`kit --read-only check`", "d.md"), [
+      { command: "check", flag: "--read-only", line: 1, file: "d.md" },
+    ]);
+  });
+
+  it("ignores pass-through flags after --", () => {
+    assert.deepEqual(extractDocFlagRefs("`kit run -- pnpm test --watch`", "d.md"), []);
+  });
+});
+
+describe("self-audit-docs — loadContractFlagSurface", () => {
+  it("loads modeled accepted flag names from the OpenCLI contract", () => {
+    const root = makeRepo({ "contracts/kit.opencli.json": CONTRACT });
+    try {
+      const surface = loadContractFlagSurface(root);
+      assert.deepEqual([...(surface?.get("check") ?? [])].sort(), [
+        "--category",
+        "--json",
+        "--read-only",
+        "--strict",
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null when every command still declares args unmodeled", () => {
+    const root = makeRepo({
+      "contracts/kit.opencli.json": JSON.stringify({
+        opencliVersion: "0.1",
+        commands: { check: { kind: "command", "x-kit-args-modeled": false } },
+      }),
+    });
+    try {
+      assert.equal(loadContractFlagSurface(root), null);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -400,13 +451,54 @@ describe("self-audit-docs — runDocsClaimsAudit over the other two classes", ()
   it("fails on a fabricated flag and names it", () => {
     const root = makeRepo({
       "contracts/kit.opencli.json": CONTRACT,
-      "src/a.ts": 'flagValue(args, "--json");',
       "docs/P.md": ["```bash", "kit check --max-parallel=4", "```"].join("\n"),
     });
     try {
       const flags = runDocsClaimsAudit(root).find((r) => r.name === "documented flags");
       assert.equal(flags?.status, "fail");
-      assert.match(flags!.detail, /--max-parallel \(docs\/P\.md:2\)/);
+      assert.match(flags!.detail, /kit check --max-parallel \(docs\/P\.md:2\)/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when a real flag is documented on the wrong command", () => {
+    const root = makeRepo({
+      "contracts/kit.opencli.json": JSON.stringify({
+        opencliVersion: "0.1",
+        commands: {
+          bootstrap: {
+            kind: "command",
+            "x-kit-args-modeled": true,
+            "x-kit-accepted-flags": ["--profile"],
+          },
+          check: { kind: "command", "x-kit-args-modeled": true, "x-kit-accepted-flags": [] },
+        },
+      }),
+      "docs/P.md": ["```bash", "kit check --profile", "```"].join("\n"),
+    });
+    try {
+      const flags = runDocsClaimsAudit(root).find((r) => r.name === "documented flags");
+      assert.equal(flags?.status, "fail");
+      assert.match(flags!.detail, /kit check --profile \(docs\/P\.md:2\)/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reports didNotRun when accepted flag names are not modeled", () => {
+    const root = makeRepo({
+      "contracts/kit.opencli.json": JSON.stringify({
+        opencliVersion: "0.1",
+        commands: { check: { kind: "command", "x-kit-args-modeled": false } },
+      }),
+      "docs/P.md": "`kit check --json`",
+    });
+    try {
+      const flags = runDocsClaimsAudit(root).find((r) => r.name === "documented flags");
+      assert.equal(flags?.status, "warn");
+      assert.equal(flags?.didNotRun, true);
+      assert.match(flags!.detail, /accepted flag names NOT verified/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -17,12 +17,14 @@ import { indexCodexSessions } from "./codex.js";
 import { palList } from "./pal.js";
 import {
   activeShared,
+  agingReport,
   recallSafeShared,
+  readShared,
   provenanceRank,
   formatAge,
   type SharedEntry,
 } from "./shared.js";
-import { decisionsForPaths, changedPaths } from "./clusters.js";
+import { clustersForPaths, decisionsForPaths, changedPaths, readClusters } from "./clusters.js";
 import { getCurrentProjectRoot } from "./project.js";
 import { readCachedUpdateSync, getKitVersionSync } from "../update-check.js";
 import { sanitizeForPrompt } from "./injection.js";
@@ -76,12 +78,14 @@ export function userPromptSubmitReminder(): string {
     // that has active decisions, surface them — touch area X ⇒ see X's decisions,
     // not a query lottery. Bounded + fail-open (no clusters.json ⇒ nothing).
     const push = touchedDecisionsNotice();
+    const aging = touchedAgingNotice();
     return (
       (stale ? `${stale}\n` : "") +
       `You have local conversation memory: ${s.messages} messages indexed. ` +
       "Before answering anything project-specific, run `kit memory search <terms>` " +
       `to retrieve what was actually said instead of reconstructing it.${pending}` +
-      (push ? `\n${push}` : "")
+      (push ? `\n${push}` : "") +
+      (aging ? `\n${aging}` : "")
     );
   } catch {
     return ""; // fail-open: never block a prompt
@@ -106,6 +110,45 @@ function touchedDecisionsNotice(root: string = getCurrentProjectRoot()): string 
       return `${g.area}: ${titles}`;
     });
     return `Active decisions for the area(s) you're touching — ${parts.join(" · ")}. (kit memory context for the full set.)`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * One-line review notice for aged machine-origin shared entries in the area(s)
+ * touched by the supplied paths. Operator/legacy entries never age; stale/aging
+ * classification is a review prompt only, never an auto-delete. Bounded and
+ * deterministic so it is safe for every-prompt hooks.
+ */
+export function agingNoticeForPaths(root: string, paths: string[], now: Date = new Date()): string {
+  try {
+    const areas = new Set(clustersForPaths(readClusters(root), paths));
+    if (areas.size === 0) return "";
+    const report = agingReport(readShared(root), now);
+    const stale = report.stale.filter((e) => areas.has(e.area));
+    const aging = report.aging.filter((e) => areas.has(e.area));
+    if (stale.length + aging.length === 0) return "";
+    const affected = [...new Set([...stale, ...aging].map((e) => e.area))].sort();
+    const shown = affected.slice(0, 2).join(", ");
+    const more = affected.length > 2 ? " …" : "";
+    const firstArea = affected[0] ?? "area";
+    return (
+      `Shared memory aging for touched area(s): ${stale.length} stale, ${aging.length} aging ` +
+      `derived/inferred entr${stale.length + aging.length === 1 ? "y" : "ies"} in ${shown}${more}. ` +
+      `Review with \`kit memory area ${firstArea} --stale\` before relying on them.`
+    );
+  } catch {
+    return "";
+  }
+}
+
+function touchedAgingNotice(
+  root: string = getCurrentProjectRoot(),
+  now: Date = new Date(),
+): string {
+  try {
+    return agingNoticeForPaths(root, changedPaths(root), now);
   } catch {
     return "";
   }

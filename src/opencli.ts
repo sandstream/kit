@@ -10,11 +10,13 @@
  * test failure), exactly as public-surface does.
  *
  * HONEST-BY-CONSTRUCTION: kit's registry models command NAMES, summaries, stability
- * tiers, and MCP exposure — not yet per-flag arg/type metadata. Rather than invent
- * `args`/`flags` we don't have (that would be a false-green artifact), each command
- * carries `x-kit-args-modeled: false` and omits args/flags. When the registry grows
- * structured arg metadata, populate them and flip the flag. We emit JSON (OpenCLI
- * accepts YAML or JSON) to stay dependency-free and byte-deterministic.
+ * tiers, MCP exposure, and accepted long-flag names. It still does not model positional
+ * args, flag value types, arity, choices, or aliases, so the standard OpenCLI `args` /
+ * `flags` arrays remain omitted rather than fabricated. The kit-specific
+ * `x-kit-accepted-flags` extension is the dispatch allowlist from flag-surface.ts plus
+ * global flags, which is enough for drift/audit tools to answer "does kit accept this
+ * documented flag on this command?". We emit JSON (OpenCLI accepts YAML or JSON) to stay
+ * dependency-free and byte-deterministic.
  */
 
 import { readFileSync } from "node:fs";
@@ -28,7 +30,9 @@ import {
   type CommandTier,
   type CommandAudience,
 } from "./cli.js";
+import { COMMAND_FLAGS } from "./flag-surface.js";
 import { KIT_MCP_TOOLS } from "./mcp-server.js";
+import { GLOBAL_FLAGS } from "./utils/flags.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -50,11 +54,17 @@ export interface OpenCliCommand {
    */
   "x-kit-audience": CommandAudience;
   /**
-   * False = kit's registry does not yet model this command's positional args /
-   * flags, so they are intentionally omitted rather than fabricated. Consumers
-   * must NOT read "no args/flags" from their absence.
+   * True when accepted long-flag names are modeled for this command via
+   * `x-kit-accepted-flags`. Positional args and flag type/arity metadata are still
+   * intentionally omitted from the standard OpenCLI fields.
    */
-  "x-kit-args-modeled": false;
+  "x-kit-args-modeled": boolean;
+  /**
+   * Dispatch-level long flags accepted by this command, including kit globals. Kept
+   * namespaced because OpenCLI's standard `flags` objects require type/arity metadata
+   * kit does not yet model.
+   */
+  "x-kit-accepted-flags"?: string[];
   /** Nested subcommands, present only on `kind: "group"`. */
   commands?: Record<string, OpenCliCommand>;
 }
@@ -82,14 +92,24 @@ function readKitVersion(): string {
 export function buildOpenCliDoc(): OpenCliDoc {
   const mcp = new Set(KIT_MCP_TOOLS.map((t) => t.replace(/^kit_/, "")));
 
-  const node = (name: string, kind: OpenCliCommand["kind"]): OpenCliCommand => ({
-    kind,
-    summary: COMMAND_HELP[name] ?? "",
-    "x-kit-stability": COMMAND_TIERS[name] ?? "experimental",
-    "x-kit-mcp": mcp.has(name),
-    "x-kit-audience": COMMAND_AUDIENCE[name] ?? "all",
-    "x-kit-args-modeled": false,
-  });
+  const acceptedFlags = (verb: string): string[] | null => {
+    const own = COMMAND_FLAGS[verb];
+    if (!own) return null;
+    return [...new Set([...own, ...GLOBAL_FLAGS])].sort();
+  };
+
+  const node = (name: string, kind: OpenCliCommand["kind"], flagVerb = name): OpenCliCommand => {
+    const flags = acceptedFlags(flagVerb);
+    return {
+      kind,
+      summary: COMMAND_HELP[name] ?? "",
+      "x-kit-stability": COMMAND_TIERS[name] ?? "experimental",
+      "x-kit-mcp": mcp.has(name),
+      "x-kit-audience": COMMAND_AUDIENCE[name] ?? "all",
+      "x-kit-args-modeled": flags !== null,
+      ...(flags !== null ? { "x-kit-accepted-flags": flags } : {}),
+    };
+  };
 
   const commands: Record<string, OpenCliCommand> = {};
   for (const name of Object.keys(COMMANDS)) commands[name] = node(name, "command");
@@ -103,14 +123,11 @@ export function buildOpenCliDoc(): OpenCliDoc {
     const parentNode = commands[parent];
     if (!parentNode) continue; // subcommand of an unknown/aliased verb — skip, never guess
     parentNode.kind = "group";
-    (parentNode.commands ??= {})[sub] = {
-      kind: "command",
-      summary: COMMAND_HELP[key] ?? "",
-      "x-kit-stability": parentNode["x-kit-stability"],
-      "x-kit-mcp": false,
-      "x-kit-audience": parentNode["x-kit-audience"],
-      "x-kit-args-modeled": false,
-    };
+    const child = node(key, "command", parent);
+    child["x-kit-stability"] = parentNode["x-kit-stability"];
+    child["x-kit-audience"] = parentNode["x-kit-audience"];
+    child["x-kit-mcp"] = false;
+    (parentNode.commands ??= {})[sub] = child;
   }
 
   return {

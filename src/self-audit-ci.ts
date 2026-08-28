@@ -7,8 +7,9 @@
 // until that workflow runs. This analyzer resolves every such reference statically:
 // file refs must exist on disk; npm-run refs must be defined in package.json.
 //
-// Pure + deterministic: no network, no LLM. extractScriptRefs/resolveNpmScript are
-// the testable units; runCiScriptAudit is the filesystem-bound orchestrator.
+// Pure + deterministic: no network, no LLM. extractScriptRefs/resolveNpmScript and
+// unreferencedScripts are the testable units; runCiScriptAudit is the filesystem-bound
+// orchestrator.
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -16,12 +17,25 @@ import type { SecurityCheckResult } from "./check-security.js";
 
 /** Category used for every result this analyzer emits. */
 const CI_CATEGORY: SecurityCheckResult["category"] = "self-audit/ci-script-paths";
+export const OPERATOR_RUN_MARKER = "kit-self-audit: operator-run";
 
 export interface ScriptRef {
   kind: "node" | "python" | "npm";
   ref: string;
   line: number;
   file: string;
+}
+
+export interface ScriptInventoryItem {
+  path: string;
+  operatorRun: boolean;
+}
+
+export interface ScriptInventoryReport {
+  total: number;
+  referenced: number;
+  operatorRun: ScriptInventoryItem[];
+  unreferenced: ScriptInventoryItem[];
 }
 
 // Matchers applied to each line of a workflow's `run:` bodies. We don't parse YAML —
@@ -98,6 +112,104 @@ function listWorkflows(repoRoot: string): string[] {
     .map((e) => join(dir, e.name));
 }
 
+function listScriptFiles(repoRoot: string): string[] {
+  const dir = join(repoRoot, "scripts");
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile())
+    .map((e) => `scripts/${e.name}`)
+    .sort();
+}
+
+const REFERENCE_TEXT_EXTENSIONS = [".yml", ".yaml", ".json", ".ts", ".mjs", ".js", ".md", ".sh"];
+const REFERENCE_SKIP_DIRS = new Set([".git", "dist", "node_modules"]);
+
+function listReferenceFiles(repoRoot: string): string[] {
+  const out: string[] = [];
+  function visit(absDir: string, relDir: string): void {
+    let entries;
+    try {
+      entries = readdirSync(absDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (REFERENCE_SKIP_DIRS.has(entry.name)) continue;
+        const childRel = relDir ? `${relDir}/${entry.name}` : entry.name;
+        visit(join(absDir, entry.name), childRel);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const rel = relDir ? `${relDir}/${entry.name}` : entry.name;
+      if (REFERENCE_TEXT_EXTENSIONS.some((ext) => rel.endsWith(ext))) out.push(rel);
+    }
+  }
+  visit(repoRoot, "");
+  return out.sort();
+}
+
+function scriptHasOperatorRunMarker(repoRoot: string, relPath: string): boolean {
+  try {
+    return readFileSync(join(repoRoot, relPath), "utf8").includes(OPERATOR_RUN_MARKER);
+  } catch {
+    return false;
+  }
+}
+
+function textReferencesScript(text: string, relPath: string): boolean {
+  const base = relPath.slice(relPath.lastIndexOf("/") + 1);
+  return text.includes(relPath) || text.includes(`./${relPath}`) || text.includes(base);
+}
+
+/**
+ * Inverse script-path report: workflow->script proves referenced files exist; this
+ * proves scripts/ has no orphaned helpers hiding outside workflows/package scripts/docs/source.
+ *
+ * Operator-run scripts are deliberate manual tools. They stay unreferenced by design and
+ * opt out with `# kit-self-audit: operator-run` in their header.
+ */
+export function unreferencedScripts(repoRoot: string): ScriptInventoryReport {
+  const scripts = listScriptFiles(repoRoot);
+  const referenceFiles = listReferenceFiles(repoRoot);
+  const operatorRun: ScriptInventoryItem[] = [];
+  const unreferenced: ScriptInventoryItem[] = [];
+  let referenced = 0;
+
+  for (const script of scripts) {
+    let live = false;
+    for (const file of referenceFiles) {
+      if (file === script) continue;
+      let text;
+      try {
+        text = readFileSync(join(repoRoot, file), "utf8");
+      } catch {
+        continue;
+      }
+      if (textReferencesScript(text, script)) {
+        live = true;
+        break;
+      }
+    }
+
+    const item = { path: script, operatorRun: scriptHasOperatorRunMarker(repoRoot, script) };
+    if (live) {
+      referenced++;
+    } else if (item.operatorRun) {
+      operatorRun.push(item);
+    } else {
+      unreferenced.push(item);
+    }
+  }
+
+  return {
+    total: scripts.length,
+    referenced,
+    operatorRun,
+    unreferenced,
+  };
+}
+
 /**
  * Audit every script reference across the repo's GitHub Actions workflows.
  *
@@ -169,13 +281,28 @@ export function runCiScriptAudit(repoRoot: string): SecurityCheckResult[] {
     }
   }
 
+  const inverse = unreferencedScripts(repoRoot);
+  for (const script of inverse.unreferenced) {
+    results.push({
+      category: CI_CATEGORY,
+      name: "unreferenced script",
+      status: "warn",
+      severity: "low",
+      detail: `${script.path} is not referenced by workflows, package.json scripts, docs, or source`,
+      files: [script.path],
+      suggestion: `Reference it, delete it, or add '# ${OPERATOR_RUN_MARKER}' if it is a deliberate operator-run tool.`,
+    });
+  }
+
   if (results.length === 0) {
     return [
       {
         category: CI_CATEGORY,
         name: "CI script paths",
         status: "pass",
-        detail: `${totalRefs} refs across ${workflows.length} workflows all resolve`,
+        detail:
+          `${totalRefs} refs across ${workflows.length} workflows all resolve; ` +
+          `${inverse.referenced + inverse.operatorRun.length}/${inverse.total} scripts referenced or declared operator-run`,
       },
     ];
   }

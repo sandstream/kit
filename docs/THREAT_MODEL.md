@@ -86,10 +86,14 @@ config knob says otherwise.
   missing triage script, or an unmappable ref all block (fail-closed). The only
   bypass is `--no-triage`, which requires a one-shot elevation and is audit-logged;
   `kit heal` never takes it. See "The triage gate" below.
-- **No interception of arbitrary installs run OUTSIDE kit.** The gate covers
-  installs kit itself drives. kit does not hook `npm`/`pip`/`docker` to block an
-  un-triaged `npm install` an agent runs directly in the shell — that enforcement
-  would live in the agent host. For installs kit performs, the gate is the kernel.
+- **No universal interception of arbitrary installs run OUTSIDE kit.** The gate
+  covers installs kit itself drives. Supported agent hosts can install a
+  PreToolUse/command hook that blocks untriaged package installs before the
+  shell runs them, and `kit guard install` can add observe-only PATH shims for
+  package-manager calls and `git clone`. Those shims never block. There is no
+  OS-level hook that catches every `npm`/`pip`/`docker` invocation in an
+  uninstrumented shell or unsupported agent. For installs kit performs, the gate
+  is the kernel.
 
 ## Trust controls
 

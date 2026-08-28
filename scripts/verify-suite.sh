@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # kit verify-suite — comprehensive end-to-end sweep
+# kit-self-audit: operator-run
 #
 # Runs every documented kit subcommand against three contexts:
 #   1. BROWNFIELD: an existing real project (default: ${1:-.})
