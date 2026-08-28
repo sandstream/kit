@@ -1,11 +1,14 @@
 import type { kitConfig } from "./config.js";
 import { execFileNoThrow, type ExecResult } from "./utils/execFileNoThrow.js";
 import { githubActionsSensor } from "./health-sensors/github-actions.js";
+import { githubDependabotSensor } from "./health-sensors/github-dependabot.js";
 import { gitlabSensor } from "./health-sensors/gitlab-ci.js";
 import { bitbucketSensor } from "./health-sensors/bitbucket-pipelines.js";
 import { vercelSensor } from "./health-sensors/vercel.js";
 import { sentrySensor } from "./health-sensors/sentry.js";
 import { resendSensor } from "./health-sensors/resend.js";
+import { posthogSensor } from "./health-sensors/posthog.js";
+import { tinybirdSensor } from "./health-sensors/tinybird.js";
 import { supabaseAdvisorSensor } from "./health-sensors/supabase-advisor.js";
 import { tlsCertSensor } from "./health-sensors/tls-cert.js";
 
@@ -32,6 +35,8 @@ export interface HealthCtx {
   gitlabCi?: boolean;
   /** True when a bitbucket-pipelines.yml is present (Bitbucket Pipelines in use). */
   bitbucketPipelines?: boolean;
+  /** True when .github/dependabot.yml is present. */
+  githubDependabot?: boolean;
   /** Vercel link from .vercel/project.json (orgId = teamId, projectId), if present. */
   vercel?: { orgId?: string; projectId?: string };
   /** Service ids the project is connected to (from the registry), for dep-detected sensors. */
@@ -83,31 +88,37 @@ export async function runHealth(
 
 export const HEALTH_SENSORS: HealthSensor[] = [
   githubActionsSensor,
+  githubDependabotSensor,
   gitlabSensor,
   bitbucketSensor,
   vercelSensor,
   sentrySensor,
   resendSensor,
+  posthogSensor,
+  tinybirdSensor,
   supabaseAdvisorSensor,
   tlsCertSensor,
 ];
 
+const SERVICE_HEALTH_SENSORS = new Set(["sentry", "resend", "posthog", "tinybird"]);
+
 /** Returns the sensors whose underlying CI platform the project actually uses. */
 export function selectSensors(ctx: HealthCtx): HealthSensor[] {
   return HEALTH_SENSORS.filter((s) => {
+    if (SERVICE_HEALTH_SENSORS.has(s.id)) {
+      return ctx.services?.includes(s.id) === true;
+    }
     switch (s.id) {
       case "github-actions":
         return ctx.gitRemote === true || ctx.config.context?.github !== undefined;
+      case "github-dependabot":
+        return ctx.gitRemote === true && ctx.githubDependabot === true;
       case "gitlab-ci":
         return ctx.gitlabCi === true;
       case "bitbucket-pipelines":
         return ctx.bitbucketPipelines === true;
       case "vercel":
         return Boolean(ctx.vercel?.projectId);
-      case "sentry":
-        return ctx.services?.includes("sentry") === true;
-      case "resend":
-        return ctx.services?.includes("resend") === true;
       case "supabase-advisor":
         return ctx.services?.includes("supabase") === true;
       case "tls-cert":
@@ -134,9 +145,18 @@ export const defaultHealthDeps: HealthDeps = {
 
 const MARK: Record<HealthStatus, string> = { green: "✓", red: "✗", unknown: "?" };
 
+export function healthOk(findings: HealthFinding[]): boolean {
+  return findings.every((f) => f.status === "green");
+}
+
 /** Pure human formatter — returns lines + red count (CLI adds color). */
-export function formatHealth(findings: HealthFinding[]): { lines: string[]; redCount: number } {
+export function formatHealth(findings: HealthFinding[]): {
+  lines: string[];
+  redCount: number;
+  nonGreenCount: number;
+} {
   const lines = findings.map((f) => `${MARK[f.status]} [${f.sensor}] ${f.title}  (${f.source})`);
   const redCount = findings.filter((f) => f.status === "red").length;
-  return { lines, redCount };
+  const nonGreenCount = findings.filter((f) => f.status !== "green").length;
+  return { lines, redCount, nonGreenCount };
 }

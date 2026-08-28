@@ -17,10 +17,11 @@ const findings: HealthFinding[] = [
 ];
 
 describe("actionableHealth", () => {
-  it("keeps only red findings (green + unknown are not action items)", () => {
+  it("keeps every non-green finding (green is the only closed state)", () => {
     const out = actionableHealth(findings);
-    assert.equal(out.length, 1);
+    assert.equal(out.length, 2);
     assert.equal(out[0].title, "workflow failing: CI");
+    assert.equal(out[1].title, "probe errored");
   });
 });
 

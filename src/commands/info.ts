@@ -58,7 +58,7 @@ export async function cmdHealth(): Promise<boolean> {
     config,
     { operation: "health", operationType: "read", metadata: {} },
     async () => {
-      const { runHealth, selectSensors, defaultHealthDeps, formatHealth } =
+      const { runHealth, selectSensors, defaultHealthDeps, formatHealth, healthOk } =
         await import("../health.js");
       const { syncHealthFindings } = await import("../health-track.js");
 
@@ -69,12 +69,12 @@ export async function cmdHealth(): Promise<boolean> {
       await syncHealthFindings(findings); // mirror red into PAL (fail-open)
 
       if (jsonMode) {
-        const redCount = findings.filter((f) => f.status === "red").length;
-        console.log(JSON.stringify({ ok: redCount === 0, findings }, null, 2));
-        return redCount === 0;
+        const ok = healthOk(findings);
+        console.log(JSON.stringify({ ok, findings }, null, 2));
+        return ok;
       }
 
-      const { lines, redCount } = formatHealth(findings);
+      const { lines, redCount, nonGreenCount } = formatHealth(findings);
       console.log(`${c.bold}kit health${c.reset}  ${c.dim}${sensors.length} sensor(s)${c.reset}`);
       if (findings.length === 0) {
         console.log(`  ${c.dim}no connected external systems detected${c.reset}`);
@@ -83,8 +83,10 @@ export async function cmdHealth(): Promise<boolean> {
         const color = line.startsWith("✗") ? c.red : line.startsWith("?") ? c.yellow : c.green;
         console.log(`  ${color}${line}${c.reset}`);
       }
-      if (redCount > 0) console.log(`${c.red}${redCount} red${c.reset}`);
-      return redCount === 0;
+      if (nonGreenCount > 0) {
+        console.log(`${c.red}${nonGreenCount} not green (${redCount} red)${c.reset}`);
+      }
+      return nonGreenCount === 0;
     },
   );
 }

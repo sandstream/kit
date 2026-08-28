@@ -68,6 +68,29 @@ describe("service-registry", () => {
       assert.ok(def, "posthog missing from registry");
       assert.ok(def.login?.startsWith("#"), "no CLI login — must be an informational comment");
       assert.ok(def.secrets?.includes("NEXT_PUBLIC_POSTHOG_KEY"));
+      assert.ok(def.secrets?.includes("POSTHOG_PERSONAL_API_KEY"));
+      assert.ok(def.secrets?.includes("POSTHOG_PROJECT_ID"));
+    });
+  });
+
+  describe("tinybird — informational analytics service", () => {
+    it("detects tinybird by config file and SDK dependency", async () => {
+      const byFile = await detectServices({
+        deps: [],
+        fileExists: async (p) => p === "tinybird.config.json",
+      });
+      assert.deepEqual(byFile, ["tinybird"]);
+
+      const byDep = await detectServices({ deps: ["tinybird"], fileExists: noFiles });
+      assert.deepEqual(byDep, ["tinybird"]);
+    });
+
+    it("declares token/env keys and no CLI login", () => {
+      const def = SERVICE_BY_ID["tinybird"];
+      assert.ok(def, "tinybird missing from registry");
+      assert.ok(def.login?.startsWith("#"), "no CLI login — must be an informational comment");
+      assert.ok(def.secrets?.includes("TINYBIRD_TOKEN"));
+      assert.ok(def.secrets?.includes("TINYBIRD_API_URL"));
     });
   });
 
