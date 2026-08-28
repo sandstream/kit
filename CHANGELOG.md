@@ -1,6 +1,25 @@
 ## [Unreleased]
 
+## [6.10.1] - 2026-08-28
+
 ### Fixed
+
+- **Open issue regression batch.** Closed the local regressions behind #529, #531, #533,
+  #535, #536, #537, #538, #549, and #550 without pulling #349 into scope.
+
+  - Memory tombstones now participate in merge/sync, so `memory forget-message` cannot be
+    undone by a later pull.
+  - Shared-memory entries written by `kit memory share` now carry explicit operator
+    provenance by default, and touched shared areas can surface aging notices.
+  - Fetch-to-shell installers that resolve to GitHub repositories now flow through the same
+    install triage path as package-manager repo forms.
+  - `kit guard status` reports displaced shims on `PATH`, and `git clone` is observed as a
+    repo-intake event without pretending it is blocked.
+  - The OpenCLI contract now publishes accepted flag names via the generated flag surface,
+    and the docs audit checks `kit <command> --flag` references against that per-command
+    oracle.
+  - The CI self-audit now has the inverse script check: scripts must either be referenced or
+    explicitly declared as operator-run.
 
 - **Publish workflow partial reruns.** Root npm publish now skips an already-published
   exact version, matching workspace publish behavior, so a rerun after a later-step
