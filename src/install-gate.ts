@@ -721,6 +721,10 @@ export function parseInstallCommand(command: string): InstallProbe {
     runnerBinCandidates: [],
   };
   if (!command || typeof command !== "string") return probe;
+  for (const ref of repoFetchToShellRefs(command)) {
+    probe.isInstall = true;
+    probe.refs.push(ref);
+  }
 
   // Scan the command AND any commands hidden in $(…)/backticks/`-c '…'`, bounded
   // so a wrapper (`sh -c '…'`, `$(…)`) can't smuggle an install past the splitter.
@@ -909,6 +913,116 @@ export function ownerRepoArg(tok: string): string | null {
   if (owner.startsWith("@")) return null;
   if (owner === "." || owner === ".." || repo === "." || repo === "..") return null;
   return /^[\w.-]+$/.test(owner) && /^[\w.-]+$/.test(repo) ? `${owner}/${repo}` : null;
+}
+
+const HTTP_URL_RE = /https?:\/\/[^\s'"`<>|;&)]+/gi;
+const FETCH_TO_SHELL_PIPE_RE =
+  /\b(?:curl|wget)\b[^\n|;&]{0,2000}\bhttps?:\/\/[^\s'"`<>|;&)]+[^\n|;&]{0,2000}\|\s*(?:(?:sudo|doas|env|command)\s+(?:\S+=\S+\s+)*)?(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|ash|fish)\b/g;
+const SHELL_BINS = new Set(["sh", "bash", "zsh", "dash", "ksh", "ash", "fish"]);
+
+function githubRepoRefFromUrl(rawUrl: string): string | null {
+  try {
+    const u = new URL(rawUrl.replace(/[),.]+$/, ""));
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    const parts = u.pathname.split("/").filter(Boolean);
+    const owner =
+      host === "github.com" || host === "raw.githubusercontent.com" ? parts[0] : undefined;
+    const repo =
+      host === "github.com" || host === "raw.githubusercontent.com" ? parts[1] : undefined;
+    if (!owner || !repo) return null;
+    const cleanRepo = repo.replace(/\.git$/, "");
+    if (!/^[\w.-]+$/.test(owner) || !/^[\w.-]+$/.test(cleanRepo)) return null;
+    return `github:${owner}/${cleanRepo}`;
+  } catch {
+    return null;
+  }
+}
+
+function repoRefsFromUrls(text: string): string[] {
+  const refs: string[] = [];
+  for (const m of text.matchAll(HTTP_URL_RE)) {
+    const ref = githubRepoRefFromUrl(m[0]);
+    if (ref) refs.push(ref);
+  }
+  return refs;
+}
+
+function segmentShellTokens(segment: string): string[] {
+  const raw = stripRedirections(stripInlineComment(segment).trim().split(/\s+/).filter(Boolean))
+    .map(dequote)
+    .filter(Boolean);
+  const tokens = stripCommandPrefix(raw);
+  if (tokens.length === 0) return tokens;
+  tokens[0] = binBase(tokens[0]);
+  return tokens;
+}
+
+function fetchDownload(tokens: string[]): { output: string; refs: string[] } | null {
+  const bin = tokens[0];
+  if (bin !== "curl" && bin !== "wget") return null;
+  let output: string | undefined;
+  const urls: string[] = [];
+  for (let i = 1; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (/^https?:\/\//i.test(tok)) urls.push(tok);
+    if (bin === "curl") {
+      if (tok === "-o" || tok === "--output") {
+        output = tokens[i + 1];
+        i++;
+        continue;
+      }
+      const eq = tok.match(/^--output=(.+)$/);
+      if (eq) output = eq[1];
+      const glued = tok.match(/^-o(.+)$/);
+      if (glued) output = glued[1];
+    } else {
+      if (tok === "-O" || tok === "--output-document") {
+        output = tokens[i + 1];
+        i++;
+        continue;
+      }
+      const eq = tok.match(/^--output-document=(.+)$/);
+      if (eq) output = eq[1];
+      const glued = tok.match(/^-.*O(.+)$/);
+      if (glued) output = glued[1];
+    }
+  }
+  if (!output || output === "-") return null;
+  const refs = repoRefsFromUrls(urls.join(" "));
+  return refs.length ? { output, refs } : null;
+}
+
+function shellScriptTarget(tokens: string[]): string | null {
+  if (!SHELL_BINS.has(tokens[0] ?? "")) return null;
+  for (let i = 1; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (tok === "-c" || tok === "--command") return null;
+    if (tok === "--") continue;
+    if (tok.startsWith("-")) continue;
+    return tok;
+  }
+  return null;
+}
+
+function directScriptTarget(tokens: string[]): string | null {
+  const first = tokens[0];
+  return first && /^[./~]/.test(first) ? first : null;
+}
+
+function repoFetchToShellRefs(command: string): string[] {
+  const refs: string[] = [];
+  for (const m of command.matchAll(FETCH_TO_SHELL_PIPE_RE)) refs.push(...repoRefsFromUrls(m[0]));
+
+  const downloads = new Map<string, string[]>();
+  for (const segment of command.split(SEGMENT_SPLIT)) {
+    const tokens = segmentShellTokens(segment);
+    if (tokens.length === 0) continue;
+    const fetched = fetchDownload(tokens);
+    if (fetched) downloads.set(fetched.output, fetched.refs);
+    const target = shellScriptTarget(tokens) ?? directScriptTarget(tokens);
+    if (target && downloads.has(target)) refs.push(...downloads.get(target)!);
+  }
+  return [...new Set(refs)];
 }
 
 /**

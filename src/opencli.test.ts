@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { buildOpenCliDoc, serializeOpenCli, OPENCLI_VERSION, type OpenCliDoc } from "./opencli.js";
+import { COMMAND_FLAGS } from "./flag-surface.js";
+import { GLOBAL_FLAGS } from "./utils/flags.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // dist/opencli.test.js -> repo root is one level up.
@@ -55,17 +57,39 @@ describe("OpenCLI document shape", () => {
     assert.equal(airgap.commands.verify.kind, "command");
   });
 
-  it("never fabricates args/flags — every node marks args unmodeled", () => {
-    const nodes: { "x-kit-args-modeled": boolean }[] = [];
+  it("publishes accepted flag names from the generated flag surface", () => {
+    const check = doc.commands.check;
+    assert.equal(check?.["x-kit-args-modeled"], true);
+    assert.deepEqual(
+      check?.["x-kit-accepted-flags"],
+      [...new Set([...COMMAND_FLAGS.check, ...GLOBAL_FLAGS])].sort(),
+    );
+    assert.ok(check?.["x-kit-accepted-flags"]?.includes("--category"));
+    assert.ok(check?.["x-kit-accepted-flags"]?.includes("--read-only"));
+  });
+
+  it("marks every tabled command and subcommand as modeled", () => {
+    for (const [name, c] of Object.entries(doc.commands)) {
+      assert.equal(c["x-kit-args-modeled"], true, `${name} must expose accepted flag names`);
+      assert.ok(Array.isArray(c["x-kit-accepted-flags"]), `${name} must carry a flag list`);
+      for (const [sub, s] of Object.entries(c.commands ?? {})) {
+        assert.equal(s["x-kit-args-modeled"], true, `${name} ${sub} must inherit parent flags`);
+        assert.deepEqual(s["x-kit-accepted-flags"], c["x-kit-accepted-flags"]);
+      }
+    }
+  });
+
+  it("does not fabricate OpenCLI arg/flag type metadata", () => {
+    const nodes: object[] = [];
     for (const c of Object.values(doc.commands)) {
       nodes.push(c);
       for (const s of Object.values(c.commands ?? {})) nodes.push(s);
     }
     assert.ok(nodes.length > 0);
-    assert.ok(
-      nodes.every((n) => n["x-kit-args-modeled"] === false),
-      "until the registry models args/flags, all nodes must declare them unmodeled",
-    );
+    for (const n of nodes) {
+      assert.equal("args" in n, false);
+      assert.equal("flags" in n, false);
+    }
   });
 
   it("only x-kit-* extension keys are used alongside spec fields (honest namespacing)", () => {
@@ -77,6 +101,7 @@ describe("OpenCLI document shape", () => {
       "x-kit-mcp",
       "x-kit-audience",
       "x-kit-args-modeled",
+      "x-kit-accepted-flags",
     ]);
     const walk = (c: OpenCliDoc["commands"][string]) => {
       for (const k of Object.keys(c)) assert.ok(allowed.has(k), `unexpected command key: ${k}`);

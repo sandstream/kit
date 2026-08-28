@@ -4,6 +4,7 @@
  * See src/guard.ts for the design contract: v1 observes, never blocks.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { c } from "../utils/colors.js";
 import {
   GUARD_TOOLS,
@@ -20,6 +21,8 @@ import {
   staleShims,
   refreshShims,
   SHIM_MARKER,
+  guardPathWinners,
+  gitCloneObservation,
 } from "../guard.js";
 
 /** Shim protocol: reconstruct the command, ask the SAME gate the agents use what
@@ -36,8 +39,11 @@ export async function cmdGuardObserve(): Promise<boolean> {
     const command = [tool, ...rest].join(" ");
     const { parseInstallCommand, decideBashGate } = await import("../install-gate.js");
     const probe = parseInstallCommand(command);
-    if (!probe.isInstall) return true; // non-install invocation — no signal, no noise
-    const verdict = await decideBashGate(command, undefined, process.cwd());
+    const clone = gitCloneObservation(tool, rest);
+    if (!probe.isInstall && !clone) return true; // non-install invocation — no signal, no noise
+    const verdict = probe.isInstall
+      ? await decideBashGate(command, undefined, process.cwd())
+      : { block: false, reason: clone!.reason };
     appendObservation({
       ts: new Date().toISOString(),
       cwd: process.cwd(),
@@ -45,7 +51,7 @@ export async function cmdGuardObserve(): Promise<boolean> {
       command: command.slice(0, 200),
       wouldBlock: verdict.block,
       reason: verdict.reason.slice(0, 300),
-      refs: probe.refs,
+      refs: clone ? [clone.ref] : probe.refs,
     });
   } catch {
     // observe is best-effort by contract — the shim runs the real tool regardless
@@ -107,6 +113,23 @@ function uninstallGuard(): boolean {
   return true;
 }
 
+function loginShellPath(): string | null {
+  try {
+    const shell = process.env.SHELL;
+    if (!shell || !existsSync(shell)) return null;
+    const marker = "__KIT_GUARD_PATH__";
+    const out = execFileSync(shell, ["-lic", `printf '\\n${marker}%s\\n' "$PATH"`], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2500,
+    });
+    const line = out.split("\n").find((l) => l.startsWith(marker));
+    return line ? line.slice(marker.length) : null;
+  } catch {
+    return null;
+  }
+}
+
 function guardStatus(): boolean {
   const dir = guardShimsDir();
   const shims = GUARD_TOOLS.filter((t) => {
@@ -119,14 +142,26 @@ function guardStatus(): boolean {
     }
   });
   const onPath = (process.env.PATH ?? "").split(":").includes(dir);
+  const loginPath = loginShellPath();
+  const winners = guardPathWinners(dir, loginPath ?? process.env.PATH ?? "");
+  const covered = winners.filter((w) => w.kitWins).length;
+  const displaced = winners.filter((w) => w.installed && !w.kitWins);
   console.log(`${c.bold}kit guard${c.reset} — observe mode (never blocks)`);
   console.log(
     `  shims: ${shims.length}/${GUARD_TOOLS.length} installed  ·  PATH active in this shell: ${onPath ? `${c.green}yes${c.reset}` : `${c.yellow}no${c.reset}`}`,
   );
+  console.log(
+    `  login-shell PATH: ${loginPath ? "checked" : "unavailable (current PATH fallback)"}  ·  ${covered}/${GUARD_TOOLS.length} shim(s) win command resolution`,
+  );
+  for (const w of displaced.slice(0, 5)) {
+    console.log(
+      `  ${c.yellow}!${c.reset} ${w.tool} resolves to ${w.winner ?? "not found"} before kit's shim — move kit guard's PATH block after later PATH prepends`,
+    );
+  }
   const obs = readObservations();
   const wouldBlock = obs.filter((o) => o.wouldBlock);
   console.log(
-    `  observations: ${obs.length} install-shaped command(s)  ·  ${wouldBlock.length > 0 ? c.yellow : c.green}${wouldBlock.length} would have been blocked${c.reset}`,
+    `  observations: ${obs.length} guarded command(s)  ·  ${wouldBlock.length > 0 ? c.yellow : c.green}${wouldBlock.length} would have been blocked${c.reset}`,
   );
   for (const o of obs.slice(-5)) {
     const icon = o.wouldBlock ? `${c.yellow}!${c.reset}` : `${c.green}✓${c.reset}`;

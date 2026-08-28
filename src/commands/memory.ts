@@ -20,7 +20,7 @@ import {
 import { effectiveMemoryClass, formatClassResolution } from "../memory/effective-class.js";
 import { sparkline, fmtTokens } from "../memory/stats.js";
 import { indexAllHarnesses } from "../memory/parser.js";
-import { mergeDb } from "../memory/merge.js";
+import { mergeDb, type MergeResult } from "../memory/merge.js";
 import { buildSuggestPrompt } from "../memory/suggest.js";
 import { learnRecurring } from "../memory/learn.js";
 import { scaffoldFromCandidate } from "../insight/scaffold.js";
@@ -486,6 +486,19 @@ async function memIndex(): Promise<boolean> {
   return true;
 }
 
+function mergePayloadChanges(r: MergeResult): number {
+  return (
+    r.messages + r.toolUses + r.pending + r.threads + r.tombstones + r.tombstoneDeletedMessages
+  );
+}
+
+function printTombstoneMergeStats(r: MergeResult): void {
+  if (r.tombstones + r.tombstoneDeletedMessages + r.tombstoneBlockedMessages === 0) return;
+  console.log(
+    `  ${c.dim}tombstones: ${r.tombstones} merged · ${r.tombstoneDeletedMessages} local rows deleted · ${r.tombstoneBlockedMessages} incoming rows blocked${c.reset}`,
+  );
+}
+
 async function memMerge(): Promise<boolean> {
   const sourcePath = process.argv[4];
   if (!sourcePath || sourcePath.startsWith("--")) {
@@ -498,7 +511,7 @@ async function memMerge(): Promise<boolean> {
   const db = openMemoryDb();
   try {
     const r = mergeDb(db, sourcePath, remapProject ? { remapProject } : {});
-    if (r.messages + r.toolUses + r.pending + r.threads === 0) {
+    if (mergePayloadChanges(r) === 0) {
       // `sessions` is inflated by merge even for a fully-redundant source — don't
       // let it dress up a no-op merge as success.
       console.log(
@@ -509,6 +522,7 @@ async function memMerge(): Promise<boolean> {
         `${c.green}✓${c.reset} merged ${c.bold}${r.messages}${c.reset} messages + ${r.toolUses} tool-uses · ${r.sessions} sessions · ${r.pending} pending · ${r.threads} copilots ${c.dim}from ${sourcePath}${c.reset}`,
       );
     }
+    printTombstoneMergeStats(r);
     // Scope visibility (#247): "merged" must not read as "reachable". Sessions
     // keyed to a foreign project (a container's -home-user, another machine's
     // tree) are invisible to project-scoped search — say where they landed.
@@ -553,7 +567,7 @@ async function memSync(): Promise<boolean> {
   const db = openMemoryDb();
   try {
     const r = syncFromExport(db, src, { passphrase: pass });
-    if (r.messages + r.toolUses + r.pending + r.threads === 0) {
+    if (mergePayloadChanges(r) === 0) {
       console.log(
         `${c.yellow}!${c.reset} nothing new — already in sync with ${c.dim}${src}${c.reset} (${r.sessions} sessions seen)`,
       );
@@ -565,6 +579,7 @@ async function memSync(): Promise<boolean> {
         `${c.dim}last-write-wins on sessions; file_index (this machine's index state) left untouched${c.reset}`,
       );
     }
+    printTombstoneMergeStats(r);
   } catch (err) {
     console.error(`${c.red}${(err as Error).message}${c.reset}`);
     return false;
@@ -1195,7 +1210,7 @@ async function memShare(): Promise<boolean> {
   const supersedes = flagValue(process.argv, "--supersedes");
   const reverses = flagValue(process.argv, "--reverses");
   const status = flagValue(process.argv, "--status") as SharedStatus | undefined;
-  const provenance = flagValue(process.argv, "--provenance") as SharedProvenance | undefined;
+  const provenance = (flagValue(process.argv, "--provenance") ?? "operator") as SharedProvenance;
   const confidence = flagValue(process.argv, "--confidence") as
     | "low"
     | "medium"

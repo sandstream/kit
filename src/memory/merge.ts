@@ -15,6 +15,9 @@ export interface MergeResult {
   sessions: number;
   messages: number;
   toolUses: number;
+  tombstones: number;
+  tombstoneDeletedMessages: number;
+  tombstoneBlockedMessages: number;
   pending: number;
   threads: number;
   /**
@@ -44,6 +47,58 @@ export function projectKeyFor(projectRoot: string): string {
   return projectRoot.replace(/\//g, "-");
 }
 
+function tableExists(db: DatabaseSync, name: string): boolean {
+  return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+}
+
+function mergeTombstones(target: DatabaseSync, src: DatabaseSync, out: MergeResult): void {
+  if (!tableExists(src, "memory_tombstones")) return;
+  const upsert = target.prepare(
+    `INSERT INTO memory_tombstones (uuid, content_sha256, session_id, reason, deleted_at)
+     VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+     ON CONFLICT(uuid) DO UPDATE SET
+       content_sha256 = excluded.content_sha256,
+       session_id = COALESCE(excluded.session_id, memory_tombstones.session_id),
+       reason = COALESCE(excluded.reason, memory_tombstones.reason),
+       deleted_at = CASE
+         WHEN excluded.deleted_at > memory_tombstones.deleted_at THEN excluded.deleted_at
+         ELSE memory_tombstones.deleted_at
+       END
+     WHERE
+       memory_tombstones.content_sha256 IS NOT excluded.content_sha256 OR
+       memory_tombstones.session_id IS NOT excluded.session_id OR
+       memory_tombstones.reason IS NOT excluded.reason OR
+       memory_tombstones.deleted_at IS NOT excluded.deleted_at`,
+  );
+  const existingMessage = target.prepare("SELECT session_id FROM messages WHERE uuid = ?");
+  const deleteMessage = target.prepare("DELETE FROM messages WHERE uuid = ?");
+  const deleteToolUses = target.prepare("DELETE FROM tool_uses WHERE message_uuid = ?");
+  const decSession = target.prepare(
+    "UPDATE sessions SET message_count = MAX(message_count - 1, 0) WHERE session_id = ?",
+  );
+
+  for (const t of src.prepare("SELECT * FROM memory_tombstones").all() as Row[]) {
+    const uuid = str(t.uuid);
+    const contentSha = str(t.content_sha256);
+    if (!uuid || !contentSha) continue;
+    const existing = existingMessage.get(uuid) as { session_id: string } | undefined;
+    if (existing) {
+      deleteMessage.run(uuid);
+      deleteToolUses.run(uuid);
+      decSession.run(existing.session_id);
+      out.tombstoneDeletedMessages++;
+    }
+    const r = upsert.run(
+      uuid,
+      contentSha,
+      (str(t.session_id) ?? null) as string | null,
+      (str(t.reason) ?? null) as string | null,
+      (str(t.deleted_at) ?? null) as string | null,
+    );
+    if (Number(r.changes) > 0) out.tombstones++;
+  }
+}
+
 export function mergeDb(
   target: DatabaseSync,
   sourcePath: string,
@@ -55,6 +110,9 @@ export function mergeDb(
     sessions: 0,
     messages: 0,
     toolUses: 0,
+    tombstones: 0,
+    tombstoneDeletedMessages: 0,
+    tombstoneBlockedMessages: 0,
     pending: 0,
     threads: 0,
     projects: {},
@@ -62,6 +120,10 @@ export function mergeDb(
   const remapKey = opts.remapProject ? projectKeyFor(opts.remapProject) : undefined;
 
   try {
+    // Tombstones must land before messages: a deletion record wins over stale
+    // rows from another machine and blocks future resurrection by uuid (#549).
+    mergeTombstones(target, src, out);
+
     // Sessions
     for (const s of src.prepare("SELECT * FROM sessions").all() as Row[]) {
       const sessionId = str(s.session_id);
@@ -94,6 +156,10 @@ export function mergeDb(
       const sessionId = str(m.session_id);
       const type = str(m.type);
       if (!uuid || !sessionId || !type) continue; // need a stable id to dedupe
+      if (target.prepare("SELECT 1 FROM memory_tombstones WHERE uuid = ?").get(uuid)) {
+        out.tombstoneBlockedMessages++;
+        continue;
+      }
       const added = insertMessage(target, {
         uuid,
         sessionId,

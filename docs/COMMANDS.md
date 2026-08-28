@@ -9,7 +9,9 @@
 > (`x-kit-mcp`), and primary audience (`x-kit-audience`: `human` for
 > interactive/setup commands, `harness` for hook stdin protocols like
 > `gate-*`/`statusline` that neither humans nor agents invoke directly, or
-> `all`). Agents should prefer that contract over parsing this document.
+> `all`). It also carries `x-kit-accepted-flags`, the generated per-command
+> allowlist for long flags kit accepts. Agents should prefer that contract over
+> parsing this document.
 
 ## Global flags
 

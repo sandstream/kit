@@ -25,6 +25,8 @@ import {
   appendFileSync,
   renameSync,
   rmSync,
+  accessSync,
+  constants,
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -45,6 +47,7 @@ export const GUARD_TOOLS: readonly string[] = [
   "brew",
   "gem",
   "cargo",
+  "git",
 ];
 
 export const SHIM_MARKER = "# kit-managed guard shim (do not edit)";
@@ -57,6 +60,125 @@ export function guardShimsDir(): string {
 
 export function guardLogPath(): string {
   return process.env.KIT_GUARD_LOG ?? join(homedir(), ".kit", "guard-observe.jsonl");
+}
+
+function executable(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function samePath(a: string, b: string): boolean {
+  return a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
+}
+
+function isKitShim(path: string): boolean {
+  try {
+    return readFileSync(path, "utf-8").includes(SHIM_MARKER);
+  } catch {
+    return false;
+  }
+}
+
+export interface GuardPathWinner {
+  tool: string;
+  installed: boolean;
+  winner: string | null;
+  kitWins: boolean;
+}
+
+/** Which executable a shell PATH would actually hit for each guarded tool. */
+export function guardPathWinners(
+  shimsDir: string,
+  pathEnv: string,
+  tools: readonly string[] = GUARD_TOOLS,
+): GuardPathWinner[] {
+  const dirs = pathEnv.split(":").filter(Boolean);
+  return tools.map((tool) => {
+    const shim = join(shimsDir, tool);
+    const installed = isKitShim(shim);
+    let winner: string | null = null;
+    for (const dir of dirs) {
+      const candidate = join(dir, tool);
+      if (executable(candidate)) {
+        winner = candidate;
+        break;
+      }
+    }
+    return { tool, installed, winner, kitWins: installed && !!winner && samePath(winner, shim) };
+  });
+}
+
+export interface GitCloneObservation {
+  target: string;
+  ref: string;
+  reason: string;
+}
+
+const GIT_CLONE_VALUE_FLAGS = new Set([
+  "-b",
+  "--branch",
+  "-o",
+  "--origin",
+  "--depth",
+  "--template",
+  "--reference",
+  "--reference-if-able",
+  "--separate-git-dir",
+  "--jobs",
+  "-j",
+  "--config",
+  "-c",
+  "--server-option",
+]);
+
+function githubRefForCloneTarget(target: string): string | null {
+  let t = target.trim();
+  const scp = /^[\w.-]+@github\.com:(.+)$/.exec(t);
+  if (scp) t = scp[1];
+  else {
+    t = t.replace(/^https?:\/\/(?:www\.)?github\.com\//i, "");
+    t = t.replace(/^ssh:\/\/(?:[\w.-]+@)?github\.com\//i, "");
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) return null;
+    t = t.replace(/^github\.com\//i, "");
+  }
+  t = t
+    .replace(/\.git$/, "")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+  const [owner, repo] = t.split("/").filter(Boolean);
+  if (!owner || !repo) return null;
+  return /^[\w.-]+$/.test(owner) && /^[\w.-]+$/.test(repo) ? `github:${owner}/${repo}` : null;
+}
+
+/** Observe `git clone` as a repo intake signal. It is NOT a hard gate in v1. */
+export function gitCloneObservation(
+  tool: string,
+  args: readonly string[],
+): GitCloneObservation | null {
+  if (tool !== "git") return null;
+  const cloneAt = args.indexOf("clone");
+  if (cloneAt < 0) return null;
+  for (let i = cloneAt + 1; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--") continue;
+    if (arg.startsWith("-")) {
+      if (GIT_CLONE_VALUE_FLAGS.has(arg) || GIT_CLONE_VALUE_FLAGS.has(arg.split("=")[0] ?? "")) {
+        if (!arg.includes("=")) i++;
+      }
+      continue;
+    }
+    const ref = githubRefForCloneTarget(arg) ?? `repo:${arg}`;
+    return {
+      target: arg,
+      ref,
+      reason: `git clone observed (observe-only; kit does not hard-gate clone). Triage third-party repo intake with: kit triage repo ${arg}`,
+    };
+  }
+  return null;
 }
 
 /** Shell rc files the PATH block goes into (existing ones + ~/.zshrc as the macOS default). */
@@ -116,7 +238,7 @@ _kit_path_minus_self() {
   _kit_out=""
   _kit_oifs="\${IFS}"
   IFS=:
-  for _p in \$PATH; do
+  for _p in $PATH; do
     IFS="\${_kit_oifs}"
     [ -n "\${_p}" ] || continue
     [ "\${_p%/}" = "\${_kit_shims%/}" ] && continue
@@ -128,7 +250,7 @@ _kit_path_minus_self() {
 _kit_handoff=""
 _old_ifs="\${IFS}"
 IFS=:
-for _d in \$PATH; do
+for _d in $PATH; do
   IFS="\${_old_ifs}"
   [ -n "\${_d}" ] || continue
   [ "\${_d%/}" = "\${_kit_shims%/}" ] && continue
@@ -141,7 +263,7 @@ for _d in \$PATH; do
         [ -n "\${_kit_handoff}" ] || _kit_handoff="\${_d}"
         continue
       fi
-      PATH="\$(_kit_path_minus_self)"
+      PATH="$(_kit_path_minus_self)"
       export PATH
       export ${active}=1
       exec "\${_d}/${tool}" "$@"
@@ -153,7 +275,7 @@ done
 IFS="\${_old_ifs}"
 if [ -n "\${_kit_handoff}" ]; then
   # Re-entered, and only shim dirs have ${tool}: run it with our dir off PATH.
-  PATH="\$(_kit_path_minus_self)"
+  PATH="$(_kit_path_minus_self)"
   export PATH
   exec "\${_kit_handoff}/${tool}" "$@"
 fi

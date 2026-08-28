@@ -312,17 +312,17 @@ RUN kit setup
 ### Debugging Setup Issues
 
 ```bash
-# See detailed setup logs
-kit setup --verbose
+# Re-run the full setup profile explicitly
+kit setup --mode full
 
-# Check specific service
-kit add database/supabase --check
+# Preview a service provision
+kit add database/supabase --dry-run
 
 # Verify environment
 kit check
 
-# See what would be installed
-kit install --dry-run
+# See missing tools before installing them
+kit check --category tools
 ```
 
 ### Rolling Back Migration

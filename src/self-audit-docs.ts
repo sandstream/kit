@@ -25,9 +25,9 @@
 // Three claim classes are checked, each against a sound oracle:
 //
 //   commands  → contracts/kit.opencli.json (the committed command contract)
-//   flags     → every `--flag` literal appearing in src/**.ts. kit parses argv by
-//               naming each flag literally (`flagValue(args, "--x")`), so a flag the
-//               implementation never names cannot possibly be read.
+//   flags     → per-command `x-kit-accepted-flags` in contracts/kit.opencli.json.
+//               That extension is generated from src/flag-surface.ts, the same table
+//               dispatch uses to reject unknown flags.
 //   sections  → config.ts KNOWN_SECTIONS, the explicit set kit validates .kit.toml
 //               against.
 //
@@ -38,13 +38,9 @@
 // which is correct usage). A gate that cries wolf is worse than no gate, so key
 // checking is left out rather than shipped unsound.
 //
-// Known scope limit that remains: the flag check is repo-global, not per-command. A
-// real flag documented on the wrong command still passes — `kit check --profile` used
-// to run and silently do nothing (`--profile` belongs to `bootstrap`). Per-command
-// ownership needs each command to declare its own flags, which is exactly what
-// `flagValidationCoverage` below measures the progress of: as of 6.2.0 one command
-// module validates its flags and the rest accept anything, so that number is reported
-// as a tracked warning rather than left invisible.
+// The OpenCLI standard `flags` array remains intentionally omitted until kit models
+// flag types/arity. The namespaced accepted-flag list is narrower: it answers the
+// enforcement question without fabricating metadata a code generator could misuse.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -140,6 +136,17 @@ export interface DocCommandRef {
   file: string;
 }
 
+export interface DocFlagRef {
+  /** The top-level command whose allowlist must contain this flag. */
+  command: string;
+  /** Normalised long flag name, e.g. `--json` from `--json=true`. */
+  flag: string;
+  /** 1-based line in the source markdown. */
+  line: number;
+  /** Repo-relative posix path of the markdown file. */
+  file: string;
+}
+
 // A `kit <verb>` occurrence in command position: at the start of a code span/line,
 // after a shell prompt, or after a `&&` / `|` chain operator. Anchoring this way is
 // what separates a real invocation from English prose — an unanchored scan matches
@@ -218,13 +225,68 @@ export function extractDocCommandRefs(markdownText: string, file: string): DocCo
   return refs;
 }
 
+const DOC_GLOBAL_PREFIX_FLAGS = new Set([
+  "--read-only",
+  "--readonly",
+  "--non-interactive",
+  "--env",
+]);
+
+const KIT_INVOCATION_RE = /(?:^|\$\s|&&\s|\|\s)\s*(?:npx\s+)?kit\s+([^;&|`\n]+)/g;
+
+function normaliseDocFlagToken(token: string): string | null {
+  let clean = token.trim().replace(/^[[{(<]+/, "");
+  if (clean === "--") return "--";
+  const eq = clean.indexOf("=");
+  if (eq >= 0) clean = clean.slice(0, eq);
+  clean = clean.replace(/[\]),}>.:;]+$/g, "");
+  return /^--[a-z][a-z0-9-]{1,30}$/.test(clean) ? clean : null;
+}
+
+function extractInvocationFlagRefs(invocation: string, line: number, file: string): DocFlagRef[] {
+  const tokens = invocation.trim().split(/\s+/).filter(Boolean);
+  const leadingFlags: string[] = [];
+  let command: string | null = null;
+  let commandIndex = -1;
+
+  for (let i = 0; i < tokens.length; i++) {
+    const flag = normaliseDocFlagToken(tokens[i]);
+    if (flag === "--") return [];
+    if (flag) {
+      if (DOC_GLOBAL_PREFIX_FLAGS.has(flag)) {
+        leadingFlags.push(flag);
+        continue;
+      }
+      return [];
+    }
+
+    const word = tokens[i].replace(/^[[{(<]+/, "").replace(/[\]),}>.:;]+$/g, "");
+    if (/^[a-z][a-z0-9-]{1,30}$/.test(word) && !PLACEHOLDER.has(word)) {
+      command = word;
+      commandIndex = i;
+    }
+    break;
+  }
+
+  if (!command) return [];
+
+  const refs = leadingFlags.map((flag) => ({ command, flag, line, file }));
+  for (const token of tokens.slice(commandIndex + 1)) {
+    const flag = normaliseDocFlagToken(token);
+    if (flag === "--") break;
+    if (flag) refs.push({ command, flag, line, file });
+  }
+  return refs;
+}
+
 /**
- * Extract flags documented on a `kit …` invocation. Only spans that actually invoke
- * kit are scanned, so a bare `--verbose` in prose about some other tool is ignored.
- * `--flag=value` is normalised to `--flag`.
+ * Extract flags documented on a `kit …` invocation, attributed to the command that
+ * owns the allowlist. Only spans that actually invoke kit are scanned, so a bare
+ * `--verbose` in prose about some other tool is ignored. `--flag=value` is
+ * normalised to `--flag`, and pass-through flags after `--` are left alone.
  */
-export function extractDocFlagRefs(markdownText: string, file: string): DocCommandRef[] {
-  const refs: DocCommandRef[] = [];
+export function extractDocFlagRefs(markdownText: string, file: string): DocFlagRef[] {
+  const refs: DocFlagRef[] = [];
   const lines = markdownText.split("\n");
   let inFence = false;
 
@@ -236,9 +298,8 @@ export function extractDocFlagRefs(markdownText: string, file: string): DocComma
     }
     const spans = inFence ? [line] : [...line.matchAll(/`([^`\n]+)`/g)].map((m) => m[1]);
     for (const span of spans) {
-      if (!/(?:^|\$\s|&&\s)\s*(?:npx\s+)?kit\s/.test(span)) continue;
-      for (const m of span.matchAll(/\s(--[a-z][a-z0-9-]{1,30})/g)) {
-        refs.push({ verb: m[1], line: i + 1, file });
+      for (const m of span.matchAll(KIT_INVOCATION_RE)) {
+        refs.push(...extractInvocationFlagRefs(m[1], i + 1, file));
       }
     }
   }
@@ -394,6 +455,36 @@ export function loadContractVerbs(repoRoot: string): Set<string> | null {
   }
 }
 
+interface ContractFlagCommand {
+  "x-kit-args-modeled"?: unknown;
+  "x-kit-accepted-flags"?: unknown;
+}
+
+/**
+ * Read per-command accepted flag names from the committed OpenCLI contract.
+ * Returns null when no command has modeled flag names — the caller must report
+ * "could not verify", never quietly fall back to a repo-global grep.
+ */
+export function loadContractFlagSurface(repoRoot: string): Map<string, Set<string>> | null {
+  try {
+    const raw = readFileSync(join(repoRoot, CONTRACT_PATH), "utf-8");
+    const parsed: unknown = JSON.parse(raw);
+    const commands = (parsed as { commands?: unknown })?.commands;
+    if (!commands || typeof commands !== "object") return null;
+
+    const out = new Map<string, Set<string>>();
+    for (const [verb, value] of Object.entries(commands as Record<string, ContractFlagCommand>)) {
+      if (value["x-kit-args-modeled"] !== true) continue;
+      const flags = value["x-kit-accepted-flags"];
+      if (!Array.isArray(flags) || !flags.every((f) => typeof f === "string")) continue;
+      out.set(verb, new Set(flags));
+    }
+    return out.size > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
 // Subtrees a markdown walk never needs to enter.
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage", ".next", "tmp"]);
 
@@ -440,12 +531,6 @@ const CLAIM_CLASSES: ClaimClass[] = [
     unit: "`kit <command>`",
     extract: extractDocCommandRefs,
     render: (v) => `kit ${v}`,
-  },
-  {
-    name: "documented flags",
-    unit: "`kit … --flag`",
-    extract: extractDocFlagRefs,
-    render: (v) => v,
   },
   {
     name: "documented config sections",
@@ -518,6 +603,87 @@ export function loadCommandSurface(repoRoot: string): { verb: string; harness: b
   }
 
   return [...out].map(([verb, harness]) => ({ verb, harness }));
+}
+
+function runDocumentedFlagsAudit(
+  repoRoot: string,
+  inScope: { file: string; text: string }[],
+  exemptFiles: number,
+): SecurityCheckResult {
+  const surface = loadContractFlagSurface(repoRoot);
+  if (!surface) {
+    return {
+      category: DOCS_CATEGORY,
+      name: "documented flags",
+      status: "warn",
+      severity: "medium",
+      detail: `${CONTRACT_PATH} has no modeled accepted flag names — accepted flag names NOT verified`,
+      didNotRun: true,
+      suggestion: "regenerate the OpenCLI contract after flag-surface is wired into it",
+    };
+  }
+
+  const unknown: DocFlagRef[] = [];
+  const unverified: DocFlagRef[] = [];
+  let checked = 0;
+
+  for (const { file, text } of inScope) {
+    for (const ref of extractDocFlagRefs(text, file)) {
+      checked++;
+      const accepted = surface.get(ref.command);
+      if (!accepted) {
+        unverified.push(ref);
+        continue;
+      }
+      if (!accepted.has(ref.flag)) unknown.push(ref);
+    }
+  }
+
+  if (unknown.length > 0) {
+    return {
+      category: DOCS_CATEGORY,
+      name: "documented flags",
+      status: "fail",
+      severity: "medium",
+      detail:
+        `${unknown.length} of ${checked} \`kit <command> --flag\` ref(s) do not exist: ` +
+        unknown
+          .slice(0, 6)
+          .map((u) => `kit ${u.command} ${u.flag} (${u.file}:${u.line})`)
+          .join(", "),
+      files: [...new Set(unknown.map((u) => u.file))],
+      suggestion:
+        "fix the doc, or add the flag to that command's declared flag surface — a real flag on the wrong command still misleads readers",
+    };
+  }
+
+  if (unverified.length > 0) {
+    return {
+      category: DOCS_CATEGORY,
+      name: "documented flags",
+      status: "warn",
+      severity: "medium",
+      detail:
+        `${unverified.length} of ${checked} \`kit <command> --flag\` ref(s) could not be verified ` +
+        `because their command has no modeled accepted flag names: ` +
+        unverified
+          .slice(0, 6)
+          .map((u) => `kit ${u.command} ${u.flag} (${u.file}:${u.line})`)
+          .join(", "),
+      files: [...new Set(unverified.map((u) => u.file))],
+      didNotRun: true,
+      suggestion: "regenerate the OpenCLI contract so every command has x-kit-accepted-flags",
+    };
+  }
+
+  return {
+    category: DOCS_CATEGORY,
+    name: "documented flags",
+    status: "pass",
+    detail:
+      `${checked} \`kit <command> --flag\` ref(s) across ${inScope.length} doc(s) all resolve ` +
+      `against ${surface.size} modeled command(s) (${exemptFiles} doc(s) exempt)`,
+  };
 }
 
 /**
@@ -620,7 +786,6 @@ export function runDocsClaimsAudit(repoRoot: string): SecurityCheckResult[] {
 
   const oracles: Record<string, Set<string>> = {
     "documented commands": verbs,
-    "documented flags": loadSourceFlagTokens(repoRoot),
     "documented config sections": new Set(KNOWN_SECTIONS),
     "documented env vars": loadKnownEnvVars(repoRoot),
   };
@@ -674,45 +839,49 @@ export function runDocsClaimsAudit(repoRoot: string): SecurityCheckResult[] {
           suggestion: `run 'node scripts/derive-command-flags.mjs --emit' — a flag that silently does nothing is how 'kit check --category' stayed broken across six majors`,
         }));
 
-  return flagValidation.concat(
-    CLAIM_CLASSES.map((cls) => {
-      const oracle = oracles[cls.name];
-      const unknown: DocCommandRef[] = [];
-      let checked = 0;
+  const claimResults: SecurityCheckResult[] = CLAIM_CLASSES.map((cls): SecurityCheckResult => {
+    const oracle = oracles[cls.name];
+    const unknown: DocCommandRef[] = [];
+    let checked = 0;
 
-      for (const { file, text } of inScope) {
-        for (const ref of cls.extract(text, file)) {
-          checked++;
-          if (!oracle.has(ref.verb)) unknown.push(ref);
-        }
+    for (const { file, text } of inScope) {
+      for (const ref of cls.extract(text, file)) {
+        checked++;
+        if (!oracle.has(ref.verb)) unknown.push(ref);
       }
+    }
 
-      if (unknown.length === 0) {
-        return {
-          category: DOCS_CATEGORY,
-          name: cls.name,
-          status: "pass",
-          detail:
-            `${checked} ${cls.unit} ref(s) across ${inScope.length} doc(s) all resolve ` +
-            `against ${oracle.size} known (${exemptFiles} doc(s) exempt)`,
-        };
-      }
-
+    if (unknown.length === 0) {
       return {
         category: DOCS_CATEGORY,
         name: cls.name,
-        status: "fail",
-        severity: "medium",
+        status: "pass",
         detail:
-          `${unknown.length} of ${checked} ${cls.unit} ref(s) do not exist: ` +
-          unknown
-            .slice(0, 6)
-            .map((u) => `${cls.render(u.verb)} (${u.file}:${u.line})`)
-            .join(", "),
-        files: [...new Set(unknown.map((u) => u.file))],
-        suggestion: `fix the doc, or implement it — a doc naming something kit does not have misleads humans and agents alike`,
+          `${checked} ${cls.unit} ref(s) across ${inScope.length} doc(s) all resolve ` +
+          `against ${oracle.size} known (${exemptFiles} doc(s) exempt)`,
       };
-    }),
+    }
+
+    return {
+      category: DOCS_CATEGORY,
+      name: cls.name,
+      status: "fail",
+      severity: "medium",
+      detail:
+        `${unknown.length} of ${checked} ${cls.unit} ref(s) do not exist: ` +
+        unknown
+          .slice(0, 6)
+          .map((u) => `${cls.render(u.verb)} (${u.file}:${u.line})`)
+          .join(", "),
+      files: [...new Set(unknown.map((u) => u.file))],
+      suggestion: `fix the doc, or implement it — a doc naming something kit does not have misleads humans and agents alike`,
+    };
+  });
+
+  return flagValidation.concat(
+    claimResults.slice(0, 1),
+    [runDocumentedFlagsAudit(repoRoot, inScope, exemptFiles)],
+    claimResults.slice(1),
     // Appended last on purpose: `flagValidation` occupies res[0] and a test pins that
     // position. Prepending this row displaced it and failed a test about node_modules
     // skipping — an unrelated rule broken by an ordering assumption.
