@@ -3079,7 +3079,7 @@
     },
     "review": {
       "kind": "command",
-      "summary": "Full repo audit — runs check + design + standards + adr in one gate (for agents / PR checks; --json emits one structured report; --stages check,standards scopes the run, --category scopes the standards stage)",
+      "summary": "Full repo audit — runs check + design + standards + adr + skill in one gate (for agents / PR checks; --json emits one structured report; --stages check,standards scopes the run, --category scopes the standards stage)",
       "x-kit-accepted-flags": [
         "--attest",
         "--category",

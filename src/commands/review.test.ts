@@ -30,10 +30,10 @@ describe("collectReview", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("returns the four stages in the order the CLI always ran them", () => {
+  it("returns every stage in the order the CLI always ran them", () => {
     assert.deepEqual(
       report.stages.map((s) => s.stage),
-      ["check", "design", "standards", "adr"],
+      ["check", "design", "standards", "adr", "skill"],
     );
   });
 

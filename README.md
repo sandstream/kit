@@ -267,7 +267,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit setup`: Full pipeline: install → hooks → login → secrets → check
 - `kit check`: Status of tools, services, secrets, hooks, deploy env, security, tests
 - `kit fix`: Auto-remediate gaps (tools, gitignore, hooks, .env.template, declared deploy env) and print HITL blocks for auth / DSN setup
-- `kit review` / `kit heal`: One-gate repo audit (check + design + standards + ADR); bounded self-heal loop
+- `kit review` / `kit heal`: One-gate repo audit (check + design + standards + ADR + skill discipline); bounded self-heal loop
 - `kit adr {check,list,freeze}`: Turn an Architecture Decision Record into a deterministic gate — enforce a `kit-enforce` block (`forbid_pattern` / `require_pattern` / `forbid_import`, incl. transitive and across npm package boundaries) cited back to the ADR. Zero-LLM (prose is never interpreted)
 - `.kit/standards.d/*.toml`: Declarative house-rule plugins support `mode = "forbid"` and `mode = "require"`; directory excludes like `scripts/` mean `scripts/**`, with zero-match warnings
 - `kit scan`: Run external scanners (snyk/trivy/grype/semgrep/osv/socket) → one merged, air-gap-aware verdict
@@ -1021,7 +1021,7 @@ For Cline, add the same config to your `cline_mcp_settings.json`.
 | Tool            | Description                                                                                     |
 | --------------- | ----------------------------------------------------------------------------------------------- |
 | `kit_check`     | Run all checks, return structured status JSON                                                   |
-| `kit_review`    | Full repo audit — check + design + standards + ADR gates as one structured report              |
+| `kit_review`    | Full repo audit — check + design + standards + ADR + skill gates as one structured report              |
 | `kit_fix`       | Auto-fix issues (install tools, generate lock files)                                            |
 | `kit_triage`    | Security-triage a dependency BEFORE installing it — a pass satisfies the install gate           |
 | `kit_memory`    | Search cross-session memory + the repo's curated shared decisions (search-only)                 |

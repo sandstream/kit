@@ -38,7 +38,7 @@ makes them four deterministic rules — not prose:
 - **ADR-0003** the check path imports no coverage-framework mappings.
 
 `node dist/cli.js adr check` runs them and **fails CI hard** on a violation. `kit check`
-does **not** include the ADR stage — only `kit review` (check + design + standards + adr)
+does **not** include the ADR stage — only `kit review` (check + design + standards + adr + skill)
 does. So before opening a PR that adds a dependency, moves an import, or touches
 `src/check*.ts`, run `kit review`, not `kit check` alone.
 
