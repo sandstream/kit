@@ -82,7 +82,13 @@ export async function cmdHooks(): Promise<boolean> {
     let allOk = true;
 
     for (const r of results) {
-      const icon = r.action === "failed" ? `${c.red}✗${c.reset}` : `${c.green}✓${c.reset}`;
+      const ok = r.action !== "failed" && (r.action !== "skipped" || r.satisfied === true);
+      const icon =
+        r.action === "failed"
+          ? `${c.red}✗${c.reset}`
+          : ok
+            ? `${c.green}✓${c.reset}`
+            : `${c.yellow}!${c.reset}`;
       const label =
         r.action === "installed"
           ? `${c.green}installed${c.reset}`
@@ -92,7 +98,7 @@ export async function cmdHooks(): Promise<boolean> {
               ? `${c.dim}skipped${c.reset}`
               : `${c.red}failed${c.reset}`;
       console.log(`  ${icon} ${r.hookName}  ${label}  ${c.dim}${r.detail}${c.reset}`);
-      if (r.action === "failed") allOk = false;
+      if (!ok) allOk = false;
     }
 
     console.log();
