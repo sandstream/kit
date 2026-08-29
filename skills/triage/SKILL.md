@@ -1,6 +1,7 @@
 ---
 name: triage
 description: "Security-triage a dependency before installing it."
+allowed-tools: Bash
 ---
 
 # Triage
@@ -32,6 +33,15 @@ python3 scripts/triage.py <type> <target>
 - **Fail-closed:** if a registry cannot be reached (offline, timeout, HTTP error)
   that is a CRITICAL ("cannot verify"), so the pass is withheld and kit blocks the
   install. Set `GITHUB_TOKEN` to avoid GitHub rate limits on `repo` checks.
+
+## Scope
+
+`allowed-tools: Bash` — the whole skill is one subprocess call to
+`scripts/triage.py`. It reads no files through the agent (the script opens what it
+needs itself), fetches nothing through the agent, and writes nothing. Anything
+broader would be a claim this skill cannot cash: an undeclared `allowed-tools`
+implicitly claims EVERY tool, which is the opposite of what a gate should assert
+about itself.
 
 ## Rules
 

@@ -42,6 +42,20 @@ function workflowBodies(): Record<string, string> {
 /** `kit adr check` and `kit review` both run the ADR rules; either satisfies the requirement. */
 const INVOKES_ADR = /\b(adr\s+check|kit_review\b|cli\.js\s+review\b|kit\s+review\b)/;
 
+/**
+ * `kit skill test --gate` gates one skill; `kit review --stages skill` gates every SKILL.md the
+ * repo ships. Either satisfies the requirement, but only the second scales to a second skill.
+ */
+// NOTE the boundary placement: a leading \b before an alternative starting with `-`
+// can never match (space→hyphen is not a word boundary), so each alternative carries
+// its own. Caught by deleting the CI step and watching this test stay green.
+const INVOKES_SKILL = /(\bskill\s+test\b|--stages[= ][^\n]*\bskill\b|\bkit_review\b)/;
+
+/** The step block that runs `re`, or undefined when no workflow step does. */
+function stepRunning(body: string, re: RegExp): string | undefined {
+  return body.split(/\n(?=\s*- name:)/).find((block) => re.test(block) && /run:/.test(block));
+}
+
 describe("the ADR gate is wired into CI", () => {
   it("is invoked by at least one workflow, outside a comment", () => {
     const hits = Object.entries(workflowBodies())
@@ -69,6 +83,40 @@ describe("the ADR gate is wired into CI", () => {
       assert.ok(
         !/\|\|\s*true/.test(step),
         `${file} swallows the ADR gate's exit code with \`|| true\``,
+      );
+    }
+  });
+});
+
+describe("the skill gate is wired into CI", () => {
+  // Same rule as above, for the gate that was found unfired the same way: `kit skill test`
+  // had a working `--gate` (exit 1) and no workflow, hook or `kit review` stage called it,
+  // while kit's own only SKILL.md failed its `scope` check. A linter nobody runs cannot be
+  // told apart, in a green build, from a repo whose skills are clean.
+  it("is invoked by at least one workflow, outside a comment", () => {
+    const hits = Object.entries(workflowBodies())
+      .filter(([, body]) => INVOKES_SKILL.test(body))
+      .map(([file]) => file);
+    assert.ok(
+      hits.length > 0,
+      "no workflow runs the skill gate (`kit review --stages skill` or `kit skill test --gate`). " +
+        "Every shipped SKILL.md then declares its scope, or fails to, with nothing checking — " +
+        "which looks exactly like having no skills at all.",
+    );
+  });
+
+  it("runs it as a hard failure, not a reported-and-ignored step", () => {
+    for (const [file, body] of Object.entries(workflowBodies())) {
+      if (!INVOKES_SKILL.test(body)) continue;
+      const step = stepRunning(body, INVOKES_SKILL);
+      if (!step) continue;
+      assert.ok(
+        !/continue-on-error:\s*true/.test(step),
+        `${file} runs the skill gate with continue-on-error — a gate that cannot fail the build is a report`,
+      );
+      assert.ok(
+        !/\|\|\s*true/.test(step),
+        `${file} swallows the skill gate's exit code with \`|| true\``,
       );
     }
   });

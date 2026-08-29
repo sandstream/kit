@@ -363,7 +363,7 @@ describe("kit_review", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("returns the structured report: ok, failed, and the four stages in order", async () => {
+  it("returns the structured report: ok, failed, and every stage in order", async () => {
     const { client, cleanup } = await createTestClient();
     try {
       const result = await client.callTool({ name: "kit_review", arguments: { cwd: tempDir } });
@@ -376,7 +376,7 @@ describe("kit_review", () => {
       assert.ok(Array.isArray(data.failed));
       assert.deepEqual(
         data.stages.map((s) => s.stage),
-        ["check", "design", "standards", "adr"],
+        ["check", "design", "standards", "adr", "skill"],
       );
       assert.equal(
         data.ok,

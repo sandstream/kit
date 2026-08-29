@@ -40,7 +40,7 @@ kit_triage  → REQUIRED before installing anything the install gate has not
               MCP-run triage satisfies it identically to a CLI-run one
 kit_memory  → recall prior cross-session decisions before answering
               project-specific questions
-kit_review  → the full audit (check + design + standards + ADR) as one
+kit_review  → the full audit (check + design + standards + ADR + skill) as one
               structured report — run before merging; concise:true trims
               pass/skip rows for context economy
 kit_run     → escape hatch: any other kit command
