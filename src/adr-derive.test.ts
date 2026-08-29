@@ -79,6 +79,9 @@ describe("importRegexFor", () => {
     assert.ok(!re.test("../../other/commands/adr.js"));
     assert.ok(!re.test("./commands/adr.js"));
     assert.ok(!re.test("../commandsx/adr.js"));
+    // Anchored: an unanchored rule matches mid-specifier and turns a package path into
+    // a violation. A surviving mutation (dropping `^`) proved nothing else caught this.
+    assert.ok(!re.test("@scope/pkg/../commands/adr.js"));
   });
 
   it("escapes regex metacharacters in a bucket name", () => {
