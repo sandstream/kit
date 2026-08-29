@@ -68,13 +68,17 @@
     },
     "adr": {
       "kind": "command",
-      "summary": "Enforce architecture decisions (ADR → gate): 'kit adr check' gates the repo on accepted ADRs' deterministic kit-enforce rules, cited to the ADR; 'kit adr list' shows enforced/documented. Zero-LLM (prose is never interpreted).",
+      "summary": "Enforce architecture decisions (ADR → gate): 'kit adr check' gates the repo on accepted ADRs' deterministic kit-enforce rules, cited to the ADR; 'kit adr list' shows enforced/documented; 'kit adr derive' proposes the decisions an inherited repo already obeys, each verified against the repo and emitted as status: proposed so it gates nothing until you accept it. Zero-LLM (prose is never interpreted).",
       "x-kit-accepted-flags": [
+        "--emit",
         "--env",
         "--help",
+        "--json",
+        "--min-support",
         "--non-interactive",
         "--read-only",
         "--readonly",
+        "--root",
         "--version"
       ],
       "x-kit-args-modeled": true,

@@ -838,7 +838,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   adr: {
     handler: cmdAdr,
     stability: "experimental",
-    help: "Enforce architecture decisions (ADR → gate): 'kit adr check' gates the repo on accepted ADRs' deterministic kit-enforce rules, cited to the ADR; 'kit adr list' shows enforced/documented. Zero-LLM (prose is never interpreted).",
+    help: "Enforce architecture decisions (ADR → gate): 'kit adr check' gates the repo on accepted ADRs' deterministic kit-enforce rules, cited to the ADR; 'kit adr list' shows enforced/documented; 'kit adr derive' proposes the decisions an inherited repo already obeys, each verified against the repo and emitted as status: proposed so it gates nothing until you accept it. Zero-LLM (prose is never interpreted).",
   },
   insight: {
     handler: cmdInsight,
