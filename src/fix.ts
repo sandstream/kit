@@ -464,8 +464,27 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
       if (config.hooks && Object.keys(config.hooks).length > 0) {
         try {
           const hookResults = await installHooks(config.hooks, ".git", cwd);
-          const installed = hookResults.filter((r) => r.action === "installed");
-          const updated = hookResults.filter((r) => r.action === "updated");
+          const configuredHookNames = new Set(
+            Object.entries(config.hooks)
+              .filter(([, commands]) => commands && commands.length > 0)
+              .map(([name]) => name),
+          );
+          const installed = hookResults.filter(
+            (r) => r.action === "installed" && configuredHookNames.has(r.hookName),
+          );
+          const updated = hookResults.filter(
+            (r) => r.action === "updated" && configuredHookNames.has(r.hookName),
+          );
+          const auxiliary = hookResults.filter(
+            (r) =>
+              (r.action === "installed" || r.action === "updated") &&
+              !configuredHookNames.has(r.hookName),
+          );
+          const skipped = hookResults.filter(
+            (r) => r.action === "skipped" && configuredHookNames.has(r.hookName),
+          );
+          const satisfiedSkipped = skipped.filter((r) => r.satisfied);
+          const blockedSkipped = skipped.filter((r) => !r.satisfied);
           const failed = hookResults.filter((r) => r.action === "failed");
           if (installed.length > 0) {
             console.log(
@@ -477,6 +496,30 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
             console.log(
               `  ${c.dim}↻ Updated ${updated.length} existing hook(s): ${updated.map((r) => r.hookName).join(", ")}${c.reset}`,
             );
+          }
+          if (auxiliary.length > 0) {
+            console.log(
+              `  ${c.dim}↻ Hook support installed/updated: ${auxiliary.map((r) => r.hookName).join(", ")}${c.reset}`,
+            );
+          }
+          if (satisfiedSkipped.length > 0) {
+            console.log(
+              `  ${c.green}✓${c.reset} Externally managed hook(s) already satisfy config: ${satisfiedSkipped.map((r) => r.hookName).join(", ")}`,
+            );
+          }
+          if (blockedSkipped.length > 0) {
+            for (const s of blockedSkipped) {
+              console.log(`  ${c.yellow}!${c.reset} ${s.hookName}: ${s.detail}`);
+              manualActions.push({
+                blocker: `${s.hookName} hook was left untouched`,
+                owner: "developer",
+                reason: "existing non-kit git hook",
+                steps: [s.detail, "Run `kit check --category hooks`."],
+                respondWith: `${s.hookName} hook includes the configured kit commands or is intentionally unmanaged`,
+                agentContinuesWith: "kit check --category hooks",
+              });
+              manualCount++;
+            }
           }
           if (failed.length > 0) {
             for (const f of failed) {
@@ -492,7 +535,13 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
               manualCount++;
             }
           }
-          if (installed.length === 0 && updated.length === 0 && failed.length === 0) {
+          if (
+            installed.length === 0 &&
+            updated.length === 0 &&
+            auxiliary.length === 0 &&
+            skipped.length === 0 &&
+            failed.length === 0
+          ) {
             console.log(`${c.dim}Hooks up to date${c.reset}`);
           }
         } catch (err: unknown) {

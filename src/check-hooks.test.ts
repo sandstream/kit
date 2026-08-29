@@ -66,9 +66,21 @@ describe("checkHooks", () => {
     assert.ok(results[0].detail.includes("not installed"));
   });
 
-  it("reports not managed by kit when hook lacks the marker", async () => {
+  it("accepts externally managed hooks when configured commands are present", async () => {
     await mkdir(join(gitDir, "hooks"), { recursive: true });
     await writeFile(join(gitDir, "hooks", "pre-commit"), "#!/bin/sh\nnpm test\n", "utf-8");
+
+    const config: HooksConfig = { "pre-commit": ["npm test"] };
+    const results = await checkHooks(config);
+
+    assert.equal(results[0].installed, true);
+    assert.equal(results[0].upToDate, true);
+    assert.ok(results[0].detail.includes("externally managed"));
+  });
+
+  it("reports not managed by kit when external hook misses configured commands", async () => {
+    await mkdir(join(gitDir, "hooks"), { recursive: true });
+    await writeFile(join(gitDir, "hooks", "pre-commit"), "#!/bin/sh\necho manual\n", "utf-8");
 
     const config: HooksConfig = { "pre-commit": ["npm test"] };
     const results = await checkHooks(config);
