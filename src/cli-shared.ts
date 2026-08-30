@@ -45,9 +45,13 @@ export async function buildHealthCtx(config: kitConfig): Promise<HealthCtx> {
       ...Object.keys(pkg.devDependencies ?? {}),
     ];
     const { detectServices } = await import("./service-registry.js");
-    services = await detectServices({ deps, fileExists: async (p) => existsSync(resolve(cwd, p)) });
+    const detected = await detectServices({
+      deps,
+      fileExists: async (p) => existsSync(resolve(cwd, p)),
+    });
+    services = Array.from(new Set([...Object.keys(config.services ?? {}), ...detected]));
   } catch {
-    services = [];
+    services = Object.keys(config.services ?? {});
   }
   return {
     cwd,
@@ -55,6 +59,7 @@ export async function buildHealthCtx(config: kitConfig): Promise<HealthCtx> {
     gitRemote: remote.ok && remote.stdout.trim().length > 0,
     gitlabCi: existsSync(resolve(cwd, ".gitlab-ci.yml")),
     bitbucketPipelines: existsSync(resolve(cwd, "bitbucket-pipelines.yml")),
+    githubDependabot: existsSync(resolve(cwd, ".github", "dependabot.yml")),
     vercel,
     services,
   };

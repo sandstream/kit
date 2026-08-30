@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   parseGitHubRuns,
   failingWorkflows,
+  pendingWorkflows,
   activeWorkflowNames,
   githubActionsSensor,
 } from "./github-actions.js";
@@ -103,6 +104,30 @@ describe("parseGitHubRuns / failingWorkflows", () => {
       ["CI"],
     );
   });
+
+  it("keeps a newer in-progress run as not-green instead of falling back to old success", () => {
+    const parsed = parseGitHubRuns(
+      JSON.stringify([
+        {
+          name: "CI",
+          status: "in_progress",
+          conclusion: "",
+          createdAt: "2026-08-28T14:38:28Z",
+          databaseId: 10,
+        },
+        {
+          name: "CI",
+          status: "completed",
+          conclusion: "success",
+          createdAt: "2026-08-28T13:30:43Z",
+          databaseId: 9,
+        },
+      ]),
+    );
+    assert.deepEqual(pendingWorkflows(parsed), [
+      { name: "CI", status: "in_progress", createdAt: "2026-08-28T14:38:28Z" },
+    ]);
+  });
 });
 
 describe("activeWorkflowNames", () => {
@@ -195,6 +220,35 @@ describe("githubActionsSensor.probe", () => {
     );
     assert.equal(out.length, 1);
     assert.equal(out[0].status, "green");
+  });
+
+  it("emits unknown while the latest workflow run is still pending", async () => {
+    const pending = JSON.stringify([
+      {
+        name: "CI",
+        status: "in_progress",
+        conclusion: "",
+        createdAt: "2026-08-28T14:38:28Z",
+        databaseId: 10,
+      },
+      {
+        name: "CI",
+        status: "completed",
+        conclusion: "success",
+        createdAt: "2026-08-28T13:30:43Z",
+        databaseId: 9,
+      },
+    ]);
+    const out = await githubActionsSensor.probe(
+      ctx,
+      deps({
+        "gh repo": { stdout: JSON.stringify({ nameWithOwner: "acme/webapp" }), ok: true },
+        "gh run": { stdout: pending, ok: true },
+      }),
+    );
+    assert.equal(out.length, 1);
+    assert.equal(out[0].status, "unknown");
+    assert.match(out[0].title, /pending/);
   });
 
   it("returns unknown when gh is not authed", async () => {

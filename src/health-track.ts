@@ -2,7 +2,7 @@ import type { HealthFinding } from "./health.js";
 import type { SyncFinding } from "./memory/pal.js";
 
 export function actionableHealth(findings: HealthFinding[]): HealthFinding[] {
-  return findings.filter((f) => f.status === "red");
+  return findings.filter((f) => f.status !== "green");
 }
 
 export function healthFindingToSync(f: HealthFinding): SyncFinding {

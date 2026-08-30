@@ -74,6 +74,7 @@ import {
   startDetachedSessionEnd,
   runSessionEndIndex,
   sessionStartRecovery,
+  claudeSessionStartPayload,
 } from "../memory/hook.js";
 import { decisionsForPaths, changedPaths } from "../memory/clusters.js";
 import { collectHints } from "../hints.js";
@@ -1053,18 +1054,24 @@ async function memHook(): Promise<boolean> {
     // text on stdout is what gets injected as context).
     const pulled = tryAutoPull(getCurrentProjectRoot());
     if (pulled.note) console.error(`${c.dim}${pulled.note}${c.reset}`);
+    const contextLines: string[] = [];
     // Inject the statusline (stdout → context) so the agent GETS the setup score /
     // update mark / PAL count deterministically — instead of a rules-file line
     // asking it to go run `kit statusline` itself (prose advises; the hook delivers).
     try {
       const { buildStatuslineText } = await import("../statusline.js");
       const line = await buildStatuslineText({ cwd: getCurrentProjectRoot() });
-      if (line) console.log(`kit statusline: ${line}`);
+      if (line) contextLines.push(`kit statusline: ${line}`);
     } catch {
       /* statusline must never break session start */
     }
     const text = sessionStartRecovery();
-    if (text) console.log(text);
+    if (text) contextLines.push(text);
+    const context = contextLines.join("\n");
+    if (context) {
+      if (process.env.KIT_HOOK_JSON === "claude") console.log(claudeSessionStartPayload(context));
+      else console.log(context);
+    }
     // One-time upgrade nudge when sync isn't configured yet.
     const nudge = maybeSyncNudge();
     if (nudge) console.error(`${c.dim}${nudge}${c.reset}`);

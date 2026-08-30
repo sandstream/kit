@@ -1,5 +1,42 @@
 ## [Unreleased]
 
+### Added
+
+- **Monkey test release gate.** Added `kit monkey-test plan|init|run` plus the
+  bundled `monkey-test` skill for role-based money-app release checks with
+  Playwright desktop/mobile crawl, sandbox payment flow, and security findings.
+
+### Fixed
+
+- **Claude hook visibility.** Claude SessionStart hooks now emit structured
+  `systemMessage` output for actionable kit signals while preserving full
+  context for the agent.
+
+## [6.10.2] - 2026-08-30
+
+### Added
+
+- **Post-merge health loop.** `kit health` now fails closed unless every connected
+  sensor is green, treats pending GitHub Actions as non-green, and reports open
+  Dependabot PRs as action items.
+
+- **External signal sensors.** Health checks can now include Sentry, Resend,
+  PostHog health issues, and Tinybird recent jobs when those services are
+  declared or detected and credentials are available.
+
+- **ADR discovery and skill lint gates.** Added `kit adr derive` support for
+  proposing enforceable ADRs from repo structure, and made the skill linter a
+  CI-enforced gate.
+
+### Fixed
+
+- **Kit CI report loop.** Cleared CI self-report warnings that were sending false
+  follow-up noise after otherwise green runs.
+
+- **Externally managed hooks.** Hook checks now accept external hooks that satisfy
+  kit's configured hook contract instead of treating any non-kit-owned hook path
+  as broken.
+
 ## [6.10.1] - 2026-08-28
 
 ### Fixed

@@ -71,6 +71,11 @@ describe("memory hook installer", () => {
         g.hooks.some((h) => h.command.endsWith("memory hook session-start")),
       ),
     );
+    const startHook = s.hooks.SessionStart.flatMap((g: { hooks: { command: string }[] }) =>
+      g.hooks.map((h) => h.command),
+    ).find((cmd: string) => cmd.endsWith("memory hook session-start"));
+    assert.ok(startHook);
+    assert.match(startHook, /^KIT_HOOK_JSON=claude /);
   });
 
   it("is idempotent — re-install adds nothing and creates no duplicates", () => {

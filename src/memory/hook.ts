@@ -298,6 +298,37 @@ export function sessionStartRecovery(opts: { limit?: number; root?: string } = {
   }
 }
 
+/** User-visible summary for Claude Code's `systemMessage` field. */
+export function sessionStartSystemMessage(additionalContext: string): string {
+  const messages: string[] = [];
+  const stale = additionalContext.match(/kit is out of date: [^\n]+/);
+  if (stale) messages.push(stale[0]);
+  const actions = additionalContext.match(/\bactions:(\d+)\b/);
+  if (actions && Number(actions[1]) > 0) {
+    messages.push(`kit has ${actions[1]} open action item(s).`);
+  }
+  if (/background capture reported problems/i.test(additionalContext)) {
+    messages.push("kit background capture reported problems; run `kit memory index`.");
+  }
+  return messages.slice(0, 3).join("\n");
+}
+
+/** Structured Claude Code hook payload: context for Claude, systemMessage for the user. */
+export function claudeSessionStartPayload(additionalContext: string): string {
+  const payload: {
+    systemMessage?: string;
+    hookSpecificOutput: { hookEventName: "SessionStart"; additionalContext: string };
+  } = {
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      additionalContext,
+    },
+  };
+  const systemMessage = sessionStartSystemMessage(additionalContext);
+  if (systemMessage) payload.systemMessage = systemMessage;
+  return JSON.stringify(payload);
+}
+
 /**
  * The just-ended hook harness is indexed directly (cheap + incremental).
  * Harnesses without lifecycle hooks (cursor/gemini/cline/amazon-q/opencode…)

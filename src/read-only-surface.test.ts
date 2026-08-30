@@ -177,6 +177,22 @@ describe("KIT_READ_ONLY=1 refuses every declared mutation (behavioural)", () => 
     }
   });
 
+  it("monkey-test init does not write the Playwright harness", () => {
+    const dir = project();
+    try {
+      const r = kit(["monkey-test", "init"], dir, { KIT_READ_ONLY: "1" });
+      assert.equal(r.code, 1, r.out);
+      assert.equal(
+        existsSync(join(dir, "playwright.monkey.config.ts")),
+        false,
+        "monkey harness was written",
+      );
+      assert.ok(auditRefusals(dir).includes("monkey-test-init"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("security check-gitignore --fix does not rewrite .gitignore", () => {
     const dir = project();
     try {

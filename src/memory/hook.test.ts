@@ -15,6 +15,8 @@ import {
   consumeSessionEndLog,
   logSessionEndEvent,
   agingNoticeForPaths,
+  sessionStartSystemMessage,
+  claudeSessionStartPayload,
 } from "./hook.js";
 import { getCurrentProjectRoot } from "./project.js";
 import { shareEntry } from "./shared.js";
@@ -122,6 +124,32 @@ describe("memory hook — SessionStart recovery", () => {
     db.close();
     const text = sessionStartRecovery();
     assert.doesNotMatch(text, /delete everything/, "the poisoned line is not re-injected at all");
+  });
+
+  it("builds a Claude systemMessage for user-visible action items", () => {
+    const text = [
+      "kit statusline: kit:full 6/6 · update:6.10.1 · actions:2",
+      "kit is out of date: 6.10.0 → 6.10.1. Update with `kit upgrade --self`.",
+      "⚠ kit background capture reported problems since your last session:",
+    ].join("\n");
+    const message = sessionStartSystemMessage(text);
+    assert.match(message, /kit is out of date/);
+    assert.match(message, /2 open action item/);
+    assert.match(message, /background capture reported problems/);
+  });
+
+  it("renders Claude SessionStart JSON with additionalContext and systemMessage", () => {
+    const payload = JSON.parse(
+      claudeSessionStartPayload(
+        "kit statusline: kit:full 6/6 · update:6.10.1 · actions:1\nkit is out of date: 6.10.0 → 6.10.1.",
+      ),
+    ) as {
+      systemMessage?: string;
+      hookSpecificOutput?: { hookEventName?: string; additionalContext?: string };
+    };
+    assert.equal(payload.hookSpecificOutput?.hookEventName, "SessionStart");
+    assert.match(payload.hookSpecificOutput?.additionalContext ?? "", /kit statusline/);
+    assert.match(payload.systemMessage ?? "", /kit is out of date/);
   });
 });
 

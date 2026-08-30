@@ -52,12 +52,13 @@ interface MemoryHookDef {
   sub: string;
   timeout?: number;
   statusMessage?: string;
+  envPrefix?: string;
 }
 
 const CLAUDE_MEMORY_HOOKS: MemoryHookDef[] = [
   { event: "UserPromptSubmit", sub: "user-prompt-submit" },
   { event: "SessionEnd", sub: "session-end" },
-  { event: "SessionStart", sub: "session-start" },
+  { event: "SessionStart", sub: "session-start", envPrefix: "KIT_HOOK_JSON=claude" },
 ];
 
 // Codex's SessionEnd must identify its harness so the detached worker indexes
@@ -264,9 +265,13 @@ function installHooksAtPath(
   const alreadyPresent: string[] = [];
   const updated: string[] = [];
   const retired = removeHookDefinitions(s, retiredDefinitions);
-  for (const { event, sub, timeout, statusMessage } of definitions) {
+  for (const { event, sub, timeout, statusMessage, envPrefix } of definitions) {
     const groups = (hooks[event] ??= []);
-    const desired: HookCmd = { type: "command", command: `${prefix} ${hookSuffix(sub)}` };
+    const commandPrefix = envPrefix ? `${envPrefix} ` : "";
+    const desired: HookCmd = {
+      type: "command",
+      command: `${commandPrefix}${prefix} ${hookSuffix(sub)}`,
+    };
     if (timeout !== undefined) desired.timeout = timeout;
     if (statusMessage !== undefined) desired.statusMessage = statusMessage;
     const upgrade = refreshHookDefinition(groups, sub, desired);
