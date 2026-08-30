@@ -61,7 +61,11 @@ export function parseSentruxJson(text: string): SentruxResult {
   try {
     parsed = JSON.parse(text);
   } catch (err) {
-    throw new Error(`Invalid Sentrux JSON: ${err instanceof Error ? err.message : err}`);
+    // `cause` keeps the parser's own diagnostic (offset, token) attached: a scanner that
+    // loses WHY it could not read its input turns "cannot verify" into an opaque failure.
+    throw new Error(`Invalid Sentrux JSON: ${err instanceof Error ? err.message : err}`, {
+      cause: err,
+    });
   }
   if (!parsed || typeof parsed !== "object") {
     return { gatePassed: true, metrics: {}, violations: [] };

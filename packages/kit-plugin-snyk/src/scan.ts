@@ -55,7 +55,11 @@ export function parseSnykJson(text: string): SnykResult[] {
   try {
     parsed = JSON.parse(text);
   } catch (err) {
-    throw new Error(`Invalid Snyk JSON: ${err instanceof Error ? err.message : err}`);
+    // See sentrux/scan.ts: the underlying parse error is the only thing that says WHERE
+    // the output went wrong, and a scanner must not discard it.
+    throw new Error(`Invalid Snyk JSON: ${err instanceof Error ? err.message : err}`, {
+      cause: err,
+    });
   }
   // multi-project: Snyk returns an array of result objects.
   if (Array.isArray(parsed)) {

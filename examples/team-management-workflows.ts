@@ -10,7 +10,6 @@ import {
   addTeamMember,
   removeTeamMember,
   updateMemberRole,
-  getTeam,
   listTeamMembers,
   grantPermission,
   revokePermission,
@@ -43,7 +42,7 @@ async function createTeamWithMembers() {
   // Add members
   const members = ["user-003", "user-004", "user-005"];
   members.forEach((userId) => {
-    const result = addTeamMember(team.team.id, userId, "member");
+    addTeamMember(team.team.id, userId, "member");
     console.log(`Member added: ${userId}`);
   });
 

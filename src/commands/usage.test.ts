@@ -43,7 +43,7 @@ describe("renderTab", () => {
       const widths = new Set(
         rendered
           .split("\n")
-          // eslint-disable-next-line no-control-regex
+           
           .map((l) => l.replace(/\x1b\[[0-9;]*m/g, "").length),
       );
       assert.equal(

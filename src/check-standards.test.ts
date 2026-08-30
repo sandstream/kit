@@ -191,9 +191,20 @@ describe("check-standards — checkStandards gating", () => {
 
 describe("check-standards — collectStandardsKeys", () => {
   it("returns empty slices when the general tools are absent (nothing to freeze)", async () => {
-    // lizard/jscpd/scc are not installed in this environment → didNotRun → empty.
-    const keys = await collectStandardsKeys(process.cwd());
-    assert.deepEqual(keys, { complexity: [], duplication: [], size: [] });
+    // The tools are FORCED absent rather than assumed absent. This test previously read
+    // "lizard/jscpd/scc are not installed in this environment", which made its green depend
+    // on the machine: provisioning lizard and jscpd turned it red without any code changing.
+    // A test whose pass condition is "the box happens to be missing something" proves nothing
+    // on a box that has it. Emptying PATH makes the scan's spawns fail to resolve on every
+    // machine, which is the condition the assertion is actually about.
+    const realPath = process.env.PATH;
+    process.env.PATH = "";
+    try {
+      const keys = await collectStandardsKeys(process.cwd());
+      assert.deepEqual(keys, { complexity: [], duplication: [], size: [] });
+    } finally {
+      process.env.PATH = realPath;
+    }
   });
 });
 
