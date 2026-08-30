@@ -43,7 +43,7 @@ describe("renderTab", () => {
       const widths = new Set(
         rendered
           .split("\n")
-           
+
           .map((l) => l.replace(/\x1b\[[0-9;]*m/g, "").length),
       );
       assert.equal(

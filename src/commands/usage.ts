@@ -38,7 +38,6 @@ const WIDTH = 66;
 
 /** Visible length: padding maths has to ignore the colour escapes, or the box comes out ragged. */
 function plain(s: string): string {
-   
   return s.replace(/\x1b\[[0-9;]*m/g, "");
 }
 

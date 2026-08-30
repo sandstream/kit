@@ -125,11 +125,18 @@ function list(frontmatter: string, key: string): string[] {
       .map((v) => v.trim().replace(/^["']|["']$/g, ""))
       .filter(Boolean);
   }
-  const blocked = frontmatter.match(new RegExp(`^${key}:[ \\t]*\\n((?:[ \\t]*-[^\\n]*\\n?)+)`, "mi"));
+  const blocked = frontmatter.match(
+    new RegExp(`^${key}:[ \\t]*\\n((?:[ \\t]*-[^\\n]*\\n?)+)`, "mi"),
+  );
   if (!blocked) return [];
   return blocked[1]
     .split("\n")
-    .map((line) => line.replace(/^[ \t]*-[ \t]*/, "").trim().replace(/^["']|["']$/g, ""))
+    .map((line) =>
+      line
+        .replace(/^[ \t]*-[ \t]*/, "")
+        .trim()
+        .replace(/^["']|["']$/g, ""),
+    )
     .filter(Boolean);
 }
 
