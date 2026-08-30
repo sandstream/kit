@@ -61,3 +61,20 @@ jobs:
       # `ci-adr-gate.test.ts` pins this step's existence — deleting it fails the suite.
       - name: ADR gate (accepted ADRs' kit-enforce rules)
         run: node dist/cli.js adr check
+
+      # SKILL DISCIPLINE — same failure class as the ADR gate above, found the same way.
+      # `kit skill test --gate` has always exited 1 on a failing skill and nothing ever ran
+      # it: not CI, not `kit review`, not verify-suite.sh. Measured the day this landed, kit's
+      # ONLY shipped SKILL.md failed kit's own linter (no `allowed-tools` — the skill
+      # implicitly claimed every tool) for as long as the linter had existed, and no pipeline
+      # said a word. A tool that lints skills while shipping one that fails it is not a gate,
+      # it is advice.
+      #
+      # This runs the `skill` stage of `kit review`, so it covers every SKILL.md the repo
+      # ships rather than one hard-coded path — a second skill cannot be added un-gated.
+      # Module discipline only: contract, trigger collision, BOUNDED tool scope, and drift
+      # from the committed snapshot. Whether a skill's output is any GOOD is a model
+      # judgement and stays outside kit (ADR-0001). A repo with no skills skips honestly.
+      # `ci-adr-gate.test.ts` pins this step's existence — deleting it fails the suite.
+      - name: Skill gate (module discipline for every shipped SKILL.md)
+        run: node dist/cli.js review --stages skill

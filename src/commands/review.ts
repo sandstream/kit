@@ -1,9 +1,9 @@
 /**
- * `kit review` — meta-runner: check + design + standards + ADR in one shot.
+ * `kit review` — meta-runner: check + design + standards + ADR + skill discipline in one shot.
  * Convenient single-command gate for AI agents and PR checks.
  *
  * collectReview is the structured core: it runs every stage's shared gate
- * (check-run, design, standards-run, adr) and returns one ReviewReport.
+ * (check-run, design, standards-run, adr, skill-run) and returns one ReviewReport.
  * cmdReview is a renderer on top; the MCP `kit_review` tool serializes the
  * same report — the computeCheckVerdict pattern, so the CLI and MCP surfaces
  * can never diverge on what a review runs or what "green" means.
@@ -20,10 +20,11 @@ import { runCheckGate, checkRunToJsonChecks } from "../check-run.js";
 import { runStandardsGate } from "../standards-run.js";
 import { runDesignGate } from "./design.js";
 import { runAdrGate } from "./adr.js";
+import { runSkillGate } from "../skill-run.js";
 import type { JsonCheck } from "../cli-checks-shared.js";
 import type { GateOpts } from "../check-security.js";
 
-export type ReviewStageName = "check" | "design" | "standards" | "adr";
+export type ReviewStageName = "check" | "design" | "standards" | "adr" | "skill";
 
 export interface ReviewStageReport {
   stage: ReviewStageName;
@@ -42,7 +43,13 @@ export interface ReviewReport {
   stages: ReviewStageReport[];
 }
 
-export const REVIEW_STAGES: readonly ReviewStageName[] = ["check", "design", "standards", "adr"];
+export const REVIEW_STAGES: readonly ReviewStageName[] = [
+  "check",
+  "design",
+  "standards",
+  "adr",
+  "skill",
+];
 
 export interface CollectReviewOptions {
   cwd?: string;
@@ -58,7 +65,7 @@ export interface CollectReviewOptions {
    *  THE scoped, read-only path: an agent iterating on standards findings runs
    *  `stages: ["standards"]` in seconds instead of paying the full audit's
    *  security scan per loop — and it survives kit_standards' 6.0 removal.
-   *  Undefined ⇒ all four. */
+   *  Undefined ⇒ every stage. */
   stages?: ReviewStageName[];
   /** Standards-stage scope (general | specific | plugins | platform | <language>),
    *  passed through to the standards gate — parity with `kit standards --category`. */
@@ -131,7 +138,7 @@ function adrFindings(adr: Awaited<ReturnType<typeof runAdrGate>>): JsonCheck[] {
 /**
  * Run the requested review stages (default: all four) and return the structured
  * report. Read-only; stages run in the order the CLI always ran them
- * (check → design → standards → adr) regardless of the input order. The report
+ * (check → design → standards → adr → skill) regardless of the input order. The report
  * covers exactly the stages that ran — a scoped run's `ok` says nothing about
  * the stages it skipped, and the `stages` array shows the scope honestly.
  */
@@ -163,6 +170,12 @@ export async function collectReview(opts: CollectReviewOptions = {}): Promise<Re
   if (wanted.has("adr")) {
     const adr = await runAdrGate(opts.cwd ?? process.cwd());
     stages.push(stageReport("adr", adr.ok, adrFindings(adr)));
+  }
+  if (wanted.has("skill")) {
+    // Module discipline over every SKILL.md the repo ships. A repo with no skills skips
+    // honestly; a repo with one gets a verdict instead of the silence this stage replaces.
+    const skill = runSkillGate(opts.cwd ?? process.cwd());
+    stages.push(stageReport("skill", skill.ok, skill.checks));
   }
 
   const failed = stages.filter((s) => !s.ok).map((s) => s.stage);

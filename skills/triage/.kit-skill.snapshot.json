@@ -1,0 +1,8 @@
+{
+  "name": "triage",
+  "triggerKey": "security triage a dependency before installing it",
+  "scope": [
+    "Bash"
+  ],
+  "fingerprint": "sha256:77a14838365b108a"
+}

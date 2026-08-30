@@ -256,6 +256,22 @@ describe("checkHooks", () => {
     assert.equal(results[0].upToDate, false);
     assert.ok(results[0].detail.includes("not managed by kit"));
   });
+
+  it("accepts a non-kit hook when it contains the configured commands", async () => {
+    const config: HooksConfig = {
+      "pre-commit": ["npm run lint"],
+    };
+
+    await mkdir(join(testGitDir, "hooks"), { recursive: true });
+    await writeFile(join(testGitDir, "hooks", "pre-commit"), "#!/bin/sh\nnpm run lint\n", "utf-8");
+
+    const results = await checkHooks(config, testGitDir);
+
+    assert.equal(results.length, 1);
+    assert.equal(results[0].installed, true);
+    assert.equal(results[0].upToDate, true);
+    assert.ok(results[0].detail.includes("externally managed"));
+  });
 });
 
 describe("uninstallHooks", () => {

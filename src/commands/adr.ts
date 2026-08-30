@@ -356,7 +356,7 @@ export async function adrCheck(cwd = process.cwd()): Promise<boolean> {
 export async function cmdAdr(): Promise<boolean> {
   const args = process.argv.slice(3);
   const sub =
-    args[0] === "list" || args[0] === "check" || args[0] === "freeze"
+    args[0] === "list" || args[0] === "check" || args[0] === "freeze" || args[0] === "derive"
       ? args[0]
       : args[0]
         ? "help"
@@ -368,7 +368,20 @@ export async function cmdAdr(): Promise<boolean> {
     console.log("  kit adr list     ADRs + status + enforced/documented");
     console.log("  kit adr check    gate the repo on accepted ADRs' rules (default)");
     console.log("  kit adr freeze   snapshot current findings into the baseline");
+    console.log(
+      "  kit adr derive   propose ADRs the code already obeys, each verified against the repo",
+    );
+    console.log(
+      `\n  ${c.dim}derive: --root <dir> --min-support <n> --json --emit <from>/<to>${c.reset}`,
+    );
     return true;
+  }
+
+  if (sub === "derive") {
+    // One module deeper so `kit adr derive`'s flags stay out of review/baseline/standards
+    // (see src/commands/adr-derive.ts) — and so `adr check` never loads the repo map.
+    const { adrDerive } = await import("./adr-derive.js");
+    return adrDerive(cwd);
   }
 
   if (sub === "list") {

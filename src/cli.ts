@@ -825,7 +825,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   review: {
     handler: cmdReview,
     stability: "stable",
-    help: "Full repo audit — runs check + design + standards + adr in one gate (for agents / PR checks; --json emits one structured report; --stages check,standards scopes the run, --category scopes the standards stage)",
+    help: "Full repo audit — runs check + design + standards + adr + skill in one gate (for agents / PR checks; --json emits one structured report; --stages check,standards scopes the run, --category scopes the standards stage)",
     // MCP-exposed: THE one-shot audit for shell-less agents (kit_review),
     // superseding kit_standards on that surface (deprecated, leaves in 6.0).
     mcp: true,
@@ -838,7 +838,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   adr: {
     handler: cmdAdr,
     stability: "experimental",
-    help: "Enforce architecture decisions (ADR → gate): 'kit adr check' gates the repo on accepted ADRs' deterministic kit-enforce rules, cited to the ADR; 'kit adr list' shows enforced/documented. Zero-LLM (prose is never interpreted).",
+    help: "Enforce architecture decisions (ADR → gate): 'kit adr check' gates the repo on accepted ADRs' deterministic kit-enforce rules, cited to the ADR; 'kit adr list' shows enforced/documented; 'kit adr derive' proposes the decisions an inherited repo already obeys, each verified against the repo and emitted as status: proposed so it gates nothing until you accept it. Zero-LLM (prose is never interpreted).",
   },
   insight: {
     handler: cmdInsight,

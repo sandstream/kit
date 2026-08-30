@@ -87,7 +87,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--with-migrate",
     "--yes",
   ],
-  adr: [],
+  adr: ["--emit", "--json", "--min-support", "--root"],
   "agent-audit": ["--attest", "--json", "--mode", "--no-auto-install", "--non-interactive"],
   "agent-config": [
     "--broker-gate",

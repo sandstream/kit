@@ -64,7 +64,7 @@ const KIT_MCP_INSTRUCTIONS = `kit is a deterministic, local-first dev-environmen
 
 If you have shell access, prefer running \`kit <command>\` directly — the CLI covers far more than these tools and \`kit <command> --help\` documents everything. These MCP tools exist for shell-less clients.
 
-Typical loop: kit_check (verify env + security) → kit_fix (auto-repair) → kit_triage (REQUIRED before installing any package kit's gate has not already cleared — the gate blocks untriaged installs) → kit_memory (recall prior cross-session decisions before answering project-specific questions) → kit_review (full audit — check + design + standards + ADR — before merging) → kit_run (escape hatch for any other kit command).`;
+Typical loop: kit_check (verify env + security) → kit_fix (auto-repair) → kit_triage (REQUIRED before installing any package kit's gate has not already cleared — the gate blocks untriaged installs) → kit_memory (recall prior cross-session decisions before answering project-specific questions) → kit_review (full audit — check + design + standards + ADR + skill discipline — before merging) → kit_run (escape hatch for any other kit command).`;
 
 function configPath(cwd?: string): string {
   return resolve(cwd ?? process.cwd(), KIT_FILE);
@@ -275,7 +275,7 @@ function register_kit_check(server: McpServer): void {
 }
 
 function register_kit_review(server: McpServer): void {
-  // kit_review — the full repo audit (check + design + standards + ADR) as ONE
+  // kit_review — the full repo audit (check + design + standards + ADR + skill) as ONE
   // structured report, via the same collectReview core `kit review` renders.
   // Replaces kit_standards on the MCP surface (that stage is one of its four).
   // Read-only: no writes, so no governance/read-only gating.

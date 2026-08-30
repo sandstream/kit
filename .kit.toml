@@ -12,7 +12,7 @@ pnpm = "latest"
 "aqua:trufflesecurity/trufflehog" = "latest"
 
 [hooks]
-pre-commit = ["kit security scan-staged", "npm run build", "npm test"]
+pre-commit = ["kit security scan-staged", "npm run build"]
 pre-push = ["npm audit --audit-level=high"]
 
 # Scanner tokens (SNYK_TOKEN, …) resolve from the shared sandstream-common
