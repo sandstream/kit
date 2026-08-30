@@ -30,14 +30,21 @@ This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, 
 
 ## Architecture decisions are a gate, and `kit check` does not run it
 
-`docs/adr` holds six ADRs. The four accepted ones carry a `kit-enforce` block, which
-makes them five deterministic rules — not prose:
+`docs/adr` holds seven ADRs. The four accepted-and-enforced ones carry a `kit-enforce`
+block, which makes them five deterministic rules — not prose:
 
 - **ADR-0001** no model-client import anywhere in `src/**` (the zero-LLM core).
 - **ADR-0002** no new runtime dependency from the forbidden list — stdlib otherwise.
+  The *floor itself* (exactly four runtime deps, all pinned) is **not** expressible in the
+  `kit-enforce` grammar and is enforced by `src/dependency-floor.test.ts`; the ADR says why.
 - **ADR-0003** the check path imports no coverage-framework mappings.
 - **ADR-0006** `src/utils/**` imports nothing from the repo — derived by `kit adr derive`
   from an asymmetry the code had obeyed for months, then accepted.
+
+Three more are accepted but **documented, not enforced** — ADR-0004 (workflow skills live
+above kit), ADR-0005 (browser substrate), and **ADR-0007** (kit may measure model + kit
+residual risk, but owns only the rig — the frozen input, ingest schema, deterministic
+adjudication and receipts — never the judgement).
 
 `node dist/cli.js adr check` runs them and **fails CI hard** on a violation. `kit check`
 does **not** include the ADR stage — only `kit review` (check + design + standards + adr + skill)
