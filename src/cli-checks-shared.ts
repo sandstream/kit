@@ -17,6 +17,43 @@ export const KIT_VERSION = (
   JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8")) as { version: string }
 ).version;
 
+/**
+ * Check categories whose verdict comes from EXECUTING the code under test rather than
+ * reading it. Everything else — secret scans, dependency audits, import rules, manifest
+ * checks, registry queries — is static: it inspects text and metadata.
+ *
+ * The distinction is not pedantry. Multi-tier verification research (arXiv:2607.00107,
+ * 8,918 programs across four tiers) found AI-generated code roughly twice as likely as
+ * human code to trigger a confirmed runtime violation — while under STATIC analysis the
+ * two appear equally safe, a similarity the authors call misleading. The tiers catch
+ * largely different classes of defect.
+ *
+ * kit's check surface is almost entirely the tier that cannot tell those apart. That does
+ * not make its green wrong; it makes it NARROWER than a reader assumes, and a gate whose
+ * scope is assumed rather than stated is the failure mode this repo keeps finding. So the
+ * scope gets printed next to the verdict, counted rather than claimed, so it cannot go
+ * stale as categories are added.
+ */
+export const EXECUTING_CATEGORIES: readonly string[] = ["tests"];
+
+/**
+ * One line naming what a green verdict covers. Returns "" for an empty run — there is no
+ * scope to state when nothing ran, and the caller already says so.
+ */
+export function tierNotice(checks: readonly JsonCheck[]): string {
+  if (checks.length === 0) return "";
+  const executing = checks.filter((k) => EXECUTING_CATEGORIES.includes(k.category)).length;
+  const stat = checks.length - executing;
+  const runtime =
+    executing === 0
+      ? "none execute the code"
+      : `${executing} execute${executing === 1 ? "s" : ""} it`;
+  return (
+    `scope: ${checks.length} check(s) — ${stat} inspect the code, ${runtime}. ` +
+    `A pass here does not cover runtime behaviour; \`kit broker\` is that tier.`
+  );
+}
+
 /** One check row in the machine-readable `kit check --json` / `kit ci --json` output. */
 export interface JsonCheck {
   name: string;

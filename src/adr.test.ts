@@ -463,3 +463,32 @@ describe("resolveRelative", () => {
     assert.equal(resolveRelative("src/web/h.ts", "./nope.js", set), null);
   });
 });
+
+describe("parseAdr — enforced_by", () => {
+  const withFrontmatter = (extra: string): string =>
+    `---\nid: ADR-0099\ntitle: T\nstatus: accepted\n${extra}---\n\n# body\n`;
+
+  it("parses an inline list", () => {
+    const adr = parseAdr(withFrontmatter("enforced_by: [src/a.test.ts, src/b.test.ts]\n"));
+    assert.deepEqual(adr?.enforcedBy, ["src/a.test.ts", "src/b.test.ts"]);
+  });
+
+  it("parses a block list", () => {
+    const adr = parseAdr(withFrontmatter("enforced_by:\n  - src/a.test.ts\n  - src/b.test.ts\n"));
+    assert.deepEqual(adr?.enforcedBy, ["src/a.test.ts", "src/b.test.ts"]);
+  });
+
+  it("strips quotes", () => {
+    const adr = parseAdr(withFrontmatter(`enforced_by: ["src/a.test.ts"]\n`));
+    assert.deepEqual(adr?.enforcedBy, ["src/a.test.ts"]);
+  });
+
+  it("is an empty list when absent — the field is optional, never undefined", () => {
+    // Callers iterate it directly; an undefined here would be a crash at the call site.
+    assert.deepEqual(parseAdr(withFrontmatter(""))?.enforcedBy, []);
+  });
+
+  it("yields nothing rather than a guess for a shape it does not understand", () => {
+    assert.deepEqual(parseAdr(withFrontmatter("enforced_by: src/a.test.ts\n"))?.enforcedBy, []);
+  });
+});

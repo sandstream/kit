@@ -12,7 +12,6 @@ import {
   makeClient,
   rollJwtSecret,
   mintScopedKey,
-  listApiKeys,
   detectKeyMode,
   type MgmtClient,
   type RotateMode,

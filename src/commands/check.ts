@@ -36,6 +36,7 @@ import { syncSecurityFindings } from "../findings-track.js";
 import { collectHints } from "../hints.js";
 import {
   KIT_VERSION,
+  tierNotice,
   type JsonCheck,
   type JsonCheckOutput,
   autoInstallScanners,
@@ -270,6 +271,17 @@ export async function cmdCheck(): Promise<boolean> {
           deploy: deployResults,
         }),
       );
+
+      // What the verdict COVERS, counted from the checks that ran. Sibling to the
+      // partial-run line below and for the same reason: a scope the reader has to assume
+      // is a scope that gets assumed wrong. kit's surface is almost all static analysis,
+      // which is the tier that provably cannot distinguish AI-written code from
+      // human-written code (see EXECUTING_CATEGORIES) — so it says so rather than letting
+      // a green stand in for more than it checked.
+      {
+        const notice = tierNotice(checkRunToJsonChecks(run));
+        if (notice) console.log(`${c.dim}${notice}${c.reset}`);
+      }
 
       // A narrowed run must say so next to its verdict. Without this line a
       // `--category security` pass is visually identical to a full green.

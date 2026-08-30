@@ -5,6 +5,7 @@
  * to optimize CloudFront caching behavior.
  */
 
+import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 // ─── Public API Endpoints (Cacheable) ───────────────────────────────────
@@ -232,7 +233,7 @@ export async function refreshToken(req: NextRequest) {
 // ─── Utility Functions ────────────────────────────────────────────────
 
 function generateETag(data: any): string {
-  const hash = require("crypto").createHash("md5").update(JSON.stringify(data)).digest("hex");
+  const hash = createHash("md5").update(JSON.stringify(data)).digest("hex");
   return `"${hash}"`;
 }
 

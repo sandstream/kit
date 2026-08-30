@@ -17,12 +17,21 @@ This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, 
 
 ## Architecture decisions are a gate, and `kit check` does not run it
 
-`docs/adr` holds five ADRs. The three accepted ones carry a `kit-enforce` block, which
-makes them four deterministic rules — not prose:
+`docs/adr` holds seven ADRs. The four accepted-and-enforced ones carry a `kit-enforce`
+block, which makes them five deterministic rules — not prose:
 
 - **ADR-0001** no model-client import anywhere in `src/**` (the zero-LLM core).
 - **ADR-0002** no new runtime dependency from the forbidden list — stdlib otherwise.
+  The *floor itself* (exactly four runtime deps, all pinned) is **not** expressible in the
+  `kit-enforce` grammar and is enforced by `src/dependency-floor.test.ts`; the ADR says why.
 - **ADR-0003** the check path imports no coverage-framework mappings.
+- **ADR-0006** `src/utils/**` imports nothing from the repo — derived by `kit adr derive`
+  from an asymmetry the code had obeyed for months, then accepted.
+
+Three more are accepted but **documented, not enforced** — ADR-0004 (workflow skills live
+above kit), ADR-0005 (browser substrate), and **ADR-0007** (kit may measure model + kit
+residual risk, but owns only the rig — the frozen input, ingest schema, deterministic
+adjudication and receipts — never the judgement).
 
 `node dist/cli.js adr check` runs them and **fails CI hard** on a violation. `kit check`
 does **not** include the ADR stage — only `kit review` (check + design + standards + adr + skill)
@@ -31,3 +40,11 @@ does. So before opening a PR that adds a dependency, moves an import, or touches
 
 Adding one of those imports is an ADR-level decision, not a code change: amend or supersede
 the ADR in the same PR, or the gate will refuse the code and cite the ADR that refused it.
+
+**When a decision does not fit the `kit-enforce` grammar, say where it lives instead of
+dropping it.** Three limits are measured and will bite again: `paths` has no negation,
+`forbid_pattern`/`require_pattern` match line by line, and the import extractor is
+text-level (a fixture string that looks like an import counts as one). An ADR in that
+position declares `enforced_by: [src/x.test.ts]` in its frontmatter — `adr list` prints it
+and `adr check` fails if the file is missing. Silently declaring more than you enforce is
+the failure this exists to prevent; ADR-0002 sat that way for months.
