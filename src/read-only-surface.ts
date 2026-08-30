@@ -72,6 +72,8 @@ export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
   { command: "identity", subcommand: "init", operation: "identity-init" },
   { command: "identity", subcommand: "rotate", operation: "identity-rotate" },
   { command: "identity", subcommand: "migrate", operation: "identity-migrate" },
+  // Scaffolds Playwright monkey-test harness files into the repo.
+  { command: "monkey-test", subcommand: "init", operation: "monkey-test-init" },
   // Creates or re-signs the org policy document that other gates read as authority.
   { command: "policy", subcommand: "init", operation: "policy-init" },
   { command: "policy", subcommand: "sign", operation: "policy-sign" },

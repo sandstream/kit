@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+### Added
+
+- **Monkey test release gate.** Added `kit monkey-test plan|init|run` plus the
+  bundled `monkey-test` skill for role-based money-app release checks with
+  Playwright desktop/mobile crawl, sandbox payment flow, and security findings.
+
+### Fixed
+
+- **Claude hook visibility.** Claude SessionStart hooks now emit structured
+  `systemMessage` output for actionable kit signals while preserving full
+  context for the agent.
+
 ## [6.10.2] - 2026-08-30
 
 ### Added

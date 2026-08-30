@@ -2809,6 +2809,34 @@
       "x-kit-mcp": true,
       "x-kit-stability": "stable"
     },
+    "monkey-test": {
+      "kind": "command",
+      "summary": "Role-based release gate for money-handling apps: detect stack/env/seed, scaffold Playwright desktop+mobile harness, run role crawl, sandbox money flow, and security pack (plan|init|run; --json)",
+      "x-kit-accepted-flags": [
+        "--base-url",
+        "--env",
+        "--env-command",
+        "--expected",
+        "--force",
+        "--help",
+        "--json",
+        "--link-depth",
+        "--non-interactive",
+        "--read-only",
+        "--readonly",
+        "--seed-command",
+        "--skip-browser",
+        "--skip-security",
+        "--skip-seed",
+        "--start-command",
+        "--test-command",
+        "--version"
+      ],
+      "x-kit-args-modeled": true,
+      "x-kit-audience": "all",
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
     "open": {
       "kind": "command",
       "summary": "Open service dashboard in browser (stripe, vercel, railway, etc.)",

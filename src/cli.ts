@@ -32,6 +32,7 @@ import { cmdProfile } from "./commands/profile.js";
 import { cmdBroker } from "./commands/broker.js";
 import { cmdBootstrap } from "./commands/bootstrap.js";
 import { cmdSkill } from "./commands/skill.js";
+import { cmdMonkeyTest } from "./commands/monkey-test.js";
 import { cmdMap } from "./commands/repomap.js";
 import { cmdBrowser } from "./commands/browser.js";
 import { cmdUsage } from "./commands/usage.js";
@@ -138,7 +139,10 @@ function cmdHelp(subcommand?: string): boolean {
         "health",
       ],
     ],
-    ["Review & quality", ["review", "design", "standards", "coverage", "baseline", "analyze"]],
+    [
+      "Review & quality",
+      ["review", "design", "standards", "coverage", "baseline", "analyze", "monkey-test"],
+    ],
     ["Secrets & environments", ["secrets", "env", "login"]],
     [
       "Security & supply chain",
@@ -734,6 +738,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdBrowser,
     stability: "experimental",
     help: "Browser-verification diagnostics: select Playwright/system Chrome/CDP strategy from [browser] without guessing (doctor|status|cdp-url|playwright-env; --json)",
+  },
+  "monkey-test": {
+    handler: cmdMonkeyTest,
+    stability: "experimental",
+    help: "Role-based release gate for money-handling apps: detect stack/env/seed, scaffold Playwright desktop+mobile harness, run role crawl, sandbox money flow, and security pack (plan|init|run; --json)",
   },
   identity: {
     handler: cmdIdentity,
