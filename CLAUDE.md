@@ -53,3 +53,11 @@ does. So before opening a PR that adds a dependency, moves an import, or touches
 
 Adding one of those imports is an ADR-level decision, not a code change: amend or supersede
 the ADR in the same PR, or the gate will refuse the code and cite the ADR that refused it.
+
+**When a decision does not fit the `kit-enforce` grammar, say where it lives instead of
+dropping it.** Three limits are measured and will bite again: `paths` has no negation,
+`forbid_pattern`/`require_pattern` match line by line, and the import extractor is
+text-level (a fixture string that looks like an import counts as one). An ADR in that
+position declares `enforced_by: [src/x.test.ts]` in its frontmatter — `adr list` prints it
+and `adr check` fails if the file is missing. Silently declaring more than you enforce is
+the failure this exists to prevent; ADR-0002 sat that way for months.

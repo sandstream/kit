@@ -66,6 +66,21 @@ export interface Adr {
   rules: AdrRule[];
   /** True when a ```toml kit-enforce block was present (even if it parsed to zero rules). */
   hasEnforceBlock: boolean;
+  /**
+   * Repo-relative paths that enforce this ADR's claim OUTSIDE the `kit-enforce` block.
+   *
+   * Some decisions are not expressible in the block's grammar — measured cases: `paths`
+   * has no negation, `forbid_pattern`/`require_pattern` match line by line so a JSON
+   * block cannot be pinned, and the manifest is not in the walked file set at all. Before
+   * this field the only options were to encode the rule wrong or to leave the ADR
+   * declaring more than it enforced, silently. ADR-0002 sat in the second state for
+   * months: titled "four runtime deps", enforcing "not these twelve imports".
+   *
+   * Naming the real enforcement point turns that silence into a claim, and a claim can be
+   * checked — `adr check` fails when a path listed here does not exist, so the pointer
+   * cannot rot into a lie.
+   */
+  enforcedBy: string[];
 }
 
 export interface AdrViolation {
@@ -91,6 +106,33 @@ function scalar(frontmatter: string, key: string): string | undefined {
   return m ? m[1].trim().replace(/^["']|["']$/g, "") : undefined;
 }
 
+/**
+ * A frontmatter list, in either shape:
+ *
+ *   enforced_by: [src/a.test.ts, src/b.test.ts]
+ *   enforced_by:
+ *     - src/a.test.ts
+ *     - src/b.test.ts
+ *
+ * Deliberately tiny: this is not a YAML parser, it is two shapes an ADR author writes by
+ * hand. Anything else yields an empty list rather than a guess.
+ */
+function list(frontmatter: string, key: string): string[] {
+  const inline = frontmatter.match(new RegExp(`^${key}:[ \\t]*\\[(.*)\\][ \\t]*$`, "mi"));
+  if (inline) {
+    return inline[1]
+      .split(",")
+      .map((v) => v.trim().replace(/^["']|["']$/g, ""))
+      .filter(Boolean);
+  }
+  const blocked = frontmatter.match(new RegExp(`^${key}:[ \\t]*\\n((?:[ \\t]*-[^\\n]*\\n?)+)`, "mi"));
+  if (!blocked) return [];
+  return blocked[1]
+    .split("\n")
+    .map((line) => line.replace(/^[ \t]*-[ \t]*/, "").trim().replace(/^["']|["']$/g, ""))
+    .filter(Boolean);
+}
+
 function str(o: Record<string, unknown>, k: string): string | undefined {
   return typeof o[k] === "string" ? (o[k] as string) : undefined;
 }
@@ -112,6 +154,7 @@ export function parseAdr(raw: string): Adr | null {
   const status: AdrStatus = (STATUSES as string[]).includes(rawStatus)
     ? (rawStatus as AdrStatus)
     : "unknown";
+  const enforcedBy = list(frontmatter, "enforced_by");
 
   // A fenced ```toml kit-enforce block anywhere in the body.
   const block = body.match(/```toml\s+kit-enforce\s*\n([\s\S]*?)\n```/);
@@ -154,7 +197,7 @@ export function parseAdr(raw: string): Adr | null {
       rules = []; // malformed TOML → zero rules, but hasEnforceBlock stays true (surfaced)
     }
   }
-  return { id, title, status, rules, hasEnforceBlock };
+  return { id, title, status, rules, hasEnforceBlock, enforcedBy };
 }
 
 function arr(v: unknown): Record<string, unknown>[] {

@@ -2,6 +2,7 @@
 id: ADR-0002
 title: Dependency floor — four runtime deps, stdlib otherwise
 status: accepted
+enforced_by: [src/dependency-floor.test.ts]
 ---
 
 # ADR-0002: Dependency floor

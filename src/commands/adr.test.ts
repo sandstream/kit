@@ -84,3 +84,44 @@ describe("collectAdrFindings + freezeAdrBaseline (temp repo)", () => {
     assert.equal(live.length, 0, "the frozen violation is suppressed on re-check");
   });
 });
+
+describe("collectAdrFindings — an enforced_by pointer must point at something real", () => {
+  let dir = "";
+
+  const seed = (frontmatterExtra: string, status = "accepted"): string => {
+    const root = mkdtempSync(join(tmpdir(), "kit-enforcedby-"));
+    mkdirSync(join(root, "docs", "adr"), { recursive: true });
+    writeFileSync(
+      join(root, "docs", "adr", "0001-x.md"),
+      `---\nid: ADR-0001\ntitle: X\nstatus: ${status}\n${frontmatterExtra}---\n\n# X\n`,
+    );
+    return root;
+  };
+
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("fails when the named file does not exist — a claim of coverage that is not coverage", () => {
+    dir = seed("enforced_by: [src/gone.test.ts]\n");
+    const f = collectAdrFindings(dir);
+    assert.equal(f.violations.length, 1);
+    assert.equal(f.violations[0].detail, "src/gone.test.ts");
+    assert.match(f.violations[0].message, /does not exist/);
+  });
+
+  it("passes when the file is there", () => {
+    dir = seed("enforced_by: [src/here.test.ts]\n");
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "here.test.ts"), "// enforcement lives here\n");
+    assert.equal(collectAdrFindings(dir).violations.length, 0);
+  });
+
+  it("ignores a non-accepted ADR — a proposal's pointer is not yet a claim", () => {
+    dir = seed("enforced_by: [src/gone.test.ts]\n", "proposed");
+    assert.equal(collectAdrFindings(dir).violations.length, 0);
+  });
+
+  it("is silent when the field is absent", () => {
+    dir = seed("");
+    assert.equal(collectAdrFindings(dir).violations.length, 0);
+  });
+});

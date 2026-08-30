@@ -10,7 +10,13 @@
  *
  * kit never interprets ADR prose (off-charter); it enforces only the explicit
  * toml block. Only `accepted` ADRs gate; an accepted ADR with no rules is surfaced
- * as "documented, not enforced" — never silently green. A transitive forbid_import
+ * as "documented, not enforced" — never silently green.
+ *
+ * Some decisions are not expressible in the block's grammar (no `paths` negation;
+ * patterns match line by line; the manifest is not in the walked file set). Those name
+ * their real enforcement point in frontmatter — `enforced_by: [src/x.test.ts]` — which
+ * `adr list` prints and `adr check` verifies exists, so the pointer cannot rot into a
+ * claim of coverage that is not coverage. A transitive forbid_import
  * that hits an unresolvable relative import is a `gap` (can't prove), not a pass.
  *
  * This file also owns the impure `node_modules` resolver injected into the pure evaluator
@@ -215,7 +221,26 @@ export function collectAdrFindings(cwd: string): AdrFindings {
   // One resolver per run: its caches are what make a cross-package walk affordable. Rules
   // without `follow_packages` never call it, so this costs nothing when nobody opted in.
   const packages = createNodeModulesResolver(cwd);
-  for (const { adr } of adrs) {
+  for (const { adr, file } of adrs) {
+    // An `enforced_by` pointer is a CLAIM that the decision is enforced somewhere the
+    // kit-enforce grammar cannot reach. A pointer at a file that does not exist is worse
+    // than no pointer: it reads as coverage. Checked for every accepted ADR, enforced or
+    // not — a documented-only ADR may still name an external enforcement point.
+    if (adr.status === "accepted") {
+      for (const target of adr.enforcedBy) {
+        if (!exists(pathJoin(cwd, target))) {
+          violations.push({
+            adrId: adr.id,
+            file,
+            line: 1,
+            rule: "require-pattern",
+            detail: target,
+            message: `${adr.id} declares enforced_by: ${target}, which does not exist — an enforcement claim must point at something real`,
+            kind: "violation",
+          });
+        }
+      }
+    }
     if (!adrIsEnforced(adr)) continue;
     enforcedCount++;
     for (const v of evaluateAdr(adr, files, { packages })) {
@@ -398,6 +423,11 @@ export async function cmdAdr(): Promise<boolean> {
           ? `${c.yellow}documented, not enforced${c.reset}`
           : `${c.dim}${adr.status}${c.reset}`;
       console.log(`  ${adr.id}  ${adr.title}  [${state}]  ${c.dim}${file}${c.reset}`);
+      // Where the claim is held when the grammar cannot hold it. Printed under the ADR so
+      // "documented, not enforced" is never confused with "not enforced anywhere".
+      for (const target of adr.enforcedBy) {
+        console.log(`      ${c.dim}└ also enforced by ${target}${c.reset}`);
+      }
     }
     return true;
   }
