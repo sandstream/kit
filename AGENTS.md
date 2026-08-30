@@ -17,12 +17,14 @@ This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, 
 
 ## Architecture decisions are a gate, and `kit check` does not run it
 
-`docs/adr` holds five ADRs. The three accepted ones carry a `kit-enforce` block, which
-makes them four deterministic rules — not prose:
+`docs/adr` holds six ADRs. The four accepted ones carry a `kit-enforce` block, which
+makes them five deterministic rules — not prose:
 
 - **ADR-0001** no model-client import anywhere in `src/**` (the zero-LLM core).
 - **ADR-0002** no new runtime dependency from the forbidden list — stdlib otherwise.
 - **ADR-0003** the check path imports no coverage-framework mappings.
+- **ADR-0006** `src/utils/**` imports nothing from the repo — derived by `kit adr derive`
+  from an asymmetry the code had obeyed for months, then accepted.
 
 `node dist/cli.js adr check` runs them and **fails CI hard** on a violation. `kit check`
 does **not** include the ADR stage — only `kit review` (check + design + standards + adr + skill)
