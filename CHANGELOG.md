@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [6.11.0] - 2026-08-30
+
 ### Added
 
 - **Monkey test release gate.** Added `kit monkey-test plan|init|run` plus the
