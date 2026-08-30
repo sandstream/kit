@@ -1,6 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { runHealth, type HealthSensor, type HealthCtx, type HealthDeps } from "./health.js";
+import {
+  runHealth,
+  healthOk,
+  type HealthSensor,
+  type HealthCtx,
+  type HealthDeps,
+} from "./health.js";
 import { selectSensors, defaultHealthDeps, HEALTH_SENSORS } from "./health.js";
 
 const ctx: HealthCtx = { cwd: "/tmp/repo", config: {} };
@@ -41,6 +47,17 @@ describe("runHealth", () => {
   });
 });
 
+describe("healthOk", () => {
+  it("requires every connected sensor finding to be green", () => {
+    assert.equal(healthOk([{ sensor: "a", source: "s", status: "green", title: "ok" }]), true);
+    assert.equal(healthOk([{ sensor: "a", source: "s", status: "red", title: "bad" }]), false);
+    assert.equal(
+      healthOk([{ sensor: "a", source: "s", status: "unknown", title: "still running" }]),
+      false,
+    );
+  });
+});
+
 describe("selectSensors", () => {
   it("includes github-actions when a git remote is present", () => {
     const sel = selectSensors({ cwd: "/tmp/repo", config: {}, gitRemote: true });
@@ -75,6 +92,26 @@ describe("selectSensors", () => {
       selectSensors({ cwd: "/r", config: {} }).some((s) => s.id === "bitbucket-pipelines"),
       false,
     );
+  });
+
+  it("includes github-dependabot when Dependabot config is present", () => {
+    assert.ok(
+      selectSensors({ cwd: "/r", config: {}, gitRemote: true, githubDependabot: true }).some(
+        (s) => s.id === "github-dependabot",
+      ),
+    );
+    assert.equal(
+      selectSensors({ cwd: "/r", config: {}, gitRemote: true }).some(
+        (s) => s.id === "github-dependabot",
+      ),
+      false,
+    );
+  });
+
+  it("includes analytics sensors when analytics services are detected or declared", () => {
+    const sel = selectSensors({ cwd: "/r", config: {}, services: ["posthog", "tinybird"] });
+    assert.ok(sel.some((s) => s.id === "posthog"));
+    assert.ok(sel.some((s) => s.id === "tinybird"));
   });
 
   it("registry has all three CI sensors and defaultHealthDeps exposes runCli + httpGet", () => {

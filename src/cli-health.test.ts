@@ -18,6 +18,7 @@ describe("formatHealth", () => {
   it("counts red findings and renders a line per finding", () => {
     const out = formatHealth(findings);
     assert.equal(out.redCount, 1);
+    assert.equal(out.nonGreenCount, 2);
     assert.equal(out.lines.length, 3);
     assert.ok(out.lines.some((l) => l.includes("workflow failing: CI")));
     assert.ok(out.lines.some((l) => l.includes("acme/webapp")));
@@ -26,5 +27,6 @@ describe("formatHealth", () => {
   it("redCount is 0 when nothing is red", () => {
     const out = formatHealth([{ sensor: "a", source: "s", status: "green", title: "ok" }]);
     assert.equal(out.redCount, 0);
+    assert.equal(out.nonGreenCount, 0);
   });
 });

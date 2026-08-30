@@ -8,7 +8,13 @@ export interface GhRun {
   databaseId: number;
 }
 
-const FAIL_CONCLUSIONS = new Set(["failure", "timed_out", "startup_failure"]);
+const FAIL_CONCLUSIONS = new Set([
+  "failure",
+  "timed_out",
+  "startup_failure",
+  "cancelled",
+  "action_required",
+]);
 
 export function parseGitHubRuns(json: string): GhRun[] {
   try {
@@ -40,17 +46,28 @@ export function failingWorkflows(
   runs: GhRun[],
   active?: Set<string>,
 ): { name: string; createdAt: string }[] {
+  return latestWorkflowRuns(runs, active)
+    .filter((r) => r.status === "completed" && FAIL_CONCLUSIONS.has(r.conclusion))
+    .map((r) => ({ name: r.name, createdAt: r.createdAt }));
+}
+
+export function pendingWorkflows(
+  runs: GhRun[],
+  active?: Set<string>,
+): { name: string; status: string; createdAt: string }[] {
+  return latestWorkflowRuns(runs, active)
+    .filter((r) => r.status !== "completed")
+    .map((r) => ({ name: r.name, status: r.status, createdAt: r.createdAt }));
+}
+
+function latestWorkflowRuns(runs: GhRun[], active?: Set<string>): GhRun[] {
   const latest = new Map<string, GhRun>();
   for (const r of runs) {
-    if (r.status !== "completed") continue;
     const cur = latest.get(r.name);
     if (!cur || r.createdAt > cur.createdAt) latest.set(r.name, r);
   }
   const filterDisabled = active !== undefined && active.size > 0;
-  return [...latest.values()]
-    .filter((r) => FAIL_CONCLUSIONS.has(r.conclusion))
-    .filter((r) => !filterDisabled || active.has(r.name))
-    .map((r) => ({ name: r.name, createdAt: r.createdAt }));
+  return [...latest.values()].filter((r) => !filterDisabled || active.has(r.name));
 }
 
 export const githubActionsSensor: HealthSensor = {
@@ -112,8 +129,10 @@ export const githubActionsSensor: HealthSensor = {
     const wfRes = await deps.runCli("gh", ["workflow", "list", "--json", "name,state"]);
     const active = wfRes.ok ? activeWorkflowNames(wfRes.stdout) : new Set<string>();
 
-    const failing = failingWorkflows(parseGitHubRuns(listRes.stdout), active);
-    if (failing.length === 0) {
+    const runs = parseGitHubRuns(listRes.stdout);
+    const pending = pendingWorkflows(runs, active);
+    const failing = failingWorkflows(runs, active);
+    if (pending.length === 0 && failing.length === 0) {
       return [
         {
           sensor: "github-actions",
@@ -123,14 +142,25 @@ export const githubActionsSensor: HealthSensor = {
         },
       ];
     }
-    return failing.map((w) => ({
-      sensor: "github-actions",
-      source: nwo,
-      status: "red" as const,
-      severity: "high" as const,
-      title: `GitHub Actions workflow failing: ${w.name}`,
-      detail: `latest run of "${w.name}" failed (${w.createdAt})`,
-      suggestedClass: "code" as const,
-    }));
+    return [
+      ...pending.map((w) => ({
+        sensor: "github-actions",
+        source: nwo,
+        status: "unknown" as const,
+        severity: "medium" as const,
+        title: `GitHub Actions workflow pending: ${w.name}`,
+        detail: `latest run of "${w.name}" is ${w.status} (${w.createdAt}); wait before declaring green`,
+        suggestedClass: "human" as const,
+      })),
+      ...failing.map((w) => ({
+        sensor: "github-actions",
+        source: nwo,
+        status: "red" as const,
+        severity: "high" as const,
+        title: `GitHub Actions workflow failing: ${w.name}`,
+        detail: `latest run of "${w.name}" failed (${w.createdAt})`,
+        suggestedClass: "code" as const,
+      })),
+    ];
   },
 };

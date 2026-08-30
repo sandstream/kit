@@ -154,7 +154,21 @@ export const SERVICE_REGISTRY: ServiceDef[] = [
     pyDeps: ["posthog"],
     login: "# posthog — no CLI login; get keys from https://app.posthog.com/settings/project",
     check: "# posthog — check NEXT_PUBLIC_POSTHOG_KEY is set",
-    secrets: ["NEXT_PUBLIC_POSTHOG_KEY", "NEXT_PUBLIC_POSTHOG_HOST"],
+    secrets: [
+      "NEXT_PUBLIC_POSTHOG_KEY",
+      "NEXT_PUBLIC_POSTHOG_HOST",
+      "POSTHOG_PROJECT_ID",
+      "POSTHOG_PERSONAL_API_KEY",
+    ],
+  },
+  {
+    id: "tinybird",
+    deps: ["tinybird"],
+    pyDeps: ["tinybird"],
+    files: ["tinybird.config.json"],
+    login: "# tinybird — no CLI login; set TINYBIRD_TOKEN in env",
+    check: "# tinybird — check TINYBIRD_TOKEN is set",
+    secrets: ["TINYBIRD_TOKEN", "TINYBIRD_API_URL"],
   },
   {
     id: "typeorm",
