@@ -20,6 +20,26 @@
 
 const DEFAULT_BASE_URL = "https://api.vercel.com";
 
+const ERROR_SECRET_PATTERNS: RegExp[] = [
+  /\b(?:sk|pk|rk)_(?:test|live)_[A-Za-z0-9]{20,}/g,
+  /\bwhsec_[A-Za-z0-9]{20,}/g,
+  /\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{30,}/g,
+  /\bgithub_pat_[A-Za-z0-9_]{60,}/g,
+  /\bsk-(?:proj|ant|svcacct|admin)-[A-Za-z0-9_-]{20,}/g,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+];
+
+function redactErrorText(input: string, knownSecrets: readonly string[] = []): string {
+  let output = input;
+  for (const value of [...new Set(knownSecrets)].filter((value) => value.length >= 8)) {
+    output = output.split(value).join("[REDACTED]");
+  }
+  for (const pattern of ERROR_SECRET_PATTERNS) output = output.replace(pattern, "[REDACTED]");
+  return output
+    .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/[^\s:@/]{0,128}:)[^\s@/]{3,256}@/gi, "$1[REDACTED]@")
+    .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/)[A-Za-z0-9._~%+-]{16,256}@/gi, "$1[REDACTED]@");
+}
+
 function assertNotReadOnly(operation: string): void {
   const v = process.env.KIT_READ_ONLY;
   if (v === "1" || v === "true") {
@@ -65,13 +85,21 @@ export interface MgmtClient {
   teamQuery: string;
 }
 
+const CLIENT_SECRETS = new WeakMap<MgmtClient, readonly string[]>();
+
+function clientSecrets(client: MgmtClient): string[] {
+  const authorization = new Headers(client.headers).get("authorization") ?? "";
+  const bearer = /^Bearer\s+(.+)$/i.exec(authorization)?.[1];
+  return [...(CLIENT_SECRETS.get(client) ?? []), ...(bearer ? [bearer] : [])];
+}
+
 export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
   const token = cfg.token ?? process.env.VERCEL_TOKEN;
   if (!token) {
     throw new Error("VERCEL_TOKEN not set — generate one at https://vercel.com/account/tokens");
   }
   const teamId = cfg.teamId ?? process.env.VERCEL_TEAM_ID;
-  return {
+  const client = {
     baseUrl: cfg.baseUrl ?? DEFAULT_BASE_URL,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -79,6 +107,8 @@ export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
     },
     teamQuery: teamId ? `?teamId=${encodeURIComponent(teamId)}` : "",
   };
+  CLIENT_SECRETS.set(client, [token]);
+  return client;
 }
 
 export interface ProjectSummary {
@@ -96,7 +126,7 @@ export async function listProjects(client: MgmtClient): Promise<ProjectSummary[]
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
-    throw new Error(`/v9/projects returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(`/v9/projects returned ${res.status}: ${await safeText(res, client)}`);
   }
   const body = (await res.json()) as { projects: ProjectSummary[] };
   return body.projects ?? [];
@@ -120,7 +150,7 @@ export async function listEnvVars(client: MgmtClient, projectIdOrName: string): 
   );
   if (!res.ok) {
     throw new Error(
-      `/v9/projects/${projectIdOrName}/env returned ${res.status}: ${await safeText(res)}`,
+      `/v9/projects/${projectIdOrName}/env returned ${res.status}: ${await safeText(res, client)}`,
     );
   }
   const body = (await res.json()) as { envs: EnvVar[] };
@@ -149,7 +179,9 @@ export async function createEnvVar(
     },
   );
   if (!res.ok) {
-    throw new Error(`POST env returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(
+      `POST env returned ${res.status}: ${await safeText(res, client, [entry.value])}`,
+    );
   }
   return (await res.json()) as EnvVar;
 }
@@ -166,7 +198,7 @@ export async function deleteEnvVar(
     { method: "DELETE", headers: client.headers, signal: AbortSignal.timeout(10_000) },
   );
   if (!res.ok) {
-    throw new Error(`DELETE env returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(`DELETE env returned ${res.status}: ${await safeText(res, client)}`);
   }
 }
 
@@ -194,7 +226,9 @@ export async function updateEnvVar(
     },
   );
   if (!res.ok) {
-    throw new Error(`PATCH env returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(
+      `PATCH env returned ${res.status}: ${await safeText(res, client, patch.value ? [patch.value] : [])}`,
+    );
   }
   return (await res.json()) as EnvVar;
 }
@@ -294,7 +328,9 @@ export async function redeployLatest(
     { headers: client.headers, signal: AbortSignal.timeout(10_000) },
   );
   if (!listRes.ok) {
-    throw new Error(`/v6/deployments returned ${listRes.status}: ${await safeText(listRes)}`);
+    throw new Error(
+      `/v6/deployments returned ${listRes.status}: ${await safeText(listRes, client)}`,
+    );
   }
   const listBody = (await listRes.json()) as { deployments?: { uid: string; name?: string }[] };
   const last = listBody.deployments?.[0];
@@ -314,16 +350,20 @@ export async function redeployLatest(
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
-    throw new Error(`POST /v13/deployments returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(`POST /v13/deployments returned ${res.status}: ${await safeText(res, client)}`);
   }
   const body = (await res.json()) as { id: string; url: string; readyState?: string };
   return { id: body.id, url: body.url, readyState: body.readyState };
 }
 
-async function safeText(res: Response): Promise<string> {
+async function safeText(
+  res: Response,
+  client: MgmtClient,
+  sensitiveValues: readonly string[] = [],
+): Promise<string> {
   try {
     const t = await res.text();
-    return t.slice(0, 200);
+    return redactErrorText(t, [...clientSecrets(client), ...sensitiveValues]).slice(0, 200);
   } catch {
     return "<no body>";
   }

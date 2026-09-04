@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   redactSecrets,
   safeStatusLine,
@@ -133,7 +135,8 @@ describe("redactSecrets — B3 coverage (PEM / cloud / url-token)", () => {
     const ms = Number(process.hrtime.bigint() - t0) / 1e6;
     assert.ok(ms < 200, `hyphen-run scanned in ${ms.toFixed(0)}ms — possible ReDoS`);
     // real connection strings still redact (incl. a long-ish scheme like mongodb+srv)
-    assert.match(redactSecrets("mongodb+srv://u:passwordvalue@c.mongodb.net"), /\[REDACTED\]@/);
+    const connectionString = ["mongodb+srv://u:", "passwordvalue", "@c.mongodb.net"].join("");
+    assert.match(redactSecrets(connectionString), /\[REDACTED\]@/);
   });
 
   it("PEM matcher is ReDoS-safe on an unterminated near-miss body", () => {
@@ -221,6 +224,12 @@ describe("redactSecrets", () => {
   it("handles empty input", () => {
     assert.equal(redactSecrets(""), "");
   });
+
+  it("redacts caller-known opaque secrets without removing surrounding diagnostics", () => {
+    const secret = "opaque-provider-value-" + "z".repeat(20);
+    const out = redactSecrets(`request_id=req_exact rejected ${secret}`, [secret]);
+    assert.equal(out, "request_id=req_exact rejected [REDACTED]");
+  });
 });
 
 describe("safeStatusLine", () => {
@@ -300,5 +309,14 @@ describe("the detector's declared bound", () => {
     assert.deepEqual(labels, [...labels].sort(), "stable order for stable output");
     // Every pattern contributes a label: a nameless pattern could never be reported.
     for (const p of SECRET_PATTERNS) assert.ok(p.label.length > 0);
+  });
+
+  it("does not classify its own production source as a secret", () => {
+    const source = readFileSync(
+      resolve(import.meta.dirname, "../../src/utils/redactSecrets.ts"),
+      "utf8",
+    );
+
+    assert.deepEqual(findSecrets(source), []);
   });
 });

@@ -23,11 +23,17 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { checkSecurity } from "./check-security.js";
+import {
+  checkLockfilesCommitted,
+  checkNpmAudit,
+  checkSecretsInCode,
+  checkSecurity,
+} from "./check-security.js";
 
 /** A project whose .gitignore covers every .env spelling the check looks for. */
 function projectWithGitignore(): string {
@@ -61,6 +67,46 @@ async function inCwd<T>(dir: string, fn: () => Promise<T>): Promise<T> {
   } finally {
     process.chdir(prev);
   }
+}
+
+async function withPath<T>(path: string, fn: () => Promise<T>): Promise<T> {
+  const previous = process.env.PATH;
+  process.env.PATH = path;
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) delete process.env.PATH;
+    else process.env.PATH = previous;
+  }
+}
+
+async function withEnv<T>(name: string, value: string, fn: () => Promise<T>): Promise<T> {
+  const previous = process.env[name];
+  process.env[name] = value;
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) delete process.env[name];
+    else process.env[name] = previous;
+  }
+}
+
+function initRepo(dir: string, files: Record<string, string>): void {
+  for (const [path, body] of Object.entries(files)) {
+    const full = join(dir, path);
+    mkdirSync(resolve(full, ".."), { recursive: true });
+    writeFileSync(full, body);
+  }
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["add", "."], { cwd: dir });
+}
+
+function fakeExecutable(dir: string, name: string, body: string): string {
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, name);
+  writeFileSync(path, `#!/bin/sh\n${body}\n`);
+  chmodSync(path, 0o755);
+  return path;
 }
 
 function statusOf(results: Awaited<ReturnType<typeof checkSecurity>>, name: string): string {
@@ -187,6 +233,22 @@ describe("no scanner spawn may inherit the caller's cwd", () => {
     assert.deepEqual(missing, [], `these scanner spawns would read the caller's tree: ${missing}`);
   });
 
+  it("every target-sensitive exec in check-security.ts passes the governed cwd", () => {
+    const src = readFileSync(
+      resolve(import.meta.dirname, "..", "src", "check-security.ts"),
+      "utf8",
+    );
+    const calls = src.split("await exec(").slice(1);
+    const missing: string[] = [];
+    for (const call of calls) {
+      const body = call.slice(0, 900);
+      // Host service exposure is deliberately machine-wide, not project-relative.
+      if (/^\s*"sh"/.test(body)) continue;
+      if (!/cwd:\s*root/.test(body)) missing.push(body.split("\n")[0].trim());
+    }
+    assert.deepEqual(missing, [], `these subprocesses would read the caller's tree: ${missing}`);
+  });
+
   it("check-security.ts reads no path from process.cwd() outside a parameter default", () => {
     const src = readFileSync(
       resolve(import.meta.dirname, "..", "src", "check-security.ts"),
@@ -209,6 +271,115 @@ describe("no scanner spawn may inherit the caller's cwd", () => {
       [],
       `direct process.cwd() reads defeat the cwd parameter: ${JSON.stringify(offenders)}`,
     );
+  });
+});
+
+describe("target-sensitive security subprocesses use the governed tree", () => {
+  it("npm audit runs in the target repo", async () => {
+    const caller = mkdtempSync(join(tmpdir(), "kit-npm-caller-"));
+    const target = mkdtempSync(join(tmpdir(), "kit-npm-target-"));
+    const bin = mkdtempSync(join(tmpdir(), "kit-npm-bin-"));
+    try {
+      writeFileSync(join(target, "package.json"), '{"name":"target","version":"1.0.0"}\n');
+      writeFileSync(join(target, "package-lock.json"), '{"lockfileVersion":3}\n');
+      writeFileSync(join(target, ".target-marker"), "target\n");
+      fakeExecutable(
+        bin,
+        "npm",
+        `if [ -f .target-marker ]; then\n  printf '%s' '{"metadata":{"vulnerabilities":{"high":1,"critical":0}}}'\n  exit 1\nfi\nprintf '%s' '{"metadata":{"vulnerabilities":{"high":0,"critical":0}}}'`,
+      );
+
+      const result = await withPath(`${bin}:/usr/bin:/bin`, () =>
+        inCwd(caller, () => checkNpmAudit(target)),
+      );
+      assert.equal(result.status, "fail");
+      assert.match(result.detail, /1 high/);
+    } finally {
+      rmSync(caller, { recursive: true, force: true });
+      rmSync(target, { recursive: true, force: true });
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it("npm audit timeout is scanner-health failure, not a fabricated vulnerability", async () => {
+    const target = mkdtempSync(join(tmpdir(), "kit-npm-timeout-"));
+    const bin = mkdtempSync(join(tmpdir(), "kit-npm-bin-"));
+    try {
+      writeFileSync(join(target, "package.json"), '{"name":"target","version":"1.0.0"}\n');
+      writeFileSync(join(target, "package-lock.json"), '{"lockfileVersion":3}\n');
+      fakeExecutable(bin, "npm", "sleep 1");
+
+      const result = await withPath(`${bin}:/usr/bin:/bin`, () =>
+        withEnv("KIT_NPM_AUDIT_TIMEOUT_MS", "20", () => checkNpmAudit(target)),
+      );
+      assert.equal(result.status, "warn");
+      assert.equal(result.didNotRun, true);
+      assert.match(result.detail, /timed out/i);
+      assert.doesNotMatch(result.detail, /high|critical/i);
+    } finally {
+      rmSync(target, { recursive: true, force: true });
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it("npm audit transport failure is unverified, not high severity", async () => {
+    const target = mkdtempSync(join(tmpdir(), "kit-npm-network-"));
+    const bin = mkdtempSync(join(tmpdir(), "kit-npm-bin-"));
+    try {
+      writeFileSync(join(target, "package.json"), '{"name":"target","version":"1.0.0"}\n');
+      writeFileSync(join(target, "package-lock.json"), '{"lockfileVersion":3}\n');
+      fakeExecutable(bin, "npm", "printf '%s' 'registry unavailable' >&2\nexit 2");
+
+      const result = await withPath(`${bin}:/usr/bin:/bin`, () => checkNpmAudit(target));
+      assert.equal(result.status, "warn");
+      assert.equal(result.didNotRun, true);
+      assert.equal(result.severity, "medium");
+      assert.match(result.detail, /could not run|unavailable|failed/i);
+    } finally {
+      rmSync(target, { recursive: true, force: true });
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it("lockfile tracking follows the target git index", async () => {
+    const caller = mkdtempSync(join(tmpdir(), "kit-git-caller-"));
+    const target = mkdtempSync(join(tmpdir(), "kit-git-target-"));
+    try {
+      initRepo(caller, { "Cargo.toml": "[package]\nname='caller'\n", "Cargo.lock": "# tracked\n" });
+      initRepo(target, { "Cargo.toml": "[package]\nname='target'\n" });
+      writeFileSync(join(target, "Cargo.lock"), "# deliberately untracked\n");
+
+      const results = await inCwd(caller, () => checkLockfilesCommitted(target));
+      const cargo = results.find((result) => result.name === "Cargo.lock");
+      assert.equal(
+        cargo?.status,
+        "fail",
+        "target's untracked lockfile must not inherit caller pass",
+      );
+    } finally {
+      rmSync(caller, { recursive: true, force: true });
+      rmSync(target, { recursive: true, force: true });
+    }
+  });
+
+  it("the degraded secret scan greps the target repo", async () => {
+    const caller = mkdtempSync(join(tmpdir(), "kit-secret-caller-"));
+    const target = mkdtempSync(join(tmpdir(), "kit-secret-target-"));
+    try {
+      initRepo(caller, { "src/clean.ts": "export const clean = true;\n" });
+      initRepo(target, {
+        "src/prod.ts": 'export const api_key="synthetic_secret_value_123456789";\n',
+      });
+
+      const result = await withPath("/usr/bin:/bin", () =>
+        inCwd(caller, () => checkSecretsInCode(target)),
+      );
+      assert.equal(result.status, "warn");
+      assert.deepEqual(result.files, ["src/prod.ts"]);
+    } finally {
+      rmSync(caller, { recursive: true, force: true });
+      rmSync(target, { recursive: true, force: true });
+    }
   });
 });
 

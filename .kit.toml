@@ -10,6 +10,14 @@ pnpm = "latest"
 # installs on PASS — bare names are untriageable and the gate blocks them.
 "aqua:aquasecurity/trivy" = "latest"
 "aqua:trufflesecurity/trufflehog" = "latest"
+# Strict `kit review --enforce` delegates to these scanners. Exact pins keep
+# local and CI findings stable; `kit install` triages each backend ref before
+# mise installs it, and `resolveToolBin` finds the resulting binary mise-first.
+"npm:license-checker" = "25.0.1"
+"pipx:lizard" = "1.24.0"
+"npm:jscpd" = "5.1.2"
+"aqua:boyter/scc" = "4.0.0"
+"aqua:hadolint/hadolint" = "2.15.1"
 
 [hooks]
 pre-commit = ["kit security scan-staged", "npm run build"]

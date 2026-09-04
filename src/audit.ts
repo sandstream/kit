@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import type { GovernanceConfig } from "./config.js";
 import { identityId, verifySignature } from "./identity.js";
 import { resolveKeyStore, assertHardwareIdentity, hardwareRequired } from "./keystore/index.js";
-import { redactSecrets } from "./utils/redactSecrets.js";
+import { redactSecrets, secretValuesFromEnv } from "./utils/redactSecrets.js";
 
 // Redact secrets from an audit event BEFORE it is hashed and written. The sink previously
 // stored `error` and `metadata` verbatim, so a credential echoed in an error message or
@@ -14,14 +14,14 @@ import { redactSecrets } from "./utils/redactSecrets.js";
 // so the persisted line AND its chain hash cover the redacted form (chain stays consistent).
 // Uses defineProperty for reassembly so a `__proto__`/`constructor` metadata key can't
 // pollute the prototype during the walk.
-function redactAuditValue(v: unknown): unknown {
-  if (typeof v === "string") return redactSecrets(v);
-  if (Array.isArray(v)) return v.map(redactAuditValue);
+function redactAuditValue(v: unknown, knownSecrets: readonly string[]): unknown {
+  if (typeof v === "string") return redactSecrets(v, knownSecrets);
+  if (Array.isArray(v)) return v.map((item) => redactAuditValue(item, knownSecrets));
   if (v && typeof v === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v)) {
       Object.defineProperty(out, k, {
-        value: redactAuditValue(val),
+        value: redactAuditValue(val, knownSecrets),
         enumerable: true,
         writable: true,
         configurable: true,
@@ -93,16 +93,17 @@ function withAttribution(event: AuditEvent, cwd: string): AuditEvent {
 }
 
 function redactAuditEvent(event: AuditEvent): AuditEvent {
+  const knownSecrets = secretValuesFromEnv(process.env);
   return {
     ...event,
     // operation strings commonly embed a command line, so a token can land there;
     // environment is redacted too for the same reason. Both are cheap and normal values
     // ("secrets.generate", "prod") never match a credential pattern → no false redaction.
-    operation: redactSecrets(event.operation),
-    environment: redactSecrets(event.environment),
-    error: event.error ? redactSecrets(event.error) : event.error,
+    operation: redactSecrets(event.operation, knownSecrets),
+    environment: redactSecrets(event.environment, knownSecrets),
+    error: event.error ? redactSecrets(event.error, knownSecrets) : event.error,
     metadata: event.metadata
-      ? (redactAuditValue(event.metadata) as Record<string, unknown>)
+      ? (redactAuditValue(event.metadata, knownSecrets) as Record<string, unknown>)
       : event.metadata,
   };
 }
@@ -421,7 +422,7 @@ export async function appendAuditEventDirect(
  */
 async function postToRemoteOnce(event: AuditEvent, companyId: string): Promise<boolean> {
   const apiUrl = process.env.KIT_REMOTE_URL || "http://localhost:3199";
-  const url = `${apiUrl}/api/companies/${companyId}/audit-logs`;
+  const url = `${apiUrl}/api/companies/${encodeURIComponent(companyId)}/audit-logs`;
   for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt++) {
     try {
       const response = await fetch(url, {
@@ -440,7 +441,7 @@ async function postToRemoteOnce(event: AuditEvent, companyId: string): Promise<b
       // Transient — fall through to backoff/retry.
       if (attempt === RETRY_BACKOFF_MS.length) {
         console.error(
-          `Remote audit-log final-attempt failed: ${error instanceof Error ? error.message : error}`,
+          `Remote audit-log final-attempt failed: ${redactSecrets(error instanceof Error ? error.message : String(error))}`,
         );
         return false;
       }
@@ -457,6 +458,8 @@ interface PendingEntry {
   event: AuditEvent;
   companyId: string;
   parkedAt: string;
+  /** Preserve payloads only when the originating config explicitly opted in. */
+  includeSecrets?: boolean;
 }
 
 /**
@@ -464,13 +467,19 @@ interface PendingEntry {
  * call can drain it. Bounded to MAX_PENDING_ENTRIES so a long outage
  * doesn't grow the file without limit.
  */
-async function parkPendingEntry(event: AuditEvent, companyId: string): Promise<void> {
+async function parkPendingEntry(
+  event: AuditEvent,
+  companyId: string,
+  cwd: string,
+  includeSecrets: boolean,
+): Promise<void> {
   const entry: PendingEntry = {
     event,
     companyId,
     parkedAt: new Date().toISOString(),
+    includeSecrets: includeSecrets || undefined,
   };
-  const queuePath = resolve(process.cwd(), PENDING_QUEUE_FILE);
+  const queuePath = resolve(cwd, PENDING_QUEUE_FILE);
   try {
     let existing = "";
     try {
@@ -494,8 +503,8 @@ async function parkPendingEntry(event: AuditEvent, companyId: string): Promise<v
  * mid-drain doesn't lose entries). Called opportunistically from
  * logAuditEvent so the queue drains whenever the API is reachable.
  */
-async function drainPendingQueue(): Promise<void> {
-  const queuePath = resolve(process.cwd(), PENDING_QUEUE_FILE);
+async function drainPendingQueue(cwd: string): Promise<void> {
+  const queuePath = resolve(cwd, PENDING_QUEUE_FILE);
   let content: string;
   try {
     content = await readFile(queuePath, "utf-8");
@@ -505,6 +514,7 @@ async function drainPendingQueue(): Promise<void> {
   const lines = content.split("\n").filter((l) => l.trim().length > 0);
   if (lines.length === 0) return;
   const remaining: string[] = [];
+  let queueChanged = false;
   for (const line of lines) {
     let entry: PendingEntry;
     try {
@@ -513,10 +523,14 @@ async function drainPendingQueue(): Promise<void> {
       // Drop malformed line.
       continue;
     }
-    const sent = await postToRemoteOnce(entry.event, entry.companyId);
-    if (!sent) remaining.push(line);
+    const safeEntry =
+      entry.includeSecrets === true ? entry : { ...entry, event: redactAuditEvent(entry.event) };
+    const serialized = JSON.stringify(safeEntry);
+    if (serialized !== line) queueChanged = true;
+    const sent = await postToRemoteOnce(safeEntry.event, safeEntry.companyId);
+    if (!sent) remaining.push(serialized);
   }
-  if (remaining.length === lines.length) return; // nothing drained, leave file as-is
+  if (remaining.length === lines.length && !queueChanged) return;
   const tmpPath = `${queuePath}.tmp`;
   try {
     await writeFile(tmpPath, remaining.length ? remaining.join("\n") + "\n" : "", "utf-8");
@@ -530,13 +544,18 @@ async function drainPendingQueue(): Promise<void> {
  * Send audit event to Remote API with retry queue. Caller is non-blocking
  * — they don't await the network round-trip; the queue catches up next call.
  */
-async function sendToRemoteAPI(event: AuditEvent, companyId: string): Promise<void> {
+async function sendToRemoteAPI(
+  event: AuditEvent,
+  companyId: string,
+  cwd: string,
+  includeSecrets: boolean,
+): Promise<void> {
   // Opportunistically drain prior failures first — if the API is up, we
   // clear the backlog before adding this event.
-  await drainPendingQueue();
+  await drainPendingQueue(cwd);
   const ok = await postToRemoteOnce(event, companyId);
   if (!ok) {
-    await parkPendingEntry(event, companyId);
+    await parkPendingEntry(event, companyId, cwd, includeSecrets);
   }
 }
 
@@ -548,7 +567,8 @@ export async function logAuditEvent(
   event: Omit<AuditEvent, "timestamp" | "agent_id" | "agent_name">,
   opts: { companyId?: string; cwd?: string } = {},
 ): Promise<boolean> {
-  const { companyId, cwd } = opts;
+  const { cwd } = opts;
+  const companyId = opts.companyId ?? config.audit.company_id?.trim();
   // Audit disabled by config → nothing to write, nothing to gate on.
   if (!config.audit.enabled) {
     return true;
@@ -572,15 +592,16 @@ export async function logAuditEvent(
   // message or carried under an innocuous key (detail/value/output) never persists locally
   // or ships to Remote. include_secrets=true is an explicit opt-in and skips both.
   if (!config.audit.include_secrets) {
+    const knownSecrets = secretValuesFromEnv(process.env);
     if (auditEvent.metadata) {
-      auditEvent.metadata = redactAuditValue(sanitizeMetadata(auditEvent.metadata)) as Record<
-        string,
-        unknown
-      >;
+      auditEvent.metadata = redactAuditValue(
+        sanitizeMetadata(auditEvent.metadata),
+        knownSecrets,
+      ) as Record<string, unknown>;
     }
-    if (auditEvent.error) auditEvent.error = redactSecrets(auditEvent.error);
-    auditEvent.operation = redactSecrets(auditEvent.operation);
-    auditEvent.environment = redactSecrets(auditEvent.environment);
+    if (auditEvent.error) auditEvent.error = redactSecrets(auditEvent.error, knownSecrets);
+    auditEvent.operation = redactSecrets(auditEvent.operation, knownSecrets);
+    auditEvent.environment = redactSecrets(auditEvent.environment, knownSecrets);
   }
 
   // Write to local JSONL file (hash-chained for tamper-evidence). The boolean
@@ -617,9 +638,18 @@ export async function logAuditEvent(
   // the governance config. Default off — audit-log stays local-first per
   // docs/THREAT_MODEL.md. Operators opt in by setting
   // `[governance.audit].remote = true` in .kit.toml.
-  if (companyId && config.audit.remote === true) {
-    warnFirstRemotePush(companyId);
-    await sendToRemoteAPI(auditEvent, companyId);
+  if (config.audit.remote === true) {
+    if (companyId) {
+      warnFirstRemotePush(companyId);
+      await sendToRemoteAPI(
+        auditEvent,
+        companyId,
+        cwd ?? process.cwd(),
+        config.audit.include_secrets === true,
+      );
+    } else {
+      warnRemoteMissingCompanyId();
+    }
   }
 
   // Auditability is the local append; remote is best-effort and does not gate.
@@ -632,13 +662,22 @@ export async function logAuditEvent(
  * operator made — silent shipping would violate the threat-model contract.
  */
 let warnedRemotePush = false;
+let warnedRemoteMissingCompany = false;
 function warnFirstRemotePush(companyId: string): void {
   if (warnedRemotePush) return;
   warnedRemotePush = true;
   const apiUrl = process.env.KIT_REMOTE_URL || "http://localhost:3199";
   console.error(
-    `[kit] NOTICE: [governance.audit].remote=true — shipping audit events to ${apiUrl} (company ${companyId}). ` +
+    `[kit] NOTICE: [governance.audit].remote=true — shipping audit events to ${redactSecrets(apiUrl)} (company ${redactSecrets(companyId)}). ` +
       `Disable in .kit.toml to keep audit-log local-only.`,
+  );
+}
+
+function warnRemoteMissingCompanyId(): void {
+  if (warnedRemoteMissingCompany) return;
+  warnedRemoteMissingCompany = true;
+  console.error(
+    "[kit] WARNING: [governance.audit].remote=true but company_id is missing; remote audit delivery is disabled until [governance.audit].company_id is configured.",
   );
 }
 
@@ -647,6 +686,7 @@ function warnFirstRemotePush(companyId: string): void {
  */
 export function _resetRemotePushWarningForTests(): void {
   warnedRemotePush = false;
+  warnedRemoteMissingCompany = false;
 }
 
 /**

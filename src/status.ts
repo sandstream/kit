@@ -12,7 +12,7 @@ import { loadConfig } from "./config.js";
 import { KIT_BLOCK_BEGIN } from "./agent-config.js";
 import { checkGitignore } from "./check-gitignore.js";
 import { openMemoryDb, getStats } from "./memory/db.js";
-import { getClaudeSettingsPath } from "./memory/install.js";
+import { allMemoryHooksLiveness } from "./memory/install.js";
 
 // Dependency allowlist file (kept as a literal here, matching security-policy.ts
 // + post-pull-audit.ts — the convention isn't exported).
@@ -147,12 +147,18 @@ export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusI
     hint: messages > 0 ? undefined : "run `kit memory index`",
   });
 
-  const hooked = fileIncludes(getClaudeSettingsPath(), "kit memory hook");
+  const hookLiveness = allMemoryHooksLiveness();
+  const hooked = hookLiveness.everInstalled && hookLiveness.missing.length === 0;
+  const hookDetail = !hookLiveness.everInstalled
+    ? "not installed"
+    : hookLiveness.missing.length > 0
+      ? `missing: ${hookLiveness.missing.join(", ")}`
+      : `${hookLiveness.present.length} wired`;
   items.push({
     key: "memory-hooks",
     label: "memory hooks",
     ok: hooked,
-    detail: hooked ? "installed" : "not installed",
+    detail: hookDetail,
     hint: hooked ? undefined : "run `kit memory install`",
   });
 

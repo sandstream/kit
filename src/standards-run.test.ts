@@ -5,6 +5,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runStandardsGate } from "./standards-run.js";
 
+async function withoutToolPath<T>(run: () => Promise<T>): Promise<T> {
+  const previous = process.env.PATH;
+  process.env.PATH = "";
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.PATH;
+    else process.env.PATH = previous;
+  }
+}
+
 // A bare TS project with no linters installed: every gate is a setup gap, so the
 // score is over gates that RAN (0), findings/failed are 0, and ok stays true — the
 // P5 "setup gaps aren't failures" contract.
@@ -15,7 +26,7 @@ describe("standards-run — summary separates setup gaps from findings", () => {
     try {
       writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "x", version: "1.0.0" }));
       writeFileSync(join(repo, "index.ts"), "export const x = 1;\n");
-      const r = await runStandardsGate({ cwd: repo, category: "general" });
+      const r = await withoutToolPath(() => runStandardsGate({ cwd: repo, category: "general" }));
       // lizard/jscpd/scc absent here → 3 setup gaps, none ran.
       assert.equal(r.summary.setupGaps >= 1, true);
       assert.equal(r.summary.findings, 0);
@@ -32,7 +43,9 @@ describe("standards-run — summary separates setup gaps from findings", () => {
     const repo = mkdtempSync(join(tmpdir(), "kit-srun2-"));
     try {
       writeFileSync(join(repo, "index.ts"), "export const x = 1;\n");
-      const r = await runStandardsGate({ cwd: repo, category: "general", enforce: true });
+      const r = await withoutToolPath(() =>
+        runStandardsGate({ cwd: repo, category: "general", enforce: true }),
+      );
       assert.equal(r.ok, false, "setup gaps fail closed under --enforce");
       assert.equal(r.summary.failed >= 1, true);
     } finally {

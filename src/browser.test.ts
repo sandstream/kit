@@ -6,6 +6,7 @@ import type { BrowserProbeDeps } from "./browser.js";
 const noMachineDeps: BrowserProbeDeps = {
   existsSync: () => false,
   readdirSync: () => [],
+  isExecutable: () => false,
   findOnPath: () => undefined,
   probeUrl: async () => false,
   homedir: () => "/home/alice",
@@ -92,6 +93,7 @@ describe("browser diagnostics", () => {
           ...noMachineDeps,
           existsSync: (path) => exists.has(path),
           readdirSync: () => ["chromium-1234"],
+          isExecutable: (path) => path.endsWith("/chromium-1234/chrome-linux/chrome"),
         },
         env: {},
         cwd: "/repo",
@@ -100,6 +102,28 @@ describe("browser diagnostics", () => {
     assert.equal(result.status, "pass");
     assert.equal(result.strategy, "playwright");
     assert.equal(result.env.PLAYWRIGHT_BROWSERS_PATH, "/home/alice/.cache/ms-playwright");
+  });
+
+  it("does not accept a stale Chromium cache directory without an executable", async () => {
+    const exists = new Set([
+      "/repo/node_modules/@playwright/test/package.json",
+      "/home/alice/.cache/ms-playwright",
+    ]);
+    const result = await diagnoseBrowser(
+      { port: 3107, routes: "e2e/routes.spec.ts" },
+      {
+        deps: {
+          ...noMachineDeps,
+          existsSync: (path) => exists.has(path),
+          readdirSync: () => ["chromium-1234"],
+        },
+        env: {},
+        cwd: "/repo",
+      },
+    );
+    assert.equal(result.status, "blocker");
+    assert.equal(result.strategy, "none");
+    assert.match(result.actions[0].command, /playwright install chromium/);
   });
 
   it("selects system Chrome before CDP when no project Playwright is present", async () => {

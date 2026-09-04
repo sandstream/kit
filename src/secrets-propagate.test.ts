@@ -107,6 +107,32 @@ describe("propagate", () => {
     }
   });
 
+  it("redacts the bearer token from Vercel API error bodies", async () => {
+    const priorToken = process.env.VERCEL_TOKEN;
+    const priorFetch = globalThis.fetch;
+    const secret = "opaque-vercel-token-" + "C".repeat(32);
+    process.env.VERCEL_TOKEN = secret;
+    globalThis.fetch = (async () =>
+      new Response(`request_id=req_vercel rejected credential ${secret}`, {
+        status: 401,
+      })) as typeof fetch;
+
+    try {
+      const [result] = await propagate("API_KEY", "replacement-value", ["vercel"], {
+        vercelProject: "app-stg",
+      });
+      assert.equal(result.ok, false);
+      assert.ok(!result.detail.includes(secret), "Vercel error detail must not expose the secret");
+      assert.match(result.detail, /\[REDACTED\]/);
+      assert.match(result.detail, /request_id=req_vercel/);
+      assert.match(result.detail, /401/);
+    } finally {
+      if (priorToken === undefined) delete process.env.VERCEL_TOKEN;
+      else process.env.VERCEL_TOKEN = priorToken;
+      globalThis.fetch = priorFetch;
+    }
+  });
+
   it("returns a non-ok result with a clear missing-opt message for fly without --fly-app", async () => {
     const results = await propagate("X", "y", ["fly"]);
     assert.equal(results[0].ok, false);

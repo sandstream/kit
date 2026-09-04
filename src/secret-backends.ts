@@ -61,6 +61,7 @@ export interface SecretBackend {
     name: string,
     config: SecretKeyConfig,
     infisicalConfig?: InfisicalConfig,
+    cwd?: string,
   ): Promise<SecretResolveResult>;
   /** Write a secret. Absent ⇒ the backend is read-only (migration unsupported).
    *  May throw; callers wrap it so the error is redacted before surfacing.
@@ -331,13 +332,13 @@ export const BACKENDS: Record<string, SecretBackend> = {
   },
 
   dotenvx: {
-    async resolve(name, config) {
+    async resolve(name, config, _infisicalConfig, cwd) {
       // `dotenvx get <KEY>` prints the decrypted value to stdout, using
       // DOTENV_PRIVATE_KEY (from .env.keys or the environment). `config.name`
       // overrides the lookup key; the file defaults to ./.env.
       const key = config.name || name;
       try {
-        const { stdout } = await exec("dotenvx", ["get", key], { timeout: 10_000 });
+        const { stdout } = await execCli("dotenvx", ["get", key], { timeout: 10_000, cwd });
         const val = stdout.trim();
         return {
           name,
@@ -585,12 +586,13 @@ export async function resolveViaBackend(
   name: string,
   config: SecretKeyConfig,
   infisicalConfig?: InfisicalConfig,
+  cwd?: string,
 ): Promise<SecretResolveResult> {
   const backend = BACKENDS[config.source];
   if (!backend) {
     return { name, resolved: false, value: null, detail: `Unknown source: ${config.source}` };
   }
-  return backend.resolve(name, config, infisicalConfig);
+  return backend.resolve(name, config, infisicalConfig, cwd);
 }
 
 /** Write a secret via the registry. Backends without a `write` are read-only;

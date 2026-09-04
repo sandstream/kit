@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { accessSync, constants, existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import type { BrowserConfig } from "./config.js";
@@ -37,6 +37,7 @@ export interface BrowserDoctorResult {
 export interface BrowserProbeDeps {
   existsSync?: (path: string) => boolean;
   readdirSync?: (path: string) => string[];
+  isExecutable?: (path: string) => boolean;
   findOnPath?: (names: string[], envPath?: string) => string | undefined;
   probeUrl?: (url: string) => Promise<boolean>;
   homedir?: () => string;
@@ -281,6 +282,17 @@ function normalizeDeps(deps: BrowserProbeDeps = {}): Required<BrowserProbeDeps> 
   return {
     existsSync: deps.existsSync ?? existsSync,
     readdirSync: deps.readdirSync ?? ((path: string) => readdirSync(path)),
+    isExecutable:
+      deps.isExecutable ??
+      ((path: string) => {
+        try {
+          if (!statSync(path).isFile()) return false;
+          accessSync(path, constants.X_OK);
+          return true;
+        } catch {
+          return false;
+        }
+      }),
     findOnPath: deps.findOnPath ?? findOnPath,
     probeUrl: deps.probeUrl ?? probeUrl,
     homedir: deps.homedir ?? homedir,
@@ -318,7 +330,24 @@ function playwrightBrowsersPath(env: NodeJS.ProcessEnv, deps: Required<BrowserPr
 function hasChromiumCache(cachePath: string, deps: Required<BrowserProbeDeps>): boolean {
   if (!deps.existsSync(cachePath)) return false;
   try {
-    return deps.readdirSync(cachePath).some((entry) => /^chromium/.test(entry));
+    return deps.readdirSync(cachePath).some((entry) => {
+      if (!/^chromium(?:_headless_shell)?-/.test(entry)) return false;
+      const root = join(cachePath, entry);
+      const candidates = [
+        join(root, "chrome-linux", "chrome"),
+        join(root, "chrome-linux64", "chrome"),
+        join(root, "chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium"),
+        join(root, "chrome-mac-arm64", "Chromium.app", "Contents", "MacOS", "Chromium"),
+        join(root, "chrome-win", "chrome.exe"),
+        join(root, "chrome-win64", "chrome.exe"),
+        join(root, "chrome-headless-shell-linux", "chrome-headless-shell"),
+        join(root, "chrome-headless-shell-linux64", "chrome-headless-shell"),
+        join(root, "chrome-headless-shell-mac", "chrome-headless-shell"),
+        join(root, "chrome-headless-shell-mac-arm64", "chrome-headless-shell"),
+        join(root, "chrome-headless-shell-win64", "headless_shell.exe"),
+      ];
+      return candidates.some(deps.isExecutable);
+    });
   } catch {
     return false;
   }

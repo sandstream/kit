@@ -160,13 +160,13 @@ published (signatures), it was built by this repo's workflow from a signed tag
 (provenance + `git tag -v`), and its dependency tree is enumerated for scanning (SBOM).
 That is a strong chain. It is not a reproducibility claim and not a certified level.
 
-## What kit explicitly does NOT do
+## Update and telemetry boundaries
 
-- **No auto-update.** kit never silently upgrades itself. You install /
-  upgrade via `npm install -g sandstream-kit@<version>`. If you didn't run
-  that, the binary on your machine is the binary you last verified.
-- **No phone-home version-check.** kit doesn't ping a remote endpoint to
-  see if a newer version exists. `npm outdated` is the only mechanism.
+- **No automatic update by default.** Normal interactive commands may perform a cached version
+  check against the npm registry and print an available-update notice. Disable it with
+  `[update].check = false`, `KIT_NO_UPDATE_CHECK=1`, CI mode, or air-gap mode. An actual self-update
+  happens only through explicit `kit upgrade --self`, or the explicit opt-in
+  `[update].auto = true`; both paths triage the package before installation and surface the action.
 - **No telemetry on verification failure.** If `npm audit signatures` fails,
   kit (the CLI) is never notified. You decide what to do.
 

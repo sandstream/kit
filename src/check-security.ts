@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFile, access, readdir, mkdtemp, rm } from "node:fs/promises";
+import { readFile, access, readdir } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join, resolve } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { resolve } from "node:path";
+import { homedir } from "node:os";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
@@ -21,6 +21,9 @@ import {
   isCatalogStale,
   BUMBLEBEE_VERSION,
   type BumblebeeFinding,
+  type EnsureFailureKind,
+  type ScannerInstall,
+  type ScanOutcome,
 } from "./bumblebee.js";
 
 const exec = promisify(execFile);
@@ -33,6 +36,10 @@ function envFlagDisabled(value: string | undefined): boolean {
 function envFlagEnabled(value: string | undefined): boolean {
   if (!value) return false;
   return ["1", "true", "on", "yes"].includes(value.toLowerCase());
+}
+
+export function bumblebeeDownloadAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !envFlagEnabled(env.KIT_NO_DOWNLOAD) && !isAirGap(env);
 }
 
 /** Map a bumblebee severity label to the SecurityCheckResult severity scale. */
@@ -369,7 +376,7 @@ export async function checkMemoryInjection(): Promise<SecurityCheckResult> {
 /**
  * Run npm audit and check for high/critical vulnerabilities
  */
-async function checkNpmAudit(root: string): Promise<SecurityCheckResult> {
+export async function checkNpmAudit(root: string): Promise<SecurityCheckResult> {
   try {
     // Check if package.json exists
     await access(resolve(root, "package.json"));
@@ -411,8 +418,10 @@ async function checkNpmAudit(root: string): Promise<SecurityCheckResult> {
   }
 
   try {
+    const timeout = Number(process.env.KIT_NPM_AUDIT_TIMEOUT_MS ?? "") || 300_000;
     const { stdout } = await exec("npm", ["audit", "--audit-level=high", "--json"], {
-      timeout: 30_000,
+      timeout,
+      cwd: root,
     });
     // Exit 0 = npm found nothing >= high. But a broken / odd npm that exits 0
     // with no report must NOT be read as a clean pass — be honest (warn), don't
@@ -434,9 +443,25 @@ async function checkNpmAudit(root: string): Promise<SecurityCheckResult> {
       detail: "no high/critical vulnerabilities",
     };
   } catch (error: unknown) {
-    if (error && typeof error === "object" && "stdout" in error) {
+    const failure =
+      error && typeof error === "object"
+        ? (error as {
+            stdout?: unknown;
+            code?: unknown;
+            killed?: unknown;
+            signal?: unknown;
+            message?: unknown;
+          })
+        : null;
+    if (failure?.stdout !== undefined) {
       try {
-        const auditResult = JSON.parse(error.stdout as string);
+        const stdout =
+          typeof failure.stdout === "string"
+            ? failure.stdout
+            : Buffer.isBuffer(failure.stdout)
+              ? failure.stdout.toString("utf8")
+              : "";
+        const auditResult = JSON.parse(stdout);
         const vulnerabilities = auditResult.metadata?.vulnerabilities || {};
         const high = vulnerabilities.high || 0;
         const critical = vulnerabilities.critical || 0;
@@ -455,12 +480,20 @@ async function checkNpmAudit(root: string): Promise<SecurityCheckResult> {
       }
     }
 
+    const timedOut =
+      failure?.killed === true ||
+      failure?.code === "ETIMEDOUT" ||
+      failure?.signal === "SIGTERM" ||
+      (typeof failure?.message === "string" && /timed?\s*out/i.test(failure.message));
     return {
       category: "dependency",
       name: "npm audit",
-      status: "fail",
-      detail: "audit check failed",
-      severity: "high",
+      status: "warn",
+      detail: timedOut
+        ? "npm audit timed out — vulnerability status unverified"
+        : "npm audit could not run — vulnerability status unverified",
+      severity: "medium",
+      didNotRun: true,
     };
   }
 }
@@ -486,7 +519,7 @@ async function checkPipAudit(root: string): Promise<SecurityCheckResult> {
   const pipAuditBin = (await resolveToolBin("pip-audit")) ?? "pip-audit";
   try {
     // Check if pip-audit is installed
-    await exec(pipAuditBin, ["--version"], { timeout: 5_000 });
+    await exec(pipAuditBin, ["--version"], { timeout: 5_000, cwd: root });
   } catch {
     return {
       category: "dependency",
@@ -504,6 +537,7 @@ async function checkPipAudit(root: string): Promise<SecurityCheckResult> {
   try {
     const { stdout } = await exec(pipAuditBin, ["--format=json"], {
       timeout: 30_000,
+      cwd: root,
     });
 
     const result = JSON.parse(stdout);
@@ -621,7 +655,7 @@ export const LOCKFILE_ECOSYSTEMS: { name: string; manifests: string[]; lockfiles
   { name: "flake.lock", manifests: ["flake.nix"], lockfiles: ["flake.lock"] },
 ];
 
-async function checkLockfilesCommitted(root: string): Promise<SecurityCheckResult[]> {
+export async function checkLockfilesCommitted(root: string): Promise<SecurityCheckResult[]> {
   const results: SecurityCheckResult[] = [];
   const present = (f: string): Promise<boolean> =>
     access(resolve(root, f))
@@ -632,7 +666,7 @@ async function checkLockfilesCommitted(root: string): Promise<SecurityCheckResul
   // per-ecosystem repeat.
   let gitOk = true;
   try {
-    await exec("git", ["rev-parse", "--git-dir"], { timeout: 5_000 });
+    await exec("git", ["rev-parse", "--git-dir"], { timeout: 5_000, cwd: root });
   } catch {
     gitOk = false;
   }
@@ -655,7 +689,7 @@ async function checkLockfilesCommitted(root: string): Promise<SecurityCheckResul
     // A committed lockfile of ANY kind for this ecosystem satisfies the check.
     let committed: string | null = null;
     for (const lf of eco.lockfiles) {
-      const { stdout } = await exec("git", ["ls-files", lf], { timeout: 5_000 });
+      const { stdout } = await exec("git", ["ls-files", lf], { timeout: 5_000, cwd: root });
       if (stdout.trim()) {
         committed = lf;
         break;
@@ -1469,10 +1503,10 @@ export function basicSecretScanFiles(lines: string[]): string[] {
   return [...files];
 }
 
-async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
+export async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
   try {
     // Check if we're in a git repo
-    await exec("git", ["rev-parse", "--git-dir"], { timeout: 5_000 });
+    await exec("git", ["rev-parse", "--git-dir"], { timeout: 5_000, cwd: root });
   } catch {
     return {
       category: "secrets",
@@ -1497,7 +1531,7 @@ async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
       const { stdout } = await exec(
         trufflehogBin,
         ["git", `file://${root}`, "--json", "--no-update"],
-        { timeout: 90_000 },
+        { timeout: 90_000, cwd: root },
       );
 
       // Split verified-live from unverified (#noise-reduction). Only a VERIFIED
@@ -1589,7 +1623,7 @@ async function checkSecretsInCode(root: string): Promise<SecurityCheckResult> {
           "-iE",
           "(api[_-]?key|secret[_-]?key|password|token|credential)[\"']?\\s*[:=]\\s*[\"'][^\"']{20,}",
         ],
-        { timeout: 10_000 },
+        { timeout: 10_000, cwd: root },
       );
 
       if (stdout.trim()) {
@@ -2231,6 +2265,60 @@ async function checkOsvScanner(root: string): Promise<SecurityCheckResult> {
 /**
  * Check dependency licenses for GPL/AGPL that create legal obligations.
  */
+const PROBLEMATIC_LICENSES = ["GPL", "AGPL", "LGPL", "CPAL", "OSL", "EUPL"];
+
+function licenseScannerUnavailable(detail: string): SecurityCheckResult {
+  return {
+    category: "supply-chain",
+    name: "license check",
+    status: "warn",
+    detail,
+    severity: "low",
+    suggestion: "Install license-checker through a triaged tool declaration, then re-run",
+    didNotRun: true,
+  };
+}
+
+function findProblematicLicenses(packages: Record<string, { licenses?: string }>): string[] {
+  return Object.entries(packages).flatMap(([pkg, info]) => {
+    const license = info.licenses ?? "";
+    const problematic = PROBLEMATIC_LICENSES.some((name) => license.toUpperCase().includes(name));
+    return problematic ? [`${pkg} (${license})`] : [];
+  });
+}
+
+function licenseScanVerdict(result: { stderr: string; stdout: string }): SecurityCheckResult {
+  try {
+    const packages = JSON.parse(result.stdout) as Record<string, { licenses?: string }>;
+    const violations = findProblematicLicenses(packages);
+    if (violations.length === 0) {
+      return {
+        category: "supply-chain",
+        name: "license check",
+        status: "pass",
+        detail: "no problematic licenses found",
+      };
+    }
+    const remainder = violations.length > 3 ? ` +${violations.length - 3} more` : "";
+    return {
+      category: "supply-chain",
+      name: "license check",
+      status: "warn",
+      detail: `${violations.length} copyleft license(s): ${violations.slice(0, 3).join(", ")}${remainder}`,
+      severity: "medium",
+    };
+  } catch {
+    return {
+      category: "supply-chain",
+      name: "license check",
+      status: "warn",
+      detail: licenseFailureDetail(result),
+      severity: "low",
+      didNotRun: true,
+    };
+  }
+}
+
 export async function checkLicenses(root: string): Promise<SecurityCheckResult> {
   try {
     await access(resolve(root, "package.json"));
@@ -2243,104 +2331,23 @@ export async function checkLicenses(root: string): Promise<SecurityCheckResult> 
     };
   }
 
-  // Try direct binary first (fast). If absent, fall back to `npx --yes
-  // license-checker` so we don't force users to `npm install -g`.
-  // npx first-run can fetch the package, so allow generous timeout.
-  let runner: { cmd: string; baseArgs: string[]; isolatedNpmCache?: boolean } | null = null;
-  // Resolve mise-first so a `mise use -g` license-checker is found even when mise
-  // isn't activated; otherwise fall back to npx (below).
-  const licenseCheckerBin = (await resolveToolBin("license-checker")) ?? "license-checker";
-  const direct = await execFileNoThrow(licenseCheckerBin, ["--version"], { timeout: 5_000 });
-  if (direct.ok) {
-    runner = { cmd: licenseCheckerBin, baseArgs: [] };
-  } else {
-    const npxAvailable = await withIsolatedNpmCache((env) =>
-      execFileNoThrow("npx", ["--version"], { timeout: 5_000, env }),
+  // Security checks inspect; they never install their own executable. Provision the
+  // scanner explicitly so this path cannot bypass kit's triage boundary.
+  const licenseCheckerBin = await resolveToolBin("license-checker");
+  if (!licenseCheckerBin) {
+    return licenseScannerUnavailable("license-checker not installed or not executable");
+  }
+
+  const result = await execFileNoThrow(licenseCheckerBin, ["--json", "--production"], {
+    timeout: 120_000,
+    cwd: root,
+  });
+  if (!result.ok) {
+    return licenseScannerUnavailable(
+      `license-checker not installed or not executable: ${licenseFailureDetail(result)}`,
     );
-    if (npxAvailable.ok) {
-      runner = { cmd: "npx", baseArgs: ["--yes", "license-checker"], isolatedNpmCache: true };
-    }
   }
-
-  if (!runner) {
-    return {
-      category: "supply-chain",
-      name: "license check",
-      status: "warn",
-      detail: "license-checker not installed (npx also unavailable)",
-      severity: "low",
-      suggestion: "npm install -g license-checker",
-      // Neither the binary nor the npx fallback is available → the license scan
-      // could not run at all: a scanner-health failure under strict, not a skip.
-      didNotRun: true,
-    };
-  }
-
-  const PROBLEMATIC = ["GPL", "AGPL", "LGPL", "CPAL", "OSL", "EUPL"];
-  const runLicenseChecker = (env?: NodeJS.ProcessEnv) =>
-    execFileNoThrow(runner.cmd, [...runner.baseArgs, "--json", "--production"], {
-      timeout: 120_000,
-      cwd: root,
-      env,
-    });
-  const result = runner.isolatedNpmCache
-    ? await withIsolatedNpmCache(runLicenseChecker)
-    : await runLicenseChecker();
-
-  if (!result.ok && !result.stdout) {
-    return {
-      category: "supply-chain",
-      name: "license check",
-      status: "warn",
-      detail: licenseFailureDetail(result),
-      severity: "low",
-    };
-  }
-
-  try {
-    const packages = JSON.parse(result.stdout) as Record<string, { licenses?: string }>;
-    const violations: string[] = [];
-
-    for (const [pkg, info] of Object.entries(packages)) {
-      const license = info.licenses ?? "";
-      if (PROBLEMATIC.some((l) => license.toUpperCase().includes(l))) {
-        violations.push(`${pkg} (${license})`);
-      }
-    }
-
-    if (violations.length > 0) {
-      return {
-        category: "supply-chain",
-        name: "license check",
-        status: "warn",
-        detail: `${violations.length} copyleft license(s): ${violations.slice(0, 3).join(", ")}${violations.length > 3 ? ` +${violations.length - 3} more` : ""}`,
-        severity: "medium",
-      };
-    }
-    return {
-      category: "supply-chain",
-      name: "license check",
-      status: "pass",
-      detail: "no problematic licenses found",
-    };
-  } catch {
-    return {
-      category: "supply-chain",
-      name: "license check",
-      status: "warn",
-      detail: licenseFailureDetail(result),
-      severity: "low",
-    };
-  }
-}
-
-async function withIsolatedNpmCache<T>(fn: (env: NodeJS.ProcessEnv) => Promise<T>): Promise<T> {
-  const cacheDir = await mkdtemp(join(tmpdir(), "kit-npm-cache-"));
-  try {
-    return await fn({ ...process.env, NPM_CONFIG_CACHE: cacheDir, npm_config_cache: cacheDir });
-  } finally {
-    await rm(cacheDir, { recursive: true, force: true });
-  }
+  return licenseScanVerdict(result);
 }
 
 function licenseFailureDetail(result: { stderr: string; stdout: string }): string {
@@ -2351,60 +2358,42 @@ function licenseFailureDetail(result: { stderr: string; stdout: string }): strin
 /**
  * Run static analysis using Semgrep to catch security anti-patterns in source code.
  */
-async function checkSemgrep(root: string): Promise<SecurityCheckResult> {
-  // Opt-in FIRST: a networked, multi-second SAST scan does not run by default.
-  // Not opted in → skipping is honest (green stays "0 unreviewed").
-  if (!process.env.KIT_SEMGREP_CONFIG?.trim()) {
-    return {
-      category: "supply-chain",
-      name: "semgrep SAST",
-      status: "skip",
-      detail:
-        "SAST opt-in: set KIT_SEMGREP_CONFIG (e.g. p/default, or a local ruleset path) to enable",
-    };
-  }
+const SEMGREP_NAME = "semgrep SAST";
 
-  // Opted in → SAST is EXPECTED to run. If semgrep is absent, that is NOT a legit
-  // skip: the operator asked for SAST and it didn't happen → WARN (so --strict
-  // catches an unreviewed commit) rather than a silent green.
-  // Resolve mise-first (see socket): a mise-installed semgrep isn't on kit's PATH.
-  const semgrepBin = await resolveToolBin("semgrep");
-  if (!semgrepBin) {
-    return {
-      category: "supply-chain",
-      name: "semgrep SAST",
-      status: "warn",
-      detail:
-        "KIT_SEMGREP_CONFIG is set (SAST opted in) but semgrep is not installed — SAST did NOT run (mise use pipx:semgrep, or brew install semgrep)",
-      severity: "medium",
-      didNotRun: true,
-    };
-  }
+function semgrepNotConfigured(): SecurityCheckResult {
+  return {
+    category: "supply-chain",
+    name: SEMGREP_NAME,
+    status: "skip",
+    detail:
+      "SAST opt-in: set KIT_SEMGREP_CONFIG (e.g. p/default, or a local ruleset path) to enable",
+  };
+}
 
-  const semgrepCfg = semgrepConfig(process.env);
+function semgrepUnavailable(): SecurityCheckResult {
+  return {
+    category: "supply-chain",
+    name: SEMGREP_NAME,
+    status: "warn",
+    detail:
+      "KIT_SEMGREP_CONFIG is set (SAST opted in) but semgrep is not installed — SAST did NOT run (mise use pipx:semgrep, or brew install semgrep)",
+    severity: "medium",
+    didNotRun: true,
+  };
+}
 
-  // Provable air-gap: a registry ('p/...') ruleset egresses to the semgrep
-  // registry on first run. In air-gap mode refuse it (only a LOCAL ruleset path
-  // may run) — an honest skip, never a silent egress. Mirrors the scanner-runner
-  // air-gap path so `kit ci` cannot leak where `kit scan` would not.
-  if (isAirGap(process.env) && !isLocalSemgrepConfig(semgrepCfg)) {
-    return {
-      category: "supply-chain",
-      name: "semgrep SAST",
-      status: "skip",
-      detail: `air-gap: refusing registry semgrep config '${semgrepCfg}' (would egress) — set KIT_SEMGREP_CONFIG to a local ruleset path`,
-    };
-  }
+function semgrepAirGapRefusal(config: string): SecurityCheckResult {
+  return {
+    category: "supply-chain",
+    name: SEMGREP_NAME,
+    status: "skip",
+    detail: `air-gap: refusing registry semgrep config '${config}' (would egress) — set KIT_SEMGREP_CONFIG to a local ruleset path`,
+  };
+}
 
-  const result = await execFileNoThrow(
-    semgrepBin,
-    buildSemgrepArgs({ mode: "json", config: semgrepCfg }),
-    { timeout: 120_000, cwd: root },
-  );
-
-  const raw = result.stdout || result.stderr;
+function semgrepVerdict(raw: string, config: string): SecurityCheckResult {
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as { results?: Array<{ extra?: { severity?: string } }> };
     const findings: Array<{ extra?: { severity?: string } }> = parsed.results ?? [];
     const high = findings.filter(
       (f) => f.extra?.severity === "ERROR" || f.extra?.severity === "WARNING",
@@ -2413,27 +2402,45 @@ async function checkSemgrep(root: string): Promise<SecurityCheckResult> {
     if (high.length === 0) {
       return {
         category: "supply-chain",
-        name: "semgrep SAST",
+        name: SEMGREP_NAME,
         status: "pass",
         detail: "no security issues found",
       };
     }
     return {
       category: "supply-chain",
-      name: "semgrep SAST",
+      name: SEMGREP_NAME,
       status: high.some((f) => f.extra?.severity === "ERROR") ? "fail" : "warn",
-      detail: `${high.length} security finding(s) -run: semgrep scan --config ${semgrepCfg}`,
+      detail: `${high.length} security finding(s) -run: semgrep scan --config ${config}`,
       severity: high.some((f) => f.extra?.severity === "ERROR") ? "high" : "medium",
     };
   } catch {
     return {
       category: "supply-chain",
-      name: "semgrep SAST",
+      name: SEMGREP_NAME,
       status: "warn",
       detail: "semgrep scan failed",
       severity: "low",
     };
   }
+}
+
+async function checkSemgrep(root: string): Promise<SecurityCheckResult> {
+  // SAST is opt-in. Once requested, a missing scanner is an unscanned warning,
+  // while air-gap mode refuses registry rules before spawning the process.
+  if (!process.env.KIT_SEMGREP_CONFIG?.trim()) return semgrepNotConfigured();
+  const semgrepBin = await resolveToolBin("semgrep");
+  if (!semgrepBin) return semgrepUnavailable();
+
+  const config = semgrepConfig(process.env);
+  if (isAirGap(process.env) && !isLocalSemgrepConfig(config)) {
+    return semgrepAirGapRefusal(config);
+  }
+  const result = await execFileNoThrow(semgrepBin, buildSemgrepArgs({ mode: "json", config }), {
+    timeout: 120_000,
+    cwd: root,
+  });
+  return semgrepVerdict(result.stdout || result.stderr, config);
 }
 
 /**
@@ -2450,156 +2457,170 @@ async function checkSemgrep(root: string): Promise<SecurityCheckResult> {
  *   KIT_BUMBLEBEE_BIN      use a pre-installed bumblebee instead of downloading
  *   KIT_BUMBLEBEE_CATALOG  override the exposure-catalog directory
  */
-async function checkBumblebee(root: string): Promise<SecurityCheckResult> {
-  const name = "bumblebee (supply-chain)";
-  const category = "supply-chain" as const;
+const BUMBLEBEE_NAME = "bumblebee (supply-chain)";
 
-  // Publish gate: when set, an UNSCANNED release must not ship. Scanner-
-  // unavailable / scan-failed / scan-incomplete are "warn" (advisory) in normal
-  // runs but become a hard "fail" here so the gate can fail-closed (#supply).
+interface BumblebeeCheckContext {
+  required: boolean;
+  unscanned: "fail" | "warn";
+}
+
+function bumblebeeContext(): BumblebeeCheckContext {
   const required = envFlagEnabled(process.env.KIT_BUMBLEBEE_REQUIRED);
-  // "could not scan" status under the required gate: fail-closed instead of warn.
-  const unscanned = required ? ("fail" as const) : ("warn" as const);
+  return { required, unscanned: required ? "fail" : "warn" };
+}
 
-  if (envFlagDisabled(process.env.KIT_BUMBLEBEE)) {
-    return { category, name, status: "skip", detail: "disabled via KIT_BUMBLEBEE" };
-  }
-
-  const { install, reason, kind } = await ensureBumblebee({
-    allowDownload: !envFlagEnabled(process.env.KIT_NO_DOWNLOAD),
-  });
-  if (!install) {
-    // A failed integrity check (checksum mismatch) is a potential tampering
-    // event — escalate to a hard failure rather than failing open to a warn.
-    if (kind === "integrity") {
-      return {
-        category,
-        name,
-        status: "fail",
-        detail: `scanner ${reason}`,
-        severity: "high",
-        suggestion:
-          "The downloaded scanner did not match its pinned checksum. Do NOT trust it. Investigate for tampering (network MITM, compromised mirror), clear ~/.kit/tools/bumblebee, and retry from a trusted network.",
-      };
-    }
+function bumblebeeInstallFailure(
+  context: BumblebeeCheckContext,
+  reason: string | undefined,
+  kind: EnsureFailureKind | undefined,
+): SecurityCheckResult {
+  if (kind === "integrity") {
     return {
-      category,
-      name,
-      status: unscanned,
-      detail: `scanner unavailable: ${reason}${required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
-      severity: required ? "high" : "low",
+      category: "supply-chain",
+      name: BUMBLEBEE_NAME,
+      status: "fail",
+      detail: `scanner ${reason}`,
+      severity: "high",
       suggestion:
-        "Provide a binary with KIT_BUMBLEBEE_BIN, or allow downloads (unset KIT_NO_DOWNLOAD). Manual install: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest",
+        "The downloaded scanner did not match its pinned checksum. Do NOT trust it. Investigate for tampering (network MITM, compromised mirror), clear ~/.kit/tools/bumblebee, and retry from a trusted network.",
     };
   }
+  return {
+    category: "supply-chain",
+    name: BUMBLEBEE_NAME,
+    status: context.unscanned,
+    detail: `scanner unavailable: ${reason}${context.required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
+    severity: context.required ? "high" : "low",
+    suggestion:
+      "Provide a binary with KIT_BUMBLEBEE_BIN, or allow downloads (unset KIT_NO_DOWNLOAD). Manual install: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest",
+  };
+}
+
+function bumblebeeScanFailure(
+  context: BumblebeeCheckContext,
+  error: string | undefined,
+): SecurityCheckResult {
+  return {
+    category: "supply-chain",
+    name: BUMBLEBEE_NAME,
+    status: context.unscanned,
+    detail: `scan failed: ${error ?? "no output"}${context.required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
+    severity: context.required ? "high" : "medium",
+  };
+}
+
+async function bumblebeeFindingsVerdict(
+  outcome: ScanOutcome,
+  profile: string,
+  root: string,
+): Promise<SecurityCheckResult | null> {
+  if (outcome.findings.length === 0) return null;
+  // Persist matches under the governed root. Logging failure never hides the scanner verdict.
+  await logSupplyChainFindings(outcome.findings, profile, root).catch(() => {});
+  return {
+    category: "supply-chain",
+    name: BUMBLEBEE_NAME,
+    status: "fail",
+    detail: `${outcome.findings.length} known supply-chain exposure(s): ${describeFindings(outcome.findings)}`,
+    severity: toResultSeverity(maxSeverity(outcome.findings)),
+    files: Array.from(new Set(outcome.findings.map((f) => f.sourceFile).filter(Boolean))),
+    suggestion:
+      "Remove or downgrade the flagged packages immediately — they match curated known-compromise catalogs. Verify on the source advisory before trusting any replacement.",
+  };
+}
+
+function bumblebeeIncompleteVerdict(
+  outcome: ScanOutcome,
+  context: BumblebeeCheckContext,
+): SecurityCheckResult | null {
+  if (outcome.summarySeen && outcome.status === "complete" && !outcome.timedOut) return null;
+  return {
+    category: "supply-chain",
+    name: BUMBLEBEE_NAME,
+    status: context.unscanned,
+    detail: `scan incomplete (status=${outcome.status}${outcome.timedOut ? ", timed out" : ""})${context.required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
+    severity: context.required ? "high" : "low",
+  };
+}
+
+function bumblebeeStaleCatalogVerdict(
+  outcome: ScanOutcome,
+  ageDays: number,
+  update: { latest: string; pinned: string } | null,
+): SecurityCheckResult {
+  const suggestion = update
+    ? `bumblebee ${update.latest} is available (pinned ${update.pinned}). Moving BUMBLEBEE_VERSION + TARBALL_CHECKSUMS together in src/bumblebee.ts is the only way to change the bundled catalogs — compare the release tarball's threat_intel/ to see what it actually adds.`
+    : "No newer bumblebee release is known here (the check is cached, suppressed, or upstream has published none), so this age may be upstream's own rather than a lagging pin.";
+  return {
+    category: "supply-chain",
+    name: BUMBLEBEE_NAME,
+    status: "pass",
+    detail:
+      `no known exposures (${outcome.packagesScanned} packages); note: threat-intel catalogs are ${ageDays} days old (advisory — not gated)` +
+      (update
+        ? `; bumblebee ${update.latest} is available upstream (pinned ${update.pinned})`
+        : ""),
+    suggestion,
+    advisory: {
+      key: update ? `bumblebee-catalogs-stale:${update.latest}` : "bumblebee-catalogs-stale",
+      title: update
+        ? `bumblebee ${update.latest} available (pinned ${update.pinned}, catalogs ${ageDays}d old)`
+        : `bumblebee threat-intel catalogs ${ageDays} days old`,
+      detail: suggestion,
+    },
+  };
+}
+
+async function bumblebeeCatalogAdvisory(
+  install: ScannerInstall,
+  outcome: ScanOutcome,
+): Promise<SecurityCheckResult | null> {
+  const newest = await newestCatalogMtime(install.catalogDir);
+  if (newest === null) return null;
+  const { stale, ageDays } = isCatalogStale(newest, Date.now());
+  if (!stale) return null;
+  // Cached-only lookup keeps the security verdict independent of network availability.
+  const { readCachedBumblebeeUpdateSync } = await import("./bumblebee-update.js");
+  const update = readCachedBumblebeeUpdateSync(BUMBLEBEE_VERSION);
+  return bumblebeeStaleCatalogVerdict(outcome, ageDays, update);
+}
+
+async function checkBumblebee(root: string): Promise<SecurityCheckResult> {
+  const context = bumblebeeContext();
+  if (envFlagDisabled(process.env.KIT_BUMBLEBEE)) {
+    return {
+      category: "supply-chain",
+      name: BUMBLEBEE_NAME,
+      status: "skip",
+      detail: "disabled via KIT_BUMBLEBEE",
+    };
+  }
+  const ensured = await ensureBumblebee({
+    allowDownload: bumblebeeDownloadAllowed(process.env),
+  });
+  if (!ensured.install) return bumblebeeInstallFailure(context, ensured.reason, ensured.kind);
 
   const profile = process.env.KIT_BUMBLEBEE_PROFILE || "baseline";
   const roots = (process.env.KIT_BUMBLEBEE_ROOTS || "")
     .split(",")
-    .map((s) => s.trim())
+    .map((value) => value.trim())
     .filter(Boolean);
+  const { outcome, error } = await runScan({ install: ensured.install, profile, roots });
+  if (!outcome || error) return bumblebeeScanFailure(context, error);
 
-  const { outcome, error } = await runScan({ install, profile, roots });
-  if (error || !outcome) {
-    return {
-      category,
-      name,
-      status: unscanned,
-      detail: `scan failed: ${error ?? "no output"}${required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
-      severity: required ? "high" : "medium",
-    };
-  }
-
-  if (outcome.findings.length > 0) {
-    const catalogs = describeFindings(outcome.findings);
-    // F9: persist every catalog match to the local audit log so the find
-    // survives the next CI run and shows up in `kit audit`.
-    // WRITE, not a read: bumblebee findings are appended to <root>/.kit-findings.jsonl. Omitting
-    // the third argument defaulted it to process.cwd(), so a check run FOR another project
-    // appended that project's supply-chain findings to the calling process's file.
-    //
-    // Why the cross-project probe could not catch it: NOT because bumblebee is absent — it is
-    // provisioned under ~/.kit/tools/bumblebee/<version>/ and does run (measured: `pass`,
-    // 36 packages, on a clean fixture). The branch is gated on `findings.length > 0`, and a
-    // freshly created temp project has no known exposures, so the write is unreachable from any
-    // fixture that is clean. Found by enumerating the write surface instead. A green probe over a
-    // clean fixture says nothing about the code paths that only a dirty one reaches.
-    await logSupplyChainFindings(outcome.findings, profile, root).catch(() => {});
-    return {
-      category,
-      name,
-      status: "fail",
-      detail: `${outcome.findings.length} known supply-chain exposure(s): ${catalogs}`,
-      severity: toResultSeverity(maxSeverity(outcome.findings)),
-      files: Array.from(new Set(outcome.findings.map((f) => f.sourceFile).filter(Boolean))),
-      suggestion:
-        "Remove or downgrade the flagged packages immediately — they match curated known-compromise catalogs. Verify on the source advisory before trusting any replacement.",
-    };
-  }
-
-  if (!outcome.summarySeen || outcome.status !== "complete" || outcome.timedOut) {
-    return {
-      category,
-      name,
-      status: unscanned,
-      detail: `scan incomplete (status=${outcome.status}${outcome.timedOut ? ", timed out" : ""})${required ? " (KIT_BUMBLEBEE_REQUIRED — cannot ship unscanned)" : ""}`,
-      severity: required ? "high" : "low",
-    };
-  }
-
-  // Clean scan — but a frozen catalog set silently loses coverage over time.
-  // Catalog age is ADVISORY, not part of the verdict: it's a pure function of the
-  // wall clock, so letting it flip pass→warn would make `kit ci --strict` return
-  // a different verdict for the same repo + same scanners purely because the
-  // calendar advanced (non-deterministic gate). We keep `status: "pass"` and
-  // surface the staleness in the detail/suggestion instead, so the signal stays
-  // visible without the gate depending on the date.
-  const newest = await newestCatalogMtime(install.catalogDir);
-  if (newest !== null) {
-    const { stale, ageDays } = isCatalogStale(newest, Date.now());
-    if (stale) {
-      // Cached-only lookup: whether a newer release EXISTS is the other half of "your
-      // catalogs are old", but it must not put a network call in the check path — the
-      // check's output would then depend on whether a GitHub request succeeded. The
-      // cache is populated by the post-command notice in cli.ts.
-      const { readCachedBumblebeeUpdateSync } = await import("./bumblebee-update.js");
-      const upd = readCachedBumblebeeUpdateSync(BUMBLEBEE_VERSION);
-      // Neither branch ASSERTS that a bump refreshes the catalogs — it depends on the
-      // release. (v0.1.1 → v0.1.2 did: 6 → 11 catalogs, 65 → 38 days. But the six
-      // pre-existing files were byte-identical, so a bump can also change nothing.)
-      const suggestion = upd
-        ? `bumblebee ${upd.latest} is available (pinned ${upd.pinned}). Moving BUMBLEBEE_VERSION + TARBALL_CHECKSUMS together in src/bumblebee.ts is the only way to change the bundled catalogs — compare the release tarball's threat_intel/ to see what it actually adds.`
-        : "No newer bumblebee release is known here (the check is cached, suppressed, or upstream has published none), so this age may be upstream's own rather than a lagging pin.";
-      return {
-        category,
-        name,
-        status: "pass",
-        detail:
-          `no known exposures (${outcome.packagesScanned} packages); note: threat-intel catalogs are ${ageDays} days old (advisory — not gated)` +
-          (upd ? `; bumblebee ${upd.latest} is available upstream (pinned ${upd.pinned})` : ""),
-        suggestion,
-        // Dedup identity excludes ageDays on purpose: the age climbs every single day,
-        // so keying on it would open a NEW ledger row per day instead of keeping one
-        // open item. It does include whether an upstream bump is known, so the row is
-        // replaced (not silently kept stale) when "old catalogs" becomes "old catalogs,
-        // and here is the version to bump to".
-        advisory: {
-          key: upd ? `bumblebee-catalogs-stale:${upd.latest}` : "bumblebee-catalogs-stale",
-          title: upd
-            ? `bumblebee ${upd.latest} available (pinned ${upd.pinned}, catalogs ${ageDays}d old)`
-            : `bumblebee threat-intel catalogs ${ageDays} days old`,
-          detail: suggestion,
-        },
-      };
+  const findings = await bumblebeeFindingsVerdict(outcome, profile, root);
+  if (findings) return findings;
+  const incomplete = bumblebeeIncompleteVerdict(outcome, context);
+  if (incomplete) return incomplete;
+  const advisory = await bumblebeeCatalogAdvisory(ensured.install, outcome);
+  return (
+    advisory ?? {
+      category: "supply-chain",
+      name: BUMBLEBEE_NAME,
+      status: "pass",
+      detail: `no known exposures (${outcome.packagesScanned} packages, profile=${profile})`,
     }
-  }
-
-  return {
-    category,
-    name,
-    status: "pass",
-    detail: `no known exposures (${outcome.packagesScanned} packages, profile=${profile})`,
-  };
+  );
 }
 
 /** Short, human-readable summary of the catalogs matched by findings. */
@@ -2611,43 +2632,8 @@ function describeFindings(findings: BumblebeeFinding[]): string {
   return labels.length > 3 ? `${shown}; +${labels.length - 3} more` : shown;
 }
 
-/**
- * Run all security checks
- */
-export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]> {
-  // The GOVERNED project's root, threaded to every sub-check and to every scanner spawn.
-  //
-  // Before this, all fifteen sub-checks resolved paths from `process.cwd()` and none of the seven
-  // scanner spawns passed a `cwd`, so a caller that supplied one got a verdict about the CALLING
-  // process's tree. Measured over MCP: `kit_check({cwd: B})` from a server launched in A answered
-  // `pass — all .env patterns in .gitignore` for a project B that has no `.gitignore` at all.
-  // The config came from B; the verdict came from A. That is the worst shape a gate can fail in.
-  //
-  // Passing the path alone would not have fixed it: `trivy fs .`, `osv-scanner -r .` and
-  // `semgrep .` all resolve "." against the spawned process's cwd, so they would still have read
-  // the caller's tree while the parameter made the call look threaded. Both halves are required,
-  // and the test asserts the OUTCOME differs between two trees rather than that `cwd` was passed.
-  const root = cwd ?? process.cwd();
-  const results: SecurityCheckResult[] = [];
-
-  const [
-    npmResult,
-    pipResult,
-    envResult,
-    pinnedResult,
-    secretsScan,
-    socketResult,
-    trivyResult,
-    licenseResult,
-    semgrepResult,
-    bumblebeeResult,
-    trivyConfigResult,
-    osvResult,
-    mavenResult,
-    guarddogResult,
-    allowScriptsResult,
-    ...lockfileResults
-  ] = await Promise.all([
+async function runPrimarySecurityChecks(root: string): Promise<SecurityCheckResult[]> {
+  const checks = [
     checkNpmAudit(root),
     checkPipAudit(root),
     checkEnvGitignored(root),
@@ -2663,115 +2649,77 @@ export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]
     checkMavenAudit(root),
     checkGuardDog(root),
     checkAllowScripts(root),
-    ...(await checkLockfilesCommitted(root)),
-  ]);
+  ];
+  const lockfileResults = await checkLockfilesCommitted(root);
+  return [...(await Promise.all(checks)), ...lockfileResults];
+}
 
-  results.push(
-    npmResult,
-    pipResult,
-    envResult,
-    pinnedResult,
-    secretsScan,
-    socketResult,
-    trivyResult,
-    licenseResult,
-    semgrepResult,
-    bumblebeeResult,
-    trivyConfigResult,
-    osvResult,
-    mavenResult,
-    guarddogResult,
-    allowScriptsResult,
-  );
-  results.push(...lockfileResults);
-
-  const exposureResults = await checkServiceExposure();
-  results.push(...exposureResults);
-
-  // At-rest exposure of kit's own secret-dense local state: verify full-disk
-  // encryption is on, and that the memory store isn't redirected into a repo.
+async function appendHostSecurityChecks(
+  results: SecurityCheckResult[],
+  root: string,
+): Promise<void> {
+  results.push(...(await checkServiceExposure()));
   const { checkDiskEncryption, checkMemoryDirSafety } = await import("./check-disk-encryption.js");
   results.push(await checkDiskEncryption());
   results.push(checkMemoryDirSafety());
-  // A poisoned memory store is a delayed prompt-injection replayed into every recall;
-  // fail-closed if a non-quarantined high-confidence injection is present or the scan
-  // can't run. (Recall render paths already sanitize; this gates the store itself.)
   results.push(await checkMemoryInjection());
-  // Self-playing loop liveness: fail if capture hooks were installed but have since
-  // vanished from settings.json (capture silently off — a false green).
   results.push(await checkMemoryHooksLiveness());
-  // Enforcement floor liveness: fail if kit was taught here but a PreToolUse gate
-  // has vanished — the agent runs un-gated while kit still reads green. The floor
-  // must prove it exists.
   results.push(await checkGateLiveness(root));
-  // The git-hook floor: where it resolves to, and whether an installed gate can actually fail.
   results.push(await checkGitHookFloor(root));
   results.push(await checkDeviceIdOverride());
-  // `[policy.agent_writes]` posture: an entry naming an op kit never asks about grants nothing while
-  // still declaring the vendor — which refuses that vendor's real ops. Four documents claimed this
-  // was surfaced; nothing called the function that computes it. Wired HERE, not in `runCheckGate`,
-  // so `kit ci` and `kit heal` see it too.
+}
+
+async function loadGovernedConfig(root: string): Promise<import("./config.js").kitConfig | null> {
+  try {
+    const { loadConfig } = await import("./config.js");
+    return await loadConfig(resolve(root, ".kit.toml"));
+  } catch {
+    return null;
+  }
+}
+
+async function appendProjectSecurityChecks(
+  results: SecurityCheckResult[],
+  root: string,
+): Promise<SecurityCheckResult[]> {
   const { checkPolicyAgentWrites } = await import("./check-policy-ops.js");
   results.push(await checkPolicyAgentWrites(root));
-  // What this run's directory covers. Run from a workspace root holding several repos side by
-  // side, every manifest-dependent scanner skips truthfully and the summary read "All 25 checks
-  // passed" — while the tree one level down had 30 known dependency vulnerabilities. The skips
-  // were honest; the missing row was the one saying the code lives somewhere kit did not look.
   const { checkScanScope, scanScopeFacts, escalateManifestSkips } =
     await import("./check-nested-projects.js");
   const scope = await scanScopeFacts(root);
   results.push(await checkScanScope(root, scope));
-
-  // New dependency debt, as distinct from the debt this repo already ships. A gate that fails on
-  // all 30 existing advisories gets disabled the same afternoon; one that fails only on the 31st
-  // survives. Opt-in: without a committed baseline there is nothing to compare against.
   const { checkAdvisoryBaseline } = await import("./check-advisory-baseline.js");
   results.push(await checkAdvisoryBaseline(root));
-
-  // What reaches the browser. Committed-secret scanning cannot see this: a VITE_/NEXT_PUBLIC_
-  // variable with a secret value is inlined into the bundle at build time and shipped to every
-  // visitor without ever being committed. The bundle scanner already existed and was reachable
-  // only from `kit security scan-build`, so no automatic verdict ever looked at build output.
   const { checkClientExposedNames, checkBuiltBundleSecrets } =
     await import("./check-client-exposure.js");
-  // The GOVERNED project's config, from the threaded root — not the calling process's.
-  let governed: import("./config.js").kitConfig | null = null;
-  try {
-    const { loadConfig } = await import("./config.js");
-    governed = await loadConfig(resolve(root, ".kit.toml"));
-  } catch {
-    /* no config here — the checks below still work from what is on disk */
-  }
+  const governed = await loadGovernedConfig(root);
   const clientAllow: Record<string, string> = governed?.scan?.client_exposed_allow ?? {};
   const declaredKeyNames: string[] = Object.keys(governed?.secrets?.keys ?? {});
   results.push(await checkClientExposedNames(root, clientAllow, declaredKeyNames));
   results.push(await checkBuiltBundleSecrets(root));
-
-  // The decisions a run made where the spec was silent. Once nobody reads the diff, that list —
-  // not the diff — is the review surface, and kit had no artifact for it. Required only when the
-  // repo says so (`[decisions] require`), because a gate nobody opted into is a gate that gets
-  // switched off; verified whenever a ledger exists, because a ledger kit cannot read is worse
-  // than none. kit checks the SHAPE and never the content: writing the entries is model work, and
-  // scoring them would re-create the incentive the auditor separation exists to remove.
   const { checkDecisionLedger } = await import("./check-decision-ledger.js");
   results.push(await checkDecisionLedger(root, governed?.decisions?.require === true));
-  // Inbound integration: fold any third-party findings a partner tool emitted to
-  // `.kit-scan-results.jsonl` into the verdict. No file → no-op. Can only escalate
-  // (fail/warn), never green the gate — see external-findings.ts.
   const { checkExternalFindings } = await import("./external-findings.js");
   results.push(...(await checkExternalFindings(root)));
+  return escalateManifestSkips(results, scope);
+}
 
-  // Attach a rule citation (CWE/OWASP) to each finding whose check is mapped in
-  // the local rules catalog. Deterministic lookup, no network. Unmapped checks
-  // pass through unchanged.
-  // A manifest-absence skip is an honest not-applicable in a normal project and a coverage hole
-  // when kit is standing in the wrong directory — same words, different meaning. Resolved here,
-  // once, from the scope facts rather than by each scanner guessing, and applied last so it also
-  // covers results appended after the scanners ran.
-  return escalateManifestSkips(results, scope).map((r) => {
+function attachRuleCitations(results: SecurityCheckResult[]): SecurityCheckResult[] {
+  return results.map((r) => {
     const rule = ruleForCheck(r.name);
     return rule ? { ...r, rule } : r;
   });
+}
+
+/**
+ * Run all security checks against the governed root. Every filesystem read and scanner spawn
+ * receives this root; callers may therefore audit another project without changing process cwd.
+ */
+export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]> {
+  const root = cwd ?? process.cwd();
+  const results = await runPrimarySecurityChecks(root);
+  await appendHostSecurityChecks(results, root);
+  return attachRuleCitations(await appendProjectSecurityChecks(results, root));
 }
 
 /** Separate findings sink — deliberately NOT the chained audit log. */

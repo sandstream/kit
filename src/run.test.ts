@@ -7,6 +7,37 @@ import { executeCommand } from "./run.js";
 
 let tmpDir: string;
 
+function captureProcessOutput(): {
+  stdout: () => string;
+  stderr: () => string;
+  restore: () => void;
+} {
+  const stdoutChunks: string[] = [];
+  const stderrChunks: string[] = [];
+  const originalStdout = process.stdout.write.bind(process.stdout);
+  const originalStderr = process.stderr.write.bind(process.stderr);
+  (process.stdout as unknown as { write: unknown }).write = (
+    chunk: string | Uint8Array,
+  ): boolean => {
+    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString());
+    return true;
+  };
+  (process.stderr as unknown as { write: unknown }).write = (
+    chunk: string | Uint8Array,
+  ): boolean => {
+    stderrChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString());
+    return true;
+  };
+  return {
+    stdout: () => stdoutChunks.join(""),
+    stderr: () => stderrChunks.join(""),
+    restore: () => {
+      (process.stdout as unknown as { write: unknown }).write = originalStdout;
+      (process.stderr as unknown as { write: unknown }).write = originalStderr;
+    },
+  };
+}
+
 before(async () => {
   tmpDir = join(tmpdir(), `kit-run-test-${process.pid}`);
   await mkdir(tmpDir, { recursive: true });
@@ -164,6 +195,38 @@ describe("executeCommand", () => {
 
     assert.equal(result.exitCode, 0, "Should exit with code 0");
     assert(result.stderr.includes("error message"), "Should capture stderr");
+  });
+
+  it("redacts known secret values from captured and forwarded stdout/stderr", async () => {
+    const secret = "opaque-cli-value-" + "A".repeat(32);
+    const capture = captureProcessOutput();
+    let result;
+    try {
+      result = await executeCommand({
+        commandArgs: [
+          process.execPath,
+          "-e",
+          "process.stdout.write(`stdout request_id=req_stdout token=${process.env.TEST_API_TOKEN}\\n`);process.stderr.write(`stderr request_id=req_stderr token=${process.env.TEST_API_TOKEN}\\n`)",
+        ],
+        cwd: tmpDir,
+        inheritEnv: false,
+        envOverrides: { TEST_API_TOKEN: secret },
+      });
+    } finally {
+      capture.restore();
+    }
+
+    for (const [label, text] of [
+      ["captured stdout", result!.stdout],
+      ["captured stderr", result!.stderr],
+      ["forwarded stdout", capture.stdout()],
+      ["forwarded stderr", capture.stderr()],
+    ]) {
+      assert.ok(!text.includes(secret), `${label} must not expose the secret`);
+      assert.match(text, /\[REDACTED\]/, `${label} should mark the removed value`);
+    }
+    assert.match(result.stdout, /request_id=req_stdout/);
+    assert.match(result.stderr, /request_id=req_stderr/);
   });
 
   it("handles multiline output correctly", async () => {

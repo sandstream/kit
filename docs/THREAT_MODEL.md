@@ -69,8 +69,8 @@ config knob says otherwise.
 - **No background processes.** kit is a one-shot CLI. There is no daemon
   watching files, no scheduled poller, no IPC channel.
 - **No automatic remote audit-log shipping.** `.kit-audit.jsonl` stays local.
-  A remote audit sink is **opt-in** via `[audit].remote = true` (see
-  `src/audit.ts`).
+  A remote audit sink is **opt-in** via `[governance.audit].remote = true` plus
+  an explicit `[governance.audit].company_id` (see `src/audit.ts`).
 - **No secret values in error messages or logs.** Backend-write failures redact
   the held plaintext by exact substring before surfacing; `redactSecrets()`
   pattern-matching backs that up for values kit doesn't hold.
@@ -177,7 +177,7 @@ kit calls vendor APIs the operator already calls. kit adds **no extra
 network hops**. If you trust Stripe and Vercel with your data, you trust the
 same Stripe and Vercel endpoints when kit calls them.
 
-The one exception is `[audit].remote = true` (off by default). When on,
+The one exception is `[governance.audit].remote = true` with `company_id` (off by default). When on,
 audit-events are POST'd to a `KIT_REMOTE_URL` you configure. That URL is
 yours — kit ships no default value.
 

@@ -19,7 +19,7 @@ import {
 import { detectStack } from "./stack-detector.js";
 import { generateToml } from "./toml-generator.js";
 import { writeFile, access } from "node:fs/promises";
-import { executeCommand } from "./run.js";
+import { executeCommand, redactCommandForEnvironment } from "./run.js";
 import { gatherProjectContext } from "./context.js";
 import { mapReport } from "./commands/repomap.js";
 import { isReadOnlyMode } from "./read-only-mode.js";
@@ -31,6 +31,7 @@ import { openMemoryDb, searchMessages, getMemoryDbPath, recordQuery } from "./me
 import { searchShared } from "./memory/shared.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
 import { existsSync } from "node:fs";
+import { redactSecrets } from "./utils/redactSecrets.js";
 
 const KIT_FILE = ".kit.toml";
 
@@ -649,6 +650,7 @@ function register_kit_run(server: McpServer): void {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_run");
       try {
         const workDir = cwd ?? process.cwd();
+        const displayCommand = await redactCommandForEnvironment(command, workDir);
         // Tokenize like a shell (respecting quotes) — a naive whitespace split turns
         // `git commit -m "a b"` into the wrong argv and silently runs a different
         // command. An unterminated quote throws → we refuse rather than mis-split.
@@ -676,7 +678,10 @@ function register_kit_run(server: McpServer): void {
           {
             operation: "run",
             operationType: "write",
-            metadata: { command, mediation: "egress-only (arbitrary command; fs/env un-mediated)" },
+            metadata: {
+              command: displayCommand,
+              mediation: "egress-only (arbitrary command; fs/env un-mediated)",
+            },
             egressTargets,
           },
           () =>
@@ -703,18 +708,26 @@ function register_kit_run(server: McpServer): void {
             ? `stderr:\n${result.stderr}`
             : "(no output)";
 
+        const response = redactSecrets(
+          `Command: ${displayCommand}\nStatus: ${status}\nExit code: ${result.exitCode}\n\nOutput:\n${output}`,
+        );
         return {
           content: [
             {
               type: "text" as const,
-              text: `Command: ${command}\nStatus: ${status}\nExit code: ${result.exitCode}\n\nOutput:\n${output}`,
+              text: response,
             },
           ],
           isError: result.exitCode !== 0,
         };
       } catch (err) {
         return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
+          content: [
+            {
+              type: "text" as const,
+              text: `Error: ${redactSecrets((err as Error).message)}`,
+            },
+          ],
           isError: true,
         };
       }

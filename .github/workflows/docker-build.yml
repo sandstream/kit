@@ -10,6 +10,8 @@ on:
     branches:
       - main
 
+permissions: {}
+
 env:
   REGISTRY: docker.io
   IMAGE_NAME: sandstream/kit
@@ -19,7 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
       pull-requests: write
       id-token: write # cosign keyless signing via Sigstore OIDC
       security-events: write # upload Trivy SARIF to Code Scanning
@@ -114,7 +115,7 @@ jobs:
       # SBOM per image — attached to the registry alongside the signature.
       - name: Generate SBOM for CLI image
         if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true' && steps.build-cli.outputs.digest != ''
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build-cli.outputs.digest }}
           format: cyclonedx-json
@@ -162,7 +163,7 @@ jobs:
         # the scan result above is the gate, so a failed upload must not fail the publish.
         if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true'
         continue-on-error: true # kit-self-audit: allow-continue-on-error
-        uses: github/codeql-action/upload-sarif@c35d1b164463ee62a100735382aaaa525c5d3496 # codeql-bundle-v2.25.6
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: "trivy-results.json"
 

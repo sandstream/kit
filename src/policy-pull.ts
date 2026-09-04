@@ -21,12 +21,15 @@
  * Deterministic, local-only, no telemetry, no egress.
  */
 import {
+  chmodSync,
   existsSync,
   readFileSync,
   writeFileSync,
   copyFileSync,
   mkdtempSync,
+  renameSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -48,7 +51,9 @@ export type PullStatus =
   /** No local `.kit-policy.signers` anchor — root trust is never fetched (§6.1), so fail closed. */
   | "no-anchor"
   /** Verification did not return "valid"; the policy was NOT applied (kept existing). */
-  | PolicyVerifyStatus;
+  | PolicyVerifyStatus
+  /** The verified pair could not be installed; the prior pair was retained or remains fail-closed. */
+  | "apply-failed";
 
 export interface PullResult {
   ok: boolean;
@@ -61,6 +66,106 @@ export interface PullResult {
 export function pullSourceToPath(source: string): string {
   const s = source.startsWith("file://") ? source.slice("file://".length) : source;
   return resolve(s);
+}
+
+type RenameFile = (from: string, to: string) => void;
+
+export interface ApplyPolicyPairResult {
+  ok: boolean;
+  detail: string;
+}
+
+interface SignatureSnapshot {
+  bytes: Buffer;
+  mode: number;
+}
+
+function errorCode(error: unknown): string {
+  if (error && typeof error === "object" && "code" in error && typeof error.code === "string") {
+    return error.code;
+  }
+  return "filesystem error";
+}
+
+function readSignatureSnapshot(path: string): SignatureSnapshot | null {
+  if (!existsSync(path)) return null;
+  return {
+    bytes: readFileSync(path),
+    mode: statSync(path).mode,
+  };
+}
+
+function restoreSignature(path: string, snapshot: SignatureSnapshot | null): void {
+  if (snapshot === null) {
+    rmSync(path, { force: true });
+    return;
+  }
+  writeFileSync(path, snapshot.bytes);
+  chmodSync(path, snapshot.mode);
+}
+
+function rollbackSignature(
+  path: string,
+  snapshot: SignatureSnapshot | null,
+  applyError: unknown,
+): ApplyPolicyPairResult {
+  try {
+    restoreSignature(path, snapshot);
+  } catch (restoreError) {
+    return {
+      ok: false,
+      detail: `apply failed (${errorCode(applyError)}); signature rollback also failed (${errorCode(restoreError)}) — policy remains fail-closed`,
+    };
+  }
+  return {
+    ok: false,
+    detail: `apply failed (${errorCode(applyError)}); previous pair retained`,
+  };
+}
+
+/**
+ * Install a verified policy pair without ever exposing a new policy under an old signature.
+ * The signature moves first, making any interrupted transition fail closed; the policy is the
+ * final atomic rename. If that rename fails, restore the exact previous signature bytes.
+ */
+export function applyPolicyPairAtomically(
+  destRoot: string,
+  policyBytes: Buffer,
+  signatureBytes: Buffer,
+  renameFile: RenameFile = renameSync,
+): ApplyPolicyPairResult {
+  let stage: string | null = null;
+  const destPolicy = getPolicyPath(destRoot);
+  const destSignature = getPolicySigPath(destRoot);
+  let previousSignature: SignatureSnapshot | null = null;
+  let signatureReplaced = false;
+
+  try {
+    previousSignature = readSignatureSnapshot(destSignature);
+    stage = mkdtempSync(join(destRoot, ".kit-policy-apply-"));
+    const nextPolicy = join(stage, POLICY_FILE);
+    const nextSignature = join(stage, POLICY_SIG_FILE);
+    writeFileSync(nextPolicy, policyBytes);
+    writeFileSync(nextSignature, signatureBytes);
+
+    renameFile(nextSignature, destSignature);
+    signatureReplaced = true;
+    renameFile(nextPolicy, destPolicy);
+    return { ok: true, detail: "verified policy pair installed" };
+  } catch (error) {
+    if (signatureReplaced) {
+      return rollbackSignature(destSignature, previousSignature, error);
+    }
+    return { ok: false, detail: `apply failed (${errorCode(error)}); previous pair retained` };
+  } finally {
+    if (stage) {
+      try {
+        rmSync(stage, { recursive: true, force: true });
+      } catch {
+        // The applied pair is already complete; stale private staging data is non-authoritative.
+      }
+    }
+  }
 }
 
 /**
@@ -89,8 +194,9 @@ export function pullPolicy(source: string, destRoot: string): PullResult {
   }
 
   // Stage pulled policy+sig WITH the LOCAL anchor and verify OFFLINE before writing anything.
-  const stage = mkdtempSync(join(tmpdir(), "kit-policy-pull-"));
+  let stage: string | null = null;
   try {
+    stage = mkdtempSync(join(tmpdir(), "kit-policy-pull-"));
     copyFileSync(srcPolicy, join(stage, POLICY_FILE));
     copyFileSync(srcSig, join(stage, POLICY_SIG_FILE));
     // The LOCAL anchor — deliberately not the source's — is what the pulled policy must satisfy.
@@ -106,16 +212,39 @@ export function pullPolicy(source: string, destRoot: string): PullResult {
       };
     }
 
-    // Verified → apply. Write ONLY the policy + its signature; never the trust anchor.
-    writeFileSync(getPolicyPath(destRoot), readFileSync(srcPolicy));
-    writeFileSync(getPolicySigPath(destRoot), readFileSync(srcSig));
+    // Verified → install the pair fail-closed; never write or fetch the trust anchor.
+    const applied = applyPolicyPairAtomically(
+      destRoot,
+      readFileSync(srcPolicy),
+      readFileSync(srcSig),
+    );
+    if (!applied.ok) {
+      return {
+        ok: false,
+        status: "apply-failed",
+        detail: `verified policy NOT applied — ${applied.detail}`,
+        fingerprint: v.fingerprint,
+      };
+    }
     return {
       ok: true,
       status: "applied",
       detail: `applied org policy — ${v.detail}`,
       fingerprint: v.fingerprint,
     };
+  } catch (error) {
+    return {
+      ok: false,
+      status: "apply-failed",
+      detail: `policy pull could not complete (${errorCode(error)}); existing policy was not intentionally changed`,
+    };
   } finally {
-    rmSync(stage, { recursive: true, force: true });
+    if (stage) {
+      try {
+        rmSync(stage, { recursive: true, force: true });
+      } catch {
+        // Staging is non-authoritative; cleanup failure cannot invalidate the applied pair.
+      }
+    }
   }
 }

@@ -69,15 +69,24 @@ describe("cmdMonkeyTest", () => {
     assert.equal(existsSync(join(dir, "tests", "monkey", "monkey.spec.ts")), true);
   });
 
-  it("run --skip-browser needs an expected reason and can return a structured skipped run", async () => {
+  it("run --skip-browser records the skip but still fails missing runner prerequisites", async () => {
     writePackage({ scripts: {} });
     setArgs("run", "--skip-browser", "--expected", "browser is covered by release smoke", "--json");
 
-    assert.equal(await cmdMonkeyTest(), true);
-    const result = outputJson<{ ok: boolean; steps: { name: string; status: string }[] }>();
+    assert.equal(await cmdMonkeyTest(), false);
+    const result = outputJson<{
+      ok: boolean;
+      findings: { title: string }[];
+      steps: { name: string; status: string }[];
+    }>();
 
-    assert.equal(result.ok, true);
+    assert.equal(result.ok, false);
     assert.ok(result.steps.some((step) => step.name === "browser" && step.status === "skip"));
+    assert.ok(result.findings.some((finding) => finding.title === "Playwright dependency missing"));
+    assert.ok(result.findings.some((finding) => finding.title === "Monkey harness incomplete"));
+    assert.ok(
+      result.findings.some((finding) => finding.title === "No idempotent seed command detected"),
+    );
   });
 
   it("rejects an unknown subcommand and prints usage", async () => {

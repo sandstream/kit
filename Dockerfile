@@ -3,12 +3,9 @@
 # Final image: Node 22 Alpine (~100MB)
 
 # Stage 1: Builder
-FROM node:22-alpine AS builder
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS builder
 
 WORKDIR /build
-
-# Install build dependencies
-RUN apk add --no-cache python3 make g++
 
 # Copy package files
 COPY package*.json ./
@@ -22,22 +19,26 @@ COPY src ./src
 COPY tsconfig*.json ./
 COPY .kit ./.kit
 COPY scripts ./scripts
+COPY skills ./skills
 
 # Build TypeScript → JavaScript
 RUN npm run build
 
 # Stage 2: Runtime
-FROM node:22-alpine
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
 
 WORKDIR /app
 
-# Install dumb-init for proper signal handling, and pull fixed OpenSSL patch
-# levels from Alpine repositories when the floating Node image lags them.
-# Remove bundled npm (ships with a vulnerable picomatch and isn't needed at
-# runtime — kit CLI shells out to `node`, never `npm`). Saves ~30MB.
-RUN apk add --no-cache --upgrade dumb-init libcrypto3 libssl3 \
- && rm -rf /usr/local/lib/node_modules/npm \
- && rm -f /usr/local/bin/npm /usr/local/bin/npx
+# Plugin installation needs npm; its mandatory triage gate needs Python and the
+# bundled triage skill copied below. Keep npm on the triaged, Node 22-compatible
+# release instead of inheriting whichever version ships in the base image.
+RUN apk add --no-cache --upgrade \
+        dumb-init=1.2.5-r4 \
+        libcrypto3=3.5.8-r0 \
+        libssl3=3.5.8-r0 \
+        python3=3.14.7-r1 \
+    && npm install -g npm@11.19.1 --ignore-scripts \
+    && npm cache clean --force
 
 # Create non-root user
 RUN addgroup -g 1001 -S kit && \
@@ -47,17 +48,19 @@ RUN addgroup -g 1001 -S kit && \
 COPY --from=builder --chown=kit:kit /build/dist ./dist
 COPY --from=builder --chown=kit:kit /build/node_modules ./node_modules
 COPY --from=builder --chown=kit:kit /build/package.json ./
+COPY --from=builder --chown=kit:kit /build/skills ./skills
+RUN chown kit:kit /app
 
 # Set environment
 ENV NODE_ENV=production
 ENV NODE_OPTIONS="--enable-source-maps"
 
 # Switch to non-root user
-USER kit
+USER 1001:1001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD node /app/dist/cli.js --version || exit 1
+    CMD ["node", "/app/dist/cli.js", "--version"]
 
 # Entrypoint with dumb-init for proper signal handling.
 # Bake `node dist/cli.js` into ENTRYPOINT so `docker run kit --help` works

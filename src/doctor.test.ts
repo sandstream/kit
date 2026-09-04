@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   runDoctor,
+  checkToolsInPath,
   triageGateStatus,
   agentEgressExposureStatus,
   containmentPostureStatus,
@@ -25,6 +26,23 @@ import {
 import { addPolicySigner } from "./policy-trust.js";
 import { PROFILE_FILE } from "./profile/schema.js";
 import { signProfile } from "./profile/sign.js";
+
+describe("doctor tool resolution", () => {
+  it("probes the executable name for scheme-qualified tool declarations", async () => {
+    const probed: string[] = [];
+    const checks = await checkToolsInPath(
+      { tools: { "aqua:aquasecurity/trivy": "latest" } },
+      async (name) => {
+        probed.push(name);
+        return name === "trivy" ? "/tools/trivy" : null;
+      },
+    );
+
+    assert.deepEqual(probed, ["trivy"]);
+    assert.equal(checks[0].status, "pass");
+    assert.equal(checks[0].detail, "/tools/trivy");
+  });
+});
 
 describe("runDoctor", () => {
   it("returns skip for Node.js check when no package.json exists", async () => {

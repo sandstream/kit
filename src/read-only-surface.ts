@@ -1,118 +1,382 @@
 /**
- * kit's declared WRITE SURFACE — the entry points read-only mode must refuse, checked once at
- * dispatch instead of once per handler.
+ * kit's declared WRITE SURFACE: every CLI entry point that can mutate durable local or remote
+ * state. The dispatcher checks this once before invoking a handler, so read-only enforcement does
+ * not depend on every module remembering its own guard.
  *
- * WHY A TABLE AND NOT MORE PER-MODULE GUARDS: read-only mode was guarded inside 11 modules
- * (hooks, elevation, fix, secrets-migrate, context-lock, agent-config, env-switch, install,
- * mcp-server, …) and the plumbing worked — `kit fix` under `KIT_READ_ONLY=1` refuses, exits 1 and
- * audit-logs the refusal. But a behavioural sweep over the claim
- * "Read-only mode refuses every mutation" found four commands that wrote anyway:
+ * Module-level guards remain required for library and MCP callers. This table is the CLI floor.
+ * `read-only-surface-matrix.test.ts` independently accounts for every registered top-level command,
+ * every known mutating invocation, and the read forms inside mixed command families.
  *
- *     kit identity init                → minted a fresh Ed25519 PRIVATE KEY
- *     kit policy init                  → created .kit-policy.toml
- *     kit security check-gitignore --fix → rewrote .gitignore (1 → 16 lines)
- *     kit upgrade                      → rewrote both lock files
- *
- * None refused, none was audited. An operator who locks an agent session down with
- * KIT_READ_ONLY=1 believing "every mutation" is refused would have the agent mint a new signing
- * identity under it — the identity that then attributes audit and policy signatures.
- *
- * Guarding those four modules individually would fix today and rot tomorrow: the defect is not
- * four missing guards, it is that nothing enumerated the write surface, so "did we cover
- * everything?" had no answer. This table IS that answer, and `read-only-surface.test.ts` drives
- * every entry behaviourally, so an entry that stops refusing fails the suite.
- *
- * The per-module guards stay. They cover library callers that never pass through the CLI
- * dispatcher (the MCP server, plugins, `withGovernance` closures) and they carry operation-specific
- * metadata into the audit trail. This table is the floor, not a replacement.
- *
- * ADDING A COMMAND: if it can write outside /tmp — a file, a key, a lock, a remote resource — it
- * belongs here. A command missing from the table is not "allowed in read-only mode", it is
- * unreviewed.
+ * ADDING A COMMAND: classify it in that matrix. If it can write a file, key, lock, database, or
+ * remote resource, add a rule here. A new top-level command left unreviewed fails the matrix.
  */
 
-/** A mutating entry point: a command, optionally narrowed to a subcommand and/or a flag. */
+export interface FlagValueConstraint {
+  flag: string;
+  values: readonly string[];
+}
+
+/** A mutating CLI pattern and the operation recorded when read-only mode refuses it. */
 export interface WriteSurfaceEntry {
-  /** argv[2] — the command verb. */
+  /** argv[2]: top-level command. */
   command: string;
-  /**
-   * argv[3] — when only some subcommands mutate. `kit policy show` reads, `kit policy init`
-   * writes; omitting this would refuse the read too, which trains people to drop the flag.
-   */
-  subcommand?: string;
-  /**
-   * When the mutation is opt-in behind a flag: `kit security check-gitignore` reports,
-   * `--fix` rewrites. Only the flagged form is refused.
-   */
+  /** argv[3]. `null` means no positional subcommand (flags do not count as positionals). */
+  subcommand?: string | null;
+  /** Match any listed argv[3] value; `null` has the same meaning as above. */
+  subcommands?: readonly (string | null)[];
+  /** argv[4], for nested forms such as `security policy init` or `memory pal add`. */
+  argument?: string;
+  /** Match any listed argv[4] value. */
+  arguments?: readonly string[];
+  /** Backward-compatible single required flag. */
   flag?: string;
-  /** The operation name recorded in the audit trail (`refused_operation`). */
+  /** At least one of these flags must be present. */
+  anyFlags?: readonly string[];
+  /** Every one of these flags must be present. */
+  allFlags?: readonly string[];
+  /** Each flag must have one of its listed values. Supports `--flag=x` and `--flag x`. */
+  flagValues?: readonly FlagValueConstraint[];
+  /** Do not match when any of these flags is present. */
+  unlessFlags?: readonly string[];
+  /** Do not match when a flag has one of these values. */
+  unlessFlagValues?: readonly FlagValueConstraint[];
+  /** Require a non-flag positional token at this absolute argv index. */
+  positionalAt?: number;
+  /** Unambiguous audit metadata (`refused_operation`). */
   operation: string;
 }
 
 /**
- * The declared write surface. Kept alphabetical by command for reviewability.
- *
- * Deliberately NOT here:
- *   - `check`, `doctor`, `coverage`, `map`, `insight`, `status` — read-only by construction.
- *   - `run` / `triage` / `secrets` / `fix` / `init` — already refused inside their own modules or
- *     via the MCP guards, and they carry richer metadata there than this table can. Listing them
- *     twice would produce two audit entries for one refusal.
- *
- *     READ THAT EXCLUSION CAREFULLY, because it was wrong once. "Already refused inside their own
- *     modules" is a claim about a MODULE, and a module can hold more than one write. `secrets`
- *     refused the LOCAL secret write (`writeSecretToBackend` → `refuseWrite`) while
- *     `secrets-propagate.ts` wrote the same secret into a third-party control plane with no
- *     read-only check at all — measured: with elevation satisfied, `KIT_READ_ONLY=1 kit secrets
- *     propagate ... --to vercel` reached `spawn vercel`. Fixed at `propagate()`'s own choke point.
- *     Before excluding a command from this table, enumerate its writes, not its modules.
+ * Declared mutation patterns, alphabetical by top-level command. Rules for one command are ordered
+ * from specific to broad. Multiple invocation forms sharing one semantic write use one rule so
+ * operation names stay unique.
  */
 export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
-  // Mints or rotates a signing key, or records a revocation — the worst thing to allow under a
-  // lock-down, because it changes WHO later artifacts are attributed to.
+  { command: "add", positionalAt: 3, unlessFlags: ["--list"], operation: "add-service" },
+  { command: "adr", subcommand: "freeze", operation: "adr-freeze" },
+  { command: "agent-config", operation: "agent-config" },
+  { command: "analyze", anyFlags: ["--write"], operation: "analyze-write" },
+  { command: "audit", subcommand: "anchor", operation: "audit-anchor" },
+  {
+    command: "auth",
+    subcommand: "elevate",
+    unlessFlags: ["--list-scopes"],
+    operation: "auth-elevate",
+  },
+  { command: "auth", subcommand: "revoke", operation: "auth-revoke" },
+  { command: "auth", subcommand: "setup-totp", operation: "auth-setup-totp" },
+  { command: "baseline", subcommand: "freeze", operation: "baseline-freeze" },
+  { command: "bootstrap", operation: "bootstrap" },
+  { command: "broker", subcommand: "enforce", operation: "broker-enforce" },
+  {
+    command: "check",
+    subcommand: "verify-attestation",
+    anyFlags: ["--pin"],
+    operation: "check-attestation-pin",
+  },
+  { command: "check", subcommand: null, anyFlags: ["--attest"], operation: "check-attest" },
+  {
+    command: "ci",
+    allFlags: ["--init", "--write"],
+    operation: "ci-init-write",
+  },
+  {
+    command: "ci",
+    flagValues: [{ flag: "--format", values: ["gitlab"] }],
+    operation: "ci-gitlab-report",
+  },
+  { command: "ci", anyFlags: ["--attest"], operation: "ci-attest" },
+  { command: "clone", operation: "clone" },
+  {
+    command: "config",
+    subcommand: "migrate",
+    unlessFlags: ["--check", "--dry-run"],
+    operation: "config-migrate",
+  },
+  { command: "context", subcommand: "use", operation: "context-use" },
+  { command: "create-plugin", operation: "create-plugin" },
+  { command: "decisions", subcommand: "add", operation: "decisions-add" },
+  { command: "env", subcommand: "switch", operation: "env-switch" },
+  { command: "escalate", operation: "escalate" },
+  { command: "fix", operation: "fix" },
+  { command: "guard", subcommand: "install", operation: "guard-install" },
+  { command: "guard", subcommand: "uninstall", operation: "guard-uninstall" },
+  { command: "heal", unlessFlags: ["--dry-run"], operation: "heal" },
+  {
+    command: "hooks",
+    subcommands: [null, "install", "sync"],
+    operation: "hooks-install",
+  },
+  { command: "hooks", subcommand: "add", operation: "hooks-add" },
+  { command: "hooks", subcommand: "uninstall", operation: "hooks-uninstall" },
   { command: "identity", subcommand: "init", operation: "identity-init" },
-  { command: "identity", subcommand: "rotate", operation: "identity-rotate" },
   { command: "identity", subcommand: "migrate", operation: "identity-migrate" },
-  // Scaffolds Playwright monkey-test harness files into the repo.
+  { command: "identity", subcommand: "rotate", operation: "identity-rotate" },
+  { command: "init", operation: "init" },
+  { command: "install", operation: "install" },
+  { command: "login", unlessFlags: ["--plan"], operation: "login" },
+  { command: "mcp", subcommand: "clear", operation: "mcp-clear" },
+  { command: "mcp", subcommand: "set-token", operation: "mcp-set-token" },
+  { command: "memory", subcommand: "backup", operation: "memory-backup" },
+  {
+    command: "memory",
+    subcommand: "export",
+    anyFlags: ["--obsidian"],
+    unlessFlags: ["--json"],
+    operation: "memory-export",
+  },
+  { command: "memory", subcommand: "forget", operation: "memory-forget" },
+  {
+    command: "memory",
+    subcommand: "forget-message",
+    operation: "memory-forget-message",
+  },
+  { command: "memory", subcommand: "hook", operation: "memory-hook" },
+  { command: "memory", subcommand: "index", operation: "memory-index" },
+  { command: "memory", subcommand: "install", operation: "memory-install" },
+  { command: "memory", subcommand: "keygen", operation: "memory-keygen" },
+  { command: "memory", subcommand: "merge", operation: "memory-merge" },
+  { command: "memory", subcommand: "pal", argument: "add", operation: "memory-pal-add" },
+  { command: "memory", subcommand: "pal", argument: "claim", operation: "memory-pal-claim" },
+  { command: "memory", subcommand: "pal", argument: "done", operation: "memory-pal-done" },
+  { command: "memory", subcommand: "pal", argument: "import", operation: "memory-pal-import" },
+  { command: "memory", subcommand: "pal", argument: "prune", operation: "memory-pal-prune" },
+  {
+    command: "memory",
+    subcommand: "pal",
+    argument: "release",
+    operation: "memory-pal-release",
+  },
+  {
+    command: "memory",
+    subcommand: "pal",
+    argument: "snooze",
+    operation: "memory-pal-snooze",
+  },
+  { command: "memory", subcommand: "pal", argument: "verify", operation: "memory-pal-verify" },
+  { command: "memory", subcommand: "pull", operation: "memory-pull" },
+  { command: "memory", subcommand: "push", operation: "memory-push" },
+  { command: "memory", subcommand: "restore", operation: "memory-restore" },
+  { command: "memory", subcommand: "save", operation: "memory-save" },
+  {
+    command: "memory",
+    subcommand: "scan",
+    anyFlags: ["--quarantine"],
+    operation: "memory-scan-quarantine",
+  },
+  { command: "memory", subcommand: "share", operation: "memory-share" },
+  { command: "memory", subcommand: "sync", operation: "memory-sync" },
+  { command: "memory", subcommand: "uninstall", operation: "memory-uninstall" },
   { command: "monkey-test", subcommand: "init", operation: "monkey-test-init" },
-  // Creates or re-signs the org policy document that other gates read as authority.
+  { command: "monkey-test", subcommand: "run", operation: "monkey-test-run" },
+  { command: "panic", operation: "panic" },
+  { command: "pkg", operation: "pkg-install" },
+  { command: "plugin", subcommand: "install", operation: "plugin-install" },
+  { command: "plugin", subcommand: "scaffold", operation: "plugin-scaffold" },
+  { command: "policy", subcommand: "approve", operation: "policy-approve" },
   { command: "policy", subcommand: "init", operation: "policy-init" },
+  { command: "policy", subcommand: "pull", operation: "policy-pull" },
+  {
+    command: "policy",
+    subcommand: "pull-revocations",
+    operation: "policy-pull-revocations",
+  },
   { command: "policy", subcommand: "sign", operation: "policy-sign" },
-  // Signs / freezes / imports the traveling profile.
+  {
+    command: "policy",
+    subcommand: "trust",
+    positionalAt: 4,
+    unlessFlags: ["--list", "--remove"],
+    operation: "policy-trust-add",
+  },
+  {
+    command: "policy",
+    subcommand: "trust",
+    anyFlags: ["--remove"],
+    operation: "policy-trust-remove",
+  },
+  {
+    command: "profile",
+    subcommand: "export",
+    anyFlags: ["--out"],
+    operation: "profile-export",
+  },
   { command: "profile", subcommand: "freeze", operation: "profile-freeze" },
-  { command: "profile", subcommand: "sign", operation: "profile-sign" },
   { command: "profile", subcommand: "import", operation: "profile-import" },
-  // Rewrites .gitignore in place. Only the --fix form mutates.
+  { command: "profile", subcommand: "sign", operation: "profile-sign" },
+  { command: "run", operation: "run" },
+  { command: "scan", anyFlags: ["--update-baseline"], operation: "scan-update-baseline" },
+  { command: "secrets", subcommand: null, operation: "secrets-generate" },
+  { command: "secrets", subcommand: "migrate", operation: "secrets-migrate" },
+  {
+    command: "secrets",
+    subcommand: "onecli",
+    argument: "register",
+    operation: "secrets-onecli-register",
+  },
+  { command: "secrets", subcommand: "propagate", operation: "secrets-propagate" },
+  { command: "secrets", subcommand: "purge-history", operation: "secrets-purge-history" },
+  { command: "secrets", subcommand: "revoke-old", operation: "secrets-revoke-old" },
+  { command: "secrets", subcommand: "rotate", operation: "secrets-rotate" },
+  { command: "secrets", subcommand: "set", operation: "secrets-set" },
+  {
+    command: "secrets",
+    subcommand: "sync",
+    flagValues: [{ flag: "--target", values: ["dotenv-ci", "github"] }],
+    unlessFlags: ["--dry-run"],
+    operation: "secrets-sync",
+  },
+  {
+    command: "secrets",
+    subcommand: "validate",
+    anyFlags: ["--auto", "--fix"],
+    operation: "secrets-validate-write",
+  },
+  {
+    command: "secrets",
+    subcommand: "vault-migrate",
+    operation: "secrets-vault-migrate",
+  },
+  {
+    command: "security",
+    subcommand: "advisories",
+    anyFlags: ["--accept"],
+    operation: "security-advisories-accept",
+  },
+  { command: "security", subcommand: "clear-cache", operation: "security-clear-cache" },
   {
     command: "security",
     subcommand: "check-gitignore",
-    flag: "--fix",
+    anyFlags: ["--fix"],
     operation: "check-gitignore-fix",
   },
-  // Appends to the per-run decision ledger. `list` / `verify` read; only `add` writes.
-  { command: "decisions", subcommand: "add", operation: "decisions-add" },
-  // Rewrites the lock files (cli-lock.json, skills-lock.json).
+  {
+    command: "security",
+    subcommand: "policy",
+    arguments: ["add", "init"],
+    operation: "security-policy-update",
+  },
+  { command: "sentinel", subcommand: "install", operation: "sentinel-install" },
+  {
+    command: "setup",
+    unlessFlagValues: [{ flag: "--mode", values: ["review"] }],
+    operation: "setup",
+  },
+  {
+    command: "skill",
+    subcommand: "test",
+    anyFlags: ["--update-snapshot"],
+    operation: "skill-update-snapshot",
+  },
+  { command: "standards", subcommand: "freeze", operation: "standards-freeze" },
+  { command: "team", subcommand: "create", operation: "team-create" },
+  { command: "team", subcommand: "invite", operation: "team-invite" },
+  {
+    command: "team",
+    subcommand: "member",
+    argument: "remove",
+    operation: "team-member-remove",
+  },
+  {
+    command: "triage",
+    subcommands: ["all", "brew", "docker", "npm", "pip", "plugin", "repo", "skill"],
+    operation: "triage-record",
+  },
+  {
+    command: "triage",
+    subcommand: "mcp",
+    anyFlags: ["--pin"],
+    operation: "triage-mcp-pin",
+  },
   { command: "upgrade", operation: "upgrade" },
 ];
 
+function positional(argv: readonly string[], index: number): string | null {
+  const value = argv[index];
+  return value && !value.startsWith("-") ? value : null;
+}
+
+function hasCliFlag(argv: readonly string[], flag: string): boolean {
+  return argv.some((value) => value === flag || value.startsWith(`${flag}=`));
+}
+
+function cliFlagValue(argv: readonly string[], flag: string): string | undefined {
+  for (let index = 0; index < argv.length; index++) {
+    const value = argv[index];
+    if (value.startsWith(`${flag}=`)) return value.slice(flag.length + 1);
+    if (value === flag) {
+      const next = argv[index + 1];
+      return next && !next.startsWith("-") ? next : undefined;
+    }
+  }
+  return undefined;
+}
+
+function matchesFlagValues(
+  argv: readonly string[],
+  constraints: readonly FlagValueConstraint[] | undefined,
+): boolean {
+  return (
+    constraints === undefined ||
+    constraints.every(({ flag, values }) => {
+      const value = cliFlagValue(argv, flag);
+      return value !== undefined && values.includes(value);
+    })
+  );
+}
+
+function matchesPositionals(entry: WriteSurfaceEntry, argv: readonly string[]): boolean {
+  const subcommand = positional(argv, 3);
+  if (entry.subcommand !== undefined && entry.subcommand !== subcommand) return false;
+  if (entry.subcommands !== undefined && !entry.subcommands.includes(subcommand)) return false;
+
+  const argument = positional(argv, 4);
+  if (entry.argument !== undefined && entry.argument !== argument) return false;
+  if (entry.arguments !== undefined && (argument === null || !entry.arguments.includes(argument)))
+    return false;
+
+  if (entry.positionalAt !== undefined && positional(argv, entry.positionalAt) === null)
+    return false;
+  return true;
+}
+
+function matchesRequiredFlags(entry: WriteSurfaceEntry, argv: readonly string[]): boolean {
+  const anyFlags = entry.anyFlags ?? (entry.flag ? [entry.flag] : undefined);
+  if (anyFlags !== undefined && !anyFlags.some((flag) => hasCliFlag(argv, flag))) return false;
+  if (entry.allFlags !== undefined && !entry.allFlags.every((flag) => hasCliFlag(argv, flag)))
+    return false;
+  return matchesFlagValues(argv, entry.flagValues);
+}
+
+function matchesExclusions(entry: WriteSurfaceEntry, argv: readonly string[]): boolean {
+  if (entry.unlessFlags?.some((flag) => hasCliFlag(argv, flag))) return false;
+  if (
+    entry.unlessFlagValues?.some(({ flag, values }) => {
+      const value = cliFlagValue(argv, flag);
+      return value !== undefined && values.includes(value);
+    })
+  )
+    return false;
+
+  return true;
+}
+
+function matchesEntry(entry: WriteSurfaceEntry, argv: readonly string[]): boolean {
+  return (
+    entry.command === argv[2] &&
+    matchesPositionals(entry, argv) &&
+    matchesRequiredFlags(entry, argv) &&
+    matchesExclusions(entry, argv)
+  );
+}
+
 /**
- * Decide whether this argv is a declared mutation. Pure — no I/O, no env reads — so the
- * dispatcher's behaviour under read-only mode is a function of argv alone and is testable
- * without a filesystem.
- *
- * `argv` is the full process.argv (argv[2] = command, argv[3] = subcommand).
+ * Return the declared mutation matching a normalized process.argv, or null for a read. Pure: no
+ * I/O and no environment reads. cli.ts normalizes leading global flags before calling this.
  */
 export function matchWriteSurface(argv: readonly string[]): WriteSurfaceEntry | null {
-  const command = argv[2];
-  if (!command) return null;
-  const subcommand = argv[3];
   for (const entry of WRITE_SURFACE) {
-    if (entry.command !== command) continue;
-    // An entry with a subcommand matches only that subcommand. An entry without one matches the
-    // command regardless — `kit upgrade` mutates however it is invoked.
-    if (entry.subcommand !== undefined && entry.subcommand !== subcommand) continue;
-    // A flagged entry matches only when the flag is present: the unflagged form is a read.
-    if (entry.flag !== undefined && !argv.includes(entry.flag)) continue;
-    return entry;
+    if (matchesEntry(entry, argv)) return entry;
   }
   return null;
 }

@@ -1,6 +1,12 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { parseEnvFile } from "./env-inspect.js";
+import {
+  createRedactingLineWriter,
+  redactSecrets,
+  secretValuesFromEnv,
+} from "./utils/redactSecrets.js";
 
 export interface RunOptions {
   /** Command and arguments to execute */
@@ -31,6 +37,32 @@ export interface RunResult {
 const DEFAULT_TIMEOUT_MS = 120_000;
 /** Default cap on combined captured output (10 MiB). */
 const DEFAULT_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
+async function loadCommandEnvironment(
+  cwd: string,
+  inheritEnv: boolean,
+  overrides: Record<string, string>,
+): Promise<{ env: Record<string, string>; knownSecrets: string[] }> {
+  const env: Record<string, string> = inheritEnv
+    ? { ...(process.env as Record<string, string>) }
+    : {};
+  try {
+    const content = await readFile(resolve(cwd, ".env.local"), "utf-8");
+    Object.assign(env, parseEnvFile(content));
+  } catch {
+    // .env.local is optional.
+  }
+  Object.assign(env, overrides);
+  const knownSecrets = secretValuesFromEnv(env);
+  return { env, knownSecrets };
+}
+
+export async function redactCommandForEnvironment(
+  command: string,
+  cwd: string = process.cwd(),
+): Promise<string> {
+  const { knownSecrets } = await loadCommandEnvironment(cwd, true, {});
+  return redactSecrets(command, knownSecrets);
+}
 
 /**
  * Execute a command with project environment variables loaded.
@@ -51,35 +83,7 @@ export async function executeCommand(opts: RunOptions): Promise<RunResult> {
     throw new Error("No command provided");
   }
 
-  // Build environment
-  const env: Record<string, string> = inheritEnv
-    ? { ...(process.env as Record<string, string>) }
-    : {};
-
-  // Load .env.local if it exists
-  const envPath = resolve(cwd, ".env.local");
-  try {
-    const envContent = await readFile(envPath, "utf-8");
-    const lines = envContent.split("\n");
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-
-      const eqIndex = trimmed.indexOf("=");
-      if (eqIndex === -1) continue;
-
-      const key = trimmed.substring(0, eqIndex);
-      const value = trimmed.substring(eqIndex + 1);
-      env[key] = value;
-    }
-  } catch {
-    // .env.local not found or unreadable — continue with existing env
-  }
-
-  // Apply overrides
-  for (const [key, value] of Object.entries(envOverrides)) {
-    env[key] = value;
-  }
+  const { env, knownSecrets } = await loadCommandEnvironment(cwd, inheritEnv, envOverrides);
 
   // Execute the command
   return new Promise((resolve) => {
@@ -96,6 +100,14 @@ export async function executeCommand(opts: RunOptions): Promise<RunResult> {
     let timedOut = false;
     let truncated = false;
     let settled = false;
+    const stdoutWriter = createRedactingLineWriter(
+      (text) => process.stdout.write(text),
+      knownSecrets,
+    );
+    const stderrWriter = createRedactingLineWriter(
+      (text) => process.stderr.write(text),
+      knownSecrets,
+    );
 
     // Wall-clock timeout — kill a runaway/hung subprocess.
     const timer =
@@ -114,10 +126,10 @@ export async function executeCommand(opts: RunOptions): Promise<RunResult> {
       const text = slice.toString();
       if (target === "stdout") {
         stdout += text;
-        process.stdout.write(slice);
+        stdoutWriter.append(text);
       } else {
         stderr += text;
-        process.stderr.write(slice);
+        stderrWriter.append(text);
       }
       captured += slice.length;
       if (maxOutputBytes > 0 && captured >= maxOutputBytes) {
@@ -143,15 +155,21 @@ export async function executeCommand(opts: RunOptions): Promise<RunResult> {
 
     child.on("close", (exitCode) => {
       if (timedOut) {
-        stderr += `\n[kit] command timed out after ${timeoutMs}ms — killed`;
+        const detail = `\n[kit] command timed out after ${timeoutMs}ms — killed`;
+        stderr += detail;
+        stderrWriter.append(detail);
       } else if (truncated) {
-        stderr += `\n[kit] output exceeded ${maxOutputBytes} bytes — killed, output truncated`;
+        const detail = `\n[kit] output exceeded ${maxOutputBytes} bytes — killed, output truncated`;
+        stderr += detail;
+        stderrWriter.append(detail);
       }
+      stdoutWriter.flush();
+      stderrWriter.flush();
       finish({
         // A killed process reports null exitCode; surface as non-zero failure.
         exitCode: exitCode ?? (timedOut || truncated ? 124 : 1),
-        stdout,
-        stderr,
+        stdout: redactSecrets(stdout, knownSecrets),
+        stderr: redactSecrets(stderr, knownSecrets),
         ...(timedOut && { timedOut }),
         ...(truncated && { truncated }),
       });
@@ -159,11 +177,14 @@ export async function executeCommand(opts: RunOptions): Promise<RunResult> {
 
     child.on("error", (err) => {
       // Command not found or spawn error
-      console.error(`Failed to execute command: ${err.message}`);
+      stdoutWriter.flush();
+      stderrWriter.flush();
+      const message = redactSecrets(err.message, knownSecrets);
+      console.error(`Failed to execute command: ${message}`);
       finish({
         exitCode: 127,
         stdout: "",
-        stderr: err.message,
+        stderr: message,
       });
     });
   });

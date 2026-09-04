@@ -66,7 +66,9 @@ describe("parseDependabotPrs / dependabotPrFindings", () => {
     assert.equal(out[0].status, "red");
     assert.match(out[0].title, /checks failing/);
   });
+});
 
+describe("dependabotPrFindings states", () => {
   it("turns pending Dependabot PR checks into unknown health findings", () => {
     const prs = parseDependabotPrs(
       JSON.stringify([

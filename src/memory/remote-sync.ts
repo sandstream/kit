@@ -33,9 +33,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "smol-toml";
 import { getMemoryDir, getMemoryDbPath, openMemoryDb } from "./db.js";
-import { backupEncrypted, backupToRecipient, backupPlain } from "./backup.js";
+import { backupEncrypted, backupToRecipient } from "./backup.js";
 import { syncFromExport } from "./sync.js";
 import type { MergeResult } from "./merge.js";
+import { redactSecrets } from "../utils/redactSecrets.js";
 
 /** How the encrypted blob travels. `git` = a private remote; `command` = your own shell command (S3/rclone/scp/USB/…). */
 export type SyncTransport = "git" | "command";
@@ -63,15 +64,21 @@ export interface SyncConfig {
    *  instead of a passphrase — so an ephemeral session needs NO secret, only this
    *  (non-secret) public key. Only holders of the matching private key can decrypt. */
   recipient?: string;
-  /** Encrypt the synced blob (default TRUE). Set `encrypt = false` for the low-ceremony
-   *  path: the blob is a plain SQLite DB — no passphrase, no recipient. Requires a PRIVATE
-   *  destination (the store can hold secret-shaped strings); the pull path still runs the
-   *  R7 injection scan before merge. */
+  /** Synced blobs are always encrypted. Kept in the runtime shape so hand-built
+   *  configs that attempt `false` can be rejected before any transport runs. */
   encrypt: boolean;
 }
 
 const DEFAULT_BRANCH = "main";
 const DEFAULT_FILE = "memory.enc";
+
+function safeDiagnostic(value: unknown): string {
+  return redactSecrets(value instanceof Error ? value.message : String(value));
+}
+
+function displayRemote(remote: string): string {
+  return redactSecrets(remote);
+}
 
 /** Path to the LOCAL sync config — under ~/.kit, deliberately NOT in the repo tree. */
 export function getSyncConfigPath(): string {
@@ -107,8 +114,12 @@ export function loadSyncConfig(): SyncConfig | null {
   const pullOnStart = bool(s.pull_on_start);
   const pushOnEnd = bool(s.push_on_end);
   const recipient = str(s.recipient) || undefined; // public-key mode (optional)
-  // Encryption is ON unless explicitly disabled (`encrypt = false`) — secure by default.
-  const encrypt = s.encrypt !== false;
+  if (s.encrypt === false) {
+    throw new Error(
+      "[memory.sync] encryption cannot be disabled; use KIT_MEMORY_PASSPHRASE or a public-key recipient",
+    );
+  }
+  const encrypt = true;
 
   const transport: SyncTransport = s.transport === "command" ? "command" : "git";
   if (transport === "command") {
@@ -142,11 +153,13 @@ export function loadSyncConfig(): SyncConfig | null {
  */
 function assertSafeGitRef(value: string, what: "remote" | "branch"): void {
   if (value.startsWith("-")) {
-    throw new Error(`invalid [memory.sync] ${what} "${value}" — must not start with '-'`);
+    throw new Error(
+      `invalid [memory.sync] ${what} "${displayRemote(value)}" — must not start with '-'`,
+    );
   }
   if (what === "remote" && /^(ext|fd)::/i.test(value)) {
     throw new Error(
-      `invalid [memory.sync] remote "${value}" — ext::/fd:: remote helpers are not allowed`,
+      `invalid [memory.sync] remote "${displayRemote(value)}" — ext::/fd:: remote helpers are not allowed`,
     );
   }
 }
@@ -191,7 +204,7 @@ export function assertRemoteNotProjectOrigin(remote: string, root: string): void
   const origin = projectOrigin(root);
   if (origin && normalizeRemote(origin) === normalizeRemote(remote)) {
     throw new Error(
-      `refusing to sync: [memory.sync] remote (${remote}) is THIS project's origin — ` +
+      `refusing to sync: [memory.sync] remote (${displayRemote(remote)}) is THIS project's origin — ` +
         `private memory must go to a separate private repo, never the project repo`,
     );
   }
@@ -286,10 +299,9 @@ function encryptBlobForSync(
   outPath: string,
 ): void {
   if (cfg.encrypt === false) {
-    // Opt-out: write a plain SQLite snapshot. No passphrase/recipient required — the
-    // destination is trusted to be private and the pull path still R7-scans before merge.
-    backupPlain(getMemoryDbPath(), outPath);
-    return;
+    throw new Error(
+      "[memory.sync] encryption cannot be disabled; refusing to create a plaintext memory blob",
+    );
   }
   if (cfg.recipient) {
     backupToRecipient(cfg.recipient, getMemoryDbPath(), outPath);
@@ -323,13 +335,15 @@ export function pushMemory(
     encryptBlobForSync(cfg, passphrase, join(dir, cfg.file));
     git(["add", "--", cfg.file], dir);
     const dirty = git(["status", "--porcelain"], dir).trim();
-    if (!dirty) return { target: cfg.remote!, file: cfg.file, pushed: false, verified: true };
+    if (!dirty) {
+      return { target: displayRemote(cfg.remote!), file: cfg.file, pushed: false, verified: true };
+    }
     // Identify the commit so a fresh-init repo has an author; rely on the user's
     // git identity, falling back to a neutral one only if git has none configured.
     ensureCommitIdentity(dir);
     git(["commit", "-q", "-m", "kit memory sync", "--", cfg.file], dir);
     git(["push", "-q", "origin", `HEAD:${cfg.branch ?? DEFAULT_BRANCH}`], dir);
-    return { target: cfg.remote!, file: cfg.file, pushed: true, verified: true };
+    return { target: displayRemote(cfg.remote!), file: cfg.file, pushed: true, verified: true };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -365,7 +379,7 @@ export function pullMemory(
     } else {
       assertRemoteNotProjectOrigin(cfg.remote!, projectRoot);
       cloneOrInit(cfg.remote!, cfg.branch ?? DEFAULT_BRANCH, dir);
-      target = cfg.remote!;
+      target = displayRemote(cfg.remote!);
     }
     if (!existsSync(blob)) return { target, file: cfg.file, found: false };
     const db = openMemoryDb();
@@ -441,7 +455,7 @@ export function tryAutoPull(projectRoot: string): AutoSyncResult {
     cfg = loadSyncConfig();
   } catch (e) {
     // A malformed sync.toml must not silently disable pull_on_start — say why.
-    return { ran: false, note: `memory pull skipped: invalid sync.toml — ${(e as Error).message}` };
+    return { ran: false, note: `memory pull skipped: invalid sync.toml — ${safeDiagnostic(e)}` };
   }
   if (!cfg || !cfg.pullOnStart) return { ran: false };
   try {
@@ -455,7 +469,7 @@ export function tryAutoPull(projectRoot: string): AutoSyncResult {
         : `memory pull: no blob at ${r.target} yet — started with the local store only`,
     };
   } catch (e) {
-    return { ran: false, note: `memory pull skipped: ${(e as Error).message}` };
+    return { ran: false, note: `memory pull skipped: ${safeDiagnostic(e)}` };
   }
 }
 
@@ -469,7 +483,7 @@ export function tryAutoPush(projectRoot: string): AutoSyncResult {
   try {
     cfg = loadSyncConfig();
   } catch (e) {
-    return { ran: false, note: `memory push skipped: invalid sync.toml — ${(e as Error).message}` };
+    return { ran: false, note: `memory push skipped: invalid sync.toml — ${safeDiagnostic(e)}` };
   }
   if (!cfg || !cfg.pushOnEnd) return { ran: false };
   // Public-key mode needs NO secret — that's the whole point for ephemeral
@@ -488,7 +502,7 @@ export function tryAutoPush(projectRoot: string): AutoSyncResult {
         : `ran memory push command for ${r.target} — UNVERIFIED, confirm the blob was stored`;
     return { ran: true, note };
   } catch (e) {
-    return { ran: false, note: `memory push skipped: ${(e as Error).message}` };
+    return { ran: false, note: `memory push skipped: ${safeDiagnostic(e)}` };
   }
 }
 

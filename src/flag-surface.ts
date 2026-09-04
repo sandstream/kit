@@ -166,6 +166,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   clone: [
     "--env",
     "--install",
+    "--json",
     "--list",
     "--minimal",
     "--mode",
@@ -199,6 +200,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   "create-plugin": [
     "--env",
     "--install",
+    "--json",
     "--list",
     "--minimal",
     "--mode",
@@ -476,6 +478,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   open: [
     "--env",
     "--install",
+    "--json",
     "--list",
     "--minimal",
     "--mode",
@@ -520,6 +523,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   run: [
     "--env",
     "--install",
+    "--json",
     "--list",
     "--minimal",
     "--mode",

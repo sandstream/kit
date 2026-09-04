@@ -1,9 +1,9 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createPlugin } from "./create-plugin.js";
+import { createPlugin, type CreatePluginDeps } from "./create-plugin.js";
 
 let tmpDir: string;
 
@@ -17,6 +17,99 @@ after(async () => {
 });
 
 describe("createPlugin", () => {
+  it("rejects traversal, absolute, and ambiguous scaffold names before writing", async () => {
+    const escapedName = `kit-create-plugin-escaped-${process.pid}`;
+    const escapedPath = join(tmpdir(), escapedName);
+    const invalidNames = [
+      `../../../${escapedName}`,
+      "/tmp/absolute-plugin",
+      "C:\\temp\\absolute-plugin",
+      ".",
+      "..",
+      "",
+      " trailing-space ",
+      "kit-plugin-",
+      "kit-plugin-kit-plugin-double-prefix",
+      "nested/plugin",
+    ];
+
+    try {
+      for (const name of invalidNames) {
+        await assert.rejects(
+          createPlugin({ name, cwd: tmpDir, skipInstall: true }),
+          /invalid plugin scaffold name/i,
+          JSON.stringify(name),
+        );
+      }
+    } finally {
+      await rm(escapedPath, { recursive: true, force: true });
+    }
+  });
+
+  it("does not follow an existing scaffold-directory symlink outside cwd", async () => {
+    const outside = join(tmpdir(), `kit-create-plugin-symlink-target-${process.pid}`);
+    const link = join(tmpDir, "kit-plugin-symlink-escape");
+    await mkdir(outside, { recursive: true });
+    await rm(link, { recursive: true, force: true });
+    await symlink(outside, link, "dir");
+
+    try {
+      await assert.rejects(
+        createPlugin({ name: "symlink-escape", cwd: tmpDir, skipInstall: true }),
+        /already exists/i,
+      );
+      await assert.rejects(readFile(join(outside, "package.json"), "utf-8"), {
+        code: "ENOENT",
+      });
+    } finally {
+      await rm(link, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("triages every generated dependency before running npm install", async () => {
+    const events: string[] = [];
+    const deps: CreatePluginDeps = {
+      gateInstall: async (tool) => {
+        events.push(`triage:${tool}`);
+        return { decision: "pass", reason: "test pass", tool };
+      },
+      exec: async (command, args) => {
+        events.push(`${command}:${args.join(" ")}`);
+        return { stdout: "", stderr: "" };
+      },
+    };
+
+    await createPlugin({ name: "triage-order", cwd: tmpDir }, deps);
+
+    assert.deepEqual(events, [
+      "triage:npm:@types/node@^22.0.0",
+      "triage:npm:typescript@^5.9.3",
+      "npm:install",
+    ]);
+  });
+
+  it("keeps the scaffold but skips npm when dependency triage blocks", async () => {
+    const events: string[] = [];
+    const deps: CreatePluginDeps = {
+      gateInstall: async (tool) => {
+        events.push(`triage:${tool}`);
+        return { decision: "blocked", reason: "fixture refused", tool };
+      },
+      exec: async (command, args) => {
+        events.push(`${command}:${args.join(" ")}`);
+        return { stdout: "", stderr: "" };
+      },
+    };
+
+    const result = await createPlugin({ name: "triage-block", cwd: tmpDir }, deps);
+
+    assert.equal(result.success, true, "scaffold files were created successfully");
+    assert.match(result.message, /dependency install skipped.*triage/i);
+
+    assert.deepEqual(events, ["triage:npm:@types/node@^22.0.0"]);
+  });
+
   it("creates plugin directory with correct package name", async () => {
     const result = await createPlugin({ name: "test-svc", cwd: tmpDir, skipInstall: true });
     assert.equal(result.success, true);

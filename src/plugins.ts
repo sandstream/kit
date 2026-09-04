@@ -10,6 +10,8 @@
 
 import { exec } from "./utils/exec.js";
 import { OFFICIAL_PLUGINS } from "./plugin-registry.generated.js";
+import { gateInstall } from "./triage-gate.js";
+import { isRegistrySpec } from "./triage-sandbox.js";
 
 /**
  * Plugin metadata as it appears in the registry
@@ -64,6 +66,17 @@ export interface PluginRegistry {
   updated?: string;
   plugins: PluginMetadata[];
 }
+
+export interface PluginInstallDeps {
+  gateInstall: typeof gateInstall;
+  exec(
+    command: string,
+    args: readonly string[],
+    options?: { cwd?: string; timeout?: number },
+  ): Promise<{ stdout: string; stderr: string }>;
+}
+
+const defaultInstallDeps: PluginInstallDeps = { gateInstall, exec };
 
 /**
  * kit's default plugin registry.
@@ -228,17 +241,27 @@ export async function isPluginInstalled(packageName: string): Promise<boolean> {
 export async function installPlugin(
   pluginName: string,
   metadata: PluginMetadata,
+  deps: PluginInstallDeps = defaultInstallDeps,
 ): Promise<{ success: boolean; message: string }> {
   try {
-    // Use npm to install the package
     const packageName = metadata.package || pluginName;
-    const cmd = metadata.install;
-
-    // Extract the actual npm install command
-    const match = cmd.match(/npm install (.+)/);
+    const match = metadata.install.trim().match(/^npm\s+install\s+(\S+)$/);
     const pkgToInstall = match ? match[1] : packageName;
+    if (!isRegistrySpec(pkgToInstall)) {
+      return {
+        success: false,
+        message: `Refusing non-registry plugin package spec: ${pkgToInstall}`,
+      };
+    }
+    const verdict = await deps.gateInstall(`npm:${pkgToInstall}`);
+    if (verdict.decision === "blocked") {
+      return {
+        success: false,
+        message: `Triage blocked installation: ${verdict.reason}`,
+      };
+    }
 
-    const { stderr } = await exec("npm", ["install", pkgToInstall], {
+    const { stderr } = await deps.exec("npm", ["install", pkgToInstall], {
       timeout: 60000,
     });
 

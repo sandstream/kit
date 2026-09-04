@@ -266,6 +266,8 @@ export interface GovernanceAuditConfig {
    * data is leaving the machine.
    */
   remote?: boolean;
+  /** Company/tenant path segment used by the explicitly enabled remote sink. */
+  company_id?: string;
   /**
    * Fail-closed anchoring for `kit audit verify`. When true, an unanchored log,
    * an unreadable anchor key, an unsealed tail, or a rotated key are treated as
@@ -671,6 +673,8 @@ const GovernanceConfigSchema = z
         log_file: z.string().optional(),
         log_level: z.enum(["debug", "info", "warn", "error"]).optional(),
         include_secrets: z.boolean().optional(),
+        remote: z.boolean().optional(),
+        company_id: z.string().min(1).optional(),
         require_anchor: z.boolean().optional(),
       })
       .passthrough()

@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { kitConfig } from "./config.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
+import { probeName } from "./tool-inventory.js";
 import { activeKeyStoreStatus, hardwareRequired } from "./keystore/active.js";
 import { existsSync } from "node:fs";
 import { profileBrokerPolicy } from "./exec-broker/profile-policy.js";
@@ -121,7 +122,12 @@ async function checkEnvLocal(config: kitConfig, cwd: string): Promise<DoctorChec
   }
 }
 
-async function checkToolsInPath(config: kitConfig): Promise<DoctorCheck[]> {
+export type DoctorToolResolver = (tool: string) => Promise<string | null>;
+
+export async function checkToolsInPath(
+  config: kitConfig,
+  resolver: DoctorToolResolver = resolveToolBin,
+): Promise<DoctorCheck[]> {
   if (!config.tools) return [];
 
   const checks: DoctorCheck[] = [];
@@ -133,7 +139,7 @@ async function checkToolsInPath(config: kitConfig): Promise<DoctorCheck[]> {
     // resolveToolBin is mise-first (`mise which`), so it finds tools installed via
     // `mise use -g` even when mise isn't activated and its shims aren't on PATH —
     // before falling back to a system PATH lookup.
-    const bin = await resolveToolBin(toolName);
+    const bin = await resolver(probeName(toolName));
     if (bin) {
       checks.push({ name, status: "pass", detail: bin, category });
     } else {

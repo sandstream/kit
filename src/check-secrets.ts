@@ -2,6 +2,7 @@ import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { SecretsConfig, SecretKeyConfig, InfisicalConfig } from "./config.js";
 import { check1PasswordStatus } from "./onepassword.js";
+import { resolveViaBackend } from "./secret-backends.js";
 import { exec } from "./utils/exec.js";
 
 export interface SecretStatus {
@@ -368,6 +369,11 @@ export async function checkSecrets(
         case "config":
           result = await checkConfigSecret(config.value || "");
           break;
+        case "dotenvx": {
+          const resolved = await resolveViaBackend(name, config, secrets.infisical, cwd);
+          result = { available: resolved.resolved, detail: resolved.detail };
+          break;
+        }
         case "eas":
           result = await checkEasSecret(config.name || name);
           break;

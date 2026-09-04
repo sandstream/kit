@@ -23,6 +23,7 @@ import {
   auditAllowScripts,
   checkAllowScripts,
   grantsTriageCoverage,
+  bumblebeeDownloadAllowed,
   LOCKFILE_ECOSYSTEMS,
   type SecurityCheckResult,
 } from "./check-security.js";
@@ -39,6 +40,17 @@ import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { insertMessage, openMemoryDb, upsertSession } from "./memory/db.js";
+
+describe("bumblebeeDownloadAllowed", () => {
+  it("blocks downloads in air-gap mode even when KIT_NO_DOWNLOAD is unset", () => {
+    assert.strictEqual(bumblebeeDownloadAllowed({ KIT_AIRGAP: "1" }), false);
+  });
+
+  it("honors KIT_NO_DOWNLOAD outside air-gap mode", () => {
+    assert.strictEqual(bumblebeeDownloadAllowed({ KIT_NO_DOWNLOAD: "true" }), false);
+    assert.strictEqual(bumblebeeDownloadAllowed({}), true);
+  });
+});
 
 describe("gateStatus — scanner-health strict by default", () => {
   const r = (over: Partial<SecurityCheckResult>): SecurityCheckResult => ({
@@ -646,54 +658,64 @@ describe(".kit-secretsignore (explicitly accepted historical findings)", () => {
   });
 });
 
-describe("license check npx fallback", () => {
-  it("uses an isolated npm cache so a broken user cache does not make the scan red", async () => {
+describe("license check tool boundary", () => {
+  it("uses the real JSON scan when license-checker has a broken --version exit code", async () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-license-version-"));
+    const bin = join(root, "bin");
+    const project = join(root, "project");
+    mkdirSync(bin, { recursive: true });
+    mkdirSync(project, { recursive: true });
+    writeFileSync(join(project, "package.json"), JSON.stringify({ name: "x", version: "1.0.0" }));
+    writeFileSync(
+      join(bin, "license-checker"),
+      '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 25.0.1; exit 1; fi\nprintf \'{"x@1.0.0":{"licenses":"MIT"}}\'\n',
+    );
+    chmodSync(join(bin, "license-checker"), 0o755);
+
+    const prevPath = process.env.PATH;
+    try {
+      process.env.PATH = [bin, "/usr/bin", "/bin"].join(":");
+      const result = await checkLicenses(project);
+      assert.equal(result.status, "pass", result.detail);
+      assert.equal(result.didNotRun, undefined);
+    } finally {
+      if (prevPath === undefined) delete process.env.PATH;
+      else process.env.PATH = prevPath;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("never downloads license-checker from inside the security gate", async () => {
     const root = mkdtempSync(join(tmpdir(), "kit-license-root-"));
     const bin = join(root, "bin");
     const project = join(root, "project");
-    const badCache = join(root, "root-owned-npm-cache");
+    const npxMarker = join(root, "npx-ran");
     mkdirSync(bin, { recursive: true });
     mkdirSync(project, { recursive: true });
-    mkdirSync(badCache, { recursive: true });
     writeFileSync(join(project, "package.json"), JSON.stringify({ name: "x", version: "1.0.0" }));
 
     writeFileSync(join(bin, "license-checker"), "#!/bin/sh\nexit 127\n");
     chmodSync(join(bin, "license-checker"), 0o755);
-    writeFileSync(
-      join(bin, "npx"),
-      [
-        "#!/bin/sh",
-        'if [ "$1" = "--version" ]; then echo "10.0.0"; exit 0; fi',
-        'if [ -z "$NPM_CONFIG_CACHE" ]; then echo "missing isolated cache" >&2; exit 7; fi',
-        'if [ "$NPM_CONFIG_CACHE" = "$BAD_NPM_CACHE" ]; then echo "used broken user cache" >&2; exit 13; fi',
-        'case "$*" in',
-        '  *license-checker*--json*--production*) printf \'%s\\n\' \'{ "left-pad@1.3.0": { "licenses": "MIT" } }\'; exit 0 ;;',
-        "esac",
-        'echo "unexpected args: $*" >&2',
-        "exit 2",
-      ].join("\n") + "\n",
-    );
+    writeFileSync(join(bin, "npx"), `#!/bin/sh\ntouch ${npxMarker}\nexit 0\n`);
     chmodSync(join(bin, "npx"), 0o755);
 
     const prevPath = process.env.PATH;
-    const prevNpmCache = process.env.NPM_CONFIG_CACHE;
-    const prevBadCache = process.env.BAD_NPM_CACHE;
     try {
       process.env.PATH = [bin, "/usr/bin", "/bin"].join(":");
-      process.env.NPM_CONFIG_CACHE = badCache;
-      process.env.BAD_NPM_CACHE = badCache;
 
       const result = await checkLicenses(project);
 
-      assert.equal(result.status, "pass");
-      assert.equal(result.detail, "no problematic licenses found");
+      assert.equal(result.status, "warn");
+      assert.equal(result.didNotRun, true);
+      assert.match(result.detail, /license-checker not installed/i);
+      assert.equal(
+        existsSync(npxMarker),
+        false,
+        "security checks must not install their own tools",
+      );
     } finally {
       if (prevPath === undefined) delete process.env.PATH;
       else process.env.PATH = prevPath;
-      if (prevNpmCache === undefined) delete process.env.NPM_CONFIG_CACHE;
-      else process.env.NPM_CONFIG_CACHE = prevNpmCache;
-      if (prevBadCache === undefined) delete process.env.BAD_NPM_CACHE;
-      else process.env.BAD_NPM_CACHE = prevBadCache;
       rmSync(root, { recursive: true, force: true });
     }
   });

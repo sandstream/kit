@@ -175,6 +175,17 @@ describe("check-standards — checkStandards gating", () => {
     assert.ok(r.every((x) => x.status === "pass"));
   });
 
+  it("does not treat kit's generated baseline as application source", async () => {
+    const scan: GeneralScan = {
+      ...CLEAN_SCAN,
+      size: { findings: [{ file: ".kit-baseline.json", lines: 1_200 }], didNotRun: false },
+    };
+
+    const r = await checkStandards({ scan, enforce: true });
+    const size = r.find((x) => x.name.startsWith("file size"));
+    assert.equal(size?.status, "pass");
+  });
+
   it("a tool that could not run is a setup gap: warn by default, fail under --enforce", async () => {
     const gapScan: GeneralScan = {
       complexity: { findings: [], didNotRun: true },

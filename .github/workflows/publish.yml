@@ -5,6 +5,8 @@ on:
     tags:
       - "v*"
 
+permissions: {}
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -25,7 +27,6 @@ jobs:
       # workflow in the repo stays read-only.
       contents: write # checkout + create release / upload SBOM assets
       id-token: write # npm provenance via OIDC (SLSA attestation)
-      packages: write
       attestations: write # GitHub artifact attestations
 
     steps:
@@ -53,12 +54,12 @@ jobs:
         # OIDC exchange to make. Installed here so the prerequisite is already true when the
         # registry-side switch lands (one per published package on npmjs.com — docs/RELEASING.md).
         #
-        # Measured on npm 11.19.0 against this repo before wiring: `npm ci` and
+        # Measured on npm 11.19.1 against this repo before wiring: `npm ci` and
         # `npm publish --dry-run` both behave identically, and npm >= 11's skip-install-scripts
         # default costs nothing here (esbuild's postinstall is the only one in the tree, and
         # the build + tests pass without it). Asserted by src/publish-workflow.test.ts.
         run: |
-          npm i -g npm@^11.5.1
+          npm i -g npm@11.19.1
           npm --version
 
       - name: Install dependencies
@@ -426,7 +427,7 @@ jobs:
       - name: Generate SBOM (CycloneDX)
         # CycloneDX SBOM is required by EU CRA and US EO 14028 for shipped
         # software. Lets downstream consumers introspect the dep tree.
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: .
           config: .syft.yaml # names the root component (see the step above)
@@ -436,7 +437,7 @@ jobs:
 
       - name: Generate SBOM (SPDX)
         # Some consumers (e.g. RHEL, federal) require SPDX format.
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: .
           config: .syft.yaml # names the root component (see the step above)

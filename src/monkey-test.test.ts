@@ -3,12 +3,18 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import ts from "typescript";
 import {
   MONKEY_ROLES,
   buildMonkeyTestPlan,
+  controlHasAccessibleName,
+  focusableIsOffscreen,
   parseEnvOutput,
   securityFindings,
+  unexpectedMonkeyFindings,
+  validateRoleMatrix,
   writeMonkeyHarness,
+  type MonkeyFinding,
 } from "./monkey-test.js";
 
 const roots: string[] = [];
@@ -39,9 +45,44 @@ describe("monkey-test role matrix", () => {
       ["public", "customer", "staff", "owner", "superadmin"],
     );
   });
+
+  it("requires explicit allow, deny, and cross-org expectations for every role", () => {
+    const roles = MONKEY_ROLES.map((role) => ({
+      id: role.id,
+      allowRoutes: ["/"],
+      denyRoutes: [`/forbidden-to-${role.id}`],
+      requiredText: [`own-org-${role.id}`],
+      forbiddenText: [`other-org-${role.id}`],
+    }));
+
+    assert.throws(() => validateRoleMatrix({ configured: false, roles }), /configured/);
+    assert.equal(validateRoleMatrix({ configured: true, roles }).length, MONKEY_ROLES.length);
+    assert.throws(
+      () => validateRoleMatrix({ configured: true, roles: roles.slice(1) }),
+      /exactly once|public/,
+    );
+
+    const noPositiveControl = roles.map((role) => ({ ...role, requiredText: [] }));
+    assert.throws(
+      () => validateRoleMatrix({ configured: true, roles: noPositiveControl }),
+      /requiredText/,
+    );
+
+    const placeholders = MONKEY_ROLES.map((role) => ({
+      id: role.id,
+      allowRoutes: ["/"],
+      denyRoutes: [`/replace-with-route-denied-to-${role.id}`],
+      requiredText: [`replace-with-seeded-own-org-marker-for-${role.id}`],
+      forbiddenText: [`replace-with-seeded-other-org-marker-for-${role.id}`],
+    }));
+    assert.throws(
+      () => validateRoleMatrix({ configured: true, roles: placeholders }),
+      /placeholder/,
+    );
+  });
 });
 
-describe("monkey-test planning", () => {
+describe("monkey-test planning - stack detection", () => {
   it("detects stack, Playwright, dev server, seed, env, and money provider", async () => {
     const dir = tempRepo();
     mkdirSync(join(dir, "src"), { recursive: true });
@@ -85,7 +126,9 @@ describe("monkey-test planning", () => {
     assert.deepEqual(plan.money.providers, ["stripe"]);
     assert.equal(plan.checks.find((check) => check.name === "test runner")?.status, "pass");
   });
+});
 
+describe("monkey-test planning - command selection", () => {
   it("prefers specific browser test scripts over generic unit test scripts", async () => {
     const dir = tempRepo();
     writeJson(join(dir, "package.json"), {
@@ -137,7 +180,9 @@ describe("monkey-test planning", () => {
       else process.env[envName] = previous;
     }
   });
+});
 
+describe("monkey-test planning - payment source detection", () => {
   it("ignores docs and test fixtures when deciding whether a repo is a money app", async () => {
     const dir = tempRepo();
     mkdirSync(join(dir, "docs"), { recursive: true });
@@ -181,6 +226,20 @@ describe("monkey-test planning", () => {
 
     assert.deepEqual(plan.money.providers, ["stripe"]);
   });
+
+  it("does not expose an env provider command or its embedded credentials in the plan", async () => {
+    const dir = tempRepo();
+    const secret = "ghp_" + "R".repeat(36);
+
+    const plan = await buildMonkeyTestPlan(dir, {
+      envCommand: `provider export --token ${secret}`,
+    });
+    const serialized = JSON.stringify(plan);
+
+    assert.ok(!serialized.includes(secret));
+    assert.ok(!serialized.includes("provider export"));
+    assert.equal(plan.env.envCommand, "provided via --env-command");
+  });
 });
 
 describe("monkey-test security pack", () => {
@@ -217,6 +276,95 @@ describe("monkey-test security pack", () => {
       "reports key class, not the secret value",
     );
   });
+
+  it("does not treat comments or checklist keywords as implemented security controls", async () => {
+    const dir = tempRepo();
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeJson(join(dir, "package.json"), {
+      dependencies: {
+        stripe: "1.0.0",
+        "@supabase/supabase-js": "1.0.0",
+      },
+    });
+    writeFileSync(
+      join(dir, "src", "checkout.ts"),
+      [
+        'import Stripe from "stripe";',
+        "const stripe = new Stripe(process.env.STRIPE_TEST_KEY ?? 'missing');",
+        "export async function checkout() { return stripe.checkout.sessions.create({ mode: 'payment' }); }",
+        "export const releaseChecklist = { tenant_id: true, constructEvent: true, idempotency: true, refund: true, receipt: true, immutable: true, journal: true };",
+        "/* enable row level security; create policy using (auth.uid());",
+        "stripe.webhooks.constructEvent(raw, sig, secret);",
+        "insert processed event.id for idempotency; refund receipt immutable journal tenant_id */",
+      ].join("\n"),
+    );
+
+    const titles = (await securityFindings(dir)).map((item) => item.title);
+
+    for (const title of [
+      "Supabase detected without obvious RLS policy coverage",
+      "Money app lacks obvious tenant/org isolation markers",
+      "Payment provider detected without webhook signature verification",
+      "Payment webhook path lacks obvious idempotency ledger",
+      "Refund path not found",
+      "Receipt path not found",
+      "Immutable money journal not found",
+    ]) {
+      assert.ok(titles.includes(title), `${title}: ${JSON.stringify(titles)}`);
+    }
+  });
+
+  it("recognizes control-shaped security implementations", async () => {
+    const dir = tempRepo();
+    mkdirSync(join(dir, "src"), { recursive: true });
+    mkdirSync(join(dir, "supabase", "migrations"), { recursive: true });
+    writeJson(join(dir, "package.json"), {
+      dependencies: {
+        stripe: "1.0.0",
+        "@supabase/supabase-js": "1.0.0",
+      },
+    });
+    writeFileSync(
+      join(dir, "supabase", "migrations", "001.sql"),
+      [
+        "create table orders (id uuid primary key, tenant_id uuid references tenants(id));",
+        "alter table orders enable row level security;",
+        "create policy tenant_orders on orders using (tenant_id = auth.uid());",
+        "create table webhook_events (event_id text unique);",
+        "create table journal (id uuid primary key, event jsonb not null);",
+        "revoke update, delete on table journal from authenticated;",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(dir, "src", "payments.ts"),
+      [
+        "export async function webhook(raw: string, sig: string, secret: string) {",
+        "  const event = stripe.webhooks.constructEvent(raw, sig, secret);",
+        "  await processedEvents.insert({ event_id: event.id });",
+        "}",
+        "export async function refundPayment(id: string) { return stripe.refunds.create({ payment_intent: id }); }",
+        "export function receiptFor(charge: { receipt_url: string }) { return charge.receipt_url; }",
+        "export async function recordPayment(event: unknown) { await journal.insert({ event }); }",
+      ].join("\n"),
+    );
+
+    const titles = (await securityFindings(dir)).map((item) => item.title);
+
+    assert.deepEqual(titles, []);
+  });
+
+  it("detects non-payment secret shapes in runtime source without echoing the value", async () => {
+    const dir = tempRepo();
+    mkdirSync(join(dir, "src"), { recursive: true });
+    const secret = "ghp_" + "Q".repeat(36);
+    writeFileSync(join(dir, "src", "provider.ts"), `export const credential = "${secret}";\n`);
+
+    const findings = await securityFindings(dir);
+    const serialized = JSON.stringify(findings);
+
+    assert.ok(findings.some((item) => item.title === "Secret-shaped value in runtime source"));
+    assert.ok(!serialized.includes(secret), "finding output must not echo the credential");
+  });
 });
 
 describe("monkey-test harness writer", () => {
@@ -234,11 +382,48 @@ describe("monkey-test harness writer", () => {
     const spec = readFileSync(join(dir, "tests", "monkey", "monkey.spec.ts"), "utf-8");
     assert.match(spec, /MONKEY_MONEY_ROUTE/);
     assert.match(spec, /Kiosk staff/);
+    const transpiled = ts.transpileModule(spec, {
+      compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+      reportDiagnostics: true,
+    });
+    const syntaxErrors = (transpiled.diagnostics ?? []).filter(
+      (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+    );
+    assert.deepEqual(
+      syntaxErrors.map((diagnostic) =>
+        ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+      ),
+      [],
+    );
 
-    const roles = JSON.parse(
+    const roleMatrix = JSON.parse(
       readFileSync(join(dir, ".kit", "monkey-test", "role-matrix.json"), "utf-8"),
-    ) as { roles: { id: string; label: string }[] };
-    assert.ok(roles.roles.some((role) => role.id === "staff" && role.label === "Kiosk staff"));
+    ) as {
+      configured: boolean;
+      roles: {
+        id: string;
+        label: string;
+        allowRoutes: string[];
+        denyRoutes: string[];
+        forbiddenText: string[];
+        requiredText: string[];
+      }[];
+    };
+    assert.equal(roleMatrix.configured, false);
+    assert.ok(roleMatrix.roles.some((role) => role.id === "staff" && role.label === "Kiosk staff"));
+    assert.ok(
+      roleMatrix.roles.every(
+        (role) =>
+          Array.isArray(role.allowRoutes) &&
+          Array.isArray(role.denyRoutes) &&
+          Array.isArray(role.requiredText) &&
+          Array.isArray(role.forbiddenText),
+      ),
+    );
+    assert.match(spec, /validateRoleMatrix/);
+    assert.match(spec, /Denied route exposed/);
+    assert.match(spec, /Cross-org isolation marker visible/);
+    assert.match(spec, /expectedAuthFailure/);
 
     const second = await writeMonkeyHarness(dir);
     assert.equal(second.ok, true);
@@ -260,5 +445,94 @@ describe("monkey-test env parsing", () => {
   it("accepts JSON or dotenv-style temporary env without writing .env files", () => {
     assert.deepEqual(parseEnvOutput('{"A":"one","B":2}'), { A: "one", B: "2" });
     assert.deepEqual(parseEnvOutput("A=one\n# skip\nB='two'\n"), { A: "one", B: "two" });
+  });
+});
+
+describe("monkey-test expected findings", () => {
+  const publicFinding: MonkeyFinding = {
+    severity: "high",
+    area: "authz",
+    title: "Protected route exposed",
+    role: "public",
+    route: "/admin",
+    repro: "GET /admin returned 200",
+    fix: "Deny public access.",
+  };
+  const customerFinding: MonkeyFinding = { ...publicFinding, role: "customer" };
+
+  it("rejects reason-only rules and scopes valid rules to title, role, and route", () => {
+    assert.throws(
+      () =>
+        unexpectedMonkeyFindings(
+          [publicFinding, customerFinding],
+          [{ reason: "Accepted temporarily by release owner." }],
+        ),
+      /title, role, and route/,
+    );
+
+    assert.deepEqual(
+      unexpectedMonkeyFindings(
+        [publicFinding, customerFinding],
+        [
+          {
+            title: "Protected route exposed",
+            role: "public",
+            route: "/admin",
+            reason: "Public maintenance route exception expires after migration.",
+          },
+        ],
+      ),
+      [customerFinding],
+    );
+  });
+});
+
+describe("monkey-test accessibility predicates", () => {
+  it("honors associated labels and aria-labelledby", () => {
+    assert.equal(controlHasAccessibleName({ associatedLabel: "Email address" }), true);
+    assert.equal(controlHasAccessibleName({ labelledByText: "Open cart" }), true);
+    assert.equal(controlHasAccessibleName({}), false);
+  });
+
+  it("ignores ordinary below-fold controls but catches horizontal off-canvas controls", () => {
+    assert.equal(
+      focusableIsOffscreen({
+        left: 20,
+        right: 180,
+        top: 1_400,
+        bottom: 1_440,
+        viewportWidth: 390,
+        viewportHeight: 844,
+        display: "block",
+        visibility: "visible",
+      }),
+      false,
+    );
+    assert.equal(
+      focusableIsOffscreen({
+        left: 500,
+        right: 620,
+        top: 20,
+        bottom: 60,
+        viewportWidth: 390,
+        viewportHeight: 844,
+        display: "block",
+        visibility: "visible",
+      }),
+      true,
+    );
+    assert.equal(
+      focusableIsOffscreen({
+        left: 20,
+        right: 180,
+        top: -100,
+        bottom: -40,
+        viewportWidth: 390,
+        viewportHeight: 844,
+        display: "block",
+        visibility: "visible",
+      }),
+      true,
+    );
   });
 });

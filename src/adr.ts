@@ -20,6 +20,21 @@
  *                       using an injected resolver so this module stays I/O-free.
  */
 import { parse as parseToml } from "smol-toml";
+import {
+  evaluateTransitiveImport,
+  extractImports,
+  type AdrImportWalkContext,
+  type ImportRef,
+  type PackageResolver,
+} from "./adr-import-graph.js";
+
+export {
+  extractImports,
+  isBuiltinSpecifier,
+  resolveRelative,
+  type ImportRef,
+  type PackageResolver,
+} from "./adr-import-graph.js";
 
 export type AdrStatus = "proposed" | "accepted" | "superseded" | "deprecated" | "unknown";
 
@@ -144,71 +159,83 @@ function str(o: Record<string, unknown>, k: string): string | undefined {
   return typeof o[k] === "string" ? (o[k] as string) : undefined;
 }
 
+function arr(v: unknown): Record<string, unknown>[] {
+  return Array.isArray(v) ? (v as Record<string, unknown>[]) : [];
+}
+
+type AdrDocument = { frontmatter: string; body: string };
+
+function parseAdrDocument(raw: string): AdrDocument | null {
+  const text = raw.replace(/\r\n/g, "\n");
+  const match = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  return match ? { frontmatter: match[1], body: match[2] } : null;
+}
+
+function parseAdrStatus(frontmatter: string): AdrStatus {
+  const status = (scalar(frontmatter, "status") ?? "unknown").toLowerCase();
+  return (STATUSES as string[]).includes(status) ? (status as AdrStatus) : "unknown";
+}
+
+function parsePatternRule(
+  type: "forbid-pattern" | "require-pattern",
+  rule: Record<string, unknown>,
+): AdrRule | null {
+  const pattern = str(rule, "pattern");
+  const paths = str(rule, "paths");
+  return pattern && paths ? { type, pattern, paths, message: str(rule, "message") } : null;
+}
+
+function parseForbidImportRule(rule: Record<string, unknown>): AdrRule | null {
+  const imported = str(rule, "import");
+  const paths = str(rule, "paths");
+  if (!imported || !paths) return null;
+  return {
+    type: "forbid-import",
+    import: imported,
+    paths,
+    transitive: rule.transitive === true,
+    followPackages: rule.follow_packages === true,
+    message: str(rule, "message"),
+  };
+}
+
+function parseEnforceRules(source: string): AdrRule[] {
+  try {
+    const parsed = parseToml(source) as Record<string, unknown>;
+    return [
+      ...arr(parsed.forbid_pattern).map((rule) => parsePatternRule("forbid-pattern", rule)),
+      ...arr(parsed.require_pattern).map((rule) => parsePatternRule("require-pattern", rule)),
+      ...arr(parsed.forbid_import).map(parseForbidImportRule),
+    ].filter((rule): rule is AdrRule => rule !== null);
+  } catch {
+    return [];
+  }
+}
+
+function parseEnforcement(body: string): Pick<Adr, "rules" | "hasEnforceBlock"> {
+  const block = body.match(/```toml\s+kit-enforce\s*\n([\s\S]*?)\n```/);
+  return block
+    ? { rules: parseEnforceRules(block[1]), hasEnforceBlock: true }
+    : { rules: [], hasEnforceBlock: false };
+}
+
 /**
  * Parse an ADR markdown file. Returns null when it has no `---` frontmatter or no `id`
  * (not an ADR). Never throws — a malformed enforce block yields `hasEnforceBlock: true`
  * with zero rules (surfaced, not a crash).
  */
 export function parseAdr(raw: string): Adr | null {
-  const text = raw.replace(/\r\n/g, "\n");
-  const fm = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-  if (!fm) return null;
-  const [, frontmatter, body] = fm;
-  const id = scalar(frontmatter, "id");
+  const document = parseAdrDocument(raw);
+  if (!document) return null;
+  const id = scalar(document.frontmatter, "id");
   if (!id) return null;
-  const title = scalar(frontmatter, "title") ?? id;
-  const rawStatus = (scalar(frontmatter, "status") ?? "unknown").toLowerCase();
-  const status: AdrStatus = (STATUSES as string[]).includes(rawStatus)
-    ? (rawStatus as AdrStatus)
-    : "unknown";
-  const enforcedBy = list(frontmatter, "enforced_by");
-
-  // A fenced ```toml kit-enforce block anywhere in the body.
-  const block = body.match(/```toml\s+kit-enforce\s*\n([\s\S]*?)\n```/);
-  let rules: AdrRule[] = [];
-  const hasEnforceBlock = block !== null;
-  if (block) {
-    try {
-      const parsed = parseToml(block[1]) as Record<string, unknown>;
-      rules = [
-        ...arr(parsed.forbid_pattern).map((r): AdrRule | null => {
-          const pattern = str(r, "pattern");
-          const paths = str(r, "paths");
-          return pattern && paths
-            ? { type: "forbid-pattern", pattern, paths, message: str(r, "message") }
-            : null;
-        }),
-        ...arr(parsed.require_pattern).map((r): AdrRule | null => {
-          const pattern = str(r, "pattern");
-          const paths = str(r, "paths");
-          return pattern && paths
-            ? { type: "require-pattern", pattern, paths, message: str(r, "message") }
-            : null;
-        }),
-        ...arr(parsed.forbid_import).map((r): AdrRule | null => {
-          const imp = str(r, "import");
-          const paths = str(r, "paths");
-          return imp && paths
-            ? {
-                type: "forbid-import",
-                import: imp,
-                paths,
-                transitive: r.transitive === true,
-                followPackages: r.follow_packages === true,
-                message: str(r, "message"),
-              }
-            : null;
-        }),
-      ].filter((r): r is AdrRule => r !== null);
-    } catch {
-      rules = []; // malformed TOML → zero rules, but hasEnforceBlock stays true (surfaced)
-    }
-  }
-  return { id, title, status, rules, hasEnforceBlock, enforcedBy };
-}
-
-function arr(v: unknown): Record<string, unknown>[] {
-  return Array.isArray(v) ? (v as Record<string, unknown>[]) : [];
+  return {
+    id,
+    title: scalar(document.frontmatter, "title") ?? id,
+    status: parseAdrStatus(document.frontmatter),
+    ...parseEnforcement(document.body),
+    enforcedBy: list(document.frontmatter, "enforced_by"),
+  };
 }
 
 /** An accepted ADR that actually carries at least one enforceable rule. */
@@ -240,109 +267,6 @@ export function globToRegExp(glob: string): RegExp {
   return new RegExp(`^${re}$`);
 }
 
-/** A module specifier imported by a file, with its 1-indexed source line. */
-export interface ImportRef {
-  specifier: string;
-  line: number;
-}
-
-// A quoted module specifier used in an import / require / from / dynamic-import context.
-const IMPORT_LINE = /(?:^|[^\w$])(?:import|require|from)\b[^'"\n]*['"]([^'"\n]+)['"]/;
-
-/** Extract quoted module specifiers (ES import / re-export / require / dynamic import). */
-export function extractImports(content: string): ImportRef[] {
-  const out: ImportRef[] = [];
-  const lines = content.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(IMPORT_LINE);
-    if (m) out.push({ specifier: m[1], line: i + 1 });
-  }
-  return out;
-}
-
-const RESOLVE_EXTS = ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
-
-/** POSIX-normalize a path (resolve `.`/`..`, no I/O). Used for relative-import resolution. */
-function normalizePosix(p: string): string {
-  const parts = p.split("/");
-  const out: string[] = [];
-  for (const seg of parts) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") out.pop();
-    else out.push(seg);
-  }
-  return out.join("/");
-}
-
-function dirOf(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i < 0 ? "" : p.slice(0, i);
-}
-
-/**
- * Resolve a *relative* specifier (`./` `../`) against `fromFile` to a member of `fileSet`.
- * Returns null for bare specifiers (npm packages — intentionally graph leaves) and for
- * relative specifiers that resolve to nothing in the set (surfaced as a gap by the caller).
- */
-export function resolveRelative(
-  fromFile: string,
-  specifier: string,
-  fileSet: Set<string>,
-): string | null {
-  if (!specifier.startsWith(".")) return null; // bare specifier = external leaf
-  const base = normalizePosix(`${dirOf(fromFile)}/${specifier}`);
-  // A `.js`/`.jsx`/`.mjs`/`.cjs` specifier resolves to the `.ts`-family source (ESM/TS
-  // convention), so also try the extension-stripped base.
-  const bases = [base];
-  const jsExt = base.match(/\.(js|jsx|mjs|cjs)$/);
-  if (jsExt) bases.push(base.slice(0, -jsExt[0].length));
-  for (const b of bases) {
-    for (const ext of RESOLVE_EXTS) {
-      if (fileSet.has(b + ext)) return b + ext;
-    }
-    for (const ext of RESOLVE_EXTS.slice(1)) {
-      if (fileSet.has(`${b}/index${ext}`)) return `${b}/index${ext}`;
-    }
-  }
-  return null;
-}
-
-function isRelative(specifier: string): boolean {
-  return specifier.startsWith(".");
-}
-
-// Node builtins are true graph leaves: there is no user code behind `node:fs` to walk into,
-// so an unfollowed builtin is NOT a gap. A rule that forbids one still gates on the direct
-// match — the specifier is tested before we ever ask whether it is followable.
-const NODE_BUILTINS = new Set([
-  "assert", "async_hooks", "buffer", "child_process", "cluster", "console", "constants",
-  "crypto", "dgram", "diagnostics_channel", "dns", "domain", "events", "fs", "http", "http2",
-  "https", "inspector", "module", "net", "os", "path", "perf_hooks", "process", "punycode",
-  "querystring", "readline", "repl", "sqlite", "stream", "string_decoder", "sys", "test",
-  "timers", "tls", "trace_events", "tty", "url", "util", "v8", "vm", "worker_threads", "zlib",
-]); // prettier-ignore
-
-/** True for `node:*` and bare builtin specifiers (`fs`, `path/posix`, …). */
-export function isBuiltinSpecifier(specifier: string): boolean {
-  if (specifier.startsWith("node:")) return true;
-  return NODE_BUILTINS.has(specifier.split("/")[0]);
-}
-
-/**
- * Resolves what the pure in-repo graph cannot: an npm package's entry point and the files
- * inside it. INJECTED rather than imported so `evaluateAdr` stays a pure function of its
- * inputs; the fs-backed implementation lives in `src/commands/adr.ts`.
- */
-export interface PackageResolver {
-  /**
-   * Resolve `specifier` (bare or relative) as imported from `fromFile` to a stable key, or
-   * null when it cannot be resolved. Null is never a pass — the caller emits a `gap`.
-   */
-  resolve(fromFile: string, specifier: string): string | null;
-  /** Source of a key previously returned by `resolve`, or null when unreadable. */
-  read(key: string): string | null;
-}
-
 export interface EvaluateAdrOptions {
   /** Enables `follow_packages`. Without it such a rule degrades to the in-repo walk. */
   packages?: PackageResolver;
@@ -355,23 +279,12 @@ export interface EvaluateAdrOptions {
 const DEFAULT_MAX_PACKAGE_DEPTH = 3;
 const DEFAULT_MAX_NODES = 2000;
 
-/**
- * Evaluate an accepted ADR's rules over the provided files. Pure — the caller supplies
- * `{ path, content }` for the repo; this never touches disk. A non-accepted ADR (or one
- * with no rules) yields no violations. Line numbers are 1-indexed.
- */
-export function evaluateAdr(
-  adr: Adr,
-  files: { path: string; content: string }[],
-  opts: EvaluateAdrOptions = {},
-): AdrViolation[] {
-  if (adr.status !== "accepted") return [];
-  const out: AdrViolation[] = [];
-  const fileSet = new Set(files.map((f) => f.path));
-  // Import graph is built lazily and only once, only if a transitive rule needs it.
-  let importCache: Map<string, ImportRef[]> | null = null;
+type AdrSourceFile = { path: string; content: string };
+
+function createWalkContext(files: AdrSourceFile[], opts: EvaluateAdrOptions): AdrImportWalkContext {
+  const fileSet = new Set(files.map((file) => file.path));
+  const importCache = new Map<string, ImportRef[]>();
   const importsOf = (path: string, content: string): ImportRef[] => {
-    if (!importCache) importCache = new Map();
     let refs = importCache.get(path);
     if (!refs) {
       refs = extractImports(content);
@@ -379,56 +292,121 @@ export function evaluateAdr(
     }
     return refs;
   };
-  const contentByPath = new Map(files.map((f) => [f.path, f.content] as const));
-  const walkCtx: WalkCtx = {
+  return {
     fileSet,
     importsOf,
-    contentByPath,
+    contentByPath: new Map(files.map((file) => [file.path, file.content] as const)),
     packages: opts.packages,
     maxPackageDepth: opts.maxPackageDepth ?? DEFAULT_MAX_PACKAGE_DEPTH,
     maxNodes: opts.maxNodes ?? DEFAULT_MAX_NODES,
   };
+}
 
-  for (const rule of adr.rules) {
-    let globRe: RegExp;
-    try {
-      globRe = globToRegExp(rule.paths);
-    } catch {
-      continue;
-    }
-    const matched = files.filter((f) => globRe.test(f.path));
-
-    if (rule.type === "forbid-pattern") {
-      const matcher = safeRegExp(rule.pattern);
-      if (!matcher) continue;
-      for (const f of matched) {
-        const idx = firstMatchingLine(f.content, matcher);
-        if (idx >= 0)
-          out.push(v(adr.id, f.path, idx + 1, "forbid-pattern", rule.pattern, "violation", rule.message ?? `forbidden by ${adr.id}: /${rule.pattern}/`)); // prettier-ignore
-      }
-    } else if (rule.type === "require-pattern") {
-      const matcher = safeRegExp(rule.pattern);
-      if (!matcher) continue;
-      for (const f of matched) {
-        if (firstMatchingLine(f.content, matcher) < 0)
-          out.push(v(adr.id, f.path, 1, "require-pattern", rule.pattern, "violation", rule.message ?? `${adr.id} requires /${rule.pattern}/ — missing in this file`)); // prettier-ignore
-      }
-    } else if (rule.type === "forbid-import") {
-      const matcher = safeRegExp(rule.import);
-      if (!matcher) continue;
-      for (const f of matched) {
-        if (rule.transitive) {
-          out.push(...evalTransitiveImport(adr.id, rule, f.path, matcher, walkCtx));
-        } else {
-          for (const ref of importsOf(f.path, f.content)) {
-            if (matcher.test(ref.specifier))
-              out.push(v(adr.id, f.path, ref.line, "forbid-import", ref.specifier, "violation", rule.message ?? `${adr.id} forbids importing "${ref.specifier}"`)); // prettier-ignore
-          }
-        }
-      }
-    }
+function matchRuleFiles(paths: string, files: AdrSourceFile[]): AdrSourceFile[] {
+  try {
+    const matcher = globToRegExp(paths);
+    return files.filter((file) => matcher.test(file.path));
+  } catch {
+    return [];
   }
-  return out;
+}
+
+type PatternRule = Exclude<AdrRule, { type: "forbid-import" }>;
+
+function evaluatePatternRule(
+  adrId: string,
+  rule: PatternRule,
+  file: AdrSourceFile,
+  matcher: RegExp,
+): AdrViolation[] {
+  const line = firstMatchingLine(file.content, matcher);
+  const forbidden = rule.type === "forbid-pattern";
+  if (forbidden ? line < 0 : line >= 0) return [];
+  return [
+    {
+      adrId,
+      file: file.path,
+      line: forbidden ? line + 1 : 1,
+      rule: rule.type,
+      detail: rule.pattern,
+      kind: "violation",
+      message:
+        rule.message ??
+        (forbidden
+          ? `forbidden by ${adrId}: /${rule.pattern}/`
+          : `${adrId} requires /${rule.pattern}/ — missing in this file`),
+    },
+  ];
+}
+
+function evaluateDirectImport(
+  adrId: string,
+  rule: Extract<AdrRule, { type: "forbid-import" }>,
+  file: AdrSourceFile,
+  matcher: RegExp,
+  ctx: AdrImportWalkContext,
+): AdrViolation[] {
+  return ctx
+    .importsOf(file.path, file.content)
+    .filter((ref) => matcher.test(ref.specifier))
+    .map(
+      (ref): AdrViolation => ({
+        adrId,
+        file: file.path,
+        line: ref.line,
+        rule: "forbid-import",
+        detail: ref.specifier,
+        kind: "violation",
+        message: rule.message ?? `${adrId} forbids importing "${ref.specifier}"`,
+      }),
+    );
+}
+
+function evaluateForbidImport(
+  adrId: string,
+  rule: Extract<AdrRule, { type: "forbid-import" }>,
+  files: AdrSourceFile[],
+  matcher: RegExp,
+  ctx: AdrImportWalkContext,
+): AdrViolation[] {
+  const violations: AdrViolation[] = [];
+  for (const file of files) {
+    const found = rule.transitive
+      ? evaluateTransitiveImport(adrId, rule, file.path, matcher, ctx)
+      : evaluateDirectImport(adrId, rule, file, matcher, ctx);
+    violations.push(...found);
+  }
+  return violations;
+}
+
+function evaluateRule(
+  adrId: string,
+  rule: AdrRule,
+  files: AdrSourceFile[],
+  ctx: AdrImportWalkContext,
+): AdrViolation[] {
+  const matched = matchRuleFiles(rule.paths, files);
+  const source = rule.type === "forbid-import" ? rule.import : rule.pattern;
+  const matcher = safeRegExp(source);
+  if (!matcher) return [];
+  return rule.type === "forbid-import"
+    ? evaluateForbidImport(adrId, rule, matched, matcher, ctx)
+    : matched.flatMap((file) => evaluatePatternRule(adrId, rule, file, matcher));
+}
+
+/**
+ * Evaluate an accepted ADR's rules over the provided files. Pure — the caller supplies
+ * `{ path, content }` for the repo; this never touches disk. A non-accepted ADR (or one
+ * with no rules) yields no violations. Line numbers are 1-indexed.
+ */
+export function evaluateAdr(
+  adr: Adr,
+  files: AdrSourceFile[],
+  opts: EvaluateAdrOptions = {},
+): AdrViolation[] {
+  if (adr.status !== "accepted") return [];
+  const walkCtx = createWalkContext(files, opts);
+  return adr.rules.flatMap((rule) => evaluateRule(adr.id, rule, files, walkCtx));
 }
 
 function safeRegExp(src: string): RegExp | null {
@@ -443,137 +421,4 @@ function firstMatchingLine(content: string, matcher: RegExp): number {
   const lines = content.split("\n");
   for (let i = 0; i < lines.length; i++) if (matcher.test(lines[i])) return i;
   return -1;
-}
-
-function v(
-  adrId: string,
-  file: string,
-  line: number,
-  rule: AdrRuleType,
-  detail: string,
-  kind: "violation" | "gap",
-  message: string,
-): AdrViolation {
-  return { adrId, file, line, rule, detail, message, kind };
-}
-
-interface WalkCtx {
-  fileSet: Set<string>;
-  importsOf: (path: string, content: string) => ImportRef[];
-  contentByPath: Map<string, string>;
-  packages?: PackageResolver;
-  maxPackageDepth: number;
-  maxNodes: number;
-}
-
-/** Shorten a package key for the `via` chain: `…/node_modules/pg/index.js` → `pg/index.js`. */
-function chainLabel(key: string): string {
-  const i = key.lastIndexOf("node_modules/");
-  return i < 0 ? key : key.slice(i + "node_modules/".length);
-}
-
-/** What one import edge is: a graph leaf, something we cannot prove, or a node to walk into. */
-type WalkEdge =
-  | { kind: "leaf" }
-  | { kind: "gap"; why: string }
-  | { kind: "follow"; resolved: string; depth: number };
-
-/**
- * Classify one import edge. Bare specifiers are leaves unless the rule asked to cross package
- * boundaries AND a resolver was injected; builtins are always leaves. In-repo relative edges
- * stay on the pure fileSet resolver — everything else (bare specifiers, and any import made
- * from inside a package) goes through the injected one.
- */
-function resolveEdge(
-  ctx: WalkCtx,
-  at: { ref: ImportRef; file: string; inRepo: boolean; depth: number; followPkgs: boolean },
-): WalkEdge {
-  const { ref, file, inRepo, depth, followPkgs } = at;
-  const relative = isRelative(ref.specifier);
-  if (!relative && (!followPkgs || isBuiltinSpecifier(ref.specifier))) return { kind: "leaf" };
-  const nextDepth = relative ? depth : depth + 1;
-  if (nextDepth > ctx.maxPackageDepth)
-    return {
-      kind: "gap",
-      why: `package-walk depth ${ctx.maxPackageDepth} reached at "${ref.specifier}" in ${chainLabel(file)}`,
-    };
-  const resolved =
-    inRepo && relative
-      ? resolveRelative(file, ref.specifier, ctx.fileSet)
-      : (ctx.packages?.resolve(file, ref.specifier) ?? null);
-  return resolved === null
-    ? { kind: "gap", why: `unresolved import "${ref.specifier}" in ${chainLabel(file)}` }
-    : { kind: "follow", resolved, depth: nextDepth };
-}
-
-/**
- * Transitive forbid-import: BFS the import graph from `startFile`. A direct or reachable
- * import whose specifier matches → one violation (cited to the start file, with the chain in
- * the message). Anything we cannot follow to the end is surfaced as a `gap` (we cannot prove
- * the target is unreachable) — never silent green:
- *
- *   - an unresolvable relative import inside the repo
- *   - with `follow_packages`, a bare specifier that does not resolve in `node_modules`,
- *     a resolved module we cannot read, or a walk that hits the depth / node bound
- *
- * Without `follow_packages` (or without an injected resolver) bare specifiers stay leaves:
- * only a matching one gates, and an unmatched one is not a gap. Node builtins are always
- * leaves — there is no user code behind them to walk into.
- */
-function evalTransitiveImport(
-  adrId: string,
-  rule: Extract<AdrRule, { type: "forbid-import" }>,
-  startFile: string,
-  matcher: RegExp,
-  ctx: WalkCtx,
-): AdrViolation[] {
-  const followPkgs = rule.followPackages === true && ctx.packages !== undefined;
-  const seen = new Set<string>([startFile]);
-  const queue: { file: string; chain: string[]; depth: number }[] = [
-    { file: startFile, chain: [startFile], depth: 0 },
-  ];
-  const gaps: AdrViolation[] = [];
-  const gap = (specifier: string, file: string, line: number, why: string): void => {
-    gaps.push(
-      v(adrId, startFile, file === startFile ? line : 1, "forbid-import", specifier, "gap",
-        `${adrId}: cannot prove — ${why}`), // prettier-ignore
-    );
-  };
-
-  while (queue.length) {
-    const { file, chain, depth } = queue.shift()!;
-    const inRepo = ctx.fileSet.has(file);
-    const content = inRepo ? ctx.contentByPath.get(file) : ctx.packages?.read(file);
-    if (content === undefined || content === null) {
-      // In-repo: the file was listed without content (nothing to walk). Out-of-repo: we
-      // resolved a module and then could not read it — that edge is unproven, not clean.
-      if (!inRepo) gap(file, file, 1, `unreadable module ${chainLabel(file)}`);
-      continue;
-    }
-    for (const ref of ctx.importsOf(file, content)) {
-      if (matcher.test(ref.specifier)) {
-        const via = chain.length > 1 ? ` (via ${chain.map(chainLabel).join(" → ")})` : "";
-        const line = file === startFile ? ref.line : 1;
-        const base = rule.message ?? `${adrId} forbids reaching "${ref.specifier}"`;
-        return [v(adrId, startFile, line, "forbid-import", ref.specifier, "violation", base + via)];
-      }
-      const edge = resolveEdge(ctx, { ref, file, inRepo, depth, followPkgs });
-      if (edge.kind === "leaf") continue;
-      if (edge.kind === "gap") {
-        gap(ref.specifier, file, ref.line, edge.why);
-        continue;
-      }
-      if (seen.has(edge.resolved)) continue;
-      if (seen.size >= ctx.maxNodes) {
-        gap(ref.specifier, file, ref.line,
-          `import graph exceeded ${ctx.maxNodes} files — walk truncated at "${ref.specifier}"`); // prettier-ignore
-        continue;
-      }
-      seen.add(edge.resolved);
-      queue.push({ file: edge.resolved, chain: [...chain, edge.resolved], depth: edge.depth });
-    }
-  }
-  // No violation found; surface at most one gap per start file (deduped) so an unresolved
-  // edge downgrades the result from clean-green to "unproven" without flooding output.
-  return gaps.length ? [gaps[0]] : [];
 }

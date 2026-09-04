@@ -65,9 +65,6 @@ import { cmdCheck } from "./check.js";
 import { cmdHooks } from "./hooks.js";
 
 export async function cmdDoctor(): Promise<boolean> {
-  console.log(`${c.bold}${c.cyan}kit doctor${c.reset}`);
-  console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
-
   let config: ReturnType<typeof Object.create> = {};
   try {
     config = await loadConfig(resolveConfigPath());
@@ -76,6 +73,15 @@ export async function cmdDoctor(): Promise<boolean> {
   }
 
   const result = await runDoctor(config, process.cwd());
+  const ok = result.failed === 0;
+  if (hasFlag(process.argv, "--json")) {
+    const skipped = result.checks.filter((check) => check.status === "skip").length;
+    console.log(JSON.stringify({ ok, ...result, skipped }, null, 2));
+    return ok;
+  }
+
+  console.log(`${c.bold}${c.cyan}kit doctor${c.reset}`);
+  console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   for (const check of result.checks) {
     const icon =
@@ -103,7 +109,7 @@ export async function cmdDoctor(): Promise<boolean> {
 
   console.log(`\n  ${summaryParts.join(" · ")}\n`);
 
-  return result.failed === 0;
+  return ok;
 }
 
 export async function cmdAdd(): Promise<boolean> {

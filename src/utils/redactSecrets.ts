@@ -145,7 +145,7 @@ export const SECRET_PATTERNS: RedactPattern[] = [
     re: KV_SECRET_RE,
     label: "kv-secret",
   },
-  // Terraform — `sensitive = "..."` blocks in HCL leak the literal value
+  // Terraform — literal `sensitive` assignments in HCL can leak their value
   // unless the operator uses a vault-backed datasource. Catches both the
   // unquoted and quoted forms.
   {
@@ -160,8 +160,8 @@ export const SECRET_PATTERNS: RedactPattern[] = [
     re: /"(sensitive_value|value)"\s*:\s*"([A-Za-z0-9_\-+/]{20,})"/g,
     label: "tfstate-value",
   },
-  // Credentials embedded in a connection-string URL, e.g.
-  // `postgres://user:supersecret@host/db`, `redis://:pw@host`, `mongodb+srv://…`.
+  // Credentials embedded in connection-string URL userinfo (Postgres, Redis,
+  // MongoDB, and similar schemes).
   // The `kv-secret` class stops at the `:`/`@`, so these slipped through. Redact
   // ONLY the password and keep the scheme/user/host as diagnostic context.
   {
@@ -202,13 +202,53 @@ export function secretShapeLabels(): string[] {
   return [...new Set(SECRET_PATTERNS.map((p) => p.label))].sort();
 }
 
-export function redactSecrets(input: string): string {
+const MIN_KNOWN_SECRET_LENGTH = 8;
+const SECRET_ENV_NAME =
+  /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|CREDENTIALS?|DSN|DATABASE_URL|REDIS_URL|MONGODB_URI)(?:_|$)/i;
+
+export function secretValuesFromEnv(env: Readonly<Record<string, string | undefined>>): string[] {
+  return Object.entries(env)
+    .filter(([key, value]) => SECRET_ENV_NAME.test(key) && typeof value === "string")
+    .map(([, value]) => value!);
+}
+
+export function redactSecrets(input: string, knownSecrets: Iterable<string> = []): string {
   if (!input) return input;
   let out = input;
+  const literals = [...new Set(knownSecrets)]
+    .filter((value) => value.length >= MIN_KNOWN_SECRET_LENGTH)
+    .sort((a, b) => b.length - a.length);
+  for (const value of literals) out = out.split(value).join("[REDACTED]");
   for (const { re, replacement } of SECRET_PATTERNS) {
     out = out.replace(re, replacement ?? "[REDACTED]");
   }
   return out;
+}
+
+/** Hold incomplete lines so a credential split across process-output chunks is
+ * redacted before either half reaches the terminal. */
+export function createRedactingLineWriter(
+  write: (text: string) => void,
+  knownSecrets: Iterable<string> = [],
+): { append: (text: string) => void; flush: () => void } {
+  const secrets = [...knownSecrets];
+  let pending = "";
+  return {
+    append(text: string): void {
+      pending += text;
+      let newline = pending.indexOf("\n");
+      while (newline !== -1) {
+        write(redactSecrets(pending.slice(0, newline + 1), secrets));
+        pending = pending.slice(newline + 1);
+        newline = pending.indexOf("\n");
+      }
+    },
+    flush(): void {
+      if (!pending) return;
+      write(redactSecrets(pending, secrets));
+      pending = "";
+    },
+  };
 }
 
 /**

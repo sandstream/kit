@@ -28,6 +28,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BASELINE_FILE } from "./baseline.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
 
@@ -299,6 +300,11 @@ export const complexityKey = (f: { file: string; fn: string }): string => `${f.f
 /** Stable baseline key for a size finding. */
 export const sizeKey = (f: { file: string }): string => f.file;
 
+function isGeneratedStandardsMetadata(file: string): boolean {
+  const normalized = file.replaceAll("\\", "/");
+  return normalized === BASELINE_FILE || normalized.endsWith(`/${BASELINE_FILE}`);
+}
+
 function didNotRunResult(name: string, tool: string, enforce: boolean): StandardsCheckResult {
   return {
     category: "standards",
@@ -386,6 +392,7 @@ export async function checkStandards(
   } else {
     const over = scan.size.findings
       .map((f) => ({ ...f, file: REL(cwd, f.file) }))
+      .filter((f) => !isGeneratedStandardsMetadata(f.file))
       .filter((f) => f.lines > t.maxFileLines);
     const seen = new Set(opts.baseline?.size ?? []);
     const fresh = over.filter((f) => !seen.has(sizeKey(f)));
@@ -458,6 +465,7 @@ export async function collectStandardsKeys(
     ? []
     : scan.size.findings
         .map((f) => ({ ...f, file: REL(cwd, f.file) }))
+        .filter((f) => !isGeneratedStandardsMetadata(f.file))
         .filter((f) => f.lines > t.maxFileLines)
         .map(sizeKey);
   return { complexity, duplication, size };

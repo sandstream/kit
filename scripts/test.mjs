@@ -50,11 +50,15 @@ function collectWorkspaceTests() {
   return out;
 }
 
-const files = [...collect("dist"), ...collectWorkspaceTests()];
-if (files.length === 0) {
-  console.error("no dist/**/*.test.js files found");
+const rootTests = collect("dist");
+if (rootTests.length === 0) {
+  console.error(
+    "no root dist/**/*.test.js files found — run `npm run build` before `npm test`; " +
+      "a production-only build does not contain the test suite",
+  );
   process.exit(1);
 }
+const files = [...rootTests, ...collectWorkspaceTests()];
 
 // This repo can live in a synced folder (iCloud Drive), where a conflicted file gains a
 // ` 2` twin. A twin under dist/ is a STALE compiled test: it runs old assertions against

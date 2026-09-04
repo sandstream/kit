@@ -93,7 +93,7 @@ describe("publish.yml — the signature gate cannot fail open", () => {
 
 describe("publish.yml — trusted-publishing prerequisites", () => {
   it("installs an npm that has the OIDC exchange (>= 11.5.1)", () => {
-    const m = EXECUTED.match(/npm (?:i|install) -g npm@\^?(\d+)\.(\d+)\.(\d+)/);
+    const m = EXECUTED.match(/npm (?:i|install) -g npm@(\d+)\.(\d+)\.(\d+)/);
     assert.ok(
       m,
       "publish.yml must install npm explicitly: setup-node's bundled npm for node 22 is 10.9.x, which predates trusted publishing (>= 11.5.1)",

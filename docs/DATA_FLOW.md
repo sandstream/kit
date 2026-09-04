@@ -145,16 +145,17 @@ cli.ts caller ──▶ makeClient({ token })       token resolved from vault
 ```
 appendAuditEventDirect({event}) ──▶ appendFile(.kit-audit.jsonl)
                                     │
-                                    └──▶ if companyId AND
-                                         [audit].remote == true
+                                    └──▶ if [governance.audit].remote == true
+                                         AND company_id is configured
                                          ──▶ HTTPS POST to KIT_REMOTE_URL
                                              with exponential backoff
                                              ──▶ failed events → .kit-audit.pending
 ```
 
 **Default:** local append only. Remote-push gate: explicit
-`[audit].remote = true` in `.kit.toml` (one-time opt-in surfaces a loud
-stderr notice on first send).
+`[governance.audit].remote = true` plus an explicit
+`[governance.audit].company_id` in `.kit.toml` (one-time opt-in surfaces a loud
+stderr notice on first send; a missing company id surfaces a configuration warning).
 
 ## Network hosts contacted
 

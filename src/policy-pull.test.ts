@@ -1,6 +1,14 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  rmSync,
+  renameSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadOrCreateIdentity, identityId } from "./identity.js";
@@ -16,7 +24,7 @@ import {
   type PolicySignature,
 } from "./policy-doc.js";
 import { addPolicySigner, getSignersPath } from "./policy-trust.js";
-import { pullPolicy } from "./policy-pull.js";
+import { applyPolicyPairAtomically, pullPolicy } from "./policy-pull.js";
 
 let idDir: string;
 let source: string;
@@ -124,5 +132,66 @@ describe("pullPolicy", () => {
     const r = pullPolicy(`file://${source}`, dest);
     assert.equal(r.ok, true, r.detail);
     assert.equal(r.status, "applied");
+  });
+});
+
+describe("pullPolicy atomic application", () => {
+  it("never throws or leaves a mixed policy/signature pair when apply cannot complete", () => {
+    const oldPolicy = POLICY_TEMPLATE.replace("require_triage = true", "require_triage = false");
+    writeFileSync(getPolicyPath(dest), oldPolicy, "utf-8");
+    const pub = signPolicyInDir(dest);
+    addPolicySigner(dest, pub, "org");
+    assert.equal(verifyPolicy(dest).status, "valid");
+
+    writeFileSync(getPolicyPath(source), POLICY_TEMPLATE, "utf-8");
+    signPolicyInDir(source);
+    const oldPolicyBytes = readFileSync(getPolicyPath(dest));
+    const oldSignatureBytes = readFileSync(getPolicySigPath(dest));
+    chmodSync(getPolicySigPath(dest), 0o400);
+
+    let result: ReturnType<typeof pullPolicy> | undefined;
+    assert.doesNotThrow(() => {
+      result = pullPolicy(source, dest);
+    });
+    chmodSync(getPolicySigPath(dest), 0o600);
+
+    assert.equal(verifyPolicy(dest).status, "valid", "a failed apply must remain fail-closed");
+    if (!result?.ok) {
+      assert.deepEqual(readFileSync(getPolicyPath(dest)), oldPolicyBytes);
+      assert.deepEqual(readFileSync(getPolicySigPath(dest)), oldSignatureBytes);
+    } else {
+      assert.deepEqual(readFileSync(getPolicyPath(dest)), readFileSync(getPolicyPath(source)));
+      assert.deepEqual(
+        readFileSync(getPolicySigPath(dest)),
+        readFileSync(getPolicySigPath(source)),
+      );
+    }
+  });
+
+  it("restores the exact prior pair when the final policy rename fails", () => {
+    const oldPolicy = Buffer.from("old policy bytes\n");
+    const oldSignature = Buffer.from("old signature bytes\n");
+    writeFileSync(getPolicyPath(dest), oldPolicy);
+    writeFileSync(getPolicySigPath(dest), oldSignature);
+    let calls = 0;
+
+    const result = applyPolicyPairAtomically(
+      dest,
+      Buffer.from("new policy bytes\n"),
+      Buffer.from("new signature bytes\n"),
+      (from, to) => {
+        calls++;
+        if (calls === 2) {
+          const error = Object.assign(new Error("injected final rename failure"), { code: "EIO" });
+          throw error;
+        }
+        renameSync(from, to);
+      },
+    );
+
+    assert.equal(result.ok, false);
+    assert.match(result.detail, /previous pair retained/);
+    assert.deepEqual(readFileSync(getPolicyPath(dest)), oldPolicy);
+    assert.deepEqual(readFileSync(getPolicySigPath(dest)), oldSignature);
   });
 });

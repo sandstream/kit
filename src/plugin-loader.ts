@@ -24,7 +24,7 @@ function isValidPluginName(name: string): boolean {
  *
  * Plugin registration protocol:
  * 1. Read `kitPlugins` array from `<projectPath>/package.json`
- * 2. For each entry, attempt to import `<plugin>/kit-adapter` then `<plugin>`
+ * 2. For each entry, attempt its adapter entry points and built package output
  * 3. Expect the module to export `{ adapter: ServiceAdapter }` or `{ adapters: ServiceAdapter[] }`
  * 4. Invalid/missing plugins are skipped with a warning (never throw)
  *
@@ -71,7 +71,7 @@ async function readkitPlugins(projectPath: string): Promise<string[]> {
 }
 
 /**
- * Attempt to load a plugin by name, trying `<plugin>/kit-adapter` first, then `<plugin>`.
+ * Attempt to load a plugin by name, trying adapter entry points and conventional package output.
  * Returns an array of ServiceAdapters or throws if both entry points fail.
  */
 async function loadSinglePlugin(
@@ -88,6 +88,9 @@ async function loadSinglePlugin(
   const candidates = [
     join(nodeModules, pluginName, "kit-adapter.js"),
     join(nodeModules, pluginName, "kit-adapter.cjs"),
+    join(nodeModules, pluginName, "dist", "index.js"),
+    join(nodeModules, pluginName, "dist", "index.mjs"),
+    join(nodeModules, pluginName, "dist", "index.cjs"),
     join(nodeModules, pluginName, "index.js"),
     join(nodeModules, pluginName),
   ];
