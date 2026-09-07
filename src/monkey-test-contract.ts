@@ -361,6 +361,40 @@ export function validateRoleMatrix(value: unknown): MonkeyRoleExpectation[] {
   return entries as MonkeyRoleExpectation[];
 }
 
+/** The one shape `monkeyRouteIsDenied` needs from a Playwright page. */
+export interface MonkeyNavigatedPage {
+  url(): string;
+}
+
+/** Pathname of a route or absolute URL, resolved against the crawl's base URL. */
+export function monkeyRoutePath(urlOrPath: string): string {
+  return new URL(urlOrPath, process.env.MONKEY_BASE_URL ?? "http://127.0.0.1").pathname;
+}
+
+/**
+ * Whether the app actually DENIED this navigation.
+ *
+ * Two signals count, both of them the server's own: an authorization status code, or a
+ * redirect away from the requested route to a route whose PATH documents a denial
+ * (`/login`, `/unauthorized`, and friends).
+ *
+ * What deliberately does NOT count is the page's text (MHB-02). Matching /forbidden|access
+ * denied|not authorized/ in the body made any 200 that merely mentions those words read as
+ * a denial: a permissions screen, an audit log listing "Forbidden" events, a page rendering
+ * attacker-influenced content. The crawl then recorded a denied route as correctly denied
+ * while the server had served it, which inverts the finding this check exists to produce.
+ */
+export function monkeyRouteIsDenied(
+  page: MonkeyNavigatedPage,
+  status: number,
+  requestedRoute: string,
+): boolean {
+  if ([401, 403, 404].includes(status)) return true;
+  const landed = monkeyRoutePath(page.url());
+  if (landed === monkeyRoutePath(requestedRoute)) return false;
+  return /login|sign-in|unauthorized|forbidden|access-denied/i.test(landed);
+}
+
 export function controlHasAccessibleName(control: MonkeyControlName): boolean {
   return [
     control.visibleText,

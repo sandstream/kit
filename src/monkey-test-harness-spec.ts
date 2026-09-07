@@ -7,6 +7,8 @@ import {
   focusableIsOffscreen,
   isRoleWithId,
   matchesExpectedFinding,
+  monkeyRouteIsDenied,
+  monkeyRoutePath,
   requireDisjointValues,
   requireSameOriginRoutes,
   requiredRole,
@@ -118,6 +120,8 @@ const validateRoleExpectation: (role: Record<string, unknown>, id: RoleExpectati
 const validateRoleMatrix: (value: unknown) => RoleExpectation[] = ${validateRoleMatrix.toString()};
 const controlHasAccessibleName: (control: ControlName) => boolean = ${controlHasAccessibleName.toString()};
 const focusableIsOffscreen: (geometry: FocusableGeometry) => boolean = ${focusableIsOffscreen.toString()};
+const monkeyRoutePath: (urlOrPath: string) => string = ${monkeyRoutePath.toString()};
+const monkeyRouteIsDenied: (page: Page, status: number, requestedRoute: string) => boolean = ${monkeyRouteIsDenied.toString()};
 const validateMoneyFlowConfig: (env: Record<string, string | undefined>) => MoneyFlowConfig = ${validateMoneyFlowConfig.toString()};
 `;
 }
@@ -155,19 +159,6 @@ async function collectLinks(page: Page, depth: number): Promise<string[]> {
       .filter((href) => href.startsWith(origin))
       .map((href) => new URL(href).pathname + new URL(href).search);
   });
-}
-
-function routePath(urlOrPath: string): string {
-  return new URL(urlOrPath, process.env.MONKEY_BASE_URL ?? "http://127.0.0.1").pathname;
-}
-
-async function routeIsDenied(page: Page, status: number, requestedRoute: string): Promise<boolean> {
-  if ([401, 403, 404].includes(status)) return true;
-  const redirected = routePath(page.url()) !== routePath(requestedRoute);
-  if (redirected && /login|sign-in|unauthorized|forbidden|access-denied/i.test(routePath(page.url()))) {
-    return true;
-  }
-  return (await page.getByText(/access denied|forbidden|not authorized|sign in to continue/i).count()) > 0;
 }
 
 async function isolationFindings(
@@ -418,7 +409,7 @@ for (const role of roles) {
             repro: response.url(),
             fix: "Return an intentional authorization denial instead of a server error.",
           });
-        } else if (!(await routeIsDenied(page, response.status(), route))) {
+        } else if (!monkeyRouteIsDenied(page, response.status(), route)) {
           findings.push({
             severity: "critical",
             area: "authz",
@@ -428,6 +419,13 @@ for (const role of roles) {
             repro: \`GET \${route} returned \${response.status()} at \${page.url()}\`,
             fix: "Enforce route authorization server-side and assert this role remains denied.",
           });
+        }
+        // A denial page and a login redirect render a body too, and that body has leaked
+        // another tenant's data before (MHB-02): the isolation scan used to run only on
+        // routes the crawl considered allowed, so the one place an authz bug is most likely
+        // to show was the one place nobody looked.
+        if (response) {
+          findings.push(...(await isolationFindings(page, role.id, route, expectation.forbiddenText)));
         }
       }
 
@@ -469,7 +467,7 @@ for (const role of roles) {
             });
             continue;
           }
-          if (await routeIsDenied(page, response.status(), route)) {
+          if (monkeyRouteIsDenied(page, response.status(), route)) {
             findings.push({
               severity: expectation.allowRoutes.includes(route) ? "critical" : "high",
               area: "authz",
@@ -481,6 +479,7 @@ for (const role of roles) {
               repro: \`GET \${route} returned \${response.status()} at \${page.url()}\`,
               fix: "Align navigation visibility and route authorization with the role matrix.",
             });
+            findings.push(...(await isolationFindings(page, role.id, route, expectation.forbiddenText)));
             continue;
           }
           findings.push(...(await inspectPage(page, role.id, route)));

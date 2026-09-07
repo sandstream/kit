@@ -43,7 +43,15 @@ function writeValidReportScript(dir: string): string {
     `import { writeFileSync } from "node:fs";
 const projects = ["desktop-chromium", "mobile-chrome"];
 const roles = ${JSON.stringify(MONKEY_ROLES.map(({ id, label }) => ({ id, label })))};
-const tests = () => projects.map((projectName) => ({ projectName, status: "expected" }));
+// A genuinely passing case, as Playwright records one: expectations matched, the
+// expectation WAS "passed", and an attempt passed. "expected" alone is also what a
+// test.fail() spec reports (MHB-03), so it is not evidence on its own.
+const tests = () => projects.map((projectName) => ({
+  projectName,
+  expectedStatus: "passed",
+  status: "expected",
+  results: [{ status: "passed" }],
+}));
 const suites = roles.map((role) => ({
   title: role.id + ": " + role.label,
   specs: [{ title: "route crawl", tests: tests() }],
@@ -411,7 +419,12 @@ describe("monkey-test runner gate skipped evidence", () => {
       `import { writeFileSync } from "node:fs";
 const projects = ["desktop-chromium", "mobile-chrome"];
 const roles = ${JSON.stringify(MONKEY_ROLES.map(({ id, label }) => ({ id, label })))};
-const expected = () => projects.map((projectName) => ({ projectName, status: "expected" }));
+const expected = () => projects.map((projectName) => ({
+  projectName,
+  expectedStatus: "passed",
+  status: "expected",
+  results: [{ status: "passed" }],
+}));
 const skipped = () => projects.map((projectName) => ({
   projectName,
   status: "skipped",

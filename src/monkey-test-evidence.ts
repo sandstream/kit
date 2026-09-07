@@ -12,6 +12,10 @@ import { readMonkeyJson } from "./monkey-test-scan.js";
 interface PlaywrightReportTest {
   projectName?: string;
   status?: string;
+  /** What the spec DECLARED the outcome should be. `test.fail()` makes this "failed". */
+  expectedStatus?: string;
+  /** One entry per attempt (retries included), each with the outcome of that attempt. */
+  results?: { status?: string }[];
   annotations?: { type?: string; description?: string }[];
 }
 
@@ -47,6 +51,21 @@ function collectPlaywrightTests(
   return tests;
 }
 
+/**
+ * Whether this test is evidence that the contract case ran and PASSED.
+ *
+ * `status: "expected"` alone is not that claim (MHB-03): it means the outcome matched the
+ * spec's declaration, which a `test.fail()` spec satisfies by failing. Evidence therefore
+ * requires all three: the run matched expectations, the expectation was "passed", and some
+ * attempt actually passed. A missing `expectedStatus` is treated as "passed", which is
+ * Playwright's own default for a spec that declares nothing.
+ */
+function contractCasePassed(test: PlaywrightReportTest): boolean {
+  if (test.status !== "expected") return false;
+  if (test.expectedStatus !== undefined && test.expectedStatus !== "passed") return false;
+  return (test.results ?? []).some((result) => result.status === "passed");
+}
+
 function missingContractCases(tests: PlaywrightEvidenceTest[]): string[] {
   const missing: string[] = [];
   for (const project of ["desktop-chromium", "mobile-chrome"]) {
@@ -54,16 +73,19 @@ function missingContractCases(tests: PlaywrightEvidenceTest[]): string[] {
       const found = tests.some(
         (test) =>
           test.projectName === project &&
-          test.status === "expected" &&
+          contractCasePassed(test) &&
           test.title.includes(`${role.id}: ${role.label}`) &&
           test.title.endsWith("route crawl"),
       );
       if (!found) missing.push(`${project}/${role.id}/route crawl`);
     }
-    const money = tests.find(
-      (test) => test.projectName === project && test.title.endsWith("money flow"),
+    const money = tests.some(
+      (test) =>
+        test.projectName === project &&
+        contractCasePassed(test) &&
+        test.title.endsWith("money flow"),
     );
-    if (!money || money.status !== "expected") missing.push(`${project}/money flow`);
+    if (!money) missing.push(`${project}/money flow`);
   }
   return missing;
 }
