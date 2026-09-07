@@ -426,7 +426,7 @@ jobs:
       - name: Generate SBOM (CycloneDX)
         # CycloneDX SBOM is required by EU CRA and US EO 14028 for shipped
         # software. Lets downstream consumers introspect the dep tree.
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: .
           config: .syft.yaml # names the root component (see the step above)
@@ -436,7 +436,7 @@ jobs:
 
       - name: Generate SBOM (SPDX)
         # Some consumers (e.g. RHEL, federal) require SPDX format.
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: .
           config: .syft.yaml # names the root component (see the step above)
