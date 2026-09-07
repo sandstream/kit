@@ -150,6 +150,13 @@ export async function cmdSecrets(): Promise<boolean> {
   if (process.argv[3] === "revoke-old") {
     return cmdSecretsRevokeOld();
   }
+  if (process.argv[3] !== undefined && !process.argv[3].startsWith("-")) {
+    console.error(`Unknown secrets subcommand: ${process.argv[3]}`);
+    console.error(
+      `Usage: kit secrets [sync|validate|migrate|vault-migrate|rotate|onecli|purge-history|propagate|set|revoke-old]`,
+    );
+    return false;
+  }
 
   const config = await loadConfig(resolveConfigPath());
 

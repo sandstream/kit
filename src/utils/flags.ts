@@ -28,6 +28,36 @@ export function envTruthy(value: string | undefined): boolean {
   return ["1", "true", "yes", "on"].includes((value ?? "").trim().toLowerCase());
 }
 
+/** Matches `--read-only` / `--readonly`, bare or with `=value`. */
+const READ_ONLY_FLAG_RE = /^--read-?only(?:=(.*))?$/;
+
+/** True for any argv token spelling the read-only flag, regardless of its value's validity. */
+export function isReadOnlyToken(token: string): boolean {
+  return READ_ONLY_FLAG_RE.test(token);
+}
+
+export type ReadOnlyFlagResult =
+  | { kind: "absent" }
+  | { kind: "active" }
+  | { kind: "invalid"; flag: string; value: string };
+
+/**
+ * Scans argv for a `--read-only` / `--readonly` token. A bare flag or a truthy value
+ * (1/true/yes/on, case-insensitive) activates read-only mode; any other value is a
+ * usage error the caller must surface. RO-1 found `--read-only=0` silently doing
+ * nothing because only the bare flag was ever recognized.
+ */
+export function readOnlyFlag(argv: readonly string[]): ReadOnlyFlagResult {
+  for (const token of argv) {
+    const m = READ_ONLY_FLAG_RE.exec(token);
+    if (!m) continue;
+    const value = m[1];
+    if (value === undefined || envTruthy(value)) return { kind: "active" };
+    return { kind: "invalid", flag: token.slice(0, token.indexOf("=")), value };
+  }
+  return { kind: "absent" };
+}
+
 /**
  * Flags present in argv that are not in `allowed`.
  *
@@ -126,7 +156,11 @@ export const GLOBAL_FLAGS = [
 const GLOBAL_PREFIX_FLAGS = ["--read-only", "--readonly", "--non-interactive"] as const;
 
 function isGlobalPrefixFlag(token: string): boolean {
-  return (GLOBAL_PREFIX_FLAGS as readonly string[]).includes(token) || token.startsWith("--env=");
+  return (
+    (GLOBAL_PREFIX_FLAGS as readonly string[]).includes(token) ||
+    token.startsWith("--env=") ||
+    isReadOnlyToken(token)
+  );
 }
 
 /**

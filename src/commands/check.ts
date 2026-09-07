@@ -102,6 +102,17 @@ export async function cmdCheck(): Promise<boolean> {
     if (rejectUnknownFlags("kit check compare", COMPARE_FLAGS)) return false;
     return cmdCompare();
   }
+  // An unrecognized argv[3] (e.g. a typo'd subcommand) must not silently fall through
+  // to the default full-check-plus-flags action below. RO-3 found `check zzz --attest`
+  // running the full check and minting an attestation key because argv[3] was simply
+  // never inspected outside the two branches above.
+  if (process.argv[3] !== undefined && !process.argv[3].startsWith("-")) {
+    console.error(`${c.red}Unknown check subcommand: ${process.argv[3]}${c.reset}`);
+    console.error(
+      `${c.dim}Usage: kit check [--category=...] [--json] [--attest] | kit check verify-attestation <file> | kit check compare <before.json> <after.json>${c.reset}`,
+    );
+    return false;
+  }
   if (rejectUnknownFlags("kit check", CHECK_FLAGS)) return false;
 
   // --category narrows which dimensions run. An unrecognised value is an error, not

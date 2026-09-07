@@ -325,10 +325,40 @@ function matchesFlagValues(
   );
 }
 
+/** Every subcommand value this command declares a rule for (null excluded). */
+function knownSubcommands(command: string): Set<string> {
+  const known = new Set<string>();
+  for (const entry of WRITE_SURFACE) {
+    if (entry.command !== command) continue;
+    if (typeof entry.subcommand === "string") known.add(entry.subcommand);
+    for (const value of entry.subcommands ?? []) {
+      if (typeof value === "string") known.add(value);
+    }
+  }
+  return known;
+}
+
 function matchesPositionals(entry: WriteSurfaceEntry, argv: readonly string[]): boolean {
-  const subcommand = positional(argv, 3);
-  if (entry.subcommand !== undefined && entry.subcommand !== subcommand) return false;
-  if (entry.subcommands !== undefined && !entry.subcommands.includes(subcommand)) return false;
+  const rawSubcommand = positional(argv, 3);
+  if (entry.subcommand !== undefined) {
+    // RO-3: a `subcommand: null` rule guards a command's DEFAULT action. A positional
+    // that names none of this command's other declared subcommands is not a subcommand
+    // at all from the handler's point of view: the handler (correctly, after its own
+    // fix) rejects it, but the classifier used to miss it too, since `"zzz" !== null`
+    // failed this rule. Treat an unrecognized token the same as no subcommand so the
+    // read-only floor still catches the default action even if a handler regresses.
+    // Scoped to the singular field only: a `subcommands` (plural) list, e.g. hooks,
+    // already enumerates every non-mutating form it cares about and must not have
+    // an unrelated unknown token quietly redirected into one of its listed entries.
+    const subcommand =
+      entry.subcommand === null &&
+      rawSubcommand !== null &&
+      !knownSubcommands(entry.command).has(rawSubcommand)
+        ? null
+        : rawSubcommand;
+    if (entry.subcommand !== subcommand) return false;
+  }
+  if (entry.subcommands !== undefined && !entry.subcommands.includes(rawSubcommand)) return false;
 
   const argument = positional(argv, 4);
   if (entry.argument !== undefined && entry.argument !== argument) return false;

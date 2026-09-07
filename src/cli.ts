@@ -4,7 +4,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { loadConfig } from "./config.js";
-import { hasFlag, splitLeadingGlobalFlags, GLOBAL_FLAGS } from "./utils/flags.js";
+import { hasFlag, splitLeadingGlobalFlags, GLOBAL_FLAGS, readOnlyFlag } from "./utils/flags.js";
 import { generateCompletions } from "./completions.js";
 import { checkForUpdate, printUpdateNotice } from "./update-check.js";
 import { SKIPPED_COMMITS_LOG } from "./hooks.js";
@@ -328,7 +328,14 @@ async function main(): Promise<void> {
   // Honored gates: writeSecretToBackend, grantElevation, installHooks, and
   // every kit-plugin write surface (vercel env-set, github secret-put,
   // stripe webhook-create, etc).
-  if (hasFlag(args, "--read-only") || hasFlag(args, "--readonly")) {
+  const readOnly = readOnlyFlag(args);
+  if (readOnly.kind === "invalid") {
+    console.error(
+      `${c.red}invalid value for ${readOnly.flag}: "${readOnly.value}" (expected no value, or a truthy value: 1, true, yes)${c.reset}`,
+    );
+    process.exitCode = 2;
+    return;
+  } else if (readOnly.kind === "active") {
     const { activateReadOnlyMode } = await import("./read-only-mode.js");
     activateReadOnlyMode("flag");
   } else if (process.env.KIT_READ_ONLY === "1") {
@@ -348,7 +355,11 @@ async function main(): Promise<void> {
       // never calls and the environment is the only channel that reaches them. See `installPolicyEnv`.
       const { installPolicyEnv } = await import("./policy-gate.js");
       await installPolicyEnv(cfgForPolicy.policy);
-      if (cfgForPolicy.policy.default_mode === "read-only" && !process.env.KIT_READ_ONLY) {
+      // Forces read-only regardless of KIT_READ_ONLY's value (a "0" must not defeat policy);
+      // activateReadOnlyMode() itself no-ops when read-only is already active, so the only
+      // way to skip it is for read-only to already be on (RO-2: this used to skip on any
+      // KIT_READ_ONLY string, including "0" and "false").
+      if (cfgForPolicy.policy.default_mode === "read-only") {
         const { activateReadOnlyMode } = await import("./read-only-mode.js");
         activateReadOnlyMode("policy");
       }
