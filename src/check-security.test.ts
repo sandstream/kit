@@ -802,7 +802,7 @@ describe("checkSecurity", () => {
     mkdirSync(agentState, { recursive: true });
     writeFileSync(
       join(root, ".gitignore"),
-      [".env", ".env.local", ".env.*.local", "node_modules"].join("\n") + "\n",
+      [".env", ".env.local", ".env.*.local", ".env.keys", "node_modules"].join("\n") + "\n",
     );
     for (const key of envKeys) prevEnv.set(key, process.env[key]);
     process.env.KIT_AUDIT_ANCHOR = "0";

@@ -103,6 +103,7 @@ describe("patched .gitignore is honored by GIT, not just by kit", () => {
         ".env",
         ".env.local",
         ".env.production.local",
+        ".env.keys",
         ".kit/elevation.json",
         ".kit-audit.jsonl",
         "server.pem",
@@ -325,6 +326,44 @@ describe("findCommittedSensitive", () => {
       execSync("git add . && git commit -q -m init", { cwd: dir });
       const r = await findCommittedSensitive(dir);
       assert.equal(r.length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * F2: `.env.keys` holds the dotenvx PRIVATE keys, the ones that decrypt every encrypted
+ * `.env` in the repo. Committing it hands over every secret the encryption was protecting,
+ * so it belongs in the same must-be-ignored class as `.env.local`. It was absent from the
+ * required set: a repo listing the three classic `.env` patterns literally satisfied every
+ * check while leaving the keyfile trackable.
+ */
+describe("checkGitignore covers the dotenvx keyfile (F2)", () => {
+  it("flags .env.keys when the classic .env patterns are present but it is not", async () => {
+    const dir = tmpRepo();
+    try {
+      writeFileSync(
+        join(dir, ".gitignore"),
+        ".env\n.env.local\n.env.*.local\nnode_modules\n.kit/*\n!.kit/shared/\n",
+      );
+      const r = await checkGitignore(dir);
+      assert.ok(
+        r.missingPatterns.some((m) => m.pattern === ".env.keys"),
+        `expected .env.keys to be required, got: ${r.missingPatterns.map((m) => m.pattern).join(", ")}`,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts the .env* catch-all as covering it", async () => {
+    const dir = tmpRepo();
+    try {
+      writeFileSync(join(dir, ".gitignore"), ".env*\n");
+      const r = await checkGitignore(dir);
+      assert.ok(!r.missingPatterns.some((m) => m.pattern === ".env.keys"));
+      assert.ok(r.presentPatterns.includes(".env.keys"));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

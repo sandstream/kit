@@ -37,6 +37,15 @@ const REQUIRED_PATTERNS: RequiredEntry[] = [
     aliases: [".env*"],
   },
   { pattern: ".env.*.local", reason: "per-env local secrets", aliases: [".env*"] },
+  {
+    // The dotenvx PRIVATE keys: whoever has this file decrypts every encrypted .env in
+    // the repo, so committing it surrenders exactly what the encryption was protecting.
+    // `*.key` does not cover it (this ends in `.keys`), and a repo that lists the three
+    // classic .env patterns literally satisfied every check while leaving it trackable.
+    pattern: ".env.keys",
+    reason: "dotenvx private keys (decrypt every encrypted .env)",
+    aliases: [".env*"],
+  },
   { pattern: "node_modules", reason: "dependency tree", aliases: ["node_modules/"] },
   // Ignore kit's local-state CONTENTS via `.kit/*` (not the wholesale `.kit/`):
   // git won't descend into a wholesale-excluded dir, so a later `!.kit/shared/`

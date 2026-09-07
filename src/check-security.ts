@@ -581,8 +581,17 @@ async function checkEnvGitignored(root: string): Promise<SecurityCheckResult> {
   try {
     const gitignoreContent = await readFile(resolve(root, ".gitignore"), "utf-8");
 
-    const envPatterns = [".env", ".env.local", ".env.*.local"];
-    const missingPatterns = envPatterns.filter((pattern) => !gitignoreContent.includes(pattern));
+    // .env.keys is the dotenvx private keyfile: same must-be-ignored class as .env.local.
+    const envPatterns = [".env", ".env.local", ".env.*.local", ".env.keys"];
+    // `.env*` covers all of them, so accept it rather than reporting a repo that uses the
+    // glob as missing four patterns.
+    const hasEnvGlob = gitignoreContent
+      .split("\n")
+      .map((line) => line.trim())
+      .includes(".env*");
+    const missingPatterns = hasEnvGlob
+      ? []
+      : envPatterns.filter((pattern) => !gitignoreContent.includes(pattern));
 
     if (missingPatterns.length === 0) {
       return {

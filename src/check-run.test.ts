@@ -26,7 +26,11 @@ describe("runCheckGate", () => {
     // isolated fixture so the run is about the fixture and stays fast.
     originalCwd = process.cwd();
     tempDir = await mkdtemp(join(tmpdir(), "kit-check-run-"));
-    await writeFile(join(tempDir, ".gitignore"), ".env\n.env.local\n.env.*.local\n", "utf-8");
+    await writeFile(
+      join(tempDir, ".gitignore"),
+      ".env\n.env.local\n.env.*.local\n.env.keys\n",
+      "utf-8",
+    );
     await writeFile(
       join(tempDir, ".kit.toml"),
       `[secrets.keys]\nAPP_KEY = { source = "config", value = "hello" }\n`,

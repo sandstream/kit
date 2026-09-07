@@ -5,6 +5,7 @@ __pycache__/
 .env
 .env.local
 .env.*.local
+.env.keys
 .env.*.backup
 *.prod-backup
 *.pem

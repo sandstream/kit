@@ -43,7 +43,10 @@ function projectWithGitignore(): string {
     join(dir, "package.json"),
     JSON.stringify({ name: "a", version: "1.0.0", private: true }) + "\n",
   );
-  writeFileSync(join(dir, ".gitignore"), ".env\n.env.local\n.env.*.local\nnode_modules\n");
+  writeFileSync(
+    join(dir, ".gitignore"),
+    ".env\n.env.local\n.env.*.local\n.env.keys\nnode_modules\n",
+  );
   return dir;
 }
 
@@ -404,7 +407,7 @@ describe("runCheckGate threads cwd to the dimensions that read the filesystem", 
 
   it("the security verdict describes the requested project, not the server's", async () => {
     const { runCheckGate } = await import("./check-run.js");
-    const A = project(".env\n.env.local\n.env.*.local\nnode_modules\n", null);
+    const A = project(".env\n.env.local\n.env.*.local\n.env.keys\nnode_modules\n", null);
     const B = project(null, null);
     try {
       const aboutB = await inCwd(A, () => runCheckGate({ cwd: B, categories: ["security"] }));
