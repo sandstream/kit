@@ -598,14 +598,14 @@ describe("countTombstones (verified-forget receipts, G1)", () => {
     forgetMemory(db, "u1", "first reason");
     assert.equal(countTombstones(db), 1);
 
-    // Same uuid captured again (a re-imported transcript line) and forgotten again.
-    // The receipt table is keyed by uuid and upserts, so the count stays at 1.
-    insertMessage(db, {
-      uuid: "u1",
-      sessionId: "s1",
-      type: "user",
-      content: "replacement content",
-    });
+    // A second row under the same uuid, written RAW on purpose: insertMessage now refuses a
+    // tombstoned uuid (MP-1-r1, proved in memory/forget.test.ts), so a re-import can no
+    // longer resurrect it. What is under test here is the receipt table's upsert, which
+    // still has to hold for a row that reached the store some other way, such as a merge
+    // from a store written before tombstones existed.
+    db.prepare(
+      "INSERT INTO messages (uuid, session_id, type, content) VALUES ('u1', 's1', 'user', 'replacement content')",
+    ).run();
     const second = forgetMemory(db, "u1", "second reason");
     assert.equal(second.ok, true);
     assert.equal(countTombstones(db), 1);

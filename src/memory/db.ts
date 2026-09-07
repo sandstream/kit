@@ -400,9 +400,16 @@ export function upsertSession(db: DatabaseSync, s: SessionInput): void {
 }
 
 /** Insert a message idempotently (by uuid). Returns true if a new row was added.
- *  Returns false when the row already exists OR the capture-time write-gate (G1)
- *  rejects it (schema-invalid always; injection/oversize under KIT_MEMORY_WRITE_ENFORCE). */
+ *  Returns false when the row already exists, the uuid carries a forget tombstone, OR
+ *  the capture-time write-gate (G1) rejects it (schema-invalid always; injection/oversize
+ *  under KIT_MEMORY_WRITE_ENFORCE). */
 export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
+  // A forgotten uuid stays forgotten (MP-1-r1). mergeDb has always refused a tombstoned
+  // uuid; this path had not, so the next re-index of the still-present transcript line
+  // resurrected the row, with the same id, content and FTS terms. That made verified
+  // forget hold only until something re-read the source. Keyed on the uuid, not the
+  // content hash: an edited line under the same id is the same forgotten message.
+  if (db.prepare("SELECT 1 FROM memory_tombstones WHERE uuid = ?").get(m.uuid)) return false;
   const content = captureText(m.content);
   // Capture-time WRITE-GATE (G1): authorize the row BEFORE it lands. Fail closed
   // toward the prompt — any unexpected gate error quarantines (warn) or rejects
