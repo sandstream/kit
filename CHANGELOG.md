@@ -93,6 +93,30 @@
   before the policy and rolls the signature back when the apply fails, so an
   interrupted pull can never leave a new policy sitting under an old signature.
 
+- **Redaction gaps beyond the pattern list.** Env-name-based redaction (`kit
+  run`, MCP `kit_run`) missed common but unrecognized secret-bearing names,
+  such as `PGPASSWORD`, `DB_PASS`, `MYSQL_PWD`, `AUTH_HEADER`, and
+  `WEBHOOK_URL`, because the matcher required an underscore boundary a glued
+  name like `PGPASSWORD` never has. The direct audit-log writer sanitized by
+  pattern and by env-value but not by metadata *key* name, so a field
+  literally named `password` persisted verbatim. Six of the seven plugin
+  management-API clients (all but `vercel`, already fixed) surfaced raw
+  upstream error bodies with no redaction, so a provider echoing a bearer
+  token back in an error message leaked it into a thrown `Error`; they now
+  redact the same way vercel does. And the shared-memory write gate had no
+  pattern for a `?token=`/`&access_token=` query-string credential or a
+  generic (non-JWT) `Bearer <token>` header value, so those forms could reach
+  the committed, world-readable `.kit/shared/memory.jsonl`.
+
+- **Read-only mode still wrote local state.** `.kit-budget.json`,
+  `.kit/sentinel.json`, and `.kit/runs/*.json` were all written
+  unconditionally, so an audited read-only session left untracked files
+  behind despite the "all writes will be refused" banner. All three now
+  check `KIT_READ_ONLY` before touching disk. (Global `~/.kit` state, namely
+  `memory.db` and the per-machine `device-id`, is out of scope: it lives
+  outside the audited project tree, never shows up in that repo's `git
+  status`, and is machine identity rather than project mutation.)
+
 ## [6.11.0] - 2026-08-30
 
 ### Added

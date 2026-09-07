@@ -13,6 +13,7 @@
  */
 import { mkdirSync, writeFileSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { isReadOnlyMode } from "./read-only-mode.js";
 
 export const RUNS_DIR = join(".kit", "runs");
 /** How many runs to keep. Enough for an agent's check → fix → check loop to look back. */
@@ -32,6 +33,10 @@ export function writeCheckDetail(
   payload: unknown,
   stamp: number,
 ): { path: string; hint: string } | null {
+  // Read-only mode promises "all writes will be refused"; this cache is a write like any
+  // other, so it must not persist behind that banner's back (RO-5: it used to, leaving an
+  // untracked `.kit/runs/` directory in an audited read-only repo).
+  if (isReadOnlyMode()) return null;
   const dir = join(cwd, RUNS_DIR);
   const file = join(dir, `check-${stamp}.json`);
   try {

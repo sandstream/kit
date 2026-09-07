@@ -102,8 +102,14 @@ function redactAuditEvent(event: AuditEvent): AuditEvent {
     operation: redactSecrets(event.operation, knownSecrets),
     environment: redactSecrets(event.environment, knownSecrets),
     error: event.error ? redactSecrets(event.error, knownSecrets) : event.error,
+    // Redact by metadata KEY NAME (sanitizeMetadata) before the pattern/env-value pass
+    // (redactAuditValue): a field literally named `password` carrying a low-entropy,
+    // no-known-pattern value (e.g. "hunter2") is invisible to both of the other checks.
     metadata: event.metadata
-      ? (redactAuditValue(event.metadata, knownSecrets) as Record<string, unknown>)
+      ? (redactAuditValue(
+          sanitizeMetadata(event.metadata),
+          knownSecrets,
+        ) as Record<string, unknown>)
       : event.metadata,
   };
 }

@@ -88,6 +88,40 @@ describe("shared project memory (Track D)", () => {
     rmSync(r, { recursive: true, force: true });
   });
 
+  it("refuses a URL query-string token or a Bearer header value (RED-5)", () => {
+    const r = root();
+    assert.throws(
+      () =>
+        shareEntry(
+          r,
+          {
+            area: "ops",
+            kind: "how-built",
+            title: "webhook",
+            body: "callback: https://hooks.example.com/x?token=oPaQu3WebhookToken1234567890",
+          },
+          "t",
+        ),
+      /secret/,
+    );
+    assert.throws(
+      () =>
+        shareEntry(
+          r,
+          {
+            area: "ops",
+            kind: "how-built",
+            title: "api call",
+            body: "curl -H 'Authorization: Bearer opaqueBearerTokenValue1234567890' ...",
+          },
+          "t",
+        ),
+      /secret/,
+    );
+    assert.equal(readShared(r).length, 0);
+    rmSync(r, { recursive: true, force: true });
+  });
+
   it("lists areas with counts and queries one area", () => {
     const r = root();
     shareEntry(r, { area: "stripe", kind: "decision", title: "a", body: "x" }, "t1");

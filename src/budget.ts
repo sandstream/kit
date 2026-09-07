@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import type { GovernanceConfig } from "./config.js";
 import { mergeGovernanceConfig } from "./governance.js";
+import { isReadOnlyMode } from "./read-only-mode.js";
 
 const BUDGET_STATE_FILE = ".kit-budget.json";
 
@@ -98,9 +99,14 @@ async function loadBudgetState(): Promise<BudgetState> {
 }
 
 /**
- * Save budget state to file
+ * Save budget state to file.
+ *
+ * Read-only mode promises "all writes will be refused"; this bookkeeping file is
+ * a write like any other, so it must not persist behind that banner's back (RO-5:
+ * it used to, leaving an untracked `.kit-budget.json` in an audited read-only repo).
  */
 async function saveBudgetState(state: BudgetState): Promise<void> {
+  if (isReadOnlyMode()) return;
   const statePath = resolve(process.cwd(), BUDGET_STATE_FILE);
 
   try {

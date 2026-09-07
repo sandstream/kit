@@ -7,6 +7,7 @@ import {
   safeStatusLine,
   findSecrets,
   shannonEntropy,
+  secretValuesFromEnv,
   SECRET_PATTERNS,
   SECRET_SHAPE_COUNT,
   secretShapeLabels,
@@ -229,6 +230,64 @@ describe("redactSecrets", () => {
     const secret = "opaque-provider-value-" + "z".repeat(20);
     const out = redactSecrets(`request_id=req_exact rejected ${secret}`, [secret]);
     assert.equal(out, "request_id=req_exact rejected [REDACTED]");
+  });
+});
+
+describe("secretValuesFromEnv: common but unrecognized secret-bearing names (RED-2)", () => {
+  it("catches PGPASSWORD, glued directly onto PG with no separator", () => {
+    const values = secretValuesFromEnv({ PGPASSWORD: "hunter2-pg-secret-value" });
+    assert.deepEqual(values, ["hunter2-pg-secret-value"]);
+  });
+
+  it("catches DB_PASS and MYSQL_PWD (short password aliases)", () => {
+    const values = secretValuesFromEnv({
+      DB_PASS: "db-pass-secret-value",
+      MYSQL_PWD: "mysql-pwd-secret-value",
+    });
+    assert.deepEqual(values.sort(), ["db-pass-secret-value", "mysql-pwd-secret-value"]);
+  });
+
+  it("catches AUTH_HEADER", () => {
+    const values = secretValuesFromEnv({ AUTH_HEADER: "Bearer opaque-header-secret-value" });
+    assert.deepEqual(values, ["Bearer opaque-header-secret-value"]);
+  });
+
+  it("catches WEBHOOK_URL (a query-string token commonly rides here)", () => {
+    const values = secretValuesFromEnv({
+      WEBHOOK_URL: "https://hooks.example.com/x?token=opaque-webhook-secret-value",
+    });
+    assert.deepEqual(values, ["https://hooks.example.com/x?token=opaque-webhook-secret-value"]);
+  });
+});
+
+describe("redactSecrets / findSecrets: query-token + Bearer header (RED-5)", () => {
+  it("redacts a ?token= query-string value but keeps the URL/path as context", () => {
+    const out = redactSecrets(
+      "webhook: https://hooks.example.com/x?token=oPaQu3WebhookToken1234567890",
+    );
+    assert.ok(!out.includes("oPaQu3WebhookToken1234567890"));
+    assert.match(out, /https:\/\/hooks\.example\.com\/x\?token=\[REDACTED\]/);
+  });
+
+  it("redacts an &access_token= query-string value mid-URL", () => {
+    const out = redactSecrets("cb=https://api.example.com/cb?state=x&access_token=abcDEF0123456789ghijKLMN");
+    assert.ok(!out.includes("abcDEF0123456789ghijKLMN"));
+    assert.match(out, /access_token=\[REDACTED\]/);
+    assert.match(out, /state=x/);
+  });
+
+  it("redacts a generic 'Bearer <token>' header value that isn't JWT-shaped", () => {
+    const out = redactSecrets("Authorization: Bearer opaqueBearerTokenValue1234567890");
+    assert.ok(!out.includes("opaqueBearerTokenValue1234567890"));
+    assert.match(out, /Bearer \[REDACTED\]/);
+  });
+
+  it("findSecrets reports the same two gaps", () => {
+    const labels = findSecrets(
+      "https://x.test/a?token=oPaQu3WebhookToken1234567890 and Authorization: Bearer opaqueBearerTokenValue1234567890",
+    ).map((f) => f.label);
+    assert.ok(labels.includes("url-query-token"));
+    assert.ok(labels.includes("bearer-header"));
   });
 });
 

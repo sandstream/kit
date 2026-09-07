@@ -35,4 +35,30 @@ describe("audit env-aware redaction", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("redacts by metadata KEY NAME too, not just by pattern/env-value (RED-3)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-audit-metadata-key-"));
+    try {
+      // "hunter2" matches no known credential shape and isn't a process-env value:
+      // only a key-name check (metadata.password) can catch it.
+      const ok = await appendAuditEventDirect(
+        {
+          operation: "login attempt",
+          environment: "dev",
+          success: false,
+          metadata: { username: "alice", password: "hunter2" },
+        },
+        { cwd: root },
+      );
+
+      assert.equal(ok, true);
+      const raw = readFileSync(join(root, ".kit-audit.jsonl"), "utf8");
+      assert.ok(!raw.includes("hunter2"));
+      assert.match(raw, /\[REDACTED\]/);
+      assert.match(raw, /alice/);
+      assert.equal(verifyAuditChain(raw).ok, true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

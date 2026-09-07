@@ -182,6 +182,24 @@ export const SECRET_PATTERNS: RedactPattern[] = [
     label: "url-token-userinfo",
     replacement: "$1[REDACTED]@",
   },
+  // Token/key riding in a URL QUERY STRING (`?token=`, `&access_token=`, ...): the other
+  // common place a webhook/OAuth/callback URL carries a credential besides the userinfo
+  // forms above. A common but generic param name is followed by `=` and a 12+ char value;
+  // redact only the value so the URL/path stays diagnostic context.
+  {
+    re: /\b((?:token|access_token|api_key|apikey|auth_token|session_token)=)[A-Za-z0-9_\-+/%.]{12,}/gi,
+    label: "url-query-token",
+    replacement: "$1[REDACTED]",
+  },
+  // `Authorization: Bearer <token>` header text with an opaque (non-JWT-shaped) value.
+  // The `jwt` pattern above only catches the `eyJ...` form; a provider that issues a
+  // plain opaque bearer token (not a JWT) reflected into a log/error string slipped
+  // through entirely.
+  {
+    re: /\bBearer\s+[A-Za-z0-9_\-+/.=]{16,}/gi,
+    label: "bearer-header",
+    replacement: "Bearer [REDACTED]",
+  },
   // Generic high-entropy hex tokens (32+ hex chars) — last resort
   // Skipped intentionally: too many false-positives against commit hashes.
 ];
@@ -203,8 +221,13 @@ export function secretShapeLabels(): string[] {
 }
 
 const MIN_KNOWN_SECRET_LENGTH = 8;
+// Anchored to a `_`/start/end boundary per keyword, so e.g. "MONKEY_RUN_ID" (contains "KEY"
+// mid-word) or "COMPASS_DIRECTION" (contains "PASS" mid-word) don't false-positive. PASSWORD
+// is the exception, split out unanchored-on-the-left below because common DB env vars glue it directly
+// onto a prefix with no separator (PGPASSWORD, MYSQLPASSWORD) and there's no legitimate name
+// that merely ends in "...password" without meaning one.
 const SECRET_ENV_NAME =
-  /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|CREDENTIALS?|DSN|DATABASE_URL|REDIS_URL|MONGODB_URI)(?:_|$)/i;
+  /(?:^|_)(?:KEY|TOKEN|SECRET|PASSPHRASE|CREDENTIALS?|DSN|DATABASE_URL|REDIS_URL|MONGODB_URI|PASS|PWD|AUTH|HEADER|URL)(?:_|$)|PASSWORD$/i;
 
 export function secretValuesFromEnv(env: Readonly<Record<string, string | undefined>>): string[] {
   return Object.entries(env)

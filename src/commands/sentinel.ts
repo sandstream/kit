@@ -11,6 +11,7 @@ import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { loadConfig, type kitConfig } from "../config.js";
 import { resolveConfigPath, buildHealthCtx } from "../cli-shared.js";
+import { isReadOnlyMode } from "../read-only-mode.js";
 import type { SentinelSummary } from "../sentinel.js";
 
 export async function cmdSentinel(): Promise<boolean> {
@@ -76,12 +77,18 @@ export async function cmdSentinel(): Promise<boolean> {
 
   // L3: cache a compact summary for the SessionStart surface (#53). Best-effort —
   // a cache-write failure must never fail the run itself.
-  try {
-    const cachePath = resolve(process.cwd(), SENTINEL_CACHE);
-    await mkdir(dirname(cachePath), { recursive: true });
-    writeFileSync(cachePath, JSON.stringify(proposalSummary(proposals), null, 2) + "\n");
-  } catch {
-    // no cache → status surface simply stays quiet
+  //
+  // Read-only mode promises "all writes will be refused"; this cache is a write like
+  // any other, so it must not persist behind that banner's back (RO-5: it used to,
+  // leaving an untracked `.kit/sentinel.json` in an audited read-only repo).
+  if (!isReadOnlyMode()) {
+    try {
+      const cachePath = resolve(process.cwd(), SENTINEL_CACHE);
+      await mkdir(dirname(cachePath), { recursive: true });
+      writeFileSync(cachePath, JSON.stringify(proposalSummary(proposals), null, 2) + "\n");
+    } catch {
+      // no cache → status surface simply stays quiet
+    }
   }
 
   if (jsonMode) {

@@ -15,6 +15,29 @@
 const DEFAULT_BASE_URL = "https://api.stripe.com";
 const API_VERSION = "2024-12-18.acacia";
 
+// Stripe API errors (and the raw HTTP body) can echo back caller-supplied or
+// provider-side credentials verbatim. Mirrors the redaction the vercel plugin
+// already ships, using the same pattern list, same client-bound known-secrets lookup.
+const ERROR_SECRET_PATTERNS: RegExp[] = [
+  /\b(?:sk|pk|rk)_(?:test|live)_[A-Za-z0-9]{20,}/g,
+  /\bwhsec_[A-Za-z0-9]{20,}/g,
+  /\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{30,}/g,
+  /\bgithub_pat_[A-Za-z0-9_]{60,}/g,
+  /\bsk-(?:proj|ant|svcacct|admin)-[A-Za-z0-9_-]{20,}/g,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+];
+
+function redactErrorText(input: string, knownSecrets: readonly string[] = []): string {
+  let output = input;
+  for (const value of [...new Set(knownSecrets)].filter((value) => value.length >= 8)) {
+    output = output.split(value).join("[REDACTED]");
+  }
+  for (const pattern of ERROR_SECRET_PATTERNS) output = output.replace(pattern, "[REDACTED]");
+  return output
+    .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/[^\s:@/]{0,128}:)[^\s@/]{3,256}@/gi, "$1[REDACTED]@")
+    .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/)[A-Za-z0-9._~%+-]{16,256}@/gi, "$1[REDACTED]@");
+}
+
 /**
  * Refuses mutating ops when KIT_READ_ONLY=1 is set. Called from each
  * write surface (createWebhookEndpoint, deleteWebhookEndpoint). Throws so
@@ -65,12 +88,22 @@ export interface MgmtClient {
   mode: StripeMode;
 }
 
+const CLIENT_SECRETS = new WeakMap<MgmtClient, readonly string[]>();
+
+/** Known secrets for this client: the bound key plus whatever the Authorization header
+ * carries (covers a client built by hand, not via makeClient). */
+function clientSecrets(client: MgmtClient): string[] {
+  const authorization = new Headers(client.headers).get("authorization") ?? "";
+  const bearer = /^Bearer\s+(.+)$/i.exec(authorization)?.[1];
+  return [...(CLIENT_SECRETS.get(client) ?? []), ...(bearer ? [bearer] : [])];
+}
+
 export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
   const secretKey = cfg.secretKey ?? process.env.STRIPE_SECRET_KEY;
   if (!secretKey) {
     throw new Error("STRIPE_SECRET_KEY not set — fetch from https://dashboard.stripe.com/apikeys");
   }
-  return {
+  const client = {
     baseUrl: cfg.baseUrl ?? DEFAULT_BASE_URL,
     headers: {
       Authorization: `Bearer ${secretKey}`,
@@ -79,6 +112,8 @@ export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
     },
     mode: detectMode(secretKey),
   };
+  CLIENT_SECRETS.set(client, [secretKey]);
+  return client;
 }
 
 export function detectMode(secretKey: string): StripeMode {
@@ -175,7 +210,7 @@ export async function createWebhookEndpoint(
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
-    throw new Error(`POST /v1/webhook_endpoints returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(`POST /v1/webhook_endpoints returned ${res.status}: ${await safeText(res, client)}`);
   }
   return (await res.json()) as WebhookEndpoint;
 }
@@ -186,7 +221,7 @@ export async function listWebhookEndpoints(client: MgmtClient): Promise<WebhookE
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
-    throw new Error(`GET /v1/webhook_endpoints returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(`GET /v1/webhook_endpoints returned ${res.status}: ${await safeText(res, client)}`);
   }
   const body = (await res.json()) as { data: WebhookEndpoint[] };
   return body.data ?? [];
@@ -203,7 +238,7 @@ export async function deleteWebhookEndpoint(
     { method: "DELETE", headers: client.headers, signal: AbortSignal.timeout(10_000) },
   );
   if (!res.ok && res.status !== 404) {
-    throw new Error(`DELETE webhook_endpoint returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(`DELETE webhook_endpoint returned ${res.status}: ${await safeText(res, client)}`);
   }
 }
 
@@ -222,15 +257,15 @@ export async function getAccount(client: MgmtClient): Promise<AccountSummary> {
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
-    throw new Error(`GET /v1/account returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(`GET /v1/account returned ${res.status}: ${await safeText(res, client)}`);
   }
   return (await res.json()) as AccountSummary;
 }
 
-async function safeText(res: Response): Promise<string> {
+async function safeText(res: Response, client: MgmtClient): Promise<string> {
   try {
     const t = await res.text();
-    return t.slice(0, 200);
+    return redactErrorText(t, clientSecrets(client)).slice(0, 200);
   } catch {
     return "<no body>";
   }
