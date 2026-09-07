@@ -171,6 +171,34 @@ describe("cloneRepository", () => {
     assert(result.message.includes("Failed to clone"), "Should have error message");
   });
 
+  // RED-1: git's own "Command failed: git clone -- <url> ..." error text quotes the
+  // full URL, and a private clone target may legitimately carry a credential in it.
+  it("redacts an embedded credential from a failed clone's error message", async () => {
+    const token = `ghp_${"A".repeat(40)}`;
+    const opts = {
+      repoUrl: `https://u:${token}@github.com/nonexistent-user-12345/nonexistent-repo-98765.git`,
+      targetDir: "fail-test-creds",
+      cwd: tmpDir,
+    };
+    const result = await cloneRepository(opts);
+
+    assert.equal(result.success, false, "Should fail for invalid repo");
+    assert.ok(!result.message.includes(token), `message must not leak the token: ${result.message}`);
+  });
+
+  it("redacts an embedded credential from a refused (unsafe transport) repo URL", async () => {
+    const token = `ghp_${"A".repeat(40)}`;
+    const opts = {
+      repoUrl: `ext::sh -c "echo https://u:${token}@evil.example/x.git"`,
+      cwd: tmpDir,
+    };
+    const result = await cloneRepository(opts);
+
+    assert.equal(result.success, false);
+    assert.match(result.message, /Refused to clone/);
+    assert.ok(!result.message.includes(token), `message must not leak the token: ${result.message}`);
+  });
+
   it("includes clonedPath in result even on failure", async () => {
     const opts = {
       repoUrl: "not-a-valid-repo-url",

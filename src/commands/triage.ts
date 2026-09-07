@@ -9,6 +9,7 @@ import { scanPluginManifest, manifestHasHighRisk } from "../plugin-triage.js";
 import { triageVaultConfig } from "../vault-triage.js";
 import { triageModelArtifact } from "../model-artifact-triage.js";
 import { existsSync, statSync } from "node:fs";
+import { redactSecrets } from "../utils/redactSecrets.js";
 
 export async function cmdTriage(): Promise<boolean> {
   const args = process.argv.slice(3);
@@ -106,7 +107,7 @@ export async function cmdTriage(): Promise<boolean> {
     return false;
   }
 
-  console.log(`${c.bold}Running triage on ${type}: ${target}${c.reset}\n`);
+  console.log(`${c.bold}Running triage on ${type}: ${redactSecrets(target)}${c.reset}\n`);
   const result = await runTriage(type as TriageType, target);
   console.log(result.output);
 

@@ -63,6 +63,18 @@ PYPI_INDEX = os.environ.get("KIT_PYPI_INDEX", "https://pypi.org").rstrip("/")
 GITHUB_API = os.environ.get("KIT_GITHUB_API", "https://api.github.com").rstrip("/")
 DOCKER_REGISTRY = os.environ.get("KIT_DOCKER_REGISTRY", "https://hub.docker.com").rstrip("/")
 
+_USERINFO_RE = re.compile(r"://[^\s/@]{1,256}@")
+
+
+def _strip_userinfo(s):
+    """Strip URL userinfo (`user:pass@` / `token@`) before a target reaches stdout.
+
+    A `triage repo <url>` target can carry a credential in its URL userinfo (embedded
+    for a private clone); every place that echoes the raw target back to the operator
+    must not leak that credential.
+    """
+    return _USERINFO_RE.sub("://", str(s))
+
 
 def _get_json(url, headers=None):
     h = dict(UA)
@@ -135,8 +147,10 @@ class Report:
     def emit(self):
         score = max(0, 100 - 45 * len(self.criticals) - 12 * len(self.warnings))
         # Sanitize the echoed target: it is attacker-influenceable, and a newline
-        # in it could otherwise forge a standalone "TRIAGE PASSED" verdict line.
-        safe_target = str(self.target).replace("\n", " ").replace("\r", " ")
+        # in it could otherwise forge a standalone "TRIAGE PASSED" verdict line. It
+        # may also carry embedded URL credentials (`repo` targets clone over https),
+        # which must not reach stdout/CI logs either.
+        safe_target = _strip_userinfo(str(self.target).replace("\n", " ").replace("\r", " "))
         print(f"Triage: {self.ttype} {safe_target}")
         print("-" * 50)
         for f in self.facts:
@@ -553,17 +567,26 @@ def _owner_repo(target):
     and `git@github.com:owner/repo[.git]`.
     """
     t = target.strip()
+    # Every refusal below echoes the target back to the operator; strip URL
+    # credentials from it first (userinfo in an https target is a valid, if
+    # unsupported-host, spelling of a private clone target).
+    safe = _strip_userinfo(target)
     # scp-style `git@host:owner/repo` -> `host/owner/repo`, so one path below fits both.
     scp = re.match(r"^[\w.+-]+@([\w.-]+):(.+)$", t)
     if scp:
         t = f"{scp.group(1)}/{scp.group(2)}"
     else:
         t = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", t)
+        # Strip `user:pass@` / `token@` userinfo left over from an https:// target: without
+        # this, the dot in a host like "evil.example" made the whole userinfo+host segment
+        # look like a hostname below, promoting the credential into the `host` variable
+        # and, through it, into the "cannot check {host}" refusal message.
+        t = re.sub(r"^[^/@]*@", "", t)
     t = t.split("?")[0].split("#")[0]
 
     parts = [p for p in t.split("/") if p]
     if not parts:
-        return None, f"could not parse owner/repo from '{target}'"
+        return None, f"could not parse owner/repo from '{safe}'"
 
     if parts[0].lower().startswith("www."):
         parts[0] = parts[0][4:]
@@ -573,17 +596,17 @@ def _owner_repo(target):
         host = parts.pop(0).lower()
         if host not in _REPO_HOSTS and host not in _REPO_PATH_HOSTS:
             return None, (
-                f"'{target}' is not a github.com repo URL -- this probe verifies repos "
+                f"'{safe}' is not a github.com repo URL -- this probe verifies repos "
                 f"through the GitHub API and cannot check {host}"
             )
 
     if len(parts) < 2:
-        return None, f"could not parse owner/repo from '{target}'"
+        return None, f"could not parse owner/repo from '{safe}'"
     owner, repo = parts[0], parts[1]
     if repo.endswith(".git"):
         repo = repo[:-4]
     if not owner or not repo:
-        return None, f"could not parse owner/repo from '{target}'"
+        return None, f"could not parse owner/repo from '{safe}'"
     return f"{owner}/{repo}", None
 
 
