@@ -64,6 +64,40 @@ describe("GitHub workflow hardening", () => {
     assert.match(triage, /sha256sum --check/);
   });
 
+});
+
+describe("informational CI jobs can still fail", () => {
+  /**
+   * F1: the dogfood job's stated purpose is to PROVE kit's provisioning + scan path works
+   * end to end. Both of its real steps carried continue-on-error, so the job reported
+   * success no matter what happened and proved nothing. Informational has to mean "does
+   * not block the gate", which its absence from the gate's needs already achieves, not
+   * "cannot fail".
+   */
+  it("lets the dogfood job fail: its real steps are not swallowed (F1)", () => {
+    const security = workflow("security.yml");
+    const dogfood = section(security, "dogfood-scan", "gate");
+    assert.match(dogfood, /node dist\/cli\.js install/);
+    assert.match(dogfood, /run-security-check\.mjs/);
+    assert.doesNotMatch(
+      dogfood,
+      /continue-on-error/,
+      "a job that claims to prove something must be able to report failure",
+    );
+  });
+
+  it("keeps the dogfood job out of the gate, so a red run informs without blocking", () => {
+    const gate = workflow("security.yml").slice(
+      workflow("security.yml").indexOf("\n  gate:"),
+    );
+    const needs = gate.slice(gate.indexOf("needs:"), gate.indexOf("runs-on:"));
+    assert.doesNotMatch(needs, /dogfood/);
+    assert.match(needs, /self-audit/);
+  });
+
+});
+
+describe("GitHub workflow standards gate", () => {
   it("provisions the pinned standards tools and runs the full standards gate in CI", () => {
     const ci = workflow("ci.yml");
     assert.match(ci, /uses:\s*jdx\/mise-action@[a-f0-9]{40}\s*#\s*v4\.3\.0/);

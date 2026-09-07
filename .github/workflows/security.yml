@@ -349,9 +349,13 @@ jobs:
 
   # kit dogfood — provision the scanners declared in .kit.toml [tools] via
   # `kit install` (mise), then run kit's own security scan with them present.
-  # Proves kit's provisioning + scan path works end-to-end. INFORMATIONAL ONLY:
-  # not in the `gate` needs, and each step is continue-on-error, so a finding
-  # never blocks — the gating trivy/gitleaks live in the dedicated stages above.
+  # Proves kit's provisioning + scan path works end-to-end.
+  #
+  # INFORMATIONAL, which means it does not BLOCK: it is absent from the `gate`
+  # needs, so a red run here never fails the required check (the gating
+  # trivy/gitleaks live in the dedicated stages above). It does not mean the job
+  # cannot fail. Both steps used to carry continue-on-error, so the job reported
+  # success whatever happened and proved nothing it claimed to prove.
   dogfood-scan:
     name: kit dogfood (provision + scan)
     runs-on: ubuntu-latest
@@ -365,10 +369,8 @@ jobs:
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
       - name: Provision declared tools via kit install (triage-gated)
         run: node dist/cli.js install
-        continue-on-error: true # kit-self-audit: allow-continue-on-error
       - name: Run kit's security scan with trivy + trufflehog present
         run: node scripts/run-security-check.mjs
-        continue-on-error: true # kit-self-audit: allow-continue-on-error
 
   # Aggregated gate — all stages must pass
   gate:
