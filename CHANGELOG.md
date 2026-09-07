@@ -27,9 +27,64 @@
 - **Generated monkey harness evaluated at runtime.** The role matrix validator
   embedded in the generated Playwright spec called module-private helpers that
   were never embedded, so the generated harness threw `ReferenceError` on load
-  and registered no tests. The validator is now self-contained, and a test
+  and registered no tests. The whole helper chain now travels with it, and a test
   evaluates the generated spec against a stub Playwright to assert all five role
   crawls plus the money flow register.
+
+- **Read-only mode could be bypassed three ways.** `--read-only=1` and
+  `--readonly=true` were not recognized at all, so the flag silently did nothing;
+  a value that is not truthy is now a usage error (exit 2) instead. A policy
+  `default_mode = "read-only"` deferred to `KIT_READ_ONLY`'s mere presence, so
+  `KIT_READ_ONLY=0` disabled it; policy now wins regardless of the value. An
+  unrecognized subcommand (`kit secrets zzz`, `kit check zzz --attest`) fell
+  through to the command's default write action, in both the handlers and the
+  write-surface classifier.
+
+- **Credentials in a target URL reached stdout.** `kit clone` and `kit triage`
+  echoed the target back verbatim, including any credential in its userinfo, and
+  a failed clone quoted git's own error text with the full command line. Every
+  echo site is redacted now, in the CLI and in the bundled triage skill.
+
+- **A non-executable git hook read as installed.** git silently ignores a hook
+  file without an execute bit. `kit hooks check`, `kit check` and `kit doctor`
+  reported such a hook as up to date, which is worse than reporting it missing:
+  the gate looked on while nothing ran. It is a failure now, with the reason
+  named.
+
+- **`kit policy pull` verified one thing and installed another.** The pulled pair
+  was verified in a staging directory and then installed by re-reading the
+  source, so a source that changed in between had its unverified bytes installed
+  under a "verified" verdict. It installs the verified bytes now. The `revision`
+  ratchet the policy schema documents is also enforced at last: a pull whose
+  revision is lower than the applied one, or absent while one is applied, is
+  refused instead of silently rolling policy back.
+
+- **Monkey-test gates that could not fail.** The browser-evidence check counted a
+  contract case on Playwright's `status: "expected"`, which a `test.fail()` spec
+  satisfies by failing, so the role and money-flow gates could be satisfied by
+  tests that never passed. The route crawl also accepted a page's own text as
+  proof of an authorization denial, so a 200 that merely mentioned "forbidden"
+  counted as denied, and it scanned for cross-org data leaks only on routes it
+  considered allowed, skipping the denial pages where such a leak is most likely.
+
+- **A forgotten memory row came back on the next re-index.** `kit memory forget`
+  deleted the row and recorded a receipt, but the indexer did not consult
+  tombstones, so re-reading the same transcript restored the row with its
+  original id, content and search terms.
+
+- **`.env.keys` was not required to be gitignored.** The file holds the dotenvx
+  private keys that decrypt every encrypted `.env` in a repo, and `*.key` does
+  not match it. It is now required, and `kit check-gitignore --fix` writes it.
+
+- **Container image shipped its build dependencies.** The runtime stage copied
+  the builder's `node_modules`, so the published CLI image carried typescript,
+  eslint and esbuild: 170 packages where kit has four runtime dependencies. The
+  image is 376MB instead of 460MB, and its own header no longer claims "~100MB".
+
+- **A CI job that could not report failure.** The dogfood job exists to prove
+  kit's provisioning and scan path works end to end, and both of its steps
+  swallowed their exit code. Informational means it does not block the gate,
+  which its absence from the gate's dependencies already achieves.
 
 - **Redaction hardening.** Vercel Management API error text and audit
   environment output are redacted before they reach logs or reports.
