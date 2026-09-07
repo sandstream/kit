@@ -38,6 +38,7 @@ import {
   POLICY_SIG_FILE,
   getPolicyPath,
   getPolicySigPath,
+  loadPolicy,
   verifyPolicy,
   type PolicyVerifyStatus,
 } from "./policy-doc.js";
@@ -52,6 +53,13 @@ export type PullStatus =
   | "no-anchor"
   /** Verification did not return "valid"; the policy was NOT applied (kept existing). */
   | PolicyVerifyStatus
+  /**
+   * The pulled policy verified, but its `revision` would move the applied ratchet BACKWARD
+   * (lower, or absent while a revision is applied). Refused; the existing pair is kept.
+   * This is what stops a replay of an older, still-validly-signed policy from restoring a
+   * permission the org has since removed.
+   */
+  | "stale-revision"
   /** The verified pair could not be installed; the prior pair was retained or remains fail-closed. */
   | "apply-failed";
 
@@ -169,10 +177,91 @@ export function applyPolicyPairAtomically(
 }
 
 /**
+ * The one-way revision ratchet PolicyDoc.revision has always documented and nothing
+ * enforced (PP-02). Returns the refusal reason, or null when the pull may proceed.
+ *
+ * Read from the APPLIED policy on disk and from the VERIFIED staged copy, never from the
+ * source: the incoming revision is only a claim worth acting on once its signature has
+ * been checked. Opt-in and one-way: no applied revision means no ratchet yet (a fleet that
+ * has never published one is unaffected), and an equal revision is a re-apply, not a
+ * rollback. An absent incoming revision IS refused once one is applied, because "drop the
+ * revision key" would otherwise be the trivial way around the ratchet.
+ */
+function staleRevisionRefusal(destRoot: string, stage: string): string | null {
+  const applied = loadPolicy(destRoot)?.revision;
+  if (typeof applied !== "number") return null;
+
+  const incoming = loadPolicy(stage)?.revision;
+  if (typeof incoming !== "number") {
+    return `pulled policy declares no revision while revision ${applied} is applied: refusing a bundle that would drop rollback protection`;
+  }
+  if (incoming < applied) {
+    return `pulled policy revision ${incoming} is older than the applied revision ${applied}: refusing a rollback`;
+  }
+  return null;
+}
+
+export interface PullPolicyDeps {
+  /**
+   * Called once verification has succeeded and before the pair is installed. The ONLY
+   * purpose is to make the verify-to-install window observable to a test, so the
+   * "installs what it verified" invariant (PP-01) can be asserted deterministically
+   * instead of raced. Same injected-seam precedent as `applyPolicyPairAtomically`'s
+   * `renameFile`. Production callers never pass it.
+   */
+  afterVerify?: () => void;
+}
+
+/**
+ * Decide and install, given a stage whose pair verifyPolicy has already accepted.
+ * Split out of `pullPolicy` to keep both halves inside the repo's function-length gate:
+ * this half owns the ratchet and the write, that half owns fetch, staging and verify.
+ */
+function installVerifiedPull(
+  destRoot: string,
+  stage: string,
+  verifyDetail: string,
+  fingerprint: string | undefined,
+  deps: PullPolicyDeps,
+): PullResult {
+  // Verified, so the incoming revision is now a claim worth ratcheting against (PP-02).
+  const stale = staleRevisionRefusal(destRoot, stage);
+  if (stale !== null) {
+    return { ok: false, status: "stale-revision", detail: `${stale} (kept existing)`, fingerprint };
+  }
+
+  deps.afterVerify?.();
+
+  // Install the STAGED bytes: the ones verifyPolicy just accepted. Re-reading the source
+  // here reopened the whole verification window (PP-01). A source that changed after
+  // verification (a shared mount, a git checkout, an attacker with write access to the
+  // distribution dir) had its unverified bytes installed under a "verified" verdict.
+  // Never write or fetch the trust anchor.
+  const applied = applyPolicyPairAtomically(
+    destRoot,
+    readFileSync(join(stage, POLICY_FILE)),
+    readFileSync(join(stage, POLICY_SIG_FILE)),
+  );
+  if (!applied.ok) {
+    return {
+      ok: false,
+      status: "apply-failed",
+      detail: `verified policy NOT applied: ${applied.detail}`,
+      fingerprint,
+    };
+  }
+  return { ok: true, status: "applied", detail: `applied org policy: ${verifyDetail}`, fingerprint };
+}
+
+/**
  * Pull the signed policy at `source` into `destRoot`, applying it only if it verifies against
  * `destRoot`'s LOCAL trust anchor. Never throws; never writes `.kit-policy.signers`.
  */
-export function pullPolicy(source: string, destRoot: string): PullResult {
+export function pullPolicy(
+  source: string,
+  destRoot: string,
+  deps: PullPolicyDeps = {},
+): PullResult {
   const srcDir = pullSourceToPath(source);
   const srcPolicy = join(srcDir, POLICY_FILE);
   const srcSig = join(srcDir, POLICY_SIG_FILE);
@@ -212,26 +301,7 @@ export function pullPolicy(source: string, destRoot: string): PullResult {
       };
     }
 
-    // Verified → install the pair fail-closed; never write or fetch the trust anchor.
-    const applied = applyPolicyPairAtomically(
-      destRoot,
-      readFileSync(srcPolicy),
-      readFileSync(srcSig),
-    );
-    if (!applied.ok) {
-      return {
-        ok: false,
-        status: "apply-failed",
-        detail: `verified policy NOT applied — ${applied.detail}`,
-        fingerprint: v.fingerprint,
-      };
-    }
-    return {
-      ok: true,
-      status: "applied",
-      detail: `applied org policy — ${v.detail}`,
-      fingerprint: v.fingerprint,
-    };
+    return installVerifiedPull(destRoot, stage, v.detail, v.fingerprint, deps);
   } catch (error) {
     return {
       ok: false,

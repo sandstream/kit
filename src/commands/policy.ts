@@ -28,7 +28,7 @@ import {
   type PolicySignature,
 } from "../policy-doc.js";
 import { evaluatePolicy, formatPolicyEval } from "../policy-check.js";
-import { pullPolicy } from "../policy-pull.js";
+import { pullPolicy, type PullStatus } from "../policy-pull.js";
 import { pullRevocations } from "../revocation-pull.js";
 import { extractRbac } from "../rbac/policy-schema.js";
 import { mintApprovalToken, APPROVAL_TOKENS_FILE } from "../approval-tokens.js";
@@ -108,6 +108,24 @@ function policyApprove(root: string): boolean {
 }
 
 /**
+ * What to do about a refused pull. A "stale-revision" refusal needs its own line: that
+ * policy verified, so telling the operator it was "unsigned, tampered, or untrusted" would
+ * send them to debug a signature that is fine.
+ */
+function pullFailureHint(status: PullStatus): string {
+  switch (status) {
+    case "no-anchor":
+      return " — add trusted org keys with `kit policy trust add` (committed out of band)";
+    case "no-source":
+      return "";
+    case "stale-revision":
+      return " (the signature is valid; the pull was refused as a rollback). Publish a revision at or above the applied one";
+    default:
+      return " — the source policy is unsigned, tampered, or signed by an untrusted/revoked key";
+  }
+}
+
+/**
  * `kit policy pull <source>` — fetch an org-signed policy from a self-hostable source (a local
  * path or `file://` dir holding `.kit-policy.toml` + `.kit-policy.sig`) and apply it ONLY if it
  * verifies offline against this project's LOCAL `.kit-policy.signers` anchor. Fail-closed: anything
@@ -143,12 +161,7 @@ function policyPull(root: string): boolean {
     );
     return true;
   }
-  const hint =
-    r.status === "no-anchor"
-      ? " — add trusted org keys with `kit policy trust add` (committed out of band)"
-      : r.status === "no-source"
-        ? ""
-        : " — the source policy is unsigned, tampered, or signed by an untrusted/revoked key";
+  const hint = pullFailureHint(r.status);
   console.error(`${c.red}✗ policy pull failed${c.reset} ${c.dim}(${r.detail})${c.reset}${hint}`);
   return false;
 }
