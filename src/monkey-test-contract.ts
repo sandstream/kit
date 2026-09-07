@@ -259,18 +259,23 @@ export function unexpectedMonkeyFindings(
   );
 }
 
-const MONKEY_ROLE_IDS = ["public", "customer", "staff", "owner", "superadmin"] as const;
-const MONKEY_ROLE_LIST_KEYS = [
+// The role-matrix chain below is embedded verbatim into the generated Playwright
+// spec by monkey-test-harness-spec.ts, which is why every part of it is exported:
+// a helper left behind resolves to nothing in the generated file and throws
+// ReferenceError on load. monkey-test-harness-spec.test.ts evaluates the
+// generated spec and fails if a piece is missing.
+export const MONKEY_ROLE_IDS = ["public", "customer", "staff", "owner", "superadmin"] as const;
+export const MONKEY_ROLE_LIST_KEYS = [
   "allowRoutes",
   "denyRoutes",
   "requiredText",
   "forbiddenText",
 ] as const;
-const MONKEY_ROLE_ROUTE_KEYS = ["allowRoutes", "denyRoutes"] as const;
+export const MONKEY_ROLE_ROUTE_KEYS = ["allowRoutes", "denyRoutes"] as const;
 
 type MonkeyRoleListKey = (typeof MONKEY_ROLE_LIST_KEYS)[number];
 
-function configuredRoleEntries(value: unknown): unknown[] {
+export function configuredRoleEntries(value: unknown): unknown[] {
   const matrix = value as { configured?: unknown; roles?: unknown } | null;
   if (!matrix || typeof matrix !== "object" || matrix.configured !== true) {
     throw new Error("Monkey role matrix must be reviewed and set to configured: true.");
@@ -282,7 +287,7 @@ function configuredRoleEntries(value: unknown): unknown[] {
   return matrix.roles;
 }
 
-function isRoleWithId(
+export function isRoleWithId(
   candidate: unknown,
   id: MonkeyRole["id"],
 ): candidate is Record<string, unknown> {
@@ -291,13 +296,13 @@ function isRoleWithId(
   );
 }
 
-function requiredRole(entries: unknown[], id: MonkeyRole["id"]): Record<string, unknown> {
+export function requiredRole(entries: unknown[], id: MonkeyRole["id"]): Record<string, unknown> {
   const matching = entries.filter((candidate) => isRoleWithId(candidate, id));
   if (matching.length !== 1) throw new Error(`Monkey role matrix requires exactly one ${id}.`);
   return matching[0];
 }
 
-function requiredStringList(
+export function requiredStringList(
   role: Record<string, unknown>,
   id: MonkeyRole["id"],
   key: MonkeyRoleListKey,
@@ -316,7 +321,7 @@ function requiredStringList(
   return entries;
 }
 
-function requireSameOriginRoutes(
+export function requireSameOriginRoutes(
   routes: string[],
   id: MonkeyRole["id"],
   key: (typeof MONKEY_ROLE_ROUTE_KEYS)[number],
@@ -326,12 +331,12 @@ function requireSameOriginRoutes(
   }
 }
 
-function requireDisjointValues(included: string[], excluded: string[], message: string): void {
+export function requireDisjointValues(included: string[], excluded: string[], message: string): void {
   const includedValues = new Set(included);
   if (excluded.some((value) => includedValues.has(value))) throw new Error(message);
 }
 
-function validateRoleExpectation(role: Record<string, unknown>, id: MonkeyRole["id"]): void {
+export function validateRoleExpectation(role: Record<string, unknown>, id: MonkeyRole["id"]): void {
   const lists = Object.fromEntries(
     MONKEY_ROLE_LIST_KEYS.map((key) => [key, requiredStringList(role, id, key)]),
   ) as Record<MonkeyRoleListKey, string[]>;

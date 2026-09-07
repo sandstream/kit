@@ -1,10 +1,20 @@
 import {
+  MONKEY_ROLE_IDS,
+  MONKEY_ROLE_LIST_KEYS,
+  MONKEY_ROLE_ROUTE_KEYS,
+  configuredRoleEntries,
   controlHasAccessibleName,
   focusableIsOffscreen,
+  isRoleWithId,
   matchesExpectedFinding,
+  requireDisjointValues,
+  requireSameOriginRoutes,
+  requiredRole,
+  requiredStringList,
   unexpectedMonkeyFindings,
   validateExpectedFindings,
   validateMoneyFlowConfig,
+  validateRoleExpectation,
   validateRoleMatrix,
 } from "./monkey-test-contract.js";
 
@@ -94,6 +104,17 @@ function embeddedContractSource(): string {
   return `const validateExpectedFindings: (value: unknown) => ExpectedFinding[] = ${validateExpectedFindings.toString()};
 const matchesExpectedFinding: (actual: Finding, expected: ExpectedFinding) => boolean = ${matchesExpectedFinding.toString()};
 const unexpectedMonkeyFindings: (findings: Finding[], expected: unknown) => Finding[] = ${unexpectedMonkeyFindings.toString()};
+const MONKEY_ROLE_IDS = ${JSON.stringify(MONKEY_ROLE_IDS)} as const;
+const MONKEY_ROLE_LIST_KEYS = ${JSON.stringify(MONKEY_ROLE_LIST_KEYS)} as const;
+const MONKEY_ROLE_ROUTE_KEYS = ${JSON.stringify(MONKEY_ROLE_ROUTE_KEYS)} as const;
+type MonkeyRoleListKey = (typeof MONKEY_ROLE_LIST_KEYS)[number];
+const isRoleWithId: (candidate: unknown, id: RoleExpectation["id"]) => candidate is Record<string, unknown> = ${isRoleWithId.toString()};
+const configuredRoleEntries: (value: unknown) => unknown[] = ${configuredRoleEntries.toString()};
+const requiredRole: (entries: unknown[], id: RoleExpectation["id"]) => Record<string, unknown> = ${requiredRole.toString()};
+const requiredStringList: (role: Record<string, unknown>, id: RoleExpectation["id"], key: MonkeyRoleListKey) => string[] = ${requiredStringList.toString()};
+const requireSameOriginRoutes: (routes: string[], id: RoleExpectation["id"], key: (typeof MONKEY_ROLE_ROUTE_KEYS)[number]) => void = ${requireSameOriginRoutes.toString()};
+const requireDisjointValues: (included: string[], excluded: string[], message: string) => void = ${requireDisjointValues.toString()};
+const validateRoleExpectation: (role: Record<string, unknown>, id: RoleExpectation["id"]) => void = ${validateRoleExpectation.toString()};
 const validateRoleMatrix: (value: unknown) => RoleExpectation[] = ${validateRoleMatrix.toString()};
 const controlHasAccessibleName: (control: ControlName) => boolean = ${controlHasAccessibleName.toString()};
 const focusableIsOffscreen: (geometry: FocusableGeometry) => boolean = ${focusableIsOffscreen.toString()};

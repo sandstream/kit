@@ -313,7 +313,7 @@ describe("the detector's declared bound", () => {
 
   it("does not classify its own production source as a secret", () => {
     const source = readFileSync(
-      resolve(import.meta.dirname, "../../src/utils/redactSecrets.ts"),
+      resolve(import.meta.dirname, "..", "..", "src", "utils", "redactSecrets.ts"),
       "utf8",
     );
 

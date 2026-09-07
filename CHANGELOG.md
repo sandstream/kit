@@ -1,5 +1,43 @@
 ## [Unreleased]
 
+### Added
+
+- **ADR import graph derivation.** `kit adr derive` proposes enforceable ADRs
+  from the repository's own import graph, and `kit adr check` runs the
+  `kit-enforce` rules as a hard CI gate.
+
+- **Read-only write-surface matrix.** Every command that can write is now
+  declared in one matrix and asserted against `--read-only`, so a new write path
+  cannot escape the read-only contract unnoticed.
+
+- **CI standards, ADR, and skill gates.** The standards runner, the ADR check,
+  and the skill linter now run in CI instead of only on demand.
+
+- **Docker plugin runtime.** The container image ships a runtime that can load
+  kit plugins, with a test asserting the runtime contract the docs describe.
+
+### Changed
+
+- **Monkey test gate split into modules.** `kit monkey-test` moved out of one
+  1700-line module into planner, runner, scanner, security, evidence, and
+  harness modules, each with its own tests.
+
+### Fixed
+
+- **Generated monkey harness evaluated at runtime.** The role matrix validator
+  embedded in the generated Playwright spec called module-private helpers that
+  were never embedded, so the generated harness threw `ReferenceError` on load
+  and registered no tests. The validator is now self-contained, and a test
+  evaluates the generated spec against a stub Playwright to assert all five role
+  crawls plus the money flow register.
+
+- **Redaction hardening.** Vercel Management API error text and audit
+  environment output are redacted before they reach logs or reports.
+
+- **Policy pull stays fail-closed.** `kit policy pull` now moves the signature
+  before the policy and rolls the signature back when the apply fails, so an
+  interrupted pull can never leave a new policy sitting under an old signature.
+
 ## [6.11.0] - 2026-08-30
 
 ### Added

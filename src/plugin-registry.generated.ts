@@ -148,7 +148,7 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
     name: "vercel",
     description:
       "kit plugin: Vercel Management API (env management, project metadata, redeploy triggers).",
-    version: "0.2.1",
+    version: "0.2.2",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
