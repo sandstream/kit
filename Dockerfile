@@ -1,6 +1,13 @@
 # ─── kit CLI Container ────────────────────────────────────────────────
 # Multi-stage build for production-ready CLI executable
-# Final image: Node 22 Alpine (~100MB)
+# Final image: Node 22 Alpine, 376MB (arm64, `docker images`).
+#
+# The size claim is measured, not estimated: it read "~100MB" while the image
+# actually shipped 460MB, because the runtime copied the BUILDER's node_modules.
+# That tree is `npm ci` with devDependencies, so the published CLI image carried
+# typescript, eslint and esbuild: 170 packages, 93.6MB, none of them reachable at
+# runtime. kit has four runtime dependencies, which now come from a dedicated
+# prod-deps stage: 114 packages, 27.2MB (MR-1).
 
 # Stage 1: Builder
 FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS builder
@@ -24,7 +31,21 @@ COPY skills ./skills
 # Build TypeScript → JavaScript
 RUN npm run build
 
-# Stage 2: Runtime
+# Stage 2: Production dependencies only.
+# Resolved from the same committed lockfile as the builder, so the runtime tree is
+# reproducible rather than a pruned leftover of the build tree. Scripts are ignored:
+# all four runtime deps are pure JS, and an install script in the image build is
+# exactly the supply-chain surface kit's own install gate exists to refuse.
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS prod-deps
+
+WORKDIR /deps
+
+COPY package*.json ./
+COPY packages ./packages
+
+RUN npm ci --omit=dev --ignore-scripts
+
+# Stage 3: Runtime
 FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
 
 WORKDIR /app
@@ -46,7 +67,7 @@ RUN addgroup -g 1001 -S kit && \
 
 # Copy built application from builder
 COPY --from=builder --chown=kit:kit /build/dist ./dist
-COPY --from=builder --chown=kit:kit /build/node_modules ./node_modules
+COPY --from=prod-deps --chown=kit:kit /deps/node_modules ./node_modules
 COPY --from=builder --chown=kit:kit /build/package.json ./
 COPY --from=builder --chown=kit:kit /build/skills ./skills
 RUN chown kit:kit /app
