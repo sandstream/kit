@@ -198,7 +198,7 @@ async function checkMemoryHooks(): Promise<DoctorCheck | null> {
 async function checkGitHooks(config: kitConfig): Promise<DoctorCheck[]> {
   if (!config.hooks) return [];
 
-  const { checkHooks, isGitRepository } = await import("./check-hooks.js");
+  const { checkHooks, hookCheckStatus, isGitRepository } = await import("./check-hooks.js");
 
   if (!isGitRepository()) {
     return [
@@ -215,7 +215,7 @@ async function checkGitHooks(config: kitConfig): Promise<DoctorCheck[]> {
   return hookResults.map((h) => ({
     name: h.hookName,
     category: "hooks",
-    status: (!h.installed ? "fail" : !h.upToDate ? "warn" : "pass") as DoctorCheckStatus,
+    status: hookCheckStatus(h) as DoctorCheckStatus,
     detail: h.detail,
   }));
 }

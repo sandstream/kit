@@ -91,7 +91,17 @@ describe("checkRunToJsonChecks", () => {
     ],
     secrets: { templateExists: true, keys: [{ name: "KEY", available: false }] },
     skills: [{ name: "triage", required: false, installed: false }],
-    hooks: [{ hookName: "pre-commit", installed: true, upToDate: false, detail: "outdated" }],
+    // executable: true — an outdated-but-runnable hook is the "warn" row this asserts;
+    // a non-executable one is a "fail" (BH-01), covered in check-hooks-executable.test.ts.
+    hooks: [
+      {
+        hookName: "pre-commit",
+        installed: true,
+        executable: true,
+        upToDate: false,
+        detail: "outdated",
+      },
+    ],
     webSearch: null,
     deploy: [
       {

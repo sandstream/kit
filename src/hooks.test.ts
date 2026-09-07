@@ -241,12 +241,13 @@ describe("checkHooks", () => {
       "pre-commit": ["npm run lint"],
     };
 
-    // Create a non-kit hook
+    // Create a non-kit hook. 0o755, because a hook without its execute bit is a
+    // BH-01 failure in its own right and would mask the content check under test.
     await mkdir(join(testGitDir, "hooks"), { recursive: true });
     await writeFile(
       join(testGitDir, "hooks", "pre-commit"),
       "#!/bin/sh\necho manual hook\n",
-      "utf-8",
+      { encoding: "utf-8", mode: 0o755 },
     );
 
     const results = await checkHooks(config, testGitDir);
@@ -263,7 +264,10 @@ describe("checkHooks", () => {
     };
 
     await mkdir(join(testGitDir, "hooks"), { recursive: true });
-    await writeFile(join(testGitDir, "hooks", "pre-commit"), "#!/bin/sh\nnpm run lint\n", "utf-8");
+    await writeFile(join(testGitDir, "hooks", "pre-commit"), "#!/bin/sh\nnpm run lint\n", {
+      encoding: "utf-8",
+      mode: 0o755,
+    });
 
     const results = await checkHooks(config, testGitDir);
 

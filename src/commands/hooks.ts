@@ -110,16 +110,21 @@ export async function cmdHooks(): Promise<boolean> {
     let allOk = true;
 
     for (const r of results) {
-      const icon = !r.installed
-        ? `${c.red}✗${c.reset}`
-        : !r.upToDate
-          ? `${c.yellow}!${c.reset}`
-          : `${c.green}✓${c.reset}`;
+      const icon =
+        !r.installed || !r.executable
+          ? `${c.red}✗${c.reset}`
+          : !r.upToDate
+            ? `${c.yellow}!${c.reset}`
+            : `${c.green}✓${c.reset}`;
+      // "outdated" would be the wrong word for a hook git never runs (BH-01): the
+      // content may be perfect. Name the condition that actually stops enforcement.
       const status = !r.installed
         ? `${c.red}not installed${c.reset}`
-        : !r.upToDate
-          ? `${c.yellow}outdated${c.reset}`
-          : `${c.green}up-to-date${c.reset}`;
+        : !r.executable
+          ? `${c.red}not executable${c.reset}`
+          : !r.upToDate
+            ? `${c.yellow}outdated${c.reset}`
+            : `${c.green}up-to-date${c.reset}`;
       console.log(`  ${icon} ${r.hookName}  ${status}  ${c.dim}${r.detail}${c.reset}`);
       if (!r.installed || !r.upToDate) allOk = false;
     }

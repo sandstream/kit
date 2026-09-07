@@ -1,14 +1,46 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import type { HooksConfig } from "./config.js";
 import { missingHookCommands, resolveHooksDir } from "./hooks.js";
 
 export interface HookCheckResult {
   hookName: string;
   installed: boolean;
+  /**
+   * False when the file exists but carries no execute bit. git does not run such a
+   * hook and does not say so, which makes it strictly worse than a missing hook: the
+   * operator is told the gate is installed while nothing enforces it. Reported as a
+   * FAIL (not a warn) on every surface — see the doctor.ts / check-run.ts mappings.
+   */
+  executable: boolean;
   upToDate: boolean;
   detail: string;
+}
+
+/**
+ * The one status rule for a hook row, shared by `kit check --json` (check-run.ts) and
+ * `kit doctor` (doctor.ts) so the two surfaces cannot disagree about what a broken hook
+ * is worth. Missing or non-executable is a FAIL: git runs nothing, so nothing is
+ * enforced. Present-but-outdated is a WARN: it still enforces its older command set.
+ */
+export function hookCheckStatus(h: HookCheckResult): "pass" | "warn" | "fail" {
+  if (!h.installed || !h.executable) return "fail";
+  return h.upToDate ? "pass" : "warn";
+}
+
+/**
+ * Whether git would run this file as a hook. On win32 the POSIX mode bits do not
+ * describe executability (git-for-windows runs hooks regardless), so the check would
+ * be a false failure there and is skipped.
+ */
+function isExecutable(path: string): boolean {
+  if (process.platform === "win32") return true;
+  try {
+    return (statSync(path).mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -52,8 +84,22 @@ async function checkHook(
     return {
       hookName,
       installed: false,
+      executable: false,
       upToDate: false,
       detail: "not installed",
+    };
+  }
+
+  // Before the content check: a hook git will not execute cannot be up-to-date, whatever
+  // it contains. Checked first so the reported reason is the one that actually stops
+  // enforcement, rather than a content diff the operator would fix to no effect.
+  if (!isExecutable(hookPath)) {
+    return {
+      hookName,
+      installed: true,
+      executable: false,
+      upToDate: false,
+      detail: "not executable; git will not run it (run kit hooks install)",
     };
   }
 
@@ -70,6 +116,7 @@ async function checkHook(
       return {
         hookName,
         installed: true,
+        executable: true,
         upToDate,
         detail: upToDate
           ? `externally managed; ${commands.length} configured command(s) present`
@@ -80,6 +127,7 @@ async function checkHook(
     return {
       hookName,
       installed: true,
+      executable: true,
       upToDate,
       detail: upToDate ? `${commands.length} command(s)` : "outdated (run kit hooks install)",
     };
@@ -87,6 +135,7 @@ async function checkHook(
     return {
       hookName,
       installed: true,
+      executable: true,
       upToDate: false,
       detail: error instanceof Error ? error.message : String(error),
     };
