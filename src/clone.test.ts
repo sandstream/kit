@@ -183,7 +183,10 @@ describe("cloneRepository", () => {
     const result = await cloneRepository(opts);
 
     assert.equal(result.success, false, "Should fail for invalid repo");
-    assert.ok(!result.message.includes(token), `message must not leak the token: ${result.message}`);
+    assert.ok(
+      !result.message.includes(token),
+      `message must not leak the token: ${result.message}`,
+    );
   });
 
   it("redacts an embedded credential from a refused (unsafe transport) repo URL", async () => {
@@ -196,7 +199,10 @@ describe("cloneRepository", () => {
 
     assert.equal(result.success, false);
     assert.match(result.message, /Refused to clone/);
-    assert.ok(!result.message.includes(token), `message must not leak the token: ${result.message}`);
+    assert.ok(
+      !result.message.includes(token),
+      `message must not leak the token: ${result.message}`,
+    );
   });
 
   it("includes clonedPath in result even on failure", async () => {

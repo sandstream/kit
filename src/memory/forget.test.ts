@@ -180,7 +180,12 @@ describe("a tombstone survives re-indexing (MP-1-r1)", () => {
     forgetMemory(db, "u1");
 
     assert.equal(
-      insertMessage(db, { uuid: "u2", sessionId: "s1", type: "user", content: "keep the aardvark" }),
+      insertMessage(db, {
+        uuid: "u2",
+        sessionId: "s1",
+        type: "user",
+        content: "keep the aardvark",
+      }),
       true,
     );
     assert.equal(searchMessages(db, "aardvark").length, 1);

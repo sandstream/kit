@@ -14,10 +14,7 @@ describe("Docker plugin runtime", () => {
     // builder, prod-deps, runtime
     assert.equal(fromLines.length, 3);
     for (const line of fromLines) {
-      assert.match(
-        line,
-        /^FROM node:22-alpine@sha256:[a-f0-9]{64}(?: AS (?:builder|prod-deps))?$/,
-      );
+      assert.match(line, /^FROM node:22-alpine@sha256:[a-f0-9]{64}(?: AS (?:builder|prod-deps))?$/);
     }
   });
 

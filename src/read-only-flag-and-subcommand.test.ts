@@ -152,49 +152,57 @@ describe("unknown subcommand never falls through to a default write (RO-3)", () 
     }
   });
 
-  it("`--read-only secrets zzz` is refused before reaching the handler", { timeout: 20_000 }, () => {
-    const dir = project();
-    const home = mkdtempSync(join(tmpdir(), "kit-ro-unknown-sub-home-"));
-    try {
-      const env: NodeJS.ProcessEnv = {
-        ...process.env,
-        CI: "true",
-        HOME: home,
-        KIT_HIDE_HOOK_SKIP_BANNER: "1",
-        KIT_IDENTITY_DIR: join(home, ".kit"),
-        KIT_MEMORY_DIR: join(home, ".kit", "memory"),
-      };
-      delete env.KIT_READ_ONLY;
-      const result = spawnSync(process.execPath, [CLI, "secrets", "zzz", "--read-only"], {
-        cwd: dir,
-        encoding: "utf-8",
-        env,
-        timeout: 10_000,
-      });
-      assert.notEqual(result.status, 0);
-      assert.ok(!existsSync(join(dir, ".env.local")));
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(home, { recursive: true, force: true });
-    }
-  });
+  it(
+    "`--read-only secrets zzz` is refused before reaching the handler",
+    { timeout: 20_000 },
+    () => {
+      const dir = project();
+      const home = mkdtempSync(join(tmpdir(), "kit-ro-unknown-sub-home-"));
+      try {
+        const env: NodeJS.ProcessEnv = {
+          ...process.env,
+          CI: "true",
+          HOME: home,
+          KIT_HIDE_HOOK_SKIP_BANNER: "1",
+          KIT_IDENTITY_DIR: join(home, ".kit"),
+          KIT_MEMORY_DIR: join(home, ".kit", "memory"),
+        };
+        delete env.KIT_READ_ONLY;
+        const result = spawnSync(process.execPath, [CLI, "secrets", "zzz", "--read-only"], {
+          cwd: dir,
+          encoding: "utf-8",
+          env,
+          timeout: 10_000,
+        });
+        assert.notEqual(result.status, 0);
+        assert.ok(!existsSync(join(dir, ".env.local")));
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+  );
 
-  it("`check zzz --attest` is a usage error, no attestation key minted", { timeout: 20_000 }, () => {
-    const dir = project();
-    const home = mkdtempSync(join(tmpdir(), "kit-ro-unknown-check-home-"));
-    try {
-      const env: NodeJS.ProcessEnv = { ...process.env, CI: "true", HOME: home };
-      const result = spawnSync(process.execPath, [CLI, "check", "zzz", "--attest", "--json"], {
-        cwd: dir,
-        encoding: "utf-8",
-        env,
-        timeout: 20_000,
-      });
-      assert.notEqual(result.status, 0);
-      assert.ok(!existsSync(join(home, ".kit", "audit-anchor.key")));
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(home, { recursive: true, force: true });
-    }
-  });
+  it(
+    "`check zzz --attest` is a usage error, no attestation key minted",
+    { timeout: 20_000 },
+    () => {
+      const dir = project();
+      const home = mkdtempSync(join(tmpdir(), "kit-ro-unknown-check-home-"));
+      try {
+        const env: NodeJS.ProcessEnv = { ...process.env, CI: "true", HOME: home };
+        const result = spawnSync(process.execPath, [CLI, "check", "zzz", "--attest", "--json"], {
+          cwd: dir,
+          encoding: "utf-8",
+          env,
+          timeout: 20_000,
+        });
+        assert.notEqual(result.status, 0);
+        assert.ok(!existsSync(join(home, ".kit", "audit-anchor.key")));
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+  );
 });

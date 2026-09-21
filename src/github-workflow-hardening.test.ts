@@ -63,7 +63,6 @@ describe("GitHub workflow hardening", () => {
     );
     assert.match(triage, /sha256sum --check/);
   });
-
 });
 
 describe("informational CI jobs can still fail", () => {
@@ -87,14 +86,11 @@ describe("informational CI jobs can still fail", () => {
   });
 
   it("keeps the dogfood job out of the gate, so a red run informs without blocking", () => {
-    const gate = workflow("security.yml").slice(
-      workflow("security.yml").indexOf("\n  gate:"),
-    );
+    const gate = workflow("security.yml").slice(workflow("security.yml").indexOf("\n  gate:"));
     const needs = gate.slice(gate.indexOf("needs:"), gate.indexOf("runs-on:"));
     assert.doesNotMatch(needs, /dogfood/);
     assert.match(needs, /self-audit/);
   });
-
 });
 
 describe("GitHub workflow standards gate", () => {
