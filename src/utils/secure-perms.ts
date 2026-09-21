@@ -7,12 +7,11 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const WINDOWS_PRIVATE_ACL = readFileSync(
-  new URL("../../scripts/windows-private-acl.ps1", import.meta.url),
-  "utf8",
-);
-
 type PrivatePathKind = "file" | "dir";
+
+function windowsAclScript(): string {
+  return readFileSync(new URL("../../scripts/windows-private-acl.ps1", import.meta.url), "utf8");
+}
 
 function windowsAclErrorDetail(error: unknown): string {
   if (!error || typeof error !== "object" || !("stderr" in error)) return "";
@@ -90,7 +89,7 @@ function windowsAcl(path: string, kind: PrivatePathKind, repair: boolean): boole
   }
   // Absolute system path avoids PATH search for an authority-bearing subprocess.
   const powershell = join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-  const encoded = Buffer.from(WINDOWS_PRIVATE_ACL, "utf16le").toString("base64");
+  const encoded = Buffer.from(windowsAclScript(), "utf16le").toString("base64");
   try {
     const output = execFileSync(
       powershell,
