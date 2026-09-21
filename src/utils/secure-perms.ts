@@ -37,9 +37,17 @@ if ($repair) {
     )
   }
   [void]$acl.AddAccessRule($rule)
-  Set-Acl -LiteralPath $path -AclObject $acl
+  if ($kind -eq 'dir') {
+    [System.IO.Directory]::SetAccessControl($path, $acl)
+  } else {
+    [System.IO.File]::SetAccessControl($path, $acl)
+  }
 }
-$acl = Get-Acl -LiteralPath $path
+if ($kind -eq 'dir') {
+  $acl = [System.IO.Directory]::GetAccessControl($path)
+} else {
+  $acl = [System.IO.File]::GetAccessControl($path)
+}
 $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
 $entries = @($acl.Access)
 $valid = $acl.AreAccessRulesProtected -and $owner -eq $sid.Value -and $entries.Count -eq 1
