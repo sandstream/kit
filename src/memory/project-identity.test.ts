@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { insertMessage, openMemoryDb, searchMessages, upsertSession } from "./db.js";
 import { mergeDb } from "./merge.js";
-import { getProjectIdentity } from "./project.js";
+import { getProjectIdentity, initializeProjectIdentity } from "./project.js";
 import { listThreads, saveThread } from "./threads.js";
 
 it("recalls imported work in another clone carrying the same explicit project identity", (t) => {
@@ -97,3 +97,15 @@ it(
     assert.match(readFileSync(join(dir, ".kit.toml"), "utf8"), /\[tools\]\nnode = "22"/);
   },
 );
+
+it("refuses identity publication when a TOML string mimics a memory table", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "kit-project-identity-string-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, ".kit.toml");
+  const original = 'version = 1\nmessage = """\n[memory]\n"""\n';
+  writeFileSync(path, original);
+
+  assert.throws(() => initializeProjectIdentity(dir), /project identity|memory\.project_id/i);
+  assert.equal(readFileSync(path, "utf8"), original);
+  assert.equal(getProjectIdentity(dir), null);
+});

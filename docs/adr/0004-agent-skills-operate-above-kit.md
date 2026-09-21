@@ -19,6 +19,12 @@ Skills may call kit. kit must not absorb workflow skills as core commands unless
 the behavior can be verified without a model and belongs on the action or review
 path.
 
+When kit executes a script from a mutable agent-skill directory, a version marker
+is not provenance. kit must compare the executable bytes with its bundled,
+published copy immediately before use, repair a mismatch atomically, and refuse
+execution if the verified copy cannot be established. `src/triage.test.ts` pins
+this contract for the bundled triage skill.
+
 ## Rationale
 
 This keeps the zero-LLM contract intact while letting teams adopt strong agent
@@ -44,3 +50,5 @@ without needing to know kit internals.
   inventory as team policy.
 - If a proposed kit feature needs a model judgement to decide pass/fail, keep it
   in a skill or expose a deterministic primitive that the skill can call.
+- Never treat agent-writable skill placement as an executable trust boundary.
+  Verify bundled artifacts by content before kit delegates a gate to them.

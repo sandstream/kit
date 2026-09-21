@@ -4,6 +4,7 @@
  */
 
 import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -22,7 +23,6 @@ const BUNDLED_TRIAGE_SKILL = resolve(__dirname, "..", "skills", "triage");
 /** Stamp of the kit version that produced the installed skill copy. Used to refresh a STALE
  *  copy after a kit upgrade — otherwise an improved `triage.py` (e.g. a fixed version resolver
  *  or a new secret pattern) would never reach existing installs, silently running old logic. */
-const SKILL_VERSION_MARKER = resolve(TRIAGE_SKILL_DIR, ".kit-skill-version");
 const KIT_VERSION = (() => {
   try {
     return (
@@ -100,11 +100,26 @@ export async function installBundledTriageSkill(
 }
 
 /** True when the installed skill was written by the CURRENT kit version. */
-async function installedSkillIsCurrent(): Promise<boolean> {
+async function installedSkillIsCurrent(targetDir: string): Promise<boolean> {
   try {
-    return (await readFile(SKILL_VERSION_MARKER, "utf-8")).trim() === KIT_VERSION;
+    return (
+      (await readFile(resolve(targetDir, ".kit-skill-version"), "utf-8")).trim() === KIT_VERSION
+    );
   } catch {
     return false; // no marker → an old/hand-copied skill → treat as stale
+  }
+}
+
+async function installedScriptMatchesBundled(targetDir: string): Promise<boolean> {
+  try {
+    const [installed, bundled] = await Promise.all([
+      readFile(resolve(targetDir, "scripts/triage.py")),
+      readFile(resolve(BUNDLED_TRIAGE_SKILL, "scripts/triage.py")),
+    ]);
+    const digest = (value: Buffer): string => createHash("sha256").update(value).digest("hex");
+    return digest(installed) === digest(bundled);
+  } catch {
+    return false;
   }
 }
 
@@ -124,15 +139,24 @@ export interface TriageResult {
  * copy kit ships, so the watertight gate works on a fresh machine without a
  * manual "copy the triage skill" step.
  */
-async function ensureTriageScript(): Promise<boolean> {
+export async function ensureTriageScript(targetDir: string = TRIAGE_SKILL_DIR): Promise<boolean> {
+  const script = resolve(targetDir, "scripts/triage.py");
   try {
-    await access(TRIAGE_SCRIPT);
-    // Present — but refresh if it was written by an older kit (stale logic otherwise persists).
-    if (await installedSkillIsCurrent()) return true;
-    return installBundledTriageSkill();
+    await access(script);
+    // A version marker is only metadata. Trust the installed executable only when
+    // its bytes still match kit's provenance-published bundled copy.
+    if (
+      (await installedSkillIsCurrent(targetDir)) &&
+      (await installedScriptMatchesBundled(targetDir))
+    )
+      return true;
   } catch {
-    return installBundledTriageSkill();
+    // Missing/unreadable script follows the same self-repair path as tampering.
   }
+  if (!(await installBundledTriageSkill(targetDir))) return false;
+  return (
+    (await installedSkillIsCurrent(targetDir)) && (await installedScriptMatchesBundled(targetDir))
+  );
 }
 
 /**

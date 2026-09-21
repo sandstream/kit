@@ -34,14 +34,51 @@ describe("browser diagnostics", () => {
   });
 
   it("uses KIT_BROWSER_CDP_URL when no Playwright or system Chrome path exists", async () => {
+    const urls: string[] = [];
     const result = await diagnoseBrowser(
       { port: 3107 },
-      { deps: noMachineDeps, env: { KIT_BROWSER_CDP_URL: "http://127.0.0.1:9333" }, cwd: "/repo" },
+      {
+        deps: {
+          ...noMachineDeps,
+          probeUrl: async (url) => {
+            urls.push(url);
+            return true;
+          },
+        },
+        env: { KIT_BROWSER_CDP_URL: "http://127.0.0.1:9333" },
+        cwd: "/repo",
+      },
     );
     assert.equal(result.status, "pass");
     assert.equal(result.strategy, "cdp");
+    assert.deepEqual(urls, ["http://127.0.0.1:9333/json/version"]);
     assert.equal(result.cdp_url, "http://127.0.0.1:9333");
     assert.equal(result.env.KIT_BROWSER_CDP_URL, "http://127.0.0.1:9333");
+  });
+
+  it("blocks instead of exporting an unreachable configured CDP URL", async () => {
+    const urls: string[] = [];
+    const result = await diagnoseBrowser(
+      { port: 3107, cdp_url: "http://127.0.0.1:9/not-listening" },
+      {
+        deps: {
+          ...noMachineDeps,
+          probeUrl: async (url) => {
+            urls.push(url);
+            return false;
+          },
+        },
+        env: {},
+        cwd: "/repo",
+      },
+    );
+    assert.equal(result.status, "blocker");
+    assert.equal(result.strategy, "none");
+    assert.equal(result.env.KIT_BROWSER_CDP_URL, undefined);
+    assert.deepEqual(urls, [
+      "http://127.0.0.1:9/not-listening/json/version",
+      "http://127.0.0.1:9222/json/version",
+    ]);
   });
 
   it("probes localhost 9222 as the last CDP source", async () => {

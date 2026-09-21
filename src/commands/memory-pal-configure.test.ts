@@ -82,6 +82,7 @@ it("PAL verifier configuration rejects ambiguous input and respects read-only mo
     [],
     ["--manual", "--verify-file", "artifact"],
     ["--verify-file", "artifact", "--verify-http", "https://example.com"],
+    ["--verify-file", "one", "--verify-file", "two"],
     ["--verify-file", ""],
     ["--verify-file"],
     ["--manual", "extra"],

@@ -36,8 +36,10 @@ async function freezeStandardsBaseline(baseline: Baseline, cwd: string): Promise
 
   const general = await collectStandardsKeys(cwd);
   baselineSet(baseline, "standards", "complexity", general.complexity);
+  baselineSet(baseline, "standards", "complexity_metrics", general.complexityMetrics);
   baselineSet(baseline, "standards", "duplication", general.duplication);
   baselineSet(baseline, "standards", "size", general.size);
+  baselineSet(baseline, "standards", "size_metrics", general.sizeMetrics);
 
   const lang = (await detectStack(cwd)).language;
   let specificCount = 0;

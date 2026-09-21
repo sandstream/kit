@@ -378,9 +378,9 @@ the live session. Your **shared** project memory recovers for free with
 Transfer personal-store snapshots between laptop, server, and ephemeral cloud
 sessions. Same encrypted-blob mechanism as
 backup, wired to a transport. **Opt-in** (no `~/.kit/sync.toml` → nothing happens),
-and the remote **only ever sees ciphertext** — the blob is AES-256-GCM encrypted
-and **gzip-compressed before encryption** (a SQLite store shrinks ~3×: 139 MB →
-~30 MB, so it fits under a git host's 100 MB file limit).
+and the remote **only ever sees ciphertext**. Current backups split the SQLite
+snapshot into independently gzip-compressed and AES-256-GCM-authenticated 1 MiB
+frames, keeping memory bounded during both upload and restore.
 
 ```bash
 kit memory push          # encrypt + upload this machine's store to the hub

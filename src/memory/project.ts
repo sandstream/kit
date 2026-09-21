@@ -102,8 +102,16 @@ export function initializeProjectIdentity(path: string): ProjectIdentityInitiali
 
   const id = randomUUID();
   const content = configWithProjectIdentity(source, id);
-  // Validate the exact output before publication; malformed input never becomes a partial config.
-  parse(content);
+  // Validate both syntax and semantics before publication. A table-looking line
+  // inside a TOML multiline string must not become the insertion point and make
+  // the command report a durable identity that cannot be read back.
+  const next = parse(content) as Record<string, unknown>;
+  const nextMemory = next.memory as Record<string, unknown> | undefined;
+  if (nextMemory?.project_id !== id) {
+    throw new Error(
+      `Cannot initialize project identity in ${configPath}: generated [memory].project_id was not readable after insertion.`,
+    );
+  }
   const mode = existsSync(configPath) ? lstatSync(configPath).mode & 0o777 : 0o600;
   const temporary = `${configPath}.kit-tmp-${process.pid}-${randomUUID()}`;
   let fd: number | undefined;

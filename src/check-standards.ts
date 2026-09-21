@@ -297,8 +297,42 @@ const REL = (cwd: string, p: string): string => {
 
 /** Stable baseline key for a complexity finding. */
 export const complexityKey = (f: { file: string; fn: string }): string => `${f.file}:${f.fn}`;
+/** Frozen magnitude for a known complexity finding; stored beside its identity key. */
+export const complexityMetricKey = (f: {
+  file: string;
+  fn: string;
+  ccn: number;
+  length: number;
+}): string => `${complexityKey(f)}|ccn=${f.ccn}|length=${f.length}`;
 /** Stable baseline key for a size finding. */
 export const sizeKey = (f: { file: string }): string => f.file;
+/** Frozen magnitude for a known oversized file; stored beside its identity key. */
+export const sizeMetricKey = (f: { file: string; lines: number }): string =>
+  `${sizeKey(f)}|lines=${f.lines}`;
+
+function complexityMetricMap(entries: string[]): Map<string, { ccn: number; length: number }> {
+  const metrics = new Map<string, { ccn: number; length: number }>();
+  for (const entry of entries) {
+    const match = /^(.*)\|ccn=(\d+)\|length=(\d+)$/.exec(entry);
+    if (!match) continue;
+    const key = match[1]!;
+    const previous = metrics.get(key);
+    metrics.set(key, {
+      ccn: Math.max(previous?.ccn ?? 0, Number(match[2])),
+      length: Math.max(previous?.length ?? 0, Number(match[3])),
+    });
+  }
+  return metrics;
+}
+
+function sizeMetricMap(entries: string[]): Map<string, number> {
+  const metrics = new Map<string, number>();
+  for (const entry of entries) {
+    const match = /^(.*)\|lines=(\d+)$/.exec(entry);
+    if (match) metrics.set(match[1]!, Number(match[2]));
+  }
+  return metrics;
+}
 
 function isGeneratedStandardsMetadata(file: string): boolean {
   const normalized = file.replaceAll("\\", "/");
@@ -321,9 +355,112 @@ export interface CheckStandardsOptions {
   cwd?: string;
   enforce?: boolean;
   thresholds?: Partial<StandardsThresholds>;
-  baseline?: { complexity?: string[]; duplication?: string[]; size?: string[] };
+  baseline?: {
+    complexity?: string[];
+    complexityMetrics?: string[];
+    duplication?: string[];
+    size?: string[];
+    sizeMetrics?: string[];
+  };
   /** Injected pre-computed scan (tests / reuse). Falls back to running the tools. */
   scan?: GeneralScan;
+}
+
+function complexityResult(
+  scan: GeneralScan["complexity"],
+  cwd: string,
+  thresholds: StandardsThresholds,
+  baseline: CheckStandardsOptions["baseline"],
+  enforce: boolean,
+): StandardsCheckResult {
+  if (scan.didNotRun) return didNotRunResult("complexity (lizard)", "lizard", enforce);
+  const over = scan.findings
+    .map((finding) => ({ ...finding, file: REL(cwd, finding.file) }))
+    .filter(
+      (finding) =>
+        finding.ccn > thresholds.maxComplexity || finding.length > thresholds.maxFunctionLines,
+    );
+  const seen = new Set(baseline?.complexity ?? []);
+  const frozen = complexityMetricMap(baseline?.complexityMetrics ?? []);
+  const ratcheted = (baseline?.complexityMetrics?.length ?? 0) > 0;
+  const fresh = over.filter((finding) => {
+    const key = complexityKey(finding);
+    if (!seen.has(key)) return true;
+    const metric = frozen.get(key);
+    return metric ? finding.ccn > metric.ccn || finding.length > metric.length : ratcheted;
+  });
+  return buildResult({
+    name: "complexity (lizard)",
+    total: over.length,
+    fresh: fresh.length,
+    enforce,
+    passDetail: `all functions within CCN ${thresholds.maxComplexity} / ${thresholds.maxFunctionLines} lines`,
+    freshDetail: `${fresh.length} function(s) over CCN ${thresholds.maxComplexity} or ${thresholds.maxFunctionLines} lines`,
+    files: fresh
+      .slice(0, 10)
+      .map(
+        (finding) =>
+          `${finding.file} :: ${finding.fn} (CCN ${finding.ccn}, ${finding.length} lines)`,
+      ),
+  });
+}
+
+function duplicationResult(
+  scan: GeneralScan["duplication"],
+  thresholds: StandardsThresholds,
+  baseline: CheckStandardsOptions["baseline"],
+  enforce: boolean,
+): StandardsCheckResult {
+  if (scan.didNotRun) return didNotRunResult("duplication (jscpd)", "jscpd", enforce);
+  const { percentage, pairs } = scan.report;
+  const seen = new Set(baseline?.duplication ?? []);
+  const freshPairs = pairs.filter((pair) => !seen.has(pair));
+  // The percentage is the gate and clone pairs are the baseline unit.
+  const over = percentage > thresholds.maxDuplicationPct;
+  return buildResult({
+    name: "duplication (jscpd)",
+    total: over ? Math.max(pairs.length, 1) : 0,
+    fresh: over ? freshPairs.length || (pairs.length === 0 ? 1 : 0) : 0,
+    enforce,
+    passDetail: `${percentage.toFixed(1)}% duplicated (≤ ${thresholds.maxDuplicationPct}%)`,
+    freshDetail: `${percentage.toFixed(1)}% duplicated (threshold ${thresholds.maxDuplicationPct}%), ${freshPairs.length} new clone pair(s)`,
+    files: freshPairs.slice(0, 10),
+  });
+}
+
+function sizeResult(
+  scan: GeneralScan["size"],
+  cwd: string,
+  thresholds: StandardsThresholds,
+  baseline: CheckStandardsOptions["baseline"],
+  enforce: boolean,
+): StandardsCheckResult {
+  if (scan.didNotRun) return didNotRunResult("file size (scc)", "scc", enforce);
+  const over = scan.findings
+    .map((finding) => ({ ...finding, file: REL(cwd, finding.file) }))
+    .filter((finding) => !isGeneratedStandardsMetadata(finding.file))
+    .filter((finding) => finding.lines > thresholds.maxFileLines);
+  const seen = new Set(baseline?.size ?? []);
+  const frozen = sizeMetricMap(baseline?.sizeMetrics ?? []);
+  const ratcheted = (baseline?.sizeMetrics?.length ?? 0) > 0;
+  const fresh = over.filter((finding) => {
+    const key = sizeKey(finding);
+    if (!seen.has(key)) return true;
+    // Changelog is deliberately append-only release history. Its identity stays
+    // baselined, but growth is not code-shape regression.
+    if (key === "CHANGELOG.md") return false;
+    const lines = frozen.get(key);
+    return lines !== undefined ? finding.lines > lines : ratcheted;
+  });
+  return buildResult({
+    name: "file size (scc)",
+    total: over.length,
+    fresh: fresh.length,
+    enforce,
+    passDetail: `no file over ${thresholds.maxFileLines} lines`,
+    freshDetail: `${fresh.length} file(s) over ${thresholds.maxFileLines} lines`,
+    files: fresh.slice(0, 10).map((finding) => `${finding.file} (${finding.lines} lines)`),
+  });
 }
 
 export async function checkStandards(
@@ -333,83 +470,11 @@ export async function checkStandards(
   const enforce = opts.enforce ?? false;
   const t: StandardsThresholds = { ...DEFAULT_STANDARDS_THRESHOLDS, ...opts.thresholds };
   const scan = opts.scan ?? (await scanGeneral(cwd));
-  const results: StandardsCheckResult[] = [];
-
-  // Complexity ------------------------------------------------------------------
-  if (scan.complexity.didNotRun) {
-    results.push(didNotRunResult("complexity (lizard)", "lizard", enforce));
-  } else {
-    const over = scan.complexity.findings
-      .map((f) => ({ ...f, file: REL(cwd, f.file) }))
-      .filter((f) => f.ccn > t.maxComplexity || f.length > t.maxFunctionLines);
-    const seen = new Set(opts.baseline?.complexity ?? []);
-    const fresh = over.filter((f) => !seen.has(complexityKey(f)));
-    results.push(
-      buildResult({
-        name: "complexity (lizard)",
-        total: over.length,
-        fresh: fresh.length,
-        enforce,
-        passDetail: `all functions within CCN ${t.maxComplexity} / ${t.maxFunctionLines} lines`,
-        freshDetail: `${fresh.length} function(s) over CCN ${t.maxComplexity} or ${t.maxFunctionLines} lines`,
-        files: fresh
-          .slice(0, 10)
-          .map((f) => `${f.file} :: ${f.fn} (CCN ${f.ccn}, ${f.length} lines)`),
-      }),
-    );
-  }
-
-  // Duplication -----------------------------------------------------------------
-  if (scan.duplication.didNotRun) {
-    results.push(didNotRunResult("duplication (jscpd)", "jscpd", enforce));
-  } else {
-    const { percentage, pairs } = scan.duplication.report;
-    const seen = new Set(opts.baseline?.duplication ?? []);
-    const freshPairs = pairs.filter((p) => !seen.has(p));
-    // The gate is the PERCENTAGE threshold. Clone pairs are the baseline unit: when
-    // duplication is over threshold, freezing the offending pairs accepts that debt
-    // (a fully-baselined breach downgrades to a frozen warn); a NET-NEW pair is what
-    // re-fails. When under threshold there is nothing to gate.
-    const overPct = percentage > t.maxDuplicationPct;
-    const total = overPct ? Math.max(pairs.length, 1) : 0;
-    const fresh = overPct ? freshPairs.length || (pairs.length === 0 ? 1 : 0) : 0;
-    results.push(
-      buildResult({
-        name: "duplication (jscpd)",
-        total,
-        fresh,
-        enforce,
-        passDetail: `${percentage.toFixed(1)}% duplicated (≤ ${t.maxDuplicationPct}%)`,
-        freshDetail: `${percentage.toFixed(1)}% duplicated (threshold ${t.maxDuplicationPct}%), ${freshPairs.length} new clone pair(s)`,
-        files: freshPairs.slice(0, 10),
-      }),
-    );
-  }
-
-  // Size / shape ----------------------------------------------------------------
-  if (scan.size.didNotRun) {
-    results.push(didNotRunResult("file size (scc)", "scc", enforce));
-  } else {
-    const over = scan.size.findings
-      .map((f) => ({ ...f, file: REL(cwd, f.file) }))
-      .filter((f) => !isGeneratedStandardsMetadata(f.file))
-      .filter((f) => f.lines > t.maxFileLines);
-    const seen = new Set(opts.baseline?.size ?? []);
-    const fresh = over.filter((f) => !seen.has(sizeKey(f)));
-    results.push(
-      buildResult({
-        name: "file size (scc)",
-        total: over.length,
-        fresh: fresh.length,
-        enforce,
-        passDetail: `no file over ${t.maxFileLines} lines`,
-        freshDetail: `${fresh.length} file(s) over ${t.maxFileLines} lines`,
-        files: fresh.slice(0, 10).map((f) => `${f.file} (${f.lines} lines)`),
-      }),
-    );
-  }
-
-  return results;
+  return [
+    complexityResult(scan.complexity, cwd, t, opts.baseline, enforce),
+    duplicationResult(scan.duplication, t, opts.baseline, enforce),
+    sizeResult(scan.size, cwd, t, opts.baseline, enforce),
+  ];
 }
 
 /** Shared pass / baseline-frozen-warn / net-new-finding shaping (mirrors checkDesign). */
@@ -451,7 +516,13 @@ function buildResult(args: {
 export async function collectStandardsKeys(
   cwd: string = process.cwd(),
   thresholds?: Partial<StandardsThresholds>,
-): Promise<{ complexity: string[]; duplication: string[]; size: string[] }> {
+): Promise<{
+  complexity: string[];
+  complexityMetrics: string[];
+  duplication: string[];
+  size: string[];
+  sizeMetrics: string[];
+}> {
   const t: StandardsThresholds = { ...DEFAULT_STANDARDS_THRESHOLDS, ...thresholds };
   const scan = await scanGeneral(cwd);
   const complexity = scan.complexity.didNotRun
@@ -460,6 +531,12 @@ export async function collectStandardsKeys(
         .map((f) => ({ ...f, file: REL(cwd, f.file) }))
         .filter((f) => f.ccn > t.maxComplexity || f.length > t.maxFunctionLines)
         .map(complexityKey);
+  const complexityMetrics = scan.complexity.didNotRun
+    ? []
+    : scan.complexity.findings
+        .map((f) => ({ ...f, file: REL(cwd, f.file) }))
+        .filter((f) => f.ccn > t.maxComplexity || f.length > t.maxFunctionLines)
+        .map(complexityMetricKey);
   const duplication = scan.duplication.didNotRun ? [] : scan.duplication.report.pairs;
   const size = scan.size.didNotRun
     ? []
@@ -468,5 +545,12 @@ export async function collectStandardsKeys(
         .filter((f) => !isGeneratedStandardsMetadata(f.file))
         .filter((f) => f.lines > t.maxFileLines)
         .map(sizeKey);
-  return { complexity, duplication, size };
+  const sizeMetrics = scan.size.didNotRun
+    ? []
+    : scan.size.findings
+        .map((f) => ({ ...f, file: REL(cwd, f.file) }))
+        .filter((f) => !isGeneratedStandardsMetadata(f.file))
+        .filter((f) => f.lines > t.maxFileLines)
+        .map(sizeMetricKey);
+  return { complexity, complexityMetrics, duplication, size, sizeMetrics };
 }

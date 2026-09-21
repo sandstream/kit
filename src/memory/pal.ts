@@ -475,12 +475,7 @@ export function importLegacyLedger(
   path: string = getLegacyLedgerPath(),
 ): { imported: number } {
   if (!existsSync(path)) return { imported: 0 };
-  let raw: string;
-  try {
-    raw = readFileSync(path, "utf8");
-  } catch {
-    return { imported: 0 };
-  }
+  const raw = readFileSync(path, "utf8");
   const insert = db.prepare(
     `INSERT OR IGNORE INTO pending_actions
      (id, status, title, detail, scope, kind, verify_cmd, created_at, next_check, verify_passes, sync_id)

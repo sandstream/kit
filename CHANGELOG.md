@@ -45,6 +45,14 @@
 
 ### Fixed
 
+- **Independent audit hardening.** Triage verifies installed script bytes before
+  execution; project identity publication validates semantic readback; PAL rejects
+  duplicate verifier flags and surfaces unreadable legacy ledgers; browser CDP
+  selection requires a live endpoint; npm/Docker packaging gates retain runtime
+  assets while excluding compiled workspace tests; standards baselines now ratchet
+  frozen metric magnitude; and the ChatGPT tunnel wizard reports unverified final
+  connectivity instead of a false success.
+
 - **Native Windows verifier authority.** Approval markers and their database
   bindings now require a re-verified owner-only Windows ACL. Failure to establish
   it refuses approval, and the real Windows slice is a required pull-request gate.

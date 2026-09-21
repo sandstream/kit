@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { secureFile, secureDir } from "./secure-perms.js";
 
-// POSIX behavior is directly assertable (mode bits). The Windows icacls branch is
-// exercised by the windows-latest probe (#43) — it's a no-op-on-POSIX here.
+// POSIX behavior is directly assertable (mode bits). The Windows .NET ACL helper is
+// exercised by the windows-latest probe (#43) — it is not invoked on POSIX here.
 const posix = process.platform !== "win32";
 
 it("Windows ACL helper uses framework APIs without PowerShell security modules", () => {

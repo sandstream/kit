@@ -27,6 +27,7 @@ ENV_FILE="${ENV_FILE:-.env}"
 WRITTEN_ENV=()    # KEYs written to ENV_FILE this run
 WRITTEN_SECRET=() # secret NAMEs set this run
 SKIPPED=()        # things we couldn't do (e.g. gh missing)
+VERIFICATION_PENDING=0
 
 # _clear — wipe the terminal so only the current step is on screen. No-op when
 # output isn't a terminal, so piped logs stay readable.
@@ -169,7 +170,11 @@ set_var() {
 # finish — clear, then a closing summary of everything configured.
 finish() {
   _clear
-  printf '\n%s%s  ✓ Setup complete%s\n' "$BOLD" "$GREEN" "$RESET"
+  if (( VERIFICATION_PENDING )); then
+    printf '\n%s%s  ⚠ Setup configured; end-to-end verification incomplete%s\n' "$BOLD" "$YELLOW" "$RESET"
+  else
+    printf '\n%s%s  ✓ Setup complete%s\n' "$BOLD" "$GREEN" "$RESET"
+  fi
   (( ${#WRITTEN_ENV[@]} ))    && note "wrote ${#WRITTEN_ENV[@]} value(s) to $ENV_FILE: ${WRITTEN_ENV[*]}"
   (( ${#WRITTEN_SECRET[@]} )) && note "set ${#WRITTEN_SECRET[@]} GitHub secret(s): ${WRITTEN_SECRET[*]}"
   if (( ${#SKIPPED[@]} )); then
@@ -278,9 +283,13 @@ step "If needed: Settings → Security and login → enable Developer mode."
 step "Select + → create developer-mode app → Connection: Tunnel."
 step "Choose this tunnel (or paste $TUNNEL_ID), create the app, then review discovered kit tools."
 step "Call kit_memory with a harmless search to verify the complete web path."
-pause "Press Enter after ChatGPT has successfully called a kit tool."
+if ! confirm "Did ChatGPT successfully call a kit tool?"; then
+  VERIFICATION_PENDING=1
+  SKIPPED+=("End-to-end ChatGPT tool call remains UNVERIFIED; re-run and confirm only after a real kit_memory call succeeds")
+fi
 
 CONTROL_PLANE_API_KEY=""
 unset CONTROL_PLANE_API_KEY
 SKIPPED+=("After a reboot, load CONTROL_PLANE_API_KEY from your vault and run: tunnel-client run --profile $TUNNEL_PROFILE")
 finish
+exit "$VERIFICATION_PENDING"

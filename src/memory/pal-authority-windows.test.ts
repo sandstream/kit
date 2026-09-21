@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it, type TestContext } from "node:test";
 import { openMemoryDb } from "./db.js";
@@ -70,6 +71,58 @@ it(
     assert.equal((await palAutoVerify(db, 1)).checked, 1);
     assert.equal(palList(db, { status: "closed", readOnly: true })[0]?.id, id);
     assert.equal(existsSync(join(dir, ".kit-verifier-grants")), true);
+  },
+);
+
+it(
+  "native Windows refuses a verifier grant readable by another principal",
+  { skip: process.platform !== "win32" },
+  async (t) => {
+    const { src, dir, track } = fixture(t);
+    const db = track(openMemoryDb(src));
+    const id = palAdd(db, {
+      title: "native Windows leaked grant",
+      check: { type: "file-exists", path: src },
+    });
+    assert.equal((await palAutoVerify(db, 1)).checked, 1);
+    const grants = join(dir, ".kit-verifier-grants");
+    const marker = join(grants, readdirSync(grants)[0]!);
+    const powershell = join(
+      process.env.SystemRoot!,
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe",
+    );
+    const script = `
+$acl = [System.IO.File]::GetAccessControl($env:KIT_TEST_MARKER)
+$sid = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')
+$rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+  $sid,
+  [System.Security.AccessControl.FileSystemRights]::Read,
+  [System.Security.AccessControl.AccessControlType]::Allow
+)
+[void]$acl.AddAccessRule($rule)
+[System.IO.File]::SetAccessControl($env:KIT_TEST_MARKER, $acl)
+`;
+    execFileSync(
+      powershell,
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+      { env: { ...process.env, KIT_TEST_MARKER: marker } },
+    );
+
+    const before = palList(db, { status: "closed", readOnly: true });
+    const result = await palAutoVerify(db, 1);
+    assert.equal(result.checked, 0);
+    assert.equal(result.unverified[0]?.reason, "no-local-approval");
+    assert.equal(before[0]?.id, id);
+    assert.deepEqual(palList(db, { status: "closed", readOnly: true }), before);
   },
 );
 

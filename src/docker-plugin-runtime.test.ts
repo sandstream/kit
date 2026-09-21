@@ -1,10 +1,20 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+async function sourceFiles(dir: string): Promise<string[]> {
+  const files: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const path = resolve(dir, entry.name);
+    if (entry.isDirectory()) files.push(...(await sourceFiles(path)));
+    else if (entry.name.endsWith(".ts")) files.push(path);
+  }
+  return files;
+}
 
 describe("Docker plugin runtime", () => {
   it("pins every Node base image to the reviewed multi-architecture manifest", async () => {
@@ -24,11 +34,37 @@ describe("Docker plugin runtime", () => {
     const runtime = dockerfile.slice(dockerfile.lastIndexOf("FROM node:22-alpine@sha256:"));
 
     assert.match(builder, /COPY skills \.\/skills/);
+    assert.match(runtime, /apk add[^\n\\]*(?:\\\n[^\n]*)*\bbash\b/);
     assert.match(runtime, /apk add[^\n\\]*(?:\\\n[^\n]*)*\bpython3\b/);
     assert.match(runtime, /npm\s+install\s+-g\s+npm@11\.19\.1\s+--ignore-scripts/);
     assert.match(runtime, /npm\s+cache\s+clean\s+--force/);
     assert.match(runtime, /COPY --from=builder[^\n]*\/build\/skills\s+\.\/skills/);
     assert.match(runtime, /chown\s+kit:kit\s+\/app/);
+  });
+
+  it("ships every script asset read by production code in npm and Docker", async () => {
+    const assets = new Set<string>();
+    for (const file of await sourceFiles(resolve(repoRoot, "src"))) {
+      if (file.endsWith(".test.ts")) continue;
+      const source = await readFile(file, "utf8");
+      for (const match of source.matchAll(/new URL\(["'](?:\.\.\/)+scripts\/([^"']+)["']/g)) {
+        assets.add(`scripts/${match[1]}`);
+      }
+    }
+    assert.deepEqual([...assets].sort(), [
+      "scripts/chatgpt-web-wizard.sh",
+      "scripts/windows-private-acl.ps1",
+    ]);
+
+    const pkg = JSON.parse(await readFile(resolve(repoRoot, "package.json"), "utf8")) as {
+      files: string[];
+    };
+    for (const asset of assets)
+      assert.ok(pkg.files.includes(asset), `${asset} missing from npm files`);
+
+    const dockerfile = await readFile(resolve(repoRoot, "Dockerfile"), "utf8");
+    const runtime = dockerfile.slice(dockerfile.lastIndexOf("FROM node:22-alpine@sha256:"));
+    assert.match(runtime, /COPY --from=builder[^\n]*\/build\/scripts\s+\.\/scripts/);
   });
 });
 

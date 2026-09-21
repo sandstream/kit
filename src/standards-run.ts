@@ -84,8 +84,10 @@ export async function runStandardsGate(
         thresholds,
         baseline: {
           complexity: baselineGet(baseline, "standards", "complexity"),
+          complexityMetrics: baselineGet(baseline, "standards", "complexity_metrics"),
           duplication: baselineGet(baseline, "standards", "duplication"),
           size: baselineGet(baseline, "standards", "size"),
+          sizeMetrics: baselineGet(baseline, "standards", "size_metrics"),
         },
       })),
     );

@@ -23,7 +23,6 @@ import {
   type ScryptOptions,
   type KeyObject,
 } from "node:crypto";
-import { gunzipSync } from "node:zlib";
 import {
   readFileSync,
   readSync,
@@ -49,7 +48,6 @@ import { assertRecoveryCompatible } from "./pal-check-storage.js";
 import { assertActionDeletionsPreserved } from "./pal-recovery.js";
 import {
   copyFileToDescriptor,
-  MAX_DECOMPRESSED_BYTES,
   restoreChunkedFile,
   restoreLegacyFile,
   SIZE_HEADER_LEN,
@@ -171,12 +169,9 @@ function writeBackupFile(
   }
 }
 
-// The plaintext DB is gzip-compressed BEFORE encryption (a SQLite file is highly
-// compressible — ~139 MB → ~30 MB — which keeps the blob under a 100 MB git host
-// limit and speeds every transport). Compression is INSIDE the encryption, so the
-// remote still only ever sees ciphertext. Backward-compatible on read: an older
-// (uncompressed) blob decrypts to a raw SQLite file that lacks the gzip header, so
-// `maybeGunzip` passes it through untouched — no new format version needed.
+// Capture one committed SQLite snapshot before the format-specific writer runs.
+// Current V4/V5 writers compress and authenticate independent 1 MiB frames; legacy
+// V1-V3 readers use bounded staging streams for backward compatibility.
 function withMemoryDbSnapshot<T>(
   srcPath: string,
   outPath: string,
@@ -199,31 +194,6 @@ function withMemoryDbSnapshot<T>(
     return use(snapshot, statSync(snapshot).size);
   } finally {
     rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-// Hard ceiling on the decompressed size. A V3 (public-key) blob is near-unauthenticated —
-// the recipient public key is meant to be shared, so anyone can craft a VALID blob whose
-// plaintext is a gzip bomb (a few KB → many GB). Without a cap, `kit memory pull` of such a
-// blob exhausts memory on the durable box. 1 GiB is well above a real brain (a large store
-// is ~139 MB uncompressed) while bounding a bomb; an over-limit blob throws a clear error
-// instead of OOMing.
-/** Gunzip if the buffer carries the gzip magic (0x1f 0x8b); otherwise return as-is
- *  (a pre-compression blob, whose plaintext is a raw SQLite file). Bounded output so a
- *  crafted blob can't decompress into a memory-exhausting gzip bomb. `maxBytes` is a test
- *  seam; production callers use the default 1 GiB ceiling. */
-export function maybeGunzip(buf: Buffer, maxBytes: number = MAX_DECOMPRESSED_BYTES): Buffer {
-  if (!(buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b)) return buf;
-  try {
-    return gunzipSync(buf, { maxOutputLength: maxBytes });
-  } catch (e) {
-    if (e instanceof RangeError) {
-      throw new Error(
-        `backup decompresses beyond the ${Math.round(maxBytes / (1024 * 1024))} MB limit — refusing (possible gzip bomb)`,
-        { cause: e },
-      );
-    }
-    throw e;
   }
 }
 

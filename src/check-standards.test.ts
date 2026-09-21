@@ -7,7 +7,9 @@ import {
   checkStandards,
   collectStandardsKeys,
   complexityKey,
+  complexityMetricKey,
   sizeKey,
+  sizeMetricKey,
   DEFAULT_STANDARDS_THRESHOLDS,
   type GeneralScan,
 } from "./check-standards.js";
@@ -125,8 +127,12 @@ describe("check-standards — checkStandards gating", () => {
       enforce: true,
       baseline: {
         complexity: [complexityKey({ file: "src/big.ts", fn: "monster" })],
+        complexityMetrics: [
+          complexityMetricKey({ file: "src/big.ts", fn: "monster", ccn: 40, length: 300 }),
+        ],
         duplication: ["src/a.ts|src/b.ts"],
         size: [sizeKey({ file: "src/huge.ts" })],
+        sizeMetrics: [sizeMetricKey({ file: "src/huge.ts", lines: 1200 })],
       },
     });
     // complexity + size are fully baselined → low warn.
@@ -141,6 +147,24 @@ describe("check-standards — checkStandards gating", () => {
     const dup = r.find((x) => x.name.startsWith("duplication"));
     assert.equal(dup?.status, "warn");
     assert.equal(dup?.severity, "low");
+  });
+
+  it("re-fails when a frozen function or file grows beyond its recorded metrics", async () => {
+    const r = await checkStandards({
+      scan: DIRTY_SCAN,
+      enforce: true,
+      baseline: {
+        complexity: [complexityKey({ file: "src/big.ts", fn: "monster" })],
+        complexityMetrics: [
+          complexityMetricKey({ file: "src/big.ts", fn: "monster", ccn: 39, length: 299 }),
+        ],
+        duplication: ["src/a.ts|src/b.ts"],
+        size: [sizeKey({ file: "src/huge.ts" })],
+        sizeMetrics: [sizeMetricKey({ file: "src/huge.ts", lines: 1199 })],
+      },
+    });
+    assert.equal(r.find((x) => x.name.startsWith("complexity"))?.status, "fail");
+    assert.equal(r.find((x) => x.name.startsWith("file size"))?.status, "fail");
   });
 
   it("a NET-NEW clone pair re-fails duplication under enforce even with an old pair frozen", async () => {
@@ -200,6 +224,24 @@ describe("check-standards — checkStandards gating", () => {
   });
 });
 
+it("allows append-only changelog growth while retaining its frozen size identity", async () => {
+  const scan: GeneralScan = {
+    ...CLEAN_SCAN,
+    size: { findings: [{ file: "CHANGELOG.md", lines: 1_201 }], didNotRun: false },
+  };
+  const r = await checkStandards({
+    scan,
+    enforce: true,
+    baseline: {
+      size: [sizeKey({ file: "CHANGELOG.md" })],
+      sizeMetrics: [sizeMetricKey({ file: "CHANGELOG.md", lines: 1_200 })],
+    },
+  });
+  const size = r.find((x) => x.name.startsWith("file size"));
+  assert.equal(size?.status, "warn");
+  assert.equal(size?.severity, "low");
+});
+
 describe("check-standards — collectStandardsKeys", () => {
   it("returns empty slices when the general tools are absent (nothing to freeze)", async () => {
     // The tools are FORCED absent rather than assumed absent. This test previously read
@@ -212,7 +254,13 @@ describe("check-standards — collectStandardsKeys", () => {
     process.env.PATH = "";
     try {
       const keys = await collectStandardsKeys(process.cwd());
-      assert.deepEqual(keys, { complexity: [], duplication: [], size: [] });
+      assert.deepEqual(keys, {
+        complexity: [],
+        complexityMetrics: [],
+        duplication: [],
+        size: [],
+        sizeMetrics: [],
+      });
     } finally {
       process.env.PATH = realPath;
     }

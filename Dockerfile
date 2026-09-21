@@ -54,6 +54,7 @@ WORKDIR /app
 # bundled triage skill copied below. Keep npm on the triaged, Node 22-compatible
 # release instead of inheriting whichever version ships in the base image.
 RUN apk add --no-cache --upgrade \
+        bash=5.3.9-r1 \
         dumb-init=1.2.5-r4 \
         libcrypto3=3.5.8-r0 \
         libssl3=3.5.8-r0 \
@@ -70,6 +71,7 @@ COPY --from=builder --chown=kit:kit /build/dist ./dist
 COPY --from=prod-deps --chown=kit:kit /deps/node_modules ./node_modules
 COPY --from=builder --chown=kit:kit /build/package.json ./
 COPY --from=builder --chown=kit:kit /build/skills ./skills
+COPY --from=builder --chown=kit:kit /build/scripts ./scripts
 RUN chown kit:kit /app
 
 # Set environment

@@ -26,6 +26,14 @@ describe("ChatGPT web MCP wizard", () => {
     assert.doesNotMatch(source, /set_secret CONTROL_PLANE_API_KEY/);
   });
 
+  it("does not report success until the human confirms a real ChatGPT tool call", () => {
+    const source = readFileSync(WIZARD, "utf8");
+    assert.match(source, /if ! confirm "Did ChatGPT successfully call a kit tool\?"; then/);
+    assert.match(source, /VERIFICATION_PENDING=1/);
+    assert.match(source, /Setup configured; end-to-end verification incomplete/);
+    assert.doesNotMatch(source, /pause "Press Enter after ChatGPT has successfully called/);
+  });
+
   it("refuses a non-interactive run before opening a browser", () => {
     const result = spawnSync("bash", [WIZARD], {
       cwd: REPO_ROOT,

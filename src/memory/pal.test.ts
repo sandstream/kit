@@ -290,6 +290,17 @@ describe("PAL — pending actions", () => {
     db.close();
   });
 
+  it("surfaces an unreadable legacy ledger instead of pretending it is absent", () => {
+    const db = fresh();
+    const dir = mkdtempSync(join(tmpdir(), "kit-pal-ledger-error-"));
+    try {
+      assert.throws(() => importLegacyLedger(db, dir), /EISDIR|directory|read/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      db.close();
+    }
+  });
+
   it("SECURITY: a verify command imported from a legacy ledger is never auto-executed", async () => {
     const db = fresh();
     const tmp = mkdtempSync(join(tmpdir(), "kit-pal-sec-"));

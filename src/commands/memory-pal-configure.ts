@@ -2,28 +2,25 @@ import { parseArgs } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
 import { palConfigure, type VerifyCheck } from "../memory/pal.js";
 import { sanitizeForPrompt } from "../memory/injection.js";
+import { assertUniquePalOptions, PAL_COMMON_OPTIONS } from "./memory-pal-claims.js";
 
 const USAGE =
   "usage: kit memory pal configure <id> (--manual | --verify-file <path> | --verify-http <url> [--expect <code>])";
 
 function configurationArgs() {
-  const { values, positionals } = parseArgs({
+  const { values, positionals, tokens } = parseArgs({
     args: process.argv.slice(5),
     allowPositionals: true,
+    tokens: true,
     options: {
       manual: { type: "boolean" },
       "verify-file": { type: "string" },
       "verify-http": { type: "string" },
       expect: { type: "string" },
-      "non-interactive": { type: "boolean" },
-      "read-only": { type: "boolean" },
-      readonly: { type: "boolean" },
-      env: { type: "string" },
-      json: { type: "boolean" },
-      help: { type: "boolean" },
-      version: { type: "boolean" },
+      ...PAL_COMMON_OPTIONS,
     },
   });
+  assertUniquePalOptions(tokens);
   const modes = [values.manual, values["verify-file"], values["verify-http"]];
   if (
     positionals.length !== 1 ||

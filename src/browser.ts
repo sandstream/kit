@@ -221,7 +221,7 @@ export async function diagnoseBrowser(
   checks.push({
     name: "chrome cdp",
     status: "blocker",
-    detail: "No CDP URL configured and localhost:9222 did not respond.",
+    detail: "No configured or localhost CDP endpoint responded.",
   });
   actions.push({
     label: "Start Chrome with CDP",
@@ -376,9 +376,16 @@ async function probeCdp(
   deps: Required<BrowserProbeDeps>,
 ): Promise<CdpProbe> {
   const fromEnv = env.KIT_BROWSER_CDP_URL?.trim();
-  if (fromEnv) return { url: fromEnv, source: "env" };
   const fromConfig = config?.cdp_url?.trim();
-  if (fromConfig) return { url: fromConfig, source: "config" };
+  const candidates: CdpProbe[] = [];
+  if (fromEnv) candidates.push({ url: fromEnv, source: "env" });
+  if (fromConfig && fromConfig !== fromEnv) candidates.push({ url: fromConfig, source: "config" });
+  for (const candidate of candidates) {
+    const versionUrl = candidate.url!.endsWith("/json/version")
+      ? candidate.url!
+      : `${candidate.url!.replace(/\/+$/, "")}/json/version`;
+    if (await deps.probeUrl(versionUrl)) return candidate;
+  }
   if (await deps.probeUrl(`${LOCAL_CDP_URL}/json/version`))
     return { url: LOCAL_CDP_URL, source: "localhost" };
   return {};

@@ -5,7 +5,8 @@
  * encrypted backup blob already let you move it by hand. This wires that to a
  * concrete, opt-in transport — YOUR OWN private git repo — so machine A `push`es
  * and machine B `pull`s without a manual file copy. Imported task histories merge
- * causally; this latest-snapshot transport does not guarantee every writer arrives.
+ * causally. Git transport replays every reachable snapshot; command transport carries
+ * only one latest snapshot and therefore does not guarantee every writer arrives.
  *
  * It is configurable WITHOUT being a backdoor, by construction:
  *   1. Config is read ONLY from ~/.kit/sync.toml (a LOCAL file) — never from the

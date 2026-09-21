@@ -31,8 +31,11 @@ another model. True, but it made this look like a nice-to-have. The real motive 
 narrower and more uncomfortable.
 
 **kit's green is a claim about kit's floor, and readers take it as a claim about the
-work.** Measured on this repo: `kit check` runs 42 checks, of which **41 inspect the code
-and 1 executes it**. kit lives almost entirely in the static tier.
+work.** At this ADR's original measurement, `kit check` reported 42 checks, of which
+**41 inspected the code and 1 executed it**. That count is historical evidence, not a
+stable product invariant: checks have since changed, and the shipped `tierNotice` derives
+scope from the checks that actually ran. The underlying observation remains that kit's
+floor lives predominantly in the static tier.
 
 Multi-tier verification research ([arXiv:2607.00107](https://arxiv.org/abs/2607.00107) —
 8,918 C++ programs across 851 tasks, four tiers, three models plus human-authored code)
@@ -103,6 +106,14 @@ Also: **`kit check` now states its scope next to its verdict** (`tierNotice`,
 `src/cli-checks-shared.ts`), counted from the checks that ran rather than asserted, so the
 narrowness above is visible without needing this rig at all. That was the cheap half of
 the fix and it shipped first.
+
+## Implementation status
+
+As of 2026-09-21, the scope notice above is shipped. The frozen-input runner, structured
+finding ingest, deterministic adjudication, comparison arithmetic, and rig receipts are
+an accepted design but **not a shipped command surface**: there is no `rig`, ingest, or
+adjudicate command. This ADR constrains that future implementation; it must not be read as
+evidence that the rig already exists.
 
 ## Status of enforcement
 
