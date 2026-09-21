@@ -71,8 +71,13 @@ it("keeps SQL and hash comments language-specific while preserving literals and 
   assert.doesNotMatch(clean["query.sql"], /new Stripe/);
   assert.doesNotMatch(clean["app.py"], /new Stripe/);
   assert.match(clean["checkout.js"], /attempts--/);
-  for (const [path, source] of Object.entries(sources)) {
-    assert.ok(clean[path].includes("https://js.stripe.com/v3/"));
+  assert.deepEqual(clean, {
+    "query.sql": "select 1;                    \nselect 'https://js.stripe.com/v3/';",
+    "app.py": 'name = "ready"                   \nurl = "https://js.stripe.com/v3/"',
+    "checkout.js": 'let attempts = 3; attempts--;\nconst url = "https://js.stripe.com/v3/";',
+  });
+  for (const path of Object.keys(sources) as (keyof typeof sources)[]) {
+    const source = sources[path];
     assert.equal(clean[path].split("\n").length, source.split("\n").length);
   }
 });
