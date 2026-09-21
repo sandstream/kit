@@ -4,65 +4,13 @@
 // write. Authority-bearing callers use strict variants and verify the ACL before trusting a
 // local marker.
 import { execFileSync } from "node:child_process";
-import { chmodSync, statSync } from "node:fs";
+import { chmodSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const WINDOWS_PRIVATE_ACL = String.raw`
-$ErrorActionPreference = 'Stop'
-$path = $env:KIT_PRIVATE_ACL_PATH
-$kind = $env:KIT_PRIVATE_ACL_KIND
-$repair = $env:KIT_PRIVATE_ACL_REPAIR -eq '1'
-$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-if ($repair) {
-  if ($kind -eq 'dir') {
-    $acl = [System.Security.AccessControl.DirectorySecurity]::new()
-  } else {
-    $acl = [System.Security.AccessControl.FileSecurity]::new()
-  }
-  $acl.SetAccessRuleProtection($true, $false)
-  $acl.SetOwner($sid)
-  if ($kind -eq 'dir') {
-    $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
-      $sid,
-      [System.Security.AccessControl.FileSystemRights]::FullControl,
-      ([System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit),
-      [System.Security.AccessControl.PropagationFlags]::None,
-      [System.Security.AccessControl.AccessControlType]::Allow
-    )
-  } else {
-    $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
-      $sid,
-      [System.Security.AccessControl.FileSystemRights]::FullControl,
-      [System.Security.AccessControl.AccessControlType]::Allow
-    )
-  }
-  [void]$acl.AddAccessRule($rule)
-  if ($kind -eq 'dir') {
-    [System.IO.Directory]::SetAccessControl($path, $acl)
-  } else {
-    [System.IO.File]::SetAccessControl($path, $acl)
-  }
-}
-if ($kind -eq 'dir') {
-  $acl = [System.IO.Directory]::GetAccessControl($path)
-} else {
-  $acl = [System.IO.File]::GetAccessControl($path)
-}
-$owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
-$entries = @($acl.Access)
-$valid = $acl.AreAccessRulesProtected -and $owner -eq $sid.Value -and $entries.Count -eq 1
-if ($valid) {
-  $entry = $entries[0]
-  $entrySid = $entry.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
-  $full = [System.Security.AccessControl.FileSystemRights]::FullControl
-  $valid = -not $entry.IsInherited -and
-    $entrySid -eq $sid.Value -and
-    $entry.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and
-    (($entry.FileSystemRights -band $full) -eq $full)
-}
-if (-not $valid) { exit 3 }
-Write-Output 'PRIVATE'
-`;
+const WINDOWS_PRIVATE_ACL = readFileSync(
+  new URL("../../scripts/windows-private-acl.ps1", import.meta.url),
+  "utf8",
+);
 
 type PrivatePathKind = "file" | "dir";
 
@@ -71,46 +19,6 @@ function windowsAclErrorDetail(error: unknown): string {
   const stderr = (error as { stderr?: unknown }).stderr;
   const detail = Buffer.isBuffer(stderr) ? stderr.toString("utf8") : String(stderr ?? "");
   return detail.replaceAll(/\s+/g, " ").trim().slice(0, 500);
-}
-
-function windowsAcl(path: string, kind: PrivatePathKind, repair: boolean): boolean {
-  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
-  if (!systemRoot) {
-    if (repair) throw new Error("Cannot establish Windows ACL: SystemRoot is unavailable");
-    return false;
-  }
-  // Absolute system path avoids PATH search for an authority-bearing subprocess.
-  const powershell = join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-  const encoded = Buffer.from(WINDOWS_PRIVATE_ACL, "utf16le").toString("base64");
-  try {
-    const output = execFileSync(
-      powershell,
-      ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-      {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout: 10_000,
-        env: {
-          ...process.env,
-          KIT_PRIVATE_ACL_PATH: path,
-          KIT_PRIVATE_ACL_KIND: kind,
-          KIT_PRIVATE_ACL_REPAIR: repair ? "1" : "0",
-        },
-      },
-    );
-    if (output.trim() === "PRIVATE") return true;
-  } catch (err) {
-    if (repair) {
-      const detail = windowsAclErrorDetail(err);
-      throw new Error(
-        `Cannot establish owner-only Windows ACL for ${path}${detail ? `: ${detail}` : ""}`,
-        { cause: err },
-      );
-    }
-    return false;
-  }
-  if (repair) throw new Error(`Cannot verify owner-only Windows ACL for ${path}`);
-  return false;
 }
 
 function posixPathIsControlled(path: string, kind: PrivatePathKind): boolean {
@@ -172,4 +80,44 @@ export function secureDir(path: string): void {
   } catch {
     // Authority-bearing callers use secureDirStrict and fail closed.
   }
+}
+
+function windowsAcl(path: string, kind: PrivatePathKind, repair: boolean): boolean {
+  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+  if (!systemRoot) {
+    if (repair) throw new Error("Cannot establish Windows ACL: SystemRoot is unavailable");
+    return false;
+  }
+  // Absolute system path avoids PATH search for an authority-bearing subprocess.
+  const powershell = join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  const encoded = Buffer.from(WINDOWS_PRIVATE_ACL, "utf16le").toString("base64");
+  try {
+    const output = execFileSync(
+      powershell,
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 10_000,
+        env: {
+          ...process.env,
+          KIT_PRIVATE_ACL_PATH: path,
+          KIT_PRIVATE_ACL_KIND: kind,
+          KIT_PRIVATE_ACL_REPAIR: repair ? "1" : "0",
+        },
+      },
+    );
+    if (output.trim() === "PRIVATE") return true;
+  } catch (err) {
+    if (repair) {
+      const detail = windowsAclErrorDetail(err);
+      throw new Error(
+        `Cannot establish owner-only Windows ACL for ${path}${detail ? `: ${detail}` : ""}`,
+        { cause: err },
+      );
+    }
+    return false;
+  }
+  if (repair) throw new Error(`Cannot verify owner-only Windows ACL for ${path}`);
+  return false;
 }

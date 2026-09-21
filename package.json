@@ -22,7 +22,8 @@
     "README.md",
     "skills",
     "docs/MONKEY_TEST.md",
-    "scripts/chatgpt-web-wizard.sh"
+    "scripts/chatgpt-web-wizard.sh",
+    "scripts/windows-private-acl.ps1"
   ],
   "publishConfig": {
     "access": "public"

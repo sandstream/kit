@@ -63,7 +63,9 @@ describe("forgetMemory (verified-forget, G1)", () => {
     assert.equal(countTombstones(db), 1);
     db.close();
   });
+});
 
+describe("forgetMemory edge behavior", () => {
   it("returns found:false / ok:false for a uuid that does not exist", () => {
     const db = setup();
     const proof = forgetMemory(db, "nope");
@@ -173,7 +175,9 @@ describe("a tombstone survives re-indexing (MP-1-r1)", () => {
     assert.equal(searchMessages(db, "edited").length, 0);
     db.close();
   });
+});
 
+describe("tombstone re-index accounting", () => {
   it("does not block unrelated uuids", () => {
     const db = setup();
     insertMessage(db, { uuid: "u1", sessionId: "s1", type: "user", content: "forget the beetle" });
