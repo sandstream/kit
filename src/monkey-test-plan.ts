@@ -16,6 +16,7 @@ import {
   scanMonkeySources,
 } from "./monkey-test-scan.js";
 import { securityFindings } from "./monkey-test-security.js";
+import { monkeyEnvironmentFindings } from "./monkey-test-runner-env.js";
 import { detectStack } from "./stack-detector.js";
 import { redactSecrets, secretValuesFromEnv } from "./utils/redactSecrets.js";
 
@@ -264,12 +265,19 @@ export async function buildMonkeyTestPlan(
   const packageManager = detectPackageManager(pkg, root);
   const commands = redactCommands(detectCommands(pkg, packageManager));
   const scan = await scanMonkeySources(root);
-  const providers = detectPaymentProviders(deps, scan.runtimeText);
+  const providers = detectPaymentProviders(deps, scan.runtimeFiles);
   const playwright = detectPlaywright(root, deps);
   const env = await detectEnvironment(root, options.envCommand);
   const harnessMissing = MONKEY_HARNESS_FILES.filter((file) => !existsSync(join(root, file)));
-  const findings = await securityFindings(root);
+  const environmentFindings = await monkeyEnvironmentFindings(root, process.env);
+  const findings = [...(await securityFindings(root)), ...environmentFindings];
   const checkInput = { stack, commands, playwright, env, providers, harnessMissing };
+  const checks = buildPlanChecks(checkInput);
+  if (environmentFindings.length > 0) {
+    const envCheck = checks.find((check) => check.name === "env")!;
+    envCheck.status = "fail";
+    envCheck.detail = "Unsafe or unreadable application environment; inspect findings";
+  }
   return {
     cwd: root,
     stack,
@@ -279,13 +287,13 @@ export async function buildMonkeyTestPlan(
     env,
     money: {
       providers,
-      sandboxOnly: findings.every(
-        (finding) => !/live payment|payment credential/i.test(finding.title),
-      ),
+      sandboxOnly:
+        environmentFindings.length === 0 &&
+        findings.every((finding) => !/live payment|payment credential/i.test(finding.title)),
     },
     harness: { files: [...MONKEY_HARNESS_FILES], missing: harnessMissing },
     roles: MONKEY_ROLES,
-    checks: buildPlanChecks(checkInput),
+    checks,
     findings,
     nextSteps: buildNextSteps(checkInput),
   };

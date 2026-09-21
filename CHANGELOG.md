@@ -2,6 +2,19 @@
 
 ### Added
 
+- **Bounded memory transport.** Current encrypted backups use independently
+  authenticated 1 MiB frames, legacy restores stream through private staging,
+  and Git pulls enumerate long reachable histories with one streamed log plus a
+  disk-backed deduplication index.
+
+- **Cross-clone project identity.** `kit memory project init` writes one public
+  UUID to `[memory].project_id`; clones carrying it register local roots and recall
+  the same project history without equating unrelated folders by name or remote URL.
+
+- **ChatGPT web bridge.** `kit mcp web` provides a six-stage interactive setup for
+  OpenAI Secure MCP Tunnel, keeping kit's existing stdio server private and the
+  runtime credential out of repo files.
+
 - **ADR import graph derivation.** `kit adr derive` proposes enforceable ADRs
   from the repository's own import graph, and `kit adr check` runs the
   `kit-enforce` rules as a hard CI gate.
@@ -18,11 +31,140 @@
 
 ### Changed
 
+- **BREAKING: session-owned pending-action claims.** `pal claim` now requires
+  explicit `--harness`, `--session` and `--expect` arguments. Claim, renewal and
+  explicit takeover return a new frontier receipt; claimed transitions require
+  matching ownership and the current receipt. Claims never expire automatically.
+  Unknown legacy owners require takeover. Schema 16 preserves historical revisions
+  and fences older causal writers; these receipts are not authentication or a
+  distributed lock for external work. SessionStart and claimed lists expose owners.
+
 - **Monkey test gate split into modules.** `kit monkey-test` moved out of one
   1700-line module into planner, runner, scanner, security, evidence, and
   harness modules, each with its own tests.
 
 ### Fixed
+
+- **Native Windows verifier authority.** Approval markers and their database
+  bindings now require a re-verified owner-only Windows ACL. Failure to establish
+  it refuses approval, and the real Windows slice is a required pull-request gate.
+
+- **Pending-action verification targets.** Relative file checks use their creation
+  directory, never a later caller's cwd or recall alias. Unavailable checks report
+  `unverified` without changing task state; JSON output and nonzero exit make the
+  gap visible. Explicit `pal configure` replaces a check or selects manual mode
+  without rewriting creation history, claims, or task status.
+
+- **Pending-action verification races.** Queued checks revalidate before starting,
+  and delayed results cannot overwrite newer action state. Local version metadata
+  survives row replacement without trusting imported versions; stale observations
+  are reported by the CLI. This is local coordination, not distributed ownership.
+
+- **Consistent encrypted memory backups.** Both encryption modes export a committed
+  SQLite snapshot without migrating the source. Private atomic output publication
+  preserves previous bytes on ordinary failures and rejects source/sidecar aliases.
+
+- **Governed project scope.** Review rejects missing or non-directory roots before
+  running stages. MCP triage resolves mirrors and local targets from the requested
+  project, including delegated Homebrew checks.
+
+- **Concurrent memory-store startup.** WAL negotiation tolerates transient busy
+  errors within a bounded budget. Schema inspection, migration, and backfill run
+  in one writer transaction; failures roll back and close the connection.
+
+- **Concurrent device identity.** First local sessions publish one complete private
+  device ID without overwriting another initializer. Corrupt files remain intact;
+  degraded host-derived identity is visible at session start.
+
+- **Visible memory recovery failures.** SessionStart reports unavailable private
+  history or pending work in agent context and Claude's user-visible message,
+  while retaining independently available curated shared decisions. Health signals
+  travel separately from recalled text and shared metadata.
+
+- **Pending-action status inspection.** `pal list --status` exposes claimed,
+  snoozed, and closed work without widening default project/device filters.
+  Claimed items show their owner; invalid status selections fail explicitly.
+
+- **Pending-action lifecycle.** Expired snoozes resurface during writable recovery;
+  early release and explicit closed-item reopening complete the local workflow.
+  Invalid durations and unsuccessful transitions fail instead of reporting success.
+  Automatic reactivation respects project/device assignments, and read-only listing
+  neither migrates the store nor changes tasks or creates a device identity.
+
+- **Monkey runner lifecycle.** Browser prerequisites and seed failures stop later
+  side effects. Interrupt handling tracks active process groups, retires completed
+  commands, and cleans descendants. Streamed child logs use redacted stderr so
+  JSON stdout remains parseable. POSIX group probes are not kernel identity handles.
+
+- **Monkey runner environment checks.** Provider exports retain literal dotenv
+  assignments; live payment prefixes are screened by value, not variable name.
+  Standard root dotenv files are checked before side effects and between stages.
+  Unsupported loader syntax, unresolved references and NUL values are refused
+  without printing values. This is not an application-code sandbox.
+
+- **Test-support packaging.** Shared subprocess fixtures compile with the tests,
+  not the published runtime. A compiler-graph regression prevents production code
+  from pulling test modules back into that build; ADR checks still inspect them.
+
+- **Infisical authentication evidence.** Service and secret-fallback checks use
+  backend-verified status for the active credential and configured domain. Help
+  text, expired sessions, and skipped verification no longer establish health.
+  Authenticated secret fallbacks still do not claim that a key exists.
+
+- **Heal retains unsuccessful repairs.** Findings that remain after a failed or
+  ineffective automatic repair now require manual action instead of disappearing
+  from the result. A bounded confirmation scan covers attempts that changed state
+  before throwing; dry-run plans and triage refusals remain distinct.
+
+- **Effective Git ignore protection.** Security checks now ask Git about ignore
+  rules and already tracked dotenv secrets. Negations and unavailable verification
+  cannot earn a pass. Repairs preserve user rules and nested private Kit state,
+  retain access to root shared memory, and verify the resulting protection without
+  removing files from the index.
+
+- **Plugin error-response redaction.** Nine independently packaged plugins now
+  mask opaque Bearer and query tokens consistently with core, including Snyk/Wiz
+  response bodies and GraphQL errors. Shared compatibility fixtures exercise the
+  real failure paths without adding a runtime dependency on core.
+
+- **MCP dependency security update.** The exact Hono override is now 4.13.5.
+  An installed-dependency HTTP regression ensures URL fragments cannot become
+  query parameters; Kit's stdio transport still does not load the HTTP stack.
+
+- **Portable pending-action import.** Actions retain original device/path/id and
+  claim metadata. Explicit mappings make them locally reachable; independent short
+  ID collisions no longer discard work. Incoming verification remains manual-only.
+  Causal descendants advance state; concurrent alternatives remain inspectable and
+  require observed-frontier resolution or explicit claim takeover. Both hook formats
+  surface conflicts without promoting stored text into trusted health notices.
+  Latest-snapshot transport is still not a lossless multi-writer protocol.
+
+- **Monkey Test denial redirects.** Only documented exact denial paths satisfy the
+  redirect contract. Successful pages whose names merely contain `login` or
+  `forbidden` no longer pass a denied-route assertion.
+
+- **Cross-device memory recall.** Explicit import mappings now repair message and
+  bookmark recall, including repeat imports, without rewriting original paths.
+  Selective mappings work through encrypted sync and configured pulls. Imports
+  retain sensitivity/quarantine protection and roll back on failure.
+
+- **Concurrent policy pulls.** A destination lock covers revision comparison and
+  verified-pair installation, preventing a concurrent pull from rolling policy
+  backward. Existing locks fail closed and are never removed automatically.
+
+- **Cross-agent worktree recall.** Claude Code and Codex history and saved threads
+  can be found across a repository's linked worktrees. Recall includes its harness
+  and original path; explicit subdirectory scopes stay local. Path matching treats
+  SQL wildcard characters literally, preventing unrelated-project matches.
+
+- **Pending work at agent handoff.** Hooks and suggestions now use absolute project
+  scopes, and action lists include registered worktrees without dropping the device
+  filter. Suggestions preserve claims and mark recalled action titles as stored data.
+
+- **Audit evidence survives redaction.** Nested arrays retain their shape while
+  secret fields are masked. Invalid observe denial evidence blocks enforcement
+  readiness instead of counting as a successful observation. Password environment
+  names with suffixes remain covered alongside glued names such as `PGPASSWORD`.
 
 - **Generated monkey harness evaluated at runtime.** The role matrix validator
   embedded in the generated Playwright spec called module-private helpers that

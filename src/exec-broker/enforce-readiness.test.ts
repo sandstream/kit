@@ -35,22 +35,40 @@ describe("parseObserveRecords", () => {
     assert.deepEqual(records[0].wouldDeny, ["r1"]);
   });
 
-  it("treats a missing or non-array wouldDeny as an empty (would-pass) op", () => {
-    const jsonl = [
-      JSON.stringify({ metadata: { phase: "observe" } }), // no wouldDeny
-      JSON.stringify({ metadata: { phase: "observe", wouldDeny: "oops" } }), // wrong type
-      JSON.stringify({ metadata: { phase: "observe", wouldDeny: [1, "keep", null] } }), // mixed
-    ].join("\n");
-    const records = parseObserveRecords(jsonl);
-    assert.equal(records.length, 3);
-    assert.deepEqual(records[0].wouldDeny, []);
-    assert.deepEqual(records[1].wouldDeny, []);
-    assert.deepEqual(records[2].wouldDeny, ["keep"]); // non-strings filtered out
+  it("blocks invalid observe evidence even alongside a valid would-pass operation", () => {
+    for (const wouldDeny of [
+      undefined,
+      null,
+      "oops",
+      {},
+      { 0: "denied" },
+      [1, "keep", null],
+      [" "],
+    ]) {
+      const jsonl = [
+        observeLine([]),
+        JSON.stringify({ metadata: { phase: "observe", wouldDeny } }),
+      ].join("\n");
+      const records = parseObserveRecords(jsonl);
+      assert.equal(records.length, 2);
+      const result = assessEnforceReadiness(records);
+      assert.equal(result.verdict, "would-block", JSON.stringify(wouldDeny));
+      assert.equal(result.wouldBlockOps, 1);
+      assert.match(result.reasons[0].reason, /invalid observe evidence/);
+    }
   });
 
   it("returns [] for empty input", () => {
     assert.deepEqual(parseObserveRecords(""), []);
     assert.deepEqual(parseObserveRecords("\n\n"), []);
+  });
+
+  it("does not claim that later clean observations repair invalid historical evidence", () => {
+    const jsonl = [observeLine([], { wouldDeny: {} }), observeLine([])].join("\n");
+    const result = assessEnforceReadiness(parseObserveRecords(jsonl));
+    assert.equal(result.verdict, "would-block");
+    assert.match(result.reasons[0].reason, /inspect the audit log/);
+    assert.doesNotMatch(result.reasons[0].reason, /rerun observe/);
   });
 });
 

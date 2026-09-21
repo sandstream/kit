@@ -19,11 +19,11 @@ cd kit
 # Install dependencies
 npm install
 
-# Run tests
-npm test
-
 # Build for development
 npm run build
+
+# Run tests against the compiled tree
+npm test
 
 # Run CLI from source
 npm run dev -- check
@@ -32,12 +32,20 @@ npm run dev -- check
 ### Running Tests
 
 ```bash
-# Run all tests
+# Build first, then run all tests
+npm run build
 npm test
-
-# Run in watch mode (requires tsx)
-npm run dev -- test
 ```
+
+`npm test` applies the fixture environment, concurrency limit, and complete TAP
+logging in `scripts/test.mjs`. A bare `node --test` invocation does not reproduce
+that environment. Do not rebuild shared `dist` while another test run uses it.
+
+Shared fixture helpers use `*.test-support.ts`. They compile in the development
+test build but are excluded from production builds and production-only source
+inventories. Do not import them from runtime modules: `production-build.test.ts`
+checks the production compiler's resolved module graph for transitive test
+imports. ADR checks still include test and test-support files explicitly.
 
 ### Code Style
 

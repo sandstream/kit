@@ -106,10 +106,10 @@ function redactAuditEvent(event: AuditEvent): AuditEvent {
     // (redactAuditValue): a field literally named `password` carrying a low-entropy,
     // no-known-pattern value (e.g. "hunter2") is invisible to both of the other checks.
     metadata: event.metadata
-      ? (redactAuditValue(
-          sanitizeMetadata(event.metadata),
-          knownSecrets,
-        ) as Record<string, unknown>)
+      ? (redactAuditValue(sanitizeMetadata(event.metadata), knownSecrets) as Record<
+          string,
+          unknown
+        >)
       : event.metadata,
   };
 }
@@ -698,6 +698,12 @@ export function _resetRemotePushWarningForTests(): void {
 /**
  * Sanitize metadata to remove potential secrets
  */
+function sanitizeMetadataValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeMetadataValue);
+  if (value && typeof value === "object") return sanitizeMetadata(value as Record<string, unknown>);
+  return value;
+}
+
 function sanitizeMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
   const secretKeys = [
@@ -717,10 +723,8 @@ function sanitizeMetadata(metadata: Record<string, unknown>): Record<string, unk
 
     if (isSecret) {
       sanitized[key] = "[REDACTED]";
-    } else if (value && typeof value === "object") {
-      sanitized[key] = sanitizeMetadata(value as Record<string, unknown>);
     } else {
-      sanitized[key] = value;
+      sanitized[key] = sanitizeMetadataValue(value);
     }
   }
 

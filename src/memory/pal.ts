@@ -9,90 +9,41 @@
  * SECURITY: a verify is a DECLARATIVE, typed check (see `VerifyCheck`), executed
  * natively (fetch / fs) with a timeout. kit NEVER runs a shell, and never
  * interpolates a stored string into a command, so there is no arbitrary-command-
- * execution sink: a planted or imported value can only ever do what the fixed
- * check types allow (nothing). This is deliberately compatible with autonomous
- * agents: auto-verify needs no human gate, yet a prompt-injected agent cannot
- * plant a command that detonates later in a more-trusted session. Fail-open /
- * no-info aware.
+ * execution sink. HTTP checks still send requests; typed input is not a network
+ * authorization boundary. Merged and legacy-imported checks are disabled until
+ * explicitly configured locally. Unavailable evidence does not mutate task state and is
+ * reported separately from a determinate failed check.
  */
 import { randomBytes, createHash } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { homedir, hostname, userInfo } from "node:os";
-import { join, dirname, basename } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, basename, isAbsolute } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-
-/** A device id is an opaque, filesystem- and SQL-safe token. We validate any
- *  externally-supplied value against this before trusting it. */
-const DEVICE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-
-/** Where the persisted per-device id lives. Mirrors `getMemoryDir()` (db.ts) but
- *  is inlined to avoid a circular import. */
-function deviceIdPath(): string {
-  const dir = process.env.KIT_MEMORY_DIR ?? join(homedir(), ".kit");
-  return join(dir, "device-id");
-}
-
-/** Hostname+user-derived id. Deterministic, but DRIFTS when the hostname changes
- *  (DHCP lease, machine rename, a sudo/login shell with a different hostname),
- *  which would silently orphan this device's own items. Used only as a last
- *  resort when a persisted id can neither be read nor written. */
-function hostnameDeviceId(): string {
-  try {
-    return createHash("sha256")
-      .update(`${hostname()}\x1f${userInfo().username}`)
-      .digest("hex")
-      .slice(0, 16);
-  } catch {
-    return "unknown";
-  }
-}
-
-/**
- * A stable identifier for THIS device. Used to device-couple PAL items so an item
- * created in an ephemeral session/container (which gets its own throwaway id)
- * never nags on your durable device.
- *
- * Resolution order:
- *  1. `KIT_DEVICE_ID` IF well-formed (`[A-Za-z0-9_-]{1,64}`). A malformed value is
- *     ignored, not trusted. SECURITY: on a SHARED store this override is
- *     trust-bearing — setting it to another device's id lets you surface or
- *     suppress that device's items. Set it only on trusted hosts.
- *  2. A random id persisted once to `<memoryDir>/device-id` (0600). Unguessable
- *     and stable across hostname churn — unlike the host-derived hash, which a
- *     peer on a shared store can also guess from `sha256(hostname+user)`.
- *  3. Hostname-derived hash, only if the id file can't be read or written.
- */
-/**
- * True when a KIT_DEVICE_ID override is set AND well-formed — i.e. actually TRUSTED
- * by deviceId() (a malformed override is ignored, so it is not "active"). This id is
- * trust-bearing: the device fences in palList/palSyncFindings auto-close another
- * device's open findings by it, so a spoofed value could silently close them. Callers
- * (kit check) surface a warning when it is active on a real store.
- */
-export function deviceIdOverrideActive(): boolean {
-  const override = (process.env.KIT_DEVICE_ID ?? "").trim();
-  return override !== "" && DEVICE_ID_RE.test(override);
-}
-
-export function deviceId(): string {
-  const override = (process.env.KIT_DEVICE_ID ?? "").trim();
-  if (override && DEVICE_ID_RE.test(override)) return override;
-  // (a malformed override falls through to the persisted id rather than being trusted)
-  try {
-    const path = deviceIdPath();
-    if (existsSync(path)) {
-      const saved = readFileSync(path, "utf8").trim();
-      if (DEVICE_ID_RE.test(saved)) return saved;
-    }
-    const fresh = randomBytes(8).toString("hex"); // 16 hex chars, unguessable
-    const dir = dirname(path);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
-    writeFileSync(path, fresh + "\n", { mode: 0o600 });
-    return fresh;
-  } catch {
-    return hostnameDeviceId();
-  }
-}
+import {
+  readActionHistory,
+  recordLegacyAction,
+  revisionTransaction,
+  writeActionRevision,
+} from "./pal-revisions.js";
+import { withPalWrite } from "./pal-write-guard.js";
+import { pendingActionSyncId } from "./merge-actions.js";
+import { getProjectRecallRoots, registerProjectIdentity } from "./project.js";
+import { deviceId } from "./device.js";
+import { palDone } from "./pal-state.js";
+import { createActionGrant, removeActionGrant } from "./pal-authority.js";
+import { inspectAction } from "./pal-check-storage.js";
+import type { PalClaimOwner } from "./pal-state-codec.js";
+export { palDone, palSnooze, palRelease, palReopen } from "./pal-state.js";
+export { palClaim, palRenew, palTakeover, type PalClaimOptions } from "./pal-claims.js";
+export type { PalClaimOwner } from "./pal-state-codec.js";
+export { palAutoVerify, type AutoVerifyResult } from "./pal-verify.js";
+export { palConfigure } from "./pal-configure.js";
+export { palForget } from "./pal-forget.js";
+export {
+  readActionHistory as palShow,
+  resolveActionHistory as palResolve,
+} from "./pal-revisions.js";
+export { deviceId, deviceIdOverrideActive } from "./device.js";
 
 /**
  * A declarative verify check. Fixed shapes only, executed natively by kit (no
@@ -113,8 +64,10 @@ export interface PendingAction {
   /** Legacy raw shell command from pre-1.4 stores. NEVER executed; kept only so
    *  `kit memory scan` can still find secrets leaked into old rows. */
   verify_cmd: string | null;
-  /** JSON-encoded VerifyCheck. The only field auto-verify ever executes. */
+  /** Public JSON-encoded VerifyCheck; stored in verify_definition on current layouts. */
   verify_check: string | null;
+  /** Opaque local approval lookup, not portable authority. Missing on old layouts. */
+  verify_grant?: string | null;
   created_at: string | null;
   next_check: string | null;
   snooze_until: string | null;
@@ -122,12 +75,30 @@ export interface PendingAction {
   verify_passes: number;
   /** Device where this item was created (v5+); NULL on legacy rows. */
   origin_device: string | null;
-  /** Absolute project path at creation (v5+) — used by `pal prune`. */
+  /** Absolute creation path (v5+), also anchors original relative file checks. */
   origin_root: string | null;
   /** Agent/session that atomically claimed this open item (v6+); NULL = unclaimed. */
   claimed_by: string | null;
   /** When the claim was taken (v6+). */
   claimed_at: string | null;
+  /** Explicit session owner; absent/null on historical claims with unknown ownership. */
+  claim_owner?: PalClaimOwner | null;
+  /** Portable identity; display ids may differ on another device. */
+  sync_id?: string | null;
+  origin_id?: string | null;
+  /** Explicit local recall assignment. These aliases never travel implicitly. */
+  recall_scope?: string | null;
+  recall_device?: string | null;
+  /** Fingerprint of the imported state, not permission to overwrite later local changes. */
+  import_state?: string | null;
+  /** Derived conflict flag; the stored row is not an adjudicated state when set. */
+  state_conflict?: number;
+}
+
+/** Raw provenance for an imported action; prompt/terminal renderers sanitize it. */
+export function pendingActionOrigin(action: PendingAction): string {
+  if (!action.import_state) return "";
+  return `[source: ${action.origin_device ?? "unknown device"} | ${action.origin_root ?? "unknown path"} | ${action.origin_id ?? action.id}]`;
 }
 
 export interface PalAddInput {
@@ -150,25 +121,53 @@ export function palAdd(db: DatabaseSync, input: PalAddInput): string {
   const id = newId(db);
   const kind = input.kind ?? (input.check ? "auto" : "manual");
   const verifyCheck = input.check ? JSON.stringify(input.check) : null;
-  db.prepare(
-    `INSERT INTO pending_actions (id, status, title, detail, scope, kind, verify_check, origin_device, origin_root)
-     VALUES (?, 'open', ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    input.title,
-    input.detail ?? null,
-    input.scope ?? null,
-    kind,
-    verifyCheck,
-    deviceId(),
-    process.cwd(),
-  );
+  const originDevice = deviceId();
+  const originRoot = process.cwd();
+  const syncId = randomBytes(16).toString("hex");
+  const grant =
+    kind === "auto" && verifyCheck
+      ? createActionGrant(db, {
+          sync_id: syncId,
+          origin_root: originRoot,
+          verify_check: verifyCheck,
+        })
+      : null;
+  try {
+    writeActionRevision(db, id, () =>
+      db
+        .prepare(
+          `INSERT INTO pending_actions
+       (id, status, title, detail, scope, kind, verify_definition, origin_device, origin_root,
+        sync_id, origin_id, verify_grant)
+       VALUES (?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id,
+          input.title,
+          input.detail ?? null,
+          input.scope ?? null,
+          kind,
+          verifyCheck,
+          originDevice,
+          originRoot,
+          syncId,
+          id,
+          grant,
+        ),
+    );
+  } catch (error) {
+    removeActionGrant(db, grant);
+    throw error;
+  }
+  registerProjectIdentity(db, originRoot);
   return id;
 }
 
 export interface PalListOptions {
   status?: string;
-  /** Restrict to this scope plus globally-scoped (NULL) items. Omit = every scope. */
+  /** All unresolved alternatives, independent of the display candidate's status. */
+  conflictsOnly?: boolean;
+  /** Restrict to this scope (including registered worktrees) plus NULL/global items. */
   scope?: string;
   /**
    * Include items from OTHER devices. Default false: only this device's items
@@ -176,67 +175,113 @@ export interface PalListOptions {
    * nag your durable device. `kit memory pal list --all` sets this.
    */
   allDevices?: boolean;
+  /** Inspect stored state without maintenance or creating a device identity. */
+  readOnly?: boolean;
   /**
-   * Release abandoned claims before listing open work. Default true for normal
-   * read-write surfaces; read-only status surfaces disable this so they can render
-   * from sandboxed agents without mutating the memory store.
+   * Reactivate expired snoozes before listing open work. Claims require explicit release or takeover.
+   * Default true for normal
+   * read-write surfaces. Legacy false also disables identity persistence;
+   * new read-only callers should use readOnly instead.
    */
   reapStale?: boolean;
 }
 
-/** A claim older than this with no release is treated as abandoned (the claimer
- *  crashed / the ephemeral session died) and auto-released back to 'open'. */
-const STALE_CLAIM_TTL_HOURS = 24;
+/** Shared project/device fence for inspection and local automatic reactivation. */
+function actionScope(db: DatabaseSync, opts: PalListOptions) {
+  const where: string[] = [];
+  const params: (string | number)[] = [];
+  // Read-only status can open an older store that has not migrated yet.
+  const portable = db
+    .prepare("PRAGMA table_info(pending_actions)")
+    .all()
+    .some((column) => column.name === "recall_scope");
+  const scopeColumn = portable ? "COALESCE(recall_scope, scope)" : "scope";
+  const deviceColumn = portable ? "COALESCE(recall_device, origin_device)" : "origin_device";
+  if (opts.scope !== undefined) {
+    // Match paths literally across the same registered worktrees as transcript
+    // recall. Basename aliases remain solely for legacy rows; NULL is global.
+    const roots = isAbsolute(opts.scope) ? getProjectRecallRoots(opts.scope, db) : [opts.scope];
+    const scopes = [...new Set(roots.flatMap((root) => [root, basename(root)]))];
+    where.push(
+      `(${scopeColumn} IN (${scopes.map(() => "?").join(", ")}) OR ${scopeColumn} IS NULL)`,
+    );
+    params.push(...scopes);
+  }
+  if (!opts.allDevices) {
+    // Local legacy rows remain visible. Missing origin on an imported snapshot
+    // is unknown, not evidence that the action belongs to this device.
+    const legacy = portable
+      ? `${deviceColumn} IS NULL AND import_state IS NULL`
+      : `${deviceColumn} IS NULL`;
+    where.push(`(${deviceColumn} = ? OR (${legacy}))`);
+    params.push(deviceId({ persist: !opts.readOnly && opts.reapStale !== false }));
+  }
+  return { where: where.length ? where.join(" AND ") : "1", params };
+}
 
-/**
- * Auto-release claims whose claimer went silent. `palClaim` flips open→claimed and
- * stamps `claimed_at`, but a crashed or abandoned agent never calls `palRelease` —
- * so the item drops out of every default (open) surface indefinitely, silently
- * blocking the human who is actually waiting on it. This releases any `claimed` row
- * older than `ttlHours` back to `open` so it resurfaces for another agent.
- * Idempotent; returns the released ids. Deterministic (SQLite clock).
- */
-export function reapStaleClaims(db: DatabaseSync, ttlHours = STALE_CLAIM_TTL_HOURS): string[] {
-  const cutoff = `-${Math.max(1, Math.floor(ttlHours))} hours`;
-  const stale = "status='claimed' AND claimed_at IS NOT NULL AND claimed_at <= datetime('now', ?)";
-  const rows = db.prepare(`SELECT id FROM pending_actions WHERE ${stale}`).all(cutoff) as {
-    id: string;
-  }[];
-  if (!rows.length) return [];
-  db.prepare(
-    `UPDATE pending_actions SET status='open', claimed_by=NULL, claimed_at=NULL WHERE ${stale}`,
-  ).run(cutoff);
-  return rows.map((r) => r.id);
+const DUE_SNOOZE =
+  "status='snoozed' AND (julianday(snooze_until) IS NULL OR julianday(snooze_until) <= julianday('now'))";
+
+function reopenDue(db: DatabaseSync, scope?: string): string[] {
+  // Even an all-device listing is not authority to reap an unassigned foreign task.
+  const filter = actionScope(db, { scope });
+  const eligible = `(${DUE_SNOOZE}) AND ${filter.where} AND state_conflict=0`;
+  const rows = db.prepare(`SELECT id FROM pending_actions WHERE ${eligible}`).all(...filter.params);
+  const reopened: string[] = [];
+  for (const row of rows) {
+    const id = String(row.id);
+    if (readActionHistory(db, id)?.conflict) continue;
+    const changed = writeActionRevision(db, id, () =>
+      db
+        .prepare(
+          `UPDATE pending_actions SET status='open', claimed_by=NULL, claimed_at=NULL, claim_owner=NULL,
+        snooze_until=NULL, closed_at=NULL, next_check=NULL, verify_passes=0
+       WHERE id=? AND ${eligible}`,
+        )
+        .run(id, ...filter.params),
+    );
+    if (Number(changed.changes)) reopened.push(id);
+  }
+  return reopened;
 }
 
 export function palList(db: DatabaseSync, opts: PalListOptions = {}): PendingAction[] {
   const status = opts.status ?? "open";
-  // Before listing the open work, resurface anything a crashed claimer abandoned —
-  // otherwise a stale claim hides a blocked-on-you item from every default surface.
-  if (status === "open" && opts.reapStale !== false) reapStaleClaims(db);
-  const where: string[] = ["status = ?"];
-  const params: unknown[] = [status];
-  if (opts.scope !== undefined) {
-    // Canonical scope is the ABSOLUTE project root (see syncSecurityFindings —
-    // basenames collide across repos). Legacy rows (pre-fix `pal add`) stored the
-    // basename, so a path scope also matches its basename form; NULL = global.
-    const alias = basename(opts.scope);
-    if (alias && alias !== opts.scope) {
-      where.push("(scope = ? OR scope = ? OR scope IS NULL)");
-      params.push(opts.scope, alias);
-    } else {
-      where.push("(scope = ? OR scope IS NULL)");
-      params.push(opts.scope);
-    }
+  if (status === "open" && !opts.readOnly && opts.reapStale !== false) {
+    reopenDue(db, opts.scope);
   }
-  if (!opts.allDevices) {
-    // NULL origin_device = legacy/pre-v5 row → always shown (backward-compatible).
-    where.push("(origin_device = ? OR origin_device IS NULL)");
-    params.push(deviceId());
-  }
-  return db
-    .prepare(`SELECT * FROM pending_actions WHERE ${where.join(" AND ")} ORDER BY created_at, id`)
-    .all(...(params as never[])) as unknown as PendingAction[];
+  const filter = actionScope(db, opts);
+  const hasConflicts = db
+    .prepare("PRAGMA table_info(pending_actions)")
+    .all()
+    .some((column) => column.name === "state_conflict");
+  // Old projections can hide equal-valued claimed heads. Include those candidates
+  // and derive their conflict flag even when the caller cannot migrate the store.
+  const conflict = hasConflicts ? "(state_conflict=1 OR status='claimed')" : "0";
+  const stateFilter = opts.conflictsOnly
+    ? conflict
+    : status === "open"
+      ? `(status=? OR ${conflict})`
+      : "status=?";
+  const rows = db
+    .prepare(
+      `SELECT * FROM pending_actions WHERE ${stateFilter} AND ${filter.where}
+       ORDER BY created_at, id`,
+    )
+    .all(...(opts.conflictsOnly ? [] : [status]), ...filter.params) as unknown as PendingAction[];
+  return rows
+    .map((row) =>
+      hasConflicts && row.status === "claimed"
+        ? { ...row, state_conflict: Number(readActionHistory(db, row.id)!.conflict) }
+        : row,
+    )
+    .filter((row) =>
+      opts.conflictsOnly
+        ? row.state_conflict === 1
+        : row.status === status || (status === "open" && row.state_conflict === 1),
+    )
+    .sort((a, b) => (b.state_conflict ?? 0) - (a.state_conflict ?? 0))
+    .map(inspectAction);
 }
 
 export interface PalPruneResult {
@@ -252,7 +297,7 @@ export interface PalPruneResult {
 export function palPrune(db: DatabaseSync): PalPruneResult {
   const rows = db
     .prepare(
-      "SELECT id, origin_root FROM pending_actions WHERE status='open' AND origin_root IS NOT NULL AND origin_device = ?",
+      "SELECT id, origin_root FROM pending_actions WHERE status='open' AND origin_root IS NOT NULL AND origin_device = ? AND import_state IS NULL",
     )
     .all(deviceId()) as { id: string; origin_root: string }[];
   const closed: string[] = [];
@@ -260,56 +305,6 @@ export function palPrune(db: DatabaseSync): PalPruneResult {
     if (!existsSync(r.origin_root) && palDone(db, r.id)) closed.push(r.id);
   }
   return { closed };
-}
-
-export function palDone(db: DatabaseSync, id: string): boolean {
-  const res = db
-    .prepare(
-      "UPDATE pending_actions SET status='closed', closed_at=datetime('now') WHERE id=? AND status!='closed'",
-    )
-    .run(id);
-  return Number(res.changes) > 0;
-}
-
-export function palSnooze(db: DatabaseSync, id: string, days: number): boolean {
-  const d = Math.max(1, Math.floor(days));
-  const res = db
-    .prepare(
-      "UPDATE pending_actions SET status='snoozed', snooze_until=datetime('now', ?) WHERE id=?",
-    )
-    .run(`+${d} days`, id);
-  return Number(res.changes) > 0;
-}
-
-/**
- * Atomically claim an OPEN item so two parallel agents don't both work it (from
- * guild's Quests). The `WHERE status='open'` guard makes this a race-free
- * compare-and-set: exactly one caller sees `changes === 1` and wins; every other
- * concurrent caller gets false. The winner flips the item to 'claimed' so it
- * drops out of the default (open) list. Returns true iff this caller won.
- */
-export function palClaim(db: DatabaseSync, id: string, claimedBy?: string): boolean {
-  const who = claimedBy ?? deviceId();
-  const res = db
-    .prepare(
-      "UPDATE pending_actions SET status='claimed', claimed_by=?, claimed_at=datetime('now') WHERE id=? AND status='open'",
-    )
-    .run(who, id);
-  return Number(res.changes) > 0;
-}
-
-/**
- * Release a claimed item back to 'open' (the claimer crashed, gave up, or handed
- * it off) so another agent can pick it up. Only touches a currently-'claimed'
- * row. Returns true iff a claimed item was released.
- */
-export function palRelease(db: DatabaseSync, id: string): boolean {
-  const res = db
-    .prepare(
-      "UPDATE pending_actions SET status='open', claimed_by=NULL, claimed_at=NULL WHERE id=? AND status='claimed'",
-    )
-    .run(id);
-  return Number(res.changes) > 0;
 }
 
 /** One scanner finding to track. `dedupKey` is stable per finding within its
@@ -324,6 +319,8 @@ export interface SyncFindingsResult {
   added: number;
   reopened: number;
   closed: string[];
+  /** Claimed or contested findings retained until their owner releases or resolves them. */
+  deferred?: string[];
 }
 
 /** Deterministic pal id for a finding: `${sourceTag}-${6 hex}`. The source tag
@@ -331,6 +328,29 @@ export interface SyncFindingsResult {
 export function findingPalId(sourceTag: string, dedupKey: string): string {
   const h = createHash("sha256").update(dedupKey).digest("hex").slice(0, 6);
   return `${sourceTag}-${h}`;
+}
+
+function scannerFindingId(db: DatabaseSync, source: string, key: string, device: string): string {
+  const base = findingPalId(source, key);
+  let id = base;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const row = db
+      .prepare("SELECT origin_device, kind, import_state FROM pending_actions WHERE id = ?")
+      .get(id);
+    if (
+      !row ||
+      (row.kind === "finding" &&
+        !row.import_state &&
+        (row.origin_device === device || row.origin_device === null))
+    )
+      return id;
+    const suffix = createHash("sha256")
+      .update(`${device}\x1f${attempt}`)
+      .digest("hex")
+      .slice(0, 16);
+    id = `${base}-${suffix}`;
+  }
+  throw new Error("could not allocate an independent scanner finding id");
 }
 
 /**
@@ -359,13 +379,15 @@ export function palSyncFindings(
   opts: { scope?: string } = {},
 ): SyncFindingsResult {
   const scope = opts.scope ?? null;
+  const device = deviceId();
   // Fold scope into the id so the same finding in two different repos maps to two
   // distinct ledger rows (findingPalId alone is repo-independent).
   const idFor = (dedupKey: string) =>
-    findingPalId(sourceTag, scope ? `${scope}\x1f${dedupKey}` : dedupKey);
+    scannerFindingId(db, sourceTag, scope ? `${scope}\x1f${dedupKey}` : dedupKey, device);
   const currentIds = new Set<string>();
   let added = 0;
   let reopened = 0;
+  const deferred = new Set<string>();
 
   for (const f of findings) {
     const id = idFor(f.dedupKey);
@@ -373,25 +395,37 @@ export function palSyncFindings(
     const existing = db.prepare("SELECT status FROM pending_actions WHERE id = ?").get(id) as
       | { status: string }
       | undefined;
+    if (existing && (existing.status === "claimed" || readActionHistory(db, id)?.conflict)) {
+      deferred.add(id);
+      continue;
+    }
     if (!existing) {
-      db.prepare(
-        `INSERT INTO pending_actions (id, status, title, detail, scope, kind, origin_device, origin_root)
+      writeActionRevision(db, id, () =>
+        db
+          .prepare(
+            `INSERT INTO pending_actions (id, status, title, detail, scope, kind, origin_device, origin_root)
          VALUES (?, 'open', ?, ?, ?, 'finding', ?, ?)`,
-      ).run(id, f.title, f.detail ?? null, scope, deviceId(), process.cwd());
+          )
+          .run(id, f.title, f.detail ?? null, scope, deviceId(), process.cwd()),
+      );
       added++;
     } else if (existing.status === "closed") {
-      // Re-attribute on reopen: the device observing the recurrence is the one
-      // that should be reminded (and able to auto-close it once it clears).
-      db.prepare(
-        "UPDATE pending_actions SET status='open', closed_at=NULL, title=?, detail=?, origin_device=?, origin_root=? WHERE id=?",
-      ).run(f.title, f.detail ?? null, deviceId(), process.cwd(), id);
+      // Creation provenance is immutable. Foreign/imported findings receive a
+      // separate local scanner identity above, never a new owner on the old row.
+      writeActionRevision(db, id, () =>
+        db
+          .prepare(
+            "UPDATE pending_actions SET status='open', closed_at=NULL, title=?, detail=? WHERE id=?",
+          )
+          .run(f.title, f.detail ?? null, id),
+      );
       reopened++;
     } else {
       // already open/snoozed — refresh the text so the reminder stays accurate
-      db.prepare("UPDATE pending_actions SET title=?, detail=? WHERE id=?").run(
-        f.title,
-        f.detail ?? null,
-        id,
+      writeActionRevision(db, id, () =>
+        db
+          .prepare("UPDATE pending_actions SET title=?, detail=? WHERE id=?")
+          .run(f.title, f.detail ?? null, id),
       );
     }
   }
@@ -402,115 +436,19 @@ export function palSyncFindings(
   // NULL-origin rows predate device coupling and are reconcilable by any device.
   const open = db
     .prepare(
-      "SELECT id FROM pending_actions WHERE kind='finding' AND status='open' AND id LIKE ? AND scope IS ? AND (origin_device = ? OR origin_device IS NULL)",
+      "SELECT id, status FROM pending_actions WHERE kind='finding' AND (status IN ('open','claimed') OR state_conflict=1) AND id LIKE ? AND scope IS ? AND (origin_device = ? OR origin_device IS NULL)",
     )
-    .all(`${sourceTag}-%`, scope, deviceId()) as { id: string }[];
+    .all(`${sourceTag}-%`, scope, deviceId()) as { id: string; status: string }[];
   const closed: string[] = [];
   for (const row of open) {
+    if (row.status === "claimed" || readActionHistory(db, row.id)?.conflict) {
+      deferred.add(row.id);
+      continue;
+    }
     if (!currentIds.has(row.id) && palDone(db, row.id)) closed.push(row.id);
   }
 
-  return { added, reopened, closed };
-}
-
-/**
- * Parse the stored JSON into a VerifyCheck, defensively. Only known shapes are
- * accepted; anything malformed, unknown, or legacy returns null and is never
- * executed. This is the gate that makes a planted/imported value inert.
- */
-function parseCheck(json: string | null): VerifyCheck | null {
-  if (!json) return null;
-  let raw: unknown;
-  try {
-    raw = JSON.parse(json);
-  } catch {
-    return null;
-  }
-  if (!raw || typeof raw !== "object") return null;
-  const o = raw as Record<string, unknown>;
-  if (o.type === "file-exists" && typeof o.path === "string") {
-    return { type: "file-exists", path: o.path };
-  }
-  if (o.type === "http-status" && typeof o.url === "string" && typeof o.expect === "number") {
-    return { type: "http-status", url: o.url, expect: o.expect };
-  }
-  return null;
-}
-
-/**
- * Run a declarative verify check. true = pass, false = ran but failed, null =
- * no-info (leave state unchanged). Executed NATIVELY (fetch / fs), never through
- * a shell and never by interpolating a stored string into a command, so there is
- * no command-execution sink: a check can only do what its fixed type allows.
- */
-async function runCheck(check: VerifyCheck): Promise<boolean | null> {
-  try {
-    if (check.type === "file-exists") {
-      return existsSync(check.path);
-    }
-    // http-status: kit makes the request itself; the URL is data, not a command.
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15_000);
-    try {
-      const res = await fetch(check.url, { signal: controller.signal, redirect: "manual" });
-      return res.status === check.expect;
-    } finally {
-      clearTimeout(timer);
-    }
-  } catch {
-    return null; // network/fs error or timeout → no-info
-  }
-}
-
-export interface AutoVerifyResult {
-  checked: number;
-  closed: string[];
-  reopened: string[];
-}
-
-/**
- * Auto-verify `auto` items. An OPEN item that passes `confirmPasses` consecutive
- * times is closed (a pass increments the streak, a fail resets it). A CLOSED item
- * whose verify now FAILS is reopened (reopen-on-regress). No-info leaves it alone.
- */
-export async function palAutoVerify(
-  db: DatabaseSync,
-  confirmPasses = 2,
-): Promise<AutoVerifyResult> {
-  const out: AutoVerifyResult = { checked: 0, closed: [], reopened: [] };
-  const rows = db
-    .prepare(
-      "SELECT * FROM pending_actions WHERE kind='auto' AND verify_check IS NOT NULL AND status IN ('open','closed')",
-    )
-    .all() as unknown as PendingAction[];
-  for (const r of rows) {
-    const check = parseCheck(r.verify_check);
-    if (!check) continue; // malformed/unknown/legacy shape -> never executed
-    const result = await runCheck(check);
-    if (result === null) continue; // no-info
-    out.checked++;
-    if (r.status === "open") {
-      if (result) {
-        const passes = r.verify_passes + 1;
-        if (passes >= confirmPasses) {
-          db.prepare(
-            "UPDATE pending_actions SET status='closed', closed_at=datetime('now'), verify_passes=? WHERE id=?",
-          ).run(passes, r.id);
-          out.closed.push(r.id);
-        } else {
-          db.prepare("UPDATE pending_actions SET verify_passes=? WHERE id=?").run(passes, r.id);
-        }
-      } else if (r.verify_passes !== 0) {
-        db.prepare("UPDATE pending_actions SET verify_passes=0 WHERE id=?").run(r.id);
-      }
-    } else if (r.status === "closed" && !result) {
-      db.prepare(
-        "UPDATE pending_actions SET status='open', verify_passes=0, closed_at=NULL WHERE id=?",
-      ).run(r.id);
-      out.reopened.push(r.id);
-    }
-  }
-  return out;
+  return { added, reopened, closed, ...(deferred.size ? { deferred: [...deferred].sort() } : {}) };
 }
 
 // ── Migration from the legacy python PAL ledger ───────────────────────────────
@@ -545,8 +483,8 @@ export function importLegacyLedger(
   }
   const insert = db.prepare(
     `INSERT OR IGNORE INTO pending_actions
-     (id, status, title, detail, scope, kind, verify_cmd, created_at, next_check, verify_passes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, status, title, detail, scope, kind, verify_cmd, created_at, next_check, verify_passes, sync_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   let imported = 0;
   for (const line of raw.split("\n")) {
@@ -566,18 +504,38 @@ export function importLegacyLedger(
     // executable command, so palAutoVerify can never run a command that crossed
     // the file boundary. Re-authorise auto-verify by re-adding via `pal add`
     // (typed input). Invariant: kind='auto' + verify_cmd is only ever created
-    // by palAdd.
-    const res = insert.run(
-      e.id,
+    // by palAdd. An existing item can also be explicitly configured via `pal configure`.
+    const id = e.id;
+    const title = e.title;
+    const syncId = pendingActionSyncId({
+      id,
       status,
-      e.title,
-      e.why ?? null,
-      e.repo ?? null,
-      "manual",
-      null,
-      e.ts ?? null,
-      e.next_check ?? null,
-      e.pass_streak ?? 0,
+      title,
+      detail: e.why,
+      scope: e.repo,
+      created_at: e.ts,
+      next_check: e.next_check,
+    });
+    const res = withPalWrite(db, { mode: "import", id }, () =>
+      revisionTransaction(db, () => {
+        if (db.prepare("SELECT 1 FROM pal_tombstones WHERE sync_id=?").get(syncId))
+          return { changes: 0 };
+        const result = insert.run(
+          id,
+          status,
+          title,
+          e.why ?? null,
+          e.repo ?? null,
+          "manual",
+          null,
+          e.ts ?? null,
+          e.next_check ?? null,
+          e.pass_streak ?? 0,
+          syncId,
+        );
+        if (Number(result.changes)) recordLegacyAction(db, id);
+        return result;
+      }),
     );
     if (Number(res.changes) > 0) imported++;
   }

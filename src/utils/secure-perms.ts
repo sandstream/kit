@@ -1,51 +1,152 @@
-// Cross-platform "restrict to the current user" for secret files/dirs (#43).
+// Cross-platform "restrict to the current user" for sensitive files and directories.
 //
-// POSIX uses mode bits (0o600 / 0o700). On native Windows (NTFS) those bits are
-// no-ops — `fs.chmod` doesn't restrict access — so a secret file written with
-// `{ mode: 0o600 }` is still readable by other accounts. There we use `icacls`:
-// strip inherited ACLs (`/inheritance:r`) and grant ONLY the current user, so the
-// file/dir is genuinely owner-only. Best-effort + fail-soft: a missing icacls or
-// unknown user never throws (the caller's write already happened).
-import { chmodSync } from "node:fs";
+// Ordinary helpers are fail-soft because many callers protect data only after a successful
+// write. Authority-bearing callers use strict variants and verify the ACL before trusting a
+// local marker.
 import { execFileSync } from "node:child_process";
+import { chmodSync, statSync } from "node:fs";
+import { join } from "node:path";
 
-function currentWindowsUser(): string | null {
-  // DOMAIN\\user is the most specific grant target; fall back to bare username.
-  const domain = process.env.USERDOMAIN;
-  const user = process.env.USERNAME;
-  if (!user) return null;
-  return domain ? `${domain}\\${user}` : user;
+const WINDOWS_PRIVATE_ACL = String.raw`
+$ErrorActionPreference = 'Stop'
+$path = $env:KIT_PRIVATE_ACL_PATH
+$kind = $env:KIT_PRIVATE_ACL_KIND
+$repair = $env:KIT_PRIVATE_ACL_REPAIR -eq '1'
+$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+if ($repair) {
+  $acl = Get-Acl -LiteralPath $path
+  $acl.SetAccessRuleProtection($true, $false)
+  foreach ($entry in @($acl.Access)) { [void]$acl.RemoveAccessRuleSpecific($entry) }
+  $acl.SetOwner($sid)
+  if ($kind -eq 'dir') {
+    $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+      $sid,
+      [System.Security.AccessControl.FileSystemRights]::FullControl,
+      ([System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit),
+      [System.Security.AccessControl.PropagationFlags]::None,
+      [System.Security.AccessControl.AccessControlType]::Allow
+    )
+  } else {
+    $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+      $sid,
+      [System.Security.AccessControl.FileSystemRights]::FullControl,
+      [System.Security.AccessControl.AccessControlType]::Allow
+    )
+  }
+  [void]$acl.AddAccessRule($rule)
+  Set-Acl -LiteralPath $path -AclObject $acl
+}
+$acl = Get-Acl -LiteralPath $path
+$owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+$entries = @($acl.Access)
+$valid = $acl.AreAccessRulesProtected -and $owner -eq $sid.Value -and $entries.Count -eq 1
+if ($valid) {
+  $entry = $entries[0]
+  $entrySid = $entry.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+  $full = [System.Security.AccessControl.FileSystemRights]::FullControl
+  $valid = -not $entry.IsInherited -and
+    $entrySid -eq $sid.Value -and
+    $entry.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and
+    (($entry.FileSystemRights -band $full) -eq $full)
+}
+if (-not $valid) { exit 3 }
+Write-Output 'PRIVATE'
+`;
+
+type PrivatePathKind = "file" | "dir";
+
+function windowsAcl(path: string, kind: PrivatePathKind, repair: boolean): boolean {
+  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+  if (!systemRoot) {
+    if (repair) throw new Error("Cannot establish Windows ACL: SystemRoot is unavailable");
+    return false;
+  }
+  // Absolute system path avoids PATH search for an authority-bearing subprocess.
+  const powershell = join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  const encoded = Buffer.from(WINDOWS_PRIVATE_ACL, "utf16le").toString("base64");
+  try {
+    const output = execFileSync(
+      powershell,
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 10_000,
+        env: {
+          ...process.env,
+          KIT_PRIVATE_ACL_PATH: path,
+          KIT_PRIVATE_ACL_KIND: kind,
+          KIT_PRIVATE_ACL_REPAIR: repair ? "1" : "0",
+        },
+      },
+    );
+    if (output.trim() === "PRIVATE") return true;
+  } catch (err) {
+    if (repair)
+      throw new Error(`Cannot establish owner-only Windows ACL for ${path}`, { cause: err });
+    return false;
+  }
+  if (repair) throw new Error(`Cannot verify owner-only Windows ACL for ${path}`);
+  return false;
 }
 
-/** Restrict a secret FILE to the current user (0o600 on POSIX; icacls on Windows). */
+function posixPathIsControlled(path: string, kind: PrivatePathKind): boolean {
+  const info = statSync(path, { bigint: true });
+  const uid = process.getuid?.();
+  return (
+    (kind === "file" ? info.isFile() : info.isDirectory()) &&
+    (info.mode & 0o022n) === 0n &&
+    (uid === undefined || info.uid === BigInt(uid))
+  );
+}
+
+function securePrivatePath(path: string, kind: PrivatePathKind): void {
+  if (process.platform === "win32") windowsAcl(path, kind, true);
+  else chmodSync(path, kind === "file" ? 0o600 : 0o700);
+}
+
+function privatePathIsControlled(path: string, kind: PrivatePathKind): boolean {
+  try {
+    return process.platform === "win32"
+      ? windowsAcl(path, kind, false)
+      : posixPathIsControlled(path, kind);
+  } catch {
+    return false;
+  }
+}
+
+/** Establish owner-only access or throw. Used where filesystem integrity grants authority. */
+export function secureFileStrict(path: string): void {
+  securePrivatePath(path, "file");
+}
+
+/** Establish owner-only directory access or throw. */
+export function secureDirStrict(path: string): void {
+  securePrivatePath(path, "dir");
+}
+
+export function privateFileIsControlled(path: string): boolean {
+  return privatePathIsControlled(path, "file");
+}
+
+export function privateDirIsControlled(path: string): boolean {
+  return privatePathIsControlled(path, "dir");
+}
+
+/** Restrict a sensitive file; fail-soft for callers whose primary write already succeeded. */
 export function secureFile(path: string): void {
-  if (process.platform !== "win32") {
-    chmodSync(path, 0o600);
-    return;
-  }
-  const user = currentWindowsUser();
-  if (!user) return;
   try {
-    execFileSync("icacls", [path, "/inheritance:r", "/grant:r", `${user}:F`], { stdio: "ignore" });
+    secureFileStrict(path);
   } catch {
-    // best-effort — icacls absent / restricted shell
+    // Authority-bearing callers use secureFileStrict and fail closed.
   }
 }
 
-/** Restrict a secret DIR to the current user (0o700 on POSIX; icacls (OI)(CI) on Windows). */
+/** Restrict a sensitive directory; fail-soft for ordinary storage hardening. */
 export function secureDir(path: string): void {
-  if (process.platform !== "win32") {
-    chmodSync(path, 0o700);
-    return;
-  }
-  const user = currentWindowsUser();
-  if (!user) return;
   try {
-    // (OI)(CI) = object- + container-inherit, so files created later inherit owner-only.
-    execFileSync("icacls", [path, "/inheritance:r", "/grant:r", `${user}:(OI)(CI)F`], {
-      stdio: "ignore",
-    });
+    secureDirStrict(path);
   } catch {
-    // best-effort
+    // Authority-bearing callers use secureDirStrict and fail closed.
   }
 }

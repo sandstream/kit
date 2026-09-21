@@ -45,7 +45,7 @@ describe("memory encrypted backup / restore", () => {
   });
 
   it(
-    "writes the backup and the restored db with 0600 perms (V2 magic)",
+    "writes the backup and the restored db with 0600 perms (chunked V4 magic)",
     { skip: process.platform === "win32" },
     () => {
       const tmp = mkdtempSync(join(tmpdir(), "kit-bak4-"));
@@ -58,8 +58,8 @@ describe("memory encrypted backup / restore", () => {
       assert.equal(statSync(enc).mode & 0o777, 0o600, "encrypted blob must be 0600");
       assert.equal(
         readFileSync(enc).subarray(0, 8).toString(),
-        "KITMEM02",
-        "new backups use the hardened-KDF v2 magic",
+        "KITMEM04",
+        "new passphrase backups use the bounded chunk format",
       );
 
       restoreEncrypted("Galaxy-Vortex-Quartz-2026-x9", enc, dest);
@@ -106,7 +106,7 @@ describe("memory asymmetric (public-key) backup — no passphrase, ephemeral-saf
     backupToRecipient(publicKey, src, enc);
     assert.ok(isEncryptedBackup(enc), "V3 counts as an encrypted backup");
     assert.ok(isAsymmetricBackup(enc), "flagged as the public-key (V3) form");
-    assert.equal(readFileSync(enc).subarray(0, 8).toString(), "KITMEM03");
+    assert.equal(readFileSync(enc).subarray(0, 8).toString(), "KITMEM05");
     assert.equal(statSync(enc).mode & 0o777, 0o600, "blob is 0600");
 
     restoreWithKey(privateJwk, enc, dest);

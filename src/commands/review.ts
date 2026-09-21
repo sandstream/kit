@@ -11,10 +11,12 @@
  * Pure read: no PAL sync, attestation, hints, or scanner self-heal — those are
  * `kit check`'s own CLI extras. `kit review` is the gate, not the fixer.
  */
+import { stat } from "node:fs/promises";
+import { resolve } from "node:path";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue, envTruthy } from "../utils/flags.js";
 import { loadConfig, type kitConfig } from "../config.js";
-import { resolveConfigPath } from "../cli-shared.js";
+import { KIT_FILE } from "../cli-shared.js";
 import { withGovernance } from "../governance-middleware.js";
 import { runCheckGate, checkRunToJsonChecks } from "../check-run.js";
 import { runStandardsGate } from "../standards-run.js";
@@ -135,20 +137,32 @@ function adrFindings(adr: Awaited<ReturnType<typeof runAdrGate>>): JsonCheck[] {
   return rows;
 }
 
+async function reviewDirectory(cwd = process.cwd()): Promise<string> {
+  const root = resolve(cwd);
+  const info = await stat(root).catch((error: unknown) => {
+    throw new Error(
+      `Cannot review directory "${root}": ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+  if (!info.isDirectory()) throw new Error(`Cannot review directory "${root}": not a directory`);
+  return root;
+}
+
 /**
- * Run the requested review stages (default: all four) and return the structured
+ * Run the requested review stages (default: all five) and return the structured
  * report. Read-only; stages run in the order the CLI always ran them
  * (check → design → standards → adr → skill) regardless of the input order. The report
  * covers exactly the stages that ran — a scoped run's `ok` says nothing about
  * the stages it skipped, and the `stages` array shows the scope honestly.
  */
 export async function collectReview(opts: CollectReviewOptions = {}): Promise<ReviewReport> {
+  const cwd = await reviewDirectory(opts.cwd);
   const wanted = new Set<ReviewStageName>(opts.stages ?? REVIEW_STAGES);
   const stages: ReviewStageReport[] = [];
 
   if (wanted.has("check")) {
     const check = await runCheckGate({
-      cwd: opts.cwd,
+      cwd,
       config: opts.config,
       enforceTests: opts.enforceTests,
       gate: opts.gate,
@@ -156,25 +170,25 @@ export async function collectReview(opts: CollectReviewOptions = {}): Promise<Re
     stages.push(stageReport("check", check.ok, checkRunToJsonChecks(check)));
   }
   if (wanted.has("design")) {
-    const design = await runDesignGate({ cwd: opts.cwd, enforce: opts.enforce });
+    const design = await runDesignGate({ cwd, enforce: opts.enforce });
     stages.push(stageReport("design", design.ok, design.checks));
   }
   if (wanted.has("standards")) {
     const standards = await runStandardsGate({
-      cwd: opts.cwd,
+      cwd,
       enforce: opts.enforce,
       category: opts.category,
     });
     stages.push(stageReport("standards", standards.ok, standards.checks));
   }
   if (wanted.has("adr")) {
-    const adr = await runAdrGate(opts.cwd ?? process.cwd());
+    const adr = await runAdrGate(cwd);
     stages.push(stageReport("adr", adr.ok, adrFindings(adr)));
   }
   if (wanted.has("skill")) {
     // Module discipline over every SKILL.md the repo ships. A repo with no skills skips
     // honestly; a repo with one gets a verdict instead of the silence this stage replaces.
-    const skill = runSkillGate(opts.cwd ?? process.cwd());
+    const skill = runSkillGate(cwd);
     stages.push(stageReport("skill", skill.ok, skill.checks));
   }
 
@@ -190,6 +204,7 @@ const ICON: Record<JsonCheck["status"], string> = {
 };
 
 export async function cmdReview(): Promise<boolean> {
+  const cwd = await reviewDirectory();
   const jsonMode = hasFlag(process.argv, "--json");
   const enforce = hasFlag(process.argv, "--enforce");
   const enforceTests = hasFlag(process.argv, "--enforce-tests");
@@ -217,7 +232,7 @@ export async function cmdReview(): Promise<boolean> {
     stages = parsed as ReviewStageName[];
   }
   const category = flagValue(process.argv, "--category");
-  const config = await loadConfig(resolveConfigPath());
+  const config = await loadConfig(resolve(cwd, KIT_FILE));
 
   return await withGovernance(
     config,
@@ -225,6 +240,7 @@ export async function cmdReview(): Promise<boolean> {
     async () => {
       if (!jsonMode) console.log(`${c.bold}kit review${c.reset} — full repo audit\n`);
       const report = await collectReview({
+        cwd,
         config,
         enforce,
         enforceTests,

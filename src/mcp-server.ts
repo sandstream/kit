@@ -842,7 +842,7 @@ function register_kit_triage(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Working directory (defaults to process.cwd()) — where the triage log is written",
+            "Project directory (defaults to process.cwd()) — resolves triage config, local targets, and the triage log",
           ),
       },
     },
@@ -851,7 +851,7 @@ function register_kit_triage(server: McpServer): void {
       // an unrecordable pass could not satisfy the gates anyway (fail-closed).
       if (isReadOnlyMode()) return readOnlyRefusal("kit_triage");
       try {
-        const result = await runTriage(type as TriageType, target);
+        const result = await runTriage(type as TriageType, target, { cwd });
         if (result.passed && target) {
           await recordTriageRun(type, target, false, false, cwd);
         }

@@ -362,13 +362,15 @@ const R1b: SelfAuditRule = {
         }
         if (parseLine < 0) continue;
 
-        // Is there a guard (Number.isFinite / !isNaN / isNaN) on that var
+        // Finite and integer guards both reject NaN. Is there a guard on that var
         // anywhere in the window? Order doesn't matter — a guard present anywhere
         // in the same fn means the comparison can't be reached with NaN.
         const wtext = windowText(file, w);
         const guarded =
           // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- parseVar is a source identifier, escapeRe()ed
-          new RegExp(`Number\\.isFinite\\s*\\(\\s*${escapeRe(parseVar)}\\b`).test(wtext) ||
+          new RegExp(
+            `Number\\.(?:isFinite|isInteger|isSafeInteger)\\s*\\(\\s*${escapeRe(parseVar)}\\b`,
+          ).test(wtext) ||
           // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- parseVar is a source identifier, escapeRe()ed
           new RegExp(`!\\s*isNaN\\s*\\(\\s*${escapeRe(parseVar)}\\b`).test(wtext) ||
           // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- parseVar is a source identifier, escapeRe()ed

@@ -15,18 +15,31 @@
 import { DatabaseSync } from "node:sqlite";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import type { MemoryStats, MessageInput, SearchHit, SessionInput, ToolUseInput } from "./types.js";
+import type { DisclosedHit, Disclosure, DiscloseOptions } from "./types.js";
+export type { DisclosedHit, Disclosure, DiscloseOptions } from "./types.js";
 import { summarizeTokens } from "./stats.js";
 import { redactSecrets } from "../utils/redactSecrets.js";
 import { secureFile, secureDir } from "../utils/secure-perms.js";
 import { findInjection } from "./injection.js";
 import { evaluateWriteGate, writeGateEnforcing, type WriteGateVerdict } from "./write-gate.js";
 import { DEFAULT_MEMORY_CLASS, disclosableClasses, type MemoryClass } from "./class.js";
+import {
+  getProjectRecallRoots,
+  prepareProjectIdentities,
+  registerProjectIdentity,
+} from "./project.js";
+import { prepareActionIdentity } from "./merge-actions.js";
+import { openMigratedDb, openReadOnlyDb } from "./db-startup.js";
+import { prepareActionVersion } from "./pal-version.js";
+import { prepareActionChecks } from "./pal-check-storage.js";
+import { prepareRevisionHistory } from "./pal-revisions.js";
+import { withPalWrite } from "./pal-write-guard.js";
+import { SCHEMA_VERSION } from "./db-schema.js";
 
-export const SCHEMA_VERSION = 9;
+export { SCHEMA_VERSION } from "./db-schema.js";
 
 /** True when text carries a HIGH-confidence prompt-injection pattern — used to
  *  quarantine a message on insert so recall never re-injects it into the prompt. */
@@ -159,6 +172,13 @@ CREATE TABLE IF NOT EXISTS query_log (
   executed_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS memory_projects (
+  project_id TEXT NOT NULL,
+  project_path TEXT NOT NULL,
+  observed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (project_id, project_path)
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_type ON messages(type);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
@@ -226,7 +246,6 @@ END;`);
 }
 
 function migrate(db: DatabaseSync, defaultClass: MemoryClass): void {
-  db.exec("CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL)");
   db.exec(SCHEMA_SQL);
   // v2: pending_actions.verify_passes (N=2 auto-verify confirmation). Add to
   // tables created before this column existed.
@@ -252,6 +271,7 @@ function migrate(db: DatabaseSync, defaultClass: MemoryClass): void {
   // (unclaimed) → backward-compatible.
   ensureColumn(db, "pending_actions", "claimed_by", "TEXT");
   ensureColumn(db, "pending_actions", "claimed_at", "TEXT");
+  ensureColumn(db, "pending_actions", "claim_owner", "TEXT");
   // v7: quarantine a message carrying a high-confidence prompt-injection pattern so
   // recall (searchMessages / recentMessages) never re-injects it into the prompt.
   // Set on insert going forward; `kit memory scan --injection --quarantine` backfills
@@ -267,7 +287,21 @@ function migrate(db: DatabaseSync, defaultClass: MemoryClass): void {
   // would make every historical row unclassifiable and (fail-closed) invisible, which is a
   // silent data loss disguised as security. New rows get their class at insert time.
   ensureColumn(db, "messages", "class", "TEXT");
+  // Local recall aliases never replace raw origin paths or travel implicitly on merge.
+  ensureColumn(db, "messages", "recall_cwd", "TEXT");
+  ensureColumn(db, "saved_threads", "recall_project_path", "TEXT");
+  prepareProjectIdentities(db);
+  prepareActionIdentity(db);
+  // Approval itself is local, outside backup bytes. Old/imported rows receive no grant.
+  ensureColumn(db, "pending_actions", "verify_grant", "TEXT");
+  ensureColumn(db, "pending_actions", "verify_definition", "TEXT");
+  prepareActionChecks(db);
+  // Invalidate asynchronous verification after any local mutation, including legacy SQL writers.
+  prepareActionVersion(db);
+  ensureColumn(db, "pending_actions", "state_conflict", "INTEGER NOT NULL DEFAULT 0");
+  prepareRevisionHistory(db);
   backfillMessageClass(db, defaultClass);
+  db.exec("CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL)");
   const row = db.prepare("SELECT version FROM schema_meta LIMIT 1").get() as
     | { version: number }
     | undefined;
@@ -288,11 +322,11 @@ export function openMemoryDb(
 ): DatabaseSync {
   const dbPath = path ?? getMemoryDbPath();
   if (dbPath !== ":memory:") ensureMemoryDir(dirname(dbPath));
-  const db = new DatabaseSync(dbPath);
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA busy_timeout = 5000");
-  db.exec("PRAGMA foreign_keys = OFF");
-  migrate(db, opts.defaultClass ?? DEFAULT_MEMORY_CLASS);
+  const db = openMigratedDb(dbPath, (connection) =>
+    withPalWrite(connection, { mode: "migration" }, () =>
+      migrate(connection, opts.defaultClass ?? DEFAULT_MEMORY_CLASS),
+    ),
+  );
   if (dbPath !== ":memory:" && existsSync(dbPath)) {
     try {
       secureFile(dbPath); // 0o600 on POSIX, icacls owner-only on Windows — #43
@@ -321,36 +355,10 @@ export function openMemoryDb(
  * create, chmod, or migrate ~/.kit: sandboxed checks must not fail because a
  * read-only verification tried to mutate machine-local memory state.
  *
- * A WAL-mode db opened `{ readOnly: true }` still needs to touch the `-wal`/
- * `-shm` sidecars for a consistent read; if they're missing AND the directory
- * can't create them (read-only dir — a locked-down sandbox, or a store shipped
- * without its sidecars), SQLite refuses. The exact message varies by SQLite
- * build/version — this session's observed "attempt to write a readonly
- * database" alongside the originally-handled "unable to open database file" —
- * so the retry is keyed on the meaningful precondition (sidecars absent), not
- * message-sniffing a string libsqlite doesn't guarantee.
+ * Connection startup validates the schema and handles missing WAL sidecars.
  */
 export function openMemoryDbReadOnly(path: string = getMemoryDbPath()): DatabaseSync {
-  if (path === ":memory:") return new DatabaseSync(path);
-  const db = new DatabaseSync(path, { readOnly: true });
-  try {
-    db.prepare("SELECT name FROM sqlite_master LIMIT 1").get();
-    return db;
-  } catch (err) {
-    try {
-      db.close();
-    } catch {
-      /* best-effort close */
-    }
-    const sidecarsMissing = !existsSync(`${path}-wal`) && !existsSync(`${path}-shm`);
-    if (sidecarsMissing) {
-      const uri = pathToFileURL(path);
-      uri.searchParams.set("mode", "ro");
-      uri.searchParams.set("immutable", "1");
-      return new DatabaseSync(uri.href);
-    }
-    throw err;
-  }
+  return openReadOnlyDb(path);
 }
 
 /** Has this file already been indexed at exactly this mtime + size? (incremental index) */
@@ -455,6 +463,7 @@ export function insertMessage(db: DatabaseSync, m: MessageInput): boolean {
       m.memoryClass ?? DEFAULT_MEMORY_CLASS,
     );
   if (Number(res.changes) > 0) {
+    registerProjectIdentity(db, m.cwd);
     db.prepare("UPDATE sessions SET message_count = message_count + 1 WHERE session_id = ?").run(
       m.sessionId,
     );
@@ -602,7 +611,7 @@ export interface SearchOptions {
    */
   contextClass?: MemoryClass;
   limit?: number;
-  /** Restrict to messages whose cwd is this repo root (or a subdirectory). */
+  /** Restrict to this root and its Git-registered worktrees (including subdirectories). */
   projectPath?: string;
   /** Include quarantined (high-confidence injection) rows. Default false: recall
    *  excludes them so a poisoned line is never re-injected. Set for inspection. */
@@ -671,6 +680,7 @@ export function searchMessages(
   // Recency-boost needs a candidate POOL larger than `limit` to re-rank; the default path fetches
   // exactly `limit` (behavior unchanged).
   const poolLimit = opts.recencyBoost ? Math.max(limit * 4, 40) : limit;
+  const roots = opts.projectPath ? getProjectRecallRoots(opts.projectPath, db) : [];
 
   const run = (match: string): SearchHit[] => {
     const params: (string | number)[] = [match];
@@ -685,17 +695,19 @@ export function searchMessages(
       where += ` AND m.class IN (${allowed.map(() => "?").join(", ")})`;
       params.push(...allowed);
     }
-    if (opts.projectPath) {
-      where += " AND (m.cwd = ? OR m.cwd LIKE ?)";
-      params.push(opts.projectPath, `${opts.projectPath}/%`);
+    if (roots.length) {
+      where += ` AND (${roots.map(() => "(COALESCE(m.recall_cwd, m.cwd) = ? OR instr(COALESCE(m.recall_cwd, m.cwd), ?) = 1)").join(" OR ")})`;
+      for (const root of roots) params.push(root, `${root.replace(/\/$/, "")}/`);
     }
     params.push(poolLimit);
     return db
       .prepare(
         `SELECT m.id AS id, m.uuid AS uuid, m.session_id AS sessionId, m.role AS role,
-                m.content AS content, m.timestamp AS timestamp
+                m.content AS content, m.timestamp AS timestamp,
+                m.cwd AS cwd, m.git_branch AS gitBranch, s.harness AS harness
          FROM messages_fts f
          JOIN messages m ON m.id = f.rowid
+         LEFT JOIN sessions s ON s.session_id = m.session_id
          WHERE ${where}
          ORDER BY rank
          LIMIT ?`,
@@ -721,37 +733,6 @@ export function searchMessages(
   const recencyOf = (h: SearchHit): number => (h.timestamp ? Date.parse(h.timestamp) || 0 : 0);
   const byRecency = [...pool].sort((a, b) => recencyOf(b) - recencyOf(a));
   return fuseByRrf<SearchHit>([pool, byRecency], (h) => h.id).slice(0, limit);
-}
-
-/** One disclosed hit — a compact, budget-trimmed view of a SearchHit. */
-export interface DisclosedHit {
-  id: number;
-  uuid: string | null;
-  sessionId: string;
-  role: string | null;
-  timestamp: string | null;
-  /** Content trimmed to the snippet budget (whole content when it already fits). */
-  snippet: string;
-  /** True when the snippet is shorter than the full content. */
-  truncated: boolean;
-}
-
-export interface Disclosure {
-  hits: DisclosedHit[];
-  /** How many ranked hits were disclosed. */
-  shown: number;
-  /** Ranked hits NOT disclosed (budget or count reached) — surfaced, never silently dropped. */
-  withheld: number;
-  budgetChars: number;
-}
-
-export interface DiscloseOptions {
-  /** Total character budget across all snippets (default 1200). */
-  budgetChars?: number;
-  /** Per-hit snippet cap (default 240). */
-  snippetChars?: number;
-  /** Hard cap on hits shown regardless of budget (default 8). */
-  maxHits?: number;
 }
 
 /**
@@ -781,6 +762,9 @@ export function progressiveDisclose(hits: SearchHit[], opts: DiscloseOptions = {
       sessionId: h.sessionId,
       role: h.role,
       timestamp: h.timestamp,
+      cwd: h.cwd,
+      gitBranch: h.gitBranch,
+      harness: h.harness,
       snippet,
       truncated: !full,
     });
@@ -817,26 +801,29 @@ export function recordQuery(db: DatabaseSync, q: QueryLogInput): void {
 export function recentMessages(db: DatabaseSync, opts: SearchOptions = {}): SearchHit[] {
   const limit = opts.limit ?? 10;
   const params: (string | number)[] = [];
-  let where = "content IS NOT NULL AND content != ''";
-  if (!opts.includeQuarantined) where += " AND quarantined = 0";
+  let where = "m.content IS NOT NULL AND m.content != ''";
+  if (!opts.includeQuarantined) where += " AND m.quarantined = 0";
   // Same class gate as searchMessages (#348) — see there for the fail-closed rationale.
   // Pushed here so the bound values stay in the WHERE clause's positional order.
   if (opts.contextClass) {
     const allowed = disclosableClasses(opts.contextClass);
-    where += ` AND class IN (${allowed.map(() => "?").join(", ")})`;
+    where += ` AND m.class IN (${allowed.map(() => "?").join(", ")})`;
     params.push(...allowed);
   }
   if (opts.projectPath) {
-    where += " AND (cwd = ? OR cwd LIKE ?)";
-    params.push(opts.projectPath, `${opts.projectPath}/%`);
+    const roots = getProjectRecallRoots(opts.projectPath, db);
+    where += ` AND (${roots.map(() => "(COALESCE(m.recall_cwd, m.cwd) = ? OR instr(COALESCE(m.recall_cwd, m.cwd), ?) = 1)").join(" OR ")})`;
+    for (const root of roots) params.push(root, `${root.replace(/\/$/, "")}/`);
   }
   params.push(limit);
   return db
     .prepare(
-      `SELECT id, uuid, session_id AS sessionId, role, content, timestamp
-       FROM messages
+      `SELECT m.id, m.uuid, m.session_id AS sessionId, m.role, m.content, m.timestamp,
+              m.cwd AS cwd, m.git_branch AS gitBranch, s.harness AS harness
+       FROM messages m
+       LEFT JOIN sessions s ON s.session_id = m.session_id
        WHERE ${where}
-       ORDER BY timestamp DESC, id DESC
+       ORDER BY m.timestamp DESC, m.id DESC
        LIMIT ?`,
     )
     .all(...params) as unknown as SearchHit[];

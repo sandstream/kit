@@ -27,12 +27,26 @@ security findings.
 - `.kit/monkey-test/role-matrix.json`
 - `.kit/monkey-test/expected-findings.example.json`
 
+Repeat init preserves existing Playwright configuration, role matrix, and expected
+findings example byte-for-byte, including with `--force`. Other existing files are
+refreshed only when they carry the Kit managed marker and `--force` is supplied;
+unmarked files remain operator-owned. Symlinked parents and nonregular or multiply
+linked destinations are skipped. Publication stages a complete file before replacing
+the leaf entry, so refreshing a scaffold does not write through its linked target.
+These pathname checks are not protection against hostile concurrent parent renames.
+
 `run` executes the static security pack and, when Playwright prerequisites are
 present, starts the app on a kit-chosen free port and runs the browser gate.
 It deletes stale Playwright JSON output before the run and accepts browser
 success only when the new report contains the current run ID, both configured
 projects, every role crawl, and the money-flow case. A custom `--test-command`
 must therefore run the generated monkey config and preserve its JSON reporter.
+
+For browser runs, a missing Playwright dependency or incomplete harness stops
+before the environment command, seed, server, or test command. Role validation
+uses the temporary environment, then blocks seed/server/test on failure. A
+failed or missing seed also blocks server/test. Explicit browser skips retain
+their documented validation and seed behavior; skipping is not browser evidence.
 
 ## Roles
 
@@ -55,19 +69,48 @@ the placeholders with:
 
 Set `configured` to `true` only after every role has non-empty values. The
 browser gate fails closed while the matrix is unconfigured or still contains
-generated placeholders. Expected 401, 403,
-404, access-denied redirects, and denial pages satisfy `denyRoutes`; allowed
-routes must render successfully. Discovered same-origin links still receive UX,
-runtime, and isolation checks.
+generated placeholders. A `denyRoutes` navigation must return HTTP 401, 403, or
+404, or land on a different pathname that exactly matches one of these denial
+routes: `/login`, `/sign-in`, `/unauthorized`, `/forbidden`, `/access-denied`.
+Path matching is case-sensitive and does not accept trailing slashes, nested
+paths, or longer names such as `/admin/login-audit` or
+`/reports/forbidden-attempts`. Query strings and fragments are ignored; changing
+only those does not count as a redirect. Other denial destinations must return
+401, 403, or 404 to satisfy the gate. Denial wording in an HTTP 200 body is not
+proof of denied access. Denial responses and redirects still receive cross-org
+isolation checks.
+
+Allowed routes must render successfully. Discovered same-origin links still
+receive UX, runtime, and isolation checks.
 
 ## Runner Inputs
 
 The runner uses a free local port unless `--base-url` points at an existing test
 server. It passes `PORT`, `KIT_MONKEY_PORT`, and `MONKEY_BASE_URL` to the dev
 server. Env values come from the current process plus optional `--env-command`,
-whose stdout may be JSON or dotenv-style `KEY=VALUE` lines; kit never writes
-those values to `.env`. A failed env command or any detected live payment
-configuration stops the run before seed, dev server, or browser side effects.
+whose stdout may be JSON or literal dotenv `KEY=VALUE` assignments, including
+`export KEY=VALUE`; kit never writes those values to `.env`. A failed env command,
+invalid output, or detected live payment configuration stops the run before
+seed, dev server, or browser side effects. Stripe live prefixes are checked in
+trimmed values regardless of the variable's name. Refusal reports omit values.
+
+Planning and execution inspect root `.env`, `.env.local`, and their development,
+test, production and valid `NODE_ENV` mode variants. Files must be readable regular
+files of at most 512 KiB. The parser accepts a conservative literal subset and
+refuses ambiguous loader syntax, colon assignments, unsupported escapes, NUL bytes,
+and unresolved variable or command references. Effective process and provider
+values must also be literal. Resolve references through the provider/vault before
+running; do not write provider secrets into dotenv files to bypass a refusal.
+The runner checks again after provider/seed/server stages before starting the next
+stage. These checks do not sandbox application code, cover arbitrary custom env
+loaders or nested workspaces, or prevent files from changing during a running child.
+
+Streamed seed/test logs go to stderr with secret redaction, leaving JSON stdout
+for the result. SIGINT/SIGTERM abort the run and clean up its tracked process
+groups, including commands still starting. Completed groups are retired promptly,
+and surviving descendants are cleaned before a command reports completion.
+This uses POSIX process-group probes, not kernel-level identity handles; Windows
+descendant cleanup is not equivalent and has not been verified.
 
 Useful flags:
 
@@ -120,7 +163,11 @@ Skipping browser execution or its money-flow case always leaves the release gate
 red even when the exception has a reason; a money-app release requires fresh
 desktop/mobile browser evidence and at least one completed sandbox money flow.
 
-Static security detection ignores source comments and requires control-shaped
+Static detection filters comments per source language, including JavaScript
+template expressions and HTML comments; executable decrement expressions and
+string URLs remain visible. This is lexical evidence, not a full language parser
+or proof that payment code runs. Payment dependencies remain independent signals.
+Static security detection requires control-shaped
 schema, query, or API operations. Checklist words alone do not satisfy RLS,
 tenant isolation, webhook verification/idempotency, refund/receipt paths, or an
 immutable journal.

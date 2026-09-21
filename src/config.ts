@@ -514,7 +514,12 @@ export interface kitConfig {
    * A more restrictive memory is never recalled into a less restrictive context; an
    * INVALID value fails closed to `restricted`. `KIT_MEMORY_CLASS` overrides it.
    */
-  memory?: { track_findings?: boolean; default_class?: "public" | "internal" | "restricted" };
+  memory?: {
+    /** Stable public repository association used by cross-clone memory recall. */
+    project_id?: string;
+    track_findings?: boolean;
+    default_class?: "public" | "internal" | "restricted";
+  };
   /**
    * Decision ledger (`kit decisions`). `require = true` turns the per-run ledger into a gate: a
    * governed run that recorded no decisions leaves no review surface, and `kit check` fails it as
@@ -973,6 +978,7 @@ export const kitConfigSchema = z
       .optional(),
     memory: z
       .object({
+        project_id: z.string().uuid().optional(),
         track_findings: z.boolean().optional(),
         default_class: z.enum(["public", "internal", "restricted"]).optional(),
       })

@@ -30,7 +30,15 @@ export interface TestCheckResult {
 }
 
 const DEFAULT_SRC_DIRS = ["src"];
-const DEFAULT_EXCLUDE_SUFFIXES = [".test.ts", ".test.js", ".spec.ts", ".spec.js", ".d.ts"];
+const DEFAULT_EXCLUDE_SUFFIXES = [
+  ".test.ts",
+  ".test.js",
+  ".test-support.ts",
+  ".test-support.js",
+  ".spec.ts",
+  ".spec.js",
+  ".d.ts",
+];
 const DEFAULT_EXCLUDE_NAMES = ["index.ts", "index.js", "types.ts"];
 
 async function pathExists(p: string): Promise<boolean> {

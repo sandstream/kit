@@ -57,7 +57,7 @@ async function securityContext(cwd: string): Promise<SecurityContext> {
   const deps = allMonkeyDependencies(pkg);
   const scan = await scanMonkeySources(cwd);
   const controlFiles = withoutMonkeySourceComments(scan.runtimeFiles);
-  const providers = detectPaymentProviders(deps, scan.runtimeText);
+  const providers = detectPaymentProviders(deps, scan.runtimeFiles);
   return {
     scan,
     deps,

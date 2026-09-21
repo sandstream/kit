@@ -1,6 +1,6 @@
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb } from "./db.js";
@@ -11,7 +11,8 @@ import {
   palSnooze,
   palClaim,
   palRelease,
-  reapStaleClaims,
+  palShow,
+  palTakeover,
   palAutoVerify,
   palPrune,
   deviceId,
@@ -20,6 +21,16 @@ import {
   palSyncFindings,
   findingPalId,
 } from "./pal.js";
+import { claimTask, legacyPalDb, setPalClock } from "./pal-fixture.test-support.js";
+
+const previousDevice = process.env.KIT_DEVICE_ID;
+before(() => {
+  process.env.KIT_DEVICE_ID = "pal-test-device";
+});
+after(() => {
+  if (previousDevice === undefined) delete process.env.KIT_DEVICE_ID;
+  else process.env.KIT_DEVICE_ID = previousDevice;
+});
 
 describe("PAL — pending actions", () => {
   const fresh = () => openMemoryDb(":memory:");
@@ -89,8 +100,13 @@ describe("PAL — pending actions", () => {
   it("claim atomically takes an open item; a concurrent second claim loses", () => {
     const db = fresh();
     const id = palAdd(db, { title: "flip the auth setting" });
-    assert.equal(palClaim(db, id, "agent-a"), true); // first caller wins
-    assert.equal(palClaim(db, id, "agent-b"), false); // WHERE status='open' guard: no double-claim
+    const expectedFrontier = palShow(db, id)!.frontier;
+    const owner = { device: deviceId(), harness: "test-harness", session: "agent-a" };
+    assert.equal(palClaim(db, id, { owner, label: "agent-a", expectedFrontier }).status, "applied");
+    assert.equal(
+      palClaim(db, id, { owner: { ...owner, session: "agent-b" }, expectedFrontier }).status,
+      "stale",
+    );
     assert.equal(palList(db).length, 0); // a claimed item drops out of the open list
     const claimed = palList(db, { status: "claimed" });
     assert.equal(claimed.length, 1);
@@ -98,11 +114,23 @@ describe("PAL — pending actions", () => {
     db.close();
   });
 
-  it("claim defaults claimed_by to this device", () => {
+  it("claim defaults its display label to the explicitly supplied harness", () => {
     const db = fresh();
     const id = palAdd(db, { title: "x" });
-    assert.equal(palClaim(db, id), true);
-    assert.equal(palList(db, { status: "claimed" })[0]?.claimed_by, deviceId());
+    const owner = { device: deviceId(), harness: "codex", session: "explicit-session" };
+    assert.equal(
+      palClaim(db, id, { owner, expectedFrontier: palShow(db, id)!.frontier }).status,
+      "applied",
+    );
+    assert.equal(palList(db, { status: "claimed" })[0]?.claimed_by, "codex");
+    db.close();
+  });
+
+  it("claim cannot silently infer a session for an old caller", () => {
+    const db = fresh();
+    const id = palAdd(db, { title: "require explicit session identity" });
+    assert.throws(() => Reflect.apply(palClaim, undefined, [db, id]), { code: "owner-required" });
+    assert.equal(palList(db)[0]?.id, id);
     db.close();
   });
 
@@ -110,67 +138,63 @@ describe("PAL — pending actions", () => {
     const db = fresh();
     const id = palAdd(db, { title: "x" });
     assert.equal(palRelease(db, id), false); // nothing to release — still open
-    palClaim(db, id, "agent-a");
-    assert.equal(palRelease(db, id), true);
+    const claim = claimTask(db, id, "agent-a");
+    assert.equal(palRelease(db, id, claim), true);
     const open = palList(db);
     assert.equal(open.length, 1);
     assert.equal(open[0]?.claimed_by, null); // claim cleared
     db.close();
   });
 
-  it("reaps a stale claim (crashed claimer) back to open; a fresh claim is spared", () => {
+  it("a claim's age is advisory and does not prove its owner abandoned work", () => {
     const db = fresh();
     const id = palAdd(db, { title: "finish the migration" });
-    palClaim(db, id, "agent-a");
-    assert.deepEqual(reapStaleClaims(db), [], "a just-made claim is NOT reaped");
+    claimTask(db, id, "agent-a");
     assert.equal(palList(db, { status: "claimed" }).length, 1);
-    // Backdate the claim past the TTL → abandoned.
-    db.prepare("UPDATE pending_actions SET claimed_at=datetime('now','-30 hours') WHERE id=?").run(
-      id,
-    );
-    assert.deepEqual(reapStaleClaims(db), [id]);
+    // An old timestamp no longer authorizes revocation of another session's claim.
+    setPalClock(db, id, { claimed_at: new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString() });
+    const before = palShow(db, id, { history: true });
+    assert.deepEqual(palList(db), []);
     const claimed = db
       .prepare("SELECT status, claimed_by FROM pending_actions WHERE id=?")
       .get(id) as { status: string; claimed_by: string | null };
-    assert.equal(claimed.status, "open");
-    assert.equal(claimed.claimed_by, null);
+    assert.equal(claimed.status, "claimed");
+    assert.equal(claimed.claimed_by, "agent-a");
+    assert.deepEqual(palShow(db, id, { history: true }), before);
     db.close();
   });
 
-  it("palList auto-reaps a stale claim so a crashed agent can't hide a blocked item", () => {
+  it("an old claim can be explicitly taken over with an inspected generation", () => {
     const db = fresh();
     const id = palAdd(db, { title: "unblock me" });
-    palClaim(db, id, "agent-a");
+    claimTask(db, id, "agent-a");
     assert.equal(palList(db).length, 0, "fresh claim stays hidden");
-    db.prepare("UPDATE pending_actions SET claimed_at=datetime('now','-48 hours') WHERE id=?").run(
-      id,
-    );
-    const open = palList(db); // reap runs inside palList
-    assert.equal(open.length, 1, "the abandoned item resurfaces as open");
-    assert.equal(open[0]?.id, id);
+    setPalClock(db, id, { claimed_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString() });
+    const owner = { device: deviceId(), harness: "codex", session: "successor" };
+    const taken = palTakeover(db, id, { owner, expectedFrontier: palShow(db, id)!.frontier });
+    assert.equal(taken.status, "applied");
+    assert.deepEqual(palList(db, { status: "claimed" })[0]?.claim_owner, owner);
     db.close();
   });
 
-  it("palList can skip stale-claim reaping for read-only status surfaces", () => {
+  it("both ordinary and read-only lists leave old claim ownership intact", () => {
     const db = fresh();
     const id = palAdd(db, { title: "read-only view" });
-    palClaim(db, id, "agent-a");
-    db.prepare("UPDATE pending_actions SET claimed_at=datetime('now','-48 hours') WHERE id=?").run(
-      id,
-    );
+    claimTask(db, id, "agent-a");
+    setPalClock(db, id, { claimed_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString() });
 
     assert.equal(palList(db, { reapStale: false }).length, 0);
     assert.equal(palList(db, { status: "claimed" })[0]?.id, id);
 
-    assert.equal(palList(db).length, 1);
+    assert.equal(palList(db).length, 0);
     db.close();
   });
 
   it("a claimed item can still be marked done by its claimer", () => {
     const db = fresh();
     const id = palAdd(db, { title: "x" });
-    palClaim(db, id, "agent-a");
-    assert.equal(palDone(db, id), true);
+    const claim = claimTask(db, id, "agent-a");
+    assert.equal(palDone(db, id, claim), true);
     assert.equal(palList(db, { status: "closed" }).length, 1);
     db.close();
   });
@@ -295,15 +319,20 @@ describe("PAL — pending actions", () => {
     const db = fresh();
     const tmp = mkdtempSync(join(tmpdir(), "kit-pal-sec2-"));
     const marker = join(tmp, "PWNED");
-    // Simulate DB tampering: inject a row with a bogus verify_check that a naive
+    // Simulate DB tampering: inject a bogus definition that a naive
     // executor might run as a command. parseCheck must reject the unknown shape;
     // nothing executes.
-    db.prepare(
-      `INSERT INTO pending_actions (id, status, title, kind, verify_check)
-       VALUES ('evil', 'open', 'injected', 'auto', ?)`,
-    ).run(JSON.stringify({ type: "shell", cmd: `touch ${marker}` }));
+    const id = palAdd(db, { title: "injected", kind: "auto" });
+    db.prepare("UPDATE pending_actions SET verify_definition=? WHERE id=?").run(
+      JSON.stringify({ type: "shell", cmd: `touch ${marker}` }),
+      id,
+    );
     const r = await palAutoVerify(db);
     assert.equal(r.checked, 0); // unknown shape -> not even run
+    assert.deepEqual(
+      r.unverified.map(({ id, reason }) => ({ id, reason })),
+      [{ id, reason: "invalid-check" }],
+    );
     assert.equal(existsSync(marker), false, "injected verify_check must never execute");
     rmSync(tmp, { recursive: true, force: true });
     db.close();
@@ -415,13 +444,11 @@ describe("palSyncFindings — findings → ledger (track layer)", () => {
     assert.notEqual(all[0]?.id, all[1]?.id);
   });
 
-  it("legacy NULL-origin findings are reconcilable by any device", () => {
-    const db = fresh();
-    // simulate a pre-v5 open finding row (no origin_device) at this scope+id
+  it("legacy NULL-origin findings are reconcilable by any device", (t) => {
     const legacyId = findingPalId("sec", "repo\x1fold");
-    db.prepare(
-      "INSERT INTO pending_actions (id, status, title, scope, kind, origin_device) VALUES (?, 'open', 'old', 'repo', 'finding', NULL)",
-    ).run(legacyId);
+    const db = legacyPalDb(t, [
+      { id: legacyId, title: "old", scope: "repo", kind: "finding", origin_device: null },
+    ]);
     const r = withDevice("whoever", () => palSyncFindings(db, "sec", [], { scope: "repo" }));
     assert.equal(r.closed.length, 1, "a NULL-origin legacy finding can be cleared by any device");
     db.close();
@@ -468,40 +495,44 @@ describe("PAL — device coupling (don't nag about ephemeral-session items)", ()
     db.close();
   });
 
-  it("legacy rows with NULL origin_device always surface (back-compat)", () => {
-    const db = fresh();
-    db.prepare(
-      "INSERT INTO pending_actions (id, status, title, kind, origin_device) VALUES ('leg', 'open', 'legacy', 'manual', NULL)",
-    ).run();
+  it("legacy rows with NULL origin_device always surface (back-compat)", (t) => {
+    const db = legacyPalDb(t, [{ id: "leg", title: "legacy", origin_device: null }]);
     withDevice("any-device", () => {
       assert.ok(palList(db).some((p) => p.id === "leg"));
     });
     db.close();
   });
 
-  it("prune closes this device's dead-origin items, keeps live ones, ignores other devices", () => {
+  it("prune closes this device's dead-origin items, keeps live ones, ignores other devices", (t) => {
     const db = fresh();
-    const live = mkdtempSync(join(tmpdir(), "kit-pal-live-"));
-    const dead = join(tmpdir(), "kit-pal-dead-does-not-exist-zzz");
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "kit-pal-prune-")));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const live = join(directory, "live");
+    const dead = join(directory, "dead");
+    mkdirSync(live);
+    mkdirSync(dead);
+    const addAt = (title: string, dev: string, root: string) => {
+      const cwd = process.cwd();
+      try {
+        process.chdir(root);
+        return withDevice(dev, () => palAdd(db, { title }));
+      } finally {
+        process.chdir(cwd);
+      }
+    };
+    const deadId = addAt("dead", "dev-here", dead);
+    const liveId = addAt("live", "dev-here", live);
+    const otherId = addAt("other", "other-dev", dead);
+    rmSync(dead, { recursive: true });
     assert.ok(!existsSync(dead));
-    const ins = (id: string, dev: string, root: string) =>
-      db
-        .prepare(
-          "INSERT INTO pending_actions (id, status, title, kind, origin_device, origin_root) VALUES (?, 'open', ?, 'manual', ?, ?)",
-        )
-        .run(id, id, dev, root);
     withDevice("dev-here", () => {
-      ins("dead", "dev-here", dead); // this device, gone dir → pruned
-      ins("live", "dev-here", live); // this device, dir exists → kept
-      ins("other", "other-dev", dead); // another device's gone dir → left alone
       const r = palPrune(db);
-      assert.deepEqual(r.closed, ["dead"]);
+      assert.deepEqual(r.closed, [deadId]);
       const openIds = palList(db, { allDevices: true })
         .map((p) => p.id)
         .sort();
-      assert.deepEqual(openIds, ["live", "other"].sort());
+      assert.deepEqual(openIds, [liveId, otherId].sort());
     });
-    rmSync(live, { recursive: true, force: true });
     db.close();
   });
 

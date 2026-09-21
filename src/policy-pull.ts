@@ -26,8 +26,10 @@ import {
   readFileSync,
   writeFileSync,
   copyFileSync,
+  mkdirSync,
   mkdtempSync,
   renameSync,
+  rmdirSync,
   rmSync,
   statSync,
 } from "node:fs";
@@ -60,7 +62,7 @@ export type PullStatus =
    * permission the org has since removed.
    */
   | "stale-revision"
-  /** The verified pair could not be installed; the prior pair was retained or remains fail-closed. */
+  /** Installation or lock handling failed; the destination must be verified before use. */
   | "apply-failed";
 
 export interface PullResult {
@@ -203,13 +205,36 @@ function staleRevisionRefusal(destRoot: string, stage: string): string | null {
 
 export interface PullPolicyDeps {
   /**
-   * Called once verification has succeeded and before the pair is installed. The ONLY
-   * purpose is to make the verify-to-install window observable to a test, so the
+   * Called under the destination lock once verification and the revision check have
+   * succeeded, before the pair is installed. The ONLY purpose is to make the
+   * verify-to-install window observable to a test, so the
    * "installs what it verified" invariant (PP-01) can be asserted deterministically
    * instead of raced. Same injected-seam precedent as `applyPolicyPairAtomically`'s
    * `renameFile`. Production callers never pass it.
    */
   afterVerify?: () => void;
+}
+
+function withPolicyPullLock(destRoot: string, install: () => PullResult): PullResult {
+  const lock = join(destRoot, ".kit-policy-pull.lock");
+  try {
+    // Atomic creation serializes all pulls into this destination, including path aliases.
+    // Never break an existing lock: age or a missing PID cannot prove its owner is done.
+    mkdirSync(lock, { mode: 0o700 });
+  } catch (error) {
+    const reason = errorCode(error) === "EEXIST" ? "busy" : `unavailable (${errorCode(error)})`;
+    return {
+      ok: false,
+      status: "apply-failed",
+      detail: `policy pull lock is ${reason}; verified policy NOT applied (kept existing); existing locks are never removed automatically`,
+    };
+  }
+  try {
+    return install();
+  } finally {
+    // Only remove the empty lock we acquired; cleanup errors leave subsequent pulls closed.
+    rmdirSync(lock);
+  }
 }
 
 /**
@@ -224,33 +249,45 @@ function installVerifiedPull(
   fingerprint: string | undefined,
   deps: PullPolicyDeps,
 ): PullResult {
-  // Verified, so the incoming revision is now a claim worth ratcheting against (PP-02).
-  const stale = staleRevisionRefusal(destRoot, stage);
-  if (stale !== null) {
-    return { ok: false, status: "stale-revision", detail: `${stale} (kept existing)`, fingerprint };
-  }
+  return withPolicyPullLock(destRoot, () => {
+    // Compare and install under the same lock so a concurrent pull cannot undo the ratchet.
+    const stale = staleRevisionRefusal(destRoot, stage);
+    if (stale !== null) {
+      return {
+        ok: false,
+        status: "stale-revision",
+        detail: `${stale} (kept existing)`,
+        fingerprint,
+      };
+    }
 
-  deps.afterVerify?.();
+    deps.afterVerify?.();
 
-  // Install the STAGED bytes: the ones verifyPolicy just accepted. Re-reading the source
-  // here reopened the whole verification window (PP-01). A source that changed after
-  // verification (a shared mount, a git checkout, an attacker with write access to the
-  // distribution dir) had its unverified bytes installed under a "verified" verdict.
-  // Never write or fetch the trust anchor.
-  const applied = applyPolicyPairAtomically(
-    destRoot,
-    readFileSync(join(stage, POLICY_FILE)),
-    readFileSync(join(stage, POLICY_SIG_FILE)),
-  );
-  if (!applied.ok) {
+    // Install the STAGED bytes: the ones verifyPolicy just accepted. Re-reading the source
+    // here reopened the whole verification window (PP-01). A source that changed after
+    // verification (a shared mount, a git checkout, an attacker with write access to the
+    // distribution dir) had its unverified bytes installed under a "verified" verdict.
+    // Never write or fetch the trust anchor.
+    const applied = applyPolicyPairAtomically(
+      destRoot,
+      readFileSync(join(stage, POLICY_FILE)),
+      readFileSync(join(stage, POLICY_SIG_FILE)),
+    );
+    if (!applied.ok) {
+      return {
+        ok: false,
+        status: "apply-failed",
+        detail: `verified policy NOT applied: ${applied.detail}`,
+        fingerprint,
+      };
+    }
     return {
-      ok: false,
-      status: "apply-failed",
-      detail: `verified policy NOT applied: ${applied.detail}`,
+      ok: true,
+      status: "applied",
+      detail: `applied org policy: ${verifyDetail}`,
       fingerprint,
     };
-  }
-  return { ok: true, status: "applied", detail: `applied org policy: ${verifyDetail}`, fingerprint };
+  });
 }
 
 /**
@@ -306,7 +343,7 @@ export function pullPolicy(
     return {
       ok: false,
       status: "apply-failed",
-      detail: `policy pull could not complete (${errorCode(error)}); existing policy was not intentionally changed`,
+      detail: `policy pull could not complete (${errorCode(error)}); inspect the destination policy and pull lock before retrying`,
     };
   } finally {
     if (stage) {

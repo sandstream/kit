@@ -2,41 +2,41 @@
  * .gitignore validator. Checks that the project's `.gitignore` covers the
  * paths that historically leak credentials when accidentally committed.
  *
- * Two operations:
- *   - `verify(cwd)` — returns the list of patterns that should be present
- *                     but aren't
- *   - `patch(cwd)`  — appends missing entries to `.gitignore` (or creates
- *                     the file). Idempotent — re-running is a no-op.
- *
- * `.gitignore` semantics are minimal here: we string-match by line, ignore
- * comments, and require an exact pattern match (no globbing equivalence —
- * if the user has `**.env*` instead of `.env*`, kit still nudges them).
+ * Git evaluates representative paths and lists exposed or already tracked
+ * sensitive files. Verification errors are explicit; pattern text alone is
+ * never evidence of protection.
  */
 
-import { readFile, writeFile, access, stat } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { readFile, writeFile, access } from "node:fs/promises";
 import { resolve } from "node:path";
 
 export interface IgnoreCheckResult {
   exists: boolean;
   presentPatterns: string[];
   missingPatterns: { pattern: string; reason: string }[];
+  trackedFiles: string[];
+  unignoredFiles: string[];
 }
 
 interface RequiredEntry {
   pattern: string;
   reason: string;
-  /** Aliases that also satisfy this entry (e.g. `**.env*` works for `.env*`). */
-  aliases?: string[];
+  /** Concrete paths for Git to evaluate; never pass globs to check-ignore. */
+  paths?: string[];
 }
 
-const REQUIRED_PATTERNS: RequiredEntry[] = [
-  { pattern: ".env", reason: "default dotenv file", aliases: [".env*", "**/.env"] },
+const ENV_PATTERNS: RequiredEntry[] = [
+  { pattern: ".env", reason: "default dotenv file" },
   {
     pattern: ".env.local",
     reason: "local secrets materialized by kit secrets",
-    aliases: [".env*"],
   },
-  { pattern: ".env.*.local", reason: "per-env local secrets", aliases: [".env*"] },
+  {
+    pattern: ".env.*.local",
+    reason: "per-env local secrets",
+    paths: [".env.production.local", ".env.development.local", ".env.test.local"],
+  },
   {
     // The dotenvx PRIVATE keys: whoever has this file decrypts every encrypted .env in
     // the repo, so committing it surrenders exactly what the encryption was protecting.
@@ -44,9 +44,27 @@ const REQUIRED_PATTERNS: RequiredEntry[] = [
     // classic .env patterns literally satisfied every check while leaving it trackable.
     pattern: ".env.keys",
     reason: "dotenvx private keys (decrypt every encrypted .env)",
-    aliases: [".env*"],
   },
-  { pattern: "node_modules", reason: "dependency tree", aliases: ["node_modules/"] },
+];
+
+const REQUIRED_PATTERNS: RequiredEntry[] = [
+  ...ENV_PATTERNS,
+  {
+    pattern: ".env.local.*",
+    reason: "local secrets backups",
+    paths: [".env.local.prod-backup"],
+  },
+  {
+    pattern: ".env.*.backup",
+    reason: "per-env secrets backups",
+    paths: [".env.production.backup"],
+  },
+  { pattern: "*.prod-backup", reason: "production backups", paths: ["secrets.prod-backup"] },
+  {
+    pattern: "node_modules",
+    reason: "dependency tree",
+    paths: ["node_modules/kit-ignore-probe/index.js"],
+  },
   // Ignore kit's local-state CONTENTS via `.kit/*` (not the wholesale `.kit/`):
   // git won't descend into a wholesale-excluded dir, so a later `!.kit/shared/`
   // negation cannot re-include the curated, committed-by-design shared tier
@@ -55,87 +73,147 @@ const REQUIRED_PATTERNS: RequiredEntry[] = [
   {
     pattern: ".kit/*",
     reason: "kit local state (elevation, env, runtime)",
-    aliases: [".kit", ".kit/", ".kit/*"],
+    paths: [".kit/elevation.json", ".kit/env/local", ".kit/runtime/state"],
   },
   {
     pattern: "!.kit/shared/",
     reason: "keep curated shared memory tracked (committed by design)",
-    aliases: ["!.kit/shared", "!.kit/shared/**"],
+    paths: [".kit/shared/memory.jsonl"],
   },
   { pattern: ".kit-audit.jsonl", reason: "audit log can contain secret labels + paths" },
-  { pattern: "*.pem", reason: "PEM keys / certs" },
-  { pattern: "*.key", reason: "private keys" },
-  { pattern: "id_rsa", reason: "SSH private key", aliases: ["id_rsa*"] },
-  { pattern: "id_ed25519", reason: "SSH ed25519 private key", aliases: ["id_ed25519*"] },
-  { pattern: "*.p12", reason: "PKCS#12 bundle (TLS certs + keys)" },
-  { pattern: "*-service-account*.json", reason: "GCP service-account JSON keys" },
+  { pattern: ".kit-audit.pending", reason: "pending audit records" },
+  { pattern: ".kit-skipped-commits.jsonl", reason: "local bypass records" },
+  { pattern: "*.pem", reason: "PEM keys / certs", paths: ["server.pem"] },
+  { pattern: "*.key", reason: "private keys", paths: ["server.key"] },
+  { pattern: "id_rsa", reason: "SSH private key" },
+  { pattern: "id_ed25519", reason: "SSH ed25519 private key" },
+  { pattern: "*.p12", reason: "PKCS#12 bundle (TLS certs + keys)", paths: ["bundle.p12"] },
+  {
+    pattern: "*-service-account*.json",
+    reason: "GCP service-account JSON keys",
+    paths: ["gcp-service-account-prod.json"],
+  },
 ];
 
-/**
- * Parse `.gitignore` the way GIT parses it — which is emphatically not the way this function
- * used to.
- *
- * It used to strip everything after the first `#` on every line, "matching how our patch helper
- * writes `pattern  # reason`". Writer and parser agreed with each other and both disagreed with
- * git: per gitignore(5) only a line whose first non-whitespace character is `#` is a comment,
- * there is no trailing-comment syntax. So `*.pem  # PEM keys / certs` is a pattern matching a
- * file literally named `*.pem  # PEM keys / certs`, and every entry `--fix` wrote was inert.
- *
- * The loop closed on itself: `--fix` wrote 12 annotated patterns, this parser stripped the
- * annotations back off, `checkGitignore` reported 13/13 present, and `kit check --category
- * security` printed ".env gitignored: pass" while `git check-ignore .env` said nothing was
- * ignored. A checker that reads its own output as evidence can never fail.
- *
- * Rules implemented, per gitignore(5): a comment line starts with `#` (leading whitespace
- * allowed); trailing whitespace is stripped unless backslash-escaped; blank lines are skipped.
- * An escaped `\#` at the start is a literal `#` pattern.
- */
-function parseGitignore(text: string): string[] {
-  const out: string[] = [];
-  for (const raw of text.split("\n")) {
-    const line = raw.replace(/\r$/, "");
-    if (line.trim().length === 0) continue;
-    if (line.trimStart().startsWith("#")) continue; // whole-line comment
-    // Trailing spaces are not part of the pattern unless escaped ("foo\ " keeps one space).
-    const pattern = line.replace(/(?<!\\)\s+$/, "");
-    if (pattern.length === 0) continue;
-    out.push(pattern.startsWith("\\#") ? pattern.slice(1) : pattern);
-  }
-  return out;
+function git(cwd: string, args: string[], input?: string): Promise<string> {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: "0" };
+  // Hooks can export an index or worktree belonging to the calling repository.
+  for (const key of [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_PREFIX",
+  ])
+    delete env[key];
+  return new Promise((resolveOutput, reject) => {
+    const child = execFile(
+      "git",
+      args,
+      { cwd, env, timeout: 5_000, maxBuffer: 8 * 1024 * 1024 },
+      (error, stdout) => {
+        if (
+          error &&
+          !(args[0] === "check-ignore" && error.code === 1 && !error.killed && !error.signal)
+        ) {
+          reject(
+            new Error(
+              `Git ${args[0]} failed (${error.code ?? error.signal ?? "unknown error"}); ignore protection could not be verified`,
+            ),
+          );
+        } else {
+          resolveOutput(stdout);
+        }
+      },
+    );
+    // A failed spawn can close stdin before the NUL-delimited paths are written.
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(input);
+  });
 }
 
-export async function checkGitignore(cwd: string = process.cwd()): Promise<IgnoreCheckResult> {
-  const path = resolve(cwd, ".gitignore");
-  let exists = false;
-  let lines: string[] = [];
-  try {
-    await access(path);
-    exists = true;
-    const text = await readFile(path, "utf-8");
-    lines = parseGitignore(text);
-  } catch {
-    // file missing — every required pattern is "missing"
+async function requireWorktree(cwd: string): Promise<void> {
+  if ((await git(cwd, ["rev-parse", "--is-inside-work-tree"])).trim() !== "true") {
+    throw new Error("Git working tree unavailable; ignore protection could not be verified");
   }
+}
 
-  const present = new Set(lines);
+function isEnvSecret(path: string): boolean {
+  const base = path.split("/").pop() ?? path;
+  return /^\.env(\..+)?$/.test(base) && !/\.(template|example|sample)$/.test(base);
+}
+
+function isSensitive(path: string): boolean {
+  const base = path.split("/").pop() ?? path;
+  return (
+    isEnvSecret(path) ||
+    /\.(pem|key|p12|prod-backup)$/.test(base) ||
+    /^id_(rsa|ed25519)(\.|$)/.test(base) ||
+    /-service-account.*\.json$/.test(base)
+  );
+}
+
+async function inspectPatterns(
+  cwd: string,
+  entries: RequiredEntry[],
+  sensitive: (path: string) => boolean,
+): Promise<IgnoreCheckResult> {
+  await requireWorktree(cwd);
+  const trackedFiles = (await git(cwd, ["ls-files", "--cached", "-z"]))
+    .split("\0")
+    .filter((path) => path && sensitive(path));
+  const unignoredFiles = (await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]))
+    .split("\0")
+    .filter((path) => path && sensitive(path));
+  const paths = entries.flatMap((entry) => entry.paths ?? [entry.pattern]);
+  // --no-index measures the rules; tracked files are independently rejected above.
+  const ignored = new Set(
+    (await git(cwd, ["check-ignore", "--no-index", "-z", "--stdin"], `${paths.join("\0")}\0`))
+      .split("\0")
+      .filter(Boolean),
+  );
   const missing: { pattern: string; reason: string }[] = [];
   const matched: string[] = [];
-
-  for (const entry of REQUIRED_PATTERNS) {
-    const candidates = [entry.pattern, ...(entry.aliases ?? [])];
-    const found = candidates.find((p) => present.has(p));
-    if (found) {
+  for (const entry of entries) {
+    const shouldIgnore = !entry.pattern.startsWith("!");
+    if ((entry.paths ?? [entry.pattern]).every((path) => ignored.has(path) === shouldIgnore)) {
       matched.push(entry.pattern);
     } else {
       missing.push({ pattern: entry.pattern, reason: entry.reason });
     }
   }
-
+  for (const path of unignoredFiles) {
+    if (!missing.some((entry) => entry.pattern === path)) {
+      missing.push({ pattern: path, reason: "sensitive file is not ignored by Git" });
+    }
+  }
+  for (const path of trackedFiles) {
+    missing.push({
+      pattern: path,
+      reason: "sensitive file is already tracked by Git; ignore rules cannot untrack it",
+    });
+  }
   return {
-    exists,
+    exists: await access(resolve(cwd, ".gitignore")).then(
+      () => true,
+      () => false,
+    ),
     presentPatterns: matched,
     missingPatterns: missing,
+    trackedFiles,
+    unignoredFiles,
   };
+}
+
+export async function checkGitignore(cwd: string = process.cwd()): Promise<IgnoreCheckResult> {
+  return inspectPatterns(cwd, REQUIRED_PATTERNS, isSensitive);
+}
+
+export async function checkEnvIgnoreProtection(cwd: string): Promise<IgnoreCheckResult> {
+  // Keep the security gate's established dotenv floor; broader backup protection is repaired by fix.
+  return inspectPatterns(cwd, ENV_PATTERNS, isEnvSecret);
 }
 
 /**
@@ -153,9 +231,9 @@ export async function patchGitignore(
   const path = resolve(cwd, ".gitignore");
   let existing: string;
   try {
-    await access(path);
     existing = await readFile(path, "utf-8");
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     existing = "";
   }
 
@@ -168,26 +246,44 @@ export async function patchGitignore(
   // `pattern  # reason` form made every entry a literal pattern matching a filename that
   // contains " # reason" — 12 patterns written, 0 honored by git, and the checker read its own
   // annotations back and called it green.
+  const extra = result.unignoredFiles.filter(
+    (path) => !REQUIRED_PATTERNS.some((entry) => entry.pattern === path),
+  );
+  if (extra.some((path) => /[\r\n]/.test(path))) {
+    throw new Error("Gitignore repair requires manual review: a sensitive path contains a newline");
+  }
+  const lines = existing.split("\n");
+  const start = lines.findIndex((line) => line.replace(/\r$/, "") === MARKER_START);
+  const end = lines.findIndex((line, i) => i > start && line.replace(/\r$/, "") === MARKER_END);
+  // Literal repairs from earlier runs may cover filenames beyond the standard probes.
+  const previousExtras =
+    start >= 0 && end > start
+      ? lines.slice(start + 1, end).filter((line) => line.startsWith("/"))
+      : [];
   const block = [
     MARKER_START,
-    ...result.missingPatterns.flatMap((m) => [`# ${m.reason}`, m.pattern]),
+    ...previousExtras,
+    // Reopen only the root parent; nested .kit directories retain their protection.
+    "!/.kit/",
+    ...REQUIRED_PATTERNS.flatMap((m) => [`# ${m.reason}`, m.pattern]),
+    ...extra.map((path) => `/${path.replace(/[\\*?[\] ]/g, "\\$&")}`),
     MARKER_END,
     "",
   ].join("\n");
 
-  let next: string;
-  if (existing.includes(MARKER_START) && existing.includes(MARKER_END)) {
-    const before = existing.split(MARKER_START)[0].trimEnd();
-    // `block` already ends in a newline and `after` begins with one, so joining them verbatim
-    // adds a blank line on every re-patch — the file grows a little each run, which is how a
-    // tool teaches people not to trust it. Strip the leading newlines from the tail instead.
-    const after = (existing.split(MARKER_END)[1] ?? "").replace(/^\n+/, "");
-    next = `${before}\n\n${block}${after}`;
-  } else {
-    const trimmed = existing.trimEnd();
-    next = trimmed.length > 0 ? `${trimmed}\n\n${block}` : block;
+  if (start >= 0 && end > start) {
+    lines.splice(start, end - start + 1);
   }
+  // Preserve user lines, but place the complete block after any later negations.
+  const remaining = lines.join("\n");
+  const next = `${remaining}${remaining && !remaining.endsWith("\n") ? "\n" : ""}${block}`;
   await writeFile(path, next, "utf-8");
+  const verified = await checkGitignore(cwd);
+  if (verified.missingPatterns.length > 0) {
+    throw new Error(
+      `Gitignore repair incomplete: ${verified.missingPatterns.map((entry) => `${JSON.stringify(entry.pattern)} (${entry.reason})`).join(", ")}`,
+    );
+  }
   return { added: result.missingPatterns.length, written: true };
 }
 
@@ -198,31 +294,12 @@ export async function patchGitignore(
  * up" case where adding the pattern doesn't help.
  */
 export async function findCommittedSensitive(cwd: string = process.cwd()): Promise<string[]> {
-  const { execFile } = await import("node:child_process");
-  const { promisify } = await import("node:util");
-  const exec = promisify(execFile);
-  try {
-    const { stdout } = await exec("git", ["ls-files"], { cwd, timeout: 5_000 });
-    const tracked = stdout.split("\n").filter(Boolean);
-    const offenders: string[] = [];
-    for (const path of tracked) {
-      const base = path.split("/").pop() ?? path;
-      // `.env`, `.env.local`, `.env.local.prod-backup`, etc.
-      // Excluded as harmless: any path that ends in `.template`,
-      // `.example`, `.sample` (covers `.env.staging.example` too).
-      if (/^\.env(\..+)?$/.test(base) && !/\.(template|example|sample)$/.test(base))
-        offenders.push(path);
-      if (base.endsWith(".pem") || base.endsWith(".key") || base.endsWith(".p12"))
-        offenders.push(path);
-      if (base === "id_rsa" || base.startsWith("id_rsa.")) offenders.push(path);
-      if (base === "id_ed25519" || base.startsWith("id_ed25519.")) offenders.push(path);
-      if (/-service-account.*\.json$/.test(base)) offenders.push(path);
-    }
-    return [...new Set(offenders)];
-  } catch {
-    return [];
-  }
+  await requireWorktree(cwd);
+  return [
+    ...new Set(
+      (await git(cwd, ["ls-files", "--cached", "-z"]))
+        .split("\0")
+        .filter((path) => path && isSensitive(path)),
+    ),
+  ];
 }
-
-// Suppress unused-import warning for stat — kept for future size-cap checks.
-void stat;

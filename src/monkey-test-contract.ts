@@ -331,7 +331,11 @@ export function requireSameOriginRoutes(
   }
 }
 
-export function requireDisjointValues(included: string[], excluded: string[], message: string): void {
+export function requireDisjointValues(
+  included: string[],
+  excluded: string[],
+  message: string,
+): void {
   const includedValues = new Set(included);
   if (excluded.some((value) => includedValues.has(value))) throw new Error(message);
 }
@@ -375,8 +379,10 @@ export function monkeyRoutePath(urlOrPath: string): string {
  * Whether the app actually DENIED this navigation.
  *
  * Two signals count, both of them the server's own: an authorization status code, or a
- * redirect away from the requested route to a route whose PATH documents a denial
- * (`/login`, `/unauthorized`, and friends).
+ * redirect away from the requested pathname to exactly `/login`, `/sign-in`,
+ * `/unauthorized`, `/forbidden`, or `/access-denied` (case-sensitive, no trailing slash).
+ * Query strings and fragments do not affect pathname matching. Keep this list in sync
+ * with docs/MONKEY_TEST.md; nested routes and names like `/admin/login-audit` are not denials.
  *
  * What deliberately does NOT count is the page's text (MHB-02). Matching /forbidden|access
  * denied|not authorized/ in the body made any 200 that merely mentions those words read as
@@ -392,7 +398,7 @@ export function monkeyRouteIsDenied(
   if ([401, 403, 404].includes(status)) return true;
   const landed = monkeyRoutePath(page.url());
   if (landed === monkeyRoutePath(requestedRoute)) return false;
-  return /login|sign-in|unauthorized|forbidden|access-denied/i.test(landed);
+  return ["/login", "/sign-in", "/unauthorized", "/forbidden", "/access-denied"].includes(landed);
 }
 
 export function controlHasAccessibleName(control: MonkeyControlName): boolean {

@@ -8,6 +8,11 @@
  * all projects; this just filters). Pure read/write — no model calls.
  */
 import type { DatabaseSync } from "node:sqlite";
+import {
+  getProjectRecallRoots,
+  registerProjectIdentity,
+  resolveLocalProjectPath,
+} from "./project.js";
 
 export interface SavedThread {
   name: string;
@@ -33,8 +38,10 @@ export function saveThread(db: DatabaseSync, input: SaveThreadInput): void {
        session_id = excluded.session_id,
        summary = COALESCE(excluded.summary, saved_threads.summary),
        project_path = COALESCE(excluded.project_path, saved_threads.project_path),
+       recall_project_path = CASE WHEN excluded.project_path IS NOT NULL THEN NULL ELSE saved_threads.recall_project_path END,
        saved_at = datetime('now')`,
   ).run(input.name, input.sessionId, input.summary ?? null, input.projectPath ?? null);
+  registerProjectIdentity(db, input.projectPath);
 }
 
 export function listThreads(db: DatabaseSync, opts: { projectPath?: string } = {}): SavedThread[] {
@@ -48,11 +55,12 @@ export function listThreads(db: DatabaseSync, opts: { projectPath?: string } = {
     FROM saved_threads
     LEFT JOIN sessions ON sessions.session_id = saved_threads.session_id`;
   if (opts.projectPath) {
+    const roots = getProjectRecallRoots(opts.projectPath, db);
     return db
       .prepare(
-        `${select} WHERE saved_threads.project_path = ? ORDER BY saved_threads.saved_at DESC`,
+        `${select} WHERE COALESCE(saved_threads.recall_project_path, saved_threads.project_path) IN (${roots.map(() => "?").join(", ")}) ORDER BY saved_threads.saved_at DESC`,
       )
-      .all(opts.projectPath) as unknown as SavedThread[];
+      .all(...roots) as unknown as SavedThread[];
   }
   return db
     .prepare(`${select} ORDER BY saved_threads.saved_at DESC`)
@@ -87,13 +95,21 @@ export function latestSessionId(
 ): string | undefined {
   let row: { session_id: string } | undefined;
   if (opts.projectPath) {
+    const roots = [
+      ...new Set([
+        ...getProjectRecallRoots(opts.projectPath, db),
+        resolveLocalProjectPath(opts.projectPath),
+      ]),
+    ];
     row = db
       .prepare(
         `SELECT session_id FROM messages
-         WHERE cwd = ? OR cwd LIKE ?
+         WHERE ${roots.map(() => "(COALESCE(recall_cwd, cwd) = ? OR instr(COALESCE(recall_cwd, cwd), ?) = 1)").join(" OR ")}
          ORDER BY timestamp DESC LIMIT 1`,
       )
-      .get(opts.projectPath, `${opts.projectPath}/%`) as { session_id: string } | undefined;
+      .get(...roots.flatMap((root) => [root, `${root.replace(/\/$/, "")}/`])) as
+      | { session_id: string }
+      | undefined;
   } else {
     row = db.prepare("SELECT session_id FROM messages ORDER BY timestamp DESC LIMIT 1").get() as
       | { session_id: string }

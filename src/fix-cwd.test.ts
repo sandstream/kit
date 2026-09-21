@@ -16,6 +16,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,6 +26,7 @@ import { cmdFix } from "./fix.js";
 /** A minimal project: no tools/services/skills/hooks, so fix only writes locks + files. */
 function project(extra = ""): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-fix-cwd-"));
+  execFileSync("git", ["init", "-q", dir]);
   writeFileSync(join(dir, ".kit.toml"), `version = 1\n${extra}`);
   writeFileSync(
     join(dir, "package.json"),
@@ -196,6 +198,32 @@ describe("cmdFix writes into the project it was given", () => {
   });
 });
 
+describe("cmdFix verifies effective Git protection", () => {
+  it("repairs negated .env.keys and reports tracked secrets without touching them", async () => {
+    const dir = project();
+    const prevLog = console.log;
+    const output: string[] = [];
+    console.log = (...args: unknown[]) => output.push(args.join(" "));
+    try {
+      writeFileSync(join(dir, ".gitignore"), ".env*\n!.env.keys\n");
+      assert.equal(await inCwd(dir, () => cmdFix(dir)), true);
+      execFileSync("git", ["check-ignore", "-q", "--", ".env.keys"], { cwd: dir });
+      writeFileSync(join(dir, ".env.keys"), "fixture only\n");
+      execFileSync("git", ["add", "-f", "--", ".env.keys"], { cwd: dir });
+      assert.equal(await inCwd(dir, () => cmdFix(dir)), false);
+      assert.match(output.join("\n"), /already tracked/);
+      assert.equal(readFileSync(join(dir, ".env.keys"), "utf8"), "fixture only\n");
+      assert.equal(
+        execFileSync("git", ["ls-files", "-z"], { cwd: dir, encoding: "utf8" }),
+        ".env.keys\0",
+      );
+    } finally {
+      console.log = prevLog;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("a governed operation files its evidence in the governed tree", () => {
   // `withGovernance` took no `cwd` and `logAuditEvent` resolved `.kit-audit.jsonl` against
   // `process.cwd()`, so a fix performed FOR B recorded its proof in A. That is not cosmetic:
@@ -205,6 +233,7 @@ describe("a governed operation files its evidence in the governed tree", () => {
   // in place for `kit_fix`.
   function governedProject(): string {
     const dir = mkdtempSync(join(tmpdir(), "kit-audit-cwd-"));
+    execFileSync("git", ["init", "-q", dir]);
     writeFileSync(
       join(dir, ".kit.toml"),
       "version = 1\n\n[governance]\nenabled = true\n\n[governance.audit]\nenabled = true\n",

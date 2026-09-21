@@ -22,7 +22,11 @@ For AI agents and humans. Manages tools, auth, secrets, and project setup. Zero 
 
 **Prerequisites:** Node.js 22+, git, and [mise](https://mise.jdx.dev) for installing tools (`brew install mise`, or `curl https://mise.run | sh`).
 
-**Platform support:** macOS, Linux, and Windows **via [WSL2](https://learn.microsoft.com/windows/wsl/install) or Git Bash**. Native Windows (PowerShell/cmd) is not supported yet — kit's git hooks, tool resolution, and secret-file permissions assume a POSIX shell. On Windows, run kit from inside a WSL2 distro (recommended) or Git Bash. See [docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md).
+**Platform support:** macOS, Linux, WSL2, Git Bash, and the core workflow on
+native Windows. WSL2 remains the recommended Windows experience because several
+edge tools still need POSIX utilities. Native verifier approvals use owner-only
+Windows ACLs and run as a required Windows CI gate. See
+[docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md).
 
 ```bash
 # zero install (also sidesteps npm -g permission issues):
@@ -951,6 +955,19 @@ prose here. A drift test pins this README example to the `KIT_INSTRUCTION`
 the code actually writes, so the promise can't rot.
 
 kit exposes its capabilities as an MCP server, making it usable directly by Claude Code, Cursor, Windsurf, Cline, and any other MCP-compatible AI assistant. Once registered, assistants can call `kit_check`, `kit_fix`, `kit_triage`, and other tools without leaving their context. (An agent **with shell access** should prefer the CLI — zero standing context cost, and `kit <command> --help` self-documents; the MCP surface exists for shell-less clients. The server's `instructions` field tells clients exactly this.)
+
+### ChatGPT web
+
+Run `kit mcp web` in an interactive terminal. Its six-stage wizard connects the
+existing local stdio server through
+[OpenAI Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels):
+no inbound port and no public kit endpoint. It verifies `tunnel-client`, opens
+the exact Platform and ChatGPT pages, configures `kit mcp`, runs `doctor`, and
+starts the tunnel. The runtime API key stays in process memory; keep the durable
+copy in your vault. Native Windows operators need Git Bash or WSL for the wizard.
+
+This path is specifically for ChatGPT web. Claude Code uses local stdio below;
+kit does not expose a public remote HTTP endpoint for claude.ai connectors.
 
 ### Claude Code
 

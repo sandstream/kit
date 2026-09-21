@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { checkGitignore, patchGitignore, findCommittedSensitive } from "./check-gitignore.js";
 
 function tmpRepo(): string {
-  return mkdtempSync(join(tmpdir(), "kit-gi-"));
+  const dir = mkdtempSync(join(tmpdir(), "kit-gi-"));
+  execFileSync("git", ["init", "-q", dir]);
+  return dir;
 }
 
 describe("checkGitignore", () => {
@@ -28,7 +30,7 @@ describe("checkGitignore", () => {
       writeFileSync(join(dir, ".gitignore"), "# nothing here\n");
       const r = await checkGitignore(dir);
       assert.equal(r.exists, true);
-      assert.equal(r.presentPatterns.length, 0);
+      assert.deepEqual(r.presentPatterns, ["!.kit/shared/"]);
       assert.ok(r.missingPatterns.length > 0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -286,11 +288,11 @@ describe("patchGitignore", () => {
 });
 
 describe("findCommittedSensitive", () => {
-  it("returns [] when not a git repo", async () => {
+  it("explicitly rejects verification outside a git repo", async () => {
     const dir = tmpRepo();
     try {
-      const r = await findCommittedSensitive(dir);
-      assert.deepEqual(r, []);
+      rmSync(join(dir, ".git"), { recursive: true, force: true });
+      await assert.rejects(findCommittedSensitive(dir), /Git.*could not be verified/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

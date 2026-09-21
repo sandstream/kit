@@ -2,6 +2,7 @@ import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { SecretsConfig, SecretKeyConfig, InfisicalConfig } from "./config.js";
 import { check1PasswordStatus } from "./onepassword.js";
+import { checkInfisicalStatus } from "./infisical-status.js";
 import { resolveViaBackend } from "./secret-backends.js";
 import { exec } from "./utils/exec.js";
 
@@ -80,6 +81,7 @@ async function checkConfigSecret(value: string): Promise<{ available: boolean; d
 async function checkInfisicalSecret(
   name: string,
   infisicalConfig?: InfisicalConfig,
+  cwd = process.cwd(),
 ): Promise<{ available: boolean; detail: string; unverified?: boolean }> {
   // Check for machine identity token first
   if (process.env.INFISICAL_TOKEN) {
@@ -117,16 +119,13 @@ async function checkInfisicalSecret(
 
   // Fallback: we could only confirm the CLI is authenticated, NOT that the key
   // exists. Mark it unverified → renders as warn, not a green pass (no false-green).
-  try {
-    await exec("infisical", ["user", "get"], { timeout: 10_000 });
-    return {
-      available: true,
-      detail: "Infisical CLI authenticated — key presence not verified",
-      unverified: true,
-    };
-  } catch {
-    return { available: false, detail: "Infisical CLI not available or not logged in" };
-  }
+  const status = await checkInfisicalStatus({ cwd });
+  if (!status.ok) return { available: false, detail: status.output };
+  return {
+    available: true,
+    detail: `${status.output}; key presence not verified`,
+    unverified: true,
+  };
 }
 
 async function checkEasSecret(name: string): Promise<{ available: boolean; detail: string }> {
@@ -378,7 +377,7 @@ export async function checkSecrets(
           result = await checkEasSecret(config.name || name);
           break;
         case "infisical":
-          result = await checkInfisicalSecret(config.name || name, secrets.infisical);
+          result = await checkInfisicalSecret(config.name || name, secrets.infisical, cwd);
           break;
         case "bitwarden":
           result =

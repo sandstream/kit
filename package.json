@@ -21,7 +21,8 @@
     "dist",
     "README.md",
     "skills",
-    "docs/MONKEY_TEST.md"
+    "docs/MONKEY_TEST.md",
+    "scripts/chatgpt-web-wizard.sh"
   ],
   "publishConfig": {
     "access": "public"
@@ -39,11 +40,11 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
     "@upstash/redis": "1.37.0",
-    "smol-toml": "1.6.1",
+    "smol-toml": "1.7.1",
     "zod": "4.3.6"
   },
   "overrides": {
-    "hono": "4.12.34"
+    "hono": "4.13.5"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

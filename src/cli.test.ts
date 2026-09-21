@@ -71,6 +71,7 @@ async function runCli(
 const GITIGNORE_CONTENT = `.env
 .env.local
 .env.*.local
+.env.keys
 `;
 
 const FIXTURE_EMPTY = `# Minimal kit config — no tools, services, or secrets
@@ -258,6 +259,7 @@ describe("kit check", () => {
 
   before(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "kit-integ-check-"));
+    await exec("git", ["init", "-q", tempDir]);
     await writeFile(join(tempDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
   });
 
@@ -361,6 +363,7 @@ describe("kit fix", () => {
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "kit-integ-fix-"));
+    await exec("git", ["init", "-q", tempDir]);
     await writeFile(join(tempDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
   });
 
@@ -509,6 +512,7 @@ describe("kit setup", () => {
 
   before(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "kit-integ-setup-"));
+    await exec("git", ["init", "-q", tempDir]);
     await writeFile(join(tempDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
   });
 
@@ -553,6 +557,7 @@ describe("kit default command", () => {
 
   before(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "kit-integ-default-"));
+    await exec("git", ["init", "-q", tempDir]);
     await writeFile(join(tempDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8");
   });
 

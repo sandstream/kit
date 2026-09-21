@@ -42,8 +42,8 @@ const SKIP_DIRS = new Set([
   "playwright-report",
 ]);
 
-const SOURCE_LITERAL_OR_COMMENT =
-  /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(\/\*[\s\S]*?\*\/|\/\/[^\n]*|--[^\n]*|^[ \t]*#[^\n]*)/gm;
+const SOURCE_LITERAL = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/;
+const SOURCE_TEMPLATE_LITERAL = /`(?:\\.|[^`\\])*`/;
 
 export interface MonkeySourceScan {
   text: string;
@@ -72,9 +72,16 @@ export function allMonkeyDependencies(pkg: MonkeyPackageJson | null): Record<str
   return { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
 }
 
-export function detectPaymentProviders(deps: Record<string, string>, sourceText: string): string[] {
+export function detectPaymentProviders(
+  deps: Record<string, string>,
+  source: string | Record<string, string>,
+): string[] {
   const providers = new Set<string>();
   const depNames = Object.keys(deps).join("\n");
+  const sourceText =
+    typeof source === "string"
+      ? stripSourceComments(source)
+      : Object.values(withoutMonkeySourceComments(source)).join("\n");
   if (/\bstripe\b|@stripe\//i.test(depNames)) providers.add("stripe");
   if (/\badyen\b/i.test(depNames)) providers.add("adyen");
   if (/\bpaypal\b|braintree/i.test(depNames)) providers.add("paypal");
@@ -187,15 +194,97 @@ export function firstMonkeyFileMatching(
   return Object.entries(files).find(([, text]) => pattern.test(text))?.[0];
 }
 
-function stripSourceComments(text: string): string {
-  return text.replace(SOURCE_LITERAL_OR_COMMENT, (token, literal: string | undefined) =>
-    literal === undefined ? token.replace(/[^\n]/g, "") : literal,
-  );
+function sourceCommentPattern(path: string): string {
+  const ext = extname(path).toLowerCase();
+  if (ext === ".sql") return /--[^\n]*|\/\*[\s\S]*?\*\//.source;
+  if ([".py", ".rb", ".toml", ".yaml", ".yml"].includes(ext)) return /#[^\n]*/.source;
+  if (ext === ".json") return "(?!)";
+  const slash = /\/\*[\s\S]*?\*\/|\/\/[^\n]*/.source;
+  return ext === ".php" ? `${slash}|#[^\\n]*` : slash;
+}
+
+interface CommentCursor {
+  text: string;
+  offset: number;
+  tokens: RegExp;
+  parts: string[];
+}
+
+function blankComment(text: string): string {
+  return text.replace(/[^\n]/g, " ");
+}
+
+function copyTemplate(cursor: CommentCursor): void {
+  while (cursor.offset < cursor.text.length) {
+    const char = cursor.text[cursor.offset++];
+    cursor.parts.push(char);
+    if (char === "\\") {
+      cursor.parts.push(cursor.text.slice(cursor.offset, cursor.offset + 1));
+      cursor.offset++;
+    } else if (char === "`") {
+      return;
+    } else if (char === "$" && cursor.text[cursor.offset] === "{") {
+      cursor.parts.push("{");
+      cursor.offset++;
+      copyCodeWithoutComments(cursor, true);
+    }
+  }
+}
+
+function copyCodeWithoutComments(cursor: CommentCursor, interpolation = false): void {
+  let depth = 1;
+  while (cursor.offset < cursor.text.length) {
+    cursor.tokens.lastIndex = cursor.offset;
+    const match = cursor.tokens.exec(cursor.text);
+    if (!match) {
+      cursor.parts.push(cursor.text.slice(cursor.offset));
+      cursor.offset = cursor.text.length;
+      return;
+    }
+    cursor.parts.push(cursor.text.slice(cursor.offset, match.index));
+    const token = match[0];
+    cursor.offset = cursor.tokens.lastIndex;
+    cursor.parts.push(match[2] === undefined ? token : blankComment(token));
+    if (token === "`") copyTemplate(cursor);
+    if (!interpolation) continue;
+    if (token === "{") depth++;
+    if (token === "}" && --depth === 0) return;
+  }
+}
+
+function stripHtmlComments(text: string): string {
+  // Script bodies have JavaScript strings/templates; prose apostrophes do not open strings.
+  const tokens = /<!--[\s\S]*?(?:-->|$)|<script\b[^>]*>[\s\S]*?(?:<\/script\s*>|$)|<[^>]*>/gi;
+  return text.replace(tokens, (token) => {
+    if (token.startsWith("<!--")) return blankComment(token);
+    if (!/^<script\b/i.test(token)) return token;
+    const start = token.indexOf(">") + 1;
+    const closing = token.search(/<\/script\s*>$/i);
+    const end = closing < 0 ? token.length : closing;
+    return token.slice(0, start) + stripSourceComments(token.slice(start, end)) + token.slice(end);
+  });
+}
+
+function stripSourceComments(text: string, path = "source.js"): string {
+  if (extname(path).toLowerCase() === ".html") return stripHtmlComments(text);
+  const javascript = /\.[cm]?[jt]sx?$/i.test(path);
+  const literals = javascript
+    ? SOURCE_LITERAL.source
+    : `${SOURCE_LITERAL.source}|${SOURCE_TEMPLATE_LITERAL.source}`;
+  const syntax = javascript ? "|[`{}]" : "";
+  const cursor: CommentCursor = {
+    text,
+    offset: 0,
+    tokens: new RegExp(`(${literals})|(${sourceCommentPattern(path)})${syntax}`, "gm"),
+    parts: [],
+  };
+  copyCodeWithoutComments(cursor);
+  return cursor.parts.join("");
 }
 
 export function withoutMonkeySourceComments(files: Record<string, string>): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(files).map(([path, text]) => [path, stripSourceComments(text)]),
+    Object.entries(files).map(([path, text]) => [path, stripSourceComments(text, path)]),
   );
 }
 

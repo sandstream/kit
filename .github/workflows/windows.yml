@@ -1,12 +1,11 @@
-# Native Windows compatibility probe (#43). NOT a required gate — it runs on
-# demand (and on windows-ci/** branches) to surface the real PowerShell/cmd
-# blockers against a genuine windows-latest runner, instead of guessing on macOS.
-# Build + unit tests must pass; the kit-command smoke is allowed to fail so it
-# reports the remaining operational gaps (POSIX git hooks, tar, ACLs) as it goes.
+# Native Windows compatibility probe (#43). The verifier-authority slice is a
+# required gate because an ACL failure must never produce a false approval. Broader
+# unit/smoke coverage remains diagnostic while unrelated Windows gaps are retired.
 name: Windows (native, probe)
 
 on:
   workflow_dispatch: {}
+  pull_request: {}
   push:
     branches:
       - "windows-ci/**"
@@ -26,6 +25,8 @@ jobs:
         run: npm ci
       - name: Build (cross-platform — no POSIX rm/chmod)
         run: npm run build
+      - name: Memory verifier authority (required)
+        run: node --test dist/memory/pal-authority-windows.test.js
       - name: Unit tests
         continue-on-error: true # kit-self-audit: allow-continue-on-error
         shell: bash

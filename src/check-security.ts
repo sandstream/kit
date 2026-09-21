@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
+import { checkEnvIgnoreProtection } from "./check-gitignore.js";
 import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { classifyGuardDog } from "./guarddog.js";
@@ -575,46 +576,40 @@ async function checkPipAudit(root: string): Promise<SecurityCheckResult> {
 }
 
 /**
- * Check if .env files are in .gitignore
+ * Verify effective dotenv ignore rules and reject secrets already in Git's index.
  */
-async function checkEnvGitignored(root: string): Promise<SecurityCheckResult> {
+export async function checkEnvGitignored(root: string): Promise<SecurityCheckResult> {
   try {
-    const gitignoreContent = await readFile(resolve(root, ".gitignore"), "utf-8");
-
-    // .env.keys is the dotenvx private keyfile: same must-be-ignored class as .env.local.
-    const envPatterns = [".env", ".env.local", ".env.*.local", ".env.keys"];
-    // `.env*` covers all of them, so accept it rather than reporting a repo that uses the
-    // glob as missing four patterns.
-    const hasEnvGlob = gitignoreContent
-      .split("\n")
-      .map((line) => line.trim())
-      .includes(".env*");
-    const missingPatterns = hasEnvGlob
-      ? []
-      : envPatterns.filter((pattern) => !gitignoreContent.includes(pattern));
-
-    if (missingPatterns.length === 0) {
+    const result = await checkEnvIgnoreProtection(root);
+    if (result.missingPatterns.length === 0) {
       return {
         category: "secrets",
         name: ".env gitignored",
         status: "pass",
-        detail: "all .env patterns in .gitignore",
+        detail: "Git ignores dotenv probe paths; no exposed or tracked dotenv secret files",
       };
     }
 
     return {
       category: "secrets",
       name: ".env gitignored",
-      status: "warn",
-      detail: `missing patterns: ${missingPatterns.join(", ")}`,
+      status: "fail",
+      detail: result.missingPatterns
+        .map((entry) => `${JSON.stringify(entry.pattern)}: ${entry.reason}`)
+        .join("; "),
+      files: [...new Set([...result.trackedFiles, ...result.unignoredFiles])],
       severity: "high",
+      suggestion:
+        "Run kit fix for ignore rules. Review already tracked files separately; ignore rules cannot untrack them.",
     };
-  } catch {
+  } catch (error) {
     return {
       category: "secrets",
       name: ".env gitignored",
       status: "warn",
-      detail: ".gitignore not found",
+      detail:
+        error instanceof Error ? error.message : "Git ignore protection could not be verified",
+      didNotRun: true,
       severity: "medium",
     };
   }

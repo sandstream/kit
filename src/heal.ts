@@ -31,7 +31,7 @@ export interface GatedFinding {
 export interface HealResult {
   /** dedup keys (category:name) of findings that were auto-fixed and cleared. */
   healed: string[];
-  /** findings heal proposes but will never auto-run (destructive/outward). */
+  /** unresolved findings requiring manual action, including unsuccessful auto-repairs. */
   gated: GatedFinding[];
   /** tamper-suspect findings heal refuses to touch. */
   failClosed: SecurityCheckResult[];
@@ -96,6 +96,18 @@ function toGated(r: SecurityCheckResult): GatedFinding {
   return { name: r.name, issue: r.detail, action: r.suggestion ?? "see `kit check`" };
 }
 
+export interface HealDeps {
+  scan: typeof checkSecurity;
+  sync: typeof syncSecurityFindings;
+  recipe: typeof safeRecipe;
+}
+
+const DEFAULT_DEPS: HealDeps = {
+  scan: checkSecurity,
+  sync: syncSecurityFindings,
+  recipe: safeRecipe,
+};
+
 /**
  * Run the heal loop. Re-scans after each round of safe fixes; PAL auto-close
  * confirms a finding cleared. Bounded by `maxIterations` and a no-progress
@@ -103,31 +115,27 @@ function toGated(r: SecurityCheckResult): GatedFinding {
  */
 export async function runHeal(
   opts: { dryRun?: boolean; maxIterations?: number; onProgress?: (msg: string) => void } = {},
+  deps: HealDeps = DEFAULT_DEPS,
 ): Promise<HealResult> {
   const max = opts.maxIterations ?? 3;
   const log = opts.onProgress ?? ((): void => undefined);
   const tried = new Set<string>();
-  let gated: GatedFinding[] = [];
-  const triageGated: GatedFinding[] = []; // tool installs the triage gate refused
-  let failClosed: SecurityCheckResult[] = [];
+  const triageGated = new Map<string, GatedFinding>();
   let plannedSafe: string[] = [];
   let iterations = 0;
-  let appliedAny = false;
   let lastResults: SecurityCheckResult[] = [];
 
   for (let i = 0; i < max; i++) {
     iterations = i + 1;
     log(`scanning (round ${i + 1}/${max}) — running checks, this can take a minute…`);
     const t0 = Date.now();
-    lastResults = await checkSecurity();
-    await syncSecurityFindings(lastResults); // track + auto-close (fail-open)
+    lastResults = await deps.scan();
+    await deps.sync(lastResults); // track + auto-close (fail-open)
 
     const actionable = actionableFindings(lastResults);
     log(
       `  scan ${((Date.now() - t0) / 1000).toFixed(1)}s — ${actionable.length} actionable finding(s)`,
     );
-    failClosed = actionable.filter(isFailClosed);
-    gated = actionable.filter((r) => classify(r) === "gated").map(toGated);
 
     // Fail-closed findings are EXCLUDED from auto-heal (safeRecipe returns null
     // for them) and surfaced loudly — but they don't block applying unrelated,
@@ -147,19 +155,16 @@ export async function runHeal(
       tried.add(dedupKey(r));
       log(`  • ${dedupKey(r)} → ${r.suggestion ?? "safe recipe"}`);
       try {
-        await safeRecipe(r)!();
-        appliedAny = true;
+        await deps.recipe(r)!();
         log(`    ✓ applied`);
       } catch (e) {
         if (e instanceof TriageBlocked) {
           log(`    ⚠ triage blocked — proposing instead of installing`);
-          if (!triageGated.some((g) => g.name === r.name)) {
-            triageGated.push({
-              name: r.name,
-              issue: `${r.detail} — install blocked by triage gate`,
-              action: `${r.suggestion ?? "install the scanner"}  (triage: ${e.reason})`,
-            });
-          }
+          triageGated.set(dedupKey(r), {
+            name: r.name,
+            issue: `${r.detail} — install blocked by triage gate`,
+            action: `${r.suggestion ?? "install the scanner"}  (triage: ${e.reason})`,
+          });
         } else {
           log(`    ✗ failed (will resurface on re-scan)`);
           // leave it — the next re-scan will still surface it
@@ -168,21 +173,24 @@ export async function runHeal(
     }
   }
 
-  // Confirm the final state when we changed anything (loop applies then the next
-  // iteration scans; a final scan covers fixes applied in the last iteration).
-  if (appliedAny && !opts.dryRun) {
+  // A repair can change state before throwing. Confirm every attempted batch once,
+  // including when the iteration cap prevents another loop scan.
+  if (tried.size > 0 && !opts.dryRun) {
     log(`re-scanning to confirm fixes…`);
     const t1 = Date.now();
-    lastResults = await checkSecurity();
+    lastResults = await deps.scan();
     log(`  confirm scan ${((Date.now() - t1) / 1000).toFixed(1)}s`);
-    await syncSecurityFindings(lastResults);
-    const actionable = actionableFindings(lastResults);
-    failClosed = actionable.filter(isFailClosed);
-    gated = actionable.filter((r) => classify(r) === "gated").map(toGated);
+    await deps.sync(lastResults);
   }
 
-  const finalActionable = new Set(actionableFindings(lastResults).map(dedupKey));
+  const unresolved = actionableFindings(lastResults);
+  const finalActionable = new Set(unresolved.map(dedupKey));
   const healed = [...tried].filter((k) => !finalActionable.has(k));
-  // triage-blocked tool installs are surfaced as gated proposals (never auto-run).
-  return { healed, gated: [...gated, ...triageGated], failClosed, plannedSafe, iterations };
+  const failClosed = unresolved.filter(isFailClosed);
+  // "Safe to attempt" does not mean healed. Anything still actionable must remain
+  // visible after retries stop; dry-run keeps safe findings in plannedSafe instead.
+  const gated = unresolved
+    .filter((r) => !isFailClosed(r) && (!opts.dryRun || classify(r) === "gated"))
+    .map((r) => triageGated.get(dedupKey(r)) ?? toGated(r));
+  return { healed, gated, failClosed, plannedSafe, iterations };
 }

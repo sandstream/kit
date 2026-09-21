@@ -67,19 +67,21 @@ writeFileSync(".kit/monkey-test/playwright-report.json", JSON.stringify({
   return name;
 }
 
-function captureStdout(): { output: () => string; restore: () => void } {
+function captureOutput(): { output: () => string; restore: () => void } {
   const chunks: string[] = [];
-  const original = process.stdout.write.bind(process.stdout);
-  (process.stdout as unknown as { write: unknown }).write = (
-    chunk: string | Uint8Array,
-  ): boolean => {
+  const stdoutWrite = process.stdout.write;
+  const stderrWrite = process.stderr.write;
+  const capture = (chunk: string | Uint8Array): boolean => {
     chunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString());
     return true;
   };
+  (process.stdout as unknown as { write: unknown }).write = capture;
+  (process.stderr as unknown as { write: unknown }).write = capture;
   return {
     output: () => chunks.join(""),
     restore: () => {
-      (process.stdout as unknown as { write: unknown }).write = original;
+      process.stdout.write = stdoutWrite;
+      process.stderr.write = stderrWrite;
     },
   };
 }
@@ -207,7 +209,7 @@ describe("monkey-test runner gate redaction", () => {
     });
     await writeMonkeyHarness(dir);
     configureRoleMatrix(dir);
-    const capture = captureStdout();
+    const capture = captureOutput();
 
     try {
       const result = await runMonkeyTest(dir, {
@@ -236,7 +238,7 @@ describe("monkey-test runner gate redaction", () => {
     });
     await writeMonkeyHarness(dir);
     configureRoleMatrix(dir);
-    const capture = captureStdout();
+    const capture = captureOutput();
 
     try {
       const result = await runMonkeyTest(dir, {

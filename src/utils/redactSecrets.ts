@@ -223,11 +223,11 @@ export function secretShapeLabels(): string[] {
 const MIN_KNOWN_SECRET_LENGTH = 8;
 // Anchored to a `_`/start/end boundary per keyword, so e.g. "MONKEY_RUN_ID" (contains "KEY"
 // mid-word) or "COMPASS_DIRECTION" (contains "PASS" mid-word) don't false-positive. PASSWORD
-// is the exception, split out unanchored-on-the-left below because common DB env vars glue it directly
+// also matches unanchored-on-the-left below because common DB env vars glue it directly
 // onto a prefix with no separator (PGPASSWORD, MYSQLPASSWORD) and there's no legitimate name
 // that merely ends in "...password" without meaning one.
 const SECRET_ENV_NAME =
-  /(?:^|_)(?:KEY|TOKEN|SECRET|PASSPHRASE|CREDENTIALS?|DSN|DATABASE_URL|REDIS_URL|MONGODB_URI|PASS|PWD|AUTH|HEADER|URL)(?:_|$)|PASSWORD$/i;
+  /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|CREDENTIALS?|DSN|DATABASE_URL|REDIS_URL|MONGODB_URI|PASS|PWD|AUTH|HEADER|URL)(?:_|$)|PASSWORD$/i;
 
 export function secretValuesFromEnv(env: Readonly<Record<string, string | undefined>>): string[] {
   return Object.entries(env)

@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { palAdd } from "./pal.js";
 import {
   SCHEMA_VERSION,
   openMemoryDb,
@@ -164,7 +165,7 @@ describe("memory db", () => {
     upsertSession(db, { sessionId: "s1", harness: "claude-code" });
     insertMessage(db, { uuid: "u1", sessionId: "s1", type: "user", content: "a" });
     insertMessage(db, { uuid: "u2", sessionId: "s1", type: "assistant", content: "b" });
-    db.prepare("INSERT INTO pending_actions(id, title) VALUES ('p1', 'do thing')").run();
+    palAdd(db, { title: "do thing" });
     const stats = getStats(db);
     assert.equal(stats.sessions, 1);
     assert.equal(stats.messages, 2);

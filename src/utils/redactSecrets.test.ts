@@ -234,6 +234,21 @@ describe("redactSecrets", () => {
 });
 
 describe("secretValuesFromEnv: common but unrecognized secret-bearing names (RED-2)", () => {
+  it("retains password keyword coverage when a suffix follows the keyword", () => {
+    for (const key of ["DB_PASSWORD_ROTATED", "PASSWORD_PRIMARY", "APP_PASSWORD_BACKUP"]) {
+      const secret = "opaque-rotated-password-value";
+      assert.equal(
+        redactSecrets(`rejected ${secret}`, secretValuesFromEnv({ [key]: secret })),
+        "rejected [REDACTED]",
+        key,
+      );
+    }
+    assert.deepEqual(
+      secretValuesFromEnv({ COMPASS_DIRECTION: "north", MONKEY_RUN_ID: "test" }),
+      [],
+    );
+  });
+
   it("catches PGPASSWORD, glued directly onto PG with no separator", () => {
     const values = secretValuesFromEnv({ PGPASSWORD: "hunter2-pg-secret-value" });
     assert.deepEqual(values, ["hunter2-pg-secret-value"]);
@@ -270,7 +285,9 @@ describe("redactSecrets / findSecrets: query-token + Bearer header (RED-5)", () 
   });
 
   it("redacts an &access_token= query-string value mid-URL", () => {
-    const out = redactSecrets("cb=https://api.example.com/cb?state=x&access_token=abcDEF0123456789ghijKLMN");
+    const out = redactSecrets(
+      "cb=https://api.example.com/cb?state=x&access_token=abcDEF0123456789ghijKLMN",
+    );
     assert.ok(!out.includes("abcDEF0123456789ghijKLMN"));
     assert.match(out, /access_token=\[REDACTED\]/);
     assert.match(out, /state=x/);

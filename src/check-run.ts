@@ -146,7 +146,7 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
       : [];
   const services =
     wants("services") && config.services
-      ? await step("services", () => checkServices(config.services!))
+      ? await step("services", () => checkServices(config.services!, cwd))
       : [];
   const secrets =
     wants("secrets") && config.secrets

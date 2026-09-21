@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendAuditEventDirect, verifyAuditChain } from "./audit.js";
+import { assessEnforceReadiness, parseObserveRecords } from "./exec-broker/enforce-readiness.js";
 
 describe("audit env-aware redaction", () => {
   it("removes opaque env secrets before metadata is hashed or persisted", async () => {
@@ -28,6 +29,7 @@ describe("audit env-aware redaction", () => {
       assert.ok(!raw.includes(secret));
       assert.match(raw, /\[REDACTED\]/);
       assert.match(raw, /request_id=req_audit/);
+      assert.deepEqual(JSON.parse(raw).metadata.nested, ["request_id=req_audit", "[REDACTED]"]);
       assert.equal(verifyAuditChain(raw).ok, true);
     } finally {
       if (previous === undefined) delete process.env.TEST_API_TOKEN;
@@ -35,7 +37,55 @@ describe("audit env-aware redaction", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+});
 
+describe("audit redaction preserves structured evidence", () => {
+  it("preserves nested arrays and observe denials through redaction and audit persistence", async () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-audit-array-"));
+    try {
+      for (const wouldDeny of [[], ["egress outside declared scope"]]) {
+        assert.equal(
+          await appendAuditEventDirect(
+            {
+              operation: "bash",
+              environment: "test",
+              success: true,
+              metadata: {
+                phase: "observe",
+                wouldDeny,
+                nested: [[{ password: "private-passphrase", label: "safe" }], null, 3, false],
+              },
+            },
+            { cwd: root },
+          ),
+          true,
+        );
+      }
+      const raw = readFileSync(join(root, ".kit-audit.jsonl"), "utf8");
+      const events = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      assert.deepEqual(
+        events.map((event) => event.metadata.wouldDeny),
+        [[], ["egress outside declared scope"]],
+      );
+      assert.deepEqual(events[0].metadata.nested, [
+        [{ password: "[REDACTED]", label: "safe" }],
+        null,
+        3,
+        false,
+      ]);
+      assert.ok(!raw.includes("private-passphrase"));
+      assert.equal(verifyAuditChain(raw).ok, true);
+      assert.equal(assessEnforceReadiness(parseObserveRecords(raw)).verdict, "would-block");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("audit metadata-key redaction", () => {
   it("redacts by metadata KEY NAME too, not just by pattern/env-value (RED-3)", async () => {
     const root = mkdtempSync(join(tmpdir(), "kit-audit-metadata-key-"));
     try {

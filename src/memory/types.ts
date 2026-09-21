@@ -55,6 +55,32 @@ export interface SearchHit {
   role: string | null;
   content: string | null;
   timestamp: string | null;
+  cwd?: string | null;
+  gitBranch?: string | null;
+  harness?: string | null;
+}
+
+/** One disclosed hit: content is replaced by a budget-trimmed snippet. */
+export interface DisclosedHit extends Omit<SearchHit, "content"> {
+  snippet: string;
+  truncated: boolean;
+}
+
+export interface Disclosure {
+  hits: DisclosedHit[];
+  shown: number;
+  /** Ranked hits withheld by budget or count; never silently dropped. */
+  withheld: number;
+  budgetChars: number;
+}
+
+export interface DiscloseOptions {
+  /** Total character budget across all snippets (default 1200). */
+  budgetChars?: number;
+  /** Per-hit snippet cap (default 240). */
+  snippetChars?: number;
+  /** Hard cap on hits shown regardless of budget (default 8). */
+  maxHits?: number;
 }
 
 export interface MemoryStats {

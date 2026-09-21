@@ -18,6 +18,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -156,10 +157,25 @@ describe("collectReview honours cwd in every stage", () => {
   it("the check stage still discriminates through collectReview", async () => {
     const A = baseProject();
     const B = baseProject();
-    writeFileSync(join(A, ".gitignore"), ".env\n.env.local\n.env.*.local\nnode_modules\n");
+    execFileSync("git", ["init", "-q", A]);
+    execFileSync("git", ["init", "-q", B]);
+    writeFileSync(
+      join(A, ".gitignore"),
+      ".env\n.env.local\n.env.*.local\n.env.keys\nnode_modules\n",
+    );
     try {
       const aboutA = await inCwd(A, () => collectReview({ cwd: A, stages: ["check"] }));
       const aboutB = await inCwd(A, () => collectReview({ cwd: B, stages: ["check"] }));
+      assert.equal(
+        stage(aboutA, "check")?.findings.find((finding) => finding.name === ".env gitignored")
+          ?.status,
+        "pass",
+      );
+      assert.equal(
+        stage(aboutB, "check")?.findings.find((finding) => finding.name === ".env gitignored")
+          ?.status,
+        "fail",
+      );
       assert.notDeepEqual(
         stage(aboutB, "check")?.findings,
         stage(aboutA, "check")?.findings,

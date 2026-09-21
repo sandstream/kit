@@ -36,6 +36,35 @@ function fileIncludes(path: string, needle: string): boolean {
   }
 }
 
+async function gitignoreStatus(cwd: string): Promise<StatusItem> {
+  const item = { key: "gitignore", label: "gitignore hygiene" };
+  try {
+    const ignore = await checkGitignore(cwd);
+    return {
+      ...item,
+      ok: ignore.missingPatterns.length === 0,
+      detail:
+        ignore.missingPatterns.length === 0
+          ? "sensitive paths covered"
+          : `${ignore.missingPatterns.length} sensitive path(s) unprotected`,
+      hint:
+        ignore.trackedFiles.length > 0
+          ? "review already tracked sensitive files; ignore rules cannot untrack them"
+          : ignore.missingPatterns.length === 0
+            ? undefined
+            : "run `kit security check-gitignore --fix`",
+    };
+  } catch (error) {
+    return {
+      ...item,
+      ok: false,
+      detail:
+        error instanceof Error ? error.message : "Git ignore protection could not be verified",
+      hint: "ensure Git is available and run inside a Git working tree",
+    };
+  }
+}
+
 export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusItem[]> {
   const items: StatusItem[] = [];
 
@@ -77,18 +106,7 @@ export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusI
   }
 
   // Secret hygiene — does .gitignore cover the sensitive paths kit cares about?
-  const ignore = await checkGitignore(cwd);
-  items.push({
-    key: "gitignore",
-    label: "gitignore hygiene",
-    ok: ignore.missingPatterns.length === 0,
-    detail:
-      ignore.missingPatterns.length === 0
-        ? "sensitive paths covered"
-        : `${ignore.missingPatterns.length} sensitive path(s) unignored`,
-    hint:
-      ignore.missingPatterns.length === 0 ? undefined : "run `kit security check-gitignore --fix`",
-  });
+  items.push(await gitignoreStatus(cwd));
 
   // Schema currency. `kit config migrate --check` has answered this since versioning landed —
   // and nothing called it, so `✓ .kit.toml present` was the only thing the checklist said about

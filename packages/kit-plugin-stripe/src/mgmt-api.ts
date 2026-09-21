@@ -33,9 +33,15 @@ function redactErrorText(input: string, knownSecrets: readonly string[] = []): s
     output = output.split(value).join("[REDACTED]");
   }
   for (const pattern of ERROR_SECRET_PATTERNS) output = output.replace(pattern, "[REDACTED]");
+  // Core URL/Bearer parity is tested by src/plugin-error-redaction.test.ts.
   return output
     .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/[^\s:@/]{0,128}:)[^\s@/]{3,256}@/gi, "$1[REDACTED]@")
-    .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/)[A-Za-z0-9._~%+-]{16,256}@/gi, "$1[REDACTED]@");
+    .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/)[A-Za-z0-9._~%+-]{16,256}@/gi, "$1[REDACTED]@")
+    .replace(
+      /\b((?:token|access_token|api_key|apikey|auth_token|session_token)=)[A-Za-z0-9_\-+/%.]{12,}/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/\bBearer\s+[A-Za-z0-9_\-+/.=]{16,}/gi, "Bearer [REDACTED]");
 }
 
 /**
@@ -210,7 +216,9 @@ export async function createWebhookEndpoint(
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
-    throw new Error(`POST /v1/webhook_endpoints returned ${res.status}: ${await safeText(res, client)}`);
+    throw new Error(
+      `POST /v1/webhook_endpoints returned ${res.status}: ${await safeText(res, client)}`,
+    );
   }
   return (await res.json()) as WebhookEndpoint;
 }
@@ -221,7 +229,9 @@ export async function listWebhookEndpoints(client: MgmtClient): Promise<WebhookE
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
-    throw new Error(`GET /v1/webhook_endpoints returned ${res.status}: ${await safeText(res, client)}`);
+    throw new Error(
+      `GET /v1/webhook_endpoints returned ${res.status}: ${await safeText(res, client)}`,
+    );
   }
   const body = (await res.json()) as { data: WebhookEndpoint[] };
   return body.data ?? [];
@@ -238,7 +248,9 @@ export async function deleteWebhookEndpoint(
     { method: "DELETE", headers: client.headers, signal: AbortSignal.timeout(10_000) },
   );
   if (!res.ok && res.status !== 404) {
-    throw new Error(`DELETE webhook_endpoint returned ${res.status}: ${await safeText(res, client)}`);
+    throw new Error(
+      `DELETE webhook_endpoint returned ${res.status}: ${await safeText(res, client)}`,
+    );
   }
 }
 

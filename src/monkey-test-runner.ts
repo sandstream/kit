@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   MONKEY_PLAYWRIGHT_REPORT,
   monkeyFinding,
@@ -15,10 +16,13 @@ import {
 import { runnerRoleMatrixFinding, validatePlaywrightEvidence } from "./monkey-test-evidence.js";
 import {
   expectedReasonState,
+  livePaymentEnvironmentFindings,
+  monkeyEnvironmentFindings,
   parseEnvOutput,
   runnerEnvironment,
 } from "./monkey-test-runner-env.js";
-import { runShell, stopProcess } from "./monkey-test-process.js";
+import { runShell } from "./monkey-test-process.js";
+import { MonkeyProcessScope } from "./monkey-test-runner-processes.js";
 import { buildMonkeyTestPlan } from "./monkey-test-plan.js";
 import { redactSecrets, secretValuesFromEnv } from "./utils/redactSecrets.js";
 
@@ -33,6 +37,7 @@ interface RunContext {
   hasExpectedReason: boolean;
   timeoutMs: number;
   env: NodeJS.ProcessEnv;
+  processes: MonkeyProcessScope;
 }
 
 interface BrowserRun {
@@ -60,19 +65,20 @@ export async function findFreePort(): Promise<number> {
   });
 }
 
-async function waitForUrl(url: string, timeoutMs: number): Promise<boolean> {
+async function waitForUrl(url: string, timeoutMs: number, signal: AbortSignal): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    signal.throwIfAborted();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 1000);
     try {
-      const response = await fetch(url, { signal: controller.signal });
+      const response = await fetch(url, { signal: AbortSignal.any([signal, controller.signal]) });
       clearTimeout(timer);
       if (response.status < 500) return true;
     } catch {
       clearTimeout(timer);
     }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 250));
+    await delay(250, undefined, { signal });
   }
   return false;
 }
@@ -93,6 +99,7 @@ async function createRunContext(cwd: string, options: MonkeyRunOptions): Promise
     hasExpectedReason: expectedReason.valid,
     timeoutMs: options.timeoutMs ?? 120_000,
     env: runnerEnvironment(options, runId),
+    processes: new MonkeyProcessScope(),
   };
 }
 
@@ -194,6 +201,7 @@ async function loadTemporaryEnvironment(context: RunContext): Promise<boolean> {
     env,
     timeoutMs: 30_000,
     rawStdout: true,
+    processes: context.processes,
   });
   if (!result.ok) {
     findings.push(
@@ -214,7 +222,28 @@ async function loadTemporaryEnvironment(context: RunContext): Promise<boolean> {
     });
     return false;
   }
-  const loaded = parseEnvOutput(result.stdout);
+  let loaded: Record<string, string>;
+  try {
+    loaded = parseEnvOutput(result.stdout);
+  } catch {
+    findings.push(
+      monkeyFinding({
+        severity: "critical",
+        area: "runner",
+        title: "Temporary env output invalid",
+        repro: "kit monkey-test run --env-command <provider-or-vault-command>",
+        fix: "Make the provider command print a JSON object or dotenv assignments.",
+      }),
+    );
+    steps.push({ name: "env", status: "fail", detail: "invalid provider output" });
+    return false;
+  }
+  const liveFindings = livePaymentEnvironmentFindings(loaded, "temporary env command");
+  if (liveFindings.length > 0) {
+    findings.push(...liveFindings);
+    steps.push({ name: "env", status: "fail", detail: "live payment environment refused" });
+    return false;
+  }
   for (const reserved of ["MONKEY_RUN_ID", "MONKEY_BASE_URL", "KIT_MONKEY_PORT", "PORT"]) {
     delete loaded[reserved];
   }
@@ -230,27 +259,20 @@ function restoreRunnerEnvironment(context: RunContext): void {
   }
 }
 
-function rejectLivePaymentEnvironment(context: RunContext): boolean {
-  const { env, findings } = context;
-  const livePaymentKeys = Object.entries(env)
-    .filter(
-      ([key, value]) =>
-        /STRIPE|PAYMENT|CONNECT/i.test(key) && /^(?:sk|pk|rk)_live_/.test(value ?? ""),
+async function environmentIsSafe(context: RunContext): Promise<boolean> {
+  const findings = await monkeyEnvironmentFindings(context.root, context.env);
+  for (const finding of findings) {
+    if (
+      !context.findings.some(
+        (existing) =>
+          existing.title === finding.title &&
+          existing.file === finding.file &&
+          existing.repro === finding.repro,
+      )
     )
-    .map(([key]) => key);
-  if (livePaymentKeys.length === 0 && env.MONKEY_PAYMENT_MODE?.toLowerCase() !== "live") {
-    return false;
+      context.findings.push(finding);
   }
-  findings.push(
-    monkeyFinding({
-      severity: "critical",
-      area: "money",
-      title: "Live payment environment refused",
-      repro: `Live payment configuration detected in: ${livePaymentKeys.join(", ") || "MONKEY_PAYMENT_MODE"}`,
-      fix: "Replace live payment configuration with provider sandbox/test credentials before running Monkey Test.",
-    }),
-  );
-  return true;
+  return findings.length === 0;
 }
 
 function stopBeforeSideEffects(context: RunContext, detail: string): MonkeyRunResult {
@@ -261,9 +283,10 @@ function stopBeforeSideEffects(context: RunContext, detail: string): MonkeyRunRe
   return resultFromContext(context);
 }
 
-async function validateRunnerRoleMatrix(context: RunContext): Promise<void> {
+async function validateRunnerRoleMatrix(context: RunContext): Promise<boolean> {
   const roleMatrixFinding = await runnerRoleMatrixFinding(context.root, context.env);
   if (roleMatrixFinding) context.findings.push(roleMatrixFinding);
+  return !roleMatrixFinding;
 }
 
 async function runSeed(context: RunContext): Promise<void> {
@@ -303,7 +326,13 @@ async function runSeed(context: RunContext): Promise<void> {
     steps.push({ name: "seed", status: "fail", detail: "missing seed command" });
     return;
   }
-  const seed = await runShell(seedCommand, { cwd: root, env, timeoutMs, stream: true });
+  const seed = await runShell(seedCommand, {
+    cwd: root,
+    env,
+    timeoutMs,
+    stream: true,
+    processes: context.processes,
+  });
   if (!seed.ok) {
     findings.push(
       monkeyFinding({
@@ -328,7 +357,7 @@ async function startOrValidateServer(
 ): Promise<ChildProcess | null> {
   const { options, plan, root, env, findings, steps } = context;
   if (options.baseUrl) {
-    const reachable = await waitForUrl(baseUrl, 5_000);
+    const reachable = await waitForUrl(baseUrl, 5_000, context.processes.signal);
     steps.push({
       name: "dev server",
       status: reachable ? "pass" : "fail",
@@ -362,6 +391,7 @@ async function startOrValidateServer(
     );
     return null;
   }
+  context.processes.signal.throwIfAborted();
   const server = spawn(startCommand, {
     cwd: root,
     env,
@@ -369,9 +399,10 @@ async function startOrValidateServer(
     stdio: ["ignore", "pipe", "pipe"],
     detached: process.platform !== "win32",
   });
+  context.processes.add(server, "server");
   server.stdout?.on("data", () => undefined);
   server.stderr?.on("data", () => undefined);
-  const ready = await waitForUrl(baseUrl, 30_000);
+  const ready = await waitForUrl(baseUrl, 30_000, context.processes.signal);
   steps.push({
     name: "dev server",
     status: ready ? "pass" : "fail",
@@ -414,7 +445,13 @@ async function runPlaywrightGate(context: RunContext): Promise<void> {
     return;
   }
   await rm(join(root, MONKEY_PLAYWRIGHT_REPORT), { force: true });
-  const result = await runShell(testCommand, { cwd: root, env, timeoutMs, stream: true });
+  const result = await runShell(testCommand, {
+    cwd: root,
+    env,
+    timeoutMs,
+    stream: true,
+    processes: context.processes,
+  });
   const evidence = result.ok
     ? await validatePlaywrightEvidence(root, env.MONKEY_RUN_ID!)
     : { ok: false, detail: "test command failed before evidence validation" };
@@ -460,11 +497,11 @@ async function runBrowser(context: RunContext): Promise<BrowserRun> {
   let server: ChildProcess | null = null;
   try {
     server = await startOrValidateServer(context, baseUrl);
-    if (!hasCriticalRunnerFinding(context.findings)) {
+    if (!hasCriticalRunnerFinding(context.findings) && (await environmentIsSafe(context))) {
       await runPlaywrightGate(context);
     }
   } finally {
-    if (server && !(await stopProcess(server))) {
+    if (server && !(await context.processes.stopChild(server))) {
       context.findings.push(
         monkeyFinding({
           severity: "critical",
@@ -494,21 +531,53 @@ function resultFromContext(context: RunContext, browser?: BrowserRun): MonkeyRun
   };
 }
 
+async function executeRun(context: RunContext): Promise<MonkeyRunResult> {
+  const { options } = context;
+  applySecurityGate(context);
+  applyBrowserSkipGate(context);
+  applyHarnessPrerequisites(context);
+  if (!options.skipBrowser && hasCriticalRunnerFinding(context.findings)) {
+    context.steps.push({ name: "env", status: "skip", detail: "runner prerequisites failed" });
+    return stopBeforeSideEffects(context, "runner prerequisites failed");
+  }
+  if (!(await environmentIsSafe(context))) {
+    context.steps.push({ name: "env", status: "fail", detail: "unsafe application environment" });
+    return stopBeforeSideEffects(context, "unsafe application environment");
+  }
+  const envReady = await loadTemporaryEnvironment(context);
+  restoreRunnerEnvironment(context);
+  const environmentSafe = await environmentIsSafe(context);
+  const roleMatrixReady = await validateRunnerRoleMatrix(context);
+  if (!envReady) return stopBeforeSideEffects(context, "temporary env command failed");
+  if (!environmentSafe) return stopBeforeSideEffects(context, "unsafe application environment");
+  if (!options.skipBrowser && !roleMatrixReady) {
+    return stopBeforeSideEffects(context, "role matrix prerequisite failed");
+  }
+  await runSeed(context);
+  if (options.skipBrowser) return resultFromContext(context);
+  if (context.steps.some((step) => step.name === "seed" && step.status === "fail")) {
+    context.steps.push({ name: "browser", status: "skip", detail: "seed prerequisite failed" });
+    return resultFromContext(context);
+  }
+  if (!(await environmentIsSafe(context))) {
+    context.steps.push({
+      name: "browser",
+      status: "skip",
+      detail: "unsafe application environment",
+    });
+    return resultFromContext(context);
+  }
+  return resultFromContext(context, await runBrowser(context));
+}
+
 export async function runMonkeyTest(
   cwd: string = process.cwd(),
   options: MonkeyRunOptions = {},
 ): Promise<MonkeyRunResult> {
   const context = await createRunContext(cwd, options);
-  applySecurityGate(context);
-  applyBrowserSkipGate(context);
-  applyHarnessPrerequisites(context);
-  const envReady = await loadTemporaryEnvironment(context);
-  restoreRunnerEnvironment(context);
-  const livePaymentRefused = rejectLivePaymentEnvironment(context);
-  await validateRunnerRoleMatrix(context);
-  if (!envReady) return stopBeforeSideEffects(context, "temporary env command failed");
-  if (livePaymentRefused) return stopBeforeSideEffects(context, "live payment environment refused");
-  await runSeed(context);
-  if (options.skipBrowser) return resultFromContext(context);
-  return resultFromContext(context, await runBrowser(context));
+  try {
+    return await executeRun(context);
+  } finally {
+    await context.processes.close();
+  }
 }

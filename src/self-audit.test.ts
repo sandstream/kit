@@ -48,6 +48,19 @@ function countStatus(results: { status: string }[], status: string): number {
 // ---------------------------------------------------------------------------
 
 describe("R1b-nan-fresh", () => {
+  it("recognizes integer guards that reject NaN and infinities, only for the checked variable", () => {
+    for (const guard of ["isInteger", "isSafeInteger"]) {
+      const source = `function days(value: string) {
+  const parsed = Number(value);
+  if (!Number.${guard}(parsed) || parsed < 1) throw new Error("invalid days");
+  return parsed;
+}`;
+      assert.equal(countStatus(ruleById("R1b-nan-fresh").run(ctxFromText(source)), "warn"), 0);
+      const other = source.replace(`${guard}(parsed)`, `${guard}(other)`);
+      assert.equal(countStatus(ruleById("R1b-nan-fresh").run(ctxFromText(other)), "warn"), 1);
+    }
+  });
+
   it("fires when a parsed timestamp is compared to a cutoff with no finite guard", () => {
     const pre = `function check(ts: string, cutoff: number) {
   const parsed = Date.parse(ts);

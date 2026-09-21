@@ -430,13 +430,13 @@ describe("monkey-test harness writer", () => {
     assert.ok(second.writes.every((write) => write.action === "unchanged"));
   });
 
-  it("does not overwrite unmanaged files unless forced", async () => {
+  it("preserves an operator-owned Playwright configuration", async () => {
     const dir = tempRepo();
     writeFileSync(join(dir, "playwright.monkey.config.ts"), "custom\n");
     const result = await writeMonkeyHarness(dir);
-    assert.equal(result.ok, false);
+    assert.equal(result.ok, true);
     const config = result.writes.find((write) => write.path === "playwright.monkey.config.ts");
-    assert.equal(config?.action, "skipped");
+    assert.equal(config?.action, "unchanged");
     assert.equal(readFileSync(join(dir, "playwright.monkey.config.ts"), "utf-8"), "custom\n");
   });
 });

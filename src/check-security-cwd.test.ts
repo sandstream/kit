@@ -38,6 +38,7 @@ import {
 /** A project whose .gitignore covers every .env spelling the check looks for. */
 function projectWithGitignore(): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-sec-A-"));
+  execFileSync("git", ["init", "-q", dir]);
   writeFileSync(join(dir, ".kit.toml"), "version = 1\n");
   writeFileSync(
     join(dir, "package.json"),
@@ -392,6 +393,7 @@ describe("runCheckGate threads cwd to the dimensions that read the filesystem", 
   // verdict came from A.
   function project(gitignore: string | null, template: string | null): string {
     const dir = mkdtempSync(join(tmpdir(), "kit-gate-cwd-"));
+    execFileSync("git", ["init", "-q", dir]);
     let toml = "version = 1\n";
     if (template !== null) {
       toml += `\n[secrets]\nstore = "env"\ntemplate = "${template}"\n`;

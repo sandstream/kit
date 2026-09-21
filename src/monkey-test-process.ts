@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import type { MonkeyProcessScope } from "./monkey-test-runner-processes.js";
 import {
   createRedactingLineWriter,
   redactSecrets,
@@ -27,7 +28,7 @@ function signalProcess(child: ChildProcess, signal: NodeJS.Signals): void {
   }
 }
 
-function processTreeRunning(child: ChildProcess): boolean {
+export function processTreeRunning(child: ChildProcess): boolean {
   if (!child.pid) return false;
   if (process.platform === "win32") {
     return child.exitCode === null && child.signalCode === null;
@@ -35,24 +36,38 @@ function processTreeRunning(child: ChildProcess): boolean {
   try {
     process.kill(-child.pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
   }
 }
 
 async function waitForProcessTreeExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
-  while (processTreeRunning(child) && Date.now() < deadline) {
+  while (Date.now() < deadline) {
+    if (!processTreeRunning(child)) return true;
     await new Promise((resolveWait) => setTimeout(resolveWait, 25));
   }
   return !processTreeRunning(child);
 }
 
 export async function stopProcess(child: ChildProcess): Promise<boolean> {
+  if (!processTreeRunning(child)) return true;
   signalProcess(child, "SIGTERM");
   if (await waitForProcessTreeExit(child, 1_000)) return true;
   signalProcess(child, "SIGKILL");
   return await waitForProcessTreeExit(child, 1_000);
+}
+
+function finishShell(
+  child: ChildProcess,
+  processes: MonkeyProcessScope | undefined,
+  result: ShellResult,
+  resolveRun: (result: ShellResult) => void,
+): void {
+  if (!processes) return resolveRun(result);
+  void processes.stopChild(child).then((stopped) => {
+    resolveRun({ ...result, ok: result.ok && stopped });
+  });
 }
 
 export async function runShell(
@@ -63,9 +78,11 @@ export async function runShell(
     timeoutMs: number;
     stream?: boolean;
     rawStdout?: boolean;
+    processes?: MonkeyProcessScope;
   },
 ): Promise<ShellResult> {
   return new Promise((resolveRun) => {
+    opts.processes?.signal.throwIfAborted();
     const child = spawn(command, {
       cwd: opts.cwd,
       env: opts.env,
@@ -73,6 +90,7 @@ export async function runShell(
       stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
     });
+    opts.processes?.add(child);
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -80,7 +98,7 @@ export async function runShell(
     let forceKillTimer: NodeJS.Timeout | undefined;
     const knownSecrets = secretValuesFromEnv(opts.env);
     const stdoutWriter = createRedactingLineWriter((text) => {
-      if (opts.stream) process.stdout.write(text);
+      if (opts.stream) process.stderr.write(text);
     }, knownSecrets);
     const stderrWriter = createRedactingLineWriter((text) => {
       if (opts.stream) process.stderr.write(text);
@@ -92,7 +110,7 @@ export async function runShell(
       if (forceKillTimer) clearTimeout(forceKillTimer);
       stdoutWriter.flush();
       stderrWriter.flush();
-      resolveRun(result);
+      finishShell(child, opts.processes, result, resolveRun);
     };
     const timer = setTimeout(() => {
       timedOut = true;

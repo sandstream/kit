@@ -7,7 +7,7 @@ import {
   updateCliLock,
 } from "./lock.js";
 
-import { readFile, writeFile, access } from "node:fs/promises";
+import { writeFile, access } from "node:fs/promises";
 import { resolve } from "node:path";
 import { loadConfig, type kitConfig } from "./config.js";
 import { withGovernance } from "./governance-middleware.js";
@@ -17,6 +17,7 @@ import { buildVercelDeployTargets, checkDeploy } from "./check-deploy.js";
 import { resolveViaBackend } from "./secret-backends.js";
 import { propagate } from "./secrets-propagate.js";
 import { installHooks } from "./hooks.js";
+import { patchGitignore } from "./check-gitignore.js";
 import { c } from "./utils/colors.js";
 import { formatHitlBlocks, hitlBlockForService, type HitlBlock } from "./hitl.js";
 
@@ -407,40 +408,13 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
       //    are ignored. Idempotent: only appends what's missing.
       console.log(`${c.bold}[5/6] .gitignore${c.reset}`);
       try {
-        const gitignorePath = resolve(cwd, ".gitignore");
-        let current = "";
-        try {
-          current = await readFile(gitignorePath, "utf-8");
-        } catch {
-          current = "";
-        }
-        const required = [
-          ".env",
-          ".env.local",
-          ".env.local.*",
-          ".env.*.local",
-          ".env.*.backup",
-          "*.prod-backup",
-          ".kit/elevation.json",
-          ".kit-audit.jsonl",
-          ".kit-audit.pending",
-          ".kit-skipped-commits.jsonl",
-        ];
-        const lines = current.split("\n").map((l) => l.trim());
-        const missing = required.filter((r) => !lines.includes(r));
-        if (missing.length === 0) {
+        const patch = await patchGitignore(cwd);
+        if (!patch.written) {
           console.log(`${c.dim}.gitignore already hardened${c.reset}`);
         } else {
-          const appended =
-            (current.endsWith("\n") || current === "" ? "" : "\n") +
-            "\n# kit fix — secret-leak prevention\n" +
-            missing.join("\n") +
-            "\n";
-          await writeFile(gitignorePath, current + appended, "utf-8");
-          console.log(`  ${c.green}✓${c.reset} Added ${missing.length} pattern(s) to .gitignore`);
-          for (const m of missing) {
-            console.log(`     ${c.dim}+ ${m}${c.reset}`);
-          }
+          console.log(
+            `  ${c.green}✓${c.reset} Repaired .gitignore protection and verified with Git`,
+          );
           fixedCount++;
         }
       } catch (err: unknown) {
@@ -449,8 +423,11 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
         manualActions.push({
           blocker: ".gitignore could not be hardened",
           owner: "developer",
-          reason: "local file permission / config",
-          steps: ["Add .env*, *.pem, id_rsa, and kit local-state ignores.", "Run `kit check`."],
+          reason: msg,
+          steps: [
+            "Review Git availability, remaining ignore overrides, and already tracked sensitive files.",
+            "Run `kit check`.",
+          ],
           respondWith: ".gitignore hardened",
           agentContinuesWith: "kit check",
         });

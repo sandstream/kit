@@ -1,4 +1,15 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
+import {
+  link,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  realpath,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
   MONKEY_MANAGED,
@@ -7,7 +18,12 @@ import {
   type HarnessWriteResult,
 } from "./monkey-test-contract.js";
 import { monkeySpec } from "./monkey-test-harness-spec.js";
-import { readMonkeyText } from "./monkey-test-scan.js";
+
+const OPERATOR_CONFIG_FILES = new Set([
+  "playwright.monkey.config.ts",
+  ".kit/monkey-test/role-matrix.json",
+  ".kit/monkey-test/expected-findings.example.json",
+]);
 
 function generatedHeader(path: string): string {
   return `// ${MONKEY_MANAGED}. Edit source in kit or re-run \`kit monkey-test init --force\`.\n// File: ${path}\n\n`;
@@ -91,7 +107,10 @@ const PLAYWRIGHT_CONFIG_LINES = [
 ];
 
 function playwrightConfig(): string {
-  return generatedHeader("playwright.monkey.config.ts") + PLAYWRIGHT_CONFIG_LINES.join("\n");
+  return (
+    `// ${MONKEY_MANAGED}. Operator configuration; init preserves this file.\n\n` +
+    PLAYWRIGHT_CONFIG_LINES.join("\n")
+  );
 }
 
 function harnessReadme(): string {
@@ -179,6 +198,101 @@ function harnessFiles(): Record<string, string> {
   };
 }
 
+async function harnessFileStat(path: string): Promise<Stats | null> {
+  return lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+}
+
+async function harnessDirectory(root: string, relPath: string, create: boolean): Promise<boolean> {
+  let directory = root;
+  for (const segment of relPath.split("/").slice(0, -1)) {
+    directory = join(directory, segment);
+    if (create) {
+      await mkdir(directory).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "EEXIST") throw error;
+      });
+    }
+    if (!(await harnessFileStat(directory))?.isDirectory()) return false;
+  }
+  return true;
+}
+
+function sameHarnessFile(before: Stats, after: Stats | null): boolean {
+  return (
+    !!after &&
+    before.dev === after.dev &&
+    before.ino === after.ino &&
+    after.isFile() &&
+    after.nlink === 1 &&
+    before.size === after.size &&
+    before.mtimeMs === after.mtimeMs &&
+    before.ctimeMs === after.ctimeMs
+  );
+}
+
+async function readHarnessFile(path: string, expected: Stats): Promise<string | null> {
+  if (typeof constants.O_NOFOLLOW !== "number") return null;
+  const file = await open(
+    path,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  ).catch((error: NodeJS.ErrnoException) => {
+    if (["ENOENT", "ELOOP"].includes(error.code ?? "")) return null;
+    throw error;
+  });
+  if (!file) return null;
+  try {
+    if (!sameHarnessFile(expected, await file.stat())) return null;
+    const content = await file.readFile("utf8");
+    return sameHarnessFile(expected, await file.stat()) ? content : null;
+  } finally {
+    await file.close();
+  }
+}
+
+async function publishHarnessFile(
+  root: string,
+  relPath: string,
+  content: string,
+  existing: Stats | null,
+): Promise<boolean> {
+  const path = join(root, relPath);
+  const staging = await mkdtemp(join(dirname(path), ".kit-monkey-"));
+  try {
+    const temporary = join(staging, "content");
+    await writeFile(temporary, content, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: existing ? existing.mode & 0o777 : 0o644,
+    });
+    if (!(await harnessDirectory(root, relPath, false))) return false;
+    const current = await harnessFileStat(path);
+    if (existing ? !sameHarnessFile(existing, current) : current !== null) return false;
+    // Rename replaces the leaf entry, never its linked inode. Parent-directory rename
+    // races remain outside this path-based API's guarantee (no directory handles).
+    if (existing) await rename(temporary, path);
+    else await link(temporary, path);
+    return true;
+  } catch (error) {
+    if (
+      ["EEXIST", "EISDIR", "ENOTDIR", "ELOOP"].includes((error as NodeJS.ErrnoException).code ?? "")
+    )
+      return false;
+    throw error;
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
+
+function scaffoldPreservationReason(before: string, force: boolean): string | undefined {
+  if (!before.includes(MONKEY_MANAGED)) {
+    return "operator-owned file preserved; only generated scaffold can be refreshed";
+  }
+  if (!force) return "exists with different content; pass --force to refresh generated scaffold";
+  return undefined;
+}
+
 async function writeManaged(
   root: string,
   relPath: string,
@@ -186,25 +300,43 @@ async function writeManaged(
   force: boolean,
 ): Promise<HarnessWrite> {
   const path = join(root, relPath);
-  const before = await readMonkeyText(path);
-  if (before === content) return { path: relPath, action: "unchanged" };
-  if (before && !before.includes(MONKEY_MANAGED) && !force) {
+  if (!(await harnessDirectory(root, relPath, true))) {
+    return { path: relPath, action: "skipped", reason: "parent is not a regular directory" };
+  }
+  const existing = await harnessFileStat(path);
+  if (existing && (!existing.isFile() || existing.nlink !== 1)) {
     return {
       path: relPath,
       action: "skipped",
-      reason: "exists and is not kit-managed; pass --force to overwrite",
+      reason: "destination is not a regular file with one link",
     };
   }
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, content, "utf-8");
-  return { path: relPath, action: before ? "updated" : "created" };
+  if (existing && OPERATOR_CONFIG_FILES.has(relPath)) {
+    return { path: relPath, action: "unchanged", reason: "operator configuration preserved" };
+  }
+  const before = existing ? await readHarnessFile(path, existing) : null;
+  if (existing && before === null) {
+    return {
+      path: relPath,
+      action: "skipped",
+      reason: "destination changed or cannot be read without following links",
+    };
+  }
+  if (before === content) return { path: relPath, action: "unchanged" };
+  const reason = before === null ? undefined : scaffoldPreservationReason(before, force);
+  if (reason) return { path: relPath, action: "skipped", reason };
+  if (!(await publishHarnessFile(root, relPath, content, existing))) {
+    return { path: relPath, action: "skipped", reason: "destination changed during init" };
+  }
+  return { path: relPath, action: existing ? "updated" : "created" };
 }
 
 export async function writeMonkeyHarness(
   cwd: string = process.cwd(),
   opts: { force?: boolean } = {},
 ): Promise<HarnessWriteResult> {
-  const root = resolve(cwd);
+  await mkdir(resolve(cwd), { recursive: true });
+  const root = await realpath(resolve(cwd));
   const writes: HarnessWrite[] = [];
   for (const [relPath, content] of Object.entries(harnessFiles())) {
     writes.push(await writeManaged(root, relPath, content, opts.force === true));

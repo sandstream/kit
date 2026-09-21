@@ -1,5 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -55,6 +56,7 @@ describe("kit status", () => {
     assert.equal(find(items, "tools"), undefined);
     // Project-level checks still run without a config.
     assert.equal(find(items, "gitignore")?.ok, false);
+    assert.match(find(items, "gitignore")?.detail ?? "", /Git.*could not be verified/);
     assert.equal(find(items, "dep-policy")?.ok, false);
     assert.match(find(items, "dep-policy")?.hint ?? "", /security policy init/);
     assert.equal(find(items, "agent-config")?.ok, false);
@@ -65,6 +67,7 @@ describe("kit status", () => {
   it("configured project: every signal on", async () => {
     const proj = join(tmp, "ready");
     mkdirSync(proj, { recursive: true });
+    execFileSync("git", ["init", "-q", proj]);
     writeFileSync(
       join(proj, ".kit.toml"),
       // The version stamp is part of being configured: the new `config schema` row reports a
@@ -81,6 +84,9 @@ describe("kit status", () => {
         ".kit/*",
         "!.kit/shared/",
         ".kit-audit.jsonl",
+        ".kit-audit.pending",
+        ".kit-skipped-commits.jsonl",
+        "*.prod-backup",
         "*.pem",
         "*.key",
         "id_rsa*",

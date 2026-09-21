@@ -24,6 +24,32 @@ import { resolve } from "node:path";
 
 const SCAN_RESULTS_FILE = ".kit-scan-results.jsonl";
 
+const ERROR_SECRET_PATTERNS: RegExp[] = [
+  /\b(?:sk|pk|rk)_(?:test|live)_[A-Za-z0-9]{20,}/g,
+  /\bwhsec_[A-Za-z0-9]{20,}/g,
+  /\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{30,}/g,
+  /\bgithub_pat_[A-Za-z0-9_]{60,}/g,
+  /\bsk-(?:proj|ant|svcacct|admin)-[A-Za-z0-9_-]{20,}/g,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+];
+
+function redactErrorText(input: string, knownSecrets: readonly string[] = []): string {
+  let output = input;
+  for (const value of [...new Set(knownSecrets)].filter((value) => value.length >= 8)) {
+    output = output.split(value).join("[REDACTED]");
+  }
+  for (const pattern of ERROR_SECRET_PATTERNS) output = output.replace(pattern, "[REDACTED]");
+  // Core URL/Bearer parity is tested by src/plugin-error-redaction.test.ts.
+  return output
+    .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/[^\s:@/]{0,128}:)[^\s@/]{3,256}@/gi, "$1[REDACTED]@")
+    .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/)[A-Za-z0-9._~%+-]{16,256}@/gi, "$1[REDACTED]@")
+    .replace(
+      /\b((?:token|access_token|api_key|apikey|auth_token|session_token)=)[A-Za-z0-9_\-+/%.]{12,}/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/\bBearer\s+[A-Za-z0-9_\-+/.=]{16,}/gi, "Bearer [REDACTED]");
+}
+
 export interface WizIssue {
   id: string;
   severity: "INFORMATIONAL" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -86,7 +112,7 @@ export async function makeClient(opts: MakeClientOptions = {}): Promise<WizClien
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
-    throw new Error(`Wiz auth ${res.status}: ${await safeText(res)}`);
+    throw new Error(`Wiz auth ${res.status}: ${await safeText(res, [clientSecret])}`);
   }
   const data = (await res.json()) as { access_token?: string };
   if (!data.access_token) {
@@ -143,7 +169,7 @@ export async function fetchIssues(
     signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) {
-    throw new Error(`Wiz GraphQL ${res.status}: ${await safeText(res)}`);
+    throw new Error(`Wiz GraphQL ${res.status}: ${await safeText(res, [client.accessToken])}`);
   }
   const body = (await res.json()) as {
     data?: {
@@ -163,7 +189,9 @@ export async function fetchIssues(
     errors?: Array<{ message?: string }>;
   };
   if (body.errors && body.errors.length) {
-    throw new Error(`Wiz GraphQL errors: ${body.errors.map((e) => e.message).join("; ")}`);
+    throw new Error(
+      `Wiz GraphQL errors: ${redactErrorText(body.errors.map((e) => e.message).join("; "), [client.accessToken])}`,
+    );
   }
   return (body.data?.issues?.nodes ?? []).map((n) => ({
     id: n.id ?? "",
@@ -215,9 +243,9 @@ export async function recordWizIssues(
   return { written: lines.length };
 }
 
-async function safeText(res: Response): Promise<string> {
+async function safeText(res: Response, knownSecrets: readonly string[]): Promise<string> {
   try {
-    return (await res.text()).slice(0, 200);
+    return redactErrorText(await res.text(), knownSecrets).slice(0, 200);
   } catch {
     return "<no body>";
   }

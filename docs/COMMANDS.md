@@ -198,6 +198,7 @@ required = ["NEXT_PUBLIC_SENTRY_DSN", "NEXT_PUBLIC_SENTRY_ENVIRONMENT"]
 | `kit mcp auth <name>`                                  | Show OAuth-flow guidance for vendor. |
 | `kit mcp set-token <name> [--from-env VAR \| --paste]` | Headless / paste-token install.      |
 | `kit mcp clear <name>`                                 | Remove stored token.                 |
+| `kit mcp web`                                          | Interactive ChatGPT-web setup through OpenAI Secure MCP Tunnel; keeps kit private and uses its existing stdio server. |
 
 ## Hooks
 
@@ -339,6 +340,13 @@ computed from the recorded observe window, and the flip refuses unless that verd
 | `kit broker enforce-readiness [--gate]` | Read the recorded observe window (`.kit-audit.jsonl`) and report whether flipping to enforce is safe: `ready` \| `would-block` (+ exactly what breaks) \| `untested`. `--gate` fails CI on any not-ready verdict. |
 | `kit broker enforce [--force]` | Guided observe→enforce flip: readiness pre-flight (refuses unless `ready`; `--force` overrides), sets `[scope].enforce_runtime = true`, re-signs the profile scope, and audits the transition. |
 
+Invalid observe evidence is not a successful observation. Readiness reads the entire
+audit file, so appending clean operations does not repair an older malformed record.
+Inspect and preserve that evidence; do not edit signed audit history to obtain a
+green result. After reviewing the intended scope and the malformed evidence, an
+operator can explicitly choose `kit broker enforce --force`. This records a forced
+transition, not a passing readiness check; it does not repair or discard the log.
+
 ## Traveling profile
 
 The declared project profile (`.kit-profile.toml`) plus an offline-verifiable signature over its
@@ -388,7 +396,7 @@ Every slice file is attributed to its owner — CODEOWNERS (last-match-wins) or 
 
 ## Memory
 
-Local-first second brain — SQLite + FTS5, deterministic, zero model calls. Full guide: `docs/MEMORY.md`.
+Local-first second brain — SQLite + FTS5, deterministic, zero model calls. Full guide: [kit memory](MEMORY.md). For session ownership, frontier receipts, handoff, conflicts and legacy claims, read [Session-owned claims](MEMORY_CLAIMS.md).
 
 | Command                                                                     | Purpose                                                                                                                                                                                                      |
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -398,11 +406,21 @@ Local-first second brain — SQLite + FTS5, deterministic, zero model calls. Ful
 | `kit memory suggest [--limit N] [--json]`                                   | Emit a BYO-LLM review prompt (recent activity + open items) to stdout — pipe to your own model. kit never calls a model.                                                                                     |
 | `kit memory install` / `uninstall`                                          | Wire (or remove) Claude Code prompt/start/end hooks plus silent Codex start/end hooks (`~/.codex/hooks.json`); Codex hooks require `/hooks` trust.                                                                                                |
 | `kit memory scan`                                                           | Scan the store for stored secrets (masked; exits 1 if any found).                                                                                                                                            |
-| `kit memory backup <file>` / `restore <file>`                               | Encrypted AES-256-GCM backup/restore (`KIT_MEMORY_PASSPHRASE`).                                                                                                                                              |
+| `kit memory project [show\|init]`                                           | Show or initialize the checked-in UUID that associates independently cloned copies for local recall. Public association metadata, not authentication.                                                      |
+| `kit memory backup <file>` / `restore <file>`                               | Encrypted AES-256-GCM backup/restore (`KIT_MEMORY_PASSPHRASE`). Raw restore refuses executable legacy verifier data; use `memory sync <file>` for safe import. Existing destination sidecars require offline recovery, even with `--force`. |
 | `kit memory sync init <remote> [--auto]`                                    | Write `~/.kit/sync.toml` (LOCAL, never committed). `--auto` = pull at session start + push at session end via the hooks.                                                                                     |
 | `kit memory push` / `pull`                                                  | Sync the store to/from your PRIVATE remote. Blobs are always encrypted, using a passphrase or `recipient` public key (`kit memory keygen`); `encrypt = false` is rejected. |
+| `kit memory merge <file> [--remap-project <path> \| --project-map <json>]` | Import a database; rehome a single-project export or selectively map source paths. Original transcript paths remain intact. |
+| `kit memory sync <file> [--remap-project <path> \| --project-map <json>]` | Import a raw or encrypted export with the same explicit recall mappings. Configured pulls use `[[memory.sync.project_map]]` from the local sync configuration. |
 | `kit memory keygen`                                                         | X25519 recipient keypair: ephemeral sessions push encrypted with NO secret; only holders of the private key decrypt.                                                                                         |
-| `kit memory pal [list\|add\|done\|snooze\|verify\|import]`                  | Pending-action ledger; auto-closes on verify. Project-scoped (`--global` for all).                                                                                                                           |
+| `kit memory pal [list\|add\|configure\|done\|snooze\|claim\|renew\|takeover\|release\|reopen\|show\|resolve\|forget\|verify\|import\|prune]` | Pending-action ledger; auto-closes on verify. `list --status=open\|claimed\|snoozed\|closed` selects lifecycle state; default is open. `configure <id> --manual` disables checks; `--verify-file <path>` or `--verify-http <url> [--expect <code>]` replaces them explicitly without changing status or provenance. `verify --json` reports checked, closed, reopened, stale and unverified; unverified exits 1. Project-scoped (`--global` expands projects, `--all` expands devices). `--read-only` listing never reactivates tasks. |
+| `kit memory pal show <id> [--history] [--json]` | Read-only causal history: current alternatives, immutable origin, and frontier token. Does not create or migrate a store. `list --conflicts` includes conflicts regardless of the display candidate's lifecycle state. |
+| `kit memory pal claim <id> [label] --harness <name> --session <id> --expect <frontier> [--json]` | Claim open, uncontested work with explicit session identity and the local device ID. The label is display-only. Success returns a new frontier and structured owner; retain that receipt for subsequent mutations. |
+| `kit memory pal renew <id> --harness <name> --session <id> --expect <frontier> [--json]` | Record continued ownership with the matching owner and current receipt. Always creates a new revision on success, even within one clock second. Claims never expire automatically; renewal is not a lease extension. |
+| `kit memory pal takeover <id> [label] --harness <name> --session <id> --expect <frontier> [--take <head>] [--json]` | Explicitly transfer an existing claim, including unknown legacy ownership. Multiple heads require `--take`; the new revision acknowledges all observed heads and returns the caller's owner and new frontier. Not a distributed lock. |
+| `kit memory pal done\|snooze\|release\|reopen <id> [days] [--expect <frontier>] [--harness <name> --session <id>]` | Close, postpone, release to open, or reopen closed work. `[days]` applies only to snooze (default 7). Claimed work requires matching owner and current frontier; unclaimed transitions accept an optional frontier. Unchanged or refused transitions exit 1; invalid input exits 2. |
+| `kit memory pal forget <id> --expect <frontier> [--harness <name> --session <id>] [--json]` | Delete the task and its revision history and retain only a portable deletion identity. Claimed work requires its owner; contested or legacy claims require takeover first. Rejects read-only mode. Stale imports cannot recreate it. Does not erase retained backups or remote Git history. |
+| `kit memory pal resolve <id> --expect <frontier> (--take <revision> \| --state <file>) [--harness <name> --session <id>]` | Reconcile observed alternatives using a current revision or complete portable state. Existing claims require their owner; resolution cannot create or transfer ownership. Contested or legacy claims require takeover first. Local verifier authority is not portable state. `--json` returns the result and available view; only applied mutations exit 0. |
 | `kit memory save <name>` / `threads` / `resume <name\|n>` / `forget <name>` | Named copilots — bookmark + resume sessions; `resume` prints the Claude or Codex command for the saved harness.                                                                                              |
 | `kit memory share …` / `areas` / `area <name>`                              | Shared, area-organized team memory (committed, secret-scanned, reviewed like code).                                                                                                                          |
 | `kit memory context`                                                        | Push-surface the active decisions for the area(s) whose files you are touching (deterministic, path→cluster). |

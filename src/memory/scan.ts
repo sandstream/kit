@@ -31,6 +31,14 @@ export interface ScanFinding {
   projects: string[];
 }
 
+export interface ScanOccurrence {
+  table: string;
+  id: unknown;
+  label: string;
+  confidence: ScanConfidence;
+}
+type OccurrenceObserver = (occurrence: ScanOccurrence) => void;
+
 interface Target {
   table: string;
   idCol: string;
@@ -57,8 +65,16 @@ const TARGETS: Target[] = [
   {
     table: "pending_actions",
     idCol: "id",
-    columns: ["title", "detail", "verify_cmd"],
-    select: "SELECT id, title, detail, verify_cmd, scope AS __project FROM pending_actions",
+    columns: ["title", "detail", "verify_cmd", "verify_check", "verify_definition"],
+    select:
+      "SELECT id, title, detail, verify_cmd, verify_check, verify_definition, scope AS __project FROM pending_actions",
+  },
+  {
+    table: "pal_revisions",
+    idCol: "rev_id",
+    columns: ["state_json", "actor_device"],
+    select:
+      "SELECT rev_id, state_json, actor_device, json_extract(state_json, '$.scope') AS __project FROM pal_revisions",
   },
   {
     table: "saved_threads",
@@ -105,12 +121,14 @@ function foldRow(
   table: string,
   finder: CellFinder,
   byKey: Map<string, FindingEntry>,
+  observe?: OccurrenceObserver,
 ): void {
   const proj = projectName(row.__project);
   for (const col of columns) {
     const val = row[col];
     if (typeof val !== "string" || !val) continue;
     for (const f of finder(val)) {
+      observe?.({ table, id: row[idKey], label: f.label, confidence: f.confidence });
       const key = `${f.label} ${f.preview}`;
       let entry = byKey.get(key);
       if (!entry) {
@@ -145,28 +163,32 @@ function scanTarget(
   target: Target,
   finder: CellFinder,
   byKey: Map<string, FindingEntry>,
+  observe?: OccurrenceObserver,
 ): void {
+  let rows: Record<string, unknown>[] | undefined;
   try {
-    for (const row of db.prepare(target.select).all() as Record<string, unknown>[]) {
-      foldRow(row, target.columns, target.idCol, target.table, finder, byKey);
-    }
-    return;
+    rows = db.prepare(target.select).all();
   } catch {
     // Rich SELECT failed (missing hint column / join / table) → resilient fallback.
+  }
+  if (rows) {
+    for (const row of rows)
+      foldRow(row, target.columns, target.idCol, target.table, finder, byKey, observe);
+    return;
   }
   const cols = tableColumns(db, target.table);
   if (cols.size === 0) return; // table genuinely absent → nothing here to scan
   const idExpr = cols.has(target.idCol) ? target.idCol : "rowid";
   for (const col of target.columns) {
     if (!cols.has(col)) continue;
+    let cells: Record<string, unknown>[];
     try {
-      const rows = db
-        .prepare(`SELECT ${idExpr} AS __id, ${col} FROM ${target.table}`)
-        .all() as Record<string, unknown>[];
-      for (const row of rows) foldRow(row, [col], "__id", target.table, finder, byKey);
+      cells = db.prepare(`SELECT ${idExpr} AS __id, ${col} FROM ${target.table}`).all();
     } catch {
       // this column is genuinely unreadable → skip just it, keep scanning the rest
+      continue;
     }
+    for (const row of cells) foldRow(row, [col], "__id", target.table, finder, byKey, observe);
   }
 }
 
@@ -178,9 +200,13 @@ function scanTarget(
  * partial/adversarial schema (see scanTarget) — a missing auxiliary column can no
  * longer suppress scanning of a present payload column.
  */
-function scanDbWith(db: DatabaseSync, finder: CellFinder): ScanFinding[] {
+function scanDbWith(
+  db: DatabaseSync,
+  finder: CellFinder,
+  observe?: OccurrenceObserver,
+): ScanFinding[] {
   const byKey = new Map<string, FindingEntry>();
-  for (const target of TARGETS) scanTarget(db, target, finder, byKey);
+  for (const target of TARGETS) scanTarget(db, target, finder, byKey, observe);
   return [...byKey.values()]
     .map(({ _projects, ...f }) => ({ ...f, projects: [..._projects].sort() }))
     .sort((a, b) => {
@@ -205,8 +231,8 @@ export function scanDbForSecrets(db: DatabaseSync): ScanFinding[] {
  * the agent's prompt, so a poisoned entry is a delayed injection vector). Same
  * shape as the secret scan — deduped, confidence-tiered, project-attributed.
  */
-export function scanDbForInjection(db: DatabaseSync): ScanFinding[] {
-  return scanDbWith(db, (text) => findInjection(text));
+export function scanDbForInjection(db: DatabaseSync, observe?: OccurrenceObserver): ScanFinding[] {
+  return scanDbWith(db, (text) => findInjection(text), observe);
 }
 
 /**
