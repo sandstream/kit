@@ -64,10 +64,54 @@ const CONVENTIONALLY_PUBLIC =
 
 export type NameVerdict = "leak" | "public-by-convention" | "not-client-exposed";
 
-/** Classify one env var NAME. No value is read, and none is needed. */
-export function classifyClientName(name: string): NameVerdict {
+/**
+ * A `@sensitive` annotation in a `.env*` comment, borrowed from varlock's `.env.schema`
+ * decorators (`@sensitive`, `@sensitive=false`).
+ *
+ * WHY THIS EXISTS. `SENSITIVE_WORD` above INFERS sensitivity from the identifier, and a name is
+ * not a declaration. Measured against the built classifier, three real client-exposed credentials
+ * come back `not-client-exposed` purely because of how they were spelled:
+ *
+ *     VITE_TWILIO_AUTH        no listed word ("AUTH" is not in SENSITIVE_WORD)
+ *     VITE_OPENAI_SK          abbreviated
+ *     NEXT_PUBLIC_DB_DSN      `_DSN` is in CONVENTIONALLY_PUBLIC (Sentry's public DSN), but a
+ *                             database DSN carries a password
+ *
+ * Those are FALSE NEGATIVES in a security check — the direction that matters. The heuristic stays
+ * as the floor for repos that annotate nothing; a declaration, where present, wins over it.
+ */
+const SENSITIVE_ANNOTATION = /@sensitive(?:\s*=\s*(true|false))?\b/i;
+
+/**
+ * Read a `@sensitive` annotation out of one comment or trailing comment.
+ * `@sensitive` / `@sensitive=true` -> true, `@sensitive=false` -> false, absent -> undefined.
+ * Pure.
+ */
+export function parseSensitiveAnnotation(text: string): boolean | undefined {
+  const m = SENSITIVE_ANNOTATION.exec(text);
+  if (!m) return undefined;
+  return m[1] === undefined ? true : m[1].toLowerCase() === "true";
+}
+
+/**
+ * Classify one env var NAME. No value is read, and none is needed.
+ *
+ * `declaredSensitive` is the author's `@sensitive` annotation when they wrote one. Declared beats
+ * inferred; inferred beats nothing:
+ *   - `true`      -> `leak` on a client-prefixed name, whatever it is called. Catches the three
+ *                    false negatives above.
+ *   - `false`     -> `public-by-convention`. An explicit, greppable, reviewable opt-out, which is
+ *                    strictly better than the same var passing silently because of its spelling.
+ *   - `undefined` -> the name heuristic, unchanged. Nothing regresses for repos that annotate
+ *                    nothing.
+ *
+ * A name with no client prefix is still `not-client-exposed` even when declared sensitive: a
+ * server-side secret is not a bundle leak, and this check is only about the bundle.
+ */
+export function classifyClientName(name: string, declaredSensitive?: boolean): NameVerdict {
   const upper = name.toUpperCase();
   if (!CLIENT_PREFIXES.some((p) => upper.startsWith(p))) return "not-client-exposed";
+  if (declaredSensitive !== undefined) return declaredSensitive ? "leak" : "public-by-convention";
   if (!SENSITIVE_WORD.test(upper)) return "not-client-exposed";
   if (CONVENTIONALLY_PUBLIC.test(upper)) return "public-by-convention";
   return "leak";
@@ -80,7 +124,35 @@ export function classifyClientName(name: string): NameVerdict {
  * next developer to put a secret somewhere the browser will read it. The name is the defect.
  */
 export async function collectEnvNames(root: string): Promise<Map<string, string[]>> {
-  const byName = new Map<string, string[]>();
+  const decls = await collectEnvDeclarations(root);
+  return new Map([...decls].map(([name, d]) => [name, d.sources]));
+}
+
+/** One declared env var: where it was seen, and the author's `@sensitive` annotation if any. */
+export interface EnvDeclaration {
+  /** The `.env*` files that declare this name, in read order. */
+  sources: string[];
+  /** The author's `@sensitive` annotation. `undefined` when they wrote none. */
+  sensitive?: boolean;
+}
+
+/**
+ * Env var names declared anywhere in the repo's `.env*` files, with any `@sensitive` annotation.
+ *
+ * An annotation attaches to a var when it is written on the preceding comment line(s) or trailing
+ * the declaration itself — both forms people actually use:
+ *
+ *     # @sensitive
+ *     VITE_TWILIO_AUTH=
+ *     VITE_OPENAI_SK=          # @sensitive
+ *     NEXT_PUBLIC_MAP_STYLE=   # @sensitive=false
+ *
+ * Values are still never read: the trailing form is parsed from the comment, and the annotation is
+ * a boolean, not content. The first annotation wins if a name is declared in several files, so a
+ * later `.env.local` cannot silently downgrade one declared sensitive in `.env.example`.
+ */
+export async function collectEnvDeclarations(root: string): Promise<Map<string, EnvDeclaration>> {
+  const byName = new Map<string, EnvDeclaration>();
   let entries: string[];
   try {
     entries = await readdir(root);
@@ -94,18 +166,39 @@ export async function collectEnvNames(root: string): Promise<Map<string, string[
     } catch {
       continue;
     }
+    // Annotation carried down from the comment block immediately above a declaration.
+    let pending: boolean | undefined;
     for (const line of text.split("\n")) {
       const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
+      if (!trimmed) {
+        pending = undefined; // a blank line ends the comment block, so it cannot drift
+        continue;
+      }
+      if (trimmed.startsWith("#")) {
+        pending = parseSensitiveAnnotation(trimmed) ?? pending;
+        continue;
+      }
       const eq = trimmed.indexOf("=");
-      if (eq <= 0) continue;
-      // The name only. Everything right of `=` is deliberately dropped, here, at the parse.
+      if (eq <= 0) {
+        pending = undefined;
+        continue;
+      }
+      // The name only. Everything right of `=` is deliberately dropped, here, at the parse —
+      // except a trailing `#` comment, which is scanned for the annotation and nothing else.
       const name = trimmed
         .slice(0, eq)
         .replace(/^export\s+/, "")
         .trim();
+      const hash = trimmed.indexOf("#", eq);
+      const trailing = hash >= 0 ? parseSensitiveAnnotation(trimmed.slice(hash)) : undefined;
+      const sensitive = trailing ?? pending;
+      pending = undefined;
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
-      byName.set(name, [...(byName.get(name) ?? []), file]);
+      const prev = byName.get(name);
+      byName.set(name, {
+        sources: [...(prev?.sources ?? []), file],
+        sensitive: prev?.sensitive ?? sensitive,
+      });
     }
   }
   return byName;
@@ -130,9 +223,9 @@ export async function checkClientExposedNames(
     name: NAME_CHECK,
   };
 
-  const declared = await collectEnvNames(root);
+  const declared = await collectEnvDeclarations(root);
   for (const name of extraNames)
-    if (!declared.has(name)) declared.set(name, ["[secrets] in .kit.toml"]);
+    if (!declared.has(name)) declared.set(name, { sources: ["[secrets] in .kit.toml"] });
 
   if (declared.size === 0) {
     return {
@@ -144,8 +237,8 @@ export async function checkClientExposedNames(
 
   const leaks: string[] = [];
   const allowedWithoutReason: string[] = [];
-  for (const [name, sources] of declared) {
-    if (classifyClientName(name) !== "leak") continue;
+  for (const [name, { sources, sensitive }] of declared) {
+    if (classifyClientName(name, sensitive) !== "leak") continue;
     const reason = allow[name];
     if (reason === undefined) {
       leaks.push(`${name} (${sources.join(", ")})`);
@@ -177,16 +270,23 @@ export async function checkClientExposedNames(
     };
   }
 
-  const exposed = [...declared.keys()].filter(
-    (n) => classifyClientName(n) === "public-by-convention",
+  const exposed = [...declared].filter(
+    ([n, d]) => classifyClientName(n, d.sensitive) === "public-by-convention",
   );
+  // Say what the green covers. Un-annotated names are judged by SPELLING, so a pass is a
+  // statement about names, not about values — the same honesty `tierNotice` adds to `kit check`.
+  const annotated = [...declared.values()].filter((d) => d.sensitive !== undefined).length;
+  const scope =
+    annotated === declared.size
+      ? "every name carries a @sensitive annotation"
+      : `${declared.size - annotated} judged by name only — add \`# @sensitive\` to declare rather than infer`;
   return {
     ...base,
     status: "pass",
     detail:
       exposed.length > 0
-        ? `${declared.size} declared name(s); ${exposed.length} client-exposed and public by convention`
-        : `${declared.size} declared name(s), none client-exposed with a secret-shaped name`,
+        ? `${declared.size} declared name(s); ${exposed.length} client-exposed and public by convention (${scope})`
+        : `${declared.size} declared name(s), none client-exposed with a secret-shaped name (${scope})`,
   };
 }
 
