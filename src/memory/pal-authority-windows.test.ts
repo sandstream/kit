@@ -73,17 +73,21 @@ it(
   },
 );
 
-it("a POSIX disk approval cannot execute after switching to native Windows", async (t) => {
-  const { src, track } = fixture(t);
-  const db = track(openMemoryDb(src));
-  palAdd(db, { title: "POSIX approval", check: { type: "file-exists", path: src } });
-  const before = palList(db, { readOnly: true });
-  simulateWindows(t);
-  const result = await palAutoVerify(db, 1);
-  assert.equal(result.checked, 0);
-  assert.equal(result.unverified[0]?.reason, "no-local-approval");
-  assert.deepEqual(palList(db, { readOnly: true }), before);
-});
+it(
+  "a POSIX disk approval cannot execute after switching to native Windows",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const { src, track } = fixture(t);
+    const db = track(openMemoryDb(src));
+    palAdd(db, { title: "POSIX approval", check: { type: "file-exists", path: src } });
+    const before = palList(db, { readOnly: true });
+    simulateWindows(t);
+    const result = await palAutoVerify(db, 1);
+    assert.equal(result.checked, 0);
+    assert.equal(result.unverified[0]?.reason, "no-local-approval");
+    assert.deepEqual(palList(db, { readOnly: true }), before);
+  },
+);
 
 it("native Windows in-memory approvals remain confined to their connection", async (t) => {
   const { src, track } = fixture(t);

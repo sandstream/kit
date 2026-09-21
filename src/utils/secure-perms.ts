@@ -14,9 +14,12 @@ $kind = $env:KIT_PRIVATE_ACL_KIND
 $repair = $env:KIT_PRIVATE_ACL_REPAIR -eq '1'
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
 if ($repair) {
-  $acl = Get-Acl -LiteralPath $path
+  if ($kind -eq 'dir') {
+    $acl = [System.Security.AccessControl.DirectorySecurity]::new()
+  } else {
+    $acl = [System.Security.AccessControl.FileSecurity]::new()
+  }
   $acl.SetAccessRuleProtection($true, $false)
-  foreach ($entry in @($acl.Access)) { [void]$acl.RemoveAccessRuleSpecific($entry) }
   $acl.SetOwner($sid)
   if ($kind -eq 'dir') {
     $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
@@ -55,6 +58,13 @@ Write-Output 'PRIVATE'
 
 type PrivatePathKind = "file" | "dir";
 
+function windowsAclErrorDetail(error: unknown): string {
+  if (!error || typeof error !== "object" || !("stderr" in error)) return "";
+  const stderr = (error as { stderr?: unknown }).stderr;
+  const detail = Buffer.isBuffer(stderr) ? stderr.toString("utf8") : String(stderr ?? "");
+  return detail.replaceAll(/\s+/g, " ").trim().slice(0, 500);
+}
+
 function windowsAcl(path: string, kind: PrivatePathKind, repair: boolean): boolean {
   const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
   if (!systemRoot) {
@@ -70,7 +80,7 @@ function windowsAcl(path: string, kind: PrivatePathKind, repair: boolean): boole
       ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
       {
         encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
+        stdio: ["ignore", "pipe", "pipe"],
         timeout: 10_000,
         env: {
           ...process.env,
@@ -82,8 +92,13 @@ function windowsAcl(path: string, kind: PrivatePathKind, repair: boolean): boole
     );
     if (output.trim() === "PRIVATE") return true;
   } catch (err) {
-    if (repair)
-      throw new Error(`Cannot establish owner-only Windows ACL for ${path}`, { cause: err });
+    if (repair) {
+      const detail = windowsAclErrorDetail(err);
+      throw new Error(
+        `Cannot establish owner-only Windows ACL for ${path}${detail ? `: ${detail}` : ""}`,
+        { cause: err },
+      );
+    }
     return false;
   }
   if (repair) throw new Error(`Cannot verify owner-only Windows ACL for ${path}`);
