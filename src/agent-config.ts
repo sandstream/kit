@@ -1,5 +1,16 @@
-import { readFile, writeFile, mkdir, readdir, stat, lstat } from "node:fs/promises";
-import { existsSync, readdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import {
+  open,
+  readFile,
+  writeFile,
+  mkdir,
+  readdir,
+  rename,
+  rm,
+  stat,
+  lstat,
+} from "node:fs/promises";
+import { constants, existsSync, readdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { resolve, dirname, join, isAbsolute } from "node:path";
 
@@ -1440,6 +1451,30 @@ export const kitInstallGate = async () => ({
 `;
 }
 
+async function readOpenCodePlugin(path: string): Promise<string> {
+  const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    if (!(await handle.stat()).isFile()) throw new Error("OpenCode gate path is not a file");
+    return await handle.readFile("utf8");
+  } finally {
+    await handle.close();
+  }
+}
+
+async function writeOpenCodePlugin(path: string, content: string, replace: boolean): Promise<void> {
+  if (!replace) {
+    await writeFile(path, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    return;
+  }
+  const temporary = `${path}.kit-tmp-${process.pid}-${randomBytes(12).toString("hex")}`;
+  try {
+    await writeFile(temporary, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
 /**
  * OpenCode install-gate: unlike the other agents (which register a hook *command*
  * in a config file), OpenCode enforces via a JS **plugin** that hooks
@@ -1471,7 +1506,7 @@ export async function installInstallGateOpenCode(
     if (info.isSymbolicLink() || !info.isFile()) {
       return { file, action: "skipped", detail: "external or symlinked path; refusing overwrite" };
     }
-    const current = await readFile(path, "utf-8");
+    const current = await readOpenCodePlugin(path);
     if (current === plugin) {
       return { file, action: "unchanged", detail: "install-gate already wired" };
     }
@@ -1492,7 +1527,7 @@ export async function installInstallGateOpenCode(
   }
   try {
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, plugin, "utf-8");
+    await writeOpenCodePlugin(path, plugin, existed);
     return { file, action: existed ? "updated" : "created" };
   } catch (err) {
     return { file, action: "failed", detail: err instanceof Error ? err.message : String(err) };

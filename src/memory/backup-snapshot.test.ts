@@ -255,13 +255,21 @@ for (const mode of modes) {
     const f = fixture(t);
     closedSource(f.src);
     chmodSync(f.src, 0o444);
-    const before = readFileSync(f.src);
-    const metadata = statSync(f.src);
+    const source = fs.openSync(f.src, "r");
+    t.after(() => fs.closeSync(source));
+    const readSource = (): Buffer => {
+      const size = fs.fstatSync(source).size;
+      const bytes = Buffer.alloc(size);
+      assert.equal(fs.readSync(source, bytes, 0, size, 0), size);
+      return bytes;
+    };
+    const before = readSource();
+    const metadata = fs.fstatSync(source);
     mode.backup(f.src, f.blob);
     mode.restore(f.blob, f.dest);
-    assert.deepEqual(readFileSync(f.src), before);
-    assert.equal(statSync(f.src).mode, metadata.mode);
-    assert.equal(statSync(f.src).mtimeMs, metadata.mtimeMs);
+    assert.deepEqual(readSource(), before);
+    assert.equal(fs.fstatSync(source).mode, metadata.mode);
+    assert.equal(fs.fstatSync(source).mtimeMs, metadata.mtimeMs);
     const restored = f.track(new DatabaseSync(f.dest, { readOnly: true }));
     assert.deepEqual(
       restored

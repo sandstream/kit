@@ -21,9 +21,14 @@
  * Deterministic, zero-LLM, zero new dependencies (node:child_process + git).
  */
 import { execFileSync, execSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
+  closeSync,
   existsSync,
+  fsyncSync,
+  openSync,
   readFileSync,
+  renameSync,
   writeFileSync,
   statSync,
   mkdirSync,
@@ -81,6 +86,33 @@ export interface SyncConfig {
 
 const DEFAULT_BRANCH = "main";
 const DEFAULT_FILE = "memory.enc";
+
+function publishSyncConfig(path: string, content: string, force: boolean): boolean {
+  if (!force) {
+    try {
+      writeFileSync(path, content, { flag: "wx", mode: 0o600 });
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw error;
+    }
+  }
+
+  const temporary = `${path}.kit-tmp-${process.pid}-${randomBytes(12).toString("hex")}`;
+  let fd: number | undefined;
+  try {
+    fd = openSync(temporary, "wx", 0o600);
+    writeFileSync(fd, content, "utf8");
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
+    renameSync(temporary, path);
+    return true;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+    rmSync(temporary, { force: true });
+  }
+}
 
 function safeDiagnostic(value: unknown): string {
   return redactSecrets(value instanceof Error ? value.message : String(value));
@@ -403,7 +435,6 @@ export interface InitSyncOptions {
  */
 export function initSyncConfig(opts: InitSyncOptions = {}): { path: string; created: boolean } {
   const path = getSyncConfigPath();
-  if (existsSync(path) && !opts.force) return { path, created: false };
   const transport: SyncTransport = opts.transport ?? "git";
   const lines = ["[memory.sync]"];
   if (transport === "command") {
@@ -433,8 +464,8 @@ export function initSyncConfig(opts: InitSyncOptions = {}): { path: string; crea
     );
   }
   mkdirSync(getMemoryDir(), { recursive: true, mode: 0o700 });
-  writeFileSync(path, lines.join("\n") + "\n", { mode: 0o600 });
-  return { path, created: true };
+  const created = publishSyncConfig(path, lines.join("\n") + "\n", opts.force === true);
+  return { path, created };
 }
 
 export interface AutoSyncResult {
@@ -524,7 +555,6 @@ export function maybeSyncNudge(): string | null {
     return null;
   }
   const marker = join(getMemoryDir(), NUDGE_MARKER);
-  if (existsSync(marker)) return null;
   let worthIt: boolean;
   try {
     const p = getMemoryDbPath();
@@ -535,8 +565,9 @@ export function maybeSyncNudge(): string | null {
   if (!worthIt) return null;
   let markerErr: string | null = null;
   try {
-    writeFileSync(marker, "", { mode: 0o600 });
+    writeFileSync(marker, "", { flag: "wx", mode: 0o600 });
   } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") return null;
     // Fail-soft (worst case we nudge again), but surface it — a permanently
     // unwritable ~/.kit is worth knowing rather than silently re-nudging forever.
     markerErr = (e as Error).message;

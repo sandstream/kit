@@ -1,7 +1,7 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
@@ -16,8 +16,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let tmpProject: string;
 
 before(async () => {
-  tmpProject = join(tmpdir(), `sandstream-kit-plugin-loader-test-${process.pid}`);
-  await mkdir(tmpProject, { recursive: true });
+  tmpProject = await mkdtemp(join(tmpdir(), "sandstream-kit-plugin-loader-test-"));
 });
 
 after(async () => {
@@ -80,8 +79,7 @@ describe("loadPluginAdapters", () => {
   });
 
   it("returns empty registry when package.json is absent", async () => {
-    const emptyDir = join(tmpdir(), `kit-empty-${process.pid}`);
-    await mkdir(emptyDir, { recursive: true });
+    const emptyDir = await mkdtemp(join(tmpdir(), "kit-empty-"));
     try {
       const result = await loadPluginAdapters(emptyDir);
       assert.deepEqual(result, {});

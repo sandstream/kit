@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, readFile, rm, symlink } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createPlugin, type CreatePluginDeps } from "./create-plugin.js";
@@ -8,8 +8,7 @@ import { createPlugin, type CreatePluginDeps } from "./create-plugin.js";
 let tmpDir: string;
 
 before(async () => {
-  tmpDir = join(tmpdir(), `kit-create-plugin-test-${process.pid}`);
-  await mkdir(tmpDir, { recursive: true });
+  tmpDir = await mkdtemp(join(tmpdir(), "kit-create-plugin-test-"));
 });
 
 after(async () => {
@@ -47,9 +46,8 @@ describe("createPlugin", () => {
   });
 
   it("does not follow an existing scaffold-directory symlink outside cwd", async () => {
-    const outside = join(tmpdir(), `kit-create-plugin-symlink-target-${process.pid}`);
+    const outside = await mkdtemp(join(tmpdir(), "kit-create-plugin-symlink-target-"));
     const link = join(tmpDir, "kit-plugin-symlink-escape");
-    await mkdir(outside, { recursive: true });
     await rm(link, { recursive: true, force: true });
     await symlink(outside, link, "dir");
 

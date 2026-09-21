@@ -1,4 +1,5 @@
-import { writeFile, chmod, mkdir, readFile, unlink, lstat } from "node:fs/promises";
+import { open, writeFile, mkdir, readFile, rename, rm, unlink, lstat } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { resolve, isAbsolute, dirname, relative } from "node:path";
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -139,12 +140,10 @@ async function installBypassDetector(hooksDir: string): Promise<HookInstallResul
         // Inject the sentinel-write block right after the shebang line.
         const lines = current.split("\n");
         const injected = [lines[0], "", sentinelWriter, ...lines.slice(1)].join("\n");
-        await writeFile(preCommitDetectorPath, injected, "utf-8");
-        await chmod(preCommitDetectorPath, 0o755);
+        await writeHookFile(preCommitDetectorPath, injected, true);
       }
     } else {
-      await writeFile(preCommitDetectorPath, `#!/bin/sh\n${sentinelWriter}\nexit 0\n`, "utf-8");
-      await chmod(preCommitDetectorPath, 0o755);
+      await writeHookFile(preCommitDetectorPath, `#!/bin/sh\n${sentinelWriter}\nexit 0\n`, false);
     }
     results.push({
       hookName: "pre-commit (sentinel)",
@@ -170,12 +169,10 @@ async function installBypassDetector(hooksDir: string): Promise<HookInstallResul
       if (!current.includes("KIT_HOOK_SENTINEL")) {
         const lines = current.split("\n");
         const injected = [lines[0], "", detectorScript, ...lines.slice(1)].join("\n");
-        await writeFile(postCommitDetectorPath, injected, "utf-8");
-        await chmod(postCommitDetectorPath, 0o755);
+        await writeHookFile(postCommitDetectorPath, injected, true);
       }
     } else {
-      await writeFile(postCommitDetectorPath, `#!/bin/sh\n${detectorScript}\nexit 0\n`, "utf-8");
-      await chmod(postCommitDetectorPath, 0o755);
+      await writeHookFile(postCommitDetectorPath, `#!/bin/sh\n${detectorScript}\nexit 0\n`, false);
     }
     results.push({
       hookName: "post-commit (bypass-detector)",
@@ -301,10 +298,7 @@ async function installHook(
     const action = exists ? "updated" : "installed";
 
     // Write hook file
-    await writeFile(hookPath, hookContent, "utf-8");
-
-    // Make executable
-    await chmod(hookPath, 0o755);
+    await writeHookFile(hookPath, hookContent, exists);
 
     return {
       hookName,
@@ -443,7 +437,7 @@ export async function uninstallHooks(
 
         const stripped = stripSentinelBlock(current, hookName);
         if (stripped !== null) {
-          await writeFile(hookPath, stripped, "utf-8");
+          await writeHookFile(hookPath, stripped, true);
           results.push({
             hookName,
             action: "installed",
@@ -484,6 +478,27 @@ function safeHookPath(hooksDir: string, hookName: string): string | null {
     return null;
   }
   return hookPath;
+}
+
+async function writeHookFile(path: string, content: string, replace: boolean): Promise<void> {
+  if (!replace) {
+    const handle = await open(path, "wx", 0o755);
+    try {
+      await handle.writeFile(content, "utf8");
+      await handle.chmod(0o755);
+    } finally {
+      await handle.close();
+    }
+    return;
+  }
+
+  const temporary = `${path}.kit-tmp-${process.pid}-${randomBytes(12).toString("hex")}`;
+  try {
+    await writeFile(temporary, content, { encoding: "utf8", flag: "wx", mode: 0o755 });
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 async function hookPathState(hookPath: string): Promise<"missing" | "present" | "symlink"> {

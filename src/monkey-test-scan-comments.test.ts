@@ -72,7 +72,7 @@ it("keeps SQL and hash comments language-specific while preserving literals and 
   assert.doesNotMatch(clean["app.py"], /new Stripe/);
   assert.match(clean["checkout.js"], /attempts--/);
   for (const [path, source] of Object.entries(sources)) {
-    assert.match(clean[path], /https:\/\/js\.stripe\.com\/v3\//);
+    assert.ok(clean[path].includes("https://js.stripe.com/v3/"));
     assert.equal(clean[path].split("\n").length, source.split("\n").length);
   }
 });

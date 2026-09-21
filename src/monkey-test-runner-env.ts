@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { lstat, open } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
 import {
@@ -110,12 +110,14 @@ function parseLiteralDotenv(text: string): NodeJS.ProcessEnv {
 }
 
 async function readApplicationEnv(path: string): Promise<NodeJS.ProcessEnv | undefined> {
-  const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+  const handle = await open(
+    path,
+    constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0),
+  ).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return undefined;
     throw error;
   });
-  if (!info) return undefined;
-  const handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  if (!handle) return undefined;
   try {
     const maximum = 512 * 1024;
     const target = await handle.stat();

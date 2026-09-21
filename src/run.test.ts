@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { executeCommand } from "./run.js";
@@ -39,8 +39,7 @@ function captureProcessOutput(): {
 }
 
 before(async () => {
-  tmpDir = join(tmpdir(), `kit-run-test-${process.pid}`);
-  await mkdir(tmpDir, { recursive: true });
+  tmpDir = await mkdtemp(join(tmpdir(), "kit-run-test-"));
 });
 
 after(async () => {

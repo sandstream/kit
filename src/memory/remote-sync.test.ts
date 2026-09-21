@@ -1,7 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -462,6 +470,25 @@ describe("remote-sync — init + auto-sync wiring + nudge", () => {
       assert.equal(loadSyncConfig()?.transport, "command");
     });
   });
+
+  it(
+    "initSyncConfig never follows an existing sync.toml symlink",
+    { skip: process.platform === "win32" },
+    () => {
+      withDir((dir) => {
+        const operatorFile = join(dir, "operator-owned.toml");
+        writeFileSync(operatorFile, "operator bytes");
+        symlinkSync(operatorFile, getSyncConfigPath());
+
+        assert.equal(initSyncConfig({ remote: "git@h:me/m.git" }).created, false);
+        assert.equal(readFileSync(operatorFile, "utf8"), "operator bytes");
+
+        assert.equal(initSyncConfig({ remote: "git@h:me/m.git", force: true }).created, true);
+        assert.equal(lstatSync(getSyncConfigPath()).isSymbolicLink(), false);
+        assert.equal(readFileSync(operatorFile, "utf8"), "operator bytes");
+      });
+    },
+  );
 
   it("tryAutoPull / tryAutoPush are no-ops without the opt-in flags (and never throw)", () => {
     withDir(() => {

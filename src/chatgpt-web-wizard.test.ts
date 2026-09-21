@@ -17,8 +17,8 @@ describe("ChatGPT web MCP wizard", () => {
 
   it("uses the official outbound tunnel path without persisting its runtime key", () => {
     const source = readFileSync(WIZARD, "utf8");
-    assert.match(source, /platform\.openai\.com\/settings\/organization\/tunnels/);
-    assert.match(source, /chatgpt\.com\/plugins/);
+    assert.ok(source.includes("platform.openai.com/settings/organization/tunnels"));
+    assert.ok(source.includes("chatgpt.com/plugins"));
     assert.match(source, /--sample sample_mcp_stdio_local/);
     assert.match(source, /--mcp-command "\$KIT_BIN mcp"/);
     assert.match(source, /ask_secret CONTROL_PLANE_API_KEY/);

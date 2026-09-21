@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   closeSync,
+  constants,
+  fstatSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -120,13 +122,18 @@ export function actionCheckIsAuthorized(db: DatabaseSync, target: GrantTarget): 
     if (!directory.isDirectory() || !locallyControlled(context.directory, "dir", directory))
       return false;
     const path = join(context.directory, `${context.namespace}-${target.verify_grant}`);
-    const info = lstatSync(path);
-    return (
-      info.isFile() &&
-      locallyControlled(path, "file", info) &&
-      info.size === 64 &&
-      readFileSync(path, "utf8") === expected
-    );
+    const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const info = fstatSync(fd);
+      return (
+        info.isFile() &&
+        locallyControlled(path, "file", info) &&
+        info.size === 64 &&
+        readFileSync(fd, "utf8") === expected
+      );
+    } finally {
+      closeSync(fd);
+    }
   } catch {
     return false;
   }

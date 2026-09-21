@@ -2,7 +2,6 @@ import {
   chmodSync,
   closeSync,
   copyFileSync,
-  existsSync,
   mkdtempSync,
   openSync,
   readSync,
@@ -13,8 +12,13 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 function hasSqliteHeader(path: string): boolean {
-  if (!existsSync(path)) return false;
-  const fd = openSync(path, "r");
+  let fd: number;
+  try {
+    fd = openSync(path, "r");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
   try {
     const header = Buffer.alloc(16);
     return readSync(fd, header, 0, 16, 0) === 16 && header.toString() === "SQLite format 3\0";

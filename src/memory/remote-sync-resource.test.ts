@@ -36,7 +36,7 @@ function fastImportHistory(repo: string): void {
 it("starts replaying a large Git history without one Git process per snapshot", () => {
   const repo = mkdtempSync(join(tmpdir(), "kit-memory-history-resource-"));
   try {
-    execFileSync("git", ["init", "-q", repo]);
+    execFileSync("git", ["init", "-q", "--initial-branch=main", repo]);
     fastImportHistory(repo);
     const source = import.meta.url.endsWith(".ts");
     const moduleUrl = new URL(

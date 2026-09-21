@@ -1,4 +1,4 @@
-import { describe, it, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFile, writeFile, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -16,7 +16,11 @@ import {
 } from "./skipped-commits.js";
 
 describe("installHooks", () => {
-  const testGitDir = join(tmpdir(), `.test-git-${process.pid}`);
+  let testGitDir: string;
+
+  beforeEach(async () => {
+    testGitDir = await mkdtemp(join(tmpdir(), "kit-install-hooks-"));
+  });
 
   afterEach(async () => {
     try {
@@ -177,7 +181,11 @@ describe("installHooks", () => {
 });
 
 describe("checkHooks", () => {
-  const testGitDir = join(tmpdir(), `.test-git-check-${process.pid}`);
+  let testGitDir: string;
+
+  beforeEach(async () => {
+    testGitDir = await mkdtemp(join(tmpdir(), "kit-check-hooks-"));
+  });
 
   afterEach(async () => {
     try {
@@ -278,7 +286,11 @@ describe("checkHooks", () => {
 });
 
 describe("uninstallHooks", () => {
-  const testGitDir = join(tmpdir(), `.test-git-uninstall-${process.pid}`);
+  let testGitDir: string;
+
+  beforeEach(async () => {
+    testGitDir = await mkdtemp(join(tmpdir(), "kit-uninstall-hooks-"));
+  });
 
   afterEach(async () => {
     try {

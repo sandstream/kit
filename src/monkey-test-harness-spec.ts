@@ -103,12 +103,19 @@ function storageState(role: (typeof roles)[number]): string | undefined {
 `;
 
 function embeddedContractSource(): string {
+  const roleConstantsCurrent =
+    MONKEY_ROLE_IDS.join(",") === "public,customer,staff,owner,superadmin" &&
+    MONKEY_ROLE_LIST_KEYS.join(",") === "allowRoutes,denyRoutes,requiredText,forbiddenText" &&
+    MONKEY_ROLE_ROUTE_KEYS.join(",") === "allowRoutes,denyRoutes";
+  if (!roleConstantsCurrent) {
+    throw new Error("Embedded monkey role constants are stale");
+  }
   return `const validateExpectedFindings: (value: unknown) => ExpectedFinding[] = ${validateExpectedFindings.toString()};
 const matchesExpectedFinding: (actual: Finding, expected: ExpectedFinding) => boolean = ${matchesExpectedFinding.toString()};
 const unexpectedMonkeyFindings: (findings: Finding[], expected: unknown) => Finding[] = ${unexpectedMonkeyFindings.toString()};
-const MONKEY_ROLE_IDS = ${JSON.stringify(MONKEY_ROLE_IDS)} as const;
-const MONKEY_ROLE_LIST_KEYS = ${JSON.stringify(MONKEY_ROLE_LIST_KEYS)} as const;
-const MONKEY_ROLE_ROUTE_KEYS = ${JSON.stringify(MONKEY_ROLE_ROUTE_KEYS)} as const;
+const MONKEY_ROLE_IDS = ["public", "customer", "staff", "owner", "superadmin"] as const;
+const MONKEY_ROLE_LIST_KEYS = ["allowRoutes", "denyRoutes", "requiredText", "forbiddenText"] as const;
+const MONKEY_ROLE_ROUTE_KEYS = ["allowRoutes", "denyRoutes"] as const;
 type MonkeyRoleListKey = (typeof MONKEY_ROLE_LIST_KEYS)[number];
 const isRoleWithId: (candidate: unknown, id: RoleExpectation["id"]) => candidate is Record<string, unknown> = ${isRoleWithId.toString()};
 const configuredRoleEntries: (value: unknown) => unknown[] = ${configuredRoleEntries.toString()};

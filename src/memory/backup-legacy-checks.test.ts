@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { it } from "node:test";
 import { openMemoryDb } from "./db.js";
@@ -28,7 +28,7 @@ for (const mode of modes) {
     }
     mode.backup(src, blob);
     assert.throws(() => mode.restore(blob, dest), /legacy verification.*memory sync/i);
-    assert.equal(existsSync(dest), false);
+    assert.throws(() => readFileSync(dest), { code: "ENOENT" });
     writeFileSync(dest, "previous destination");
     assert.throws(() => mode.restore(blob, dest), /legacy verification.*memory sync/i);
     assert.equal(readFileSync(dest, "utf8"), "previous destination");
@@ -80,7 +80,7 @@ for (const mode of modes) {
       mode.backup(src, blob);
       const contents = readdirSync(dir).sort();
       assert.throws(() => mode.restore(blob, dest), /memory sync/i);
-      assert.equal(existsSync(dest), false);
+      assert.throws(() => readFileSync(dest), { code: "ENOENT" });
       assert.deepEqual(readdirSync(dir).sort(), contents);
       writeFileSync(dest, "previous destination");
       assert.throws(() => mode.restore(blob, dest), /memory sync/i);
