@@ -26,6 +26,8 @@ import { join } from "node:path";
 import {
   classifyClientName,
   collectEnvNames,
+  collectEnvDeclarations,
+  parseSensitiveAnnotation,
   checkClientExposedNames,
   checkBuiltBundleSecrets,
   detectClientBuilds,
@@ -121,6 +123,108 @@ describe("collectEnvNames", () => {
   });
 });
 
+describe("@sensitive annotation — declared beats inferred", () => {
+  // The three names measured against the built classifier before this existed. Each is a real
+  // client-exposed credential that the SPELLING heuristic calls safe. Delete the annotation
+  // handling and these three flip back to "not-client-exposed" — that is the regression guard.
+  const FALSE_NEGATIVES = ["VITE_TWILIO_AUTH", "VITE_OPENAI_SK", "NEXT_PUBLIC_DB_DSN"];
+
+  it("the heuristic alone misses all three — the defect this closes", () => {
+    for (const name of FALSE_NEGATIVES)
+      assert.equal(
+        classifyClientName(name),
+        "not-client-exposed",
+        `${name} should be the documented false negative`,
+      );
+  });
+
+  it("a declared @sensitive turns each of them into a leak", () => {
+    for (const name of FALSE_NEGATIVES) assert.equal(classifyClientName(name, true), "leak", name);
+  });
+
+  it("@sensitive=false is an explicit, auditable opt-out", () => {
+    // Overrides the heuristic in the other direction: greppable, reviewable, and not a silence.
+    assert.equal(classifyClientName("VITE_STRIPE_SECRET_KEY", false), "public-by-convention");
+  });
+
+  it("an annotation cannot make a server-side name a bundle leak", () => {
+    // No client prefix means the bundler never inlines it; this check is only about the bundle.
+    assert.equal(classifyClientName("STRIPE_SECRET_KEY", true), "not-client-exposed");
+  });
+
+  it("un-annotated names keep the old verdicts exactly", () => {
+    assert.equal(classifyClientName("VITE_STRIPE_SECRET_KEY"), "leak");
+    assert.equal(classifyClientName("NEXT_PUBLIC_SUPABASE_ANON_KEY"), "public-by-convention");
+    assert.equal(classifyClientName("VITE_API_URL"), "not-client-exposed");
+  });
+});
+
+describe("parseSensitiveAnnotation", () => {
+  it("reads the forms people actually write", () => {
+    assert.equal(parseSensitiveAnnotation("# @sensitive"), true);
+    assert.equal(parseSensitiveAnnotation("# @sensitive=true"), true);
+    assert.equal(parseSensitiveAnnotation("# @sensitive = false"), false);
+    assert.equal(parseSensitiveAnnotation("# @SENSITIVE"), true);
+    assert.equal(parseSensitiveAnnotation("# just a comment"), undefined);
+    assert.equal(parseSensitiveAnnotation("# @sensitivity is high"), undefined);
+  });
+});
+
+describe("collectEnvDeclarations", () => {
+  it("attaches an annotation from the comment above and from a trailing comment", async () => {
+    const dir = tree({
+      ".env.example":
+        "# @sensitive\nVITE_TWILIO_AUTH=\n" +
+        "VITE_OPENAI_SK=   # @sensitive\n" +
+        "NEXT_PUBLIC_MAP_STYLE=  # @sensitive=false\n" +
+        "VITE_API_URL=\n",
+    });
+    try {
+      const d = await collectEnvDeclarations(dir);
+      assert.equal(d.get("VITE_TWILIO_AUTH")?.sensitive, true);
+      assert.equal(d.get("VITE_OPENAI_SK")?.sensitive, true);
+      assert.equal(d.get("NEXT_PUBLIC_MAP_STYLE")?.sensitive, false);
+      assert.equal(d.get("VITE_API_URL")?.sensitive, undefined, "no annotation stays undefined");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a blank line ends the comment block, so an annotation cannot drift onto a later var", async () => {
+    const dir = tree({ ".env.example": "# @sensitive\n\nVITE_API_URL=\n" });
+    try {
+      const d = await collectEnvDeclarations(dir);
+      assert.equal(d.get("VITE_API_URL")?.sensitive, undefined);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the first annotation wins, so a later file cannot silently downgrade one", async () => {
+    const dir = tree({
+      ".env.example": "# @sensitive\nVITE_TWILIO_AUTH=\n",
+      ".env.local": "VITE_TWILIO_AUTH=  # @sensitive=false\n",
+    });
+    try {
+      const d = await collectEnvDeclarations(dir);
+      assert.equal(d.get("VITE_TWILIO_AUTH")?.sensitive, true);
+      assert.equal(d.get("VITE_TWILIO_AUTH")?.sources.length, 2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still never reads a value", async () => {
+    const dir = tree({ ".env": "# @sensitive\nVITE_A=super-secret-value\n" });
+    try {
+      const d = await collectEnvDeclarations(dir);
+      assert.equal(JSON.stringify([...d.values()]).includes("super-secret-value"), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("checkClientExposedNames", () => {
   it("fails on a secret-shaped client name and says how to resolve it", async () => {
     const dir = tree({ ".env": "VITE_STRIPE_SECRET_KEY=x\nVITE_API_URL=y\n" });
@@ -184,8 +288,7 @@ describe("checkClientExposedNames", () => {
 describe("detectClientBuilds", () => {
   it("finds the framework in a workspace package, not just the root", async () => {
     // The shape measured on a real repo: the root declares workspaces and no framework, and the
-    // app that ships lives one level in. A root-only check called that "nothing builds for a
-    // browser".
+    // app that ships lives one level in. A root-only check called that "nothing builds for a\n    // browser".
     const dir = tree({
       "package.json": JSON.stringify({ workspaces: ["apps/*", "packages/*"] }),
       "apps/web/package.json": JSON.stringify({ devDependencies: { vite: "^5" } }),
