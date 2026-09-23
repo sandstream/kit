@@ -1,6 +1,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, statSync, readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  existsSync,
+  statSync,
+  readFileSync,
+  openSync,
+  fstatSync,
+  readSync,
+  closeSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, upsertSession, insertMessage, getStats } from "./db.js";
@@ -53,12 +63,15 @@ describe("memory encrypted backup / restore", () => {
       openMemoryDb(src).close();
 
       backupEncrypted("Galaxy-Vortex-Quartz-2026-x9", src, enc);
-      assert.equal(statSync(enc).mode & 0o777, 0o600, "encrypted blob must be 0600");
-      assert.equal(
-        readFileSync(enc).subarray(0, 8).toString(),
-        "KITMEM04",
-        "new passphrase backups use the bounded chunk format",
-      );
+      const fd = openSync(enc, "r");
+      try {
+        assert.equal(fstatSync(fd).mode & 0o777, 0o600, "encrypted blob must be 0600");
+        const magic = Buffer.alloc(8);
+        assert.equal(readSync(fd, magic, 0, magic.length, 0), magic.length);
+        assert.equal(magic.toString(), "KITMEM04", "new backups use the bounded chunk format");
+      } finally {
+        closeSync(fd);
+      }
 
       restoreEncrypted("Galaxy-Vortex-Quartz-2026-x9", enc, dest);
       assert.equal(statSync(dest).mode & 0o777, 0o600, "restored plaintext db must be 0600");
