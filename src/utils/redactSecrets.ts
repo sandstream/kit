@@ -209,9 +209,15 @@ export const SECRET_PATTERNS: RedactPattern[] = [
  *
  * Derived from the list, never written down: a hardcoded count is a claim that rots the first time
  * someone adds a pattern. This number exists so a scanner that finds nothing can say what it looked
- * for — "no secrets found" and "no secrets of the 29 kinds I know" are different statements, and
+ * for — "no secrets found" and "no secrets of the N kinds I know" are different statements, and
  * only the second one is true. Some tables must be hardcoded (nothing in a repo can tell you what a
  * Stripe key looks like); what must never be hidden is where the table ends.
+ *
+ * This prose used to say "29 kinds" while the list held 25 — a stale count inside the comment that
+ * argues against stale counts. The 29 came from a `grep` for `label:` that also counted the
+ * interface field and a doc line; `redactSecrets.test.ts` records that measurement and pins the
+ * derived count against it. Read `SECRET_SHAPE_COUNT`, or `secretShapeLabels()` for the names; do
+ * not restate either in prose.
  */
 export const SECRET_SHAPE_COUNT = SECRET_PATTERNS.length;
 
