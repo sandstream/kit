@@ -438,7 +438,7 @@ async function runPlaywrightGate(context: RunContext): Promise<void> {
         area: "runner",
         title: "No Playwright command available",
         repro: "kit monkey-test plan",
-        fix: "Install Playwright after triage or pass --test-command.",
+        fix: "Install Playwright after triage and regenerate the committed monkey harness.",
       }),
     );
     steps.push({ name: "playwright", status: "fail", detail: "missing command" });
@@ -455,7 +455,8 @@ async function runPlaywrightGate(context: RunContext): Promise<void> {
   const evidence = result.ok
     ? await validatePlaywrightEvidence(root, env.MONKEY_RUN_ID!)
     : { ok: false, detail: "test command failed before evidence validation" };
-  const passed = result.ok && evidence.ok;
+  const customCommand = options.testCommand !== undefined;
+  const passed = result.ok && evidence.ok && !customCommand;
   const detail = result.timedOut
     ? "timed out"
     : result.ok
@@ -473,6 +474,17 @@ async function runPlaywrightGate(context: RunContext): Promise<void> {
       }),
     );
     return;
+  }
+  if (customCommand) {
+    findings.push(
+      monkeyFinding({
+        severity: "critical",
+        area: "runner",
+        title: "Custom test command cannot establish browser evidence",
+        repro: "kit monkey-test run --test-command <command>",
+        fix: "Run the generated Playwright command from the committed monkey harness. Custom commands may run diagnostics but cannot attest release-gate browser execution.",
+      }),
+    );
   }
   if (!evidence.ok) {
     findings.push(

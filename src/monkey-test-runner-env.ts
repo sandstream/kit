@@ -50,7 +50,13 @@ export function livePaymentEnvironmentFindings(
   const liveKey = Object.values(env).some((value) =>
     /^(?:sk|pk|rk)_live_/.test(value?.trim() ?? ""),
   );
-  if (!liveKey && env.MONKEY_PAYMENT_MODE?.trim().toLowerCase() !== "live") return [];
+  const liveMode = Object.entries(env).some(
+    ([key, value]) =>
+      /^(?:MONKEY_PAYMENT|STRIPE|PAYPAL|BRAINTREE|ADYEN|SQUARE)_(?:MODE|ENV|ENVIRONMENT)$/i.test(
+        key,
+      ) && /^(?:live|prod|production)$/i.test(value?.trim() ?? ""),
+  );
+  if (!liveKey && !liveMode) return [];
   return [
     monkeyFinding({
       severity: "critical",

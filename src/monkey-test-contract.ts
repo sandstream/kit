@@ -426,6 +426,30 @@ export function focusableIsOffscreen(geometry: MonkeyFocusableGeometry): boolean
   return geometry.right <= 0 || geometry.left >= geometry.viewportWidth || geometry.bottom <= 0;
 }
 
+type NamedMoneyFlowValue = [string, string | undefined];
+
+function validateMoneyFlowFields(required: NamedMoneyFlowValue[]): void {
+  const missing = required.filter(([, value]) => !value?.trim()).map(([name]) => name);
+  if (missing.length > 0) throw new Error(`Money flow requires ${missing.join(", ")}.`);
+  const broadSelectors = required
+    .slice(1)
+    .filter(([, value]) =>
+      /^(?:html|body|:root|\*|(?:html|body)\s*(?:>|\s)\s*\*)$/i.test(value!.trim()),
+    )
+    .map(([name]) => name);
+  if (broadSelectors.length > 0) {
+    throw new Error(
+      `Money flow requires a specific DOM selector for ${broadSelectors.join(", ")}; document-wide selectors are not evidence.`,
+    );
+  }
+  const evidenceSelectors = required.slice(3).map(([, value]) => value!.trim());
+  if (new Set(evidenceSelectors).size !== evidenceSelectors.length) {
+    throw new Error(
+      "Money flow requires distinct DOM selectors for the payment shell, sandbox indicator, action, and final state.",
+    );
+  }
+}
+
 export function validateMoneyFlowConfig(
   env: Record<string, string | undefined>,
 ): MonkeyMoneyFlowConfig {
@@ -442,7 +466,7 @@ export function validateMoneyFlowConfig(
     requestedAction === "confirm" ? "MONKEY_CONFIRM_PAYMENT" : "MONKEY_CANCEL_PAYMENT";
   const finalStateName =
     requestedAction === "confirm" ? "MONKEY_CONFIRMED_STATE" : "MONKEY_CANCELLED_STATE";
-  const required = [
+  const required: NamedMoneyFlowValue[] = [
     ["MONKEY_MONEY_ROUTE", env.MONKEY_MONEY_ROUTE],
     ["MONKEY_ADD_TO_CART", env.MONKEY_ADD_TO_CART],
     ["MONKEY_CHECKOUT", env.MONKEY_CHECKOUT],
@@ -451,8 +475,7 @@ export function validateMoneyFlowConfig(
     [actionControlName, env[actionControlName]],
     [finalStateName, env[finalStateName]],
   ];
-  const missing = required.filter(([, value]) => !value?.trim()).map(([name]) => name);
-  if (missing.length > 0) throw new Error(`Money flow requires ${missing.join(", ")}.`);
+  validateMoneyFlowFields(required);
   return {
     mode,
     action: requestedAction,

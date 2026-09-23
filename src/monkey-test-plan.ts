@@ -98,14 +98,8 @@ function detectDevCommand(
   );
 }
 
-function detectTestCommand(
-  pkg: MonkeyPackageJson | null,
-  packageManager: MonkeyTestPlan["packageManager"],
-): string | undefined {
-  return (
-    pickScript(pkg, packageManager, [/playwright/i, /e2e/i, /^test$/]) ??
-    defaultPlaywrightCommand(packageManager)
-  );
+function detectTestCommand(packageManager: MonkeyTestPlan["packageManager"]): string | undefined {
+  return defaultPlaywrightCommand(packageManager);
 }
 
 function detectSeedCommand(
@@ -123,7 +117,7 @@ function detectCommands(
   return {
     dev: detectDevCommand(pkg, packageManager),
     build: scripts.build ? scriptCommand(packageManager, "build") : undefined,
-    test: detectTestCommand(pkg, packageManager),
+    test: detectTestCommand(packageManager),
     seed: detectSeedCommand(pkg, packageManager),
   };
 }

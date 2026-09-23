@@ -129,6 +129,42 @@ describe("monkey-test money flow contract", () => {
       },
     );
   });
+
+  it("rejects document-wide selectors as payment evidence (MHB-09)", () => {
+    assert.throws(
+      () =>
+        validateMoneyFlowConfig({
+          MONKEY_PAYMENT_MODE: "sandbox",
+          MONKEY_PAYMENT_ACTION: "cancel",
+          MONKEY_MONEY_ROUTE: "/shop",
+          MONKEY_ADD_TO_CART: "#add",
+          MONKEY_CHECKOUT: "#checkout",
+          MONKEY_PAYMENT_SHELL: "body",
+          MONKEY_SANDBOX_INDICATOR: "body",
+          MONKEY_CANCEL_PAYMENT: "body",
+          MONKEY_CANCELLED_STATE: "body",
+        }),
+      /specific DOM selector/,
+    );
+  });
+
+  it("requires independent selectors for payment stages (MHB-09)", () => {
+    assert.throws(
+      () =>
+        validateMoneyFlowConfig({
+          MONKEY_PAYMENT_MODE: "sandbox",
+          MONKEY_PAYMENT_ACTION: "cancel",
+          MONKEY_MONEY_ROUTE: "/shop",
+          MONKEY_ADD_TO_CART: "#add",
+          MONKEY_CHECKOUT: "#checkout",
+          MONKEY_PAYMENT_SHELL: "[data-payment]",
+          MONKEY_SANDBOX_INDICATOR: "[data-payment]",
+          MONKEY_CANCEL_PAYMENT: "[data-payment]",
+          MONKEY_CANCELLED_STATE: "[data-payment]",
+        }),
+      /distinct DOM selectors/,
+    );
+  });
 });
 
 describe("monkey-test runner gate prerequisites", () => {
@@ -284,6 +320,37 @@ describe("monkey-test runner payment safety", () => {
     assert.ok(result.steps.some((step) => step.name === "seed" && step.status === "skip"));
     assert.ok(result.steps.some((step) => step.name === "browser" && step.status === "skip"));
   });
+
+  it("refuses a non-Stripe provider production environment before side effects (MHB-05)", async () => {
+    const dir = tempRepo();
+    writeJson(join(dir, "package.json"), {
+      scripts: {},
+      devDependencies: { "@playwright/test": "1.0.0" },
+    });
+    await writeMonkeyHarness(dir);
+    configureRoleMatrix(dir);
+    const server = createServer((_request, response) => response.end("ok"));
+    await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+
+    try {
+      const result = await runMonkeyTest(dir, {
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        skipSecurity: true,
+        expectedReason: "Focused provider production-mode safety regression fixture.",
+        envCommand: `node -e 'process.stdout.write(JSON.stringify({PAYPAL_ENVIRONMENT:"production"}))'`,
+        seedCommand: `node -e "require('node:fs').writeFileSync('seed-ran', 'yes')"`,
+      });
+
+      assert.equal(existsSync(join(dir, "seed-ran")), false);
+      assert.ok(result.findings.some((item) => item.title === "Live payment environment refused"));
+    } finally {
+      await new Promise<void>((resolveClose, rejectClose) =>
+        server.close((error) => (error ? rejectClose(error) : resolveClose())),
+      );
+    }
+  });
 });
 
 describe("monkey-test runner gate missing evidence", () => {
@@ -326,8 +393,8 @@ describe("monkey-test runner gate missing evidence", () => {
   });
 });
 
-describe("monkey-test runner gate valid evidence", () => {
-  it("accepts fresh evidence covering both projects, every role, and the money flow", async () => {
+describe("monkey-test runner custom-command evidence (MHB-04)", () => {
+  it("rejects a current-run JSON report produced without the generated browser command", async () => {
     const dir = tempRepo();
     writeJson(join(dir, "package.json"), {
       scripts: {},
@@ -353,8 +420,18 @@ describe("monkey-test runner gate valid evidence", () => {
         testCommand: `node ${reportScript}`,
       });
 
-      assert.equal(result.ok, true, JSON.stringify(result.findings, null, 2));
-      assert.ok(result.steps.some((step) => step.name === "playwright" && step.status === "pass"));
+      assert.equal(
+        result.ok,
+        false,
+        "a child that only writes JSON cannot attest browser execution",
+      );
+      assert.ok(
+        result.findings.some(
+          (item) => item.title === "Custom test command cannot establish browser evidence",
+        ),
+        JSON.stringify(result.findings, null, 2),
+      );
+      assert.ok(result.steps.some((step) => step.name === "playwright" && step.status === "fail"));
     } finally {
       await new Promise<void>((resolveClose, rejectClose) =>
         server.close((error) => (error ? rejectClose(error) : resolveClose())),
@@ -392,7 +469,11 @@ writeFileSync("server.pid", String(process.pid));
         testCommand: `node ${reportScript}`,
       });
 
-      assert.equal(result.ok, true, JSON.stringify(result.findings, null, 2));
+      assert.equal(
+        result.findings.some((finding) => finding.title === "Dev server did not stop"),
+        false,
+        JSON.stringify(result.findings, null, 2),
+      );
       await assert.rejects(fetch(result.baseUrl!));
     } finally {
       const pidPath = join(dir, "server.pid");

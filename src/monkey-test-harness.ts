@@ -162,9 +162,11 @@ Useful env:
 Do not silence failures with broad skips. Use \`MONKEY_EXPECTED_FINDINGS\` with a
 specific \`title\`, \`role\`, \`route\`, and \`reason\`, or
 \`MONKEY_SKIP_MONEY_FLOW=1 MONKEY_EXPECTED_REASON=...\` only when the release
-owner has accepted the gap. A custom test command passes only when it preserves
-the generated JSON report for the current run and covers desktop, mobile, every
-role, and the money flow.
+owner has accepted the gap. Payment shell, sandbox indicator, action, and final
+state require distinct, specific selectors; \`body\`, \`html\`, \`:root\`, and
+universal selectors are not evidence. A custom test command is diagnostic only
+and cannot attest browser execution; the release gate runs the generated monkey
+Playwright config directly.
 `;
 }
 

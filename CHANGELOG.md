@@ -45,6 +45,14 @@
 
 ### Fixed
 
+- **Monkey browser evidence hardening.** The release gate now runs the generated
+  Playwright config instead of trusting arbitrary repo or `--test-command` output;
+  custom commands remain diagnostic but cannot attest browser execution. Live or
+  production mode signals for Stripe, PayPal/Braintree, Adyen, and Square stop the
+  run before side effects. Generated findings use stable pathnames rather than
+  random local ports, ordinary words containing `nan` no longer trip the `NaN`
+  placeholder check, and payment stages require distinct, specific selectors.
+
 - **Independent audit hardening.** Triage verifies installed script bytes before
   execution; project identity publication validates semantic readback; PAL rejects
   duplicate verifier flags and surfaces unreadable legacy ledgers; browser CDP

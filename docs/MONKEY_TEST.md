@@ -39,8 +39,10 @@ These pathname checks are not protection against hostile concurrent parent renam
 present, starts the app on a kit-chosen free port and runs the browser gate.
 It deletes stale Playwright JSON output before the run and accepts browser
 success only when the new report contains the current run ID, both configured
-projects, every role crawl, and the money-flow case. A custom `--test-command`
-must therefore run the generated monkey config and preserve its JSON reporter.
+projects, every role crawl, and the money-flow case. The release gate invokes the
+generated monkey config directly instead of trusting a repo test script. A custom
+`--test-command` may run diagnostics, but cannot attest browser execution or make
+the release gate green merely by writing a matching JSON report.
 
 For browser runs, a missing Playwright dependency or incomplete harness stops
 before the environment command, seed, server, or test command. Role validation
@@ -116,7 +118,7 @@ Useful flags:
 
 - `--start-command <cmd>`
 - `--seed-command <cmd>`
-- `--test-command <cmd>`
+- `--test-command <cmd>` (diagnostic only; cannot attest the browser gate)
 - `--env-command <cmd>`
 - `--base-url <url>`
 - `--link-depth <n>`
@@ -146,7 +148,11 @@ Useful Playwright env:
 The money flow runs with customer storage state. It adds a product, opens the
 configured payment shell, verifies visible sandbox evidence, performs the
 chosen action, and asserts the configured post-action state. Page text, URL
-keywords, and browser back navigation are not payment evidence.
+keywords, and browser back navigation are not payment evidence. Payment shell,
+sandbox indicator, action control, and final state must use distinct, specific
+selectors. Document-wide selectors such as `body`, `html`, `:root`, and `*` are
+refused. Runtime and dotenv inspection also rejects live/production mode signals
+for Stripe, PayPal/Braintree, Adyen, and Square before seed or browser side effects.
 
 ## Findings
 

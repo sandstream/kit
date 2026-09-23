@@ -46,6 +46,7 @@ interface Finding {
   title: string;
   role: string;
   route: string;
+  repro: string;
 }
 
 interface CrawlResult {
@@ -61,6 +62,10 @@ interface CrawlScenario {
   leak?: boolean;
   denyRoute?: string;
   expected?: unknown;
+  bodyText?: string;
+  httpErrorUrl?: string;
+  consoleError?: string;
+  baseUrl?: string;
 }
 
 // Execute the generated crawl, including its final assertion. Only browser I/O is faked.
@@ -78,7 +83,9 @@ const denialBody = [
   "Forbidden",
   ...(scenario.leak === false ? [] : roleIds.map((id) => "other-org-" + id)),
 ].join(" ");
-const allowBody = roleIds.map((id) => "own-org-" + id).join(" ");
+const allowBody = [roleIds.map((id) => "own-org-" + id).join(" "), scenario.bodyText ?? ""]
+  .filter(Boolean)
+  .join(" ");
 
 function isDenyRoute(route) {
   return scenario.denyRoute === route || roleIds.some((id) => route === "/forbidden-to-" + id);
@@ -98,18 +105,29 @@ function fakeLocator(selector, route) {
 function fakePage() {
   let requested = "/";
   let current = "/";
+  const handlers = {};
   return {
     goto: async (route) => {
       requested = route;
       current = isDenyRoute(route) ? (scenario.destination ?? route) : route;
+      if (!isDenyRoute(route) && scenario.httpErrorUrl) {
+        handlers.response?.({
+          status: () => 500,
+          url: () => scenario.httpErrorUrl,
+          request: () => ({ isNavigationRequest: () => false }),
+        });
+      }
+      if (!isDenyRoute(route) && scenario.consoleError) {
+        handlers.console?.({ type: () => "error", text: () => scenario.consoleError });
+      }
       return {
         status: () => isDenyRoute(route) ? (scenario.status ?? 200) : 200,
-        url: () => new URL(current, "http://127.0.0.1").href,
+        url: () => new URL(current, scenario.baseUrl ?? "http://127.0.0.1").href,
         request: () => ({ isNavigationRequest: () => true }),
       };
     },
-    url: () => new URL(current, "http://127.0.0.1").href,
-    on: () => {},
+    url: () => new URL(current, scenario.baseUrl ?? "http://127.0.0.1").href,
+    on: (event, handler) => { handlers[event] = handler; },
     waitForLoadState: async () => {},
     locator: (selector) => fakeLocator(selector, requested),
     // Matches against the rendered body, as the real getByText does. Stubbing this to 0
@@ -290,6 +308,59 @@ describe("the generated crawl catches a served denied route (MHB-02)", () => {
     // Every role's crawl must report it, not just the first one.
     const rolesWithFindings = new Set([...exposed, ...isolation].map((f) => f.role));
     assert.equal(rolesWithFindings.size, MONKEY_ROLES.length);
+  });
+});
+
+describe("generated crawl placeholder matching (MHB-07)", () => {
+  it("does not find NaN inside ordinary product words", () => {
+    const { findings, results, status } = crawlFindings({
+      leak: false,
+      status: 403,
+      bodyText: "tenant finance maintenance",
+    });
+
+    assert.equal(status, 0);
+    assert.deepEqual(findings, []);
+    assert.ok(results.every((result) => result.assertions === 1 && !result.error));
+  });
+});
+
+describe("generated crawl finding locations (MHB-08)", () => {
+  it("removes the random local origin from subresource HTTP findings", () => {
+    const { findings, status } = crawlFindings({
+      leak: false,
+      status: 403,
+      httpErrorUrl: "http://127.0.0.1:43210/api/orders?attempt=1",
+    });
+
+    assert.equal(status, 1);
+    const responses = findings.filter((finding) => finding.title === "HTTP 500");
+    assert.equal(responses.length, MONKEY_ROLES.length);
+    assert.ok(
+      responses.every(
+        (finding) => finding.route === "/api/orders" && finding.repro === "/api/orders",
+      ),
+      JSON.stringify(responses, null, 2),
+    );
+  });
+
+  it("removes the random local origin from console-error routes", () => {
+    const { findings, status } = crawlFindings({
+      leak: false,
+      status: 403,
+      baseUrl: "http://127.0.0.1:54321",
+      consoleError: "fixture console failure",
+    });
+
+    assert.equal(status, 1);
+    const errors = findings.filter((finding) => finding.title === "Console error");
+    assert.equal(errors.length, MONKEY_ROLES.length);
+    assert.ok(
+      errors.every(
+        (finding) => finding.route === "/" && finding.repro === "fixture console failure",
+      ),
+      JSON.stringify(errors, null, 2),
+    );
   });
 });
 

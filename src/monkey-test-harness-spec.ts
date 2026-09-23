@@ -285,7 +285,7 @@ async function inspectPage(page: Page, role: string, route: string): Promise<Fin
   const body = await page.locator("body").innerText({ timeout: 5_000 }).catch(() => "");
   const textChecks: [RegExp, Severity, Finding["area"], string, string][] = [
     [/translation missing|missing translation|i18n missing|__MSG_/i, "medium", "i18n", "Missing translation marker", "Add the missing locale key or remove the placeholder."],
-    [/\\bundefined\\b|\\bnull\\b|NaN|\\[object Object\\]/i, "high", "ux", "Fatal UI copy placeholder", "Render a real empty/error state instead of leaking runtime placeholders."],
+    [/\\b(?:undefined|null|NaN)\\b|\\[object Object\\]/i, "high", "ux", "Fatal UI copy placeholder", "Render a real empty/error state instead of leaking runtime placeholders."],
     [/lorem ipsum|todo:|coming soon/i, "medium", "ux", "Unfinished UI copy", "Replace placeholder copy or mark the route expected with a release owner reason."],
   ];
   for (const [pattern, severity, area, title, fix] of textChecks) {
@@ -356,8 +356,8 @@ for (const role of roles) {
             area: "ux",
             title: \`HTTP \${status}\`,
             role: role.id,
-            route: response.url(),
-            repro: response.url(),
+            route: monkeyRoutePath(response.url()),
+            repro: monkeyRoutePath(response.url()),
             fix: "Fix the failing request or block the route from this role intentionally.",
           });
         }
@@ -369,7 +369,7 @@ for (const role of roles) {
             area: "ux",
             title: "Console error",
             role: role.id,
-            route: page.url(),
+            route: monkeyRoutePath(page.url()),
             repro: message.text(),
             fix: "Fix browser console errors; hydration/runtime errors are release blockers.",
           });
@@ -381,7 +381,7 @@ for (const role of roles) {
           area: "ux",
           title: "Page error",
           role: role.id,
-          route: page.url(),
+          route: monkeyRoutePath(page.url()),
           repro: error.message,
           fix: "Fix uncaught browser exceptions before release.",
         });
@@ -413,7 +413,7 @@ for (const role of roles) {
             title: \`HTTP \${response.status()} on denied route\`,
             role: role.id,
             route,
-            repro: response.url(),
+            repro: monkeyRoutePath(response.url()),
             fix: "Return an intentional authorization denial instead of a server error.",
           });
         } else if (!monkeyRouteIsDenied(page, response.status(), route)) {
@@ -469,7 +469,7 @@ for (const role of roles) {
               title: \`HTTP \${response.status()}\`,
               role: role.id,
               route,
-              repro: response.url(),
+              repro: monkeyRoutePath(response.url()),
               fix: "Fix the server error before release.",
             });
             continue;

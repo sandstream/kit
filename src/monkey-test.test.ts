@@ -129,7 +129,7 @@ describe("monkey-test planning - stack detection", () => {
 });
 
 describe("monkey-test planning - command selection", () => {
-  it("prefers specific browser test scripts over generic unit test scripts", async () => {
+  it("uses the generated monkey config instead of an arbitrary repo test script (MHB-04)", async () => {
     const dir = tempRepo();
     writeJson(join(dir, "package.json"), {
       packageManager: "pnpm@10.0.0",
@@ -148,7 +148,7 @@ describe("monkey-test planning - command selection", () => {
 
     const plan = await buildMonkeyTestPlan(dir);
 
-    assert.equal(plan.commands.test, "pnpm run e2e");
+    assert.equal(plan.commands.test, "pnpm exec playwright test -c playwright.monkey.config.ts");
   });
 
   it("marks runtime live payment credentials as not sandbox-only without leaking the value", async () => {
