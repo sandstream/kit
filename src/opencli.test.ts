@@ -31,6 +31,11 @@ describe("OpenCLI document snapshot", () => {
   it("serialization is deterministic (stable across repeated builds)", () => {
     assert.equal(serializeOpenCli(buildOpenCliDoc()), serializeOpenCli(buildOpenCliDoc()));
   });
+
+  it("compact flag lists preserve the complete command contract", () => {
+    const doc = buildOpenCliDoc();
+    assert.deepEqual(JSON.parse(serializeOpenCli(doc)), doc);
+  });
 });
 
 describe("OpenCLI document shape", () => {

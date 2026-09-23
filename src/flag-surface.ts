@@ -134,7 +134,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--ttl-minutes",
   ],
   baseline: ["--category", "--enforce", "--help", "--json"],
-  bootstrap: ["--json", "--minimal", "--no-memory", "--profile"],
+  bootstrap: ["--json", "--minimal", "--no-memory", "--policy-source", "--profile"],
   broker: ["--force", "--gate", "--json"],
   browser: ["--help", "--json"],
   check: [

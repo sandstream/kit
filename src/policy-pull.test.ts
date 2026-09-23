@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { generateKeyPairSync } from "node:crypto";
 import { loadOrCreateIdentity, identityId } from "./identity.js";
 import { resolveKeyStore } from "./keystore/index.js";
 import {
@@ -25,6 +26,7 @@ import {
 } from "./policy-doc.js";
 import { addPolicySigner, getSignersPath } from "./policy-trust.js";
 import { applyPolicyPairAtomically, pullPolicy } from "./policy-pull.js";
+import { evaluatePolicy } from "./policy-check.js";
 
 let idDir: string;
 let source: string;
@@ -99,7 +101,49 @@ describe("pullPolicy", () => {
     assert.equal(r.status, "no-anchor");
     assert.equal(existsSync(getPolicyPath(dest)), false);
   });
+});
 
+describe("pullPolicy org trust boundary", () => {
+  it("refuses this machine's signer when the destination org anchor trusts another key", async () => {
+    writeFileSync(getPolicyPath(source), POLICY_TEMPLATE, "utf-8");
+    signPolicyInDir(source);
+    const { publicKey } = generateKeyPairSync("ed25519");
+    const orgPem = publicKey.export({ type: "spki", format: "pem" }) as string;
+    addPolicySigner(dest, orgPem, "org");
+
+    const result = pullPolicy(source, dest);
+    assert.equal(result.ok, false);
+    assert.equal(result.status, "unverifiable");
+    assert.equal(existsSync(getPolicyPath(dest)), false);
+    assert.equal(existsSync(getPolicySigPath(dest)), false);
+
+    writeFileSync(getPolicyPath(dest), POLICY_TEMPLATE, "utf-8");
+    signPolicyInDir(dest);
+    assert.equal(verifyPolicy(dest).status, "unverifiable");
+    const check = await evaluatePolicy(dest, { strict: true });
+    assert.equal(check.ok, false);
+    assert.equal(check.signature?.status, "fail");
+  });
+
+  it("refuses an empty org anchor even when this machine signed the source", async () => {
+    writeFileSync(getPolicyPath(source), POLICY_TEMPLATE, "utf-8");
+    signPolicyInDir(source);
+    writeFileSync(getSignersPath(dest), '{"signers":[]}\n');
+
+    const result = pullPolicy(source, dest);
+    assert.equal(result.ok, false);
+    assert.equal(result.status, "no-anchor");
+    assert.equal(existsSync(getPolicyPath(dest)), false);
+
+    writeFileSync(getPolicyPath(dest), POLICY_TEMPLATE, "utf-8");
+    signPolicyInDir(dest);
+    const check = await evaluatePolicy(dest, { strict: true });
+    assert.equal(check.ok, false);
+    assert.equal(check.signature?.status, "fail");
+  });
+});
+
+describe("pullPolicy source handling", () => {
   it("'no-source' when the source has no signed policy pair", () => {
     addPolicySigner(dest, resolveKeyStore().store.publicKeyPem()!, "org");
     const r = pullPolicy(source, dest);

@@ -44,7 +44,7 @@ import {
   verifyPolicy,
   type PolicyVerifyStatus,
 } from "./policy-doc.js";
-import { POLICY_SIGNERS_FILE, getSignersPath } from "./policy-trust.js";
+import { POLICY_SIGNERS_FILE, getSignersPath, hasPolicyAnchor } from "./policy-trust.js";
 
 export type PullStatus =
   /** Verified against the local anchor and written to the project. */
@@ -311,7 +311,7 @@ export function pullPolicy(
   }
 
   // §6.1 — the anchor is NEVER pulled; it must exist locally, committed out of band.
-  if (!existsSync(getSignersPath(destRoot))) {
+  if (!hasPolicyAnchor(destRoot)) {
     return {
       ok: false,
       status: "no-anchor",

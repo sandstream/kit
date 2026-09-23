@@ -22,6 +22,13 @@ environment, never a failed container). `--json` emits a redacted receipt of wha
 each step established, skipped, or degraded. It never fetches, stores, or logs the
 seed.
 
+When the repo has an org trust anchor (`.kit-policy.signers`), provide a policy
+source with `--policy-source <directory>` or `KIT_POLICY_SOURCE=<directory>`.
+The directory must hold `.kit-policy.toml` and `.kit-policy.sig`; local paths and
+`file://` directories are supported. Bootstrap fails closed if an anchor is
+present but no source is supplied, or if the source cannot be verified against
+the anchor. Without an anchor or a supplied source, it skips policy pull.
+
 The explicit two-step form still works and is the explainer for what `bootstrap` does:
 
 ```sh

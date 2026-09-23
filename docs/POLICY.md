@@ -119,10 +119,10 @@ kit policy trust --list                        # show trusted signers
 kit policy trust --remove <kid>                # revoke trust in a signer
 ```
 
-`verifyPolicy` resolves the signer key in trust order: a pinned `--key` → this
-machine's own identity → the committed org anchor. So a policy signed by the org
-key verifies as `valid (org trust anchor)` on any clone — asymmetric, no shared
-secret, only public keys distributed.
+`verifyPolicy` uses the committed org anchor when one is configured. Without an
+anchor, it can use this machine's own identity; an explicit `--key` pins the key
+for a standalone verification. A policy signed by an anchored org key verifies
+on any clone — asymmetric, no shared secret, only public keys distributed.
 
 **Fail-closed once anchored.** With a `.kit-policy.signers` present, a policy whose
 signer is NOT in it is a hard **fail** in `kit policy check` / `kit ci` (not a

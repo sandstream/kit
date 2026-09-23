@@ -132,15 +132,7 @@
         "verify": {
           "kind": "command",
           "summary": "Prove zero-egress: assert every scanner that would run air-gapped resolves to a local artifact (no cloud-only, no registry semgrep config)",
-          "x-kit-accepted-flags": [
-            "--env",
-            "--help",
-            "--json",
-            "--non-interactive",
-            "--read-only",
-            "--readonly",
-            "--version"
-          ],
+          "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-mcp": false,
@@ -149,15 +141,7 @@
       },
       "kind": "group",
       "summary": "Air-gap posture tools (verify)",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--help",
-        "--json",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-mcp": false,
@@ -460,7 +444,7 @@
     },
     "bootstrap": {
       "kind": "command",
-      "summary": "Cold-start an ephemeral environment in one command: setup → identity → policy pull → profile import → memory restore, from one platform-injected seed (fail-closed floor, fail-open fuel, --json receipt) (experimental)",
+      "summary": "Cold-start an ephemeral environment: setup → identity → policy pull → profile import → memory restore (--policy-source <dir> or KIT_POLICY_SOURCE with an org anchor; --json receipt) (experimental)",
       "x-kit-accepted-flags": [
         "--env",
         "--help",
@@ -468,6 +452,7 @@
         "--minimal",
         "--no-memory",
         "--non-interactive",
+        "--policy-source",
         "--profile",
         "--read-only",
         "--readonly",
@@ -542,15 +527,7 @@
         "cdp-url": {
           "kind": "command",
           "summary": "Print the detected Chrome DevTools Protocol URL, if one is configured or reachable (--json)",
-          "x-kit-accepted-flags": [
-            "--env",
-            "--help",
-            "--json",
-            "--non-interactive",
-            "--read-only",
-            "--readonly",
-            "--version"
-          ],
+          "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-mcp": false,
@@ -559,15 +536,7 @@
         "doctor": {
           "kind": "command",
           "summary": "Diagnose browser-verification readiness from [browser], selecting Playwright, system Chrome, CDP, or a blocker (--json)",
-          "x-kit-accepted-flags": [
-            "--env",
-            "--help",
-            "--json",
-            "--non-interactive",
-            "--read-only",
-            "--readonly",
-            "--version"
-          ],
+          "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-mcp": false,
@@ -576,15 +545,7 @@
         "playwright-env": {
           "kind": "command",
           "summary": "Print shell exports for browser test runners (--json emits the same env object)",
-          "x-kit-accepted-flags": [
-            "--env",
-            "--help",
-            "--json",
-            "--non-interactive",
-            "--read-only",
-            "--readonly",
-            "--version"
-          ],
+          "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-mcp": false,
@@ -593,15 +554,7 @@
         "status": {
           "kind": "command",
           "summary": "Print the selected browser strategy and top-level verdict (--json)",
-          "x-kit-accepted-flags": [
-            "--env",
-            "--help",
-            "--json",
-            "--non-interactive",
-            "--read-only",
-            "--readonly",
-            "--version"
-          ],
+          "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
           "x-kit-args-modeled": true,
           "x-kit-audience": "all",
           "x-kit-mcp": false,
@@ -610,15 +563,7 @@
       },
       "kind": "group",
       "summary": "Browser-verification diagnostics: select Playwright/system Chrome/CDP strategy from [browser] without guessing (doctor|status|cdp-url|playwright-env; --json)",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--help",
-        "--json",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-mcp": false,
@@ -995,16 +940,7 @@
     "design": {
       "kind": "command",
       "summary": "Check design quality (a11y, design tokens) against the baseline",
-      "x-kit-accepted-flags": [
-        "--enforce",
-        "--env",
-        "--help",
-        "--json",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--enforce","--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-mcp": false,
@@ -1161,14 +1097,7 @@
     "fix": {
       "kind": "command",
       "summary": "Auto-fix what is possible",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--help",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-mcp": true,
@@ -1277,15 +1206,7 @@
     "gha-audit": {
       "kind": "command",
       "summary": "CI hardening lint — unpinned actions/images + pwn-request/remote-include (GitHub Actions, GitLab CI, Bitbucket Pipelines)",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--help",
-        "--json",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-mcp": false,
@@ -1362,16 +1283,7 @@
     "heal": {
       "kind": "command",
       "summary": "Loop: auto-fix safe findings, re-scan until green; gate destructive, fail-closed on tamper (--dry-run, --agent)",
-      "x-kit-accepted-flags": [
-        "--agent",
-        "--dry-run",
-        "--env",
-        "--help",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--agent","--dry-run","--env","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-mcp": false,
@@ -1402,15 +1314,7 @@
         "add": {
           "kind": "command",
           "summary": "Install a built-in hook (secret-scan, post-pull-audit, context-check)",
-          "x-kit-accepted-flags": [
-            "--env",
-            "--force",
-            "--help",
-            "--non-interactive",
-            "--read-only",
-            "--readonly",
-            "--version"
-          ],
+          "x-kit-accepted-flags": ["--env","--force","--help","--non-interactive","--read-only","--readonly","--version"],
           "x-kit-args-modeled": true,
           "x-kit-audience": "human",
           "x-kit-mcp": false,
@@ -1419,15 +1323,7 @@
         "uninstall": {
           "kind": "command",
           "summary": "Remove the configured git hooks (enforcement off until re-installed)",
-          "x-kit-accepted-flags": [
-            "--env",
-            "--force",
-            "--help",
-            "--non-interactive",
-            "--read-only",
-            "--readonly",
-            "--version"
-          ],
+          "x-kit-accepted-flags": ["--env","--force","--help","--non-interactive","--read-only","--readonly","--version"],
           "x-kit-args-modeled": true,
           "x-kit-audience": "human",
           "x-kit-mcp": false,
@@ -1436,15 +1332,7 @@
       },
       "kind": "group",
       "summary": "Manage git hooks",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--force",
-        "--help",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--env","--force","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
       "x-kit-mcp": false,
@@ -1453,15 +1341,7 @@
     "identity": {
       "kind": "command",
       "summary": "Manage this machine/agent's Ed25519 identity (init/show/rotate) — asymmetric, attributable signing for audit/policy (experimental)",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--help",
-        "--non-interactive",
-        "--public",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--non-interactive","--public","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
       "x-kit-mcp": false,
@@ -1556,15 +1436,7 @@
     "insight": {
       "kind": "command",
       "summary": "Deterministic lifecycle insight (unused: loaded-but-never-called MCP servers, from the transcript index; --json)",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--help",
-        "--json",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
       "x-kit-mcp": false,
@@ -1573,15 +1445,7 @@
     "install": {
       "kind": "command",
       "summary": "Install missing tools via mise",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--help",
-        "--no-triage",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--no-triage","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
       "x-kit-mcp": false,
@@ -1654,16 +1518,7 @@
     "mcp": {
       "kind": "command",
       "summary": "MCP server over stdio; 'kit mcp web' connects ChatGPT through an outbound secure tunnel",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--from-env",
-        "--help",
-        "--non-interactive",
-        "--paste",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--env","--from-env","--help","--non-interactive","--paste","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
       "x-kit-mcp": false,
@@ -3559,16 +3414,7 @@
     "pkg": {
       "kind": "command",
       "summary": "Install package with mandatory triage (kit pkg npm:express)",
-      "x-kit-accepted-flags": [
-        "--agent",
-        "--dry-run",
-        "--env",
-        "--help",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--agent","--dry-run","--env","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
       "x-kit-mcp": false,
@@ -3577,15 +3423,7 @@
     "plugin": {
       "kind": "command",
       "summary": "Discover and manage kit plugins (search, list, scaffold, install)",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--help",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--tag",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--tag","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
       "x-kit-mcp": false,
@@ -3836,16 +3674,7 @@
     "sbom": {
       "kind": "command",
       "summary": "Generate a CycloneDX / SPDX SBOM from the lockfile (SARIF emit via kit scan --sarif)",
-      "x-kit-accepted-flags": [
-        "--agent",
-        "--env",
-        "--format",
-        "--help",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--agent","--env","--format","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-mcp": false,
@@ -4844,15 +4673,7 @@
     "slopsquat": {
       "kind": "command",
       "summary": "Score npm/PyPI packages for hallucination/slopsquat risk (registry metadata)",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--fail-on",
-        "--help",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--env","--fail-on","--help","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-mcp": false,
@@ -4961,16 +4782,7 @@
     "tools": {
       "kind": "command",
       "summary": "Inventory the CLIs on this machine — path, installer, installed version, and (with --latest) how far behind each one is",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--help",
-        "--json",
-        "--latest",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--json","--latest","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-mcp": false,
@@ -5003,15 +4815,7 @@
     "upgrade": {
       "kind": "command",
       "summary": "Update lock files from .kit.toml",
-      "x-kit-accepted-flags": [
-        "--env",
-        "--help",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--self",
-        "--version"
-      ],
+      "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--self","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
       "x-kit-mcp": false,

@@ -27,6 +27,8 @@ export interface BootstrapSeed {
   memoryBackup?: string;
   /** A control plane is configured (signers anchored) so `kit policy pull` is meaningful. */
   controlPlane: boolean;
+  /** Local path or file:// directory containing the signed org policy pair. */
+  policySource?: string;
 }
 
 export interface BootstrapOpts {
@@ -43,6 +45,8 @@ export interface BootstrapStep {
   failMode: FailMode;
   /** Present iff the step is skipped (absent seed / precondition). */
   skippedReason?: string;
+  /** Missing required seed for a fail-closed step; no command is invoked. */
+  blockedReason?: string;
 }
 
 /**
@@ -65,7 +69,19 @@ export function planBootstrap(seed: BootstrapSeed, opts: BootstrapOpts = {}): Bo
 
   steps.push(
     seed.controlPlane
-      ? { id: "policy", argv: ["policy", "pull"], failMode: "fail-closed" }
+      ? seed.policySource
+        ? {
+            id: "policy",
+            argv: ["policy", "pull", seed.policySource],
+            failMode: "fail-closed",
+          }
+        : {
+            id: "policy",
+            argv: null,
+            failMode: "fail-closed",
+            blockedReason:
+              "org trust anchor configured but no policy source provided (--policy-source or KIT_POLICY_SOURCE)",
+          }
       : {
           id: "policy",
           argv: null,
@@ -121,6 +137,9 @@ export interface StepResult {
  * Pure.
  */
 export function classifyStep(step: BootstrapStep, ran: boolean | null): StepResult {
+  if (step.blockedReason) {
+    return { id: step.id, status: "failed", failMode: step.failMode, detail: step.blockedReason };
+  }
   if (step.argv === null) {
     return {
       id: step.id,

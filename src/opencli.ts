@@ -165,10 +165,17 @@ function canonicalize(value: unknown): unknown {
 
 /**
  * Deterministic JSON for the OpenCLI snapshot: keys sorted, 2-space indent, LF
- * newlines, trailing newline — so the gen script and the golden test can do a
- * byte-for-byte compare on every OS (matches public-surface.ts discipline).
+ * newlines, trailing newline. Short accepted-flag arrays stay on one line so
+ * adding a flag does not inflate an already large generated contract.
  */
 export function serializeOpenCli(doc: OpenCliDoc): string {
   const json = JSON.stringify(canonicalize(doc), null, 2);
-  return `${json.replace(/\r\n/g, "\n")}\n`;
+  const compact = json.replace(
+    /("x-kit-accepted-flags": )((?:\[\n)(?:[ \t]+"[^"\n]+",?\n)+[ \t]+\])/g,
+    (whole, prefix: string, block: string) => {
+      const inline = JSON.stringify(JSON.parse(block));
+      return inline.length <= 100 ? prefix + inline : whole;
+    },
+  );
+  return `${compact.replace(/\r\n/g, "\n")}\n`;
 }

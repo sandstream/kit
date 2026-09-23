@@ -774,7 +774,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   bootstrap: {
     handler: cmdBootstrap,
     stability: "experimental",
-    help: "Cold-start an ephemeral environment in one command: setup → identity → policy pull → profile import → memory restore, from one platform-injected seed (fail-closed floor, fail-open fuel, --json receipt) (experimental)",
+    help: "Cold-start an ephemeral environment: setup → identity → policy pull → profile import → memory restore (--policy-source <dir> or KIT_POLICY_SOURCE with an org anchor; --json receipt) (experimental)",
   },
   panic: {
     handler: cmdPanic,

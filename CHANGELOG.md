@@ -45,6 +45,12 @@
 
 ### Fixed
 
+- **Org policy trust and bootstrap source.** An anchored repo accepts only org
+  signers for automatic policy verification and pull, even on the signing
+  machine; an empty anchor cannot authorize a pull. `kit bootstrap` now passes
+  `--policy-source` or `KIT_POLICY_SOURCE` to policy pull and fails closed when
+  an anchored repo has no source.
+
 - **Monkey browser evidence hardening.** The release gate now runs the generated
   Playwright config instead of trusting arbitrary repo or `--test-command` output;
   custom commands remain diagnostic but cannot attest browser execution. Live or
