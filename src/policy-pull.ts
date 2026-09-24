@@ -124,30 +124,24 @@ function readSignatureSnapshot(path: string): SignatureSnapshot | null {
     if (errorCode(error) === "ENOENT") return null;
     if (errorCode(error) !== "EINVAL") throw error;
   }
-  let info;
-  try {
-    info = lstatSync(path);
-  } catch (error) {
-    if (errorCode(error) === "ENOENT" && linkTarget === null) return null;
-    throw error;
-  }
   if (linkTarget !== null) {
+    const info = lstatSync(path);
     if (!info.isSymbolicLink()) {
       throw Object.assign(new Error("signature changed during snapshot"), { code: "EAGAIN" });
     }
     return { kind: "symlink", target: linkTarget };
   }
-  if (info.isSymbolicLink())
-    throw Object.assign(new Error("signature changed during snapshot"), { code: "EAGAIN" });
-  if (!info.isFile())
-    throw Object.assign(new Error("signature is not a regular file"), { code: "EINVAL" });
   const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
   try {
     const opened = fstatSync(fd);
-    if (!opened.isFile() || opened.dev !== info.dev || opened.ino !== info.ino) {
+    if (!opened.isFile())
+      throw Object.assign(new Error("signature is not a regular file"), { code: "EINVAL" });
+    const bytes = readFileSync(fd);
+    const entry = lstatSync(path);
+    if (!entry.isFile() || opened.dev !== entry.dev || opened.ino !== entry.ino) {
       throw Object.assign(new Error("signature changed during snapshot"), { code: "EAGAIN" });
     }
-    return { kind: "file", bytes: readFileSync(fd), mode: opened.mode };
+    return { kind: "file", bytes, mode: opened.mode };
   } finally {
     closeSync(fd);
   }
