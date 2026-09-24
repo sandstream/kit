@@ -43,8 +43,7 @@ export async function requireWorkingDirectory(cwd?: string): Promise<string> {
       throw new Error(`working directory ${workDir} does not exist`, { cause: error });
     throw error;
   }
-  if (!directory.isDirectory())
-    throw new Error(`working directory ${workDir} is not a directory`);
+  if (!directory.isDirectory()) throw new Error(`working directory ${workDir} is not a directory`);
   return workDir;
 }
 
