@@ -76,20 +76,17 @@ function isInside(parent: string, child: string): boolean {
 
 function readExecutableHook(path: string): string | null {
   try {
-    // Windows may not expose O_NOFOLLOW. Check the entry and opened descriptor.
-    const entry = lstatSync(path);
-    if (!entry.isFile()) return null;
+    // Open first, then verify the descriptor still names the directory entry.
+    // Windows may not expose O_NOFOLLOW, so a post-read lstat guards that case.
     const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
     try {
       const state = fstatSync(fd);
-      if (
-        !state.isFile() ||
-        state.dev !== entry.dev ||
-        state.ino !== entry.ino ||
-        (process.platform !== "win32" && (state.mode & 0o111) === 0)
-      )
+      if (!state.isFile() || (process.platform !== "win32" && (state.mode & 0o111) === 0))
         return null;
-      return readFileSync(fd, "utf-8");
+      const body = readFileSync(fd, "utf-8");
+      const entry = lstatSync(path);
+      if (!entry.isFile() || state.dev !== entry.dev || state.ino !== entry.ino) return null;
+      return body;
     } finally {
       closeSync(fd);
     }

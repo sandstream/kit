@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { resolveOneCliConfig, generatePlaceholder, checkOneCliStatus } from "./secrets-onecli.js";
+import {
+  resolveOneCliConfig,
+  generatePlaceholder,
+  checkOneCliStatus,
+  registerSecretInOneCli,
+} from "./secrets-onecli.js";
 
 describe("resolveOneCliConfig", () => {
   it("defaults to localhost when no env vars are set", () => {
@@ -63,5 +68,40 @@ describe("checkOneCliStatus", () => {
     assert.equal(status.reachable, false);
     assert.equal(status.authenticated, false);
     assert.ok(status.error);
+  });
+
+  it("rejects remote plaintext endpoints before sending an API key or vault value", async () => {
+    const cfg = {
+      apiUrl: "http://onecli.internal:10254",
+      gatewayUrl: "http://127.0.0.1:10255",
+      apiKey: "oc_test_xyz",
+    };
+    const status = await checkOneCliStatus(cfg);
+    assert.equal(status.reachable, false);
+    assert.match(status.error ?? "", /HTTPS/);
+    await assert.rejects(
+      registerSecretInOneCli(
+        { name: "API_KEY", value: "fixture-secret", hostPattern: "api.example.com" },
+        cfg,
+      ),
+      /HTTPS/,
+    );
+  });
+
+  it("rejects credentials embedded in a remote API URL", async () => {
+    const cfg = {
+      apiUrl: "https://user:password@onecli.internal",
+      gatewayUrl: "http://127.0.0.1:10255",
+      apiKey: "oc_test_xyz",
+    };
+    await assert.rejects(
+      registerSecretInOneCli(
+        { name: "API_KEY", value: "fixture-secret", hostPattern: "api.example.com" },
+        cfg,
+      ),
+      /without credentials/,
+    );
+    const status = await checkOneCliStatus(cfg);
+    assert.equal(status.apiUrl, "<invalid OneCLI API URL>");
   });
 });

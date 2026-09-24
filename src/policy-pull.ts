@@ -115,21 +115,30 @@ function errorCode(error: unknown): string {
 }
 
 function readSignatureSnapshot(path: string): SignatureSnapshot | null {
+  // A symlink target can only be read by path in portable Node. Read it before
+  // checking the entry, so no later path read follows a checked symlink.
+  let linkTarget: string | null = null;
+  try {
+    linkTarget = readlinkSync(path);
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return null;
+    if (errorCode(error) !== "EINVAL") throw error;
+  }
   let info;
   try {
     info = lstatSync(path);
   } catch (error) {
-    if (errorCode(error) === "ENOENT") return null;
+    if (errorCode(error) === "ENOENT" && linkTarget === null) return null;
     throw error;
   }
-  if (info.isSymbolicLink()) {
-    const target = readlinkSync(path);
-    const after = lstatSync(path);
-    if (!after.isSymbolicLink() || after.dev !== info.dev || after.ino !== info.ino) {
+  if (linkTarget !== null) {
+    if (!info.isSymbolicLink()) {
       throw Object.assign(new Error("signature changed during snapshot"), { code: "EAGAIN" });
     }
-    return { kind: "symlink", target };
+    return { kind: "symlink", target: linkTarget };
   }
+  if (info.isSymbolicLink())
+    throw Object.assign(new Error("signature changed during snapshot"), { code: "EAGAIN" });
   if (!info.isFile())
     throw Object.assign(new Error("signature is not a regular file"), { code: "EINVAL" });
   const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
