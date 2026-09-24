@@ -53,7 +53,7 @@ Use this checklist before publishing your plugin to npm and registering with the
 ## Package Configuration
 
 ### package.json
-- [ ] Name follows convention: `@provider/kit-service` or `sandstream-kit-plugin-service`
+- [ ] Name follows convention: scaffolded community packages use `kit-plugin-<service>`; scoped packages may use `@provider/kit-service`; first-party packages use `sandstream-kit-plugin-<service>`
 - [ ] Version is valid semver: `1.0.0`, `0.1.0`, etc.
 - [ ] Description is clear and concise
 - [ ] Keywords include: `kit`, `adapter`, `plugin`
@@ -102,7 +102,7 @@ Use this checklist before publishing your plugin to npm and registering with the
 - [ ] npm account created and logged in
 - [ ] 2FA enabled on npm account (recommended)
 - [ ] Package name is available and not taken
-- [ ] Scope is correct (`@provider/` or `sandstream-kit-plugin-`)
+- [ ] Package prefix or scope is correct (`kit-plugin-` for scaffolded community packages, `@provider/` if scoped, `sandstream-kit-plugin-` for first-party packages)
 
 ### Plugin.json Metadata
 - [ ] Create `plugin.json` with registry metadata:

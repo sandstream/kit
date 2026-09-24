@@ -16,10 +16,12 @@ When `v<N>.<N>.<N>` is tagged on `main`:
    signed provenance statement for the published tarball to this repo's
    attestation store. **Present from 6.3.2 onward**; releases up to and
    including 6.3.1 have none (see the note below).
-3. **CycloneDX SBOM** (`sbom.cyclonedx.json`) — full dependency-tree
-   inventory in the format US EO 14028 / EU CRA expect.
-4. **SPDX SBOM** (`sbom.spdx.json`) — same, in the SPDX 2.3 format some
-   federal/RHEL consumers prefer.
+3. **CycloneDX SBOM** (`sbom.cyclonedx.json`) — inventory Syft derives from
+   the extracted `sandstream-kit` npm tarball. It does not scan the repository
+   checkout or the separately published plugin tarballs.
+4. **SPDX SBOM** (`sbom.spdx.json`) — the same root-tarball scan in SPDX 2.3
+   format. The root tarball has no installed `node_modules`, so these files
+   should not be treated as a complete transitive dependency inventory.
 5. **Signed git tag** — GPG-signed annotated tag on the publish commit.
    Verify with `git tag -v v<N>.<N>.<N>`.
 
@@ -39,6 +41,7 @@ npm audit signatures
 ```
 
 The `npm audit signatures` command checks two things:
+
 - Registry signature (every npm package since Apr 2024)
 - Provenance attestation (only packages published with `--provenance`)
 
@@ -93,6 +96,7 @@ git tag -v v<version>
 ```
 
 Expected output:
+
 ```
 gpg: Signature made <timestamp>
 gpg:                using <KEY-TYPE> key <KEY-ID>
@@ -100,6 +104,7 @@ gpg: Good signature from "<MAINTAINER>" [<TRUST>]
 ```
 
 Import the maintainer's public key once:
+
 ```bash
 gh api /users/sandstream/gpg_keys --jq '.[0].raw_key' | gpg --import
 ```
@@ -128,37 +133,33 @@ grype sbom:sbom.cyclonedx.json
 trivy sbom sbom.cyclonedx.json
 ```
 
-The SBOM lists every transitive dep with its resolved version and license.
-If your supply-chain policy bans a specific package or license, this is the
-artifact you scan against.
+The SBOM lists components Syft detects in the extracted root tarball. It does
+not establish a complete installed dependency tree or describe the separate
+plugin packages. Scan it for package contents and detected components; assess
+installed transitive dependencies separately.
 
 ## What "verified" buys you
 
-| Verification | Catches |
-|---|---|
-| `npm audit signatures` | Tarball tampering after publish; registry compromise |
+| Verification            | Catches                                                                                                                                                                           |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm audit signatures`  | Tarball tampering after publish; registry compromise                                                                                                                              |
 | `gh attestation verify` | Cross-checks against the GitHub build — catches divergence between npm-side and source-of-truth. Available from **6.3.2** onward; nothing to check on ≤6.3.1 (see the note above) |
-| `git tag -v` | Tag-rewrite attacks; ensures the commit you check out is what the maintainer published |
-| SBOM scan | Known-vulnerable transitive deps; license-policy violations |
+| `git tag -v`            | Tag-rewrite attacks; ensures the commit you check out is what the maintainer published                                                                                            |
+| SBOM scan               | Vulnerabilities or license-policy violations among detected components of the root tarball                                                                                        |
 
-What these four do NOT add up to is a SLSA level. SLSA levels are defined on the
-build/provenance track: L3 asks for a hardened build platform producing
-non-falsifiable provenance, which `npm publish --provenance` from a GitHub-hosted
-runner does supply — verified for 6.3.1 and 6.3.2, whose npm attestations carry a
-`slsa.dev/provenance/v1` statement with the GitHub Actions workflow buildType. From
-6.3.2 the GitHub artifact attestation carries the same predicate type for the same
-tarball, independently signed. The other three rows are CONSUMER-side verifications.
-They are worth running, and they do not raise a level.
+These four checks do not certify a SLSA level. npm provenance and the optional
+GitHub artifact attestation identify the build workflow and artifact digest;
+they are evidence for assessing a release, not a substitute for assessing the
+build platform and its controls. The other rows are consumer-side checks.
 
 And this paragraph previously claimed "the build is reproducible from source". It is
 not, and SLSA does not ask for it at any level (reproducible builds are explicitly out
 of scope in SLSA v1.0). kit has no reproducible-build proof — no build-timestamp
 normalisation, no rebuild-and-compare in CI. Do not cite kit as reproducible.
 
-Honest summary of what the four buy you: the artifact you install is the one that was
-published (signatures), it was built by this repo's workflow from a signed tag
-(provenance + `git tag -v`), and its dependency tree is enumerated for scanning (SBOM).
-That is a strong chain. It is not a reproducibility claim and not a certified level.
+Together, the signatures identify the published tarball, provenance identifies
+the workflow and tag, and the SBOM inventories components detected in the root
+tarball. This is neither a reproducibility claim nor a certified SLSA level.
 
 ## Update and telemetry boundaries
 

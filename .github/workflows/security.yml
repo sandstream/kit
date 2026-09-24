@@ -42,6 +42,9 @@ jobs:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
           args: --severity-threshold=high --all-projects
+      - name: Note Snyk skip (visible, not a silent green)
+        if: env.SNYK_TOKEN == ''
+        run: echo "::warning title=Snyk skipped::SNYK_TOKEN not set; dependency stage ran npm audit only"
 
   # Stage 1b: Supply-chain (bumblebee — known compromises, not CVEs)
   supply-chain:

@@ -21,6 +21,10 @@ export async function runnerFixture(): Promise<string> {
       devDependencies: { "@playwright/test": "1.0.0" },
     }),
   );
+  const playwright = join(root, "node_modules", "@playwright", "test");
+  mkdirSync(playwright, { recursive: true });
+  writeFileSync(join(playwright, "package.json"), JSON.stringify({ main: "index.js" }));
+  writeFileSync(join(playwright, "index.js"), "module.exports = {};\n");
   await writeMonkeyHarness(root);
   writeFileSync(
     join(root, ".kit/monkey-test/role-matrix.json"),

@@ -6,6 +6,7 @@ import {
   prioritizeFindings,
   validateExpectedFindings,
   validateMoneyFlowConfig,
+  validateRoleMatrix,
 } from "./monkey-test-contract.js";
 
 describe("monkey-test contract", () => {
@@ -55,5 +56,16 @@ describe("monkey-test contract", () => {
     });
     assert.equal(flow.action, "cancel");
     assert.equal(flow.mode, "sandbox");
+  });
+
+  it("rejects five role labels backed by the same route and marker expectations", () => {
+    const roles = MONKEY_ROLES.map(({ id }) => ({
+      id,
+      allowRoutes: ["/account"],
+      denyRoutes: ["/admin"],
+      requiredText: ["same-user"],
+      forbiddenText: ["other-user"],
+    }));
+    assert.throws(() => validateRoleMatrix({ configured: true, roles }), /distinct/i);
   });
 });

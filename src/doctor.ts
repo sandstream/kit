@@ -156,25 +156,11 @@ export async function checkToolsInPath(
 }
 
 async function checkKitWrapper(): Promise<DoctorCheck | null> {
-  const { kitWrapperPath, WRAPPER_MARKER } = await import("./kit-wrapper.js");
-  const path = kitWrapperPath();
+  const { describeWrapper, judgeWrapper } = await import("./hook-floor.js");
+  const verdict = judgeWrapper(describeWrapper());
   const name = "hook wrapper";
   const category = "hooks";
-  try {
-    await access(path);
-  } catch {
-    return {
-      name,
-      status: "warn",
-      detail: `${path} missing — hooks may fail in a non-login shell. Run: kit memory install`,
-      category,
-    };
-  }
-  const content = await readFile(path, "utf-8").catch(() => "");
-  if (!content.includes(WRAPPER_MARKER)) {
-    return { name, status: "warn", detail: `${path} exists but is not kit-managed`, category };
-  }
-  return { name, status: "pass", detail: path, category };
+  return { name, status: verdict.status, detail: verdict.detail, category };
 }
 
 async function checkMemoryHooks(): Promise<DoctorCheck | null> {

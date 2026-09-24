@@ -1,9 +1,9 @@
 import { describe, it, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, mkdir, writeFile, chmod } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, chmod, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { checkHooks, isGitRepository } from "./check-hooks.js";
+import { checkHooks, hookCheckStatus, isGitRepository } from "./check-hooks.js";
 import { installHooks } from "./hooks.js";
 import type { HooksConfig } from "./config.js";
 
@@ -83,6 +83,18 @@ describe("checkHooks", () => {
     assert.ok(results[0].detail.includes("externally managed"));
   });
 
+  it("does not count a symlinked hook as installed enforcement", async () => {
+    await mkdir(join(gitDir, "hooks"), { recursive: true });
+    const target = join(tempDir, "operator-hook");
+    await writeFile(target, "#!/bin/sh\nnpm test\n", { mode: 0o755 });
+    await symlink(target, join(gitDir, "hooks", "pre-commit"));
+
+    const [result] = await checkHooks({ "pre-commit": ["npm test"] });
+    assert.equal(hookCheckStatus(result), "fail");
+    assert.match(result.detail, /symbolic link/i);
+    await rm(target);
+  });
+
   it("reports not managed by kit when external hook misses configured commands", async () => {
     await mkdir(join(gitDir, "hooks"), { recursive: true });
     await writeFile(join(gitDir, "hooks", "pre-commit"), "#!/bin/sh\necho manual\n", {
@@ -97,7 +109,9 @@ describe("checkHooks", () => {
     assert.equal(results[0].upToDate, false);
     assert.ok(results[0].detail.includes("not managed by kit"));
   });
+});
 
+describe("checkHooks generated hooks", () => {
   it("reports up to date when all commands are present in kit hook", async () => {
     // Use hooks.ts to install a real kit hook
     const config: HooksConfig = {

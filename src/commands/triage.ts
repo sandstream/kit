@@ -10,6 +10,7 @@ import { triageVaultConfig } from "../vault-triage.js";
 import { triageModelArtifact } from "../model-artifact-triage.js";
 import { existsSync, statSync } from "node:fs";
 import { redactSecrets } from "../utils/redactSecrets.js";
+import { appendTriagePass, TRIAGE_LOG_FILE, type TriageLogEntry } from "../triage-receipt.js";
 
 export async function cmdTriage(): Promise<boolean> {
   const args = process.argv.slice(3);
@@ -425,22 +426,11 @@ async function readMcpPins(
   }
 }
 
-const TRIAGE_LOG_FILE = ".kit-triage.jsonl";
 /** A triage PASS counts as current for this long. Exported so every consumer reads ONE
  *  number: `check-deps` gates new manifest entries on it, and the "install-script grants"
  *  security check asks the same freshness question about a package granted install scripts.
  *  Two copies of a policy window drift, and the drift is silent. */
 export const TRIAGE_MAX_AGE_DAYS = 7;
-
-interface TriageLogEntry {
-  timestamp: string;
-  type: string;
-  target: string;
-  sandbox: boolean;
-  /** Whether a deep delegate scan (SkillSpector Stage 1) ran — lets a gate require it for skills. */
-  deep?: boolean;
-  granter: string;
-}
 
 /**
  * Append a PASS entry to the triage log. Exported so the MCP `kit_triage` tool
@@ -456,22 +446,8 @@ export async function recordTriageRun(
   deep = false,
   cwd?: string,
 ): Promise<void> {
-  const { appendFile } = await import("node:fs/promises");
-  const { resolve } = await import("node:path");
-  const entry: TriageLogEntry = {
-    timestamp: new Date().toISOString(),
-    type,
-    target,
-    sandbox,
-    deep,
-    granter: process.env.USER ?? "unknown",
-  };
   try {
-    await appendFile(
-      resolve(cwd ?? process.cwd(), TRIAGE_LOG_FILE),
-      JSON.stringify(entry) + "\n",
-      "utf-8",
-    );
+    await appendTriagePass({ type, target, sandbox, deep, cwd });
   } catch (err) {
     console.error(
       `${c.dim}(triage-log append failed: ${err instanceof Error ? err.message : err})${c.reset}`,

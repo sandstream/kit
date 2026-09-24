@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseEnvFile } from "./env-inspect.js";
 import {
@@ -31,6 +31,21 @@ export interface RunResult {
   timedOut?: boolean;
   /** True when output was capped at maxOutputBytes and the process killed. */
   truncated?: boolean;
+}
+
+export async function requireWorkingDirectory(cwd?: string): Promise<string> {
+  const workDir = cwd ?? process.cwd();
+  let directory;
+  try {
+    directory = await stat(workDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      throw new Error(`working directory ${workDir} does not exist`, { cause: error });
+    throw error;
+  }
+  if (!directory.isDirectory())
+    throw new Error(`working directory ${workDir} is not a directory`);
+  return workDir;
 }
 
 /** Default wall-clock limit for a subprocess (2 minutes). */

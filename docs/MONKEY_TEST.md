@@ -154,15 +154,26 @@ selectors. Document-wide selectors such as `body`, `html`, `:root`, and `*` are
 refused. Runtime and dotenv inspection also rejects live/production mode signals
 for Stripe, PayPal/Braintree, Adyen, and Square before seed or browser side effects.
 
+This is browser evidence about the application's configured UI selectors. A
+passing money-flow case does not prove that the app called a real Stripe, PayPal,
+Braintree, Adyen, or Square sandbox endpoint, crossed a provider SDK boundary,
+created a provider-side payment object, or received a verified webhook. The app
+can render the expected final state without doing any of those things. For a
+release that depends on provider settlement or webhooks, verify the provider
+sandbox transaction and webhook path separately and retain its receipt.
+
 ## Findings
 
 Output is a prioritized list with severity, area, role, route, repro, file when
-known, and fix guidance. Critical and high findings should block release.
+known, and fix guidance. The command's gate stays red for every unresolved
+finding, including low and medium findings.
 
 Do not silence the gate by deleting assertions or broadening ignores. Expected
 findings require `MONKEY_EXPECTED_FINDINGS` entries with exact `title`, `role`,
 and `route`, plus a specific `reason`; optional fields narrow matching further.
-Reason-only entries are rejected. Skips require `--expected <reason>` or
+This allowlist applies to generated browser findings, not static or runner
+findings. Critical authorization findings cannot be waived. Reason-only entries
+are rejected. Skips require `--expected <reason>` or
 `MONKEY_EXPECTED_REASON`, and skip only the named pack: prerequisite, harness,
 temporary-env, and seed validation still run.
 Skipping browser execution or its money-flow case always leaves the release gate

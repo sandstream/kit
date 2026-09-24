@@ -17,7 +17,7 @@
 
 | Flag                         | Effect                                                                                     |
 | ---------------------------- | ------------------------------------------------------------------------------------------ |
-| `--read-only` / `--readonly` | Activate session-wide refusal of every mutating op. Also honored as `KIT_READ_ONLY=1` env. |
+| `--read-only` / `--readonly` | Refuse project and provider mutations. Also honored as `KIT_READ_ONLY=1` env. |
 | `--non-interactive`          | Skip all confirmation prompts. Required in CI / agent contexts.                            |
 | `--env=<name>`               | Select the environment overlay (`[env.<name>]` in `.kit.toml`). Also honored as `KIT_ENV`. |
 | `--version` / `-v`           | Print kit version + exit.                                                                  |
@@ -27,6 +27,10 @@
 written before or after the command word — `kit --read-only check` and
 `kit check --read-only` are equivalent. Every command accepts them; a command
 that rejects unknown flags allows these on top of its own.
+
+`KIT_READ_ONLY` also accepts `true`, `yes`, and `on`, ignoring case and surrounding spaces.
+Read commands can still initialize local machine state under `~/.kit`, including memory
+database and device identity files. Read-only mode does not guarantee a write-free home directory.
 
 **`[tools]` pins say what they check.** An exact pin (`bun = "1.3.10"`) is a prefix match on
 the installed version. `latest` now means *current*: kit resolves the newest version the tool's
@@ -435,8 +439,8 @@ Local-first second brain — SQLite + FTS5, deterministic, zero model calls. Ful
 
 ## Notes on read-only mode
 
-The following commands write external state and refuse when
-`KIT_READ_ONLY=1`:
+Mutating CLI forms are declared in `src/read-only-surface.ts` and refuse when
+`KIT_READ_ONLY=1` (also `true`, `yes`, or `on`, case-insensitive). Examples:
 
 - `secrets migrate` / `vault-migrate` / `rotate` / `set-value` / `pull --from`
 - `auth elevate` (writes elevation marker)

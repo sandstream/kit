@@ -145,9 +145,12 @@ export async function createPlugin(
 
     if (!blockedTarget) {
       try {
-        await deps.exec("npm", ["install"], { cwd: pluginDir, timeout: 60_000 });
+        // Runtime images set NODE_ENV=production. The scaffold's build and test tools are
+        // devDependencies, so request them explicitly even under that inherited setting.
+        await deps.exec("npm", ["install", "--include=dev"], { cwd: pluginDir, timeout: 60_000 });
       } catch {
-        installMessage = "Dependency install failed; run npm install after resolving the error.";
+        installMessage =
+          "Dependency install failed; run npm install --include=dev after resolving the error.";
       }
     }
   }
@@ -161,9 +164,9 @@ export async function createPlugin(
     `# And add to your project: { "kitPlugins": ["${packageName}"] }`,
   ];
   if (blockedTarget) {
-    nextSteps.splice(1, 0, `kit triage npm ${blockedTarget}`, `npm install`);
-  } else if (installMessage) {
-    nextSteps.splice(1, 0, `npm install`);
+    nextSteps.splice(1, 0, `kit triage npm ${blockedTarget}`, `npm install --include=dev`);
+  } else if (opts.skipInstall || installMessage) {
+    nextSteps.splice(1, 0, `npm install --include=dev`);
   }
 
   return {

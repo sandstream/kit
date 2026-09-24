@@ -149,7 +149,8 @@ export async function cmdStandards(): Promise<boolean> {
  *   - tests.untested_files
  */
 export async function cmdBaseline(): Promise<boolean> {
-  const sub = process.argv[3];
+  const first = process.argv[3];
+  const sub = first?.startsWith("-") ? undefined : first;
   if (!sub || sub === "--help" || sub === "-h") {
     console.log(`${c.bold}kit baseline${c.reset} — freeze current warnings`);
     console.log("\nUsage:");

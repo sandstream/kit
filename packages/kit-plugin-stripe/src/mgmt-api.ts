@@ -51,7 +51,7 @@ function redactErrorText(input: string, knownSecrets: readonly string[] = []): s
  */
 function assertNotReadOnly(operation: string): void {
   const v = process.env.KIT_READ_ONLY;
-  if (v === "1" || v === "true") {
+  if (["1", "true", "yes", "on"].includes((v ?? "").trim().toLowerCase())) {
     throw new Error(`read-only mode active — refusing "${operation}"`);
   }
 }

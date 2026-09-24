@@ -113,7 +113,7 @@ function withExport<T>(exportPath: string, opts: SyncOptions, read: (path: strin
   }
   if (!asymmetric && !opts.passphrase) {
     throw new Error(
-      "this looks like an encrypted backup — set KIT_MEMORY_PASSPHRASE (or pass --passphrase) to decrypt it",
+      "this looks like an encrypted backup — set KIT_MEMORY_PASSPHRASE to decrypt it",
     );
   }
 

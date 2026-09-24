@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { openMemoryDb, insertMessage, upsertSession, searchMessages } from "./db.js";
+import { openMemoryDb, insertMessage, upsertSession, searchMessages, forgetMemory } from "./db.js";
 import { backupEncrypted } from "./backup.js";
 import { syncFromExport } from "./sync.js";
 import {
@@ -180,6 +180,39 @@ it("concurrent remote action state is visible in sync, pull and Claude's user me
   const payload = JSON.parse(hook.stdout);
   assert.match(payload.systemMessage, /memory pull needs attention/);
   assert.match(payload.hookSpecificOutput.additionalContext, /memory pull needs attention/);
+});
+
+it("CLI pull reports an applied deletion even when it imports no new messages", (t) => {
+  const { sourcePath, blob, destination } = setup(t);
+  initSyncConfig({
+    transport: "command",
+    pushCmd: "true",
+    pullCmd: `cp "${blob}" "$KIT_MEMORY_BLOB"`,
+  });
+  const run = () =>
+    spawnSync(process.execPath, [...cli, "memory", "pull"], {
+      cwd: destination,
+      encoding: "utf8",
+    });
+  assert.equal(run().status, 0);
+  const source = openMemoryDb(sourcePath);
+  try {
+    assert.equal(forgetMemory(source, "alpha").ok, true);
+  } finally {
+    source.close();
+  }
+  backupEncrypted(PASS, sourcePath, blob);
+
+  const pulled = run();
+  assert.equal(pulled.status, 0, pulled.stderr);
+  assert.doesNotMatch(pulled.stdout, /already up to date|nothing new/i);
+  assert.match(pulled.stdout, /tombstones: 1 merged · 1 local rows deleted/i);
+  const local = openMemoryDb();
+  try {
+    assert.equal(searchMessages(local, "importeddecision").length, 1);
+  } finally {
+    local.close();
+  }
 });
 
 it("the real CLI repairs a prior import and reports scope-only changes", (t) => {

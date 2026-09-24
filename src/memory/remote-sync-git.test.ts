@@ -12,6 +12,7 @@ import {
   upsertSession,
 } from "./db.js";
 import { pullMemory, pushMemory } from "./remote-sync.js";
+import { generateMemoryKeypair, saveMemoryKey } from "./backup.js";
 import { palAdd } from "./pal.js";
 import { gitHistoryFixture as fixture } from "./remote-sync-causal.test-support.js";
 
@@ -57,6 +58,50 @@ it("a fresh device recalls both offline writers after separate successful Git pu
     db.close();
   }
   assert.equal(pullMemory(config, passphrase, dir).merge?.messages, 0);
+});
+
+it("a repeated Git push of an unchanged memory store creates no new commit", (t) => {
+  const { dir, config, device } = fixture(t);
+  device("a");
+  seed("unchanged-session", "claude-code", "unchanged memory");
+  assert.equal(pushMemory(config, passphrase, dir).pushed, true);
+  const head = execFileSync("git", ["ls-remote", config.remote!, "refs/heads/main"], {
+    encoding: "utf8",
+  });
+
+  const repeated = pushMemory(config, passphrase, dir);
+  assert.equal(repeated.pushed, false);
+  assert.equal(repeated.verified, true);
+  assert.equal(
+    execFileSync("git", ["ls-remote", config.remote!, "refs/heads/main"], {
+      encoding: "utf8",
+    }),
+    head,
+  );
+});
+
+it("a recipient-key Git push is a no-op when this machine has the matching private key", (t) => {
+  const { dir, config, device } = fixture(t);
+  device("a");
+  const pair = generateMemoryKeypair();
+  saveMemoryKey(pair.privateJwk);
+  seed("key-session", "codex", "unchanged recipient memory");
+  const keyed = { ...config, recipient: pair.publicKey };
+  assert.equal(pushMemory(keyed, undefined, dir).pushed, true);
+  assert.equal(pushMemory(keyed, undefined, dir).pushed, false);
+});
+
+it("a changed recipient key still publishes a new encrypted snapshot", (t) => {
+  const { dir, config, device } = fixture(t);
+  device("a");
+  const oldKey = generateMemoryKeypair();
+  saveMemoryKey(oldKey.privateJwk);
+  seed("rotation-session", "codex", "key rotation memory");
+  assert.equal(pushMemory({ ...config, recipient: oldKey.publicKey }, undefined, dir).pushed, true);
+
+  const newKey = generateMemoryKeypair();
+  saveMemoryKey(newKey.privateJwk);
+  assert.equal(pushMemory({ ...config, recipient: newKey.publicKey }, undefined, dir).pushed, true);
 });
 
 it("unavailable Git transport fails visibly instead of reporting an empty remote", (t) => {

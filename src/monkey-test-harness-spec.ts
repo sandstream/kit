@@ -147,6 +147,18 @@ function loadRoleMatrix(): RoleExpectation[] {
 
 const roleExpectations = loadRoleMatrix();
 
+const seenAuthStates = new Map<string, string>();
+for (const role of roles) {
+  const state = storageState(role);
+  if (!state) continue;
+  const content = readFileSync(state).toString("base64");
+  const otherRole = seenAuthStates.get(content);
+  if (otherRole) {
+    throw new Error(\`Auth storage state for \${role.id} is shared with \${otherRole}.\`);
+  }
+  seenAuthStates.set(content, role.id);
+}
+
 function summarize(findings: Finding[]): string {
   return findings
     .sort((a, b) => severityRank[a.severity] - severityRank[b.severity])

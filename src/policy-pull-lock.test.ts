@@ -6,6 +6,7 @@ import fs, {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -212,6 +213,52 @@ describe("policy pull lock during pair replacement", () => {
       assert.equal(competingPull(source7).status, "applied");
     });
   }
+});
+
+describe("policy pull process death during pair replacement (PP-06)", () => {
+  it("fails closed, blocks automatic retry, and permits inspected manual recovery", () => {
+    const previousPolicy = readFileSync(getPolicyPath(dest));
+    const incomingSignature = readFileSync(getPolicySigPath(source6));
+    const run = spawnSync(
+      process.execPath,
+      [
+        ...process.execArgv.filter((arg) => !arg.startsWith("--test")),
+        "--input-type=module",
+        "--eval",
+        `const fs = await import('node:fs');
+         const { syncBuiltinESMExports } = await import('node:module');
+         const { pullPolicy } = await import(process.argv[1]);
+         const { getPolicySigPath } = await import(process.argv[2]);
+         const rename = fs.default.renameSync;
+         fs.default.renameSync = (from, to) => {
+           rename(from, to);
+           if (to === getPolicySigPath(process.argv[4])) process.kill(process.pid, 'SIGKILL');
+         };
+         syncBuiltinESMExports();
+         pullPolicy(process.argv[3], process.argv[4]);`,
+        new URL("./policy-pull.js", import.meta.url).href,
+        new URL("./policy-doc.js", import.meta.url).href,
+        source6,
+        dest,
+      ],
+      { encoding: "utf8", timeout: 10_000, env: process.env },
+    );
+    assert.equal(run.error, undefined, String(run.error));
+    assert.equal(run.signal, "SIGKILL", run.stderr);
+    assert.equal(verifyPolicy(dest).status, "invalid");
+    assert.deepEqual(readFileSync(getPolicyPath(dest)), previousPolicy);
+    assert.deepEqual(readFileSync(getPolicySigPath(dest)), incomingSignature);
+    const lock = join(dest, ".kit-policy-pull.lock");
+    assert.equal(existsSync(lock), true);
+    assert.ok(readdirSync(dest).some((name) => name.startsWith(".kit-policy-apply-")));
+    assert.equal(competingPull(source7).status, "apply-failed");
+    assert.equal(verifyPolicy(dest).status, "invalid");
+
+    // Operator has inspected the destination and established that the owner is gone.
+    rmSync(lock, { recursive: true });
+    assert.equal(pullPolicy(source7, dest).status, "applied");
+    assert.equal(verifyPolicy(dest).status, "valid");
+  });
 });
 
 describe("policy pull lock filesystem errors", () => {

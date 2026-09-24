@@ -34,6 +34,17 @@ describe("read-only mode", () => {
     }
   });
 
+  it("honors case and whitespace variants of truthy KIT_READ_ONLY", () => {
+    for (const value of ["TRUE", " yes ", "On"]) {
+      process.env.KIT_READ_ONLY = value;
+      try {
+        assert.equal(isReadOnlyMode(), true, value);
+      } finally {
+        _resetReadOnlyModeForTests();
+      }
+    }
+  });
+
   it("activateReadOnlyMode sets the env var", () => {
     _resetReadOnlyModeForTests();
     activateReadOnlyMode("flag");

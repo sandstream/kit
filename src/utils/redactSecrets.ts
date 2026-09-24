@@ -73,6 +73,21 @@ const KV_SECRET_RE = new RegExp(
   "g",
 );
 
+// Secrets under explicit field names appear in dotenv, JSON and escaped log
+// strings. Keep the key and quote delimiters so diagnostics remain readable.
+// Key names are bounded; the value alternatives cannot overlap, so even a
+// long malformed value is scanned linearly rather than backtracked quadratically.
+const KEYED_SECRET_NAME =
+  "(?:(?:[A-Za-z0-9_]{0,63}_)?(?:KEY|TOKEN|SECRET|PASSWORD|PASS|PWD|CREDENTIALS?)|PGPASSWORD|MYSQLPASSWORD|AUTH_HEADER)";
+const KEYED_QUOTED_RE = new RegExp(
+  String.raw`(?<![A-Za-z0-9_])((?:\\?["'])?${KEYED_SECRET_NAME}(?:\\?["'])?[ \t]*[:=][ \t]*)(\\?["'])((?:\\.|[^"'\\\r\n]){8,})\2`,
+  "gi",
+);
+const KEYED_UNQUOTED_RE = new RegExp(
+  String.raw`(?<![A-Za-z0-9_])((?:\\?["'])?${KEYED_SECRET_NAME}(?:\\?["'])?[ \t]*[:=][ \t]*)([A-Za-z0-9_+./~-]{20,})`,
+  "gi",
+);
+
 export const SECRET_PATTERNS: RedactPattern[] = [
   // Stripe — sk_test_, sk_live_, pk_test_, pk_live_, rk_test_, rk_live_,
   // whsec_, sk_test_..., 24+ random chars
@@ -144,6 +159,16 @@ export const SECRET_PATTERNS: RedactPattern[] = [
   {
     re: KV_SECRET_RE,
     label: "kv-secret",
+  },
+  {
+    re: KEYED_QUOTED_RE,
+    label: "keyed-secret",
+    replacement: "$1$2[REDACTED]$2",
+  },
+  {
+    re: KEYED_UNQUOTED_RE,
+    label: "keyed-secret",
+    replacement: "$1[REDACTED]",
   },
   // Terraform — literal `sensitive` assignments in HCL can leak their value
   // unless the operator uses a vault-backed datasource. Catches both the

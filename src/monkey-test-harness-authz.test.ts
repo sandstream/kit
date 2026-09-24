@@ -237,8 +237,16 @@ function crawlFindings(scenario: CrawlScenario = {}): {
     }).outputText,
   );
   installStub(dir);
-  const statePath = join(dir, "storage-state.json");
-  writeFileSync(statePath, JSON.stringify({ cookies: [], origins: [] }));
+  const statePaths = Object.fromEntries(
+    MONKEY_ROLES.map((role) => {
+      const statePath = join(dir, `${role.id}-storage-state.json`);
+      writeFileSync(
+        statePath,
+        JSON.stringify({ cookies: [{ name: "session", value: role.id }], origins: [] }),
+      );
+      return [role.id, statePath];
+    }),
+  );
   const expectedPath = join(dir, "expected-findings.json");
   writeFileSync(expectedPath, JSON.stringify(scenario.expected ?? []));
 
@@ -252,10 +260,10 @@ function crawlFindings(scenario: CrawlScenario = {}): {
       MONKEY_STUB_OUT: outPath,
       MONKEY_STUB_ROLE_IDS: JSON.stringify(MONKEY_ROLES.map((role) => role.id)),
       MONKEY_STUB_SCENARIO: JSON.stringify(scenario),
-      MONKEY_CUSTOMER_STATE: statePath,
-      MONKEY_STAFF_STATE: statePath,
-      MONKEY_OWNER_STATE: statePath,
-      MONKEY_SUPERADMIN_STATE: statePath,
+      MONKEY_CUSTOMER_STATE: statePaths.customer,
+      MONKEY_STAFF_STATE: statePaths.staff,
+      MONKEY_OWNER_STATE: statePaths.owner,
+      MONKEY_SUPERADMIN_STATE: statePaths.superadmin,
       MONKEY_EXPECTED_FINDINGS: expectedPath,
       MONKEY_LINK_DEPTH: "0",
       MONKEY_BASE_URL: "http://127.0.0.1",
@@ -490,37 +498,34 @@ describe("generated crawl expected findings", () => {
     reason,
   }));
 
-  it("accepts exact expected findings with a specific reason", () => {
+  it("keeps critical authorization findings despite exact expected findings", () => {
     const { findings, results, status } = crawlFindings({
       destination: "/admin/login-audit",
       leak: false,
       expected,
     });
-    assert.equal(status, 0);
-    assert.deepEqual(findings, []);
-    assert.ok(results.every((result) => result.assertions === 1 && !result.error));
+    assert.equal(status, 1);
+    assert.equal(findings.length, MONKEY_ROLES.length);
+    assert.ok(findings.every((finding) => finding.title === "Denied route exposed"));
+    assert.ok(
+      results.every((result) => result.assertions === 1 && result.error?.code === "ERR_ASSERTION"),
+    );
   });
 
-  it("keeps other roles' findings when an exception covers only public", () => {
+  it("does not waive a critical authorization finding for one role", () => {
     const { findings, results, status } = crawlFindings({
       destination: "/reports/forbidden-attempts",
       leak: false,
       expected: [expected[0]],
     });
     assert.equal(status, 1);
-    assert.deepEqual(results[0].findings, []);
+    assert.equal(results[0].findings.length, 1);
     assert.equal(results[0].assertions, 1);
-    assert.equal(results[0].error, undefined);
-    assert.equal(findings.length, MONKEY_ROLES.length - 1);
+    assert.equal(results[0].error?.code, "ERR_ASSERTION");
+    assert.equal(findings.length, MONKEY_ROLES.length);
+    assert.ok(findings.every((finding) => finding.title === "Denied route exposed"));
     assert.ok(
-      findings.every(
-        (finding) => finding.title === "Denied route exposed" && finding.role !== "public",
-      ),
-    );
-    assert.ok(
-      results
-        .slice(1)
-        .every((result) => result.assertions === 1 && result.error?.code === "ERR_ASSERTION"),
+      results.every((result) => result.assertions === 1 && result.error?.code === "ERR_ASSERTION"),
     );
   });
 

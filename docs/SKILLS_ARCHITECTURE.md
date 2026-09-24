@@ -75,7 +75,7 @@ C. kit (PREPARES B for A — governance/build layer)
    declare(.kit.toml) -> resolve -> triage -> lock -> place -> verify
    federates over the marketplaces in B
    - SkillSource adapters    (resolve skills per source)
-   - kit-plugins = packages/kit-plugin-*  (ServiceAdapters: railway/supabase/...) — extend KIT itself
+   - kit-plugins = packages/kit-plugin-*  (ServiceAdapter: railway; other packages expose APIs or ingest results)
 ```
 
 The word "plugin" means two different things on opposite sides of kit, and they must
@@ -85,14 +85,15 @@ never be conflated:
 | --- | --- | --- |
 | Layer | C (inside kit) | B (a capability) |
 | Extends | kit (the CLI) | the runtime (Claude Code/Cowork) |
-| Does | ServiceAdapters: provision/login/secrets for services | bundles skills + commands + agents + hooks + MCP |
-| Loaded by | kit | Claude |
-| Format | `packages/adapter-sdk` | Anthropic's plugin spec |
+| Does | Some packages provide ServiceAdapters through `kit add`; others expose APIs or ingest results | bundles skills + commands + agents + hooks + MCP |
+| Loaded by | `kit add` for ServiceAdapters; consumer code for API packages | Claude |
+| Format | `packages/adapter-sdk` for ServiceAdapters | Anthropic's plugin spec |
 
 A kit-plugin is part of the engine that PREPARES the environment. A Claude plugin is
 part of the environment that GETS prepared. In this architecture a Claude plugin is
 just one SOURCE on the source axis (`plugin:marketplace/name`, a bundle source); a
-kit-plugin is kit's own extension mechanism. kit is never itself something a runtime
+kit-plugin is kit's own extension mechanism. ServiceAdapters do not run through `kit check`,
+and kit exposes no `kit_add` MCP tool. kit is never itself something a runtime
 loads.
 
 ## Building your own (when no one has built it)

@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -89,7 +89,9 @@ describe("pullRevocations", () => {
     assert.equal(r.rejected, 1);
     assert.equal(isRevoked("target-C", idDir), false);
   });
+});
 
+describe("pullRevocations repeated and invalid sources", () => {
   it("is monotone — a later pull that omits a kid does NOT un-revoke it", () => {
     writeFeed([signedRevocation("keep-revoked")]);
     assert.equal(pullRevocations(source, dest, idDir).added, 1);
@@ -125,5 +127,27 @@ describe("pullRevocations", () => {
     const r = pullRevocations(source, dest, idDir);
     assert.equal(r.ok, false);
     assert.equal(r.status, "no-source");
+  });
+
+  it("refuses a directory used as the revocation feed without throwing", () => {
+    mkdirSync(join(source, REVOCATIONS_FEED_FILE));
+    let result: ReturnType<typeof pullRevocations> | undefined;
+    assert.doesNotThrow(() => {
+      result = pullRevocations(source, dest, idDir);
+    });
+    assert.equal(result?.ok, false);
+    assert.equal(result?.status, "no-source");
+    assert.match(result?.detail ?? "", /regular file/i);
+  });
+
+  it("does not echo credentials from an unsupported source URL", () => {
+    const credential = "synthetic_source_credential_123";
+    const result = pullRevocations(
+      `https://operator:${credential}@example.invalid/feed`,
+      dest,
+      idDir,
+    );
+    assert.equal(result.status, "no-source");
+    assert.doesNotMatch(result.detail, new RegExp(credential));
   });
 });

@@ -12,7 +12,7 @@
  * these never become repo noise.
  */
 import { mkdirSync, writeFileSync, readdirSync, rmSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { isReadOnlyMode } from "./read-only-mode.js";
 
 export const RUNS_DIR = join(".kit", "runs");
@@ -37,7 +37,8 @@ export function writeCheckDetail(
   // other, so it must not persist behind that banner's back (RO-5: it used to, leaving an
   // untracked `.kit/runs/` directory in an audited read-only repo).
   if (isReadOnlyMode()) return null;
-  const dir = join(cwd, RUNS_DIR);
+  const root = resolve(cwd);
+  const dir = join(root, RUNS_DIR);
   const file = join(dir, `check-${stamp}.json`);
   try {
     mkdirSync(dir, { recursive: true });
@@ -45,7 +46,7 @@ export function writeCheckDetail(
   } catch {
     return null; // read-only checkout, missing permission — say "no reference", never lie about one
   }
-  pruneCheckDetails(cwd);
+  pruneCheckDetails(root);
   return {
     path: file,
     hint: "complete run, including every passing check — read this file only if the summary is not enough",

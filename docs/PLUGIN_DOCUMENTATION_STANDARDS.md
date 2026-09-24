@@ -43,7 +43,7 @@ The README is the primary entry point. It should be concise but comprehensive.
 ## Quick Start
 
 ```bash
-kit plugin install package/name
+kit plugin install railway
 ```
 
 ### Minimal Setup
@@ -67,8 +67,8 @@ export const myAdapter: ServiceAdapter = {
 ## Installation
 
 ```bash
-# Via kit
-kit plugin install provider/service
+# Via kit (use the registry ID, not the adapter's provider/service name)
+kit plugin install railway
 
 # Via npm
 npm install @provider/kit-service
@@ -151,7 +151,7 @@ Full API documentation for the ServiceAdapter interface.
 
 ## ServiceAdapter Interface
 
-All kit plugins implement the `ServiceAdapter` interface.
+Kit plugins that provision services through `kit add` implement the `ServiceAdapter` interface. API and result-ingestion packages use their own exported APIs.
 
 ### Type Definition
 

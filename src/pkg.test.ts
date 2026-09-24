@@ -1,6 +1,25 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parsePkgSpec, buildInstallSpec } from "./pkg.js";
+import { parsePkgSpec, buildInstallSpec, installPkg } from "./pkg.js";
+
+it("triage refusal names a real recovery path and never advertises --force", async () => {
+  const result = await installPkg(
+    { ecosystem: "npm", name: "example" },
+    {
+      runTriage: async () => ({
+        target: "example",
+        type: "npm",
+        passed: false,
+        output: "security finding",
+      }),
+    },
+  );
+  assert.equal(result.installed, false);
+  assert.match(result.output, /security finding/);
+  assert.match(result.output, /Package not installed/);
+  assert.match(result.output, /kit triage npm example/);
+  assert.doesNotMatch(result.output, /--force/);
+});
 
 describe("parsePkgSpec", () => {
   it("parses ecosystem:name@version", () => {

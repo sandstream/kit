@@ -40,9 +40,28 @@ function repositoryUrl() {
   }
 }
 
+function pluginFromManifest(pkg, dir, repository) {
+  const id = dir.replace(/^kit-plugin-/, "");
+  return {
+    name: id,
+    description: pkg.description ?? `kit plugin: ${id}`,
+    version: pkg.version ?? "0.0.0",
+    author: typeof pkg.author === "string" ? pkg.author : (pkg.author?.name ?? "Sandstream"),
+    license: pkg.license ?? "MIT",
+    repository,
+    package: pkg.name,
+    adapter: pkg.kitAdapter,
+    kitVersion: pkg.peerDependencies?.["sandstream-kit"] ?? ">=6.0.0",
+    tags: [...new Set([id, ...(pkg.keywords ?? []), "official"])].sort(),
+    install: `npm install ${pkg.name}@${pkg.version}`,
+  };
+}
+
 export function collect() {
   const packagesDir = join(ROOT, "packages");
-  const dirs = readdirSync(packagesDir).filter((d) => d.startsWith("kit-plugin-")).sort();
+  const dirs = readdirSync(packagesDir)
+    .filter((d) => d.startsWith("kit-plugin-"))
+    .sort();
   const repository = repositoryUrl();
   const plugins = [];
 
@@ -54,19 +73,7 @@ export function collect() {
       continue;
     }
     if (pkg.private === true) continue; // not published: nothing to advertise
-    const id = dir.replace(/^kit-plugin-/, "");
-    plugins.push({
-      name: id,
-      description: pkg.description ?? `kit plugin: ${id}`,
-      version: pkg.version ?? "0.0.0",
-      author: typeof pkg.author === "string" ? pkg.author : (pkg.author?.name ?? "Sandstream"),
-      license: pkg.license ?? "MIT",
-      repository,
-      package: pkg.name,
-      kitVersion: pkg.peerDependencies?.["sandstream-kit"] ?? ">=6.0.0",
-      tags: [...new Set([id, ...(pkg.keywords ?? []), "official"])].sort(),
-      install: `npm install ${pkg.name}`,
-    });
+    plugins.push(pluginFromManifest(pkg, dir, repository));
   }
   return plugins;
 }
@@ -93,6 +100,7 @@ export function render() {
         `    license: ${JSON.stringify(p.license)},`,
         `    repository: ${JSON.stringify(p.repository)},`,
         `    package: ${JSON.stringify(p.package)},`,
+        ...(p.adapter ? [`    adapter: ${JSON.stringify(p.adapter)},`] : []),
         `    kitVersion: ${JSON.stringify(p.kitVersion)},`,
         `    tags: [${p.tags.map((t) => JSON.stringify(t)).join(", ")}],`,
         `    install: ${JSON.stringify(p.install)},`,

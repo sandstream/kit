@@ -147,7 +147,10 @@ async function getBrewRepoUrl(name: string): Promise<string | null> {
 /**
  * Install a package with mandatory triage
  */
-export async function installPkg(spec: PkgSpec): Promise<PkgResult> {
+export async function installPkg(
+  spec: PkgSpec,
+  deps: { runTriage: typeof runTriage } = { runTriage },
+): Promise<PkgResult> {
   const eco = ECOSYSTEM_MAP[spec.ecosystem];
   if (!eco) {
     return {
@@ -174,14 +177,14 @@ export async function installPkg(spec: PkgSpec): Promise<PkgResult> {
     triageTarget = `https://${ghParts.join("/")}`;
   }
 
-  const triageResult = await runTriage(eco.triageType, triageTarget);
+  const triageResult = await deps.runTriage(eco.triageType, triageTarget);
 
   if (!triageResult.passed) {
     return {
       spec,
       triagePassed: false,
       installed: false,
-      output: `${triageResult.output}\n\n❌ Triage failed. Package not installed.\nReview warnings above. Use --force to override (not recommended).`,
+      output: `${triageResult.output}\n\n❌ Triage failed. Package not installed.\nReview warnings above. After resolving findings, run kit triage ${eco.triageType} ${triageTarget}.`,
     };
   }
 

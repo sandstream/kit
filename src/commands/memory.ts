@@ -22,6 +22,7 @@ import { effectiveMemoryClass, formatClassResolution } from "../memory/effective
 import { sparkline, fmtTokens } from "../memory/stats.js";
 import { indexAllHarnesses } from "../memory/parser.js";
 import { mergeDb, type MergeResult } from "../memory/merge.js";
+import { mergePayloadChanges } from "./memory-merge-summary.js";
 import {
   createProjectMapper,
   parseProjectMappings,
@@ -134,6 +135,14 @@ function recallOrigin(hit: Pick<SearchHit, "harness" | "cwd" | "gitBranch">): st
 
 export async function cmdMemory(): Promise<boolean> {
   const subcommand = process.argv[3];
+  if (
+    process.argv.slice(3).some((arg) => arg === "--passphrase" || arg.startsWith("--passphrase="))
+  ) {
+    console.error(
+      `${c.red}refusing --passphrase in argv; use KIT_MEMORY_PASSPHRASE from the environment${c.reset}`,
+    );
+    return false;
+  }
   if (!subcommand || subcommand === "--help" || subcommand === "-h") return memHelp();
   // A --help/-h flag after a subcommand means "show help", never run a
   // side-effectful subcommand (e.g. `kit memory install --help` must not install).
@@ -534,19 +543,6 @@ async function memIndex(): Promise<boolean> {
   return true;
 }
 
-function mergePayloadChanges(r: MergeResult): number {
-  return (
-    r.messages +
-    r.toolUses +
-    r.pending +
-    r.threads +
-    r.tombstones +
-    r.tombstoneDeletedMessages +
-    r.scopeRepairs +
-    r.protectionRepairs
-  );
-}
-
 function memoryScopeOptions(): MergeScopeOptions {
   const file = flagValue(process.argv, "--project-map");
   const remapProject = flagValue(process.argv, "--remap-project");
@@ -658,7 +654,7 @@ async function memSync(): Promise<boolean> {
     console.error(`${c.red}export not found: ${src}${c.reset}`);
     return false;
   }
-  const pass = process.env.KIT_MEMORY_PASSPHRASE ?? flagValue(process.argv, "--passphrase");
+  const pass = process.env.KIT_MEMORY_PASSPHRASE;
   const db = openMemoryDb();
   try {
     const r = syncFromExport(db, src, { passphrase: pass, ...memoryScopeOptions() });
@@ -757,13 +753,13 @@ async function memPush(): Promise<boolean> {
     return false;
   }
   if (!cfg) return syncNotConfigured();
-  const pass = process.env.KIT_MEMORY_PASSPHRASE ?? flagValue(process.argv, "--passphrase");
+  const pass = process.env.KIT_MEMORY_PASSPHRASE;
   // Encryption is on by default: public-key mode (recipient set) needs no secret; passphrase
   // mode does. The `encrypt = false` opt-out needs neither — the blob is a plain SQLite DB, so
   // don't demand a passphrase the plaintext path will never use.
   if (cfg.encrypt !== false && !cfg.recipient && !pass) {
     console.error(
-      `${c.red}set KIT_MEMORY_PASSPHRASE (or --passphrase), or add a public-key \`recipient\` to [memory.sync] — the pushed blob is encrypted${c.reset}`,
+      `${c.red}set KIT_MEMORY_PASSPHRASE, or add a public-key \`recipient\` to [memory.sync] — the pushed blob is encrypted${c.reset}`,
     );
     return false;
   }
@@ -837,7 +833,7 @@ async function memPull(): Promise<boolean> {
     return false;
   }
   if (!cfg) return syncNotConfigured();
-  const pass = process.env.KIT_MEMORY_PASSPHRASE ?? flagValue(process.argv, "--passphrase");
+  const pass = process.env.KIT_MEMORY_PASSPHRASE;
   try {
     const r = pullMemory(cfg, pass, getCurrentProjectRoot());
     if (!r.found) {
@@ -1719,15 +1715,13 @@ async function memScan(): Promise<boolean> {
 
 async function memBackup(): Promise<boolean> {
   const out = process.argv[4];
-  const pass = process.env.KIT_MEMORY_PASSPHRASE ?? flagValue(process.argv, "--passphrase");
+  const pass = process.env.KIT_MEMORY_PASSPHRASE;
   if (!out) {
     console.error(`${c.red}usage: kit memory backup <file>  (set KIT_MEMORY_PASSPHRASE)${c.reset}`);
     return false;
   }
   if (!pass) {
-    console.error(
-      `${c.red}set KIT_MEMORY_PASSPHRASE (or --passphrase) — the key is never stored${c.reset}`,
-    );
+    console.error(`${c.red}set KIT_MEMORY_PASSPHRASE — the key is never stored${c.reset}`);
     return false;
   }
   try {
@@ -1744,13 +1738,13 @@ async function memBackup(): Promise<boolean> {
 
 async function memRestore(): Promise<boolean> {
   const inFile = process.argv[4];
-  const pass = process.env.KIT_MEMORY_PASSPHRASE ?? flagValue(process.argv, "--passphrase");
+  const pass = process.env.KIT_MEMORY_PASSPHRASE;
   if (!inFile) {
     console.error(`${c.red}usage: kit memory restore <file> [--to <path>] [--force]${c.reset}`);
     return false;
   }
   if (!pass) {
-    console.error(`${c.red}set KIT_MEMORY_PASSPHRASE (or --passphrase)${c.reset}`);
+    console.error(`${c.red}set KIT_MEMORY_PASSPHRASE${c.reset}`);
     return false;
   }
   const dest = flagValue(process.argv, "--to") ?? getMemoryDbPath();

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { makeClient, listProjects, createEnvVar, updateEnvVar } from "./mgmt-api.js";
+import { makeClient, listProjects, createEnvVar, updateEnvVar, upsertEnvVar } from "./mgmt-api.js";
 
 describe("makeClient", () => {
   it("throws when VERCEL_TOKEN is missing", () => {
@@ -169,4 +169,27 @@ describe("env writes preserve known-value error masking", () => {
       });
     }
   }
+});
+
+describe("upsertEnvVar read-only boundary (RO-8)", () => {
+  it("refuses before even listing remote env vars", async (t) => {
+    const prior = process.env.KIT_READ_ONLY;
+    process.env.KIT_READ_ONLY = "TRUE";
+    t.after(() => {
+      if (prior === undefined) delete process.env.KIT_READ_ONLY;
+      else process.env.KIT_READ_ONLY = prior;
+    });
+    const fetchMock = t.mock.method(globalThis, "fetch", async () => new Response("{}"));
+    const client = makeClient({ token: "fixture", baseUrl: "https://api.example.test" });
+    await assert.rejects(
+      () =>
+        upsertEnvVar(client, "project", {
+          key: "CONFIG_VALUE",
+          value: "fixture",
+          target: ["production"],
+        }),
+      /read-only mode active/,
+    );
+    assert.equal(fetchMock.mock.callCount(), 0);
+  });
 });

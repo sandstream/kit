@@ -1,13 +1,17 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdtempSync,
   writeFileSync,
   readFileSync,
   existsSync,
+  lstatSync,
+  readlinkSync,
   rmSync,
   renameSync,
+  symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -144,6 +148,13 @@ describe("pullPolicy org trust boundary", () => {
 });
 
 describe("pullPolicy source handling", () => {
+  it("does not echo credentials from an unsupported source URL", () => {
+    const credential = "synthetic_source_credential_123";
+    const result = pullPolicy(`https://operator:${credential}@example.invalid/policy`, dest);
+    assert.equal(result.status, "no-source");
+    assert.doesNotMatch(result.detail, new RegExp(credential));
+  });
+
   it("'no-source' when the source has no signed policy pair", () => {
     addPolicySigner(dest, resolveKeyStore().store.publicKeyPem()!, "org");
     const r = pullPolicy(source, dest);
@@ -177,6 +188,38 @@ describe("pullPolicy source handling", () => {
     assert.equal(r.ok, true, r.detail);
     assert.equal(r.status, "applied");
   });
+
+  it(
+    "refuses a FIFO source without waiting for a writer",
+    { skip: process.platform === "win32" },
+    () => {
+      const created = spawnSync("mkfifo", [getPolicyPath(source)], { encoding: "utf8" });
+      assert.equal(created.status, 0, created.stderr);
+      writeFileSync(getPolicySigPath(source), "not a signature\n");
+      addPolicySigner(dest, resolveKeyStore().store.publicKeyPem()!, "org");
+
+      const run = spawnSync(
+        process.execPath,
+        [
+          ...process.execArgv.filter((arg) => !arg.startsWith("--test")),
+          "--input-type=module",
+          "--eval",
+          "const { pullPolicy } = await import(process.argv[1]); process.stdout.write(JSON.stringify(pullPolicy(process.argv[2], process.argv[3])));",
+          new URL("./policy-pull.js", import.meta.url).href,
+          source,
+          dest,
+        ],
+        { encoding: "utf8", timeout: 2_000, env: process.env },
+      );
+      assert.equal(run.error, undefined, String(run.error));
+      assert.equal(run.status, 0, run.stderr);
+      const result = JSON.parse(run.stdout) as ReturnType<typeof pullPolicy>;
+      assert.equal(result.ok, false);
+      assert.equal(result.status, "no-source");
+      assert.match(result.detail, /regular file/i);
+      assert.equal(existsSync(getPolicyPath(dest)), false);
+    },
+  );
 });
 
 describe("pullPolicy atomic application", () => {
@@ -211,7 +254,9 @@ describe("pullPolicy atomic application", () => {
       );
     }
   });
+});
 
+describe("pullPolicy rollback of prior files", () => {
   it("restores the exact prior pair when the final policy rename fails", () => {
     const oldPolicy = Buffer.from("old policy bytes\n");
     const oldSignature = Buffer.from("old signature bytes\n");
@@ -237,5 +282,32 @@ describe("pullPolicy atomic application", () => {
     assert.match(result.detail, /previous pair retained/);
     assert.deepEqual(readFileSync(getPolicyPath(dest)), oldPolicy);
     assert.deepEqual(readFileSync(getPolicySigPath(dest)), oldSignature);
+  });
+
+  it("restores a prior signature symlink without writing through its target", () => {
+    const oldPolicy = Buffer.from("old policy bytes\n");
+    const oldSignature = Buffer.from("old signature bytes\n");
+    const target = join(dest, "signature-target");
+    writeFileSync(getPolicyPath(dest), oldPolicy);
+    writeFileSync(target, oldSignature);
+    symlinkSync("signature-target", getPolicySigPath(dest));
+    let calls = 0;
+
+    const result = applyPolicyPairAtomically(
+      dest,
+      Buffer.from("new policy bytes\n"),
+      Buffer.from("new signature bytes\n"),
+      (from, to) => {
+        calls++;
+        if (calls === 2) throw Object.assign(new Error("injected failure"), { code: "EIO" });
+        renameSync(from, to);
+      },
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(lstatSync(getPolicySigPath(dest)).isSymbolicLink(), true);
+    assert.equal(readlinkSync(getPolicySigPath(dest)), "signature-target");
+    assert.deepEqual(readFileSync(target), oldSignature);
+    assert.deepEqual(readFileSync(getPolicyPath(dest)), oldPolicy);
   });
 });

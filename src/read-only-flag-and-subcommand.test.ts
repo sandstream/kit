@@ -97,6 +97,71 @@ describe("read-only flag value parsing (RO-1)", () => {
   });
 });
 
+describe("KIT_READ_ONLY environment values (RO-4)", () => {
+  it("refuses mutations for case-insensitive truthy values", { timeout: 30_000 }, () => {
+    const dir = project();
+    const home = mkdtempSync(join(tmpdir(), "kit-ro-env-home-"));
+    try {
+      for (const value of ["TRUE", "yes", "On"]) {
+        const result = spawnSync(process.execPath, [CLI, "fix"], {
+          cwd: dir,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            CI: "true",
+            HOME: home,
+            KIT_HIDE_HOOK_SKIP_BANNER: "1",
+            KIT_IDENTITY_DIR: join(home, ".kit"),
+            KIT_MEMORY_DIR: join(home, ".kit", "memory"),
+            KIT_READ_ONLY: value,
+          },
+          timeout: 10_000,
+        });
+        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+        assert.equal(result.status, 1, `${value}: ${output}`);
+        assert.match(output, /read-only mode active/, value);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("read-only global flags on a command without a subcommand (RO-6)", () => {
+  it("shows baseline usage instead of treating --read-only as a subcommand", () => {
+    const dir = project();
+    const home = mkdtempSync(join(tmpdir(), "kit-ro-baseline-home-"));
+    try {
+      for (const args of [
+        ["--read-only", "baseline"],
+        ["baseline", "--read-only"],
+      ]) {
+        const result = spawnSync(process.execPath, [CLI, ...args], {
+          cwd: dir,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            CI: "true",
+            HOME: home,
+            KIT_HIDE_HOOK_SKIP_BANNER: "1",
+            KIT_IDENTITY_DIR: join(home, ".kit"),
+            KIT_MEMORY_DIR: join(home, ".kit", "memory"),
+          },
+          timeout: 10_000,
+        });
+        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+        assert.equal(result.status, 0, output);
+        assert.match(output, /kit baseline.*freeze current warnings/s);
+        assert.doesNotMatch(output, /Unknown subcommand/);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("policy default_mode forces read-only regardless of KIT_READ_ONLY value (RO-2)", () => {
   it("KIT_READ_ONLY=0 does not override a read-only policy", { timeout: 20_000 }, () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-ro-policy-"));

@@ -13,6 +13,7 @@
  */
 
 import { appendAuditEventDirect } from "./audit.js";
+import { envTruthy } from "./utils/flags.js";
 
 const READ_ONLY_ENV = "KIT_READ_ONLY";
 
@@ -24,8 +25,7 @@ const READ_ONLY_ENV = "KIT_READ_ONLY";
  *   3. `.kit.toml [policy].default_mode = "read-only"` (read at boot)
  */
 export function isReadOnlyMode(): boolean {
-  const v = process.env[READ_ONLY_ENV];
-  return v === "1" || v === "true";
+  return envTruthy(process.env[READ_ONLY_ENV]);
 }
 
 /**

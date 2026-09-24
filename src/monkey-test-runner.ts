@@ -1,9 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { rm } from "node:fs/promises";
-import { createServer } from "node:net";
-import { join, resolve } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
+import { join } from "node:path";
 import {
   MONKEY_PLAYWRIGHT_REPORT,
   monkeyFinding,
@@ -11,34 +10,17 @@ import {
   type MonkeyFinding,
   type MonkeyRunOptions,
   type MonkeyRunResult,
-  type MonkeyTestPlan,
 } from "./monkey-test-contract.js";
 import { runnerRoleMatrixFinding, validatePlaywrightEvidence } from "./monkey-test-evidence.js";
 import {
-  expectedReasonState,
   livePaymentEnvironmentFindings,
   monkeyEnvironmentFindings,
   parseEnvOutput,
-  runnerEnvironment,
 } from "./monkey-test-runner-env.js";
 import { runShell } from "./monkey-test-process.js";
-import { MonkeyProcessScope } from "./monkey-test-runner-processes.js";
-import { buildMonkeyTestPlan } from "./monkey-test-plan.js";
+import { createRunContext, type RunContext } from "./monkey-test-runner-context.js";
+import { findFreePort, isLoopbackBaseUrl, waitForUrl } from "./monkey-test-runner-network.js";
 import { redactSecrets, secretValuesFromEnv } from "./utils/redactSecrets.js";
-
-interface RunContext {
-  root: string;
-  options: MonkeyRunOptions;
-  plan: MonkeyTestPlan;
-  findings: MonkeyFinding[];
-  steps: MonkeyRunResult["steps"];
-  expectedReasonRaw?: string;
-  expectedReason?: string;
-  hasExpectedReason: boolean;
-  timeoutMs: number;
-  env: NodeJS.ProcessEnv;
-  processes: MonkeyProcessScope;
-}
 
 interface BrowserRun {
   port?: number;
@@ -46,61 +28,10 @@ interface BrowserRun {
 }
 
 export { parseEnvOutput };
+export { findFreePort } from "./monkey-test-runner-network.js";
 
 function safeRunnerText(value: string, env: NodeJS.ProcessEnv = process.env): string {
   return redactSecrets(value, secretValuesFromEnv(env));
-}
-
-export async function findFreePort(): Promise<number> {
-  return new Promise((resolvePort, reject) => {
-    const server = createServer();
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      server.close(() => {
-        if (typeof address === "object" && address?.port) resolvePort(address.port);
-        else reject(new Error("could not allocate a free port"));
-      });
-    });
-    server.on("error", reject);
-  });
-}
-
-async function waitForUrl(url: string, timeoutMs: number, signal: AbortSignal): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    signal.throwIfAborted();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1000);
-    try {
-      const response = await fetch(url, { signal: AbortSignal.any([signal, controller.signal]) });
-      clearTimeout(timer);
-      if (response.status < 500) return true;
-    } catch {
-      clearTimeout(timer);
-    }
-    await delay(250, undefined, { signal });
-  }
-  return false;
-}
-
-async function createRunContext(cwd: string, options: MonkeyRunOptions): Promise<RunContext> {
-  const root = resolve(cwd);
-  const plan = await buildMonkeyTestPlan(root, { envCommand: options.envCommand });
-  const expectedReason = expectedReasonState(options);
-  const runId = randomUUID();
-  return {
-    root,
-    options,
-    plan,
-    findings: [],
-    steps: [],
-    expectedReasonRaw: expectedReason.raw,
-    expectedReason: expectedReason.redacted,
-    hasExpectedReason: expectedReason.valid,
-    timeoutMs: options.timeoutMs ?? 120_000,
-    env: runnerEnvironment(options, runId),
-    processes: new MonkeyProcessScope(),
-  };
 }
 
 function applySecurityGate(context: RunContext): void {
@@ -164,8 +95,17 @@ function applyBrowserSkipGate(context: RunContext): void {
 }
 
 function applyHarnessPrerequisites(context: RunContext): void {
-  const { plan, findings } = context;
-  if (!plan.playwright.dependency) {
+  const { plan, findings, root } = context;
+  const projectRequire = createRequire(join(root, "package.json"));
+  const installed = ["@playwright/test", "playwright"].some((name) => {
+    try {
+      projectRequire.resolve(name);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (!plan.playwright.dependency || !installed) {
     findings.push(
       monkeyFinding({
         severity: "critical",
@@ -173,7 +113,7 @@ function applyHarnessPrerequisites(context: RunContext): void {
         title: "Playwright dependency missing",
         repro: "kit monkey-test plan",
         file: "package.json",
-        fix: "Run `kit triage npm @playwright/test`, install it after a pass, then re-run `kit monkey-test init`.",
+        fix: "Declare and install @playwright/test in this project after a triage pass, then re-run `kit monkey-test init`.",
       }),
     );
   }
@@ -428,6 +368,28 @@ function hasCriticalRunnerFinding(findings: MonkeyFinding[]): boolean {
   return findings.some((finding) => finding.area === "runner" && finding.severity === "critical");
 }
 
+async function configuredBaseUrlReady(context: RunContext): Promise<boolean> {
+  const baseUrl = context.options.baseUrl;
+  if (!baseUrl) return true;
+  const reachable = await waitForUrl(baseUrl, 2_000, context.processes.signal);
+  context.steps.push({
+    name: "base URL",
+    status: reachable ? "pass" : "fail",
+    detail: `${safeRunnerText(baseUrl, context.env)} ${reachable ? "reachable" : "not reachable"}`,
+  });
+  if (reachable) return true;
+  context.findings.push(
+    monkeyFinding({
+      severity: "critical",
+      area: "runner",
+      title: "Base URL is not reachable",
+      repro: safeRunnerText(baseUrl, context.env),
+      fix: "Start the local test app before seed, or let kit start it with --start-command.",
+    }),
+  );
+  return false;
+}
+
 async function runPlaywrightGate(context: RunContext): Promise<void> {
   const { options, plan, root, env, timeoutMs, findings, steps } = context;
   const testCommand = options.testCommand ?? plan.commands.test;
@@ -552,6 +514,19 @@ async function executeRun(context: RunContext): Promise<MonkeyRunResult> {
     context.steps.push({ name: "env", status: "skip", detail: "runner prerequisites failed" });
     return stopBeforeSideEffects(context, "runner prerequisites failed");
   }
+  if (options.baseUrl && !isLoopbackBaseUrl(options.baseUrl)) {
+    context.findings.push(
+      monkeyFinding({
+        severity: "critical",
+        area: "runner",
+        title: "Invalid base URL",
+        repro: "--base-url must name a local HTTP(S) loopback server without credentials",
+        fix: "Use http://127.0.0.1:<port>, http://localhost:<port>, or a local IPv6 loopback URL.",
+      }),
+    );
+    context.steps.push({ name: "env", status: "skip", detail: "invalid base URL" });
+    return stopBeforeSideEffects(context, "invalid base URL");
+  }
   if (!(await environmentIsSafe(context))) {
     context.steps.push({ name: "env", status: "fail", detail: "unsafe application environment" });
     return stopBeforeSideEffects(context, "unsafe application environment");
@@ -564,6 +539,9 @@ async function executeRun(context: RunContext): Promise<MonkeyRunResult> {
   if (!environmentSafe) return stopBeforeSideEffects(context, "unsafe application environment");
   if (!options.skipBrowser && !roleMatrixReady) {
     return stopBeforeSideEffects(context, "role matrix prerequisite failed");
+  }
+  if (!options.skipBrowser && !(await configuredBaseUrlReady(context))) {
+    return stopBeforeSideEffects(context, "base URL prerequisite failed");
   }
   await runSeed(context);
   if (options.skipBrowser) return resultFromContext(context);

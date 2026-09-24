@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -41,6 +41,55 @@ function withWarnCapture<T>(fn: () => Promise<T>): Promise<{ result: T; warnings
 }
 
 describe("loadPluginAdapters path-traversal hardening", () => {
+  it("refuses a package symlink that resolves outside project node_modules", async () => {
+    const outside = join(tmpdir(), `kit-external-plugin-${process.pid}`);
+    const marker = join(tmpdir(), `kit-external-plugin-ran-${process.pid}`);
+    const linked = join(tmpProject, "node_modules", "kit-plugin-outside");
+    await mkdir(outside, { recursive: true });
+    await writeFile(join(outside, "package.json"), JSON.stringify({ type: "module" }));
+    await writeFile(
+      join(outside, "index.js"),
+      `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "ran"); export const adapter = { name: "outside", description: "outside", getRequiredTools: () => [], check: async () => false, provision: async () => ({ success: true, message: "" }) };`,
+    );
+    await symlink(outside, linked, "junction");
+    try {
+      await writeKitPlugins(["kit-plugin-outside"]);
+      const { result, warnings } = await withWarnCapture(() => loadPluginAdapters(tmpProject));
+      assert.deepEqual(result, {});
+      assert.equal(existsSync(marker), false, "external module must not execute");
+      assert.ok(warnings.some((warning) => /outside node_modules/.test(warning)));
+    } finally {
+      await rm(linked, { force: true });
+      await rm(outside, { recursive: true, force: true });
+      await rm(marker, { force: true });
+    }
+  });
+
+  it("refuses an entrypoint symlink that resolves outside project node_modules", async () => {
+    const outside = join(tmpdir(), `kit-external-entry-${process.pid}.mjs`);
+    const marker = join(tmpdir(), `kit-external-entry-ran-${process.pid}`);
+    const packageDir = join(tmpProject, "node_modules", "kit-plugin-linked-entry");
+    await mkdir(packageDir, { recursive: true });
+    await writeFile(
+      outside,
+      `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "ran"); export const adapter = { name: "outside", description: "outside", getRequiredTools: () => [], check: async () => false, provision: async () => ({ success: true, message: "" }) };`,
+    );
+    await symlink(outside, join(packageDir, "index.js"), "file");
+    try {
+      await writeKitPlugins(["kit-plugin-linked-entry"]);
+      const { result, warnings } = await withWarnCapture(() => loadPluginAdapters(tmpProject));
+      assert.deepEqual(result, {});
+      assert.equal(existsSync(marker), false, "external entrypoint must not execute");
+      assert.ok(warnings.some((warning) => /outside node_modules/.test(warning)));
+    } finally {
+      await rm(packageDir, { recursive: true, force: true });
+      await rm(outside, { force: true });
+      await rm(marker, { force: true });
+    }
+  });
+});
+
+describe("loadPluginAdapters rejects unsafe package names", () => {
   it("does NOT import a module outside node_modules and does not execute it (RCE guard)", async () => {
     // Plant an evil module OUTSIDE the project's node_modules that, if imported,
     // writes a marker file (stand-in for arbitrary code execution).

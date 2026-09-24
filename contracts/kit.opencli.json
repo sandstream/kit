@@ -3423,7 +3423,16 @@
     "plugin": {
       "kind": "command",
       "summary": "Discover and manage kit plugins (search, list, scaffold, install)",
-      "x-kit-accepted-flags": ["--env","--help","--non-interactive","--read-only","--readonly","--tag","--version"],
+      "x-kit-accepted-flags": [
+        "--env",
+        "--help",
+        "--non-interactive",
+        "--read-only",
+        "--readonly",
+        "--skip-install",
+        "--tag",
+        "--version"
+      ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "human",
       "x-kit-mcp": false,
@@ -4887,7 +4896,7 @@
     "binary": "kit",
     "summary": "Deterministic, local-first developer-environment manager and fail-closed governance layer for AI agents and humans.",
     "title": "kit",
-    "version": "6.11.0"
+    "version": "6.12.0"
   },
   "opencliVersion": "1.0.0-alpha.12"
 }

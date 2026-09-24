@@ -50,6 +50,7 @@ import {
   verifyMemoryPublication,
 } from "./remote-sync-git.js";
 import type { MergeResult } from "./merge.js";
+import { ensureCommitIdentity, matchesPublishedSnapshot } from "./remote-sync-publish.js";
 import { parseProjectMappings, type ProjectMapping } from "./remap.js";
 import { redactSecrets } from "../utils/redactSecrets.js";
 
@@ -299,7 +300,9 @@ export interface PushResult {
 /**
  * Encrypt the local memory DB and push it to the private remote. Requires a
  * passphrase (KIT_MEMORY_PASSPHRASE). Clones the remote, refreshes the blob,
- * commits and pushes only when it changed (so a no-op push is free and quiet).
+ * skips an unchanged Git snapshot when the local machine can decrypt the published blob.
+ * A recipient-only push machine has no private key to compare randomized ciphertext and
+ * may publish another commit for unchanged content.
  */
 /** Encrypt the live memory DB into `outPath`, picking the mode from the config:
  *  a configured `recipient` → public-key (V3, no passphrase); otherwise the
@@ -343,6 +346,14 @@ export function pushMemory(
     // git transport — clone into the (empty) dir FIRST, then write the blob inside it.
     assertRemoteNotProjectOrigin(cfg.remote!, projectRoot);
     cloneMemoryBranch(cfg.remote!, cfg.branch ?? DEFAULT_BRANCH, dir);
+    if (matchesPublishedSnapshot(cfg, passphrase, dir)) {
+      verifyMemoryPublication(
+        dir,
+        cfg.branch ?? DEFAULT_BRANCH,
+        git(["rev-parse", "HEAD"], dir).trim(),
+      );
+      return { target: displayRemote(cfg.remote!), file: cfg.file, pushed: false, verified: true };
+    }
     encryptBlobForSync(cfg, passphrase, join(dir, cfg.file));
     git(["add", "--", cfg.file], dir);
     const dirty = git(["status", "--porcelain"], dir).trim();
@@ -575,17 +586,4 @@ export function maybeSyncNudge(): string | null {
   }
   const tip = "tip: sync your memory across machines (and back it up) — run `kit memory sync init`";
   return markerErr ? `${tip}\n  (note: couldn't write ~/.kit marker — ${markerErr})` : tip;
-}
-
-/** Give the throwaway clone a commit identity if the environment has none. */
-function ensureCommitIdentity(dir: string): void {
-  const has = (key: string): boolean => {
-    try {
-      return !!git(["config", key], dir).trim();
-    } catch {
-      return false;
-    }
-  };
-  if (!has("user.email")) git(["config", "user.email", "kit-memory-sync@localhost"], dir);
-  if (!has("user.name")) git(["config", "user.name", "kit memory sync"], dir);
 }

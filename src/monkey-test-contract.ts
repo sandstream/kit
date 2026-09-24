@@ -245,6 +245,7 @@ export function matchesExpectedFinding(
   actual: MonkeyFinding,
   expected: MonkeyExpectedFinding,
 ): boolean {
+  if (actual.severity === "critical" && actual.area === "authz") return false;
   const keys = ["severity", "area", "title", "role", "route", "repro", "file"] as const;
   return keys.every((key) => expected[key] === undefined || expected[key] === actual[key]);
 }
@@ -359,8 +360,17 @@ export function validateRoleExpectation(role: Record<string, unknown>, id: Monke
 
 export function validateRoleMatrix(value: unknown): MonkeyRoleExpectation[] {
   const entries = configuredRoleEntries(value);
+  const signatures = new Set<string>();
   for (const id of MONKEY_ROLE_IDS) {
-    validateRoleExpectation(requiredRole(entries, id), id);
+    const role = requiredRole(entries, id);
+    validateRoleExpectation(role, id);
+    const signature = JSON.stringify(
+      MONKEY_ROLE_LIST_KEYS.map((key) => [...new Set(role[key] as string[])].sort()),
+    );
+    if (signatures.has(signature)) {
+      throw new Error(`Monkey role ${id} must have distinct route and marker expectations.`);
+    }
+    signatures.add(signature);
   }
   return entries as MonkeyRoleExpectation[];
 }

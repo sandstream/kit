@@ -300,7 +300,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit config migrate`: Migrate a versioned `.kit.toml` to the current schema (`--dry-run` default, auto-backup, re-validate-or-restore, `--check` for CI)
 - `kit airgap verify`: Prove every scanner that would run in air-gap mode resolves to a local artifact (no egress)
 - `kit browser {doctor,status,cdp-url,playwright-env}`: Which browser strategy a repo actually gets for verification — Playwright, system Chrome, or CDP — or the blocker in the way, plus the exports to wire a test runner (`--json` on each). kit owns local browser diagnostics, not app start
-- `kit --read-only <subcommand>`: Session-wide refusal of all writes
+- `kit --read-only <subcommand>`: Refuses project and provider writes; local `~/.kit` memory state may still be initialized by read commands
 
 ### What you'll see
 

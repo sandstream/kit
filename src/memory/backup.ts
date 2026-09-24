@@ -197,6 +197,40 @@ function withMemoryDbSnapshot<T>(
   }
 }
 
+function readWindow(fd: number, buffer: Buffer, length: number, position: number): number {
+  let total = 0;
+  while (total < length) {
+    const count = readSync(fd, buffer, total, length - total, position + total);
+    if (count === 0) break;
+    total += count;
+  }
+  return total;
+}
+
+/** Compare a live store's committed SQLite snapshot with a previously decrypted backup. */
+export function memoryDbMatchesSnapshot(srcPath: string, snapshotPath: string): boolean {
+  return withMemoryDbSnapshot(srcPath, snapshotPath, (current) => {
+    const size = statSync(current).size;
+    if (size !== statSync(snapshotPath).size) return false;
+    const currentFd = openSync(current, "r");
+    const previousFd = openSync(snapshotPath, "r");
+    const a = Buffer.allocUnsafe(1024 * 1024);
+    const b = Buffer.allocUnsafe(1024 * 1024);
+    try {
+      for (let offset = 0; offset < size; offset += a.length) {
+        const length = Math.min(a.length, size - offset);
+        if (readWindow(currentFd, a, length, offset) !== length) return false;
+        if (readWindow(previousFd, b, length, offset) !== length) return false;
+        if (!a.subarray(0, length).equals(b.subarray(0, length))) return false;
+      }
+      return true;
+    } finally {
+      closeSync(currentFd);
+      closeSync(previousFd);
+    }
+  });
+}
+
 const MIN_PASSPHRASE_LEN = 12;
 // Substrings that mark an obviously guessable / placeholder passphrase. A long
 // phrase is worthless if it is predictable — the passphrase is the ONLY thing

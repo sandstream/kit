@@ -1,13 +1,9 @@
 # ─── kit CLI Container ────────────────────────────────────────────────
 # Multi-stage build for production-ready CLI executable
-# Final image: Node 22 Alpine, 376MB (arm64, `docker images`).
-#
-# The size claim is measured, not estimated: it read "~100MB" while the image
-# actually shipped 460MB, because the runtime copied the BUILDER's node_modules.
-# That tree is `npm ci` with devDependencies, so the published CLI image carried
-# typescript, eslint and esbuild: 170 packages, 93.6MB, none of them reachable at
-# runtime. kit has four runtime dependencies, which now come from a dedicated
-# prod-deps stage: 114 packages, 27.2MB (MR-1).
+# Final image: Node 22 Alpine, 384MB (arm64, `docker images`).
+# An earlier image copied the builder's node_modules into runtime, including
+# TypeScript, ESLint, and esbuild. The prod-deps stage below uses the committed
+# lockfile and omits dev dependencies instead.
 
 # Stage 1: Builder
 FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS builder
@@ -66,13 +62,19 @@ RUN apk add --no-cache --upgrade \
 RUN addgroup -g 1001 -S kit && \
     adduser -S kit -u 1001
 
-# Copy built application from builder
-COPY --from=builder --chown=kit:kit /build/dist ./dist
-COPY --from=prod-deps --chown=kit:kit /deps/node_modules ./node_modules
-COPY --from=builder --chown=kit:kit /build/package.json ./
-COPY --from=builder --chown=kit:kit /build/skills ./skills
-COPY --from=builder --chown=kit:kit /build/scripts ./scripts
-RUN chown kit:kit /app
+# Keep kit's executable and bundled triage code root-owned. The unprivileged
+# runtime user can install project plugins in /workspace without rewriting the
+# program that performs the trust check.
+COPY --from=builder /build/dist ./dist
+COPY --from=prod-deps /deps/node_modules ./node_modules
+COPY --from=builder /build/package.json ./
+COPY --from=builder /build/skills ./skills
+# Runtime code reads only these two scripts. Exclude build/test scripts (and
+# their synthetic secret fixtures) from the executable image.
+COPY --from=builder /build/scripts/chatgpt-web-wizard.sh ./scripts/chatgpt-web-wizard.sh
+COPY --from=builder /build/scripts/windows-private-acl.ps1 ./scripts/windows-private-acl.ps1
+RUN mkdir -p /workspace && chown kit:kit /workspace
+WORKDIR /workspace
 
 # Set environment
 ENV NODE_ENV=production

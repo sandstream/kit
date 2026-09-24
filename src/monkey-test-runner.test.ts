@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -16,6 +16,13 @@ const roots: string[] = [];
 function tempRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-monkey-"));
   roots.push(dir);
+  const playwrightModule = join(dir, "node_modules", "@playwright", "test");
+  mkdirSync(playwrightModule, { recursive: true });
+  writeFileSync(
+    join(playwrightModule, "package.json"),
+    '{"name":"@playwright/test","main":"index.js"}\n',
+  );
+  writeFileSync(join(playwrightModule, "index.js"), "module.exports = {};\n");
   return dir;
 }
 
@@ -61,6 +68,7 @@ writeFileSync(".kit/monkey-test/playwright-report.json", JSON.stringify({
   config: { metadata: { kitMonkeyContract: 1, kitMonkeyRunId: process.env.MONKEY_RUN_ID } },
   suites: [{ title: "monkey.spec.ts", suites }],
   errors: [],
+  stats: { expected: 10, unexpected: 0, skipped: 0, flaky: 0 },
 }));
 `,
   );

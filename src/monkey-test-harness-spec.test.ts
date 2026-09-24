@@ -86,6 +86,7 @@ type Registration = { path: string[]; name: string };
 function evaluateGeneratedSpec(
   dir = tempDir(),
   initialized = false,
+  extraEnv: NodeJS.ProcessEnv = {},
 ): {
   status: number | null;
   stderr: string;
@@ -117,6 +118,7 @@ function evaluateGeneratedSpec(
         : writeRoleMatrix(dir),
       MONKEY_STUB_OUT: outPath,
       MONKEY_EXPECTED_FINDINGS: "",
+      ...extraEnv,
     },
   });
 
@@ -292,4 +294,16 @@ it("evaluates as a module and registers every role crawl plus the money flow", (
   assert.equal(money.length, 1);
   assert.deepEqual(money[0]?.path, ["customer payment"]);
   assert.equal(registrations.length, MONKEY_ROLES.length + 1);
+});
+
+it("MHB-10: generated spec refuses one storage state reused for customer and staff", () => {
+  const dir = tempDir();
+  const state = join(dir, "shared-state.json");
+  writeFileSync(state, '{"cookies":[{"name":"session","value":"same"}]}');
+  const loaded = evaluateGeneratedSpec(dir, false, {
+    MONKEY_CUSTOMER_STATE: state,
+    MONKEY_STAFF_STATE: state,
+  });
+  assert.equal(loaded.status, 1);
+  assert.match(loaded.stderr, /auth state|storage state/i);
 });

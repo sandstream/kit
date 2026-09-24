@@ -53,6 +53,13 @@ describe("GitHub workflow hardening", () => {
     assert.match(security, /pipx install semgrep==1\.176\.0/);
   });
 
+  it("makes a missing Snyk token visible in the dependency job", () => {
+    const deps = section(workflow("security.yml"), "deps", "supply-chain");
+    assert.match(deps, /- name: Snyk scan\n\s+if: env\.SNYK_TOKEN != ''/);
+    assert.match(deps, /- name: Note Snyk skip[^\n]*\n\s+if: env\.SNYK_TOKEN == ''/);
+    assert.match(deps, /::warning title=Snyk skipped::/);
+  });
+
   it("downloads a fixed Trivy release and verifies its published digest before install", () => {
     const triage = workflow("triage-deps.yml");
     assert.doesNotMatch(triage, /curl[^\n|]*\|\s*(?:sh|bash)\b/);

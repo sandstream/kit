@@ -19,7 +19,7 @@ import {
 import { detectStack } from "./stack-detector.js";
 import { generateToml } from "./toml-generator.js";
 import { writeFile, access } from "node:fs/promises";
-import { executeCommand, redactCommandForEnvironment } from "./run.js";
+import { executeCommand, redactCommandForEnvironment, requireWorkingDirectory } from "./run.js";
 import { gatherProjectContext } from "./context.js";
 import { mapReport } from "./commands/repomap.js";
 import { isReadOnlyMode } from "./read-only-mode.js";
@@ -649,7 +649,7 @@ function register_kit_run(server: McpServer): void {
     async ({ command, cwd }) => {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_run");
       try {
-        const workDir = cwd ?? process.cwd();
+        const workDir = await requireWorkingDirectory(cwd);
         const displayCommand = await redactCommandForEnvironment(command, workDir);
         // Tokenize like a shell (respecting quotes) — a naive whitespace split turns
         // `git commit -m "a b"` into the wrong argv and silently runs a different

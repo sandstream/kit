@@ -43,3 +43,27 @@ for (const missing of ["dependency", "harness"] as const) {
     }
   });
 }
+
+it("MSG-01: a package.json Playwright declaration without an installed module cannot seed", async () => {
+  const root = await runnerFixture();
+  try {
+    rmSync(join(root, "node_modules", "@playwright", "test"), { recursive: true, force: true });
+    const result = await runMonkey(root, [
+      "--json",
+      "--seed-command",
+      markerCommand(root, "seed"),
+      "--start-command",
+      serverCommand(root),
+      "--test-command",
+      markerCommand(root, "test"),
+    ]);
+    assert.equal(result.code, 1, result.stderr);
+    const report = JSON.parse(result.stdout) as MonkeyRunResult;
+    assert.ok(report.findings.some((finding) => finding.title === "Playwright dependency missing"));
+    for (const stage of ["seed", "server", "test"]) {
+      assert.equal(existsSync(join(root, `${stage}.ran`)), false);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [6.12.0] - 2026-09-24
+
 ### Added
 
 - **Bounded memory transport.** Current encrypted backups use independently
@@ -45,6 +47,55 @@
 
 ### Fixed
 
+- **Release source and image gates.** Publishing refuses an npm version reused
+  from changed source, scans the unpacked root tarball for release SBOMs, and
+  leaves pack and attestation steps behind successful publication. Docker CI
+  scans the local image before pushing that same image, signing it, or attaching
+  its SBOM. Missing Snyk credentials now produce a visible CI warning.
+
+- **Plugin installation and container trust.** Official installs triage and
+  install the same exact package version, record a package-bound PASS receipt,
+  and reject plugin entrypoints that escape `node_modules` through symlinks.
+  Built-in adapters cannot be shadowed by plugin adapters. The Docker runtime
+  runs as a non-root user while kit code remains root-owned and unwritable.
+
+- **Read-only and error redaction.** Truthy `KIT_READ_ONLY` values are accepted
+  consistently in core and plugin clients; Vercel refuses writes before its
+  preliminary network read. The CLI's last-resort error path and shared redactor
+  now mask keyed secret values before emitting errors.
+
+- **Memory passphrases stay out of command arguments.** The undocumented
+  `--passphrase` form is rejected before dispatch; memory backup and sync read
+  passphrases from `KIT_MEMORY_PASSPHRASE`.
+
+- **Monkey-test role and browser evidence.** Role expectations and authenticated
+  session files must differ. Critical authorization findings cannot be waived.
+  The Playwright gate rejects duplicate, extra, failed, skipped, and flaky cases
+  or inconsistent statistics, requires an installed Playwright package, and
+  checks a loopback base URL before seed side effects.
+
+- **Hook and browser reporting.** Executable external hooks count when they run
+  their declared command, without being mislabeled as kit's `context-check`.
+  Symlinked hooks cannot pass checks or be partly changed by install/uninstall;
+  `kit status` reports git hooks. CDP URLs with embedded credentials are refused
+  before they can reach command output.
+
+- **Memory sync receipts.** Git push skips an unchanged decryptable snapshot,
+  while a key rotation still publishes new ciphertext. A deletion-only pull is
+  reported as a change instead of "nothing new".
+
+- **Policy sources and command targets.** Policy pull rejects FIFOs without
+  hanging, hides credentials from URL diagnostics, and preserves a symlinked
+  signature on caught rollback. Revocation pull rejects directory feeds with a
+  regular-file diagnostic. MCP check details use absolute paths, and `kit run`
+  names a missing working directory before trying to spawn a command.
+
+- **CLI and plugin guidance.** `kit --read-only baseline` prints baseline usage
+  when no subcommand was supplied. `kit add --list` includes project plugin
+  adapters; plugin scaffold can skip installation, and refusal hints no longer
+  suggest an unsupported `--force` option. Policy trust hints name the real
+  `kit policy trust <pubkey.pem>` command.
+
 - **Org policy trust and bootstrap source.** An anchored repo accepts only org
   signers for automatic policy verification and pull, even on the signing
   machine; an empty anchor cannot authorize a pull. `kit bootstrap` now passes
@@ -58,6 +109,7 @@
   run before side effects. Generated findings use stable pathnames rather than
   random local ports, ordinary words containing `nan` no longer trip the `NaN`
   placeholder check, and payment stages require distinct, specific selectors.
+  Selector evidence does not establish a real sandbox provider interaction.
 
 - **Independent audit hardening.** Triage verifies installed script bytes before
   execution; project identity publication validates semantic readback; PAL rejects
@@ -159,7 +211,8 @@
   Causal descendants advance state; concurrent alternatives remain inspectable and
   require observed-frontier resolution or explicit claim takeover. Both hook formats
   surface conflicts without promoting stored text into trusted health notices.
-  Latest-snapshot transport is still not a lossless multi-writer protocol.
+  Command transport remains last-write-wins and is not a lossless multi-writer
+  protocol; Git transport replays reachable snapshot history.
 
 - **Monkey Test denial redirects.** Only documented exact denial paths satisfy the
   redirect contract. Successful pages whose names merely contain `login` or
@@ -243,7 +296,8 @@
 - **Container image shipped its build dependencies.** The runtime stage copied
   the builder's `node_modules`, so the published CLI image carried typescript,
   eslint and esbuild: 170 packages where kit has four runtime dependencies. The
-  image is 376MB instead of 460MB, and its own header no longer claims "~100MB".
+  runtime now installs only production dependencies and carries the scripts its
+  CLI needs.
 
 - **A CI job that could not report failure.** The dogfood job exists to prove
   kit's provisioning and scan path works end to end, and both of its steps
@@ -255,7 +309,7 @@
 
 - **Policy pull stays fail-closed.** `kit policy pull` now moves the signature
   before the policy and rolls the signature back when the apply fails, so an
-  interrupted pull can never leave a new policy sitting under an old signature.
+  ordinary apply error cannot leave a new policy sitting under an old signature.
 
 - **Redaction gaps beyond the pattern list.** Env-name-based redaction (`kit
   run`, MCP `kit_run`) missed common but unrecognized secret-bearing names,
@@ -280,6 +334,26 @@
   `memory.db` and the per-machine `device-id`, is out of scope: it lives
   outside the audited project tree, never shows up in that repo's `git
   status`, and is machine identity rather than project mutation.)
+
+### Known limitations (2026-09-24)
+
+- A process killed during the narrow policy/signature rename window can leave an
+  invalid pair, stale lock, and staging directory. `policy pull` then fails closed;
+  recovery requires inspecting the files, removing the stale lock, and pulling a
+  fresh signed pair. Ordinary caught apply errors roll back automatically.
+  Durability after sudden power loss is unproven because staged files and their
+  directory are not explicitly synced before rename.
+- Command-based memory transport remains last-write-wins. A stale writer can
+  overwrite a newer single blob and resurrect forgotten content for a fresh
+  joiner. Git transport replays reachable history and preserves tombstones.
+- A Git sync machine with only a recipient's public key cannot decrypt its last
+  snapshot to prove it unchanged; repeated pushes may create redundant commits.
+- Read-only commands can initialize local machine state under `~/.kit`.
+  Project and provider mutations are guarded; a write-free home directory is
+  not yet guaranteed.
+- The monkey-test Playwright report's run ID is self-reported by the local test
+  process. Malicious test code in the project can forge this positive control;
+  generated selectors and result checks do not prove a real provider interaction.
 
 ## [6.11.0] - 2026-08-30
 

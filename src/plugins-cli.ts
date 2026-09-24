@@ -5,14 +5,13 @@
  * scaffolding in create-plugin.ts — this module is the argv-facing shell.
  */
 
-import { flagValue } from "./utils/flags.js";
+import { flagValue, hasFlag } from "./utils/flags.js";
 import {
   searchPlugins,
   listPlugins,
   getPluginInfo,
   getAllTags,
   formatPluginForDisplay,
-  isPluginInstalled,
   installPlugin,
 } from "./plugins.js";
 import { createPlugin } from "./create-plugin.js";
@@ -29,13 +28,13 @@ export async function cmdPlugin(): Promise<boolean> {
     console.log(`  kit plugin search <query>            Search for plugins by name/description`);
     console.log(`  kit plugin info <name>               Show detailed info about a plugin`);
     console.log(`  kit plugin install <name>            Install a plugin`);
-    console.log(`  kit plugin scaffold <name>           Create a new plugin from template`);
+    console.log(`  kit plugin scaffold <name> [--skip-install]  Create a new plugin from template`);
     console.log(`  kit plugin tags                      List all available plugin tags\n`);
     console.log(`${c.dim}Examples:${c.reset}`);
     console.log(`  kit plugin search stripe             # Search for stripe plugins`);
-    console.log(`  kit plugin list --tag database       # Show all database adapters`);
-    console.log(`  kit plugin info stripe/payments      # Get plugin details`);
-    console.log(`  kit plugin install stripe/payments   # Install a plugin`);
+    console.log(`  kit plugin list --tag database       # Show database-tagged packages`);
+    console.log(`  kit plugin info railway              # Get plugin details`);
+    console.log(`  kit plugin install railway           # Install an adapter plugin`);
     console.log(`  kit plugin scaffold my-service       # Create a plugin package`);
     return true;
   }
@@ -113,12 +112,6 @@ export async function cmdPlugin(): Promise<boolean> {
           return false;
         }
 
-        const isInstalled = await isPluginInstalled(plugin.package || name);
-        if (isInstalled) {
-          console.log(`${c.green}✓${c.reset} Plugin already installed: ${name}`);
-          return true;
-        }
-
         console.log(`${c.dim}Installing ${name}...${c.reset}`);
         const result = await installPlugin(name, plugin);
 
@@ -158,7 +151,7 @@ export async function cmdPlugin(): Promise<boolean> {
         const result = await createPlugin({
           name,
           cwd: process.cwd(),
-          skipInstall: false,
+          skipInstall: hasFlag(args, "--skip-install"),
         });
 
         if (result.success) {

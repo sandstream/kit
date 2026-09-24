@@ -22,8 +22,14 @@
  */
 import {
   chmodSync,
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
   readFileSync,
+  readlinkSync,
   writeFileSync,
   copyFileSync,
   mkdirSync,
@@ -31,7 +37,7 @@ import {
   renameSync,
   rmdirSync,
   rmSync,
-  statSync,
+  symlinkSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -78,6 +84,18 @@ export function pullSourceToPath(source: string): string {
   return resolve(s);
 }
 
+export function readRegularSource(path: string): Buffer | null {
+  // O_NONBLOCK prevents a FIFO substituted at this path from waiting for a writer.
+  // Inspect and read through the same descriptor so a path swap cannot undo the check.
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    if (!fstatSync(fd).isFile()) return null;
+    return readFileSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 type RenameFile = (from: string, to: string) => void;
 
 export interface ApplyPolicyPairResult {
@@ -85,10 +103,9 @@ export interface ApplyPolicyPairResult {
   detail: string;
 }
 
-interface SignatureSnapshot {
-  bytes: Buffer;
-  mode: number;
-}
+type SignatureSnapshot =
+  | { kind: "file"; bytes: Buffer; mode: number }
+  | { kind: "symlink"; target: string };
 
 function errorCode(error: unknown): string {
   if (error && typeof error === "object" && "code" in error && typeof error.code === "string") {
@@ -98,16 +115,27 @@ function errorCode(error: unknown): string {
 }
 
 function readSignatureSnapshot(path: string): SignatureSnapshot | null {
-  if (!existsSync(path)) return null;
-  return {
-    bytes: readFileSync(path),
-    mode: statSync(path).mode,
-  };
+  let info;
+  try {
+    info = lstatSync(path);
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return null;
+    throw error;
+  }
+  if (info.isSymbolicLink()) return { kind: "symlink", target: readlinkSync(path) };
+  if (!info.isFile())
+    throw Object.assign(new Error("signature is not a regular file"), { code: "EINVAL" });
+  return { kind: "file", bytes: readFileSync(path), mode: info.mode };
 }
 
 function restoreSignature(path: string, snapshot: SignatureSnapshot | null): void {
   if (snapshot === null) {
     rmSync(path, { force: true });
+    return;
+  }
+  if (snapshot.kind === "symlink") {
+    rmSync(path, { force: true });
+    symlinkSync(snapshot.target, path);
     return;
   }
   writeFileSync(path, snapshot.bytes);
@@ -306,7 +334,7 @@ export function pullPolicy(
     return {
       ok: false,
       status: "no-source",
-      detail: `no signed policy at ${srcDir} — expected ${POLICY_FILE} + ${POLICY_SIG_FILE}`,
+      detail: `no signed policy at the configured source — expected ${POLICY_FILE} + ${POLICY_SIG_FILE}`,
     };
   }
 
@@ -323,8 +351,18 @@ export function pullPolicy(
   let stage: string | null = null;
   try {
     stage = mkdtempSync(join(tmpdir(), "kit-policy-pull-"));
-    copyFileSync(srcPolicy, join(stage, POLICY_FILE));
-    copyFileSync(srcSig, join(stage, POLICY_SIG_FILE));
+    const policyBytes = readRegularSource(srcPolicy);
+    const signatureBytes = readRegularSource(srcSig);
+    if (policyBytes === null || signatureBytes === null) {
+      return {
+        ok: false,
+        status: "no-source",
+        detail:
+          "policy source must contain a regular file for both policy and signature; kept existing",
+      };
+    }
+    writeFileSync(join(stage, POLICY_FILE), policyBytes);
+    writeFileSync(join(stage, POLICY_SIG_FILE), signatureBytes);
     // The LOCAL anchor — deliberately not the source's — is what the pulled policy must satisfy.
     copyFileSync(getSignersPath(destRoot), join(stage, POLICY_SIGNERS_FILE));
 

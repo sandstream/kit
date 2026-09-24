@@ -80,6 +80,11 @@ jobs:
           fi
           echo "Tag $TAG matches package.json version $PKG_VERSION"
 
+      - name: Refuse reused npm versions from changed source
+        # A partial release may resume from the same commit. A different tag tree
+        # may not reuse published root/workspace versions or rewrite their release assets.
+        run: node scripts/verify-published-versions.mjs
+
       - name: Verify the adapter-SDK contract the plugins are published against
         # The workspaces are DELIBERATELY NOT in lockstep with the CLI. README.md:574 —
         # "adapter-sdk@1.0 is frozen on its own semver track, decoupled from kit's version" — and
@@ -363,7 +368,7 @@ jobs:
           echo "Created release $TAG"
 
       - name: Name the SBOM's root component
-        # Without this, syft records the scanned path (".") as the root
+        # Without this, syft records the unpacked scan path as the root
         # component, so the SBOM cannot say which release it describes — a
         # consumer holding the bare file has no version to go on. syft reads
         # source.name / source.version from its config file.
@@ -382,13 +387,15 @@ jobs:
         # `gh attestation verify` would have found no attestation at all. Packing first also makes
         # the subject digest identical to what npm published, so the GitHub attestation and the
         # npm provenance describe the same bytes instead of two different views of the build.
-        if: always()
         id: pack
         run: |
           set -euo pipefail
           TARBALL="$(npm pack --silent)"
           echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
           sha256sum "$TARBALL"
+          mkdir -p .release-package
+          tar -xzf "$TARBALL" -C .release-package
+          test -f .release-package/package/package.json
 
       - name: Generate GitHub artifact attestation
         # Independent of npm provenance — attaches a signed provenance statement for the published
@@ -397,7 +404,6 @@ jobs:
         # timeout-minutes guards against Sigstore (Fulcio/Rekor) hangs, which once left this step
         # running ~15min; npm publish already succeeded by here, so a slow attestation must fail
         # fast (continue-on-error) not block.
-        if: always()
         id: attest
         timeout-minutes: 5
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -411,7 +417,6 @@ jobs:
         # jobs API while the log says failure, which is how a broken attestation survived every
         # release unnoticed. This step cannot block; it exists so the failure is impossible to
         # read as green: an annotation on the run and a line in the job summary.
-        if: always()
         env:
           OUTCOME: ${{ steps.attest.outcome }}
         run: |
@@ -425,11 +430,11 @@ jobs:
           fi
 
       - name: Generate SBOM (CycloneDX)
-        # CycloneDX SBOM is required by EU CRA and US EO 14028 for shipped
-        # software. Lets downstream consumers introspect the dep tree.
+        # Scan the extracted npm package, which contains what the consumer gets.
+        # Scanning the checkout would include dev tools absent from the tarball.
         uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
-          path: .
+          path: .release-package/package
           config: .syft.yaml # names the root component (see the step above)
           format: cyclonedx-json
           artifact-name: sbom.cyclonedx.json
@@ -439,7 +444,7 @@ jobs:
         # Some consumers (e.g. RHEL, federal) require SPDX format.
         uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
-          path: .
+          path: .release-package/package
           config: .syft.yaml # names the root component (see the step above)
           format: spdx-json
           artifact-name: sbom.spdx.json

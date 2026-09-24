@@ -83,7 +83,7 @@ describe("createPlugin", () => {
     assert.deepEqual(events, [
       "triage:npm:@types/node@^22.0.0",
       "triage:npm:typescript@^5.9.3",
-      "npm:install",
+      "npm:install --include=dev",
     ]);
   });
 
@@ -104,10 +104,13 @@ describe("createPlugin", () => {
 
     assert.equal(result.success, true, "scaffold files were created successfully");
     assert.match(result.message, /dependency install skipped.*triage/i);
+    assert.ok(result.nextSteps.includes("npm install --include=dev"));
 
     assert.deepEqual(events, ["triage:npm:@types/node@^22.0.0"]);
   });
+});
 
+describe("createPlugin generated scaffold", () => {
   it("creates plugin directory with correct package name", async () => {
     const result = await createPlugin({ name: "test-svc", cwd: tmpDir, skipInstall: true });
     assert.equal(result.success, true);

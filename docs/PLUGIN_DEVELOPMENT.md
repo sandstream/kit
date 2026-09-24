@@ -8,6 +8,9 @@ This guide helps you create, test, and publish ServiceAdapter plugins for the ki
 # Scaffold a new plugin
 kit plugin scaffold my-service
 
+# To create files without installing dependencies yet:
+kit plugin scaffold my-service --skip-install
+
 # Navigate to the plugin directory
 cd kit-plugin-my-service
 
@@ -24,7 +27,7 @@ npm publish
 
 ## Understanding Plugins
 
-A **kit plugin** is a TypeScript package that implements the `ServiceAdapter` interface. It enables kit to automatically provision external services (payment processors, databases, hosting platforms, etc.) in development and production environments.
+A **service-adapter kit plugin** is a TypeScript package that implements the `ServiceAdapter` interface. It enables `kit add` to provision external services (payment processors, databases, hosting platforms, etc.) in development and production environments. Other kit plugin packages expose APIs or ingest results without implementing this interface.
 
 ### Core Concepts
 
@@ -187,7 +190,7 @@ async provision(context: AdapterContext): Promise<ProvisionResult> {
     success: true,
     message: "PostgreSQL configured",
     secrets: {
-      DATABASE_URL: "postgresql://user:pass@host:5432/db",
+      DATABASE_URL: "<connection-string>",
       DATABASE_HOST: "localhost",
       DATABASE_PORT: "5432",
       DATABASE_NAME: "myapp",
@@ -370,7 +373,7 @@ export const neonDbAdapter: ServiceAdapter = {
 2. Create a new project
 3. Copy the connection string
 4. Set in .env.local:
-   DATABASE_URL=postgresql://user:password@host/dbname
+   DATABASE_URL=<connection-string>
    NEON_API_KEY=neon_api_key_here`,
     };
   },

@@ -308,6 +308,41 @@ describe("redactSecrets / findSecrets: query-token + Bearer header (RED-5)", () 
   });
 });
 
+describe("redactSecrets: keyed values in logs and JSON (RED-6)", () => {
+  const value = "opaque" + "CredentialValue1234567890";
+
+  it("does not treat the next dotenv line as an empty key's value", () => {
+    const input = "API_KEY=\nDATABASE_URL=changeme\nDEBUG=true\n";
+    assert.equal(
+      findSecrets(input).some((finding) => finding.label === "keyed-secret"),
+      false,
+    );
+  });
+
+  it("masks a query token without swallowing the next parameter or fragment", () => {
+    const input = `https://example.test/cb?token=${"q".repeat(24)}&page=2#end`;
+    assert.equal(redactSecrets(input), "https://example.test/cb?token=[REDACTED]&page=2#end");
+  });
+
+  it("masks quoted, lowercase and JSON assignments while keeping field names", () => {
+    const input = `PASSWORD="${value}" db_pass='${value}' {"api_key":"${value}"}`;
+    const output = redactSecrets(input);
+    assert.ok(!output.includes(value));
+    assert.match(output, /PASSWORD="\[REDACTED\]"/);
+    assert.match(output, /db_pass='\[REDACTED\]'/);
+    assert.match(output, /"api_key":"\[REDACTED\]"/);
+    assert.ok(findSecrets(input).some((finding) => finding.label === "keyed-secret"));
+  });
+
+  it("masks escaped JSON literals without changing public metadata", () => {
+    const input = `\\"auth_token\\":\\"${value}\\" {"GITHUB_SHA":"${"a".repeat(40)}"}`;
+    const output = redactSecrets(input);
+    assert.ok(!output.includes(value));
+    assert.match(output, /GITHUB_SHA/);
+    assert.match(output, new RegExp("a{40}"));
+  });
+});
+
 describe("safeStatusLine", () => {
   it("collapses a multi-line check dump to the first non-empty line", () => {
     const dump = "color = ''\nproject-name = 'default'\n['acme']\naccount_id = 'acct_123'";

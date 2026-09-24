@@ -9,35 +9,32 @@ import { openMemoryDb, insertMessage } from "./memory/db.js";
 import { CONFIG_SCHEMA_VERSION } from "./config.js";
 import { KIT_BLOCK_BEGIN } from "./agent-config.js";
 
-describe("kit status", () => {
-  let tmp: string;
-  const prevDb = process.env.KIT_MEMORY_DB;
-  const prevSettings = process.env.KIT_CLAUDE_SETTINGS;
-  const prevClaudeMarker = process.env.KIT_MEMORY_HOOK_MARKER;
-  const prevCodexHooks = process.env.KIT_CODEX_HOOKS;
-  const prevCodexMarker = process.env.KIT_CODEX_MEMORY_HOOK_MARKER;
+let tmp: string;
+const statusEnvKeys = [
+  "KIT_MEMORY_DB",
+  "KIT_CLAUDE_SETTINGS",
+  "KIT_MEMORY_HOOK_MARKER",
+  "KIT_CODEX_HOOKS",
+  "KIT_CODEX_MEMORY_HOOK_MARKER",
+] as const;
+const previousEnv = statusEnvKeys.map((key) => [key, process.env[key]] as const);
 
-  before(() => {
-    tmp = mkdtempSync(join(tmpdir(), "kit-status-"));
-  });
+before(() => {
+  tmp = mkdtempSync(join(tmpdir(), "kit-status-"));
+});
 
-  after(() => {
-    if (prevDb === undefined) delete process.env.KIT_MEMORY_DB;
-    else process.env.KIT_MEMORY_DB = prevDb;
-    if (prevSettings === undefined) delete process.env.KIT_CLAUDE_SETTINGS;
-    else process.env.KIT_CLAUDE_SETTINGS = prevSettings;
-    if (prevClaudeMarker === undefined) delete process.env.KIT_MEMORY_HOOK_MARKER;
-    else process.env.KIT_MEMORY_HOOK_MARKER = prevClaudeMarker;
-    if (prevCodexHooks === undefined) delete process.env.KIT_CODEX_HOOKS;
-    else process.env.KIT_CODEX_HOOKS = prevCodexHooks;
-    if (prevCodexMarker === undefined) delete process.env.KIT_CODEX_MEMORY_HOOK_MARKER;
-    else process.env.KIT_CODEX_MEMORY_HOOK_MARKER = prevCodexMarker;
-    rmSync(tmp, { recursive: true, force: true });
-  });
+after(() => {
+  for (const [key, value] of previousEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  rmSync(tmp, { recursive: true, force: true });
+});
 
-  const find = (items: Awaited<ReturnType<typeof gatherStatus>>, key: string) =>
-    items.find((i) => i.key === key);
+const find = (items: Awaited<ReturnType<typeof gatherStatus>>, key: string) =>
+  items.find((i) => i.key === key);
 
+describe("kit status without full setup", () => {
   it("empty project: signals off with actionable hints", async () => {
     const proj = join(tmp, "empty");
     mkdirSync(proj, { recursive: true });
@@ -62,8 +59,26 @@ describe("kit status", () => {
     assert.equal(find(items, "agent-config")?.ok, false);
     assert.equal(find(items, "memory")?.ok, false);
     assert.equal(find(items, "memory-hooks")?.ok, false);
+    const gitHooks = find(items, "git-hooks");
+    assert.ok(gitHooks);
+    assert.equal(gitHooks.ok, false);
   });
 
+  it("reports configured git-hook enforcement separately from memory hooks", async () => {
+    const proj = join(tmp, "git-hooks");
+    mkdirSync(proj, { recursive: true });
+    execFileSync("git", ["init", "-q", proj]);
+    writeFileSync(join(proj, ".kit.toml"), '[hooks]\npre-commit = ["npm test"]\n');
+    writeFileSync(join(proj, ".git", "hooks", "pre-commit"), "#!/bin/sh\nnpm test\n", {
+      mode: 0o755,
+    });
+    const items = await gatherStatus(proj);
+    assert.equal(find(items, "git-hooks")?.ok, true);
+    assert.match(find(items, "git-hooks")?.detail ?? "", /1.*wired/);
+  });
+});
+
+describe("kit status with memory hooks", () => {
   it("configured project: every signal on", async () => {
     const proj = join(tmp, "ready");
     mkdirSync(proj, { recursive: true });
@@ -73,8 +88,11 @@ describe("kit status", () => {
       // The version stamp is part of being configured: the new `config schema` row reports a
       // config that predates the current schema, and this fixture is meant to be a repo with
       // nothing outstanding. Written from the constant so the fixture cannot rot behind it.
-      `version = ${CONFIG_SCHEMA_VERSION}\n\n[tools]\nnode = "22"\n\n[secrets]\nstore = "1password"\n`,
+      `version = ${CONFIG_SCHEMA_VERSION}\n\n[tools]\nnode = "22"\n\n[secrets]\nstore = "1password"\n\n[hooks]\npre-commit = ["npm test"]\n`,
     );
+    writeFileSync(join(proj, ".git", "hooks", "pre-commit"), "#!/bin/sh\nnpm test\n", {
+      mode: 0o755,
+    });
     writeFileSync(join(proj, "CLAUDE.md"), `# Project\n\n${KIT_BLOCK_BEGIN}\nuse kit\n`);
     writeFileSync(
       join(proj, ".gitignore"),

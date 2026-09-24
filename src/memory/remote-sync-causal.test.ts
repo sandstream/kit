@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { it } from "node:test";
+import { forgetMemory, insertMessage, searchMessages, upsertSession } from "./db.js";
 import {
   palAdd,
   palAutoVerify,
@@ -16,6 +17,54 @@ import {
 } from "./pal.js";
 import { commonGitTask, gitHistoryFixture } from "./remote-sync-causal.test-support.js";
 import type { PalRevision } from "./pal-revisions.js";
+
+it("Git history keeps a forgotten message erased after an offline stale push", async (t) => {
+  const files = gitHistoryFixture(t);
+  files.device("a");
+  await files.memory((db) => {
+    upsertSession(db, { sessionId: "shared", harness: "claude-code" });
+    insertMessage(db, {
+      uuid: "forgotten-message",
+      sessionId: "shared",
+      type: "user",
+      content: "erasedmarker private history",
+    });
+  });
+  files.push();
+
+  files.device("b");
+  files.pull();
+  files.device("a");
+  assert.equal((await files.memory((db) => forgetMemory(db, "forgotten-message"))).ok, true);
+  files.push();
+
+  files.device("b");
+  await files.memory((db) => {
+    assert.equal(searchMessages(db, "erasedmarker").length, 1, "writer is still stale");
+    insertMessage(db, {
+      uuid: "late-message",
+      sessionId: "shared",
+      type: "assistant",
+      content: "latewriter retained history",
+    });
+  });
+  files.push();
+
+  files.device("c");
+  files.pull();
+  await files.memory((db) => {
+    assert.equal(searchMessages(db, "erasedmarker").length, 0);
+    assert.equal(searchMessages(db, "latewriter").length, 1);
+    assert.equal(
+      (
+        db
+          .prepare("SELECT COUNT(*) AS count FROM memory_tombstones WHERE uuid = ?")
+          .get("forgotten-message") as { count: number }
+      ).count,
+      1,
+    );
+  });
+});
 
 it("fresh Git pull retains both offline task edits and repeated pull preserves their conflict", async (t) => {
   const files = await commonGitTask(t);

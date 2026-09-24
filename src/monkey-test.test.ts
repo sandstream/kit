@@ -485,6 +485,24 @@ describe("monkey-test expected findings", () => {
       [customerFinding],
     );
   });
+
+  it("does not waive a critical authorization finding", () => {
+    const critical = { ...publicFinding, severity: "critical" as const };
+    assert.deepEqual(
+      unexpectedMonkeyFindings(
+        [critical],
+        [
+          {
+            title: critical.title,
+            role: critical.role,
+            route: critical.route,
+            reason: "Temporary exception approved for this exact route.",
+          },
+        ],
+      ),
+      [critical],
+    );
+  });
 });
 
 describe("monkey-test accessibility predicates", () => {

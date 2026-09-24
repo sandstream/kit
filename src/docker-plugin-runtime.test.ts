@@ -39,7 +39,10 @@ describe("Docker plugin runtime", () => {
     assert.match(runtime, /npm\s+install\s+-g\s+npm@11\.19\.1\s+--ignore-scripts/);
     assert.match(runtime, /npm\s+cache\s+clean\s+--force/);
     assert.match(runtime, /COPY --from=builder[^\n]*\/build\/skills\s+\.\/skills/);
-    assert.match(runtime, /chown\s+kit:kit\s+\/app/);
+    assert.doesNotMatch(runtime, /COPY --from=[^\n]*--chown=kit:kit/);
+    assert.doesNotMatch(runtime, /chown\s+kit:kit\s+\/app/);
+    assert.match(runtime, /mkdir\s+-p\s+\/workspace\s+&&\s+chown\s+kit:kit\s+\/workspace/);
+    assert.match(runtime, /WORKDIR \/workspace/);
   });
 
   it("ships every script asset read by production code in npm and Docker", async () => {
@@ -64,7 +67,14 @@ describe("Docker plugin runtime", () => {
 
     const dockerfile = await readFile(resolve(repoRoot, "Dockerfile"), "utf8");
     const runtime = dockerfile.slice(dockerfile.lastIndexOf("FROM node:22-alpine@sha256:"));
-    assert.match(runtime, /COPY --from=builder[^\n]*\/build\/scripts\s+\.\/scripts/);
+    for (const asset of assets) {
+      assert.ok(
+        runtime.includes(`COPY --from=builder /build/${asset} ./${asset}`),
+        `${asset} must be copied into the runtime image`,
+      );
+    }
+    assert.doesNotMatch(runtime, /COPY --from=builder[^\n]*\/build\/scripts\s+\.\/scripts/);
+    assert.doesNotMatch(runtime, /verify-suite\.sh/);
   });
 });
 

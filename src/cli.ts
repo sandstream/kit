@@ -5,12 +5,14 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { loadConfig } from "./config.js";
 import { hasFlag, splitLeadingGlobalFlags, GLOBAL_FLAGS, readOnlyFlag } from "./utils/flags.js";
+import { envTruthy } from "./utils/flags.js";
 import { generateCompletions } from "./completions.js";
 import { checkForUpdate, printUpdateNotice } from "./update-check.js";
 import { SKIPPED_COMMITS_LOG } from "./hooks.js";
 import { cmdFix } from "./fix.js";
 import { c } from "./utils/colors.js";
 import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
+import { reportUnexpectedCliError } from "./cli-error.js";
 import { cmdEnv } from "./commands/env.js";
 import { cmdContext } from "./commands/context.js";
 import { cmdConfig } from "./commands/config.js";
@@ -322,7 +324,7 @@ async function showSkippedCommitBanner(): Promise<void> {
  * zero-LLM: it stores raw transcripts and searches them; it never calls a model.
  */
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   // Global flags may precede the command word (`kit --read-only check`, the form
   // README.md:299 and docs/THREAT_MODEL.md:98 document). Move them behind the
   // positionals — and rewrite process.argv to match — so command modules that
@@ -355,14 +357,14 @@ async function main(): Promise<void> {
   const readOnly = readOnlyFlag(args);
   if (readOnly.kind === "invalid") {
     console.error(
-      `${c.red}invalid value for ${readOnly.flag}: "${readOnly.value}" (expected no value, or a truthy value: 1, true, yes)${c.reset}`,
+      `${c.red}invalid value for ${readOnly.flag}: "${readOnly.value}" (expected no value, or a truthy value: 1, true, yes, on)${c.reset}`,
     );
     process.exitCode = 2;
     return;
   } else if (readOnly.kind === "active") {
     const { activateReadOnlyMode } = await import("./read-only-mode.js");
     activateReadOnlyMode("flag");
-  } else if (process.env.KIT_READ_ONLY === "1") {
+  } else if (envTruthy(process.env.KIT_READ_ONLY)) {
     const { activateReadOnlyMode } = await import("./read-only-mode.js");
     activateReadOnlyMode("env");
   }
@@ -538,7 +540,7 @@ async function main(): Promise<void> {
       console.error(`${c.red}${msg}${c.reset}`);
       process.exitCode = 1;
     } else {
-      throw err;
+      reportUnexpectedCliError(err, args);
     }
   }
 }
@@ -1182,9 +1184,7 @@ export function emitDeprecationWarning(
   return true;
 }
 
-// Run only when invoked as the real CLI entry — NOT when imported by a test
-// (command-surface.test.ts imports COMMANDS/COMMAND_HELP). main() handles its own
-// errors and sets process.exitCode; `void` marks the intentional non-await.
+// Run only as the real CLI entry; tests import COMMANDS and COMMAND_HELP.
 function isCliEntry(): boolean {
   const entry = process.argv[1];
   if (!entry) return false;
@@ -1195,4 +1195,4 @@ function isCliEntry(): boolean {
   }
 }
 
-if (isCliEntry()) void main();
+if (isCliEntry()) void main().catch(reportUnexpectedCliError);

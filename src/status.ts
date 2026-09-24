@@ -8,7 +8,8 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig } from "./config.js";
+import { loadConfig, type HooksConfig } from "./config.js";
+import { checkHooks, hookCheckStatus } from "./check-hooks.js";
 import { KIT_BLOCK_BEGIN } from "./agent-config.js";
 import { checkGitignore } from "./check-gitignore.js";
 import { openMemoryDb, getStats } from "./memory/db.js";
@@ -67,6 +68,7 @@ async function gitignoreStatus(cwd: string): Promise<StatusItem> {
 
 export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusItem[]> {
   const items: StatusItem[] = [];
+  let configuredHooks: HooksConfig | undefined;
 
   const configPath = join(cwd, ".kit.toml");
   const hasConfig = existsSync(configPath);
@@ -81,6 +83,7 @@ export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusI
   if (hasConfig) {
     try {
       const cfg = await loadConfig(configPath);
+      configuredHooks = cfg.hooks;
       const hasVault = !!(
         cfg.secrets &&
         (cfg.secrets.store || (cfg.secrets.keys && Object.keys(cfg.secrets.keys).length > 0))
@@ -178,6 +181,21 @@ export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusI
     ok: hooked,
     detail: hookDetail,
     hint: hooked ? undefined : "run `kit memory install`",
+  });
+
+  const hookChecks = configuredHooks ? await checkHooks(configuredHooks, ".git", cwd) : [];
+  const failingHooks = hookChecks.filter((check) => hookCheckStatus(check) === "fail");
+  const gitHooksWired = hookChecks.length > 0 && failingHooks.length === 0;
+  items.push({
+    key: "git-hooks",
+    label: "git hooks",
+    ok: gitHooksWired,
+    detail: gitHooksWired
+      ? `${hookChecks.length} wired`
+      : failingHooks.length > 0
+        ? `missing or outdated: ${failingHooks.map((check) => check.hookName).join(", ")}`
+        : "not configured",
+    hint: gitHooksWired ? undefined : "run `kit hooks check` and `kit hooks install`",
   });
 
   return items;

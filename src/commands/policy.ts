@@ -115,7 +115,7 @@ function policyApprove(root: string): boolean {
 function pullFailureHint(status: PullStatus): string {
   switch (status) {
     case "no-anchor":
-      return " — add trusted org keys with `kit policy trust add` (committed out of band)";
+      return " — add trusted org keys with `kit policy trust <pubkey.pem>` (committed out of band)";
     case "no-source":
       return "";
     case "stale-revision":
@@ -189,7 +189,7 @@ function policyPullRevocations(root: string): boolean {
   }
   const hint =
     r.status === "no-anchor"
-      ? " — add trusted org keys with `kit policy trust add` (committed out of band)"
+      ? " — add trusted org keys with `kit policy trust <pubkey.pem>` (committed out of band)"
       : "";
   console.error(
     `${c.red}✗ pull-revocations failed${c.reset} ${c.dim}(${r.detail})${c.reset}${hint}`,

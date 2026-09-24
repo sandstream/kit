@@ -243,7 +243,7 @@ describe("Plugin Registry", () => {
         assert(plugin.install, "plugin must have install command");
         assert.equal(
           plugin.install,
-          `npm install ${plugin.package}`,
+          `npm install ${plugin.package}@${plugin.version}`,
           `${plugin.name}: the printed install command must be runnable`,
         );
       }

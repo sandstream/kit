@@ -503,7 +503,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
   ],
   panic: ["--no-checklist", "--reason"],
   pkg: ["--agent", "--dry-run", "--help"],
-  plugin: ["--help", "--tag"],
+  plugin: ["--help", "--skip-install", "--tag"],
   policy: [
     "--env",
     "--force",

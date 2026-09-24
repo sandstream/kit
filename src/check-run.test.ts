@@ -132,8 +132,8 @@ describe("checkRunToJsonChecks", () => {
     assert.equal(byName["KEY"].status, "fail");
     // Optional skill missing warns (only required ones fail).
     assert.equal(byName["triage"].status, "warn");
-    // Installed-but-outdated hook is a warn row even though the verdict dimension is red.
-    assert.equal(byName["pre-commit"].status, "warn");
+    // An outdated hook misses a declared command, so both row and verdict fail.
+    assert.equal(byName["pre-commit"].status, "fail");
     assert.equal(byName["gitleaks"].category, "security/secrets");
     assert.equal(byName["skills-lock.json"].status, "pass");
     assert.equal(byName["vercel/production/app-prod"].status, "warn");

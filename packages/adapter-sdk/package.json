@@ -1,6 +1,6 @@
 {
   "name": "sandstream-kit-adapter-sdk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Frozen, independently-versioned type contract for building kit service adapters",
   "type": "module",
   "exports": {
