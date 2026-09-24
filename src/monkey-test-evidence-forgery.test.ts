@@ -188,6 +188,30 @@ describe("browser evidence checks the whole Playwright report (MHB-12)", () => {
     assert.match(result.detail, /unexpected|failing/i);
   });
 
+  it("rejects an extra passing test outside the contract", async () => {
+    const doc = passingReport();
+    doc.suites[0].suites.push({
+      title: "unrelated",
+      specs: [
+        {
+          title: "extra success",
+          tests: [
+            {
+              projectName: "desktop-chromium",
+              expectedStatus: "passed",
+              status: "expected",
+              results: [{ status: "passed" }],
+            },
+          ],
+        },
+      ],
+    });
+    doc.stats.expected++;
+    const result = await validate(doc);
+    assert.equal(result.ok, false);
+    assert.match(result.detail, /extra|contract/i);
+  });
+
   it("rejects stats that report an unexpected result", async () => {
     const doc = passingReport();
     doc.stats.unexpected = 1;

@@ -28,6 +28,60 @@ async function run(args: string[], cwd: string) {
 }
 
 describe("plugin command lifecycle", () => {
+  it("shows the official uninstall command and requires a plugin name", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "kit-plugin-uninstall-usage-"));
+    try {
+      const help = await run(["plugin"], cwd);
+      assert.equal(help.code, 0, help.stderr);
+      assert.match(help.stdout, /kit plugin uninstall <name>/);
+
+      const missing = await run(["plugin", "uninstall"], cwd);
+      assert.equal(missing.code, 1);
+      assert.match(missing.stderr, /plugin name required/);
+      assert.match(missing.stderr, /kit plugin uninstall <name>/);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("lists only project plugins and marks a stale adapter registration", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "kit-plugin-installed-list-"));
+    try {
+      await writeFile(
+        join(cwd, "package.json"),
+        JSON.stringify({
+          name: "app",
+          dependencies: { "sandstream-kit-plugin-stripe": "6.12.0" },
+          kitPlugins: ["sandstream-kit-plugin-railway"],
+        }),
+      );
+      const result = await run(["plugin", "list", "--installed"], cwd);
+      assert.equal(result.code, 0, result.stderr);
+      assert.match(result.stdout, /stripe/);
+      assert.match(result.stdout, /railway/);
+      assert.match(result.stdout, /Declared package/);
+      assert.doesNotMatch(result.stdout, /Installed package/);
+      assert.match(result.stdout, /registered.*package not declared/i);
+      assert.doesNotMatch(result.stdout, /vercel/);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("explains that --installed needs a project manifest", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "kit-plugin-installed-empty-"));
+    try {
+      const result = await run(["plugin", "list", "--installed"], cwd);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, /Project package\.json required; run npm init first/);
+      assert.doesNotMatch(result.stdout, /No official plugins/);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("plugin project lifecycle", () => {
   it("lists the same project plugin adapter that kit add can provision", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "kit-plugin-list-"));
     try {

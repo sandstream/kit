@@ -308,7 +308,9 @@ fixture credentials at run time) so nothing new accumulates.
 | ---------------------------- | ------------------------------------- |
 | `kit pkg install <pkg>`      | Triage → install with pinned version. |
 | `kit plugin search <query>`  | Search plugin marketplace.            |
-| `kit plugin install <id>`    | Install a plugin.                     |
+| `kit plugin install <id>`    | Install an official plugin.            |
+| `kit plugin uninstall <id>`  | Remove an official package and adapter registration. |
+| `kit plugin list --installed` | Show project packages and stale adapter registrations. |
 | `kit plugin info <id>`       | Plugin metadata.                      |
 | `kit plugin scaffold <name>` | Generate a new plugin skeleton.       |
 

@@ -24,6 +24,8 @@ kit add railway/deploy
 
 `kit plugin install` triages the npm package before running `npm install`. For an adapter, it then records the package name in `kitPlugins`. Repeating the command does not duplicate the entry. If the npm package was already installed, the command still registers it.
 
+Use `kit plugin list --installed` to see official packages declared in this project's dependencies and adapters recorded in `kitPlugins`. A registered adapter whose npm package is not declared is labeled as stale.
+
 You can also inspect the resulting manifest:
 
 ```json
@@ -34,16 +36,27 @@ You can also inspect the resulting manifest:
 
 The adapter loader reads this array when `kit add` runs, including `kit add --list`. `kit check` does not load plugin adapters, and kit exposes no `kit_add` MCP tool. Install an API-only package such as `stripe` only if your code needs its exported API; it does not provision a Stripe integration through `kit add`.
 
+## Uninstall an official plugin
+
+From the project directory, run:
+
+```bash
+kit plugin uninstall railway
+kit plugin list --installed
+```
+
+Uninstall removes the npm package and any matching entry in `kitPlugins`; other registered adapters remain. API-only packages normally have no adapter registration, but uninstall also cleans up one added manually. If npm fails, kit leaves its registration untouched. If npm succeeds but updating `kitPlugins` fails, the command reports the partial failure and names the manual cleanup needed in `package.json`.
+
 ## Create an adapter package
 
 ```bash
 kit plugin scaffold my-service
-# Or skip dependency installation and install later:
-kit plugin scaffold another-service --skip-install
 cd kit-plugin-my-service
 npm run build
 npm test
 ```
+
+For an offline scaffold, use `kit plugin scaffold my-service --skip-install` **instead of** the first command, then install dependencies before building.
 
 The scaffold contains TypeScript source, tests, and a local type stub for the adapter SDK. By default the scaffold command installs its development tools, including in a production-configured Docker image. With `--skip-install`, install them before building. If dependency triage blocks installation or npm fails, follow the command's printed recovery steps before building.
 

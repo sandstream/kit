@@ -741,7 +741,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   plugin: {
     handler: cmdPlugin,
     stability: "stable",
-    help: "Discover and manage kit plugins (search, list, scaffold, install)",
+    help: "Discover and manage kit plugins (search, list, scaffold, install, uninstall)",
   },
   ci: {
     handler: cmdCi,

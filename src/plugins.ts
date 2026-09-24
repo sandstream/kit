@@ -14,6 +14,8 @@ import { dirname, resolve } from "node:path";
 import { OFFICIAL_PLUGINS } from "./plugin-registry.generated.js";
 import { gateInstall } from "./triage-gate.js";
 import { isRegistrySpec } from "./triage-sandbox.js";
+import { isReadOnlyMode, refuseWrite } from "./read-only-mode.js";
+import { redactSecrets, secretValuesFromEnv } from "./utils/redactSecrets.js";
 
 /**
  * Plugin metadata as it appears in the registry
@@ -81,6 +83,19 @@ export interface PluginInstallDeps {
 }
 
 const defaultInstallDeps: PluginInstallDeps = { gateInstall, exec };
+
+export interface PluginUninstallDeps {
+  exec: PluginInstallDeps["exec"];
+  /** Filesystem boundary for updating project adapter registration. */
+  manifestIO?: { writeFile: typeof writeFile; rename: typeof rename };
+}
+
+const defaultUninstallDeps: PluginUninstallDeps = { exec };
+
+function safePluginError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  return redactSecrets(raw, secretValuesFromEnv(process.env));
+}
 
 /**
  * kit's default plugin registry.
@@ -151,6 +166,32 @@ export function listPlugins(
   return registry.plugins
     .filter((plugin) => plugin.tags.includes(tag.toLowerCase()))
     .sort((a, b) => (b.downloads ?? 0) - (a.downloads ?? 0));
+}
+
+/** Official packages declared or registered in the current project. */
+export async function listProjectPlugins(
+  cwd: string = process.cwd(),
+  tag?: string,
+): Promise<{ plugin: PluginMetadata; declared: boolean; registered: boolean }[]> {
+  const { data } = await readPluginManifest(cwd);
+  const registered = new Set((data["kitPlugins"] as string[] | undefined) ?? []);
+  const dependencySections = ["dependencies", "devDependencies", "optionalDependencies"];
+  return listPlugins(tag).flatMap((plugin) => {
+    const packageName = plugin.package ?? plugin.name;
+    const declared = dependencySections.some((section) => {
+      const dependencies = data[section];
+      return (
+        dependencies !== null &&
+        typeof dependencies === "object" &&
+        !Array.isArray(dependencies) &&
+        Object.hasOwn(dependencies, packageName)
+      );
+    });
+    const adapterRegistered = registered.has(packageName);
+    return declared || adapterRegistered
+      ? [{ plugin, declared, registered: adapterRegistered }]
+      : [];
+  });
 }
 
 /**
@@ -298,6 +339,56 @@ export async function installPlugin(
   }
 }
 
+/** Remove an official package and its ServiceAdapter registration from this project. */
+export async function uninstallPlugin(
+  pluginName: string,
+  metadata: PluginMetadata,
+  deps: PluginUninstallDeps = defaultUninstallDeps,
+  cwd: string = process.cwd(),
+): Promise<{ success: boolean; message: string }> {
+  const packageName = metadata.package ?? pluginName;
+  if (isReadOnlyMode()) {
+    const refusal = await refuseWrite("plugin-uninstall", { package: packageName }, { cwd });
+    return { success: false, message: refusal.reason };
+  }
+  if (!isRegistrySpec(packageName)) {
+    return {
+      success: false,
+      message: `Refusing non-registry plugin package spec: ${safePluginError(packageName)}`,
+    };
+  }
+  try {
+    await readPluginManifest(cwd);
+  } catch (error) {
+    const message = safePluginError(error);
+    return { success: false, message: `Cannot uninstall ${pluginName}: ${message}` };
+  }
+  try {
+    const { stderr } = await deps.exec("npm", ["uninstall", "--ignore-scripts", packageName], {
+      cwd,
+      timeout: 60000,
+    });
+    if (stderr.includes("ERR!")) throw new Error(stderr);
+  } catch (error) {
+    const message = safePluginError(error);
+    return {
+      success: false,
+      message: `npm uninstall failed: ${message}. kitPlugins registration was not removed by kit; inspect package.json before retrying.`,
+    };
+  }
+
+  try {
+    await unregisterInstalledPluginAdapter(packageName, cwd, deps.manifestIO);
+  } catch (error) {
+    const message = safePluginError(error);
+    return {
+      success: false,
+      message: `Package removed by npm, but ${packageName} remains in kitPlugins: ${message}. Remove it from package.json manually.`,
+    };
+  }
+  return { success: true, message: `Uninstalled ${pluginName} from this project` };
+}
+
 async function readPluginManifest(
   cwd: string,
 ): Promise<{ path: string; data: Record<string, unknown> }> {
@@ -307,7 +398,7 @@ async function readPluginManifest(
     raw = await readFile(path, "utf-8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error("Adapter installation requires a project package.json; run npm init first", {
+      throw new Error("Project package.json required; run npm init first", {
         cause: error,
       });
     }
@@ -327,6 +418,24 @@ async function readPluginManifest(
   return { path, data: data as Record<string, unknown> };
 }
 
+async function writePluginManifest(
+  path: string,
+  data: Record<string, unknown>,
+  io: { writeFile: typeof writeFile; rename: typeof rename } = { writeFile, rename },
+): Promise<void> {
+  const tmp = resolve(
+    dirname(path),
+    `.package.json.kit-plugin-${process.pid}-${Math.random().toString(36).slice(2)}`,
+  );
+  try {
+    const mode = (await stat(path)).mode & 0o777;
+    await io.writeFile(tmp, JSON.stringify(data, null, 2) + "\n", { encoding: "utf-8", mode });
+    await io.rename(tmp, path);
+  } finally {
+    await rm(tmp, { force: true }).catch(() => {});
+  }
+}
+
 /** Register an already installed ServiceAdapter; safe to call again on repeat installs. */
 export async function registerInstalledPluginAdapter(
   metadata: PluginMetadata,
@@ -338,16 +447,19 @@ export async function registerInstalledPluginAdapter(
   const plugins = (data["kitPlugins"] as string[] | undefined) ?? [];
   if (plugins.includes(packageName)) return false;
   const next = { ...data, kitPlugins: [...plugins, packageName] };
-  const tmp = resolve(
-    dirname(path),
-    `.package.json.kit-plugin-${process.pid}-${Math.random().toString(36).slice(2)}`,
-  );
-  try {
-    const mode = (await stat(path)).mode & 0o777;
-    await writeFile(tmp, JSON.stringify(next, null, 2) + "\n", { encoding: "utf-8", mode });
-    await rename(tmp, path);
-  } finally {
-    await rm(tmp, { force: true }).catch(() => {});
-  }
+  await writePluginManifest(path, next);
+  return true;
+}
+
+async function unregisterInstalledPluginAdapter(
+  packageName: string,
+  cwd: string,
+  io?: { writeFile: typeof writeFile; rename: typeof rename },
+): Promise<boolean> {
+  const { path, data } = await readPluginManifest(cwd);
+  const plugins = (data["kitPlugins"] as string[] | undefined) ?? [];
+  if (!plugins.includes(packageName)) return false;
+  const next = { ...data, kitPlugins: plugins.filter((name) => name !== packageName) };
+  await writePluginManifest(path, next, io);
   return true;
 }

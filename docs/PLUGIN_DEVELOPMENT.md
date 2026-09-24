@@ -8,9 +8,6 @@ This guide helps you create, test, and publish ServiceAdapter plugins for the ki
 # Scaffold a new plugin
 kit plugin scaffold my-service
 
-# To create files without installing dependencies yet:
-kit plugin scaffold my-service --skip-install
-
 # Navigate to the plugin directory
 cd kit-plugin-my-service
 
@@ -24,6 +21,8 @@ npm test
 # Publish to npm
 npm publish
 ```
+
+To create files without installing dependencies, run `kit plugin scaffold my-service --skip-install` **instead of** the scaffold command above. Install dependencies before building.
 
 ## Understanding Plugins
 

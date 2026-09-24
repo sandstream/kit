@@ -190,6 +190,7 @@ export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
   { command: "panic", operation: "panic" },
   { command: "pkg", operation: "pkg-install" },
   { command: "plugin", subcommand: "install", operation: "plugin-install" },
+  { command: "plugin", subcommand: "uninstall", operation: "plugin-uninstall" },
   { command: "plugin", subcommand: "scaffold", operation: "plugin-scaffold" },
   { command: "policy", subcommand: "approve", operation: "policy-approve" },
   { command: "policy", subcommand: "init", operation: "policy-init" },

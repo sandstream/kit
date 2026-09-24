@@ -38,6 +38,8 @@ interface PlaywrightEvidenceTest extends PlaywrightReportTest {
   specTitle: string;
 }
 
+const MONKEY_PROJECTS = ["desktop-chromium", "mobile-chrome"] as const;
+
 function collectPlaywrightTests(
   suites: PlaywrightReportSuite[],
   parents: string[] = [],
@@ -73,7 +75,7 @@ function contractCasePassed(test: PlaywrightReportTest): boolean {
 
 function contractCaseProblems(tests: PlaywrightEvidenceTest[]): string[] {
   const missing: string[] = [];
-  for (const project of ["desktop-chromium", "mobile-chrome"]) {
+  for (const project of MONKEY_PROJECTS) {
     for (const role of MONKEY_ROLES) {
       const matches = tests.filter(
         (test) =>
@@ -128,6 +130,13 @@ export async function validatePlaywrightEvidence(
   const problems = contractCaseProblems(tests);
   if (problems.length > 0) {
     return { ok: false, detail: `missing successful contract cases: ${problems.join(", ")}` };
+  }
+  const requiredCases = MONKEY_PROJECTS.length * (MONKEY_ROLES.length + 1);
+  if (tests.length !== requiredCases) {
+    return {
+      ok: false,
+      detail: `report has extra or missing cases (${tests.length}/${requiredCases})`,
+    };
   }
   const failed = tests.filter((test) => !contractCasePassed(test));
   if (failed.length > 0) {

@@ -124,6 +124,7 @@ const MUTATING_COMMANDS: readonly CommandCase[] = [
   mutation("panic", "panic", "panic", "--reason", "test"),
   mutation("pkg", "pkg-install", "pkg", "npm:example"),
   mutation("plugin install", "plugin-install", "plugin", "install", "demo"),
+  mutation("plugin uninstall", "plugin-uninstall", "plugin", "uninstall", "demo"),
   mutation("plugin scaffold", "plugin-scaffold", "plugin", "scaffold", "demo"),
   mutation("policy approve", "policy-approve", "policy", "approve", "deploy"),
   mutation("policy init", "policy-init", "policy", "init"),

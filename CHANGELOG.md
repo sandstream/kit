@@ -31,6 +31,13 @@
 - **Docker plugin runtime.** The container image ships a runtime that can load
   kit plugins, with a test asserting the runtime contract the docs describe.
 
+- **Plugin lifecycle commands.** `kit plugin list --installed` shows official
+  packages declared or registered in the current project, and
+  `kit plugin uninstall <name>` removes a package and its adapter registration.
+
+- **Plugin package guides.** Each official plugin tarball now includes its
+  README and package changelog, with setup, API, testing, and recovery guidance.
+
 ### Changed
 
 - **BREAKING: session-owned pending-action claims.** `pal claim` now requires

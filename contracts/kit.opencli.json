@@ -3422,10 +3422,11 @@
     },
     "plugin": {
       "kind": "command",
-      "summary": "Discover and manage kit plugins (search, list, scaffold, install)",
+      "summary": "Discover and manage kit plugins (search, list, scaffold, install, uninstall)",
       "x-kit-accepted-flags": [
         "--env",
         "--help",
+        "--installed",
         "--non-interactive",
         "--read-only",
         "--readonly",

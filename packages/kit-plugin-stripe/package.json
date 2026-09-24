@@ -13,7 +13,9 @@
   "types": "dist/index.d.ts",
   "files": [
     "dist",
-    "!dist/**/*.test.*"
+    "!dist/**/*.test.*",
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc"
