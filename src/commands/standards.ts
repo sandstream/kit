@@ -36,8 +36,10 @@ async function freezeStandardsBaseline(baseline: Baseline, cwd: string): Promise
 
   const general = await collectStandardsKeys(cwd);
   baselineSet(baseline, "standards", "complexity", general.complexity);
+  baselineSet(baseline, "standards", "complexity_metrics", general.complexityMetrics);
   baselineSet(baseline, "standards", "duplication", general.duplication);
   baselineSet(baseline, "standards", "size", general.size);
+  baselineSet(baseline, "standards", "size_metrics", general.sizeMetrics);
 
   const lang = (await detectStack(cwd)).language;
   let specificCount = 0;
@@ -147,7 +149,8 @@ export async function cmdStandards(): Promise<boolean> {
  *   - tests.untested_files
  */
 export async function cmdBaseline(): Promise<boolean> {
-  const sub = process.argv[3];
+  const first = process.argv[3];
+  const sub = first?.startsWith("-") ? undefined : first;
   if (!sub || sub === "--help" || sub === "-h") {
     console.log(`${c.bold}kit baseline${c.reset} — freeze current warnings`);
     console.log("\nUsage:");

@@ -4,13 +4,15 @@ import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { loadConfig } from "./config.js";
-import { hasFlag, splitLeadingGlobalFlags, GLOBAL_FLAGS } from "./utils/flags.js";
+import { hasFlag, splitLeadingGlobalFlags, GLOBAL_FLAGS, readOnlyFlag } from "./utils/flags.js";
+import { envTruthy } from "./utils/flags.js";
 import { generateCompletions } from "./completions.js";
 import { checkForUpdate, printUpdateNotice } from "./update-check.js";
 import { SKIPPED_COMMITS_LOG } from "./hooks.js";
 import { cmdFix } from "./fix.js";
 import { c } from "./utils/colors.js";
 import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
+import { reportUnexpectedCliError } from "./cli-error.js";
 import { cmdEnv } from "./commands/env.js";
 import { cmdContext } from "./commands/context.js";
 import { cmdConfig } from "./commands/config.js";
@@ -98,11 +100,28 @@ const KIT_VERSION = (
   JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8")) as { version: string }
 ).version;
 
-function cmdHelp(subcommand?: string): boolean {
-  if (subcommand && COMMAND_HELP[subcommand]) {
-    console.log(`kit ${subcommand} — ${COMMAND_HELP[subcommand]}`);
-    return true;
+function printCommandHelp(args: readonly string[]): boolean {
+  const target = args.join(" ");
+  const entries = Object.entries(COMMAND_HELP);
+  const match = entries
+    .filter(([command]) => target === command || target.startsWith(`${command} `))
+    .sort(([a], [b]) => b.length - a.length)[0];
+  if (!match) return false;
+
+  const [command, help] = match;
+  console.log(`kit ${command} — ${help}`);
+  const subcommands = entries.filter(([name]) => name.startsWith(`${command} `));
+  if (subcommands.length > 0) {
+    console.log("\nSubcommands:");
+    for (const [name, description] of subcommands) {
+      console.log(`  kit ${name} — ${description}`);
+    }
   }
+  return true;
+}
+
+function cmdHelp(args: readonly string[] = []): boolean {
+  if (printCommandHelp(args)) return true;
 
   const bold = c.bold,
     cyan = c.cyan,
@@ -305,7 +324,7 @@ async function showSkippedCommitBanner(): Promise<void> {
  * zero-LLM: it stores raw transcripts and searches them; it never calls a model.
  */
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   // Global flags may precede the command word (`kit --read-only check`, the form
   // README.md:299 and docs/THREAT_MODEL.md:98 document). Move them behind the
   // positionals — and rewrite process.argv to match — so command modules that
@@ -319,6 +338,13 @@ async function main(): Promise<void> {
     process.argv = [...process.argv.slice(0, 2), ...args];
   }
   const command = positional[0];
+  // Help must precede policy/read-only initialization too: activating read-only
+  // mode writes an audit event. Render only registry data, never dispatch a handler.
+  if (command === "help" || hasFlag(args, "--help", "-h")) {
+    cmdHelp(command === "help" ? positional.slice(1) : positional);
+    process.exitCode = 0;
+    return;
+  }
   const nonInteractive =
     hasFlag(args, "--non-interactive") ||
     process.env.CI === "true" ||
@@ -328,10 +354,17 @@ async function main(): Promise<void> {
   // Honored gates: writeSecretToBackend, grantElevation, installHooks, and
   // every kit-plugin write surface (vercel env-set, github secret-put,
   // stripe webhook-create, etc).
-  if (hasFlag(args, "--read-only") || hasFlag(args, "--readonly")) {
+  const readOnly = readOnlyFlag(args);
+  if (readOnly.kind === "invalid") {
+    console.error(
+      `${c.red}invalid value for ${readOnly.flag}: "${readOnly.value}" (expected no value, or a truthy value: 1, true, yes, on)${c.reset}`,
+    );
+    process.exitCode = 2;
+    return;
+  } else if (readOnly.kind === "active") {
     const { activateReadOnlyMode } = await import("./read-only-mode.js");
     activateReadOnlyMode("flag");
-  } else if (process.env.KIT_READ_ONLY === "1") {
+  } else if (envTruthy(process.env.KIT_READ_ONLY)) {
     const { activateReadOnlyMode } = await import("./read-only-mode.js");
     activateReadOnlyMode("env");
   }
@@ -348,7 +381,11 @@ async function main(): Promise<void> {
       // never calls and the environment is the only channel that reaches them. See `installPolicyEnv`.
       const { installPolicyEnv } = await import("./policy-gate.js");
       await installPolicyEnv(cfgForPolicy.policy);
-      if (cfgForPolicy.policy.default_mode === "read-only" && !process.env.KIT_READ_ONLY) {
+      // Forces read-only regardless of KIT_READ_ONLY's value (a "0" must not defeat policy);
+      // activateReadOnlyMode() itself no-ops when read-only is already active, so the only
+      // way to skip it is for read-only to already be on (RO-2: this used to skip on any
+      // KIT_READ_ONLY string, including "0" and "false").
+      if (cfgForPolicy.policy.default_mode === "read-only") {
         const { activateReadOnlyMode } = await import("./read-only-mode.js");
         activateReadOnlyMode("policy");
       }
@@ -362,34 +399,16 @@ async function main(): Promise<void> {
   try {
     let ok: boolean;
 
-    // --version / --help flags before the switch
+    // --version flag before dispatch
     if (positional[0] === "--version" || positional[0] === "-v") {
       ok = cmdVersion();
       process.exitCode = ok ? 0 : 1;
       return;
     }
-    if (positional[0] === "--help" || positional[0] === "-h") {
-      ok = cmdHelp();
-      process.exitCode = 0;
-      return;
-    }
-    // A `--help`/`-h` anywhere after the command means "show that command's
-    // help" — NEVER execute the command. Critical for side-effectful commands
-    // (agent-config, fix, secrets, hooks add): `kit <cmd> --help` previously
-    // fell through to the dispatch and ran <cmd>. (Generalizes the 1.4.0 fix
-    // that only covered `kit memory <sub> --help`.)
-    if (command && command !== "help" && (hasFlag(args, "--help") || hasFlag(args, "-h"))) {
-      cmdHelp(command);
-      process.exitCode = 0;
-      return;
-    }
-
-    // version/help/completions need bespoke handling; everything else is a flat
+    // version/completions need bespoke handling; everything else is a flat
     // command->fn dispatch (was a ~40-case switch — the main complexity driver).
     if (command === "version") {
       ok = cmdVersion();
-    } else if (command === "help") {
-      ok = cmdHelp(positional[1]);
     } else if (command === "completions") {
       const shell = positional[1];
       const script = generateCompletions(shell);
@@ -498,7 +517,12 @@ async function main(): Promise<void> {
     const code =
       err instanceof Error && "code" in err ? (err as { code?: string }).code : undefined;
     const jsonMode = hasFlag(args, "--json");
-    if (code === "ENOENT") {
+    if (code === "KIT_USAGE_ERROR") {
+      const message = err instanceof Error ? err.message : String(err);
+      if (jsonMode) console.log(JSON.stringify({ ok: false, error: message }));
+      console.error(`${c.red}${message}${c.reset}`);
+      process.exitCode = 2;
+    } else if (code === "ENOENT") {
       // In --json mode emit a valid JSON error so consumers never get empty stdout.
       if (jsonMode) console.log(JSON.stringify({ ok: false, error: `${KIT_FILE} not found` }));
       console.error(`${c.red}Error: ${KIT_FILE} not found in ${process.cwd()}${c.reset}`);
@@ -516,7 +540,7 @@ async function main(): Promise<void> {
       console.error(`${c.red}${msg}${c.reset}`);
       process.exitCode = 1;
     } else {
-      throw err;
+      reportUnexpectedCliError(err, args);
     }
   }
 }
@@ -691,7 +715,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   mcp: {
     handler: cmdMcp,
     stability: "stable",
-    help: "MCP server over stdio (Claude Code/Cursor/Codex); 'kit mcp list|auth|set-token|clear' manages declared servers",
+    help: "MCP server over stdio; 'kit mcp web' connects ChatGPT through an outbound secure tunnel",
   },
   env: { handler: cmdEnv, stability: "stable", help: "Show current environment info" },
   doctor: {
@@ -717,7 +741,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   plugin: {
     handler: cmdPlugin,
     stability: "stable",
-    help: "Discover and manage kit plugins (search, list, scaffold, install)",
+    help: "Discover and manage kit plugins (search, list, scaffold, install, uninstall)",
   },
   ci: {
     handler: cmdCi,
@@ -752,7 +776,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   bootstrap: {
     handler: cmdBootstrap,
     stability: "experimental",
-    help: "Cold-start an ephemeral environment in one command: setup → identity → policy pull → profile import → memory restore, from one platform-injected seed (fail-closed floor, fail-open fuel, --json receipt) (experimental)",
+    help: "Cold-start an ephemeral environment: setup → identity → policy pull → profile import → memory restore (--policy-source <dir> or KIT_POLICY_SOURCE with an org anchor; --json receipt) (experimental)",
   },
   panic: {
     handler: cmdPanic,
@@ -960,11 +984,13 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   "memory search":
     "Full-text search memory (current project; --global for all; --fresh = recency-aware ranking)",
   "memory stats": "Show what the local memory store contains",
+  "memory project":
+    "Show or initialize the checked-in project identity used for cross-clone recall",
   "memory suggest":
     "Emit a BYO-LLM review prompt (recent activity + open items) — pipe to your own model",
   "memory merge": "Merge another machine's memory.db into this one (dedup by uuid)",
   "memory sync":
-    "Sync from a memory export or encrypted backup (mergeDb; last-write-wins, file_index excluded)",
+    "Import a memory export or encrypted backup (task descendants advance, concurrent alternatives retained; file_index excluded)",
   "memory install":
     "Wire Claude Code prompt/start/end hooks and silent Codex start/end hooks into lifecycle config",
   "memory scan":
@@ -976,7 +1002,22 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   "memory area": "Show shared entries for one area (decisions, how-built, status, security)",
   "memory context":
     "Push-surface active decisions for the area(s) whose files you're touching (deterministic, path→cluster)",
-  "memory pal": "Pending action ledger — list/add/done/snooze/verify/import 'blocked-on-you' items",
+  "memory pal":
+    "Pending action ledger — list/show/add/configure/claim/renew/takeover/release/reopen/done/snooze/resolve/forget/verify/import/prune",
+  "memory pal claim":
+    "Claim inspected work: kit memory pal claim <id> [label] --harness <name> --session <id> --expect <frontier>",
+  "memory pal renew":
+    "Renew owned work and receive a new frontier: kit memory pal renew <id> --harness <name> --session <id> --expect <frontier>",
+  "memory pal takeover":
+    "Explicitly take over claimed work: kit memory pal takeover <id> [label] --harness <name> --session <id> --expect <frontier> [--take <head>] (required for multiple heads)",
+  "memory pal configure":
+    "Configure a local verifier: kit memory pal configure <id> (--manual | --verify-file <path> | --verify-http <url> [--expect <code>])",
+  "memory pal show":
+    "Inspect causal task state without writes: kit memory pal show <id> [--history] [--json]",
+  "memory pal resolve":
+    "Resolve observed alternatives: kit memory pal resolve <id> --expect <frontier> (--take <revision> | --state <file>) [--harness <name> --session <id>] (contested claims require takeover)",
+  "memory pal forget":
+    "Erase a task and its history with a sync tombstone: kit memory pal forget <id> --expect <frontier> [--harness <name> --session <id>] [--json] (claimed work requires its owner)",
   "memory save": "Bookmark the current session as a named copilot",
   "memory threads": "List saved copilots (current project; --global for all)",
   "memory resume": "Print the resume command for a saved copilot (by name or number)",
@@ -1143,9 +1184,7 @@ export function emitDeprecationWarning(
   return true;
 }
 
-// Run only when invoked as the real CLI entry — NOT when imported by a test
-// (command-surface.test.ts imports COMMANDS/COMMAND_HELP). main() handles its own
-// errors and sets process.exitCode; `void` marks the intentional non-await.
+// Run only as the real CLI entry; tests import COMMANDS and COMMAND_HELP.
 function isCliEntry(): boolean {
   const entry = process.argv[1];
   if (!entry) return false;
@@ -1156,4 +1195,4 @@ function isCliEntry(): boolean {
   }
 }
 
-if (isCliEntry()) void main();
+if (isCliEntry()) void main().catch(reportUnexpectedCliError);

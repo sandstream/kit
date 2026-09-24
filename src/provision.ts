@@ -3,7 +3,23 @@ import { resolve } from "node:path";
 import { adapters } from "./adapters/index.js";
 import { loadPluginAdapters } from "./plugin-loader.js";
 import { secureFile } from "./utils/secure-perms.js";
-import type { AdapterContext, ProvisionResult } from "./adapters/types.js";
+import type { AdapterContext, AdapterRegistry, ProvisionResult } from "./adapters/types.js";
+
+/** Plugin adapters can add services, but cannot replace kit's built-in providers. */
+export function mergeProvisionAdapters(
+  pluginAdapters: AdapterRegistry,
+  warn: (message: string) => void = (message) => console.warn(message),
+): AdapterRegistry {
+  const merged: AdapterRegistry = { ...adapters };
+  for (const [name, adapter] of Object.entries(pluginAdapters)) {
+    if (Object.hasOwn(adapters, name)) {
+      warn(`[kit] plugin adapter "${name}" ignored: built-in adapter already exists`);
+      continue;
+    }
+    merged[name] = adapter;
+  }
+  return merged;
+}
 
 /**
  * Load existing environment variables
@@ -91,9 +107,9 @@ export async function provisionService(
   projectPath: string,
   projectName?: string,
 ): Promise<ProvisionResult> {
-  // Merge built-in adapters with any plugin adapters from kitPlugins in package.json
+  // Add non-conflicting plugin adapters from kitPlugins in package.json.
   const pluginAdapters = await loadPluginAdapters(projectPath);
-  const allAdapters = { ...adapters, ...pluginAdapters };
+  const allAdapters = mergeProvisionAdapters(pluginAdapters);
 
   const adapter = allAdapters[serviceName];
 
@@ -180,4 +196,16 @@ export function getServiceInfo(
     description: adapter.description,
     tools: adapter.getRequiredTools(),
   };
+}
+
+/** List the adapters that provisionService accepts in this project. */
+export async function listProjectServices(
+  projectPath: string,
+): Promise<{ name: string; description: string; tools: string[] }[]> {
+  const allAdapters = mergeProvisionAdapters(await loadPluginAdapters(projectPath));
+  return Object.entries(allAdapters).map(([name, adapter]) => ({
+    name,
+    description: adapter.description,
+    tools: adapter.getRequiredTools(),
+  }));
 }

@@ -1,11 +1,12 @@
 # Running kit in an air-gapped / no-egress environment
 
-kit is local-first and makes **zero LLM calls and no telemetry**, so it already
-fits a restricted enclave. The one place the default configuration reaches the
-public internet is the **triage gate**, which queries package registries to
-evaluate a target before install. In an air-gapped network you point those
-queries at your **internal mirrors** instead, and run the heavy scanners against
-**local databases**. Nothing else phones home.
+kit is local-first and makes **zero LLM calls and no telemetry**, so it fits a
+restricted enclave when air-gap posture is enabled. In normal connected mode,
+operator-invoked triage, provider commands and network-backed scanners can reach
+their declared services; interactive commands can also perform cached kit and
+Bumblebee update checks. Air-gap posture suppresses those update checks, prevents
+Bumblebee binary downloads, removes cloud-only scanners and requires triage to use
+the internal mirrors below. Heavy scanners must use pre-synced **local databases**.
 
 > Fail-closed by design: if a registry/mirror is unreachable, triage records a
 > CRITICAL ("cannot verify") and withholds `TRIAGE PASSED`, so kit **blocks** the
@@ -63,7 +64,7 @@ runs against a **pre-synced local DB with no network**.
 
 ```bash
 export KIT_AIRGAP=1
-kit scan      # → "air-gap mode: offline scanners only (skipping cloud-only: snyk, semgrep)"
+kit scan      # → air-gap mode: offline scanners only; cloud-only scanners are skipped
 ```
 
 What the mode does per scanner:
@@ -74,10 +75,12 @@ What the mode does per scanner:
 | **grype**       | sets `GRYPE_DB_AUTO_UPDATE=false` (provide a cached DB via `GRYPE_DB_CACHE_DIR`, synced with `grype db update` on a connected host)                           |
 | **osv-scanner** | adds `--offline` (point at a synced local OSV DB)                                                                                                             |
 | **snyk**        | **skipped** — talks to the Snyk cloud                                                                                                                         |
-| **semgrep**     | **skipped** — `--config auto` fetches the registry (local-ruleset support is a tracked follow-up)                                                             |
+| **semgrep**     | Registry configs are refused; an explicit local ruleset path can run offline.                                                                                |
 
-Install the scanners through your internal package mirror or an approved binary
-cache; kit never downloads them itself.
+Install scanners through your internal package mirror or an approved binary
+cache. In connected mode kit may provision its pinned Bumblebee binary; air-gap
+posture forbids that download and requires a pre-populated cache or
+`KIT_BUMBLEBEE_BIN`.
 
 ### Verified offline threat-data bundle (signed)
 
@@ -180,8 +183,11 @@ If you genuinely need a single install to span multiple levels, that is an
 OS/MLS platform requirement: accredit the platform for multi-level operation and
 run kit on top of it. It is not, and should not be, a kit feature.
 
-## What still never leaves the enclave
+## Local-state boundary
 
-Secret resolution, the memory store, the audit log, `kit check`/`review`
-verdicts, agent/MCP config and GitHub-Actions auditing, and SBOM generation are
-all fully local and make no network calls regardless of the settings above.
+With air-gap posture enabled, scanners pointed at local artifacts, remote audit
+disabled and triage pointed at internal mirrors, kit's verdicts, agent/MCP config,
+local audit file and local memory database remain inside the enclave. Commands
+explicitly configured to use provider-backed secret stores, a private memory-sync
+remote or remote audit are network operations and must be disabled or redirected to
+approved internal endpoints; air-gap posture is not permission to call them.

@@ -266,6 +266,8 @@ export interface GovernanceAuditConfig {
    * data is leaving the machine.
    */
   remote?: boolean;
+  /** Company/tenant path segment used by the explicitly enabled remote sink. */
+  company_id?: string;
   /**
    * Fail-closed anchoring for `kit audit verify`. When true, an unanchored log,
    * an unreadable anchor key, an unsealed tail, or a rotated key are treated as
@@ -512,7 +514,12 @@ export interface kitConfig {
    * A more restrictive memory is never recalled into a less restrictive context; an
    * INVALID value fails closed to `restricted`. `KIT_MEMORY_CLASS` overrides it.
    */
-  memory?: { track_findings?: boolean; default_class?: "public" | "internal" | "restricted" };
+  memory?: {
+    /** Stable public repository association used by cross-clone memory recall. */
+    project_id?: string;
+    track_findings?: boolean;
+    default_class?: "public" | "internal" | "restricted";
+  };
   /**
    * Decision ledger (`kit decisions`). `require = true` turns the per-run ledger into a gate: a
    * governed run that recorded no decisions leaves no review surface, and `kit check` fails it as
@@ -671,6 +678,8 @@ const GovernanceConfigSchema = z
         log_file: z.string().optional(),
         log_level: z.enum(["debug", "info", "warn", "error"]).optional(),
         include_secrets: z.boolean().optional(),
+        remote: z.boolean().optional(),
+        company_id: z.string().min(1).optional(),
         require_anchor: z.boolean().optional(),
       })
       .passthrough()
@@ -969,6 +978,7 @@ export const kitConfigSchema = z
       .optional(),
     memory: z
       .object({
+        project_id: z.string().uuid().optional(),
         track_findings: z.boolean().optional(),
         default_class: z.enum(["public", "internal", "restricted"]).optional(),
       })

@@ -1,8 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
+import { execFileSync, spawnSync } from "node:child_process";
 
 /**
  * publish.yml ↔ npm's trusted-publishing prerequisites.
@@ -33,6 +35,24 @@ const EXECUTED = WORKFLOW.split("\n")
   .filter((line) => !/^\s*#/.test(line))
   .join("\n");
 
+function stepBody(name: string): string {
+  const start = EXECUTED.indexOf(`- name: ${name}`);
+  assert.ok(start >= 0, `missing publish step: ${name}`);
+  const end = EXECUTED.indexOf("\n      - name:", start + name.length);
+  return EXECUTED.slice(start, end < 0 ? undefined : end);
+}
+
+function beforePublish(name: string): string {
+  const body = stepBody(name);
+  assert.ok(
+    EXECUTED.indexOf(`- name: ${name}`) <
+      EXECUTED.indexOf("- name: Publish to npm with provenance"),
+    `${name} must run before publishing`,
+  );
+  assert.doesNotMatch(body, /continue-on-error:\s*true|if:\s*always\(\)/);
+  return body;
+}
+
 /** npm's documented floor for trusted publishing. */
 const MIN_NPM = [11, 5, 1] as const;
 
@@ -43,6 +63,74 @@ function atLeast(found: readonly number[], min: readonly number[]): boolean {
     if (f < min[i]) return false;
   }
   return true;
+}
+
+function commitFixture(root: string, message: string): string {
+  execFileSync("git", ["-C", root, "add", "."]);
+  execFileSync("git", [
+    "-C",
+    root,
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-qm",
+    message,
+  ]);
+  return execFileSync("git", ["-C", root, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
+}
+
+function createPublishFixture(root: string): { first: string; second: string; binDir: string } {
+  const pkgDir = join(root, "packages", "kit-plugin-demo");
+  const binDir = join(root, "bin");
+  mkdirSync(pkgDir, { recursive: true });
+  mkdirSync(binDir);
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({ name: "kit-fixture", version: "1.0.0" }),
+  );
+  writeFileSync(
+    join(pkgDir, "package.json"),
+    JSON.stringify({ name: "kit-plugin-demo", version: "0.1.0" }),
+  );
+  writeFileSync(join(pkgDir, "index.js"), "export const value = 1;\n");
+  execFileSync("git", ["init", "-q", root]);
+  const first = commitFixture(root, "first");
+  writeFileSync(
+    join(binDir, "npm"),
+    `#!/usr/bin/env node
+const spec = process.argv[3];
+const state = JSON.parse(process.env.FAKE_NPM_STATE || '{}');
+if (state[spec] === 'offline') { process.stderr.write('network unavailable'); process.exit(1); }
+if (!(spec in state)) { process.stderr.write('npm ERR! code E404\\n'); process.exit(1); }
+process.stdout.write(JSON.stringify(state[spec]) + '\\n');
+`,
+  );
+  chmodSync(join(binDir, "npm"), 0o755);
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({ name: "kit-fixture", version: "1.1.0" }),
+  );
+  writeFileSync(join(pkgDir, "index.js"), "export const value = 2;\n");
+  const second = commitFixture(root, "second");
+  return { first, second, binDir };
+}
+
+function runPublishGuard(root: string, binDir: string, state: Record<string, string>) {
+  return spawnSync(process.execPath, [join(REPO_ROOT, "scripts/verify-published-versions.mjs")], {
+    cwd: root,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      FAKE_NPM_STATE: JSON.stringify(state),
+    },
+  });
 }
 
 describe("publish.yml — publishes over OIDC, not a long-lived token", () => {
@@ -93,7 +181,7 @@ describe("publish.yml — the signature gate cannot fail open", () => {
 
 describe("publish.yml — trusted-publishing prerequisites", () => {
   it("installs an npm that has the OIDC exchange (>= 11.5.1)", () => {
-    const m = EXECUTED.match(/npm (?:i|install) -g npm@\^?(\d+)\.(\d+)\.(\d+)/);
+    const m = EXECUTED.match(/npm (?:i|install) -g npm@(\d+)\.(\d+)\.(\d+)/);
     assert.ok(
       m,
       "publish.yml must install npm explicitly: setup-node's bundled npm for node 22 is 10.9.x, which predates trusted publishing (>= 11.5.1)",
@@ -132,6 +220,51 @@ describe("publish.yml — trusted-publishing prerequisites", () => {
   });
 });
 
+describe("publish.yml — documented release gates execute before publication", () => {
+  it("binds the tag to the package version", () => {
+    const body = beforePublish("Verify tag matches package.json version");
+    assert.match(body, /PKG_VERSION=.*package\.json/);
+    assert.match(body, /TAG_VERSION="\$\{TAG#v\}"/);
+    assert.match(body, /if \[ "\$PKG_VERSION" != "\$TAG_VERSION" \]; then[\s\S]*?exit 1/);
+  });
+
+  it("requires matching changelog notes", () => {
+    const body = beforePublish("Verify the CHANGELOG documents this version");
+    assert.match(body, /if ! node scripts\/changelog-section\.mjs "\$VERSION"/);
+    assert.match(body, /exit 1/);
+  });
+
+  it("requires one maintainer key with the pinned fingerprint and a signed tag", () => {
+    const key = beforePublish("Import maintainer public key");
+    assert.match(key, /EXPECTED_FPR: \$\{\{ secrets\.MAINTAINER_KEY_FPR \}\}/);
+    assert.match(key, /if \[ -z "\$EXPECTED_FPR" \]; then[\s\S]*?exit 1/);
+    assert.match(key, /if \[ "\$NKEYS" != "1" \]; then[\s\S]*?exit 1/);
+    assert.match(key, /if \[ "\$NORM_FPR" != "\$NORM_EXP" \]; then[\s\S]*?exit 1/);
+    const signature = beforePublish("Verify tag is GPG-signed");
+    assert.match(signature, /if ! git verify-tag "\$TAG"[^\n]*; then[\s\S]*?exit 1/);
+  });
+
+  it("requires audit and a fail-closed supply-chain scan", () => {
+    assert.match(beforePublish("npm audit (high+)"), /run: npm audit --audit-level=high/);
+    const supply = beforePublish("Bumblebee supply-chain gate");
+    assert.match(supply, /KIT_BUMBLEBEE_REQUIRED:\s*"1"/);
+    assert.match(supply, /node scripts\/run-supply-chain-check\.mjs/);
+  });
+
+  it("runs tests and production build", () => {
+    assert.match(beforePublish("Run tests"), /run: npm test/);
+    assert.match(beforePublish("Build production artifacts"), /run: npm run build:prod/);
+  });
+
+  it("checks SDK major and each plugin peer range", () => {
+    const body = beforePublish("Verify the adapter-SDK contract the plugins are published against");
+    assert.match(body, /SDK_VER=.*adapter-sdk\/package\.json/);
+    assert.match(body, /1\.\*\) : ;;/);
+    assert.match(body, /require\('semver'\)\.satisfies/);
+    assert.match(body, /if \[ -n "\$BAD" \]; then[\s\S]*?exit 1/);
+  });
+});
+
 describe("publish.yml — publish steps are rerunnable after partial failures", () => {
   it("skips the root package when the exact version already exists on npm", () => {
     const start = EXECUTED.indexOf("Publish to npm with provenance");
@@ -146,5 +279,64 @@ describe("publish.yml — publish steps are rerunnable after partial failures", 
     assert.ok(lookup >= 0, "root publish must check whether name@version already exists");
     assert.ok(publish > lookup, "root publish must check npm before publishing");
     assert.match(step, /already on npm/);
+  });
+});
+
+describe("publish.yml — published versions bind to the source tree", () => {
+  it("checks registry versions before any publish", () => {
+    const guard = EXECUTED.indexOf("node scripts/verify-published-versions.mjs");
+    const publish = EXECUTED.indexOf("Publish to npm with provenance");
+    assert.ok(guard >= 0 && guard < publish);
+  });
+
+  it("refuses reused root and changed workspace versions, but permits an exact rerun", () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-publish-guard-"));
+    try {
+      const { first, second, binDir } = createPublishFixture(root);
+      const run = (state: Record<string, string>) => runPublishGuard(root, binDir, state);
+
+      const reusedRoot = run({ "kit-fixture@1.1.0": first });
+      assert.equal(reusedRoot.status, 1, reusedRoot.stderr);
+      assert.match(reusedRoot.stderr, /different commit/);
+
+      const changedWorkspace = run({ "kit-plugin-demo@0.1.0": first });
+      assert.equal(changedWorkspace.status, 1, changedWorkspace.stderr);
+      assert.match(changedWorkspace.stderr, /changed since publication/);
+
+      const exactRerun = run({ "kit-fixture@1.1.0": second, "kit-plugin-demo@0.1.0": second });
+      assert.equal(exactRerun.status, 0, exactRerun.stderr);
+
+      const offline = run({ "kit-fixture@1.1.0": "offline" });
+      assert.equal(offline.status, 1, offline.stderr);
+      assert.match(offline.stderr, /registry lookup failed/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("publish.yml — release evidence describes the shipped package", () => {
+  it("scans the unpacked npm tarball for both SBOM formats", () => {
+    const pack = EXECUTED.slice(
+      EXECUTED.indexOf("Pack the tarball to attest"),
+      EXECUTED.indexOf("Generate GitHub artifact attestation"),
+    );
+    assert.match(pack, /tar -xzf "\$TARBALL" -C \.release-package/);
+    for (const name of ["Generate SBOM (CycloneDX)", "Generate SBOM (SPDX)"]) {
+      const start = EXECUTED.indexOf(name);
+      const end = EXECUTED.indexOf("\n      - name:", start + name.length);
+      const step = EXECUTED.slice(start, end < 0 ? undefined : end);
+      assert.match(step, /path:\s*\.release-package\/package/);
+      assert.doesNotMatch(step, /path:\s*\.\s*$/m);
+    }
+  });
+
+  it("does not pack or attest after a failed publish", () => {
+    for (const name of ["Pack the tarball to attest", "Generate GitHub artifact attestation"]) {
+      const start = EXECUTED.indexOf(name);
+      const end = EXECUTED.indexOf("\n      - name:", start + name.length);
+      const step = EXECUTED.slice(start, end < 0 ? undefined : end);
+      assert.doesNotMatch(step, /\bif:\s*always\(\)/);
+    }
   });
 });

@@ -213,24 +213,20 @@ export function toLockSource(source: ToolSource | undefined): LockSource {
  *
  * The resolved version is recorded when the tool is installed; when it is not, the declared pin
  * is kept so the entry still says what was asked for. `sourceDetail` carries the installer kit
- * actually saw, because the lock's four-value vocabulary cannot say "brew".
+ * actually saw, because the lock's four-value vocabulary cannot say "brew". Executable paths stay
+ * in `kit tools list`; recording absolute machine paths in a committed lock leaks local identity
+ * and makes the artifact non-portable.
  */
 export async function resolveLockEntries(
   declared: Record<string, string>,
-): Promise<
-  Record<string, { version: string; source: LockSource; sourceDetail?: string; path?: string }>
-> {
-  const out: Record<
-    string,
-    { version: string; source: LockSource; sourceDetail?: string; path?: string }
-  > = {};
+): Promise<Record<string, { version: string; source: LockSource; sourceDetail?: string }>> {
+  const out: Record<string, { version: string; source: LockSource; sourceDetail?: string }> = {};
   for (const [name, pin] of Object.entries(declared)) {
     const facts = await describeTool(name);
     out[name] = {
       version: facts.installed ?? pin,
       source: toLockSource(facts.provenance?.source),
       sourceDetail: facts.provenance?.source,
-      path: facts.path ?? undefined,
     };
   }
   return out;

@@ -17,14 +17,13 @@
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { walkSourceFiles } from "./source-walk.js";
 import { runCiScriptAudit } from "./self-audit-ci.js";
 import { runDocsClaimsAudit } from "./self-audit-docs.js";
 import { runWiringAudit } from "./self-audit-wiring.js";
 import { ruleForSelfAudit } from "./rules/catalog.js";
+export { resolveKitRoot } from "./self-audit-root.js";
 
 export type SelfAuditSeverity = "error" | "warn" | "info";
 
@@ -362,13 +361,15 @@ const R1b: SelfAuditRule = {
         }
         if (parseLine < 0) continue;
 
-        // Is there a guard (Number.isFinite / !isNaN / isNaN) on that var
+        // Finite and integer guards both reject NaN. Is there a guard on that var
         // anywhere in the window? Order doesn't matter — a guard present anywhere
         // in the same fn means the comparison can't be reached with NaN.
         const wtext = windowText(file, w);
         const guarded =
           // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- parseVar is a source identifier, escapeRe()ed
-          new RegExp(`Number\\.isFinite\\s*\\(\\s*${escapeRe(parseVar)}\\b`).test(wtext) ||
+          new RegExp(
+            `Number\\.(?:isFinite|isInteger|isSafeInteger)\\s*\\(\\s*${escapeRe(parseVar)}\\b`,
+          ).test(wtext) ||
           // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- parseVar is a source identifier, escapeRe()ed
           new RegExp(`!\\s*isNaN\\s*\\(\\s*${escapeRe(parseVar)}\\b`).test(wtext) ||
           // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- parseVar is a source identifier, escapeRe()ed
@@ -582,7 +583,22 @@ const R4: SelfAuditRule = {
 // ---------------------------------------------------------------------------
 
 const NAME_VALIDATION_RE = /\bisValidPluginName\s*\(|_NAME_RE\b|NAME_RE\.test\s*\(/;
-const PATH_CONTAINMENT_RE = /\brelative\s*\([^)]*\)[\s\S]{0,40}?\.startsWith\s*\(\s*["']\.\.["']/;
+const INLINE_PATH_CONTAINMENT_RE = /\brelative\s*\([^)]*\)\s*\.\s*startsWith\s*\(\s*["']\.\.["']/;
+const ASSIGNED_RELATIVE_RE =
+  /\b(?:const|let)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*relative\s*\([^)]*\)/g;
+
+function hasPathContainment(source: string): boolean {
+  if (INLINE_PATH_CONTAINMENT_RE.test(source)) return true;
+  for (const assignment of source.matchAll(ASSIGNED_RELATIVE_RE)) {
+    const start = (assignment.index ?? 0) + assignment[0].length;
+    const rest = source.slice(start, start + 250);
+    const guard = new RegExp(
+      `\\b${assignment[1]}\\.startsWith\\s*\\(\\s*(?:["']\\.\\.["']|\\x60\\.\\.\\$\\{sep\\}\\x60)`,
+    );
+    if (guard.test(rest)) return true;
+  }
+  return false;
+}
 
 const R6: SelfAuditRule = {
   id: "R6-dynamic-import",
@@ -604,7 +620,7 @@ const R6: SelfAuditRule = {
         if (dynIdx < 0) continue;
 
         const hasName = NAME_VALIDATION_RE.test(wtext);
-        const hasContainment = PATH_CONTAINMENT_RE.test(wtext);
+        const hasContainment = hasPathContainment(wtext);
         if (!hasName || !hasContainment) {
           const missing = [
             hasName ? null : "name-validation (isValidPluginName/_NAME_RE)",
@@ -1212,30 +1228,6 @@ function findDynamicImportLine(
 // ---------------------------------------------------------------------------
 // Root resolution + orchestration
 // ---------------------------------------------------------------------------
-
-/**
- * Walk up from `startDir` (default: this module's dir) to the nearest package.json
- * whose `name` is `sandstream-kit`. Returns that directory or null.
- */
-export function resolveKitRoot(startDir?: string): string | null {
-  let dir = startDir ?? dirname(fileURLToPath(import.meta.url));
-  // Bound the walk to avoid an infinite loop at the filesystem root.
-  for (let depth = 0; depth < 64; depth++) {
-    const pkgPath = join(dir, "package.json");
-    if (existsSync(pkgPath)) {
-      try {
-        const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { name?: unknown };
-        if (pkg && pkg.name === "sandstream-kit") return dir;
-      } catch {
-        // Malformed package.json: keep walking up.
-      }
-    }
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
 
 /** Read repoRoot/package.json as a plain object (empty object on failure). */
 function readPkgJson(repoRoot: string): Record<string, unknown> {

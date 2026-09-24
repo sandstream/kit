@@ -11,7 +11,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
   actions: read
   pull-requests: read
 
@@ -43,6 +42,9 @@ jobs:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
           args: --severity-threshold=high --all-projects
+      - name: Note Snyk skip (visible, not a silent green)
+        if: env.SNYK_TOKEN == ''
+        run: echo "::warning title=Snyk skipped::SNYK_TOKEN not set; dependency stage ran npm audit only"
 
   # Stage 1b: Supply-chain (bumblebee — known compromises, not CVEs)
   supply-chain:
@@ -88,7 +90,10 @@ jobs:
       - name: Build CLI
         run: npm run build
       - name: Install guarddog + semgrep
-        run: pip install --user pipx && pipx install guarddog && pipx install semgrep
+        run: |
+          python3 -m pip install --user pipx==1.17.2
+          pipx install guarddog==3.2.0
+          pipx install semgrep==1.176.0
       - name: GuardDog verify (direct deps, no cache, long budget)
         env:
           KIT_GUARDDOG: "1"
@@ -137,6 +142,27 @@ jobs:
         if: env.SONAR_TOKEN == ''
         run: echo "::warning title=SonarCloud skipped::SONAR_TOKEN not set — SonarCloud did NOT run; SAST this stage is semgrep-only"
 
+  # Stage 2b: GitHub-native semantic analysis. README has always promised CodeQL;
+  # upload-sarif alone only transports other scanners' output and is not CodeQL.
+  codeql:
+    name: Stage 2b — CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - name: Analyze JavaScript and TypeScript
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          category: "/language:javascript-typescript"
+
   # Stage 3: DAST — N/A for this repo.
   # kit is a CLI + MCP (stdio) tool — no HTTP surface to scan.
   # ZAP baseline can't run without a reachable target. The marketplace
@@ -153,6 +179,10 @@ jobs:
   container:
     name: Stage 4 — Container (Trivy)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build image
@@ -175,7 +205,7 @@ jobs:
         # Don't fail the job if Code Scanning is off — scan result is the gate.
         if: always()
         continue-on-error: true # kit-self-audit: allow-continue-on-error
-        uses: github/codeql-action/upload-sarif@c35d1b164463ee62a100735382aaaa525c5d3496 # codeql-bundle-v2.25.6
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: trivy-results.sarif
 
@@ -183,12 +213,16 @@ jobs:
   infra:
     name: Stage 5 — Infrastructure
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Checkov (terraform + kubernetes)
         # Baseline of pre-existing findings in .checkov.yaml skip-check.
         # Gating on net-new findings only — see .checkov.yaml header for context.
-        uses: bridgecrewio/checkov-action@59b9d7edfcad5b87fbe3f473a9a134a721ad03f8 # v12.3119.0
+        uses: bridgecrewio/checkov-action@5659ddea96102e16d8f221b3d8402453c0b1c150 # v12.3121.0
         with:
           directory: .
           config_file: .checkov.yaml
@@ -206,7 +240,7 @@ jobs:
         # SARIF upload requires Code Scanning enabled in repo settings.
         if: always()
         continue-on-error: true # kit-self-audit: allow-continue-on-error
-        uses: github/codeql-action/upload-sarif@c35d1b164463ee62a100735382aaaa525c5d3496 # codeql-bundle-v2.25.6
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: checkov.sarif
 
@@ -318,9 +352,13 @@ jobs:
 
   # kit dogfood — provision the scanners declared in .kit.toml [tools] via
   # `kit install` (mise), then run kit's own security scan with them present.
-  # Proves kit's provisioning + scan path works end-to-end. INFORMATIONAL ONLY:
-  # not in the `gate` needs, and each step is continue-on-error, so a finding
-  # never blocks — the gating trivy/gitleaks live in the dedicated stages above.
+  # Proves kit's provisioning + scan path works end-to-end.
+  #
+  # INFORMATIONAL, which means it does not BLOCK: it is absent from the `gate`
+  # needs, so a red run here never fails the required check (the gating
+  # trivy/gitleaks live in the dedicated stages above). It does not mean the job
+  # cannot fail. Both steps used to carry continue-on-error, so the job reported
+  # success whatever happened and proved nothing it claimed to prove.
   dogfood-scan:
     name: kit dogfood (provision + scan)
     runs-on: ubuntu-latest
@@ -331,18 +369,28 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci && npm run build
-      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4.2.5
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
       - name: Provision declared tools via kit install (triage-gated)
         run: node dist/cli.js install
-        continue-on-error: true # kit-self-audit: allow-continue-on-error
       - name: Run kit's security scan with trivy + trufflehog present
         run: node scripts/run-security-check.mjs
-        continue-on-error: true # kit-self-audit: allow-continue-on-error
 
   # Aggregated gate — all stages must pass
   gate:
     name: Security gate
-    needs: [deps, supply-chain, sast, container, infra, secrets, compliance, self-check, self-audit]
+    needs:
+      [
+        deps,
+        supply-chain,
+        sast,
+        codeql,
+        container,
+        infra,
+        secrets,
+        compliance,
+        self-check,
+        self-audit,
+      ]
     runs-on: ubuntu-latest
     if: always()
     steps:

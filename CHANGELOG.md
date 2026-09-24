@@ -1,5 +1,367 @@
 ## [Unreleased]
 
+## [6.12.0] - 2026-09-24
+
+### Added
+
+- **Bounded memory transport.** Current encrypted backups use independently
+  authenticated 1 MiB frames, legacy restores stream through private staging,
+  and Git pulls enumerate long reachable histories with one streamed log plus a
+  disk-backed deduplication index.
+
+- **Cross-clone project identity.** `kit memory project init` writes one public
+  UUID to `[memory].project_id`; clones carrying it register local roots and recall
+  the same project history without equating unrelated folders by name or remote URL.
+
+- **ChatGPT web bridge.** `kit mcp web` provides a six-stage interactive setup for
+  OpenAI Secure MCP Tunnel, keeping kit's existing stdio server private and the
+  runtime credential out of repo files.
+
+- **ADR import graph derivation.** `kit adr derive` proposes enforceable ADRs
+  from the repository's own import graph, and `kit adr check` runs the
+  `kit-enforce` rules as a hard CI gate.
+
+- **Read-only write-surface matrix.** Every command that can write is now
+  declared in one matrix and asserted against `--read-only`, so a new write path
+  cannot escape the read-only contract unnoticed.
+
+- **CI standards, ADR, and skill gates.** The standards runner, the ADR check,
+  and the skill linter now run in CI instead of only on demand.
+
+- **Docker plugin runtime.** The container image ships a runtime that can load
+  kit plugins, with a test asserting the runtime contract the docs describe.
+
+- **Plugin lifecycle commands.** `kit plugin list --installed` shows official
+  packages declared or registered in the current project, and
+  `kit plugin uninstall <name>` removes a package and its adapter registration.
+
+- **Plugin package guides.** Each official plugin tarball now includes its
+  README and package changelog, with setup, API, testing, and recovery guidance.
+
+### Changed
+
+- **BREAKING: session-owned pending-action claims.** `pal claim` now requires
+  explicit `--harness`, `--session` and `--expect` arguments. Claim, renewal and
+  explicit takeover return a new frontier receipt; claimed transitions require
+  matching ownership and the current receipt. Claims never expire automatically.
+  Unknown legacy owners require takeover. Schema 16 preserves historical revisions
+  and fences older causal writers; these receipts are not authentication or a
+  distributed lock for external work. SessionStart and claimed lists expose owners.
+
+- **Monkey test gate split into modules.** `kit monkey-test` moved out of one
+  1700-line module into planner, runner, scanner, security, evidence, and
+  harness modules, each with its own tests.
+
+### Fixed
+
+- **Release source and image gates.** Publishing refuses an npm version reused
+  from changed source, scans the unpacked root tarball for release SBOMs, and
+  leaves pack and attestation steps behind successful publication. Docker CI
+  scans the local image before pushing that same image, signing it, or attaching
+  its SBOM. Missing Snyk credentials now produce a visible CI warning.
+
+- **Plugin installation and container trust.** Official installs triage and
+  install the same exact package version, record a package-bound PASS receipt,
+  and reject plugin entrypoints that escape `node_modules` through symlinks.
+  Built-in adapters cannot be shadowed by plugin adapters. The Docker runtime
+  runs as a non-root user while kit code remains root-owned and unwritable.
+
+- **Read-only and error redaction.** Truthy `KIT_READ_ONLY` values are accepted
+  consistently in core and plugin clients; Vercel refuses writes before its
+  preliminary network read. The CLI's last-resort error path and shared redactor
+  now mask keyed secret values before emitting errors.
+
+- **Memory passphrases stay out of command arguments.** The undocumented
+  `--passphrase` form is rejected before dispatch; memory backup and sync read
+  passphrases from `KIT_MEMORY_PASSPHRASE`.
+
+- **Monkey-test role and browser evidence.** Role expectations and authenticated
+  session files must differ. Critical authorization findings cannot be waived.
+  The Playwright gate rejects duplicate, extra, failed, skipped, and flaky cases
+  or inconsistent statistics, requires an installed Playwright package, and
+  checks a loopback base URL before seed side effects.
+
+- **Hook and browser reporting.** Executable external hooks count when they run
+  their declared command, without being mislabeled as kit's `context-check`.
+  Symlinked hooks cannot pass checks or be partly changed by install/uninstall;
+  `kit status` reports git hooks. CDP URLs with embedded credentials are refused
+  before they can reach command output.
+
+- **Memory sync receipts.** Git push skips an unchanged decryptable snapshot,
+  while a key rotation still publishes new ciphertext. A deletion-only pull is
+  reported as a change instead of "nothing new".
+
+- **Policy sources and command targets.** Policy pull rejects FIFOs without
+  hanging, hides credentials from URL diagnostics, and preserves a symlinked
+  signature on caught rollback. Revocation pull rejects directory feeds with a
+  regular-file diagnostic. MCP check details use absolute paths, and `kit run`
+  names a missing working directory before trying to spawn a command.
+
+- **CLI and plugin guidance.** `kit --read-only baseline` prints baseline usage
+  when no subcommand was supplied. `kit add --list` includes project plugin
+  adapters; plugin scaffold can skip installation, and refusal hints no longer
+  suggest an unsupported `--force` option. Policy trust hints name the real
+  `kit policy trust <pubkey.pem>` command.
+
+- **Org policy trust and bootstrap source.** An anchored repo accepts only org
+  signers for automatic policy verification and pull, even on the signing
+  machine; an empty anchor cannot authorize a pull. `kit bootstrap` now passes
+  `--policy-source` or `KIT_POLICY_SOURCE` to policy pull and fails closed when
+  an anchored repo has no source.
+
+- **Monkey browser evidence hardening.** The release gate now runs the generated
+  Playwright config instead of trusting arbitrary repo or `--test-command` output;
+  custom commands remain diagnostic but cannot attest browser execution. Live or
+  production mode signals for Stripe, PayPal/Braintree, Adyen, and Square stop the
+  run before side effects. Generated findings use stable pathnames rather than
+  random local ports, ordinary words containing `nan` no longer trip the `NaN`
+  placeholder check, and payment stages require distinct, specific selectors.
+  Selector evidence does not establish a real sandbox provider interaction.
+
+- **Independent audit hardening.** Triage verifies installed script bytes before
+  execution; project identity publication validates semantic readback; PAL rejects
+  duplicate verifier flags and surfaces unreadable legacy ledgers; browser CDP
+  selection requires a live endpoint; npm/Docker packaging gates retain runtime
+  assets while excluding compiled workspace tests; standards baselines now ratchet
+  frozen metric magnitude; and the ChatGPT tunnel wizard reports unverified final
+  connectivity instead of a false success.
+
+- **Native Windows verifier authority.** Approval markers and their database
+  bindings now require a re-verified owner-only Windows ACL. Failure to establish
+  it refuses approval, and the real Windows slice is a required pull-request gate.
+
+- **Pending-action verification targets.** Relative file checks use their creation
+  directory, never a later caller's cwd or recall alias. Unavailable checks report
+  `unverified` without changing task state; JSON output and nonzero exit make the
+  gap visible. Explicit `pal configure` replaces a check or selects manual mode
+  without rewriting creation history, claims, or task status.
+
+- **Pending-action verification races.** Queued checks revalidate before starting,
+  and delayed results cannot overwrite newer action state. Local version metadata
+  survives row replacement without trusting imported versions; stale observations
+  are reported by the CLI. This is local coordination, not distributed ownership.
+
+- **Consistent encrypted memory backups.** Both encryption modes export a committed
+  SQLite snapshot without migrating the source. Private atomic output publication
+  preserves previous bytes on ordinary failures and rejects source/sidecar aliases.
+
+- **Governed project scope.** Review rejects missing or non-directory roots before
+  running stages. MCP triage resolves mirrors and local targets from the requested
+  project, including delegated Homebrew checks.
+
+- **Concurrent memory-store startup.** WAL negotiation tolerates transient busy
+  errors within a bounded budget. Schema inspection, migration, and backfill run
+  in one writer transaction; failures roll back and close the connection.
+
+- **Concurrent device identity.** First local sessions publish one complete private
+  device ID without overwriting another initializer. Corrupt files remain intact;
+  degraded host-derived identity is visible at session start.
+
+- **Visible memory recovery failures.** SessionStart reports unavailable private
+  history or pending work in agent context and Claude's user-visible message,
+  while retaining independently available curated shared decisions. Health signals
+  travel separately from recalled text and shared metadata.
+
+- **Pending-action status inspection.** `pal list --status` exposes claimed,
+  snoozed, and closed work without widening default project/device filters.
+  Claimed items show their owner; invalid status selections fail explicitly.
+
+- **Pending-action lifecycle.** Expired snoozes resurface during writable recovery;
+  early release and explicit closed-item reopening complete the local workflow.
+  Invalid durations and unsuccessful transitions fail instead of reporting success.
+  Automatic reactivation respects project/device assignments, and read-only listing
+  neither migrates the store nor changes tasks or creates a device identity.
+
+- **Monkey runner lifecycle.** Browser prerequisites and seed failures stop later
+  side effects. Interrupt handling tracks active process groups, retires completed
+  commands, and cleans descendants. Streamed child logs use redacted stderr so
+  JSON stdout remains parseable. POSIX group probes are not kernel identity handles.
+
+- **Monkey runner environment checks.** Provider exports retain literal dotenv
+  assignments; live payment prefixes are screened by value, not variable name.
+  Standard root dotenv files are checked before side effects and between stages.
+  Unsupported loader syntax, unresolved references and NUL values are refused
+  without printing values. This is not an application-code sandbox.
+
+- **Test-support packaging.** Shared subprocess fixtures compile with the tests,
+  not the published runtime. A compiler-graph regression prevents production code
+  from pulling test modules back into that build; ADR checks still inspect them.
+
+- **Infisical authentication evidence.** Service and secret-fallback checks use
+  backend-verified status for the active credential and configured domain. Help
+  text, expired sessions, and skipped verification no longer establish health.
+  Authenticated secret fallbacks still do not claim that a key exists.
+
+- **Heal retains unsuccessful repairs.** Findings that remain after a failed or
+  ineffective automatic repair now require manual action instead of disappearing
+  from the result. A bounded confirmation scan covers attempts that changed state
+  before throwing; dry-run plans and triage refusals remain distinct.
+
+- **Effective Git ignore protection.** Security checks now ask Git about ignore
+  rules and already tracked dotenv secrets. Negations and unavailable verification
+  cannot earn a pass. Repairs preserve user rules and nested private Kit state,
+  retain access to root shared memory, and verify the resulting protection without
+  removing files from the index.
+
+- **Plugin error-response redaction.** Nine independently packaged plugins now
+  mask opaque Bearer and query tokens consistently with core, including Snyk/Wiz
+  response bodies and GraphQL errors. Shared compatibility fixtures exercise the
+  real failure paths without adding a runtime dependency on core.
+
+- **MCP dependency security update.** The exact Hono override is now 4.13.5.
+  An installed-dependency HTTP regression ensures URL fragments cannot become
+  query parameters; Kit's stdio transport still does not load the HTTP stack.
+
+- **Portable pending-action import.** Actions retain original device/path/id and
+  claim metadata. Explicit mappings make them locally reachable; independent short
+  ID collisions no longer discard work. Incoming verification remains manual-only.
+  Causal descendants advance state; concurrent alternatives remain inspectable and
+  require observed-frontier resolution or explicit claim takeover. Both hook formats
+  surface conflicts without promoting stored text into trusted health notices.
+  Command transport remains last-write-wins and is not a lossless multi-writer
+  protocol; Git transport replays reachable snapshot history.
+
+- **Monkey Test denial redirects.** Only documented exact denial paths satisfy the
+  redirect contract. Successful pages whose names merely contain `login` or
+  `forbidden` no longer pass a denied-route assertion.
+
+- **Cross-device memory recall.** Explicit import mappings now repair message and
+  bookmark recall, including repeat imports, without rewriting original paths.
+  Selective mappings work through encrypted sync and configured pulls. Imports
+  retain sensitivity/quarantine protection and roll back on failure.
+
+- **Concurrent policy pulls.** A destination lock covers revision comparison and
+  verified-pair installation, preventing a concurrent pull from rolling policy
+  backward. Existing locks fail closed and are never removed automatically.
+
+- **Cross-agent worktree recall.** Claude Code and Codex history and saved threads
+  can be found across a repository's linked worktrees. Recall includes its harness
+  and original path; explicit subdirectory scopes stay local. Path matching treats
+  SQL wildcard characters literally, preventing unrelated-project matches.
+
+- **Pending work at agent handoff.** Hooks and suggestions now use absolute project
+  scopes, and action lists include registered worktrees without dropping the device
+  filter. Suggestions preserve claims and mark recalled action titles as stored data.
+
+- **Audit evidence survives redaction.** Nested arrays retain their shape while
+  secret fields are masked. Invalid observe denial evidence blocks enforcement
+  readiness instead of counting as a successful observation. Password environment
+  names with suffixes remain covered alongside glued names such as `PGPASSWORD`.
+
+- **Generated monkey harness evaluated at runtime.** The role matrix validator
+  embedded in the generated Playwright spec called module-private helpers that
+  were never embedded, so the generated harness threw `ReferenceError` on load
+  and registered no tests. The whole helper chain now travels with it, and a test
+  evaluates the generated spec against a stub Playwright to assert all five role
+  crawls plus the money flow register.
+
+- **Read-only mode could be bypassed three ways.** `--read-only=1` and
+  `--readonly=true` were not recognized at all, so the flag silently did nothing;
+  a value that is not truthy is now a usage error (exit 2) instead. A policy
+  `default_mode = "read-only"` deferred to `KIT_READ_ONLY`'s mere presence, so
+  `KIT_READ_ONLY=0` disabled it; policy now wins regardless of the value. An
+  unrecognized subcommand (`kit secrets zzz`, `kit check zzz --attest`) fell
+  through to the command's default write action, in both the handlers and the
+  write-surface classifier.
+
+- **Credentials in a target URL reached stdout.** `kit clone` and `kit triage`
+  echoed the target back verbatim, including any credential in its userinfo, and
+  a failed clone quoted git's own error text with the full command line. Every
+  echo site is redacted now, in the CLI and in the bundled triage skill.
+
+- **A non-executable git hook read as installed.** git silently ignores a hook
+  file without an execute bit. `kit hooks check`, `kit check` and `kit doctor`
+  reported such a hook as up to date, which is worse than reporting it missing:
+  the gate looked on while nothing ran. It is a failure now, with the reason
+  named.
+
+- **`kit policy pull` verified one thing and installed another.** The pulled pair
+  was verified in a staging directory and then installed by re-reading the
+  source, so a source that changed in between had its unverified bytes installed
+  under a "verified" verdict. It installs the verified bytes now. The `revision`
+  ratchet the policy schema documents is also enforced at last: a pull whose
+  revision is lower than the applied one, or absent while one is applied, is
+  refused instead of silently rolling policy back.
+
+- **Monkey-test gates that could not fail.** The browser-evidence check counted a
+  contract case on Playwright's `status: "expected"`, which a `test.fail()` spec
+  satisfies by failing, so the role and money-flow gates could be satisfied by
+  tests that never passed. The route crawl also accepted a page's own text as
+  proof of an authorization denial, so a 200 that merely mentioned "forbidden"
+  counted as denied, and it scanned for cross-org data leaks only on routes it
+  considered allowed, skipping the denial pages where such a leak is most likely.
+
+- **A forgotten memory row came back on the next re-index.** `kit memory forget`
+  deleted the row and recorded a receipt, but the indexer did not consult
+  tombstones, so re-reading the same transcript restored the row with its
+  original id, content and search terms.
+
+- **`.env.keys` was not required to be gitignored.** The file holds the dotenvx
+  private keys that decrypt every encrypted `.env` in a repo, and `*.key` does
+  not match it. It is now required, and `kit check-gitignore --fix` writes it.
+
+- **Container image shipped its build dependencies.** The runtime stage copied
+  the builder's `node_modules`, so the published CLI image carried typescript,
+  eslint and esbuild: 170 packages where kit has four runtime dependencies. The
+  runtime now installs only production dependencies and carries the scripts its
+  CLI needs.
+
+- **A CI job that could not report failure.** The dogfood job exists to prove
+  kit's provisioning and scan path works end to end, and both of its steps
+  swallowed their exit code. Informational means it does not block the gate,
+  which its absence from the gate's dependencies already achieves.
+
+- **Redaction hardening.** Vercel Management API error text and audit
+  environment output are redacted before they reach logs or reports.
+
+- **Policy pull stays fail-closed.** `kit policy pull` now moves the signature
+  before the policy and rolls the signature back when the apply fails, so an
+  ordinary apply error cannot leave a new policy sitting under an old signature.
+
+- **Redaction gaps beyond the pattern list.** Env-name-based redaction (`kit
+  run`, MCP `kit_run`) missed common but unrecognized secret-bearing names,
+  such as `PGPASSWORD`, `DB_PASS`, `MYSQL_PWD`, `AUTH_HEADER`, and
+  `WEBHOOK_URL`, because the matcher required an underscore boundary a glued
+  name like `PGPASSWORD` never has. The direct audit-log writer sanitized by
+  pattern and by env-value but not by metadata *key* name, so a field
+  literally named `password` persisted verbatim. Six of the seven plugin
+  management-API clients (all but `vercel`, already fixed) surfaced raw
+  upstream error bodies with no redaction, so a provider echoing a bearer
+  token back in an error message leaked it into a thrown `Error`; they now
+  redact the same way vercel does. And the shared-memory write gate had no
+  pattern for a `?token=`/`&access_token=` query-string credential or a
+  generic (non-JWT) `Bearer <token>` header value, so those forms could reach
+  the committed, world-readable `.kit/shared/memory.jsonl`.
+
+- **Read-only mode still wrote local state.** `.kit-budget.json`,
+  `.kit/sentinel.json`, and `.kit/runs/*.json` were all written
+  unconditionally, so an audited read-only session left untracked files
+  behind despite the "all writes will be refused" banner. All three now
+  check `KIT_READ_ONLY` before touching disk. (Global `~/.kit` state, namely
+  `memory.db` and the per-machine `device-id`, is out of scope: it lives
+  outside the audited project tree, never shows up in that repo's `git
+  status`, and is machine identity rather than project mutation.)
+
+### Known limitations (2026-09-24)
+
+- A process killed during the narrow policy/signature rename window can leave an
+  invalid pair, stale lock, and staging directory. `policy pull` then fails closed;
+  recovery requires inspecting the files, removing the stale lock, and pulling a
+  fresh signed pair. Ordinary caught apply errors roll back automatically.
+  Durability after sudden power loss is unproven because staged files and their
+  directory are not explicitly synced before rename.
+- Command-based memory transport remains last-write-wins. A stale writer can
+  overwrite a newer single blob and resurrect forgotten content for a fresh
+  joiner. Git transport replays reachable history and preserves tombstones.
+- A Git sync machine with only a recipient's public key cannot decrypt its last
+  snapshot to prove it unchanged; repeated pushes may create redundant commits.
+- Read-only commands can initialize local machine state under `~/.kit`.
+  Project and provider mutations are guarded; a write-free home directory is
+  not yet guaranteed.
+- The monkey-test Playwright report's run ID is self-reported by the local test
+  process. Malicious test code in the project can forge this positive control;
+  generated selectors and result checks do not prove a real provider interaction.
+
 ## [6.11.0] - 2026-08-30
 
 ### Added

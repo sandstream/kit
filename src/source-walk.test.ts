@@ -45,6 +45,23 @@ describe("walkSourceFiles", () => {
     }
   });
 
+  it("test support is excluded from production walks but remains in explicit test-inclusive walks", () => {
+    const root = tmpTree();
+    try {
+      touch(root, "runtime.ts");
+      touch(root, "fixture.test-support.ts");
+      touch(root, "test-support-client.ts");
+      assert.deepEqual(rels(root, walkSourceFiles(root)), ["runtime.ts", "test-support-client.ts"]);
+      assert.deepEqual(rels(root, walkSourceFiles(root, { includeTests: true })), [
+        "fixture.test-support.ts",
+        "runtime.ts",
+        "test-support-client.ts",
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("includes *.test.ts when includeTests is set", () => {
     const root = tmpTree();
     try {

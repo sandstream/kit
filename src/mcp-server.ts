@@ -16,10 +16,8 @@ import {
   updateCliLock,
   readkitMeta,
 } from "./lock.js";
-import { detectStack } from "./stack-detector.js";
-import { generateToml } from "./toml-generator.js";
-import { writeFile, access } from "node:fs/promises";
-import { executeCommand } from "./run.js";
+import { generateMcpInit } from "./mcp-init.js";
+import { executeCommand, redactCommandForEnvironment, requireWorkingDirectory } from "./run.js";
 import { gatherProjectContext } from "./context.js";
 import { mapReport } from "./commands/repomap.js";
 import { isReadOnlyMode } from "./read-only-mode.js";
@@ -31,6 +29,7 @@ import { openMemoryDb, searchMessages, getMemoryDbPath, recordQuery } from "./me
 import { searchShared } from "./memory/shared.js";
 import { getCurrentProjectRoot } from "./memory/project.js";
 import { existsSync } from "node:fs";
+import { redactSecrets } from "./utils/redactSecrets.js";
 
 const KIT_FILE = ".kit.toml";
 
@@ -547,77 +546,12 @@ function register_kit_init(server: McpServer): void {
       // dry_run is a read-only preview; a real write is refused in read-only mode.
       if (!dry_run && isReadOnlyMode()) return readOnlyRefusal("kit_init");
       try {
-        const workDir = cwd ?? process.cwd();
-        const cfgPath = resolve(workDir, KIT_FILE);
-
-        // Check if .kit.toml already exists
-        let alreadyExists = false;
-        try {
-          await access(cfgPath);
-          alreadyExists = true;
-        } catch {
-          // File does not exist — proceed
-        }
-
-        // Same service resolution as the CLI init flow — the two surfaces must generate
-        // the same config. There is no prompt on this surface, so the operator's known
-        // services are never applied here; they come back as an `offered` gap for the
-        // agent to put to the user and answer with a follow-up call.
-        const { resolveInitServices } = await import("./user-defaults.js");
-        const detected = await detectStack(workDir);
-        const {
-          stack,
-          offered: offeredServices,
-          applied: appliedDefaults,
-          unknown: unknownDefaults,
-        } = resolveInitServices(detected);
-        // `gaps` is the point of this response for an agent caller: the fields kit
-        // refused to invent, each with the command that settles it. Without them the
-        // caller sees a short config and no reason for what is absent.
-        const { toml: generatedConfig, gaps: configGaps } = generateToml(stack);
-        const gaps =
-          offeredServices.length > 0
-            ? [
-                {
-                  path: "services",
-                  owner: "agent" as const,
-                  why: "known services that nothing in this repo references",
-                  candidates: offeredServices,
-                  fix: `kit init --services ${[...stack.services, ...offeredServices].join(",")}`,
-                },
-                ...configGaps,
-              ]
-            : configGaps;
-
-        let written = false;
-
-        if (!dry_run && !alreadyExists) {
-          await writeFile(cfgPath, generatedConfig, "utf-8");
-          written = true;
-        }
-
+        const result = await generateMcpInit(cwd, dry_run);
         return {
           content: [
             {
               type: "text" as const,
-              text: JSON.stringify(
-                {
-                  detectedStack: stack,
-                  appliedDefaults,
-                  unknownDefaults,
-                  generatedConfig,
-                  gaps,
-                  written,
-                  alreadyExists,
-                  message: alreadyExists
-                    ? ".kit.toml already exists — not overwritten"
-                    : dry_run
-                      ? "dry_run=true, config not written"
-                      : ".kit.toml generated successfully",
-                },
-                null,
-                2,
-              ),
+              text: JSON.stringify(result, null, 2),
             },
           ],
         };
@@ -648,7 +582,8 @@ function register_kit_run(server: McpServer): void {
     async ({ command, cwd }) => {
       if (isReadOnlyMode()) return readOnlyRefusal("kit_run");
       try {
-        const workDir = cwd ?? process.cwd();
+        const workDir = await requireWorkingDirectory(cwd);
+        const displayCommand = await redactCommandForEnvironment(command, workDir);
         // Tokenize like a shell (respecting quotes) — a naive whitespace split turns
         // `git commit -m "a b"` into the wrong argv and silently runs a different
         // command. An unterminated quote throws → we refuse rather than mis-split.
@@ -676,7 +611,10 @@ function register_kit_run(server: McpServer): void {
           {
             operation: "run",
             operationType: "write",
-            metadata: { command, mediation: "egress-only (arbitrary command; fs/env un-mediated)" },
+            metadata: {
+              command: displayCommand,
+              mediation: "egress-only (arbitrary command; fs/env un-mediated)",
+            },
             egressTargets,
           },
           () =>
@@ -703,18 +641,26 @@ function register_kit_run(server: McpServer): void {
             ? `stderr:\n${result.stderr}`
             : "(no output)";
 
+        const response = redactSecrets(
+          `Command: ${displayCommand}\nStatus: ${status}\nExit code: ${result.exitCode}\n\nOutput:\n${output}`,
+        );
         return {
           content: [
             {
               type: "text" as const,
-              text: `Command: ${command}\nStatus: ${status}\nExit code: ${result.exitCode}\n\nOutput:\n${output}`,
+              text: response,
             },
           ],
           isError: result.exitCode !== 0,
         };
       } catch (err) {
         return {
-          content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }],
+          content: [
+            {
+              type: "text" as const,
+              text: `Error: ${redactSecrets((err as Error).message)}`,
+            },
+          ],
           isError: true,
         };
       }
@@ -829,7 +775,7 @@ function register_kit_triage(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Working directory (defaults to process.cwd()) — where the triage log is written",
+            "Project directory (defaults to process.cwd()) — resolves triage config, local targets, and the triage log",
           ),
       },
     },
@@ -838,7 +784,7 @@ function register_kit_triage(server: McpServer): void {
       // an unrecordable pass could not satisfy the gates anyway (fail-closed).
       if (isReadOnlyMode()) return readOnlyRefusal("kit_triage");
       try {
-        const result = await runTriage(type as TriageType, target);
+        const result = await runTriage(type as TriageType, target, { cwd });
         if (result.passed && target) {
           await recordTriageRun(type, target, false, false, cwd);
         }

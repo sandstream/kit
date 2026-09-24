@@ -1,5 +1,5 @@
 /**
- * The registry must describe plugins that exist, with the versions they were published at.
+ * The registry must describe plugins that exist, with the versions in their manifests.
  *
  * The hand-written table this replaces was not merely stale, it was fabricated — measured against
  * npm and GitHub:
@@ -59,9 +59,17 @@ describe("the plugin registry", () => {
       assert.equal(plugin.version, manifest.version, `${plugin.name}: version`);
       assert.equal(
         plugin.install,
-        `npm install ${manifest.name}`,
+        `npm install ${manifest.name}@${manifest.version}`,
         `${plugin.name}: the printed install command must be runnable`,
       );
+    }
+  });
+
+  it("advertises only adapters that the built plugin package exports", async () => {
+    for (const plugin of OFFICIAL_PLUGINS.filter((entry) => entry.adapter)) {
+      const entry = join(REPO_ROOT, "packages", `kit-plugin-${plugin.name}`, "dist", "index.js");
+      const mod = (await import(pathToFileURL(entry).href)) as { adapter?: { name?: string } };
+      assert.equal(mod.adapter?.name, plugin.adapter, `${plugin.name}: registry adapter claim`);
     }
   });
 
@@ -93,6 +101,24 @@ describe("the plugin registry", () => {
     for (const id of ["cloudflare", "stripe", "wiz"]) {
       const hits = searchPlugins(id);
       assert.ok(hits.length > 0, `\`kit plugin search ${id}\` must find the shipped plugin`);
+    }
+  });
+
+  it("uses real registry IDs in getting-started and CLI install examples", () => {
+    for (const path of [
+      "docs/GETTING_STARTED_PLUGINS.md",
+      "docs/PLUGIN_DOCUMENTATION_STANDARDS.md",
+      "docs/API_STABILITY_AND_VERSIONING.md",
+      "docs/EXAMPLE_PLUGIN_README.md",
+      "src/plugins-cli.ts",
+    ]) {
+      const body = readFileSync(join(REPO_ROOT, path), "utf-8");
+      for (const match of body.matchAll(/kit plugin (?:info|install) ([a-z][a-z0-9/-]*)/g)) {
+        assert.ok(
+          OFFICIAL_PLUGINS.some((plugin) => plugin.name === match[1]),
+          `${path}: ${match[0]} names no shipped plugin`,
+        );
+      }
     }
   });
 

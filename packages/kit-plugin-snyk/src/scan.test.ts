@@ -87,6 +87,61 @@ describe("recordSnykFindings", () => {
 });
 
 describe("fetchSnykIssues", () => {
+  for (const source of ["explicit", "env"]) {
+    it(`masks a known ${source} token in an HTTP error`, async (t) => {
+      const token = "snyk:v42";
+      const priorToken = process.env.SNYK_TOKEN;
+      process.env.SNYK_TOKEN = source === "env" ? token : "unused-env-token";
+      t.after(() => {
+        if (priorToken === undefined) delete process.env.SNYK_TOKEN;
+        else process.env.SNYK_TOKEN = priorToken;
+      });
+      const fetchMock = t.mock.method(
+        globalThis,
+        "fetch",
+        async (_url: string | URL | Request, init?: RequestInit) => {
+          assert.equal(new Headers(init?.headers).get("authorization"), `token ${token}`);
+          return new Response(`request_id=req_snyk rejected credential ${token}`, { status: 401 });
+        },
+      );
+      await assert.rejects(
+        () =>
+          fetchSnykIssues({
+            token: source === "explicit" ? token : undefined,
+            orgSlug: "org",
+            apiBase: "https://api.example.test",
+          }),
+        { message: "Snyk API 401: request_id=req_snyk rejected credential [REDACTED]" },
+      );
+      assert.equal(fetchMock.mock.callCount(), 1);
+    });
+  }
+
+  it("keeps the no-body fallback when an error response cannot be read", async (t) => {
+    t.mock.method(
+      globalThis,
+      "fetch",
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new Error("unreadable response"));
+            },
+          }),
+          { status: 403 },
+        ),
+    );
+    await assert.rejects(
+      () =>
+        fetchSnykIssues({
+          token: "fixture-token",
+          orgSlug: "org",
+          apiBase: "https://api.example.test",
+        }),
+      { message: "Snyk API 403: <no body>" },
+    );
+  });
+
   it("refuses when SNYK_TOKEN missing", async () => {
     const prev = process.env.SNYK_TOKEN;
     delete process.env.SNYK_TOKEN;

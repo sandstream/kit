@@ -3,6 +3,33 @@ import assert from "node:assert/strict";
 import { makeClient, rollJwtSecret, revokeScopedKey, mintScopedKey } from "./mgmt-api.js";
 import { rotateSupabaseKey, previewSupabaseRotation } from "./rotate.js";
 
+describe("rollJwtSecret (redaction, RED-4)", () => {
+  it("redacts the bearer token in API error bodies without hiding diagnostics", async () => {
+    const priorFetch = globalThis.fetch;
+    const secret = "opaque-supabase-token-" + "E".repeat(32);
+    globalThis.fetch = (async () =>
+      new Response(`request_id=req_supabase rejected credential ${secret}`, {
+        status: 403,
+      })) as typeof fetch;
+    try {
+      const client = makeClient({ accessToken: secret, baseUrl: "https://api.example.test" });
+      await assert.rejects(
+        () => rollJwtSecret(client, "proj"),
+        (err: unknown) => {
+          assert.ok(err instanceof Error);
+          assert.ok(!err.message.includes(secret), "plugin error must not expose the secret");
+          assert.match(err.message, /\[REDACTED\]/);
+          assert.match(err.message, /request_id=req_supabase/);
+          assert.match(err.message, /403/);
+          return true;
+        },
+      );
+    } finally {
+      globalThis.fetch = priorFetch;
+    }
+  });
+});
+
 describe("makeClient", () => {
   it("throws when no access token is provided", () => {
     const prev = process.env.SUPABASE_ACCESS_TOKEN;

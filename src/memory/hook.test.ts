@@ -127,12 +127,13 @@ describe("memory hook — SessionStart recovery", () => {
   });
 
   it("builds a Claude systemMessage for user-visible action items", () => {
-    const text = [
-      "kit statusline: kit:full 6/6 · update:6.10.1 · actions:2",
-      "kit is out of date: 6.10.0 → 6.10.1. Update with `kit upgrade --self`.",
-      "⚠ kit background capture reported problems since your last session:",
-    ].join("\n");
-    const message = sessionStartSystemMessage(text);
+    const message = sessionStartSystemMessage({
+      statusline: "kit:full 6/6 · update:6.10.1 · actions:2",
+      notices: [
+        "kit is out of date: 6.10.0 → 6.10.1. Update with `kit upgrade --self`.",
+        "kit background capture reported problems; run `kit memory index`.",
+      ],
+    });
     assert.match(message, /kit is out of date/);
     assert.match(message, /2 open action item/);
     assert.match(message, /background capture reported problems/);
@@ -142,6 +143,10 @@ describe("memory hook — SessionStart recovery", () => {
     const payload = JSON.parse(
       claudeSessionStartPayload(
         "kit statusline: kit:full 6/6 · update:6.10.1 · actions:1\nkit is out of date: 6.10.0 → 6.10.1.",
+        {
+          statusline: "kit:full 6/6 · update:6.10.1 · actions:1",
+          notices: ["kit is out of date: 6.10.0 → 6.10.1."],
+        },
       ),
     ) as {
       systemMessage?: string;
@@ -412,11 +417,30 @@ describe("memory hook — detached SessionEnd", () => {
   let tmp: string;
   const prevDir = process.env.KIT_MEMORY_DIR;
   const prevDb = process.env.KIT_MEMORY_DB;
+  const harnessEnvKeys = [
+    "KIT_CLAUDE_DIR",
+    "KIT_CODEX_DIR",
+    "KIT_GEMINI_DIR",
+    "KIT_CONTINUE_DIR",
+    "KIT_CURSOR_DB",
+    "KIT_AMAZONQ_DB",
+    "KIT_KIRO_DB",
+    "KIT_DROID_DIR",
+    "KIT_AIDER_HISTORY",
+    "KIT_ANTIGRAVITY_DIR",
+    "KIT_CLINE_DIR",
+    "KIT_OPENCODE_DIR",
+  ] as const;
+  const previousHarnessEnv: Record<string, string | undefined> = {};
 
   before(() => {
     tmp = mkdtempSync(join(tmpdir(), "kit-sessionend-"));
     process.env.KIT_MEMORY_DIR = tmp;
     process.env.KIT_MEMORY_DB = join(tmp, "memory.db");
+    for (const key of harnessEnvKeys) {
+      previousHarnessEnv[key] = process.env[key];
+      process.env[key] = join(tmp, key.toLowerCase());
+    }
   });
 
   after(() => {
@@ -424,6 +448,11 @@ describe("memory hook — detached SessionEnd", () => {
     else process.env.KIT_MEMORY_DIR = prevDir;
     if (prevDb === undefined) delete process.env.KIT_MEMORY_DB;
     else process.env.KIT_MEMORY_DB = prevDb;
+    for (const key of harnessEnvKeys) {
+      const previous = previousHarnessEnv[key];
+      if (previous === undefined) delete process.env[key];
+      else process.env[key] = previous;
+    }
     rmSync(tmp, { recursive: true, force: true });
   });
 

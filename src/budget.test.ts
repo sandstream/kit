@@ -10,6 +10,7 @@ import {
   formatBudgetStatus,
   clearBudgetState,
 } from "./budget.js";
+import { _resetReadOnlyModeForTests } from "./read-only-mode.js";
 import type { GovernanceConfig } from "./config.js";
 
 const disabledConfig: GovernanceConfig = { enabled: false };
@@ -326,5 +327,38 @@ describe("clearBudgetState", () => {
     } finally {
       await rm(statePath, { recursive: true, force: true });
     }
+  });
+});
+
+describe("recordUsage honors read-only mode (RO-5)", () => {
+  let tempDir: string;
+  let originalCwd: string;
+  const enabledConfig: GovernanceConfig = { enabled: true, environment: "dev" };
+
+  before(async () => {
+    originalCwd = process.cwd();
+    tempDir = await mkdtemp(join(tmpdir(), "kit-budget-readonly-"));
+    process.chdir(tempDir);
+  });
+
+  after(async () => {
+    process.chdir(originalCwd);
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  afterEach(() => {
+    _resetReadOnlyModeForTests();
+  });
+
+  it("never writes .kit-budget.json under KIT_READ_ONLY=1 (the read-only banner promises zero writes)", async () => {
+    const { existsSync } = await import("node:fs");
+    const statePath = join(process.cwd(), ".kit-budget.json");
+    process.env.KIT_READ_ONLY = "1";
+    await recordUsage(enabledConfig, 42);
+    assert.equal(
+      existsSync(statePath),
+      false,
+      "read-only mode must not leave an untracked budget-state file behind",
+    );
   });
 });

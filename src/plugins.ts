@@ -1,21 +1,27 @@
 /**
  * Plugin registry and management
  *
- * kit plugins are ServiceAdapter-based packages that can be discovered,
- * installed, and registered in .kit.toml. This module provides:
+ * kit plugins are published packages that can be discovered and installed.
+ * ServiceAdapter packages additionally register in project package.json. This module provides:
  * - Plugin registry search and discovery
  * - Plugin installation and configuration
  * - Metadata management
  */
 
 import { exec } from "./utils/exec.js";
+import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { OFFICIAL_PLUGINS } from "./plugin-registry.generated.js";
+import { gateInstall } from "./triage-gate.js";
+import { isRegistrySpec } from "./triage-sandbox.js";
+import { isReadOnlyMode, refuseWrite } from "./read-only-mode.js";
+import { redactSecrets, secretValuesFromEnv } from "./utils/redactSecrets.js";
 
 /**
  * Plugin metadata as it appears in the registry
  */
 export interface PluginMetadata {
-  /** Unique identifier: provider/service (e.g., "stripe/payments") */
+  /** Registry ID (e.g., "stripe" or "railway") */
   name: string;
   /** Human-readable description */
   description: string;
@@ -29,6 +35,8 @@ export interface PluginMetadata {
   repository: string;
   /** npm package name (if published) */
   package?: string;
+  /** ServiceAdapter name exported by this package, when it is a `kit add` adapter. */
+  adapter?: string;
   /** Minimum kit version required */
   kitVersion: string;
   /** Array of tags for categorization */
@@ -63,6 +71,30 @@ export interface PluginRegistry {
    */
   updated?: string;
   plugins: PluginMetadata[];
+}
+
+export interface PluginInstallDeps {
+  gateInstall: typeof gateInstall;
+  exec(
+    command: string,
+    args: readonly string[],
+    options?: { cwd?: string; timeout?: number },
+  ): Promise<{ stdout: string; stderr: string }>;
+}
+
+const defaultInstallDeps: PluginInstallDeps = { gateInstall, exec };
+
+export interface PluginUninstallDeps {
+  exec: PluginInstallDeps["exec"];
+  /** Filesystem boundary for updating project adapter registration. */
+  manifestIO?: { writeFile: typeof writeFile; rename: typeof rename };
+}
+
+const defaultUninstallDeps: PluginUninstallDeps = { exec };
+
+function safePluginError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  return redactSecrets(raw, secretValuesFromEnv(process.env));
 }
 
 /**
@@ -136,6 +168,32 @@ export function listPlugins(
     .sort((a, b) => (b.downloads ?? 0) - (a.downloads ?? 0));
 }
 
+/** Official packages declared or registered in the current project. */
+export async function listProjectPlugins(
+  cwd: string = process.cwd(),
+  tag?: string,
+): Promise<{ plugin: PluginMetadata; declared: boolean; registered: boolean }[]> {
+  const { data } = await readPluginManifest(cwd);
+  const registered = new Set((data["kitPlugins"] as string[] | undefined) ?? []);
+  const dependencySections = ["dependencies", "devDependencies", "optionalDependencies"];
+  return listPlugins(tag).flatMap((plugin) => {
+    const packageName = plugin.package ?? plugin.name;
+    const declared = dependencySections.some((section) => {
+      const dependencies = data[section];
+      return (
+        dependencies !== null &&
+        typeof dependencies === "object" &&
+        !Array.isArray(dependencies) &&
+        Object.hasOwn(dependencies, packageName)
+      );
+    });
+    const adapterRegistered = registered.has(packageName);
+    return declared || adapterRegistered
+      ? [{ plugin, declared, registered: adapterRegistered }]
+      : [];
+  });
+}
+
 /**
  * Get detailed information about a single plugin
  */
@@ -189,6 +247,11 @@ export function formatPluginForDisplay(plugin: PluginMetadata, detailed: boolean
 
     // Installation command
     lines.push(`    Install: ${plugin.install}`);
+    lines.push(
+      plugin.adapter
+        ? `    Integration: kit add ${plugin.adapter} (registered in package.json kitPlugins)`
+        : "    Integration: package API; no kit add adapter",
+    );
 
     // Repository
     lines.push(`    Repository: ${plugin.repository}`);
@@ -208,38 +271,49 @@ function formatStars(rating: number): string {
   return "★".repeat(full) + (half ? "◆" : "") + "☆".repeat(empty) + ` ${rating.toFixed(1)}`;
 }
 
-/**
- * Check if a plugin is installed by attempting to require/import it
- */
-export async function isPluginInstalled(packageName: string): Promise<boolean> {
-  try {
-    const result = await exec("npm", ["ls", packageName, "--depth=0"], {
-      timeout: 5000,
-    });
-    return result.stdout.includes(packageName);
-  } catch {
-    return false;
+function registryInstallSpec(installCommand: string): string {
+  const match = installCommand.trim().match(/^npm\s+install\s+(\S+)$/);
+  const declaredSpec = match?.[1] ?? "";
+  if (!isRegistrySpec(declaredSpec)) {
+    throw new Error(`Refusing non-registry plugin package spec: ${declaredSpec || installCommand}`);
   }
+  return declaredSpec;
 }
 
-/**
- * Install a plugin via npm
- */
+/** Install a plugin via npm using the exact registry package/version. */
+function pinnedPluginSpec(pluginName: string, metadata: PluginMetadata): string {
+  const packageName = metadata.package || pluginName;
+  const declaredSpec = registryInstallSpec(metadata.install);
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(metadata.version)) {
+    throw new Error(`Invalid exact plugin version: ${metadata.version}`);
+  }
+  const pinned = `${packageName}@${metadata.version}`;
+  if (!isRegistrySpec(pinned) || (declaredSpec !== packageName && declaredSpec !== pinned)) {
+    throw new Error(`Registry install spec ${declaredSpec} disagrees with ${pinned}`);
+  }
+  return pinned;
+}
+
 export async function installPlugin(
   pluginName: string,
   metadata: PluginMetadata,
+  deps: PluginInstallDeps = defaultInstallDeps,
+  cwd: string = process.cwd(),
 ): Promise<{ success: boolean; message: string }> {
   try {
-    // Use npm to install the package
-    const packageName = metadata.package || pluginName;
-    const cmd = metadata.install;
+    const pkgToInstall = pinnedPluginSpec(pluginName, metadata);
+    if (metadata.adapter) await readPluginManifest(cwd);
+    const verdict = await deps.gateInstall(`npm:${pkgToInstall}`);
+    if (verdict.decision === "blocked") {
+      return {
+        success: false,
+        message: `Triage blocked installation: ${verdict.reason}`,
+      };
+    }
 
-    // Extract the actual npm install command
-    const match = cmd.match(/npm install (.+)/);
-    const pkgToInstall = match ? match[1] : packageName;
-
-    const { stderr } = await exec("npm", ["install", pkgToInstall], {
+    const { stderr } = await deps.exec("npm", ["install", "--save-exact", pkgToInstall], {
       timeout: 60000,
+      cwd,
     });
 
     if (stderr && stderr.includes("ERR!")) {
@@ -249,9 +323,12 @@ export async function installPlugin(
       };
     }
 
+    if (metadata.adapter) await registerInstalledPluginAdapter(metadata, cwd);
     return {
       success: true,
-      message: `Installed ${pluginName} (${metadata.version})`,
+      message: metadata.adapter
+        ? `Installed ${pluginName} (${metadata.version}); registered ${metadata.package || pluginName} in package.json kitPlugins. Run kit add ${metadata.adapter}.`
+        : `Installed ${pluginName} (${metadata.version}); package API only, no kit add adapter. See the package README for usage.`,
     };
   } catch (err: unknown) {
     const error = err as { message?: string; stderr?: string };
@@ -260,4 +337,129 @@ export async function installPlugin(
       message: `Installation error: ${error.message || error.stderr || String(err)}`,
     };
   }
+}
+
+/** Remove an official package and its ServiceAdapter registration from this project. */
+export async function uninstallPlugin(
+  pluginName: string,
+  metadata: PluginMetadata,
+  deps: PluginUninstallDeps = defaultUninstallDeps,
+  cwd: string = process.cwd(),
+): Promise<{ success: boolean; message: string }> {
+  const packageName = metadata.package ?? pluginName;
+  if (isReadOnlyMode()) {
+    const refusal = await refuseWrite("plugin-uninstall", { package: packageName }, { cwd });
+    return { success: false, message: refusal.reason };
+  }
+  if (!isRegistrySpec(packageName)) {
+    return {
+      success: false,
+      message: `Refusing non-registry plugin package spec: ${safePluginError(packageName)}`,
+    };
+  }
+  try {
+    await readPluginManifest(cwd);
+  } catch (error) {
+    const message = safePluginError(error);
+    return { success: false, message: `Cannot uninstall ${pluginName}: ${message}` };
+  }
+  try {
+    const { stderr } = await deps.exec("npm", ["uninstall", "--ignore-scripts", packageName], {
+      cwd,
+      timeout: 60000,
+    });
+    if (stderr.includes("ERR!")) throw new Error(stderr);
+  } catch (error) {
+    const message = safePluginError(error);
+    return {
+      success: false,
+      message: `npm uninstall failed: ${message}. kitPlugins registration was not removed by kit; inspect package.json before retrying.`,
+    };
+  }
+
+  try {
+    await unregisterInstalledPluginAdapter(packageName, cwd, deps.manifestIO);
+  } catch (error) {
+    const message = safePluginError(error);
+    return {
+      success: false,
+      message: `Package removed by npm, but ${packageName} remains in kitPlugins: ${message}. Remove it from package.json manually.`,
+    };
+  }
+  return { success: true, message: `Uninstalled ${pluginName} from this project` };
+}
+
+async function readPluginManifest(
+  cwd: string,
+): Promise<{ path: string; data: Record<string, unknown> }> {
+  const path = resolve(cwd, "package.json");
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error("Project package.json required; run npm init first", {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+  const data = JSON.parse(raw) as unknown;
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Project package.json must be an object to register an adapter");
+  }
+  const plugins = (data as Record<string, unknown>)["kitPlugins"];
+  if (
+    plugins !== undefined &&
+    (!Array.isArray(plugins) || !plugins.every((name) => typeof name === "string"))
+  ) {
+    throw new Error("Project package.json kitPlugins must be an array of package names");
+  }
+  return { path, data: data as Record<string, unknown> };
+}
+
+async function writePluginManifest(
+  path: string,
+  data: Record<string, unknown>,
+  io: { writeFile: typeof writeFile; rename: typeof rename } = { writeFile, rename },
+): Promise<void> {
+  const tmp = resolve(
+    dirname(path),
+    `.package.json.kit-plugin-${process.pid}-${Math.random().toString(36).slice(2)}`,
+  );
+  try {
+    const mode = (await stat(path)).mode & 0o777;
+    await io.writeFile(tmp, JSON.stringify(data, null, 2) + "\n", { encoding: "utf-8", mode });
+    await io.rename(tmp, path);
+  } finally {
+    await rm(tmp, { force: true }).catch(() => {});
+  }
+}
+
+/** Register an already installed ServiceAdapter; safe to call again on repeat installs. */
+export async function registerInstalledPluginAdapter(
+  metadata: PluginMetadata,
+  cwd: string = process.cwd(),
+): Promise<boolean> {
+  if (!metadata.adapter) return false;
+  const { path, data } = await readPluginManifest(cwd);
+  const packageName = metadata.package ?? metadata.name;
+  const plugins = (data["kitPlugins"] as string[] | undefined) ?? [];
+  if (plugins.includes(packageName)) return false;
+  const next = { ...data, kitPlugins: [...plugins, packageName] };
+  await writePluginManifest(path, next);
+  return true;
+}
+
+async function unregisterInstalledPluginAdapter(
+  packageName: string,
+  cwd: string,
+  io?: { writeFile: typeof writeFile; rename: typeof rename },
+): Promise<boolean> {
+  const { path, data } = await readPluginManifest(cwd);
+  const plugins = (data["kitPlugins"] as string[] | undefined) ?? [];
+  if (!plugins.includes(packageName)) return false;
+  const next = { ...data, kitPlugins: plugins.filter((name) => name !== packageName) };
+  await writePluginManifest(path, next, io);
+  return true;
 }

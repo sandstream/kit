@@ -37,7 +37,9 @@ function usage(): void {
   console.log(`  ${c.green}--base-url <url>${c.reset}        Use an already-running test server`);
   console.log(`  ${c.green}--start-command <cmd>${c.reset}   Start app on a kit-chosen free port`);
   console.log(`  ${c.green}--seed-command <cmd>${c.reset}    Idempotent seed command`);
-  console.log(`  ${c.green}--test-command <cmd>${c.reset}    Playwright command override`);
+  console.log(
+    `  ${c.green}--test-command <cmd>${c.reset}    Diagnostic only; cannot attest browser gate`,
+  );
   console.log(
     `  ${c.green}--env-command <cmd>${c.reset}     Print temporary env as JSON or KEY=VALUE lines`,
   );

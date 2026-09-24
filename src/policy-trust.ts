@@ -6,8 +6,8 @@
  * That can't express the org case: ONE policy signed by a central org key,
  * dropped into MANY repos, verified everywhere. This adds a committed,
  * repo-resident trust anchor — `.kit-policy.signers` — listing the org public
- * key(s) allowed to sign the policy. `verifyPolicy` consults it after the local
- * store, so a distributed org-signed policy verifies authentically on any clone,
+ * key(s) allowed to sign the policy. `verifyPolicy` uses it instead of the local
+ * store when present, so a distributed org-signed policy verifies on any clone,
  * with no shared secret (asymmetric: only public keys are distributed).
  *
  * Committed + reviewed like the rest of the governance surface; deterministic,

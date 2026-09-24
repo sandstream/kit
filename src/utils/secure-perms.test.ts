@@ -1,13 +1,23 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, statSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, statSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { secureFile, secureDir } from "./secure-perms.js";
 
-// POSIX behavior is directly assertable (mode bits). The Windows icacls branch is
-// exercised by the windows-latest probe (#43) — it's a no-op-on-POSIX here.
+// POSIX behavior is directly assertable (mode bits). The Windows .NET ACL helper is
+// exercised by the windows-latest probe (#43) — it is not invoked on POSIX here.
 const posix = process.platform !== "win32";
+
+it("Windows ACL helper uses framework APIs without PowerShell security modules", () => {
+  const script = readFileSync(
+    new URL("../../scripts/windows-private-acl.ps1", import.meta.url),
+    "utf8",
+  );
+  assert.match(script, /\[System\.IO\.File\]::SetAccessControl/);
+  assert.match(script, /\[System\.IO\.Directory\]::SetAccessControl/);
+  assert.doesNotMatch(script, /\b(?:Get|Set)-Acl\b/);
+});
 
 describe("secure-perms (POSIX mode bits)", { skip: !posix }, () => {
   it("secureFile restricts a file to 0o600", () => {

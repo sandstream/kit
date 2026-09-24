@@ -1,6 +1,6 @@
 {
   "name": "sandstream-kit",
-  "version": "6.11.0",
+  "version": "6.12.0",
   "description": "developer kit. zero LLM, local-first, multi-vault. one command from git clone to working dev environment.",
   "license": "MIT",
   "funding": "https://buymeacoffee.com/sandstream",
@@ -20,7 +20,10 @@
   "files": [
     "dist",
     "README.md",
-    "skills"
+    "skills",
+    "docs/MONKEY_TEST.md",
+    "scripts/chatgpt-web-wizard.sh",
+    "scripts/windows-private-acl.ps1"
   ],
   "publishConfig": {
     "access": "public"
@@ -42,12 +45,13 @@
     "zod": "4.3.6"
   },
   "overrides": {
-    "hono": "4.12.34"
+    "hono": "4.13.5"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "22.19.15",
     "eslint": "10.8.0",
+    "fast-check": "4.9.0",
     "globals": "17.6.0",
     "prettier": "3.8.4",
     "tsx": "4.22.4",

@@ -1,6 +1,7 @@
 import { access, constants } from "node:fs/promises";
 import { resolve } from "node:path";
 import { exec } from "./utils/exec.js";
+import { redactSecrets } from "./utils/redactSecrets.js";
 
 export interface CloneOptions {
   /** Git repository URL */
@@ -60,7 +61,7 @@ export async function cloneRepository(opts: CloneOptions): Promise<CloneResult> 
       clonedPath,
       haskitToml: false,
       setupSkipped: false,
-      message: `Refused to clone: unsafe repository URL "${repoUrl}"`,
+      message: `Refused to clone: unsafe repository URL "${redactSecrets(repoUrl)}"`,
     };
   }
 
@@ -77,7 +78,7 @@ export async function cloneRepository(opts: CloneOptions): Promise<CloneResult> 
       // .kit.toml not found — that's okay
     }
 
-    let message = `Cloned ${repoUrl} to ${clonedPath}`;
+    let message = `Cloned ${redactSecrets(repoUrl)} to ${clonedPath}`;
     if (haskitToml) {
       message += noSetup
         ? "\nkit config found but setup skipped per --no-setup"
@@ -94,13 +95,16 @@ export async function cloneRepository(opts: CloneOptions): Promise<CloneResult> 
       message,
     };
   } catch (err) {
+    // The thrown error's message quotes the full git command, URL included ("Command
+    // failed: git clone -- ..."), so a credential carried in the URL userinfo must be
+    // redacted here too, not just in the two success-path messages above.
     const message = err instanceof Error ? err.message : String(err);
     return {
       success: false,
       clonedPath,
       haskitToml: false,
       setupSkipped: false,
-      message: `Failed to clone repository: ${message}`,
+      message: `Failed to clone repository: ${redactSecrets(message)}`,
     };
   }
 }

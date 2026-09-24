@@ -1,9 +1,17 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { resolve, join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { gateInstall } from "./triage-gate.js";
 import { exec } from "./utils/exec.js";
 
+const PLUGIN_PREFIX = "kit-plugin-";
+const SHORT_NAME_RE = /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/;
+const PLUGIN_DEV_DEPENDENCIES = {
+  "@types/node": "^22.0.0",
+  typescript: "^5.9.3",
+} as const;
+
 export interface CreatePluginOptions {
-  /** Plugin short name, e.g. "aws-s3" → package "sandstream-kit-plugin-aws-s3" */
+  /** Plugin short name, e.g. "aws-s3" → package "kit-plugin-aws-s3" */
   name: string;
   /** Directory to create the plugin in (defaults to cwd) */
   cwd?: string;
@@ -19,22 +27,65 @@ export interface CreatePluginResult {
   nextSteps: string[];
 }
 
+export interface CreatePluginDeps {
+  gateInstall: typeof gateInstall;
+  exec(
+    command: string,
+    args: readonly string[],
+    options?: { cwd?: string; timeout?: number },
+  ): Promise<{ stdout: string; stderr: string }>;
+}
+
+const defaultDeps: CreatePluginDeps = { gateInstall, exec };
+
+function normalizePluginName(name: string): string {
+  if (typeof name !== "string" || name !== name.trim()) {
+    throw new Error(`Invalid plugin scaffold name ${JSON.stringify(name)}`);
+  }
+
+  const shortName = name.startsWith(PLUGIN_PREFIX) ? name.slice(PLUGIN_PREFIX.length) : name;
+  const packageName = `${PLUGIN_PREFIX}${shortName}`;
+  if (
+    !SHORT_NAME_RE.test(shortName) ||
+    shortName.startsWith(PLUGIN_PREFIX) ||
+    packageName.length > 214
+  ) {
+    throw new Error(
+      `Invalid plugin scaffold name ${JSON.stringify(name)}; use a lowercase npm slug`,
+    );
+  }
+  return shortName;
+}
+
 /**
  * Scaffold a new kit adapter plugin from the reference template.
  *
  * Creates `./kit-plugin-<name>/` with a working TypeScript adapter
  * that builds and passes tests immediately.
  */
-export async function createPlugin(opts: CreatePluginOptions): Promise<CreatePluginResult> {
+export async function createPlugin(
+  opts: CreatePluginOptions,
+  deps: CreatePluginDeps = defaultDeps,
+): Promise<CreatePluginResult> {
   const { name } = opts;
-  const cwd = opts.cwd ?? process.cwd();
+  const cwd = resolve(opts.cwd ?? process.cwd());
 
   // Normalise: strip "kit-plugin-" prefix if the user passed the full name.
   // Community plugins use the unscoped `kit-plugin-<name>` convention (cf. eslint-plugin-*);
   // only first-party packages live under the @sandstream scope.
-  const shortName = name.replace(/^kit-plugin-/, "");
-  const packageName = `kit-plugin-${shortName}`;
+  const shortName = normalizePluginName(name);
+  const packageName = `${PLUGIN_PREFIX}${shortName}`;
   const pluginDir = resolve(cwd, packageName);
+  const pluginRelative = relative(cwd, pluginDir);
+  if (
+    pluginRelative === "" ||
+    pluginRelative === ".." ||
+    pluginRelative.startsWith("../") ||
+    pluginRelative.startsWith("..\\") ||
+    isAbsolute(pluginRelative)
+  ) {
+    throw new Error(`Invalid plugin scaffold name ${JSON.stringify(name)}; path escapes cwd`);
+  }
 
   // Capitalise for class/export names: "aws-s3" → "AwsS3", "my-service" → "MyService"
   const titleCase = shortName
@@ -45,7 +96,15 @@ export async function createPlugin(opts: CreatePluginOptions): Promise<CreatePlu
   const adapterName = `${titleCase.charAt(0).toLowerCase()}${titleCase.slice(1)}Adapter`;
   const serviceName = shortName; // e.g. "aws-s3/deploy" — user can change
 
-  await mkdir(pluginDir, { recursive: true });
+  await mkdir(cwd, { recursive: true });
+  try {
+    await mkdir(pluginDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error(`Plugin scaffold path already exists: ${pluginDir}`, { cause: error });
+    }
+    throw error;
+  }
   await mkdir(join(pluginDir, "src"), { recursive: true });
 
   const typesDir = join(pluginDir, "src", "types");
@@ -71,27 +130,53 @@ export async function createPlugin(opts: CreatePluginOptions): Promise<CreatePlu
     "utf-8",
   );
 
+  let installMessage: string | undefined;
+  let blockedTarget: string | undefined;
   if (!opts.skipInstall) {
-    try {
-      await exec("npm", ["install"], { cwd: pluginDir, timeout: 60_000 });
-    } catch {
-      // Non-fatal: user can run manually
+    for (const [dependency, version] of Object.entries(PLUGIN_DEV_DEPENDENCIES)) {
+      const target = `${dependency}@${version}`;
+      const verdict = await deps.gateInstall(`npm:${target}`);
+      if (verdict.decision === "blocked") {
+        blockedTarget = target;
+        installMessage = `Dependency install skipped: triage blocked ${target}: ${verdict.reason}`;
+        break;
+      }
     }
+
+    if (!blockedTarget) {
+      try {
+        // Runtime images set NODE_ENV=production. The scaffold's build and test tools are
+        // devDependencies, so request them explicitly even under that inherited setting.
+        await deps.exec("npm", ["install", "--include=dev"], { cwd: pluginDir, timeout: 60_000 });
+      } catch {
+        installMessage =
+          "Dependency install failed; run npm install --include=dev after resolving the error.";
+      }
+    }
+  }
+
+  const nextSteps = [
+    `cd ${packageName}`,
+    `npm run build`,
+    `npm test`,
+    `# Edit src/${shortName}.ts to implement your adapter`,
+    `# Then publish: npm publish`,
+    `# And add to your project: { "kitPlugins": ["${packageName}"] }`,
+  ];
+  if (blockedTarget) {
+    nextSteps.splice(1, 0, `kit triage npm ${blockedTarget}`, `npm install --include=dev`);
+  } else if (opts.skipInstall || installMessage) {
+    nextSteps.splice(1, 0, `npm install --include=dev`);
   }
 
   return {
     success: true,
     pluginDir,
     packageName,
-    message: `Created ${packageName} in ./${packageName}/`,
-    nextSteps: [
-      `cd ${packageName}`,
-      `npm run build`,
-      `npm test`,
-      `# Edit src/${shortName}.ts to implement your adapter`,
-      `# Then publish: npm publish`,
-      `# And add to your project: { "kitPlugins": ["${packageName}"] }`,
-    ],
+    message: installMessage
+      ? `Created ${packageName} in ./${packageName}/; ${installMessage}`
+      : `Created ${packageName} in ./${packageName}/`,
+    nextSteps,
   };
 }
 
@@ -158,10 +243,7 @@ function packageJsonTemplate(packageName: string): string {
         // sandstream-kit-adapter-sdk types are bundled in src/types/adapter-sdk.d.ts so this
         // plugin builds without any registry dependencies. Once sandstream-kit-adapter-sdk is
         // published, add it here:  peerDependencies: { "sandstream-kit-adapter-sdk": ">=0.1.0" }
-        devDependencies: {
-          "@types/node": "^22.0.0",
-          typescript: "^5.9.3",
-        },
+        devDependencies: PLUGIN_DEV_DEPENDENCIES,
       },
       null,
       2,

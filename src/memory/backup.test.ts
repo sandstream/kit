@@ -1,6 +1,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, statSync, readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  existsSync,
+  statSync,
+  readFileSync,
+  openSync,
+  fstatSync,
+  readSync,
+  closeSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, upsertSession, insertMessage, getStats } from "./db.js";
@@ -13,10 +23,8 @@ import {
   isAsymmetricBackup,
   isEncryptedBackup,
   parseRecipient,
-  maybeGunzip,
   restoreFailureMessage,
 } from "./backup.js";
-import { gzipSync } from "node:zlib";
 
 describe("memory encrypted backup / restore", () => {
   it("roundtrips data; a wrong passphrase fails", () => {
@@ -45,7 +53,7 @@ describe("memory encrypted backup / restore", () => {
   });
 
   it(
-    "writes the backup and the restored db with 0600 perms (V2 magic)",
+    "writes the backup and the restored db with 0600 perms (chunked V4 magic)",
     { skip: process.platform === "win32" },
     () => {
       const tmp = mkdtempSync(join(tmpdir(), "kit-bak4-"));
@@ -55,12 +63,15 @@ describe("memory encrypted backup / restore", () => {
       openMemoryDb(src).close();
 
       backupEncrypted("Galaxy-Vortex-Quartz-2026-x9", src, enc);
-      assert.equal(statSync(enc).mode & 0o777, 0o600, "encrypted blob must be 0600");
-      assert.equal(
-        readFileSync(enc).subarray(0, 8).toString(),
-        "KITMEM02",
-        "new backups use the hardened-KDF v2 magic",
-      );
+      const fd = openSync(enc, "r");
+      try {
+        assert.equal(fstatSync(fd).mode & 0o777, 0o600, "encrypted blob must be 0600");
+        const magic = Buffer.alloc(8);
+        assert.equal(readSync(fd, magic, 0, magic.length, 0), magic.length);
+        assert.equal(magic.toString(), "KITMEM04", "new backups use the bounded chunk format");
+      } finally {
+        closeSync(fd);
+      }
 
       restoreEncrypted("Galaxy-Vortex-Quartz-2026-x9", enc, dest);
       assert.equal(statSync(dest).mode & 0o777, 0o600, "restored plaintext db must be 0600");
@@ -106,7 +117,7 @@ describe("memory asymmetric (public-key) backup — no passphrase, ephemeral-saf
     backupToRecipient(publicKey, src, enc);
     assert.ok(isEncryptedBackup(enc), "V3 counts as an encrypted backup");
     assert.ok(isAsymmetricBackup(enc), "flagged as the public-key (V3) form");
-    assert.equal(readFileSync(enc).subarray(0, 8).toString(), "KITMEM03");
+    assert.equal(readFileSync(enc).subarray(0, 8).toString(), "KITMEM05");
     assert.equal(statSync(enc).mode & 0o777, 0o600, "blob is 0600");
 
     restoreWithKey(privateJwk, enc, dest);
@@ -134,19 +145,6 @@ describe("memory asymmetric (public-key) backup — no passphrase, ephemeral-saf
   it("parseRecipient rejects a malformed public key", () => {
     assert.throws(() => parseRecipient("not-a-key"), /must start with/);
     assert.throws(() => parseRecipient("kitmem-pub-deadbeef"), /X25519 public key/);
-  });
-});
-
-describe("memory backup — gzip-bomb guard (bounded decompression)", () => {
-  it("refuses a blob that decompresses past the cap; passes legit data through", () => {
-    // A tiny gzip that expands to 1 MB of zeros — with a small cap it must be refused
-    // (a V3 public-key blob is near-unauthenticated, so a bomb plaintext is craftable).
-    const bomb = gzipSync(Buffer.alloc(1024 * 1024));
-    assert.throws(() => maybeGunzip(bomb, 4096), /gzip bomb/);
-    // legit small payload round-trips under the default cap
-    assert.equal(maybeGunzip(gzipSync(Buffer.from("hello"))).toString(), "hello");
-    // a non-gzip (pre-compression) blob passes through untouched
-    assert.equal(maybeGunzip(Buffer.from("rawsqlite")).toString(), "rawsqlite");
   });
 });
 

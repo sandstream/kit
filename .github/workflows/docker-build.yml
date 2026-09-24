@@ -10,6 +10,8 @@ on:
     branches:
       - main
 
+permissions: {}
+
 env:
   REGISTRY: docker.io
   IMAGE_NAME: sandstream/kit
@@ -19,7 +21,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
       pull-requests: write
       id-token: write # cosign keyless signing via Sigstore OIDC
       security-events: write # upload Trivy SARIF to Code Scanning
@@ -41,8 +42,9 @@ jobs:
         if: github.event_name != 'pull_request'
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
-          if [ -n "$DOCKER_USERNAME" ]; then
+          if [ -n "$DOCKER_USERNAME" ] && [ -n "$DOCKER_PASSWORD" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
@@ -70,26 +72,95 @@ jobs:
             type=sha,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
-      # PR builds: GHA cache (no registry creds needed).
-      # Master/tag builds: registry cache for cross-runner reuse.
-      - name: Build and push CLI image
+      # Build once and load the exact image Trivy and PR smoke tests will use.
+      # Publication happens only after the vulnerability gate passes.
+      - name: Build CLI image locally
         id: build-cli
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: ./Dockerfile
-          # Only push when we have creds. Otherwise build-only so we still
-          # exercise the Dockerfile + Trivy scan on master.
-          push: ${{ github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true' }}
-          tags: ${{ steps.meta-cli.outputs.tags }}
+          load: true
+          tags: kit:scan
           labels: ${{ steps.meta-cli.outputs.labels }}
-          # Registry cache requires creds; gate it same as push.
           cache-from: |
             type=gha,scope=cli
             ${{ steps.docker-creds.outputs.present == 'true' && format('type=registry,ref={0}/{1}:buildcache', env.REGISTRY, env.IMAGE_NAME) || '' }}
-          cache-to: |
-            type=gha,scope=cli,mode=max
-            ${{ steps.docker-creds.outputs.present == 'true' && format('type=registry,ref={0}/{1}:buildcache,mode=max', env.REGISTRY, env.IMAGE_NAME) || '' }}
+          cache-to: type=gha,scope=cli,mode=max
+
+      - name: Image vulnerability scan
+        id: scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: kit:scan
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          format: sarif
+          output: trivy-results.sarif
+          limit-severities-for-sarif: true
+
+      - name: Explain failed image scan
+        if: ${{ !cancelled() && steps.scan.outcome == 'failure' }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'trivy-results.sarif';
+          if (!fs.existsSync(file)) {
+            console.log('Trivy SARIF unavailable; scan failed before producing a report.');
+            process.exit(0);
+          }
+          try {
+            const sarif = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const results = (sarif.runs ?? []).flatMap((run) => run.results ?? []);
+            const safe = (value) => String(value ?? 'unknown').replace(/[^a-zA-Z0-9.:@/_+-]/g, '_').replace(/::/g, '__').slice(0, 120);
+            console.log(`Trivy SARIF: ${results.length} finding(s)`);
+            for (const result of results.slice(0, 20)) {
+              const location = result.locations?.[0]?.physicalLocation?.artifactLocation?.uri;
+              console.log(`  ${safe(result.ruleId)} ${safe(location)}`);
+            }
+            if (results.length > 20) console.log(`  ... ${results.length - 20} more finding(s)`);
+            if (results.length === 0) console.log('Scan failed without SARIF findings; inspect scanner logs.');
+          } catch {
+            console.log('Trivy SARIF unreadable; scan failed before a usable report was produced.');
+          }
+          NODE
+
+      - name: Upload Trivy scan results
+        # Preserve findings when the scan rejects the image. SARIF availability
+        # must not turn a failed vulnerability gate into a successful publish.
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+        continue-on-error: true # kit-self-audit: allow-continue-on-error
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Push scanned CLI image
+        id: push-cli
+        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true' && steps.scan.outcome == 'success'
+        env:
+          TAGS: ${{ steps.meta-cli.outputs.tags }}
+        run: |
+          digest=""
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            docker tag kit:scan "$tag"
+            docker push "$tag"
+            pushed_digest="$(docker buildx imagetools inspect "$tag" --format '{{.Manifest.Digest}}')"
+            if [[ ! "$pushed_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::Cannot resolve registry digest for $tag" >&2
+              exit 1
+            fi
+            if [ -n "$digest" ] && [ "$digest" != "$pushed_digest" ]; then
+              echo "::error::Published tags have different image digests" >&2
+              exit 1
+            fi
+            digest="$pushed_digest"
+          done <<< "$TAGS"
+          if [ -z "$digest" ]; then
+            echo "::error::No Docker image tags to push" >&2
+            exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       # Sigstore keyless signing — only when an image was actually pushed.
       # Consumers verify with:
@@ -101,9 +172,9 @@ jobs:
           cosign-release: "v2.4.1"
 
       - name: Sign CLI image (keyless)
-        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true' && steps.build-cli.outputs.digest != ''
+        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true' && steps.push-cli.outputs.digest != ''
         env:
-          DIGEST: ${{ steps.build-cli.outputs.digest }}
+          DIGEST: ${{ steps.push-cli.outputs.digest }}
           TAGS: ${{ steps.meta-cli.outputs.tags }}
           COSIGN_EXPERIMENTAL: "1"
         run: |
@@ -113,61 +184,33 @@ jobs:
 
       # SBOM per image — attached to the registry alongside the signature.
       - name: Generate SBOM for CLI image
-        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true' && steps.build-cli.outputs.digest != ''
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true' && steps.push-cli.outputs.digest != ''
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
-          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build-cli.outputs.digest }}
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push-cli.outputs.digest }}
           format: cyclonedx-json
           artifact-name: cli-sbom.cyclonedx.json
           output-file: cli-sbom.cyclonedx.json
           upload-release-assets: false
 
       - name: Attest CLI image SBOM
-        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true' && steps.build-cli.outputs.digest != ''
+        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true' && steps.push-cli.outputs.digest != ''
         env:
-          DIGEST: ${{ steps.build-cli.outputs.digest }}
+          DIGEST: ${{ steps.push-cli.outputs.digest }}
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           COSIGN_EXPERIMENTAL: "1"
         run: |
           cosign attest --yes --predicate cli-sbom.cyclonedx.json --type cyclonedx \
             "${IMAGE}@${DIGEST}"
 
-      - name: Build test image (PR only)
-        if: github.event_name == 'pull_request'
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: ./Dockerfile
-          load: true
-          tags: kit:test
-
       - name: Test CLI image
         if: github.event_name == 'pull_request'
         run: |
-          docker run --rm kit:test --version
-          docker run --rm kit:test --help
-
-      - name: Image vulnerability scan
-        # Skip when no registry push happened — Trivy can't pull an image that
-        # wasn't published (DOCKER_USERNAME/PASSWORD missing → push step skipped).
-        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          format: "sarif"
-          output: "trivy-results.json"
-
-      - name: Upload Trivy scan results
-        # continue-on-error: SARIF upload needs Code Scanning enabled on the repo;
-        # the scan result above is the gate, so a failed upload must not fail the publish.
-        if: github.event_name != 'pull_request' && steps.docker-creds.outputs.present == 'true'
-        continue-on-error: true # kit-self-audit: allow-continue-on-error
-        uses: github/codeql-action/upload-sarif@c35d1b164463ee62a100735382aaaa525c5d3496 # codeql-bundle-v2.25.6
-        with:
-          sarif_file: "trivy-results.json"
+          docker run --rm kit:scan --version
+          docker run --rm kit:scan --help
 
       - name: Comment PR with image details
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
@@ -175,5 +218,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '✅ Docker image built successfully\n\n- CLI image: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test`'
+              body: 'Docker image built, scanned, and smoke-tested in CI. The PR image is local to this run and is not published.'
             })

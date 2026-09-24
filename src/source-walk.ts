@@ -9,7 +9,7 @@
  *   - exts:     ['.ts']
  *   - skipDirs: ['node_modules','dist','.next','.git','coverage']
  *   - dotdirs (any directory starting with '.') are skipped
- *   - `*.test.ts` is excluded unless `includeTests` is set
+ *   - `*.test.ts` and `*.test-support.ts` are excluded unless `includeTests` is set
  */
 
 import { readdirSync } from "node:fs";
@@ -20,7 +20,7 @@ export interface WalkOpts {
   exts?: string[];
   /** Directory names to skip entirely. Default node_modules/dist/.next/.git/coverage. */
   skipDirs?: string[];
-  /** When true, include `*.test.<ext>` files (excluded by default). */
+  /** When true, include tests and test-support modules (excluded by default). */
   includeTests?: boolean;
 }
 
@@ -28,7 +28,7 @@ const DEFAULT_EXTS = [".ts"];
 const DEFAULT_SKIP_DIRS = ["node_modules", "dist", ".next", ".git", "coverage"];
 
 function isTestFile(name: string, exts: string[]): boolean {
-  return exts.some((ext) => name.endsWith(`.test${ext}`));
+  return exts.some((ext) => name.endsWith(`.test${ext}`) || name.endsWith(`.test-support${ext}`));
 }
 
 /**

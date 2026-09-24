@@ -8,13 +8,11 @@
  * encrypted blob can live anywhere — Turso, object storage, a USB stick — and is
  * the transport for the future opt-in live sync.
  *
- * Blob layout: MAGIC(8) | salt(16) | iv(12) | authTag(16) | ciphertext
- * The MAGIC byte is versioned so the scrypt KDF cost can be raised without
- * breaking older backups: V1 used scrypt defaults; V2 uses a hardened cost.
+ * Current blobs use independently authenticated 1 MiB frames, so neither backup
+ * nor restore buffers a whole database. The versioned MAGIC retains streaming
+ * compatibility with the older one-shot V1/V2/V3 formats.
  */
 import {
-  createCipheriv,
-  createDecipheriv,
   randomBytes,
   scryptSync,
   generateKeyPairSync,
@@ -25,14 +23,45 @@ import {
   type ScryptOptions,
   type KeyObject,
 } from "node:crypto";
-import { gzipSync, gunzipSync } from "node:zlib";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { openMemoryDb, getMemoryDbPath, getMemoryDir } from "./db.js";
+import {
+  readFileSync,
+  readSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  lstatSync,
+  statSync,
+  realpathSync,
+  readlinkSync,
+  openSync,
+  fstatSync,
+  constants,
+  fchmodSync,
+  closeSync,
+  renameSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, resolve, sep } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { getMemoryDbPath, getMemoryDir } from "./db.js";
+import { assertRecoveryCompatible } from "./pal-check-storage.js";
+import { assertActionDeletionsPreserved } from "./pal-recovery.js";
+import {
+  copyFileToDescriptor,
+  restoreChunkedFile,
+  restoreLegacyFile,
+  SIZE_HEADER_LEN,
+  sizeHeader,
+  writeChunkedSnapshot,
+} from "./backup-stream.js";
 
 const MAGIC_V1 = Buffer.from("KITMEM01"); // legacy: scrypt defaults (N=16384, ~16 MB)
 const MAGIC_V2 = Buffer.from("KITMEM02"); // hardened: N=2^17 (~134 MB) — write path
 const MAGIC_V3 = Buffer.from("KITMEM03"); // asymmetric: X25519 → HKDF → AES-256-GCM (no passphrase)
+const MAGIC_V4 = Buffer.from("KITMEM04"); // chunked V2 successor: bounded gzip + AES-256-GCM
+const MAGIC_V5 = Buffer.from("KITMEM05"); // chunked V3 successor: X25519 + bounded gzip/GCM
 const MAGIC_LEN = 8;
 const SALT_LEN = 16;
 const IV_LEN = 12;
@@ -48,41 +77,167 @@ function deriveKey(passphrase: string, salt: Buffer, opts?: ScryptOptions): Buff
   return scryptSync(passphrase, salt, 32, opts);
 }
 
-// The plaintext DB is gzip-compressed BEFORE encryption (a SQLite file is highly
-// compressible — ~139 MB → ~30 MB — which keeps the blob under a 100 MB git host
-// limit and speeds every transport). Compression is INSIDE the encryption, so the
-// remote still only ever sees ciphertext. Backward-compatible on read: an older
-// (uncompressed) blob decrypts to a raw SQLite file that lacks the gzip header, so
-// `maybeGunzip` passes it through untouched — no new format version needed.
-function readMemoryDbCompressed(srcPath: string): Buffer {
-  return gzipSync(readFileSync(srcPath));
+function destinationPath(path: string): string {
+  let target = resolve(path);
+  for (let links = 0; links < 40; links++) {
+    const entry = lstatSync(target, { throwIfNoEntry: false });
+    if (!entry?.isSymbolicLink()) {
+      if (entry) return realpathSync(target);
+      const suffix = [basename(target)];
+      let ancestor = dirname(target);
+      while (!lstatSync(ancestor, { throwIfNoEntry: false })) {
+        suffix.unshift(basename(ancestor));
+        ancestor = dirname(ancestor);
+      }
+      return join(realpathSync(ancestor), ...suffix);
+    }
+    // Follow dangling links too: their targets may be not-yet-created WAL files.
+    target = resolve(dirname(target), readlinkSync(target));
+  }
+  throw new Error("too many symbolic links in backup destination");
 }
 
-// Hard ceiling on the decompressed size. A V3 (public-key) blob is near-unauthenticated —
-// the recipient public key is meant to be shared, so anyone can craft a VALID blob whose
-// plaintext is a gzip bomb (a few KB → many GB). Without a cap, `kit memory pull` of such a
-// blob exhausts memory on the durable box. 1 GiB is well above a real brain (a large store
-// is ~139 MB uncompressed) while bounding a bomb; an over-limit blob throws a clear error
-// instead of OOMing.
-const MAX_DECOMPRESSED_BYTES = 1024 * 1024 * 1024;
-
-/** Gunzip if the buffer carries the gzip magic (0x1f 0x8b); otherwise return as-is
- *  (a pre-compression blob, whose plaintext is a raw SQLite file). Bounded output so a
- *  crafted blob can't decompress into a memory-exhausting gzip bomb. `maxBytes` is a test
- *  seam; production callers use the default 1 GiB ceiling. */
-export function maybeGunzip(buf: Buffer, maxBytes: number = MAX_DECOMPRESSED_BYTES): Buffer {
-  if (!(buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b)) return buf;
-  try {
-    return gunzipSync(buf, { maxOutputLength: maxBytes });
-  } catch (e) {
-    if (e instanceof RangeError) {
-      throw new Error(
-        `backup decompresses beyond the ${Math.round(maxBytes / (1024 * 1024))} MB limit — refusing (possible gzip bomb)`,
-        { cause: e },
-      );
+function assertDistinctFiles(input: string, output: string, sqlite: boolean): void {
+  const source = realpathSync(input);
+  const destination = destinationPath(output);
+  const target = statSync(destination, { throwIfNoEntry: false });
+  const suffixes = sqlite ? ["", "-wal", "-shm", "-journal"] : [""];
+  for (const base of new Set([source, resolve(input)])) {
+    for (const suffix of suffixes) {
+      const protectedPath = destinationPath(base + suffix);
+      const original = statSync(protectedPath, { throwIfNoEntry: false });
+      if (
+        destination === protectedPath ||
+        destination.startsWith(protectedPath + sep) ||
+        (original && target && original.dev === target.dev && original.ino === target.ino)
+      ) {
+        throw new Error(
+          "backup input and output must be different files (including SQLite sidecar aliases)",
+        );
+      }
     }
-    throw e;
   }
+}
+
+function assertOfflineDestination(destination: string): void {
+  if (
+    ["-wal", "-shm", "-journal"].some((suffix) =>
+      lstatSync(destination + suffix, { throwIfNoEntry: false }),
+    )
+  ) {
+    throw new Error(
+      "SQLite sidecar exists at restore destination; restore offline after closing database users, or choose a new path",
+    );
+  }
+}
+
+type RestorePurpose = "recovery" | "import";
+
+function writeBackupFile(
+  input: string,
+  output: string,
+  write: Buffer | ((fd: number) => void),
+  purpose: RestorePurpose | "backup" = "recovery",
+): void {
+  const sqlite = purpose === "backup";
+  assertDistinctFiles(input, output, sqlite);
+  const destination = destinationPath(output);
+  if (!sqlite) assertOfflineDestination(destination);
+  mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+  assertDistinctFiles(input, destination, sqlite);
+  const temporary = join(
+    dirname(destination),
+    `.kit-memory-${randomBytes(16).toString("hex")}.tmp`,
+  );
+  const fd = openSync(temporary, "wx", 0o600);
+  try {
+    try {
+      // Set exact permissions on the empty, owned inode before any plaintext.
+      fchmodSync(fd, 0o600);
+      if (Buffer.isBuffer(write)) writeFileSync(fd, write);
+      else write(fd);
+    } finally {
+      closeSync(fd);
+    }
+    if (purpose === "recovery") assertRecoveryCompatible(temporary);
+    assertDistinctFiles(input, destination, sqlite);
+    if (!sqlite) assertOfflineDestination(destination);
+    if (purpose === "recovery") assertActionDeletionsPreserved(temporary, destination);
+    if (!sqlite) assertOfflineDestination(destination);
+    renameSync(temporary, destination);
+  } finally {
+    for (const suffix of ["", "-wal", "-shm", "-journal"])
+      rmSync(temporary + suffix, { force: true });
+  }
+}
+
+// Capture one committed SQLite snapshot before the format-specific writer runs.
+// Current V4/V5 writers compress and authenticate independent 1 MiB frames; legacy
+// V1-V3 readers use bounded staging streams for backward compatibility.
+function withMemoryDbSnapshot<T>(
+  srcPath: string,
+  outPath: string,
+  use: (snapshot: string, bytes: number) => T,
+): T {
+  assertDistinctFiles(srcPath, outPath, true);
+  const dir = mkdtempSync(join(tmpdir(), "kit-memory-snapshot-"));
+  try {
+    const snapshot = join(dir, "memory.db");
+    writeFileSync(snapshot, "", { flag: "wx", mode: 0o600 });
+    const db = new DatabaseSync(srcPath, { readOnly: true });
+    try {
+      // SQLite reads committed WAL frames under one snapshot without migrating
+      // or checkpointing the source. Keep auxiliary temporary data in memory.
+      db.exec("PRAGMA busy_timeout = 5000; PRAGMA temp_store = MEMORY");
+      db.prepare("VACUUM main INTO ?").run(snapshot);
+    } finally {
+      db.close();
+    }
+    return use(snapshot, statSync(snapshot).size);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function readWindow(fd: number, buffer: Buffer, length: number, position: number): number {
+  let total = 0;
+  while (total < length) {
+    const count = readSync(fd, buffer, total, length - total, position + total);
+    if (count === 0) break;
+    total += count;
+  }
+  return total;
+}
+
+/** Compare a live store's committed SQLite snapshot with a previously decrypted backup. */
+export function memoryDbMatchesSnapshot(srcPath: string, snapshotPath: string): boolean {
+  return withMemoryDbSnapshot(srcPath, snapshotPath, (current) => {
+    const flags = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
+    const currentFd = openSync(current, flags);
+    try {
+      const previousFd = openSync(snapshotPath, flags);
+      try {
+        const currentInfo = fstatSync(currentFd);
+        const previousInfo = fstatSync(previousFd);
+        if (!currentInfo.isFile() || !previousInfo.isFile()) return false;
+        const size = currentInfo.size;
+        if (size !== previousInfo.size) return false;
+        const a = Buffer.allocUnsafe(1024 * 1024);
+        const b = Buffer.allocUnsafe(1024 * 1024);
+        for (let offset = 0; offset < size; offset += a.length) {
+          const length = Math.min(a.length, size - offset);
+          if (readWindow(currentFd, a, length, offset) !== length) return false;
+          if (readWindow(previousFd, b, length, offset) !== length) return false;
+          if (!a.subarray(0, length).equals(b.subarray(0, length))) return false;
+        }
+        return true;
+      } finally {
+        closeSync(previousFd);
+      }
+    } finally {
+      closeSync(currentFd);
+    }
+  });
 }
 
 const MIN_PASSPHRASE_LEN = 12;
@@ -117,7 +272,19 @@ export function validatePassphrase(passphrase: string): void {
 
 function magicOf(inPath: string): Buffer | null {
   try {
-    return readFileSync(inPath).subarray(0, MAGIC_LEN);
+    const fd = openSync(inPath, "r");
+    try {
+      const header = Buffer.alloc(MAGIC_LEN);
+      let offset = 0;
+      while (offset < MAGIC_LEN) {
+        const count = readSync(fd, header, offset, MAGIC_LEN - offset, offset);
+        if (count === 0) return null;
+        offset += count;
+      }
+      return header;
+    } finally {
+      closeSync(fd);
+    }
   } catch {
     return null; // unreadable/missing — let the caller surface a clean error
   }
@@ -127,17 +294,24 @@ function magicOf(inPath: string): Buffer | null {
  *  or V3 public-key). Lets `kit memory sync` tell an encrypted backup from a raw .db. */
 export function isEncryptedBackup(inPath: string): boolean {
   const m = magicOf(inPath);
-  return !!m && (m.equals(MAGIC_V1) || m.equals(MAGIC_V2) || m.equals(MAGIC_V3));
+  return (
+    !!m &&
+    (m.equals(MAGIC_V1) ||
+      m.equals(MAGIC_V2) ||
+      m.equals(MAGIC_V3) ||
+      m.equals(MAGIC_V4) ||
+      m.equals(MAGIC_V5))
+  );
 }
 
 /** True only for a V3 (asymmetric, public-key) blob — decrypts with the local
  *  private key, never a passphrase. The branch `kit memory pull` keys off. */
 export function isAsymmetricBackup(inPath: string): boolean {
   const m = magicOf(inPath);
-  return !!m && m.equals(MAGIC_V3);
+  return !!m && (m.equals(MAGIC_V3) || m.equals(MAGIC_V5));
 }
 
-/** Encrypt the memory DB file into `outPath`. WAL is checkpointed first so the file is complete. */
+/** Encrypt a consistent SQLite snapshot of the memory DB into `outPath`. */
 export function backupEncrypted(
   passphrase: string,
   srcPath: string = getMemoryDbPath(),
@@ -145,44 +319,17 @@ export function backupEncrypted(
 ): void {
   if (!outPath) throw new Error("backupEncrypted requires an output path");
   validatePassphrase(passphrase);
-  // Flush WAL into the main file so reading the .db captures everything.
-  const db = openMemoryDb(srcPath);
-  db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-  db.close();
-
-  const data = readMemoryDbCompressed(srcPath);
   const salt = randomBytes(SALT_LEN);
-  const iv = randomBytes(IV_LEN);
-  const cipher = createCipheriv("aes-256-gcm", deriveKey(passphrase, salt, SCRYPT_V2), iv, {
-    authTagLength: TAG_LEN,
+  const key = deriveKey(passphrase, salt, SCRYPT_V2);
+  withMemoryDbSnapshot(srcPath, outPath, (snapshot, bytes) => {
+    const header = Buffer.concat([MAGIC_V4, salt, sizeHeader(bytes)]);
+    writeBackupFile(
+      srcPath,
+      outPath!,
+      (fd) => writeChunkedSnapshot(fd, snapshot, header, key),
+      "backup",
+    );
   });
-  const ciphertext = Buffer.concat([cipher.update(data), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  // 0600: the blob is encrypted, but there is no reason to leave your whole
-  // (encrypted) brain world-readable on a shared host.
-  writeFileSync(outPath, Buffer.concat([MAGIC_V2, salt, iv, tag, ciphertext]), { mode: 0o600 });
-}
-
-/**
- * Write an UNENCRYPTED, consistent snapshot of the memory DB to `outPath` (SQLite
- * `VACUUM INTO` after a WAL checkpoint → a standalone .db the pull side merges directly).
- * For the low-ceremony `[memory.sync] encrypt = false` option: no passphrase, no recipient.
- * The blob is plaintext, so the sync DESTINATION MUST be private (the store can hold
- * secret-shaped strings) — the pull path still runs the R7 injection scan before merge.
- * 0600 like every other kit-written store file.
- */
-export function backupPlain(srcPath: string = getMemoryDbPath(), outPath?: string): void {
-  if (!outPath) throw new Error("backupPlain requires an output path");
-  const db = openMemoryDb(srcPath);
-  try {
-    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-    // VACUUM INTO requires the target not to exist (a prior blob may have been pulled in).
-    if (existsSync(outPath)) rmSync(outPath);
-    db.exec(`VACUUM INTO '${outPath.replace(/'/g, "''")}'`);
-  } finally {
-    db.close();
-  }
-  chmodSync(outPath, 0o600);
 }
 
 /** Decrypt a backup blob into `destPath`. Throws on a wrong passphrase or tampered blob (GCM auth). */
@@ -198,30 +345,45 @@ export function restoreFailureMessage(err: unknown): string {
     : msg;
 }
 
-export function restoreEncrypted(passphrase: string, inPath: string, destPath: string): void {
-  const blob = readFileSync(inPath);
-  const magic = blob.subarray(0, MAGIC_LEN);
-  // Pick the KDF cost from the version tag so older (V1) backups still restore.
-  let scrypt: ScryptOptions | undefined;
-  if (magic.equals(MAGIC_V2)) scrypt = SCRYPT_V2;
-  else if (magic.equals(MAGIC_V1))
-    scrypt = undefined; // legacy scrypt defaults
-  else throw new Error("not a kit memory backup (bad magic)");
-
-  let off = MAGIC_LEN;
-  const salt = blob.subarray(off, (off += SALT_LEN));
-  const iv = blob.subarray(off, (off += IV_LEN));
-  const tag = blob.subarray(off, (off += TAG_LEN));
-  const ciphertext = blob.subarray(off);
-  const decipher = createDecipheriv("aes-256-gcm", deriveKey(passphrase, salt, scrypt), iv, {
-    authTagLength: TAG_LEN,
-  });
-  decipher.setAuthTag(tag);
-  const data = Buffer.concat([decipher.update(ciphertext), decipher.final()]); // throws if wrong key
-  // 0600: never leave the decrypted plaintext brain world-readable, even when
-  // restoring to a custom path outside ~/.kit. (openMemoryDb chmods the live DB;
-  // this is the restore-time equivalent.)
-  writeFileSync(destPath, maybeGunzip(data), { mode: 0o600 });
+export function restoreEncrypted(
+  passphrase: string,
+  inPath: string,
+  destPath: string,
+  purpose: RestorePurpose = "recovery",
+): void {
+  const format = magicOf(inPath);
+  if (format?.equals(MAGIC_V4)) {
+    assertDistinctFiles(inPath, destPath, false);
+    restoreChunkedFile(
+      inPath,
+      MAGIC_LEN + SALT_LEN + SIZE_HEADER_LEN,
+      (header) => {
+        if (!header.subarray(0, MAGIC_LEN).equals(MAGIC_V4)) {
+          throw new Error("not a kit memory backup (bad magic)");
+        }
+        return deriveKey(passphrase, header.subarray(MAGIC_LEN, MAGIC_LEN + SALT_LEN), SCRYPT_V2);
+      },
+      (plaintext) =>
+        writeBackupFile(inPath, destPath, (fd) => copyFileToDescriptor(plaintext, fd), purpose),
+    );
+    return;
+  }
+  assertDistinctFiles(inPath, destPath, false);
+  restoreLegacyFile(
+    inPath,
+    MAGIC_LEN + SALT_LEN + IV_LEN + TAG_LEN,
+    (header) => {
+      const magic = header.subarray(0, MAGIC_LEN);
+      const scrypt = magic.equals(MAGIC_V2) ? SCRYPT_V2 : magic.equals(MAGIC_V1) ? undefined : null;
+      if (scrypt === null) throw new Error("not a kit memory backup (bad magic)");
+      const salt = header.subarray(MAGIC_LEN, MAGIC_LEN + SALT_LEN);
+      const iv = header.subarray(MAGIC_LEN + SALT_LEN, MAGIC_LEN + SALT_LEN + IV_LEN);
+      const tag = header.subarray(MAGIC_LEN + SALT_LEN + IV_LEN);
+      return { key: deriveKey(passphrase, salt, scrypt), iv, tag };
+    },
+    (plaintext) =>
+      writeBackupFile(inPath, destPath, (fd) => copyFileToDescriptor(plaintext, fd), purpose),
+  );
 }
 
 // ── Asymmetric (public-key) mode ──────────────────────────────────────────────
@@ -310,7 +472,7 @@ function deriveSharedKey(ephPubRaw: Buffer, recipPubRaw: Buffer, shared: Buffer)
   return Buffer.from(hkdfSync("sha256", shared, salt, HKDF_INFO, 32));
 }
 
-/** Encrypt the memory DB to a PUBLIC recipient key (no passphrase). WAL-checkpoint first. */
+/** Encrypt a consistent SQLite snapshot to a PUBLIC recipient key (no passphrase). */
 export function backupToRecipient(
   recipient: string,
   srcPath: string = getMemoryDbPath(),
@@ -320,49 +482,78 @@ export function backupToRecipient(
   const recipKey = parseRecipient(recipient);
   const recipRaw = rawFromJwkComponent((recipKey.export({ format: "jwk" }) as { x: string }).x);
 
-  const db = openMemoryDb(srcPath);
-  db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-  db.close();
-  const data = readMemoryDbCompressed(srcPath);
-
   const { publicKey: ephPub, privateKey: ephPriv } = generateKeyPairSync("x25519");
   const ephRaw = rawFromJwkComponent((ephPub.export({ format: "jwk" }) as { x: string }).x);
   const shared = diffieHellman({ privateKey: ephPriv, publicKey: recipKey });
   const key = deriveSharedKey(ephRaw, recipRaw, shared);
-
-  const iv = randomBytes(IV_LEN);
-  const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_LEN });
-  const ciphertext = Buffer.concat([cipher.update(data), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  writeFileSync(outPath, Buffer.concat([MAGIC_V3, ephRaw, iv, tag, ciphertext]), { mode: 0o600 });
+  withMemoryDbSnapshot(srcPath, outPath, (snapshot, bytes) => {
+    const header = Buffer.concat([MAGIC_V5, ephRaw, sizeHeader(bytes)]);
+    writeBackupFile(
+      srcPath,
+      outPath!,
+      (fd) => writeChunkedSnapshot(fd, snapshot, header, key),
+      "backup",
+    );
+  });
 }
 
 /** Decrypt a V3 blob with the local private key. Throws on wrong key / tamper (GCM auth). */
-export function restoreWithKey(privateJwk: MemoryKeyJwk, inPath: string, destPath: string): void {
-  const blob = readFileSync(inPath);
-  if (!blob.subarray(0, MAGIC_LEN).equals(MAGIC_V3)) {
-    throw new Error("not a kit public-key backup (bad magic)");
+export function restoreWithKey(
+  privateJwk: MemoryKeyJwk,
+  inPath: string,
+  destPath: string,
+  purpose: RestorePurpose = "recovery",
+): void {
+  const format = magicOf(inPath);
+  if (format?.equals(MAGIC_V5)) {
+    assertDistinctFiles(inPath, destPath, false);
+    restoreChunkedFile(
+      inPath,
+      MAGIC_LEN + X25519_LEN + SIZE_HEADER_LEN,
+      (header) => {
+        if (!header.subarray(0, MAGIC_LEN).equals(MAGIC_V5)) {
+          throw new Error("not a kit public-key backup (bad magic)");
+        }
+        const ephRaw = header.subarray(MAGIC_LEN, MAGIC_LEN + X25519_LEN);
+        const privKey = createPrivateKey({
+          key: { kty: "OKP", crv: "X25519", x: privateJwk.x, d: privateJwk.d },
+          format: "jwk",
+        });
+        const ephPub = createPublicKey({
+          key: { kty: "OKP", crv: "X25519", x: ephRaw.toString("base64url") },
+          format: "jwk",
+        });
+        const shared = diffieHellman({ privateKey: privKey, publicKey: ephPub });
+        return deriveSharedKey(ephRaw, rawFromJwkComponent(privateJwk.x), shared);
+      },
+      (plaintext) =>
+        writeBackupFile(inPath, destPath, (fd) => copyFileToDescriptor(plaintext, fd), purpose),
+    );
+    return;
   }
-  let off = MAGIC_LEN;
-  const ephRaw = blob.subarray(off, (off += X25519_LEN));
-  const iv = blob.subarray(off, (off += IV_LEN));
-  const tag = blob.subarray(off, (off += TAG_LEN));
-  const ciphertext = blob.subarray(off);
-
-  const privKey = createPrivateKey({
-    key: { kty: "OKP", crv: "X25519", x: privateJwk.x, d: privateJwk.d },
-    format: "jwk",
-  });
-  const ephPub = createPublicKey({
-    key: { kty: "OKP", crv: "X25519", x: ephRaw.toString("base64url") },
-    format: "jwk",
-  });
-  const shared = diffieHellman({ privateKey: privKey, publicKey: ephPub });
-  const recipRaw = rawFromJwkComponent(privateJwk.x);
-  const key = deriveSharedKey(ephRaw, recipRaw, shared);
-
-  const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_LEN });
-  decipher.setAuthTag(tag);
-  const data = Buffer.concat([decipher.update(ciphertext), decipher.final()]); // throws if wrong key
-  writeFileSync(destPath, maybeGunzip(data), { mode: 0o600 });
+  assertDistinctFiles(inPath, destPath, false);
+  restoreLegacyFile(
+    inPath,
+    MAGIC_LEN + X25519_LEN + IV_LEN + TAG_LEN,
+    (header) => {
+      if (!header.subarray(0, MAGIC_LEN).equals(MAGIC_V3)) {
+        throw new Error("not a kit public-key backup (bad magic)");
+      }
+      const ephRaw = header.subarray(MAGIC_LEN, MAGIC_LEN + X25519_LEN);
+      const iv = header.subarray(MAGIC_LEN + X25519_LEN, MAGIC_LEN + X25519_LEN + IV_LEN);
+      const tag = header.subarray(MAGIC_LEN + X25519_LEN + IV_LEN);
+      const privKey = createPrivateKey({
+        key: { kty: "OKP", crv: "X25519", x: privateJwk.x, d: privateJwk.d },
+        format: "jwk",
+      });
+      const ephPub = createPublicKey({
+        key: { kty: "OKP", crv: "X25519", x: ephRaw.toString("base64url") },
+        format: "jwk",
+      });
+      const shared = diffieHellman({ privateKey: privKey, publicKey: ephPub });
+      return { key: deriveSharedKey(ephRaw, rawFromJwkComponent(privateJwk.x), shared), iv, tag };
+    },
+    (plaintext) =>
+      writeBackupFile(inPath, destPath, (fd) => copyFileToDescriptor(plaintext, fd), purpose),
+  );
 }

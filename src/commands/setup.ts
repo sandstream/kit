@@ -18,7 +18,7 @@ import { c } from "../utils/colors.js";
 import { loadConfig, type kitConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { runDoctor } from "../doctor.js";
-import { provisionService, listAvailableServices, getServiceInfo } from "../provision.js";
+import { provisionService, listProjectServices } from "../provision.js";
 import { executeCommand } from "../run.js";
 import { resolveMode, MODE_NAMES } from "../setup-modes.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
@@ -63,11 +63,9 @@ import { cmdLogin } from "./login.js";
 import { cmdSecrets } from "./secrets.js";
 import { cmdCheck } from "./check.js";
 import { cmdHooks } from "./hooks.js";
+import { recordFirstInstallPrompt } from "./setup-marker.js";
 
 export async function cmdDoctor(): Promise<boolean> {
-  console.log(`${c.bold}${c.cyan}kit doctor${c.reset}`);
-  console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
-
   let config: ReturnType<typeof Object.create> = {};
   try {
     config = await loadConfig(resolveConfigPath());
@@ -76,6 +74,15 @@ export async function cmdDoctor(): Promise<boolean> {
   }
 
   const result = await runDoctor(config, process.cwd());
+  const ok = result.failed === 0;
+  if (hasFlag(process.argv, "--json")) {
+    const skipped = result.checks.filter((check) => check.status === "skip").length;
+    console.log(JSON.stringify({ ok, ...result, skipped }, null, 2));
+    return ok;
+  }
+
+  console.log(`${c.bold}${c.cyan}kit doctor${c.reset}`);
+  console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
   for (const check of result.checks) {
     const icon =
@@ -103,7 +110,7 @@ export async function cmdDoctor(): Promise<boolean> {
 
   console.log(`\n  ${summaryParts.join(" · ")}\n`);
 
-  return result.failed === 0;
+  return ok;
 }
 
 export async function cmdAdd(): Promise<boolean> {
@@ -117,13 +124,10 @@ export async function cmdAdd(): Promise<boolean> {
   if (!serviceName || hasFlag(process.argv, "--list")) {
     console.log(`${c.bold}${c.cyan}Available services:${c.reset}\n`);
 
-    const services = listAvailableServices();
-    for (const svc of services) {
-      const info = getServiceInfo(svc);
-      if (info) {
-        console.log(`  ${c.green}${svc}${c.reset}  ${c.dim}${info.description}${c.reset}`);
-        console.log(`    ${c.dim}Requires: ${info.tools.join(", ")}${c.reset}`);
-      }
+    const services = await listProjectServices(process.cwd());
+    for (const info of services) {
+      console.log(`  ${c.green}${info.name}${c.reset}  ${c.dim}${info.description}${c.reset}`);
+      console.log(`    ${c.dim}Requires: ${info.tools.join(", ")}${c.reset}`);
     }
 
     console.log();
@@ -1012,7 +1016,7 @@ async function offerFirstInstallPrescan(): Promise<void> {
 
   // Always write marker (even if user declined) — don't re-pester.
   await mkdir(markerDir, { recursive: true, mode: 0o700 });
-  await writeFile(markerPath, new Date().toISOString() + "\n", { encoding: "utf-8", mode: 0o600 });
+  await recordFirstInstallPrompt(markerPath);
 
   if (answer !== "y" && answer !== "yes") {
     console.log(

@@ -129,16 +129,12 @@ Plugins specify minimum kit version:
 
 ### Plugin Compatibility with Each Other
 
-Plugins are independent and can have different versions. kit manages:
-- Version resolution
-- Dependency tracking
-- Conflict detection
+Plugins are independent and can have different versions. npm resolves and installs their dependencies; kit's registry reports each package's declared version.
 
 ```bash
-# Install multiple plugins with different versions
-kit plugin install stripe/payments        # Uses @1.0.0
-kit plugin install supabase/database      # Uses @2.1.0
-# Both work together as long as they target compatible kit versions
+# These are registry IDs, not adapter names.
+kit plugin install stripe
+kit plugin install supabase
 ```
 
 ## Deprecation Policy

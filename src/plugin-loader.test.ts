@@ -1,16 +1,22 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, writeFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import { createPlugin } from "./create-plugin.js";
 import { loadPluginAdapters } from "./plugin-loader.js";
+
+const execFileAsync = promisify(execFile);
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 // Build a temporary project with node_modules for mock plugins
 let tmpProject: string;
 
 before(async () => {
-  tmpProject = join(tmpdir(), `sandstream-kit-plugin-loader-test-${process.pid}`);
-  await mkdir(tmpProject, { recursive: true });
+  tmpProject = await mkdtemp(join(tmpdir(), "sandstream-kit-plugin-loader-test-"));
 });
 
 after(async () => {
@@ -73,8 +79,7 @@ describe("loadPluginAdapters", () => {
   });
 
   it("returns empty registry when package.json is absent", async () => {
-    const emptyDir = join(tmpdir(), `kit-empty-${process.pid}`);
-    await mkdir(emptyDir, { recursive: true });
+    const emptyDir = await mkdtemp(join(tmpdir(), "kit-empty-"));
     try {
       const result = await loadPluginAdapters(emptyDir);
       assert.deepEqual(result, {});
@@ -101,6 +106,32 @@ describe("loadPluginAdapters", () => {
     assert.ok(result["mock/service-b"], "second adapter registered");
     assert.equal(result["mock/service-a"].description, "Mock service A");
     assert.equal(result["mock/service-b"].description, "Mock service B");
+  });
+
+  it("loads the built output produced by the scaffold package exports", async () => {
+    const shortName = `scaffold-load-${process.pid}`;
+    const scaffold = await createPlugin({ name: shortName, cwd: tmpProject, skipInstall: true });
+    const rootNodeModules = join(repoRoot, "node_modules");
+
+    await symlink(rootNodeModules, join(scaffold.pluginDir, "node_modules"), "dir");
+    try {
+      await execFileAsync(
+        process.execPath,
+        [join(rootNodeModules, "typescript", "bin", "tsc"), "-p", scaffold.pluginDir],
+        { timeout: 30_000 },
+      );
+    } finally {
+      await rm(join(scaffold.pluginDir, "node_modules"), { recursive: true, force: true });
+    }
+
+    const installedDir = join(tmpProject, "node_modules", scaffold.packageName);
+    await mkdir(join(tmpProject, "node_modules"), { recursive: true });
+    await rm(installedDir, { recursive: true, force: true });
+    await rename(scaffold.pluginDir, installedDir);
+    await writePackageJson([scaffold.packageName]);
+
+    const result = await loadPluginAdapters(tmpProject);
+    assert.ok(result[`${shortName}/deploy`], "scaffolded adapter should load from dist/index.js");
   });
 
   it("loads multiple plugins at once", async () => {

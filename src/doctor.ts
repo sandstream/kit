@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { kitConfig } from "./config.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
+import { probeName } from "./tool-inventory.js";
 import { activeKeyStoreStatus, hardwareRequired } from "./keystore/active.js";
 import { existsSync } from "node:fs";
 import { profileBrokerPolicy } from "./exec-broker/profile-policy.js";
@@ -121,7 +122,12 @@ async function checkEnvLocal(config: kitConfig, cwd: string): Promise<DoctorChec
   }
 }
 
-async function checkToolsInPath(config: kitConfig): Promise<DoctorCheck[]> {
+export type DoctorToolResolver = (tool: string) => Promise<string | null>;
+
+export async function checkToolsInPath(
+  config: kitConfig,
+  resolver: DoctorToolResolver = resolveToolBin,
+): Promise<DoctorCheck[]> {
   if (!config.tools) return [];
 
   const checks: DoctorCheck[] = [];
@@ -133,7 +139,7 @@ async function checkToolsInPath(config: kitConfig): Promise<DoctorCheck[]> {
     // resolveToolBin is mise-first (`mise which`), so it finds tools installed via
     // `mise use -g` even when mise isn't activated and its shims aren't on PATH —
     // before falling back to a system PATH lookup.
-    const bin = await resolveToolBin(toolName);
+    const bin = await resolver(probeName(toolName));
     if (bin) {
       checks.push({ name, status: "pass", detail: bin, category });
     } else {
@@ -150,25 +156,11 @@ async function checkToolsInPath(config: kitConfig): Promise<DoctorCheck[]> {
 }
 
 async function checkKitWrapper(): Promise<DoctorCheck | null> {
-  const { kitWrapperPath, WRAPPER_MARKER } = await import("./kit-wrapper.js");
-  const path = kitWrapperPath();
+  const { describeWrapper, judgeWrapper } = await import("./hook-floor.js");
+  const verdict = judgeWrapper(describeWrapper());
   const name = "hook wrapper";
   const category = "hooks";
-  try {
-    await access(path);
-  } catch {
-    return {
-      name,
-      status: "warn",
-      detail: `${path} missing — hooks may fail in a non-login shell. Run: kit memory install`,
-      category,
-    };
-  }
-  const content = await readFile(path, "utf-8").catch(() => "");
-  if (!content.includes(WRAPPER_MARKER)) {
-    return { name, status: "warn", detail: `${path} exists but is not kit-managed`, category };
-  }
-  return { name, status: "pass", detail: path, category };
+  return { name, status: verdict.status, detail: verdict.detail, category };
 }
 
 async function checkMemoryHooks(): Promise<DoctorCheck | null> {
@@ -192,7 +184,7 @@ async function checkMemoryHooks(): Promise<DoctorCheck | null> {
 async function checkGitHooks(config: kitConfig): Promise<DoctorCheck[]> {
   if (!config.hooks) return [];
 
-  const { checkHooks, isGitRepository } = await import("./check-hooks.js");
+  const { checkHooks, hookCheckStatus, isGitRepository } = await import("./check-hooks.js");
 
   if (!isGitRepository()) {
     return [
@@ -209,7 +201,7 @@ async function checkGitHooks(config: kitConfig): Promise<DoctorCheck[]> {
   return hookResults.map((h) => ({
     name: h.hookName,
     category: "hooks",
-    status: (!h.installed ? "fail" : !h.upToDate ? "warn" : "pass") as DoctorCheckStatus,
+    status: hookCheckStatus(h) as DoctorCheckStatus,
     detail: h.detail,
   }));
 }

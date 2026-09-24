@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
@@ -12,10 +12,29 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeCheckDetail, pruneCheckDetails, RUNS_DIR, KEEP_RUNS } from "./check-detail-store.js";
+import { _resetReadOnlyModeForTests } from "./read-only-mode.js";
 
 function tmpProject(): string {
   return mkdtempSync(join(tmpdir(), "kit-runs-"));
 }
+
+describe("writeCheckDetail: read-only mode (RO-5)", () => {
+  afterEach(() => {
+    _resetReadOnlyModeForTests();
+  });
+
+  it("never writes .kit/runs/*.json under KIT_READ_ONLY=1 (the read-only banner promises zero writes)", () => {
+    const cwd = tmpProject();
+    process.env.KIT_READ_ONLY = "1";
+    const ref = writeCheckDetail(cwd, { ok: true, security: [] }, 1000);
+    assert.equal(ref, null, "read-only mode must return no reference, and write nothing");
+    assert.equal(
+      existsSync(join(cwd, RUNS_DIR)),
+      false,
+      "read-only mode must not leave an untracked .kit/runs/ directory behind",
+    );
+  });
+});
 
 describe("writeCheckDetail", () => {
   it("writes the payload where the returned path says it did", () => {

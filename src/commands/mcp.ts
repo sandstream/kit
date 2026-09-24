@@ -4,6 +4,16 @@ import { loadConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+function runWebWizard(): boolean {
+  const wizard = fileURLToPath(new URL("../../scripts/chatgpt-web-wizard.sh", import.meta.url));
+  const result = spawnSync("bash", [wizard], { stdio: "inherit" });
+  if (!result.error) return result.status === 0;
+  console.error(`${c.red}Could not start ChatGPT web setup: ${result.error.message}${c.reset}`);
+  return false;
+}
 
 export async function cmdMcp(): Promise<boolean> {
   const sub = process.argv[3];
@@ -15,6 +25,8 @@ export async function cmdMcp(): Promise<boolean> {
     await startMcpServer();
     return true;
   }
+
+  if (sub === "web") return runWebWizard();
 
   const config = await loadConfig(resolveConfigPath()).catch(() => null);
   const mcpConfig = config?.mcp;
@@ -129,7 +141,7 @@ export async function cmdMcp(): Promise<boolean> {
   }
 
   console.error(
-    `${c.red}Usage: kit mcp [list | status | auth <name> | set-token <name> | clear <name>]${c.reset}`,
+    `${c.red}Usage: kit mcp [web | list | status | auth <name> | set-token <name> | clear <name>]${c.reset}`,
   );
   return false;
 }

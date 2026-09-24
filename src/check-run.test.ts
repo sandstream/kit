@@ -26,7 +26,11 @@ describe("runCheckGate", () => {
     // isolated fixture so the run is about the fixture and stays fast.
     originalCwd = process.cwd();
     tempDir = await mkdtemp(join(tmpdir(), "kit-check-run-"));
-    await writeFile(join(tempDir, ".gitignore"), ".env\n.env.local\n.env.*.local\n", "utf-8");
+    await writeFile(
+      join(tempDir, ".gitignore"),
+      ".env\n.env.local\n.env.*.local\n.env.keys\n",
+      "utf-8",
+    );
     await writeFile(
       join(tempDir, ".kit.toml"),
       `[secrets.keys]\nAPP_KEY = { source = "config", value = "hello" }\n`,
@@ -91,7 +95,17 @@ describe("checkRunToJsonChecks", () => {
     ],
     secrets: { templateExists: true, keys: [{ name: "KEY", available: false }] },
     skills: [{ name: "triage", required: false, installed: false }],
-    hooks: [{ hookName: "pre-commit", installed: true, upToDate: false, detail: "outdated" }],
+    // executable: true — an outdated-but-runnable hook is the "warn" row this asserts;
+    // a non-executable one is a "fail" (BH-01), covered in check-hooks-executable.test.ts.
+    hooks: [
+      {
+        hookName: "pre-commit",
+        installed: true,
+        executable: true,
+        upToDate: false,
+        detail: "outdated",
+      },
+    ],
     webSearch: null,
     deploy: [
       {
@@ -118,8 +132,8 @@ describe("checkRunToJsonChecks", () => {
     assert.equal(byName["KEY"].status, "fail");
     // Optional skill missing warns (only required ones fail).
     assert.equal(byName["triage"].status, "warn");
-    // Installed-but-outdated hook is a warn row even though the verdict dimension is red.
-    assert.equal(byName["pre-commit"].status, "warn");
+    // An outdated hook misses a declared command, so both row and verdict fail.
+    assert.equal(byName["pre-commit"].status, "fail");
     assert.equal(byName["gitleaks"].category, "security/secrets");
     assert.equal(byName["skills-lock.json"].status, "pass");
     assert.equal(byName["vercel/production/app-prod"].status, "warn");

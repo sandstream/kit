@@ -49,6 +49,7 @@ import { syncSecrets } from "../secrets-sync.js";
 import { withGovernance } from "../governance-middleware.js";
 import { vaultMeta } from "../vault-meta.js";
 import { vaultCliInstalled, resolveViaBackend } from "../secret-backends.js";
+import { writeOneCliPlaceholder } from "./onecli-env-file.js";
 
 /**
  * `kit secrets validate [--fix] [--auto]` — verify every declared key resolves
@@ -149,6 +150,13 @@ export async function cmdSecrets(): Promise<boolean> {
   }
   if (process.argv[3] === "revoke-old") {
     return cmdSecretsRevokeOld();
+  }
+  if (process.argv[3] !== undefined && !process.argv[3].startsWith("-")) {
+    console.error(`Unknown secrets subcommand: ${process.argv[3]}`);
+    console.error(
+      `Usage: kit secrets [sync|validate|migrate|vault-migrate|rotate|onecli|purge-history|propagate|set|revoke-old]`,
+    );
+    return false;
   }
 
   const config = await loadConfig(resolveConfigPath());
@@ -308,10 +316,10 @@ async function cmdSecretsOneCli(): Promise<boolean> {
   }
 
   const args = process.argv.slice(5);
-  const keyName = args[0];
-  if (!keyName || keyName.startsWith("--")) {
+  const keyName = args[0] ?? "";
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(keyName)) {
     console.error(
-      `${c.red}Usage: kit secrets onecli register <KEY> --host <pattern> [--path <pattern>]${c.reset}`,
+      `${c.red}Invalid environment key name: use letters, digits, and underscores, starting with a letter or underscore. Usage: kit secrets onecli register <KEY> --host <pattern> [--path <pattern>]${c.reset}`,
     );
     return false;
   }
@@ -401,24 +409,15 @@ async function cmdSecretsOneCli(): Promise<boolean> {
 
   // 4. Write placeholder to .env.local so agents read a non-credential.
   const placeholder = generatePlaceholder();
-  const { writeFile, readFile, access } = await import("node:fs/promises");
-  const envPath = `${process.cwd()}/.env.local`;
-  let envContent: string;
   try {
-    await access(envPath);
-    envContent = await readFile(envPath, "utf-8");
-  } catch {
-    envContent = "";
+    await writeOneCliPlaceholder(keyName, placeholder);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error(
+      `${c.red}OneCLI registered the secret, but .env.local was not updated: ${detail}${c.reset}`,
+    );
+    return false;
   }
-  const lineRe = new RegExp(`^${keyName}=.*$`, "m");
-  const newLine = `${keyName}=${placeholder}  # placeholder — real value lives in OneCLI`;
-  if (lineRe.test(envContent)) {
-    envContent = envContent.replace(lineRe, newLine);
-  } else {
-    if (!envContent.endsWith("\n") && envContent.length > 0) envContent += "\n";
-    envContent += newLine + "\n";
-  }
-  await writeFile(envPath, envContent, "utf-8");
   console.log(
     `  ${c.green}✓${c.reset} wrote placeholder to .env.local  ${c.dim}(${placeholder.slice(0, 14)}…)${c.reset}`,
   );

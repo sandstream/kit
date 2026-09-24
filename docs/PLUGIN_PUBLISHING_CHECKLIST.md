@@ -2,18 +2,20 @@
 
 Use this checklist before publishing your plugin to npm and registering with the kit registry.
 
+Apply adapter-specific `check`/`provision` items only to packages that export a `ServiceAdapter`. API clients and scanner-ingestion packages document and test their actual exports instead. A small package may cover API, configuration, examples, testing, and troubleshooting in its README; separate `docs/` files are optional when that coverage is complete.
+
 ## Pre-Publishing (Local Testing)
 
 ### Code Quality
 - [ ] All TypeScript compiles without errors: `npm run build`
-- [ ] All tests pass: `npm test`
-- [ ] Test coverage is >90%
+- [ ] All tests pass using the package's test script, if present, or the repository's compiled test suite
+- [ ] Coverage meets the repository's applicable gate
 - [ ] No console.log() or debug statements left
 - [ ] No hardcoded credentials or secrets
 - [ ] No unused imports or variables
 - [ ] Code follows consistent style
 
-### Functionality
+### Functionality (service adapters)
 - [ ] `check()` correctly identifies if service is configured
 - [ ] `provision()` works with missing credentials
 - [ ] `provision()` works with existing credentials (key-reuse)
@@ -21,12 +23,14 @@ Use this checklist before publishing your plugin to npm and registering with the
 - [ ] All error messages are helpful and actionable
 - [ ] No unhandled promise rejections
 
+For API clients, verify exported calls, authentication, read-only and policy refusals, and error handling. For scanner ingestion, verify accepted input formats, normalized output, and empty/error cases.
+
 ### Testing
 - [ ] Tested with missing environment variables
 - [ ] Tested with invalid environment variables
 - [ ] Tested with existing valid configuration
 - [ ] Tested error paths and recovery
-- [ ] Tested with different Node.js versions (18+)
+- [ ] Tested on a supported Node.js version (this repository requires Node.js 22+)
 
 ## Documentation
 
@@ -47,20 +51,22 @@ Use this checklist before publishing your plugin to npm and registering with the
 - [ ] `docs/API.md` exists (or in README)
 - [ ] `docs/CONFIGURATION.md` exists (or in README)
 - [ ] `docs/EXAMPLES.md` exists (or in README)
+- [ ] `docs/TESTING.md` exists (or in README)
+- [ ] `docs/TROUBLESHOOTING.md` exists (or in README)
 - [ ] `CHANGELOG.md` exists with version info
 - [ ] All documentation follows [standards](./PLUGIN_DOCUMENTATION_STANDARDS.md)
 
 ## Package Configuration
 
 ### package.json
-- [ ] Name follows convention: `@provider/kit-service` or `sandstream-kit-plugin-service`
+- [ ] Name follows convention: scaffolded community packages use `kit-plugin-<service>`; scoped packages may use `@provider/kit-service`; first-party packages use `sandstream-kit-plugin-<service>`
 - [ ] Version is valid semver: `1.0.0`, `0.1.0`, etc.
 - [ ] Description is clear and concise
-- [ ] Keywords include: `kit`, `adapter`, `plugin`
-- [ ] Author name and email are correct
+- [ ] Keywords describe the package's actual role (adapter, API client, or scanner ingestion)
+- [ ] Author or repository contact is correct
 - [ ] License is specified (MIT recommended)
 - [ ] Repository URL points to git repo
-- [ ] `files` array includes: `dist`, `README.md`, `CHANGELOG.md`, `LICENSE`
+- [ ] `files` includes `dist`, `README.md`, `CHANGELOG.md`, and any linked `docs/` files; include a license file when the package uses one
 - [ ] `main`/`exports` point to compiled output
 - [ ] No `devDependencies` in production build
 
@@ -86,7 +92,7 @@ Use this checklist before publishing your plugin to npm and registering with the
 - [ ] No errors in compiled output
 
 ### Testing Production Build
-- [ ] `npm test` passes on dist/ files
+- [ ] Compiled tests pass via the package script if present, or the repository test runner
 - [ ] Plugin can be imported from dist/
 - [ ] No missing dependencies
 
@@ -96,16 +102,16 @@ Use this checklist before publishing your plugin to npm and registering with the
 - [ ] No large unnecessary files
 - [ ] No credentials or secrets in package
 
-## Registry Preparation
+## Registry Preparation (when registering an adapter)
 
 ### npm Registration
 - [ ] npm account created and logged in
 - [ ] 2FA enabled on npm account (recommended)
 - [ ] Package name is available and not taken
-- [ ] Scope is correct (`@provider/` or `sandstream-kit-plugin-`)
+- [ ] Package prefix or scope is correct (`kit-plugin-` for scaffolded community packages, `@provider/` if scoped, `sandstream-kit-plugin-` for first-party packages)
 
 ### Plugin.json Metadata
-- [ ] Create `plugin.json` with registry metadata:
+- [ ] Create `plugin.json` if the target registry requires it:
   ```json
   {
     "name": "provider/service",
@@ -124,26 +130,35 @@ Use this checklist before publishing your plugin to npm and registering with the
 
 ## Publishing Steps
 
-### Step 1: Final Verification
+### First-party workspace packages (`sandstream-kit-plugin-*`)
+
+These packages ship together with kit. Follow [Releasing kit](./RELEASING.md): put version and CHANGELOG updates in a release-prep PR, merge that PR, then push a signed tag pointing to the prep commit. The tag-triggered workflow builds and publishes the workspaces through trusted publishing and the `npm-publish` environment review. Do not publish a first-party workspace with a standalone `npm publish` command or push a release commit directly to `main`.
+
+### Standalone community packages
+
+The steps below apply when publishing a package from a repository you control. Adjust the repository's review and tag process to its own rules.
+
+#### Step 1: Final Verification
 - [ ] Run: `npm run build`
-- [ ] Run: `npm test`
+- [ ] Run the applicable compiled test command (package script if present, otherwise repository suite)
 - [ ] Run: `npm run lint` (if configured)
 - [ ] Review: `npm pack --dry-run`
 
-### Step 2: Version Update
+#### Step 2: Version Update
 - [ ] Update version in `package.json`
 - [ ] Conventional: `npm version patch|minor|major`
 - [ ] Update `CHANGELOG.md` with new version
 
-### Step 3: Git Commit
+#### Step 3: Review and Tag
+
+Commit the package, open and merge a review PR if your repository uses them, and create its release tag according to that repository's policy. The following example stages only local changes:
+
 ```bash
-git add package.json CHANGELOG.md
+git add package.json README.md CHANGELOG.md
 git commit -m "chore: bump version to 1.0.0"
-git tag v1.0.0
-git push origin main --tags
 ```
 
-### Step 4: npm Publish
+#### Step 4: npm Publish
 ```bash
 # Verify credentials
 npm whoami
@@ -154,7 +169,7 @@ npm publish
 # Wait for publish to complete (verify on npmjs.com)
 ```
 
-### Step 5: Announce
+#### Step 5: Announce
 - [ ] Post on GitHub Discussions/Issues
 - [ ] Create release on GitHub
 - [ ] Share on Twitter/community channels
@@ -168,10 +183,10 @@ npm publish
 - [ ] Installation works: `npm install @provider/kit-service`
 - [ ] Package can be imported in a test project
 
-### Registry Registration
+### Registry Registration (when registering an adapter)
 - [ ] Submitted plugin info to kit registry
-- [ ] Plugin appears in `kit plugin list`
-- [ ] Plugin is searchable via `kit plugin search`
+- [ ] Plugin appears in the registry's listing
+- [ ] Plugin is searchable through the registry's supported interface
 
 ### Maintenance
 - [ ] Monitor for issues and bug reports

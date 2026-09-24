@@ -48,8 +48,10 @@ failures, and how to save evidence.
   declared.
 - `kit browser doctor` does not start the app, build the app, run Playwright
   specs, or write receipts yet.
-- CDP discovery honors `KIT_BROWSER_CDP_URL`, then `[browser].cdp_url`, then a
-  localhost `9222` probe.
+- CDP discovery probes `/json/version` before selecting a strategy. It tries
+  `KIT_BROWSER_CDP_URL`, then `[browser].cdp_url`, then localhost `9222`; a
+  configured but unreachable endpoint is a blocker, never a passing strategy.
+  `src/browser.test.ts` pins the reachability case.
 - `kit browser playwright-env` prints shell exports for callers that need to
   run Playwright with the selected environment.
 - The command remains experimental until `kit browser test` can run declared

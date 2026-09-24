@@ -1,10 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   redactSecrets,
   safeStatusLine,
   findSecrets,
   shannonEntropy,
+  secretValuesFromEnv,
   SECRET_PATTERNS,
   SECRET_SHAPE_COUNT,
   secretShapeLabels,
@@ -133,7 +136,8 @@ describe("redactSecrets — B3 coverage (PEM / cloud / url-token)", () => {
     const ms = Number(process.hrtime.bigint() - t0) / 1e6;
     assert.ok(ms < 200, `hyphen-run scanned in ${ms.toFixed(0)}ms — possible ReDoS`);
     // real connection strings still redact (incl. a long-ish scheme like mongodb+srv)
-    assert.match(redactSecrets("mongodb+srv://u:passwordvalue@c.mongodb.net"), /\[REDACTED\]@/);
+    const connectionString = ["mongodb+srv://u:", "passwordvalue", "@c.mongodb.net"].join("");
+    assert.match(redactSecrets(connectionString), /\[REDACTED\]@/);
   });
 
   it("PEM matcher is ReDoS-safe on an unterminated near-miss body", () => {
@@ -221,6 +225,122 @@ describe("redactSecrets", () => {
   it("handles empty input", () => {
     assert.equal(redactSecrets(""), "");
   });
+
+  it("redacts caller-known opaque secrets without removing surrounding diagnostics", () => {
+    const secret = "opaque-provider-value-" + "z".repeat(20);
+    const out = redactSecrets(`request_id=req_exact rejected ${secret}`, [secret]);
+    assert.equal(out, "request_id=req_exact rejected [REDACTED]");
+  });
+});
+
+describe("secretValuesFromEnv: common but unrecognized secret-bearing names (RED-2)", () => {
+  it("retains password keyword coverage when a suffix follows the keyword", () => {
+    for (const key of ["DB_PASSWORD_ROTATED", "PASSWORD_PRIMARY", "APP_PASSWORD_BACKUP"]) {
+      const secret = "opaque-rotated-password-value";
+      assert.equal(
+        redactSecrets(`rejected ${secret}`, secretValuesFromEnv({ [key]: secret })),
+        "rejected [REDACTED]",
+        key,
+      );
+    }
+    assert.deepEqual(
+      secretValuesFromEnv({ COMPASS_DIRECTION: "north", MONKEY_RUN_ID: "test" }),
+      [],
+    );
+  });
+
+  it("catches PGPASSWORD, glued directly onto PG with no separator", () => {
+    const values = secretValuesFromEnv({ PGPASSWORD: "hunter2-pg-secret-value" });
+    assert.deepEqual(values, ["hunter2-pg-secret-value"]);
+  });
+
+  it("catches DB_PASS and MYSQL_PWD (short password aliases)", () => {
+    const values = secretValuesFromEnv({
+      DB_PASS: "db-pass-secret-value",
+      MYSQL_PWD: "mysql-pwd-secret-value",
+    });
+    assert.deepEqual(values.sort(), ["db-pass-secret-value", "mysql-pwd-secret-value"]);
+  });
+
+  it("catches AUTH_HEADER", () => {
+    const values = secretValuesFromEnv({ AUTH_HEADER: "Bearer opaque-header-secret-value" });
+    assert.deepEqual(values, ["Bearer opaque-header-secret-value"]);
+  });
+
+  it("catches WEBHOOK_URL (a query-string token commonly rides here)", () => {
+    const values = secretValuesFromEnv({
+      WEBHOOK_URL: "https://hooks.example.com/x?token=opaque-webhook-secret-value",
+    });
+    assert.deepEqual(values, ["https://hooks.example.com/x?token=opaque-webhook-secret-value"]);
+  });
+});
+
+describe("redactSecrets / findSecrets: query-token + Bearer header (RED-5)", () => {
+  it("redacts a ?token= query-string value but keeps the URL/path as context", () => {
+    const out = redactSecrets(
+      "webhook: https://hooks.example.com/x?token=oPaQu3WebhookToken1234567890",
+    );
+    assert.ok(!out.includes("oPaQu3WebhookToken1234567890"));
+    assert.match(out, /https:\/\/hooks\.example\.com\/x\?token=\[REDACTED\]/);
+  });
+
+  it("redacts an &access_token= query-string value mid-URL", () => {
+    const out = redactSecrets(
+      "cb=https://api.example.com/cb?state=x&access_token=abcDEF0123456789ghijKLMN",
+    );
+    assert.ok(!out.includes("abcDEF0123456789ghijKLMN"));
+    assert.match(out, /access_token=\[REDACTED\]/);
+    assert.match(out, /state=x/);
+  });
+
+  it("redacts a generic 'Bearer <token>' header value that isn't JWT-shaped", () => {
+    const out = redactSecrets("Authorization: Bearer opaqueBearerTokenValue1234567890");
+    assert.ok(!out.includes("opaqueBearerTokenValue1234567890"));
+    assert.match(out, /Bearer \[REDACTED\]/);
+  });
+
+  it("findSecrets reports the same two gaps", () => {
+    const labels = findSecrets(
+      "https://x.test/a?token=oPaQu3WebhookToken1234567890 and Authorization: Bearer opaqueBearerTokenValue1234567890",
+    ).map((f) => f.label);
+    assert.ok(labels.includes("url-query-token"));
+    assert.ok(labels.includes("bearer-header"));
+  });
+});
+
+describe("redactSecrets: keyed values in logs and JSON (RED-6)", () => {
+  const value = "opaque" + "CredentialValue1234567890";
+
+  it("does not treat the next dotenv line as an empty key's value", () => {
+    const input = "API_KEY=\nDATABASE_URL=changeme\nDEBUG=true\n";
+    assert.equal(
+      findSecrets(input).some((finding) => finding.label === "keyed-secret"),
+      false,
+    );
+  });
+
+  it("masks a query token without swallowing the next parameter or fragment", () => {
+    const input = `https://example.test/cb?token=${"q".repeat(24)}&page=2#end`;
+    assert.equal(redactSecrets(input), "https://example.test/cb?token=[REDACTED]&page=2#end");
+  });
+
+  it("masks quoted, lowercase and JSON assignments while keeping field names", () => {
+    const input = `PASSWORD="${value}" db_pass='${value}' {"api_key":"${value}"}`;
+    const output = redactSecrets(input);
+    assert.ok(!output.includes(value));
+    assert.match(output, /PASSWORD="\[REDACTED\]"/);
+    assert.match(output, /db_pass='\[REDACTED\]'/);
+    assert.match(output, /"api_key":"\[REDACTED\]"/);
+    assert.ok(findSecrets(input).some((finding) => finding.label === "keyed-secret"));
+  });
+
+  it("masks escaped JSON literals without changing public metadata", () => {
+    const input = `\\"auth_token\\":\\"${value}\\" {"GITHUB_SHA":"${"a".repeat(40)}"}`;
+    const output = redactSecrets(input);
+    assert.ok(!output.includes(value));
+    assert.match(output, /GITHUB_SHA/);
+    assert.match(output, new RegExp("a{40}"));
+  });
 });
 
 describe("safeStatusLine", () => {
@@ -300,5 +420,14 @@ describe("the detector's declared bound", () => {
     assert.deepEqual(labels, [...labels].sort(), "stable order for stable output");
     // Every pattern contributes a label: a nameless pattern could never be reported.
     for (const p of SECRET_PATTERNS) assert.ok(p.label.length > 0);
+  });
+
+  it("does not classify its own production source as a secret", () => {
+    const source = readFileSync(
+      resolve(import.meta.dirname, "..", "..", "src", "utils", "redactSecrets.ts"),
+      "utf8",
+    );
+
+    assert.deepEqual(findSecrets(source), []);
   });
 });

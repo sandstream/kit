@@ -75,4 +75,29 @@ describe("listWebhookEndpoints (network error path)", () => {
     });
     await assert.rejects(() => listWebhookEndpoints(client));
   });
+
+  it("redacts the bearer key in API error bodies without hiding diagnostics (RED-4)", async () => {
+    const priorFetch = globalThis.fetch;
+    const secret = "opaque-stripe-key-" + "E".repeat(32);
+    globalThis.fetch = (async () =>
+      new Response(`request_id=req_stripe rejected credential ${secret}`, {
+        status: 403,
+      })) as typeof fetch;
+    try {
+      const client = makeClient({ secretKey: secret, baseUrl: "https://api.example.test" });
+      await assert.rejects(
+        () => listWebhookEndpoints(client),
+        (err: unknown) => {
+          assert.ok(err instanceof Error);
+          assert.ok(!err.message.includes(secret), "plugin error must not expose the secret");
+          assert.match(err.message, /\[REDACTED\]/);
+          assert.match(err.message, /request_id=req_stripe/);
+          assert.match(err.message, /403/);
+          return true;
+        },
+      );
+    } finally {
+      globalThis.fetch = priorFetch;
+    }
+  });
 });

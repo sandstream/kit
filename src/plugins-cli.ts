@@ -1,22 +1,42 @@
 /**
- * `kit plugin <list|search|info|install|scaffold|tags>` — plugin
+ * `kit plugin <list|search|info|install|uninstall|scaffold|tags>` — plugin
  * discovery + management CLI dispatch. Extracted from cli.ts
  * (codebase-review follow-up). Registry logic lives in plugins.ts;
  * scaffolding in create-plugin.ts — this module is the argv-facing shell.
  */
 
-import { flagValue } from "./utils/flags.js";
+import { flagValue, hasFlag } from "./utils/flags.js";
 import {
   searchPlugins,
   listPlugins,
+  listProjectPlugins,
   getPluginInfo,
   getAllTags,
   formatPluginForDisplay,
-  isPluginInstalled,
   installPlugin,
+  uninstallPlugin,
 } from "./plugins.js";
 import { createPlugin } from "./create-plugin.js";
 import { c } from "./utils/colors.js";
+
+async function showProjectPlugins(tag?: string): Promise<void> {
+  const installed = await listProjectPlugins(process.cwd(), tag);
+  if (installed.length === 0) {
+    console.log(`${c.dim}No official plugins declared or registered in this project${c.reset}`);
+    return;
+  }
+  console.log(`${c.bold}Project Plugins${c.reset} — ${installed.length} found\n`);
+  for (const { plugin, declared, registered } of installed) {
+    console.log(formatPluginForDisplay(plugin));
+    if (registered && !declared) {
+      console.log(`    ${c.yellow}Registered adapter; npm package not declared${c.reset}`);
+    } else if (registered) {
+      console.log(`    ${c.dim}Declared package; adapter registered${c.reset}`);
+    } else {
+      console.log(`    ${c.dim}Declared package${c.reset}`);
+    }
+  }
+}
 
 export async function cmdPlugin(): Promise<boolean> {
   const subcommand = process.argv[3];
@@ -25,17 +45,19 @@ export async function cmdPlugin(): Promise<boolean> {
   if (!subcommand || subcommand === "--help" || subcommand === "-h") {
     console.log(`${c.bold}kit plugin${c.reset} — discover and manage kit plugins\n`);
     console.log(`${c.bold}Usage:${c.reset}`);
-    console.log(`  kit plugin list ${c.dim}[--tag TAG]${c.reset}      List all available plugins`);
+    console.log(`  kit plugin list ${c.dim}[--tag TAG] [--installed]${c.reset}  List plugins`);
     console.log(`  kit plugin search <query>            Search for plugins by name/description`);
     console.log(`  kit plugin info <name>               Show detailed info about a plugin`);
     console.log(`  kit plugin install <name>            Install a plugin`);
-    console.log(`  kit plugin scaffold <name>           Create a new plugin from template`);
+    console.log(`  kit plugin uninstall <name>          Uninstall an official plugin`);
+    console.log(`  kit plugin scaffold <name> [--skip-install]  Create a new plugin from template`);
     console.log(`  kit plugin tags                      List all available plugin tags\n`);
     console.log(`${c.dim}Examples:${c.reset}`);
     console.log(`  kit plugin search stripe             # Search for stripe plugins`);
-    console.log(`  kit plugin list --tag database       # Show all database adapters`);
-    console.log(`  kit plugin info stripe/payments      # Get plugin details`);
-    console.log(`  kit plugin install stripe/payments   # Install a plugin`);
+    console.log(`  kit plugin list --tag database       # Show database-tagged packages`);
+    console.log(`  kit plugin info railway              # Get plugin details`);
+    console.log(`  kit plugin install railway           # Install an adapter plugin`);
+    console.log(`  kit plugin uninstall railway         # Remove package and adapter registration`);
     console.log(`  kit plugin scaffold my-service       # Create a plugin package`);
     return true;
   }
@@ -44,6 +66,11 @@ export async function cmdPlugin(): Promise<boolean> {
     switch (subcommand) {
       case "list": {
         const tag = flagValue(args, "--tag");
+
+        if (hasFlag(args, "--installed")) {
+          await showProjectPlugins(tag);
+          return true;
+        }
 
         const plugins = listPlugins(tag);
         if (plugins.length === 0) {
@@ -113,12 +140,6 @@ export async function cmdPlugin(): Promise<boolean> {
           return false;
         }
 
-        const isInstalled = await isPluginInstalled(plugin.package || name);
-        if (isInstalled) {
-          console.log(`${c.green}✓${c.reset} Plugin already installed: ${name}`);
-          return true;
-        }
-
         console.log(`${c.dim}Installing ${name}...${c.reset}`);
         const result = await installPlugin(name, plugin);
 
@@ -129,6 +150,24 @@ export async function cmdPlugin(): Promise<boolean> {
           console.error(`${c.red}✗${c.reset} ${result.message}`);
           return false;
         }
+      }
+
+      case "uninstall": {
+        const name = args[0];
+        if (!name) {
+          console.error(`${c.red}Error: plugin name required${c.reset}`);
+          console.error("Usage: kit plugin uninstall <name>");
+          return false;
+        }
+        const plugin = getPluginInfo(name);
+        if (!plugin) {
+          console.error(`${c.red}Error: plugin not found: ${name}${c.reset}`);
+          return false;
+        }
+        const result = await uninstallPlugin(name, plugin);
+        if (result.success) console.log(`${c.green}✓${c.reset} ${result.message}`);
+        else console.error(`${c.red}✗${c.reset} ${result.message}`);
+        return result.success;
       }
 
       case "tags": {
@@ -158,7 +197,7 @@ export async function cmdPlugin(): Promise<boolean> {
         const result = await createPlugin({
           name,
           cwd: process.cwd(),
-          skipInstall: false,
+          skipInstall: hasFlag(args, "--skip-install"),
         });
 
         if (result.success) {

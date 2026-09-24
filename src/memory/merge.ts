@@ -9,15 +9,19 @@
  */
 import { DatabaseSync } from "node:sqlite";
 import { existsSync } from "node:fs";
-import { insertMessage, insertToolUse, upsertSession } from "./db.js";
+import { resolve } from "node:path";
+import { upsertSession } from "./db.js";
+import { createProjectMapper, type MergeScopeOptions } from "./remap.js";
+import { mergeMessages, type MergedMessages } from "./merge-messages.js";
+import { mergePendingActions, type MergedActions } from "./merge-actions.js";
+import { assertCausalTables, assertNoOrphanActionHistory } from "./pal-revisions.js";
+import { assertSupportedMemorySchema } from "./db-schema.js";
+import { mergeProjectIdentities } from "./project.js";
 
-export interface MergeResult {
+export interface MergeResult extends MergedMessages, MergedActions {
   sessions: number;
-  messages: number;
-  toolUses: number;
   tombstones: number;
   tombstoneDeletedMessages: number;
-  tombstoneBlockedMessages: number;
   pending: number;
   threads: number;
   /**
@@ -29,22 +33,15 @@ export interface MergeResult {
   projects: Record<string, number>;
 }
 
-export interface MergeOpts {
-  /**
-   * Rewrite every imported session's project key to this project root, so
-   * sessions from another machine/container join the scope they belong to
-   * instead of staying under a foreign path like "-home-user" (#247).
-   */
-  remapProject?: string;
-}
+export type MergeOpts = MergeScopeOptions;
 
 type Row = Record<string, unknown>;
 const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
-const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
+const nullableStr = (value: unknown): string | null => str(value) ?? null;
 
 /** Project keys are stored in the Claude-projects form: path with / → -. */
 export function projectKeyFor(projectRoot: string): string {
-  return projectRoot.replace(/\//g, "-");
+  return projectRoot.split("/").join("-");
 }
 
 function tableExists(db: DatabaseSync, name: string): boolean {
@@ -99,12 +96,47 @@ function mergeTombstones(target: DatabaseSync, src: DatabaseSync, out: MergeResu
   }
 }
 
+function mergeThreads(
+  target: DatabaseSync,
+  src: DatabaseSync,
+  out: MergeResult,
+  mapProject: ReturnType<typeof createProjectMapper>,
+): void {
+  const insert = target.prepare(
+    `INSERT OR IGNORE INTO saved_threads (name, session_id, summary, project_path, saved_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  );
+  const remap = target.prepare(
+    "UPDATE saved_threads SET recall_project_path = ? WHERE name = ? AND session_id = ? AND project_path IS ? AND recall_project_path IS NOT ?",
+  );
+  for (const row of src.prepare("SELECT * FROM saved_threads").all()) {
+    const name = str(row.name);
+    const sessionId = str(row.session_id);
+    if (!name || !sessionId) continue;
+    out.threads += Number(
+      insert.run(
+        name,
+        sessionId,
+        nullableStr(row.summary),
+        nullableStr(row.project_path),
+        nullableStr(row.saved_at),
+      ).changes,
+    );
+    const recallPath = mapProject(str(row.project_path));
+    if (recallPath)
+      out.scopeRepairs += Number(
+        remap.run(recallPath, name, sessionId, nullableStr(row.project_path), recallPath).changes,
+      );
+  }
+}
+
 export function mergeDb(
   target: DatabaseSync,
   sourcePath: string,
   opts: MergeOpts = {},
 ): MergeResult {
   if (!existsSync(sourcePath)) throw new Error(`source memory db not found: ${sourcePath}`);
+  const mapProject = createProjectMapper(opts);
   const src = new DatabaseSync(sourcePath, { readOnly: true });
   const out: MergeResult = {
     sessions: 0,
@@ -114,12 +146,25 @@ export function mergeDb(
     tombstoneDeletedMessages: 0,
     tombstoneBlockedMessages: 0,
     pending: 0,
+    pendingScopeRepairs: 0,
+    pendingIdRemaps: 0,
+    pendingStateDifferences: 0,
+    pendingDifferenceIds: [],
+    pendingLegacySnapshots: 0,
     threads: 0,
+    scopeRepairs: 0,
+    protectionRepairs: 0,
     projects: {},
   };
-  const remapKey = opts.remapProject ? projectKeyFor(opts.remapProject) : undefined;
+  const remapKey = opts.remapProject ? projectKeyFor(resolve(opts.remapProject)) : undefined;
 
   try {
+    target.exec("SAVEPOINT kit_memory_merge");
+    src.exec("BEGIN");
+    assertSupportedMemorySchema(target);
+    assertCausalTables(src);
+    assertNoOrphanActionHistory(src, target);
+    mergeProjectIdentities(target, src);
     // Tombstones must land before messages: a deletion record wins over stale
     // rows from another machine and blocks future resurrection by uuid (#549).
     mergeTombstones(target, src, out);
@@ -142,101 +187,15 @@ export function mergeDb(
       out.projects[key] = (out.projects[key] ?? 0) + 1;
     }
 
-    // tool_uses grouped by message uuid (copied only for newly-added messages)
-    const toolsByUuid = new Map<string, Row[]>();
-    for (const t of src.prepare("SELECT * FROM tool_uses").all() as Row[]) {
-      const uuid = str(t.message_uuid);
-      if (!uuid) continue;
-      (toolsByUuid.get(uuid) ?? toolsByUuid.set(uuid, []).get(uuid)!).push(t);
-    }
+    Object.assign(out, mergeMessages(target, src, mapProject));
 
-    // Messages (dedupe by uuid) + their tool_uses
-    for (const m of src.prepare("SELECT * FROM messages").all() as Row[]) {
-      const uuid = str(m.uuid);
-      const sessionId = str(m.session_id);
-      const type = str(m.type);
-      if (!uuid || !sessionId || !type) continue; // need a stable id to dedupe
-      if (target.prepare("SELECT 1 FROM memory_tombstones WHERE uuid = ?").get(uuid)) {
-        out.tombstoneBlockedMessages++;
-        continue;
-      }
-      const added = insertMessage(target, {
-        uuid,
-        sessionId,
-        parentUuid: str(m.parent_uuid),
-        type,
-        role: str(m.role),
-        content: str(m.content),
-        model: str(m.model),
-        inputTokens: num(m.input_tokens),
-        outputTokens: num(m.output_tokens),
-        timestamp: str(m.timestamp),
-        cwd: str(m.cwd),
-        gitBranch: str(m.git_branch),
-        version: str(m.version),
-      });
-      if (!added) continue;
-      out.messages++;
-      for (const t of toolsByUuid.get(uuid) ?? []) {
-        insertToolUse(target, {
-          messageUuid: uuid,
-          sessionId: str(t.session_id),
-          toolName: str(t.tool_name) ?? "unknown",
-          toolInput: str(t.tool_input),
-          timestamp: str(t.timestamp),
-        });
-        out.toolUses++;
-      }
-    }
-
-    // Pending actions (dedupe by id)
-    const insPending = target.prepare(
-      `INSERT OR IGNORE INTO pending_actions
-       (id, status, title, detail, scope, kind, verify_cmd, created_at, next_check, snooze_until, closed_at, verify_passes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    for (const p of src.prepare("SELECT * FROM pending_actions").all() as Row[]) {
-      if (!str(p.id) || !str(p.title)) continue;
-      const r = insPending.run(
-        p.id as string,
-        str(p.status) ?? "open",
-        p.title as string,
-        (str(p.detail) ?? null) as string | null,
-        (str(p.scope) ?? null) as string | null,
-        // SECURITY: never carry an executable verify_cmd across a DB merge — a
-        // command from another machine's store is not operator-authored in this
-        // session. Demote merged pending actions to `manual` with no verify_cmd
-        // (same invariant as importLegacyLedger) so palAutoVerify can't execute a
-        // command that crossed the merge boundary. Re-add via `pal add` to re-arm.
-        "manual",
-        null,
-        (str(p.created_at) ?? null) as string | null,
-        (str(p.next_check) ?? null) as string | null,
-        (str(p.snooze_until) ?? null) as string | null,
-        (str(p.closed_at) ?? null) as string | null,
-        num(p.verify_passes) ?? 0,
-      );
-      if (Number(r.changes) > 0) out.pending++;
-    }
-
-    // Saved threads (dedupe by name)
-    const insThread = target.prepare(
-      `INSERT OR IGNORE INTO saved_threads (name, session_id, summary, project_path, saved_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    );
-    for (const t of src.prepare("SELECT * FROM saved_threads").all() as Row[]) {
-      const name = str(t.name);
-      const sid = str(t.session_id);
-      if (!name || !sid) continue;
-      const r = insThread.run(
-        name,
-        sid,
-        (str(t.summary) ?? null) as string | null,
-        (str(t.project_path) ?? null) as string | null,
-        (str(t.saved_at) ?? null) as string | null,
-      );
-      if (Number(r.changes) > 0) out.threads++;
-    }
+    Object.assign(out, mergePendingActions(target, src, mapProject));
+    out.scopeRepairs += out.pendingScopeRepairs;
+    mergeThreads(target, src, out, mapProject);
+    target.exec("RELEASE kit_memory_merge");
+  } catch (error) {
+    target.exec("ROLLBACK TO kit_memory_merge; RELEASE kit_memory_merge");
+    throw error;
   } finally {
     src.close();
   }

@@ -2,24 +2,58 @@
   "version": 1,
   "tools": {
     "node": {
-      "version": "22",
+      "version": "22.23.2",
       "source": "mise",
-      "installedAt": "2026-03-30T15:48:16.532Z"
+      "sourceDetail": "mise",
+      "installedAt": "2026-09-04T15:16:40.580Z"
     },
     "pnpm": {
-      "version": "latest",
-      "source": "mise",
-      "installedAt": "2026-03-30T15:48:16.532Z"
+      "version": "10.32.1",
+      "source": "manual",
+      "sourceDetail": "kit-shim",
+      "installedAt": "2026-09-04T15:16:40.580Z"
     },
     "aqua:aquasecurity/trivy": {
-      "version": "latest",
+      "version": "0.72.0",
       "source": "mise",
-      "installedAt": "2026-06-27T20:56:16.000Z"
+      "sourceDetail": "mise",
+      "installedAt": "2026-09-04T15:16:40.580Z"
     },
     "aqua:trufflesecurity/trufflehog": {
-      "version": "latest",
+      "version": "3.95.9",
       "source": "mise",
-      "installedAt": "2026-06-27T20:56:16.000Z"
+      "sourceDetail": "mise",
+      "installedAt": "2026-09-04T15:16:40.580Z"
+    },
+    "npm:license-checker": {
+      "version": "25.0.1",
+      "source": "mise",
+      "sourceDetail": "mise",
+      "installedAt": "2026-09-04T15:16:40.580Z"
+    },
+    "pipx:lizard": {
+      "version": "1.24.0",
+      "source": "mise",
+      "sourceDetail": "mise",
+      "installedAt": "2026-09-04T15:16:40.580Z"
+    },
+    "npm:jscpd": {
+      "version": "5.1.2",
+      "source": "mise",
+      "sourceDetail": "mise",
+      "installedAt": "2026-09-04T15:16:40.580Z"
+    },
+    "aqua:boyter/scc": {
+      "version": "4.0.0",
+      "source": "mise",
+      "sourceDetail": "mise",
+      "installedAt": "2026-09-04T15:16:40.580Z"
+    },
+    "aqua:hadolint/hadolint": {
+      "version": "2.15.1",
+      "source": "mise",
+      "sourceDetail": "mise",
+      "installedAt": "2026-09-04T15:16:40.580Z"
     }
   }
 }

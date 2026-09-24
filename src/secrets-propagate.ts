@@ -21,6 +21,7 @@
 import { spawn } from "node:child_process";
 import type { PolicyConfig } from "./config.js";
 import { enforcePolicy } from "./policy-gate.js";
+import { redactSecrets } from "./utils/redactSecrets.js";
 
 export type PropagationTarget = "vercel" | "github" | "fly" | "cloudflare" | "railway" | "aws-ssm";
 
@@ -82,6 +83,11 @@ export interface PropagationOptions {
   cwd?: string;
 }
 
+function safeDiagnostic(value: unknown, knownSecrets: readonly string[] = [], max = 300): string {
+  const text = redactSecrets(value instanceof Error ? value.message : String(value), knownSecrets);
+  return (text.split(/\r?\n/)[0] ?? "").slice(0, max);
+}
+
 /**
  * Spawns a CLI with the value piped via stdin. Returns the exit code +
  * captured stderr for diagnostics. The value never appears in argv.
@@ -90,18 +96,20 @@ async function spawnWithStdin(
   cmd: string,
   args: string[],
   stdinValue: string,
+  sensitiveValues: readonly string[] = [],
 ): Promise<{ code: number; stderr: string }> {
   return new Promise((resolve) => {
+    const knownSecrets = [stdinValue, ...sensitiveValues];
     const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] });
     let stderr = "";
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
     });
     child.on("error", (err) => {
-      resolve({ code: 127, stderr: err.message });
+      resolve({ code: 127, stderr: safeDiagnostic(err, knownSecrets) });
     });
     child.on("close", (code) => {
-      resolve({ code: code ?? 1, stderr });
+      resolve({ code: code ?? 1, stderr: redactSecrets(stderr, knownSecrets) });
     });
     child.stdin.write(stdinValue);
     child.stdin.end();
@@ -130,7 +138,12 @@ function vercelCreateApiPath(project: string, teamId: string | undefined): strin
   return `https://api.vercel.com/v10/projects/${encodeURIComponent(project)}/env${query ? `?${query}` : ""}`;
 }
 
-async function vercelJson<T>(url: string, token: string, init: RequestInit = {}): Promise<T> {
+async function vercelJson<T>(
+  url: string,
+  token: string,
+  init: RequestInit = {},
+  sensitiveValues: readonly string[] = [],
+): Promise<T> {
   const res = await fetch(url, {
     ...init,
     headers: {
@@ -142,7 +155,9 @@ async function vercelJson<T>(url: string, token: string, init: RequestInit = {})
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Vercel API ${res.status}: ${text.split("\n")[0] ?? ""}`.trim());
+    throw new Error(
+      `Vercel API ${res.status}: ${safeDiagnostic(text, [token, ...sensitiveValues])}`.trim(),
+    );
   }
   return (await res.json()) as T;
 }
@@ -179,6 +194,7 @@ async function propagateVercelViaApi(
       vercelApiPath(project, opts.vercelTeamId, `/${encodeURIComponent(exact.id)}`),
       token,
       { method: "PATCH", body: JSON.stringify({ value }) },
+      [value],
     );
     return {
       target: "vercel",
@@ -188,10 +204,15 @@ async function propagateVercelViaApi(
     };
   }
 
-  await vercelJson<VercelEnvVar>(vercelCreateApiPath(project, opts.vercelTeamId), token, {
-    method: "POST",
-    body: JSON.stringify({ key: name, value, target: [target], type: "encrypted" }),
-  });
+  await vercelJson<VercelEnvVar>(
+    vercelCreateApiPath(project, opts.vercelTeamId),
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ key: name, value, target: [target], type: "encrypted" }),
+    },
+    [value],
+  );
 
   const staleDeleteFailures: string[] = [];
   for (const stale of sameKey.filter((entry) => entry.target.includes(target))) {
@@ -239,7 +260,7 @@ async function propagateVercel(
       return {
         target: "vercel",
         ok: false,
-        detail: `vercel API failed: ${err instanceof Error ? err.message : String(err)}`,
+        detail: `vercel API failed: ${safeDiagnostic(err)}`,
         valueInArgv: false,
       };
     }
@@ -313,6 +334,7 @@ async function propagateFly(
     "fly",
     ["secrets", "set", `${name}=${value}`, "--app", opts.flyApp, "--stage"],
     "",
+    [value],
   );
   return {
     target: "fly",
@@ -362,7 +384,7 @@ async function propagateRailway(
   // `railway variables --set KEY=VALUE` — value in argv (no stdin path).
   const args = ["variables", "--set", `${name}=${value}`];
   if (opts.railwayService) args.push("--service", opts.railwayService);
-  const { code, stderr } = await spawnWithStdin("railway", args, "");
+  const { code, stderr } = await spawnWithStdin("railway", args, "", [value]);
   return {
     target: "railway",
     ok: code === 0,
@@ -485,7 +507,7 @@ export async function propagate(
       results.push({
         target: t,
         ok: false,
-        detail: err instanceof Error ? err.message.split("\n")[0] : String(err),
+        detail: safeDiagnostic(err),
         valueInArgv: false,
       });
     }

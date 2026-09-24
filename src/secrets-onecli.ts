@@ -30,6 +30,27 @@ export function resolveOneCliConfig(): OneCliConfig {
   };
 }
 
+/** Keep vault values and API keys on loopback or an encrypted remote connection. */
+function oneCliApiBase(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Invalid OneCLI API URL");
+  }
+  const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname.toLowerCase());
+  if (
+    (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error("OneCLI API URL must use HTTPS, or HTTP on loopback, without credentials");
+  }
+  return url.href.replace(/\/$/, "");
+}
+
 export interface OneCliStatus {
   reachable: boolean;
   authenticated: boolean;
@@ -49,8 +70,17 @@ export async function checkOneCliStatus(
     gatewayUrl: cfg.gatewayUrl,
   };
 
+  let apiBase: string;
   try {
-    const res = await fetch(`${cfg.apiUrl}/api/health`, {
+    apiBase = oneCliApiBase(cfg.apiUrl);
+  } catch (error) {
+    status.apiUrl = "<invalid OneCLI API URL>";
+    status.error = error instanceof Error ? error.message : String(error);
+    return status;
+  }
+
+  try {
+    const res = await fetch(`${apiBase}/api/health`, {
       signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) {
@@ -73,7 +103,7 @@ export async function checkOneCliStatus(
   }
 
   try {
-    const res = await fetch(`${cfg.apiUrl}/api/user`, {
+    const res = await fetch(`${apiBase}/api/user`, {
       headers: { Authorization: `Bearer ${cfg.apiKey}` },
       signal: AbortSignal.timeout(3000),
     });
@@ -122,6 +152,7 @@ export async function registerSecretInOneCli(
   if (!cfg.apiKey) {
     throw new Error("ONECLI_API_KEY not set — generate one in OneCLI's UI (Settings → API Keys)");
   }
+  const apiBase = oneCliApiBase(cfg.apiUrl);
   const body = {
     name: input.name,
     type: "generic" as const,
@@ -133,7 +164,7 @@ export async function registerSecretInOneCli(
       valueFormat: "Bearer {value}",
     },
   };
-  const res = await fetch(`${cfg.apiUrl}/api/secrets`, {
+  const res = await fetch(`${apiBase}/api/secrets`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${cfg.apiKey}`,

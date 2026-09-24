@@ -19,11 +19,11 @@ cd kit
 # Install dependencies
 npm install
 
-# Run tests
-npm test
-
 # Build for development
 npm run build
+
+# Run tests against the compiled tree
+npm test
 
 # Run CLI from source
 npm run dev -- check
@@ -32,12 +32,20 @@ npm run dev -- check
 ### Running Tests
 
 ```bash
-# Run all tests
+# Build first, then run all tests
+npm run build
 npm test
-
-# Run in watch mode (requires tsx)
-npm run dev -- test
 ```
+
+`npm test` applies the fixture environment, concurrency limit, and complete TAP
+logging in `scripts/test.mjs`. A bare `node --test` invocation does not reproduce
+that environment. Do not rebuild shared `dist` while another test run uses it.
+
+Shared fixture helpers use `*.test-support.ts`. They compile in the development
+test build but are excluded from production builds and production-only source
+inventories. Do not import them from runtime modules: `production-build.test.ts`
+checks the production compiler's resolved module graph for transitive test
+imports. ADR checks still include test and test-support files explicitly.
 
 ### Code Style
 
@@ -132,20 +140,17 @@ git push origin v1.2.3             # pushing the tag triggers the publish workfl
 Prereleases (e.g. `v1.2.3-alpha.1`) publish under the npm `next` dist-tag, not
 `latest` — see `.github/workflows/publish.yml`.
 
-### Manual Publishing
+### Local Package Check
 
-If you need to publish manually (e.g., in a local environment without GitHub Actions):
+Check the release package locally before opening the release-prep PR:
 
 ```bash
-# 1. Verify the package manifest
-npm publish --dry-run
-
-# 2. Build production artifacts
 npm run build:prod
-
-# 3. Publish to npm (requires NPM_TOKEN set in .npmrc or environment)
-npm publish
+npm pack --dry-run
 ```
+
+Publishing runs from a signed release tag through GitHub Actions. See
+[Releasing kit](docs/RELEASING.md) for the tag, approval, and verification steps.
 
 ### Version Management
 
@@ -162,16 +167,15 @@ The package is configured in `package.json` for automatic publishing:
 
 - **bin**: Exports the `kit` command globally
 - **exports**: Exports the MCP server for programmatic use
-- **files**: Includes only dist/ and README.md in published package
+- **files**: Includes dist/, README.md, skills/, the monkey-test guide, and the two runtime scripts
 - **prepublishOnly**: Automatically builds before publishing
 
-### NPM Credentials
+### npm Publishing Identity
 
-GitHub Actions uses the `NPM_TOKEN` secret for authentication. To set up:
-
-1. Generate token at https://npmjs.com/settings/tokens
-2. Set as GitHub secret: `Settings` → `Secrets` → `NPM_TOKEN`
-3. Token should have "publish" scope
+The publish workflow uses npm Trusted Publishing with GitHub OIDC and the
+`npm-publish` environment. It does not consume `NPM_TOKEN` or `NODE_AUTH_TOKEN`.
+Configure each package's trusted publisher and the environment reviewer before
+tagging; [Releasing kit](docs/RELEASING.md) records the required settings.
 
 ## Pull Request Process
 

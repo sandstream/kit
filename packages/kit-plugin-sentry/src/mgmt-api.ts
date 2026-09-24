@@ -20,9 +20,38 @@
 
 const DEFAULT_HOST = "https://sentry.io";
 
+// Sentry API errors (and the raw HTTP body) can echo back caller-supplied or
+// provider-side credentials verbatim. Mirrors the redaction the vercel plugin
+// already ships, using the same pattern list, same client-bound known-secrets lookup.
+const ERROR_SECRET_PATTERNS: RegExp[] = [
+  /\b(?:sk|pk|rk)_(?:test|live)_[A-Za-z0-9]{20,}/g,
+  /\bwhsec_[A-Za-z0-9]{20,}/g,
+  /\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{30,}/g,
+  /\bgithub_pat_[A-Za-z0-9_]{60,}/g,
+  /\bsk-(?:proj|ant|svcacct|admin)-[A-Za-z0-9_-]{20,}/g,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+];
+
+function redactErrorText(input: string, knownSecrets: readonly string[] = []): string {
+  let output = input;
+  for (const value of [...new Set(knownSecrets)].filter((value) => value.length >= 8)) {
+    output = output.split(value).join("[REDACTED]");
+  }
+  for (const pattern of ERROR_SECRET_PATTERNS) output = output.replace(pattern, "[REDACTED]");
+  // Core URL/Bearer parity is tested by src/plugin-error-redaction.test.ts.
+  return output
+    .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/[^\s:@/]{0,128}:)[^\s@/]{3,256}@/gi, "$1[REDACTED]@")
+    .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/)[A-Za-z0-9._~%+-]{16,256}@/gi, "$1[REDACTED]@")
+    .replace(
+      /\b((?:token|access_token|api_key|apikey|auth_token|session_token)=)[A-Za-z0-9_\-+/%.]{12,}/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/\bBearer\s+[A-Za-z0-9_\-+/.=]{16,}/gi, "Bearer [REDACTED]");
+}
+
 function assertNotReadOnly(operation: string): void {
   const v = process.env.KIT_READ_ONLY;
-  if (v === "1" || v === "true") {
+  if (["1", "true", "yes", "on"].includes((v ?? "").trim().toLowerCase())) {
     throw new Error(`read-only mode active — refusing "${operation}"`);
   }
 }
@@ -78,6 +107,16 @@ export interface MgmtClient {
   headers: HeadersInit;
 }
 
+const CLIENT_SECRETS = new WeakMap<MgmtClient, readonly string[]>();
+
+/** Known secrets for this client: the bound token plus whatever the Authorization header
+ * carries (covers a client built by hand, not via makeClient). */
+function clientSecrets(client: MgmtClient): string[] {
+  const authorization = new Headers(client.headers).get("authorization") ?? "";
+  const bearer = /^Bearer\s+(.+)$/i.exec(authorization)?.[1];
+  return [...(CLIENT_SECRETS.get(client) ?? []), ...(bearer ? [bearer] : [])];
+}
+
 export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
   const token = cfg.token ?? process.env.SENTRY_AUTH_TOKEN;
   if (!token) {
@@ -85,7 +124,7 @@ export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
       "SENTRY_AUTH_TOKEN not set — create a token at https://sentry.io/settings/account/api/auth-tokens/ (or your regional URL) with org:read + project:read scopes (see templates/iam/sentry.json)",
     );
   }
-  return {
+  const client = {
     host: cfg.host ?? process.env.SENTRY_URL ?? DEFAULT_HOST,
     organizationSlug: cfg.organizationSlug,
     headers: {
@@ -94,6 +133,8 @@ export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
       "User-Agent": "sandstream-kit-plugin-sentry",
     },
   };
+  CLIENT_SECRETS.set(client, [token]);
+  return client;
 }
 
 export interface SentryOrganization {
@@ -109,7 +150,9 @@ export async function listOrganizations(client: MgmtClient): Promise<SentryOrgan
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
-    throw new Error(`GET /api/0/organizations/ returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(
+      `GET /api/0/organizations/ returned ${res.status}: ${await safeText(res, client)}`,
+    );
   }
   return (await res.json()) as SentryOrganization[];
 }
@@ -134,7 +177,7 @@ export async function listProjects(
   );
   if (!res.ok) {
     throw new Error(
-      `GET /api/0/organizations/${org}/projects/ returned ${res.status}: ${await safeText(res)}`,
+      `GET /api/0/organizations/${org}/projects/ returned ${res.status}: ${await safeText(res, client)}`,
     );
   }
   return (await res.json()) as SentryProject[];
@@ -184,7 +227,7 @@ export async function searchIssues(
     signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) {
-    throw new Error(`GET .../issues/ returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(`GET .../issues/ returned ${res.status}: ${await safeText(res, client)}`);
   }
   return (await res.json()) as SentryIssue[];
 }
@@ -221,7 +264,9 @@ export async function updateIssue(
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
-    throw new Error(`PUT /api/0/issues/${issueId}/ returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(
+      `PUT /api/0/issues/${issueId}/ returned ${res.status}: ${await safeText(res, client)}`,
+    );
   }
   const updated = (await res.json()) as SentryIssue;
 
@@ -272,7 +317,7 @@ export async function getIssueEvents(
   );
   if (!res.ok) {
     throw new Error(
-      `GET /api/0/issues/${issueId}/events/ returned ${res.status}: ${await safeText(res)}`,
+      `GET /api/0/issues/${issueId}/events/ returned ${res.status}: ${await safeText(res, client)}`,
     );
   }
   return (await res.json()) as SentryEvent[];
@@ -323,14 +368,14 @@ export async function createRelease(
     },
   );
   if (!res.ok) {
-    throw new Error(`POST .../releases/ returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(`POST .../releases/ returned ${res.status}: ${await safeText(res, client)}`);
   }
   return (await res.json()) as SentryRelease;
 }
 
-async function safeText(res: Response): Promise<string> {
+async function safeText(res: Response, client: MgmtClient): Promise<string> {
   try {
-    return (await res.text()).slice(0, 200);
+    return redactErrorText(await res.text(), clientSecrets(client)).slice(0, 200);
   } catch {
     return "<no body>";
   }

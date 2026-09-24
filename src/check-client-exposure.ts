@@ -136,6 +136,56 @@ export interface EnvDeclaration {
   sensitive?: boolean;
 }
 
+interface ParsedEnvDeclarationLine {
+  pending?: boolean;
+  name?: string;
+  sensitive?: boolean;
+}
+
+function parseEnvDeclarationLine(line: string, pending?: boolean): ParsedEnvDeclarationLine {
+  const trimmed = line.trim();
+  if (!trimmed) return {};
+  if (trimmed.startsWith("#")) {
+    return { pending: parseSensitiveAnnotation(trimmed) ?? pending };
+  }
+  const eq = trimmed.indexOf("=");
+  if (eq <= 0) return {};
+  const name = trimmed
+    .slice(0, eq)
+    .replace(/^export\s+/, "")
+    .trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return {};
+  const hash = trimmed.indexOf("#", eq);
+  const trailing = hash >= 0 ? parseSensitiveAnnotation(trimmed.slice(hash)) : undefined;
+  return { name, sensitive: trailing ?? pending };
+}
+
+function collectDeclarationsFromText(
+  byName: Map<string, EnvDeclaration>,
+  file: string,
+  text: string,
+): void {
+  let pending: boolean | undefined;
+  for (const line of text.split("\n")) {
+    const parsed = parseEnvDeclarationLine(line, pending);
+    pending = parsed.pending;
+    if (!parsed.name) continue;
+    const prev = byName.get(parsed.name);
+    byName.set(parsed.name, {
+      sources: [...(prev?.sources ?? []), file],
+      sensitive: prev?.sensitive ?? parsed.sensitive,
+    });
+  }
+}
+
+async function readOptionalText(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, "utf-8");
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Env var names declared anywhere in the repo's `.env*` files, with any `@sensitive` annotation.
  *
@@ -160,46 +210,8 @@ export async function collectEnvDeclarations(root: string): Promise<Map<string, 
     return byName;
   }
   for (const file of entries.filter((f) => f === ".env" || f.startsWith(".env."))) {
-    let text: string;
-    try {
-      text = await readFile(join(root, file), "utf-8");
-    } catch {
-      continue;
-    }
-    // Annotation carried down from the comment block immediately above a declaration.
-    let pending: boolean | undefined;
-    for (const line of text.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        pending = undefined; // a blank line ends the comment block, so it cannot drift
-        continue;
-      }
-      if (trimmed.startsWith("#")) {
-        pending = parseSensitiveAnnotation(trimmed) ?? pending;
-        continue;
-      }
-      const eq = trimmed.indexOf("=");
-      if (eq <= 0) {
-        pending = undefined;
-        continue;
-      }
-      // The name only. Everything right of `=` is deliberately dropped, here, at the parse —
-      // except a trailing `#` comment, which is scanned for the annotation and nothing else.
-      const name = trimmed
-        .slice(0, eq)
-        .replace(/^export\s+/, "")
-        .trim();
-      const hash = trimmed.indexOf("#", eq);
-      const trailing = hash >= 0 ? parseSensitiveAnnotation(trimmed.slice(hash)) : undefined;
-      const sensitive = trailing ?? pending;
-      pending = undefined;
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
-      const prev = byName.get(name);
-      byName.set(name, {
-        sources: [...(prev?.sources ?? []), file],
-        sensitive: prev?.sensitive ?? sensitive,
-      });
-    }
+    const text = await readOptionalText(join(root, file));
+    if (text !== undefined) collectDeclarationsFromText(byName, file, text);
   }
   return byName;
 }

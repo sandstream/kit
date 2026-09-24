@@ -36,4 +36,29 @@ describe("listAppSecrets (network error path)", () => {
     });
     await assert.rejects(() => listAppSecrets(client, "demo-app"));
   });
+
+  it("redacts the bearer token in API error bodies without hiding diagnostics (RED-4)", async () => {
+    const priorFetch = globalThis.fetch;
+    const secret = "opaque-fly-token-" + "E".repeat(32);
+    globalThis.fetch = (async () =>
+      new Response(`request_id=req_fly rejected credential ${secret}`, {
+        status: 403,
+      })) as typeof fetch;
+    try {
+      const client = makeClient({ token: secret, graphqlUrl: "https://api.example.test/graphql" });
+      await assert.rejects(
+        () => listAppSecrets(client, "demo-app"),
+        (err: unknown) => {
+          assert.ok(err instanceof Error);
+          assert.ok(!err.message.includes(secret), "plugin error must not expose the secret");
+          assert.match(err.message, /\[REDACTED\]/);
+          assert.match(err.message, /request_id=req_fly/);
+          assert.match(err.message, /403/);
+          return true;
+        },
+      );
+    } finally {
+      globalThis.fetch = priorFetch;
+    }
+  });
 });

@@ -9,7 +9,9 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const exec = promisify(execFile);
-const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "..", "cli.js");
+const moduleRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const adjacentCli = resolve(moduleRoot, "cli.js");
+const CLI_PATH = existsSync(adjacentCli) ? adjacentCli : resolve(moduleRoot, "../dist/cli.js");
 
 // `kit hooks uninstall` — the wire for `uninstallHooks`, which was exported and called by
 // nothing (self-audit rule 15) since hooks shipped: kit could install git hooks and had no

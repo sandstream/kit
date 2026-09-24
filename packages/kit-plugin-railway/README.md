@@ -1,6 +1,6 @@
 # sandstream-kit-plugin-railway
 
-[kit](https://github.com/sandstream/kit) adapter plugin for [Railway](https://railway.app) — Heroku-style deployment platform.
+[kit](https://github.com/sandstream/kit) `ServiceAdapter` for Railway project setup. It exports `adapter` with the service name `railway/deploy`.
 
 ## Installation
 
@@ -22,36 +22,42 @@ Then register it in your `package.json`:
 kit add railway/deploy
 ```
 
-Or via MCP:
-
-```json
-{ "name": "kit_add", "arguments": { "service": "railway/deploy", "project_name": "my-app" } }
-```
-
 ## Prerequisites
 
-The Railway CLI must be installed:
-
-```bash
-npm install -g @railway/cli
-```
+The `railway` CLI must be installed and available on `PATH`.
 
 ## What it does
 
-1. Runs `railway login --browserless` (suitable for agent/CI use)
+1. Runs `railway login --browserless` unless an existing project ID is supplied
 2. Creates a new Railway project with `railway init`
-3. Writes `RAILWAY_PROJECT_ID` and `RAILWAY_ENVIRONMENT` to `.env.local`
+3. Returns `RAILWAY_PROJECT_ID` when Railway reports it, plus `RAILWAY_ENVIRONMENT`, to kit's provisioning flow
 
-If `RAILWAY_PROJECT_ID` is already set, provisioning is skipped (key-reuse pattern).
+If `RAILWAY_PROJECT_ID` is already set, provisioning reuses it. `check()` also asks `railway status` whether the current directory is linked. When Railway's status JSON lacks a project ID, the adapter cannot return that ID; inspect the Railway project before relying on the generated configuration.
 
-## Environment variables
+## Configuration
 
-| Variable | Description |
-|----------|-------------|
-| `RAILWAY_PROJECT_ID` | Railway project ID |
+| Variable              | Description                                    |
+| --------------------- | ---------------------------------------------- |
+| `RAILWAY_PROJECT_ID`  | Railway project ID                             |
 | `RAILWAY_ENVIRONMENT` | Deployment environment (default: `production`) |
 
----
+## API
+
+The package exports `adapter` (`railway/deploy`). Its `getRequiredTools()` returns `railway`; `check(context)` verifies a configured project ID and Railway CLI link; `provision(context)` reuses an existing project ID or attempts login and project initialization.
+
+## Testing
+
+From the repository root, run `npm run build --workspace=sandstream-kit-plugin-railway` and `npm test --workspace=sandstream-kit-plugin-railway`. The test command runs the package's compiled tests.
+
+## Troubleshooting
+
+- `railway` command missing: install the Railway CLI and confirm it is on `PATH`.
+- Login or init fails: complete Railway authentication, then retry `kit add railway/deploy`.
+- No `RAILWAY_PROJECT_ID` returned: inspect `railway status --json` and link the project before relying on the generated configuration.
+
+## Support
+
+Report package issues in [sandstream/kit issues](https://github.com/sandstream/kit/issues).
 
 ## Using this as a template for your own plugin
 
@@ -63,4 +69,8 @@ This package is the reference implementation for kit adapter plugins. To build y
 4. Export `{ adapter }` from `src/index.ts`
 5. Publish to npm and add to `kitPlugins` in your project
 
-See [PLUGIN_AUTHORING.md](../../PLUGIN_AUTHORING.md) for the full guide.
+See [PLUGIN_AUTHORING.md](https://github.com/sandstream/kit/blob/main/PLUGIN_AUTHORING.md) for the full guide.
+
+## Version
+
+Current package version: `0.1.2`. See [CHANGELOG.md](./CHANGELOG.md).

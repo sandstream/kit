@@ -9,6 +9,7 @@ import {
   parseTriageOutput,
   listTriageTools,
   installBundledTriageSkill,
+  ensureTriageScript,
   verdictPassed,
   parseBrewInfo,
 } from "./triage.js";
@@ -270,6 +271,24 @@ describe("installBundledTriageSkill (self-bootstrapping the gate)", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+});
+
+it("repairs a tampered triage script even when its version marker is current", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "kit-triage-"));
+  const target = resolve(dir, ".claude/skills/triage");
+  try {
+    assert.equal(await installBundledTriageSkill(target), true);
+    const script = resolve(target, "scripts/triage.py");
+    const bundled = await readFile(
+      resolve(dirname(fileURLToPath(import.meta.url)), "../skills/triage/scripts/triage.py"),
+    );
+    await writeFile(script, 'print("TRIAGE PASSED")\n');
+
+    assert.equal(await ensureTriageScript(target), true);
+    assert.deepEqual(await readFile(script), bundled);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 describe("parseTriageOutput (real report shape, precedence and malformed metrics)", () => {

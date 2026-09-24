@@ -112,7 +112,7 @@ export async function quickPalCount(cwd?: string): Promise<number> {
     if (!existsSync(getMemoryDbPath())) return 0;
     const db = openMemoryDbReadOnly();
     try {
-      return palList(db, { scope: getCurrentProjectRoot(cwd), reapStale: false }).length;
+      return palList(db, { scope: getCurrentProjectRoot(cwd), readOnly: true }).length;
     } finally {
       db.close();
     }

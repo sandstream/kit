@@ -1,7 +1,7 @@
 // `kit hooks` commands (git hook install/check/add) — extracted from cli.ts (split step 6).
 import { loadConfig } from "../config.js";
 import { resolveConfigPath, KIT_FILE } from "../cli-shared.js";
-import { isGitRepository, checkHooks } from "../check-hooks.js";
+import { isGitRepository, checkHooks, hookCheckStatus } from "../check-hooks.js";
 import { installHooks, uninstallHooks } from "../hooks.js";
 import { isNonInteractive } from "../environment.js";
 import { promptConfirm } from "../utils/prompt.js";
@@ -110,18 +110,19 @@ export async function cmdHooks(): Promise<boolean> {
     let allOk = true;
 
     for (const r of results) {
-      const icon = !r.installed
-        ? `${c.red}✗${c.reset}`
-        : !r.upToDate
-          ? `${c.yellow}!${c.reset}`
-          : `${c.green}✓${c.reset}`;
+      const failed = hookCheckStatus(r) === "fail";
+      const icon = failed ? `${c.red}✗${c.reset}` : `${c.green}✓${c.reset}`;
+      // "outdated" would be the wrong word for a hook git never runs (BH-01): the
+      // content may be perfect. Name the condition that actually stops enforcement.
       const status = !r.installed
         ? `${c.red}not installed${c.reset}`
-        : !r.upToDate
-          ? `${c.yellow}outdated${c.reset}`
-          : `${c.green}up-to-date${c.reset}`;
+        : !r.executable
+          ? `${c.red}not executable${c.reset}`
+          : !r.upToDate
+            ? `${c.red}outdated${c.reset}`
+            : `${c.green}up-to-date${c.reset}`;
       console.log(`  ${icon} ${r.hookName}  ${status}  ${c.dim}${r.detail}${c.reset}`);
-      if (!r.installed || !r.upToDate) allOk = false;
+      if (failed) allOk = false;
     }
 
     if (!allOk) {

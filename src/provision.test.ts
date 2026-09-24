@@ -8,8 +8,7 @@ import { provisionService, listAvailableServices, getServiceInfo } from "./provi
 let testProjectPath: string;
 
 beforeEach(async () => {
-  testProjectPath = resolve(tmpdir(), `kit-test-${Date.now()}`);
-  await fs.mkdir(testProjectPath, { recursive: true });
+  testProjectPath = await fs.mkdtemp(resolve(tmpdir(), "kit-test-"));
 });
 
 afterEach(async () => {

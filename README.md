@@ -22,7 +22,11 @@ For AI agents and humans. Manages tools, auth, secrets, and project setup. Zero 
 
 **Prerequisites:** Node.js 22+, git, and [mise](https://mise.jdx.dev) for installing tools (`brew install mise`, or `curl https://mise.run | sh`).
 
-**Platform support:** macOS, Linux, and Windows **via [WSL2](https://learn.microsoft.com/windows/wsl/install) or Git Bash**. Native Windows (PowerShell/cmd) is not supported yet — kit's git hooks, tool resolution, and secret-file permissions assume a POSIX shell. On Windows, run kit from inside a WSL2 distro (recommended) or Git Bash. See [docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md).
+**Platform support:** macOS, Linux, WSL2, Git Bash, and the core workflow on
+native Windows. WSL2 remains the recommended Windows experience because several
+edge tools still need POSIX utilities. Native verifier approvals use owner-only
+Windows ACLs and run as a required Windows CI gate. See
+[docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md).
 
 ```bash
 # zero install (also sidesteps npm -g permission issues):
@@ -296,7 +300,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit config migrate`: Migrate a versioned `.kit.toml` to the current schema (`--dry-run` default, auto-backup, re-validate-or-restore, `--check` for CI)
 - `kit airgap verify`: Prove every scanner that would run in air-gap mode resolves to a local artifact (no egress)
 - `kit browser {doctor,status,cdp-url,playwright-env}`: Which browser strategy a repo actually gets for verification — Playwright, system Chrome, or CDP — or the blocker in the way, plus the exports to wire a test runner (`--json` on each). kit owns local browser diagnostics, not app start
-- `kit --read-only <subcommand>`: Session-wide refusal of all writes
+- `kit --read-only <subcommand>`: Refuses project and provider writes; local `~/.kit` memory state may still be initialized by read commands
 
 ### What you'll see
 
@@ -590,7 +594,7 @@ Context pointers are non-secret and live in config; the credentials they authent
 - `kit scan`: Run the installed external scanners (Snyk, Trivy, Grype, Semgrep, osv-scanner, Socket) and merge them into one local, air-gap-aware verdict. **GuardDog** (opt-in via `KIT_GUARDDOG=1` or `[scan] guarddog`) adds local malware detection. The **cloud** scanners (Snyk, Socket) run when their token is set (`SNYK_TOKEN` / `SOCKET_SECURITY_API_TOKEN`, resolved from `[scan.tooling]` vault or env — kit never stores them) and are **dropped in air-gap** mode; `kit setup` asks the network posture (connected vs enclave) and writes `[air_gap]`. Socket has no stable findings-JSON, so kit gates on `socket ci`'s exit code (never false-green). Token absent → the scanner is skipped, not failed
 - **Scanner-health gate.** The exit verdict accounts for scanner _health_, not just findings: a scanner that errored, isn't installed, or lacked its token can no longer exit 0 (a false green). Default is a loud warn (no existing green CI breaks); opt in to a hard fail via `[governance.scan].required_scanners` (a listed scanner that didn't run fails) or `kit ci --strict` / `KIT_CI_STRICT=1` (any non-running scanner fails)
 - `kit airgap verify`: assert every scanner that would run in air-gap mode resolves to a local artifact (no cloud-only scanner, no registry config) and print a pass/fail table. In air-gap mode a registry (`p/…`) `KIT_SEMGREP_CONFIG` is refused in both scan paths (it would egress to the semgrep registry), while a **local** ruleset path is kept so semgrep can still run fully offline
-- Supply-chain findings auto-append to `.kit-audit.jsonl` (one JSON line per finding) for SIEM ingest
+- Supply-chain findings auto-append to `.kit-findings.jsonl` (one JSON line per finding). They stay separate from the hash-chained `.kit-audit.jsonl`, whose integrity would be broken by raw finding rows
 - Releases ship with SLSA provenance (`npm publish --provenance`), CycloneDX + SPDX SBOMs on every GitHub release, cosign-signed Docker images, and weekly OpenSSF Scorecard
 
 ### Shell guard (observe mode)
@@ -951,6 +955,19 @@ prose here. A drift test pins this README example to the `KIT_INSTRUCTION`
 the code actually writes, so the promise can't rot.
 
 kit exposes its capabilities as an MCP server, making it usable directly by Claude Code, Cursor, Windsurf, Cline, and any other MCP-compatible AI assistant. Once registered, assistants can call `kit_check`, `kit_fix`, `kit_triage`, and other tools without leaving their context. (An agent **with shell access** should prefer the CLI — zero standing context cost, and `kit <command> --help` self-documents; the MCP surface exists for shell-less clients. The server's `instructions` field tells clients exactly this.)
+
+### ChatGPT web
+
+Run `kit mcp web` in an interactive terminal. Its six-stage wizard connects the
+existing local stdio server through
+[OpenAI Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels):
+no inbound port and no public kit endpoint. It verifies `tunnel-client`, opens
+the exact Platform and ChatGPT pages, configures `kit mcp`, runs `doctor`, and
+starts the tunnel. The runtime API key stays in process memory; keep the durable
+copy in your vault. Native Windows operators need Git Bash or WSL for the wizard.
+
+This path is specifically for ChatGPT web. Claude Code uses local stdio below;
+kit does not expose a public remote HTTP endpoint for claude.ai connectors.
 
 ### Claude Code
 

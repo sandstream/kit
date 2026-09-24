@@ -1,6 +1,6 @@
-# kit Plugin Example: Stripe Payments
+# kit Plugin Documentation Example: Stripe Payments
 
-> Stripe payment processing adapter for kit
+> Illustrative adapter design. No Stripe payments adapter package is published in kit's plugin registry. The official `stripe` package is a management API client, not a `ServiceAdapter`.
 
 ## Overview
 
@@ -20,16 +20,15 @@ Stripe enables:
 ## Quick Start
 
 ```bash
-# Discover and install the plugin
-kit plugin search stripe
-kit plugin info stripe/payments
-kit plugin install stripe/payments
+# Generate a local adapter package to implement this example
+kit plugin scaffold stripe-payments
+cd kit-plugin-stripe-payments
 ```
 
 ### Minimal Setup
 
 ```typescript
-import { stripeAdapter } from "@kit/plugins/stripe";
+import { stripeAdapter } from "./src/adapters/stripe.js";
 
 const result = await stripeAdapter.provision({
   projectPath: process.cwd(),
@@ -37,7 +36,7 @@ const result = await stripeAdapter.provision({
 });
 
 if (result.success) {
-  console.log("Stripe ready! API Key:", result.secrets.STRIPE_SECRET_KEY);
+  console.log("Stripe adapter ready");
 }
 ```
 
@@ -52,17 +51,13 @@ if (result.success) {
 
 ## Installation
 
-### Via kit CLI
+### Scaffold the example locally
 
 ```bash
-kit plugin install stripe/payments
+kit plugin scaffold stripe-payments
 ```
 
-### Via npm
-
-```bash
-npm install @kit/plugins/stripe
-```
+There is no published npm package for this example. After implementing and publishing your adapter, add its package name to your project's `kitPlugins` array.
 
 ### Manual Setup
 
@@ -130,8 +125,8 @@ export const stripeAdapter: ServiceAdapter = {
 4. Copy the **Test Secret Key** (starts with `sk_test_`)
 5. Add to `.env.local`:
    ```
-   STRIPE_SECRET_KEY=sk_test_YOUR_KEY_HERE
-   STRIPE_PUBLISHABLE_KEY=pk_test_YOUR_KEY_HERE
+   STRIPE_SECRET_KEY=<your-test-secret-key>
+   STRIPE_PUBLISHABLE_KEY=<your-test-publishable-key>
    ```
 6. Set up webhooks (optional):
    - Go to Webhooks section

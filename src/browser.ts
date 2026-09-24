@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { accessSync, constants, existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import type { BrowserConfig } from "./config.js";
@@ -37,6 +37,7 @@ export interface BrowserDoctorResult {
 export interface BrowserProbeDeps {
   existsSync?: (path: string) => boolean;
   readdirSync?: (path: string) => string[];
+  isExecutable?: (path: string) => boolean;
   findOnPath?: (names: string[], envPath?: string) => string | undefined;
   probeUrl?: (url: string) => Promise<boolean>;
   homedir?: () => string;
@@ -220,7 +221,7 @@ export async function diagnoseBrowser(
   checks.push({
     name: "chrome cdp",
     status: "blocker",
-    detail: "No CDP URL configured and localhost:9222 did not respond.",
+    detail: "No configured or localhost CDP endpoint responded.",
   });
   actions.push({
     label: "Start Chrome with CDP",
@@ -278,14 +279,26 @@ function result(
 }
 
 function normalizeDeps(deps: BrowserProbeDeps = {}): Required<BrowserProbeDeps> {
+  const isExecutable = deps.isExecutable ?? isExecutableFile;
   return {
     existsSync: deps.existsSync ?? existsSync,
     readdirSync: deps.readdirSync ?? ((path: string) => readdirSync(path)),
-    findOnPath: deps.findOnPath ?? findOnPath,
+    isExecutable,
+    findOnPath: deps.findOnPath ?? ((names, envPath) => findOnPath(names, envPath, isExecutable)),
     probeUrl: deps.probeUrl ?? probeUrl,
     homedir: deps.homedir ?? homedir,
     platform: deps.platform ?? process.platform,
   };
+}
+
+function isExecutableFile(path: string): boolean {
+  try {
+    if (!statSync(path).isFile()) return false;
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function probePlaywright(
@@ -318,7 +331,24 @@ function playwrightBrowsersPath(env: NodeJS.ProcessEnv, deps: Required<BrowserPr
 function hasChromiumCache(cachePath: string, deps: Required<BrowserProbeDeps>): boolean {
   if (!deps.existsSync(cachePath)) return false;
   try {
-    return deps.readdirSync(cachePath).some((entry) => /^chromium/.test(entry));
+    return deps.readdirSync(cachePath).some((entry) => {
+      if (!/^chromium(?:_headless_shell)?-/.test(entry)) return false;
+      const root = join(cachePath, entry);
+      const candidates = [
+        join(root, "chrome-linux", "chrome"),
+        join(root, "chrome-linux64", "chrome"),
+        join(root, "chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium"),
+        join(root, "chrome-mac-arm64", "Chromium.app", "Contents", "MacOS", "Chromium"),
+        join(root, "chrome-win", "chrome.exe"),
+        join(root, "chrome-win64", "chrome.exe"),
+        join(root, "chrome-headless-shell-linux", "chrome-headless-shell"),
+        join(root, "chrome-headless-shell-linux64", "chrome-headless-shell"),
+        join(root, "chrome-headless-shell-mac", "chrome-headless-shell"),
+        join(root, "chrome-headless-shell-mac-arm64", "chrome-headless-shell"),
+        join(root, "chrome-headless-shell-win64", "headless_shell.exe"),
+      ];
+      return candidates.some(deps.isExecutable);
+    });
   } catch {
     return false;
   }
@@ -332,13 +362,13 @@ function probeSystemChrome(
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
   ];
-  const mac =
-    deps.platform === "darwin" ? findFirstExisting(macCandidates, deps.existsSync) : undefined;
+  const mac = deps.platform === "darwin" ? macCandidates.find(deps.isExecutable) : undefined;
   if (mac) return mac;
-  return deps.findOnPath(
+  const pathMatch = deps.findOnPath(
     ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
     env.PATH,
   );
+  return pathMatch && deps.isExecutable(pathMatch) ? pathMatch : undefined;
 }
 
 async function probeCdp(
@@ -347,12 +377,35 @@ async function probeCdp(
   deps: Required<BrowserProbeDeps>,
 ): Promise<CdpProbe> {
   const fromEnv = env.KIT_BROWSER_CDP_URL?.trim();
-  if (fromEnv) return { url: fromEnv, source: "env" };
   const fromConfig = config?.cdp_url?.trim();
-  if (fromConfig) return { url: fromConfig, source: "config" };
+  const candidates: CdpProbe[] = [];
+  if (fromEnv && !cdpUrlContainsCredentials(fromEnv))
+    candidates.push({ url: fromEnv, source: "env" });
+  if (fromConfig && fromConfig !== fromEnv && !cdpUrlContainsCredentials(fromConfig))
+    candidates.push({ url: fromConfig, source: "config" });
+  for (const candidate of candidates) {
+    const versionUrl = candidate.url!.endsWith("/json/version")
+      ? candidate.url!
+      : `${candidate.url!.replace(/\/+$/, "")}/json/version`;
+    if (await deps.probeUrl(versionUrl)) return candidate;
+  }
   if (await deps.probeUrl(`${LOCAL_CDP_URL}/json/version`))
     return { url: LOCAL_CDP_URL, source: "localhost" };
   return {};
+}
+
+function cdpUrlContainsCredentials(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      Boolean(url.username || url.password) ||
+      [...url.searchParams.keys()].some((key) =>
+        /(?:token|secret|password|credential|api[_-]?key|auth)/i.test(key),
+      )
+    );
+  } catch {
+    return true;
+  }
 }
 
 function findFirstExisting(
@@ -362,12 +415,16 @@ function findFirstExisting(
   return candidates.find((candidate) => exists(candidate));
 }
 
-function findOnPath(names: string[], envPath = process.env.PATH): string | undefined {
+function findOnPath(
+  names: string[],
+  envPath: string | undefined,
+  isExecutable: (path: string) => boolean,
+): string | undefined {
   const dirs = (envPath ?? "").split(delimiter).filter(Boolean);
   for (const dir of dirs) {
     for (const name of names) {
       const full = join(dir, name);
-      if (existsSync(full)) return full;
+      if (isExecutable(full)) return full;
     }
   }
   return undefined;

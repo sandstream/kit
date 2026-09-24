@@ -10,6 +10,8 @@ import {
   getStats,
   forgetMemory,
   countTombstones,
+  searchMessages,
+  recentMessages,
 } from "./db.js";
 import { palAdd } from "./pal.js";
 import { mergeDb } from "./merge.js";
@@ -158,6 +160,11 @@ describe("memory merge", () => {
       project: string;
     };
     assert.equal(row.project, "-Users-x-dev-kit");
+    assert.equal(
+      searchMessages(target, "container", { projectPath: "/Users/x/dev/kit" }).length,
+      1,
+    );
+    assert.equal(recentMessages(target, { projectPath: "/Users/x/dev/kit" }).length, 1);
 
     // Re-merge with remap also rehomes an ALREADY-imported foreign session
     // (upsert: a non-null incoming project wins) — the recovery path when the
@@ -169,6 +176,10 @@ describe("memory merge", () => {
       project: string;
     };
     assert.equal(row2.project, "-Users-x-dev-kit");
+    assert.equal(
+      searchMessages(target2, "container", { projectPath: "/Users/x/dev/kit" }).length,
+      1,
+    );
     target.close();
     target2.close();
     rmSync(tmp, { recursive: true, force: true });

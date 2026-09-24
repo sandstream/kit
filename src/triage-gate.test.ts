@@ -1,7 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { triageTargetFor, gateInstall, CORE_RUNTIMES, type GateDeps } from "./triage-gate.js";
 import type { TriageResult, TriageType } from "./triage.js";
+import { appendTriagePass } from "./triage-receipt.js";
 
 const triageStub = (passed: boolean, output = ""): GateDeps => ({
   runTriage: async (type: TriageType, target: string): Promise<TriageResult> => ({
@@ -83,6 +87,39 @@ describe("triage-gate — watertight gate (fail-closed)", () => {
     const v = await gateInstall("aqua:aquasecurity/trivy", triageStub(true));
     assert.equal(v.decision, "pass");
     assert.equal(v.triageType, "repo");
+  });
+
+  it("records a kit-driven npm PASS under the package name with exact triaged spec", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "kit-triage-receipt-"));
+    try {
+      const v = await gateInstall("npm:@acme/plugin@1.2.3", {
+        ...triageStub(true),
+        recordPass: (type, target, triagedSpec) =>
+          appendTriagePass({ type, target, sandbox: false, cwd, triagedSpec }),
+      });
+      assert.equal(v.decision, "pass");
+      const entries = (await readFile(join(cwd, ".kit-triage.jsonl"), "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0]?.type, "npm");
+      assert.equal(entries[0]?.target, "@acme/plugin");
+      assert.equal(entries[0]?.triagedSpec, "@acme/plugin@1.2.3");
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks a kit-driven install when its PASS receipt cannot be saved", async () => {
+    const v = await gateInstall("npm:kit-plugin-fixture@1.2.3", {
+      ...triageStub(true),
+      recordPass: async () => {
+        throw new Error("disk full");
+      },
+    });
+    assert.equal(v.decision, "blocked");
+    assert.match(v.reason, /receipt.*disk full/i);
   });
 
   it("triage non-pass (WARN/FAIL/offline) → blocked", async () => {

@@ -4,6 +4,7 @@
  */
 
 import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -22,7 +23,6 @@ const BUNDLED_TRIAGE_SKILL = resolve(__dirname, "..", "skills", "triage");
 /** Stamp of the kit version that produced the installed skill copy. Used to refresh a STALE
  *  copy after a kit upgrade — otherwise an improved `triage.py` (e.g. a fixed version resolver
  *  or a new secret pattern) would never reach existing installs, silently running old logic. */
-const SKILL_VERSION_MARKER = resolve(TRIAGE_SKILL_DIR, ".kit-skill-version");
 const KIT_VERSION = (() => {
   try {
     return (
@@ -100,11 +100,26 @@ export async function installBundledTriageSkill(
 }
 
 /** True when the installed skill was written by the CURRENT kit version. */
-async function installedSkillIsCurrent(): Promise<boolean> {
+async function installedSkillIsCurrent(targetDir: string): Promise<boolean> {
   try {
-    return (await readFile(SKILL_VERSION_MARKER, "utf-8")).trim() === KIT_VERSION;
+    return (
+      (await readFile(resolve(targetDir, ".kit-skill-version"), "utf-8")).trim() === KIT_VERSION
+    );
   } catch {
     return false; // no marker → an old/hand-copied skill → treat as stale
+  }
+}
+
+async function installedScriptMatchesBundled(targetDir: string): Promise<boolean> {
+  try {
+    const [installed, bundled] = await Promise.all([
+      readFile(resolve(targetDir, "scripts/triage.py")),
+      readFile(resolve(BUNDLED_TRIAGE_SKILL, "scripts/triage.py")),
+    ]);
+    const digest = (value: Buffer): string => createHash("sha256").update(value).digest("hex");
+    return digest(installed) === digest(bundled);
+  } catch {
+    return false;
   }
 }
 
@@ -124,15 +139,24 @@ export interface TriageResult {
  * copy kit ships, so the watertight gate works on a fresh machine without a
  * manual "copy the triage skill" step.
  */
-async function ensureTriageScript(): Promise<boolean> {
+export async function ensureTriageScript(targetDir: string = TRIAGE_SKILL_DIR): Promise<boolean> {
+  const script = resolve(targetDir, "scripts/triage.py");
   try {
-    await access(TRIAGE_SCRIPT);
-    // Present — but refresh if it was written by an older kit (stale logic otherwise persists).
-    if (await installedSkillIsCurrent()) return true;
-    return installBundledTriageSkill();
+    await access(script);
+    // A version marker is only metadata. Trust the installed executable only when
+    // its bytes still match kit's provenance-published bundled copy.
+    if (
+      (await installedSkillIsCurrent(targetDir)) &&
+      (await installedScriptMatchesBundled(targetDir))
+    )
+      return true;
   } catch {
-    return installBundledTriageSkill();
+    // Missing/unreadable script follows the same self-repair path as tampering.
   }
+  if (!(await installBundledTriageSkill(targetDir))) return false;
+  return (
+    (await installedSkillIsCurrent(targetDir)) && (await installedScriptMatchesBundled(targetDir))
+  );
 }
 
 /**
@@ -162,11 +186,11 @@ export function verdictPassed(output: string): boolean {
  * the operator didn't export the env var. Best-effort: never breaks triage if
  * the config can't be read. Env vars already in `process.env` still win.
  */
-async function airGapMirrorEnv(): Promise<Record<string, string>> {
+async function airGapMirrorEnv(cwd: string): Promise<Record<string, string>> {
   try {
     const { loadConfig } = await import("./config.js");
     const { resolveAirGap, airGapTriageEnv } = await import("./airgap/config.js");
-    const cfg = await loadConfig(resolve(process.cwd(), ".kit.toml"));
+    const cfg = await loadConfig(resolve(cwd, ".kit.toml"));
     return airGapTriageEnv(resolveAirGap(cfg.air_gap, process.env));
   } catch {
     return {};
@@ -234,7 +258,7 @@ export function parseBrewInfo(json: unknown): BrewInfo {
  * for an un-scored source). `brew info` runs as an arg-array (no shell), and the
  * formula name is validated first to block flag/arg injection.
  */
-async function triageBrew(formula: string): Promise<TriageResult> {
+async function triageBrew(formula: string, cwd: string): Promise<TriageResult> {
   if (!BREW_FORMULA_RE.test(formula)) {
     return {
       target: formula,
@@ -245,7 +269,7 @@ async function triageBrew(formula: string): Promise<TriageResult> {
   }
   let info: BrewInfo;
   try {
-    const { stdout } = await exec("brew", ["info", "--json=v2", formula], { timeout: 60_000 });
+    const { stdout } = await exec("brew", ["info", "--json=v2", formula], { timeout: 60_000, cwd });
     info = parseBrewInfo(JSON.parse(stdout));
   } catch (error: unknown) {
     const err = error as { stderr?: string; message?: string };
@@ -272,7 +296,7 @@ async function triageBrew(formula: string): Promise<TriageResult> {
   }
 
   if (info.repoUrl) {
-    const repo = await runTriage("repo", info.repoUrl);
+    const repo = await runTriage("repo", info.repoUrl, { cwd });
     const dep = info.deprecated ? " (formula DEPRECATED)" : "";
     return {
       target: formula,
@@ -296,10 +320,15 @@ async function triageBrew(formula: string): Promise<TriageResult> {
 }
 
 /**
- * Run triage on a target
+ * Run triage on a target, resolving project config and local paths from cwd.
  */
-export async function runTriage(type: TriageType, target: string): Promise<TriageResult> {
-  if (type === "brew") return triageBrew(target);
+export async function runTriage(
+  type: TriageType,
+  target: string,
+  opts: { cwd?: string } = {},
+): Promise<TriageResult> {
+  const cwd = resolve(opts.cwd ?? process.cwd());
+  if (type === "brew") return triageBrew(target, cwd);
   const scriptExists = await ensureTriageScript();
   if (!scriptExists) {
     return {
@@ -313,8 +342,9 @@ export async function runTriage(type: TriageType, target: string): Promise<Triag
   try {
     const { stdout, stderr } = await exec("python3", [TRIAGE_SCRIPT, type, target], {
       timeout: 300_000, // 5 min for Docker pulls
+      cwd,
       // config-declared mirrors, with real env taking precedence
-      env: { ...(await airGapMirrorEnv()), ...process.env },
+      env: { ...(await airGapMirrorEnv(cwd)), ...process.env },
     });
 
     const output = stdout + (stderr ? `\n${stderr}` : "");

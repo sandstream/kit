@@ -16,6 +16,7 @@
  * supply-chain surface and is always triaged.
  */
 import { runTriage, type TriageType, type TriageResult } from "./triage.js";
+import { appendTriagePass } from "./triage-receipt.js";
 
 /** Core language runtimes managed by mise core — the trusted base, not triaged. */
 export const CORE_RUNTIMES = new Set([
@@ -89,9 +90,20 @@ export interface GateVerdict {
 
 export interface GateDeps {
   runTriage: (type: TriageType, target: string) => Promise<TriageResult>;
+  recordPass?: (type: TriageType, target: string, triagedSpec: string) => Promise<void>;
 }
 
-const defaultDeps: GateDeps = { runTriage };
+const defaultDeps: GateDeps = {
+  runTriage,
+  recordPass: (type, target, triagedSpec) =>
+    appendTriagePass({ type, target, sandbox: false, triagedSpec }),
+};
+
+function receiptTarget(type: TriageType, target: string): string {
+  if (type !== "npm") return target;
+  const versionAt = target.lastIndexOf("@");
+  return versionAt > 0 ? target.slice(0, versionAt) : target;
+}
 
 /** First non-empty line of triage output, for a compact block reason. */
 /**
@@ -142,6 +154,17 @@ export async function gateInstall(
   }
   const res = await deps.runTriage(t.type, t.target);
   if (res.passed) {
+    try {
+      await deps.recordPass?.(t.type, receiptTarget(t.type, t.target), t.target);
+    } catch (error) {
+      return {
+        tool,
+        decision: "blocked",
+        reason: `triage PASS receipt could not be saved: ${error instanceof Error ? error.message : String(error)}`,
+        triageType: t.type,
+        triageTarget: t.target,
+      };
+    }
     return {
       tool,
       decision: "pass",

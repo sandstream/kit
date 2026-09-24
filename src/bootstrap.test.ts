@@ -27,15 +27,26 @@ describe("planBootstrap — step order + fail modes", () => {
     assert.deepEqual(plan[0].argv, ["setup", "--minimal"]);
   });
 
-  it("skips policy without a control plane, runs it with one (fail-closed both ways)", () => {
+  it("skips policy without a control plane, passes its source when configured", () => {
     const off = planBootstrap({ controlPlane: false }).find((s) => s.id === "policy")!;
     assert.equal(off.argv, null);
     assert.match(off.skippedReason!, /control plane/);
     assert.equal(off.failMode, "fail-closed");
 
-    const on = planBootstrap({ controlPlane: true }).find((s) => s.id === "policy")!;
-    assert.deepEqual(on.argv, ["policy", "pull"]);
+    const on = planBootstrap({ controlPlane: true, policySource: "/org/policy" }).find(
+      (s) => s.id === "policy",
+    )!;
+    assert.deepEqual(on.argv, ["policy", "pull", "/org/policy"]);
     assert.equal(on.failMode, "fail-closed");
+  });
+
+  it("fails before invoking policy pull when an anchor has no source", () => {
+    const step = planBootstrap({ controlPlane: true }).find((s) => s.id === "policy")!;
+    assert.equal(step.argv, null);
+    const result = classifyStep(step, null);
+    assert.equal(result.status, "failed");
+    assert.match(result.detail, /policy source/i);
+    assert.equal(isFatal(result), true);
   });
 
   it("plans profile import only with a bundle; integrity step is fail-closed", () => {

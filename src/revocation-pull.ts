@@ -20,9 +20,9 @@
  *
  * Deterministic, local-only, no telemetry, no egress.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { pullSourceToPath } from "./policy-pull.js";
+import { pullSourceToPath, readRegularSource } from "./policy-pull.js";
 import {
   appendRevocations,
   isAuthoritativeRevocation,
@@ -76,7 +76,7 @@ export function pullRevocations(
       status: "no-source",
       added: 0,
       rejected: 0,
-      detail: `no ${REVOCATIONS_FEED_FILE} at ${pullSourceToPath(source)}`,
+      detail: `no ${REVOCATIONS_FEED_FILE} at the configured source`,
     };
   }
   // §6.1 — authority comes from the LOCAL committed anchor, never the source. Without it we cannot
@@ -95,7 +95,28 @@ export function pullRevocations(
   const trustedKeys = new Map<string, string>([...localPublicKeys(dir), ...orgSigners]);
   const authorities = new Set<string>(orgSigners.keys());
 
-  const records = parseFeed(readFileSync(feed, "utf-8"));
+  let feedBytes: Buffer | null;
+  try {
+    feedBytes = readRegularSource(feed);
+  } catch {
+    return {
+      ok: false,
+      status: "no-source",
+      added: 0,
+      rejected: 0,
+      detail: "revocation feed is not a readable regular file; kept existing",
+    };
+  }
+  if (feedBytes === null) {
+    return {
+      ok: false,
+      status: "no-source",
+      added: 0,
+      rejected: 0,
+      detail: "revocation feed must be a regular file; kept existing",
+    };
+  }
+  const records = parseFeed(feedBytes.toString("utf-8"));
   const authoritative = records.filter((r) =>
     isAuthoritativeRevocation(r, trustedKeys, authorities),
   );

@@ -20,9 +20,38 @@
 
 const DEFAULT_BASE_URL = "https://api.supabase.com";
 
+// Supabase API errors (and the raw HTTP body) can echo back caller-supplied or
+// provider-side credentials verbatim. Mirrors the redaction the vercel plugin
+// already ships, using the same pattern list, same client-bound known-secrets lookup.
+const ERROR_SECRET_PATTERNS: RegExp[] = [
+  /\b(?:sk|pk|rk)_(?:test|live)_[A-Za-z0-9]{20,}/g,
+  /\bwhsec_[A-Za-z0-9]{20,}/g,
+  /\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{30,}/g,
+  /\bgithub_pat_[A-Za-z0-9_]{60,}/g,
+  /\bsk-(?:proj|ant|svcacct|admin)-[A-Za-z0-9_-]{20,}/g,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+];
+
+function redactErrorText(input: string, knownSecrets: readonly string[] = []): string {
+  let output = input;
+  for (const value of [...new Set(knownSecrets)].filter((value) => value.length >= 8)) {
+    output = output.split(value).join("[REDACTED]");
+  }
+  for (const pattern of ERROR_SECRET_PATTERNS) output = output.replace(pattern, "[REDACTED]");
+  // Core URL/Bearer parity is tested by src/plugin-error-redaction.test.ts.
+  return output
+    .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/[^\s:@/]{0,128}:)[^\s@/]{3,256}@/gi, "$1[REDACTED]@")
+    .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/)[A-Za-z0-9._~%+-]{16,256}@/gi, "$1[REDACTED]@")
+    .replace(
+      /\b((?:token|access_token|api_key|apikey|auth_token|session_token)=)[A-Za-z0-9_\-+/%.]{12,}/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/\bBearer\s+[A-Za-z0-9_\-+/.=]{16,}/gi, "Bearer [REDACTED]");
+}
+
 function assertNotReadOnly(operation: string): void {
   const v = process.env.KIT_READ_ONLY;
-  if (v === "1" || v === "true") {
+  if (["1", "true", "yes", "on"].includes((v ?? "").trim().toLowerCase())) {
     throw new Error(`read-only mode active — refusing "${operation}"`);
   }
 }
@@ -62,6 +91,16 @@ export interface MgmtClient {
   headers: HeadersInit;
 }
 
+const CLIENT_SECRETS = new WeakMap<MgmtClient, readonly string[]>();
+
+/** Known secrets for this client: the bound token plus whatever the Authorization header
+ * carries (covers a client built by hand, not via makeClient). */
+function clientSecrets(client: MgmtClient): string[] {
+  const authorization = new Headers(client.headers).get("authorization") ?? "";
+  const bearer = /^Bearer\s+(.+)$/i.exec(authorization)?.[1];
+  return [...(CLIENT_SECRETS.get(client) ?? []), ...(bearer ? [bearer] : [])];
+}
+
 export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
   const token = cfg.accessToken ?? process.env.SUPABASE_ACCESS_TOKEN;
   if (!token) {
@@ -69,13 +108,15 @@ export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
       "SUPABASE_ACCESS_TOKEN not set — generate a PAT at https://supabase.com/dashboard/account/tokens",
     );
   }
-  return {
+  const client = {
     baseUrl: cfg.baseUrl ?? DEFAULT_BASE_URL,
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
   };
+  CLIENT_SECRETS.set(client, [token]);
+  return client;
 }
 
 export interface ProjectSummary {
@@ -93,7 +134,7 @@ export async function listProjects(client: MgmtClient): Promise<ProjectSummary[]
   });
   if (!res.ok) {
     throw new Error(
-      `Supabase Management API /v1/projects returned ${res.status}: ${await safeText(res)}`,
+      `Supabase Management API /v1/projects returned ${res.status}: ${await safeText(res, client)}`,
     );
   }
   return (await res.json()) as ProjectSummary[];
@@ -115,7 +156,7 @@ export async function listApiKeys(client: MgmtClient, projectRef: string): Promi
   });
   if (!res.ok) {
     throw new Error(
-      `/v1/projects/${projectRef}/api-keys returned ${res.status}: ${await safeText(res)}`,
+      `/v1/projects/${projectRef}/api-keys returned ${res.status}: ${await safeText(res, client)}`,
     );
   }
   return (await res.json()) as ApiKey[];
@@ -195,7 +236,7 @@ export async function rollJwtSecret(client: MgmtClient, projectRef: string): Pro
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) {
-    throw new Error(`JWT-secret roll returned ${res.status}: ${await safeText(res)}`);
+    throw new Error(`JWT-secret roll returned ${res.status}: ${await safeText(res, client)}`);
   }
   const body = (await res.json()) as { jwt_secret?: string; api_keys?: ApiKey[] };
   return {
@@ -229,7 +270,7 @@ export async function revokeScopedKey(
   if (!res.ok) {
     return {
       ok: false,
-      detail: `DELETE /api-keys/${keyId} returned ${res.status}: ${await safeText(res)}`,
+      detail: `DELETE /api-keys/${keyId} returned ${res.status}: ${await safeText(res, client)}`,
     };
   }
   return { ok: true, detail: `revoked key ${keyId}` };
@@ -264,17 +305,17 @@ export async function mintScopedKey(
   });
   if (!res.ok) {
     throw new Error(
-      `/v1/projects/${projectRef}/api-keys returned ${res.status}: ${await safeText(res)}`,
+      `/v1/projects/${projectRef}/api-keys returned ${res.status}: ${await safeText(res, client)}`,
     );
   }
   const key = (await res.json()) as ApiKey;
   return { mode: "scoped-key-mint", newKey: key.api_key };
 }
 
-async function safeText(res: Response): Promise<string> {
+async function safeText(res: Response, client: MgmtClient): Promise<string> {
   try {
     const t = await res.text();
-    return t.slice(0, 200);
+    return redactErrorText(t, clientSecrets(client)).slice(0, 200);
   } catch {
     return "<no body>";
   }

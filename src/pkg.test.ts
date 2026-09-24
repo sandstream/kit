@@ -1,6 +1,38 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parsePkgSpec, buildInstallSpec } from "./pkg.js";
+import { parsePkgSpec, buildInstallSpec, installPkg, isGitHubRepoUrl } from "./pkg.js";
+
+it("accepts only HTTPS GitHub URLs without embedded credentials for Brew triage", () => {
+  assert.equal(isGitHubRepoUrl("https://github.com/owner/repo"), true);
+  for (const url of [
+    "https://github.com.evil.example/owner/repo",
+    "https://evil.example/github.com/owner/repo",
+    "https://github.com@evil.example/owner/repo",
+    "http://github.com/owner/repo",
+    "not a URL",
+  ]) {
+    assert.equal(isGitHubRepoUrl(url), false, url);
+  }
+});
+
+it("triage refusal names a real recovery path and never advertises --force", async () => {
+  const result = await installPkg(
+    { ecosystem: "npm", name: "example" },
+    {
+      runTriage: async () => ({
+        target: "example",
+        type: "npm",
+        passed: false,
+        output: "security finding",
+      }),
+    },
+  );
+  assert.equal(result.installed, false);
+  assert.match(result.output, /security finding/);
+  assert.match(result.output, /Package not installed/);
+  assert.match(result.output, /kit triage npm example/);
+  assert.doesNotMatch(result.output, /--force/);
+});
 
 describe("parsePkgSpec", () => {
   it("parses ecosystem:name@version", () => {

@@ -73,6 +73,21 @@ const KV_SECRET_RE = new RegExp(
   "g",
 );
 
+// Secrets under explicit field names appear in dotenv, JSON and escaped log
+// strings. Keep the key and quote delimiters so diagnostics remain readable.
+// Key names are bounded; the value alternatives cannot overlap, so even a
+// long malformed value is scanned linearly rather than backtracked quadratically.
+const KEYED_SECRET_NAME =
+  "(?:(?:[A-Za-z0-9_]{0,63}_)?(?:KEY|TOKEN|SECRET|PASSWORD|PASS|PWD|CREDENTIALS?)|PGPASSWORD|MYSQLPASSWORD|AUTH_HEADER)";
+const KEYED_QUOTED_RE = new RegExp(
+  String.raw`(?<![A-Za-z0-9_])((?:\\?["'])?${KEYED_SECRET_NAME}(?:\\?["'])?[ \t]*[:=][ \t]*)(\\?["'])((?:\\.|[^"'\\\r\n]){8,})\2`,
+  "gi",
+);
+const KEYED_UNQUOTED_RE = new RegExp(
+  String.raw`(?<![A-Za-z0-9_])((?:\\?["'])?${KEYED_SECRET_NAME}(?:\\?["'])?[ \t]*[:=][ \t]*)([A-Za-z0-9_+./~-]{20,})`,
+  "gi",
+);
+
 export const SECRET_PATTERNS: RedactPattern[] = [
   // Stripe — sk_test_, sk_live_, pk_test_, pk_live_, rk_test_, rk_live_,
   // whsec_, sk_test_..., 24+ random chars
@@ -145,7 +160,17 @@ export const SECRET_PATTERNS: RedactPattern[] = [
     re: KV_SECRET_RE,
     label: "kv-secret",
   },
-  // Terraform — `sensitive = "..."` blocks in HCL leak the literal value
+  {
+    re: KEYED_QUOTED_RE,
+    label: "keyed-secret",
+    replacement: "$1$2[REDACTED]$2",
+  },
+  {
+    re: KEYED_UNQUOTED_RE,
+    label: "keyed-secret",
+    replacement: "$1[REDACTED]",
+  },
+  // Terraform — literal `sensitive` assignments in HCL can leak their value
   // unless the operator uses a vault-backed datasource. Catches both the
   // unquoted and quoted forms.
   {
@@ -160,8 +185,8 @@ export const SECRET_PATTERNS: RedactPattern[] = [
     re: /"(sensitive_value|value)"\s*:\s*"([A-Za-z0-9_\-+/]{20,})"/g,
     label: "tfstate-value",
   },
-  // Credentials embedded in a connection-string URL, e.g.
-  // `postgres://user:supersecret@host/db`, `redis://:pw@host`, `mongodb+srv://…`.
+  // Credentials embedded in connection-string URL userinfo (Postgres, Redis,
+  // MongoDB, and similar schemes).
   // The `kv-secret` class stops at the `:`/`@`, so these slipped through. Redact
   // ONLY the password and keep the scheme/user/host as diagnostic context.
   {
@@ -181,6 +206,24 @@ export const SECRET_PATTERNS: RedactPattern[] = [
     re: /\b([a-z][a-z0-9+.-]{0,15}:\/\/)[A-Za-z0-9._~%+-]{16,256}@/gi,
     label: "url-token-userinfo",
     replacement: "$1[REDACTED]@",
+  },
+  // Token/key riding in a URL QUERY STRING (`?token=`, `&access_token=`, ...): the other
+  // common place a webhook/OAuth/callback URL carries a credential besides the userinfo
+  // forms above. A common but generic param name is followed by `=` and a 12+ char value;
+  // redact only the value so the URL/path stays diagnostic context.
+  {
+    re: /\b((?:token|access_token|api_key|apikey|auth_token|session_token)=)[A-Za-z0-9_\-+/%.]{12,}/gi,
+    label: "url-query-token",
+    replacement: "$1[REDACTED]",
+  },
+  // `Authorization: Bearer <token>` header text with an opaque (non-JWT-shaped) value.
+  // The `jwt` pattern above only catches the `eyJ...` form; a provider that issues a
+  // plain opaque bearer token (not a JWT) reflected into a log/error string slipped
+  // through entirely.
+  {
+    re: /\bBearer\s+[A-Za-z0-9_\-+/.=]{16,}/gi,
+    label: "bearer-header",
+    replacement: "Bearer [REDACTED]",
   },
   // Generic high-entropy hex tokens (32+ hex chars) — last resort
   // Skipped intentionally: too many false-positives against commit hashes.
@@ -208,13 +251,58 @@ export function secretShapeLabels(): string[] {
   return [...new Set(SECRET_PATTERNS.map((p) => p.label))].sort();
 }
 
-export function redactSecrets(input: string): string {
+const MIN_KNOWN_SECRET_LENGTH = 8;
+// Anchored to a `_`/start/end boundary per keyword, so e.g. "MONKEY_RUN_ID" (contains "KEY"
+// mid-word) or "COMPASS_DIRECTION" (contains "PASS" mid-word) don't false-positive. PASSWORD
+// also matches unanchored-on-the-left below because common DB env vars glue it directly
+// onto a prefix with no separator (PGPASSWORD, MYSQLPASSWORD) and there's no legitimate name
+// that merely ends in "...password" without meaning one.
+const SECRET_ENV_NAME =
+  /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSPHRASE|CREDENTIALS?|DSN|DATABASE_URL|REDIS_URL|MONGODB_URI|PASS|PWD|AUTH|HEADER|URL)(?:_|$)|PASSWORD$/i;
+
+export function secretValuesFromEnv(env: Readonly<Record<string, string | undefined>>): string[] {
+  return Object.entries(env)
+    .filter(([key, value]) => SECRET_ENV_NAME.test(key) && typeof value === "string")
+    .map(([, value]) => value!);
+}
+
+export function redactSecrets(input: string, knownSecrets: Iterable<string> = []): string {
   if (!input) return input;
   let out = input;
+  const literals = [...new Set(knownSecrets)]
+    .filter((value) => value.length >= MIN_KNOWN_SECRET_LENGTH)
+    .sort((a, b) => b.length - a.length);
+  for (const value of literals) out = out.split(value).join("[REDACTED]");
   for (const { re, replacement } of SECRET_PATTERNS) {
     out = out.replace(re, replacement ?? "[REDACTED]");
   }
   return out;
+}
+
+/** Hold incomplete lines so a credential split across process-output chunks is
+ * redacted before either half reaches the terminal. */
+export function createRedactingLineWriter(
+  write: (text: string) => void,
+  knownSecrets: Iterable<string> = [],
+): { append: (text: string) => void; flush: () => void } {
+  const secrets = [...knownSecrets];
+  let pending = "";
+  return {
+    append(text: string): void {
+      pending += text;
+      let newline = pending.indexOf("\n");
+      while (newline !== -1) {
+        write(redactSecrets(pending.slice(0, newline + 1), secrets));
+        pending = pending.slice(newline + 1);
+        newline = pending.indexOf("\n");
+      }
+    },
+    flush(): void {
+      if (!pending) return;
+      write(redactSecrets(pending, secrets));
+      pending = "";
+    },
+  };
 }
 
 /**

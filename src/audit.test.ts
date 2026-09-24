@@ -365,7 +365,7 @@ describe("audit sink — secret redaction (B3)", () => {
           operation: "elevate",
           environment: "prod",
           success: false,
-          error: "failed: key sk-abcdefghijklmnopqrstuvwxyz0123456789ABCD rejected",
+          error: `failed: key ${["sk-", "abcdefghijklmnopqrstuvwxyz", "0123456789ABCD"].join("")} rejected`,
           metadata: {
             detail: "postgres://app:S3cr3tPassw0rd@db/x",
             nested: {

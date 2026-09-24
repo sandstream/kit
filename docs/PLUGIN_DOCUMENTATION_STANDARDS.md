@@ -4,25 +4,32 @@ This document defines the documentation structure and content standards for all 
 
 ## Document Structure
 
-Every plugin package should include:
+Every plugin package needs a README, CHANGELOG, and package metadata. Use either a self-contained README or split supporting docs:
 
 ```
 plugin-root/
-├── README.md              # Main overview (required)
-├── docs/
-│   ├── API.md            # ServiceAdapter interface docs
-│   ├── CONFIGURATION.md  # Environment variables & setup
-│   ├── EXAMPLES.md       # Usage examples
-│   ├── TESTING.md        # Testing guide
-│   └── TROUBLESHOOTING.md # Common issues
-├── CHANGELOG.md          # Version history
-├── package.json          # Metadata
-└── plugin.json           # Registry metadata (optional)
+├── README.md              # Required: installation, configuration, usage, API,
+│                          # testing, troubleshooting, support, and version
+├── CHANGELOG.md           # Required: verified version history
+├── package.json           # Required: package metadata
+├── docs/                  # Optional when these topics are complete in README
+│   ├── API.md
+│   ├── CONFIGURATION.md
+│   ├── EXAMPLES.md
+│   ├── TESTING.md
+│   └── TROUBLESHOOTING.md
+└── plugin.json            # Optional registry metadata
 ```
 
-## 1. README.md (Required)
+Small first-party packages may keep all five topics in README rather than create empty or repetitive `docs/` files. Split a topic into `docs/` when it needs more detail, and link it from README. The published tarball must contain every document the README links to.
+
+Match the package type: a `ServiceAdapter` can document `kit add <adapter-name>` after registration in `kitPlugins`; an API client documents its exported functions; a scanner-ingestion package documents its input, local output, and any read-only API calls. Do not present API clients or ingestion packages as `kit add` services.
+
+## README.md (Required)
 
 The README is the primary entry point. It should be concise but comprehensive.
+
+The following extended template illustrates a service adapter. Replace adapter-specific commands and methods with the real exports for API clients or ingestion packages. For a self-contained README, include the API, configuration, examples, testing, and troubleshooting content directly instead of linking to `docs/`.
 
 ### Structure
 
@@ -43,7 +50,7 @@ The README is the primary entry point. It should be concise but comprehensive.
 ## Quick Start
 
 ```bash
-kit plugin install package/name
+kit plugin install railway
 ```
 
 ### Minimal Setup
@@ -67,8 +74,8 @@ export const myAdapter: ServiceAdapter = {
 ## Installation
 
 ```bash
-# Via kit
-kit plugin install provider/service
+# Via kit (use the registry ID, not the adapter's provider/service name)
+kit plugin install railway
 
 # Via npm
 npm install @provider/kit-service
@@ -142,385 +149,11 @@ Current version: 1.0.0
 See [CHANGELOG.md](./CHANGELOG.md) for version history.
 ```
 
-## 2. docs/API.md
+## Detailed reference examples
 
-Full API documentation for the ServiceAdapter interface.
+The [adapter documentation examples](./PLUGIN_DOCUMENTATION_REFERENCE.md) show expanded API, configuration, usage, and testing pages for packages that need more than a self-contained README. These examples are optional layouts; the coverage requirements above apply either way.
 
-```markdown
-# API Reference
-
-## ServiceAdapter Interface
-
-All kit plugins implement the `ServiceAdapter` interface.
-
-### Type Definition
-
-\`\`\`typescript
-interface ServiceAdapter {
-  name: string;
-  description: string;
-  check(context: AdapterContext): Promise<boolean>;
-  provision(context: AdapterContext): Promise<ProvisionResult>;
-  getRequiredTools(): string[];
-}
-\`\`\`
-
-### Properties
-
-#### name: string
-
-Unique identifier in format: `provider/service`
-
-Examples:
-- `stripe/payments`
-- `supabase/database`
-- `railway/hosting`
-
-#### description: string
-
-Human-readable description of what this adapter provisions (50-200 chars).
-
-### Methods
-
-#### check(context): Promise<boolean>
-
-Verify if the service is already provisioned.
-
-**Parameters:**
-- `context: AdapterContext` - Project context and environment
-
-**Returns:** 
-- `true` if already provisioned (skip provision)
-- `false` if provisioning needed
-
-**Example:**
-\`\`\`typescript
-async check(context: AdapterContext): Promise<boolean> {
-  return !!context.existingEnv["SERVICE_API_KEY"];
-}
-\`\`\`
-
-#### provision(context): Promise<ProvisionResult>
-
-Perform actual provisioning. Should be idempotent.
-
-**Parameters:**
-- `context: AdapterContext` - Project context and environment
-
-**Returns:** `ProvisionResult` with secrets and status
-
-**Example:**
-\`\`\`typescript
-async provision(context: AdapterContext): Promise<ProvisionResult> {
-  const key = context.existingEnv["SERVICE_API_KEY"];
-  if (key) {
-    return {
-      success: true,
-      message: "Already configured",
-      secrets: { SERVICE_API_KEY: key },
-    };
-  }
-  // ... actual provisioning
-}
-\`\`\`
-
-#### getRequiredTools(): string[]
-
-List CLI tools needed for this adapter.
-
-**Returns:** Array of tool names (e.g., `["stripe-cli", "terraform"]`)
-
-**Example:**
-\`\`\`typescript
-getRequiredTools(): string[] {
-  return ["aws-cli", "terraform"];
-}
-\`\`\`
-
-## AdapterContext
-
-Information provided to your adapter methods.
-
-\`\`\`typescript
-interface AdapterContext {
-  projectName?: string;           // Project name if available
-  projectPath: string;            // Absolute path to project
-  existingEnv: Record<string, string>;  // Environment variables
-}
-\`\`\`
-
-## ProvisionResult
-
-Result returned from `provision()` method.
-
-\`\`\`typescript
-interface ProvisionResult {
-  success: boolean;               // Did it succeed?
-  message: string;                // Human-readable message
-  secrets?: Record<string, string>;    // Secrets for .env.local
-  config?: Record<string, unknown>;    // Metadata for lock files
-  error?: string;                 // Error code if failed
-}
-\`\`\`
-
-## Common Patterns
-
-### Key-Reuse Pattern
-
-Always check for existing credentials before making API calls:
-
-\`\`\`typescript
-async provision(context: AdapterContext): Promise<ProvisionResult> {
-  const existing = context.existingEnv["API_KEY"];
-  if (existing) {
-    return { success: true, secrets: { API_KEY: existing } };
-  }
-  // Only provision if missing
-}
-\`\`\`
-
-### Multiple Credentials
-
-Return all related secrets together:
-
-\`\`\`typescript
-return {
-  success: true,
-  secrets: {
-    DATABASE_URL: "postgresql://...",
-    DATABASE_HOST: "db.example.com",
-    DATABASE_PORT: "5432",
-    DATABASE_NAME: "myapp",
-  },
-};
-\`\`\`
-
-### Error with Instructions
-
-Provide actionable error messages:
-
-\`\`\`typescript
-return {
-  success: false,
-  error: "missing_credentials",
-  message: [
-    "Set up SERVICE_API_KEY:",
-    "1. Go to https://dashboard.example.com/api-keys",
-    "2. Create a new key",
-    "3. Add to .env.local: SERVICE_API_KEY=key_here",
-  ].join("\n"),
-};
-\`\`\`
-```
-
-## 3. docs/CONFIGURATION.md
-
-Environment variables and configuration options.
-
-```markdown
-# Configuration Guide
-
-## Environment Variables
-
-### Required
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `SERVICE_API_KEY` | API authentication key | `sk_live_...` |
-| `SERVICE_WEBHOOK_SECRET` | Webhook signing secret | `whsec_...` |
-
-### Optional
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `SERVICE_BASE_URL` | Custom API endpoint | `https://api.service.com` |
-| `SERVICE_TIMEOUT` | Request timeout (ms) | `30000` |
-| `SERVICE_RETRY_COUNT` | Retry failed requests | `3` |
-
-## Setup Instructions
-
-### For Development
-
-1. Create account at https://example.com
-2. Navigate to Settings > API Keys
-3. Generate a new key
-4. Add to `.env.local`:
-   ```
-   SERVICE_API_KEY=sk_test_...
-   SERVICE_WEBHOOK_SECRET=whsec_...
-   ```
-
-### For Production
-
-Same as development, but use production credentials:
-```
-SERVICE_API_KEY=sk_live_...
-SERVICE_WEBHOOK_SECRET=whsec_live_...
-```
-
-## Advanced Configuration
-
-### Custom Endpoints
-
-Override API endpoint for self-hosted instances:
-
-```env
-SERVICE_BASE_URL=https://api.internal.example.com
-SERVICE_API_KEY=your_key
-```
-
-### Timeouts and Retries
-
-Configure request behavior:
-
-```env
-SERVICE_TIMEOUT=60000          # 60 second timeout
-SERVICE_RETRY_COUNT=5          # Retry 5 times
-SERVICE_RETRY_DELAY=1000       # 1 second between retries
-```
-```
-
-## 4. docs/EXAMPLES.md
-
-Usage examples for different scenarios.
-
-```markdown
-# Usage Examples
-
-## Basic Setup
-
-```typescript
-import { adapter } from "@provider/kit-service";
-
-const context = {
-  projectPath: process.cwd(),
-  existingEnv: process.env,
-};
-
-// Check if already configured
-const isConfigured = await adapter.check(context);
-console.log(isConfigured); // true or false
-
-// Provision if needed
-const result = await adapter.provision(context);
-if (result.success) {
-  console.log("Configured! Secrets:", result.secrets);
-}
-```
-
-## In kit Projects
-
-Adapters ship inside a plugin package, and kit discovers them from the `kitPlugins`
-array in `package.json` (`loadPluginAdapters`). `.kit.toml` has no `[adapters]`
-section — the adapter names a plugin exports are what `kit add` then offers.
-
-```json
-{ "kitPlugins": ["@acme/kit-stripe", "@acme/kit-supabase"] }
-```
-
-Then use CLI:
-```bash
-kit add stripe/payments
-```
-
-## Checking Status
-
-```typescript
-if (await adapter.check(context)) {
-  console.log("Service is ready to use");
-} else {
-  console.log("Run kit setup to configure");
-}
-```
-
-## Handling Errors
-
-```typescript
-const result = await adapter.provision(context);
-
-if (!result.success) {
-  console.error("Setup failed:", result.message);
-  if (result.error === "missing_credentials") {
-    console.log("Follow the setup instructions above");
-  }
-}
-```
-```
-
-## 5. docs/TESTING.md
-
-Testing guidelines for plugins.
-
-```markdown
-# Testing Guide
-
-## Test Structure
-
-```typescript
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
-import { adapter } from "./plugin.js";
-
-const ctx = (env = {}) => ({
-  projectPath: "/tmp/test",
-  projectName: "test-app",
-  existingEnv: env,
-});
-
-describe("Plugin Name", () => {
-  // Tests here
-});
-```
-
-## Test Checklist
-
-- [ ] Adapter has correct name format (provider/service)
-- [ ] check() returns true when configured
-- [ ] check() returns false when missing
-- [ ] provision() returns success=true on valid credentials
-- [ ] provision() returns error when credentials missing
-- [ ] provision() implements key-reuse pattern
-- [ ] getRequiredTools() lists all required CLIs
-- [ ] Error messages are actionable
-- [ ] All tests pass locally
-
-## Common Test Patterns
-
-```typescript
-// Test with missing credentials
-it("check returns false when key absent", async () => {
-  assert.equal(await adapter.check(ctx()), false);
-});
-
-// Test with existing credentials
-it("check returns true when key present", async () => {
-  const result = await adapter.check(ctx({ API_KEY: "test" }));
-  assert.equal(result, true);
-});
-
-// Test error handling
-it("provision returns error with helpful message", async () => {
-  const result = await adapter.provision(ctx());
-  assert.equal(result.success, false);
-  assert.match(result.message, /setup|instructions/i);
-});
-```
-
-## Running Tests
-
-```bash
-npm test
-```
-
-Expected output:
-```
-# tests 10
-# pass 10
-# fail 0
-```
-```
-
-## 6. CHANGELOG.md
+## CHANGELOG.md
 
 Version history and breaking changes.
 
@@ -578,7 +211,7 @@ Use [Semantic Versioning](https://semver.org/):
 Example: `feat: add webhook signing support`
 ```
 
-## 7. package.json Metadata
+## package.json Metadata
 
 Include plugin metadata in package.json:
 
@@ -605,7 +238,7 @@ Include plugin metadata in package.json:
 }
 ```
 
-## 8. Registry Metadata Schema
+## Registry Metadata Schema
 
 For plugins submitted to the official registry, include a `plugin.json`:
 
@@ -634,7 +267,10 @@ For plugins submitted to the official registry, include a `plugin.json`:
 - [ ] Configuration section shows all required env vars
 - [ ] Examples work without modification
 - [ ] API documentation is complete
+- [ ] Testing instructions match the scripts this package actually provides
 - [ ] Troubleshooting covers common issues
+- [ ] Support path is provided
+- [ ] Every linked file is included in the npm tarball
 - [ ] CHANGELOG follows Semantic Versioning
 - [ ] All documentation is spell-checked
 - [ ] Links are not broken
@@ -655,7 +291,7 @@ For plugins submitted to the official registry, include a `plugin.json`:
 ### DON'T
 
 - Assume user knowledge of the service
-- Put all docs in one long README
+- Bury long reference material in a README when a linked supporting document is clearer
 - Use acronyms without explanation
 - Hardcode usernames/credentials in examples
 - Document unfinished features
@@ -665,11 +301,12 @@ For plugins submitted to the official registry, include a `plugin.json`:
 
 When publishing to npm:
 
-1. Ensure all .md files are in package
-2. Set `files` in package.json:
+1. Include README and CHANGELOG, plus any linked `docs/` files, in the package.
+2. Set `files` in package.json to match the chosen layout. For a split layout:
    ```json
    "files": ["dist", "docs", "README.md", "CHANGELOG.md"]
    ```
+   For a self-contained README, omit `docs` and retain both Markdown files.
 3. Create detailed npm package description
 4. Link to GitHub repository
 5. Add topic: "kit-plugin"
@@ -682,12 +319,17 @@ To validate plugin documentation:
 # Check files exist
 test -f README.md || echo "Missing README.md"
 test -f CHANGELOG.md || echo "Missing CHANGELOG.md"
-test -d docs || echo "Missing docs directory"
+# A docs/ directory is optional when README covers its five topics.
 
 # Check required sections in README
 grep -q "Installation" README.md || echo "Missing Installation section"
 grep -q "Configuration" README.md || echo "Missing Configuration section"
 grep -q "Usage" README.md || echo "Missing Usage section"
+grep -q "API" README.md || echo "Missing API section"
+grep -q "Testing" README.md || echo "Missing Testing section"
+grep -q "Troubleshooting" README.md || echo "Missing Troubleshooting section"
+grep -q "Support" README.md || echo "Missing Support section"
+npm pack --dry-run --json  # Inspect README, CHANGELOG, linked docs, and test exclusions.
 ```
 
 ## Template

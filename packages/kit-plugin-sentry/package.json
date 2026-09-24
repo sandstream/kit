@@ -1,6 +1,6 @@
 {
   "name": "sandstream-kit-plugin-sentry",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Sentry REST API client for kit \u2014 issue triage, release tagging, project introspection.",
   "keywords": [
     "kit-plugin",
@@ -12,7 +12,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc"

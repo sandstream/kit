@@ -8,11 +8,12 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig } from "./config.js";
+import { loadConfig, type HooksConfig } from "./config.js";
+import { checkHooks, hookCheckStatus } from "./check-hooks.js";
 import { KIT_BLOCK_BEGIN } from "./agent-config.js";
 import { checkGitignore } from "./check-gitignore.js";
 import { openMemoryDb, getStats } from "./memory/db.js";
-import { getClaudeSettingsPath } from "./memory/install.js";
+import { allMemoryHooksLiveness } from "./memory/install.js";
 
 // Dependency allowlist file (kept as a literal here, matching security-policy.ts
 // + post-pull-audit.ts — the convention isn't exported).
@@ -36,8 +37,38 @@ function fileIncludes(path: string, needle: string): boolean {
   }
 }
 
+async function gitignoreStatus(cwd: string): Promise<StatusItem> {
+  const item = { key: "gitignore", label: "gitignore hygiene" };
+  try {
+    const ignore = await checkGitignore(cwd);
+    return {
+      ...item,
+      ok: ignore.missingPatterns.length === 0,
+      detail:
+        ignore.missingPatterns.length === 0
+          ? "sensitive paths covered"
+          : `${ignore.missingPatterns.length} sensitive path(s) unprotected`,
+      hint:
+        ignore.trackedFiles.length > 0
+          ? "review already tracked sensitive files; ignore rules cannot untrack them"
+          : ignore.missingPatterns.length === 0
+            ? undefined
+            : "run `kit security check-gitignore --fix`",
+    };
+  } catch (error) {
+    return {
+      ...item,
+      ok: false,
+      detail:
+        error instanceof Error ? error.message : "Git ignore protection could not be verified",
+      hint: "ensure Git is available and run inside a Git working tree",
+    };
+  }
+}
+
 export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusItem[]> {
   const items: StatusItem[] = [];
+  let configuredHooks: HooksConfig | undefined;
 
   const configPath = join(cwd, ".kit.toml");
   const hasConfig = existsSync(configPath);
@@ -52,6 +83,7 @@ export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusI
   if (hasConfig) {
     try {
       const cfg = await loadConfig(configPath);
+      configuredHooks = cfg.hooks;
       const hasVault = !!(
         cfg.secrets &&
         (cfg.secrets.store || (cfg.secrets.keys && Object.keys(cfg.secrets.keys).length > 0))
@@ -77,18 +109,7 @@ export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusI
   }
 
   // Secret hygiene — does .gitignore cover the sensitive paths kit cares about?
-  const ignore = await checkGitignore(cwd);
-  items.push({
-    key: "gitignore",
-    label: "gitignore hygiene",
-    ok: ignore.missingPatterns.length === 0,
-    detail:
-      ignore.missingPatterns.length === 0
-        ? "sensitive paths covered"
-        : `${ignore.missingPatterns.length} sensitive path(s) unignored`,
-    hint:
-      ignore.missingPatterns.length === 0 ? undefined : "run `kit security check-gitignore --fix`",
-  });
+  items.push(await gitignoreStatus(cwd));
 
   // Schema currency. `kit config migrate --check` has answered this since versioning landed —
   // and nothing called it, so `✓ .kit.toml present` was the only thing the checklist said about
@@ -147,13 +168,34 @@ export async function gatherStatus(cwd: string = process.cwd()): Promise<StatusI
     hint: messages > 0 ? undefined : "run `kit memory index`",
   });
 
-  const hooked = fileIncludes(getClaudeSettingsPath(), "kit memory hook");
+  const hookLiveness = allMemoryHooksLiveness();
+  const hooked = hookLiveness.everInstalled && hookLiveness.missing.length === 0;
+  const hookDetail = !hookLiveness.everInstalled
+    ? "not installed"
+    : hookLiveness.missing.length > 0
+      ? `missing: ${hookLiveness.missing.join(", ")}`
+      : `${hookLiveness.present.length} wired`;
   items.push({
     key: "memory-hooks",
     label: "memory hooks",
     ok: hooked,
-    detail: hooked ? "installed" : "not installed",
+    detail: hookDetail,
     hint: hooked ? undefined : "run `kit memory install`",
+  });
+
+  const hookChecks = configuredHooks ? await checkHooks(configuredHooks, ".git", cwd) : [];
+  const failingHooks = hookChecks.filter((check) => hookCheckStatus(check) === "fail");
+  const gitHooksWired = hookChecks.length > 0 && failingHooks.length === 0;
+  items.push({
+    key: "git-hooks",
+    label: "git hooks",
+    ok: gitHooksWired,
+    detail: gitHooksWired
+      ? `${hookChecks.length} wired`
+      : failingHooks.length > 0
+        ? `missing or outdated: ${failingHooks.map((check) => check.hookName).join(", ")}`
+        : "not configured",
+    hint: gitHooksWired ? undefined : "run `kit hooks check` and `kit hooks install`",
   });
 
   return items;

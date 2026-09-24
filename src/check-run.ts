@@ -17,7 +17,12 @@ import { checkTools, type ToolStatus } from "./check-tools.js";
 import { checkServices, type ServiceStatus } from "./check-services.js";
 import { checkSecrets, type SecretStatus } from "./check-secrets.js";
 import { checkSkills, type SkillCheckResult } from "./check-skills.js";
-import { checkHooks, isGitRepository, type HookCheckResult } from "./check-hooks.js";
+import {
+  checkHooks,
+  hookCheckStatus,
+  isGitRepository,
+  type HookCheckResult,
+} from "./check-hooks.js";
 import { checkWebSearch, type WebSearchStatus } from "./check-web-search.js";
 import { checkSecurity, type SecurityCheckResult, type GateOpts } from "./check-security.js";
 import { checkLockFiles, type LockCheckResult } from "./check-lock.js";
@@ -141,7 +146,7 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
       : [];
   const services =
     wants("services") && config.services
-      ? await step("services", () => checkServices(config.services!))
+      ? await step("services", () => checkServices(config.services!, cwd))
       : [];
   const secrets =
     wants("secrets") && config.secrets
@@ -257,7 +262,7 @@ export function checkRunToJsonChecks(r: CheckRunResult): JsonCheck[] {
     })),
     ...r.hooks.map((h) => ({
       name: h.hookName,
-      status: (!h.installed ? "fail" : !h.upToDate ? "warn" : "pass") as JsonCheck["status"],
+      status: hookCheckStatus(h) as JsonCheck["status"],
       detail: h.detail,
       category: "hooks",
     })),

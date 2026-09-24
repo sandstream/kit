@@ -1,7 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -78,7 +86,7 @@ describe("remote-sync — loadSyncConfig (LOCAL, ~/.kit only)", () => {
     }
   });
 
-  it("encryption is ON by default and OFF only on an explicit encrypt = false", () => {
+  it("requires encryption and rejects an explicit encrypt = false downgrade", () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-cfg-"));
     const prev = process.env.KIT_MEMORY_DIR;
     process.env.KIT_MEMORY_DIR = dir;
@@ -92,12 +100,12 @@ describe("remote-sync — loadSyncConfig (LOCAL, ~/.kit only)", () => {
         '[memory.sync]\nremote = "git@h:me/mem.git"\nencrypt = true\n',
       );
       assert.equal(loadSyncConfig()?.encrypt, true);
-      // encrypt = false → opt-out honored
+      // A local config must not turn a secret-dense remote blob into plaintext.
       writeFileSync(
         getSyncConfigPath(),
         '[memory.sync]\nremote = "git@h:me/mem.git"\nencrypt = false\n',
       );
-      assert.equal(loadSyncConfig()?.encrypt, false);
+      assert.throws(() => loadSyncConfig(), /encryption.*cannot be disabled/i);
       // a non-boolean must NOT silently disable encryption — anything but a literal
       // `false` stays encrypted (fail-safe).
       writeFileSync(
@@ -152,6 +160,28 @@ describe("remote-sync — assertRemoteNotProjectOrigin (anti-exfil guard)", () =
       // a genuinely separate private repo is allowed
       assert.doesNotThrow(() =>
         assertRemoteNotProjectOrigin("git@github.com:me/private-memory.git", proj),
+      );
+    } finally {
+      rmSync(proj, { recursive: true, force: true });
+    }
+  });
+
+  it("redacts credentials from a refused remote while preserving the repo", () => {
+    const proj = mkdtempSync(join(tmpdir(), "kit-proj-secret-url-"));
+    const secret = "ghp_" + "D".repeat(36);
+    const remote = `https://${secret}@github.com/me/project.git`;
+    try {
+      git(["init", "-q"], proj);
+      git(["remote", "add", "origin", remote], proj);
+      assert.throws(
+        () => assertRemoteNotProjectOrigin(remote, proj),
+        (err: unknown) => {
+          assert.ok(err instanceof Error);
+          assert.ok(!err.message.includes(secret), "remote error must not expose credentials");
+          assert.match(err.message, /https:\/\/\[REDACTED\]@github\.com\/me\/project\.git/);
+          assert.match(err.message, /separate private repo/);
+          return true;
+        },
       );
     } finally {
       rmSync(proj, { recursive: true, force: true });
@@ -221,63 +251,28 @@ describe("remote-sync — push → pull round trip over a git remote", () => {
     }
   });
 
-  it("encrypt = false pushes a PLAINTEXT SQLite blob that pulls with NO passphrase", () => {
-    const bare = mkdtempSync(join(tmpdir(), "kit-pbare-")) + "/mem.git";
-    const machineA = mkdtempSync(join(tmpdir(), "kit-pA-"));
-    const machineB = mkdtempSync(join(tmpdir(), "kit-pB-"));
+  it("rejects a hand-built encrypt = false config before transport receives a blob", () => {
+    const machine = mkdtempSync(join(tmpdir(), "kit-pA-"));
     const proj = mkdtempSync(join(tmpdir(), "kit-pproj-"));
+    const marker = join(proj, "transport-ran");
     const prevDir = process.env.KIT_MEMORY_DIR;
-    const marker = "plaintext-sync-marker-qqq";
     try {
-      execFileSync("git", ["init", "--bare", "-q", bare]);
       const cfg: SyncConfig = {
-        transport: "git",
-        remote: bare,
-        branch: "main",
+        transport: "command",
+        pushCmd: `touch ${marker}`,
+        pullCmd: "true",
         file: "memory.db",
         encrypt: false,
       };
 
-      process.env.KIT_MEMORY_DIR = machineA;
-      const dbA = openMemoryDb();
-      upsertSession(dbA, { sessionId: "s-plain", harness: "claude-code", project: "p" });
-      insertMessage(dbA, {
-        uuid: "u-plain",
-        sessionId: "s-plain",
-        type: "message",
-        role: "user",
-        content: marker,
-      });
-      dbA.close();
-
-      // NO passphrase, NO recipient — the whole point of the low-ceremony path.
-      const pushed = pushMemory(cfg, undefined, proj);
-      assert.equal(pushed.pushed, true);
-      assert.equal(pushed.verified, true);
-
-      // the remote blob is a real, unencrypted SQLite file (magic "SQLite format 3\0"),
-      // NOT a kit backup MAGIC — proving encryption was actually skipped.
-      const inspect = mkdtempSync(join(tmpdir(), "kit-pinspect-"));
-      git(["clone", "-q", "--branch", "main", bare, "."], inspect);
-      const blob = readFileSync(join(inspect, "memory.db"));
-      assert.equal(blob.subarray(0, 16).toString("latin1"), "SQLite format 3\0");
-      rmSync(inspect, { recursive: true, force: true });
-
-      // machine B pulls with NO passphrase and recalls the message.
-      process.env.KIT_MEMORY_DIR = machineB;
-      const r = pullMemory(cfg, undefined, proj);
-      assert.equal(r.found, true);
-      assert.ok((r.merge?.messages ?? 0) >= 1, "at least one message merged");
-      const dbB = openMemoryDb();
-      const hits = searchMessages(dbB, "marker");
-      dbB.close();
-      assert.ok(hits.some((h) => (h.content ?? "").includes(marker)));
+      process.env.KIT_MEMORY_DIR = machine;
+      openMemoryDb().close();
+      assert.throws(() => pushMemory(cfg, undefined, proj), /encryption.*cannot be disabled/i);
+      assert.equal(existsSync(marker), false, "transport must not run after a downgrade attempt");
     } finally {
       if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
       else process.env.KIT_MEMORY_DIR = prevDir;
-      for (const d of [bare.replace(/\/mem\.git$/, ""), machineA, machineB, proj]) {
-        rmSync(d, { recursive: true, force: true });
-      }
+      for (const d of [machine, proj]) rmSync(d, { recursive: true, force: true });
     }
   });
 
@@ -475,6 +470,25 @@ describe("remote-sync — init + auto-sync wiring + nudge", () => {
       assert.equal(loadSyncConfig()?.transport, "command");
     });
   });
+
+  it(
+    "initSyncConfig never follows an existing sync.toml symlink",
+    { skip: process.platform === "win32" },
+    () => {
+      withDir((dir) => {
+        const operatorFile = join(dir, "operator-owned.toml");
+        writeFileSync(operatorFile, "operator bytes");
+        symlinkSync(operatorFile, getSyncConfigPath());
+
+        assert.equal(initSyncConfig({ remote: "git@h:me/m.git" }).created, false);
+        assert.equal(readFileSync(operatorFile, "utf8"), "operator bytes");
+
+        assert.equal(initSyncConfig({ remote: "git@h:me/m.git", force: true }).created, true);
+        assert.equal(lstatSync(getSyncConfigPath()).isSymbolicLink(), false);
+        assert.equal(readFileSync(operatorFile, "utf8"), "operator bytes");
+      });
+    },
+  );
 
   it("tryAutoPull / tryAutoPush are no-ops without the opt-in flags (and never throw)", () => {
     withDir(() => {

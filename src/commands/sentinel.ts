@@ -5,13 +5,41 @@
  * so it lives in the neutral cli-shared module. Imports only sibling core modules.
  */
 import { resolve, dirname } from "node:path";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { loadConfig, type kitConfig } from "../config.js";
 import { resolveConfigPath, buildHealthCtx } from "../cli-shared.js";
+import { isReadOnlyMode } from "../read-only-mode.js";
+import { execFileNoThrow } from "../utils/execFileNoThrow.js";
 import type { SentinelSummary } from "../sentinel.js";
+
+const SENTINEL_MARKER = /kit-sentinel:([^\s]+?)\s*-->/g;
+
+/** Read-only dedup: open issues and PRs carrying sentinel finding markers. */
+async function openSentinelMarkers(): Promise<Set<string> | null> {
+  const out = new Set<string>();
+  for (const base of [
+    ["issue", "list"],
+    ["pr", "list"],
+  ]) {
+    const res = await execFileNoThrow(
+      "gh",
+      [...base, "--label", "kit-sentinel", "--state", "open", "--json", "body", "--limit", "200"],
+      { timeout: 15_000 },
+    );
+    if (!res.ok) return null; // gh absent/unauth → agent dedups (fail-open)
+    try {
+      for (const it of JSON.parse(res.stdout) as { body?: string }[]) {
+        for (const g of (it.body ?? "").matchAll(SENTINEL_MARKER)) out.add(g[1]);
+      }
+    } catch {
+      return null;
+    }
+  }
+  return out;
+}
 
 export async function cmdSentinel(): Promise<boolean> {
   const sub = process.argv[3];
@@ -31,57 +59,28 @@ export async function cmdSentinel(): Promise<boolean> {
   const { runSentinel, healthToRedFindings, proposalSummary, SENTINEL_CACHE } =
     await import("../sentinel.js");
   const { runHealth, selectSensors, defaultHealthDeps } = await import("../health.js");
-  const { execFileNoThrow } = await import("../utils/execFileNoThrow.js");
-
   const proposals = await runSentinel(process.cwd(), {
     gatherRed: async () => {
       const ctx = await buildHealthCtx(config);
       return healthToRedFindings(await runHealth(ctx, selectSensors(ctx), defaultHealthDeps));
     },
-    openMarkers: async () => {
-      // Read-only dedup: open issues + PRs labeled kit-sentinel, scrape findingId markers.
-      const out = new Set<string>();
-      for (const base of [
-        ["issue", "list"],
-        ["pr", "list"],
-      ]) {
-        const res = await execFileNoThrow(
-          "gh",
-          [
-            ...base,
-            "--label",
-            "kit-sentinel",
-            "--state",
-            "open",
-            "--json",
-            "body",
-            "--limit",
-            "200",
-          ],
-          { timeout: 15_000 },
-        );
-        if (!res.ok) return null; // gh absent/unauth → agent dedups (fail-open)
-        try {
-          for (const it of JSON.parse(res.stdout) as { body?: string }[]) {
-            for (const g of (it.body ?? "").matchAll(/kit-sentinel:([^\s]+?)\s*-->/g))
-              out.add(g[1]);
-          }
-        } catch {
-          return null;
-        }
-      }
-      return out;
-    },
+    openMarkers: openSentinelMarkers,
   });
 
   // L3: cache a compact summary for the SessionStart surface (#53). Best-effort —
   // a cache-write failure must never fail the run itself.
-  try {
-    const cachePath = resolve(process.cwd(), SENTINEL_CACHE);
-    await mkdir(dirname(cachePath), { recursive: true });
-    writeFileSync(cachePath, JSON.stringify(proposalSummary(proposals), null, 2) + "\n");
-  } catch {
-    // no cache → status surface simply stays quiet
+  //
+  // Read-only mode promises "all writes will be refused"; this cache is a write like
+  // any other, so it must not persist behind that banner's back (RO-5: it used to,
+  // leaving an untracked `.kit/sentinel.json` in an audited read-only repo).
+  if (!isReadOnlyMode()) {
+    try {
+      const cachePath = resolve(process.cwd(), SENTINEL_CACHE);
+      await mkdir(dirname(cachePath), { recursive: true });
+      writeFileSync(cachePath, JSON.stringify(proposalSummary(proposals), null, 2) + "\n");
+    } catch {
+      // no cache → status surface simply stays quiet
+    }
   }
 
   if (jsonMode) {
@@ -110,16 +109,31 @@ export async function cmdSentinel(): Promise<boolean> {
 async function cmdSentinelInstall(): Promise<boolean> {
   const { sentinelWorkflow } = await import("../sentinel.js");
   const dest = resolve(process.cwd(), ".github/workflows/kit-sentinel.yml");
-  if (existsSync(dest) && !hasFlag(process.argv, "--force")) {
-    console.error(
-      `${c.yellow}.github/workflows/kit-sentinel.yml exists — re-run with --force to overwrite${c.reset}`,
-    );
-    process.exitCode = 1;
-    return false;
-  }
+  const force = hasFlag(process.argv, "--force");
   const schedule = flagValue(process.argv, "--schedule");
   await mkdir(dirname(dest), { recursive: true });
-  writeFileSync(dest, schedule ? sentinelWorkflow(schedule) : sentinelWorkflow());
+  const body = schedule ? sentinelWorkflow(schedule) : sentinelWorkflow();
+  if (force) {
+    const stage = mkdtempSync(resolve(dirname(dest), ".kit-sentinel-install-"));
+    try {
+      const replacement = resolve(stage, "kit-sentinel.yml");
+      writeFileSync(replacement, body);
+      renameSync(replacement, dest);
+    } finally {
+      rmSync(stage, { recursive: true, force: true });
+    }
+  } else {
+    try {
+      writeFileSync(dest, body, { flag: "wx" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      console.error(
+        `${c.yellow}.github/workflows/kit-sentinel.yml exists — re-run with --force to overwrite${c.reset}`,
+      );
+      process.exitCode = 1;
+      return false;
+    }
+  }
   console.log(`${c.green}✓${c.reset} wrote .github/workflows/kit-sentinel.yml`);
   console.log(
     `  ${c.dim}recurs \`kit sentinel run --json\`; an agent (or a downstream step) acts on the JSON${c.reset}`,

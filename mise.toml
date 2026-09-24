@@ -1,2 +1,7 @@
 [tools]
+"aqua:boyter/scc" = "4.0.0"
+"aqua:hadolint/hadolint" = "2.15.1"
 node = "22"
+"npm:jscpd" = "5.1.2"
+"npm:license-checker" = "25.0.1"
+"pipx:lizard" = "1.24.0"

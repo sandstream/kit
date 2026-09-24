@@ -45,7 +45,7 @@ function runCi(dir: string, args: string[], env: Record<string, string> = {}): s
       ...process.env,
       KIT_HIDE_HOOK_SKIP_BANNER: "1",
       KIT_AUDIT_ANCHOR: "0",
-      // Keep MY_KEY unset so exactly one check fails, as in the report that prompted this.
+      // The unset secret and unverifiable Git protection are blockers; unrelated skips are not.
       ...env,
     },
     timeout: 300_000,
@@ -92,9 +92,13 @@ describe("GitHub step summary", () => {
       assert.equal(count("⚠️"), warnings, "warn rows vs footer");
       assert.equal(count("➖"), skipped, "skip rows vs footer");
 
-      // The shape that produced the report: many skips, exactly one real failure.
+      // Both real blockers stay visible among the many unrelated skips.
       assert.ok(skipped > 5, "a bare directory skips most checks");
-      assert.equal(failed, 1, "only the unset secret actually failed");
+      assert.equal(failed, 2, "unset secret plus unverifiable Git protection");
+      const gitRow = md.split("\n").find((line) => line.includes(".env gitignored"));
+      assert.ok(gitRow, "Git verification must be included in the summary");
+      assert.ok(gitRow.startsWith("| ❌ |"), "Git verification failure must stay a blocker");
+      assert.match(gitRow, /could not be verified/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -131,7 +135,7 @@ describe("GitLab JUnit", () => {
       assert.ok(attrs, "the suite must declare a skipped count");
       const [, tests, failures, skipped] = attrs.map(Number);
       assert.ok(skipped > 5);
-      assert.equal(failures, 1);
+      assert.equal(failures, 2, "unset secret plus unverifiable Git protection");
 
       const skippedTags = (xml.match(/<skipped /g) ?? []).length;
       assert.equal(skippedTags, skipped, "one <skipped> per skipped check");
@@ -139,6 +143,10 @@ describe("GitLab JUnit", () => {
       // No testcase may be empty: an empty one reads as passed, which is how 24 checks that
       // never ran showed up green.
       const cases = xml.match(/<testcase [^>]*>([\s\S]*?)<\/testcase>/g) ?? [];
+      const gitCase = cases.find((testcase) => testcase.includes('name=".env gitignored"'));
+      assert.ok(gitCase, "Git verification must be included in JUnit");
+      assert.match(gitCase, /<failure /);
+      assert.match(gitCase, /could not be verified/);
       const empty = cases.filter(
         (c) => !c.includes("<failure") && !c.includes("<system-out") && !c.includes("<skipped"),
       );

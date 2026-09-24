@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { checkSecrets } from "./check-secrets.js";
@@ -194,5 +194,38 @@ describe("checkSecrets - multiple sources", () => {
     const config: SecretsConfig = { store: "env" };
     const { keys } = await checkSecrets(config);
     assert.deepEqual(keys, []);
+  });
+});
+
+describe("checkSecrets - dotenvx source", () => {
+  it("uses the governed cwd and never returns the decrypted value", async () => {
+    const project = await mkdtemp(join(tmpdir(), "kit-dotenvx-project-"));
+    const bin = join(project, "bin");
+    const previousPath = process.env.PATH;
+    const syntheticSecret = "synthetic_dotenvx_secret_123456789";
+    try {
+      await mkdir(bin);
+      await writeFile(join(project, ".env"), "encrypted=true\n", "utf8");
+      await writeFile(
+        join(bin, "dotenvx"),
+        `#!/bin/sh\nif [ -f .env ]; then printf '%s' '${syntheticSecret}'; exit 0; fi\nexit 1\n`,
+        "utf8",
+      );
+      await chmod(join(bin, "dotenvx"), 0o755);
+      process.env.PATH = `${bin}:${previousPath ?? ""}`;
+
+      const { keys } = await checkSecrets(
+        { store: "dotenvx", keys: { API_KEY: { source: "dotenvx" } } },
+        project,
+      );
+
+      assert.equal(keys[0].available, true);
+      assert.match(keys[0].detail, /dotenvx/i);
+      assert.doesNotMatch(JSON.stringify(keys), new RegExp(syntheticSecret));
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      await rm(project, { recursive: true, force: true });
+    }
   });
 });

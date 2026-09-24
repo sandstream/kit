@@ -692,6 +692,66 @@ describe("kit_run + signed-scope egress mediation", () => {
       await cleanup();
     }
   });
+
+  it("redacts secret-shaped command, stdout and stderr text from the MCP response", async () => {
+    const secret = "sk_" + "test_" + "B".repeat(32);
+    const script =
+      "process.stdout.write(`stdout request_id=req_mcp ${process.argv[1]}\\n`);process.stderr.write(`stderr request_id=req_mcp ${process.argv[1]}\\n`)";
+    const command = `"${process.execPath}" -e '${script}' ${secret}`;
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_run",
+        arguments: { command, cwd: tempDir },
+      });
+      const text = (result.content as Array<{ text: string }>)[0].text;
+      assert.ok(
+        !text.includes(secret),
+        "MCP response must not expose command output or argv secrets",
+      );
+      assert.match(text, /\[REDACTED\]/);
+      assert.match(text, /stdout request_id=req_mcp/);
+      assert.match(text, /stderr request_id=req_mcp/);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("redacts opaque command arguments known from the target .env.local", async () => {
+    const secret = "opaque-mcp-token-" + "C".repeat(32);
+    await writeFile(join(tempDir, ".env.local"), `TEST_API_TOKEN=${secret}\n`, "utf8");
+    const command = `"${process.execPath}" -e 'console.log(process.argv[1])' ${secret}`;
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_run",
+        arguments: { command, cwd: tempDir },
+      });
+      const text = (result.content as Array<{ text: string }>)[0].text;
+      assert.ok(!text.includes(secret), "MCP response must not expose known opaque arguments");
+      assert.match(text, /Command:.*\[REDACTED\]/);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("redacts opaque command arguments from quoted .env.local values", async () => {
+    const secret = "opaque-quoted-mcp-token-" + "D".repeat(32);
+    await writeFile(join(tempDir, ".env.local"), `TEST_API_TOKEN="${secret}"\n`, "utf8");
+    const command = `"${process.execPath}" -e 'console.log(process.argv[1])' ${secret}`;
+    const { client, cleanup } = await createTestClient();
+    try {
+      const result = await client.callTool({
+        name: "kit_run",
+        arguments: { command, cwd: tempDir },
+      });
+      const text = (result.content as Array<{ text: string }>)[0].text;
+      assert.ok(!text.includes(secret), "quoted dotenv values must be normalized before redaction");
+      assert.match(text, /Command:.*\[REDACTED\]/);
+    } finally {
+      await cleanup();
+    }
+  });
 });
 
 // ─── kit_init ──────────────────────────────────────────────────────────────

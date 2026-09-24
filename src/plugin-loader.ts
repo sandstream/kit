@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { resolve, join, relative } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { resolve, join, relative, isAbsolute, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AdapterRegistry, ServiceAdapter } from "./adapters/types.js";
 
@@ -24,7 +24,7 @@ function isValidPluginName(name: string): boolean {
  *
  * Plugin registration protocol:
  * 1. Read `kitPlugins` array from `<projectPath>/package.json`
- * 2. For each entry, attempt to import `<plugin>/kit-adapter` then `<plugin>`
+ * 2. For each entry, attempt its adapter entry points and built package output
  * 3. Expect the module to export `{ adapter: ServiceAdapter }` or `{ adapters: ServiceAdapter[] }`
  * 4. Invalid/missing plugins are skipped with a warning (never throw)
  *
@@ -71,7 +71,7 @@ async function readkitPlugins(projectPath: string): Promise<string[]> {
 }
 
 /**
- * Attempt to load a plugin by name, trying `<plugin>/kit-adapter` first, then `<plugin>`.
+ * Attempt to load a plugin by name, trying adapter entry points and conventional package output.
  * Returns an array of ServiceAdapters or throws if both entry points fail.
  */
 async function loadSinglePlugin(
@@ -85,9 +85,13 @@ async function loadSinglePlugin(
 
   // Resolve the plugin from the project's node_modules (not kit's own node_modules)
   const nodeModules = resolve(projectPath, "node_modules");
+  const realNodeModules = await realpath(nodeModules);
   const candidates = [
     join(nodeModules, pluginName, "kit-adapter.js"),
     join(nodeModules, pluginName, "kit-adapter.cjs"),
+    join(nodeModules, pluginName, "dist", "index.js"),
+    join(nodeModules, pluginName, "dist", "index.mjs"),
+    join(nodeModules, pluginName, "dist", "index.cjs"),
     join(nodeModules, pluginName, "index.js"),
     join(nodeModules, pluginName),
   ];
@@ -96,20 +100,22 @@ async function loadSinglePlugin(
   let lastError: unknown;
 
   for (const candidate of candidates) {
-    // Defense in depth: never import anything that resolves outside node_modules
-    const resolved = resolve(candidate);
-    const rel = relative(nodeModules, resolved);
-    if (rel.startsWith("..") || rel === "") {
-      lastError = new Error(`Refusing to import "${candidate}" outside node_modules`);
-      continue;
-    }
     try {
+      // npm workspaces and package entrypoints can be symlinks. Check the actual
+      // target, then import that same canonical path so a symlink cannot escape
+      // node_modules between the check and module resolution.
+      const resolved = await realpath(candidate);
+      const rel = relative(realNodeModules, resolved);
+      if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+        throw new Error(`Refusing to import "${candidate}" outside node_modules`);
+      }
       // import() needs a file:// URL for an absolute path on Windows — a bare
       // "C:\\…" path throws ERR_UNSUPPORTED_ESM_URL_SCHEME. pathToFileURL is a
       // no-op-equivalent on POSIX (still produces a valid file:// URL). #43.
       mod = await import(pathToFileURL(resolved).href);
       break;
     } catch (err) {
+      if (err instanceof Error && err.message.includes("outside node_modules")) throw err;
       lastError = err;
     }
   }

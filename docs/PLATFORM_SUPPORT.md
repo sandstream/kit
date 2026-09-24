@@ -11,7 +11,7 @@ edges assume a POSIX shell and Unix tooling.
 | **Linux** (x86_64 + arm64)            | ✅ Supported                      | Full feature set. LUKS detected via `lsblk`.                                                                                                           |
 | **Windows via WSL2**                  | ✅ Supported (recommended)        | Run kit inside your WSL2 distro. Treat it as Linux.                                                                                                    |
 | **Windows via Git Bash / MSYS2**      | ✅ Supported                      | Provides the POSIX shell + tools kit relies on.                                                                                                        |
-| **Native Windows** (PowerShell / cmd) | ✅ Supported (build + test green) | Builds and the full test suite pass on `windows-latest` CI. A few features degrade gracefully — see [Residual gaps](#residual-gaps-on-native-windows). |
+| **Native Windows** (PowerShell / cmd) | ✅ Core supported; broader probe diagnostic | Build plus verifier-authority ACL tests are required on `windows-latest`. Broader tests and smoke remain diagnostic while residual edge gaps are retired. |
 
 ## Running on Windows
 
@@ -65,11 +65,12 @@ The original native-Windows blockers have been resolved cross-platform:
 
 1. **Tool resolution.** `src/utils/resolveTool.ts` uses `where` on Windows and
    `which` on POSIX (the `mise which` fast path runs first on both).
-2. **Secret-file permissions.** `src/utils/secure-perms.ts` restricts secret
-   files/dirs with `icacls` (strip inherited ACLs, grant only the current user)
-   on Windows and `chmod 0o600/0o700` on POSIX, so `~/.kit/memory.db`,
-   `mcp-tokens.json`, `elevation.key`, and materialized env files are owner-only
-   on NTFS too.
+2. **Secret-file permissions.** `src/utils/secure-perms.ts` uses the absolute
+   system PowerShell plus .NET ACL APIs to set owner=current SID, disable
+   inheritance, remove inherited/explicit entries, grant only that SID full
+   control, then re-read and verify the result. POSIX uses `chmod 0o600/0o700`.
+   Memory verifier approvals refuse creation or trust when this strict check
+   cannot be established; the native path has its own required CI test.
 3. **Self-healing hook wrapper.** `kit hooks add` / `kit memory install` emit a
    POSIX `~/.kit/bin/kit` wrapper AND a `~/.kit/bin/kit.cmd` companion shim so a
    bare `kit` resolves from cmd/PowerShell as well as from a hook's `sh`.
@@ -101,7 +102,10 @@ These are honest, narrow limitations — kit runs, but a few features degrade:
    covers invoking kit, not the hook body's coreutils.
 3. **`mise`-managed tools.** mise's native-Windows tool support is narrower than
    on POSIX; the shims-on-PATH activation helpers target a POSIX shell profile.
+4. **Interactive web wizard.** `kit mcp web` is a Bash wizard. Run it from Git
+   Bash or WSL2 on Windows; the underlying `kit mcp` stdio server is Node-based.
 
 For the richest experience on Windows, WSL2 (or the signed Docker image) remains
-the recommendation. Native Windows is now a supported, tested target for the
-core workflow.
+the recommendation. Native Windows is supported for the core workflow; only the
+build and verifier-authority slice are hard-gated today, so the broader diagnostic
+jobs must not be described as full-platform certification.

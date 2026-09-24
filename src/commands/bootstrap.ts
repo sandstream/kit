@@ -46,10 +46,12 @@ function runStep(argv: string[]): boolean {
 
 /** Detect the seed from env + flags (no secret values are read into the receipt). */
 function readSeed(args: string[]): BootstrapSeed {
+  const policySource = flagValue(args, "--policy-source") ?? process.env.KIT_POLICY_SOURCE;
   return {
     profileBundle: flagValue(args, "--profile") ?? undefined,
     memoryBackup: process.env.KIT_MEMORY_BACKUP || undefined,
-    controlPlane: existsSync(resolve(process.cwd(), ".kit-policy.signers")),
+    controlPlane: existsSync(resolve(process.cwd(), ".kit-policy.signers")) || !!policySource,
+    policySource: policySource || undefined,
   };
 }
 
@@ -69,7 +71,9 @@ export async function cmdBootstrap(): Promise<boolean> {
   const results: StepResult[] = [];
   for (const step of plan) {
     if (step.argv === null) {
-      results.push(classifyStep(step, null));
+      const result = classifyStep(step, null);
+      results.push(result);
+      if (isFatal(result)) break;
       continue;
     }
     if (!json) console.log(`${c.dim}▶ ${step.id}: kit ${step.argv.join(" ")}${c.reset}`);

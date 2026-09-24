@@ -4,8 +4,8 @@
 // a `kit identity` (Phase 0) so an org's standard is cryptographically attributable
 // and offline-verifiable. Distinct from `.kit.toml [policy.agent_writes]` (the 2.x
 // per-repo agent-write pre-approval) — this is the org-level standard.
-import { existsSync, writeFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, writeFileSync, readFileSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { getCurrentProjectRoot } from "../memory/project.js";
@@ -28,7 +28,7 @@ import {
   type PolicySignature,
 } from "../policy-doc.js";
 import { evaluatePolicy, formatPolicyEval } from "../policy-check.js";
-import { pullPolicy } from "../policy-pull.js";
+import { pullPolicy, type PullStatus } from "../policy-pull.js";
 import { pullRevocations } from "../revocation-pull.js";
 import { extractRbac } from "../rbac/policy-schema.js";
 import { mintApprovalToken, APPROVAL_TOKENS_FILE } from "../approval-tokens.js";
@@ -108,6 +108,24 @@ function policyApprove(root: string): boolean {
 }
 
 /**
+ * What to do about a refused pull. A "stale-revision" refusal needs its own line: that
+ * policy verified, so telling the operator it was "unsigned, tampered, or untrusted" would
+ * send them to debug a signature that is fine.
+ */
+function pullFailureHint(status: PullStatus): string {
+  switch (status) {
+    case "no-anchor":
+      return " — add trusted org keys with `kit policy trust <pubkey.pem>` (committed out of band)";
+    case "no-source":
+      return "";
+    case "stale-revision":
+      return " (the signature is valid; the pull was refused as a rollback). Publish a revision at or above the applied one";
+    default:
+      return " — the source policy is unsigned, tampered, or signed by an untrusted/revoked key";
+  }
+}
+
+/**
  * `kit policy pull <source>` — fetch an org-signed policy from a self-hostable source (a local
  * path or `file://` dir holding `.kit-policy.toml` + `.kit-policy.sig`) and apply it ONLY if it
  * verifies offline against this project's LOCAL `.kit-policy.signers` anchor. Fail-closed: anything
@@ -143,12 +161,7 @@ function policyPull(root: string): boolean {
     );
     return true;
   }
-  const hint =
-    r.status === "no-anchor"
-      ? " — add trusted org keys with `kit policy trust add` (committed out of band)"
-      : r.status === "no-source"
-        ? ""
-        : " — the source policy is unsigned, tampered, or signed by an untrusted/revoked key";
+  const hint = pullFailureHint(r.status);
   console.error(`${c.red}✗ policy pull failed${c.reset} ${c.dim}(${r.detail})${c.reset}${hint}`);
   return false;
 }
@@ -176,7 +189,7 @@ function policyPullRevocations(root: string): boolean {
   }
   const hint =
     r.status === "no-anchor"
-      ? " — add trusted org keys with `kit policy trust add` (committed out of band)"
+      ? " — add trusted org keys with `kit policy trust <pubkey.pem>` (committed out of band)"
       : "";
   console.error(
     `${c.red}✗ pull-revocations failed${c.reset} ${c.dim}(${r.detail})${c.reset}${hint}`,
@@ -186,11 +199,25 @@ function policyPullRevocations(root: string): boolean {
 
 function policyInit(root: string): boolean {
   const path = getPolicyPath(root);
-  if (existsSync(path) && !hasFlag(process.argv, "--force")) {
-    console.error(`${c.red}${path} already exists${c.reset} — pass --force to overwrite`);
-    return false;
+  const force = hasFlag(process.argv, "--force");
+  if (force) {
+    const stage = mkdtempSync(join(dirname(path), ".kit-policy-init-"));
+    try {
+      const replacement = join(stage, "policy.toml");
+      writeFileSync(replacement, POLICY_TEMPLATE, "utf-8");
+      renameSync(replacement, path);
+    } finally {
+      rmSync(stage, { recursive: true, force: true });
+    }
+  } else {
+    try {
+      writeFileSync(path, POLICY_TEMPLATE, { encoding: "utf-8", flag: "wx" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      console.error(`${c.red}${path} already exists${c.reset} — pass --force to overwrite`);
+      return false;
+    }
   }
-  writeFileSync(path, POLICY_TEMPLATE, "utf-8");
   console.log(`${c.green}✓${c.reset} wrote ${c.bold}${path}${c.reset}`);
   console.log(
     `${c.dim}edit it, then ${c.reset}${c.bold}kit policy sign${c.reset}${c.dim} to attribute it to your identity${c.reset}`,

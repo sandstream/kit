@@ -17,9 +17,39 @@
 
 const DEFAULT_BASE_URL = "https://api.cloudflare.com/client/v4";
 
+// Cloudflare API errors (and the outer HTTP body) can echo back caller-supplied
+// or provider-side credentials verbatim (e.g. an `Authorization` header reflected
+// into a 403 body). Mirrors the redaction the vercel plugin already ships, using
+// the same pattern list and the same client-bound known-secrets lookup.
+const ERROR_SECRET_PATTERNS: RegExp[] = [
+  /\b(?:sk|pk|rk)_(?:test|live)_[A-Za-z0-9]{20,}/g,
+  /\bwhsec_[A-Za-z0-9]{20,}/g,
+  /\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{30,}/g,
+  /\bgithub_pat_[A-Za-z0-9_]{60,}/g,
+  /\bsk-(?:proj|ant|svcacct|admin)-[A-Za-z0-9_-]{20,}/g,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+];
+
+function redactErrorText(input: string, knownSecrets: readonly string[] = []): string {
+  let output = input;
+  for (const value of [...new Set(knownSecrets)].filter((value) => value.length >= 8)) {
+    output = output.split(value).join("[REDACTED]");
+  }
+  for (const pattern of ERROR_SECRET_PATTERNS) output = output.replace(pattern, "[REDACTED]");
+  // Core URL/Bearer parity is tested by src/plugin-error-redaction.test.ts.
+  return output
+    .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/[^\s:@/]{0,128}:)[^\s@/]{3,256}@/gi, "$1[REDACTED]@")
+    .replace(/\b([a-z][a-z0-9+.-]{0,15}:\/\/)[A-Za-z0-9._~%+-]{16,256}@/gi, "$1[REDACTED]@")
+    .replace(
+      /\b((?:token|access_token|api_key|apikey|auth_token|session_token)=)[A-Za-z0-9_\-+/%.]{12,}/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/\bBearer\s+[A-Za-z0-9_\-+/.=]{16,}/gi, "Bearer [REDACTED]");
+}
+
 function assertNotReadOnly(operation: string): void {
   const v = process.env.KIT_READ_ONLY;
-  if (v === "1" || v === "true") {
+  if (["1", "true", "yes", "on"].includes((v ?? "").trim().toLowerCase())) {
     throw new Error(`read-only mode active — refusing "${operation}"`);
   }
 }
@@ -61,6 +91,16 @@ export interface MgmtClient {
   accountId?: string;
 }
 
+const CLIENT_SECRETS = new WeakMap<MgmtClient, readonly string[]>();
+
+/** Known secrets for this client: the bound token plus whatever the Authorization header
+ * carries (covers a client built by hand, not via makeClient). */
+function clientSecrets(client: MgmtClient): string[] {
+  const authorization = new Headers(client.headers).get("authorization") ?? "";
+  const bearer = /^Bearer\s+(.+)$/i.exec(authorization)?.[1];
+  return [...(CLIENT_SECRETS.get(client) ?? []), ...(bearer ? [bearer] : [])];
+}
+
 export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
   const apiToken = cfg.apiToken ?? process.env.CLOUDFLARE_API_TOKEN;
   if (!apiToken) {
@@ -68,7 +108,7 @@ export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
       "CLOUDFLARE_API_TOKEN not set — create one at https://dash.cloudflare.com/profile/api-tokens",
     );
   }
-  return {
+  const client = {
     baseUrl: cfg.baseUrl ?? DEFAULT_BASE_URL,
     headers: {
       Authorization: `Bearer ${apiToken}`,
@@ -77,6 +117,8 @@ export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
     },
     accountId: cfg.accountId ?? process.env.CLOUDFLARE_ACCOUNT_ID,
   };
+  CLIENT_SECRETS.set(client, [apiToken]);
+  return client;
 }
 
 function requireAccountId(client: MgmtClient): string {
@@ -102,7 +144,7 @@ async function cfFetch<T>(client: MgmtClient, path: string, init: RequestInit = 
   });
   if (!res.ok && res.status !== 404) {
     throw new Error(
-      `${init.method ?? "GET"} ${path} returned ${res.status}: ${await safeText(res)}`,
+      `${init.method ?? "GET"} ${path} returned ${res.status}: ${await safeText(res, client)}`,
     );
   }
   const envelope = (await res.json()) as CfEnvelope<T>;
@@ -110,7 +152,9 @@ async function cfFetch<T>(client: MgmtClient, path: string, init: RequestInit = 
     const msg = (envelope.errors ?? []).map((e) => `${e.code}: ${e.message}`).join("; ");
     // "(no detail)" instead of "<no detail>" — semgrep's
     // raw-html-format rule false-positives on the angle brackets.
-    throw new Error(`Cloudflare API error on ${path}: ${msg || "(no detail)"}`);
+    throw new Error(
+      `Cloudflare API error on ${path}: ${redactErrorText(msg || "(no detail)", clientSecrets(client))}`,
+    );
   }
   return envelope.result;
 }
@@ -195,10 +239,10 @@ export async function revokeApiToken(client: MgmtClient, tokenId: string): Promi
   });
 }
 
-async function safeText(res: Response): Promise<string> {
+async function safeText(res: Response, client: MgmtClient): Promise<string> {
   try {
     const t = await res.text();
-    return t.slice(0, 200);
+    return redactErrorText(t, clientSecrets(client)).slice(0, 200);
   } catch {
     return "<no body>";
   }

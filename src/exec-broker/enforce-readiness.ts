@@ -33,7 +33,8 @@ export interface EnforceReadiness {
 /**
  * Extract observe records from raw `.kit-audit.jsonl` content: audit lines whose
  * `metadata.phase === "observe"`, taking `metadata.wouldDeny` (a string[]) as the would-be
- * denials. Tolerant — blank/malformed lines and non-observe lines are skipped. Pure.
+ * denials. Blank/malformed lines and non-observe lines are skipped. An observe
+ * event with invalid evidence blocks readiness; missing denials are not a pass. Pure.
  */
 export function parseObserveRecords(auditJsonl: string): ObserveRecord[] {
   const out: ObserveRecord[] = [];
@@ -51,9 +52,13 @@ export function parseObserveRecords(auditJsonl: string): ObserveRecord[] {
     const e = parsed as { metadata?: { phase?: unknown; wouldDeny?: unknown } };
     if (!e.metadata || e.metadata.phase !== "observe") continue;
     const raw = e.metadata.wouldDeny;
-    const wouldDeny = Array.isArray(raw)
-      ? raw.filter((r): r is string => typeof r === "string")
-      : [];
+    const valid =
+      Array.isArray(raw) && raw.every((r) => typeof r === "string" && r.trim().length > 0);
+    const wouldDeny = valid
+      ? raw
+      : [
+          "exec-broker: invalid observe evidence (wouldDeny must be a string array); inspect the audit log before enforcing",
+        ];
     out.push({ wouldDeny });
   }
   return out;

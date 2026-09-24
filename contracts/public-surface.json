@@ -9,7 +9,7 @@
       "ReadOnlyModeError",
       "ServiceAdapter"
     ],
-    "version": "1.0.0"
+    "version": "1.0.1"
   },
   "commands": {
     "add": "stable",
@@ -204,6 +204,14 @@
     "memory install",
     "memory merge",
     "memory pal",
+    "memory pal claim",
+    "memory pal configure",
+    "memory pal forget",
+    "memory pal renew",
+    "memory pal resolve",
+    "memory pal show",
+    "memory pal takeover",
+    "memory project",
     "memory restore",
     "memory resume",
     "memory save",

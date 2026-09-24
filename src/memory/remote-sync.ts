@@ -4,7 +4,9 @@
  * The personal store (~/.kit/memory.db) is per-machine; `syncFromExport` + an
  * encrypted backup blob already let you move it by hand. This wires that to a
  * concrete, opt-in transport — YOUR OWN private git repo — so machine A `push`es
- * and machine B `pull`s without a manual file copy. Last-write-wins via `mergeDb`.
+ * and machine B `pull`s without a manual file copy. Imported task histories merge
+ * causally. Git transport replays every reachable snapshot; command transport carries
+ * only one latest snapshot and therefore does not guarantee every writer arrives.
  *
  * It is configurable WITHOUT being a backdoor, by construction:
  *   1. Config is read ONLY from ~/.kit/sync.toml (a LOCAL file) — never from the
@@ -20,9 +22,14 @@
  * Deterministic, zero-LLM, zero new dependencies (node:child_process + git).
  */
 import { execFileSync, execSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
+  closeSync,
   existsSync,
+  fsyncSync,
+  openSync,
   readFileSync,
+  renameSync,
   writeFileSync,
   statSync,
   mkdirSync,
@@ -33,14 +40,25 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "smol-toml";
 import { getMemoryDir, getMemoryDbPath, openMemoryDb } from "./db.js";
-import { backupEncrypted, backupToRecipient, backupPlain } from "./backup.js";
-import { syncFromExport } from "./sync.js";
+import { backupEncrypted, backupToRecipient } from "./backup.js";
+import { syncFromExport, syncFromExports } from "./sync.js";
+import {
+  gitMemoryCommand as git,
+  cloneMemoryBranch,
+  gitMemorySnapshots,
+  publishMemoryBranch,
+  verifyMemoryPublication,
+} from "./remote-sync-git.js";
 import type { MergeResult } from "./merge.js";
+import { ensureCommitIdentity, matchesPublishedSnapshot } from "./remote-sync-publish.js";
+import { parseProjectMappings, type ProjectMapping } from "./remap.js";
+import { redactSecrets } from "../utils/redactSecrets.js";
 
 /** How the encrypted blob travels. `git` = a private remote; `command` = your own shell command (S3/rclone/scp/USB/…). */
 export type SyncTransport = "git" | "command";
 
 export interface SyncConfig {
+  projectMappings?: ProjectMapping[];
   transport: SyncTransport;
   /** Blob filename (default "memory.enc"). A bare name — no path. */
   file: string;
@@ -63,15 +81,48 @@ export interface SyncConfig {
    *  instead of a passphrase — so an ephemeral session needs NO secret, only this
    *  (non-secret) public key. Only holders of the matching private key can decrypt. */
   recipient?: string;
-  /** Encrypt the synced blob (default TRUE). Set `encrypt = false` for the low-ceremony
-   *  path: the blob is a plain SQLite DB — no passphrase, no recipient. Requires a PRIVATE
-   *  destination (the store can hold secret-shaped strings); the pull path still runs the
-   *  R7 injection scan before merge. */
+  /** Synced blobs are always encrypted. Kept in the runtime shape so hand-built
+   *  configs that attempt `false` can be rejected before any transport runs. */
   encrypt: boolean;
 }
 
 const DEFAULT_BRANCH = "main";
 const DEFAULT_FILE = "memory.enc";
+
+function publishSyncConfig(path: string, content: string, force: boolean): boolean {
+  if (!force) {
+    try {
+      writeFileSync(path, content, { flag: "wx", mode: 0o600 });
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw error;
+    }
+  }
+
+  const temporary = `${path}.kit-tmp-${process.pid}-${randomBytes(12).toString("hex")}`;
+  let fd: number | undefined;
+  try {
+    fd = openSync(temporary, "wx", 0o600);
+    writeFileSync(fd, content, "utf8");
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
+    renameSync(temporary, path);
+    return true;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+    rmSync(temporary, { force: true });
+  }
+}
+
+function safeDiagnostic(value: unknown): string {
+  return redactSecrets(value instanceof Error ? value.message : String(value));
+}
+
+function displayRemote(remote: string): string {
+  return redactSecrets(remote);
+}
 
 /** Path to the LOCAL sync config — under ~/.kit, deliberately NOT in the repo tree. */
 export function getSyncConfigPath(): string {
@@ -107,8 +158,14 @@ export function loadSyncConfig(): SyncConfig | null {
   const pullOnStart = bool(s.pull_on_start);
   const pushOnEnd = bool(s.push_on_end);
   const recipient = str(s.recipient) || undefined; // public-key mode (optional)
-  // Encryption is ON unless explicitly disabled (`encrypt = false`) — secure by default.
-  const encrypt = s.encrypt !== false;
+  if (s.encrypt === false) {
+    throw new Error(
+      "[memory.sync] encryption cannot be disabled; use KIT_MEMORY_PASSPHRASE or a public-key recipient",
+    );
+  }
+  const encrypt = true;
+  const projectMappings = parseProjectMappings(s.project_map);
+  const common = { file, pullOnStart, pushOnEnd, recipient, encrypt, projectMappings };
 
   const transport: SyncTransport = s.transport === "command" ? "command" : "git";
   if (transport === "command") {
@@ -117,7 +174,7 @@ export function loadSyncConfig(): SyncConfig | null {
     if (!pushCmd || !pullCmd) {
       throw new Error('[memory.sync] transport = "command" requires both push_cmd and pull_cmd');
     }
-    return { transport, file, pushCmd, pullCmd, pullOnStart, pushOnEnd, recipient, encrypt };
+    return { ...common, transport, pushCmd, pullCmd };
   }
 
   const remote = str(s.remote);
@@ -125,7 +182,7 @@ export function loadSyncConfig(): SyncConfig | null {
   const branch = str(s.branch) || DEFAULT_BRANCH;
   assertSafeGitRef(remote, "remote");
   assertSafeGitRef(branch, "branch");
-  return { transport, file, remote, branch, pullOnStart, pushOnEnd, recipient, encrypt };
+  return { ...common, transport, remote, branch };
 }
 
 /**
@@ -142,11 +199,13 @@ export function loadSyncConfig(): SyncConfig | null {
  */
 function assertSafeGitRef(value: string, what: "remote" | "branch"): void {
   if (value.startsWith("-")) {
-    throw new Error(`invalid [memory.sync] ${what} "${value}" — must not start with '-'`);
+    throw new Error(
+      `invalid [memory.sync] ${what} "${displayRemote(value)}" — must not start with '-'`,
+    );
   }
   if (what === "remote" && /^(ext|fd)::/i.test(value)) {
     throw new Error(
-      `invalid [memory.sync] remote "${value}" — ext::/fd:: remote helpers are not allowed`,
+      `invalid [memory.sync] remote "${displayRemote(value)}" — ext::/fd:: remote helpers are not allowed`,
     );
   }
 }
@@ -191,44 +250,10 @@ export function assertRemoteNotProjectOrigin(remote: string, root: string): void
   const origin = projectOrigin(root);
   if (origin && normalizeRemote(origin) === normalizeRemote(remote)) {
     throw new Error(
-      `refusing to sync: [memory.sync] remote (${remote}) is THIS project's origin — ` +
+      `refusing to sync: [memory.sync] remote (${displayRemote(remote)}) is THIS project's origin — ` +
         `private memory must go to a separate private repo, never the project repo`,
     );
   }
-}
-
-function git(args: string[], cwd: string): string {
-  // Disable the command-running remote helpers unconditionally (harmless for the
-  // local ops too) so even a value that slipped past validation can't reach the
-  // ext::/fd:: handlers.
-  return execFileSync(
-    "git",
-    ["-c", "protocol.ext.allow=never", "-c", "protocol.fd.allow=never", ...args],
-    {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-}
-
-/**
- * Get a working clone of the remote on the configured branch into `dir`. If the
- * remote/branch doesn't exist yet (first push), fall back to a fresh repo wired to
- * the remote so the initial push creates the branch.
- */
-function cloneOrInit(remote: string, branch: string, dir: string): void {
-  try {
-    // --end-of-options: everything after is a positional operand, so a remote/branch
-    // can never be reinterpreted as a git option (belt-and-suspenders to assertSafeGitRef).
-    git(["clone", "--depth", "1", "--branch", branch, "--end-of-options", remote, "."], dir);
-    return;
-  } catch {
-    // empty remote or missing branch — initialize a fresh repo targeting it
-  }
-  git(["init", "-q"], dir);
-  git(["remote", "add", "origin", remote], dir);
-  git(["checkout", "-q", "-B", branch], dir);
 }
 
 /**
@@ -262,9 +287,9 @@ export interface PushResult {
   /** False when the encrypted blob was byte-identical to what's already on the remote (git only). */
   pushed: boolean;
   /**
-   * True only when kit can PROVE the blob reached durable storage. The git
-   * transport commits + pushes (a failed push is a non-zero exit → throws), so
-   * it's verified. The `command` transport runs the operator's shell command:
+   * True only when kit can read the published commit back from the destination.
+   * The git transport verifies reachability from a freshly fetched remote branch.
+   * The `command` transport runs the operator's shell command:
    * exit 0 does NOT prove the blob landed (a typo'd bucket / no-op `rclone` /
    * `true` all exit 0), so it is NEVER verified — the caller must say so rather
    * than report a false success.
@@ -275,7 +300,9 @@ export interface PushResult {
 /**
  * Encrypt the local memory DB and push it to the private remote. Requires a
  * passphrase (KIT_MEMORY_PASSPHRASE). Clones the remote, refreshes the blob,
- * commits and pushes only when it changed (so a no-op push is free and quiet).
+ * skips an unchanged Git snapshot when the local machine can decrypt the published blob.
+ * A recipient-only push machine has no private key to compare randomized ciphertext and
+ * may publish another commit for unchanged content.
  */
 /** Encrypt the live memory DB into `outPath`, picking the mode from the config:
  *  a configured `recipient` → public-key (V3, no passphrase); otherwise the
@@ -286,10 +313,9 @@ function encryptBlobForSync(
   outPath: string,
 ): void {
   if (cfg.encrypt === false) {
-    // Opt-out: write a plain SQLite snapshot. No passphrase/recipient required — the
-    // destination is trusted to be private and the pull path still R7-scans before merge.
-    backupPlain(getMemoryDbPath(), outPath);
-    return;
+    throw new Error(
+      "[memory.sync] encryption cannot be disabled; refusing to create a plaintext memory blob",
+    );
   }
   if (cfg.recipient) {
     backupToRecipient(cfg.recipient, getMemoryDbPath(), outPath);
@@ -319,17 +345,32 @@ export function pushMemory(
     }
     // git transport — clone into the (empty) dir FIRST, then write the blob inside it.
     assertRemoteNotProjectOrigin(cfg.remote!, projectRoot);
-    cloneOrInit(cfg.remote!, cfg.branch ?? DEFAULT_BRANCH, dir);
+    cloneMemoryBranch(cfg.remote!, cfg.branch ?? DEFAULT_BRANCH, dir);
+    if (matchesPublishedSnapshot(cfg, passphrase, dir)) {
+      verifyMemoryPublication(
+        dir,
+        cfg.branch ?? DEFAULT_BRANCH,
+        git(["rev-parse", "HEAD"], dir).trim(),
+      );
+      return { target: displayRemote(cfg.remote!), file: cfg.file, pushed: false, verified: true };
+    }
     encryptBlobForSync(cfg, passphrase, join(dir, cfg.file));
     git(["add", "--", cfg.file], dir);
     const dirty = git(["status", "--porcelain"], dir).trim();
-    if (!dirty) return { target: cfg.remote!, file: cfg.file, pushed: false, verified: true };
+    if (!dirty) {
+      verifyMemoryPublication(
+        dir,
+        cfg.branch ?? DEFAULT_BRANCH,
+        git(["rev-parse", "HEAD"], dir).trim(),
+      );
+      return { target: displayRemote(cfg.remote!), file: cfg.file, pushed: false, verified: true };
+    }
     // Identify the commit so a fresh-init repo has an author; rely on the user's
     // git identity, falling back to a neutral one only if git has none configured.
     ensureCommitIdentity(dir);
     git(["commit", "-q", "-m", "kit memory sync", "--", cfg.file], dir);
-    git(["push", "-q", "origin", `HEAD:${cfg.branch ?? DEFAULT_BRANCH}`], dir);
-    return { target: cfg.remote!, file: cfg.file, pushed: true, verified: true };
+    publishMemoryBranch(dir, cfg.branch ?? DEFAULT_BRANCH);
+    return { target: displayRemote(cfg.remote!), file: cfg.file, pushed: true, verified: true };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -345,7 +386,7 @@ export interface PullResult {
 
 /**
  * Fetch the encrypted blob from the configured store and merge it into the local
- * store (last-write-wins via mergeDb). The passphrase decrypts the blob; a raw
+ * store via mergeDb (task descendants advance; concurrent alternatives are retained). The passphrase decrypts the blob; a raw
  * `.db` blob (unusual for this transport) needs none.
  */
 export function pullMemory(
@@ -353,10 +394,12 @@ export function pullMemory(
   passphrase: string | undefined,
   projectRoot: string,
 ): PullResult {
+  const projectMappings = parseProjectMappings(cfg.projectMappings ?? []);
   const dir = mkdtempSync(join(tmpdir(), "kit-memsync-"));
   try {
     const blob = join(dir, cfg.file);
     let target: string;
+    let history: Iterable<string> | null = null;
     if (cfg.transport === "command") {
       // The pull command must DOWNLOAD the blob to $KIT_MEMORY_BLOB. A command
       // that finds nothing simply leaves the path absent → found:false.
@@ -364,13 +407,18 @@ export function pullMemory(
       target = "command transport";
     } else {
       assertRemoteNotProjectOrigin(cfg.remote!, projectRoot);
-      cloneOrInit(cfg.remote!, cfg.branch ?? DEFAULT_BRANCH, dir);
-      target = cfg.remote!;
+      const present = cloneMemoryBranch(cfg.remote!, cfg.branch ?? DEFAULT_BRANCH, dir, true);
+      if (present) history = gitMemorySnapshots(dir, cfg.file);
+      target = displayRemote(cfg.remote!);
     }
-    if (!existsSync(blob)) return { target, file: cfg.file, found: false };
+    if (cfg.transport === "git" ? !history : !existsSync(blob))
+      return { target, file: cfg.file, found: false };
     const db = openMemoryDb();
     try {
-      const merge = syncFromExport(db, blob, { passphrase });
+      const merge =
+        cfg.transport === "git"
+          ? syncFromExports(db, history!, { passphrase, projectMappings })
+          : syncFromExport(db, blob, { passphrase, projectMappings });
       return { target, file: cfg.file, found: true, merge };
     } finally {
       db.close();
@@ -381,6 +429,7 @@ export function pullMemory(
 }
 
 export interface InitSyncOptions {
+  projectMappings?: ProjectMapping[];
   transport?: SyncTransport;
   remote?: string;
   branch?: string;
@@ -398,7 +447,6 @@ export interface InitSyncOptions {
  */
 export function initSyncConfig(opts: InitSyncOptions = {}): { path: string; created: boolean } {
   const path = getSyncConfigPath();
-  if (existsSync(path) && !opts.force) return { path, created: false };
   const transport: SyncTransport = opts.transport ?? "git";
   const lines = ["[memory.sync]"];
   if (transport === "command") {
@@ -419,9 +467,17 @@ export function initSyncConfig(opts: InitSyncOptions = {}): { path: string; crea
     lines.push("pull_on_start = true");
     lines.push("push_on_end = true");
   }
+  for (const mapping of parseProjectMappings(opts.projectMappings ?? [])) {
+    lines.push(
+      "",
+      "[[memory.sync.project_map]]",
+      `from = ${JSON.stringify(mapping.from)}`,
+      `to = ${JSON.stringify(mapping.to)}`,
+    );
+  }
   mkdirSync(getMemoryDir(), { recursive: true, mode: 0o700 });
-  writeFileSync(path, lines.join("\n") + "\n", { mode: 0o600 });
-  return { path, created: true };
+  const created = publishSyncConfig(path, lines.join("\n") + "\n", opts.force === true);
+  return { path, created };
 }
 
 export interface AutoSyncResult {
@@ -441,11 +497,16 @@ export function tryAutoPull(projectRoot: string): AutoSyncResult {
     cfg = loadSyncConfig();
   } catch (e) {
     // A malformed sync.toml must not silently disable pull_on_start — say why.
-    return { ran: false, note: `memory pull skipped: invalid sync.toml — ${(e as Error).message}` };
+    return { ran: false, note: `memory pull skipped: invalid sync.toml — ${safeDiagnostic(e)}` };
   }
   if (!cfg || !cfg.pullOnStart) return { ran: false };
   try {
     const r = pullMemory(cfg, process.env.KIT_MEMORY_PASSPHRASE, projectRoot);
+    if (r.merge?.pendingStateDifferences)
+      return {
+        ran: true,
+        note: `memory pull needs attention: ${r.merge.pendingStateDifferences} pending action conflict(s); all alternatives retained. Run kit memory pal list --conflicts --all --global, then inspect and resolve the affected items.`,
+      };
     // found:false is NOT nothing-to-say — the session started with the local store
     // only (blob missing, or a command transport that exited 0 but wrote no file).
     return {
@@ -455,7 +516,7 @@ export function tryAutoPull(projectRoot: string): AutoSyncResult {
         : `memory pull: no blob at ${r.target} yet — started with the local store only`,
     };
   } catch (e) {
-    return { ran: false, note: `memory pull skipped: ${(e as Error).message}` };
+    return { ran: false, note: `memory pull skipped: ${safeDiagnostic(e)}` };
   }
 }
 
@@ -469,7 +530,7 @@ export function tryAutoPush(projectRoot: string): AutoSyncResult {
   try {
     cfg = loadSyncConfig();
   } catch (e) {
-    return { ran: false, note: `memory push skipped: invalid sync.toml — ${(e as Error).message}` };
+    return { ran: false, note: `memory push skipped: invalid sync.toml — ${safeDiagnostic(e)}` };
   }
   if (!cfg || !cfg.pushOnEnd) return { ran: false };
   // Public-key mode needs NO secret — that's the whole point for ephemeral
@@ -488,7 +549,7 @@ export function tryAutoPush(projectRoot: string): AutoSyncResult {
         : `ran memory push command for ${r.target} — UNVERIFIED, confirm the blob was stored`;
     return { ran: true, note };
   } catch (e) {
-    return { ran: false, note: `memory push skipped: ${(e as Error).message}` };
+    return { ran: false, note: `memory push skipped: ${safeDiagnostic(e)}` };
   }
 }
 
@@ -506,7 +567,6 @@ export function maybeSyncNudge(): string | null {
     return null;
   }
   const marker = join(getMemoryDir(), NUDGE_MARKER);
-  if (existsSync(marker)) return null;
   let worthIt: boolean;
   try {
     const p = getMemoryDbPath();
@@ -517,25 +577,13 @@ export function maybeSyncNudge(): string | null {
   if (!worthIt) return null;
   let markerErr: string | null = null;
   try {
-    writeFileSync(marker, "", { mode: 0o600 });
+    writeFileSync(marker, "", { flag: "wx", mode: 0o600 });
   } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") return null;
     // Fail-soft (worst case we nudge again), but surface it — a permanently
     // unwritable ~/.kit is worth knowing rather than silently re-nudging forever.
     markerErr = (e as Error).message;
   }
   const tip = "tip: sync your memory across machines (and back it up) — run `kit memory sync init`";
   return markerErr ? `${tip}\n  (note: couldn't write ~/.kit marker — ${markerErr})` : tip;
-}
-
-/** Give the throwaway clone a commit identity if the environment has none. */
-function ensureCommitIdentity(dir: string): void {
-  const has = (key: string): boolean => {
-    try {
-      return !!git(["config", key], dir).trim();
-    } catch {
-      return false;
-    }
-  };
-  if (!has("user.email")) git(["config", "user.email", "kit-memory-sync@localhost"], dir);
-  if (!has("user.name")) git(["config", "user.name", "kit memory sync"], dir);
 }

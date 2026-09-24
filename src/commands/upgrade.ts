@@ -12,6 +12,7 @@ import { hasFlag, unknownFlags, GLOBAL_FLAGS } from "../utils/flags.js";
 import { loadConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { readkitMeta, updateSkillsLock, updateCliLock } from "../lock.js";
+import { resolveLockEntries } from "../tool-inventory.js";
 
 /**
  * Detect the npm global-install permission failure (EACCES / EPERM writing into
@@ -138,17 +139,9 @@ export async function cmdUpgrade(): Promise<boolean> {
   const kitMeta = await readkitMeta();
   await updateSkillsLock(skills, kitMeta?.name ? `${kitMeta.name}@${kitMeta.version}` : undefined);
 
-  // Update CLI lock
-  const tools: Record<
-    string,
-    { version: string; source: "mise" | "npm" | "pip" | "manual"; auth?: string }
-  > = {};
-  if (config.tools) {
-    for (const [name, version] of Object.entries(config.tools)) {
-      tools[name] = { version, source: "mise" };
-    }
-  }
-
+  // Lock what is actually installed. A declared `latest` and an assumed mise
+  // source are requests, not provenance evidence.
+  const tools = config.tools ? await resolveLockEntries(config.tools) : {};
   await updateCliLock(tools);
 
   console.log(`${c.green}✓${c.reset} Updated lock files from .kit.toml\n`);

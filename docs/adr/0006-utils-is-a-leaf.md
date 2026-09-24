@@ -2,6 +2,7 @@
 id: ADR-0006
 title: src/utils is a leaf — it depends on nothing in the repo
 status: accepted
+enforced_by: [src/docker-plugin-runtime.test.ts]
 ---
 
 # ADR-0006: src/utils is a leaf
@@ -11,6 +12,10 @@ status: accepted
 No file under `src/utils/**` imports anything else in this repository. It may use Node
 builtins and declared dependencies; it may not reach into `src/` — not a sibling
 subsystem, not the root, not the command layer.
+
+A non-import read of a repo-root runtime asset is a separate distribution dependency,
+not an import-graph edge. Such assets are permitted only when the runtime-asset gate
+discovers the reference and proves both the npm tarball and Docker runtime copy it.
 
 ## Rationale
 
@@ -49,6 +54,9 @@ the bottom is what makes the layers above it movable.
 - Superseding this is an ADR-level act. If `utils` genuinely needs to depend on something,
   amend or supersede this file in the same PR — the gate will otherwise refuse the code
   and cite this ADR.
+- `src/docker-plugin-runtime.test.ts` covers the import extractor's blind spot for
+  `new URL("../../scripts/…", import.meta.url)` runtime reads. Adding one without both
+  distribution declarations fails the suite.
 
 ## Scope of the evidence, stated honestly
 

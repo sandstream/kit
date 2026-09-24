@@ -28,7 +28,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse } from "smol-toml";
 import { localPublicKeys, verifySignature, isRevokedWith } from "./identity.js";
-import { policySignersMap, hasPolicyAnchor } from "./policy-trust.js";
+import { policySignersMap, getSignersPath } from "./policy-trust.js";
 
 export const POLICY_FILE = ".kit-policy.toml";
 export const POLICY_SIG_FILE = ".kit-policy.sig";
@@ -226,6 +226,39 @@ export interface PolicyVerifyResult {
   anchored?: boolean;
 }
 
+function signerKey(
+  root: string,
+  kid: string,
+  pinnedKey: string | undefined,
+  anchored: boolean,
+): { pubkey: string | null; via?: PolicyVerifyResult["via"] } {
+  if (pinnedKey) {
+    return {
+      pubkey: existsSync(pinnedKey) ? readFileSync(pinnedKey, "utf-8") : pinnedKey,
+      via: "key",
+    };
+  }
+  if (anchored) {
+    const pubkey = policySignersMap(root).get(kid);
+    return { pubkey: pubkey ?? null, via: pubkey ? "org" : undefined };
+  }
+  const pubkey = localPublicKeys().get(kid);
+  return { pubkey: pubkey ?? null, via: pubkey ? "local" : undefined };
+}
+
+function signatureCheck(
+  doc: PolicyDoc,
+  record: PolicySignature,
+  pubkey: string,
+  fingerprint: string,
+): { fpMatches: boolean; sigOk: boolean } {
+  const fpMatches = record.fingerprint === fingerprint;
+  const sigOk =
+    fpMatches &&
+    verifySignature(canonicalPolicyBytes(doc), Buffer.from(record.sig, "base64"), pubkey);
+  return { fpMatches, sigOk };
+}
+
 /**
  * Verify the signature on the policy at `root`. Pure-ish (file reads, no writes).
  * Shared by `kit policy verify` and `kit policy check` so they cannot diverge.
@@ -255,23 +288,10 @@ export function verifyPolicy(root: string, opts: { key?: string } = {}): PolicyV
       detail: e instanceof Error ? e.message : "uncanonicalizable policy",
     };
   }
-  const anchored = hasPolicyAnchor(root);
-  // Resolve the signer key, in trust order: an explicit --key pin, then this
-  // machine's own identity (the author verifying their own policy), then the
-  // committed org trust anchor (.kit-policy.signers) — which is what makes an
-  // ORG-distributed policy verify on a fresh clone.
-  let pubkey: string | null = null;
-  let via: PolicyVerifyResult["via"] = undefined;
-  if (opts.key) {
-    pubkey = existsSync(opts.key) ? readFileSync(opts.key, "utf-8") : opts.key;
-    via = "key";
-  } else if (localPublicKeys().get(record.kid)) {
-    pubkey = localPublicKeys().get(record.kid)!;
-    via = "local";
-  } else if (policySignersMap(root).get(record.kid)) {
-    pubkey = policySignersMap(root).get(record.kid)!;
-    via = "org";
-  }
+  // Even an empty or malformed anchor file opts into org trust and trusts nobody.
+  const anchored = existsSync(getSignersPath(root));
+  // An org anchor overrides this machine's identity.
+  const { pubkey, via } = signerKey(root, record.kid, opts.key, anchored);
   if (!pubkey) {
     return {
       status: "unverifiable",
@@ -283,10 +303,7 @@ export function verifyPolicy(root: string, opts: { key?: string } = {}): PolicyV
       anchored,
     };
   }
-  const fpMatches = record.fingerprint === fingerprint;
-  const sigOk =
-    fpMatches &&
-    verifySignature(canonicalPolicyBytes(doc), Buffer.from(record.sig, "base64"), pubkey);
+  const { fpMatches, sigOk } = signatureCheck(doc, record, pubkey, fingerprint);
   if (!sigOk) {
     return {
       status: "invalid",
