@@ -127,6 +127,20 @@ export function parsePkgSpec(input: string): PkgSpec | null {
 /**
  * Get GitHub repo URL for brew formulas
  */
+export function isGitHubRepoUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "github.com" &&
+      url.username === "" &&
+      url.password === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function getBrewRepoUrl(name: string): Promise<string | null> {
   const res = await execFileNoThrow("brew", ["info", "--json=v2", name], { timeout: 15_000 });
   if (!res.ok) {
@@ -137,7 +151,7 @@ async function getBrewRepoUrl(name: string): Promise<string | null> {
     const data = JSON.parse(res.stdout);
     const formula = data.formulae?.[0] || data.casks?.[0];
     const homepage = formula?.homepage || "";
-    if (homepage.includes("github.com")) return homepage;
+    if (isGitHubRepoUrl(homepage)) return homepage;
     return null;
   } catch {
     return `https://github.com/search?q=${encodeURIComponent(name)}`;
@@ -166,7 +180,7 @@ export async function installPkg(
 
   if (spec.ecosystem === "brew") {
     const repoUrl = await getBrewRepoUrl(spec.name);
-    if (repoUrl && repoUrl.includes("github.com")) {
+    if (repoUrl && isGitHubRepoUrl(repoUrl)) {
       triageTarget = repoUrl;
     }
   } else if (spec.ecosystem === "docker" && !spec.name.includes("/")) {

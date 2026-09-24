@@ -26,7 +26,16 @@
  * installed gate with nothing to check is not a gate.
  */
 
-import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+} from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve, sep } from "node:path";
 import { missingHookCommands, resolveHooksDir } from "./hooks.js";
@@ -65,6 +74,30 @@ function isInside(parent: string, child: string): boolean {
   return child === parent || child.startsWith(p);
 }
 
+function readExecutableHook(path: string): string | null {
+  try {
+    // Windows may not expose O_NOFOLLOW. Check the entry and opened descriptor.
+    const entry = lstatSync(path);
+    if (!entry.isFile()) return null;
+    const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+    try {
+      const state = fstatSync(fd);
+      if (
+        !state.isFile() ||
+        state.dev !== entry.dev ||
+        state.ino !== entry.ino ||
+        (process.platform !== "win32" && (state.mode & 0o111) === 0)
+      )
+        return null;
+      return readFileSync(fd, "utf-8");
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
 function configuredHooks(dir: string, config?: kitConfig): string[] {
   if (!existsSync(dir)) return [];
   let entries: string[];
@@ -77,15 +110,8 @@ function configuredHooks(dir: string, config?: kitConfig): string[] {
   const installed: string[] = [];
   for (const [file, builtin] of Object.entries(BUILTIN_HOOK_FILES)) {
     if (!entries.includes(file)) continue;
-    let body: string;
-    try {
-      const path = resolve(dir, file);
-      const state = lstatSync(path);
-      if (!state.isFile() || (process.platform !== "win32" && (state.mode & 0o111) === 0)) continue;
-      body = readFileSync(path, "utf-8");
-    } catch {
-      continue;
-    }
+    const body = readExecutableHook(resolve(dir, file));
+    if (body === null) continue;
     // An external hook can enforce the same contract as a generated one. Both
     // readers require a real executable file with the configured command.
     const configuredCommands = config?.hooks?.[file];

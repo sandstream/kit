@@ -39,7 +39,7 @@ import {
   rmSync,
   symlinkSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
   POLICY_FILE,
@@ -122,10 +122,26 @@ function readSignatureSnapshot(path: string): SignatureSnapshot | null {
     if (errorCode(error) === "ENOENT") return null;
     throw error;
   }
-  if (info.isSymbolicLink()) return { kind: "symlink", target: readlinkSync(path) };
+  if (info.isSymbolicLink()) {
+    const target = readlinkSync(path);
+    const after = lstatSync(path);
+    if (!after.isSymbolicLink() || after.dev !== info.dev || after.ino !== info.ino) {
+      throw Object.assign(new Error("signature changed during snapshot"), { code: "EAGAIN" });
+    }
+    return { kind: "symlink", target };
+  }
   if (!info.isFile())
     throw Object.assign(new Error("signature is not a regular file"), { code: "EINVAL" });
-  return { kind: "file", bytes: readFileSync(path), mode: info.mode };
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  try {
+    const opened = fstatSync(fd);
+    if (!opened.isFile() || opened.dev !== info.dev || opened.ino !== info.ino) {
+      throw Object.assign(new Error("signature changed during snapshot"), { code: "EAGAIN" });
+    }
+    return { kind: "file", bytes: readFileSync(fd), mode: opened.mode };
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function restoreSignature(path: string, snapshot: SignatureSnapshot | null): void {
@@ -133,13 +149,19 @@ function restoreSignature(path: string, snapshot: SignatureSnapshot | null): voi
     rmSync(path, { force: true });
     return;
   }
-  if (snapshot.kind === "symlink") {
-    rmSync(path, { force: true });
-    symlinkSync(snapshot.target, path);
-    return;
+  const stage = mkdtempSync(join(dirname(path), ".kit-policy-restore-"));
+  try {
+    const replacement = join(stage, "signature");
+    if (snapshot.kind === "symlink") {
+      symlinkSync(snapshot.target, replacement);
+    } else {
+      writeFileSync(replacement, snapshot.bytes, { mode: snapshot.mode });
+      chmodSync(replacement, snapshot.mode);
+    }
+    renameSync(replacement, path);
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
   }
-  writeFileSync(path, snapshot.bytes);
-  chmodSync(path, snapshot.mode);
 }
 
 function rollbackSignature(

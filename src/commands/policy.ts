@@ -4,8 +4,8 @@
 // a `kit identity` (Phase 0) so an org's standard is cryptographically attributable
 // and offline-verifiable. Distinct from `.kit.toml [policy.agent_writes]` (the 2.x
 // per-repo agent-write pre-approval) — this is the org-level standard.
-import { existsSync, writeFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, writeFileSync, readFileSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { getCurrentProjectRoot } from "../memory/project.js";
@@ -199,11 +199,25 @@ function policyPullRevocations(root: string): boolean {
 
 function policyInit(root: string): boolean {
   const path = getPolicyPath(root);
-  if (existsSync(path) && !hasFlag(process.argv, "--force")) {
-    console.error(`${c.red}${path} already exists${c.reset} — pass --force to overwrite`);
-    return false;
+  const force = hasFlag(process.argv, "--force");
+  if (force) {
+    const stage = mkdtempSync(join(dirname(path), ".kit-policy-init-"));
+    try {
+      const replacement = join(stage, "policy.toml");
+      writeFileSync(replacement, POLICY_TEMPLATE, "utf-8");
+      renameSync(replacement, path);
+    } finally {
+      rmSync(stage, { recursive: true, force: true });
+    }
+  } else {
+    try {
+      writeFileSync(path, POLICY_TEMPLATE, { encoding: "utf-8", flag: "wx" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      console.error(`${c.red}${path} already exists${c.reset} — pass --force to overwrite`);
+      return false;
+    }
   }
-  writeFileSync(path, POLICY_TEMPLATE, "utf-8");
   console.log(`${c.green}✓${c.reset} wrote ${c.bold}${path}${c.reset}`);
   console.log(
     `${c.dim}edit it, then ${c.reset}${c.bold}kit policy sign${c.reset}${c.dim} to attribute it to your identity${c.reset}`,

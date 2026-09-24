@@ -141,3 +141,71 @@ describe("Docker image release gate (CI-08)", () => {
     },
   );
 });
+
+describe("Docker failed scan diagnostics", () => {
+  it("reports failed scan findings from SARIF without echoing untrusted details", () => {
+    const scan = step("Image vulnerability scan");
+    const explain = step("Explain failed image scan");
+    const push = step("Push scanned CLI image");
+    assert.ok(scan.start < explain.start && explain.start < push.start);
+    assert.match(explain.body, /!cancelled\(\).*steps\.scan\.outcome == 'failure'/);
+    const dir = mkdtempSync(join(tmpdir(), "kit-trivy-diagnostic-test-"));
+    try {
+      writeFileSync(
+        join(dir, "trivy-results.sarif"),
+        JSON.stringify({
+          runs: [
+            {
+              results: [
+                {
+                  ruleId: "CVE-2026-12345",
+                  message: { text: "::error::secret content" },
+                  locations: [
+                    { physicalLocation: { artifactLocation: { uri: "pkg:apk/alpine/libssl3" } } },
+                  ],
+                },
+                {
+                  ruleId: "GHSA-abcd-1234-wxyz\n::error::injected",
+                  locations: [
+                    {
+                      physicalLocation: {
+                        artifactLocation: { uri: "node_modules/evil\n::error::injected" },
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      );
+      const run = spawnSync("bash", ["-euo", "pipefail", "-c", explain.run], {
+        cwd: dir,
+        encoding: "utf8",
+      });
+      assert.equal(run.status, 0, run.stderr);
+      assert.match(run.stdout, /Trivy SARIF: 2 finding\(s\)/);
+      assert.match(run.stdout, /CVE-2026-12345.*pkg:apk\/alpine\/libssl3/);
+      assert.doesNotMatch(run.stdout, /secret content|\n::error::/);
+      assert.equal(run.stdout.split("\n").filter((line) => line.includes("::error::")).length, 0);
+
+      rmSync(join(dir, "trivy-results.sarif"));
+      const missing = spawnSync("bash", ["-euo", "pipefail", "-c", explain.run], {
+        cwd: dir,
+        encoding: "utf8",
+      });
+      assert.equal(missing.status, 0, missing.stderr);
+      assert.match(missing.stdout, /SARIF unavailable/);
+
+      writeFileSync(join(dir, "trivy-results.sarif"), "not SARIF");
+      const malformed = spawnSync("bash", ["-euo", "pipefail", "-c", explain.run], {
+        cwd: dir,
+        encoding: "utf8",
+      });
+      assert.equal(malformed.status, 0, malformed.stderr);
+      assert.match(malformed.stdout, /SARIF unreadable/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

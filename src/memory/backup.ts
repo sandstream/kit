@@ -36,6 +36,8 @@ import {
   realpathSync,
   readlinkSync,
   openSync,
+  fstatSync,
+  constants,
   fchmodSync,
   closeSync,
   renameSync,
@@ -210,23 +212,30 @@ function readWindow(fd: number, buffer: Buffer, length: number, position: number
 /** Compare a live store's committed SQLite snapshot with a previously decrypted backup. */
 export function memoryDbMatchesSnapshot(srcPath: string, snapshotPath: string): boolean {
   return withMemoryDbSnapshot(srcPath, snapshotPath, (current) => {
-    const size = statSync(current).size;
-    if (size !== statSync(snapshotPath).size) return false;
-    const currentFd = openSync(current, "r");
-    const previousFd = openSync(snapshotPath, "r");
-    const a = Buffer.allocUnsafe(1024 * 1024);
-    const b = Buffer.allocUnsafe(1024 * 1024);
+    const flags = constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
+    const currentFd = openSync(current, flags);
     try {
-      for (let offset = 0; offset < size; offset += a.length) {
-        const length = Math.min(a.length, size - offset);
-        if (readWindow(currentFd, a, length, offset) !== length) return false;
-        if (readWindow(previousFd, b, length, offset) !== length) return false;
-        if (!a.subarray(0, length).equals(b.subarray(0, length))) return false;
+      const previousFd = openSync(snapshotPath, flags);
+      try {
+        const currentInfo = fstatSync(currentFd);
+        const previousInfo = fstatSync(previousFd);
+        if (!currentInfo.isFile() || !previousInfo.isFile()) return false;
+        const size = currentInfo.size;
+        if (size !== previousInfo.size) return false;
+        const a = Buffer.allocUnsafe(1024 * 1024);
+        const b = Buffer.allocUnsafe(1024 * 1024);
+        for (let offset = 0; offset < size; offset += a.length) {
+          const length = Math.min(a.length, size - offset);
+          if (readWindow(currentFd, a, length, offset) !== length) return false;
+          if (readWindow(previousFd, b, length, offset) !== length) return false;
+          if (!a.subarray(0, length).equals(b.subarray(0, length))) return false;
+        }
+        return true;
+      } finally {
+        closeSync(previousFd);
       }
-      return true;
     } finally {
       closeSync(currentFd);
-      closeSync(previousFd);
     }
   });
 }

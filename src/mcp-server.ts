@@ -16,9 +16,7 @@ import {
   updateCliLock,
   readkitMeta,
 } from "./lock.js";
-import { detectStack } from "./stack-detector.js";
-import { generateToml } from "./toml-generator.js";
-import { writeFile, access } from "node:fs/promises";
+import { generateMcpInit } from "./mcp-init.js";
 import { executeCommand, redactCommandForEnvironment, requireWorkingDirectory } from "./run.js";
 import { gatherProjectContext } from "./context.js";
 import { mapReport } from "./commands/repomap.js";
@@ -548,77 +546,12 @@ function register_kit_init(server: McpServer): void {
       // dry_run is a read-only preview; a real write is refused in read-only mode.
       if (!dry_run && isReadOnlyMode()) return readOnlyRefusal("kit_init");
       try {
-        const workDir = cwd ?? process.cwd();
-        const cfgPath = resolve(workDir, KIT_FILE);
-
-        // Check if .kit.toml already exists
-        let alreadyExists = false;
-        try {
-          await access(cfgPath);
-          alreadyExists = true;
-        } catch {
-          // File does not exist — proceed
-        }
-
-        // Same service resolution as the CLI init flow — the two surfaces must generate
-        // the same config. There is no prompt on this surface, so the operator's known
-        // services are never applied here; they come back as an `offered` gap for the
-        // agent to put to the user and answer with a follow-up call.
-        const { resolveInitServices } = await import("./user-defaults.js");
-        const detected = await detectStack(workDir);
-        const {
-          stack,
-          offered: offeredServices,
-          applied: appliedDefaults,
-          unknown: unknownDefaults,
-        } = resolveInitServices(detected);
-        // `gaps` is the point of this response for an agent caller: the fields kit
-        // refused to invent, each with the command that settles it. Without them the
-        // caller sees a short config and no reason for what is absent.
-        const { toml: generatedConfig, gaps: configGaps } = generateToml(stack);
-        const gaps =
-          offeredServices.length > 0
-            ? [
-                {
-                  path: "services",
-                  owner: "agent" as const,
-                  why: "known services that nothing in this repo references",
-                  candidates: offeredServices,
-                  fix: `kit init --services ${[...stack.services, ...offeredServices].join(",")}`,
-                },
-                ...configGaps,
-              ]
-            : configGaps;
-
-        let written = false;
-
-        if (!dry_run && !alreadyExists) {
-          await writeFile(cfgPath, generatedConfig, "utf-8");
-          written = true;
-        }
-
+        const result = await generateMcpInit(cwd, dry_run);
         return {
           content: [
             {
               type: "text" as const,
-              text: JSON.stringify(
-                {
-                  detectedStack: stack,
-                  appliedDefaults,
-                  unknownDefaults,
-                  generatedConfig,
-                  gaps,
-                  written,
-                  alreadyExists,
-                  message: alreadyExists
-                    ? ".kit.toml already exists — not overwritten"
-                    : dry_run
-                      ? "dry_run=true, config not written"
-                      : ".kit.toml generated successfully",
-                },
-                null,
-                2,
-              ),
+              text: JSON.stringify(result, null, 2),
             },
           ],
         };

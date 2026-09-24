@@ -17,7 +17,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from "node:fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  rmSync,
+  mkdirSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -194,6 +202,23 @@ describe("cmdFix writes into the project it was given", () => {
     } finally {
       rmSync(A, { recursive: true, force: true });
       rmSync(B, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("cmdFix template path safety", () => {
+  it("does not follow an existing template symlink or overwrite its target", async () => {
+    const secrets =
+      '\n[secrets]\nstore = "env"\ntemplate = ".env.template"\n\n[secrets.keys.API_KEY]\nsource = "env"\n';
+    const dir = project(secrets);
+    const target = join(dir, "protected.txt");
+    writeFileSync(target, "keep this content\n");
+    symlinkSync(target, join(dir, ".env.template"));
+    try {
+      await inCwd(dir, () => cmdFix(dir));
+      assert.equal(readFileSync(target, "utf-8"), "keep this content\n");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

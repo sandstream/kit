@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, writeFile, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -13,7 +13,7 @@ import { loadPluginAdapters } from "./plugin-loader.js";
 let tmpProject: string;
 
 before(async () => {
-  tmpProject = join(tmpdir(), `sandstream-kit-plugin-sec-test-${process.pid}`);
+  tmpProject = await mkdtemp(join(tmpdir(), "sandstream-kit-plugin-sec-test-"));
   await mkdir(join(tmpProject, "node_modules"), { recursive: true });
 });
 
@@ -42,8 +42,8 @@ function withWarnCapture<T>(fn: () => Promise<T>): Promise<{ result: T; warnings
 
 describe("loadPluginAdapters path-traversal hardening", () => {
   it("refuses a package symlink that resolves outside project node_modules", async () => {
-    const outside = join(tmpdir(), `kit-external-plugin-${process.pid}`);
-    const marker = join(tmpdir(), `kit-external-plugin-ran-${process.pid}`);
+    const outside = join(tmpProject, "external-plugin");
+    const marker = join(tmpProject, "external-plugin-ran");
     const linked = join(tmpProject, "node_modules", "kit-plugin-outside");
     await mkdir(outside, { recursive: true });
     await writeFile(join(outside, "package.json"), JSON.stringify({ type: "module" }));
@@ -66,8 +66,8 @@ describe("loadPluginAdapters path-traversal hardening", () => {
   });
 
   it("refuses an entrypoint symlink that resolves outside project node_modules", async () => {
-    const outside = join(tmpdir(), `kit-external-entry-${process.pid}.mjs`);
-    const marker = join(tmpdir(), `kit-external-entry-ran-${process.pid}`);
+    const outside = join(tmpProject, "external-entry.mjs");
+    const marker = join(tmpProject, "external-entry-ran");
     const packageDir = join(tmpProject, "node_modules", "kit-plugin-linked-entry");
     await mkdir(packageDir, { recursive: true });
     await writeFile(
@@ -93,9 +93,9 @@ describe("loadPluginAdapters rejects unsafe package names", () => {
   it("does NOT import a module outside node_modules and does not execute it (RCE guard)", async () => {
     // Plant an evil module OUTSIDE the project's node_modules that, if imported,
     // writes a marker file (stand-in for arbitrary code execution).
-    const evilName = `kit-evil-${process.pid}`;
-    const evilDir = join(tmpdir(), evilName);
-    const marker = join(tmpdir(), `kit-pwned-${process.pid}.txt`);
+    const evilName = "kit-evil";
+    const evilDir = join(tmpProject, evilName);
+    const marker = join(tmpProject, "kit-pwned.txt");
     await mkdir(evilDir, { recursive: true });
     await writeFile(
       join(evilDir, "index.js"),

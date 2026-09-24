@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { writeFile, unlink, mkdir, rmdir, rm } from "node:fs/promises";
+import { writeFile, unlink, mkdtemp, rmdir, rm } from "node:fs/promises";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -46,8 +46,7 @@ describe("doctor tool resolution", () => {
 
 describe("runDoctor", () => {
   it("returns skip for Node.js check when no package.json exists", async () => {
-    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-1`);
-    await mkdir(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(join(tmpdir(), "kit-doctor-test-1-"));
     try {
       const result = await runDoctor({}, tmpDir);
       const nodeCheck = result.checks.find((c) => c.name === "Node.js version");
@@ -63,8 +62,7 @@ describe("runDoctor", () => {
   });
 
   it("passes Node.js check when current version satisfies engines.node", async () => {
-    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-2`);
-    await mkdir(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(join(tmpdir(), "kit-doctor-test-2-"));
     const pkg = { engines: { node: ">=1.0.0" } }; // extremely low requirement, always passes
     await writeFile(join(tmpDir, "package.json"), JSON.stringify(pkg), "utf-8");
     try {
@@ -83,8 +81,7 @@ describe("runDoctor", () => {
   });
 
   it("fails Node.js check when current version does not satisfy engines.node", async () => {
-    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-3`);
-    await mkdir(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(join(tmpdir(), "kit-doctor-test-3-"));
     const pkg = { engines: { node: ">=9999.0.0" } }; // impossibly high requirement
     await writeFile(join(tmpDir, "package.json"), JSON.stringify(pkg), "utf-8");
     try {
@@ -103,8 +100,7 @@ describe("runDoctor", () => {
   });
 
   it("warns about missing .env.local when secrets section is configured", async () => {
-    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-4`);
-    await mkdir(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(join(tmpdir(), "kit-doctor-test-4-"));
     try {
       const result = await runDoctor({ secrets: { store: "1password" } }, tmpDir);
       const envCheck = result.checks.find((c) => c.name === ".env.local");
@@ -120,8 +116,7 @@ describe("runDoctor", () => {
   });
 
   it("passes .env.local check when file exists and secrets section is configured", async () => {
-    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-5`);
-    await mkdir(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(join(tmpdir(), "kit-doctor-test-5-"));
     const envPath = join(tmpDir, ".env.local");
     await writeFile(envPath, "SECRET=value\n", "utf-8");
     try {
@@ -136,8 +131,7 @@ describe("runDoctor", () => {
   });
 
   it("skips .env.local check when no secrets section", async () => {
-    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-6`);
-    await mkdir(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(join(tmpdir(), "kit-doctor-test-6-"));
     try {
       const result = await runDoctor({}, tmpDir);
       const envCheck = result.checks.find((c) => c.name === ".env.local");
@@ -148,8 +142,7 @@ describe("runDoctor", () => {
   });
 
   it("includes mise check in every run", async () => {
-    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-7`);
-    await mkdir(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(join(tmpdir(), "kit-doctor-test-7-"));
     try {
       const result = await runDoctor({}, tmpDir);
       const miseCheck = result.checks.find((c) => c.name === "mise");
@@ -164,8 +157,7 @@ describe("runDoctor", () => {
   });
 
   it("correctly counts passed, warnings, and failed", async () => {
-    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-8`);
-    await mkdir(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(join(tmpdir(), "kit-doctor-test-8-"));
     // Force a fail via impossible Node.js requirement and a warn via missing .env.local
     const pkg = { engines: { node: ">=9999.0.0" } };
     await writeFile(join(tmpDir, "package.json"), JSON.stringify(pkg), "utf-8");
@@ -185,8 +177,7 @@ describe("runDoctor", () => {
   });
 
   it("exec-broker runtime: skips when no [scope] is declared (nothing to mediate)", async () => {
-    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-rt-skip`);
-    await mkdir(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(join(tmpdir(), "kit-doctor-test-rt-skip-"));
     try {
       const result = await runDoctor({}, tmpDir);
       const rt = result.checks.find((c) => c.name === "exec-broker runtime");
@@ -199,8 +190,7 @@ describe("runDoctor", () => {
   });
 
   it("exec-broker runtime: fails when opted in but the scope is unsigned (fail-closed)", async () => {
-    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-rt-fail`);
-    await mkdir(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(join(tmpdir(), "kit-doctor-test-rt-fail-"));
     // enforce_runtime declared but the profile is NOT signed → runtime denies governed ops.
     await writeFile(
       join(tmpDir, ".kit-profile.toml"),
@@ -222,8 +212,7 @@ describe("runDoctor", () => {
   });
 
   it("exec-broker runtime: warns in OBSERVE (dry-run) mode", async () => {
-    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-rt-observe`);
-    await mkdir(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(join(tmpdir(), "kit-doctor-test-rt-observe-"));
     await writeFile(
       join(tmpDir, ".kit-profile.toml"),
       `version = 1\n[scope]\negress = ["api.acme.com"]\nenforce_runtime = "observe"\n`,
@@ -241,8 +230,7 @@ describe("runDoctor", () => {
   });
 
   it("deep skill scanner: skips when SkillSpector is not installed (optional delegate)", async () => {
-    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-deep`);
-    await mkdir(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(join(tmpdir(), "kit-doctor-test-deep-"));
     try {
       const result = await runDoctor({}, tmpDir);
       const deep = result.checks.find((c) => c.name === "deep skill scanner");
@@ -256,8 +244,7 @@ describe("runDoctor", () => {
   });
 
   it("triage pre-commit gates: check is always present (skip when not wired)", async () => {
-    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-triage-gates`);
-    await mkdir(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(join(tmpdir(), "kit-doctor-test-triage-gates-"));
     try {
       const result = await runDoctor({}, tmpDir);
       const g = result.checks.find((c) => c.name === "triage pre-commit gates");
@@ -271,8 +258,7 @@ describe("runDoctor", () => {
   });
 
   it("surfaces the identity keystore posture (Pillar 1 — never silent)", async () => {
-    const tmpDir = join(tmpdir(), `kit-doctor-test-${process.pid}-9`);
-    await mkdir(tmpDir, { recursive: true });
+    const tmpDir = await mkdtemp(join(tmpdir(), "kit-doctor-test-9-"));
     try {
       const result = await runDoctor({}, tmpDir);
       const ks = result.checks.find((c) => c.name === "identity keystore");

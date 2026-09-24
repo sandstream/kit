@@ -193,7 +193,7 @@ describe("policy pull lock during pair replacement", () => {
           throw Object.assign(new Error("injected policy rename failure"), { code: "EIO" });
         }
         renameFile(from, to);
-        if (to === getPolicySigPath(dest)) {
+        if (to === getPolicySigPath(dest) && transitionalStatus === undefined) {
           transitionalStatus = verifyPolicy(dest).status;
           competitor = competingPull(source7);
         }

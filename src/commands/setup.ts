@@ -63,6 +63,7 @@ import { cmdLogin } from "./login.js";
 import { cmdSecrets } from "./secrets.js";
 import { cmdCheck } from "./check.js";
 import { cmdHooks } from "./hooks.js";
+import { recordFirstInstallPrompt } from "./setup-marker.js";
 
 export async function cmdDoctor(): Promise<boolean> {
   let config: ReturnType<typeof Object.create> = {};
@@ -1015,7 +1016,7 @@ async function offerFirstInstallPrescan(): Promise<void> {
 
   // Always write marker (even if user declined) — don't re-pester.
   await mkdir(markerDir, { recursive: true, mode: 0o700 });
-  await writeFile(markerPath, new Date().toISOString() + "\n", { encoding: "utf-8", mode: 0o600 });
+  await recordFirstInstallPrompt(markerPath);
 
   if (answer !== "y" && answer !== "yes") {
     console.log(

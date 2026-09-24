@@ -99,6 +99,32 @@ jobs:
           output: trivy-results.sarif
           limit-severities-for-sarif: true
 
+      - name: Explain failed image scan
+        if: ${{ !cancelled() && steps.scan.outcome == 'failure' }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'trivy-results.sarif';
+          if (!fs.existsSync(file)) {
+            console.log('Trivy SARIF unavailable; scan failed before producing a report.');
+            process.exit(0);
+          }
+          try {
+            const sarif = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const results = (sarif.runs ?? []).flatMap((run) => run.results ?? []);
+            const safe = (value) => String(value ?? 'unknown').replace(/[^a-zA-Z0-9.:@/_+-]/g, '_').replace(/::/g, '__').slice(0, 120);
+            console.log(`Trivy SARIF: ${results.length} finding(s)`);
+            for (const result of results.slice(0, 20)) {
+              const location = result.locations?.[0]?.physicalLocation?.artifactLocation?.uri;
+              console.log(`  ${safe(result.ruleId)} ${safe(location)}`);
+            }
+            if (results.length > 20) console.log(`  ... ${results.length - 20} more finding(s)`);
+            if (results.length === 0) console.log('Scan failed without SARIF findings; inspect scanner logs.');
+          } catch {
+            console.log('Trivy SARIF unreadable; scan failed before a usable report was produced.');
+          }
+          NODE
+
       - name: Upload Trivy scan results
         # Preserve findings when the scan rejects the image. SARIF availability
         # must not turn a failed vulnerability gate into a successful publish.
