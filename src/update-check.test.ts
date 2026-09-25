@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { checkForUpdate, isValidVersion, isNewer } from "./update-check.js";
+import {
+  checkForUpdate,
+  isValidVersion,
+  isNewer,
+  postCommandNoticesAllowed,
+} from "./update-check.js";
 
 describe("isValidVersion (R1: no poisoned version string reaches a prompt)", () => {
   it("accepts well-formed semver (optionally v-prefixed / pre-release)", () => {
@@ -180,5 +185,21 @@ describe("checkForUpdate", () => {
       if (origNo === undefined) delete process.env.KIT_NO_UPDATE_CHECK;
       else process.env.KIT_NO_UPDATE_CHECK = origNo;
     }
+  });
+});
+
+describe("postCommandNoticesAllowed (MP-7)", () => {
+  it("skips the notices after local-only memory commands, which promise no network", () => {
+    assert.equal(postCommandNoticesAllowed("memory", false, false), false);
+  });
+
+  it("skips them for --json and non-interactive runs, whatever the command", () => {
+    assert.equal(postCommandNoticesAllowed("check", true, false), false);
+    assert.equal(postCommandNoticesAllowed("check", false, true), false);
+  });
+
+  it("allows them after an ordinary interactive command", () => {
+    assert.equal(postCommandNoticesAllowed("check", false, false), true);
+    assert.equal(postCommandNoticesAllowed(undefined, false, false), true);
   });
 });

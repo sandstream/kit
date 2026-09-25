@@ -1,6 +1,6 @@
 # Plugin Authoring Guide
 
-kit supports community-built adapter plugins. Plugins are regular npm packages that export one or more `ServiceAdapter` implementations. Once installed, they integrate with `kit add`, `kit check`, and the `kit_add` MCP tool transparently.
+kit supports community-built adapter plugins. Plugins are regular npm packages that export one or more `ServiceAdapter` implementations. `kit plugin install` registers a package in `package.json`'s `kitPlugins` only when it exports `{ adapter }`, and only `kit add` (including `kit add --list`) loads registered adapters. `kit check` does not load them, and kit exposes no `kit_add` MCP tool. Of the official plugins, only `railway` exports an adapter; the rest are API-only packages.
 
 ---
 

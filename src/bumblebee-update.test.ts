@@ -94,6 +94,9 @@ describe("checkForBumblebeeUpdate — suppression posture", () => {
         { GITHUB_ACTIONS: "true" },
         { GITLAB_CI: "true" },
         { KIT_NO_UPDATE_CHECK: "1" },
+        // MP-7: disabling the scanner must also silence its release check.
+        { KIT_BUMBLEBEE: "0" },
+        { KIT_BUMBLEBEE: "false" },
       ];
       for (const vars of postures) {
         await withEnv(vars, async () => {

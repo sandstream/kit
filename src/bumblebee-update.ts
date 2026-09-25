@@ -112,9 +112,13 @@ export function bumblebeeUpdateFrom(pinned: string, latest: string): BumblebeeUp
   return isNewer(latest, pinned) ? { pinned, latest } : null;
 }
 
-/** True when kit must not make the outbound release check. */
+/** True when kit must not make the outbound release check. Disabling the scanner
+ * (`KIT_BUMBLEBEE=0`) also silences its release check: a notice for a tool the operator
+ * turned off is noise, and it was the one request the opt-out left behind. */
 async function checkSuppressed(): Promise<boolean> {
+  const scanner = process.env.KIT_BUMBLEBEE?.toLowerCase();
   return (
+    ["0", "false", "off", "no"].includes(scanner ?? "") ||
     process.env.KIT_NO_UPDATE_CHECK === "1" ||
     process.env.CI === "true" ||
     process.env.GITHUB_ACTIONS === "true" ||

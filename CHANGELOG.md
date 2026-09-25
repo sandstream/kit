@@ -2,6 +2,21 @@
 
 ### Fixed
 
+- **`kit memory` could still reach the network.** Memory commands are local
+  only, yet the post-command version notices ran after them, calling
+  `registry.npmjs.org` and `api.github.com`. They are skipped after `kit memory`
+  now, and `KIT_BUMBLEBEE=0`, which turns the scanner off, also silences its
+  release check.
+
+- **Docs named network hosts, plugin behaviour and an adapter that were not
+  true.** `docs/DATA_FLOW.md` omitted about twenty hosts kit contacts (triage of
+  Docker images and repos, deploy-env and secret propagation, the cost monitor,
+  health sensors, built-in adapters, operator-configured endpoints).
+  `PLUGIN_AUTHORING.md` said installed plugins work with `kit check` and a
+  `kit_add` MCP tool; only packages exporting `{ adapter }` are registered, and
+  only `kit add` loads them. An example adapter was named `neon/database`; the
+  built-in is `neon/db`.
+
 - **Four regular expressions could backtrack catastrophically.** The install
   gate's runner-flag and fetch-to-shell scans, the `allowScripts` exact-version
   check, and the AISLE plugin's finding-id slug each let one token match the same

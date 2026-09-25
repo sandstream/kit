@@ -331,7 +331,7 @@ const exec = promisify(execFile);
  * - Environment variable setup
  */
 export const neonDbAdapter: ServiceAdapter = {
-  name: "neon/database",
+  name: "neon/db",
   description: "Serverless PostgreSQL via Neon",
   
   getRequiredTools(): string[] {
