@@ -7,7 +7,7 @@ import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { triageNpmSandbox, type SandboxResult } from "./triage-sandbox.js";
@@ -43,7 +43,7 @@ const KIT_VERSION = (() => {
  *  caller's rename would steal the tmp file out from under another's. */
 async function writeFileAtomic(destPath: string, content: string | Buffer): Promise<void> {
   const unique = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
-  const tmp = resolve(dirname(destPath), `.${basenameOf(destPath)}.kit-tmp-${unique}`);
+  const tmp = resolve(dirname(destPath), `.${basename(destPath)}.kit-tmp-${unique}`);
   try {
     await writeFile(tmp, content);
     await rename(tmp, destPath);
@@ -51,10 +51,6 @@ async function writeFileAtomic(destPath: string, content: string | Buffer): Prom
     await rm(tmp, { force: true }).catch(() => {});
     throw err;
   }
-}
-
-function basenameOf(p: string): string {
-  return p.split("/").pop() ?? p;
 }
 
 /**
