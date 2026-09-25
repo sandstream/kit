@@ -1,9 +1,18 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import type { ServiceStatus } from "./check-services.js";
 
 type ProbeEntry = "services" | "gate";
@@ -38,15 +47,30 @@ function prepareProjects(dir: string, generic = false) {
   return { caller, governed, bin, cwdLog, command };
 }
 
-function prepareCli(bin: string, cwdLog: string, domain = "governed") {
+function prepareCli(bin: string, cwdLog: string, projects: string[], domain = "governed") {
   const executable = (name: string, source: string) => {
+    if (process.platform === "win32") {
+      // Native Windows cannot execute a shebang file. A hard link to node.exe
+      // preserves the real execFile path; Node loads the first CLI argument as
+      // a script in the governed cwd.
+      try {
+        linkSync(process.execPath, join(bin, `${name}.exe`));
+      } catch {
+        copyFileSync(process.execPath, join(bin, `${name}.exe`));
+      }
+      const script = name === "infisical" ? "login" : "status";
+      for (const project of projects) writeFileSync(join(project, script), source);
+      return;
+    }
     writeFileSync(join(bin, name), `#!${process.execPath}\n${source}`, { mode: 0o755 });
   };
-  executable("mise", "process.exitCode = 1;");
-  executable(
-    "which",
-    `console.log(require("node:path").join(${JSON.stringify(bin)}, process.argv[2]));`,
-  );
+  if (process.platform !== "win32") {
+    executable("mise", "process.exitCode = 1;");
+    executable(
+      "which",
+      `console.log(require("node:path").join(${JSON.stringify(bin)}, process.argv[2]));`,
+    );
+  }
   const recordCwd = `require("node:fs").writeFileSync(${JSON.stringify(cwdLog)}, process.cwd());`;
   executable("health-check", `${recordCwd}\nconsole.log(process.cwd());`);
   const status = JSON.stringify({
@@ -62,7 +86,8 @@ function prepareCli(bin: string, cwdLog: string, domain = "governed") {
   executable(
     "infisical",
     `
-        if (JSON.stringify(process.argv.slice(2)) !== '["login","status","--json","--silent","--telemetry=false"]') {
+        const args = process.platform === "win32" ? ["login", ...process.argv.slice(2)] : process.argv.slice(2);
+        if (JSON.stringify(args) !== '["login","status","--json","--silent","--telemetry=false"]') {
           throw new Error("Only the read-only status fixture is permitted");
         }
         ${recordCwd}
@@ -105,7 +130,17 @@ function runProbe(
     {
       cwd: caller,
       // Neither operator credentials nor real service executables enter this fixture.
-      env: { PATH: bin },
+      env:
+        process.platform === "win32"
+          ? {
+              PATH: [bin, join(process.env.SystemRoot ?? "C:\\Windows", "System32")].join(
+                delimiter,
+              ),
+              PATHEXT: process.env.PATHEXT,
+              SystemRoot: process.env.SystemRoot,
+              ComSpec: process.env.ComSpec,
+            }
+          : { PATH: bin },
       encoding: "utf8",
       timeout: 15_000,
     },
@@ -121,7 +156,7 @@ function probe(
   try {
     const fixture = prepareProjects(dir, options.generic);
     const { caller, governed, bin, cwdLog } = fixture;
-    prepareCli(bin, cwdLog, options.domain);
+    prepareCli(bin, cwdLog, [caller, governed], options.domain);
     return {
       ...runProbe(entry, fixture, options.omitCwd),
       probeCwd: readFileSync(cwdLog, "utf8"),
