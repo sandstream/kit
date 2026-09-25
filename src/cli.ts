@@ -7,7 +7,7 @@ import { loadConfig } from "./config.js";
 import { hasFlag, splitLeadingGlobalFlags, GLOBAL_FLAGS, readOnlyFlag } from "./utils/flags.js";
 import { envTruthy } from "./utils/flags.js";
 import { generateCompletions } from "./completions.js";
-import { checkForUpdate, printUpdateNotice } from "./update-check.js";
+import { checkForUpdate, postCommandNoticesAllowed, printUpdateNotice } from "./update-check.js";
 import { SKIPPED_COMMITS_LOG } from "./hooks.js";
 import { cmdFix } from "./fix.js";
 import { c } from "./utils/colors.js";
@@ -491,10 +491,9 @@ export async function main(): Promise<void> {
 
     process.exitCode = ok ? 0 : 1;
 
-    // Non-interactive / CI: skip update check. Also skip in --json mode: the notice
-    // prints to stdout and would corrupt a machine-readable JSON payload (e.g.
-    // `kit check --json` piped to a parser).
-    if (!nonInteractive && !hasFlag(args, "--json")) {
+    // Non-interactive / CI / --json / local-only commands: no update check.
+    // See postCommandNoticesAllowed.
+    if (postCommandNoticesAllowed(command, hasFlag(args, "--json"), nonInteractive)) {
       checkForUpdate(KIT_VERSION)
         .then((info) => {
           if (info) printUpdateNotice(info);

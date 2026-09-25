@@ -167,15 +167,20 @@ an egress policy. Some calls need no token; authentication on others is
 API-specific. In particular, the Google Custom Search probe sends its API key in
 a query parameter, so do not log full request URLs.
 
-| Kit operation                   | Default destination                                                                          | Purpose                                                                            |
-| ------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Interactive CLI version notices | `registry.npmjs.org`, `api.github.com/repos/perplexityai/bumblebee/releases`                 | Check for newer kit and pinned bumblebee versions; cached for 24 hours             |
-| Bumblebee provisioning          | `github.com/perplexityai/bumblebee/releases/download`                                        | Download a checksum-pinned scanner when absent                                     |
-| Package triage                  | `registry.npmjs.org`, `pypi.org`                                                             | Read package metadata                                                              |
-| Web-search check                | `api.search.brave.com`, `www.googleapis.com`                                                 | Probe the configured Brave or Google search API                                    |
-| Identity and service checks     | `app.infisical.com`, `api.github.com`, `graph.microsoft.com`, `cloudidentity.googleapis.com` | Verify configured credentials or memberships                                       |
-| Optional provisioning adapters  | `api.neon.tech`, `api.planetscale.com`, `api.upstash.com`, `api.cloudflare.com`              | Create or inspect selected infrastructure                                          |
-| Opt-in remote audit             | `${KIT_REMOTE_URL}`                                                                          | POST audit events when `[governance.audit].remote` and `company_id` are configured |
+| Kit operation                     | Default destination                                                                                                                                                                            | Purpose                                                                            |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Interactive CLI version notices   | `registry.npmjs.org`, `api.github.com/repos/perplexityai/bumblebee/releases`                                                                                                                   | Check for newer kit and pinned bumblebee versions; cached for 24 hours             |
+| Bumblebee provisioning            | `github.com/perplexityai/bumblebee/releases/download`                                                                                                                                          | Download a checksum-pinned scanner when absent                                     |
+| Package triage                    | `registry.npmjs.org`, `pypi.org`, `hub.docker.com`, `api.github.com`                                                                                                                           | Read package, image and repository metadata                                        |
+| Web-search check                  | `api.search.brave.com`, `www.googleapis.com`                                                                                                                                                   | Probe the configured Brave or Google search API                                    |
+| Identity and service checks       | `app.infisical.com`, `api.github.com`, `graph.microsoft.com`, `cloudidentity.googleapis.com`                                                                                                   | Verify configured credentials or memberships                                       |
+| Optional provisioning adapters    | `api.neon.tech`, `api.planetscale.com`, `api.upstash.com`, `api.cloudflare.com`                                                                                                                | Create or inspect selected infrastructure                                          |
+| Other built-in adapters           | `edge.api.flagsmith.com`, `us.i.posthog.com`, `eu.i.posthog.com`, `api.tinybird.co`, `api.eu.tinybird.co`, `api.eu-central-1.aws.tinybird.co`, `api.trigger.dev`, `sentry.io`, `api.berget.ai` | Provision or inspect the selected service                                          |
+| Deploy env and secret propagation | `api.vercel.com`, `api.github.com`                                                                                                                                                             | Diff deploy env names; push secrets to Vercel or GitHub Actions                    |
+| Cost monitor                      | `api.stripe.com`                                                                                                                                                                               | Read balance and usage for the configured account                                  |
+| Health sensors (`kit health`)     | `api.supabase.com`, `api.vercel.com`, `sentry.io`, `us.posthog.com`, `eu.posthog.com`, `api.resend.com`, `api.tinybird.co`, `api.bitbucket.org`                                                | Read status from services the project declares                                     |
+| Configured endpoints              | approval webhook, revocation endpoint, OneCLI `apiBase`, memory verification URLs, SearXNG instance, CDP URL                                                                                   | Only when the operator configures them                                             |
+| Opt-in remote audit               | `${KIT_REMOTE_URL}`                                                                                                                                                                            | POST audit events when `[governance.audit].remote` and `company_id` are configured |
 
 | First-party plugin | Default API destination                                           |
 | ------------------ | ----------------------------------------------------------------- |
@@ -189,10 +194,10 @@ a query parameter, so do not log full request URLs.
 | Snyk               | `api.snyk.io` (regional base URL configurable)                    |
 | Wiz                | `auth.app.wiz.io` plus the required tenant-specific `WIZ_API_URL` |
 
-`KIT_NO_UPDATE_CHECK=1`, CI, and configured air-gap posture suppress the two
-version notices. `KIT_BUMBLEBEE=0` disables the scanner download/scan but does
-not suppress the version notice; use `KIT_NO_UPDATE_CHECK=1` as well if neither
-request is wanted. `KIT_NO_DOWNLOAD=1` or a vetted `KIT_BUMBLEBEE_BIN` avoids
+`KIT_NO_UPDATE_CHECK=1`, CI, configured air-gap posture, `--json`,
+non-interactive runs and local-only `kit memory` commands suppress the two
+version notices. `KIT_BUMBLEBEE=0` disables the scanner download/scan and its
+release notice. `KIT_NO_DOWNLOAD=1` or a vetted `KIT_BUMBLEBEE_BIN` avoids
 scanner provisioning. See [`AIR_GAP.md`](./AIR_GAP.md) for offline scanner setup.
 
 Kit does not send default analytics or call an LLM provider. The optional audit

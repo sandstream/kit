@@ -70,13 +70,10 @@ zero-LLM core), and most setups never prove keyword search actually failed first
 Keyword search is the default; embeddings remain an explicit, opt-in escalation.
 
 The search operation reads the local SQLite store and does not start memory
-sync. A normal interactive `kit memory search` invocation can still make two
-independent update checks after the command: one to `registry.npmjs.org` for kit
-and one to `api.github.com` for bumblebee releases. Both use a 24-hour cache and
-are skipped in CI, JSON/non-interactive mode, configured air-gap posture, or with
-`KIT_NO_UPDATE_CHECK=1`. `KIT_BUMBLEBEE=0` disables the scanner, not its update
-notice. See [`DATA_FLOW.md`](./DATA_FLOW.md#network-destinations) for the wider
-network surface.
+sync. `kit memory` commands also skip the post-command version notices, so a
+memory search makes no network request at all. See
+[`DATA_FLOW.md`](./DATA_FLOW.md#network-destinations) for the wider network
+surface.
 
 ## Personal memory
 

@@ -130,6 +130,21 @@ export function suppressUpdateNotice(): void {
   noticeSuppressed = true;
 }
 
+/** Commands that only read or write local state. Their docs promise no network, so the
+ * post-command version notices (npm registry, GitHub releases) must not run after them. */
+const LOCAL_ONLY_COMMANDS = new Set(["memory"]);
+
+/** Whether the post-command update notices may run. Skipped for non-interactive and
+ * `--json` runs (the notice would corrupt the payload) and for local-only commands. */
+export function postCommandNoticesAllowed(
+  command: string | undefined,
+  jsonMode: boolean,
+  nonInteractive: boolean,
+): boolean {
+  if (nonInteractive || jsonMode) return false;
+  return !(command && LOCAL_ONLY_COMMANDS.has(command));
+}
+
 /** Current kit version from the installed package.json (sync, fail-safe). */
 export function getKitVersionSync(): string {
   try {
