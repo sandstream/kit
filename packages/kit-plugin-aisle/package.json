@@ -1,6 +1,6 @@
 {
   "name": "sandstream-kit-plugin-aisle",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "AISLE nano-analyzer result ingestion for kit (read-only).",
   "keywords": [
     "aisle",

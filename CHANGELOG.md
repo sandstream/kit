@@ -9,7 +9,7 @@
   exponential (or quadratic for the slug). The install gate runs on every
   PreToolUse Bash call. Each pattern is now unambiguous, with a regression test on
   the input shape CodeQL named, and the accepted inputs and generated ids are
-  unchanged.
+  unchanged. The slug fix ships in `sandstream-kit-plugin-aisle` 0.1.2.
 
 ## [6.12.0] - 2026-09-24
 
