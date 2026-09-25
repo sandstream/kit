@@ -10,7 +10,7 @@ import {
   READ_INVOCATIONS,
   SHARD_COUNT,
   commandShard,
-} from "./read-only-surface-matrix-fixture.js";
+} from "./read-only-surface-matrix.test-support.js";
 
 describe("read-only classifier matrix", () => {
   it("classifies every mutating CLI form", () => {

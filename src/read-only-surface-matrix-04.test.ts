@@ -1,5 +1,5 @@
 import { describe, it } from "node:test";
-import { runDispatchShard } from "./read-only-surface-matrix-fixture.js";
+import { runDispatchShard } from "./read-only-surface-matrix.test-support.js";
 
 describe("read-only CLI dispatch matrix shard 4/8", () => {
   for (const mode of ["env", "flag"] as const) {
