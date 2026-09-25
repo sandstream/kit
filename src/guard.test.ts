@@ -143,10 +143,16 @@ describe("shim + rc file handling", () => {
         } finally {
           closeSync(fd);
         }
-        assert.ok(
-          readFileSync(path, "utf-8").includes("kit guard-observe npm"),
-          "new bytes are in place",
-        );
+        // Read the replaced file through its own descriptor, not by path a second time.
+        const fresh = openSync(path, "r");
+        try {
+          assert.ok(
+            readFileSync(fresh, "utf-8").includes("kit guard-observe npm"),
+            "new bytes are in place",
+          );
+        } finally {
+          closeSync(fresh);
+        }
         assert.deepEqual(
           readdirSync(dir).filter((f) => f.includes("kit-tmp")),
           [],
@@ -181,7 +187,6 @@ describe("shim + rc file handling", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
-
 });
 
 describe("rc file handling", () => {

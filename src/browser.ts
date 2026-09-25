@@ -3,6 +3,7 @@ import {
   closeSync,
   constants,
   existsSync,
+  fstatSync,
   openSync,
   readSync,
   readdirSync,
@@ -302,19 +303,21 @@ function normalizeDeps(deps: BrowserProbeDeps = {}): Required<BrowserProbeDeps> 
 
 function isExecutableFile(path: string): boolean {
   try {
-    if (!statSync(path).isFile()) return false;
     if (process.platform === "win32") {
       // X_OK does not reflect execute bits on Windows. Browser binaries are
       // native PE files; an extension or a plain text stub alone is not enough.
+      // Open first and stat the descriptor, so the file checked is the file read.
       if (extname(path).toLowerCase() !== ".exe") return false;
       const fd = openSync(path, "r");
       try {
+        if (!fstatSync(fd).isFile()) return false;
         const header = Buffer.alloc(2);
         return readSync(fd, header, 0, 2, 0) === 2 && header.toString("ascii") === "MZ";
       } finally {
         closeSync(fd);
       }
     }
+    if (!statSync(path).isFile()) return false;
     accessSync(path, constants.X_OK);
     return true;
   } catch {

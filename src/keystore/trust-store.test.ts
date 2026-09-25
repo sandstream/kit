@@ -79,7 +79,7 @@ describe("recordExternalIdentity", () => {
     assert.equal(kid, identityId(pub));
     const path = join(dir, EXTERNAL_RECORD_FILE);
     assert.equal(existsSync(path), true);
-    if (process.platform !== "win32") assert.equal((statSync(path).mode & 0o777).toString(8), "600");
+    if (process.platform !== "win32") assert.equal(statSync(path).mode & 0o777, 0o600);
     const text = readFileSync(path, "utf-8");
     assert.ok(
       !text.includes("PRIVATE KEY"),

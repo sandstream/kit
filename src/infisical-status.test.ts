@@ -39,7 +39,10 @@ async function probe(options: {
   const command = join(dir, windows ? "infisical.exe" : "infisical");
   const pidPath = join(dir, "status.pid");
   const stdout = JSON.stringify({ sessions: options.sessions ?? [keyring] });
-  const source = `process.stdout.write(${JSON.stringify(stdout)}, () => { ${options.signal ? `require("node:fs").writeFileSync(${JSON.stringify(pidPath)}, String(process.pid)); setInterval(() => {}, 1000);` : ""} });\n`;
+  // Values enter the generated script as base64, never as source text.
+  const b64 = (value: string) =>
+    `Buffer.from(${JSON.stringify(Buffer.from(value).toString("base64"))}, "base64").toString()`;
+  const source = `process.stdout.write(${b64(stdout)}, () => { ${options.signal ? `require("node:fs").writeFileSync(${b64(pidPath)}, String(process.pid)); setInterval(() => {}, 1000);` : ""} });\n`;
   if (windows) {
     // Native Windows needs a PE executable. Node loads `login` from the test
     // cwd as its entry script; remaining status flags stay untouched.

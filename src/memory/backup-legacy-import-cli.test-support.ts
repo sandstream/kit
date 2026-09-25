@@ -20,7 +20,7 @@ export interface LegacyRestoreFixture {
 }
 
 export function checkLegacyRestore(legacy: LegacyRestoreFixture): void {
-  it(`actual CLI restore --force refuses a nonnull legacy ${legacy.name} with sync guidance before overwriting`, async (t) => {
+  void it(`actual CLI restore --force refuses a nonnull legacy ${legacy.name} with sync guidance before overwriting`, async (t) => {
     const local = await fixture(t, "legacy-import-destination", {
       KIT_MEMORY_PASSPHRASE: passphrase,
     });
