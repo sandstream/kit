@@ -1,6 +1,16 @@
-import { accessSync, constants, existsSync, readdirSync, statSync } from "node:fs";
+import {
+  accessSync,
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, extname, join, resolve } from "node:path";
 import type { BrowserConfig } from "./config.js";
 
 export type BrowserVerdictStatus = "pass" | "warn" | "fail" | "skip" | "blocker";
@@ -293,6 +303,20 @@ function normalizeDeps(deps: BrowserProbeDeps = {}): Required<BrowserProbeDeps> 
 
 function isExecutableFile(path: string): boolean {
   try {
+    if (process.platform === "win32") {
+      // X_OK does not reflect execute bits on Windows. Browser binaries are
+      // native PE files; an extension or a plain text stub alone is not enough.
+      // Open first and stat the descriptor, so the file checked is the file read.
+      if (extname(path).toLowerCase() !== ".exe") return false;
+      const fd = openSync(path, "r");
+      try {
+        if (!fstatSync(fd).isFile()) return false;
+        const header = Buffer.alloc(2);
+        return readSync(fd, header, 0, 2, 0) === 2 && header.toString("ascii") === "MZ";
+      } finally {
+        closeSync(fd);
+      }
+    }
     if (!statSync(path).isFile()) return false;
     accessSync(path, constants.X_OK);
     return true;
@@ -365,7 +389,9 @@ function probeSystemChrome(
   const mac = deps.platform === "darwin" ? macCandidates.find(deps.isExecutable) : undefined;
   if (mac) return mac;
   const pathMatch = deps.findOnPath(
-    ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
+    deps.platform === "win32"
+      ? ["chrome.exe", "google-chrome.exe", "chromium.exe", "chromium-browser.exe"]
+      : ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
     env.PATH,
   );
   return pathMatch && deps.isExecutable(pathMatch) ? pathMatch : undefined;

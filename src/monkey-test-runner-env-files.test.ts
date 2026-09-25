@@ -35,7 +35,7 @@ it("MSG-07: empty assignments cannot conceal later live values", async () => {
     });
     assertRefused(root, result, ["env", "seed", "server", "test"]);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });
 
@@ -57,7 +57,7 @@ for (const [syntax, content] of Object.entries(unsupportedDotenvInputs)) {
       assertInvalidEnvironment(root, result, "Application env file could not be inspected");
       assert.equal(readFileSync(join(root, ".env.local"), "utf8"), content);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
   });
 }
@@ -81,7 +81,7 @@ for (const file of [
       const report = assertRefused(root, result);
       assert.ok(report.findings.some((finding) => finding.file === file));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
   });
 }
@@ -97,7 +97,7 @@ it("MSG-07: provider-selected mode is checked before seed", async () => {
     assertRefused(root, result);
     assert.equal(existsSync(join(root, "env.ran")), true);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });
 
@@ -155,7 +155,7 @@ ${plant}`,
         assert.equal(await eventually(() => !processRunning(pid)), true, "server survived refusal");
       }
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
   });
 }
@@ -186,7 +186,7 @@ for (const kind of ["directory", "oversized", "dangling link"]) {
         assert.equal(existsSync(join(root, `${stage}.ran`)), false);
       assert.ok(!`${result.stdout}${result.stderr}`.includes(syntheticLiveKey));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
   });
 }
@@ -227,6 +227,6 @@ writeFileSync("seed.ran", !process.env.CHECKOUT_KEY && local.CHECKOUT_KEY?.start
     assert.equal(readFileSync(join(root, ".env.local"), "utf8"), content);
     assert.ok(!`${result.stdout}${result.stderr}`.includes(syntheticTestKey));
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });

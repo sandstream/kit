@@ -1,8 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  chmodSync,
+  linkSync,
+  copyFileSync,
+} from "node:fs";
+import { join, dirname, delimiter } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 
@@ -101,17 +110,38 @@ function createPublishFixture(root: string): { first: string; second: string; bi
   writeFileSync(join(pkgDir, "index.js"), "export const value = 1;\n");
   execFileSync("git", ["init", "-q", root]);
   const first = commitFixture(root, "first");
-  writeFileSync(
-    join(binDir, "npm"),
-    `#!/usr/bin/env node
+  const fakeNpm = `#!/usr/bin/env node
 const spec = process.argv[3];
 const state = JSON.parse(process.env.FAKE_NPM_STATE || '{}');
 if (state[spec] === 'offline') { process.stderr.write('network unavailable'); process.exit(1); }
 if (!(spec in state)) { process.stderr.write('npm ERR! code E404\\n'); process.exit(1); }
 process.stdout.write(JSON.stringify(state[spec]) + '\\n');
-`,
-  );
-  chmodSync(join(binDir, "npm"), 0o755);
+`;
+  if (process.platform === "win32") {
+    const alias = join(binDir, "npm.exe");
+    try {
+      linkSync(process.execPath, alias);
+    } catch {
+      copyFileSync(process.execPath, alias);
+    }
+    writeFileSync(
+      join(binDir, "fixture-loader.mjs"),
+      [
+        'import { basename } from "node:path";',
+        'if (process.argv[1] && basename(process.argv[1]) === "view") {',
+        "  const spec = process.argv[2];",
+        '  const state = JSON.parse(process.env.FAKE_NPM_STATE || "{}");',
+        '  if (state[spec] === "offline") { process.stderr.write("network unavailable"); process.exit(1); }',
+        '  if (!(spec in state)) { process.stderr.write("npm ERR! code E404\\n"); process.exit(1); }',
+        '  process.stdout.write(JSON.stringify(state[spec]) + "\\n");',
+        "  process.exit(0);",
+        "}",
+      ].join("\n"),
+    );
+  } else {
+    writeFileSync(join(binDir, "npm"), fakeNpm);
+    chmodSync(join(binDir, "npm"), 0o755);
+  }
   writeFileSync(
     join(root, "package.json"),
     JSON.stringify({ name: "kit-fixture", version: "1.1.0" }),
@@ -127,8 +157,13 @@ function runPublishGuard(root: string, binDir: string, state: Record<string, str
     encoding: "utf8",
     env: {
       ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
       FAKE_NPM_STATE: JSON.stringify(state),
+      ...(process.platform === "win32"
+        ? {
+            NODE_OPTIONS: `--import=${pathToFileURL(join(binDir, "fixture-loader.mjs")).href}`,
+          }
+        : {}),
     },
   });
 }

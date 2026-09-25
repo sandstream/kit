@@ -59,7 +59,7 @@ for (const kind of ["malformed", "invalid"]) {
             report.findings.some((finding) => finding.title === "Browser evidence skipped"),
           );
       } finally {
-        rmSync(root, { recursive: true, force: true });
+        rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
       }
     });
   }
@@ -116,7 +116,7 @@ for (const selectedValid of [false, true]) {
         );
       }
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
   });
 }
@@ -156,6 +156,6 @@ it("MHB-10: shared authenticated storage state blocks seed and browser", async (
     assert.equal(existsSync(join(root, "server.ran")), false);
     assert.equal(existsSync(join(root, "test.ran")), false);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });

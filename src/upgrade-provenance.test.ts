@@ -2,14 +2,25 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  linkSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { delimiter, dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const exec = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const tsxLoader = join(root, "node_modules", "tsx", "dist", "loader.mjs");
+const sourceMode = import.meta.url.endsWith(".ts");
+const cli = join(root, sourceMode ? "src" : "dist", sourceMode ? "cli.ts" : "cli.js");
+const cliArgs = sourceMode ? ["--import", import.meta.resolve("tsx"), cli] : [cli];
 
 describe("kit upgrade CLI lock provenance", () => {
   it("records measured version and installer instead of declared guesses", async () => {
@@ -17,22 +28,41 @@ describe("kit upgrade CLI lock provenance", () => {
     const bin = join(project, "bin");
     mkdirSync(bin);
     writeFileSync(join(project, ".kit.toml"), 'version = 1\n[tools]\nwidget = "latest"\n');
-    writeFileSync(join(bin, "widget"), '#!/bin/sh\necho "widget 9.8.7"\n');
-    chmodSync(join(bin, "widget"), 0o755);
+    let fixtureNodeOptions: string | undefined;
+    if (process.platform === "win32") {
+      // execFile cannot launch a shebang script on native Windows. A Node exe
+      // alias answers the version probe without involving a shell.
+      const executable = join(bin, "widget.exe");
+      try {
+        linkSync(process.execPath, executable);
+      } catch {
+        copyFileSync(process.execPath, executable);
+      }
+      const loader = join(bin, "fixture-loader.mjs");
+      writeFileSync(
+        loader,
+        'import { basename } from "node:path";\n' +
+          'if (basename(process.argv0).toLowerCase() === "widget.exe") {\n' +
+          '  console.log("widget 9.8.7");\n' +
+          "  process.exit(0);\n" +
+          "}\n",
+      );
+      fixtureNodeOptions = `--import=${pathToFileURL(loader).href}`;
+    } else {
+      writeFileSync(join(bin, "widget"), '#!/bin/sh\necho "widget 9.8.7"\n');
+      chmodSync(join(bin, "widget"), 0o755);
+    }
 
     try {
-      await exec(
-        process.execPath,
-        ["--import", tsxLoader, join(root, "src", "cli.ts"), "upgrade"],
-        {
-          cwd: project,
-          env: {
-            ...process.env,
-            PATH: `${bin}:${process.env.PATH ?? ""}`,
-            KIT_NO_UPDATE_CHECK: "1",
-          },
+      await exec(process.execPath, [...cliArgs, "upgrade"], {
+        cwd: project,
+        env: {
+          ...process.env,
+          PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+          ...(fixtureNodeOptions ? { NODE_OPTIONS: fixtureNodeOptions } : {}),
+          KIT_NO_UPDATE_CHECK: "1",
         },
-      );
+      });
       const lock = JSON.parse(readFileSync(join(project, ".kit", "cli-lock.json"), "utf8"));
       assert.equal(lock.tools.widget.version, "9.8.7");
       assert.equal(lock.tools.widget.source, "manual");

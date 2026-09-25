@@ -17,8 +17,9 @@ import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const tsx = join(root, "node_modules", ".bin", "tsx");
-const cli = join(root, "src", "cli.ts");
+const sourceMode = import.meta.url.endsWith(".ts");
+const cli = join(root, sourceMode ? "src" : "dist", sourceMode ? "cli.ts" : "cli.js");
+const cliArgs = sourceMode ? ["--import", import.meta.resolve("tsx"), cli] : [cli];
 const dirs: string[] = [];
 
 afterEach(() => {
@@ -32,15 +33,24 @@ async function runCli(
 ): Promise<{ code: number; output: string }> {
   return new Promise((done) => {
     execFile(
-      tsx,
-      [cli, ...args],
+      process.execPath,
+      [...cliArgs, ...args],
       {
         cwd,
-        env: { ...process.env, HOME: join(cwd, "home"), NO_COLOR: "1", ...env },
+        env: {
+          ...process.env,
+          HOME: join(cwd, "home"),
+          USERPROFILE: join(cwd, "home"),
+          NO_COLOR: "1",
+          ...env,
+        },
         timeout: 15_000,
       },
       (error, stdout, stderr) => {
-        done({ code: error && "code" in error ? Number(error.code) : 0, output: stdout + stderr });
+        done({
+          code: error ? (typeof error.code === "number" ? error.code : -1) : 0,
+          output: stdout + stderr + (error && typeof error.code !== "number" ? String(error) : ""),
+        });
       },
     );
   });

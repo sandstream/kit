@@ -8,7 +8,6 @@ import {
   readFileSync,
   existsSync,
   chmodSync,
-  symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,8 +36,6 @@ import {
   mergeAiderRead,
   installInstallGateGemini,
   installInstallGateCursor,
-  installInstallGateOpenCode,
-  renderOpenCodeInstallGate,
   installInstallGateCline,
   kitGateInvocation,
   kitGateArgv,
@@ -47,7 +44,8 @@ import {
 } from "./agent-config.js";
 import { kitWrapperPath, kitBinDir } from "./kit-wrapper.js";
 import { statSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 function tmpRepo(): string {
   return mkdtempSync(join(tmpdir(), "kit-agentcfg-"));
@@ -55,13 +53,17 @@ function tmpRepo(): string {
 
 async function withTempHome<T>(fn: (home: string) => T | Promise<T>): Promise<T> {
   const prev = process.env.HOME;
+  const prevUserProfile = process.env.USERPROFILE;
   const home = mkdtempSync(join(tmpdir(), "kit-home-"));
   process.env.HOME = home;
+  if (process.platform === "win32") process.env.USERPROFILE = home;
   try {
     return await fn(home);
   } finally {
     if (prev === undefined) delete process.env.HOME;
     else process.env.HOME = prev;
+    if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevUserProfile;
     rmSync(home, { recursive: true, force: true });
   }
 }
@@ -638,7 +640,7 @@ describe("installInstallGate", () => {
         assert.equal(r.action, "updated");
         const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
         assert.equal(s.hooks.PreToolUse.length, 1);
-        assert.equal(s.hooks.PreToolUse[0].hooks[0].command, '"$HOME/.kit/bin/kit" gate-bash');
+        assert.equal(s.hooks.PreToolUse[0].hooks[0].command, kitGateInvocation());
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -709,6 +711,39 @@ describe("installBrokerGates (Pillar 3, opt-in)", () => {
 });
 
 describe("kitGateInvocation / kitGateArgv (prefer the self-healing wrapper)", () => {
+  it(
+    "runs the native Windows gate command and enforces allow and deny",
+    { skip: process.platform !== "win32" },
+    () => {
+      const previousEntry = process.argv[1];
+      process.argv[1] = fileURLToPath(new URL("./cli.js", import.meta.url));
+      try {
+        const command = kitGateInvocation();
+        assert.ok(command.startsWith(`"${process.execPath}" `));
+        assert.ok(command.endsWith(" gate-bash"));
+        assert.doesNotMatch(command, /\.kit[\\/]bin[\\/]kit(?:\.cmd)?/);
+        assert.doesNotThrow(() =>
+          execSync(command, {
+            input: JSON.stringify({ tool_input: { command: "echo safe" } }),
+            stdio: ["pipe", "pipe", "pipe"],
+          }),
+        );
+        assert.throws(
+          () =>
+            execSync(command, {
+              input: JSON.stringify({ tool_input: { command: "npm install untriaged-package" } }),
+              stdio: ["pipe", "pipe", "pipe"],
+            }),
+          (error: unknown) => {
+            assert.equal((error as { status?: number }).status, 2);
+            return true;
+          },
+        );
+      } finally {
+        process.argv[1] = previousEntry;
+      }
+    },
+  );
   // The gate hook should point at the stable ~/.kit/bin/kit wrapper rather than
   // bake a volatile absolute node path into every agent's config: the wrapper
   // restores the tool PATH a non-login hook shell drops (so triage's python3/git
@@ -802,7 +837,7 @@ describe("installInstallGateCodex", () => {
         const r = await installInstallGateCodex(dir);
         assert.equal(r.action, "updated");
         const txt = readFileSync(join(dir, ".codex", "config.toml"), "utf-8");
-        assert.ok(txt.includes(`command = '"$HOME/.kit/bin/kit" gate-bash'`));
+        assert.ok(txt.includes(`command = '${kitGateInvocation()}'`));
         assert.ok(!txt.includes("/root/.kit/bin/kit"));
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -1143,132 +1178,6 @@ describe("installInstallGateCursor", () => {
   });
 });
 
-describe("installInstallGateOpenCode", () => {
-  it("writes a tool.execute.before plugin that loads as a module, idempotently", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "kit-ocgate-"));
-    try {
-      mkdirSync(join(dir, ".opencode"), { recursive: true });
-      const r1 = await installInstallGateOpenCode(dir);
-      assert.equal(r1.action, "created");
-      const pluginPath = join(dir, ".opencode", "plugin", "kit-install-gate.js");
-      assert.ok(existsSync(pluginPath));
-      const body = readFileSync(pluginPath, "utf-8");
-      assert.equal(body, renderOpenCodeInstallGate(), "installer writes canonical template");
-      assert.ok(body.includes("tool.execute.before"), "hooks the documented block point");
-      assert.ok(body.includes("gate-bash"), "invokes kit gate-bash");
-      // The generated plugin must be a loadable ESM module exporting the hook factory.
-      const mod = await import(pathToFileURL(pluginPath).href);
-      assert.equal(typeof mod.kitInstallGate, "function");
-      const hooks = await mod.kitInstallGate();
-      assert.equal(typeof hooks["tool.execute.before"], "function");
-      // Non-bash tools are ignored (no spawn, no throw).
-      await hooks["tool.execute.before"]({ tool: "read" }, { args: {} });
-      assert.equal((await installInstallGateOpenCode(dir)).action, "unchanged");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-  it("detects an opencode.json project even without a .opencode dir", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "kit-ocgate2-"));
-    try {
-      writeFileSync(join(dir, "opencode.json"), "{}");
-      assert.equal((await installInstallGateOpenCode(dir)).action, "created");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-  it("preserves the failed gate process as the blocking error cause", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "kit-ocgate-cause-"));
-    try {
-      await withTempHome(async (home) => {
-        mkdirSync(join(dir, ".opencode"), { recursive: true });
-        const wrapper = join(home, ".kit", "bin", "kit");
-        mkdirSync(join(wrapper, ".."), { recursive: true });
-        writeFileSync(wrapper, '#!/bin/sh\nprintf "fixture denied\\n" >&2\nexit 2\n');
-        chmodSync(wrapper, 0o755);
-
-        assert.equal((await installInstallGateOpenCode(dir)).action, "created");
-        const pluginPath = join(dir, ".opencode", "plugin", "kit-install-gate.js");
-        const mod = await import(pathToFileURL(pluginPath).href);
-        const hooks = await mod.kitInstallGate();
-
-        await assert.rejects(
-          hooks["tool.execute.before"](
-            { tool: "bash" },
-            { args: { command: "npm install untriaged-package" } },
-          ),
-          (error: unknown) => {
-            assert.ok(error instanceof Error);
-            assert.match(error.message, /kit install-gate blocked: fixture denied/);
-            assert.ok(error.cause instanceof Error, "blocking error retains subprocess failure");
-            assert.match(
-              String((error.cause as Error & { stderr?: Buffer }).stderr),
-              /fixture denied/,
-            );
-            return true;
-          },
-        );
-      });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-  it("updates stale kit-managed output but preserves an external gate", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "kit-ocgate-upgrade-"));
-    try {
-      const pluginPath = join(dir, ".opencode", "plugin", "kit-install-gate.js");
-      mkdirSync(join(pluginPath, ".."), { recursive: true });
-      writeFileSync(
-        pluginPath,
-        "// Generated by `kit agent-config --install-gate`. Delete this file to disable.\n// old gate-bash\n",
-      );
-      assert.equal((await installInstallGateOpenCode(dir)).action, "updated");
-      assert.equal(readFileSync(pluginPath, "utf-8"), renderOpenCodeInstallGate());
-
-      const external = "// external owner\n// custom gate-bash integration\n";
-      writeFileSync(pluginPath, external);
-      const result = await installInstallGateOpenCode(dir);
-      assert.equal(result.action, "unchanged");
-      assert.equal(result.detail, "external install-gate already wired");
-      assert.equal(readFileSync(pluginPath, "utf-8"), external);
-
-      const unrelated = "// operator-owned OpenCode plugin\nexport const keep = true;\n";
-      writeFileSync(pluginPath, unrelated);
-      const refused = await installInstallGateOpenCode(dir);
-      assert.equal(refused.action, "skipped");
-      assert.match(refused.detail ?? "", /external file.*refusing overwrite/);
-      assert.equal(readFileSync(pluginPath, "utf-8"), unrelated);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-  it("refuses a symlinked OpenCode gate path", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "kit-ocgate-symlink-"));
-    const outside = join(tmpdir(), `kit-ocgate-outside-${process.pid}`);
-    try {
-      mkdirSync(join(dir, ".opencode", "plugin"), { recursive: true });
-      symlinkSync(outside, join(dir, ".opencode", "plugin", "kit-install-gate.js"));
-
-      const result = await installInstallGateOpenCode(dir);
-
-      assert.equal(result.action, "skipped");
-      assert.match(result.detail ?? "", /symlinked path/);
-      assert.equal(existsSync(outside), false, "dangling symlink target must not be created");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(outside, { force: true });
-    }
-  });
-  it("skips when no OpenCode project is present", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "kit-ocgate3-"));
-    try {
-      assert.equal((await installInstallGateOpenCode(dir)).action, "skipped");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-});
-
 describe("installInstallGateCline", () => {
   it("writes an executable .clinerules/hooks/PreToolUse shim, idempotently", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-clinegate-"));
@@ -1310,6 +1219,57 @@ describe("installInstallGateCline", () => {
 });
 
 describe("gateLiveness (enforcement floor must prove it exists)", () => {
+  it(
+    "preserves native Windows path separators when checking the hook",
+    { skip: process.platform !== "win32" },
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "kit-gatelive-native-"));
+      try {
+        mkdirSync(join(dir, ".claude"));
+        const command = kitGateInvocation();
+        writeFileSync(
+          join(dir, ".claude", "settings.json"),
+          JSON.stringify({
+            hooks: { PreToolUse: [{ hooks: [{ type: "command", command }] }] },
+          }),
+        );
+        const live = gateLiveness(dir);
+        assert.equal(live.installGate, true);
+        assert.deepEqual(live.problems, []);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
+    "flags a native Node hook with a missing CLI entrypoint",
+    { skip: process.platform !== "win32" },
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "kit-gatelive-entry-"));
+      try {
+        mkdirSync(join(dir, ".claude"));
+        const missing = join(dir, "missing-cli.js");
+        writeFileSync(
+          join(dir, ".claude", "settings.json"),
+          JSON.stringify({
+            hooks: {
+              PreToolUse: [
+                {
+                  hooks: [
+                    { type: "command", command: `"${process.execPath}" "${missing}" gate-bash` },
+                  ],
+                },
+              ],
+            },
+          }),
+        );
+        assert.match(gateLiveness(dir).problems[0], /kit CLI missing/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
   const settings = (cmds: string[]) =>
     JSON.stringify({
       hooks: {
@@ -1480,28 +1440,32 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
     });
   });
 
-  it("when /root IS home, a /root path is judged on whether it runs — not on its prefix", () => {
-    repo((dir: string) => {
-      mark(dir);
-      // Deliberately a path that does not exist, because that keeps this test independent
-      // of whether the suite can write under /root. What it pins is WHICH verdict is
-      // reached: with the prefix branch returning unconditionally the answer was
-      // "root/container path" (wrong on a root container — the path is native there, and
-      // the advice to "rewrite hooks for /root" pointed where they already pointed); now
-      // the prefix is not itself disqualifying and the executability check decides. The
-      // two messages differ, so this distinguishes the fix from the bug.
-      writeFileSync(
-        join(dir, ".claude/settings.json"),
-        settings(["/root/.kit/bin/absent gate-bash"]),
-      );
-      withHome("/root", () => {
-        const live = gateLiveness(dir);
-        assert.equal(live.problems.length, 1);
-        assert.match(live.problems[0], /missing or not executable/);
-        assert.doesNotMatch(live.problems[0], /root\/container path/);
+  it(
+    "when /root IS home, a /root path is judged on whether it runs — not on its prefix",
+    { skip: process.platform === "win32" },
+    () => {
+      repo((dir: string) => {
+        mark(dir);
+        // Deliberately a path that does not exist, because that keeps this test independent
+        // of whether the suite can write under /root. What it pins is WHICH verdict is
+        // reached: with the prefix branch returning unconditionally the answer was
+        // "root/container path" (wrong on a root container — the path is native there, and
+        // the advice to "rewrite hooks for /root" pointed where they already pointed); now
+        // the prefix is not itself disqualifying and the executability check decides. The
+        // two messages differ, so this distinguishes the fix from the bug.
+        writeFileSync(
+          join(dir, ".claude/settings.json"),
+          settings(["/root/.kit/bin/absent gate-bash"]),
+        );
+        withHome("/root", () => {
+          const live = gateLiveness(dir);
+          assert.equal(live.problems.length, 1);
+          assert.match(live.problems[0], /missing or not executable/);
+          assert.doesNotMatch(live.problems[0], /root\/container path/);
+        });
       });
-    });
-  });
+    },
+  );
 
   it("markGatesInstalled writes the marker gateLiveness reads", async () => {
     const { markGatesInstalled } = await import("./agent-config.js");

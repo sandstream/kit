@@ -123,10 +123,13 @@ describe("Git-verified repair", () => {
     assert.equal(readFileSync(join(dir, "app", ".env.keys"), "utf8"), "fixture only\n");
   });
 
-  it("preserves newline-containing tracked paths and never untracks them", async (t) => {
+  it("preserves tracked paths with special characters and never untracks them", async (t) => {
     const dir = repo(t);
-    const path = "app\nname/.env.keys";
-    mkdirSync(join(dir, "app\nname"));
+    // Windows forbids newlines in names; a space still exercises Git's quoted
+    // path handling while POSIX covers the newline case.
+    const folder = process.platform === "win32" ? "app name" : "app\nname";
+    const path = `${folder}/.env.keys`;
+    mkdirSync(join(dir, folder));
     writeFileSync(join(dir, path), "fixture only\n");
     execFileSync("git", ["add", "-f", "--", path], { cwd: dir });
     assert.deepEqual(await findCommittedSensitive(dir), [path]);

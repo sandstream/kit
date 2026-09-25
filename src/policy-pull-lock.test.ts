@@ -244,7 +244,9 @@ describe("policy pull process death during pair replacement (PP-06)", () => {
       { encoding: "utf8", timeout: 10_000, env: process.env },
     );
     assert.equal(run.error, undefined, String(run.error));
-    assert.equal(run.signal, "SIGKILL", run.stderr);
+    // Native Windows reports termination as an exit status, not a POSIX signal.
+    if (process.platform === "win32") assert.notEqual(run.status, 0, run.stderr);
+    else assert.equal(run.signal, "SIGKILL", run.stderr);
     assert.equal(verifyPolicy(dest).status, "invalid");
     assert.deepEqual(readFileSync(getPolicyPath(dest)), previousPolicy);
     assert.deepEqual(readFileSync(getPolicySigPath(dest)), incomingSignature);

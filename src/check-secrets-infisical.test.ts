@@ -1,9 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import type { SecretStatus } from "./check-secrets.js";
 
 const session = {
@@ -12,6 +20,59 @@ const session = {
   status: "authenticated",
   verification: { state: "verified" },
 };
+
+function installInfisicalStub({
+  dir,
+  project,
+  bin,
+  calls,
+  stdout,
+  exitCode,
+}: {
+  dir: string;
+  project: string;
+  bin: string;
+  calls: string;
+  stdout: string;
+  exitCode: number;
+}): void {
+  const source = `
+    const fs = require("node:fs");
+    const args = process.platform === "win32"
+      ? [require("node:path").basename(process.argv[1]), ...process.argv.slice(2)]
+      : process.argv.slice(2);
+    fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(args) + "\\n");
+    if (args[0] === "user" && args[1] === "get") {
+      console.log("Usage:\\n  infisical user get [command]\\nFlags:\\n  --help");
+    } else if (args[0] === "login" && args[1] === "status") {
+      process.stdout.write(${JSON.stringify(stdout)});
+      process.exitCode = ${exitCode};
+    } else {
+      throw new Error("Unexpected command: only status probes are permitted");
+    }
+  `;
+  if (process.platform === "win32") {
+    const executable = join(bin, "infisical.exe");
+    try {
+      linkSync(process.execPath, executable);
+    } catch {
+      copyFileSync(process.execPath, executable);
+    }
+    for (const cwd of [dir, project]) {
+      for (const word of ["login", "user"]) writeFileSync(join(cwd, word), source);
+    }
+  } else {
+    writeFileSync(join(bin, "mise"), `#!${process.execPath}\nprocess.exitCode = 1;`, {
+      mode: 0o755,
+    });
+    writeFileSync(
+      join(bin, "which"),
+      `#!${process.execPath}\nconsole.log(${JSON.stringify(join(bin, "infisical"))});`,
+      { mode: 0o755 },
+    );
+    writeFileSync(join(bin, "infisical"), `#!${process.execPath}\n${source}`, { mode: 0o755 });
+  }
+}
 
 function fallback(
   stdout: string,
@@ -32,27 +93,7 @@ function fallback(
     join(project, ".infisical.json"),
     JSON.stringify({ domain: "https://example.test" }),
   );
-  const executable = (name: string, source: string) => {
-    writeFileSync(join(bin, name), `#!${process.execPath}\n${source}`, { mode: 0o755 });
-  };
-  executable("mise", "process.exitCode = 1;");
-  executable("which", `console.log(${JSON.stringify(join(bin, "infisical"))});`);
-  executable(
-    "infisical",
-    `
-    const fs = require("node:fs");
-    const args = process.argv.slice(2);
-    fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(args) + "\\n");
-    if (args[0] === "user" && args[1] === "get") {
-      console.log("Usage:\\n  infisical user get [command]\\nFlags:\\n  --help");
-    } else if (args[0] === "login" && args[1] === "status") {
-      process.stdout.write(${JSON.stringify(stdout)});
-      process.exitCode = ${exitCode};
-    } else {
-      throw new Error("Unexpected command: only status probes are permitted");
-    }
-  `,
-  );
+  installInfisicalStub({ dir, project, bin, calls, stdout, exitCode });
   try {
     const sourceMode = import.meta.url.endsWith(".ts");
     const moduleUrl = new URL(
@@ -75,7 +116,20 @@ function fallback(
       {
         cwd: dir,
         // Never inherit operator credentials or reach the real Infisical CLI.
-        env: { PATH: bin, ...(governedCwd ? {} : { INFISICAL_DOMAIN: "https://example.test" }) },
+        env: {
+          PATH:
+            process.platform === "win32"
+              ? [bin, join(process.env.SystemRoot ?? "C:\\Windows", "System32")].join(delimiter)
+              : bin,
+          ...(process.platform === "win32"
+            ? {
+                PATHEXT: process.env.PATHEXT,
+                SystemRoot: process.env.SystemRoot,
+                ComSpec: process.env.ComSpec,
+              }
+            : {}),
+          ...(governedCwd ? {} : { INFISICAL_DOMAIN: "https://example.test" }),
+        },
         encoding: "utf8",
         timeout: 15_000,
       },

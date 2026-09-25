@@ -1,8 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  linkSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
@@ -30,7 +39,40 @@ function writeMirrors(cwd: string, project: string): void {
 
 // Stand in only for external executables: the real MCP handler, config loader,
 // triage runner and process environment forwarding all execute unchanged.
-function writeExecutables(bin: string): void {
+function writeExecutables(bin: string): string | undefined {
+  if (process.platform === "win32") {
+    // execFile does not run shebang scripts or .cmd files on Windows. Use native
+    // Node executables as the two external CLI fixtures, without a shell.
+    for (const name of ["python3", "brew"]) {
+      const executable = join(bin, `${name}.exe`);
+      try {
+        linkSync(process.execPath, executable);
+      } catch {
+        copyFileSync(process.execPath, executable);
+      }
+    }
+    const loader = join(bin, "fixture-loader.mjs");
+    writeFileSync(
+      loader,
+      [
+        'import { basename } from "node:path";',
+        "const command = basename(process.argv0).toLowerCase().replace(/\\.exe$/, '');",
+        'if (command === "python3") {',
+        `  const keys = ${JSON.stringify(Object.keys(MIRRORS))};`,
+        "  console.log(JSON.stringify(Object.fromEntries(keys.flatMap(key =>",
+        "    process.env[key] === undefined ? [] : [[key, process.env[key]]]))));",
+        '  console.log("TRIAGE FAILED");',
+        "  process.exit(0);",
+        "}",
+        'if (command === "brew") {',
+        '  console.log(JSON.stringify({ formulae: [{ name: "fixture",',
+        '    homepage: "https://github.com/fixture/repo" }] }));',
+        "  process.exit(0);",
+        "}",
+      ].join("\n"),
+    );
+    return `--import=${pathToFileURL(loader).href}`;
+  }
   symlinkSync(process.execPath, join(bin, "node"));
   writeFileSync(
     join(bin, "python3"),
@@ -52,6 +94,7 @@ function writeExecutables(bin: string): void {
     ].join("\n"),
     { mode: 0o755 },
   );
+  return undefined;
 }
 
 async function withServer(
@@ -65,7 +108,7 @@ async function withServer(
   for (const dir of [...Object.values(projects), home, bin]) mkdirSync(dir);
   writeMirrors(projects.A, "server");
   writeMirrors(projects.B, "requested");
-  writeExecutables(bin);
+  const fixtureNodeOptions = writeExecutables(bin);
   const source = import.meta.url.endsWith(".ts");
   const entry = new URL(`./mcp-server.${source ? "ts" : "js"}`, import.meta.url).href;
   const transport = new StdioClientTransport({
@@ -77,7 +120,14 @@ async function withServer(
       `const { startMcpServer } = await import(${JSON.stringify(entry)}); await startMcpServer();`,
     ],
     cwd: projects.A,
-    env: { HOME: home, PATH: bin, KIT_IDENTITY_DIR: join(home, "identity"), ...env },
+    env: {
+      HOME: home,
+      ...(process.platform === "win32" ? { USERPROFILE: home } : {}),
+      PATH: bin,
+      KIT_IDENTITY_DIR: join(home, "identity"),
+      ...(fixtureNodeOptions ? { NODE_OPTIONS: fixtureNodeOptions } : {}),
+      ...env,
+    },
     stderr: "pipe",
   });
   const client = new Client({ name: "triage-cwd-test", version: "1" });

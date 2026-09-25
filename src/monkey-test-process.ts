@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import type { MonkeyProcessScope } from "./monkey-test-runner-processes.js";
 import {
   createRedactingLineWriter,
@@ -14,11 +14,32 @@ export interface ShellResult {
   timedOut: boolean;
 }
 
-function signalProcess(child: ChildProcess, signal: NodeJS.Signals): void {
+async function signalProcess(child: ChildProcess, signal: NodeJS.Signals): Promise<void> {
   if (!child.pid) return;
+  if (process.platform === "win32") {
+    // A shell command runs below cmd.exe. Killing only that shell leaves its
+    // child holding stdout/stderr open, so `close` never fires after timeout.
+    await new Promise<void>((resolveKill) => {
+      execFile(
+        "taskkill.exe",
+        ["/PID", String(child.pid), "/T", "/F"],
+        { timeout: 5_000, windowsHide: true },
+        (error) => {
+          if (error) {
+            try {
+              child.kill(signal);
+            } catch {
+              /* already exited */
+            }
+          }
+          resolveKill();
+        },
+      );
+    });
+    return;
+  }
   try {
-    if (process.platform === "win32") child.kill(signal);
-    else process.kill(-child.pid, signal);
+    process.kill(-child.pid, signal);
   } catch {
     try {
       child.kill(signal);
@@ -52,9 +73,9 @@ async function waitForProcessTreeExit(child: ChildProcess, timeoutMs: number): P
 
 export async function stopProcess(child: ChildProcess): Promise<boolean> {
   if (!processTreeRunning(child)) return true;
-  signalProcess(child, "SIGTERM");
+  await signalProcess(child, "SIGTERM");
   if (await waitForProcessTreeExit(child, 1_000)) return true;
-  signalProcess(child, "SIGKILL");
+  await signalProcess(child, "SIGKILL");
   return await waitForProcessTreeExit(child, 1_000);
 }
 
@@ -114,8 +135,10 @@ export async function runShell(
     };
     const timer = setTimeout(() => {
       timedOut = true;
-      signalProcess(child, "SIGTERM");
-      forceKillTimer = setTimeout(() => signalProcess(child, "SIGKILL"), 1_000);
+      void signalProcess(child, "SIGTERM");
+      forceKillTimer = setTimeout(() => {
+        void signalProcess(child, "SIGKILL");
+      }, 1_000);
     }, opts.timeoutMs);
     child.stdout?.on("data", (chunk: Buffer) => {
       const text = chunk.toString();

@@ -38,6 +38,38 @@ import {
 // it may observe, it must never block or break the real tool. These tests pin
 // that contract in the generated text and the file-handling rules.
 
+it(
+  "does not claim to install POSIX shims on native Windows",
+  { skip: process.platform !== "win32" },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-guard-windows-"));
+    const shims = join(root, "shims");
+    try {
+      for (const subcommand of ["install", "status"]) {
+        const result = spawnSync(
+          process.execPath,
+          [join(import.meta.dirname, "cli.js"), "guard", subcommand],
+          {
+            cwd: root,
+            env: { ...process.env, KIT_GUARD_DIR: shims },
+            encoding: "utf8",
+            timeout: 15_000,
+          },
+        );
+        assert.equal(result.status, 1, result.stderr);
+        assert.match(result.stderr, /native Windows shims are not supported/);
+        assert.equal(
+          existsSync(shims),
+          false,
+          "unsupported install must not write misleading shims",
+        );
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
 describe("generateShim", () => {
   const shim = generateShim("npm", "/home/u/.kit/shims");
 
@@ -89,38 +121,48 @@ describe("shim + rc file handling", () => {
     }
   });
 
-  it("writeShim replaces by rename, so a shim being executed keeps its old bytes", () => {
-    const dir = mkdtempSync(join(tmpdir(), "kit-guard-atomic-"));
-    try {
-      const path = join(dir, "npm");
-      writeFileSync(path, `#!/bin/sh\n${SHIM_MARKER}\necho old\n`, { mode: 0o755 });
-      // What `sh` holds while it executes the script: an open descriptor it reads from.
-      const fd = openSync(path, "r");
+  it(
+    "writeShim replaces by rename, so a shim being executed keeps its old bytes",
+    { skip: process.platform === "win32" },
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "kit-guard-atomic-"));
       try {
-        assert.equal(writeShim("npm", dir), "written");
-        const held = Buffer.alloc(64);
-        readSync(fd, held, 0, 64, 0);
-        assert.match(
-          held.toString("utf-8"),
-          /echo old/,
-          "in-place truncation would splice a running sh",
+        const path = join(dir, "npm");
+        writeFileSync(path, `#!/bin/sh\n${SHIM_MARKER}\necho old\n`, { mode: 0o755 });
+        // What `sh` holds while it executes the script: an open descriptor it reads from.
+        const fd = openSync(path, "r");
+        try {
+          assert.equal(writeShim("npm", dir), "written");
+          const held = Buffer.alloc(64);
+          readSync(fd, held, 0, 64, 0);
+          assert.match(
+            held.toString("utf-8"),
+            /echo old/,
+            "in-place truncation would splice a running sh",
+          );
+        } finally {
+          closeSync(fd);
+        }
+        // Read the replaced file through its own descriptor, not by path a second time.
+        const fresh = openSync(path, "r");
+        try {
+          assert.ok(
+            readFileSync(fresh, "utf-8").includes("kit guard-observe npm"),
+            "new bytes are in place",
+          );
+        } finally {
+          closeSync(fresh);
+        }
+        assert.deepEqual(
+          readdirSync(dir).filter((f) => f.includes("kit-tmp")),
+          [],
+          "no temp file left behind",
         );
       } finally {
-        closeSync(fd);
+        rmSync(dir, { recursive: true, force: true });
       }
-      assert.ok(
-        readFileSync(path, "utf-8").includes("kit guard-observe npm"),
-        "new bytes are in place",
-      );
-      assert.deepEqual(
-        readdirSync(dir).filter((f) => f.includes("kit-tmp")),
-        [],
-        "no temp file left behind",
-      );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 
   it("staleShims flags kit shims from an older version and nothing else", () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-guard-stale-"));
@@ -145,7 +187,9 @@ describe("shim + rc file handling", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
 
+describe("rc file handling", () => {
   it("upsertRcBlock appends once and replaces in place on re-run", () => {
     const block = rcBlock("/x/shims");
     const first = upsertRcBlock("# my rc\n", block);
@@ -207,7 +251,7 @@ describe("observation log", () => {
   });
 });
 
-describe("guard PATH effectiveness (#538)", () => {
+describe("guard PATH effectiveness (#538)", { skip: process.platform === "win32" }, () => {
   it("reports when another PATH entry wins before kit's shim", () => {
     const root = mkdtempSync(join(tmpdir(), "kit-guard-path-"));
     try {
@@ -350,62 +394,66 @@ exit 127
 const pathSeenBy = (run: ShimRun): string =>
   run.stdout.split("\n").find((l) => l.startsWith("PATH=")) ?? "";
 
-describe("hand-off when another shim manager owns the tool (#461)", () => {
-  it("a competing shim that re-resolves via PATH cannot ping-pong the shim", () => {
-    const r = runShim("peer");
-    assert.equal(r.signal, null, "the shim never returned — the #461 ping-pong is back");
-    assert.match(r.stdout, /REAL npm --version/);
-    assert.ok(
-      !pathSeenBy(r).includes("/kit/shims"),
-      "after a shim-to-shim hand-off kit's dir must be off PATH — that is what makes re-entry impossible",
-    );
-  });
+describe(
+  "hand-off when another shim manager owns the tool (#461)",
+  { skip: process.platform === "win32" },
+  () => {
+    it("a competing shim that re-resolves via PATH cannot ping-pong the shim", () => {
+      const r = runShim("peer");
+      assert.equal(r.signal, null, "the shim never returned — the #461 ping-pong is back");
+      assert.match(r.stdout, /REAL npm --version/);
+      assert.ok(
+        !pathSeenBy(r).includes("/kit/shims"),
+        "after a shim-to-shim hand-off kit's dir must be off PATH — that is what makes re-entry impossible",
+      );
+    });
 
-  it("hands off THROUGH the version manager, never past it to the wrong npm", () => {
-    const r = runShim("owns-tool");
-    assert.equal(r.signal, null);
-    assert.match(r.stdout, /REAL npm --version/);
-    assert.doesNotMatch(
-      r.stdout,
-      /DECOY/,
-      "skipping the manager's shim would run an npm it did not select",
-    );
-  });
+    it("hands off THROUGH the version manager, never past it to the wrong npm", () => {
+      const r = runShim("owns-tool");
+      assert.equal(r.signal, null);
+      assert.match(r.stdout, /REAL npm --version/);
+      assert.doesNotMatch(
+        r.stdout,
+        /DECOY/,
+        "skipping the manager's shim would run an npm it did not select",
+      );
+    });
 
-  it("kit's dir listed twice (rc sourced twice, trailing slash) still terminates", () => {
-    const r = runShim("peer", { duplicateKitOnPath: true });
-    assert.equal(r.signal, null, "the shim never returned — the #461 ping-pong is back");
-    assert.match(r.stdout, /REAL npm --version/);
-    assert.ok(
-      !pathSeenBy(r).includes("/kit/shims"),
-      "every occurrence must be dropped, not the first",
-    );
-  });
+    it("kit's dir listed twice (rc sourced twice, trailing slash) still terminates", () => {
+      const r = runShim("peer", { duplicateKitOnPath: true });
+      assert.equal(r.signal, null, "the shim never returned — the #461 ping-pong is back");
+      assert.match(r.stdout, /REAL npm --version/);
+      assert.ok(
+        !pathSeenBy(r).includes("/kit/shims"),
+        "every occurrence must be dropped, not the first",
+      );
+    });
 
-  it("KIT_GUARD_BYPASS=1 reaches the real tool too — the bypass never fixed the loop", () => {
-    const r = runShim("peer", { bypass: true });
-    assert.equal(r.signal, null, "bypass must not hang either");
-    assert.match(r.stdout, /REAL npm --version/);
-  });
+    it("KIT_GUARD_BYPASS=1 reaches the real tool too — the bypass never fixed the loop", () => {
+      const r = runShim("peer", { bypass: true });
+      assert.equal(r.signal, null, "bypass must not hang either");
+      assert.match(r.stdout, /REAL npm --version/);
+    });
 
-  it("no competing shim ⇒ PATH and marker untouched, so nested installs stay observed", () => {
-    const r = runShim("none");
-    assert.equal(r.signal, null);
-    assert.match(r.stdout, /REAL npm --version/);
-    assert.match(r.stdout, /MARKER=unset/, "no hand-off happened ⇒ no re-entry marker to leak");
-    assert.ok(
-      pathSeenBy(r).includes("/kit/shims"),
-      "the guard must still cover what the real tool spawns",
-    );
-  });
+    it("no competing shim ⇒ PATH and marker untouched, so nested installs stay observed", () => {
+      const r = runShim("none");
+      assert.equal(r.signal, null);
+      assert.match(r.stdout, /REAL npm --version/);
+      assert.match(r.stdout, /MARKER=unset/, "no hand-off happened ⇒ no re-entry marker to leak");
+      assert.ok(
+        pathSeenBy(r).includes("/kit/shims"),
+        "the guard must still cover what the real tool spawns",
+      );
+    });
 
-  it("nothing to hand off to still exits 127 with the uninstall hint", () => {
-    const r = runShim("none", { noRealNpm: true });
-    assert.equal(r.signal, null);
-    assert.equal(r.status, 127);
-    assert.match(r.stderr, /kit guard uninstall/);
-  });
-});
+    it("nothing to hand off to still exits 127 with the uninstall hint", () => {
+      const r = runShim("none", { noRealNpm: true });
+      assert.equal(r.signal, null);
+      assert.equal(r.status, 127);
+      assert.match(r.stderr, /kit guard uninstall/);
+    });
+  },
+);
 
 describe("coverage roster", () => {
   it("the fetch-and-run family is on the roster — npx-shaped tools above all", () => {

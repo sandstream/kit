@@ -173,37 +173,58 @@ describe("checkHooks generated hooks", () => {
   });
 });
 
-// BH-01: git silently ignores a hook file without an execute bit. Reporting such a
-// hook as installed and up-to-date is the worst possible answer: the operator is told
-// the gate is on while nothing runs. It is a fail, with the reason named.
+// BH-01: POSIX git silently ignores a hook file without an execute bit.
+// Git for Windows runs hooks without relying on those POSIX mode bits.
 describe("checkHooks: the execute bit (BH-01)", () => {
-  it("fails a kit-generated hook whose execute bit was cleared", async () => {
-    const config: HooksConfig = { "pre-commit": ["npm run lint"] };
-    await installHooks(config, gitDir);
-    await chmod(join(gitDir, "hooks", "pre-commit"), 0o644);
+  it(
+    "fails a kit-generated hook whose execute bit was cleared",
+    { skip: process.platform === "win32" },
+    async () => {
+      const config: HooksConfig = { "pre-commit": ["npm run lint"] };
+      await installHooks(config, gitDir);
+      await chmod(join(gitDir, "hooks", "pre-commit"), 0o644);
 
-    const results = await checkHooks(config);
+      const results = await checkHooks(config);
 
-    assert.equal(results[0].installed, true);
-    assert.equal(results[0].executable, false);
-    assert.equal(results[0].upToDate, false);
-    assert.match(results[0].detail, /not executable/);
-  });
+      assert.equal(results[0].installed, true);
+      assert.equal(results[0].executable, false);
+      assert.equal(results[0].upToDate, false);
+      assert.match(results[0].detail, /not executable/);
+    },
+  );
 
-  it("fails an externally managed hook whose execute bit is missing", async () => {
-    await mkdir(join(gitDir, "hooks"), { recursive: true });
-    await writeFile(join(gitDir, "hooks", "pre-commit"), "#!/bin/sh\nnpm test\n", {
-      encoding: "utf-8",
-      mode: 0o644,
-    });
+  it(
+    "fails an externally managed hook whose execute bit is missing",
+    { skip: process.platform === "win32" },
+    async () => {
+      await mkdir(join(gitDir, "hooks"), { recursive: true });
+      await writeFile(join(gitDir, "hooks", "pre-commit"), "#!/bin/sh\nnpm test\n", {
+        encoding: "utf-8",
+        mode: 0o644,
+      });
 
-    const results = await checkHooks({ "pre-commit": ["npm test"] });
+      const results = await checkHooks({ "pre-commit": ["npm test"] });
 
-    assert.equal(results[0].installed, true);
-    assert.equal(results[0].executable, false);
-    assert.equal(results[0].upToDate, false);
-    assert.match(results[0].detail, /not executable/);
-  });
+      assert.equal(results[0].installed, true);
+      assert.equal(results[0].executable, false);
+      assert.equal(results[0].upToDate, false);
+      assert.match(results[0].detail, /not executable/);
+    },
+  );
+
+  it(
+    "accepts a generated hook with POSIX mode 0644 on Windows",
+    { skip: process.platform !== "win32" },
+    async () => {
+      const config: HooksConfig = { "pre-commit": ["npm run lint"] };
+      await installHooks(config, gitDir);
+      await chmod(join(gitDir, "hooks", "pre-commit"), 0o644);
+
+      const [result] = await checkHooks(config);
+      assert.equal(result.executable, true);
+      assert.equal(result.upToDate, true);
+    },
+  );
 
   it("reports executable: true for a hook git will actually run", async () => {
     const config: HooksConfig = { "pre-commit": ["npm run lint"] };

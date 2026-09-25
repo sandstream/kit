@@ -26,11 +26,8 @@ import { secureFile, secureDir } from "../utils/secure-perms.js";
 import { findInjection } from "./injection.js";
 import { evaluateWriteGate, writeGateEnforcing, type WriteGateVerdict } from "./write-gate.js";
 import { DEFAULT_MEMORY_CLASS, disclosableClasses, type MemoryClass } from "./class.js";
-import {
-  getProjectRecallRoots,
-  prepareProjectIdentities,
-  registerProjectIdentity,
-} from "./project.js";
+import { prepareProjectIdentities, registerProjectIdentity } from "./project.js";
+import { projectRecallClause } from "./project-recall-scope.js";
 import { prepareActionIdentity } from "./merge-actions.js";
 import { openMigratedDb, openReadOnlyDb } from "./db-startup.js";
 import { prepareActionVersion } from "./pal-version.js";
@@ -680,7 +677,7 @@ export function searchMessages(
   // Recency-boost needs a candidate POOL larger than `limit` to re-rank; the default path fetches
   // exactly `limit` (behavior unchanged).
   const poolLimit = opts.recencyBoost ? Math.max(limit * 4, 40) : limit;
-  const roots = opts.projectPath ? getProjectRecallRoots(opts.projectPath, db) : [];
+  const scope = opts.projectPath ? projectRecallClause(db, opts.projectPath) : undefined;
 
   const run = (match: string): SearchHit[] => {
     const params: (string | number)[] = [match];
@@ -695,9 +692,9 @@ export function searchMessages(
       where += ` AND m.class IN (${allowed.map(() => "?").join(", ")})`;
       params.push(...allowed);
     }
-    if (roots.length) {
-      where += ` AND (${roots.map(() => "(COALESCE(m.recall_cwd, m.cwd) = ? OR instr(COALESCE(m.recall_cwd, m.cwd), ?) = 1)").join(" OR ")})`;
-      for (const root of roots) params.push(root, `${root.replace(/\/$/, "")}/`);
+    if (scope) {
+      where += ` AND ${scope.sql}`;
+      params.push(...scope.params);
     }
     params.push(poolLimit);
     return db
@@ -811,9 +808,9 @@ export function recentMessages(db: DatabaseSync, opts: SearchOptions = {}): Sear
     params.push(...allowed);
   }
   if (opts.projectPath) {
-    const roots = getProjectRecallRoots(opts.projectPath, db);
-    where += ` AND (${roots.map(() => "(COALESCE(m.recall_cwd, m.cwd) = ? OR instr(COALESCE(m.recall_cwd, m.cwd), ?) = 1)").join(" OR ")})`;
-    for (const root of roots) params.push(root, `${root.replace(/\/$/, "")}/`);
+    const scope = projectRecallClause(db, opts.projectPath);
+    where += ` AND ${scope.sql}`;
+    params.push(...scope.params);
   }
   params.push(limit);
   return db

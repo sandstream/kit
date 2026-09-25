@@ -60,7 +60,7 @@ it("MSG-02: failed seed prevents dev-server and test-command side effects", asyn
       ),
     );
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });
 
@@ -92,6 +92,6 @@ it("MSG-02: justified --skip-seed still starts browser execution", async () => {
     );
     assert.ok(!report.findings.some((finding) => finding.title === "Seed command failed"));
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });

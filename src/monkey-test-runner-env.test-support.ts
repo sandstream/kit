@@ -4,7 +4,11 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { MonkeyRunOptions, MonkeyRunResult } from "./monkey-test-contract.js";
-import { spawnRunnerScript, runnerEntry } from "./monkey-test-runner-subprocess.test-support.js";
+import {
+  spawnRunnerScript,
+  runnerEntry,
+  terminateRunnerTree,
+} from "./monkey-test-runner-subprocess.test-support.js";
 import { fixtureCommand, markerCommand, serverCommand } from "./monkey-test-runner.test-support.js";
 
 export const syntheticLiveKey = ["sk", "live", "syntheticMonkeyAuditOnly123456789"].join("_");
@@ -57,11 +61,19 @@ export function sentinelOptions(root: string): MonkeyRunOptions {
 async function runIsolated(root: string, script: string, env: NodeJS.ProcessEnv) {
   const setup = `Object.assign(process.env, ${JSON.stringify({ ...standardEnv, ...env })});`;
   const run = spawnRunnerScript(root, setup + script);
-  const timer = setTimeout(() => run.child.kill("SIGKILL"), 12_000);
+  let timedOut = false;
+  const timer = setTimeout(
+    () => {
+      timedOut = true;
+      terminateRunnerTree(run.child);
+    },
+    process.platform === "win32" ? 25_000 : 12_000,
+  );
   try {
     const exit = await run.exited;
     await run.closed;
-    assert.equal(exit.signal, null, "isolated env fixture timed out");
+    assert.equal(timedOut, false, "isolated env fixture timed out");
+    assert.equal(exit.signal, null, "isolated env fixture was killed");
     return { ...exit, ...run.output() };
   } finally {
     clearTimeout(timer);

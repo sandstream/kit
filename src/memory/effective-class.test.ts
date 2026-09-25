@@ -41,6 +41,7 @@ describe("effectiveMemoryClass", () => {
       assert.equal(r.source, "default");
       assert.equal(r.recognized, true);
     } finally {
+      process.chdir(originalCwd);
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -54,6 +55,7 @@ describe("effectiveMemoryClass", () => {
       assert.equal(r.cls, "restricted");
       assert.equal(r.source, "config");
     } finally {
+      process.chdir(originalCwd);
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -67,6 +69,7 @@ describe("effectiveMemoryClass", () => {
       assert.equal(r.cls, "public");
       assert.equal(r.source, "env");
     } finally {
+      process.chdir(originalCwd);
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -81,6 +84,7 @@ describe("effectiveMemoryClass", () => {
       assert.equal(r.cls, "restricted");
       assert.equal(r.recognized, false);
     } finally {
+      process.chdir(originalCwd);
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -94,6 +98,7 @@ describe("effectiveMemoryClass", () => {
       assert.equal(r.cls, "internal");
       assert.equal(r.recognized, true);
     } finally {
+      process.chdir(originalCwd);
       rmSync(dir, { recursive: true, force: true });
     }
   });

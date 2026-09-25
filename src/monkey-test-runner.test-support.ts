@@ -1,16 +1,67 @@
 /** Synthetic fixtures shared by runner tests, not a production entry point. */
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { MONKEY_ROLES } from "./monkey-test-contract.js";
 import { writeMonkeyHarness } from "./monkey-test-harness.js";
 
 export function shellQuote(value: string): string {
+  if (process.platform === "win32") return `"${value.replaceAll('"', '""')}"`;
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 export function fixtureEnvironment(root: string): NodeJS.ProcessEnv {
-  return { HOME: root, PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, NODE_ENV: "test" };
+  const windows = process.platform === "win32";
+  const paths = [
+    dirname(process.execPath),
+    ...(windows
+      ? process.env.SystemRoot
+        ? [join(process.env.SystemRoot, "System32")]
+        : []
+      : ["/usr/bin", "/bin"]),
+  ];
+  return {
+    HOME: root,
+    PATH: paths.join(delimiter),
+    NODE_ENV: "test",
+    ...(windows
+      ? {
+          ComSpec: process.env.ComSpec,
+          SystemRoot: process.env.SystemRoot,
+          USERPROFILE: root,
+          PATHEXT: process.env.PATHEXT,
+          TEMP: process.env.TEMP,
+          TMP: process.env.TMP,
+        }
+      : {}),
+  };
+}
+
+/** Keep in-process runner tests independent of the host's CI and developer env. */
+export async function withFixtureEnvironment<T>(root: string, run: () => Promise<T>): Promise<T> {
+  const original = { ...process.env };
+  const home = join(root, "home");
+  mkdirSync(home, { recursive: true });
+  const fixture = {
+    ...fixtureEnvironment(home),
+    KIT_NON_INTERACTIVE: "1",
+    KIT_BUMBLEBEE: "0",
+    KIT_NO_FAILURE_SIM: "1",
+    KIT_NO_UPDATE_CHECK: "1",
+    KIT_AUDIT_ANCHOR: "0",
+  };
+  const replace = (values: NodeJS.ProcessEnv): void => {
+    for (const key of Object.keys(process.env)) delete process.env[key];
+    for (const [key, value] of Object.entries(values)) {
+      if (value !== undefined) process.env[key] = value;
+    }
+  };
+  replace(fixture);
+  try {
+    return await run();
+  } finally {
+    replace(original);
+  }
 }
 
 export async function runnerFixture(): Promise<string> {

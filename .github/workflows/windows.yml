@@ -4,7 +4,16 @@
 name: Windows (native, probe)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      test_file:
+        description: Compiled test path under dist/ for a focused Windows run
+        required: false
+        default: ""
+      test_name_pattern:
+        description: Optional Node test name pattern for a focused run
+        required: false
+        default: ""
   pull_request: {}
   push:
     branches:
@@ -27,7 +36,25 @@ jobs:
         run: npm run build
       - name: Memory verifier authority (required)
         run: node --test dist/memory/pal-authority-windows.test.js
+      - name: Focused Windows test
+        if: inputs.test_file != ''
+        shell: pwsh
+        env:
+          KIT_TEST_FILE: ${{ inputs.test_file }}
+          KIT_TEST_PATTERN: ${{ inputs.test_name_pattern }}
+        run: |
+          if ($env:KIT_TEST_FILE -notmatch '^dist[/\\][a-zA-Z0-9/_\\.-]+\.test\.js$') {
+            throw 'test_file must name a compiled test under dist/'
+          }
+          if (($env:KIT_TEST_FILE -split '[/\\]') -contains '..') {
+            throw 'test_file must remain under dist/'
+          }
+          $testArgs = @('--test', '--test-timeout=180000')
+          if ($env:KIT_TEST_PATTERN) { $testArgs += "--test-name-pattern=$env:KIT_TEST_PATTERN" }
+          $testArgs += $env:KIT_TEST_FILE
+          & node @testArgs
       - name: Unit tests
+        if: inputs.test_file == ''
         continue-on-error: true # kit-self-audit: allow-continue-on-error
         shell: bash
         run: |

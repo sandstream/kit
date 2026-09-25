@@ -10,12 +10,11 @@ import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const cli = join(root, "src", "cli.ts");
-const tsx = join(root, "node_modules", ".bin", "tsx");
+const cli = join(root, "dist", "cli.js");
 
 async function run(args: string[], cwd: string) {
   try {
-    const result = await exec(tsx, [cli, ...args], {
+    const result = await exec(process.execPath, [cli, ...args], {
       cwd,
       env: { ...process.env, KIT_HIDE_HOOK_SKIP_BANNER: "1", KIT_AUDIT_ANCHOR: "0" },
       timeout: 20_000,

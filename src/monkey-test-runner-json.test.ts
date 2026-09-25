@@ -56,7 +56,7 @@ for (const outcome of ["test command success", "test failure", "seed failure", "
       if (outcome === "browser skipped")
         assert.ok(report.findings.some((finding) => finding.title === "Browser evidence skipped"));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
   });
 }

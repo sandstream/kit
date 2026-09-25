@@ -1,7 +1,7 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import { checkSecrets } from "./check-secrets.js";
 import type { SecretsConfig } from "./config.js";
@@ -206,13 +206,21 @@ describe("checkSecrets - dotenvx source", () => {
     try {
       await mkdir(bin);
       await writeFile(join(project, ".env"), "encrypted=true\n", "utf8");
-      await writeFile(
-        join(bin, "dotenvx"),
-        `#!/bin/sh\nif [ -f .env ]; then printf '%s' '${syntheticSecret}'; exit 0; fi\nexit 1\n`,
-        "utf8",
-      );
-      await chmod(join(bin, "dotenvx"), 0o755);
-      process.env.PATH = `${bin}:${previousPath ?? ""}`;
+      if (process.platform === "win32") {
+        await copyFile(process.execPath, join(bin, "dotenvx.exe"));
+        await writeFile(
+          join(project, "get"),
+          `if (require('node:fs').existsSync('.env')) process.stdout.write('${syntheticSecret}'); else process.exit(1);`,
+        );
+      } else {
+        await writeFile(
+          join(bin, "dotenvx"),
+          `#!/bin/sh\nif [ -f .env ]; then printf '%s' '${syntheticSecret}'; exit 0; fi\nexit 1\n`,
+          "utf8",
+        );
+        await chmod(join(bin, "dotenvx"), 0o755);
+      }
+      process.env.PATH = `${bin}${delimiter}${previousPath ?? ""}`;
 
       const { keys } = await checkSecrets(
         { store: "dotenvx", keys: { API_KEY: { source: "dotenvx" } } },

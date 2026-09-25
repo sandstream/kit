@@ -21,21 +21,23 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 import { chooseWrapperEntry, pathInWorkingTree, defaultGlobalBins } from "./kit-wrapper.js";
 import { describeWrapper, judgeWrapper } from "./hook-floor.js";
 
-const CHECKOUT = "/work/kit-public/dist/cli.js";
-const INSTALLED = "/home/dev/.npm-global/bin/kit";
-const inTree = (p: string): boolean => p.startsWith("/work/");
+const FIXTURE_ROOT = join(tmpdir(), "kit-wrapper-entry-fixture");
+const CHECKOUT = join(FIXTURE_ROOT, "work", "kit-public", "dist", "cli.js");
+const INSTALLED_BIN = join(FIXTURE_ROOT, "home", "dev", ".npm-global", "bin");
+const INSTALLED = join(INSTALLED_BIN, "kit");
+const inTree = (p: string): boolean => p.startsWith(join(FIXTURE_ROOT, "work") + sep);
 const installedExists = (p: string): boolean => p === INSTALLED;
 
 describe("chooseWrapperEntry", () => {
   it("prefers an installed kit over the checkout that is doing the writing", () => {
     const r = chooseWrapperEntry({
       running: CHECKOUT,
-      globalBins: ["/home/dev/.npm-global/bin"],
+      globalBins: [INSTALLED_BIN],
       exists: installedExists,
       inWorkingTree: inTree,
     });
@@ -45,7 +47,7 @@ describe("chooseWrapperEntry", () => {
   it("honours an explicit dev pin instead of quietly overriding the request", () => {
     const r = chooseWrapperEntry({
       running: CHECKOUT,
-      globalBins: ["/home/dev/.npm-global/bin"],
+      globalBins: [INSTALLED_BIN],
       exists: installedExists,
       inWorkingTree: inTree,
       allowDev: true,
@@ -81,7 +83,7 @@ describe("chooseWrapperEntry", () => {
 
   it("uses the install when there is no running entrypoint at all", () => {
     const r = chooseWrapperEntry({
-      globalBins: ["/home/dev/.npm-global/bin"],
+      globalBins: [INSTALLED_BIN],
       exists: installedExists,
       inWorkingTree: inTree,
     });
@@ -105,8 +107,8 @@ describe("chooseWrapperEntry", () => {
 
 describe("pathInWorkingTree", () => {
   it("finds a .git above the path", () => {
-    const exists = (p: string): boolean => p === "/work/kit-public/.git";
-    assert.equal(pathInWorkingTree("/work/kit-public/dist/cli.js", exists), true);
+    const exists = (p: string): boolean => p === join(FIXTURE_ROOT, "work", "kit-public", ".git");
+    assert.equal(pathInWorkingTree(CHECKOUT, exists), true);
   });
 
   it("says no for an install path with no .git above it", () => {

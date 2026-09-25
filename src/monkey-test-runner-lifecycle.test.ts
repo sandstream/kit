@@ -3,7 +3,12 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { it } from "node:test";
-import { markerCommand, runnerFixture, serverCommand } from "./monkey-test-runner.test-support.js";
+import {
+  markerCommand,
+  runnerFixture,
+  serverCommand,
+  withFixtureEnvironment,
+} from "./monkey-test-runner.test-support.js";
 import {
   cleanScenario,
   concurrentScenario,
@@ -17,8 +22,11 @@ import {
   runMonkey,
   spawnRunnerScript,
 } from "./monkey-test-runner-subprocess.test-support.js";
-import { runMonkeyTest } from "./monkey-test-runner.js";
+import { runMonkeyTest as executeMonkeyTest } from "./monkey-test-runner.js";
 import type { MonkeyRunResult } from "./monkey-test-contract.js";
+
+const runMonkeyTest = (root: string, options?: Parameters<typeof executeMonkeyTest>[1]) =>
+  withFixtureEnvironment(root, () => executeMonkeyTest(root, options));
 
 it(
   "MSG-03: concurrent runs finish all cleanup and preserve a borrowed server",
@@ -56,7 +64,7 @@ it(
       await cleanScenario(run, root, scenario.names);
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
   },
 );
@@ -72,7 +80,7 @@ it("MSG-03: failed prerequisites restore signal listeners on repeated calls", as
       assert.deepEqual([process.listeners("SIGINT"), process.listeners("SIGTERM")], original);
     }
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });
 
@@ -107,7 +115,7 @@ for (const outcome of ["missing evidence", "exception"]) {
           /* Already stopped. */
         }
       }
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
   });
 }
@@ -153,7 +161,7 @@ it(
           /* Already stopped. */
         }
       }
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
   },
 );

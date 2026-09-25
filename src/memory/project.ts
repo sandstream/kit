@@ -18,6 +18,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, posix, resolve, win32 } from "node:path";
@@ -201,8 +202,39 @@ export function getCurrentProjectRoot(cwd: string = process.cwd()): string {
   return cwd;
 }
 
+/** Git and Node use different separators for the same Windows path. Keep raw paths in storage. */
+export function recallRootVariants(root: string): string[] {
+  if (!/^(?:[A-Za-z]:[\\/]|\\\\|\/\/)/.test(root)) return [root];
+  return [...new Set([root, root.replaceAll("\\", "/"), root.replaceAll("/", "\\")])];
+}
+
+function sameLocalDirectory(left: string, right: string): boolean {
+  if (left === right) return true;
+  try {
+    const normalized = (path: string) =>
+      process.platform === "win32"
+        ? resolveLocalProjectPath(path).replaceAll("\\", "/").toLowerCase()
+        : resolveLocalProjectPath(path);
+    if (normalized(left) === normalized(right)) return true;
+    const a = statSync(left);
+    const b = statSync(right);
+    return a.isDirectory() && b.isDirectory() && a.ino !== 0 && a.dev === b.dev && a.ino === b.ino;
+  } catch {
+    return false;
+  }
+}
+
+function distinctRecallRoots(roots: string[]): string[] {
+  return [...new Set(roots.flatMap(recallRootVariants))];
+}
+
 /** Expand recall only to Git-registered worktrees, never unrelated clones with the same name. */
 export function getProjectRecallRoots(projectPath: string, db?: DatabaseSync): string[] {
+  // A path imported from another OS is evidence, not a local alias. Resolving /srv on Windows
+  // would silently turn it into the current drive's \srv and widen the recall scope.
+  if (process.platform === "win32" && /^\/(?!\/)/.test(projectPath)) return [projectPath];
+  if (process.platform !== "win32" && /^(?:[A-Za-z]:[\\/]|\\\\|\/\/)/.test(projectPath))
+    return recallRootVariants(projectPath);
   const canonical = resolveLocalProjectPath(projectPath);
   const localRoots = [...new Set([projectPath, canonical])];
   const identity = getProjectIdentity(canonical);
@@ -219,7 +251,8 @@ export function getProjectRecallRoots(projectPath: string, db?: DatabaseSync): s
   }
   try {
     // An explicitly scoped subdirectory must not silently expand to the whole repository.
-    if (resolve(getCurrentProjectRoot(canonical)) !== canonical) return localRoots;
+    if (!sameLocalDirectory(getCurrentProjectRoot(canonical), canonical))
+      return distinctRecallRoots(localRoots);
     const records = execFileSync("git", ["worktree", "list", "--porcelain", "-z"], {
       cwd: canonical,
       encoding: "utf8",
@@ -230,8 +263,11 @@ export function getProjectRecallRoots(projectPath: string, db?: DatabaseSync): s
       .split("\0")
       .filter((field) => field.startsWith("worktree "))
       .map((field) => field.slice("worktree ".length));
-    return [...new Set([...localRoots, ...roots])];
+    return distinctRecallRoots([
+      ...localRoots,
+      ...roots.flatMap((root) => [root, resolveLocalProjectPath(root)]),
+    ]);
   } catch {
-    return localRoots;
+    return distinctRecallRoots(localRoots);
   }
 }

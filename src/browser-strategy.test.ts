@@ -1,6 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { diagnoseBrowser } from "./browser.js";
@@ -12,19 +20,23 @@ const noMachineDeps: BrowserProbeDeps = {
   isExecutable: () => false,
   findOnPath: () => undefined,
   probeUrl: async () => false,
-  homedir: () => "/home/alice",
+  homedir: () => mockHome,
   platform: "linux",
 };
 
+const mockRepo = join(tmpdir(), "kit-browser-mock-repo");
+const mockHome = join(tmpdir(), "kit-browser-mock-home");
+const mockCache = join(mockHome, ".cache", "ms-playwright");
+
 describe("browser strategy selection", () => {
   it("blocks when Playwright exists but its browser cache is missing", async () => {
-    const exists = new Set(["/repo/node_modules/@playwright/test/package.json"]);
+    const exists = new Set([join(mockRepo, "node_modules", "@playwright", "test", "package.json")]);
     const result = await diagnoseBrowser(
       { port: 3107, routes: "e2e/routes.spec.ts" },
       {
         deps: { ...noMachineDeps, existsSync: (path) => exists.has(path) },
         env: {},
-        cwd: "/repo",
+        cwd: mockRepo,
       },
     );
     assert.equal(result.status, "blocker");
@@ -34,8 +46,8 @@ describe("browser strategy selection", () => {
 
   it("selects Playwright when package and Chromium cache are present", async () => {
     const exists = new Set([
-      "/repo/node_modules/@playwright/test/package.json",
-      "/home/alice/.cache/ms-playwright",
+      join(mockRepo, "node_modules", "@playwright", "test", "package.json"),
+      mockCache,
     ]);
     const result = await diagnoseBrowser(
       { port: 3107, routes: "e2e/routes.spec.ts" },
@@ -44,21 +56,22 @@ describe("browser strategy selection", () => {
           ...noMachineDeps,
           existsSync: (path) => exists.has(path),
           readdirSync: () => ["chromium-1234"],
-          isExecutable: (path) => path.endsWith("/chromium-1234/chrome-linux/chrome"),
+          isExecutable: (path) =>
+            path === join(mockCache, "chromium-1234", "chrome-linux", "chrome"),
         },
         env: {},
-        cwd: "/repo",
+        cwd: mockRepo,
       },
     );
     assert.equal(result.status, "pass");
     assert.equal(result.strategy, "playwright");
-    assert.equal(result.env.PLAYWRIGHT_BROWSERS_PATH, "/home/alice/.cache/ms-playwright");
+    assert.equal(result.env.PLAYWRIGHT_BROWSERS_PATH, mockCache);
   });
 
   it("does not accept a stale Chromium cache directory without an executable", async () => {
     const exists = new Set([
-      "/repo/node_modules/@playwright/test/package.json",
-      "/home/alice/.cache/ms-playwright",
+      join(mockRepo, "node_modules", "@playwright", "test", "package.json"),
+      mockCache,
     ]);
     const result = await diagnoseBrowser(
       { port: 3107, routes: "e2e/routes.spec.ts" },
@@ -69,7 +82,7 @@ describe("browser strategy selection", () => {
           readdirSync: () => ["chromium-1234"],
         },
         env: {},
-        cwd: "/repo",
+        cwd: mockRepo,
       },
     );
     assert.equal(result.status, "blocker");
@@ -101,13 +114,20 @@ describe("system Chrome selection", () => {
   it("rejects a directory and a non-executable chromium on PATH", async () => {
     const path = mkdtempSync(join(tmpdir(), "kit-browser-path-"));
     try {
-      mkdirSync(join(path, "chromium"));
-      writeFileSync(join(path, "google-chrome"), "#!/bin/sh\nexit 0\n");
-      chmodSync(join(path, "google-chrome"), 0o644);
+      const directory = process.platform === "win32" ? "chromium.exe" : "chromium";
+      const invalid = process.platform === "win32" ? "google-chrome.exe" : "google-chrome";
+      mkdirSync(join(path, directory));
+      writeFileSync(join(path, invalid), "#!/bin/sh\nexit 0\n");
+      chmodSync(join(path, invalid), 0o644);
       const result = await diagnoseBrowser(
         { port: 3107 },
         {
-          deps: { ...noMachineDeps, findOnPath: undefined, isExecutable: undefined },
+          deps: {
+            ...noMachineDeps,
+            platform: process.platform === "win32" ? "win32" : "linux",
+            findOnPath: undefined,
+            isExecutable: undefined,
+          },
           env: { PATH: path },
           cwd: "/repo",
         },
@@ -144,12 +164,27 @@ describe("system Chrome fallback", () => {
     try {
       mkdirSync(first);
       mkdirSync(second);
-      writeFileSync(join(first, "google-chrome"), "#!/bin/sh\nexit 0\n", { mode: 0o644 });
-      writeFileSync(join(second, "chromium"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      const invalid = process.platform === "win32" ? "google-chrome.exe" : "google-chrome";
+      const valid = process.platform === "win32" ? "chromium.exe" : "chromium";
+      writeFileSync(join(first, invalid), "#!/bin/sh\nexit 0\n", { mode: 0o644 });
+      if (process.platform === "win32") {
+        try {
+          linkSync(process.execPath, join(second, valid));
+        } catch {
+          copyFileSync(process.execPath, join(second, valid));
+        }
+      } else {
+        writeFileSync(join(second, valid), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      }
       const result = await diagnoseBrowser(
         { port: 3107 },
         {
-          deps: { ...noMachineDeps, findOnPath: undefined, isExecutable: undefined },
+          deps: {
+            ...noMachineDeps,
+            platform: process.platform === "win32" ? "win32" : "linux",
+            findOnPath: undefined,
+            isExecutable: undefined,
+          },
           env: { PATH: `${first}${delimiter}${second}` },
           cwd: "/repo",
         },
@@ -158,7 +193,7 @@ describe("system Chrome fallback", () => {
       assert.equal(result.strategy, "system-chrome");
       assert.equal(
         result.checks.find((check) => check.name === "system chrome")?.detail,
-        join(second, "chromium"),
+        join(second, valid),
       );
     } finally {
       rmSync(root, { recursive: true, force: true });

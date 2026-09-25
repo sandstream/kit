@@ -370,10 +370,16 @@ jobs:
           cache: "npm"
       - run: npm ci && npm run build
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      # Triage verifies each tool's upstream repo through the GitHub API. Anonymous calls share
+      # a 60/hour limit per runner IP, and triage correctly fails closed when it cannot verify.
       - name: Provision declared tools via kit install (triage-gated)
         run: node dist/cli.js install
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run kit's security scan with trivy + trufflehog present
         run: node scripts/run-security-check.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Aggregated gate — all stages must pass
   gate:

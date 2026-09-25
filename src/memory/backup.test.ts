@@ -118,7 +118,8 @@ describe("memory asymmetric (public-key) backup — no passphrase, ephemeral-saf
     assert.ok(isEncryptedBackup(enc), "V3 counts as an encrypted backup");
     assert.ok(isAsymmetricBackup(enc), "flagged as the public-key (V3) form");
     assert.equal(readFileSync(enc).subarray(0, 8).toString(), "KITMEM05");
-    assert.equal(statSync(enc).mode & 0o777, 0o600, "blob is 0600");
+    if (process.platform !== "win32")
+      assert.equal(statSync(enc).mode & 0o777, 0o600, "blob is 0600");
 
     restoreWithKey(privateJwk, enc, dest);
     db = openMemoryDb(dest);

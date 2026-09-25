@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { it } from "node:test";
 import { insertMessage, openMemoryDb, searchMessages, upsertSession } from "./db.js";
 import { mergeDb } from "./merge.js";
@@ -61,7 +62,7 @@ it(
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     writeFileSync(join(dir, ".kit.toml"), 'version = 1\n\n[tools]\nnode = "22"\n');
     const source = import.meta.url.endsWith(".ts");
-    const cli = new URL(source ? "../cli.ts" : "../cli.js", import.meta.url).pathname;
+    const cli = fileURLToPath(new URL(source ? "../cli.ts" : "../cli.js", import.meta.url));
     const run = () =>
       spawnSync(
         process.execPath,

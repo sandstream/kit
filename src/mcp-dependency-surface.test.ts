@@ -30,6 +30,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 /** The SDK's HTTP-transport and OAuth dependencies. kit must never load any of them. */
 const HTTP_OAUTH_STACK = [
@@ -91,7 +92,7 @@ function tracePackagesLoaded(body: string): Set<string> {
 
     execFileSync(
       process.execPath,
-      ["--import", join(dir, "register.mjs"), join(dir, "runner.mjs")],
+      ["--import", pathToFileURL(join(dir, "register.mjs")).href, join(dir, "runner.mjs")],
       {
         // cwd is the repo root so the child resolves kit's own node_modules.
         cwd: resolve(import.meta.dirname, ".."),
@@ -104,7 +105,7 @@ function tracePackagesLoaded(body: string): Set<string> {
 
     const packages = new Set<string>();
     for (const line of readFileSync(log, "utf-8").split("\n")) {
-      const m = /node_modules\/((?:@[^/]+\/)?[^/]+)\//.exec(line);
+      const m = /node_modules\/((?:@[^/]+\/)?[^/]+)\//.exec(line.replaceAll("\\", "/"));
       if (m) packages.add(m[1]!);
     }
     return packages;
@@ -113,7 +114,7 @@ function tracePackagesLoaded(body: string): Set<string> {
   }
 }
 
-const SERVER_DIST = resolve(import.meta.dirname, "mcp-server.js");
+const SERVER_DIST = pathToFileURL(resolve(import.meta.dirname, "mcp-server.js")).href;
 
 /**
  * Bare specifiers in the generated runner would resolve against ITS location — a temp dir with no
