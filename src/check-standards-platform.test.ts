@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import {
   parseHadolintJson,
   findDockerfiles,
@@ -52,7 +52,7 @@ describe("check-standards-platform — findDockerfiles", () => {
       mkdirSync(join(repo, "node_modules", "pkg"), { recursive: true });
       writeFileSync(join(repo, "node_modules", "pkg", "Dockerfile"), "FROM evil\n");
       const found = findDockerfiles(repo)
-        .map((p) => p.slice(repo.length + 1))
+        .map((p) => relative(repo, p).split(sep).join("/"))
         .sort();
       assert.deepEqual(found, ["Dockerfile", "Dockerfile.prod", "svc/app.Dockerfile"]);
     } finally {
@@ -62,6 +62,23 @@ describe("check-standards-platform — findDockerfiles", () => {
 });
 
 describe("check-standards-platform — gating", () => {
+  it("uses forward-slash baseline keys for nested Dockerfiles", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "kit-docker-key-"));
+    try {
+      const file = join(repo, "svc", "Dockerfile");
+      const scan: PlatformScan = {
+        dockerfiles: [file],
+        findings: [{ file, line: 3, rule: "DL3008" }],
+        didNotRun: false,
+      };
+      const baseline = [platformKey("hadolint", { file: "svc/Dockerfile", rule: "DL3008" })];
+      const result = await checkStandardsPlatform({ cwd: repo, scan, baseline, enforce: true });
+      assert.equal(result[0].status, "warn");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
   it("no Dockerfile → no results (gate doesn't apply)", async () => {
     const scan: PlatformScan = { dockerfiles: [], findings: [], didNotRun: false };
     assert.deepEqual(await checkStandardsPlatform({ scan }), []);

@@ -125,8 +125,9 @@ export interface AdrImportWalkContext {
 
 /** Shorten a package key for a `via` chain. */
 function chainLabel(key: string): string {
-  const index = key.lastIndexOf("node_modules/");
-  return index < 0 ? key : key.slice(index + "node_modules/".length);
+  const normalized = key.replaceAll("\\", "/");
+  const index = normalized.lastIndexOf("node_modules/");
+  return index < 0 ? normalized : normalized.slice(index + "node_modules/".length);
 }
 
 type WalkEdge =

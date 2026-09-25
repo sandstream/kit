@@ -1,5 +1,5 @@
 /** Isolated subprocess launcher for source and compiled runner tests. */
-import { spawn } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { fixtureEnvironment } from "./monkey-test-runner.test-support.js";
@@ -52,12 +52,41 @@ export function spawnRunnerScript(root: string, script: string, args: string[] =
   return { child, exited, closed, output: () => ({ stdout, stderr }) };
 }
 
+export function terminateRunnerTree(child: ChildProcess): void {
+  if (process.platform === "win32" && child.pid) {
+    execFile(
+      "taskkill.exe",
+      ["/PID", String(child.pid), "/T", "/F"],
+      { timeout: 5_000, windowsHide: true },
+      (error) => {
+        if (error) {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // The runner may have exited while taskkill was finishing.
+          }
+        }
+      },
+    );
+    return;
+  }
+  child.kill("SIGKILL");
+}
+
 export async function runMonkey(root: string, args: string[]) {
   const run = spawnMonkey(root, args);
-  const timer = setTimeout(() => run.child.kill("SIGKILL"), 8_000);
+  let timedOut = false;
+  const timer = setTimeout(
+    () => {
+      timedOut = true;
+      terminateRunnerTree(run.child);
+    },
+    process.platform === "win32" ? 20_000 : 8_000,
+  );
   try {
     const exit = await run.exited;
     await run.closed;
+    if (timedOut) throw new Error("isolated monkey runner fixture timed out");
     return { ...exit, ...run.output() };
   } finally {
     clearTimeout(timer);

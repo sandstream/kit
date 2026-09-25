@@ -13,7 +13,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "docs", "CONFIGURATION.md");
@@ -25,7 +25,7 @@ const OUT = join(ROOT, "docs", "CONFIGURATION.md");
  * rendered from exactly what the CLI loads.
  */
 async function sections() {
-  const mod = await import(join(ROOT, "dist", "config-surface.js"));
+  const mod = await import(pathToFileURL(join(ROOT, "dist", "config-surface.js")).href);
   return mod.CONFIG_SECTIONS;
 }
 

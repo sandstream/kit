@@ -45,6 +45,7 @@ import {
 import { kitWrapperPath, kitBinDir } from "./kit-wrapper.js";
 import { statSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 function tmpRepo(): string {
   return mkdtempSync(join(tmpdir(), "kit-agentcfg-"));
@@ -639,7 +640,7 @@ describe("installInstallGate", () => {
         assert.equal(r.action, "updated");
         const s = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
         assert.equal(s.hooks.PreToolUse.length, 1);
-        assert.equal(s.hooks.PreToolUse[0].hooks[0].command, '"$HOME/.kit/bin/kit" gate-bash');
+        assert.equal(s.hooks.PreToolUse[0].hooks[0].command, kitGateInvocation());
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -714,27 +715,33 @@ describe("kitGateInvocation / kitGateArgv (prefer the self-healing wrapper)", ()
     "runs the native Windows gate command and enforces allow and deny",
     { skip: process.platform !== "win32" },
     () => {
-      const command = kitGateInvocation();
-      assert.ok(command.startsWith(`"${process.execPath}" `));
-      assert.ok(command.endsWith(" gate-bash"));
-      assert.doesNotMatch(command, /\.kit[\\/]bin[\\/]kit(?:\.cmd)?/);
-      assert.doesNotThrow(() =>
-        execSync(command, {
-          input: JSON.stringify({ tool_input: { command: "echo safe" } }),
-          stdio: ["pipe", "pipe", "pipe"],
-        }),
-      );
-      assert.throws(
-        () =>
+      const previousEntry = process.argv[1];
+      process.argv[1] = fileURLToPath(new URL("./cli.js", import.meta.url));
+      try {
+        const command = kitGateInvocation();
+        assert.ok(command.startsWith(`"${process.execPath}" `));
+        assert.ok(command.endsWith(" gate-bash"));
+        assert.doesNotMatch(command, /\.kit[\\/]bin[\\/]kit(?:\.cmd)?/);
+        assert.doesNotThrow(() =>
           execSync(command, {
-            input: JSON.stringify({ tool_input: { command: "npm install" } }),
+            input: JSON.stringify({ tool_input: { command: "echo safe" } }),
             stdio: ["pipe", "pipe", "pipe"],
           }),
-        (error: unknown) => {
-          assert.equal((error as { status?: number }).status, 2);
-          return true;
-        },
-      );
+        );
+        assert.throws(
+          () =>
+            execSync(command, {
+              input: JSON.stringify({ tool_input: { command: "npm install" } }),
+              stdio: ["pipe", "pipe", "pipe"],
+            }),
+          (error: unknown) => {
+            assert.equal((error as { status?: number }).status, 2);
+            return true;
+          },
+        );
+      } finally {
+        process.argv[1] = previousEntry;
+      }
     },
   );
   // The gate hook should point at the stable ~/.kit/bin/kit wrapper rather than
@@ -830,7 +837,7 @@ describe("installInstallGateCodex", () => {
         const r = await installInstallGateCodex(dir);
         assert.equal(r.action, "updated");
         const txt = readFileSync(join(dir, ".codex", "config.toml"), "utf-8");
-        assert.ok(txt.includes(`command = '"$HOME/.kit/bin/kit" gate-bash'`));
+        assert.ok(txt.includes(`command = '${kitGateInvocation()}'`));
         assert.ok(!txt.includes("/root/.kit/bin/kit"));
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -1229,6 +1236,35 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
         const live = gateLiveness(dir);
         assert.equal(live.installGate, true);
         assert.deepEqual(live.problems, []);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
+    "flags a native Node hook with a missing CLI entrypoint",
+    { skip: process.platform !== "win32" },
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "kit-gatelive-entry-"));
+      try {
+        mkdirSync(join(dir, ".claude"));
+        const missing = join(dir, "missing-cli.js");
+        writeFileSync(
+          join(dir, ".claude", "settings.json"),
+          JSON.stringify({
+            hooks: {
+              PreToolUse: [
+                {
+                  hooks: [
+                    { type: "command", command: `"${process.execPath}" "${missing}" gate-bash` },
+                  ],
+                },
+              ],
+            },
+          }),
+        );
+        assert.match(gateLiveness(dir).problems[0], /kit CLI missing/);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

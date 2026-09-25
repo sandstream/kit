@@ -1,6 +1,6 @@
 /**
- * BH-01, at the surfaces an operator actually reads. A hook file without an execute bit
- * is never run by git, so every surface that reports on hooks must call it a failure:
+ * BH-01, at the surfaces an operator actually reads. On POSIX, a hook file without
+ * an execute bit is never run by git, so every surface must call it a failure:
  * `kit hooks check` (exit 1), `kit check --category hooks --json` (ok: false) and
  * `kit doctor --json` (a fail row). check-hooks.test.ts covers the unit; this covers the
  * wiring, which is where the three surfaces historically drifted apart.
@@ -56,6 +56,7 @@ function run(dir: string, args: string[]): { status: number | null; out: string 
         ...process.env,
         CI: "true",
         HOME: home,
+        USERPROFILE: home,
         KIT_HIDE_HOOK_SKIP_BANNER: "1",
         KIT_IDENTITY_DIR: join(home, ".kit"),
         KIT_MEMORY_DIR: join(home, ".kit", "memory"),
@@ -68,52 +69,85 @@ function run(dir: string, args: string[]): { status: number | null; out: string 
   }
 }
 
-describe("a non-executable git hook fails every reporting surface (BH-01)", () => {
-  it("`kit hooks check` exits 1 and names the reason", { timeout: 60_000 }, () => {
-    const dir = projectWithNonExecutableHook();
-    try {
-      const { status, out } = run(dir, ["hooks", "check"]);
-      assert.equal(status, 1, out);
-      assert.match(out, /not executable/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+describe(
+  "a non-executable git hook fails every reporting surface (BH-01)",
+  {
+    skip: process.platform === "win32",
+  },
+  () => {
+    it("`kit hooks check` exits 1 and names the reason", { timeout: 60_000 }, () => {
+      const dir = projectWithNonExecutableHook();
+      try {
+        const { status, out } = run(dir, ["hooks", "check"]);
+        assert.equal(status, 1, out);
+        assert.match(out, /not executable/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
 
-  it("`kit check --category hooks --json` reports ok: false", { timeout: 180_000 }, () => {
-    const dir = projectWithNonExecutableHook();
-    try {
-      const { out } = run(dir, ["check", "--category", "hooks", "--json"]);
-      const report = JSON.parse(out.slice(out.indexOf("{"), out.lastIndexOf("}") + 1)) as {
-        ok: boolean;
-        checks: { name: string; status: string; detail: string; category: string }[];
-      };
-      assert.equal(report.ok, false);
-      const hook = report.checks.find((c) => c.category === "hooks" && c.name === "pre-commit");
-      assert.ok(hook, `no pre-commit hook row in ${out}`);
-      assert.equal(hook.status, "fail");
-      assert.match(hook.detail, /not executable/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+    it("`kit check --category hooks --json` reports ok: false", { timeout: 180_000 }, () => {
+      const dir = projectWithNonExecutableHook();
+      try {
+        const { out } = run(dir, ["check", "--category", "hooks", "--json"]);
+        const report = JSON.parse(out.slice(out.indexOf("{"), out.lastIndexOf("}") + 1)) as {
+          ok: boolean;
+          checks: { name: string; status: string; detail: string; category: string }[];
+        };
+        assert.equal(report.ok, false);
+        const hook = report.checks.find((c) => c.category === "hooks" && c.name === "pre-commit");
+        assert.ok(hook, `no pre-commit hook row in ${out}`);
+        assert.equal(hook.status, "fail");
+        assert.match(hook.detail, /not executable/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
 
-  it("`kit doctor --json` reports a fail row, not a warn", { timeout: 180_000 }, () => {
+    it("`kit doctor --json` reports a fail row, not a warn", { timeout: 180_000 }, () => {
+      const dir = projectWithNonExecutableHook();
+      try {
+        const { out } = run(dir, ["doctor", "--json"]);
+        const report = JSON.parse(out.slice(out.indexOf("{"), out.lastIndexOf("}") + 1)) as {
+          checks: { name: string; status: string; detail: string; category: string }[];
+        };
+        const hook = report.checks.find((c) => c.category === "hooks" && c.name === "pre-commit");
+        assert.ok(hook, `no pre-commit hook row in ${out}`);
+        assert.equal(hook.status, "fail");
+        assert.match(hook.detail, /not executable/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  },
+);
+
+it(
+  "Windows does not reject hooks based on POSIX execute bits",
+  {
+    skip: process.platform !== "win32",
+    timeout: 180_000,
+  },
+  () => {
     const dir = projectWithNonExecutableHook();
     try {
-      const { out } = run(dir, ["doctor", "--json"]);
-      const report = JSON.parse(out.slice(out.indexOf("{"), out.lastIndexOf("}") + 1)) as {
-        checks: { name: string; status: string; detail: string; category: string }[];
-      };
-      const hook = report.checks.find((c) => c.category === "hooks" && c.name === "pre-commit");
-      assert.ok(hook, `no pre-commit hook row in ${out}`);
-      assert.equal(hook.status, "fail");
-      assert.match(hook.detail, /not executable/);
+      const hooks = run(dir, ["hooks", "check"]);
+      assert.equal(hooks.status, 0, hooks.out);
+      const check = run(dir, ["check", "--category", "hooks", "--json"]);
+      const checkReport = JSON.parse(
+        check.out.slice(check.out.indexOf("{"), check.out.lastIndexOf("}") + 1),
+      ) as { checks: { name: string; category: string; status: string }[] };
+      assert.equal(checkReport.checks.find((row) => row.name === "pre-commit")?.status, "pass");
+      const doctor = run(dir, ["doctor", "--json"]);
+      const doctorReport = JSON.parse(
+        doctor.out.slice(doctor.out.indexOf("{"), doctor.out.lastIndexOf("}") + 1),
+      ) as { checks: { name: string; category: string; status: string }[] };
+      assert.equal(doctorReport.checks.find((row) => row.name === "pre-commit")?.status, "pass");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
-});
+  },
+);
 
 describe("an outdated git hook has one verdict across all reporting surfaces (BH-04)", () => {
   it("fails hooks check, check, and doctor", { timeout: 180_000 }, () => {

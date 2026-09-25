@@ -286,6 +286,31 @@ describe("forbid_import (follow_packages — across npm package boundaries)", ()
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("shortens Windows package paths in dependency chains", () => {
+    const entry = String.raw`C:\Temp\node_modules\wrapper\lib\index.js`;
+    const db = String.raw`C:\Temp\node_modules\wrapper\lib\db.js`;
+    const v = evaluateAdr(
+      parseAdr(FORBID_IMPORT_PKG)!,
+      [{ path: "src/web/h.ts", content: "import { query } from 'wrapper'\n" }],
+      {
+        packages: {
+          resolve: (_from, specifier) =>
+            specifier === "wrapper" ? entry : specifier === "./db.js" ? db : null,
+          read: (key) =>
+            key === entry
+              ? "export { query } from './db.js'\n"
+              : key === db
+                ? "const { Client } = require('pg')\n"
+                : null,
+        },
+      },
+    );
+    assert.equal(v.length, 1);
+    assert.equal(v[0].kind, "violation");
+    assert.match(v[0].message, /wrapper\/lib\/db\.js/);
+    assert.doesNotMatch(v[0].message, /node_modules|C:\\Temp/);
+  });
+
   it("the same tree is invisible to a transitive rule WITHOUT follow_packages", () => {
     // Not a gap either: a bare leaf we were never asked to follow is honestly out of scope.
     const root = makeNodeModulesFixture();

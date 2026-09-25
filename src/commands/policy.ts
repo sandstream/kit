@@ -7,6 +7,7 @@
 import { existsSync, writeFileSync, readFileSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { c } from "../utils/colors.js";
+import { writeFileExclusiveSync } from "../utils/exclusive-file.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { getCurrentProjectRoot } from "../memory/project.js";
 import {
@@ -211,7 +212,7 @@ function policyInit(root: string): boolean {
     }
   } else {
     try {
-      writeFileSync(path, POLICY_TEMPLATE, { encoding: "utf-8", flag: "wx" });
+      writeFileExclusiveSync(path, POLICY_TEMPLATE);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       console.error(`${c.red}${path} already exists${c.reset} — pass --force to overwrite`);

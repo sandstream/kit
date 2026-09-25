@@ -659,32 +659,6 @@ describe(".kit-secretsignore (explicitly accepted historical findings)", () => {
 });
 
 describe("license check tool boundary", () => {
-  it("uses the real JSON scan when license-checker has a broken --version exit code", async () => {
-    const root = mkdtempSync(join(tmpdir(), "kit-license-version-"));
-    const bin = join(root, "bin");
-    const project = join(root, "project");
-    mkdirSync(bin, { recursive: true });
-    mkdirSync(project, { recursive: true });
-    writeFileSync(join(project, "package.json"), JSON.stringify({ name: "x", version: "1.0.0" }));
-    writeFileSync(
-      join(bin, "license-checker"),
-      '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 25.0.1; exit 1; fi\nprintf \'{"x@1.0.0":{"licenses":"MIT"}}\'\n',
-    );
-    chmodSync(join(bin, "license-checker"), 0o755);
-
-    const prevPath = process.env.PATH;
-    try {
-      process.env.PATH = [bin, "/usr/bin", "/bin"].join(":");
-      const result = await checkLicenses(project);
-      assert.equal(result.status, "pass", result.detail);
-      assert.equal(result.didNotRun, undefined);
-    } finally {
-      if (prevPath === undefined) delete process.env.PATH;
-      else process.env.PATH = prevPath;
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
   it("never downloads license-checker from inside the security gate", async () => {
     const root = mkdtempSync(join(tmpdir(), "kit-license-root-"));
     const bin = join(root, "bin");

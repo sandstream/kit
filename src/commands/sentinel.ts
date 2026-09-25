@@ -8,6 +8,7 @@ import { resolve, dirname } from "node:path";
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { c } from "../utils/colors.js";
+import { writeFileExclusiveSync } from "../utils/exclusive-file.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { loadConfig, type kitConfig } from "../config.js";
 import { resolveConfigPath, buildHealthCtx } from "../cli-shared.js";
@@ -124,7 +125,7 @@ async function cmdSentinelInstall(): Promise<boolean> {
     }
   } else {
     try {
-      writeFileSync(dest, body, { flag: "wx" });
+      writeFileExclusiveSync(dest, body);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       console.error(

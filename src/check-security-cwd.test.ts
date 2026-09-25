@@ -23,10 +23,10 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import {
   checkLockfilesCommitted,
@@ -34,6 +34,7 @@ import {
   checkSecretsInCode,
   checkSecurity,
 } from "./check-security.js";
+import { fakeNpmAudit, npmPath } from "./check-security-cwd-fixture.test-support.js";
 
 /** A project whose .gitignore covers every .env spelling the check looks for. */
 function projectWithGitignore(): string {
@@ -103,14 +104,6 @@ function initRepo(dir: string, files: Record<string, string>): void {
   }
   execFileSync("git", ["init", "-q"], { cwd: dir });
   execFileSync("git", ["add", "."], { cwd: dir });
-}
-
-function fakeExecutable(dir: string, name: string, body: string): string {
-  mkdirSync(dir, { recursive: true });
-  const path = join(dir, name);
-  writeFileSync(path, `#!/bin/sh\n${body}\n`);
-  chmodSync(path, 0o755);
-  return path;
 }
 
 function statusOf(results: Awaited<ReturnType<typeof checkSecurity>>, name: string): string {
@@ -287,15 +280,16 @@ describe("target-sensitive security subprocesses use the governed tree", () => {
       writeFileSync(join(target, "package.json"), '{"name":"target","version":"1.0.0"}\n');
       writeFileSync(join(target, "package-lock.json"), '{"lockfileVersion":3}\n');
       writeFileSync(join(target, ".target-marker"), "target\n");
-      fakeExecutable(
+      fakeNpmAudit(
         bin,
-        "npm",
+        target,
         `if [ -f .target-marker ]; then\n  printf '%s' '{"metadata":{"vulnerabilities":{"high":1,"critical":0}}}'\n  exit 1\nfi\nprintf '%s' '{"metadata":{"vulnerabilities":{"high":0,"critical":0}}}'`,
+        `const high = require('node:fs').existsSync('.target-marker') ? 1 : 0;
+process.stdout.write(JSON.stringify({ metadata: { vulnerabilities: { high, critical: 0 } } }));
+process.exit(high ? 1 : 0);`,
       );
 
-      const result = await withPath(`${bin}:/usr/bin:/bin`, () =>
-        inCwd(caller, () => checkNpmAudit(target)),
-      );
+      const result = await withPath(npmPath(bin), () => inCwd(caller, () => checkNpmAudit(target)));
       assert.equal(result.status, "fail");
       assert.match(result.detail, /1 high/);
     } finally {
@@ -311,9 +305,9 @@ describe("target-sensitive security subprocesses use the governed tree", () => {
     try {
       writeFileSync(join(target, "package.json"), '{"name":"target","version":"1.0.0"}\n');
       writeFileSync(join(target, "package-lock.json"), '{"lockfileVersion":3}\n');
-      fakeExecutable(bin, "npm", "sleep 1");
+      fakeNpmAudit(bin, target, "sleep 1", "setTimeout(() => {}, 1000);");
 
-      const result = await withPath(`${bin}:/usr/bin:/bin`, () =>
+      const result = await withPath(npmPath(bin), () =>
         withEnv("KIT_NPM_AUDIT_TIMEOUT_MS", "20", () => checkNpmAudit(target)),
       );
       assert.equal(result.status, "warn");
@@ -332,9 +326,14 @@ describe("target-sensitive security subprocesses use the governed tree", () => {
     try {
       writeFileSync(join(target, "package.json"), '{"name":"target","version":"1.0.0"}\n');
       writeFileSync(join(target, "package-lock.json"), '{"lockfileVersion":3}\n');
-      fakeExecutable(bin, "npm", "printf '%s' 'registry unavailable' >&2\nexit 2");
+      fakeNpmAudit(
+        bin,
+        target,
+        "printf '%s' 'registry unavailable' >&2\nexit 2",
+        "process.stderr.write('registry unavailable'); process.exit(2);",
+      );
 
-      const result = await withPath(`${bin}:/usr/bin:/bin`, () => checkNpmAudit(target));
+      const result = await withPath(npmPath(bin), () => checkNpmAudit(target));
       assert.equal(result.status, "warn");
       assert.equal(result.didNotRun, true);
       assert.equal(result.severity, "medium");
@@ -344,7 +343,9 @@ describe("target-sensitive security subprocesses use the governed tree", () => {
       rmSync(bin, { recursive: true, force: true });
     }
   });
+});
 
+describe("target-sensitive Git checks use the governed tree", () => {
   it("lockfile tracking follows the target git index", async () => {
     const caller = mkdtempSync(join(tmpdir(), "kit-git-caller-"));
     const target = mkdtempSync(join(tmpdir(), "kit-git-target-"));
@@ -375,7 +376,15 @@ describe("target-sensitive security subprocesses use the governed tree", () => {
         "src/prod.ts": 'export const api_key="synthetic_secret_value_123456789";\n',
       });
 
-      const result = await withPath("/usr/bin:/bin", () =>
+      // Keep Git discoverable while excluding trufflehog, so the basic scan runs
+      // on native Windows too (where /usr/bin:/bin is not a usable PATH).
+      const gitPath = execFileSync(process.platform === "win32" ? "where" : "which", ["git"], {
+        encoding: "utf8",
+      })
+        .trim()
+        .split(/\r?\n/)[0];
+      const fallbackPath = process.platform === "win32" ? dirname(gitPath) : "/usr/bin:/bin";
+      const result = await withPath(fallbackPath, () =>
         inCwd(caller, () => checkSecretsInCode(target)),
       );
       assert.equal(result.status, "warn");

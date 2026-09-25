@@ -6,11 +6,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   MONKEY_ROLES,
-  runMonkeyTest,
+  runMonkeyTest as executeMonkeyTest,
   validateMoneyFlowConfig,
   writeMonkeyHarness,
 } from "./monkey-test.js";
-import { fixtureCommand } from "./monkey-test-runner.test-support.js";
+import {
+  fixtureCommand,
+  markerCommand,
+  shellQuote,
+  withFixtureEnvironment,
+} from "./monkey-test-runner.test-support.js";
+import { providerCommand } from "./monkey-test-runner-env.test-support.js";
+
+const runMonkeyTest = (root: string, options?: Parameters<typeof executeMonkeyTest>[1]) =>
+  withFixtureEnvironment(root, () => executeMonkeyTest(root, options));
 
 const roots: string[] = [];
 
@@ -96,7 +105,8 @@ function captureOutput(): { output: () => string; restore: () => void } {
 }
 
 afterEach(() => {
-  while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
+  while (roots.length)
+    rmSync(roots.pop()!, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 });
 
 describe("monkey-test money flow contract", () => {
@@ -188,10 +198,10 @@ describe("monkey-test runner gate prerequisites", () => {
       skipSecurity: true,
       skipBrowser: true,
       expectedReason: "Focused release exception while browser infrastructure is unavailable.",
-      seedCommand: `node -e "require('node:fs').writeFileSync('seed-ran', 'yes')"`,
+      seedCommand: markerCommand(dir, "seed"),
     });
 
-    assert.equal(existsSync(join(dir, "seed-ran")), true, "seed command was bypassed");
+    assert.equal(existsSync(join(dir, "seed.ran")), true, "seed command was bypassed");
     assert.equal(result.ok, false);
     assert.ok(
       result.findings.some((item) => item.title === "Monkey harness incomplete"),
@@ -213,7 +223,7 @@ describe("monkey-test runner gate prerequisites", () => {
       skipSecurity: true,
       skipBrowser: true,
       expectedReason: "Focused release exception while browser infrastructure is unavailable.",
-      seedCommand: `node -e "process.exit(0)"`,
+      seedCommand: fixtureCommand(dir, "seed", "process.exit(0);"),
     });
 
     assert.equal(result.ok, false);
@@ -236,7 +246,7 @@ describe("monkey-test runner gate prerequisites", () => {
       skipSecurity: true,
       skipBrowser: true,
       expectedReason: "Browser infrastructure outage recorded by release owner.",
-      seedCommand: `node -e "process.exit(0)"`,
+      seedCommand: fixtureCommand(dir, "seed", "process.exit(0);"),
     });
 
     assert.equal(result.ok, false);
@@ -254,6 +264,7 @@ describe("monkey-test runner gate redaction", () => {
     });
     await writeMonkeyHarness(dir);
     configureRoleMatrix(dir);
+    writeFileSync(join(dir, "provider-error"), inlineSecret);
     const capture = captureOutput();
 
     try {
@@ -261,13 +272,17 @@ describe("monkey-test runner gate redaction", () => {
         skipSecurity: true,
         skipBrowser: true,
         expectedReason: "Runner redaction regression with browser intentionally unavailable.",
-        envCommand: `node -e "process.stderr.write('${inlineSecret}');process.exit(1)"`,
-        seedCommand: `node -e "require('node:fs').writeFileSync('seed-ran', 'yes')"`,
+        envCommand: fixtureCommand(
+          dir,
+          "env",
+          'import { readFileSync } from "node:fs"; process.stderr.write(readFileSync("provider-error", "utf8")); process.exit(1);',
+        ),
+        seedCommand: markerCommand(dir, "seed"),
       });
       const surfaced = `${capture.output()}\n${JSON.stringify(result)}`;
 
       assert.ok(!surfaced.includes(inlineSecret), "provider command/error leaked a credential");
-      assert.equal(existsSync(join(dir, "seed-ran")), false);
+      assert.equal(existsSync(join(dir, "seed.ran")), false);
       assert.ok(result.steps.some((step) => step.name === "seed" && step.status === "skip"));
     } finally {
       capture.restore();
@@ -290,11 +305,7 @@ describe("monkey-test runner gate redaction", () => {
         skipSecurity: true,
         skipBrowser: true,
         expectedReason: "Runner redaction regression with browser intentionally unavailable.",
-        envCommand: fixtureCommand(
-          dir,
-          "env",
-          `process.stdout.write(JSON.stringify({MONKEY_TEST_SECRET:${JSON.stringify(opaqueSecret)}}));`,
-        ),
+        envCommand: providerCommand(dir, JSON.stringify({ MONKEY_TEST_SECRET: opaqueSecret })),
         seedCommand: fixtureCommand(
           dir,
           "seed",
@@ -326,17 +337,13 @@ describe("monkey-test runner payment safety", () => {
     const result = await runMonkeyTest(dir, {
       skipSecurity: true,
       expectedReason: "Focused payment safety regression fixture.",
-      envCommand: fixtureCommand(
-        dir,
-        "env",
-        `process.stdout.write(JSON.stringify({STRIPE_SECRET_KEY:${JSON.stringify(liveKey)}}));`,
-      ),
-      seedCommand: `node -e "require('node:fs').writeFileSync('seed-ran', 'yes')"`,
-      startCommand: `node -e "require('node:fs').writeFileSync('server-ran', 'yes')"`,
+      envCommand: providerCommand(dir, JSON.stringify({ STRIPE_SECRET_KEY: liveKey })),
+      seedCommand: markerCommand(dir, "seed"),
+      startCommand: markerCommand(dir, "server"),
     });
 
-    assert.equal(existsSync(join(dir, "seed-ran")), false);
-    assert.equal(existsSync(join(dir, "server-ran")), false);
+    assert.equal(existsSync(join(dir, "seed.ran")), false);
+    assert.equal(existsSync(join(dir, "server.ran")), false);
     assert.ok(result.findings.some((item) => item.title === "Live payment environment refused"));
     assert.ok(result.steps.some((step) => step.name === "seed" && step.status === "skip"));
     assert.ok(result.steps.some((step) => step.name === "browser" && step.status === "skip"));
@@ -365,10 +372,10 @@ describe("monkey-test runner payment safety", () => {
           "env",
           'process.stdout.write(JSON.stringify({PAYPAL_ENVIRONMENT:"production"}));',
         ),
-        seedCommand: `node -e "require('node:fs').writeFileSync('seed-ran', 'yes')"`,
+        seedCommand: markerCommand(dir, "seed"),
       });
 
-      assert.equal(existsSync(join(dir, "seed-ran")), false);
+      assert.equal(existsSync(join(dir, "seed.ran")), false);
       assert.ok(result.findings.some((item) => item.title === "Live payment environment refused"));
     } finally {
       await new Promise<void>((resolveClose, rejectClose) =>
@@ -401,7 +408,7 @@ describe("monkey-test runner gate missing evidence", () => {
         skipSecurity: true,
         skipSeed: true,
         expectedReason: "Focused runner-contract regression fixture.",
-        testCommand: `node -e "process.exit(0)"`,
+        testCommand: fixtureCommand(dir, "test", "process.exit(0);"),
       });
 
       assert.equal(result.ok, false);
@@ -442,7 +449,7 @@ describe("monkey-test runner custom-command evidence (MHB-04)", () => {
         skipSecurity: true,
         skipSeed: true,
         expectedReason: "Focused runner-contract regression fixture.",
-        testCommand: `node ${reportScript}`,
+        testCommand: `${shellQuote(process.execPath)} ${shellQuote(reportScript)}`,
       });
 
       assert.equal(
@@ -490,8 +497,8 @@ writeFileSync("server.pid", String(process.pid));
         skipSecurity: true,
         skipSeed: true,
         expectedReason: "Focused runner lifecycle regression fixture.",
-        startCommand: "node stubborn-server.mjs",
-        testCommand: `node ${reportScript}`,
+        startCommand: `${shellQuote(process.execPath)} ${shellQuote("stubborn-server.mjs")}`,
+        testCommand: `${shellQuote(process.execPath)} ${shellQuote(reportScript)}`,
       });
 
       assert.equal(
@@ -564,7 +571,7 @@ writeFileSync(".kit/monkey-test/playwright-report.json", JSON.stringify({
         skipSecurity: true,
         skipSeed: true,
         expectedReason: "Focused runner-contract regression fixture.",
-        testCommand: "node write-skipped-report.mjs",
+        testCommand: `${shellQuote(process.execPath)} ${shellQuote("write-skipped-report.mjs")}`,
       });
 
       assert.equal(result.ok, false);

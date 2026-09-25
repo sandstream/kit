@@ -190,7 +190,7 @@ export async function checkStandardsPlatform(
 }
 
 function relPath(cwd: string, p: string): string {
-  return relative(cwd, p) || p;
+  return (relative(cwd, p) || p).replaceAll("\\", "/");
 }
 
 /** Snapshot current container findings for `kit baseline freeze`. */

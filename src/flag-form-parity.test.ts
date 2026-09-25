@@ -211,7 +211,7 @@ describe("no production command re-introduces the hand-rolled argv pattern", () 
    */
   it("no `args[indexOf('--flag') + 1]` value extraction survives outside the allowlist", async () => {
     const { readFileSync, readdirSync, statSync } = await import("node:fs");
-    const { join: pjoin, resolve: presolve } = await import("node:path");
+    const { basename, join: pjoin, relative, resolve: presolve, sep } = await import("node:path");
 
     const SRC = presolve(import.meta.dirname, "..", "src");
     const ALLOWED_FILES = new Set(["gate.ts"]);
@@ -225,7 +225,7 @@ describe("no production command re-introduces the hand-rolled argv pattern", () 
 
     const offenders: string[] = [];
     for (const file of walk(SRC)) {
-      const name = file.split("/").pop()!;
+      const name = basename(file);
       if (ALLOWED_FILES.has(name) || name === "flags.ts") continue;
       const lines = readFileSync(file, "utf8").split("\n");
       lines.forEach((line, i) => {
@@ -235,7 +235,7 @@ describe("no production command re-introduces the hand-rolled argv pattern", () 
         // The `--` separator is an index, not a value.
         if (/indexOf\(\s*"--"\s*\)/.test(line)) return;
         if (/indexOf\(\s*"--[a-z][a-z0-9-]*"\s*\)/.test(line)) {
-          offenders.push(`${file.replace(SRC, "src")}:${i + 1}: ${trimmed}`);
+          offenders.push(`src/${relative(SRC, file).split(sep).join("/")}:${i + 1}: ${trimmed}`);
         }
       });
     }

@@ -2323,7 +2323,10 @@ function licenseScanVerdict(result: { stderr: string; stdout: string }): Securit
   }
 }
 
-export async function checkLicenses(root: string): Promise<SecurityCheckResult> {
+export async function checkLicenses(
+  root: string,
+  tools = { resolveToolBin, execFileNoThrow },
+): Promise<SecurityCheckResult> {
   try {
     await access(resolve(root, "package.json"));
   } catch {
@@ -2334,15 +2337,12 @@ export async function checkLicenses(root: string): Promise<SecurityCheckResult> 
       detail: "no package.json found",
     };
   }
-
-  // Security checks inspect; they never install their own executable. Provision the
-  // scanner explicitly so this path cannot bypass kit's triage boundary.
-  const licenseCheckerBin = await resolveToolBin("license-checker");
+  const licenseCheckerBin = await tools.resolveToolBin("license-checker");
   if (!licenseCheckerBin) {
     return licenseScannerUnavailable("license-checker not installed or not executable");
   }
 
-  const result = await execFileNoThrow(licenseCheckerBin, ["--json", "--production"], {
+  const result = await tools.execFileNoThrow(licenseCheckerBin, ["--json", "--production"], {
     timeout: 120_000,
     cwd: root,
   });

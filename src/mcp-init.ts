@@ -1,6 +1,7 @@
 /** Generate the MCP kit_init result, creating .kit.toml exclusively when requested. */
-import { lstat, writeFile } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import { resolve } from "node:path";
+import { writeFileExclusive } from "./utils/exclusive-file.js";
 import { detectStack } from "./stack-detector.js";
 import { generateToml } from "./toml-generator.js";
 import { resolveInitServices } from "./user-defaults.js";
@@ -16,7 +17,7 @@ async function configExists(path: string): Promise<boolean> {
 
 async function createConfig(path: string, content: string): Promise<boolean> {
   try {
-    await writeFile(path, content, { encoding: "utf-8", flag: "wx" });
+    await writeFileExclusive(path, content);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;

@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { installFakeVercel } from "./cli-vercel-fixture.test-support.js";
 
 const exec = promisify(execFile);
 
@@ -151,31 +152,6 @@ project = "app-prod"
 required = ["NEXT_PUBLIC_SENTRY_ENVIRONMENT"]
 remote_env = "production"
 `;
-
-async function installFakeVercel(
-  dir: string,
-  scriptBody: string,
-): Promise<{ binDir: string; env: Record<string, string> }> {
-  const binDir = join(dir, "bin");
-  await mkdir(binDir, { recursive: true });
-  const vercelPath = join(binDir, "vercel");
-  await writeFile(vercelPath, scriptBody, "utf-8");
-  await chmod(vercelPath, 0o755);
-  const misePath = join(binDir, "mise");
-  await writeFile(
-    misePath,
-    `#!/bin/sh
-if [ "$1" = "which" ] && [ "$2" = "vercel" ]; then
-  printf '%s\\n' '${vercelPath}'
-  exit 0
-fi
-exit 1
-`,
-    "utf-8",
-  );
-  await chmod(misePath, 0o755);
-  return { binDir, env: { PATH: `${binDir}:${process.env.PATH ?? ""}`, VERCEL_TOKEN: "" } };
-}
 
 // ---------------------------------------------------------------------------
 // Error handling
@@ -325,16 +301,7 @@ describe("kit check", () => {
 
   it("checks declared deploy env names without printing remote values", async () => {
     await writeFile(join(tempDir, ".kit.toml"), FIXTURE_DEPLOY_MISSING, "utf-8");
-    const { env } = await installFakeVercel(
-      tempDir,
-      `#!/bin/sh
-if [ "$1" = "env" ] && [ "$2" = "ls" ]; then
-  printf '%s\\n' '[{"key":"NEXT_PUBLIC_SENTRY_DSN","value":"super-secret-dsn-value"}]'
-  exit 0
-fi
-exit 0
-`,
-    );
+    const { env } = await installFakeVercel(tempDir, "list");
 
     const result = await runCli(["check", "--category", "deploy"], tempDir, env);
 
@@ -476,18 +443,7 @@ describe("kit fix", () => {
   it("pushes missing deploy env values from declared secrets without echoing values", async () => {
     await writeFile(join(tempDir, ".kit.toml"), FIXTURE_DEPLOY_FIX, "utf-8");
     const logPath = join(tempDir, "vercel.log");
-    const { env } = await installFakeVercel(
-      tempDir,
-      `#!/bin/sh
-if [ "$1" = "env" ] && [ "$2" = "ls" ]; then
-  printf '%s\\n' '[]'
-  exit 0
-fi
-printf '%s\\n' "$*" >> '${logPath}'
-cat >/dev/null
-exit 0
-`,
-    );
+    const { env } = await installFakeVercel(tempDir, "push");
 
     const result = await runCli(["fix"], tempDir, env);
 

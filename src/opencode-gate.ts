@@ -33,6 +33,7 @@ export const kitInstallGate = async () => ({
       execFileSync(executable, args, {
         input: JSON.stringify({ tool_input: { command } }),
         stdio: ["pipe", "ignore", "pipe"],
+        windowsVerbatimArguments: process.platform === "win32",
       });
     } catch (err) {
       // gate-bash exits 2 to deny — throw to block the tool call.

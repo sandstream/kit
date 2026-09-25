@@ -73,13 +73,13 @@ afterEach(() => {
 });
 
 describe("recordExternalIdentity", () => {
-  it("writes the public record 0600, with no private material in it", () => {
+  it("writes a public record without private material and uses 0600 on POSIX", () => {
     const { pub, priv } = extKeyPair();
     const kid = recordExternalIdentity(fakeStore(pub));
     assert.equal(kid, identityId(pub));
     const path = join(dir, EXTERNAL_RECORD_FILE);
     assert.equal(existsSync(path), true);
-    assert.equal((statSync(path).mode & 0o777).toString(8), "600");
+    if (process.platform !== "win32") assert.equal((statSync(path).mode & 0o777).toString(8), "600");
     const text = readFileSync(path, "utf-8");
     assert.ok(
       !text.includes("PRIVATE KEY"),
