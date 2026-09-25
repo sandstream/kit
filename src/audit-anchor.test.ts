@@ -627,7 +627,7 @@ describe("audit anchor - external anchor (command transport, fail-closed)", () =
   it("commandExternalAnchor parses a JSON receipt and passes the tip via env", async () => {
     // The command echoes a receipt that embeds the tip it received → proves wiring.
     const a = commandExternalAnchor(
-      `printf '{"token":"tok-%s","authority":"test-tsa"}' "$KIT_ANCHOR_TIP"`,
+      `"${process.execPath}" -e "process.stdout.write(JSON.stringify({token:'tok-'+process.env.KIT_ANCHOR_TIP,authority:'test-tsa'}))"`,
     );
     const r = await a.anchor({ tip: "deadbeef", count: 3, logPath: "/x" });
     assert.equal(r.token, "tok-deadbeef");
@@ -657,11 +657,14 @@ describe("audit anchor - external anchor (command transport, fail-closed)", () =
       const content = await buildChain(cwd, 2);
       const logPath = join(cwd, ".kit-audit.jsonl");
       // configured → receipt stored on the record
-      await withCmd(`echo '{"token":"abc","authority":"acme-tsa"}'`, async () => {
-        const rec = await anchorAuditLog(logPath, content, dir, { external: true });
-        assert.equal(rec.external?.token, "abc");
-        assert.equal(rec.external?.authority, "acme-tsa");
-      });
+      await withCmd(
+        `"${process.execPath}" -e "process.stdout.write(JSON.stringify({token:'abc',authority:'acme-tsa'}))"`,
+        async () => {
+          const rec = await anchorAuditLog(logPath, content, dir, { external: true });
+          assert.equal(rec.external?.token, "abc");
+          assert.equal(rec.external?.authority, "acme-tsa");
+        },
+      );
       // requested but no command configured → fail-closed throw
       await withCmd(undefined, async () => {
         await assert.rejects(
