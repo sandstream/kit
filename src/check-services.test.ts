@@ -237,7 +237,8 @@ const configuredSessionCases = [
     label: "active environment credential despite stale keyring and aggregate exit 1",
     sessions: [activeEnvironmentSession, staleKeyring],
     exitCode: 1,
-    authenticated: true,
+    // Windows cannot distinguish this exit from external process termination.
+    authenticated: process.platform !== "win32",
   },
   {
     label: "active environment credential despite unrelated unverified keyring",

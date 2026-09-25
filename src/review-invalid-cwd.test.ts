@@ -85,7 +85,21 @@ describe("kit_review rejects invalid requested cwd over MCP", () => {
             arguments: { cwd, stages: [stage] },
           });
           assert.equal(result.isError, true, JSON.stringify(result));
-          assertDirectoryError(JSON.stringify(result.content), cwd);
+          assert.ok(Array.isArray(result.content));
+          const messages: string[] = [];
+          for (const item of result.content) {
+            if (
+              typeof item === "object" &&
+              item !== null &&
+              "type" in item &&
+              item.type === "text" &&
+              "text" in item &&
+              typeof item.text === "string"
+            ) {
+              messages.push(item.text);
+            }
+          }
+          assertDirectoryError(messages.join("\n"), cwd);
         } finally {
           await client.close();
           await transport.close();
@@ -96,12 +110,18 @@ describe("kit_review rejects invalid requested cwd over MCP", () => {
   }
 });
 
-it("CLI review names a removed working directory before loading config", () => {
-  const { root, env } = fixture();
-  const cwd = join(root, "removed");
-  mkdirSync(cwd);
-  try {
-    const script = `
+it(
+  "CLI review names a removed working directory before loading config",
+  {
+    skip:
+      process.platform === "win32" ? "Windows cannot remove a process's current directory" : false,
+  },
+  () => {
+    const { root, env } = fixture();
+    const cwd = join(root, "removed");
+    mkdirSync(cwd);
+    try {
+      const script = `
       import { rmSync } from "node:fs";
       process.chdir(${JSON.stringify(cwd)});
       process.cwd();
@@ -109,16 +129,17 @@ it("CLI review names a removed working directory before loading config", () => {
       process.argv = [process.execPath, ${JSON.stringify(fileURLToPath(cli))}, "review", "--stages", "adr", "--json"];
       await import(${JSON.stringify(cli)});
     `;
-    const result = spawnSync(process.execPath, [...loader, "--input-type=module", "-e", script], {
-      cwd: root,
-      env,
-      encoding: "utf8",
-      timeout: 30_000,
-    });
-    assert.equal(result.error, undefined);
-    assert.equal(result.status, 1, result.stderr + result.stdout);
-    assertDirectoryError(result.stderr + result.stdout, cwd);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+      const result = spawnSync(process.execPath, [...loader, "--input-type=module", "-e", script], {
+        cwd: root,
+        env,
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+      assert.equal(result.error, undefined);
+      assert.equal(result.status, 1, result.stderr + result.stdout);
+      assertDirectoryError(result.stderr + result.stdout, cwd);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

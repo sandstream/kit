@@ -210,6 +210,11 @@ function acceptedStatusExit(
   active: Session,
   exitCode: number | null,
 ): boolean {
+  if (exitCode === 0) return true;
+  // Windows reports externally terminated children as an exit code without
+  // reliable signal metadata. Exit 1 is therefore ambiguous there: accepting
+  // the stale-secondary exception could approve a truncated status command.
+  if (process.platform === "win32") return false;
   // v0.43.96 emits env + selected keyring sessions and exits 1 if EITHER is
   // expired/rejected (packages/cmd/login_status.go). Only that explained exit 1
   // may be ignored; timeouts, signals and unexplained failures still fail.
@@ -217,7 +222,7 @@ function acceptedStatusExit(
     (session) =>
       session !== active && (session.status === "expired" || session.status === "rejected"),
   );
-  return exitCode === 0 || (exitCode === 1 && secondaryFailure);
+  return exitCode === 1 && secondaryFailure;
 }
 
 function statusResult(

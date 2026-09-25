@@ -21,25 +21,21 @@ const session = {
   verification: { state: "verified" },
 };
 
-function fallback(
-  stdout: string,
-  exitCode = 0,
-  governedCwd = false,
-): { key: SecretStatus; calls: string[][] } {
-  const dir = mkdtempSync(join(tmpdir(), "kit-infisical-fallback-"));
-  const bin = join(dir, "bin");
-  const calls = join(dir, "calls.jsonl");
-  mkdirSync(bin);
-  const project = join(dir, "project");
-  mkdirSync(project);
-  writeFileSync(
-    join(dir, ".infisical.json"),
-    JSON.stringify({ domain: "https://wrong.example.test" }),
-  );
-  writeFileSync(
-    join(project, ".infisical.json"),
-    JSON.stringify({ domain: "https://example.test" }),
-  );
+function installInfisicalStub({
+  dir,
+  project,
+  bin,
+  calls,
+  stdout,
+  exitCode,
+}: {
+  dir: string;
+  project: string;
+  bin: string;
+  calls: string;
+  stdout: string;
+  exitCode: number;
+}): void {
   const source = `
     const fs = require("node:fs");
     const args = process.platform === "win32"
@@ -76,6 +72,28 @@ function fallback(
     );
     writeFileSync(join(bin, "infisical"), `#!${process.execPath}\n${source}`, { mode: 0o755 });
   }
+}
+
+function fallback(
+  stdout: string,
+  exitCode = 0,
+  governedCwd = false,
+): { key: SecretStatus; calls: string[][] } {
+  const dir = mkdtempSync(join(tmpdir(), "kit-infisical-fallback-"));
+  const bin = join(dir, "bin");
+  const calls = join(dir, "calls.jsonl");
+  mkdirSync(bin);
+  const project = join(dir, "project");
+  mkdirSync(project);
+  writeFileSync(
+    join(dir, ".infisical.json"),
+    JSON.stringify({ domain: "https://wrong.example.test" }),
+  );
+  writeFileSync(
+    join(project, ".infisical.json"),
+    JSON.stringify({ domain: "https://example.test" }),
+  );
+  installInfisicalStub({ dir, project, bin, calls, stdout, exitCode });
   try {
     const sourceMode = import.meta.url.endsWith(".ts");
     const moduleUrl = new URL(

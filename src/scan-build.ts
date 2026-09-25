@@ -1,5 +1,5 @@
 import { readFile, readdir, stat } from "node:fs/promises";
-import { resolve, join } from "node:path";
+import { resolve, join, relative, sep } from "node:path";
 import { findSecrets, type SecretFinding } from "./utils/redactSecrets.js";
 
 /**
@@ -109,8 +109,9 @@ export async function scanBuildArtifacts(
     }
     const findings = findSecrets(content).filter((f) => !BUILD_IRRELEVANT_LABELS.has(f.label));
     if (findings.length > 0) {
-      // Strip leading cwd from path for readable reporting.
-      const rel = path.startsWith(cwd) ? path.slice(cwd.length + 1) : path;
+      // Report repository-style paths so diagnostics and baselines are stable
+      // across Windows and POSIX hosts.
+      const rel = relative(cwd, path).split(sep).join("/");
       hits.push({ file: rel, findings });
     }
   }
