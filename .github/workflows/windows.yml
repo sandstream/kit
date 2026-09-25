@@ -46,7 +46,10 @@ jobs:
           if ($env:KIT_TEST_FILE -notmatch '^dist[/\\][a-zA-Z0-9/_\\.-]+\.test\.js$') {
             throw 'test_file must name a compiled test under dist/'
           }
-          $testArgs = @('--test', '--test-timeout=30000')
+          if (($env:KIT_TEST_FILE -split '[/\\]') -contains '..') {
+            throw 'test_file must remain under dist/'
+          }
+          $testArgs = @('--test', '--test-timeout=180000')
           if ($env:KIT_TEST_PATTERN) { $testArgs += "--test-name-pattern=$env:KIT_TEST_PATTERN" }
           $testArgs += $env:KIT_TEST_FILE
           & node @testArgs

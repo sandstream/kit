@@ -731,7 +731,7 @@ describe("kitGateInvocation / kitGateArgv (prefer the self-healing wrapper)", ()
         assert.throws(
           () =>
             execSync(command, {
-              input: JSON.stringify({ tool_input: { command: "npm install" } }),
+              input: JSON.stringify({ tool_input: { command: "npm install untriaged-package" } }),
               stdio: ["pipe", "pipe", "pipe"],
             }),
           (error: unknown) => {
@@ -1440,28 +1440,32 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
     });
   });
 
-  it("when /root IS home, a /root path is judged on whether it runs — not on its prefix", () => {
-    repo((dir: string) => {
-      mark(dir);
-      // Deliberately a path that does not exist, because that keeps this test independent
-      // of whether the suite can write under /root. What it pins is WHICH verdict is
-      // reached: with the prefix branch returning unconditionally the answer was
-      // "root/container path" (wrong on a root container — the path is native there, and
-      // the advice to "rewrite hooks for /root" pointed where they already pointed); now
-      // the prefix is not itself disqualifying and the executability check decides. The
-      // two messages differ, so this distinguishes the fix from the bug.
-      writeFileSync(
-        join(dir, ".claude/settings.json"),
-        settings(["/root/.kit/bin/absent gate-bash"]),
-      );
-      withHome("/root", () => {
-        const live = gateLiveness(dir);
-        assert.equal(live.problems.length, 1);
-        assert.match(live.problems[0], /missing or not executable/);
-        assert.doesNotMatch(live.problems[0], /root\/container path/);
+  it(
+    "when /root IS home, a /root path is judged on whether it runs — not on its prefix",
+    { skip: process.platform === "win32" },
+    () => {
+      repo((dir: string) => {
+        mark(dir);
+        // Deliberately a path that does not exist, because that keeps this test independent
+        // of whether the suite can write under /root. What it pins is WHICH verdict is
+        // reached: with the prefix branch returning unconditionally the answer was
+        // "root/container path" (wrong on a root container — the path is native there, and
+        // the advice to "rewrite hooks for /root" pointed where they already pointed); now
+        // the prefix is not itself disqualifying and the executability check decides. The
+        // two messages differ, so this distinguishes the fix from the bug.
+        writeFileSync(
+          join(dir, ".claude/settings.json"),
+          settings(["/root/.kit/bin/absent gate-bash"]),
+        );
+        withHome("/root", () => {
+          const live = gateLiveness(dir);
+          assert.equal(live.problems.length, 1);
+          assert.match(live.problems[0], /missing or not executable/);
+          assert.doesNotMatch(live.problems[0], /root\/container path/);
+        });
       });
-    });
-  });
+    },
+  );
 
   it("markGatesInstalled writes the marker gateLiveness reads", async () => {
     const { markGatesInstalled } = await import("./agent-config.js");

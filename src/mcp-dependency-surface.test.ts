@@ -92,7 +92,7 @@ function tracePackagesLoaded(body: string): Set<string> {
 
     execFileSync(
       process.execPath,
-      ["--import", join(dir, "register.mjs"), join(dir, "runner.mjs")],
+      ["--import", pathToFileURL(join(dir, "register.mjs")).href, join(dir, "runner.mjs")],
       {
         // cwd is the repo root so the child resolves kit's own node_modules.
         cwd: resolve(import.meta.dirname, ".."),

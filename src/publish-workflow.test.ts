@@ -127,8 +127,7 @@ process.stdout.write(JSON.stringify(state[spec]) + '\\n');
     writeFileSync(
       join(binDir, "fixture-loader.mjs"),
       [
-        'import { basename } from "node:path";',
-        'if (basename(process.argv0).toLowerCase() === "npm.exe") {',
+        'if (process.argv[1] === "view") {',
         "  const spec = process.argv[2];",
         '  const state = JSON.parse(process.env.FAKE_NPM_STATE || "{}");',
         '  if (state[spec] === "offline") { process.stderr.write("network unavailable"); process.exit(1); }',

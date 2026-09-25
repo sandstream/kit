@@ -133,7 +133,10 @@ it(
           hooks["tool.execute.before"]({ tool: "bash" }, { args: { command: "echo safe" } }),
         );
         await assert.rejects(
-          hooks["tool.execute.before"]({ tool: "bash" }, { args: { command: "npm install" } }),
+          hooks["tool.execute.before"](
+            { tool: "bash" },
+            { args: { command: "npm install untriaged-package" } },
+          ),
           /kit install-gate blocked/,
         );
       });

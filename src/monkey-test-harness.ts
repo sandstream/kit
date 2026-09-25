@@ -234,11 +234,16 @@ function sameHarnessFile(before: Stats, after: Stats | null): boolean {
   );
 }
 
-async function readHarnessFile(path: string, expected: Stats): Promise<string | null> {
-  if (typeof constants.O_NOFOLLOW !== "number") return null;
+export async function readHarnessFile(
+  path: string,
+  expected: Stats,
+  noFollowFlag: number | null = typeof constants.O_NOFOLLOW === "number"
+    ? constants.O_NOFOLLOW
+    : null,
+): Promise<string | null> {
   const file = await open(
     path,
-    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    constants.O_RDONLY | (noFollowFlag ?? 0) | constants.O_NONBLOCK,
   ).catch((error: NodeJS.ErrnoException) => {
     if (["ENOENT", "ELOOP"].includes(error.code ?? "")) return null;
     throw error;
@@ -246,8 +251,12 @@ async function readHarnessFile(path: string, expected: Stats): Promise<string | 
   if (!file) return null;
   try {
     if (!sameHarnessFile(expected, await file.stat())) return null;
+    if (!sameHarnessFile(expected, await harnessFileStat(path))) return null;
     const content = await file.readFile("utf8");
-    return sameHarnessFile(expected, await file.stat()) ? content : null;
+    return sameHarnessFile(expected, await file.stat()) &&
+      sameHarnessFile(expected, await harnessFileStat(path))
+      ? content
+      : null;
   } finally {
     await file.close();
   }
