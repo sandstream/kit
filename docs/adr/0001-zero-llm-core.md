@@ -43,12 +43,27 @@ independent mechanisms, and the `kit-enforce` block is the narrowest of them:
 Do not read the `kit-enforce` list as the contract: it is shorter than the other two and drifts
 first. `groq-sdk` and `@google/genai` are absent from it and present in both the others.
 
-**What no layer covers today**, written down rather than discovered later:
+**What no layer above covers**, written down rather than discovered later:
 
-1. **Gateway / provider packages.** `ai` (Vercel AI SDK) is banned, but a provider package for it
-   — `@openrouter/ai-sdk-provider`, `@ai-sdk/*` — is not. A gateway reaches every banned vendor
-   without matching any vendor name, because these lists enumerate *vendors* and a gateway is not
-   one.
+1. **Gateways, and it is worse than a missing package name.** `ai` (Vercel AI SDK) is banned, but a
+   provider package for it — `@openrouter/ai-sdk-provider`, `@ai-sdk/*` — is not. And a hosted
+   gateway does not need a package at all: Convex's AI Gateway documents *"You can also call the
+   HTTP API directly with `fetch`"*, which reaches OpenAI, Anthropic, Google, xAI and the rest with
+   **zero imports and zero dependencies**. `fetch` is a global, so **no import- or
+   dependency-scanning rule can see it** — there is nothing there to see.
+
+   **The answer is Pillar 3, not a longer list.** `checkEgress` in `src/exec-broker/decisions.ts`
+   is an **allow-list on hosts**: an unknown host is denied by construction, so a gateway nobody
+   has heard of yet is denied too. That makes the broker a fourth layer of this invariant and the
+   only one that covers the `fetch` case.
+
+   *A deny-list enumerates what you know; an allow-list denies what you don't.* The three layers
+   above are deny-lists and will always have this hole; the broker does not.
+
+   **The caveat that keeps this honest:** the broker is graduated, not on. `enforce-readiness`
+   reports `ready | would-block | untested`, and no observe data means `untested` — never a green
+   "ready". So this layer covers the case *when a repo has earned enforce*, and on a machine that
+   has never run observe the coverage is architectural rather than active.
 2. **Local inference runtimes.** `node-llama-cpp`, `onnxruntime-node`, `@huggingface/transformers`
    and similar are not banned anywhere. Whether they *should* be is a real question this ADR does
    not currently answer: "zero-LLM" bundles four distinct prohibitions — a network call to a
@@ -58,6 +73,7 @@ first. `groq-sdk` and `@google/genai` are absent from it and present in both the
    model"), so the split is: ADR-0001 keeps model calls out of the gate, ADR-0007 keeps model
    output out of a verdict.
 
-Neither gap is an accident to be fixed by lengthening a list — a deny-list of vendors cannot
-express "no model calls", because the set of paths to a model is not the set of vendors. They are
-recorded here so the claim this ADR makes is not read as wider than what runs.
+Neither gap is an accident to be fixed by lengthening a list: a deny-list of vendors cannot express
+"no model calls", because the set of paths to a model is not the set of vendors. Gap 1 has an answer
+one pillar over; gap 2 is an open question, not an oversight. Both are recorded here so the claim
+this ADR makes is not read as wider than what runs.
