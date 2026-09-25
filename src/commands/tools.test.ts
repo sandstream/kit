@@ -13,7 +13,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "..", "cli.js");
@@ -86,11 +86,14 @@ describe("kit tools", () => {
     const plain = run(["tools", "list"]);
     const withPaths = run(["tools", "list"], { KIT_TOOLS_PATHS: "1" });
     assert.equal(withPaths.exitCode, 0, withPaths.stderr);
-    // Strip ANSI first: the path line is dim, so the escape sits between the indent and the `/`.
+    // Strip ANSI first: the path line is dim. Accept native absolute paths on each OS.
     const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "");
-    const countSlashes = (s: string): number => (stripAnsi(s).match(/^\s{4,}\/\S+/gm) ?? []).length;
+    const countPaths = (s: string): number =>
+      stripAnsi(s)
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("      ") && isAbsolute(line.trim())).length;
     assert.ok(
-      countSlashes(withPaths.stdout) > countSlashes(plain.stdout),
+      countPaths(withPaths.stdout) > countPaths(plain.stdout),
       "KIT_TOOLS_PATHS=1 must add the resolved paths",
     );
   });

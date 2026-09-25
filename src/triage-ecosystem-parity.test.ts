@@ -185,7 +185,7 @@ describe("triage ecosystem parity (real triage.py against a local registry)", ()
     assert.match(out, /not comparable to npm's maintainer count/);
     assert.match(out, /Probes declared unavailable: 0/);
     assert.ok(
-      out.split("\n").includes("TRIAGE PASSED"),
+      out.split(/\r?\n/).includes("TRIAGE PASSED"),
       "a warning is not a critical — the package still passes",
     );
   });
@@ -308,7 +308,7 @@ describe("triage ecosystem parity (real triage.py against a local registry)", ()
     if (out === null) return;
 
     assert.match(out, /CRITICAL: package 'no-such-package-xyz' not found on PyPI/);
-    assert.ok(out.split("\n").includes("TRIAGE FAILED"));
+    assert.ok(out.split(/\r?\n/).includes("TRIAGE FAILED"));
     assert.doesNotMatch(out, /TRIAGE PASSED/);
   });
   /**

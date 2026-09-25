@@ -181,6 +181,10 @@ function guardStatus(): boolean {
 
 export async function cmdGuard(): Promise<boolean> {
   const sub = process.argv[3];
+  if (process.platform === "win32" && (sub === "install" || sub === "status" || !sub)) {
+    console.error("kit guard: native Windows shims are not supported; no guard is active");
+    return false;
+  }
   if (sub === "install") return installGuard();
   if (sub === "uninstall") return uninstallGuard();
   if (sub === "status" || !sub) return guardStatus();

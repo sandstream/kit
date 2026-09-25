@@ -30,6 +30,12 @@ import { openMemoryDb, searchMessages, upsertSession, insertMessage } from "./db
 // A strong passphrase (≥12 chars, no weak markers) so validatePassphrase accepts it.
 const PASS = "Zephyr-Quokka-Lantern-9931";
 
+function copyBlobCommand(from: string, to: string): string {
+  return process.platform === "win32" ? `copy /Y "${from}" "${to}"` : `cp "${from}" "${to}"`;
+}
+
+const blobOperand = process.platform === "win32" ? "%KIT_MEMORY_BLOB%" : "$KIT_MEMORY_BLOB";
+
 function git(args: string[], cwd: string): void {
   execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
 }
@@ -331,13 +337,13 @@ describe("remote-sync — command transport (bring-your-own move: S3/rclone/scp/
     const proj = mkdtempSync(join(tmpdir(), "kit-cproj-"));
     const prevDir = process.env.KIT_MEMORY_DIR;
     const marker = "cmd-transport-marker-zzz";
-    // The "transport" is just `cp` to/from a fixed path — the same shape as
+    // The transport copies to/from a fixed path — the same shape as
     // `aws s3 cp`, `rclone copyto`, or `scp`, driven by $KIT_MEMORY_BLOB.
     const cfg: SyncConfig = {
       transport: "command",
       file: "memory.enc",
-      pushCmd: `cp "$KIT_MEMORY_BLOB" "${storeBlob}"`,
-      pullCmd: `cp "${storeBlob}" "$KIT_MEMORY_BLOB"`,
+      pushCmd: copyBlobCommand(blobOperand, storeBlob),
+      pullCmd: copyBlobCommand(storeBlob, blobOperand),
       encrypt: true,
     };
     try {
@@ -516,8 +522,8 @@ describe("remote-sync — init + auto-sync wiring + nudge", () => {
       dbA.close();
       initSyncConfig({
         transport: "command",
-        pushCmd: `cp "$KIT_MEMORY_BLOB" "${storeBlob}"`,
-        pullCmd: `cp "${storeBlob}" "$KIT_MEMORY_BLOB"`,
+        pushCmd: copyBlobCommand(blobOperand, storeBlob),
+        pullCmd: copyBlobCommand(storeBlob, blobOperand),
         auto: true,
         force: true,
       });

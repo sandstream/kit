@@ -26,7 +26,7 @@
  */
 
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
 
@@ -276,7 +276,7 @@ export function machineFromAnchor(cwd: string, home = homedir()): MachineFacts {
     // and counting every top-level key would turn a future metadata key ("version") into a repo
     // this machine never sealed.
     const paths = record
-      ? Object.keys(record).filter((k) => k.startsWith("/") && k.endsWith(".jsonl"))
+      ? Object.keys(record).filter((k) => isAbsolute(k) && k.endsWith(".jsonl"))
       : [];
     sealed = paths.length;
     live = paths.filter((p) => existsSync(p)).length;
@@ -321,6 +321,7 @@ export function memoryFromDb(windowDays = 7): MemoryFacts {
   if (!path) return empty;
 
   let bytes = 0;
+  let db: import("node:sqlite").DatabaseSync | undefined;
   try {
     bytes = statSync(path).size;
   } catch {
@@ -334,11 +335,12 @@ export function memoryFromDb(windowDays = 7): MemoryFacts {
     const { DatabaseSync } = createRequire(import.meta.url)(
       "node:sqlite",
     ) as typeof import("node:sqlite");
-    const db = new DatabaseSync(path, { readOnly: true });
+    const opened = new DatabaseSync(path, { readOnly: true });
+    db = opened;
     const one = (sql: string): Record<string, unknown> =>
-      (db.prepare(sql).get() ?? {}) as Record<string, unknown>;
+      (opened.prepare(sql).get() ?? {}) as Record<string, unknown>;
     const all = (sql: string): Array<Record<string, unknown>> =>
-      db.prepare(sql).all() as Array<Record<string, unknown>>;
+      opened.prepare(sql).all() as Array<Record<string, unknown>>;
     const since = `datetime('now','-${Math.max(1, Math.floor(windowDays))} days')`;
 
     const messages = Number(one("SELECT COUNT(*) c FROM messages").c ?? 0);
@@ -358,8 +360,6 @@ export function memoryFromDb(windowDays = 7): MemoryFacts {
       messages: Number(r.n ?? 0),
       outputTokens: r.o === null || r.o === undefined ? null : Number(r.o),
     }));
-    db.close();
-
     return {
       path,
       bytes,
@@ -376,6 +376,8 @@ export function memoryFromDb(windowDays = 7): MemoryFacts {
     };
   } catch {
     return { ...empty, path, bytes };
+  } finally {
+    db?.close();
   }
 }
 

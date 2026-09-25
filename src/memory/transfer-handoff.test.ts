@@ -25,6 +25,13 @@ import {
 } from "./hook.js";
 
 const PASS = "Local-Transfer-Cipher-9362";
+const blobOperand = process.platform === "win32" ? "%KIT_MEMORY_BLOB%" : "$KIT_MEMORY_BLOB";
+
+function pullBlobCommand(blob: string): string {
+  return process.platform === "win32"
+    ? `copy /Y "${blob}" "${blobOperand}"`
+    : `cp "${blob}" "${blobOperand}"`;
+}
 const sourceTest = import.meta.url.endsWith(".ts");
 const cli = [
   ...(sourceTest ? ["--import", import.meta.resolve("tsx")] : []),
@@ -160,7 +167,7 @@ it("concurrent remote action state is visible in sync, pull and Claude's user me
   initSyncConfig({
     transport: "command",
     pushCmd: "true",
-    pullCmd: `cp "${blob}" "$KIT_MEMORY_BLOB"`,
+    pullCmd: pullBlobCommand(blob),
     projectMappings,
     auto: true,
   });
@@ -187,7 +194,7 @@ it("CLI pull reports an applied deletion even when it imports no new messages", 
   initSyncConfig({
     transport: "command",
     pushCmd: "true",
-    pullCmd: `cp "${blob}" "$KIT_MEMORY_BLOB"`,
+    pullCmd: pullBlobCommand(blob),
   });
   const run = () =>
     spawnSync(process.execPath, [...cli, "memory", "pull"], {
@@ -240,7 +247,7 @@ it("configured remote pulls apply the local map on every import, including repea
   initSyncConfig({
     transport: "command",
     pushCmd: "true",
-    pullCmd: `cp "${blob}" "$KIT_MEMORY_BLOB"`,
+    pullCmd: pullBlobCommand(blob),
     projectMappings,
   });
   const cfg = loadSyncConfig();

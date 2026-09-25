@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { triageNpmSandbox, type SandboxResult } from "./triage-sandbox.js";
 import { exec } from "./utils/exec.js";
@@ -46,7 +47,23 @@ async function writeFileAtomic(destPath: string, content: string | Buffer): Prom
   const tmp = resolve(dirname(destPath), `.${basename(destPath)}.kit-tmp-${unique}`);
   try {
     await writeFile(tmp, content);
-    await rename(tmp, destPath);
+    // Windows can briefly deny replacement while another refresher has the
+    // destination open. Keep the complete temp file and retry the atomic swap.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await rename(tmp, destPath);
+        break;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (
+          process.platform !== "win32" ||
+          attempt >= 11 ||
+          !["EACCES", "EBUSY", "EPERM"].includes(code ?? "")
+        )
+          throw err;
+        await delay(Math.min(5 * (attempt + 1), 30));
+      }
+    }
   } catch (err) {
     await rm(tmp, { force: true }).catch(() => {});
     throw err;
