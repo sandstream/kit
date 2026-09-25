@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Fixed
+
+- **Four regular expressions could backtrack catastrophically.** The install
+  gate's runner-flag and fetch-to-shell scans, the `allowScripts` exact-version
+  check, and the AISLE plugin's finding-id slug each let one token match the same
+  characters more than one way, so a crafted command or key made a failing match
+  exponential (or quadratic for the slug). The install gate runs on every
+  PreToolUse Bash call. Each pattern is now unambiguous, with a regression test on
+  the input shape CodeQL named, and the accepted inputs and generated ids are
+  unchanged. The slug fix ships in `sandstream-kit-plugin-aisle` 0.1.2.
+
 ## [6.12.0] - 2026-09-24
 
 ### Added

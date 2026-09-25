@@ -139,3 +139,24 @@ describe("aisle nano-analyzer plugin", () => {
     }
   });
 });
+
+describe("stable finding id (CodeQL alert 90, polynomial ReDoS)", () => {
+  const idFor = (title: string, file = "src/a.ts") =>
+    normalizeAisleNanoFindings([{ verdict: "VALID", file, finding_title: title }])[0]?.id;
+
+  it("stays linear on a long interior dash run", () => {
+    const title = "a" + "-".repeat(100_000) + "a";
+    const t0 = process.hrtime.bigint();
+    idFor(title);
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    assert.ok(ms < 500, `took ${ms.toFixed(0)}ms`);
+  });
+
+  it("keeps the same ids as before for ordinary titles", () => {
+    assert.equal(
+      idFor("--SQL  Injection!!--", "--src/x.ts--"),
+      "aisle-nano:src/x.ts:sql-injection",
+    );
+    assert.equal(idFor("a---b"), "aisle-nano:src/a.ts:a-b");
+  });
+});

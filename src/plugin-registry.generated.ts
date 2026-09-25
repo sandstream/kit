@@ -24,14 +24,14 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
   {
     name: "aisle",
     description: "AISLE nano-analyzer result ingestion for kit (read-only).",
-    version: "0.1.1",
+    version: "0.1.2",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
     package: "sandstream-kit-plugin-aisle",
     kitVersion: ">=6.0.0",
     tags: ["aisle", "ingestion", "kit-plugin", "official", "read-only", "scanning", "security"],
-    install: "npm install sandstream-kit-plugin-aisle@0.1.1",
+    install: "npm install sandstream-kit-plugin-aisle@0.1.2",
   },
   {
     name: "cloudflare",

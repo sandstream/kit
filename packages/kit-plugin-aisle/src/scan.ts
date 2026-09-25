@@ -306,11 +306,15 @@ function stableId(file: string | undefined, title: string, idx: number): string 
 }
 
 function slug(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9._/-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-+/g, "-");
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9._/-]+/g, "-")
+      // Collapse before trimming: `-+$` rescans every interior dash run to the end (O(n²),
+      // CodeQL alert 90); after collapsing, each end holds at most one dash. Same output.
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+  );
 }
 
 function str(value: unknown): string | undefined {
