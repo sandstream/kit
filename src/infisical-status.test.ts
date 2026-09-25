@@ -1,6 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { copyFileSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkInfisicalStatus } from "./infisical-status.js";
@@ -28,8 +37,9 @@ async function probe(options: {
     writeFileSync(join(nested, ".infisical.json"), options.nestedWorkspace);
   const windows = process.platform === "win32";
   const command = join(dir, windows ? "infisical.exe" : "infisical");
+  const pidPath = join(dir, "status.pid");
   const stdout = JSON.stringify({ sessions: options.sessions ?? [keyring] });
-  const source = `process.stdout.write(${JSON.stringify(stdout)}, () => { ${options.signal ? 'process.kill(process.pid, "SIGTERM");' : ""} });\n`;
+  const source = `process.stdout.write(${JSON.stringify(stdout)}, () => { ${options.signal ? `require("node:fs").writeFileSync(${JSON.stringify(pidPath)}, String(process.pid)); setInterval(() => {}, 1000);` : ""} });\n`;
   if (windows) {
     // Native Windows needs a PE executable. Node loads `login` from the test
     // cwd as its entry script; remaining status flags stay untouched.
@@ -43,12 +53,22 @@ async function probe(options: {
     writeFileSync(command, `#!${process.execPath}\n${source}`, { mode: 0o755 });
   }
   try {
-    return await checkInfisicalStatus({
+    const pending = checkInfisicalStatus({
       command,
       cwd: nested,
       env: options.env ?? {},
       args: options.args,
     });
+    if (options.signal) {
+      // Parent-initiated termination exposes execFile's signal verdict on
+      // Windows; self-signalling inside the child can instead exit cleanly.
+      for (let i = 0; i < 300 && !existsSync(pidPath); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.ok(existsSync(pidPath), "status fixture did not reach its running state");
+      process.kill(Number(readFileSync(pidPath, "utf8")), "SIGTERM");
+    }
+    return await pending;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

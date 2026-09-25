@@ -34,7 +34,7 @@
  * Programmatic (*.mjs) plugins are handled separately (standards-plugins-exec.ts).
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
 import { walkSourceFiles } from "./source-walk.js";
@@ -42,6 +42,9 @@ import type { StandardsCheckResult } from "./check-standards.js";
 
 /** Default discovery directory (overridable via [standards.plugins].dirs). */
 export const DEFAULT_PLUGIN_DIR = ".kit/standards.d";
+
+// Plugin globs and baseline keys use repository-style paths on every host.
+const pluginPath = (cwd: string, file: string): string => relative(cwd, file).split(sep).join("/");
 
 /** Source extensions a declarative plugin scans when it doesn't specify its own. */
 const DEFAULT_PLUGIN_EXTS = [
@@ -158,7 +161,7 @@ export function loadStandardPlugins(cwd: string, dirs: string[]): LoadPluginsRes
       continue;
     }
     for (const file of files) {
-      const rel = relative(cwd, file);
+      const rel = pluginPath(cwd, file);
       let raw: unknown;
       try {
         raw = parseToml(readFileSync(file, "utf8"));
@@ -387,7 +390,7 @@ export function evaluatePlugin(cwd: string, spec: StandardPluginSpec): PluginEva
       skipDirs: PLUGIN_SKIP_DIRS,
     });
     for (const file of excludeUniverse) {
-      const rel = relative(cwd, file);
+      const rel = pluginPath(cwd, file);
       for (const ex of excludes) {
         if (ex.re.test(rel)) ex.matches++;
       }
@@ -396,7 +399,7 @@ export function evaluatePlugin(cwd: string, spec: StandardPluginSpec): PluginEva
 
   let scopedFiles = 0;
   for (const file of files) {
-    const rel = relative(cwd, file);
+    const rel = pluginPath(cwd, file);
     if (excludes.some((ex) => ex.re.test(rel))) continue;
     let content: string;
     try {
