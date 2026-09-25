@@ -413,10 +413,10 @@ function nestedCommands(command: string): string[] {
   // Tolerate flags between the runner and the inner manager (`npx -y npm i evil`,
   // `npm exec -- npm i evil`). The two flag alternatives MUST be mutually exclusive — a
   // dash-led token (`-\S*`, covering `--`/`-x`/`-x=y`) vs a non-dash `key=value` env
-  // assignment (`[^-\s]\S*=\S+`) — so a `-x=y` token can't match both and blow the group up
-  // into 2^N parse paths (a catastrophic-backtracking ReDoS on this PreToolUse hot path).
+  // assignment (`[^-\s=][^\s=]*=\S+`, key `=`-free so `a==b` splits one way, CodeQL 88), or a
+  // token matches both and the group blows up into 2^N parse paths (ReDoS on this hot path).
   for (const m of command.matchAll(
-    /(?:npx|bunx|(?:npm|pnpm|yarn|bun)(?:@\S+)?\s+(?:exec|dlx|x))\s+(?:(?:-\S*|[^-\s]\S*=\S+)\s+)*((?:npm|pnpm|yarn|bun|pip|pip3|pipx|uv|uvx|python|python3|poetry|pdm)(?:@\S+)?\s[^\n]{1,2000})/g,
+    /(?:npx|bunx|(?:npm|pnpm|yarn|bun)(?:@\S+)?\s+(?:exec|dlx|x))\s+(?:(?:-\S*|[^-\s=][^\s=]*=\S+)\s+)*((?:npm|pnpm|yarn|bun|pip|pip3|pipx|uv|uvx|python|python3|poetry|pdm)(?:@\S+)?\s[^\n]{1,2000})/g,
   )) {
     out.push(m[1]);
   }
@@ -917,7 +917,7 @@ export function ownerRepoArg(tok: string): string | null {
 
 const HTTP_URL_RE = /https?:\/\/[^\s'"`<>|;&)]+/gi;
 const FETCH_TO_SHELL_PIPE_RE =
-  /\b(?:curl|wget)\b[^\n|;&]{0,2000}\bhttps?:\/\/[^\s'"`<>|;&)]+[^\n|;&]{0,2000}\|\s*(?:(?:sudo|doas|env|command)\s+(?:\S+=\S+\s+)*)?(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|ash|fish)\b/g;
+  /\b(?:curl|wget)\b[^\n|;&]{0,2000}\bhttps?:\/\/[^\s'"`<>|;&)]+[^\n|;&]{0,2000}\|\s*(?:(?:sudo|doas|env|command)\s+(?:[^\s=]+=\S+\s+)*)?(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|ash|fish)\b/g;
 const SHELL_BINS = new Set(["sh", "bash", "zsh", "dash", "ksh", "ash", "fish"]);
 
 function githubRepoRefFromUrl(rawUrl: string): string | null {

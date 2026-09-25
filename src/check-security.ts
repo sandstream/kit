@@ -910,7 +910,7 @@ export interface AllowScriptsAudit {
 }
 
 /** An exact npm version (`1.2.3`, `1.2.3-rc.1`) — anything else admits more than one release. */
-const EXACT_NPM_VERSION = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)*$/;
+const EXACT_NPM_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 const ALLOW_SCRIPTS_SHAPE =
   "npm writes an object mapping `<pkg>` or `<pkg>@<spec>` to true (granted) or false (denied)";
