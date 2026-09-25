@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, linkSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkServices } from "./check-services.js";
+import { isInfisicalLoginStatus } from "./infisical-status.js";
 
 const infisicalHelp = `Used to get properties of an Infisical profile
 
@@ -25,20 +26,31 @@ async function withCli(
   stdout: string,
   stderr: string,
   exitCode: number,
-  run: (bin: string) => Promise<void>,
+  run: (bin: string, cwd: string) => Promise<void>,
 ): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "kit-service-check-"));
-  const bin = join(dir, name);
-  writeFileSync(
-    bin,
-    `#!${process.execPath}\n` +
-      `process.stdout.write(${JSON.stringify(stdout)});\n` +
-      `process.stderr.write(${JSON.stringify(stderr)});\n` +
-      `process.exitCode = ${exitCode};\n`,
-    { mode: 0o755 },
-  );
+  const windows = process.platform === "win32";
+  const bin = join(dir, windows ? `${name}.exe` : name);
+  const source =
+    `process.stdout.write(${JSON.stringify(stdout)});\n` +
+    `process.stderr.write(${JSON.stringify(stderr)});\n` +
+    `process.exitCode = ${exitCode};\n`;
+  if (windows) {
+    // On Windows an extensionless shebang cannot be spawned with execFile.
+    // Node.exe loads the first command word as a script from this test cwd.
+    try {
+      linkSync(process.execPath, bin);
+    } catch {
+      copyFileSync(process.execPath, bin);
+    }
+    for (const word of ["login", "user", "run", "status"]) {
+      writeFileSync(join(dir, word), source);
+    }
+  } else {
+    writeFileSync(bin, `#!${process.execPath}\n${source}`, { mode: 0o755 });
+  }
   try {
-    await run(bin);
+    await run(bin, dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -52,10 +64,11 @@ describe("checkServices Infisical command detection", () => {
         stream === "stdout" ? infisicalHelp : "",
         stream === "stderr" ? infisicalHelp : "",
         0,
-        async (bin) => {
-          const [result] = await checkServices({
-            vault: { login: "", check: `${bin} user get` },
-          });
+        async (bin, cwd) => {
+          const [result] = await checkServices(
+            { vault: { login: "", check: `${bin} user get` } },
+            cwd,
+          );
           assert.equal(result.authenticated, false, "help output does not verify authentication");
           assert.match(result.output, /not verified/i);
           assert.match(result.output, /infisical login status --json/);
@@ -71,8 +84,11 @@ describe("checkServices Infisical command detection", () => {
       "CLI banner",
       `\u001b[32m${infisicalHelp}\u001b[0m`,
       0,
-      async (bin) => {
-        const [result] = await checkServices({ vault: { login: "", check: `${bin} user get` } });
+      async (bin, cwd) => {
+        const [result] = await checkServices(
+          { vault: { login: "", check: `${bin} user get` } },
+          cwd,
+        );
         assert.equal(result.authenticated, false);
         assert.match(result.output, /printed help/);
       },
@@ -85,8 +101,16 @@ describe("checkServices Infisical command detection", () => {
   ]) {
     it(`validates status with global flags: ${args}`, async () => {
       const output = '{"sessions":[{"status":"authenticated","verification":{"state":"unknown"}}]}';
-      await withCli("infisical", output, "", 0, async (bin) => {
-        const [result] = await checkServices({ vault: { login: "", check: `${bin} ${args}` } });
+      assert.equal(isInfisicalLoginStatus(args.split(/\s+/)), true);
+      await withCli("infisical", output, "", 0, async (bin, cwd) => {
+        // node.exe uses its first argument as a script on Windows. Put `login`
+        // first there, while the direct assertion above keeps pre-login flags covered.
+        const executableArgs =
+          process.platform === "win32" ? `login ${args.replace(" login", "")}` : args;
+        const [result] = await checkServices(
+          { vault: { login: "", check: `${bin} ${executableArgs}` } },
+          cwd,
+        );
         assert.equal(result.authenticated, false);
         assert.match(result.output, /not verified/);
       });
@@ -94,10 +118,11 @@ describe("checkServices Infisical command detection", () => {
   }
 
   it("does not interpret an application's arguments as an Infisical status check", async () => {
-    await withCli("infisical", "application succeeded", "", 0, async (bin) => {
-      const [result] = await checkServices({
-        vault: { login: "", check: `${bin} run -- app login status` },
-      });
+    await withCli("infisical", "application succeeded", "", 0, async (bin, cwd) => {
+      const [result] = await checkServices(
+        { vault: { login: "", check: `${bin} run -- app login status` } },
+        cwd,
+      );
       assert.equal(result.authenticated, true);
       assert.equal(result.output, "application succeeded");
     });
@@ -179,13 +204,16 @@ const verificationCases = [
 describe("checkServices Infisical backend verification", () => {
   for (const { label, stdout, exitCode, authenticated } of verificationCases) {
     it(`requires authenticated status and backend verification: ${label}`, async () => {
-      await withCli("infisical", stdout, "", exitCode, async (bin) => {
-        const [result] = await checkServices({
-          vault: {
-            login: "",
-            check: `${bin} login status --json --silent --telemetry=false --domain=https://example.test`,
+      await withCli("infisical", stdout, "", exitCode, async (bin, cwd) => {
+        const [result] = await checkServices(
+          {
+            vault: {
+              login: "",
+              check: `${bin} login status --json --silent --telemetry=false --domain=https://example.test`,
+            },
           },
-        });
+          cwd,
+        );
         assert.equal(result.authenticated, authenticated);
         assert.doesNotMatch(result.output, /private-identity|example\.test|"sessions"/);
         if (!authenticated) assert.match(result.output, /not verified/i);
@@ -267,13 +295,16 @@ const configuredSessionCases = [
 describe("checkServices Infisical session selection", () => {
   for (const { label, sessions, exitCode, authenticated } of configuredSessionCases) {
     it(`checks the configured Infisical session: ${label}`, async () => {
-      await withCli("infisical", JSON.stringify({ sessions }), "", exitCode, async (bin) => {
-        const [result] = await checkServices({
-          vault: {
-            login: "",
-            check: `${bin} login status --json --silent --domain=https://example.test/api/`,
+      await withCli("infisical", JSON.stringify({ sessions }), "", exitCode, async (bin, cwd) => {
+        const [result] = await checkServices(
+          {
+            vault: {
+              login: "",
+              check: `${bin} login status --json --silent --domain=https://example.test/api/`,
+            },
           },
-        });
+          cwd,
+        );
         assert.equal(result.authenticated, authenticated);
         assert.doesNotMatch(result.output, /private-identity|example\.test|"sessions"/);
       });
@@ -289,10 +320,11 @@ describe("checkServices arbitrary output", () => {
     infisicalHelp,
   ]) {
     it(`preserves arbitrary successful service output: ${JSON.stringify(output.slice(0, 65))}`, async () => {
-      await withCli("health-check", output, "", 0, async (bin) => {
-        const [result] = await checkServices({
-          infisical: { login: "", check: `${bin} status` },
-        });
+      await withCli("health-check", output, "", 0, async (bin, cwd) => {
+        const [result] = await checkServices(
+          { infisical: { login: "", check: `${bin} status` } },
+          cwd,
+        );
         assert.equal(result.authenticated, true);
         assert.equal(result.output, output.trim());
       });

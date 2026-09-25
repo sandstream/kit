@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkInfisicalStatus } from "./infisical-status.js";
@@ -26,13 +26,22 @@ async function probe(options: {
   writeFileSync(join(dir, ".infisical.json"), options.workspace ?? "{}");
   if (options.nestedWorkspace !== undefined)
     writeFileSync(join(nested, ".infisical.json"), options.nestedWorkspace);
-  const command = join(dir, "infisical");
+  const windows = process.platform === "win32";
+  const command = join(dir, windows ? "infisical.exe" : "infisical");
   const stdout = JSON.stringify({ sessions: options.sessions ?? [keyring] });
-  writeFileSync(
-    command,
-    `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(stdout)}, () => { ${options.signal ? 'process.kill(process.pid, "SIGTERM");' : ""} });\n`,
-    { mode: 0o755 },
-  );
+  const source = `process.stdout.write(${JSON.stringify(stdout)}, () => { ${options.signal ? 'process.kill(process.pid, "SIGTERM");' : ""} });\n`;
+  if (windows) {
+    // Native Windows needs a PE executable. Node loads `login` from the test
+    // cwd as its entry script; remaining status flags stay untouched.
+    try {
+      linkSync(process.execPath, command);
+    } catch {
+      copyFileSync(process.execPath, command);
+    }
+    writeFileSync(join(nested, "login"), source);
+  } else {
+    writeFileSync(command, `#!${process.execPath}\n${source}`, { mode: 0o755 });
+  }
   try {
     return await checkInfisicalStatus({
       command,
