@@ -10,6 +10,7 @@ import {
   validateMoneyFlowConfig,
   writeMonkeyHarness,
 } from "./monkey-test.js";
+import { fixtureCommand } from "./monkey-test-runner.test-support.js";
 
 const roots: string[] = [];
 
@@ -289,8 +290,16 @@ describe("monkey-test runner gate redaction", () => {
         skipSecurity: true,
         skipBrowser: true,
         expectedReason: "Runner redaction regression with browser intentionally unavailable.",
-        envCommand: `node -e 'process.stdout.write(JSON.stringify({MONKEY_TEST_SECRET:"${opaqueSecret}"}))'`,
-        seedCommand: "node -e 'process.stdout.write(\"seed \" + process.env.MONKEY_TEST_SECRET)'",
+        envCommand: fixtureCommand(
+          dir,
+          "env",
+          `process.stdout.write(JSON.stringify({MONKEY_TEST_SECRET:${JSON.stringify(opaqueSecret)}}));`,
+        ),
+        seedCommand: fixtureCommand(
+          dir,
+          "seed",
+          'process.stdout.write("seed " + process.env.MONKEY_TEST_SECRET);',
+        ),
       });
       const surfaced = `${capture.output()}\n${JSON.stringify(result)}`;
 
@@ -317,7 +326,11 @@ describe("monkey-test runner payment safety", () => {
     const result = await runMonkeyTest(dir, {
       skipSecurity: true,
       expectedReason: "Focused payment safety regression fixture.",
-      envCommand: `node -e 'process.stdout.write(JSON.stringify({STRIPE_SECRET_KEY:"${liveKey}"}))'`,
+      envCommand: fixtureCommand(
+        dir,
+        "env",
+        `process.stdout.write(JSON.stringify({STRIPE_SECRET_KEY:${JSON.stringify(liveKey)}}));`,
+      ),
       seedCommand: `node -e "require('node:fs').writeFileSync('seed-ran', 'yes')"`,
       startCommand: `node -e "require('node:fs').writeFileSync('server-ran', 'yes')"`,
     });
@@ -347,7 +360,11 @@ describe("monkey-test runner payment safety", () => {
         baseUrl: `http://127.0.0.1:${address.port}`,
         skipSecurity: true,
         expectedReason: "Focused provider production-mode safety regression fixture.",
-        envCommand: `node -e 'process.stdout.write(JSON.stringify({PAYPAL_ENVIRONMENT:"production"}))'`,
+        envCommand: fixtureCommand(
+          dir,
+          "env",
+          'process.stdout.write(JSON.stringify({PAYPAL_ENVIRONMENT:"production"}));',
+        ),
         seedCommand: `node -e "require('node:fs').writeFileSync('seed-ran', 'yes')"`,
       });
 
