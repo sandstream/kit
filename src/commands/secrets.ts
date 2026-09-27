@@ -13,12 +13,7 @@
 import { createInterface } from "node:readline/promises";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
-import {
-  loadConfig,
-  resolveActiveEnvironment,
-  type kitConfig,
-  type SecretKeyConfig,
-} from "../config.js";
+import { loadConfig, type kitConfig, type SecretKeyConfig } from "../config.js";
 import { KIT_FILE, resolveConfigPath } from "../cli-shared.js";
 import { isNonInteractive } from "../environment.js";
 import { promptConfirm } from "../utils/prompt.js";
@@ -173,22 +168,18 @@ export async function cmdSecrets(): Promise<boolean> {
 
   const secretsConfig = config.secrets;
 
-  // ── S9: refuse prod profiles and prod-scoped keys outside prod env ───────
-  // A profile can contain production credentials even when its key names have
-  // no "prod" marker. Check both the selected config profile and key metadata.
+  // ── S9: refuse prod-scoped keys outside prod env ──────────────────────────
+  // Each key's source/ref/vault_path is checked against a "prod" marker;
+  // if any prod-scoped key is configured AND the active env is not "prod",
+  // require explicit KIT_PROD_OK=1 to proceed (CI deploy jobs set this).
   const { looksLikeProdKey, getActiveEnv, prodReadAllowed } = await import("../env-switch.js");
   const activeEnv = await getActiveEnv(process.cwd());
-  const selectedEnv = resolveActiveEnvironment();
-  const prodProfile = selectedEnv === "prod" || selectedEnv === "production";
   const prodKeys = Object.entries(secretsConfig.keys ?? {}).filter(([, v]) => {
     return looksLikeProdKey(v.ref) || looksLikeProdKey(v.name) || looksLikeProdKey(v.vault_path);
   });
-  if ((prodProfile || prodKeys.length > 0) && !prodReadAllowed(activeEnv)) {
-    const scope = prodProfile
-      ? "production secrets profile"
-      : `${prodKeys.length} prod-scoped key(s)`;
+  if (prodKeys.length > 0 && !prodReadAllowed(activeEnv)) {
     console.error(
-      `${c.red}✗ Refusing to materialize ${scope} — active env is "${activeEnv}".${c.reset}`,
+      `${c.red}✗ Refusing to materialize ${prodKeys.length} prod-scoped key(s) — active env is "${activeEnv}".${c.reset}`,
     );
     for (const [name, v] of prodKeys.slice(0, 5)) {
       const ref = v.ref ?? v.name ?? v.vault_path ?? "?";

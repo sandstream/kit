@@ -67,7 +67,9 @@ describe("scanBuildArtifacts", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
 
+describe("scanBuildArtifacts browser output", () => {
   it("still scans prerendered Next.js HTML sent to browsers", async () => {
     const dir = makeRepo();
     try {
@@ -101,7 +103,9 @@ describe("scanBuildArtifacts", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
 
+describe("scanBuildArtifacts credential shapes", () => {
   it("does not treat ordinary client property names as credentials", async () => {
     const dir = makeRepo();
     try {
@@ -147,7 +151,9 @@ describe("scanBuildArtifacts", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
 
+describe("scanBuildArtifacts directory scope", () => {
   it("walks multiple known build dirs in one pass", async () => {
     const dir = makeRepo();
     try {
