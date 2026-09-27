@@ -49,6 +49,105 @@ describe("scanBuildArtifacts", () => {
     }
   });
 
+  it("ignores Next.js server code and its source maps", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, ".next", "server"), { recursive: true });
+      writeFileSync(
+        join(dir, ".next", "server", "edge-instrumentation.js.map"),
+        JSON.stringify({ sourcesContent: ["https://user:password@www.example.com/"] }),
+      );
+      writeFileSync(
+        join(dir, ".next", "server", "route.js"),
+        'const serverKey="' + "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123" + '";\n',
+      );
+
+      assert.deepEqual(await scanBuildArtifacts(dir), []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still scans prerendered Next.js HTML sent to browsers", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, ".next", "server", "app"), { recursive: true });
+      writeFileSync(
+        join(dir, ".next", "server", "app", "page.html"),
+        "<body>" + "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123" + "</body>",
+      );
+
+      const hits = await scanBuildArtifacts(dir);
+      assert.equal(hits.length, 1);
+      assert.equal(hits[0].file, ".next/server/app/page.html");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("scans prerendered Next.js RSC responses", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, ".next", "server", "app"), { recursive: true });
+      writeFileSync(
+        join(dir, ".next", "server", "app", "page.rsc"),
+        "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123",
+      );
+
+      const hits = await scanBuildArtifacts(dir);
+      assert.equal(hits.length, 1);
+      assert.equal(hits[0].file, ".next/server/app/page.rsc");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not treat ordinary client property names as credentials", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, ".next", "static"), { recursive: true });
+      writeFileSync(
+        join(dir, ".next", "static", "page.js"),
+        'const field={key:"sessionColumns",password:"forgotten"};' +
+          'const url="https://example.com/?token=placeholder_token_1234";',
+      );
+
+      assert.deepEqual(await scanBuildArtifacts(dir), []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("flags an opaque generic key in a client bundle", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, ".next", "static"), { recursive: true });
+      const opaque = ["A0b1C2d3", "E4f5G6h7", "I8j9K0l1", "M2n3O4p5"].join("");
+      writeFileSync(join(dir, ".next", "static", "page.js"), `const config={api_key:"${opaque}"};`);
+
+      const hits = await scanBuildArtifacts(dir);
+      assert.equal(hits.length, 1);
+      assert.ok(hits[0].findings.some((f) => f.label === "keyed-secret"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("flags an opaque token in a client URL", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, ".next", "static"), { recursive: true });
+      const opaque = ["A0b1C2d3", "E4f5G6h7", "I8j9K0l1", "M2n3O4p5"].join("");
+      writeFileSync(join(dir, ".next", "static", "page.js"), `fetch("/callback?token=${opaque}");`);
+
+      const hits = await scanBuildArtifacts(dir);
+      assert.equal(hits.length, 1);
+      assert.ok(hits[0].findings.some((f) => f.label === "url-query-token"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("walks multiple known build dirs in one pass", async () => {
     const dir = makeRepo();
     try {
@@ -98,7 +197,11 @@ describe("scanBuildArtifacts", () => {
         join(dir, ".next", "routes-manifest.json"),
         JSON.stringify({ headers: [{ value: "another-twenty-plus-character-value" }] }),
       );
-      writeFileSync(join(dir, ".next", "leak.js"), "sk_" + "live_AaBbCcDdEeFfGgHhIiJjKkLl\n");
+      mkdirSync(join(dir, ".next", "static"), { recursive: true });
+      writeFileSync(
+        join(dir, ".next", "static", "leak.js"),
+        "sk_" + "live_AaBbCcDdEeFfGgHhIiJjKkLl\n",
+      );
       const hits = await scanBuildArtifacts(dir);
       assert.equal(hits.length, 1);
       assert.ok(hits[0].file.includes("leak.js"));
