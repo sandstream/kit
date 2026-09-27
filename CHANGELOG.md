@@ -2,6 +2,16 @@
 
 ### Fixed
 
+- **`kit upgrade --version` ran the upgrade.** `--version` is a global flag, so
+  the unknown-flag floor accepted it after any command, but only `kit --version`
+  answered it; `kit upgrade --version` rewrote the lock files instead of
+  printing a version. It is now answered before any command runs, like `--help`.
+
+- **A lock could contradict its own declaration.** `kit upgrade` and `kit fix`
+  lock the installed version, and wrote it even when it missed the pin: with
+  `node = "22"` declared and node 25 on PATH, the lock said 25. Both now refuse
+  to write that lock and name the tool, the installed version and the pin.
+
 - **`kit memory` could still reach the network.** Memory commands are local
   only, yet the post-command version notices ran after them, calling
   `registry.npmjs.org` and `api.github.com`. They are skipped after `kit memory`
