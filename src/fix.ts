@@ -189,6 +189,29 @@ async function fixDeploy(
  *
  * Extracted from cli.ts (codebase-review follow-up).
  */
+/**
+ * Write `.kit/cli-lock.json` from what is installed. Measured, not assumed: both lock writers
+ * used to record the DECLARED string and hardcode `source: "mise"`, so `{"vercel":{"version":
+ * "latest","source":"mise"}}` described a Homebrew binary and `kit check` called it in sync
+ * (#500). A tool whose installed version misses its pin writes no lock at all.
+ */
+async function generateCliLock(config: kitConfig, cwd: string): Promise<boolean> {
+  const { resolveLockEntries, isLockMismatchError } = await import("./tool-inventory.js");
+  let tools: Awaited<ReturnType<typeof resolveLockEntries>> = {};
+  if (config.tools) {
+    try {
+      tools = await resolveLockEntries(config.tools);
+    } catch (err) {
+      if (!isLockMismatchError(err)) throw err;
+      console.log(`  ${c.yellow}!${c.reset} cli-lock.json not generated: ${err.message}`);
+      return false;
+    }
+  }
+  await updateCliLock(tools, cwd);
+  console.log(`  ${c.green}✓${c.reset} Generated cli-lock.json`);
+  return true;
+}
+
 export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit fix${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
@@ -297,25 +320,7 @@ export async function cmdFix(cwd: string = process.cwd()): Promise<boolean> {
         }
 
         // Generate CLI lock
-        if (!cliLock) {
-          const tools: Record<
-            string,
-            { version: string; source: "mise" | "npm" | "pip" | "manual"; auth?: string }
-          > = {};
-          if (config.tools) {
-            // Measured, not assumed. Both lock writers used to record the DECLARED string as the
-            // version and hardcode `source: "mise"`, so a lock entry read
-            // `{"vercel":{"version":"latest","source":"mise"}}` for a binary in
-            // /opt/homebrew/bin that mise does not manage — and `kit check` called it in sync
-            // (#500). `resolveLockEntries` reads the resolved version and classifies the path.
-            const { resolveLockEntries } = await import("./tool-inventory.js");
-            Object.assign(tools, await resolveLockEntries(config.tools));
-          }
-
-          await updateCliLock(tools, cwd);
-          console.log(`  ${c.green}✓${c.reset} Generated cli-lock.json`);
-          fixedCount++;
-        }
+        if (!cliLock && (await generateCliLock(config, cwd))) fixedCount++;
       } else {
         console.log(`${c.dim}Lock files exist${c.reset}`);
       }

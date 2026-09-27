@@ -399,8 +399,8 @@ export async function main(): Promise<void> {
   try {
     let ok: boolean;
 
-    // --version flag before dispatch
-    if (positional[0] === "--version" || positional[0] === "-v") {
+    // --version anywhere (it is global), before dispatch: `kit upgrade --version` must not upgrade.
+    if (positional[0] === "-v" || hasFlag(args, "--version")) {
       ok = cmdVersion();
       process.exitCode = ok ? 0 : 1;
       return;
