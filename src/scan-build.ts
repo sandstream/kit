@@ -79,7 +79,8 @@ function findBuildSecrets(content: string): SecretFinding[] {
   for (const { re, label } of SECRET_PATTERNS) {
     if (!BUILD_GENERIC_LABELS.has(label)) continue;
     for (const match of content.matchAll(new RegExp(re.source, re.flags))) {
-      const value = label === "keyed-secret" ? (match[3] ?? match[2]) : match[0].slice(match[1].length);
+      const value =
+        label === "keyed-secret" ? (match[3] ?? match[2]) : match[0].slice(match[1].length);
       if (value.length < OPAQUE_MIN_LENGTH || shannonEntropy(value) < OPAQUE_MIN_ENTROPY) continue;
       findings.push({ label, preview: "[REDACTED]" });
     }

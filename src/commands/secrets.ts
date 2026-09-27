@@ -13,7 +13,12 @@
 import { createInterface } from "node:readline/promises";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
-import { loadConfig, resolveActiveEnvironment, type kitConfig, type SecretKeyConfig } from "../config.js";
+import {
+  loadConfig,
+  resolveActiveEnvironment,
+  type kitConfig,
+  type SecretKeyConfig,
+} from "../config.js";
 import { KIT_FILE, resolveConfigPath } from "../cli-shared.js";
 import { isNonInteractive } from "../environment.js";
 import { promptConfirm } from "../utils/prompt.js";
@@ -179,7 +184,9 @@ export async function cmdSecrets(): Promise<boolean> {
     return looksLikeProdKey(v.ref) || looksLikeProdKey(v.name) || looksLikeProdKey(v.vault_path);
   });
   if ((prodProfile || prodKeys.length > 0) && !prodReadAllowed(activeEnv)) {
-    const scope = prodProfile ? "production secrets profile" : `${prodKeys.length} prod-scoped key(s)`;
+    const scope = prodProfile
+      ? "production secrets profile"
+      : `${prodKeys.length} prod-scoped key(s)`;
     console.error(
       `${c.red}✗ Refusing to materialize ${scope} — active env is "${activeEnv}".${c.reset}`,
     );
