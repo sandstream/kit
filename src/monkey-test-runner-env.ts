@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { open } from "node:fs/promises";
+import { lstat, open } from "node:fs/promises";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
 import {
@@ -116,6 +116,14 @@ function parseLiteralDotenv(text: string): NodeJS.ProcessEnv {
 }
 
 async function readApplicationEnv(path: string): Promise<NodeJS.ProcessEnv | undefined> {
+  // O_NOFOLLOW is unavailable on Windows. Inspect the directory entry first,
+  // then verify that the opened handle still refers to that regular file.
+  const entry = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (!entry) return undefined;
+  if (!entry.isFile()) throw new Error("Env file cannot be inspected");
   const handle = await open(
     path,
     constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0),
@@ -127,7 +135,14 @@ async function readApplicationEnv(path: string): Promise<NodeJS.ProcessEnv | und
   try {
     const maximum = 512 * 1024;
     const target = await handle.stat();
-    if (!target.isFile() || target.size > maximum) throw new Error("Env file cannot be inspected");
+    if (
+      !target.isFile() ||
+      target.dev !== entry.dev ||
+      target.ino !== entry.ino ||
+      target.size > maximum
+    ) {
+      throw new Error("Env file cannot be inspected");
+    }
     const buffer = Buffer.alloc(maximum + 1);
     let length = 0;
     while (length <= maximum) {

@@ -1,6 +1,6 @@
 # Native Windows compatibility probe (#43). The verifier-authority slice is a
-# required gate because an ACL failure must never produce a false approval. Broader
-# unit/smoke coverage remains diagnostic while unrelated Windows gaps are retired.
+# required gate because an ACL failure must never produce a false approval. The
+# complete unit suite is also required; platform failures must fail this workflow.
 name: Windows (native, probe)
 
 on:
@@ -55,7 +55,6 @@ jobs:
           & node @testArgs
       - name: Unit tests
         if: inputs.test_file == ''
-        continue-on-error: true # kit-self-audit: allow-continue-on-error
         shell: bash
         run: |
           set -o pipefail

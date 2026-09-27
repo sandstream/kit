@@ -21,7 +21,7 @@ import { claimTask, seedLegacyPalDb, withPalDevice } from "./pal-fixture.test-su
 type Db = ReturnType<typeof openMemoryDb>;
 type Row = Record<string, unknown>;
 const origin = "/foreign/projects/checkout";
-const destination = "/local/projects/checkout";
+const destination = join(tmpdir(), "kit-merge-actions-destination");
 const mappings = { projectMappings: [{ from: origin, to: destination }] };
 
 function fixture(run: (source: Db, target: Db, path: string) => void): void {

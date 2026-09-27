@@ -42,7 +42,7 @@ describe("kit upgrade CLI lock provenance", () => {
       writeFileSync(
         loader,
         'import { basename } from "node:path";\n' +
-          'if (basename(process.argv0).toLowerCase() === "widget.exe") {\n' +
+          'if (process.argv[1] && basename(process.argv[1]).toLowerCase() === "--version") {\n' +
           '  console.log("widget 9.8.7");\n' +
           "  process.exit(0);\n" +
           "}\n",

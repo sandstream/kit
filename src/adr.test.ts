@@ -92,6 +92,11 @@ describe("evaluateAdr", () => {
     assert.equal(v.length, 0);
   });
 
+  it("matches native Windows file paths against repository globs", () => {
+    const v = evaluateAdr(adr, [{ path: "src\\web\\handler.ts", content: "import x from 'pg'" }]);
+    assert.equal(v.length, 1);
+  });
+
   it("a non-accepted ADR never gates", () => {
     const proposed = parseAdr(ACCEPTED.replace("status: accepted", "status: superseded"))!;
     const v = evaluateAdr(proposed, [{ path: "src/web/h.ts", content: "from 'pg'" }]);
@@ -102,6 +107,7 @@ describe("evaluateAdr", () => {
 describe("globToRegExp", () => {
   it("handles ** and *", () => {
     assert.ok(globToRegExp("src/web/**/*.ts").test("src/web/a/b/c.ts"));
+    assert.ok(globToRegExp("src\\web\\**\\*.ts").test("src/web/a/b/c.ts"));
     assert.ok(globToRegExp("src/web/**/*.ts").test("src/web/x.ts"));
     assert.ok(!globToRegExp("src/web/**/*.ts").test("src/api/x.ts"));
     assert.ok(!globToRegExp("src/*.ts").test("src/a/b.ts"));
