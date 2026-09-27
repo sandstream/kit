@@ -29,7 +29,7 @@ describe("--version after a command (compiled CLI)", () => {
           env: { ...process.env, KIT_NO_UPDATE_CHECK: "1" },
           timeout: 30_000,
         });
-        assert.match(stdout, new RegExp(VERSION.replace(/\./g, "\\.")));
+        assert.ok(stdout.includes(VERSION), `expected ${VERSION} in: ${stdout}`);
         assert.equal(existsSync(join(cwd, ".kit")), false, "no lock or state file may be written");
       } finally {
         rmSync(cwd, { recursive: true, force: true });
