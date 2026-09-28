@@ -240,6 +240,30 @@ export function checkTrigger(m: SkillManifest, siblings: SiblingSkill[] = []): C
 }
 
 /**
+ * Tools whose EFFECTS no tier of kit bounds, so a declaration naming one is a smaller claim than
+ * the word "bounded" implies.
+ *
+ * WHY THIS EXISTS. `Bash` passes this check as a declared tool, and a literal `*` fails — yet
+ * `Bash` is the larger grant. Measured across every tier for `rm -rf` reached through Bash:
+ *
+ *   - this static check          pass  (Bash is in allowed-tools)
+ *   - `skill test --runtime`     undefined — `brokerVerdictForRow` extracts HOSTS from a Bash
+ *                                command, so a call with no host has no target to judge, and
+ *                                tool-scope is all that is left
+ *   - `kit gate-fs`              passes through — "Non-write tool calls pass through"
+ *   - `kit gate-bash`            not its job — it blocks un-triaged INSTALLS
+ *
+ * Egress through Bash IS bounded (hosts are extractable and a miss fails closed). Filesystem
+ * effects are not, and cannot be: `rm -rf "$T"`, `eval`, a script that reads its own paths — the
+ * effects of a shell string are undecidable in general, so a partial extractor would green exactly
+ * the commands it failed to parse. The honest move is not a stricter verdict (the declaration is
+ * real) but a truthful one: say what is unbounded instead of calling the scope "bounded".
+ *
+ * Deliberately narrow: only tools whose unboundedness has been measured belong here.
+ */
+const UNBOUNDABLE_TOOLS: ReadonlySet<string> = new Set(["Bash"]);
+
+/**
  * Scope — the DECLARED-least-privilege half. `allowed-tools` must be present and bounded:
  * absent means the skill implicitly claims every tool; a `*` wildcard is not
  * least-privilege. An empty list is the most restrictive (pass). This proves the skill
@@ -263,6 +287,13 @@ export function checkScope(m: SkillManifest): CheckResult {
     return s("fail", "allowed-tools contains a wildcard (*) — not least-privilege");
   if (m.allowedTools.length === 0)
     return s("pass", "declares zero tools (maximally least-privilege)");
+  const unbounded = m.allowedTools.filter((t) => UNBOUNDABLE_TOOLS.has(t));
+  if (unbounded.length > 0)
+    return s(
+      "pass",
+      `declares ${m.allowedTools.length} tool(s), of which ${unbounded.join(", ")} ` +
+        `cannot be bounded by any tier — its filesystem effects are checked by nothing`,
+    );
   return s("pass", `declares a bounded scope of ${m.allowedTools.length} tool(s)`);
 }
 
