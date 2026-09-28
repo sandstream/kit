@@ -143,10 +143,12 @@ release — no token is wired into the publish workflow as a fallback.
 | `sandstream-kit-plugin-wiz`     |                                  |                                    |
 
 `sandstream-kit-plugin-aisle` is not in the verified list. Version 0.1.0 is already
-on npm without provenance; the publish loop skips an exact version already there.
-Verify its Trusted Publisher and publishing-access settings in npm, then give any
-changed AISLE package a new version before the next release. Add it to the table
-only after the settings have been read back.
+on npm without provenance. Until its Trusted Publisher and publishing-access
+settings have been read back in npm, `publish.yml` lists it in
+`UNVERIFIED_PUBLISHERS` and skips it with a warning, so its repo version (0.1.2)
+does not ship; under OIDC-only publishing npm would otherwise reject it mid-loop,
+after earlier packages had already published. Once verified, add it to the table
+above and remove it from `UNVERIFIED_PUBLISHERS`.
 
 For each (and for any new package): its npm page → Settings → Trusted Publisher → GitHub
 Actions, then `Organization or user` = `sandstream`, `Repository` = `kit`,

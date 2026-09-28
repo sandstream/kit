@@ -86,7 +86,8 @@
   exponential (or quadratic for the slug). The install gate runs on every
   PreToolUse Bash call. Each pattern is now unambiguous, with a regression test on
   the input shape CodeQL named, and the accepted inputs and generated ids are
-  unchanged. The slug fix ships in `sandstream-kit-plugin-aisle` 0.1.2.
+  unchanged. The slug fix is in `sandstream-kit-plugin-aisle` 0.1.2, held back
+  from npm for now (see Known limitations).
 
 - **Release source and image gates.** Publishing refuses an npm version reused
   from changed source, scans the unpacked root tarball for release SBOMs, and
@@ -375,6 +376,13 @@
   `memory.db` and the per-machine `device-id`, is out of scope: it lives
   outside the audited project tree, never shows up in that repo's `git
   status`, and is machine identity rather than project mutation.)
+
+### Known limitations (2026-09-27)
+
+- **`sandstream-kit-plugin-aisle` 0.1.2 is not published with this release.**
+  Its npm Trusted Publisher setting has not been verified, so the publish job
+  skips it. npm keeps serving 0.1.0 until the setting is read back; the slug
+  ReDoS fix reaches AISLE users then.
 
 ### Known limitations (2026-09-24)
 
