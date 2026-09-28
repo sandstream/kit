@@ -1,42 +1,6 @@
 ## [Unreleased]
 
-### Fixed
-
-- **`kit upgrade --version` ran the upgrade.** `--version` is a global flag, so
-  the unknown-flag floor accepted it after any command, but only `kit --version`
-  answered it; `kit upgrade --version` rewrote the lock files instead of
-  printing a version. It is now answered before any command runs, like `--help`.
-
-- **A lock could contradict its own declaration.** `kit upgrade` and `kit fix`
-  lock the installed version, and wrote it even when it missed the pin: with
-  `node = "22"` declared and node 25 on PATH, the lock said 25. Both now refuse
-  to write that lock and name the tool, the installed version and the pin.
-
-- **`kit memory` could still reach the network.** Memory commands are local
-  only, yet the post-command version notices ran after them, calling
-  `registry.npmjs.org` and `api.github.com`. They are skipped after `kit memory`
-  now, and `KIT_BUMBLEBEE=0`, which turns the scanner off, also silences its
-  release check.
-
-- **Docs named network hosts, plugin behaviour and an adapter that were not
-  true.** `docs/DATA_FLOW.md` omitted about twenty hosts kit contacts (triage of
-  Docker images and repos, deploy-env and secret propagation, the cost monitor,
-  health sensors, built-in adapters, operator-configured endpoints).
-  `PLUGIN_AUTHORING.md` said installed plugins work with `kit check` and a
-  `kit_add` MCP tool; only packages exporting `{ adapter }` are registered, and
-  only `kit add` loads them. An example adapter was named `neon/database`; the
-  built-in is `neon/db`.
-
-- **Four regular expressions could backtrack catastrophically.** The install
-  gate's runner-flag and fetch-to-shell scans, the `allowScripts` exact-version
-  check, and the AISLE plugin's finding-id slug each let one token match the same
-  characters more than one way, so a crafted command or key made a failing match
-  exponential (or quadratic for the slug). The install gate runs on every
-  PreToolUse Bash call. Each pattern is now unambiguous, with a regression test on
-  the input shape CodeQL named, and the accepted inputs and generated ids are
-  unchanged. The slug fix ships in `sandstream-kit-plugin-aisle` 0.1.2.
-
-## [6.12.0] - 2026-09-24
+## [6.12.0] - 2026-09-27
 
 ### Added
 
@@ -89,6 +53,41 @@
   harness modules, each with its own tests.
 
 ### Fixed
+
+- **`kit upgrade --version` ran the upgrade.** `--version` is a global flag, so
+  the unknown-flag floor accepted it after any command, but only `kit --version`
+  answered it; `kit upgrade --version` rewrote the lock files instead of
+  printing a version. It is now answered before any command runs, like `--help`.
+
+- **A lock could contradict its own declaration.** `kit upgrade` and `kit fix`
+  lock the installed version, and wrote it even when it missed the pin: with
+  `node = "22"` declared and node 25 on PATH, the lock said 25. Both now refuse
+  to write that lock and name the tool, the installed version and the pin.
+
+- **`kit memory` could still reach the network.** Memory commands are local
+  only, yet the post-command version notices ran after them, calling
+  `registry.npmjs.org` and `api.github.com`. They are skipped after `kit memory`
+  now, and `KIT_BUMBLEBEE=0`, which turns the scanner off, also silences its
+  release check.
+
+- **Docs named network hosts, plugin behaviour and an adapter that were not
+  true.** `docs/DATA_FLOW.md` omitted about twenty hosts kit contacts (triage of
+  Docker images and repos, deploy-env and secret propagation, the cost monitor,
+  health sensors, built-in adapters, operator-configured endpoints).
+  `PLUGIN_AUTHORING.md` said installed plugins work with `kit check` and a
+  `kit_add` MCP tool; only packages exporting `{ adapter }` are registered, and
+  only `kit add` loads them. An example adapter was named `neon/database`; the
+  built-in is `neon/db`.
+
+- **Four regular expressions could backtrack catastrophically.** The install
+  gate's runner-flag and fetch-to-shell scans, the `allowScripts` exact-version
+  check, and the AISLE plugin's finding-id slug each let one token match the same
+  characters more than one way, so a crafted command or key made a failing match
+  exponential (or quadratic for the slug). The install gate runs on every
+  PreToolUse Bash call. Each pattern is now unambiguous, with a regression test on
+  the input shape CodeQL named, and the accepted inputs and generated ids are
+  unchanged. The slug fix is in `sandstream-kit-plugin-aisle` 0.1.2, held back
+  from npm for now (see Known limitations).
 
 - **Release source and image gates.** Publishing refuses an npm version reused
   from changed source, scans the unpacked root tarball for release SBOMs, and
@@ -377,6 +376,13 @@
   `memory.db` and the per-machine `device-id`, is out of scope: it lives
   outside the audited project tree, never shows up in that repo's `git
   status`, and is machine identity rather than project mutation.)
+
+### Known limitations (2026-09-27)
+
+- **`sandstream-kit-plugin-aisle` 0.1.2 is not published with this release.**
+  Its npm Trusted Publisher setting has not been verified, so the publish job
+  skips it. npm keeps serving 0.1.0 until the setting is read back; the slug
+  ReDoS fix reaches AISLE users then.
 
 ### Known limitations (2026-09-24)
 

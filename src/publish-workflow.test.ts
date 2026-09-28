@@ -375,3 +375,15 @@ describe("publish.yml — release evidence describes the shipped package", () =>
     }
   });
 });
+
+describe("publish.yml — a workspace without a verified trusted publisher is skipped", () => {
+  it("keeps sandstream-kit-plugin-aisle out of the OIDC publish loop until verified", () => {
+    // aisle@0.1.0 was published by hand, and its npm Trusted Publisher setting was never read
+    // back (RELEASING.md). Under OIDC-only publishing an unconfigured package is rejected
+    // mid-loop, after the root and earlier workspaces already shipped: a half release.
+    const skip = EXECUTED.match(/UNVERIFIED_PUBLISHERS="([^"]*)"/);
+    assert.ok(skip, "publish.yml no longer declares UNVERIFIED_PUBLISHERS");
+    assert.match(skip[1], /packages\/kit-plugin-aisle/);
+    assert.match(EXECUTED, /case " \$UNVERIFIED_PUBLISHERS " in \*" \$dir "\*\)/);
+  });
+});

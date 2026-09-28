@@ -327,8 +327,16 @@ jobs:
           publish_ws packages/adapter-sdk
 
           # Then every other workspace, in a stable (sorted) order so the log is diffable.
+          # A package whose npm Trusted Publisher has not been read back is skipped: under
+          # OIDC-only publishing npm rejects it mid-loop, after earlier packages shipped.
+          # Remove an entry once its setting is verified (docs/RELEASING.md).
+          UNVERIFIED_PUBLISHERS="packages/kit-plugin-aisle"
           for dir in $(ls -d packages/*/ | sed 's:/$::' | sort); do
             [ "$dir" = "packages/adapter-sdk" ] && continue
+            case " $UNVERIFIED_PUBLISHERS " in *" $dir "*)
+              echo "::warning::skipping $dir: npm Trusted Publisher not verified"
+              continue ;;
+            esac
             publish_ws "$dir"
           done
 
