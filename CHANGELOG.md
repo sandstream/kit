@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- **The staged secret scan blocked ordinary code.** Its unquoted keyed-secret
+  rule took a code expression for a credential: `secret: process.env.SESSION_SECRET`
+  and `const secret = speakeasy.generateSecret({` both matched, and the scan runs
+  in pre-commit. A value that is a dotted identifier path, or is being called, is
+  now treated as code; a real unquoted token under a secret-shaped name is still
+  caught.
+
 - **About thirty documentation claims were no longer true.** A full pass over
   `docs/` and the root docs against the code: the stability tiers (23 commands
   are `experimental`, not one), release steps that still ended in a manual
