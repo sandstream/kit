@@ -4,6 +4,21 @@
 
 ### Fixed
 
+- **About thirty documentation claims were no longer true.** A full pass over
+  `docs/` and the root docs against the code: the stability tiers (23 commands
+  are `experimental`, not one), release steps that still ended in a manual
+  `npm publish`, an LTS table for 1.x and 2.x, a team-management API that does
+  not exist, ROADMAP items listed as planned that shipped long ago (and three
+  that would put an LLM in the core, now marked rejected), plugin paths and
+  adapter ids that do not resolve, an SLSA level kit does not claim, and a
+  missing supported-versions table in SECURITY.md. `docs/COMMANDS.md` gained the
+  twelve registered commands it lacked.
+
+- **self-audit missed environment variables held in constants.** The rule that
+  checks documented `KIT_*` names against the code did not count a name
+  declared as `const X = "KIT_...";` and read via `process.env[X]`, so docs
+  naming `KIT_KEYSTORE_SIGN_CMD` failed the check. It counts them now.
+
 - **The npm page showed a truncated, outdated README.** npm keeps only about
   64 KB of a README, and kit's was 72 KB, so the package page stopped mid-sentence
   in the MCP section; its what's-new still led with 5.0. The feature and

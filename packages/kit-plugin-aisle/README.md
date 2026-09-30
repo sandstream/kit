@@ -45,4 +45,4 @@ Report package issues in [sandstream/kit issues](https://github.com/sandstream/k
 
 ## Version
 
-Current package version: `0.1.1`. See [CHANGELOG.md](./CHANGELOG.md).
+Release history and the current version: [CHANGELOG.md](./CHANGELOG.md).

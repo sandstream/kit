@@ -615,6 +615,6 @@ describe("Complex Adapter", () => {
 
 ## References
 
-- [ServiceAdapter Interface](/packages/adapter-sdk/src/index.ts)
-- [Plugin Development Guide](/docs/PLUGIN_DEVELOPMENT.md)
-- [Official Adapters](/src/adapters)
+- [ServiceAdapter Interface](../packages/adapter-sdk/src/index.ts)
+- [Plugin Development Guide](./PLUGIN_DEVELOPMENT.md)
+- [Official Adapters](../src/adapters)

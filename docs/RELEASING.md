@@ -18,10 +18,19 @@ than shipping under a version whose changelog does not mention it.
 ```bash
 # 1. Prepare: bump package.json, write the CHANGELOG section, merge that PR.
 # 2. Tag the prep commit itself (signed — the job verifies the signature):
-git tag -s v6.12.0 <prep-commit> -m "v6.12.0: <one line>"
-git push origin v6.12.0
+git tag -s vX.Y.Z <prep-commit> -m "vX.Y.Z: <one line>"
+git push origin vX.Y.Z
 # 3. Approve the `npm-publish` environment when GitHub asks.
 ```
+
+Every release PR also updates, in the same PR:
+
+- `README.md`: the what's-new section names the version being released
+  (gated by `src/readme-release-gate.test.ts`);
+- the docs under `docs/` and the root `*.md` files that describe changed behaviour;
+- the website page in `sandstream/sandstream.github.io` (`kit/index.html` and
+  `llms.txt`). The daily sync there only updates the version number, so any other
+  change to the page is a manual edit.
 
 ## What the job refuses to publish
 

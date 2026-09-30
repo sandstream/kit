@@ -59,8 +59,10 @@ kit_run     → escape hatch: any other kit command
   (`fsWrites` on `kit_secrets`, extracted `egressTargets` on `kit_run`,
   `infrastructure` on provisioning) so a signed `[scope]`/RoE can mediate
   them. Audit evidence lands in the governed project's `.kit-audit.jsonl`.
-- **Memory is search-only.** `kit_memory` never writes: an MCP client cannot
-  inject text into the trusted store. Quarantined (injection-flagged) rows are
+- **Memory is search-only.** `kit_memory` never writes message content, so an
+  MCP client cannot inject text into the trusted store. Its one write is a
+  query-log row (query, hit count, project) used for adoption metrics, and that
+  is skipped in read-only mode. Quarantined (injection-flagged) rows are
   excluded from recall.
 - **Secrets never round-trip.** `kit_secrets` returns key names and statuses,
   never values.

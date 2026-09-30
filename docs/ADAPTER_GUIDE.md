@@ -262,39 +262,37 @@ npm run dev add mycompany/myservice
 cat .env.local | grep MYSERVICE
 
 # 4. Verify metadata in skills-lock.json
-cat .kit/skills-lock.json | jq '.provisioned["mycompany/myservice"]'
+cat skills-lock.json | jq '.provisioned["mycompany/myservice"]'
 ```
 
 ### Automated Testing
 
 Create `src/adapters/my-service.test.ts`:
 
-```typescript
-import { describe, it, expect, vi } from 'vitest';
-import { myServiceAdapter } from './my-service';
+kit's own suite uses the built-in `node:test` runner (no vitest or jest):
 
-describe('myServiceAdapter', () => {
-  it('should have correct metadata', () => {
-    expect(myServiceAdapter.name).toBe('mycompany/myservice');
-    expect(myServiceAdapter.description).toBeTruthy();
+```typescript
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { myServiceAdapter } from "./my-service.js";
+
+describe("myServiceAdapter", () => {
+  it("has correct metadata", () => {
+    assert.equal(myServiceAdapter.name, "mycompany/myservice");
+    assert.ok(myServiceAdapter.description);
   });
-  
-  it('should require myservice CLI', () => {
-    const tools = myServiceAdapter.getRequiredTools();
-    expect(tools).toContain('myservice');
+
+  it("requires the myservice CLI", () => {
+    assert.ok(myServiceAdapter.getRequiredTools().includes("myservice"));
   });
-  
-  it('should check for existing API key', async () => {
-    const context = {
-      projectPath: '/tmp/test',
-      existingEnv: { MYSERVICE_API_KEY: 'test-key' }
-    };
-    
-    const result = await myServiceAdapter.check(context);
-    expect(result).toBe(true);
+
+  it("reports provisioned when the API key exists", async () => {
+    const result = await myServiceAdapter.check({
+      projectPath: "/tmp/test",
+      existingEnv: { MYSERVICE_API_KEY: "test-key" },
+    });
+    assert.equal(result, true);
   });
-  
-  // Add more tests...
 });
 ```
 
@@ -533,18 +531,18 @@ execSync('mytool create --yes --json', options);
 execSync('mytool create', options); // May prompt user
 ```
 
-### Debug Mode
+### Where errors and results surface
 
-Enable debug output:
-
-```bash
-DEBUG=kit:* npm run dev add mycompany/myservice
-```
-
-View provisioning logs:
+There is no debug flag or provisioning log file. `kit add` prints the outcome
+directly: a failed provision prints `✗ <message>` followed by `Error: <detail>`
+(for example an unknown service or a required tool that is not installed). On
+success, secrets are written to `.env.local` and non-secret metadata to
+`skills-lock.json` at the project root:
 
 ```bash
-cat .kit/provision.log
+npm run dev add mycompany/myservice
+grep MYSERVICE .env.local
+jq '.provisioned["mycompany/myservice"]' skills-lock.json
 ```
 
 ### Getting Help

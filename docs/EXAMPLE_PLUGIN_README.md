@@ -215,7 +215,7 @@ const subscriptions = await stripe.subscriptions.list({
 await stripe.subscriptions.del(subscriptionId);
 ```
 
-See [docs/EXAMPLES.md](../PLUGIN_DOCUMENTATION_STANDARDS.md#4-docsexamplesmd) for more examples.
+See [docs/EXAMPLES.md](./PLUGIN_DOCUMENTATION_STANDARDS.md#detailed-reference-examples) for more examples.
 
 ## API Reference
 
@@ -276,7 +276,7 @@ Returns required CLI tools.
 
 **Returns:** `[]` (empty array - Stripe is API-based)
 
-For more details, see [docs/API.md](../PLUGIN_DOCUMENTATION_STANDARDS.md#2-docsapimmd).
+For more details, see [docs/API.md](./PLUGIN_DOCUMENTATION_STANDARDS.md#detailed-reference-examples).
 
 ## Testing
 
@@ -336,7 +336,7 @@ describe("Stripe Adapter", () => {
 });
 ```
 
-For testing guidelines, see [docs/TESTING.md](../PLUGIN_DOCUMENTATION_STANDARDS.md#5-docstestingmd).
+For testing guidelines, see [docs/TESTING.md](./PLUGIN_DOCUMENTATION_STANDARDS.md#detailed-reference-examples).
 
 ## Troubleshooting
 
@@ -380,18 +380,18 @@ For testing guidelines, see [docs/TESTING.md](../PLUGIN_DOCUMENTATION_STANDARDS.
 3. Use test keys for development, live keys for production
 4. If using Node.js library, verify you've initialized with the key
 
-For more troubleshooting, see [docs/TROUBLESHOOTING.md](../PLUGIN_DOCUMENTATION_STANDARDS.md#troubleshooting).
+For more troubleshooting, see [docs/TROUBLESHOOTING.md](./PLUGIN_DOCUMENTATION_STANDARDS.md#troubleshooting).
 
 ## Support
 
 - **GitHub Issues:** [kit-stripe/issues](https://github.com/kit-community/kit-stripe/issues)
 - **Stripe Docs:** [stripe.com/docs](https://stripe.com/docs)
-- **kit Guide:** [Plugin Development Guide](../PLUGIN_DEVELOPMENT.md)
-- **Patterns:** [Advanced Patterns](../ADAPTER_PATTERNS.md)
+- **kit Guide:** [Plugin Development Guide](./PLUGIN_DEVELOPMENT.md)
+- **Patterns:** [Advanced Patterns](./ADAPTER_PATTERNS.md)
 
 ## Version History
 
-See [CHANGELOG.md](./CHANGELOG.md) for version history and breaking changes.
+See [CHANGELOG.md](../CHANGELOG.md) for version history and breaking changes.
 
 Current version: **1.0.0**
 
