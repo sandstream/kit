@@ -208,11 +208,23 @@ export function checkContract(m: SkillManifest): CheckResult {
  * Normalized trigger key: the lowercased, whitespace-collapsed, punctuation-stripped
  * description. Two skills whose descriptions normalize to the same key claim the same
  * trigger. Pure — empty when no description.
+ *
+ * Unicode-aware by necessity, not by taste. An ASCII-only class (`[^a-z0-9]`) deletes every
+ * non-Latin letter, so a description written in Chinese, Japanese, Korean, Arabic, Hebrew, Greek,
+ * Cyrillic or Thai normalizes to the EMPTY STRING — and `checkTrigger` then fails it with "no
+ * description", in the same run where `checkContract` passes it for HAVING a description. The
+ * verdict contradicted itself and the author could not fix it except by writing English.
+ * `\p{L}`/`\p{N}` keep letters and digits in any script. A pure-ASCII description yields a
+ * byte-identical key, so most snapshots are untouched — but any description containing a
+ * non-ASCII LETTER gets a new key and must be re-pinned. kit's own `monkey-test` is one: its
+ * trigger phrase is Swedish ("kör apa-test"), so its key went `k r apa test` → `kör apa test`
+ * and its snapshot is updated in the same commit. That is the fix working, on the first user
+ * it was meant to help.
  */
 export function triggerKey(m: SkillManifest): string {
   return (m.description ?? "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
     .replace(/\s+/g, " ");
 }
