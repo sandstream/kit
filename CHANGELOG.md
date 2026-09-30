@@ -1,6 +1,15 @@
 ## [Unreleased]
 
+## [6.12.1] - 2026-09-30
+
 ### Fixed
+
+- **The npm page showed a truncated, outdated README.** npm keeps only about
+  64 KB of a README, and kit's was 72 KB, so the package page stopped mid-sentence
+  in the MCP section; its what's-new still led with 5.0. The feature and
+  service-provisioning reference moved to `docs/FEATURES.md`, the README (36 KB)
+  gained a "What's new in 6.x", and a test now fails any release whose README
+  is over 60 KB or does not name the version being released.
 
 - **The container image stopped building, and its npm carried HIGH advisories.**
   Alpine replaced OpenSSL 3.5.8-r0 with 3.5.9-r0, so the exact `libcrypto3` and
