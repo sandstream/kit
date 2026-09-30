@@ -1,6 +1,6 @@
 {
   "name": "monkey-test",
-  "triggerKey": "run the monkey test release gate for money handling apps including the trigger phrase k r apa test",
+  "triggerKey": "run the monkey test release gate for money handling apps including the trigger phrase kör apa test",
   "scope": [
     "Bash",
     "Edit",
@@ -8,5 +8,5 @@
     "Read",
     "Write"
   ],
-  "fingerprint": "sha256:eb0e6045ad2ff233"
+  "fingerprint": "sha256:27d04ba96b802224"
 }
