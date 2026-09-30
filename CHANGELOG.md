@@ -2,6 +2,12 @@
 
 ### Fixed
 
+- **`sandstream-kit-plugin-aisle` publishes again.** Its npm Trusted Publisher
+  was read back and matches the other packages, and its publishing access now
+  refuses bypass-2FA tokens like theirs. It leaves `UNVERIFIED_PUBLISHERS`, so
+  0.1.2 (with the slug ReDoS fix) ships on the next tag. A test now fails if a
+  workspace is neither verified in `docs/RELEASING.md` nor skipped.
+
 - **A refused `kit upgrade` still wrote the skills lock.** When a tool missed
   its pin, upgrade reported "Lock files not written" after already writing
   `.kit/skills-lock.json`. Tools are now checked before any lock is written.
