@@ -19,14 +19,14 @@ describe("HITL formatter", () => {
       agentContinuesWith: "kit check --category services",
     });
 
-    assert.match(text, /^HITL behövs$/m);
+    assert.match(text, /^HITL required$/m);
     assert.match(text, /^Blocker: stripe is not authenticated$/m);
-    assert.match(text, /^Ägare: provider admin$/m);
-    assert.match(text, /^Varför agenten inte kan lösa: auth \/ browser \/ external account$/m);
-    assert.match(text, /^Gör detta:$/m);
+    assert.match(text, /^Owner: provider admin$/m);
+    assert.match(text, /^Why the agent cannot resolve this: auth \/ browser \/ external account$/m);
+    assert.match(text, /^Do this:$/m);
     assert.match(text, /^1\. Run `kit login --service stripe`\.$/m);
-    assert.match(text, /^Svara med: stripe authenticated; no secret values pasted$/m);
-    assert.match(text, /^Agenten fortsätter med: kit check --category services$/m);
+    assert.match(text, /^Respond with: stripe authenticated; no secret values pasted$/m);
+    assert.match(text, /^Agent continues with: kit check --category services$/m);
   });
 
   it("builds a service auth block with login, secret names, and re-check", () => {

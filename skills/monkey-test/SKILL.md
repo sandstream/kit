@@ -1,12 +1,12 @@
 ---
 name: monkey-test
-description: "Run the monkey test release gate for money-handling apps, including the trigger phrase \"kör apa-test\"."
+description: "Run the monkey test release gate for money-handling apps, including the trigger phrase \"run monkey-test\"."
 allowed-tools: Bash, Read, Edit, MultiEdit, Write
 ---
 
 # Monkey Test
 
-Use when the user asks to run the monkey test, says "kör apa-test", or asks for a
+Use when the user asks to run the monkey test, says "run monkey-test", or asks for a
 role-based release gate on an app that handles money.
 
 ## Workflow
