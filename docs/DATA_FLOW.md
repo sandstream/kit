@@ -195,7 +195,7 @@ a query parameter, so do not log full request URLs.
 | Wiz                | `auth.app.wiz.io` plus the required tenant-specific `WIZ_API_URL` |
 
 `KIT_NO_UPDATE_CHECK=1`, CI, configured air-gap posture, `--json`,
-non-interactive runs and local-only `kit memory` commands suppress the two
+non-interactive runs and every `kit memory` command suppress the two
 version notices. `KIT_BUMBLEBEE=0` disables the scanner download/scan and its
 release notice. `KIT_NO_DOWNLOAD=1` or a vetted `KIT_BUMBLEBEE_BIN` avoids
 scanner provisioning. See [`AIR_GAP.md`](./AIR_GAP.md) for offline scanner setup.
@@ -259,8 +259,8 @@ ajv   ajv-formats   fast-deep-equal   fast-uri   json-schema-traverse
 
 None of the twelve HTTP/OAuth packages load, at startup or during a tool call. That
 is inherited surface rather than executed code — which is exactly the distinction
-that decides how to read a CVE in it. Two of the four advisories cleared on this
-branch (`hono`, `ip-address`) sit in never-loaded code; `fast-uri` does **not** — ajv
+that decides how to read a CVE in it. Two of the four advisories cleared in
+6.x (`hono`, `ip-address`) sit in never-loaded code; `fast-uri` does **not**, because ajv
 reaches it when compiling the tool schemas.
 
 > The trace needs BOTH an ESM `resolve` hook and a `Module._load` patch. `ajv` is

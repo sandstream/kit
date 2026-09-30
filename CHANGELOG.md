@@ -1,32 +1,58 @@
 ## [Unreleased]
 
+## [6.12.1] - 2026-09-30
+
 ### Fixed
 
-- **`kit memory` could still reach the network.** Memory commands are local
-  only, yet the post-command version notices ran after them, calling
-  `registry.npmjs.org` and `api.github.com`. They are skipped after `kit memory`
-  now, and `KIT_BUMBLEBEE=0`, which turns the scanner off, also silences its
-  release check.
+- **The staged secret scan blocked ordinary code.** Its unquoted keyed-secret
+  rule took a code expression for a credential: `secret: process.env.SESSION_SECRET`
+  and `const secret = speakeasy.generateSecret({` both matched, and the scan runs
+  in pre-commit. A value that is a dotted identifier path, or is being called, is
+  now treated as code; a real unquoted token under a secret-shaped name is still
+  caught.
 
-- **Docs named network hosts, plugin behaviour and an adapter that were not
-  true.** `docs/DATA_FLOW.md` omitted about twenty hosts kit contacts (triage of
-  Docker images and repos, deploy-env and secret propagation, the cost monitor,
-  health sensors, built-in adapters, operator-configured endpoints).
-  `PLUGIN_AUTHORING.md` said installed plugins work with `kit check` and a
-  `kit_add` MCP tool; only packages exporting `{ adapter }` are registered, and
-  only `kit add` loads them. An example adapter was named `neon/database`; the
-  built-in is `neon/db`.
+- **About thirty documentation claims were no longer true.** A full pass over
+  `docs/` and the root docs against the code: the stability tiers (23 commands
+  are `experimental`, not one), release steps that still ended in a manual
+  `npm publish`, an LTS table for 1.x and 2.x, a team-management API that does
+  not exist, ROADMAP items listed as planned that shipped long ago (and three
+  that would put an LLM in the core, now marked rejected), plugin paths and
+  adapter ids that do not resolve, an SLSA level kit does not claim, and a
+  missing supported-versions table in SECURITY.md. `docs/COMMANDS.md` gained the
+  twelve registered commands it lacked.
 
-- **Four regular expressions could backtrack catastrophically.** The install
-  gate's runner-flag and fetch-to-shell scans, the `allowScripts` exact-version
-  check, and the AISLE plugin's finding-id slug each let one token match the same
-  characters more than one way, so a crafted command or key made a failing match
-  exponential (or quadratic for the slug). The install gate runs on every
-  PreToolUse Bash call. Each pattern is now unambiguous, with a regression test on
-  the input shape CodeQL named, and the accepted inputs and generated ids are
-  unchanged. The slug fix ships in `sandstream-kit-plugin-aisle` 0.1.2.
+- **self-audit missed environment variables held in constants.** The rule that
+  checks documented `KIT_*` names against the code did not count a name
+  declared as `const X = "KIT_...";` and read via `process.env[X]`, so docs
+  naming `KIT_KEYSTORE_SIGN_CMD` failed the check. It counts them now.
 
-## [6.12.0] - 2026-09-24
+- **The npm page showed a truncated, outdated README.** npm keeps only about
+  64 KB of a README, and kit's was 72 KB, so the package page stopped mid-sentence
+  in the MCP section; its what's-new still led with 5.0. The feature and
+  service-provisioning reference moved to `docs/FEATURES.md`, the README (36 KB)
+  gained a "What's new in 6.x", and a test now fails any release whose README
+  is over 60 KB or does not name the version being released.
+
+- **The container image stopped building, and its npm carried HIGH advisories.**
+  Alpine replaced OpenSSL 3.5.8-r0 with 3.5.9-r0, so the exact `libcrypto3` and
+  `libssl3` pins no longer resolved and every Docker build failed; both move to
+  3.5.9-r0. The npm the image installs (11.19.1, and 11.20.0, the newest) bundles
+  `brace-expansion` 5.0.9 and `undici` 6.28.0, both with HIGH advisories fixed in
+  the next patch; the image now replaces those two bundled copies with 5.0.12 and
+  6.28.1 (same major, same dependencies, both triaged). Trivy reports no HIGH or
+  CRITICAL findings in the rebuilt image.
+
+- **`sandstream-kit-plugin-aisle` publishes again.** Its npm Trusted Publisher
+  was read back and matches the other packages, and its publishing access now
+  refuses bypass-2FA tokens like theirs. It leaves `UNVERIFIED_PUBLISHERS`, so
+  0.1.2 (with the slug ReDoS fix) ships on the next tag. A test now fails if a
+  workspace is neither verified in `docs/RELEASING.md` nor skipped.
+
+- **A refused `kit upgrade` still wrote the skills lock.** When a tool missed
+  its pin, upgrade reported "Lock files not written" after already writing
+  `.kit/skills-lock.json`. Tools are now checked before any lock is written.
+
+## [6.12.0] - 2026-09-27
 
 ### Added
 
@@ -79,6 +105,41 @@
   harness modules, each with its own tests.
 
 ### Fixed
+
+- **`kit upgrade --version` ran the upgrade.** `--version` is a global flag, so
+  the unknown-flag floor accepted it after any command, but only `kit --version`
+  answered it; `kit upgrade --version` rewrote the lock files instead of
+  printing a version. It is now answered before any command runs, like `--help`.
+
+- **A lock could contradict its own declaration.** `kit upgrade` and `kit fix`
+  lock the installed version, and wrote it even when it missed the pin: with
+  `node = "22"` declared and node 25 on PATH, the lock said 25. Both now refuse
+  to write that lock and name the tool, the installed version and the pin.
+
+- **`kit memory` could still reach the network.** Memory commands are local
+  only, yet the post-command version notices ran after them, calling
+  `registry.npmjs.org` and `api.github.com`. They are skipped after `kit memory`
+  now, and `KIT_BUMBLEBEE=0`, which turns the scanner off, also silences its
+  release check.
+
+- **Docs named network hosts, plugin behaviour and an adapter that were not
+  true.** `docs/DATA_FLOW.md` omitted about twenty hosts kit contacts (triage of
+  Docker images and repos, deploy-env and secret propagation, the cost monitor,
+  health sensors, built-in adapters, operator-configured endpoints).
+  `PLUGIN_AUTHORING.md` said installed plugins work with `kit check` and a
+  `kit_add` MCP tool; only packages exporting `{ adapter }` are registered, and
+  only `kit add` loads them. An example adapter was named `neon/database`; the
+  built-in is `neon/db`.
+
+- **Four regular expressions could backtrack catastrophically.** The install
+  gate's runner-flag and fetch-to-shell scans, the `allowScripts` exact-version
+  check, and the AISLE plugin's finding-id slug each let one token match the same
+  characters more than one way, so a crafted command or key made a failing match
+  exponential (or quadratic for the slug). The install gate runs on every
+  PreToolUse Bash call. Each pattern is now unambiguous, with a regression test on
+  the input shape CodeQL named, and the accepted inputs and generated ids are
+  unchanged. The slug fix is in `sandstream-kit-plugin-aisle` 0.1.2, held back
+  from npm for now (see Known limitations).
 
 - **Release source and image gates.** Publishing refuses an npm version reused
   from changed source, scans the unpacked root tarball for release SBOMs, and
@@ -367,6 +428,13 @@
   `memory.db` and the per-machine `device-id`, is out of scope: it lives
   outside the audited project tree, never shows up in that repo's `git
   status`, and is machine identity rather than project mutation.)
+
+### Known limitations (2026-09-27)
+
+- **`sandstream-kit-plugin-aisle` 0.1.2 is not published with this release.**
+  Its npm Trusted Publisher setting has not been verified, so the publish job
+  skips it. npm keeps serving 0.1.0 until the setting is read back; the slug
+  ReDoS fix reaches AISLE users then.
 
 ### Known limitations (2026-09-24)
 

@@ -18,10 +18,19 @@ than shipping under a version whose changelog does not mention it.
 ```bash
 # 1. Prepare: bump package.json, write the CHANGELOG section, merge that PR.
 # 2. Tag the prep commit itself (signed — the job verifies the signature):
-git tag -s v6.12.0 <prep-commit> -m "v6.12.0: <one line>"
-git push origin v6.12.0
+git tag -s vX.Y.Z <prep-commit> -m "vX.Y.Z: <one line>"
+git push origin vX.Y.Z
 # 3. Approve the `npm-publish` environment when GitHub asks.
 ```
+
+Every release PR also updates, in the same PR:
+
+- `README.md`: the what's-new section names the version being released
+  (gated by `src/readme-release-gate.test.ts`);
+- the docs under `docs/` and the root `*.md` files that describe changed behaviour;
+- the website page in `sandstream/sandstream.github.io` (`kit/index.html` and
+  `llms.txt`). The daily sync there only updates the version number, so any other
+  change to the page is a manual edit.
 
 ## What the job refuses to publish
 
@@ -60,14 +69,12 @@ legacy GitHub Actions repository secret named `NPM_TOKEN` still exists as of
 2026-09-24. No workflow references it. Its presence does not establish a token
 fallback for publishing; remove it from repository settings.
 
-The thirteen packages other than `sandstream-kit-plugin-aisle` carry a GitHub
-Actions trusted publisher naming
-`sandstream/kit`, the workflow file `publish.yml`, and the environment `npm-publish`,
-with the single permission `npm publish` (not staged publish — least privilege).
-`sandstream-kit-plugin-aisle@0.1.0` was already published on 2026-08-27 outside
-the current OIDC workflow, using npm 10.9.8; its registry metadata has no
-provenance attestation. Its npm Trusted Publisher setting has not been read back.
-Verify or configure that setting before publishing a new AISLE version.
+All fourteen packages carry a GitHub Actions trusted publisher naming `sandstream/kit`,
+the workflow file `publish.yml`, and the environment `npm-publish`. The permissions npm
+shows on the settings pages read back on 2026-09-30 (AISLE and Fly) are `npm publish`
+and `npm stage publish`. `sandstream-kit-plugin-aisle@0.1.0` was published on 2026-08-27
+outside the OIDC workflow, using npm 10.9.8, so that one version has no provenance
+attestation; its trusted publisher was read back on 2026-09-30.
 
 The job exchanges its OIDC identity for a short-lived credential, so the
 environment is part of the credential rather than merely the guard around a
@@ -86,11 +93,10 @@ Two constraints keep it working:
 `--provenance` stays on the publish commands. Provenance is automatic under trusted
 publishing, so the flag is a no-op there and states the intent explicitly.
 
-**Token publishing was disabled for the thirteen verified packages** (2026-08-19,
-after 6.6.5-rc.1 proved the OIDC path). Each one's "Publishing access" was set
-to _require two-factor authentication and disallow bypass 2fa tokens_, then read
-back from its settings page. Confirm AISLE's setting separately; the existing
-0.1.0 publication is not evidence of OIDC or token exclusion.
+**Token publishing is disabled for all fourteen packages.** Each one's "Publishing
+access" is set to _require two-factor authentication and disallow bypass 2fa tokens_,
+read back from its settings page: thirteen on 2026-08-19, after 6.6.5-rc.1 proved the
+OIDC path, and AISLE on 2026-09-30.
 
 Consequences worth knowing before the next release:
 
@@ -129,8 +135,8 @@ that step exists, pins a high-enough version, and runs before any publish — a 
 fail CI, and a publish job runs only on a tag push, the worst moment to discover a too-old
 client.
 
-**The registry-side work is verified for the thirteen packages below** (2026-08-19): every
-package below was configured and its saved connection read back from its own settings
+**The registry-side work is verified for the fourteen packages below** (2026-08-19; AISLE on
+2026-09-30): every package below was configured and its saved connection read back from its own settings
 page. The list is kept because a NEW package needs the same treatment before its first
 release — no token is wired into the publish workflow as a fallback.
 
@@ -140,13 +146,15 @@ release — no token is wired into the publish workflow as a fallback.
 | `sandstream-kit-plugin-fly`     | `sandstream-kit-plugin-github`   | `sandstream-kit-plugin-railway`    |
 | `sandstream-kit-plugin-sentrux` | `sandstream-kit-plugin-sentry`   | `sandstream-kit-plugin-snyk`       |
 | `sandstream-kit-plugin-stripe`  | `sandstream-kit-plugin-supabase` | `sandstream-kit-plugin-vercel`     |
-| `sandstream-kit-plugin-wiz`     |                                  |                                    |
+| `sandstream-kit-plugin-wiz`     | `sandstream-kit-plugin-aisle`    |                                    |
 
-`sandstream-kit-plugin-aisle` is not in the verified list. Version 0.1.0 is already
-on npm without provenance; the publish loop skips an exact version already there.
-Verify its Trusted Publisher and publishing-access settings in npm, then give any
-changed AISLE package a new version before the next release. Add it to the table
-only after the settings have been read back.
+`sandstream-kit-plugin-aisle` was verified last: 0.1.0 was published by hand, without
+provenance, and its settings were read back on 2026-09-30 (Trusted Publisher `sandstream/kit`,
+`publish.yml`, environment `npm-publish`; publishing access switched to "require 2FA and
+disallow bypass tokens" to match the others). A package whose settings have not been read
+back goes in `publish.yml`'s `UNVERIFIED_PUBLISHERS` instead, and the publish loop skips it
+with a warning. `src/publish-workflow.test.ts` fails if a workspace is in neither place, or
+in both.
 
 For each (and for any new package): its npm page → Settings → Trusted Publisher → GitHub
 Actions, then `Organization or user` = `sandstream`, `Repository` = `kit`,

@@ -126,8 +126,11 @@ verifying hash-only until the next `kit audit anchor` re-seals them as v3.
 Asymmetric payoff: a remote / CI / teammate verifies WHO produced an entry with
 only the PUBLIC key — never a forge-capable secret, unlike the HMAC anchor. Same
 same-UID boundary applies for _production_: a same-UID principal can read the
-0600 private key and sign as this identity (closed later by non-exportable key
-storage — TPM/keychain/HSM, the 3.0 regulated tier). What it buys today is
+0600 private key and sign as this identity. Non-exportable key storage closes
+that gap: configure an external signer (`KIT_KEYSTORE=command` plus a sign
+command and its public key, see `src/keystore/command-store.ts`) and check it with
+`kit identity keystore`. The native TPM and Secure Enclave stores are stubs that
+report unavailable. What it buys today is
 offline, third-party-verifiable attribution that the symmetric anchor cannot
 express.
 

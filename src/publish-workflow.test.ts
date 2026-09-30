@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
   chmodSync,
@@ -372,6 +373,32 @@ describe("publish.yml — release evidence describes the shipped package", () =>
       const end = EXECUTED.indexOf("\n      - name:", start + name.length);
       const step = EXECUTED.slice(start, end < 0 ? undefined : end);
       assert.doesNotMatch(step, /\bif:\s*always\(\)/);
+    }
+  });
+});
+
+describe("publish.yml and RELEASING.md agree on which packages may publish", () => {
+  it("lists every workspace either as verified in RELEASING.md or as skipped, never both", () => {
+    // A package in neither place would be published over OIDC with no read-back of its npm
+    // Trusted Publisher; under OIDC-only publishing an unconfigured one is rejected mid-loop,
+    // after earlier packages already shipped. A package in both is a stale exception.
+    const skip = EXECUTED.match(/UNVERIFIED_PUBLISHERS="([^"]*)"/);
+    assert.ok(skip, "publish.yml no longer declares UNVERIFIED_PUBLISHERS");
+    assert.match(EXECUTED, /case " \$UNVERIFIED_PUBLISHERS " in \*" \$dir "\*\)/);
+    const skipped = new Set(skip[1].split(/\s+/).filter(Boolean));
+    const table = readFileSync(join(REPO_ROOT, "docs", "RELEASING.md"), "utf8");
+    const rows = table.split("\n").filter((l) => l.startsWith("| `sandstream-kit"));
+    const verified = new Set(
+      rows.flatMap((l) => [...l.matchAll(/`(sandstream-kit[a-z-]*)`/g)].map((m) => m[1])),
+    );
+    for (const dir of readdirSync(join(REPO_ROOT, "packages")).map((d) => `packages/${d}`)) {
+      const name = JSON.parse(readFileSync(join(REPO_ROOT, dir, "package.json"), "utf8")).name;
+      const isSkipped = skipped.has(dir);
+      assert.notEqual(
+        verified.has(name),
+        isSkipped,
+        `${name}: verified=${verified.has(name)} skipped=${isSkipped}`,
+      );
     }
   });
 });

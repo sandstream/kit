@@ -52,12 +52,27 @@ WORKDIR /app
 RUN apk add --no-cache --upgrade \
         bash=5.3.9-r1 \
         dumb-init=1.2.5-r4 \
-        libcrypto3=3.5.8-r0 \
+        libcrypto3=3.5.9-r0 \
         libexpat=2.8.5-r0 \
-        libssl3=3.5.8-r0 \
+        libssl3=3.5.9-r0 \
         python3=3.14.7-r1 \
     && npm install -g npm@11.19.1 --ignore-scripts \
     && npm cache clean --force
+
+# npm 11.19.1 (and 11.20.0, the newest) bundles brace-expansion 5.0.9 and undici 6.28.0,
+# both with HIGH advisories fixed in the next patch. Until npm ships them, replace the two
+# bundled copies with the fixed patches; same major, same dependencies, both triaged.
+# `npm pack` verifies each tarball's integrity against the registry.
+RUN bundled=/usr/local/lib/node_modules/npm/node_modules \
+    && for spec in brace-expansion@5.0.12 undici@6.28.1; do \
+        name="${spec%@*}"; \
+        tarball="/tmp/$(npm pack "$spec" --silent --pack-destination /tmp)"; \
+        rm -rf "${bundled:?}/$name" && mkdir "$bundled/$name"; \
+        tar -xzf "$tarball" -C "$bundled/$name" --strip-components=1; \
+        rm -f "$tarball"; \
+    done \
+    && npm cache clean --force \
+    && npm --version
 
 # Create non-root user
 RUN addgroup -g 1001 -S kit && \

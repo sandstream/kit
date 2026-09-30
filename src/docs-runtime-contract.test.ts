@@ -23,9 +23,11 @@ describe("runtime claims in documentation", () => {
   });
 
   it("keeps supply-chain findings separate from the chained audit log", () => {
-    const readme = read("README.md");
-    assert.match(readme, /findings auto-append to `\.kit-findings\.jsonl`/);
-    assert.doesNotMatch(readme, /findings auto-append to `\.kit-audit\.jsonl`/);
+    // The feature reference moved from README.md to docs/FEATURES.md (npm's README limit).
+    const features = read("docs/FEATURES.md");
+    assert.match(features, /findings auto-append to `\.kit-findings\.jsonl`/);
+    assert.doesNotMatch(features, /findings auto-append to `\.kit-audit\.jsonl`/);
+    assert.doesNotMatch(read("README.md"), /findings auto-append to `\.kit-audit\.jsonl`/);
   });
 
   it("documents the reachable remote-audit config keys", () => {
