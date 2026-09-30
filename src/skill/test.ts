@@ -208,11 +208,22 @@ export function checkContract(m: SkillManifest): CheckResult {
  * Normalized trigger key: the lowercased, whitespace-collapsed, punctuation-stripped
  * description. Two skills whose descriptions normalize to the same key claim the same
  * trigger. Pure — empty when no description.
+ *
+ * Unicode-aware by necessity, not by taste. An ASCII-only class (`[^a-z0-9]`) deletes every
+ * non-Latin letter, so a description written in Chinese, Japanese, Korean, Arabic, Hebrew, Greek,
+ * Cyrillic or Thai normalizes to the EMPTY STRING — and `checkTrigger` then fails it with "no
+ * description", in the same run where `checkContract` passes it for HAVING a description. The
+ * verdict contradicted itself and the author could not fix it except by writing English.
+ * `\p{L}`/`\p{N}` keep letters and digits in any script. A pure-ASCII description yields a
+ * byte-identical key, so such snapshots are untouched — but any description containing a
+ * non-ASCII LETTER gets a new key and must be re-pinned once. kit's own skills are English by
+ * policy (`src/english-only.test.ts`), so none of them exercise this; it is third-party skills
+ * that were failing, which is exactly why the bug survived this long.
  */
 export function triggerKey(m: SkillManifest): string {
   return (m.description ?? "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
     .replace(/\s+/g, " ");
 }
@@ -240,6 +251,30 @@ export function checkTrigger(m: SkillManifest, siblings: SiblingSkill[] = []): C
 }
 
 /**
+ * Tools whose EFFECTS no tier of kit bounds, so a declaration naming one is a smaller claim than
+ * the word "bounded" implies.
+ *
+ * WHY THIS EXISTS. `Bash` passes this check as a declared tool, and a literal `*` fails — yet
+ * `Bash` is the larger grant. Measured across every tier for `rm -rf` reached through Bash:
+ *
+ *   - this static check          pass  (Bash is in allowed-tools)
+ *   - `skill test --runtime`     undefined — `brokerVerdictForRow` extracts HOSTS from a Bash
+ *                                command, so a call with no host has no target to judge, and
+ *                                tool-scope is all that is left
+ *   - `kit gate-fs`              passes through — "Non-write tool calls pass through"
+ *   - `kit gate-bash`            not its job — it blocks un-triaged INSTALLS
+ *
+ * Egress through Bash IS bounded (hosts are extractable and a miss fails closed). Filesystem
+ * effects are not, and cannot be: `rm -rf "$T"`, `eval`, a script that reads its own paths — the
+ * effects of a shell string are undecidable in general, so a partial extractor would green exactly
+ * the commands it failed to parse. The honest move is not a stricter verdict (the declaration is
+ * real) but a truthful one: say what is unbounded instead of calling the scope "bounded".
+ *
+ * Deliberately narrow: only tools whose unboundedness has been measured belong here.
+ */
+const UNBOUNDABLE_TOOLS: ReadonlySet<string> = new Set(["Bash"]);
+
+/**
  * Scope — the DECLARED-least-privilege half. `allowed-tools` must be present and bounded:
  * absent means the skill implicitly claims every tool; a `*` wildcard is not
  * least-privilege. An empty list is the most restrictive (pass). This proves the skill
@@ -263,6 +298,13 @@ export function checkScope(m: SkillManifest): CheckResult {
     return s("fail", "allowed-tools contains a wildcard (*) — not least-privilege");
   if (m.allowedTools.length === 0)
     return s("pass", "declares zero tools (maximally least-privilege)");
+  const unbounded = m.allowedTools.filter((t) => UNBOUNDABLE_TOOLS.has(t));
+  if (unbounded.length > 0)
+    return s(
+      "pass",
+      `declares ${m.allowedTools.length} tool(s), of which ${unbounded.join(", ")} ` +
+        `cannot be bounded by any tier — its filesystem effects are checked by nothing`,
+    );
   return s("pass", `declares a bounded scope of ${m.allowedTools.length} tool(s)`);
 }
 
