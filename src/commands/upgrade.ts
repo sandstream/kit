@@ -127,18 +127,6 @@ export async function cmdUpgrade(): Promise<boolean> {
 
   const config = await loadConfig(resolveConfigPath());
 
-  // Update skills lock
-  const skills: Record<string, string> = {};
-  if (config.skills?.required) {
-    Object.assign(skills, config.skills.required);
-  }
-  if (config.skills?.optional) {
-    Object.assign(skills, config.skills.optional);
-  }
-
-  const kitMeta = await readkitMeta();
-  await updateSkillsLock(skills, kitMeta?.name ? `${kitMeta.name}@${kitMeta.version}` : undefined);
-
   // Lock what is actually installed. A declared `latest` and an assumed mise
   // source are requests, not provenance evidence.
   let tools: Awaited<ReturnType<typeof resolveLockEntries>>;
@@ -154,6 +142,18 @@ export async function cmdUpgrade(): Promise<boolean> {
     console.error(`${c.dim}Lock files not written. Run kit install, then kit upgrade.${c.reset}`);
     return false;
   }
+  // Skills lock only after the tool lock is known to be writable: a refusal writes nothing.
+  const skills: Record<string, string> = {};
+  if (config.skills?.required) {
+    Object.assign(skills, config.skills.required);
+  }
+  if (config.skills?.optional) {
+    Object.assign(skills, config.skills.optional);
+  }
+
+  const kitMeta = await readkitMeta();
+  await updateSkillsLock(skills, kitMeta?.name ? `${kitMeta.name}@${kitMeta.version}` : undefined);
+
   await updateCliLock(tools);
 
   console.log(`${c.green}✓${c.reset} Updated lock files from .kit.toml\n`);

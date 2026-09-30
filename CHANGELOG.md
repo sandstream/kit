@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+### Fixed
+
+- **A refused `kit upgrade` still wrote the skills lock.** When a tool missed
+  its pin, upgrade reported "Lock files not written" after already writing
+  `.kit/skills-lock.json`. Tools are now checked before any lock is written.
+
 ## [6.12.0] - 2026-09-27
 
 ### Added

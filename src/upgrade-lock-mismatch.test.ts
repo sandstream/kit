@@ -38,7 +38,8 @@ describe("kit upgrade: the lock never contradicts the declaration (compiled CLI)
     try {
       assert.equal(r.code, 1);
       assert.match(r.stderr, /node.*does not satisfy.*1/);
-      assert.equal(existsSync(join(r.cwd, ".kit", "cli-lock.json")), false);
+      // "Lock files not written" must be true of every lock file, not only the cli lock.
+      assert.equal(existsSync(join(r.cwd, ".kit")), false, "a refused upgrade writes nothing");
     } finally {
       rmSync(r.cwd, { recursive: true, force: true });
     }
