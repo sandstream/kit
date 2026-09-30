@@ -2,6 +2,21 @@
 
 ### Fixed
 
+- **The container image stopped building, and its npm carried HIGH advisories.**
+  Alpine replaced OpenSSL 3.5.8-r0 with 3.5.9-r0, so the exact `libcrypto3` and
+  `libssl3` pins no longer resolved and every Docker build failed; both move to
+  3.5.9-r0. The npm the image installs (11.19.1, and 11.20.0, the newest) bundles
+  `brace-expansion` 5.0.9 and `undici` 6.28.0, both with HIGH advisories fixed in
+  the next patch; the image now replaces those two bundled copies with 5.0.12 and
+  6.28.1 (same major, same dependencies, both triaged). Trivy reports no HIGH or
+  CRITICAL findings in the rebuilt image.
+
+- **`sandstream-kit-plugin-aisle` publishes again.** Its npm Trusted Publisher
+  was read back and matches the other packages, and its publishing access now
+  refuses bypass-2FA tokens like theirs. It leaves `UNVERIFIED_PUBLISHERS`, so
+  0.1.2 (with the slug ReDoS fix) ships on the next tag. A test now fails if a
+  workspace is neither verified in `docs/RELEASING.md` nor skipped.
+
 - **A refused `kit upgrade` still wrote the skills lock.** When a tool missed
   its pin, upgrade reported "Lock files not written" after already writing
   `.kit/skills-lock.json`. Tools are now checked before any lock is written.
