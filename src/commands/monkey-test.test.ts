@@ -11,8 +11,22 @@ let argv: string[];
 let exitCode: string | number | null | undefined;
 let logs: string[];
 let origLog: typeof console.log;
+const isolatedEnv = new Map<string, string | undefined>();
 
 beforeEach(() => {
+  isolatedEnv.clear();
+  for (const [key, value] of Object.entries(process.env)) {
+    if (
+      key === "SKIP_SEED" ||
+      /^(?:MONKEY_PAYMENT|STRIPE|PAYPAL|BRAINTREE|ADYEN|SQUARE)_(?:MODE|ENV|ENVIRONMENT)$/i.test(
+        key,
+      ) ||
+      /^(?:sk|pk|rk)_live_/.test(value?.trim() ?? "")
+    ) {
+      isolatedEnv.set(key, value);
+      delete process.env[key];
+    }
+  }
   dir = mkdtempSync(join(tmpdir(), "kit-monkey-cmd-"));
   cwd = process.cwd();
   process.chdir(dir);
@@ -28,6 +42,10 @@ afterEach(() => {
   process.argv = argv;
   process.exitCode = exitCode;
   console.log = origLog;
+  for (const [key, value] of isolatedEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -51,7 +69,7 @@ describe("cmdMonkeyTest", () => {
     });
     setArgs("plan", "--json");
 
-    assert.equal(await cmdMonkeyTest(), true);
+    assert.equal(await cmdMonkeyTest(), true, logs.join("\n"));
     const plan = outputJson<{ roles: { id: string; label: string }[] }>();
 
     assert.ok(plan.roles.some((role) => role.id === "staff" && role.label === "Kiosk staff"));
@@ -73,7 +91,7 @@ describe("cmdMonkeyTest", () => {
     writePackage({ scripts: {} });
     setArgs("run", "--skip-browser", "--expected", "browser is covered by release smoke", "--json");
 
-    assert.equal(await cmdMonkeyTest(), false);
+    assert.equal(await cmdMonkeyTest(), false, logs.join("\n"));
     const result = outputJson<{
       ok: boolean;
       findings: { title: string }[];

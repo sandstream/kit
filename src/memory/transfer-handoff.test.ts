@@ -184,8 +184,15 @@ it("concurrent remote action state is visible in sync, pull and Claude's user me
     env: { ...process.env, KIT_HOOK_JSON: "claude", KIT_NO_HINTS: "1" },
   });
   assert.equal(hook.status, 0, hook.stderr);
-  const payload = JSON.parse(hook.stdout);
-  assert.match(payload.systemMessage, /memory pull needs attention/);
+  let payload: { systemMessage?: string; hookSpecificOutput: { additionalContext: string } };
+  try {
+    payload = JSON.parse(hook.stdout) as typeof payload;
+  } catch (error) {
+    assert.fail(
+      `session-start stdout was not one JSON payload (${String(error)}): ${JSON.stringify(hook.stdout.slice(0, 240))}`,
+    );
+  }
+  assert.match(payload.systemMessage ?? "", /memory pull needs attention/);
   assert.match(payload.hookSpecificOutput.additionalContext, /memory pull needs attention/);
 });
 

@@ -99,7 +99,7 @@ export function deriveAdrs(
       const f = findings[0];
       rejected.push({
         candidate,
-        reason: `rule fires today (${findings.length} finding(s), first: ${f.file}:${f.line})`,
+        reason: `rule fires today (${findings.length} finding(s), first: ${f.file.replaceAll("\\", "/")}:${f.line})`,
       });
       continue;
     }

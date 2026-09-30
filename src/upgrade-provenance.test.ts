@@ -29,25 +29,37 @@ describe("kit upgrade CLI lock provenance", () => {
     mkdirSync(bin);
     writeFileSync(join(project, ".kit.toml"), 'version = 1\n[tools]\nwidget = "latest"\n');
     let fixtureNodeOptions: string | undefined;
+    const fixtureEnv: NodeJS.ProcessEnv = {};
     if (process.platform === "win32") {
-      // execFile cannot launch a shebang script on native Windows. A Node exe
-      // alias answers the version probe without involving a shell.
+      // A bare Node alias treats --version as a Node runtime flag and exits before
+      // userland preload hooks can answer it. Fake mise's `current` and `which`
+      // commands instead, keeping this fixture shell-free on native Windows.
       const executable = join(bin, "widget.exe");
       try {
         linkSync(process.execPath, executable);
       } catch {
         copyFileSync(process.execPath, executable);
       }
+      const mise = join(bin, "mise.exe");
+      try {
+        linkSync(process.execPath, mise);
+      } catch {
+        copyFileSync(process.execPath, mise);
+      }
       const loader = join(bin, "fixture-loader.mjs");
       writeFileSync(
         loader,
-        'import { basename } from "node:path";\n' +
-          'if (process.argv[1] && basename(process.argv[1]).toLowerCase() === "--version") {\n' +
-          '  console.log("widget 9.8.7");\n' +
+        'if (process.argv[1] === "current" && process.argv[2] === "widget") {\n' +
+          '  console.log("9.8.7");\n' +
+          "  process.exit(0);\n" +
+          "}\n" +
+          'if (process.argv[1] === "which" && process.argv[2] === "widget") {\n' +
+          "  console.log(process.env.WIDGET_FIXTURE_BIN);\n" +
           "  process.exit(0);\n" +
           "}\n",
       );
       fixtureNodeOptions = `--import=${pathToFileURL(loader).href}`;
+      fixtureEnv.WIDGET_FIXTURE_BIN = executable;
     } else {
       writeFileSync(join(bin, "widget"), '#!/bin/sh\necho "widget 9.8.7"\n');
       chmodSync(join(bin, "widget"), 0o755);
@@ -60,6 +72,7 @@ describe("kit upgrade CLI lock provenance", () => {
           ...process.env,
           PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
           ...(fixtureNodeOptions ? { NODE_OPTIONS: fixtureNodeOptions } : {}),
+          ...fixtureEnv,
           KIT_NO_UPDATE_CHECK: "1",
         },
       });

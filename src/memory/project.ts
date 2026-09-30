@@ -257,7 +257,10 @@ export function getProjectRecallRoots(projectPath: string, db?: DatabaseSync): s
       cwd: canonical,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-      timeout: 2000,
+      // Git startup on antivirus-scanned Windows worktrees can exceed 2s. A timeout
+      // that short silently drops sibling worktrees from recall (the catch below
+      // falls back to only the current root), so allow ordinary cold-start latency.
+      timeout: 10_000,
     });
     const roots = records
       .split("\0")

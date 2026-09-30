@@ -163,7 +163,7 @@ describe("memory merge", () => {
     };
     assert.equal(row.project, projectKey);
     assert.equal(searchMessages(target, "container", { projectPath: remapProject }).length, 1);
-    assert.equal(recentMessages(target, { projectPath: "/Users/x/dev/kit" }).length, 1);
+    assert.equal(recentMessages(target, { projectPath: remapProject }).length, 1);
 
     // Re-merge with remap also rehomes an ALREADY-imported foreign session
     // (upsert: a non-null incoming project wins) — the recovery path when the
