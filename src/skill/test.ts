@@ -215,11 +215,10 @@ export function checkContract(m: SkillManifest): CheckResult {
  * description", in the same run where `checkContract` passes it for HAVING a description. The
  * verdict contradicted itself and the author could not fix it except by writing English.
  * `\p{L}`/`\p{N}` keep letters and digits in any script. A pure-ASCII description yields a
- * byte-identical key, so most snapshots are untouched — but any description containing a
- * non-ASCII LETTER gets a new key and must be re-pinned. kit's own `monkey-test` is one: its
- * trigger phrase is Swedish ("kör apa-test"), so its key went `k r apa test` → `kör apa test`
- * and its snapshot is updated in the same commit. That is the fix working, on the first user
- * it was meant to help.
+ * byte-identical key, so such snapshots are untouched — but any description containing a
+ * non-ASCII LETTER gets a new key and must be re-pinned once. kit's own skills are English by
+ * policy (`src/english-only.test.ts`), so none of them exercise this; it is third-party skills
+ * that were failing, which is exactly why the bug survived this long.
  */
 export function triggerKey(m: SkillManifest): string {
   return (m.description ?? "")
