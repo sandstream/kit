@@ -1,6 +1,9 @@
 # Platform support
 
-kit targets POSIX environments. The runtime is careful about cross-platform
+kit supports macOS, Linux and Windows. On Windows, WSL2 is recommended; native
+Windows has its build and core verifier tests required on `windows-latest` in CI
+(`.github/workflows/windows.yml`), while the full native suite and smoke run there
+as diagnostics. The runtime is careful about cross-platform
 APIs (it uses `execFile` with argument arrays, `os.homedir()`, and
 platform-routed commands), but a handful of operational dependencies at the
 edges assume a POSIX shell and Unix tooling.

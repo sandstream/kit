@@ -1,6 +1,6 @@
 # CLI Stability
 
-kit 2.0 freezes its public command surface and makes that promise _enforced_,
+kit froze its public command surface in 2.0 and keeps that promise _enforced_ in every major since,
 not merely asserted. Every top-level command carries a stability tier, and a
 committed golden snapshot of the surface fails CI when it drifts without an
 explicit acknowledgement.
@@ -18,16 +18,17 @@ command has a tier _and_ a help entry, so the surface can never silently drift.
 
 | Tier           | Promise                                                                                                                              | Breaking change allowed in |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- |
-| `stable`       | Covered by the 2.x compatibility promise. The command keeps working with the same name and core behavior across the entire 2.x line. | MAJOR only (3.0)           |
+| `stable`       | Covered by the current major's compatibility promise (6.x). The command keeps working with the same name and core behavior across the whole major line. | MAJOR only (7.0)           |
 | `experimental` | Shipped, but the shape (flags, output, subcommands) may change across MINOR versions. Use with that caveat.                          | MINOR                      |
 | `deprecated`   | Slated for removal in a future MAJOR. Still runs, but prints a deprecation warning to stderr on every invocation.                    | removed in next MAJOR      |
 
 ### Current tiers
 
-Almost every shipped command is `stable`. The exception is:
-
-- `team` - `experimental`. The RBAC/team-management backend is not wired yet
-  (the command currently prints placeholders), so its surface may still change.
+52 commands are `stable` and 23 are `experimental`: `adr`, `bootstrap`, `broker`,
+`browser`, `coverage`, `decisions`, `gate-bash`, `gate-egress`, `gate-env`, `gate-fs`,
+`guard`, `guard-observe`, `identity`, `insight`, `map`, `monkey-test`, `panic`,
+`policy`, `profile`, `skill`, `slopsquat`, `team` and `tools`. `kit <cmd> --help`
+marks an experimental command.
 
 The authoritative, machine-readable list lives in
 [`contracts/public-surface.json`](../contracts/public-surface.json) under
@@ -47,7 +48,7 @@ none". Treated as an output format, not a dependency — the spec is pre-1.0.
 
 ## Stable command promise
 
-For a `stable` command, across the whole 2.x line kit will not:
+For a `stable` command, across the whole current major line kit will not:
 
 - remove or rename the command,
 - remove a documented subcommand,
@@ -76,7 +77,7 @@ From that point:
 3. It is removed only in the next MAJOR version, with a changelog entry and a
    migration note.
 
-No commands are deprecated at 2.0. The mechanism is in place so that when the
+No command is currently deprecated. The mechanism is in place so that when the
 first one is, the warning fires automatically.
 
 ## How the freeze is enforced
