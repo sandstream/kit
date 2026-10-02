@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  aliasSiblingSpelling,
+  storedAliases,
   getCurrentProjectRoot,
   getProjectRecallRoots,
   recallRootVariants,
@@ -99,20 +99,30 @@ it("expands only repository roots to their registered worktrees", () => {
   }
 });
 
-it("carries the caller's 8.3 short-name spelling onto sibling worktrees", () => {
-  const spelled = "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\kit-x\\repo";
-  const native = "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\kit-x\\repo";
+it("adds stored spellings that resolve to a recall root or below it, nothing else", () => {
+  const long = "C:\\Users\\runneradmin\\Temp\\kit-x";
+  const short = "C:\\Users\\RUNNER~1\\Temp\\kit-x";
+  const native = (path: string) =>
+    path.toLowerCase().startsWith(short.toLowerCase()) ? long + path.slice(short.length) : path;
   assert.deepEqual(
-    aliasSiblingSpelling(spelled, native, [
-      "C:/Users/runneradmin/AppData/Local/Temp/kit-x/repo",
-      "C:/Users/runneradmin/AppData/Local/Temp/kit-x/review worktree",
-      "D:/elsewhere/other",
-    ]),
-    [
-      "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\kit-x\\repo",
-      "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\kit-x\\review worktree",
-    ],
+    storedAliases(
+      [`${long}\\repo`, `${long.replaceAll("\\", "/")}/review worktree`],
+      [
+        `${short}\\repo`,
+        `${short}\\review worktree`,
+        `${short}\\review worktree\\src`,
+        `${short}\\repository-elsewhere`,
+        "D:\\other\\repo",
+      ],
+      native,
+    ),
+    [`${short}\\repo`, `${short}\\review worktree`, `${short}\\review worktree\\src`],
   );
-  assert.deepEqual(aliasSiblingSpelling(native, native, ["C:/a/b"]), []);
-  assert.deepEqual(aliasSiblingSpelling("/srv/x", "/data/x", ["/data/y"]), []);
+});
+
+it("skips stored paths that no longer resolve", () => {
+  assert.deepEqual(
+    storedAliases(["C:\\a\\repo"], ["C:\\gone\\repo"], () => null),
+    [],
+  );
 });
