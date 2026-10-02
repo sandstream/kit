@@ -185,13 +185,17 @@ async function applicationEnvFindings(root: string, file: string): Promise<Monke
   }
 }
 
+// Prompt formats use `$` as escape syntax (cmd's PROMPT=$P$G, bash's PS1), and no application
+// loader reads them. Windows inherits PROMPT into every shell, so screening it refused every run.
+const SHELL_PROMPTS = new Set(["PROMPT", "PROMPT_COMMAND", "PS1", "PS2", "PS3", "PS4"]);
+
 export async function monkeyEnvironmentFindings(
   root: string,
   env: NodeJS.ProcessEnv,
 ): Promise<MonkeyFinding[]> {
   const findings = livePaymentEnvironmentFindings(env, "process environment");
   if (findings.length > 0) return findings;
-  const unresolved = nonLiteralKeys(env);
+  const unresolved = nonLiteralKeys(env).filter((key) => !SHELL_PROMPTS.has(key.toUpperCase()));
   if (unresolved.length > 0) {
     return [
       monkeyFinding({

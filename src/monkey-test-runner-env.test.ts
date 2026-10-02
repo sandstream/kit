@@ -127,3 +127,30 @@ describe("monkeyEnvironmentFindings", () => {
     assert.doesNotMatch(JSON.stringify(findings), /release-target-value/);
   });
 });
+
+describe("monkeyEnvironmentFindings shell prompts", () => {
+  it("does not treat shell prompt formats as unresolved references", async () => {
+    const findings = await monkeyEnvironmentFindings(process.cwd(), {
+      PROMPT: "$P$G",
+      PS1: "\\u@\\h:$PWD$ ",
+      PROMPT_COMMAND: "history -a; echo $SECONDS",
+    });
+    assert.deepEqual(
+      findings.filter((f) => f.title === "Application environment could not be inspected"),
+      [],
+    );
+  });
+
+  it("still refuses a reference in any other variable next to a prompt", async () => {
+    const findings = await monkeyEnvironmentFindings(process.cwd(), {
+      PROMPT: "$P$G",
+      DATABASE_URL: "postgres://$DB_HOST/app",
+    });
+    const finding = findings.find(
+      (f) => f.title === "Application environment could not be inspected",
+    );
+    assert.ok(finding);
+    assert.match(finding.repro, /DATABASE_URL/);
+    assert.doesNotMatch(finding.repro, /PROMPT/);
+  });
+});
