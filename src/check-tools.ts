@@ -37,6 +37,7 @@ export type CurrencyChecker = (
   tool: string,
   source: ToolSource,
   installed: string | null,
+  path?: string | null,
 ) => Promise<DriftVerdict>;
 
 async function getToolVersion(tool: string, resolve: ToolResolver): Promise<string | null> {
@@ -86,7 +87,7 @@ export async function checkTools(
     // being newest, and asking anyway would put the network on the gate's critical path.
     const drift =
       currency && required === "latest"
-        ? await currency(name, source ?? "unknown", installed)
+        ? await currency(name, source ?? "unknown", installed, path ?? null)
         : undefined;
     results.push({ name, required, installed, ok, path, source, currency: drift });
   }

@@ -27,8 +27,10 @@ import {
   type DriftVerdict,
   type LatestCache,
   type LatestDeps,
+  type LatestOutcome,
 } from "./tool-latest.js";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
+import { latestQueryFor } from "./tool-query.js";
 
 /**
  * Tools whose output an agent treats as authority, beyond whatever `[tools]` declares.
@@ -54,6 +56,10 @@ export const AGENT_RELEVANT_TOOLS = [
   "python3",
   "vercel",
   "convex",
+  "infisical",
+  "aws",
+  "wrangler",
+  "flyctl",
 ] as const;
 
 export interface ToolFacts {
@@ -137,11 +143,28 @@ export async function realLatestDeps(): Promise<LatestDeps> {
  * Silence would be the old false green with extra steps.
  */
 export async function cachedCurrencyChecker(): Promise<
-  (tool: string, source: ToolSource, installed: string | null) => Promise<DriftVerdict>
+  (
+    tool: string,
+    source: ToolSource,
+    installed: string | null,
+    path?: string | null,
+  ) => Promise<DriftVerdict>
 > {
   const deps = { ...(await realLatestDeps()), cacheOnly: true };
-  return async (tool, source, installed) =>
-    judgeDrift(installed, await latestVersion(probeName(tool), source, deps));
+  return async (tool, source, installed, path = null) =>
+    judgeDrift(installed, await latestFor(tool, source, path, deps));
+}
+
+/** The gate and `kit tools list` must ask the same question, or they read different cache keys. */
+async function latestFor(
+  declaration: string,
+  source: ToolSource,
+  path: string | null,
+  deps: LatestDeps,
+): Promise<LatestOutcome> {
+  const query = latestQueryFor(declaration, source, path);
+  if ("unsupported" in query) return { status: "unsupported", reason: query.unsupported };
+  return latestVersion(query.name, source, deps);
 }
 
 /** Measure one tool. `withCurrency` gates the (possibly networked) latest lookup. */
@@ -155,10 +178,7 @@ export async function describeTool(
   const facts: ToolFacts = { name, declared: opts.declared, path, provenance, installed };
   if (opts.withCurrency && provenance) {
     const deps = opts.deps ?? (await realLatestDeps());
-    facts.currency = judgeDrift(
-      installed,
-      await latestVersion(probeName(name), provenance.source, deps),
-    );
+    facts.currency = judgeDrift(installed, await latestFor(name, provenance.source, path, deps));
   }
   return facts;
 }

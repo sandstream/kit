@@ -4791,8 +4791,18 @@
     },
     "tools": {
       "kind": "command",
-      "summary": "Inventory the CLIs on this machine — path, installer, installed version, and (with --latest) how far behind each one is",
-      "x-kit-accepted-flags": ["--env","--help","--json","--latest","--non-interactive","--read-only","--readonly","--version"],
+      "summary": "Inventory the CLIs on this machine — path, installer, installed version, and (with --latest) how far behind each one is, and (with --auth) whether it is logged in",
+      "x-kit-accepted-flags": [
+        "--auth",
+        "--env",
+        "--help",
+        "--json",
+        "--latest",
+        "--non-interactive",
+        "--read-only",
+        "--readonly",
+        "--version"
+      ],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-mcp": false,
