@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  aliasSiblingSpelling,
   getCurrentProjectRoot,
   getProjectRecallRoots,
   recallRootVariants,
@@ -96,4 +97,22 @@ it("expands only repository roots to their registered worktrees", () => {
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+it("carries the caller's 8.3 short-name spelling onto sibling worktrees", () => {
+  const spelled = "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\kit-x\\repo";
+  const native = "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\kit-x\\repo";
+  assert.deepEqual(
+    aliasSiblingSpelling(spelled, native, [
+      "C:/Users/runneradmin/AppData/Local/Temp/kit-x/repo",
+      "C:/Users/runneradmin/AppData/Local/Temp/kit-x/review worktree",
+      "D:/elsewhere/other",
+    ]),
+    [
+      "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\kit-x\\repo",
+      "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\kit-x\\review worktree",
+    ],
+  );
+  assert.deepEqual(aliasSiblingSpelling(native, native, ["C:/a/b"]), []);
+  assert.deepEqual(aliasSiblingSpelling("/srv/x", "/data/x", ["/data/y"]), []);
 });

@@ -208,6 +208,34 @@ export function recallRootVariants(root: string): string[] {
   return [...new Set([root, root.replaceAll("\\", "/"), root.replaceAll("/", "\\")])];
 }
 
+/**
+ * Windows 8.3 short names (RUNNER~1) survive Node's realpath, but git reports worktrees in
+ * long form. When the caller's spelling differs from the native path only by an 8.3 prefix,
+ * spell git's sibling worktrees the same way so rows stored under that spelling still match.
+ */
+export function aliasSiblingSpelling(spelled: string, native: string, roots: string[]): string[] {
+  const parts = (path: string) => path.split(/[\\/]+/).filter(Boolean);
+  const a = parts(spelled);
+  const b = parts(native);
+  let shared = 0;
+  while (
+    shared < a.length &&
+    shared < b.length &&
+    a[a.length - 1 - shared].toLowerCase() === b[b.length - 1 - shared].toLowerCase()
+  )
+    shared++;
+  const spelledPrefix = a.slice(0, a.length - shared);
+  const nativePrefix = b.slice(0, b.length - shared);
+  if (nativePrefix.length === 0 || !spelledPrefix.some((part) => /~\d/.test(part))) return [];
+  return roots.flatMap((root) => {
+    const segments = parts(root);
+    const under = nativePrefix.every(
+      (part, i) => segments[i]?.toLowerCase() === part.toLowerCase(),
+    );
+    return under ? [[...spelledPrefix, ...segments.slice(nativePrefix.length)].join("\\")] : [];
+  });
+}
+
 function sameLocalDirectory(left: string, right: string): boolean {
   if (left === right) return true;
   try {
@@ -266,9 +294,18 @@ export function getProjectRecallRoots(projectPath: string, db?: DatabaseSync): s
       .split("\0")
       .filter((field) => field.startsWith("worktree "))
       .map((field) => field.slice("worktree ".length));
+    let aliases: string[] = [];
+    if (process.platform === "win32") {
+      try {
+        aliases = aliasSiblingSpelling(projectPath, realpathSync.native(canonical), roots);
+      } catch {
+        // No native spelling: the long-form worktree roots above still apply.
+      }
+    }
     return distinctRecallRoots([
       ...localRoots,
       ...roots.flatMap((root) => [root, resolveLocalProjectPath(root)]),
+      ...aliases,
     ]);
   } catch {
     return distinctRecallRoots(localRoots);
