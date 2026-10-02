@@ -30,7 +30,8 @@ const blobOperand = process.platform === "win32" ? "%KIT_MEMORY_BLOB%" : "$KIT_M
 function pullBlobCommand(blob: string): string {
   return process.platform === "win32"
     ? `copy /Y "${blob}" "${blobOperand}"`
-    : `cp "${blob}" "${blobOperand}"`;
+    : // A chatty transport (rclone, verbose git) must never reach kit's own stdout.
+      `echo transport-progress && cp "${blob}" "${blobOperand}"`;
 }
 const sourceTest = import.meta.url.endsWith(".ts");
 const cli = [
@@ -184,8 +185,15 @@ it("concurrent remote action state is visible in sync, pull and Claude's user me
     env: { ...process.env, KIT_HOOK_JSON: "claude", KIT_NO_HINTS: "1" },
   });
   assert.equal(hook.status, 0, hook.stderr);
-  const payload = JSON.parse(hook.stdout);
-  assert.match(payload.systemMessage, /memory pull needs attention/);
+  let payload: { systemMessage?: string; hookSpecificOutput: { additionalContext: string } };
+  try {
+    payload = JSON.parse(hook.stdout) as typeof payload;
+  } catch (error) {
+    assert.fail(
+      `session-start stdout was not one JSON payload (${String(error)}): ${JSON.stringify(hook.stdout.slice(0, 240))}`,
+    );
+  }
+  assert.match(payload.systemMessage ?? "", /memory pull needs attention/);
   assert.match(payload.hookSpecificOutput.additionalContext, /memory pull needs attention/);
 });
 

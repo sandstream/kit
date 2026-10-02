@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { open } from "node:fs/promises";
+import { lstat, open } from "node:fs/promises";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
 import {
@@ -81,9 +81,15 @@ function applicationEnvFiles(env: NodeJS.ProcessEnv): string[] {
   return files;
 }
 
-function assertLiteralValues(env: object): void {
+function nonLiteralKeys(env: object): string[] {
   const referenceOrNul = new RegExp("\\0|\\$\\S|`");
-  if (Object.values(env).some((value) => typeof value === "string" && referenceOrNul.test(value))) {
+  return Object.entries(env)
+    .filter(([, value]) => typeof value === "string" && referenceOrNul.test(value))
+    .map(([key]) => key);
+}
+
+function assertLiteralValues(env: object): void {
+  if (nonLiteralKeys(env).length > 0) {
     throw new Error("Environment values must be literal and contain no NUL bytes");
   }
 }
@@ -116,18 +122,38 @@ function parseLiteralDotenv(text: string): NodeJS.ProcessEnv {
 }
 
 async function readApplicationEnv(path: string): Promise<NodeJS.ProcessEnv | undefined> {
+  // O_NOFOLLOW is unavailable on Windows. Open first, then verify that the
+  // path still names the same regular file as the handle before reading it.
   const handle = await open(
     path,
     constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0),
   ).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") return undefined;
+    if (error.code === "ENOENT")
+      return lstat(path).then(
+        () => {
+          throw new Error("Env file cannot be inspected");
+        },
+        (statError: NodeJS.ErrnoException) => {
+          if (statError.code === "ENOENT") return undefined;
+          throw statError;
+        },
+      );
     throw error;
   });
   if (!handle) return undefined;
   try {
     const maximum = 512 * 1024;
+    const entry = await lstat(path);
     const target = await handle.stat();
-    if (!target.isFile() || target.size > maximum) throw new Error("Env file cannot be inspected");
+    if (
+      !entry.isFile() ||
+      !target.isFile() ||
+      target.dev !== entry.dev ||
+      target.ino !== entry.ino ||
+      target.size > maximum
+    ) {
+      throw new Error("Env file cannot be inspected");
+    }
     const buffer = Buffer.alloc(maximum + 1);
     let length = 0;
     while (length <= maximum) {
@@ -159,21 +185,25 @@ async function applicationEnvFindings(root: string, file: string): Promise<Monke
   }
 }
 
+// Prompt formats use `$` as escape syntax (cmd's PROMPT=$P$G, bash's PS1), and no application
+// loader reads them. Windows inherits PROMPT into every shell, so screening it refused every run.
+const SHELL_PROMPTS = new Set(["PROMPT", "PROMPT_COMMAND", "PS1", "PS2", "PS3", "PS4"]);
+
 export async function monkeyEnvironmentFindings(
   root: string,
   env: NodeJS.ProcessEnv,
 ): Promise<MonkeyFinding[]> {
   const findings = livePaymentEnvironmentFindings(env, "process environment");
   if (findings.length > 0) return findings;
-  try {
-    assertLiteralValues(env);
-  } catch {
+  const unresolved = nonLiteralKeys(env).filter((key) => !SHELL_PROMPTS.has(key.toUpperCase()));
+  if (unresolved.length > 0) {
     return [
       monkeyFinding({
         severity: "critical",
         area: "runner",
         title: "Application environment could not be inspected",
-        repro: "Inspect the effective process environment before running Monkey Test",
+        // Names only: the values are exactly what must not be echoed.
+        repro: `Inspect the effective process environment before running Monkey Test; unresolved references in ${unresolved.join(", ")}`,
         fix: "Resolve environment references and use literal sandbox/test values with no NUL bytes.",
       }),
     ];

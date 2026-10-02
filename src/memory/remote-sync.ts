@@ -275,7 +275,8 @@ function runTransportCmd(cmd: string, blobPath: string): void {
   }
   execSync(cmd, {
     env: env as NodeJS.ProcessEnv,
-    stdio: ["ignore", "inherit", "inherit"],
+    // Transport chatter goes to stderr: kit's stdout carries hook JSON and --json.
+    stdio: ["ignore", process.stderr, "inherit"],
     timeout: 120_000,
   });
 }

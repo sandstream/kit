@@ -212,7 +212,7 @@ export interface AdrFindings {
 export function collectAdrFindings(cwd: string): AdrFindings {
   const adrs = loadAdrs(cwd);
   const files = walkSourceFiles(cwd, { exts: CODE_EXTS, includeTests: true }).map((f) => ({
-    path: rel(cwd, f),
+    path: rel(cwd, f).replaceAll("\\", "/"),
     content: read(f, "utf-8"),
   }));
   const violations: AdrViolation[] = [];

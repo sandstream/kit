@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   openMemoryDb,
   upsertSession,
@@ -14,7 +14,7 @@ import {
   recentMessages,
 } from "./db.js";
 import { palAdd } from "./pal.js";
-import { mergeDb } from "./merge.js";
+import { mergeDb, projectKeyFor } from "./merge.js";
 
 function messageCount(db: ReturnType<typeof openMemoryDb>, uuid: string): number {
   return (db.prepare("SELECT COUNT(*) c FROM messages WHERE uuid = ?").get(uuid) as { c: number })
@@ -154,32 +154,28 @@ describe("memory merge", () => {
     src.close();
 
     const target = openMemoryDb(":memory:");
-    const r = mergeDb(target, srcPath, { remapProject: "/Users/x/dev/kit" });
-    assert.deepEqual(r.projects, { "-Users-x-dev-kit": 1 });
+    const remapProject = resolve("/Users/x/dev/kit");
+    const projectKey = projectKeyFor(remapProject);
+    const r = mergeDb(target, srcPath, { remapProject });
+    assert.deepEqual(r.projects, { [projectKey]: 1 });
     const row = target.prepare("SELECT project FROM sessions WHERE session_id = 'c1'").get() as {
       project: string;
     };
-    assert.equal(row.project, "-Users-x-dev-kit");
-    assert.equal(
-      searchMessages(target, "container", { projectPath: "/Users/x/dev/kit" }).length,
-      1,
-    );
-    assert.equal(recentMessages(target, { projectPath: "/Users/x/dev/kit" }).length, 1);
+    assert.equal(row.project, projectKey);
+    assert.equal(searchMessages(target, "container", { projectPath: remapProject }).length, 1);
+    assert.equal(recentMessages(target, { projectPath: remapProject }).length, 1);
 
     // Re-merge with remap also rehomes an ALREADY-imported foreign session
     // (upsert: a non-null incoming project wins) — the recovery path when the
     // first merge forgot the flag.
     const target2 = openMemoryDb(":memory:");
     mergeDb(target2, srcPath); // first: lands foreign
-    mergeDb(target2, srcPath, { remapProject: "/Users/x/dev/kit" }); // rehome
+    mergeDb(target2, srcPath, { remapProject }); // rehome
     const row2 = target2.prepare("SELECT project FROM sessions WHERE session_id = 'c1'").get() as {
       project: string;
     };
-    assert.equal(row2.project, "-Users-x-dev-kit");
-    assert.equal(
-      searchMessages(target2, "container", { projectPath: "/Users/x/dev/kit" }).length,
-      1,
-    );
+    assert.equal(row2.project, projectKey);
+    assert.equal(searchMessages(target2, "container", { projectPath: remapProject }).length, 1);
     target.close();
     target2.close();
     rmSync(tmp, { recursive: true, force: true });

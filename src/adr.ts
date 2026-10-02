@@ -245,6 +245,9 @@ export function adrIsEnforced(adr: Adr): boolean {
 
 /** Minimal glob → RegExp (supports `**`, `*`, `?`). Anchored full-match. Deterministic. */
 export function globToRegExp(glob: string): RegExp {
+  // Repository-relative paths are stored as POSIX paths, but callers on Windows
+  // may supply native separators. Globs use `/` on every platform.
+  glob = glob.replaceAll("\\", "/");
   let re = "";
   for (let i = 0; i < glob.length; i++) {
     const ch = glob[i];
@@ -305,7 +308,7 @@ function createWalkContext(files: AdrSourceFile[], opts: EvaluateAdrOptions): Ad
 function matchRuleFiles(paths: string, files: AdrSourceFile[]): AdrSourceFile[] {
   try {
     const matcher = globToRegExp(paths);
-    return files.filter((file) => matcher.test(file.path));
+    return files.filter((file) => matcher.test(file.path.replaceAll("\\", "/")));
   } catch {
     return [];
   }

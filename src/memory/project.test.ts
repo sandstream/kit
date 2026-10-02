@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  storedAliases,
   getCurrentProjectRoot,
   getProjectRecallRoots,
   recallRootVariants,
@@ -96,4 +97,32 @@ it("expands only repository roots to their registered worktrees", () => {
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+it("adds stored spellings that resolve to a recall root or below it, nothing else", () => {
+  const long = "C:\\Users\\runneradmin\\Temp\\kit-x";
+  const short = "C:\\Users\\RUNNER~1\\Temp\\kit-x";
+  const native = (path: string) =>
+    path.toLowerCase().startsWith(short.toLowerCase()) ? long + path.slice(short.length) : path;
+  assert.deepEqual(
+    storedAliases(
+      [`${long}\\repo`, `${long.replaceAll("\\", "/")}/review worktree`],
+      [
+        `${short}\\repo`,
+        `${short}\\review worktree`,
+        `${short}\\review worktree\\src`,
+        `${short}\\repository-elsewhere`,
+        "D:\\other\\repo",
+      ],
+      native,
+    ),
+    [`${short}\\repo`, `${short}\\review worktree`, `${short}\\review worktree\\src`],
+  );
+});
+
+it("skips stored paths that no longer resolve", () => {
+  assert.deepEqual(
+    storedAliases(["C:\\a\\repo"], ["C:\\gone\\repo"], () => null),
+    [],
+  );
 });

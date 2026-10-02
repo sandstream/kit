@@ -52,7 +52,8 @@ async function withCli(
   try {
     await run(bin, dir);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    // Windows keeps a just-exited executable locked briefly (EBUSY on unlink).
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 }
 

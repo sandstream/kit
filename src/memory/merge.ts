@@ -41,7 +41,7 @@ const nullableStr = (value: unknown): string | null => str(value) ?? null;
 
 /** Project keys are stored in the Claude-projects form: path with / → -. */
 export function projectKeyFor(projectRoot: string): string {
-  return projectRoot.split("/").join("-");
+  return projectRoot.replace(/[\\/:]/g, "-");
 }
 
 function tableExists(db: DatabaseSync, name: string): boolean {
