@@ -30,7 +30,8 @@ const blobOperand = process.platform === "win32" ? "%KIT_MEMORY_BLOB%" : "$KIT_M
 function pullBlobCommand(blob: string): string {
   return process.platform === "win32"
     ? `copy /Y "${blob}" "${blobOperand}"`
-    : `cp "${blob}" "${blobOperand}"`;
+    : // A chatty transport (rclone, verbose git) must never reach kit's own stdout.
+      `echo transport-progress && cp "${blob}" "${blobOperand}"`;
 }
 const sourceTest = import.meta.url.endsWith(".ts");
 const cli = [

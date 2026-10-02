@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  monkeyEnvironmentFindings,
   expectedReasonState,
   parseEnvOutput,
   runnerEnvironment,
@@ -108,5 +109,21 @@ describe("monkey-test literal environment safety", () => {
         TOKEN: "value=with=equals",
       },
     );
+  });
+});
+
+describe("monkeyEnvironmentFindings", () => {
+  it("names the variables holding references, never their values", async () => {
+    const findings = await monkeyEnvironmentFindings(process.cwd(), {
+      SAFE: "literal",
+      DEPLOY_TARGET: "$HOME/release-target-value",
+    });
+    const finding = findings.find(
+      (f) => f.title === "Application environment could not be inspected",
+    );
+    assert.ok(finding, JSON.stringify(findings));
+    assert.match(finding.repro, /DEPLOY_TARGET/);
+    assert.doesNotMatch(finding.repro, /SAFE/);
+    assert.doesNotMatch(JSON.stringify(findings), /release-target-value/);
   });
 });
