@@ -217,7 +217,7 @@ required = ["NEXT_PUBLIC_SENTRY_DSN", "NEXT_PUBLIC_SENTRY_ENVIRONMENT"]
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kit hooks install`    | Install hooks declared in `[hooks]`. If no `[hooks]` section exists, it explains that nothing was installed and points to `kit hooks add <name>`. |
 | `kit hooks add <name> [--force]` | Add a built-in hook (`secret-scan`, `post-pull-audit`, `context-check`) without requiring `[hooks]`. Installs into the directory git will actually use — `core.hooksPath` is honored, and the path is printed when it resolves OUTSIDE the repo, since deleting that directory then removes the gate silently. `context-check` is **refused** when `.kit.toml` has no `[context]` block: the hook would pass every push and report a gate you do not have. `--force` installs it anyway. |
-| `kit hooks sync`       | Reconcile installed hooks with config.                                                                                                            |
+| `kit hooks check` | Report whether the git hooks kit manages are installed and intact. |
 | `kit hooks uninstall`  | Remove the configured git hooks. **Enforcement is off until re-installed** — git hooks are the agent-agnostic floor, so this disables the gate that fires in any agent or none. |
 
 ## Agent Config User Rules

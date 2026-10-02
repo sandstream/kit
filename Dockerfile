@@ -94,7 +94,8 @@ WORKDIR /workspace
 
 # Set environment
 ENV NODE_ENV=production
-ENV NODE_OPTIONS="--enable-source-maps"
+# node:sqlite backs kit memory; its ExperimentalWarning is noise on every invocation.
+ENV NODE_OPTIONS="--enable-source-maps --disable-warning=ExperimentalWarning"
 
 # Switch to non-root user
 USER 1001:1001
