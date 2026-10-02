@@ -827,7 +827,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   tools: {
     handler: cmdTools,
     stability: "experimental",
-    help: "Inventory the CLIs on this machine — path, installer, installed version, and (with --latest) how far behind each one is",
+    help: "Inventory the CLIs on this machine — path, installer, installed version, and (with --latest) how far behind each one is, and (with --auth) whether it is logged in",
   },
   slopsquat: {
     handler: cmdSlopsquat,
