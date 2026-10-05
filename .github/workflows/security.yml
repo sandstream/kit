@@ -154,12 +154,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: javascript-typescript
           queries: security-extended
       - name: Analyze JavaScript and TypeScript
-        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: "/language:javascript-typescript"
 
@@ -205,7 +205,7 @@ jobs:
         # Don't fail the job if Code Scanning is off — scan result is the gate.
         if: always()
         continue-on-error: true # kit-self-audit: allow-continue-on-error
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: trivy-results.sarif
 
@@ -222,7 +222,7 @@ jobs:
       - name: Checkov (terraform + kubernetes)
         # Baseline of pre-existing findings in .checkov.yaml skip-check.
         # Gating on net-new findings only — see .checkov.yaml header for context.
-        uses: bridgecrewio/checkov-action@444c9db6fa75e2d9c19ebf1fde7322089be9009e # v12.3125.0
+        uses: bridgecrewio/checkov-action@cc0e17d456ef1713bbfd963ebac19dc776775cb2 # v12.3128.0
         with:
           directory: .
           config_file: .checkov.yaml
@@ -240,7 +240,7 @@ jobs:
         # SARIF upload requires Code Scanning enabled in repo settings.
         if: always()
         continue-on-error: true # kit-self-audit: allow-continue-on-error
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: checkov.sarif
 
@@ -369,7 +369,7 @@ jobs:
           node-version: "22"
           cache: "npm"
       - run: npm ci && npm run build
-      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
       # Triage verifies each tool's upstream repo through the GitHub API. Anonymous calls share
       # a 60/hour limit per runner IP, and triage correctly fails closed when it cannot verify.
       - name: Provision declared tools via kit install (triage-gated)
