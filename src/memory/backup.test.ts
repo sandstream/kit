@@ -100,6 +100,25 @@ describe("memory encrypted backup / restore", () => {
   });
 });
 
+describe("memory restore: passphrase restore of a public-key blob points at the right key (MP-7-r1)", () => {
+  it("names the public-key format instead of reporting bad magic", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "kit-pk-hint-"));
+    const src = join(tmp, "src.db");
+    const enc = join(tmp, "backup.kitmem");
+    openMemoryDb(src).close();
+    const { publicKey } = generateMemoryKeypair();
+    backupToRecipient(publicKey, src, enc);
+    assert.throws(
+      () => restoreEncrypted("valfri-stark-passphrase-x1", enc, join(tmp, "out.db")),
+      (err: Error) =>
+        /public-key/.test(err.message) &&
+        /private key/.test(err.message) &&
+        !/bad magic/.test(err.message),
+    );
+    rmSync(tmp, { recursive: true, force: true });
+  });
+});
+
 describe("memory asymmetric (public-key) backup — no passphrase, ephemeral-safe", () => {
   it("round-trips: encrypt to a PUBLIC key, decrypt only with the matching PRIVATE key", () => {
     const tmp = mkdtempSync(join(tmpdir(), "kit-pk-"));

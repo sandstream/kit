@@ -30,3 +30,12 @@ describe("docs/COMMANDS.md only documents verbs the command handles", () => {
     }
   });
 });
+
+describe("monkey-test env switches are documented", () => {
+  it("SKIP_SEED appears in docs/MONKEY_TEST.md", () => {
+    const runner = readFileSync(join(root, "src", "monkey-test-runner.ts"), "utf8");
+    assert.match(runner, /process\.env\.SKIP_SEED/);
+    const doc = readFileSync(join(root, "docs", "MONKEY_TEST.md"), "utf8");
+    assert.match(doc, /SKIP_SEED=1/);
+  });
+});

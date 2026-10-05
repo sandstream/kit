@@ -9,6 +9,14 @@
   Findings already present in `HEAD`'s copy of the file, counted per rule and
   preview, no longer block; a new secret, or a second copy of a committed one,
   still does, and the staged blob is still what gets scanned.
+- **Restoring a public-key memory backup gave unhelpful errors.** A passphrase
+  restore of a public-key blob reported "bad magic"; it now says the blob is a
+  public-key backup and needs the private key. A sync with a local key that does
+  not match the blob's recipient surfaced a raw OpenSSL authentication error; it
+  now says the backup was encrypted to a different public key.
+- **`SKIP_SEED=1` for `kit monkey-test run` was undocumented.** It is now in
+  `docs/MONKEY_TEST.md`, with its fail-closed behavior (a skipped seed without
+  `--expected` is a high finding).
 - **Docs and hints named verbs that do not exist.** `docs/COMMANDS.md` listed
   `kit hooks sync` (the real verb is `kit hooks check`), and the profile import
   hint told operators to run `kit policy trust add` (the command is

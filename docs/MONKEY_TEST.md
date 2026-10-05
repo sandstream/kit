@@ -50,6 +50,11 @@ uses the temporary environment, then blocks seed/server/test on failure. A
 failed or missing seed also blocks server/test. Explicit browser skips retain
 their documented validation and seed behavior; skipping is not browser evidence.
 
+`SKIP_SEED=1` in the environment behaves like `--skip-seed`: the seed step is
+skipped, and the run still needs `--expected <reason>` or it is refused
+(fail-closed). Prefer the flag; the variable exists for CI wrappers that cannot
+edit the command line.
+
 ## Roles
 
 The role matrix is fixed by the gate and can be mapped to each app's auth
