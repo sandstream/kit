@@ -1,5 +1,26 @@
 ## [Unreleased]
 
+### Fixed
+
+- **The staged secret scan blocked commits over findings already in `HEAD`.** It
+  scanned the whole staged file, so a single committed match (here an example
+  value in an old CHANGELOG entry) blocked every later commit that touched the
+  file, and `--no-verify`, which disables the whole hook, was the only way past.
+  Findings already present in `HEAD`'s copy of the file, counted per rule and
+  preview, no longer block; a new secret, or a second copy of a committed one,
+  still does, and the staged blob is still what gets scanned.
+- **Docs and hints named verbs that do not exist.** `docs/COMMANDS.md` listed
+  `kit hooks sync` (the real verb is `kit hooks check`), and the profile import
+  hint told operators to run `kit policy trust add` (the command is
+  `kit policy trust <pubkey.pem>`). A test now fails when COMMANDS.md documents
+  a hooks verb the command does not handle.
+- **No workflow job had a runtime limit.** All 20 jobs across 7 workflows now
+  set `timeout-minutes` (the native Windows suite gets 90, as it runs about 46),
+  and a test fails if a new job omits it.
+- **The Docker image printed a Node ExperimentalWarning on every invocation**
+  (the SQLite module behind `kit memory`). The image now disables that one
+  warning class.
+
 ## [6.12.1] - 2026-09-30
 
 ### Fixed

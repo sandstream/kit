@@ -239,7 +239,7 @@ max_bytes = 12000
 | Command                                                                    | Purpose                                                                                                         |
 | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `kit security check-gitignore [--fix]`                                     | Verify secret-file patterns are gitignored.                                                                     |
-| `kit security scan-staged`                                                 | Block commit if staged files contain credential patterns.                                                       |
+| `kit security scan-staged`                                                 | Block commit if staged files contain credential patterns. Only findings new to the commit block it; one already in `HEAD`'s copy of the file does not.                                                       |
 | `kit security verify-pull [--base <ref>]`                                  | Post-`git pull` audit: new deps, gitignore drops, introduced secrets.                                           |
 | `kit security scan-build [<dir>]`                                          | Walk `.next` / `dist` for credential leaks in build artifacts.                                                  |
 | `kit security advisories [--accept]`                                       | Dependency advisories from the repo's own package manager, split into new debt, known debt, and baseline entries that no longer apply. `--accept` freezes the current set in `.kit/advisories.json` (and prunes it).|
