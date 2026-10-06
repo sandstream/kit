@@ -2,6 +2,14 @@
 
 ### Fixed
 
+- **Two runtime dependency advisories failed the `npm audit` gate.** The MCP
+  SDK (`@modelcontextprotocol/sdk`, GHSA-6qxp-vccf-f47h, high: an OAuth client
+  could send credentials to an authorization server chosen by the MCP server) is
+  pinned to 1.32.1, and `smol-toml` (GHSA-r4xh-jqrq-34v2, moderate: quadratic
+  parse time) to 1.9.0. Both passed `kit triage`; kit's own MCP server is not an
+  OAuth client, so the SDK advisory is closed by the bump rather than reachable
+  from kit's code. `smol-toml` 1.9 returns null-prototype tables; no kit consumer
+  uses prototype methods on parsed config, and one test now compares plain data.
 - **`kit monkey-test` was labelled experimental while documented as a release
   gate.** The usage banner and `docs/COMMANDS.md` no longer say experimental, and
   `docs/MONKEY_TEST.md` now states that the static control checks are lexical: a
@@ -46,6 +54,18 @@
 - **`proxy-addr` updated to 2.0.8 in the lockfile** (transitive via the MCP SDK's
   express), clearing a critical advisory about IP spoofing through an IPv4-mapped
   IPv6 trust subnet that failed the `npm audit` gate.
+
+### Known limitations (2026-10-06)
+
+- **A bare 40-character hex secret is not redacted.** Redacting every 40-hex
+  string would also erase commit hashes, so a value of that shape that kit does
+  not hold passes through when it appears on its own in text; a keyed assignment
+  (`NAME=<hex>`) is redacted. Documented in `docs/THREAT_MODEL.md`.
+- **`--json` is accepted but not honored by `run`, `clone`, `open` and
+  `create-plugin`.** The generated flag surface lists it for those verbs, and the
+  release audit found it has no effect on their output. Accepted for now, since
+  removing it would break scripts that already pass it; use a verb that documents
+  `--json` when machine output is needed.
 
 ## [6.12.1] - 2026-09-30
 
