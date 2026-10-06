@@ -34,6 +34,9 @@
 - **Unknown `[browser]` keys in `.kit.toml` were accepted silently.** A key kit
   does not read (for example `strategy`) now prints a one-time warning naming the
   key and the supported ones. The setting is still ignored, not rejected.
+- **`kit browser` ignored `CHROME_PATH`.** Detection only looked at standard
+  install locations and `PATH`. An executable `CHROME_PATH` is now used for the
+  system-chrome strategy; a value that is not executable is ignored.
 - **`proxy-addr` updated to 2.0.8 in the lockfile** (transitive via the MCP SDK's
   express), clearing a critical advisory about IP spoofing through an IPv4-mapped
   IPv6 trust subnet that failed the `npm audit` gate.

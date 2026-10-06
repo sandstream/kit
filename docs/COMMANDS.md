@@ -95,6 +95,10 @@ through untouched (`kit run -- pnpm test --watch`).
 `kit browser` reads only `.kit.toml` and local machine facts. Repo declares the
 app-server contract; kit owns browser strategy and diagnostics.
 
+Set `CHROME_PATH` to an executable to choose a specific Chrome or Chromium for the
+system-chrome strategy. A value that is not executable is ignored and detection
+continues as usual.
+
 ```toml
 [browser]
 app = "apps/frontend"
