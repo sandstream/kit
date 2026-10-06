@@ -1,7 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { securityFindings } from "./monkey-test-security.js";
 
 const root = join(import.meta.dirname, "..");
 
@@ -37,5 +39,30 @@ describe("monkey-test env switches are documented", () => {
     assert.match(runner, /process\.env\.SKIP_SEED/);
     const doc = readFileSync(join(root, "docs", "MONKEY_TEST.md"), "utf8");
     assert.match(doc, /SKIP_SEED=1/);
+  });
+});
+
+describe("monkey-test status is described consistently", () => {
+  it("documents the static checks that a stub and unused string can satisfy", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-monkey-doc-limitation-"));
+    try {
+      mkdirSync(join(dir, "src"));
+      writeFileSync(
+        join(dir, "package.json"),
+        JSON.stringify({ dependencies: { stripe: "1.0.0", "@supabase/supabase-js": "1.0.0" } }),
+      );
+      writeFileSync(
+        join(dir, "src", "stubs.ts"),
+        'export function verifyWebhookSignature() {}\nexport const unused = "alter table orders enable row level security; create policy tenant_orders on orders using (tenant_id = auth.uid())";\n',
+      );
+      const titles = (await securityFindings(dir)).map((finding) => finding.title);
+      assert.ok(!titles.includes("Payment provider detected without webhook signature verification"));
+      assert.ok(!titles.includes("Supabase detected without obvious RLS policy coverage"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    const doc = readFileSync(join(root, "docs", "MONKEY_TEST.md"), "utf8");
+    assert.match(doc, /stub/i);
+    assert.match(doc, /lexical/i);
   });
 });

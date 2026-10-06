@@ -2,6 +2,12 @@
 
 ### Fixed
 
+- **`kit monkey-test` was labelled experimental while documented as a release
+  gate.** The usage banner and `docs/COMMANDS.md` no longer say experimental, and
+  `docs/MONKEY_TEST.md` now states that the static control checks are lexical: a
+  stub with the shape of a control can satisfy them. Reviewers must inspect the
+  browser run and retain provider-side sandbox evidence when the release depends
+  on payment settlement or webhooks.
 - **The staged secret scan blocked commits over findings already in `HEAD`.** It
   scanned the whole staged file, so a single committed match (here an example
   value in an old CHANGELOG entry) blocked every later commit that touched the

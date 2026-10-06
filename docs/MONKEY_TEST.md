@@ -193,3 +193,10 @@ Static security detection requires control-shaped
 schema, query, or API operations. Checklist words alone do not satisfy RLS,
 tenant isolation, webhook verification/idempotency, refund/receipt paths, or an
 immutable journal.
+
+Known limitation: control-shaped is a lexical test, so a stub or a dead string
+literal that has the shape of a control (an empty `verifyWebhookSignature`
+function, a policy statement inside an unused string) can still satisfy a
+static check. The static pass narrows what a reviewer must read; it is not proof
+that a control runs. Review the browser run and retain a separate provider-side
+sandbox transaction and webhook receipt when the release depends on them.

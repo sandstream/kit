@@ -21,7 +21,7 @@ function subcommand(): MonkeySubcommand | null {
 }
 
 function usage(): void {
-  console.log(`${c.bold}kit monkey-test${c.reset} ${c.dim}(experimental)${c.reset}`);
+  console.log(`${c.bold}kit monkey-test${c.reset}`);
   console.log("");
   console.log(
     `  ${c.cyan}kit monkey-test plan [--json]${c.reset}                 Detect stack, runner, env, seed, money/security gaps`,
