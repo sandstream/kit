@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parse } from "smol-toml";
 import { z } from "zod";
+import { warnUnknownConfigKeys } from "./config-unknown-keys.js";
 
 /**
  * A `.kit.toml` that exists but is unparseable or fails schema validation. Tagged so the
@@ -1074,14 +1075,7 @@ export async function loadConfig(path: string, envName?: string): Promise<kitCon
     throw new InvalidConfigError(`Invalid .kit.toml:\n${formatted}`);
   }
 
-  // Warn about unknown top-level sections (likely typos like [tolls] vs [tools])
-  for (const key of Object.keys(raw)) {
-    if (!KNOWN_SECTIONS.has(key)) {
-      console.warn(
-        `Warning: unknown section [${key}] in .kit.toml (known: ${[...KNOWN_SECTIONS].join(", ")})`,
-      );
-    }
-  }
+  warnUnknownConfigKeys(path, raw, KNOWN_SECTIONS, result.data.browser);
 
   const base = result.data as unknown as kitConfig;
 

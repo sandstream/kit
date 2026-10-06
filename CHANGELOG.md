@@ -28,6 +28,15 @@
 - **The Docker image printed a Node ExperimentalWarning on every invocation**
   (the SQLite module behind `kit memory`). The image now disables that one
   warning class.
+- **`kit monkey-test plan` gave no sign of an unconfigured role matrix.** The plan
+  now has a "role matrix" check that validates `.kit/monkey-test/role-matrix.json`
+  and warns, with the reason, when it is missing or not set to `configured: true`.
+- **Unknown `[browser]` keys in `.kit.toml` were accepted silently.** A key kit
+  does not read (for example `strategy`) now prints a one-time warning naming the
+  key and the supported ones. The setting is still ignored, not rejected.
+- **`proxy-addr` updated to 2.0.8 in the lockfile** (transitive via the MCP SDK's
+  express), clearing a critical advisory about IP spoofing through an IPv4-mapped
+  IPv6 trust subnet that failed the `npm audit` gate.
 
 ## [6.12.1] - 2026-09-30
 
