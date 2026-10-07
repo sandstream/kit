@@ -75,6 +75,10 @@
 - **`proxy-addr` updated to 2.0.8 in the lockfile** (transitive via the MCP SDK's
   express), clearing a critical advisory about IP spoofing through an IPv4-mapped
   IPv6 trust subnet that failed the `npm audit` gate.
+- **`npm test` reported a hung test as an unexplained failure.** node counts a
+  per-test timeout as "cancelled", so the runner exited non-zero with no name. It
+  now reads its TAP log and prints `timed out: <test>` apart from `failed: <test>`
+  (`scripts/test-failure-kinds.mjs`, covered by `src/test-runner-timeout.test.ts`).
 - **Two unit tests wrote real GitHub Actions secrets.** The `propagate` tests that
   include the `github` target ran `gh secret set` against whatever repo the suite
   ran in, so a developer with an authenticated `gh` got `TEST_KEY` and `API_KEY`
