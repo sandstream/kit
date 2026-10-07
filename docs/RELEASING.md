@@ -65,9 +65,8 @@ only ever moves on a stable release.
 ## Credentials: trusted publishing
 
 The publish workflow does not read an npm token or set `NODE_AUTH_TOKEN`. A
-legacy GitHub Actions repository secret named `NPM_TOKEN` still exists as of
-2026-09-24. No workflow references it. Its presence does not establish a token
-fallback for publishing; remove it from repository settings.
+legacy GitHub Actions repository secret named `NPM_TOKEN` existed until it was
+deleted on 2026-10-07. No workflow referenced it, and none reads one now.
 
 All fourteen packages carry a GitHub Actions trusted publisher naming `sandstream/kit`,
 the workflow file `publish.yml`, and the environment `npm-publish`. The permissions npm
@@ -126,7 +125,7 @@ npm is retiring 2FA-bypass granular access tokens as a publishing credential:
 
 The migration target is **trusted publishing**: GitHub Actions exchanges its OIDC identity
 for a short-lived credential. The workflow no longer consumes a long-lived npm secret;
-the unused `NPM_TOKEN` repository secret still needs cleanup.
+the unused `NPM_TOKEN` repository secret was deleted on 2026-10-07.
 
 **Prerequisite, already in place.** Trusted publishing exists only in **npm ≥ 11.5.1** on
 **node ≥ 22.14.0**. `actions/setup-node` ships npm 10.9.x for node 22, so the job installs
