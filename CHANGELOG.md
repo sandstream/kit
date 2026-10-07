@@ -76,6 +76,16 @@
   express), clearing a critical advisory about IP spoofing through an IPv4-mapped
   IPv6 trust subnet that failed the `npm audit` gate.
 
+### Known limitations (2026-10-07)
+
+- **husky 9's shim directory is not followed.** With `core.hooksPath = .husky/_`
+  git runs a shim there that executes `.husky/<hook>` one level up. kit reads
+  only the directory git runs, so a `.husky/pre-commit` that does enforce kit's
+  contract is reported as "outdated" by `kit hooks check` and as no enforcing
+  hook by the security floor, and `kit hooks install` will not rewrite it.
+  husky 8 (hooks directly in `core.hooksPath`) is counted correctly. A test pins
+  the limit so following the shim is a deliberate change.
+
 ### Known limitations (2026-10-06)
 
 - **A bare 40-character hex secret is not redacted.** Redacting every 40-hex
