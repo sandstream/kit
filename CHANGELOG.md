@@ -2,6 +2,22 @@
 
 ### Fixed
 
+- **`kit hooks add` promised to overwrite a hook it then left alone.** Over an
+  externally managed hook (husky, a committed `.githooks/pre-commit`) it warned
+  "kit will overwrite it", prompted, skipped the install, printed a success mark
+  and a "the commit should be blocked" recipe for a gate that was not there. It
+  now prompts only for a hook kit generated, reports an external hook as "not
+  installed" with the line to add, prints no recipe, and exits non-zero.
+- **`kit hooks uninstall` reported only the first symlinked hook.** A symlink
+  refuses the whole removal set (kit never writes through a link), but the
+  report named one hook and said nothing about the rest, such as the
+  `post-commit` bypass detector left in place. Every requested hook is now
+  listed, with "nothing was removed" on those that were not touched.
+- **A hook wrapper running a different kit version than the one checking it went
+  unreported.** The managed wrapper execs a fixed kit entrypoint, so after an
+  upgrade hooks could run 6.10 while commands ran 6.11. The hook liveness
+  reader now compares the version at the wrapper's target with the running kit
+  and says to run `kit agent-config`; an unreadable version is not guessed.
 - **A deleted git worktree kept widening memory recall and pending-action scope.**
   `kit memory` expanded a project to every registered worktree, including ones
   whose directory was gone (git marks them `prunable`), so `kit memory pal list`

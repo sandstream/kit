@@ -1,8 +1,9 @@
 /** Parse and validate installed gate commands before reporting them live. */
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { WRAPPER_MARKER } from "./kit-wrapper.js";
+import { getKitVersionSync } from "./update-check.js";
 import { shellSplit } from "./utils/shellSplit.js";
 
 export const GATE_SUBCOMMANDS = ["gate-bash", "gate-env", "gate-egress", "gate-fs"];
@@ -36,6 +37,32 @@ function isExecutable(path: string): boolean {
   return (statSync(path).mode & 0o111) !== 0;
 }
 
+/** The version of the kit package a CLI entrypoint belongs to, or null when none can be read.
+ *  Walks up from the entrypoint to the nearest package.json named for kit; never guesses. */
+function kitVersionAt(cliPath: string): string | null {
+  let dir: string;
+  try {
+    dir = dirname(realpathSync(cliPath));
+  } catch {
+    return null;
+  }
+  for (let depth = 0; depth < 5; depth++) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8")) as {
+        name?: string;
+        version?: string;
+      };
+      if (pkg.name === "sandstream-kit") return pkg.version ?? null;
+    } catch {
+      /* no package.json at this level */
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
 function managedWrapperProblems(path: string): string[] {
   let body: string;
   try {
@@ -55,6 +82,14 @@ function managedWrapperProblems(path: string): string[] {
   }
   if (!existsSync(cliPath)) {
     problems.push(`managed kit wrapper points at missing kit CLI: ${cliPath}`);
+  } else {
+    const wrapped = kitVersionAt(cliPath);
+    const running = getKitVersionSync();
+    if (wrapped && running !== "unknown" && wrapped !== running) {
+      problems.push(
+        `managed kit wrapper runs kit ${wrapped} but this kit is ${running}, so hooks and commands may disagree`,
+      );
+    }
   }
   return problems.map((p) => `${p}. Run: kit agent-config`);
 }
