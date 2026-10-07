@@ -1,6 +1,14 @@
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { parseTargets, ALL_TARGETS, propagate } from "./secrets-propagate.js";
+import { installFakeGh } from "./fake-gh.test-support.js";
+
+// The github target runs `gh secret set`; never let this file reach the real CLI.
+let gh: ReturnType<typeof installFakeGh>;
+before(() => {
+  gh = installFakeGh();
+});
+after(() => gh.restore());
 
 describe("parseTargets", () => {
   it("parses a comma-separated list of known targets", () => {

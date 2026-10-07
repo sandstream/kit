@@ -75,6 +75,13 @@
 - **`proxy-addr` updated to 2.0.8 in the lockfile** (transitive via the MCP SDK's
   express), clearing a critical advisory about IP spoofing through an IPv4-mapped
   IPv6 trust subnet that failed the `npm audit` gate.
+- **Two unit tests wrote real GitHub Actions secrets.** The `propagate` tests that
+  include the `github` target ran `gh secret set` against whatever repo the suite
+  ran in, so a developer with an authenticated `gh` got `TEST_KEY` and `API_KEY`
+  repository secrets from a plain `npm test`. Both tests now put a recording
+  stand-in `gh` first on PATH (`src/fake-gh.test-support.ts`), and a test pins that
+  the stand-in catches the call. A full run with a recording `gh` on PATH shows no
+  `secret set` call.
 
 ### Known limitations (2026-10-07)
 
@@ -85,6 +92,14 @@
   hook by the security floor, and `kit hooks install` will not rewrite it.
   husky 8 (hooks directly in `core.hooksPath`) is counted correctly. A test pins
   the limit so following the shim is a deliberate change.
+
+### Known limitations (2026-10-07, triage)
+
+- **The Vercel plugin keeps its own copy of the error-redaction patterns.** A
+  plugin cannot import core, and the shared adapter SDK does not export a
+  redactor. `src/plugin-error-redaction.test.ts` pins the Vercel copy against
+  core's patterns, so a drift fails a test. Moving the patterns into the SDK is a
+  contract change and is not planned.
 
 ### Known limitations (2026-10-06)
 
