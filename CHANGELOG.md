@@ -2,6 +2,11 @@
 
 ### Fixed
 
+- **A deleted git worktree kept widening memory recall and pending-action scope.**
+  `kit memory` expanded a project to every registered worktree, including ones
+  whose directory was gone (git marks them `prunable`), so `kit memory pal list`
+  and the statusline action count showed actions raised in a worktree that no
+  longer exists. Prunable worktrees are now skipped; live ones still count.
 - **Two runtime dependency advisories failed the `npm audit` gate.** The MCP
   SDK (`@modelcontextprotocol/sdk`, GHSA-6qxp-vccf-f47h, high: an OAuth client
   could send credentials to an authorization server chosen by the MCP server) is

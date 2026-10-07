@@ -126,3 +126,25 @@ it("skips stored paths that no longer resolve", () => {
     [],
   );
 });
+
+it("drops a registered worktree whose directory was deleted (git marks it prunable)", () => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "kit-wt-")));
+  const root = join(base, "main");
+  const live = join(base, "live");
+  const gone = join(base, "gone");
+  try {
+    mkdirSync(root);
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
+    git("init", "-q");
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
+    git("worktree", "add", "-q", "-b", "live", live);
+    git("worktree", "add", "-q", "-b", "gone", gone);
+    rmSync(gone, { recursive: true, force: true });
+
+    const roots = getProjectRecallRoots(root);
+    assert.ok(roots.includes(live), "a live worktree stays in the recall scope");
+    assert.ok(!roots.includes(gone), "a deleted worktree must not widen the recall scope");
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
