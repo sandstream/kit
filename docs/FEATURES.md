@@ -68,15 +68,15 @@ Summary
   ✓ Fixed 4 issue(s) automatically
   ! 1 issue(s) require human action:
 
-HITL behövs
+HITL required
 Blocker: stripe is not authenticated
-Ägare: provider admin
-Varför agenten inte kan lösa: auth / browser / external account
-Gör detta:
+Owner: provider admin
+Why the agent cannot resolve this: auth / browser / external account
+Do this:
 1. Run `kit login --service stripe` in a normal terminal/browser session, or run `stripe login`.
 2. Run `kit check --category services,secrets`.
-Svara med: stripe configured/authenticated; no secret values pasted
-Agenten fortsätter med: kit check --category services,secrets
+Respond with: stripe configured/authenticated; no secret values pasted
+Agent continues with: kit check --category services,secrets
 ```
 
 `kit secrets`, resolves each key from the vault and writes `.env.local`:

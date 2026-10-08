@@ -210,14 +210,14 @@ export function hitlBlocksFromCheckResults(input: {
 
 export function formatHitlBlock(block: HitlBlock): string {
   const lines = [
-    "HITL behövs",
+    "HITL required",
     `Blocker: ${block.blocker}`,
-    `Ägare: ${block.owner}`,
-    `Varför agenten inte kan lösa: ${block.reason}`,
-    "Gör detta:",
+    `Owner: ${block.owner}`,
+    `Why the agent cannot resolve this: ${block.reason}`,
+    "Do this:",
     ...block.steps.map((step, i) => `${i + 1}. ${step}`),
-    `Svara med: ${block.respondWith}`,
-    `Agenten fortsätter med: ${block.agentContinuesWith}`,
+    `Respond with: ${block.respondWith}`,
+    `Agent continues with: ${block.agentContinuesWith}`,
   ];
   return lines.join("\n");
 }
