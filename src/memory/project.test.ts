@@ -141,9 +141,18 @@ it("drops a registered worktree whose directory was deleted (git marks it prunab
     git("worktree", "add", "-q", "-b", "gone", gone);
     rmSync(gone, { recursive: true, force: true });
 
+    // git reports Windows paths with forward slashes; compare spellings, not strings.
+    const same = (a: string, b: string) =>
+      a.replaceAll("\\", "/").toLowerCase() === b.replaceAll("\\", "/").toLowerCase();
     const roots = getProjectRecallRoots(root);
-    assert.ok(roots.includes(live), "a live worktree stays in the recall scope");
-    assert.ok(!roots.includes(gone), "a deleted worktree must not widen the recall scope");
+    assert.ok(
+      roots.some((r) => same(r, live)),
+      "a live worktree stays in the recall scope",
+    );
+    assert.ok(
+      !roots.some((r) => same(r, gone)),
+      "a deleted worktree must not widen the recall scope",
+    );
   } finally {
     rmSync(base, { recursive: true, force: true });
   }

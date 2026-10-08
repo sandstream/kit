@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
@@ -8,13 +8,19 @@ import { delimiter, join } from "node:path";
  * unguarded call writes a real Actions secret to whatever repo the test runs in.
  *
  * The stand-in logs its argv, drains stdin and exits 1, so adapters still see a failed push.
+ * On Windows a spawned `gh` must be an executable, not a script, so node.exe stands in under
+ * that name: it rejects `secret set` with a non-zero exit and records nothing (calls() is empty).
  */
 export function installFakeGh(): { calls: () => string[]; restore: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "kit-fake-gh-"));
   const log = join(dir, "calls.log");
-  const bin = join(dir, "gh");
-  writeFileSync(bin, `#!/bin/sh\necho "$@" >> "${log}"\ncat >/dev/null\nexit 1\n`);
-  chmodSync(bin, 0o755);
+  if (process.platform === "win32") {
+    copyFileSync(process.execPath, join(dir, "gh.exe"));
+  } else {
+    const bin = join(dir, "gh");
+    writeFileSync(bin, `#!/bin/sh\necho "$@" >> "${log}"\ncat >/dev/null\nexit 1\n`);
+    chmodSync(bin, 0o755);
+  }
   const priorPath = process.env.PATH;
   process.env.PATH = `${dir}${delimiter}${priorPath ?? ""}`;
   return {
