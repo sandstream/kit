@@ -343,10 +343,18 @@ export interface SkillSnapshot {
  * substituted-payload shape of the published plugin supply-chain class, and the one check a user
  * would expect to catch it did not.
  *
- * What this does NOT claim. A 64-bit prefix of sha256 (16 hex chars, kept so the field's shape
- * does not change twice) detects DRIFT, including hostile drift by anyone not specifically
- * grinding against this value; it is not a cryptographic commitment, and a second preimage is
- * ~2^64 work rather than ~2^128. Widening it is a one-line follow-up and a second re-pin.
+ * The digest is the FULL sha256, not a prefix. It was truncated to 16 hex chars while it covered
+ * only frontmatter, where 64 bits was ample for drift detection. Once the body is in scope the
+ * value is load-bearing against a party who may choose the body, and a 64-bit target is ~2^64 work
+ * to hit deliberately — large, but not a number to design a tamper check around. Widening cost
+ * nothing extra because adding the body already forced every snapshot to be re-pinned once.
+ *
+ * Still not covered, stated so the claim is not read wider than it is: this hashes the PARSED
+ * manifest, so frontmatter keys kit does not model are not in the digest, and neither are a
+ * skill's sibling files — scripts, hooks, anything the body shells out to.
+ *
+ * `src/profile/schema.ts` and `src/lock.ts` truncate their own hashes to 16 and are deliberately
+ * untouched here: different checks, different blast radius, separate decisions.
  *
  * Pure.
  */
@@ -361,7 +369,7 @@ function canonicalSkillBytes(m: SkillManifest): string {
 
 /** Short fingerprint over a skill module's contract + trigger + scope + body. Pure. */
 export function skillFingerprint(m: SkillManifest): string {
-  return "sha256:" + createHash("sha256").update(canonicalSkillBytes(m)).digest("hex").slice(0, 16);
+  return "sha256:" + createHash("sha256").update(canonicalSkillBytes(m)).digest("hex");
 }
 
 /** Build the snapshot object for a manifest (what `--update-snapshot` writes). Pure. */

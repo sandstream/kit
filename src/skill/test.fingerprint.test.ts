@@ -90,8 +90,10 @@ describe("skillFingerprint covers the body", () => {
     assert.notEqual(skillFingerprint(m(a)), skillFingerprint(m(c)));
   });
 
-  it("emits the sha256: prefix and a 16-hex-char digest", () => {
-    // The width is a deliberate, documented bound: drift detection, not a commitment.
-    assert.match(skillFingerprint(m(BENIGN)), /^sha256:[0-9a-f]{16}$/);
+  it("emits the sha256: prefix and a FULL 64-hex-char digest", () => {
+    // Truncation was fine while the digest covered only frontmatter. With the body in scope the
+    // value is load-bearing against a party who chooses the body, so it is no longer a prefix.
+    assert.match(skillFingerprint(m(BENIGN)), /^sha256:[0-9a-f]{64}$/);
+    assert.doesNotMatch(skillFingerprint(m(BENIGN)), /^sha256:[0-9a-f]{16}$/);
   });
 });
