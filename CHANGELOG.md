@@ -79,6 +79,11 @@
   per-test timeout as "cancelled", so the runner exited non-zero with no name. It
   now reads its TAP log and prints `timed out: <test>` apart from `failed: <test>`
   (`scripts/test-failure-kinds.mjs`, covered by `src/test-runner-timeout.test.ts`).
+- **The Docker image failed its Trivy gate on a new HIGH advisory in npm's bundled
+  `http-cache-semantics` 4.2.0** (CVE-2026-93748, `max-stale` cache disclosure, no
+  upstream fix in the base image). The Dockerfile already swaps two other bundled
+  npm dependencies for fixed releases; it now swaps this one for 4.3.0 as well.
+  A rebuilt image scans clean and `npm view` still works from it.
 - **Two unit tests wrote real GitHub Actions secrets.** The `propagate` tests that
   include the `github` target ran `gh secret set` against whatever repo the suite
   ran in, so a developer with an authenticated `gh` got `TEST_KEY` and `API_KEY`

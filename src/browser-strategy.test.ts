@@ -122,7 +122,9 @@ describe("system Chrome selection", () => {
       },
     );
     assert.equal(result.strategy, "system-chrome");
-    assert.ok(result.checks.some((check) => check.name === "system chrome" && check.detail === custom));
+    assert.ok(
+      result.checks.some((check) => check.name === "system chrome" && check.detail === custom),
+    );
   });
 
   it("ignores a CHROME_PATH that is not executable instead of trusting it", async () => {

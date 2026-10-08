@@ -113,7 +113,7 @@ describe("hook wrapper version drift (BH-13)", () => {
         assert.match(problems, /runs kit 0\.0\.1/);
         assert.match(
           problems,
-          new RegExp(`this kit is ${getKitVersionSync().replace(/\./g, "\\.")}`),
+          new RegExp(`this kit is ${getKitVersionSync().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
         );
         assert.match(problems, /kit agent-config/);
       } finally {

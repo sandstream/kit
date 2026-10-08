@@ -60,11 +60,13 @@ RUN apk add --no-cache --upgrade \
     && npm cache clean --force
 
 # npm 11.19.1 (and 11.20.0, the newest) bundles brace-expansion 5.0.9 and undici 6.28.0,
-# both with HIGH advisories fixed in the next patch. Until npm ships them, replace the two
-# bundled copies with the fixed patches; same major, same dependencies, both triaged.
+# both with HIGH advisories fixed in the next patch, and http-cache-semantics 4.2.0
+# (CVE-2026-93748, max-stale cache disclosure, affected range <= 4.2.0). Until npm ships
+# them, replace the three bundled copies with the fixed releases; same major, same
+# dependencies, all triaged.
 # `npm pack` verifies each tarball's integrity against the registry.
 RUN bundled=/usr/local/lib/node_modules/npm/node_modules \
-    && for spec in brace-expansion@5.0.12 undici@6.28.1; do \
+    && for spec in brace-expansion@5.0.12 undici@6.28.1 http-cache-semantics@4.3.0; do \
         name="${spec%@*}"; \
         tarball="/tmp/$(npm pack "$spec" --silent --pack-destination /tmp)"; \
         rm -rf "${bundled:?}/$name" && mkdir "$bundled/$name"; \

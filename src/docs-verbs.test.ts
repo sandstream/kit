@@ -56,7 +56,9 @@ describe("monkey-test status is described consistently", () => {
         'export function verifyWebhookSignature() {}\nexport const unused = "alter table orders enable row level security; create policy tenant_orders on orders using (tenant_id = auth.uid())";\n',
       );
       const titles = (await securityFindings(dir)).map((finding) => finding.title);
-      assert.ok(!titles.includes("Payment provider detected without webhook signature verification"));
+      assert.ok(
+        !titles.includes("Payment provider detected without webhook signature verification"),
+      );
       assert.ok(!titles.includes("Supabase detected without obvious RLS policy coverage"));
     } finally {
       rmSync(dir, { recursive: true, force: true });
