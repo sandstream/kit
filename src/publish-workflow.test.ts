@@ -169,6 +169,88 @@ function runPublishGuard(root: string, binDir: string, state: Record<string, str
   });
 }
 
+/** The shell a step runs: its `run: |` block, de-indented, from the executed workflow text. */
+function stepScript(name: string): string {
+  const body = stepBody(name);
+  const at = body.indexOf("run: |\n");
+  assert.ok(at >= 0, `${name} has no multi-line run block`);
+  const lines = body.slice(at + "run: |\n".length).split("\n");
+  const indent = /^ */.exec(lines[0] ?? "")?.[0].length ?? 0;
+  const out: string[] = [];
+  for (const line of lines) {
+    if (line.trim() !== "" && !line.startsWith(" ".repeat(indent))) break;
+    out.push(line.slice(indent));
+  }
+  return out.join("\n");
+}
+
+function runScript(script: string, cwd: string, env: Record<string, string>) {
+  return spawnSync("sh", ["-c", script], {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+  });
+}
+
+describe(
+  "publish.yml — gates refuse when run, not only when they read right (RPP-04)",
+  {
+    skip: process.platform === "win32" && "the gate steps are POSIX shell",
+  },
+  () => {
+    const fixture = (version: string, changelog: string): string => {
+      const root = mkdtempSync(join(tmpdir(), "kit-publish-gate-"));
+      writeFileSync(join(root, "package.json"), JSON.stringify({ name: "kit-fixture", version }));
+      writeFileSync(join(root, "CHANGELOG.md"), changelog);
+      mkdirSync(join(root, "scripts"));
+      writeFileSync(
+        join(root, "scripts", "changelog-section.mjs"),
+        readFileSync(join(REPO_ROOT, "scripts/changelog-section.mjs")),
+      );
+      return root;
+    };
+
+    it("refuses a tag that does not match package.json, and accepts one that does", () => {
+      const root = fixture("1.2.3", "## [1.2.3]\n\n- x\n");
+      try {
+        const script = stepScript("Verify tag matches package.json version");
+        assert.notEqual(
+          runScript(script, root, { TAG: "v9.9.9" }).status,
+          0,
+          "skewed tag must fail",
+        );
+        assert.equal(
+          runScript(script, root, { TAG: "v1.2.3" }).status,
+          0,
+          "matching tag must pass",
+        );
+        // The test can fail: the same script with its refusal removed lets the skew through.
+        const neutered = script.replace(/exit 1/g, "true");
+        assert.equal(runScript(neutered, root, { TAG: "v9.9.9" }).status, 0, "the check bites");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("refuses a version the CHANGELOG does not document, and accepts one it does", () => {
+      const root = fixture("1.2.3", "## [1.2.3]\n\n- documented\n\n## [1.2.2]\n\n- older\n");
+      try {
+        const script = stepScript("Verify the CHANGELOG documents this version");
+        assert.notEqual(
+          runScript(script, root, { TAG: "v1.2.4" }).status,
+          0,
+          "no section must fail",
+        );
+        assert.equal(runScript(script, root, { TAG: "v1.2.3" }).status, 0, "a section must pass");
+        const neutered = script.replace(/exit 1/g, "true");
+        assert.equal(runScript(neutered, root, { TAG: "v1.2.4" }).status, 0, "the check bites");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  },
+);
+
 describe("publish.yml — publishes over OIDC, not a long-lived token", () => {
   it("references no npm token in any executing line", () => {
     // The packages that shipped before sandstream-kit-plugin-aisle have a GitHub Actions

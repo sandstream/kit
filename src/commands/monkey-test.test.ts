@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdMonkeyTest } from "./monkey-test.js";
@@ -113,5 +113,16 @@ describe("cmdMonkeyTest", () => {
     assert.equal(await cmdMonkeyTest(), false);
     assert.equal(process.exitCode, 1);
     assert.match(logs.join("\n"), /kit monkey-test/);
+  });
+
+  it("usage and command docs do not call the release gate experimental", async () => {
+    setArgs("nope");
+
+    await cmdMonkeyTest();
+    assert.doesNotMatch(logs.join("\n"), /experimental/i);
+    const doc = readFileSync(join(import.meta.dirname, "..", "..", "docs", "COMMANDS.md"), "utf8");
+    const row = doc.split("\n").find((line) => line.includes("kit monkey-test plan"));
+    assert.ok(row, "COMMANDS.md documents the plan command");
+    assert.doesNotMatch(row, /experimental/i);
   });
 });

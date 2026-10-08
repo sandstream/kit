@@ -382,6 +382,9 @@ function probeSystemChrome(
   env: NodeJS.ProcessEnv,
   deps: Required<BrowserProbeDeps>,
 ): string | undefined {
+  // An operator-chosen browser wins, but only if it is really executable (BH-14).
+  const declared = env.CHROME_PATH?.trim();
+  if (declared && deps.isExecutable(declared)) return declared;
   const macCandidates = [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",

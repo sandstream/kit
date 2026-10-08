@@ -74,7 +74,7 @@ through untouched (`kit run -- pnpm test --watch`).
 | `kit browser status [--json]`                         | Short status/strategy summary for browser verification.                                                                                                                                                                                                                                                                                                           |
 | `kit browser cdp-url [--json]`                        | Print the selected Chrome DevTools Protocol URL when one is configured or reachable.                                                                                                                                                                                                                                                                               |
 | `kit browser playwright-env [--json]`                 | Print shell exports (`KIT_BROWSER_STRATEGY`, `KIT_BROWSER_CDP_URL`, `PLAYWRIGHT_BROWSERS_PATH`) for browser test runners.                                                                                                                                                                                                                                          |
-| `kit monkey-test plan [--json]`                       | Detect stack, package manager, Playwright, dev server, seed, local env source, money provider markers, harness files, and static security findings for the money-app release gate. `experimental`.                                                                                                                                                                  |
+| `kit monkey-test plan [--json]`                       | Detect stack, package manager, Playwright, dev server, seed, local env source, money provider markers, harness files, and static security findings for the money-app release gate.                                                                                                                                                                  |
 | `kit monkey-test init [--force] [--json]`             | Create/update the managed Playwright monkey-test harness (`playwright.monkey.config.ts`, `tests/monkey/*`, `.kit/monkey-test/*`) without overwriting unmanaged files unless forced.                                                                                                                                                                                |
 | `kit monkey-test run [--base-url <url>] [--start-command <cmd>] [--seed-command <cmd>] [--test-command <cmd>] [--env-command <cmd>] [--link-depth <n>] [--skip-seed] [--skip-browser] [--skip-security] [--expected <reason>] [--json]` | Run the security pack plus desktop/mobile role crawl and sandbox money flow. Skips require an explicit expected reason.                                                                                                                                                                               |
 | `kit health [--json]`                                     | Deep environment health diagnostics — granular pass/fail across tools, services, and config (more detail than `check`).                                                                                                                                                                                                                                              |
@@ -94,6 +94,10 @@ through untouched (`kit run -- pnpm test --watch`).
 
 `kit browser` reads only `.kit.toml` and local machine facts. Repo declares the
 app-server contract; kit owns browser strategy and diagnostics.
+
+Set `CHROME_PATH` to an executable to choose a specific Chrome or Chromium for the
+system-chrome strategy. A value that is not executable is ignored and detection
+continues as usual.
 
 ```toml
 [browser]
@@ -217,7 +221,7 @@ required = ["NEXT_PUBLIC_SENTRY_DSN", "NEXT_PUBLIC_SENTRY_ENVIRONMENT"]
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kit hooks install`    | Install hooks declared in `[hooks]`. If no `[hooks]` section exists, it explains that nothing was installed and points to `kit hooks add <name>`. |
 | `kit hooks add <name> [--force]` | Add a built-in hook (`secret-scan`, `post-pull-audit`, `context-check`) without requiring `[hooks]`. Installs into the directory git will actually use — `core.hooksPath` is honored, and the path is printed when it resolves OUTSIDE the repo, since deleting that directory then removes the gate silently. `context-check` is **refused** when `.kit.toml` has no `[context]` block: the hook would pass every push and report a gate you do not have. `--force` installs it anyway. |
-| `kit hooks sync`       | Reconcile installed hooks with config.                                                                                                            |
+| `kit hooks check` | Report whether the git hooks kit manages are installed and intact. |
 | `kit hooks uninstall`  | Remove the configured git hooks. **Enforcement is off until re-installed** — git hooks are the agent-agnostic floor, so this disables the gate that fires in any agent or none. |
 
 ## Agent Config User Rules
@@ -239,7 +243,7 @@ max_bytes = 12000
 | Command                                                                    | Purpose                                                                                                         |
 | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `kit security check-gitignore [--fix]`                                     | Verify secret-file patterns are gitignored.                                                                     |
-| `kit security scan-staged`                                                 | Block commit if staged files contain credential patterns.                                                       |
+| `kit security scan-staged`                                                 | Block commit if staged files contain credential patterns. Only findings new to the commit block it; one already in `HEAD`'s copy of the file does not.                                                       |
 | `kit security verify-pull [--base <ref>]`                                  | Post-`git pull` audit: new deps, gitignore drops, introduced secrets.                                           |
 | `kit security scan-build [<dir>]`                                          | Walk `.next` / `dist` for credential leaks in build artifacts.                                                  |
 | `kit security advisories [--accept]`                                       | Dependency advisories from the repo's own package manager, split into new debt, known debt, and baseline entries that no longer apply. `--accept` freezes the current set in `.kit/advisories.json` (and prunes it).|

@@ -1,5 +1,127 @@
 ## [Unreleased]
 
+### Fixed
+
+- **`kit hooks add` promised to overwrite a hook it then left alone.** Over an
+  externally managed hook (husky, a committed `.githooks/pre-commit`) it warned
+  "kit will overwrite it", prompted, skipped the install, printed a success mark
+  and a "the commit should be blocked" recipe for a gate that was not there. It
+  now prompts only for a hook kit generated, reports an external hook as "not
+  installed" with the line to add, prints no recipe, and exits non-zero.
+- **`kit hooks uninstall` reported only the first symlinked hook.** A symlink
+  refuses the whole removal set (kit never writes through a link), but the
+  report named one hook and said nothing about the rest, such as the
+  `post-commit` bypass detector left in place. Every requested hook is now
+  listed, with "nothing was removed" on those that were not touched.
+- **A hook wrapper running a different kit version than the one checking it went
+  unreported.** The managed wrapper execs a fixed kit entrypoint, so after an
+  upgrade hooks could run 6.10 while commands ran 6.11. The hook liveness
+  reader now compares the version at the wrapper's target with the running kit
+  and says to run `kit agent-config`; an unreadable version is not guessed.
+- **A deleted git worktree kept widening memory recall and pending-action scope.**
+  `kit memory` expanded a project to every registered worktree, including ones
+  whose directory was gone (git marks them `prunable`), so `kit memory pal list`
+  and the statusline action count showed actions raised in a worktree that no
+  longer exists. Prunable worktrees are now skipped; live ones still count.
+- **Two runtime dependency advisories failed the `npm audit` gate.** The MCP
+  SDK (`@modelcontextprotocol/sdk`, GHSA-6qxp-vccf-f47h, high: an OAuth client
+  could send credentials to an authorization server chosen by the MCP server) is
+  pinned to 1.32.1, and `smol-toml` (GHSA-r4xh-jqrq-34v2, moderate: quadratic
+  parse time) to 1.9.0. Both passed `kit triage`; kit's own MCP server is not an
+  OAuth client, so the SDK advisory is closed by the bump rather than reachable
+  from kit's code. `smol-toml` 1.9 returns null-prototype tables; no kit consumer
+  uses prototype methods on parsed config, and one test now compares plain data.
+- **`kit monkey-test` was labelled experimental while documented as a release
+  gate.** The usage banner and `docs/COMMANDS.md` no longer say experimental, and
+  `docs/MONKEY_TEST.md` now states that the static control checks are lexical: a
+  stub with the shape of a control can satisfy them. Reviewers must inspect the
+  browser run and retain provider-side sandbox evidence when the release depends
+  on payment settlement or webhooks.
+- **The staged secret scan blocked commits over findings already in `HEAD`.** It
+  scanned the whole staged file, so a single committed match (here an example
+  value in an old CHANGELOG entry) blocked every later commit that touched the
+  file, and `--no-verify`, which disables the whole hook, was the only way past.
+  Findings already present in `HEAD`'s copy of the file, counted per rule and
+  preview, no longer block; a new secret, or a second copy of a committed one,
+  still does, and the staged blob is still what gets scanned.
+- **Restoring a public-key memory backup gave unhelpful errors.** A passphrase
+  restore of a public-key blob reported "bad magic"; it now says the blob is a
+  public-key backup and needs the private key. A sync with a local key that does
+  not match the blob's recipient surfaced a raw OpenSSL authentication error; it
+  now says the backup was encrypted to a different public key.
+- **`SKIP_SEED=1` for `kit monkey-test run` was undocumented.** It is now in
+  `docs/MONKEY_TEST.md`, with its fail-closed behavior (a skipped seed without
+  `--expected` is a high finding).
+- **Docs and hints named verbs that do not exist.** `docs/COMMANDS.md` listed
+  `kit hooks sync` (the real verb is `kit hooks check`), and the profile import
+  hint told operators to run `kit policy trust add` (the command is
+  `kit policy trust <pubkey.pem>`). A test now fails when COMMANDS.md documents
+  a hooks verb the command does not handle.
+- **No workflow job had a runtime limit.** All 20 jobs across 7 workflows now
+  set `timeout-minutes` (the native Windows suite gets 90, as it runs about 46),
+  and a test fails if a new job omits it.
+- **The Docker image printed a Node ExperimentalWarning on every invocation**
+  (the SQLite module behind `kit memory`). The image now disables that one
+  warning class.
+- **`kit monkey-test plan` gave no sign of an unconfigured role matrix.** The plan
+  now has a "role matrix" check that validates `.kit/monkey-test/role-matrix.json`
+  and warns, with the reason, when it is missing or not set to `configured: true`.
+- **Unknown `[browser]` keys in `.kit.toml` were accepted silently.** A key kit
+  does not read (for example `strategy`) now prints a one-time warning naming the
+  key and the supported ones. The setting is still ignored, not rejected.
+- **`kit browser` ignored `CHROME_PATH`.** Detection only looked at standard
+  install locations and `PATH`. An executable `CHROME_PATH` is now used for the
+  system-chrome strategy; a value that is not executable is ignored.
+- **`proxy-addr` updated to 2.0.8 in the lockfile** (transitive via the MCP SDK's
+  express), clearing a critical advisory about IP spoofing through an IPv4-mapped
+  IPv6 trust subnet that failed the `npm audit` gate.
+- **`npm test` reported a hung test as an unexplained failure.** node counts a
+  per-test timeout as "cancelled", so the runner exited non-zero with no name. It
+  now reads its TAP log and prints `timed out: <test>` apart from `failed: <test>`
+  (`scripts/test-failure-kinds.mjs`, covered by `src/test-runner-timeout.test.ts`).
+- **The Docker image failed its Trivy gate on a new HIGH advisory in npm's bundled
+  `http-cache-semantics` 4.2.0** (CVE-2026-93748, `max-stale` cache disclosure, no
+  upstream fix in the base image). The Dockerfile already swaps two other bundled
+  npm dependencies for fixed releases; it now swaps this one for 4.3.0 as well.
+  A rebuilt image scans clean and `npm view` still works from it.
+- **Two unit tests wrote real GitHub Actions secrets.** The `propagate` tests that
+  include the `github` target ran `gh secret set` against whatever repo the suite
+  ran in, so a developer with an authenticated `gh` got `TEST_KEY` and `API_KEY`
+  repository secrets from a plain `npm test`. Both tests now put a recording
+  stand-in `gh` first on PATH (`src/fake-gh.test-support.ts`), and a test pins that
+  the stand-in catches the call. A full run with a recording `gh` on PATH shows no
+  `secret set` call.
+
+### Known limitations (2026-10-07)
+
+- **husky 9's shim directory is not followed.** With `core.hooksPath = .husky/_`
+  git runs a shim there that executes `.husky/<hook>` one level up. kit reads
+  only the directory git runs, so a `.husky/pre-commit` that does enforce kit's
+  contract is reported as "outdated" by `kit hooks check` and as no enforcing
+  hook by the security floor, and `kit hooks install` will not rewrite it.
+  husky 8 (hooks directly in `core.hooksPath`) is counted correctly. A test pins
+  the limit so following the shim is a deliberate change.
+
+### Known limitations (2026-10-07, triage)
+
+- **The Vercel plugin keeps its own copy of the error-redaction patterns.** A
+  plugin cannot import core, and the shared adapter SDK does not export a
+  redactor. `src/plugin-error-redaction.test.ts` pins the Vercel copy against
+  core's patterns, so a drift fails a test. Moving the patterns into the SDK is a
+  contract change and is not planned.
+
+### Known limitations (2026-10-06)
+
+- **A bare 40-character hex secret is not redacted.** Redacting every 40-hex
+  string would also erase commit hashes, so a value of that shape that kit does
+  not hold passes through when it appears on its own in text; a keyed assignment
+  (`NAME=<hex>`) is redacted. Documented in `docs/THREAT_MODEL.md`.
+- **`--json` is accepted but not honored by `run`, `clone`, `open` and
+  `create-plugin`.** The generated flag surface lists it for those verbs, and the
+  release audit found it has no effect on their output. Accepted for now, since
+  removing it would break scripts that already pass it; use a verb that documents
+  `--json` when machine output is needed.
+
 ## [6.12.1] - 2026-09-30
 
 ### Fixed

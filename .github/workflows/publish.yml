@@ -10,6 +10,7 @@ permissions: {}
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     # Protected environment gate. There is no npm token here any more: every published package
     # has a GitHub Actions trusted publisher naming this repo, THIS workflow file, and
     # THIS environment, so npm mints a short-lived credential from the job's OIDC identity

@@ -19,6 +19,7 @@ jobs:
   deps:
     name: Stage 1 — Dependencies
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       # JOB-level so the Snyk step's `if: env.SNYK_TOKEN != ''` can actually see it.
       # A step-level env is applied AFTER the step's own `if` is evaluated, so the
@@ -50,6 +51,7 @@ jobs:
   supply-chain:
     name: Stage 1b — Supply-chain (bumblebee)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -80,6 +82,7 @@ jobs:
     name: Stage 1d — GuardDog malware sweep (nightly)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -109,6 +112,7 @@ jobs:
   sast:
     name: Stage 2 — SAST
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       # JOB-level so the SonarCloud step's `if: env.SONAR_TOKEN != ''` can see it
       # (a step-level env is evaluated too late — same trap as Snyk).
@@ -147,6 +151,7 @@ jobs:
   codeql:
     name: Stage 2b — CodeQL
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       security-events: write
@@ -172,6 +177,7 @@ jobs:
     name: Stage 3 — DAST (skipped — no HTTP surface)
     if: false
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - run: echo "skipped"
 
@@ -179,6 +185,7 @@ jobs:
   container:
     name: Stage 4 — Container (Trivy)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       security-events: write
@@ -213,6 +220,7 @@ jobs:
   infra:
     name: Stage 5 — Infrastructure
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       security-events: write
@@ -248,6 +256,7 @@ jobs:
   secrets:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -263,6 +272,7 @@ jobs:
   compliance:
     name: GDPR + security headers
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: GDPR compliance check (user-data packages only)
@@ -312,6 +322,7 @@ jobs:
   self-check:
     name: kit check-security
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -329,6 +340,7 @@ jobs:
   self-audit:
     name: kit self-audit
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -362,6 +374,7 @@ jobs:
   dogfood-scan:
     name: kit dogfood (provision + scan)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -398,6 +411,7 @@ jobs:
         self-audit,
       ]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: always()
     steps:
       - name: Verify all jobs passed

@@ -14,6 +14,7 @@ jobs:
   scorecard:
     name: OpenSSF Scorecard
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       security-events: write # upload to code-scanning dashboard
       id-token: write # OIDC for publishing results

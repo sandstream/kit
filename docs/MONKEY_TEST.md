@@ -50,6 +50,11 @@ uses the temporary environment, then blocks seed/server/test on failure. A
 failed or missing seed also blocks server/test. Explicit browser skips retain
 their documented validation and seed behavior; skipping is not browser evidence.
 
+`SKIP_SEED=1` in the environment behaves like `--skip-seed`: the seed step is
+skipped, and the run still needs `--expected <reason>` or it is refused
+(fail-closed). Prefer the flag; the variable exists for CI wrappers that cannot
+edit the command line.
+
 ## Roles
 
 The role matrix is fixed by the gate and can be mapped to each app's auth
@@ -188,3 +193,10 @@ Static security detection requires control-shaped
 schema, query, or API operations. Checklist words alone do not satisfy RLS,
 tenant isolation, webhook verification/idempotency, refund/receipt paths, or an
 immutable journal.
+
+Known limitation: control-shaped is a lexical test, so a stub or a dead string
+literal that has the shape of a control (an empty `verifyWebhookSignature`
+function, a policy statement inside an unused string) can still satisfy a
+static check. The static pass narrows what a reviewer must read; it is not proof
+that a control runs. Review the browser run and retain a separate provider-side
+sandbox transaction and webhook receipt when the release depends on them.

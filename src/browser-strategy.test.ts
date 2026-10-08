@@ -111,6 +111,34 @@ describe("system Chrome selection", () => {
     assert.equal(result.cdp_url, undefined);
   });
 
+  it("honors CHROME_PATH when it points at an executable (BH-14)", async () => {
+    const custom = "/opt/browsers/chrome-beta/chrome";
+    const result = await diagnoseBrowser(
+      { port: 3107 },
+      {
+        deps: { ...noMachineDeps, isExecutable: (path) => path === custom },
+        env: { CHROME_PATH: custom },
+        cwd: "/repo",
+      },
+    );
+    assert.equal(result.strategy, "system-chrome");
+    assert.ok(
+      result.checks.some((check) => check.name === "system chrome" && check.detail === custom),
+    );
+  });
+
+  it("ignores a CHROME_PATH that is not executable instead of trusting it", async () => {
+    const result = await diagnoseBrowser(
+      { port: 3107 },
+      {
+        deps: noMachineDeps,
+        env: { CHROME_PATH: "/nonexistent/chrome" },
+        cwd: "/repo",
+      },
+    );
+    assert.notEqual(result.strategy, "system-chrome");
+  });
+
   it("rejects a directory and a non-executable chromium on PATH", async () => {
     const path = mkdtempSync(join(tmpdir(), "kit-browser-path-"));
     try {

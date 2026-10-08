@@ -14,7 +14,7 @@
  *   - **Authority** is NOT granted by the bundle. A bundled key proves "not tampered", never "trusted
  *     source". Import reports whether the signer is in the LOCAL org anchor; it never writes the
  *     anchor. An imported profile only becomes authoritative once the signer is anchored
- *     (`kit policy trust add`) — until then `verifyProfileSignature` still returns "unverifiable".
+ *     (`kit policy trust <pubkey.pem>`). Until then `verifyProfileSignature` still returns "unverifiable".
  *   - A signature that fails integrity, or whose signer is revoked, is REFUSED (nothing written).
  *
  * Deterministic, offline, zero-LLM.
@@ -211,7 +211,7 @@ export function importBundle(
   }
   return {
     status: "imported-unanchored",
-    detail: `imported with integrity verified, but signer ${signature.kid} is not in the local trust anchor — run 'kit policy trust add' to make it authoritative`,
+    detail: `imported with integrity verified, but signer ${signature.kid} is not in the local trust anchor; run 'kit policy trust <pubkey.pem>' to make it authoritative`,
     kid: signature.kid,
     fingerprint,
     anchored,

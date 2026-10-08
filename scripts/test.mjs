@@ -3,8 +3,9 @@
 // here, collect the compiled test files ourselves (no shell-glob dependency, which
 // also differs across shells), and invoke `node --test`. No external dep.
 import { spawnSync } from "node:child_process";
-import { readdirSync, existsSync } from "node:fs";
+import { readdirSync, existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { classifyTap, describeFailureKinds } from "./test-failure-kinds.mjs";
 
 const env = {
   ...process.env,
@@ -93,12 +94,13 @@ if (stale.length > 0) {
 // a `npm test | grep '# fail'` that worked before would stop matching. So the stdout reporter is
 // node's own choice, reproduced, and the file reporter is purely additive.
 const TAP_LOG = ".kit-test-run.tap";
+const TEST_TIMEOUT_MS = 180000;
 const stdoutReporter = process.stdout.isTTY ? "spec" : "tap";
 const result = spawnSync(
   process.execPath,
   [
     "--test",
-    "--test-timeout=180000",
+    `--test-timeout=${TEST_TIMEOUT_MS}`,
     "--test-concurrency=2",
     `--test-reporter=${stdoutReporter}`,
     "--test-reporter-destination=stdout",
@@ -110,7 +112,16 @@ const result = spawnSync(
 );
 if (result.status !== 0) {
   console.error(
-    `\n[kit] full TAP report written to ${TAP_LOG} — grep '^not ok' for the failing test names.`,
+    `\n[kit] full TAP report written to ${TAP_LOG} - grep '^not ok' for the failing test names.`,
   );
+  try {
+    const summary = describeFailureKinds(
+      classifyTap(readFileSync(TAP_LOG, "utf-8")),
+      TEST_TIMEOUT_MS,
+    );
+    if (summary) console.error(summary);
+  } catch {
+    // The TAP log is a convenience; the exit status below is what counts.
+  }
 }
 process.exit(result.status ?? 1);

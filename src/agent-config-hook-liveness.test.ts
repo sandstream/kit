@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { WRAPPER_MARKER } from "./kit-wrapper.js";
+import { getKitVersionSync } from "./update-check.js";
 import {
   commandIncludesSubcommand,
   expandHomePath,
@@ -80,4 +81,62 @@ describe("hookCommandProblems", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+describe("hook wrapper version drift (BH-13)", () => {
+  /** A managed wrapper whose target kit sits in a fake global install of `version`. */
+  function wrapperTo(dir: string, version: string | null): string {
+    const pkg = join(dir, "lib", "node_modules", "sandstream-kit");
+    mkdirSync(join(pkg, "dist"), { recursive: true });
+    if (version !== null) {
+      writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "sandstream-kit", version }));
+    }
+    const cli = join(pkg, "dist", "cli.js");
+    writeFileSync(cli, "");
+    const wrapper = join(dir, "kit");
+    writeFileSync(
+      wrapper,
+      `#!/bin/sh\n${WRAPPER_MARKER}\nexec ${q(process.execPath)} ${q(cli)} "$@"\n`,
+      { mode: 0o755 },
+    );
+    return wrapper;
+  }
+
+  it(
+    "reports a wrapper whose kit is a different version than the running one",
+    { skip: process.platform === "win32" },
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "kit-hook-drift-"));
+      try {
+        const wrapper = wrapperTo(dir, "0.0.1");
+        const problems = hookCommandProblems(`${q(wrapper)} gate-bash`).join();
+        assert.match(problems, /runs kit 0\.0\.1/);
+        assert.match(
+          problems,
+          new RegExp(`this kit is ${getKitVersionSync().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+        );
+        assert.match(problems, /kit agent-config/);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
+    "is quiet when the versions match, and when the target's version cannot be read",
+    { skip: process.platform === "win32" },
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "kit-hook-drift-"));
+      try {
+        assert.deepEqual(
+          hookCommandProblems(`${q(wrapperTo(dir, getKitVersionSync()))} gate-bash`),
+          [],
+        );
+        rmSync(join(dir, "lib"), { recursive: true, force: true });
+        assert.deepEqual(hookCommandProblems(`${q(wrapperTo(dir, null))} gate-bash`), []);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });
