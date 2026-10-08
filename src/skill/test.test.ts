@@ -241,7 +241,7 @@ body`);
 });
 
 describe("skillFingerprint + checkRegression", () => {
-  it("fingerprint is stable and ignores scope order", () => {
+  it("fingerprint is stable and ignores scope order (body equal)", () => {
     const a = parseSkillManifest(`---
 name: x
 description: a stable description here
@@ -253,7 +253,7 @@ name: x
 description: a stable description here
 allowed-tools: Bash, Read
 ---
-different body text does not matter`);
+body`);
     assert.equal(skillFingerprint(a), skillFingerprint(b));
   });
 
