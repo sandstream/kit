@@ -298,6 +298,28 @@ export function getProjectRecallRoots(projectPath: string, db?: DatabaseSync): s
   ]);
 }
 
+/** Worktree paths from `git worktree list --porcelain -z`, minus those git marks `prunable`
+ *  (the directory is gone): a deleted worktree must not keep widening the recall scope. */
+function livingWorktrees(porcelain: string): string[] {
+  const roots: string[] = [];
+  let current: string | null = null;
+  let isPrunable = false;
+  const flush = () => {
+    if (current !== null && !isPrunable) roots.push(current);
+  };
+  for (const field of porcelain.split("\0")) {
+    if (field.startsWith("worktree ")) {
+      flush();
+      current = field.slice("worktree ".length);
+      isPrunable = false;
+    } else if (field === "prunable" || field.startsWith("prunable ")) {
+      isPrunable = true;
+    }
+  }
+  flush();
+  return roots;
+}
+
 function registeredRecallRoots(projectPath: string, db?: DatabaseSync): string[] {
   // A path imported from another OS is evidence, not a local alias. Resolving /srv on Windows
   // would silently turn it into the current drive's \srv and widen the recall scope.
@@ -328,10 +350,7 @@ function registeredRecallRoots(projectPath: string, db?: DatabaseSync): string[]
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 2000,
     });
-    const roots = records
-      .split("\0")
-      .filter((field) => field.startsWith("worktree "))
-      .map((field) => field.slice("worktree ".length));
+    const roots = livingWorktrees(records);
     return distinctRecallRoots([
       ...localRoots,
       ...roots.flatMap((root) => [root, resolveLocalProjectPath(root)]),

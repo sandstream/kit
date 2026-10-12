@@ -7,6 +7,7 @@ import {
   type MonkeyPlanCheck,
   type MonkeyPlanOptions,
   type MonkeyTestPlan,
+  validateRoleMatrix,
 } from "./monkey-test-contract.js";
 import {
   allMonkeyDependencies,
@@ -160,6 +161,26 @@ async function detectEnvironment(
   };
 }
 
+const ROLE_MATRIX_PATH = ".kit/monkey-test/role-matrix.json";
+
+async function roleMatrixCheck(root: string): Promise<MonkeyPlanCheck> {
+  const path = join(root, ROLE_MATRIX_PATH);
+  if (!existsSync(path)) {
+    return {
+      name: "role matrix",
+      status: "warn",
+      detail: `${ROLE_MATRIX_PATH} not found; review role expectations and set configured: true`,
+    };
+  }
+  try {
+    validateRoleMatrix(await readMonkeyJson<unknown>(path));
+    return { name: "role matrix", status: "pass", detail: `${ROLE_MATRIX_PATH} configured` };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { name: "role matrix", status: "warn", detail: `${ROLE_MATRIX_PATH}: ${reason}` };
+  }
+}
+
 interface CheckInput {
   stack: MonkeyTestPlan["stack"];
   commands: MonkeyTestPlan["commands"];
@@ -267,6 +288,8 @@ export async function buildMonkeyTestPlan(
   const findings = [...(await securityFindings(root)), ...environmentFindings];
   const checkInput = { stack, commands, playwright, env, providers, harnessMissing };
   const checks = buildPlanChecks(checkInput);
+  const roleCheck = await roleMatrixCheck(root);
+  checks.push(roleCheck);
   if (environmentFindings.length > 0) {
     const envCheck = checks.find((check) => check.name === "env")!;
     envCheck.status = "fail";
@@ -289,6 +312,11 @@ export async function buildMonkeyTestPlan(
     roles: MONKEY_ROLES,
     checks,
     findings,
-    nextSteps: buildNextSteps(checkInput),
+    nextSteps: [
+      ...buildNextSteps(checkInput),
+      ...(roleCheck.status === "pass"
+        ? []
+        : [`review ${ROLE_MATRIX_PATH} and set configured: true`]),
+    ],
   };
 }

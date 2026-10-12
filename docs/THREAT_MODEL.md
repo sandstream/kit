@@ -74,6 +74,11 @@ config knob says otherwise.
 - **No secret values in error messages or logs.** Backend-write failures redact
   the held plaintext by exact substring before surfacing; `redactSecrets()`
   pattern-matching backs that up for values kit doesn't hold.
+  The pattern layer is a backstop, not a guarantee: a bare 40-character hex
+  value (the shape of a SHA-1 or a legacy API token) is not redacted when it
+  appears on its own in text, because redacting every 40-hex string would also
+  erase commit hashes. A secret of that shape that kit does not hold can
+  therefore reach a log if it is not attached to a key name.
 - **No shell-command allowlisting for agents.** kit gates its own writes
   (read-only mode) and destructive secret ops (elevation), and exports
   `KIT_POLICY_HASH` declaring the operator's pre-approved scopes — but it does
