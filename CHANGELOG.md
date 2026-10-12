@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### Added
+
+- **`kit init` creates the git repository it needs.** Hooks, the staged-file secret
+  scan and repo-scoped memory all assume a repo, and init in a bare directory used
+  to end half-installed. It now runs `git init` first: after a yes when a person is
+  present, without a question under `--yes`, `--non-interactive`, CI or no TTY. A
+  directory inside an existing work tree is left alone, so a monorepo package never
+  gets a nested repo. Answer no to the question to keep the directory without a repo.
+
 ### Fixed
 
 - **`kit hooks add` promised to overwrite a hook it then left alone.** Over an
