@@ -2,6 +2,14 @@
 
 ### Fixed
 
+- **`kit check` reported Cargo workspace members as not covered.** In a repo whose
+  root `Cargo.toml` declares `[workspace] members`, the scan scope row warned that
+  each member crate was a separate project to scan on its own, although
+  osv-scanner and cargo audit read the root `Cargo.lock`, which pins every member.
+  Members (globs such as `crates/*` included, `exclude` honored) now count as
+  covered when a root `Cargo.lock` exists. A nested project that is not a member
+  still warns, and so do members without a lockfile. A root `pnpm-workspace.yaml`
+  now counts as declaring workspaces, as `package.json` `workspaces` already did.
 - **`kit hooks add` promised to overwrite a hook it then left alone.** Over an
   externally managed hook (husky, a committed `.githooks/pre-commit`) it warned
   "kit will overwrite it", prompted, skipped the install, printed a success mark

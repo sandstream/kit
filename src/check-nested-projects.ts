@@ -18,6 +18,7 @@
 
 import { readdir, readFile, access } from "node:fs/promises";
 import { join } from "node:path";
+import { parse as parseToml } from "smol-toml";
 
 import type { SecurityCheckResult } from "./check-security.js";
 
@@ -103,8 +104,17 @@ export async function findNestedProjects(root: string, maxDepth = 2): Promise<st
   return found.sort();
 }
 
-/** True when the root package.json declares workspaces, so a root-level scan does cover the children. */
+/**
+ * True when the root declares npm/yarn workspaces in package.json, or pnpm workspaces in
+ * pnpm-workspace.yaml, so a root-level scan does cover the children.
+ */
 async function declaresWorkspaces(root: string): Promise<boolean> {
+  try {
+    await access(join(root, "pnpm-workspace.yaml"));
+    return true;
+  } catch {
+    /* not pnpm, read package.json */
+  }
   try {
     const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf-8")) as {
       workspaces?: unknown;
@@ -115,6 +125,39 @@ async function declaresWorkspaces(root: string): Promise<boolean> {
   }
 }
 
+/** `crates/*` style member patterns: `*` and `?` match within one path segment. */
+function memberMatcher(pattern: string): RegExp {
+  const clean = pattern.replace(/^\.\//, "").replace(/\/+$/, "");
+  const body = clean
+    .split("")
+    .map((c) => (c === "*" ? "[^/]*" : c === "?" ? "[^/]" : c.replace(/[.+^${}()|[\]\\]/g, "\\$&")))
+    .join("");
+  return new RegExp(`^${body}$`);
+}
+
+/**
+ * Nested paths that a root Cargo workspace lists in `[workspace] members` (minus `exclude`).
+ *
+ * Only when a root Cargo.lock exists: osv-scanner and cargo audit read the lockfile, and a
+ * workspace's single Cargo.lock pins every member. Without it the root scan has nothing to read
+ * for those crates, so they stay uncovered.
+ */
+async function cargoWorkspaceMembers(root: string, nested: string[]): Promise<string[]> {
+  try {
+    await access(join(root, "Cargo.lock"));
+    const toml = parseToml(await readFile(join(root, "Cargo.toml"), "utf-8")) as {
+      workspace?: { members?: unknown; exclude?: unknown };
+    };
+    const list = (v: unknown): RegExp[] =>
+      Array.isArray(v) ? v.filter((m) => typeof m === "string").map(memberMatcher) : [];
+    const members = list(toml.workspace?.members);
+    const excluded = list(toml.workspace?.exclude);
+    return nested.filter((n) => members.some((m) => m.test(n)) && !excluded.some((m) => m.test(n)));
+  } catch {
+    return [];
+  }
+}
+
 export interface ScanScope {
   /** Does the directory kit ran in have a manifest of its own? */
   rootManifest: boolean;
@@ -122,6 +165,8 @@ export interface ScanScope {
   nested: string[];
   /** Does the root manifest declare workspaces, so a root-level scan covers the children? */
   workspaces: boolean;
+  /** Nested paths a root Cargo workspace locks in its Cargo.lock, so the root scan reads them. */
+  cargoMembers?: string[];
 }
 
 /** The facts, gathered once: the row below and the skip escalation both read them. */
@@ -131,6 +176,7 @@ export async function scanScopeFacts(root: string): Promise<ScanScope> {
     rootManifest,
     nested,
     workspaces: rootManifest ? await declaresWorkspaces(root) : false,
+    cargoMembers: rootManifest ? await cargoWorkspaceMembers(root, nested) : [],
   };
 }
 
@@ -191,7 +237,8 @@ function say(
  *
  * The four cases are distinct, and only one of them is a problem:
  *   - nothing nested: the scope is this project, say so;
- *   - a root manifest declaring workspaces: the children are covered by the root scan;
+ *   - a root manifest declaring workspaces: the children are covered by the root scan (a Cargo
+ *     workspace covers only its locked members, so any other child still falls to the next case);
  *   - a root manifest without workspaces: the children are separate projects, not covered;
  *   - no root manifest at all: this verdict covers an empty directory. This is the false green.
  */
@@ -199,7 +246,12 @@ export async function checkScanScope(
   root: string,
   facts?: ScanScope,
 ): Promise<SecurityCheckResult> {
-  const { rootManifest, nested, workspaces } = facts ?? (await scanScopeFacts(root));
+  const {
+    rootManifest,
+    nested,
+    workspaces,
+    cargoMembers = [],
+  } = facts ?? (await scanScopeFacts(root));
 
   if (nested.length === 0) {
     return say(
@@ -208,16 +260,24 @@ export async function checkScanScope(
     );
   }
 
-  const list = nested.slice(0, 4).join(", ") + (nested.length > 4 ? `, +${nested.length - 4}` : "");
+  const show = (paths: string[]): string =>
+    paths.slice(0, 4).join(", ") + (paths.length > 4 ? `, +${paths.length - 4}` : "");
+  const list = show(nested);
 
   if (rootManifest && workspaces) {
     return say("pass", `${nested.length} nested package(s) covered via workspaces: ${list}`);
   }
 
+  const uncovered = rootManifest ? nested.filter((n) => !cargoMembers.includes(n)) : nested;
+
+  if (rootManifest && uncovered.length === 0) {
+    return say("pass", `${nested.length} nested crate(s) covered via the Cargo workspace: ${list}`);
+  }
+
   if (rootManifest) {
     return say(
       "warn",
-      `${nested.length} nested project(s) NOT covered by this scan: ${list} — run kit check in each`,
+      `${uncovered.length} nested project(s) NOT covered by this scan: ${show(uncovered)} — run kit check in each`,
       { severity: "medium", suggestion: `cd <project> && kit check --category security` },
     );
   }
