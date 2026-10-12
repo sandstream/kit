@@ -60,6 +60,7 @@ export async function syncSecurityFindings(
     const { openMemoryDb } = await import("./memory/db.js");
     const { palSyncFindings } = await import("./memory/pal.js");
     const { getCurrentProjectRoot } = await import("./memory/project.js");
+    const { getCanonicalProjectRoot } = await import("./memory/canonical-root.js");
     // Scope by the ABSOLUTE project root, not its basename: two different repos
     // that happen to share a directory name (e.g. ~/work/api and ~/scratch/api)
     // must not reconcile into each other's findings.
@@ -72,7 +73,12 @@ export async function syncSecurityFindings(
       // Advisories reconcile under their OWN source tag. palSyncFindings closes every
       // row of its tag that is absent from the batch, so folding advisories into "sec"
       // would make each sync close the other's items on every run.
-      const a = palSyncFindings(db, "adv", advisoryFindings(results), { scope });
+      // An advisory is about the machine and its tools (catalog age, tool versions), not the
+      // code, so every worktree of a repo shares one scope: the main checkout. Code findings
+      // above stay per worktree, since one worktree's clean scan must not close another's.
+      const a = palSyncFindings(db, "adv", advisoryFindings(results), {
+        scope: getCanonicalProjectRoot(),
+      });
       return {
         added: r.added + a.added,
         reopened: r.reopened + a.reopened,
