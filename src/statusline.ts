@@ -75,7 +75,14 @@ export function quickSubsystems(cwd: string): SubsystemStatus[] {
   return [
     { key: "config", label: ".kit.toml", ok: has(".kit.toml"), next: "kit init" },
     { key: "tools", label: "tools locked", ok: has(".kit/cli-lock.json"), next: "kit install" },
-    { key: "secrets", label: ".env.local", ok: has(".env.local"), next: "kit secrets" },
+    {
+      key: "secrets",
+      label: ".env.local",
+      ok: has(".env.local"),
+      // `kit secrets` has nothing to resolve without a [secrets] section, so naming it
+      // would loop: the score never rises and the hint never changes.
+      next: tomlHas("[secrets") ? "kit secrets" : "add [secrets] to .kit.toml",
+    },
     {
       key: "hooks",
       label: "git hooks",

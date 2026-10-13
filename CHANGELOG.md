@@ -2,6 +2,10 @@
 
 ### Fixed
 
+- **The statusline told a repo without `[secrets]` to run `kit secrets` forever.** With no
+  `[secrets]` section the command resolves nothing and writes no `.env.local`, so the
+  score stayed at 4/6 and the hint never changed. The hint now says
+  `add [secrets] to .kit.toml` until the section exists.
 - **`kit hooks add` promised to overwrite a hook it then left alone.** Over an
   externally managed hook (husky, a committed `.githooks/pre-commit`) it warned
   "kit will overwrite it", prompted, skipped the install, printed a success mark
