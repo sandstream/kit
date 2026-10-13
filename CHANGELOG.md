@@ -2,6 +2,10 @@
 
 ### Fixed
 
+- **A "bumblebee catalogs are N days old" action item stayed open with nothing to do.** When
+  no newer bumblebee release exists, the bundled catalogs are as fresh as upstream has
+  published, so the age is shown in the check detail only and no action item is opened. With a
+  newer release available the item is still opened, keyed on that version.
 - **`kit hooks add` promised to overwrite a hook it then left alone.** Over an
   externally managed hook (husky, a committed `.githooks/pre-commit`) it warned
   "kit will overwrite it", prompted, skipped the install, printed a success mark
