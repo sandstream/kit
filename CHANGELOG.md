@@ -2,6 +2,9 @@
 
 ### Fixed
 
+- **Windows CI failed at random on `EBUSY` while deleting a fake `.exe`.** Windows can hold a
+  just-run test binary for a moment, so cleanup in `cli.test.ts` and
+  `check-services-cwd.test.ts` now retries, as `infisical-status.test.ts` already did.
 - **`kit hooks add` promised to overwrite a hook it then left alone.** Over an
   externally managed hook (husky, a committed `.githooks/pre-commit`) it warned
   "kit will overwrite it", prompted, skipped the install, printed a success mark
