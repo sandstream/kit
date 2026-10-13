@@ -1,8 +1,9 @@
 # Monkey Test
 
-`kit monkey-test` is a portable release gate for applications that handle money.
-It combines deterministic repo inspection, a Playwright harness, role-based route
-crawling, a sandbox money-flow check, and a security checklist.
+`kit monkey-test` is a portable release gate for web and desktop applications.
+It combines deterministic repo inspection, a Playwright harness, route crawling,
+a security checklist, and, when the app has them, role separation and a sandbox
+money-flow check.
 
 ## Commands
 
@@ -15,8 +16,54 @@ kit monkey-test run \
 ```
 
 `plan` detects the stack, package manager, Playwright state, dev server, local
-env source, seed command, money provider markers, harness files, and static
-security findings.
+env source, seed command, money provider markers, a Tauri or Electron desktop
+shell, harness files, and static security findings. It also decides which
+requirements apply (see [Requirements](#requirements)).
+
+## Requirements
+
+The role crawl and the money flow apply only when the app has roles or handles
+money. `plan --json` reports the decision and the reason in `requirements`:
+
+- `money.required` is true when a payment provider is detected (dependency or
+  runtime source marker). The money flow then runs.
+- `roles.required` is true when any of these is true: the money flow is
+  required (it runs as a signed-in customer), an auth dependency is present
+  (for example `next-auth`, `@clerk/*`, `@supabase/supabase-js`, `firebase`,
+  `lucia`, `passport`), runtime source checks a role or a signed-in user
+  (`create policy`, `hasRole(`, `user.role === "admin"`, `auth.uid()`), or the
+  role matrix declares more than the public role or cannot be read.
+
+The decision is fail-closed. A false positive restores the full five-role gate.
+An app without roles is crawled as the public visitor only: `init` writes a
+public-only role matrix, and `denyRoutes` and `forbiddenText` may be empty
+because there is no other user to deny or leak to. `allowRoutes` and a seeded
+`requiredText` marker stay mandatory. The runner passes the decision to the
+generated spec as `MONKEY_ROLES_REQUIRED` and `MONKEY_MONEY_REQUIRED`, ignores
+those names from `--env-command`, and validates the browser evidence against
+the same plan. When the variables are missing or not `0`, the spec keeps the
+full gate.
+
+## Desktop apps
+
+`plan` detects a Tauri app from `src-tauri/tauri.conf.json`,
+`tauri.conf.json5`, `Tauri.toml`, or a `@tauri-apps/*` dependency, and an
+Electron app from an `electron` dependency. `plan --json` reports `desktop`
+with the identifier, product name, dev URL, the folders where this platform
+keeps the app's real data, and the drivers that can control the real app:
+
+- `eval-hook`: a debug-only hook in the app that runs JavaScript in the main
+  window and writes the result to a file. It works on every platform and keeps
+  working when the screen is locked, because each step is one evaluation.
+- `tauri-driver`: WebDriver for Tauri on Linux and Windows. macOS has no
+  WKWebView driver, so `plan` does not offer it there.
+- `playwright-electron`: Playwright's Electron support.
+
+The browser crawl reaches the web UI through the dev URL, but it cannot close,
+quit, or restart the app. Before a desktop run, make debug builds read a
+temporary data folder from an environment variable, so that the test never
+touches real user data, and confirm afterwards that every folder in
+`desktop.realDataDirs` is unchanged.
 
 `init` creates or updates a managed harness:
 
@@ -39,7 +86,8 @@ These pathname checks are not protection against hostile concurrent parent renam
 present, starts the app on a kit-chosen free port and runs the browser gate.
 It deletes stale Playwright JSON output before the run and accepts browser
 success only when the new report contains the current run ID, both configured
-projects, every role crawl, and the money-flow case. The release gate invokes the
+projects, every required role crawl, and the money-flow case when money is
+required. The release gate invokes the
 generated monkey config directly instead of trusting a repo test script. A custom
 `--test-command` may run diagnostics, but cannot attest browser execution or make
 the release gate green merely by writing a matching JSON report.
@@ -57,8 +105,8 @@ edit the command line.
 
 ## Roles
 
-The role matrix is fixed by the gate and can be mapped to each app's auth
-fixtures:
+When roles are required, the role matrix is fixed by the gate and can be mapped
+to each app's auth fixtures:
 
 - `public`: public visitor.
 - `customer`: customer/buyer.

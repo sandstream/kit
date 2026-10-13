@@ -316,12 +316,26 @@ function paymentProviderFindings(context: SecurityContext): MonkeyFinding[] {
   ];
 }
 
+/**
+ * A Tauri app sets its CSP in the app config (`app.security.csp`), not in HTTP headers,
+ * because the webview loads the UI from disk. A string or object value is a policy;
+ * `null` turns the CSP off and does not count.
+ */
+function tauriCspDeclared(files: Record<string, string>): boolean {
+  return Object.entries(files).some(
+    ([path, text]) =>
+      /(?:^|\/)src-tauri\/(?:tauri\.conf\.json5?|Tauri\.toml)$/.test(path) &&
+      (/"csp"\s*:\s*(?:"[^"]*\S[^"]*"|\{)/.test(text) || /^\s*csp\s*=\s*["{]/m.test(text)),
+  );
+}
+
 function headerPolicyFindings(context: SecurityContext): MonkeyFinding[] {
   const webApp = /next|remix|svelte|astro|react|vue|express/i.test(
     Object.keys(context.deps).join("\n"),
   );
   if (
     !webApp ||
+    tauriCspDeclared(context.controlFiles) ||
     /Content-Security-Policy|contentSecurityPolicy|headers\s*\(/i.test(context.controlText)
   ) {
     return [];

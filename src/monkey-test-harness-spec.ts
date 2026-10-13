@@ -7,6 +7,7 @@ import {
   focusableIsOffscreen,
   isRoleWithId,
   matchesExpectedFinding,
+  monkeyRoleIdsFor,
   monkeyRouteIsDenied,
   monkeyRoutePath,
   requireDisjointValues,
@@ -117,14 +118,15 @@ const MONKEY_ROLE_IDS = ["public", "customer", "staff", "owner", "superadmin"] a
 const MONKEY_ROLE_LIST_KEYS = ["allowRoutes", "denyRoutes", "requiredText", "forbiddenText"] as const;
 const MONKEY_ROLE_ROUTE_KEYS = ["allowRoutes", "denyRoutes"] as const;
 type MonkeyRoleListKey = (typeof MONKEY_ROLE_LIST_KEYS)[number];
+const monkeyRoleIdsFor: (rolesRequired: boolean) => readonly RoleExpectation["id"][] = ${monkeyRoleIdsFor.toString()};
 const isRoleWithId: (candidate: unknown, id: RoleExpectation["id"]) => candidate is Record<string, unknown> = ${isRoleWithId.toString()};
-const configuredRoleEntries: (value: unknown) => unknown[] = ${configuredRoleEntries.toString()};
+const configuredRoleEntries: (value: unknown, rolesRequired?: boolean) => unknown[] = ${configuredRoleEntries.toString()};
 const requiredRole: (entries: unknown[], id: RoleExpectation["id"]) => Record<string, unknown> = ${requiredRole.toString()};
-const requiredStringList: (role: Record<string, unknown>, id: RoleExpectation["id"], key: MonkeyRoleListKey) => string[] = ${requiredStringList.toString()};
+const requiredStringList: (role: Record<string, unknown>, id: RoleExpectation["id"], key: MonkeyRoleListKey, allowEmpty?: boolean) => string[] = ${requiredStringList.toString()};
 const requireSameOriginRoutes: (routes: string[], id: RoleExpectation["id"], key: (typeof MONKEY_ROLE_ROUTE_KEYS)[number]) => void = ${requireSameOriginRoutes.toString()};
 const requireDisjointValues: (included: string[], excluded: string[], message: string) => void = ${requireDisjointValues.toString()};
-const validateRoleExpectation: (role: Record<string, unknown>, id: RoleExpectation["id"]) => void = ${validateRoleExpectation.toString()};
-const validateRoleMatrix: (value: unknown) => RoleExpectation[] = ${validateRoleMatrix.toString()};
+const validateRoleExpectation: (role: Record<string, unknown>, id: RoleExpectation["id"], rolesRequired?: boolean) => void = ${validateRoleExpectation.toString()};
+const validateRoleMatrix: (value: unknown, rolesRequired?: boolean) => RoleExpectation[] = ${validateRoleMatrix.toString()};
 const controlHasAccessibleName: (control: ControlName) => boolean = ${controlHasAccessibleName.toString()};
 const focusableIsOffscreen: (geometry: FocusableGeometry) => boolean = ${focusableIsOffscreen.toString()};
 const monkeyRoutePath: (urlOrPath: string) => string = ${monkeyRoutePath.toString()};
@@ -140,12 +142,18 @@ function loadExpected(): unknown {
   return JSON.parse(readFileSync(path, "utf-8"));
 }
 
+// kit monkey-test run sets both from the plan. Anything other than "0" keeps the full
+// gate, so running this spec by hand never silently drops the role or money cases.
+const rolesRequired = process.env.MONKEY_ROLES_REQUIRED !== "0";
+const moneyRequired = process.env.MONKEY_MONEY_REQUIRED !== "0";
+
 function loadRoleMatrix(): RoleExpectation[] {
   const path = process.env.MONKEY_ROLE_MATRIX ?? ".kit/monkey-test/role-matrix.json";
-  return validateRoleMatrix(JSON.parse(readFileSync(path, "utf-8")));
+  return validateRoleMatrix(JSON.parse(readFileSync(path, "utf-8")), rolesRequired);
 }
 
 const roleExpectations = loadRoleMatrix();
+const activeRoles = roles.filter((role) => monkeyRoleIdsFor(rolesRequired).includes(role.id));
 
 const seenAuthStates = new Map<string, string>();
 for (const role of roles) {
@@ -334,7 +342,7 @@ async function inspectPage(page: Page, role: string, route: string): Promise<Fin
   return findings;
 }
 
-for (const role of roles) {
+for (const role of activeRoles) {
   test.describe(\`\${role.id}: \${role.label}\`, () => {
     const state = storageState(role);
     const expectation = roleExpectations.find((item) => item.id === role.id)!;
@@ -538,7 +546,7 @@ for (const role of roles) {
 
 const customer = roles.find((role) => role.id === "customer")!;
 const customerState = storageState(customer);
-test.describe("customer payment", () => {
+if (moneyRequired) test.describe("customer payment", () => {
   if (customerState) test.use({ storageState: customerState });
 
   test("money flow", async ({ page }) => {

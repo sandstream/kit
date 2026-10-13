@@ -184,7 +184,14 @@ async function loadTemporaryEnvironment(context: RunContext): Promise<boolean> {
     steps.push({ name: "env", status: "fail", detail: "live payment environment refused" });
     return false;
   }
-  for (const reserved of ["MONKEY_RUN_ID", "MONKEY_BASE_URL", "KIT_MONKEY_PORT", "PORT"]) {
+  for (const reserved of [
+    "MONKEY_RUN_ID",
+    "MONKEY_BASE_URL",
+    "KIT_MONKEY_PORT",
+    "PORT",
+    "MONKEY_ROLES_REQUIRED",
+    "MONKEY_MONEY_REQUIRED",
+  ]) {
     delete loaded[reserved];
   }
   Object.assign(env, loaded);
@@ -194,6 +201,12 @@ async function loadTemporaryEnvironment(context: RunContext): Promise<boolean> {
 
 function restoreRunnerEnvironment(context: RunContext): void {
   context.env.MONKEY_RUN_ID ||= randomUUID();
+  // The generated spec registers cases from these. They come from the plan, never from
+  // the caller's env: the evidence check below uses the same plan, so a spec that
+  // registered fewer cases than the plan requires still fails.
+  const { requirements } = context.plan;
+  context.env.MONKEY_ROLES_REQUIRED = requirements.roles.required ? "1" : "0";
+  context.env.MONKEY_MONEY_REQUIRED = requirements.money.required ? "1" : "0";
   if (context.expectedReasonRaw) {
     context.env.MONKEY_EXPECTED_REASON = context.expectedReasonRaw;
   }
@@ -224,7 +237,11 @@ function stopBeforeSideEffects(context: RunContext, detail: string): MonkeyRunRe
 }
 
 async function validateRunnerRoleMatrix(context: RunContext): Promise<boolean> {
-  const roleMatrixFinding = await runnerRoleMatrixFinding(context.root, context.env);
+  const roleMatrixFinding = await runnerRoleMatrixFinding(
+    context.root,
+    context.env,
+    context.plan.requirements.roles.required,
+  );
   if (roleMatrixFinding) context.findings.push(roleMatrixFinding);
   return !roleMatrixFinding;
 }
@@ -415,7 +432,7 @@ async function runPlaywrightGate(context: RunContext): Promise<void> {
     processes: context.processes,
   });
   const evidence = result.ok
-    ? await validatePlaywrightEvidence(root, env.MONKEY_RUN_ID!)
+    ? await validatePlaywrightEvidence(root, env.MONKEY_RUN_ID!, plan.requirements)
     : { ok: false, detail: "test command failed before evidence validation" };
   const customCommand = options.testCommand !== undefined;
   const passed = result.ok && evidence.ok && !customCommand;

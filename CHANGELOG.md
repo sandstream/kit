@@ -1,6 +1,38 @@
 ## [Unreleased]
 
+### Changed
+
+- **`kit monkey-test` required five roles and a money flow from every app.** A
+  single-user desktop app without accounts or payments could not pass: the role
+  matrix needed customer, staff, owner, and superadmin entries, and the evidence
+  check needed a money-flow case. `plan` now reports `requirements`. Roles are
+  required when the app has an auth dependency, a role or auth check in runtime
+  source, a role matrix with more than the public role, or a payment provider.
+  The money flow is required when a payment provider is detected. Detection is
+  fail-closed: a false positive restores the full gate. An app without roles is
+  crawled as the public visitor only, and `init` writes a public-only matrix for
+  it. The runner passes the decision to the spec, ignores the same names from
+  `--env-command`, and checks the evidence against the plan.
+
+### Added
+
+- **`kit monkey-test plan` detects Tauri and Electron apps.** `plan --json`
+  reports `desktop` with the config file, identifier, product name, dev URL, the
+  folders where the platform keeps the app's real data, and the drivers that
+  can control the real app (`eval-hook`, `tauri-driver` outside macOS,
+  `playwright-electron`). The next steps say to run debug builds on a temporary
+  data folder, because the browser crawl cannot close, quit, or restart the app.
+
 ### Fixed
+
+- **The monkey-test source scan read Rust build output instead of app source.**
+  The scan stops at 500 files and did not skip `target/` or `.svelte-kit/`. In a
+  Tauri repo the Cargo build folder filled the budget first, so auth and payment
+  markers in the app source were never read. Both folders are now skipped.
+- **A Tauri app's CSP was reported as missing.** Tauri sets the CSP in
+  `app.security.csp` in its config, not in HTTP headers. The security pack now
+  accepts a string or object value there. A `null` value still reports the
+  finding, because it turns the CSP off.
 
 - **`kit hooks add` promised to overwrite a hook it then left alone.** Over an
   externally managed hook (husky, a committed `.githooks/pre-commit`) it warned
