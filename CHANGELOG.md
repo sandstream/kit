@@ -2,6 +2,11 @@
 
 ### Fixed
 
+- **`kit check` read a nested Rust or Go lockfile as "nothing to scan".** The osv-scanner check
+  looked for `Cargo.lock`, `go.mod` and the like in the repo root only. With a lockfile in a
+  subproject such as `src-tauri/` and osv-scanner missing, it reported `skip` instead of the
+  `warn` that says those dependencies are unscanned. It now searches subfolders (five levels,
+  skipping `node_modules`, `target`, `.git`, `dist`, `vendor`).
 - **`kit hooks add` promised to overwrite a hook it then left alone.** Over an
   externally managed hook (husky, a committed `.githooks/pre-commit`) it warned
   "kit will overwrite it", prompted, skipped the install, printed a success mark

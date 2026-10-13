@@ -13,6 +13,7 @@ import { classifyGuardDog } from "./guarddog.js";
 import { depsHashFor, loadGuardDogCache, saveGuardDogCache } from "./guarddog-cache.js";
 import { buildSemgrepArgs, semgrepConfig, isAirGap, isLocalSemgrepConfig } from "./scanners.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
+import { hasOsvManifest } from "./osv-manifests.js";
 import { TRIAGE_MAX_AGE_DAYS } from "./commands/triage.js";
 import {
   ensureBumblebee,
@@ -2198,17 +2199,7 @@ async function checkOsvScanner(root: string): Promise<SecurityCheckResult> {
   // If none is present, osv legitimately does not apply → an honest skip. If one IS
   // present, osv absent/failed means those deps are UNSCANNED → WARN (so --strict
   // catches it), never a silent "clean".
-  const osvEcosystemPresent = async (): Promise<boolean> => {
-    for (const m of ["go.mod", "Cargo.lock", "composer.lock", "Gemfile.lock", "pubspec.lock"]) {
-      try {
-        await access(resolve(root, m));
-        return true;
-      } catch {
-        /* not present */
-      }
-    }
-    return false;
-  };
+  const osvEcosystemPresent = (): Promise<boolean> => hasOsvManifest(root);
   const osvBin = await resolveToolBin("osv-scanner");
   if (!osvBin) {
     return (await osvEcosystemPresent())
