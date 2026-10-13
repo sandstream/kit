@@ -1322,7 +1322,7 @@
         "src/doctor.test.ts|lines=647",
         "src/doctor.ts|lines=888",
         "src/exec-broker/broker.test.ts|lines=745",
-        "src/flag-surface.ts|lines=703",
+        "src/flag-surface.ts|lines=708",
         "src/governance-middleware.test.ts|lines=609",
         "src/hooks.test.ts|lines=715",
         "src/install-gate.test.ts|lines=1156",

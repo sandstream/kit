@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+### Added
+
+- **`kit monkey-test desktop` interrupts a desktop app while it works.** The
+  browser crawl never closed, quit, or restarted the app, so it could not find
+  work lost to an interruption. In one desktop app, closing the window during an
+  AI summary quit the app and dropped the summary without a message. The new
+  command drives the real debug build through a debug-only eval hook, on a
+  temporary data folder. One seed chooses the random clicks and the
+  interruptions: a configured long operation is started and then hit with
+  close-window, quit (SIGTERM), kill (SIGKILL), reload, or restart. After each
+  restart the run checks that the app starts without a crash, every data file
+  parses, no record or file is missing, and the operation finished or the UI
+  says it was interrupted. Work that disappears without a message is a finding.
+  The click pass also reports page errors, console errors, technical error text,
+  runtime placeholders, unlabeled controls, and XSS. The real data folders must
+  be unchanged after the run. Configuration and the hook contract are in
+  `docs/MONKEY_TEST.md`.
+
 ### Fixed
 
 - **`kit hooks add` promised to overwrite a hook it then left alone.** Over an

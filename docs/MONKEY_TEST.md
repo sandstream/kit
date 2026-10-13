@@ -200,3 +200,157 @@ function, a policy statement inside an unused string) can still satisfy a
 static check. The static pass narrows what a reviewer must read; it is not proof
 that a control runs. Review the browser run and retain a separate provider-side
 sandbox transaction and webhook receipt when the release depends on them.
+
+## Desktop run: clicks and interruptions
+
+The browser crawl only clicks inside a page. A desktop user also closes the
+window, quits, or loses the process while the app is working. `kit monkey-test
+desktop` drives the real debug build of a Tauri or Electron app and does both:
+
+```sh
+kit monkey-test desktop --steps 200 --interruptions 5
+kit monkey-test desktop --seed 4711 --actions kill   # repeat one finding
+```
+
+One seed chooses every random click and every interruption. Each finding's
+repro contains the seed and the flags, so the same command against the same UI
+repeats the run.
+
+### What a run does
+
+1. Fingerprints every folder in `realDataDirs`.
+2. Creates a temporary data folder and a temporary hook folder.
+3. Runs `seedCommand`, if set, with the data env variable pointing at the
+   temporary folder.
+4. Starts the app with `startCommand`, waits for `ready`, and installs an error
+   monitor in the page. A canary error proves that the monitor works.
+5. Clicks, types, and selects at random for `--steps` steps. Text inputs get
+   hostile values, including an XSS payload. After each step it checks for page
+   errors, unhandled rejections, console errors, native alerts, a blank window,
+   runtime placeholders (`undefined`, `NaN`, `[object Object]`), technical error
+   text in alerts (serde, Rust panics, `os error`), unlabeled controls, and a
+   payload that ran as script.
+6. At `--interruptions` seeded steps it starts one of the configured long
+   operations, waits a seeded time, and performs a lifecycle action:
+
+   | Action         | What it does                                                   |
+   | -------------- | -------------------------------------------------------------- |
+   | `close-window` | Runs `closeWindow` in the page, the user's close button.        |
+   | `quit`         | SIGTERM to the app's process group, a pause, then a new start.  |
+   | `kill`         | SIGKILL, as a crash or a forced quit does. No cleanup runs.     |
+   | `reload`       | Reloads the page. The process keeps running.                    |
+   | `restart`      | SIGTERM and a new start at once.                                |
+
+   The first five interruptions use each action once, in seeded order.
+7. After each interruption it brings the app back and checks:
+   - The app starts, its ready check answers, and the app log has no crash
+     (Rust panic, `fatal runtime error`, segmentation fault, or a configured
+     pattern).
+   - Every file that matches `dataFiles` parses: JSON, JSON Lines, or TOML. A
+     torn or empty file is a critical finding.
+   - No data file disappeared, and the UI still shows every record that
+     `records` returned before the interruption.
+   - The operation's `outcome` script returns `done` or `interrupted`. It may
+     return `running`, and the driver then waits up to `operationTimeoutMs`.
+     Anything else means the work disappeared without a message. That is a
+     finding, because the user cannot tell that something was lost.
+8. At the end it stops the app, checks the data files again, and compares the
+   real data folders with the first fingerprint. Any change is a critical
+   finding.
+
+The temporary folder is deleted after a clean run and kept after a run with
+findings. It holds the data, the hook files, and `app.log`.
+
+### Configuration
+
+`.kit/monkey-test/desktop.json` (or `--config <path>`):
+
+```json
+{
+  "startCommand": "bun run tauri dev",
+  "seedCommand": "bun scripts/seed-test-data.ts",
+  "dataDirEnv": "APP_DATA_DIR",
+  "hookDirEnv": "APP_DEBUG_DIR",
+  "realDataDirs": ["~/Library/Application Support/App"],
+  "realDataIgnore": ["models"],
+  "dataFiles": ["meetings/*.json", "settings.json"],
+  "records": "return [...document.querySelectorAll('nav li .title')].map((el) => el.textContent.trim());",
+  "operations": [
+    {
+      "name": "AI summary",
+      "start": "document.querySelector('[data-action=summarize]').click(); return 'ok';",
+      "outcome": "const s = document.querySelector('[data-summary-state]'); return s ? s.dataset.summaryState : 'lost';"
+    }
+  ],
+  "closeWindow": "await window.__TAURI_INTERNALS__.invoke('plugin:window|close', { label: 'main' }); return 'ok';"
+}
+```
+
+Optional fields: `ready` (default: the body has text), `logCrashPatterns`,
+`startTimeoutMs` (300000), `stepTimeoutMs` (60000), and `operationTimeoutMs`
+(120000). Scripts are function bodies. They may use `await` and must `return`.
+
+List every long operation the user can start: save, export, upload, AI calls,
+and recording. The `outcome` script is where the app says what happened to the
+work, so write it against what the user sees, not against internal state.
+
+### The app side: data folder and eval hook
+
+The debug build must read two env variables. Release builds must ignore both.
+
+- The data env variable (`dataDirEnv`) replaces the real data folder, so the
+  test never reads or writes real user data.
+- The hook env variable (`hookDirEnv`) names a folder. The app polls
+  `<folder>/cmd.js`, deletes it, runs its content as the body of an async
+  function in the main window, and writes the result to `<folder>/out.txt`. A
+  string result is written as is; anything else as JSON.
+
+The driver renames a complete file into `cmd.js` and wraps every body with a
+nonce, so a late answer to an earlier command is never read as the current one.
+Each command is one short evaluation, so the run keeps working when the screen
+locks and the webview pauses its timers.
+
+A Tauri 2 hook in `src-tauri/src/lib.rs`:
+
+```rust
+#[cfg(debug_assertions)]
+fn debug_hook(app: tauri::AppHandle) {
+    use tauri::Manager;
+    let Some(dir) = std::env::var_os("APP_DEBUG_DIR").map(std::path::PathBuf::from) else { return };
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let cmd = dir.join("cmd.js");
+        let Ok(js) = std::fs::read_to_string(&cmd) else { continue };
+        let _ = std::fs::remove_file(&cmd);
+        if let Some(window) = app.get_webview_window("main") {
+            let wrapped = format!(
+                "(async()=>{{const inv=window.__TAURI_INTERNALS__.invoke;try{{const r=await (async()=>{{{js}\n}})();await inv('debug_report',{{text:typeof r==='string'?r:JSON.stringify(r)}})}}catch(e){{await inv('debug_report',{{text:'ERR '+e}})}}}})()"
+            );
+            let _ = window.eval(&wrapped);
+        }
+    });
+}
+
+#[cfg(debug_assertions)]
+#[tauri::command]
+fn debug_report(text: String) {
+    if let Some(dir) = std::env::var_os("APP_DEBUG_DIR") {
+        let _ = std::fs::write(std::path::PathBuf::from(dir).join("out.txt"), text);
+    }
+}
+```
+
+Register `debug_report` in the invoke handler and call `debug_hook` from
+`setup`. In an Electron main process, poll the same file and run the body with
+`webContents.executeJavaScript`.
+
+### Limits
+
+- The driver uses the eval hook. It does not use `tauri-driver` or Playwright's
+  Electron support yet.
+- The process-group stop is verified on macOS and Linux. Windows process trees
+  are not verified.
+- The web Playwright harness does not run interruptions. Reload and tab close
+  during a long operation in a web app are not covered yet.
+- The checks see what the app writes and shows. They cannot prove that an
+  operation that reports `done` produced a correct result.
