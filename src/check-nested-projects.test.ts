@@ -88,7 +88,9 @@ describe("checkScanScope", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
 
+describe("checkScanScope: Cargo workspaces", () => {
   // A Cargo workspace has one Cargo.lock at the root that pins every member, and that lockfile is
   // what osv-scanner and cargo audit read. So the members are covered, but only the members, and
   // only when the lockfile is there.
@@ -133,7 +135,9 @@ describe("checkScanScope", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
 
+describe("checkScanScope: sibling projects", () => {
   it("warns at medium when a root project has uncovered siblings under it", async () => {
     const dir = tree({
       "package.json": JSON.stringify({ name: "root", dependencies: {} }),
