@@ -166,7 +166,7 @@ describe("CLI error handling", () => {
   });
 
   after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("exits 1 and explains when .kit.toml is missing", async () => {
@@ -199,7 +199,7 @@ describe("kit <command> --help", () => {
   });
 
   after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   const exists = (p: string) =>
@@ -240,7 +240,7 @@ describe("kit check", () => {
   });
 
   after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("exits 0 with empty config (no tools/services/secrets configured)", async () => {
@@ -335,7 +335,7 @@ describe("kit fix", () => {
   });
 
   afterEach(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("exits 0 when there is nothing to fix (empty config)", async () => {
@@ -473,7 +473,7 @@ describe("kit setup", () => {
   });
 
   after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("runs all 6 pipeline steps with config-sourced secrets", async () => {
@@ -518,7 +518,7 @@ describe("kit default command", () => {
   });
 
   after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("runs check when invoked with no subcommand", async () => {
@@ -540,7 +540,7 @@ describe("kit version", () => {
   });
 
   after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("kit version prints the version from package.json", async () => {
@@ -581,7 +581,7 @@ describe("kit whoami", () => {
   });
 
   after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("returns exit 0 with no governance config", async () => {
@@ -645,7 +645,7 @@ describe("kit init — auto-generate", () => {
   });
 
   after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("generates .kit.toml for a Next.js project when file is absent (--non-interactive)", async () => {
@@ -736,7 +736,7 @@ describe("kit env diff", () => {
   });
 
   after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("routes and reports drift between .env.local and the target", async () => {
@@ -769,7 +769,7 @@ describe("kit secrets validate", () => {
   });
 
   after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("exits non-zero and flags the missing key", async () => {
@@ -792,7 +792,7 @@ describe("vendor-repo safety: config-free scan + honored --no-setup", () => {
     await writeFile(join(dir, "package.json"), '{"name":"t","dependencies":{}}', "utf-8");
   });
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("kit scan runs without a .kit.toml and never creates one", async () => {
@@ -836,7 +836,7 @@ describe("kit self-audit (clean tree, machine output)", () => {
     dir = await mkdtemp(join(tmpdir(), "kit-selfaudit-"));
   });
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("--json: ok=true, failed=0, advisories separate from warnings, files carried", async () => {
@@ -887,7 +887,7 @@ describe("kit profile — malformed .kit-profile.toml fails closed", () => {
   });
 
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("exits 1 with valid JSON (never an empty-stdout crash) on invalid profile TOML", async () => {
@@ -1053,7 +1053,7 @@ describe("global flags before the command word", () => {
   });
 
   after(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("`kit --read-only check` runs the check instead of 'Unknown command'", async () => {
@@ -1103,7 +1103,7 @@ describe("kit upgrade rejects a typo'd flag instead of doing something else", ()
   });
 
   afterEach(async () => {
-    await rm(tempDir, { recursive: true, force: true });
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("`--self.` exits 1 and never touches the lock file", async () => {

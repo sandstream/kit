@@ -1,12 +1,12 @@
 /**
  * Agent-facing + governance leaves, extracted from cli.ts (5.0-alpha god-module
- * split): `kit skills`, `escalate`, `agent-config`, `governance`, `statusline`,
+ * split): `kit skills`, `escalate`, `agent-config`, `governance`,
  * `team`. Independent leaves (no cross-cluster cmd* calls), each returning a
  * boolean verdict for the COMMANDS dispatch table.
  */
 import { resolve } from "node:path";
 import { c } from "../utils/colors.js";
-import { hasFlag, flagValue, flagInt } from "../utils/flags.js";
+import { hasFlag, flagInt } from "../utils/flags.js";
 import { loadConfig } from "../config.js";
 import { KIT_FILE, resolveConfigPath } from "../cli-shared.js";
 import { checkSkills } from "../check-skills.js";
@@ -285,20 +285,6 @@ export async function cmdGovernance(): Promise<boolean> {
   }
 
   console.log();
-  return true;
-}
-
-/**
- * `kit statusline` — one compact, fast, read-only line for visible bars that can
- * run a command (Claude Code statusLine, a shell PS1, …): setup score for the
- * active mode + an "update available" mark + the open PAL count. Codex does not
- * expose that visible bar hook; its memory SessionStart hook injects the SAME text
- * as context instead.
- */
-export async function cmdStatusline(): Promise<boolean> {
-  process.env.KIT_NO_UPDATE_CHECK = "1"; // never let the post-command notice pollute the single line
-  const { buildStatuslineText } = await import("../statusline.js");
-  console.log(await buildStatuslineText({ modeFlag: flagValue(process.argv, "--mode") }));
   return true;
 }
 

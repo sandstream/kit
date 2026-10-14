@@ -8,7 +8,7 @@ import {
   checkForBumblebeeUpdate,
 } from "./bumblebee-update.js";
 import { advisoryFindings } from "./findings-track.js";
-import type { SecurityCheckResult } from "./check-security.js";
+import { bumblebeeStaleCatalogVerdict, type SecurityCheckResult } from "./check-security.js";
 
 describe("parseReleaseTag", () => {
   it("strips a leading v and accepts a plain version", () => {
@@ -164,5 +164,22 @@ describe("advisoryFindings — the PAL bridge", () => {
     ]);
     assert.equal(day1[0].dedupKey, day2[0].dedupKey);
     assert.notEqual(day1[0].title, day2[0].title, "the title still tells the truth about age");
+  });
+});
+
+describe("bumblebeeStaleCatalogVerdict", () => {
+  const outcome = { packagesScanned: 12 } as Parameters<typeof bumblebeeStaleCatalogVerdict>[0];
+
+  it("opens no action item when no newer release exists: the age is upstream's own", () => {
+    const result = bumblebeeStaleCatalogVerdict(outcome, 111, null);
+    assert.equal(result.status, "pass");
+    assert.equal(result.advisory, undefined);
+    assert.match(result.detail, /111 days old/);
+  });
+
+  it("opens an action item when a newer release is available", () => {
+    const result = bumblebeeStaleCatalogVerdict(outcome, 111, { latest: "0.2.0", pinned: "0.1.2" });
+    assert.equal(result.status, "pass");
+    assert.equal(result.advisory?.key, "bumblebee-catalogs-stale:0.2.0");
   });
 });

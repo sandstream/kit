@@ -1,5 +1,221 @@
 ## [Unreleased]
 
+### Changed
+
+- **`kit monkey-test` required five roles and a money flow from every app.** A
+  single-user desktop app without accounts or payments could not pass: the role
+  matrix needed customer, staff, owner, and superadmin entries, and the evidence
+  check needed a money-flow case. `plan` now reports `requirements`. Roles are
+  required when the app has an auth dependency, a role or auth check in runtime
+  source, a role matrix with more than the public role, or a payment provider.
+  The money flow is required when a payment provider is detected. Detection is
+  fail-closed: a false positive restores the full gate. An app without roles is
+  crawled as the public visitor only, and `init` writes a public-only matrix for
+  it. The runner passes the decision to the spec, ignores the same names from
+  `--env-command`, and checks the evidence against the plan.
+
+### Added
+
+- **`kit monkey-test plan` detects Tauri and Electron apps.** `plan --json`
+  reports `desktop` with the config file, identifier, product name, dev URL, the
+  folders where the platform keeps the app's real data, and the drivers that
+  can control the real app (`eval-hook`, `tauri-driver` outside macOS,
+  `playwright-electron`). The next steps say to run debug builds on a temporary
+  data folder, because the browser crawl cannot close, quit, or restart the app.
+
+### Fixed
+
+- **The monkey-test source scan read Rust build output instead of app source.**
+  The scan stops at 500 files and did not skip `target/` or `.svelte-kit/`. In a
+  Tauri repo the Cargo build folder filled the budget first, so auth and payment
+  markers in the app source were never read. Both folders are now skipped.
+- **A Tauri app's CSP was reported as missing.** Tauri sets the CSP in
+  `app.security.csp` in its config, not in HTTP headers. The security pack now
+  accepts a string or object value there. A `null` value still reports the
+  finding, because it turns the CSP off.
+
+### Added
+
+- **`kit init` creates the git repository it needs.** Hooks, the staged-file secret
+  scan and repo-scoped memory all assume a repo, and init in a bare directory used
+  to end half-installed. It now runs `git init` first: after a yes when a person is
+  present, without a question under `--yes`, `--non-interactive`, CI or no TTY. A
+  directory inside an existing work tree is left alone, so a monorepo package never
+  gets a nested repo. Answer no to the question to keep the directory without a repo.
+- **`kit statusline --json`.** Prints the statusline as one object: mode, setup
+  score, cached update, open action count, the next setup step, every open setup
+  gap, and the exact text line. A UI (a Claude Code mod, a shell prompt) can
+  render kit's own facts instead of parsing the text form.
+
+### Changed
+
+- **Five verbs no longer accept a `--mode` flag they never read.** `kit skills`,
+  `escalate`, `governance`, `team` and `agent-config` shared a module with
+  `statusline`, so the generated flag surface admitted its `--mode` for all of
+  them, where it did nothing. `statusline` now has its own module; passing
+  `--mode` to the other five is refused as an unknown flag, and `statusline` no
+  longer accepts the four gate flags it never read.
+
+### Fixed
+
+- **The statusline told a repo without `[secrets]` to run `kit secrets` forever.** With no
+  `[secrets]` section the command resolves nothing and writes no `.env.local`, so the
+  score stayed at 4/6 and the hint never changed. The hint now says
+  `add [secrets] to .kit.toml` until the section exists.
+- **Windows CI failed at random on `EBUSY` while deleting a fake `.exe`.** Windows can hold a
+  just-run test binary for a moment, so cleanup in `cli.test.ts` and
+  `check-services-cwd.test.ts` now retries, as `infisical-status.test.ts` already did.
+- **`kit hooks add` promised to overwrite a hook it then left alone.** Over an
+  externally managed hook (husky, a committed `.githooks/pre-commit`) it warned
+  "kit will overwrite it", prompted, skipped the install, printed a success mark
+  and a "the commit should be blocked" recipe for a gate that was not there. It
+  now prompts only for a hook kit generated, reports an external hook as "not
+  installed" with the line to add, prints no recipe, and exits non-zero.
+- **`kit hooks uninstall` reported only the first symlinked hook.** A symlink
+  refuses the whole removal set (kit never writes through a link), but the
+  report named one hook and said nothing about the rest, such as the
+  `post-commit` bypass detector left in place. Every requested hook is now
+  listed, with "nothing was removed" on those that were not touched.
+- **A hook wrapper running a different kit version than the one checking it went
+  unreported.** The managed wrapper execs a fixed kit entrypoint, so after an
+  upgrade hooks could run 6.10 while commands ran 6.11. The hook liveness
+  reader now compares the version at the wrapper's target with the running kit
+  and says to run `kit agent-config`; an unreadable version is not guessed.
+- **A deleted git worktree kept widening memory recall and pending-action scope.**
+  `kit memory` expanded a project to every registered worktree, including ones
+  whose directory was gone (git marks them `prunable`), so `kit memory pal list`
+  and the statusline action count showed actions raised in a worktree that no
+  longer exists. Prunable worktrees are now skipped; live ones still count.
+- **Two runtime dependency advisories failed the `npm audit` gate.** The MCP
+  SDK (`@modelcontextprotocol/sdk`, GHSA-6qxp-vccf-f47h, high: an OAuth client
+  could send credentials to an authorization server chosen by the MCP server) is
+  pinned to 1.32.1, and `smol-toml` (GHSA-r4xh-jqrq-34v2, moderate: quadratic
+  parse time) to 1.9.0. Both passed `kit triage`; kit's own MCP server is not an
+  OAuth client, so the SDK advisory is closed by the bump rather than reachable
+  from kit's code. `smol-toml` 1.9 returns null-prototype tables; no kit consumer
+  uses prototype methods on parsed config, and one test now compares plain data.
+- **`kit monkey-test` was labelled experimental while documented as a release
+  gate.** The usage banner and `docs/COMMANDS.md` no longer say experimental, and
+  `docs/MONKEY_TEST.md` now states that the static control checks are lexical: a
+  stub with the shape of a control can satisfy them. Reviewers must inspect the
+  browser run and retain provider-side sandbox evidence when the release depends
+  on payment settlement or webhooks.
+- **The staged secret scan blocked commits over findings already in `HEAD`.** It
+  scanned the whole staged file, so a single committed match (here an example
+  value in an old CHANGELOG entry) blocked every later commit that touched the
+  file, and `--no-verify`, which disables the whole hook, was the only way past.
+  Findings already present in `HEAD`'s copy of the file, counted per rule and
+  preview, no longer block; a new secret, or a second copy of a committed one,
+  still does, and the staged blob is still what gets scanned.
+- **Restoring a public-key memory backup gave unhelpful errors.** A passphrase
+  restore of a public-key blob reported "bad magic"; it now says the blob is a
+  public-key backup and needs the private key. A sync with a local key that does
+  not match the blob's recipient surfaced a raw OpenSSL authentication error; it
+  now says the backup was encrypted to a different public key.
+- **`SKIP_SEED=1` for `kit monkey-test run` was undocumented.** It is now in
+  `docs/MONKEY_TEST.md`, with its fail-closed behavior (a skipped seed without
+  `--expected` is a high finding).
+- **Docs and hints named verbs that do not exist.** `docs/COMMANDS.md` listed
+  `kit hooks sync` (the real verb is `kit hooks check`), and the profile import
+  hint told operators to run `kit policy trust add` (the command is
+  `kit policy trust <pubkey.pem>`). A test now fails when COMMANDS.md documents
+  a hooks verb the command does not handle.
+- **No workflow job had a runtime limit.** All 20 jobs across 7 workflows now
+  set `timeout-minutes` (the native Windows suite gets 90, as it runs about 46),
+  and a test fails if a new job omits it.
+- **The Docker image printed a Node ExperimentalWarning on every invocation**
+  (the SQLite module behind `kit memory`). The image now disables that one
+  warning class.
+- **`kit monkey-test plan` gave no sign of an unconfigured role matrix.** The plan
+  now has a "role matrix" check that validates `.kit/monkey-test/role-matrix.json`
+  and warns, with the reason, when it is missing or not set to `configured: true`.
+- **Unknown `[browser]` keys in `.kit.toml` were accepted silently.** A key kit
+  does not read (for example `strategy`) now prints a one-time warning naming the
+  key and the supported ones. The setting is still ignored, not rejected.
+- **`kit browser` ignored `CHROME_PATH`.** Detection only looked at standard
+  install locations and `PATH`. An executable `CHROME_PATH` is now used for the
+  system-chrome strategy; a value that is not executable is ignored.
+- **`proxy-addr` updated to 2.0.8 in the lockfile** (transitive via the MCP SDK's
+  express), clearing a critical advisory about IP spoofing through an IPv4-mapped
+  IPv6 trust subnet that failed the `npm audit` gate.
+- **`npm test` reported a hung test as an unexplained failure.** node counts a
+  per-test timeout as "cancelled", so the runner exited non-zero with no name. It
+  now reads its TAP log and prints `timed out: <test>` apart from `failed: <test>`
+  (`scripts/test-failure-kinds.mjs`, covered by `src/test-runner-timeout.test.ts`).
+- **The Docker image failed its Trivy gate on a new HIGH advisory in npm's bundled
+  `http-cache-semantics` 4.2.0** (CVE-2026-93748, `max-stale` cache disclosure, no
+  upstream fix in the base image). The Dockerfile already swaps two other bundled
+  npm dependencies for fixed releases; it now swaps this one for 4.3.0 as well.
+  A rebuilt image scans clean and `npm view` still works from it.
+- **Two unit tests wrote real GitHub Actions secrets.** The `propagate` tests that
+  include the `github` target ran `gh secret set` against whatever repo the suite
+  ran in, so a developer with an authenticated `gh` got `TEST_KEY` and `API_KEY`
+  repository secrets from a plain `npm test`. Both tests now put a recording
+  stand-in `gh` first on PATH (`src/fake-gh.test-support.ts`), and a test pins that
+  the stand-in catches the call. A full run with a recording `gh` on PATH shows no
+  `secret set` call.
+
+- **One advisory was raised once per worktree.** Advisories such as the
+  threat-intel catalog age are about the machine and its tools, not the code, yet
+  each live worktree of a repo kept its own copy of the same pending action. They
+  now share one scope, the main checkout. A finding about the code still belongs
+  to the worktree that raised it: one worktree's clean scan must not close a
+  finding another worktree still has.
+- **The committed `.kit/cli-lock.json` recorded a machine-local pnpm install.**
+  The repo has no `pnpm-lock.yaml` and installs with npm, but `.kit.toml`
+  declared pnpm and the lock held its `manual`/`kit-shim` provenance from one
+  machine. Both entries are gone, and `src/repo-lock-consistency.test.ts` fails
+  if the committed lock again records machine-local provenance or a tool that
+  `.kit.toml` does not declare.
+
+### Known limitations (2026-10-12)
+
+- **Some publish gates are pinned by text-level tests only.** The tag/version and
+  CHANGELOG gates are exercised by a harness that runs them. The audit,
+  supply-chain scan, tests and build, SDK and peer range, and key pin gates are
+  still checked by tests that match the workflow text, so a gate that stopped
+  working while its text stayed would not fail a test. Behavioural tests need
+  fixtures for each gate and are not planned yet.
+- **The v6.11.0 tag fails its own `npm audit --audit-level=high` gate.** The
+  advisory was published after the release. Current `main` is clean, and no
+  tagged release is rewritten.
+- **Commit `3de3e89` is typed `fix(release)` but bundles new features.** It is a
+  single 110-file commit and is already in `main`. Rewriting that history is not
+  planned. Read the CHANGELOG, not the commit type, to see what it added.
+- **OpenSSF Scorecard scores 6.0 out of 10, and "Signed-Releases" reads 0.** The
+  zero is a limit of the Scorecard tooling, as the release audit found, not a
+  release that lacks a signature. Verify a release per `docs/VERIFY.md`.
+
+### Known limitations (2026-10-07)
+
+- **husky 9's shim directory is not followed.** With `core.hooksPath = .husky/_`
+  git runs a shim there that executes `.husky/<hook>` one level up. kit reads
+  only the directory git runs, so a `.husky/pre-commit` that does enforce kit's
+  contract is reported as "outdated" by `kit hooks check` and as no enforcing
+  hook by the security floor, and `kit hooks install` will not rewrite it.
+  husky 8 (hooks directly in `core.hooksPath`) is counted correctly. A test pins
+  the limit so following the shim is a deliberate change.
+
+### Known limitations (2026-10-07, triage)
+
+- **The Vercel plugin keeps its own copy of the error-redaction patterns.** A
+  plugin cannot import core, and the shared adapter SDK does not export a
+  redactor. `src/plugin-error-redaction.test.ts` pins the Vercel copy against
+  core's patterns, so a drift fails a test. Moving the patterns into the SDK is a
+  contract change and is not planned.
+
+### Known limitations (2026-10-06)
+
+- **A bare 40-character hex secret is not redacted.** Redacting every 40-hex
+  string would also erase commit hashes, so a value of that shape that kit does
+  not hold passes through when it appears on its own in text; a keyed assignment
+  (`NAME=<hex>`) is redacted. Documented in `docs/THREAT_MODEL.md`.
+- **`--json` is accepted but not honored by `run`, `clone`, `open` and
+  `create-plugin`.** The generated flag surface lists it for those verbs, and the
+  release audit found it has no effect on their output. Accepted for now, since
+  removing it would break scripts that already pass it; use a verb that documents
+  `--json` when machine output is needed.
+
 ## [6.12.1] - 2026-09-30
 
 ### Fixed

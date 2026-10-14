@@ -1,6 +1,6 @@
 {
   "name": "monkey-test",
-  "triggerKey": "run the monkey test release gate for money handling apps including the trigger phrase run monkey test",
+  "triggerKey": "run the monkey test release gate for web and desktop tauri electron apps with role and money flow checks when the app has them including the trigger phrase run monkey test",
   "scope": [
     "Bash",
     "Edit",
@@ -8,5 +8,5 @@
     "Read",
     "Write"
   ],
-  "fingerprint": "sha256:4cf9f61fd51bd5be2719551f4b4e1aaa2761fade4096b2c6ed1b56d41de6c7db"
+  "fingerprint": "sha256:378c19ab69f324e44d39d3bd8ee54d5aa9ae181cd498b306dd2c4ed556c43a01"
 }

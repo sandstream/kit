@@ -2,7 +2,6 @@ version = 1
 
 [tools]
 node = "22"
-pnpm = "latest"
 # Security scanners kit's own `kit check` resolves mise-first. Declaring them here
 # means `kit install` provisions them so the trivy/secrets scans actually run
 # (otherwise they warn "not installed"). Scheme-qualified `aqua:` refs (matching

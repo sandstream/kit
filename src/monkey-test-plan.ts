@@ -6,8 +6,13 @@ import {
   type MonkeyPackageJson,
   type MonkeyPlanCheck,
   type MonkeyPlanOptions,
+  type MonkeyDesktopApp,
+  type MonkeyRequirements,
   type MonkeyTestPlan,
+  validateRoleMatrix,
 } from "./monkey-test-contract.js";
+import { describeDesktopApp, detectDesktopApp } from "./monkey-test-desktop-detect.js";
+import { MONKEY_ROLE_MATRIX_PATH, monkeyRequirementsFrom } from "./monkey-test-requirements.js";
 import {
   allMonkeyDependencies,
   detectPaymentProviders,
@@ -160,6 +165,31 @@ async function detectEnvironment(
   };
 }
 
+const ROLE_MATRIX_PATH = MONKEY_ROLE_MATRIX_PATH;
+
+async function roleMatrixCheck(root: string, rolesRequired: boolean): Promise<MonkeyPlanCheck> {
+  const path = join(root, ROLE_MATRIX_PATH);
+  const scope = rolesRequired ? "every role" : "the public role only (no roles detected)";
+  if (!existsSync(path)) {
+    return {
+      name: "role matrix",
+      status: "warn",
+      detail: `${ROLE_MATRIX_PATH} not found; review expectations for ${scope} and set configured: true`,
+    };
+  }
+  try {
+    validateRoleMatrix(await readMonkeyJson<unknown>(path), rolesRequired);
+    return {
+      name: "role matrix",
+      status: "pass",
+      detail: `${ROLE_MATRIX_PATH} configured for ${scope}`,
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { name: "role matrix", status: "warn", detail: `${ROLE_MATRIX_PATH}: ${reason}` };
+  }
+}
+
 interface CheckInput {
   stack: MonkeyTestPlan["stack"];
   commands: MonkeyTestPlan["commands"];
@@ -167,10 +197,36 @@ interface CheckInput {
   env: MonkeyTestPlan["env"];
   providers: string[];
   harnessMissing: readonly string[];
+  requirements: MonkeyRequirements;
+  desktop: MonkeyDesktopApp | null;
+}
+
+function moneyCheck(providers: string[], requirements: MonkeyRequirements): MonkeyPlanCheck {
+  if (!requirements.money.required) {
+    return {
+      name: "money provider",
+      status: "skip",
+      detail: "No payment provider marker detected; the money flow is not required",
+    };
+  }
+  return { name: "money provider", status: "pass", detail: providers.join(", ") };
+}
+
+function desktopChecks(desktop: MonkeyDesktopApp | null): MonkeyPlanCheck[] {
+  if (!desktop) return [];
+  return [
+    {
+      name: "desktop",
+      status: "pass",
+      detail: describeDesktopApp(desktop),
+      file: desktop.config,
+    },
+  ];
 }
 
 function buildPlanChecks(input: CheckInput): MonkeyPlanCheck[] {
-  const { stack, commands, playwright, env, providers, harnessMissing } = input;
+  const { stack, commands, playwright, env, providers, harnessMissing, requirements, desktop } =
+    input;
   const stackName = `${stack.language}${stack.framework ? `/${stack.framework}` : ""}`;
   const envDetail = env.envCommand
     ? `temporary env from ${env.envCommand}`
@@ -212,11 +268,8 @@ function buildPlanChecks(input: CheckInput): MonkeyPlanCheck[] {
       status: env.envCommand || env.kitSecrets || env.envExample ? "pass" : "warn",
       detail: envDetail,
     },
-    {
-      name: "money provider",
-      status: providers.length > 0 ? "pass" : "warn",
-      detail: providers.length > 0 ? providers.join(", ") : "No payment provider marker detected",
-    },
+    moneyCheck(providers, requirements),
+    ...desktopChecks(desktop),
     {
       name: "harness",
       status: harnessMissing.length === 0 ? "pass" : "warn",
@@ -229,8 +282,14 @@ function buildPlanChecks(input: CheckInput): MonkeyPlanCheck[] {
 }
 
 function buildNextSteps(input: Omit<CheckInput, "stack">): string[] {
-  const { commands, playwright, env, providers, harnessMissing } = input;
+  const { commands, playwright, env, providers, harnessMissing, desktop } = input;
   const nextSteps: string[] = [];
+  if (desktop) {
+    nextSteps.push(
+      `desktop app: make debug builds read a temporary data folder from an env variable, so the run never touches ${desktop.realDataDirs[0] ?? "the real data folder"}`,
+      `desktop app: drive the real ${desktop.framework === "tauri" ? "Tauri" : "Electron"} app through ${desktop.drivers.join(" or ")}; the browser crawl cannot close, quit, or restart it`,
+    );
+  }
   if (harnessMissing.length > 0) nextSteps.push("kit monkey-test init");
   if (!playwright.dependency) {
     nextSteps.push("kit triage npm @playwright/test before installing it");
@@ -265,8 +324,26 @@ export async function buildMonkeyTestPlan(
   const harnessMissing = MONKEY_HARNESS_FILES.filter((file) => !existsSync(join(root, file)));
   const environmentFindings = await monkeyEnvironmentFindings(root, process.env);
   const findings = [...(await securityFindings(root)), ...environmentFindings];
-  const checkInput = { stack, commands, playwright, env, providers, harnessMissing };
+  const requirements = await monkeyRequirementsFrom({
+    root,
+    deps,
+    runtimeFiles: scan.runtimeFiles,
+    providers,
+  });
+  const desktop = await detectDesktopApp(root, pkg);
+  const checkInput = {
+    stack,
+    commands,
+    playwright,
+    env,
+    providers,
+    harnessMissing,
+    requirements,
+    desktop,
+  };
   const checks = buildPlanChecks(checkInput);
+  const roleCheck = await roleMatrixCheck(root, requirements.roles.required);
+  checks.push(roleCheck);
   if (environmentFindings.length > 0) {
     const envCheck = checks.find((check) => check.name === "env")!;
     envCheck.status = "fail";
@@ -285,10 +362,17 @@ export async function buildMonkeyTestPlan(
         environmentFindings.length === 0 &&
         findings.every((finding) => !/live payment|payment credential/i.test(finding.title)),
     },
+    requirements,
+    desktop,
     harness: { files: [...MONKEY_HARNESS_FILES], missing: harnessMissing },
     roles: MONKEY_ROLES,
     checks,
     findings,
-    nextSteps: buildNextSteps(checkInput),
+    nextSteps: [
+      ...buildNextSteps(checkInput),
+      ...(roleCheck.status === "pass"
+        ? []
+        : [`review ${ROLE_MATRIX_PATH} and set configured: true`]),
+    ],
   };
 }

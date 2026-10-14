@@ -35,6 +35,7 @@ import {
   POLICY_OPS,
 } from "./policy-gate.js";
 import { propagate, ALL_TARGETS } from "./secrets-propagate.js";
+import { withFakeGh as fakeGh } from "./fake-gh.test-support.js";
 import type { PolicyConfig } from "./config.js";
 
 describe("trap 1 — an empty vendor list denies", () => {
@@ -184,11 +185,9 @@ describe("trap 5 — the control is WIRED, not merely correct", () => {
   });
 
   it("only the refused target is stopped — the others are unaffected", async () => {
-    // github is undeclared (unconfigured) and must proceed to its adapter, where it fails for an
-    // ordinary reason. Same call, two different failure CAUSES: that pair is what proves the gate
-    // is selective rather than a blanket stop.
+    // github is undeclared and must reach its adapter, failing for an ordinary reason (selective gate).
     const policy: PolicyConfig = { agent_writes: { vercel: [] } };
-    const results = await propagate("API_KEY", "s3cret", ["vercel", "github"], { policy });
+    const results = await fakeGh(() => propagate("API_KEY", "x", ["vercel", "github"], { policy }));
     const byTarget = new Map(results.map((r) => [r.target, r]));
     assert.match(byTarget.get("vercel")!.detail, /refused by \[policy\.agent_writes\]/);
     assert.doesNotMatch(

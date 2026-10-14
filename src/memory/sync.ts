@@ -121,8 +121,20 @@ function withExport<T>(exportPath: string, opts: SyncOptions, read: (path: strin
   const dir = mkdtempSync(join(tmpdir(), "kit-sync-"));
   const tmpDb = join(dir, "decrypted.db");
   try {
-    if (asymmetric) restoreWithKey(privateKey!, exportPath, tmpDb, "import");
-    else restoreEncrypted(opts.passphrase!, exportPath, tmpDb, "import");
+    if (asymmetric) {
+      try {
+        restoreWithKey(privateKey!, exportPath, tmpDb, "import");
+      } catch (err) {
+        // An AES-GCM auth failure here means the blob was sealed to a different recipient.
+        if (/unable to authenticate|bad[ _]decrypt|unsupported state|auth tag/i.test(String(err))) {
+          throw new Error(
+            "this public-key backup was encrypted to a different public key than the private key in ~/.kit/memory-key.json; use the key whose public half is the configured recipient",
+            { cause: err },
+          );
+        }
+        throw err;
+      }
+    } else restoreEncrypted(opts.passphrase!, exportPath, tmpDb, "import");
     return read(tmpDb);
   } finally {
     rmSync(dir, { recursive: true, force: true });

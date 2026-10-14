@@ -27,12 +27,12 @@ export interface StagedHit {
  */
 export async function scanStagedFiles(cwd: string = process.cwd()): Promise<StagedHit[]> {
   let paths: string[];
+  let hasHead = true;
   try {
     // `git diff --cached` compares the index to HEAD; on a fresh repo there
     // is no HEAD yet, which makes the call exit non-zero. Use the empty-tree
     // SHA as the comparison base in that case so first-ever-commit hooks
     // still get scanned.
-    let hasHead = true;
     try {
       await exec("git", ["rev-parse", "--verify", "HEAD"], {
         cwd,
@@ -88,10 +88,51 @@ export async function scanStagedFiles(cwd: string = process.cwd()): Promise<Stag
       });
       continue;
     }
-    const findings = findSecrets(content);
+    const findings = hasHead
+      ? await netNewFindings(cwd, path, findSecrets(content))
+      : findSecrets(content);
     if (findings.length > 0) {
       hits.push({ file: path, findings, ...(isTestOrFixturePath(path) ? { advisory: true } : {}) });
     }
   }
   return hits;
+}
+
+/**
+ * Drops the findings HEAD's copy of the file already holds, counted per label and preview, so
+ * only what this commit introduces blocks it. A finding that is already committed is not news
+ * to the hook, and blocking every later edit to that file (a CHANGELOG, a doc example) left
+ * `--no-verify`, which disables the whole hook, as the only way out. A second copy of a
+ * committed secret still counts as new. The staged blob is still what gets scanned.
+ */
+async function netNewFindings(
+  cwd: string,
+  path: string,
+  staged: SecretFinding[],
+): Promise<SecretFinding[]> {
+  if (staged.length === 0) return staged;
+  let before: string;
+  try {
+    const { stdout } = await exec("git", ["show", `HEAD:${path}`], {
+      cwd,
+      timeout: 5_000,
+      maxBuffer: 25 * 1024 * 1024,
+    });
+    before = stdout;
+  } catch {
+    // Not in HEAD (added file) or unreadable: everything staged is new.
+    return staged;
+  }
+  const remaining = new Map<string, number>();
+  for (const f of findSecrets(before)) {
+    const key = `${f.label}\0${f.preview}`;
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+  return staged.filter((f) => {
+    const key = `${f.label}\0${f.preview}`;
+    const left = remaining.get(key) ?? 0;
+    if (left === 0) return true;
+    remaining.set(key, left - 1);
+    return false;
+  });
 }
