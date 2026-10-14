@@ -289,14 +289,14 @@ describe("kit check", () => {
     const result = await runCli(["check", "--category", "services,secrets"], tempDir);
 
     assert.equal(result.exitCode, 1, `stdout: ${result.stdout}\nstderr: ${result.stderr}`);
-    assert.match(result.stdout, /HITL behövs/);
+    assert.match(result.stdout, /HITL required/);
     assert.match(result.stdout, /Blocker: stripe is not authenticated/);
     assert.match(result.stdout, /Blocker: sentry requires manual provider configuration/);
     assert.match(
       result.stdout,
       /Blocker: 2 env secrets unavailable: SENTRY_DSN, SENTRY_AUTH_TOKEN/,
     );
-    assert.match(result.stdout, /Agenten fortsätter med: kit check --category services,secrets/);
+    assert.match(result.stdout, /Agent continues with: kit check --category services,secrets/);
   });
 
   it("checks declared deploy env names without printing remote values", async () => {
@@ -392,23 +392,23 @@ describe("kit fix", () => {
 
     assert.equal(result.exitCode, 1, `stdout: ${result.stdout}\nstderr: ${result.stderr}`);
     assert.match(result.stdout, /require human action/);
-    assert.match(result.stdout, /HITL behövs/);
+    assert.match(result.stdout, /HITL required/);
     assert.match(result.stdout, /Blocker: stripe is not authenticated/);
-    assert.match(result.stdout, /Ägare: provider admin/);
+    assert.match(result.stdout, /Owner: provider admin/);
     assert.match(
       result.stdout,
-      /Varför agenten inte kan lösa: auth \/ browser \/ external account/,
+      /Why the agent cannot resolve this: auth \/ browser \/ external account/,
     );
-    assert.match(result.stdout, /Gör detta:/);
+    assert.match(result.stdout, /Do this:/);
     assert.match(
       result.stdout,
-      /Svara med: stripe configured\/authenticated; no secret values pasted/,
+      /Respond with: stripe configured\/authenticated; no secret values pasted/,
     );
     assert.match(result.stdout, /kit login --service stripe/);
     assert.match(result.stdout, /provider UI \/ external account \/ secret/);
     assert.match(result.stdout, /SENTRY_DSN, SENTRY_AUTH_TOKEN/);
     assert.match(result.stdout, /kit secrets set <KEY> --stdin/);
-    assert.match(result.stdout, /Agenten fortsätter med: kit check --category services,secrets/);
+    assert.match(result.stdout, /Agent continues with: kit check --category services,secrets/);
   });
 
   it("reports non-kit hooks under core.hooksPath as manual, not fixed", async () => {

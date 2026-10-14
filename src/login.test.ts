@@ -213,7 +213,7 @@ describe("loginServices", () => {
     const pkBody = "51ZyXwVuTsRqPoNmLkJiHgFe";
     const stripeDump = [
       "color = ''",
-      "['cdb agency-sandlåda']",
+      "['cdb agency-sandbox']",
       `test_mode_api_key = '${"sk_" + "test_" + skBody}'`,
       `test_mode_pub_key = '${"pk_" + "test_" + pkBody}'`,
     ].join("\n");
