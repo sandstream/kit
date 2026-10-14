@@ -2538,7 +2538,7 @@ function bumblebeeIncompleteVerdict(
   };
 }
 
-function bumblebeeStaleCatalogVerdict(
+export function bumblebeeStaleCatalogVerdict(
   outcome: ScanOutcome,
   ageDays: number,
   update: { latest: string; pinned: string } | null,
@@ -2556,13 +2556,13 @@ function bumblebeeStaleCatalogVerdict(
         ? `; bumblebee ${update.latest} is available upstream (pinned ${update.pinned})`
         : ""),
     suggestion,
-    advisory: {
-      key: update ? `bumblebee-catalogs-stale:${update.latest}` : "bumblebee-catalogs-stale",
-      title: update
-        ? `bumblebee ${update.latest} available (pinned ${update.pinned}, catalogs ${ageDays}d old)`
-        : `bumblebee threat-intel catalogs ${ageDays} days old`,
-      detail: suggestion,
-    },
+    ...(update && {
+      advisory: {
+        key: `bumblebee-catalogs-stale:${update.latest}`,
+        title: `bumblebee ${update.latest} available (pinned ${update.pinned}, catalogs ${ageDays}d old)`,
+        detail: suggestion,
+      },
+    }),
   };
 }
 
