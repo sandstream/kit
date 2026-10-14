@@ -54,9 +54,9 @@ import {
   cmdEscalate,
   cmdAgentConfig,
   cmdGovernance,
-  cmdStatusline,
   cmdTeam,
 } from "./commands/agent.js";
+import { cmdStatusline } from "./commands/statusline.js";
 import { cmdSelfAudit, cmdCoverage, cmdAnalyze } from "./commands/coverage.js";
 import { cmdAdr } from "./commands/adr.js";
 import { cmdDecisions } from "./commands/decisions.js";
@@ -656,7 +656,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   init: {
     handler: cmdInit,
     stability: "stable",
-    help: "Detect stack, generate .kit.toml, and run full setup (--no-setup: config + lock files only; offers ~/.kit/defaults.toml [init] known_services, --services a,b answers without a prompt)",
+    help: "Detect stack, generate .kit.toml, and run full setup (runs git init first when there is no repo; --no-setup: config + lock files only; offers ~/.kit/defaults.toml [init] known_services, --services a,b answers without a prompt)",
     mcp: true,
   },
   upgrade: { handler: cmdUpgrade, stability: "stable", help: "Update lock files from .kit.toml" },

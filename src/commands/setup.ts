@@ -64,6 +64,7 @@ import { cmdSecrets } from "./secrets.js";
 import { cmdCheck } from "./check.js";
 import { cmdHooks } from "./hooks.js";
 import { recordFirstInstallPrompt } from "./setup-marker.js";
+import { initGitStep } from "./init-git.js";
 
 export async function cmdDoctor(): Promise<boolean> {
   let config: ReturnType<typeof Object.create> = {};
@@ -877,18 +878,17 @@ export async function cmdInit(): Promise<boolean> {
   console.log(`${c.bold}${c.cyan}kit init${c.reset}`);
   console.log(`${c.dim}${"─".repeat(50)}${c.reset}\n`);
 
-  // A missing TTY counts as non-interactive. It was previously derived from flags
-  // alone, so `kit init` run from an agent, a hook or CI took the INTERACTIVE
-  // branch — and `promptSelect` answers with its `recommended` option when stdin
-  // is not a TTY. Every prompt was therefore auto-answered with kit's own default
-  // and never shown to anybody. Prompts are for questions a person is present to
-  // answer; where nobody is, the answer must be "unknown", not "kit's favourite".
+  // A missing TTY counts as non-interactive. Deriving it from flags alone sent `kit init`
+  // from an agent, a hook or CI down the interactive branch, where `promptSelect` answers
+  // with its `recommended` option, so every prompt was auto-answered and never shown.
+  // Where nobody is present, the answer must be "unknown", not "kit's favourite".
   const nonInteractive =
     hasFlag(process.argv, "--non-interactive") ||
     hasFlag(process.argv, "--yes") ||
     hasFlag(process.argv, "-y") ||
     !process.stdin.isTTY;
 
+  await initGitStep(nonInteractive);
   const configPath = resolveConfigPath();
 
   // ── Auto-generate .kit.toml if absent ──────────────────────────────────
