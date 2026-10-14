@@ -74,6 +74,70 @@ describe("checkScanScope", () => {
     }
   });
 
+  it("passes for a pnpm workspace root, declared in pnpm-workspace.yaml", async () => {
+    const dir = tree({
+      "package.json": JSON.stringify({ name: "root" }),
+      "pnpm-workspace.yaml": "packages:\n  - 'packages/*'\n",
+      "packages/a/package.json": "{}",
+    });
+    try {
+      const r = await checkScanScope(dir);
+      assert.equal(r.status, "pass", r.detail);
+      assert.match(r.detail, /covered via workspaces/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("checkScanScope: Cargo workspaces", () => {
+  // A Cargo workspace has one Cargo.lock at the root that pins every member, and that lockfile is
+  // what osv-scanner and cargo audit read. So the members are covered, but only the members, and
+  // only when the lockfile is there.
+  const cargoWorkspace = (extra: Record<string, string> = {}): string =>
+    tree({
+      "Cargo.toml": '[workspace]\nresolver = "2"\nmembers = ["crates/*", "src-tauri"]\n',
+      "crates/core/Cargo.toml": '[package]\nname = "core"\n',
+      "src-tauri/Cargo.toml": '[package]\nname = "app"\n',
+      ...extra,
+    });
+
+  it("passes for a Cargo workspace whose members are locked in the root Cargo.lock", async () => {
+    const dir = cargoWorkspace({ "Cargo.lock": "version = 3\n" });
+    try {
+      const r = await checkScanScope(dir);
+      assert.equal(r.status, "pass", r.detail);
+      assert.match(r.detail, /Cargo workspace: crates\/core, src-tauri/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still warns for Cargo workspace members when there is no root Cargo.lock to scan", async () => {
+    const dir = cargoWorkspace();
+    try {
+      const r = await checkScanScope(dir);
+      assert.equal(r.status, "warn", r.detail);
+      assert.match(r.detail, /2 nested project\(s\) NOT covered/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still warns for a nested project that is not a Cargo workspace member", async () => {
+    const dir = cargoWorkspace({ "Cargo.lock": "version = 3\n", "tools/web/package.json": "{}" });
+    try {
+      const r = await checkScanScope(dir);
+      assert.equal(r.status, "warn", r.detail);
+      // Only the non-member is named: the members are covered and listing them would mislead.
+      assert.match(r.detail, /1 nested project\(s\) NOT covered by this scan: tools\/web /);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("checkScanScope: sibling projects", () => {
   it("warns at medium when a root project has uncovered siblings under it", async () => {
     const dir = tree({
       "package.json": JSON.stringify({ name: "root", dependencies: {} }),
