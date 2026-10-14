@@ -1,7 +1,70 @@
 ## [Unreleased]
 
+### Changed
+
+- **`kit monkey-test` required five roles and a money flow from every app.** A
+  single-user desktop app without accounts or payments could not pass: the role
+  matrix needed customer, staff, owner, and superadmin entries, and the evidence
+  check needed a money-flow case. `plan` now reports `requirements`. Roles are
+  required when the app has an auth dependency, a role or auth check in runtime
+  source, a role matrix with more than the public role, or a payment provider.
+  The money flow is required when a payment provider is detected. Detection is
+  fail-closed: a false positive restores the full gate. An app without roles is
+  crawled as the public visitor only, and `init` writes a public-only matrix for
+  it. The runner passes the decision to the spec, ignores the same names from
+  `--env-command`, and checks the evidence against the plan.
+
+### Added
+
+- **`kit monkey-test plan` detects Tauri and Electron apps.** `plan --json`
+  reports `desktop` with the config file, identifier, product name, dev URL, the
+  folders where the platform keeps the app's real data, and the drivers that
+  can control the real app (`eval-hook`, `tauri-driver` outside macOS,
+  `playwright-electron`). The next steps say to run debug builds on a temporary
+  data folder, because the browser crawl cannot close, quit, or restart the app.
+
 ### Fixed
 
+- **The monkey-test source scan read Rust build output instead of app source.**
+  The scan stops at 500 files and did not skip `target/` or `.svelte-kit/`. In a
+  Tauri repo the Cargo build folder filled the budget first, so auth and payment
+  markers in the app source were never read. Both folders are now skipped.
+- **A Tauri app's CSP was reported as missing.** Tauri sets the CSP in
+  `app.security.csp` in its config, not in HTTP headers. The security pack now
+  accepts a string or object value there. A `null` value still reports the
+  finding, because it turns the CSP off.
+
+### Added
+
+- **`kit init` creates the git repository it needs.** Hooks, the staged-file secret
+  scan and repo-scoped memory all assume a repo, and init in a bare directory used
+  to end half-installed. It now runs `git init` first: after a yes when a person is
+  present, without a question under `--yes`, `--non-interactive`, CI or no TTY. A
+  directory inside an existing work tree is left alone, so a monorepo package never
+  gets a nested repo. Answer no to the question to keep the directory without a repo.
+- **`kit statusline --json`.** Prints the statusline as one object: mode, setup
+  score, cached update, open action count, the next setup step, every open setup
+  gap, and the exact text line. A UI (a Claude Code mod, a shell prompt) can
+  render kit's own facts instead of parsing the text form.
+
+### Changed
+
+- **Five verbs no longer accept a `--mode` flag they never read.** `kit skills`,
+  `escalate`, `governance`, `team` and `agent-config` shared a module with
+  `statusline`, so the generated flag surface admitted its `--mode` for all of
+  them, where it did nothing. `statusline` now has its own module; passing
+  `--mode` to the other five is refused as an unknown flag, and `statusline` no
+  longer accepts the four gate flags it never read.
+
+### Fixed
+
+- **The statusline told a repo without `[secrets]` to run `kit secrets` forever.** With no
+  `[secrets]` section the command resolves nothing and writes no `.env.local`, so the
+  score stayed at 4/6 and the hint never changed. The hint now says
+  `add [secrets] to .kit.toml` until the section exists.
+- **Windows CI failed at random on `EBUSY` while deleting a fake `.exe`.** Windows can hold a
+  just-run test binary for a moment, so cleanup in `cli.test.ts` and
+  `check-services-cwd.test.ts` now retries, as `infisical-status.test.ts` already did.
 - **`kit hooks add` promised to overwrite a hook it then left alone.** Over an
   externally managed hook (husky, a committed `.githooks/pre-commit`) it warned
   "kit will overwrite it", prompted, skipped the install, printed a success mark
@@ -91,6 +154,37 @@
   stand-in `gh` first on PATH (`src/fake-gh.test-support.ts`), and a test pins that
   the stand-in catches the call. A full run with a recording `gh` on PATH shows no
   `secret set` call.
+
+- **One advisory was raised once per worktree.** Advisories such as the
+  threat-intel catalog age are about the machine and its tools, not the code, yet
+  each live worktree of a repo kept its own copy of the same pending action. They
+  now share one scope, the main checkout. A finding about the code still belongs
+  to the worktree that raised it: one worktree's clean scan must not close a
+  finding another worktree still has.
+- **The committed `.kit/cli-lock.json` recorded a machine-local pnpm install.**
+  The repo has no `pnpm-lock.yaml` and installs with npm, but `.kit.toml`
+  declared pnpm and the lock held its `manual`/`kit-shim` provenance from one
+  machine. Both entries are gone, and `src/repo-lock-consistency.test.ts` fails
+  if the committed lock again records machine-local provenance or a tool that
+  `.kit.toml` does not declare.
+
+### Known limitations (2026-10-12)
+
+- **Some publish gates are pinned by text-level tests only.** The tag/version and
+  CHANGELOG gates are exercised by a harness that runs them. The audit,
+  supply-chain scan, tests and build, SDK and peer range, and key pin gates are
+  still checked by tests that match the workflow text, so a gate that stopped
+  working while its text stayed would not fail a test. Behavioural tests need
+  fixtures for each gate and are not planned yet.
+- **The v6.11.0 tag fails its own `npm audit --audit-level=high` gate.** The
+  advisory was published after the release. Current `main` is clean, and no
+  tagged release is rewritten.
+- **Commit `3de3e89` is typed `fix(release)` but bundles new features.** It is a
+  single 110-file commit and is already in `main`. Rewriting that history is not
+  planned. Read the CHANGELOG, not the commit type, to see what it added.
+- **OpenSSF Scorecard scores 6.0 out of 10, and "Signed-Releases" reads 0.** The
+  zero is a limit of the Scorecard tooling, as the release audit found, not a
+  release that lacks a signature. Verify a release per `docs/VERIFY.md`.
 
 ### Known limitations (2026-10-07)
 
