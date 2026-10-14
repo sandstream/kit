@@ -84,10 +84,10 @@ describe("quickSubsystems secrets hint", () => {
   };
 
   it("points at .kit.toml when no [secrets] section exists, since `kit secrets` can do nothing yet", () => {
-    assert.equal(nextFor("[project]\nname = \"x\"\n"), "add [secrets] to .kit.toml");
+    assert.equal(nextFor('[project]\nname = "x"\n'), "add [secrets] to .kit.toml");
   });
 
   it("points at `kit secrets` once a [secrets] section exists", () => {
-    assert.equal(nextFor("[secrets]\nprovider = \"env\"\n"), "kit secrets");
+    assert.equal(nextFor('[secrets]\nprovider = "env"\n'), "kit secrets");
   });
 });
