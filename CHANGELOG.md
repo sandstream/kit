@@ -24,11 +24,6 @@
 
 ### Fixed
 
-- **`kit check` read a nested Rust or Go lockfile as "nothing to scan".** The osv-scanner check
-  looked for `Cargo.lock`, `go.mod` and the like in the repo root only. With a lockfile in a
-  subproject such as `src-tauri/` and osv-scanner missing, it reported `skip` instead of the
-  `warn` that says those dependencies are unscanned. It now searches subfolders (five levels,
-  skipping `node_modules`, `target`, `.git`, `dist`, `vendor`).
 - **The statusline told a repo without `[secrets]` to run `kit secrets` forever.** With no
   `[secrets]` section the command resolves nothing and writes no `.env.local`, so the
   score stayed at 4/6 and the hint never changed. The hint now says
