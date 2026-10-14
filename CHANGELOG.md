@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+## [7.0.0] - 2026-10-14
+
+### Breaking
+
+- **BREAKING: the skill fingerprint now covers the body and is a full SHA-256.** It used to
+  leave the `SKILL.md` body out, so a substituted payload under a pinned identity reported
+  "matches committed snapshot". It was also a 64-bit prefix. Every committed
+  `.kit-skill.snapshot.json` gets a new 64-character fingerprint and must be pinned once:
+  `kit skill test <path-to-SKILL.md> --update-snapshot`. `regression` now fires on any body
+  edit, including a typo fix. Anything that parses the snapshot and assumes a 16-character
+  digest needs updating. kit's own two skills are pinned in this release.
+- **BREAKING: `kit check` prints English labels.** The HITL block said `HITL behövs`,
+  `Ägare:` and `Svara med:`. Anything that greps for those strings breaks. The skill
+  `monkey-test` answers to "run monkey-test" and no longer to "kör apa-test". A skill whose
+  description holds a non-ASCII letter gets a new `triggerKey`; a pure-ASCII description is
+  unchanged. A skill that declares `Bash` reads differently in the `scope` line, because a
+  bare `Bash` is no longer called a bounded scope.
+
 ### Changed
 
 - **`kit monkey-test` required five roles and a money flow from every app.** A
@@ -14,6 +32,13 @@
   it. The runner passes the decision to the spec, ignores the same names from
   `--env-command`, and checks the evidence against the plan.
 
+- **Five verbs no longer accept a `--mode` flag they never read.** `kit skills`,
+  `escalate`, `governance`, `team` and `agent-config` shared a module with
+  `statusline`, so the generated flag surface admitted its `--mode` for all of
+  them, where it did nothing. `statusline` now has its own module; passing
+  `--mode` to the other five is refused as an unknown flag, and `statusline` no
+  longer accepts the four gate flags it never read.
+
 ### Added
 
 - **`kit monkey-test plan` detects Tauri and Electron apps.** `plan --json`
@@ -22,19 +47,6 @@
   can control the real app (`eval-hook`, `tauri-driver` outside macOS,
   `playwright-electron`). The next steps say to run debug builds on a temporary
   data folder, because the browser crawl cannot close, quit, or restart the app.
-
-### Fixed
-
-- **The monkey-test source scan read Rust build output instead of app source.**
-  The scan stops at 500 files and did not skip `target/` or `.svelte-kit/`. In a
-  Tauri repo the Cargo build folder filled the budget first, so auth and payment
-  markers in the app source were never read. Both folders are now skipped.
-- **A Tauri app's CSP was reported as missing.** Tauri sets the CSP in
-  `app.security.csp` in its config, not in HTTP headers. The security pack now
-  accepts a string or object value there. A `null` value still reports the
-  finding, because it turns the CSP off.
-
-### Added
 
 - **`kit init` creates the git repository it needs.** Hooks, the staged-file secret
   scan and repo-scoped memory all assume a repo, and init in a bare directory used
@@ -47,16 +59,41 @@
   gap, and the exact text line. A UI (a Claude Code mod, a shell prompt) can
   render kit's own facts instead of parsing the text form.
 
-### Changed
-
-- **Five verbs no longer accept a `--mode` flag they never read.** `kit skills`,
-  `escalate`, `governance`, `team` and `agent-config` shared a module with
-  `statusline`, so the generated flag surface admitted its `--mode` for all of
-  them, where it did nothing. `statusline` now has its own module; passing
-  `--mode` to the other five is refused as an unknown flag, and `statusline` no
-  longer accepts the four gate flags it never read.
+- **`kit monkey-test desktop` interrupts a desktop app while it works.** The
+  browser crawl never closed, quit, or restarted the app, so it could not find
+  work lost to an interruption. In one desktop app, closing the window during an
+  AI summary quit the app and dropped the summary without a message. The new
+  command drives the real debug build through a debug-only eval hook, on a
+  temporary data folder. One seed chooses the random clicks and the
+  interruptions: a configured long operation is started and then hit with
+  close-window, quit (SIGTERM), kill (SIGKILL), reload, or restart. After each
+  restart the run checks that the app starts without a crash, every data file
+  parses, no record or file is missing, and the operation finished or the UI
+  says it was interrupted. Work that disappears without a message is a finding.
+  The click pass also reports page errors, console errors, technical error text,
+  runtime placeholders, unlabeled controls, and XSS. The real data folders must
+  be unchanged after the run. Configuration and the hook contract are in
+  `docs/MONKEY_TEST.md`.
 
 ### Fixed
+
+- **`kit skill test` called a declared `Bash` "a bounded scope".** A literal `*` fails the same
+  check, so the two verdicts disagreed. A bare `Bash` is no longer reported as bounded.
+- **A skill description in a non-Latin script failed for "no description".** The trigger key
+  deleted every non-ASCII letter, so a Chinese, Cyrillic or Arabic description was empty to
+  the check that also passed it for having a description. The key now keeps those letters.
+- **kit printed Swedish.** Six labels in `kit check` and one skill trigger phrase were Swedish.
+  A test now fails on Swedish letters in kit's own output, with each exception named.
+- **`src/skills.ts` was a dead second lock module.** It shadowed the live one's four export
+  names and is removed.
+- **The monkey-test source scan read Rust build output instead of app source.**
+  The scan stops at 500 files and did not skip `target/` or `.svelte-kit/`. In a
+  Tauri repo the Cargo build folder filled the budget first, so auth and payment
+  markers in the app source were never read. Both folders are now skipped.
+- **A Tauri app's CSP was reported as missing.** Tauri sets the CSP in
+  `app.security.csp` in its config, not in HTTP headers. The security pack now
+  accepts a string or object value there. A `null` value still reports the
+  finding, because it turns the CSP off.
 
 - **The statusline told a repo without `[secrets]` to run `kit secrets` forever.** With no
   `[secrets]` section the command resolves nothing and writes no `.env.local`, so the
@@ -175,6 +212,15 @@
   machine. Both entries are gone, and `src/repo-lock-consistency.test.ts` fails
   if the committed lock again records machine-local provenance or a tool that
   `.kit.toml` does not declare.
+- **A "bumblebee catalogs are N days old" action item stayed open with nothing to do.** When
+  no newer bumblebee release exists, the bundled catalogs are as fresh as upstream has
+  published, so the age is shown in the check detail only and no action item is opened. With a
+  newer release available the item is still opened, keyed on that version.
+- **`kit check` read a nested Rust or Go lockfile as "nothing to scan".** The osv-scanner check
+  looked for `Cargo.lock`, `go.mod` and the like in the repo root only. With a lockfile in a
+  subproject such as `src-tauri/` and osv-scanner missing, it reported `skip` instead of the
+  `warn` that says those dependencies are unscanned. It now searches subfolders (five levels,
+  skipping `node_modules`, `target`, `.git`, `dist`, `vendor`).
 
 ### Known limitations (2026-10-12)
 
