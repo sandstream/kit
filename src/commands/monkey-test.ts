@@ -24,7 +24,7 @@ function usage(): void {
   console.log(`${c.bold}kit monkey-test${c.reset}`);
   console.log("");
   console.log(
-    `  ${c.cyan}kit monkey-test plan [--json]${c.reset}                 Detect stack, runner, env, seed, money/security gaps`,
+    `  ${c.cyan}kit monkey-test plan [--json]${c.reset}                 Detect stack, desktop shell, env, seed, roles, money/security gaps`,
   );
   console.log(
     `  ${c.cyan}kit monkey-test init [--force] [--json]${c.reset}        Create/update the portable Playwright monkey harness`,
@@ -49,7 +49,7 @@ function usage(): void {
   console.log(`  ${c.green}--skip-security${c.reset}         Requires --expected <reason>`);
   console.log("");
   console.log(
-    `${c.dim}The generated harness defines roles: public, customer, staff (kiosk staff), owner, superadmin.${c.reset}`,
+    `${c.dim}With roles: public, customer, staff (kiosk staff), owner, superadmin. Without auth or payments: public only.${c.reset}`,
   );
 }
 
@@ -120,8 +120,26 @@ function renderPlan(plan: MonkeyTestPlan): void {
     );
   }
   console.log("");
+  console.log(`${c.bold}Requirements${c.reset}`);
+  const { roles, money } = plan.requirements;
+  console.log(
+    `  roles       ${roles.required ? "required" : "not required"} ${c.dim}${roles.reason}${c.reset}`,
+  );
+  console.log(
+    `  money flow  ${money.required ? "required" : "not required"} ${c.dim}${money.reason}${c.reset}`,
+  );
+  if (plan.desktop) {
+    console.log("");
+    console.log(`${c.bold}Desktop app${c.reset}`);
+    console.log(`  framework   ${plan.desktop.framework}`);
+    console.log(`  drivers     ${plan.desktop.drivers.join(", ")}`);
+    for (const dir of plan.desktop.realDataDirs) {
+      console.log(`  real data   ${c.dim}${dir}${c.reset}`);
+    }
+  }
+  console.log("");
   console.log(`${c.bold}Role matrix${c.reset}`);
-  for (const role of plan.roles) {
+  for (const role of plan.roles.filter((entry) => roles.required || entry.id === "public")) {
     console.log(`  ${c.green}${role.id.padEnd(10)}${c.reset} ${role.label}`);
   }
   renderFindings(plan.findings);
