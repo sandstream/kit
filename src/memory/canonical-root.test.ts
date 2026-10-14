@@ -12,7 +12,7 @@ let main: string;
 let linked: string;
 
 before(() => {
-  base = realpathSync(mkdtempSync(join(tmpdir(), "kit-canon-")));
+  base = realpathSync.native(mkdtempSync(join(tmpdir(), "kit-canon-")));
   main = join(base, "main");
   linked = join(base, "linked");
   mkdirSync(main);
@@ -27,16 +27,16 @@ after(() => rmSync(base, { recursive: true, force: true }));
 
 describe("getCanonicalProjectRoot", () => {
   it("resolves a linked worktree to the main checkout", () => {
-    assert.equal(realpathSync(getCanonicalProjectRoot(linked)), main);
+    assert.equal(realpathSync.native(getCanonicalProjectRoot(linked)), main);
   });
 
   it("leaves the main checkout, and a subdirectory of it, at the main checkout", () => {
-    assert.equal(realpathSync(getCanonicalProjectRoot(main)), main);
-    assert.equal(realpathSync(getCanonicalProjectRoot(join(main, "sub"))), main);
+    assert.equal(realpathSync.native(getCanonicalProjectRoot(main)), main);
+    assert.equal(realpathSync.native(getCanonicalProjectRoot(join(main, "sub"))), main);
   });
 
   it("falls back to the directory itself outside a git repo", () => {
-    const plain = realpathSync(mkdtempSync(join(tmpdir(), "kit-canon-plain-")));
+    const plain = realpathSync.native(mkdtempSync(join(tmpdir(), "kit-canon-plain-")));
     try {
       assert.equal(getCanonicalProjectRoot(plain), plain);
     } finally {
