@@ -73,6 +73,20 @@ laptop)? Wire `kit setup` + `kit memory sync` into the environment's setup scrip
 so it fuels itself — config, secrets (vault-backed), agent gates, identity, and
 recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md).
 
+## What's new in 7.x
+
+The 7.x line starts with one breaking change to the skill fingerprint.
+
+- **7.0.0: skill fingerprints that cover the body, and desktop apps in the Monkey test.**
+  The skill fingerprint now hashes the whole `SKILL.md` as a full SHA-256, so a changed
+  payload under a pinned name no longer reports "matches committed snapshot". Re-pin each
+  skill once with `kit skill test <SKILL.md> --update-snapshot`. `kit check` prints English
+  only. `kit monkey-test desktop` drives a real Tauri or Electron debug build with seeded
+  clicks and interruptions (close, quit, kill, reload, restart). The role and money-flow
+  gate applies only to apps that have roles or payments. `kit init` creates the git
+  repository it needs. Read the Breaking section in the
+  [CHANGELOG](CHANGELOG.md) before you upgrade.
+
 ## What's new in 6.x
 
 The 6.x line keeps every frozen contract from 5.0 and spends its effort on making each
