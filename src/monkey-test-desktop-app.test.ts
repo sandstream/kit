@@ -2,9 +2,14 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { it } from "node:test";
+import { it as nodeIt } from "node:test";
 import { DesktopApp } from "./monkey-test-desktop-app.js";
 import { shellQuote } from "./monkey-test-runner.test-support.js";
+
+// The rig launches the fake app through a POSIX shell and relies on SIGTERM/SIGKILL semantics;
+// Windows has neither, so these tests run on macOS and Linux only.
+const it = (name: string, body: () => Promise<void>): Promise<void> =>
+  nodeIt(name, { skip: process.platform === "win32" }, body);
 
 const HOOK_SCRIPT = String.raw`
 const fs = require("node:fs");
