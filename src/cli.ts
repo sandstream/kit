@@ -54,9 +54,9 @@ import {
   cmdEscalate,
   cmdAgentConfig,
   cmdGovernance,
-  cmdStatusline,
   cmdTeam,
 } from "./commands/agent.js";
+import { cmdStatusline } from "./commands/statusline.js";
 import { cmdSelfAudit, cmdCoverage, cmdAnalyze } from "./commands/coverage.js";
 import { cmdAdr } from "./commands/adr.js";
 import { cmdDecisions } from "./commands/decisions.js";

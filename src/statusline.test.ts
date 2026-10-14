@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { formatStatusline } from "./statusline.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildStatuslineParts, formatStatusline } from "./statusline.js";
 
 describe("formatStatusline", () => {
   it("renders mode score + update + actions, dot-separated", () => {
@@ -66,5 +69,25 @@ describe("formatStatusline", () => {
     );
     assert.equal(formatStatusline({ next: "kit init" }), "");
     assert.equal(formatStatusline({ mode: "full", score: { done: 1, total: 6 } }), "kit:full 1/6");
+  });
+});
+
+describe("statusline as data (for UI mods)", () => {
+  it("buildStatuslineParts carries the gaps and the same text the line prints", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-statusline-parts-"));
+    try {
+      const parts = await buildStatuslineParts({ cwd: dir });
+      assert.equal(parts.text, formatStatusline(parts));
+      assert.equal(parts.mode, "full");
+      assert.ok(
+        parts.score && parts.score.done < parts.score.total,
+        "an empty dir is not fully set up",
+      );
+      assert.equal(parts.next, "kit init");
+      assert.deepEqual(parts.gaps[0], { key: "config", label: ".kit.toml", next: "kit init" });
+      assert.equal(typeof parts.pal, "number");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
