@@ -155,6 +155,37 @@
   the stand-in catches the call. A full run with a recording `gh` on PATH shows no
   `secret set` call.
 
+- **One advisory was raised once per worktree.** Advisories such as the
+  threat-intel catalog age are about the machine and its tools, not the code, yet
+  each live worktree of a repo kept its own copy of the same pending action. They
+  now share one scope, the main checkout. A finding about the code still belongs
+  to the worktree that raised it: one worktree's clean scan must not close a
+  finding another worktree still has.
+- **The committed `.kit/cli-lock.json` recorded a machine-local pnpm install.**
+  The repo has no `pnpm-lock.yaml` and installs with npm, but `.kit.toml`
+  declared pnpm and the lock held its `manual`/`kit-shim` provenance from one
+  machine. Both entries are gone, and `src/repo-lock-consistency.test.ts` fails
+  if the committed lock again records machine-local provenance or a tool that
+  `.kit.toml` does not declare.
+
+### Known limitations (2026-10-12)
+
+- **Some publish gates are pinned by text-level tests only.** The tag/version and
+  CHANGELOG gates are exercised by a harness that runs them. The audit,
+  supply-chain scan, tests and build, SDK and peer range, and key pin gates are
+  still checked by tests that match the workflow text, so a gate that stopped
+  working while its text stayed would not fail a test. Behavioural tests need
+  fixtures for each gate and are not planned yet.
+- **The v6.11.0 tag fails its own `npm audit --audit-level=high` gate.** The
+  advisory was published after the release. Current `main` is clean, and no
+  tagged release is rewritten.
+- **Commit `3de3e89` is typed `fix(release)` but bundles new features.** It is a
+  single 110-file commit and is already in `main`. Rewriting that history is not
+  planned. Read the CHANGELOG, not the commit type, to see what it added.
+- **OpenSSF Scorecard scores 6.0 out of 10, and "Signed-Releases" reads 0.** The
+  zero is a limit of the Scorecard tooling, as the release audit found, not a
+  release that lacks a signature. Verify a release per `docs/VERIFY.md`.
+
 ### Known limitations (2026-10-07)
 
 - **husky 9's shim directory is not followed.** With `core.hooksPath = .husky/_`
