@@ -75,7 +75,14 @@ export function quickSubsystems(cwd: string): SubsystemStatus[] {
   return [
     { key: "config", label: ".kit.toml", ok: has(".kit.toml"), next: "kit init" },
     { key: "tools", label: "tools locked", ok: has(".kit/cli-lock.json"), next: "kit install" },
-    { key: "secrets", label: ".env.local", ok: has(".env.local"), next: "kit secrets" },
+    {
+      key: "secrets",
+      label: ".env.local",
+      ok: has(".env.local"),
+      // `kit secrets` has nothing to resolve without a [secrets] section, so naming it
+      // would loop: the score never rises and the hint never changes.
+      next: tomlHas("[secrets") ? "kit secrets" : "add [secrets] to .kit.toml",
+    },
     {
       key: "hooks",
       label: "git hooks",
@@ -121,14 +128,22 @@ export async function quickPalCount(cwd?: string): Promise<number> {
   }
 }
 
+/** The statusline as data: the parts, the setup gaps behind the score, and the
+ *  exact line `kit statusline` prints. `kit statusline --json` emits this so a UI
+ *  (a Claude Code mod, a shell prompt) renders kit's own facts instead of parsing text. */
+export interface StatuslineData extends StatuslineParts {
+  text: string;
+  gaps: { key: string; label: string; next?: string }[];
+}
+
 /**
- * Assemble the full statusline text for `cwd`. Shared by `kit statusline` (prints
- * it) and the memory SessionStart hook (injects it as context) so the two surfaces
+ * Assemble the statusline for `cwd`. Shared by `kit statusline` (text or `--json`)
+ * and the memory SessionStart hook (injects the text as context) so the surfaces
  * can never drift. Never throws; every input degrades to an omitted segment.
  */
-export async function buildStatuslineText(
+export async function buildStatuslineParts(
   opts: { cwd?: string; modeFlag?: string } = {},
-): Promise<string> {
+): Promise<StatuslineData> {
   const cwd = opts.cwd ?? process.cwd();
   let config: kitConfig = {} as kitConfig;
   try {
@@ -139,7 +154,7 @@ export async function buildStatuslineText(
   const { profile } = resolveMode(opts.modeFlag, config.setup?.mode);
   const { done, total, gaps } = modeScore(profile, quickSubsystems(cwd));
   const update = readCachedUpdateSync(getKitVersionSync());
-  return formatStatusline({
+  const parts: StatuslineParts = {
     mode: profile.mode,
     score: { done, total },
     update: update?.latest ?? null,
@@ -147,5 +162,17 @@ export async function buildStatuslineText(
     // First gap in subsystem order = the natural next step (config → "kit init"
     // first, so a repo with no .kit.toml is told how to START, not just scored).
     next: gaps[0]?.next,
-  });
+  };
+  return {
+    ...parts,
+    text: formatStatusline(parts),
+    gaps: gaps.map(({ key, label, next }) => ({ key, label, next })),
+  };
+}
+
+/** The statusline text alone; see `buildStatuslineParts`. */
+export async function buildStatuslineText(
+  opts: { cwd?: string; modeFlag?: string } = {},
+): Promise<string> {
+  return (await buildStatuslineParts(opts)).text;
 }
