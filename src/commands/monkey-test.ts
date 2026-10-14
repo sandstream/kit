@@ -10,13 +10,19 @@ import {
   type MonkeyRunResult,
   type MonkeyTestPlan,
 } from "../monkey-test.js";
+import {
+  DESKTOP_ACTIONS,
+  runDesktopMonkey,
+  type DesktopAction,
+  type DesktopRunResult,
+} from "../monkey-test-desktop.js";
 
-type MonkeySubcommand = "plan" | "init" | "run";
+type MonkeySubcommand = "plan" | "init" | "run" | "desktop";
 
 function subcommand(): MonkeySubcommand | null {
   const raw = process.argv[3];
   if (!raw || raw.startsWith("-")) return "plan";
-  if (raw === "plan" || raw === "init" || raw === "run") return raw;
+  if (raw === "plan" || raw === "init" || raw === "run" || raw === "desktop") return raw;
   return null;
 }
 
@@ -47,6 +53,24 @@ function usage(): void {
   console.log(`  ${c.green}--skip-seed${c.reset}             Requires --expected <reason>`);
   console.log(`  ${c.green}--skip-browser${c.reset}          Requires --expected <reason>`);
   console.log(`  ${c.green}--skip-security${c.reset}         Requires --expected <reason>`);
+  console.log("");
+  console.log(
+    `  ${c.cyan}kit monkey-test desktop [flags] [--json]${c.reset}       Drive the real desktop app: random clicks + interruptions`,
+  );
+  console.log(`${c.bold}Desktop flags:${c.reset}`);
+  console.log(
+    `  ${c.green}--seed <n>${c.reset}              Repeat a run exactly (printed in every repro)`,
+  );
+  console.log(`  ${c.green}--steps <n>${c.reset}             Click steps (default 200)`);
+  console.log(
+    `  ${c.green}--interruptions <n>${c.reset}     Interruptions during long operations (default 5)`,
+  );
+  console.log(
+    `  ${c.green}--actions <list>${c.reset}        Subset of close-window,quit,kill,reload,restart`,
+  );
+  console.log(
+    `  ${c.green}--config <path>${c.reset}         Default .kit/monkey-test/desktop.json`,
+  );
   console.log("");
   console.log(
     `${c.dim}With roles: public, customer, staff (kiosk staff), owner, superadmin. Without auth or payments: public only.${c.reset}`,
@@ -85,6 +109,8 @@ export async function cmdMonkeyTest(): Promise<boolean> {
     return result.ok;
   }
 
+  if (sub === "desktop") return runDesktop(json);
+
   const result = await runMonkeyTest(process.cwd(), {
     baseUrl: flagValue(process.argv, "--base-url"),
     startCommand: flagValue(process.argv, "--start-command"),
@@ -100,6 +126,56 @@ export async function cmdMonkeyTest(): Promise<boolean> {
   if (json) console.log(JSON.stringify(result, null, 2));
   else renderRun(result);
   return result.ok;
+}
+
+function desktopActions(): DesktopAction[] | null | undefined {
+  const raw = flagValue(process.argv, "--actions");
+  if (raw === undefined) return undefined;
+  const actions = raw.split(",").map((entry) => entry.trim());
+  const known = new Set<string>(DESKTOP_ACTIONS);
+  if (actions.length === 0 || actions.some((action) => !known.has(action))) return null;
+  return actions as DesktopAction[];
+}
+
+async function runDesktop(json: boolean): Promise<boolean> {
+  const actions = desktopActions();
+  if (actions === null) {
+    console.error(`--actions takes a comma-separated subset of ${DESKTOP_ACTIONS.join(",")}`);
+    process.exitCode = 1;
+    return false;
+  }
+  const seedFlag = flagValue(process.argv, "--seed");
+  if (seedFlag !== undefined && !/^\d+$/.test(seedFlag)) {
+    console.error("--seed takes a whole number, as printed in a finding's repro");
+    process.exitCode = 1;
+    return false;
+  }
+  const result = await runDesktopMonkey(process.cwd(), {
+    steps: flagInt(process.argv, "--steps", 200),
+    seed: seedFlag === undefined ? undefined : Number(seedFlag),
+    interruptions: flagInt(process.argv, "--interruptions", 5),
+    actions,
+    configPath: flagValue(process.argv, "--config"),
+  });
+  if (json) console.log(JSON.stringify(result, null, 2));
+  else renderDesktop(result);
+  return result.ok;
+}
+
+function renderDesktop(result: DesktopRunResult): void {
+  console.log(
+    `${c.bold}kit monkey-test desktop${c.reset} ${result.ok ? c.green + "pass" : c.red + "fail"}${c.reset} ${c.dim}seed ${result.seed}${c.reset}`,
+  );
+  for (const step of result.steps) {
+    console.log(`  ${mark(step.status)} ${step.name.padEnd(12)} ${c.dim}${step.detail}${c.reset}`);
+  }
+  for (const entry of result.interruptions) {
+    console.log(
+      `  ${c.dim}step ${entry.step}: ${entry.action} during ${entry.operation} -> ${entry.outcome}${c.reset}`,
+    );
+  }
+  renderFindings(result.findings);
+  if (result.keptDataDir) console.log(`\n${c.dim}data kept in ${result.keptDataDir}${c.reset}`);
 }
 
 function mark(status: MonkeyPlanCheck["status"] | HarnessWrite["action"]): string {

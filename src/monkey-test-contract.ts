@@ -1,7 +1,15 @@
 import type { DetectedStack } from "./stack-detector.js";
 
 export type MonkeySeverity = "critical" | "high" | "medium" | "low";
-export type MonkeyArea = "runner" | "ux" | "a11y" | "i18n" | "money" | "authz" | "security";
+export type MonkeyArea =
+  | "runner"
+  | "ux"
+  | "a11y"
+  | "i18n"
+  | "money"
+  | "authz"
+  | "security"
+  | "data";
 
 export interface MonkeyRole {
   id: "public" | "customer" | "staff" | "owner" | "superadmin";

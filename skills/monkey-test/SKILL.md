@@ -21,7 +21,8 @@ release gate on a web or desktop app.
    sandbox/test credentials only. Never write secrets to `.env`.
 4. Run `kit monkey-test run` with the needed flags:
    `--env-command`, `--seed-command`, `--start-command` or `--base-url`, and
-   `--link-depth`.
+   `--link-depth`. For a Tauri or Electron app, also run
+   `kit monkey-test desktop` (see Desktop Interruptions below).
 5. Treat every finding as release-blocking unless it is listed in
    `MONKEY_EXPECTED_FINDINGS` or skipped with an explicit reason. Do not silence
    tests by deleting assertions, broadening ignores, or adding reasonless skips.
@@ -65,6 +66,24 @@ The gate must cover:
   CSP/security headers, sandbox-only Stripe/Connect or equivalent provider use,
   and immutable refunds/receipts/journal records. Checks that depend on
   payments or Supabase run only when those are present.
+
+## Desktop Interruptions
+
+A desktop user closes the window, quits, or loses the process while the app
+works. `kit monkey-test desktop` drives the real debug build through its eval
+hook on a temporary data folder, clicks at random, and interrupts each long
+operation (save, export, upload, AI call, recording) with close-window, quit,
+kill, reload, or restart. After each restart it checks that every data file
+parses, no record is missing, the app starts without errors, and the operation
+finished or the UI says it was interrupted. Silent loss is a finding.
+
+1. Write `.kit/monkey-test/desktop.json` as `docs/MONKEY_TEST.md` describes. List
+   every long operation the user can start, with an `outcome` script that reads
+   what the user sees.
+2. If the debug build has no data-folder override or eval hook, add both behind
+   debug-only code before the run. Never point the run at real user data.
+3. Run `kit monkey-test desktop`. Reproduce a finding with the `--seed` and
+   `--actions` from its repro, fix the app, and re-run until it is green.
 
 ## Completion
 
