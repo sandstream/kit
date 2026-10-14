@@ -307,3 +307,60 @@ it("MHB-10: generated spec refuses one storage state reused for customer and sta
   assert.equal(loaded.status, 1);
   assert.match(loaded.stderr, /auth state|storage state/i);
 });
+
+function writePublicOnlyMatrix(dir: string): string {
+  const path = join(dir, "public-matrix.json");
+  writeFileSync(
+    path,
+    JSON.stringify({
+      configured: true,
+      roles: [
+        {
+          id: "public",
+          allowRoutes: ["/"],
+          denyRoutes: [],
+          requiredText: ["Meetings"],
+          forbiddenText: [],
+        },
+      ],
+    }),
+  );
+  return path;
+}
+
+it("registers only the public crawl when the plan requires no roles and no money", () => {
+  const dir = tempDir();
+  const loaded = evaluateGeneratedSpec(dir, false, {
+    MONKEY_ROLE_MATRIX: writePublicOnlyMatrix(dir),
+    MONKEY_ROLES_REQUIRED: "0",
+    MONKEY_MONEY_REQUIRED: "0",
+  });
+  assert.equal(loaded.status, 0, loaded.stderr);
+  assert.deepEqual(loaded.registrations, [
+    { path: ["public: Public visitor"], name: "route crawl" },
+  ]);
+});
+
+it("registers every role crawl but no money flow for an app with roles and no payments", () => {
+  const loaded = evaluateGeneratedSpec(tempDir(), false, { MONKEY_MONEY_REQUIRED: "0" });
+  assert.equal(loaded.status, 0, loaded.stderr);
+  assert.equal(loaded.registrations.length, MONKEY_ROLES.length);
+  assert.equal(
+    loaded.registrations.some((entry) => entry.name === "money flow"),
+    false,
+  );
+});
+
+it("keeps the full gate when the requirement variables are missing or not 0", () => {
+  const dir = tempDir();
+  const matrix = writePublicOnlyMatrix(dir);
+  const unset = evaluateGeneratedSpec(dir, false, { MONKEY_ROLE_MATRIX: matrix });
+  assert.equal(unset.status, 1, "a public-only matrix fails the default full gate");
+  assert.match(unset.stderr, /exactly once/);
+  const junk = evaluateGeneratedSpec(tempDir(), false, {
+    MONKEY_ROLES_REQUIRED: "no",
+    MONKEY_MONEY_REQUIRED: "false",
+  });
+  assert.equal(junk.status, 0, junk.stderr);
+  assert.equal(junk.registrations.length, MONKEY_ROLES.length + 1);
+});

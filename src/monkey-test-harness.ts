@@ -18,6 +18,7 @@ import {
   type HarnessWriteResult,
 } from "./monkey-test-contract.js";
 import { monkeySpec } from "./monkey-test-harness-spec.js";
+import { detectMonkeyRequirements } from "./monkey-test-requirements.js";
 
 const OPERATOR_CONFIG_FILES = new Set([
   "playwright.monkey.config.ts",
@@ -29,7 +30,30 @@ function generatedHeader(path: string): string {
   return `// ${MONKEY_MANAGED}. Edit source in kit or re-run \`kit monkey-test init --force\`.\n// File: ${path}\n\n`;
 }
 
-function roleMatrixJson(): string {
+function roleMatrixJson(rolesRequired: boolean): string {
+  if (!rolesRequired) {
+    const role = MONKEY_ROLES.find(({ id }) => id === "public")!;
+    return (
+      JSON.stringify(
+        {
+          generatedBy: "kit monkey-test",
+          configured: false,
+          roles: [
+            {
+              ...role,
+              allowRoutes: ["/"],
+              denyRoutes: [],
+              requiredText: ["replace-with-seeded-marker-visible-on-an-allowed-route"],
+              forbiddenText: [],
+            },
+          ],
+          note: "No auth, role check, or payment provider was detected, so only the public role is crawled. Replace the placeholder with text the seed puts on an allowed route, then set configured to true. Add the other roles if the app gains accounts.",
+        },
+        null,
+        2,
+      ) + "\n"
+    );
+  }
   return (
     JSON.stringify(
       {
@@ -118,11 +142,13 @@ function harnessReadme(): string {
 
 ${MONKEY_MANAGED}.
 
-Role-based release gate for applications that handle money. The harness crawls
-desktop and mobile routes as public visitor, customer/buyer, kiosk staff,
-owner/admin, and superadmin/support, then fails on broken UX, browser runtime
-errors, missing auth fixtures, inaccessible controls, and an unconfigured money
-flow.
+Release gate for web and desktop applications. The harness crawls desktop and
+mobile routes, then fails on broken UX, browser runtime errors, missing auth
+fixtures, inaccessible controls, and an unconfigured money flow. When the app
+has roles it crawls as public visitor, customer/buyer, kiosk staff,
+owner/admin, and superadmin/support; without roles, as the public visitor only.
+The money flow runs only when a payment provider is detected. See
+\`kit monkey-test plan\` for the decision and its reason.
 
 Run through kit so the runner gets a free local port and a temporary env:
 
@@ -189,13 +215,13 @@ Gate these before release:
 `;
 }
 
-function harnessFiles(): Record<string, string> {
+function harnessFiles(rolesRequired: boolean): Record<string, string> {
   return {
     "playwright.monkey.config.ts": playwrightConfig(),
     "tests/monkey/monkey.spec.ts": monkeySpec(generatedHeader("tests/monkey/monkey.spec.ts")),
     "tests/monkey/README.md": harnessReadme(),
     "tests/monkey/security-checklist.md": securityChecklist(),
-    ".kit/monkey-test/role-matrix.json": roleMatrixJson(),
+    ".kit/monkey-test/role-matrix.json": roleMatrixJson(rolesRequired),
     ".kit/monkey-test/expected-findings.example.json": expectedFindingsJson(),
   };
 }
@@ -349,7 +375,8 @@ export async function writeMonkeyHarness(
   await mkdir(resolve(cwd), { recursive: true });
   const root = await realpath(resolve(cwd));
   const writes: HarnessWrite[] = [];
-  for (const [relPath, content] of Object.entries(harnessFiles())) {
+  const requirements = await detectMonkeyRequirements(root);
+  for (const [relPath, content] of Object.entries(harnessFiles(requirements.roles.required))) {
     writes.push(await writeManaged(root, relPath, content, opts.force === true));
   }
   return { ok: writes.every((write) => write.action !== "skipped"), writes };

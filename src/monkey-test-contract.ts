@@ -112,6 +112,35 @@ export interface MonkeyMoneyFlowConfig {
   finalState: string;
 }
 
+/**
+ * Which release-gate packs apply to this app. The role crawl and money flow came from a
+ * shop with five roles. An app with one user and no payments, such as a desktop tool,
+ * has neither, and failing it for missing roles only teaches operators to skip the gate.
+ * Detection is fail-closed: any auth or payment marker, or a role matrix that declares
+ * more than the public role, keeps the full requirement.
+ */
+export interface MonkeyRequirements {
+  roles: { required: boolean; reason: string };
+  money: { required: boolean; reason: string };
+}
+
+export type MonkeyDesktopFramework = "tauri" | "electron";
+export type MonkeyDesktopDriver = "eval-hook" | "tauri-driver" | "playwright-electron";
+
+/** A desktop shell around the web UI. The browser crawl alone cannot close, quit, or restart it. */
+export interface MonkeyDesktopApp {
+  framework: MonkeyDesktopFramework;
+  /** Config file that identified the app, relative to the repo root. */
+  config: string;
+  identifier?: string;
+  productName?: string;
+  devUrl?: string;
+  /** Where this platform keeps the app's real per-user data. A run must leave these unchanged. */
+  realDataDirs: string[];
+  /** Ways to drive the real app on this platform, best first. */
+  drivers: MonkeyDesktopDriver[];
+}
+
 export interface MonkeyPlanCheck {
   name: string;
   status: "pass" | "warn" | "fail" | "skip";
@@ -143,6 +172,8 @@ export interface MonkeyTestPlan {
     providers: string[];
     sandboxOnly: boolean;
   };
+  requirements: MonkeyRequirements;
+  desktop: MonkeyDesktopApp | null;
   harness: {
     files: string[];
     missing: string[];
@@ -284,13 +315,21 @@ export const MONKEY_ROLE_ROUTE_KEYS = ["allowRoutes", "denyRoutes"] as const;
 
 type MonkeyRoleListKey = (typeof MONKEY_ROLE_LIST_KEYS)[number];
 
-export function configuredRoleEntries(value: unknown): unknown[] {
+/**
+ * The role ids a matrix must hold. With roles required, every gate role. Without them,
+ * only the public visitor, because an app without accounts has one kind of user.
+ */
+export function monkeyRoleIdsFor(rolesRequired: boolean): readonly MonkeyRole["id"][] {
+  return rolesRequired ? MONKEY_ROLE_IDS : ["public"];
+}
+
+export function configuredRoleEntries(value: unknown, rolesRequired = true): unknown[] {
   const matrix = value as { configured?: unknown; roles?: unknown } | null;
   if (!matrix || typeof matrix !== "object" || matrix.configured !== true) {
     throw new Error("Monkey role matrix must be reviewed and set to configured: true.");
   }
   if (!Array.isArray(matrix.roles)) throw new Error("Monkey role matrix must contain roles.");
-  if (matrix.roles.length !== MONKEY_ROLE_IDS.length) {
+  if (matrix.roles.length !== monkeyRoleIdsFor(rolesRequired).length) {
     throw new Error("Monkey role matrix must contain each required role exactly once.");
   }
   return matrix.roles;
@@ -315,11 +354,12 @@ export function requiredStringList(
   role: Record<string, unknown>,
   id: MonkeyRole["id"],
   key: MonkeyRoleListKey,
+  allowEmpty = false,
 ): string[] {
   const entries = role[key];
   if (
     !Array.isArray(entries) ||
-    entries.length === 0 ||
+    (!allowEmpty && entries.length === 0) ||
     entries.some((entry) => typeof entry !== "string" || entry.trim().length === 0)
   ) {
     throw new Error(`Monkey role ${id} requires non-empty ${key}.`);
@@ -349,9 +389,27 @@ export function requireDisjointValues(
   if (excluded.some((value) => includedValues.has(value))) throw new Error(message);
 }
 
-export function validateRoleExpectation(role: Record<string, unknown>, id: MonkeyRole["id"]): void {
+/**
+ * With roles required, every list must be non-empty: deny routes and other-org markers
+ * are the negative controls. Without roles there is no other user to deny or leak to,
+ * so `denyRoutes` and `forbiddenText` may be empty. Allowed routes and the seeded
+ * positive-control marker stay mandatory in both cases.
+ */
+export function validateRoleExpectation(
+  role: Record<string, unknown>,
+  id: MonkeyRole["id"],
+  rolesRequired = true,
+): void {
   const lists = Object.fromEntries(
-    MONKEY_ROLE_LIST_KEYS.map((key) => [key, requiredStringList(role, id, key)]),
+    MONKEY_ROLE_LIST_KEYS.map((key) => [
+      key,
+      requiredStringList(
+        role,
+        id,
+        key,
+        !rolesRequired && (key === "denyRoutes" || key === "forbiddenText"),
+      ),
+    ]),
   ) as Record<MonkeyRoleListKey, string[]>;
   for (const key of MONKEY_ROLE_ROUTE_KEYS) requireSameOriginRoutes(lists[key], id, key);
   requireDisjointValues(
@@ -366,12 +424,12 @@ export function validateRoleExpectation(role: Record<string, unknown>, id: Monke
   );
 }
 
-export function validateRoleMatrix(value: unknown): MonkeyRoleExpectation[] {
-  const entries = configuredRoleEntries(value);
+export function validateRoleMatrix(value: unknown, rolesRequired = true): MonkeyRoleExpectation[] {
+  const entries = configuredRoleEntries(value, rolesRequired);
   const signatures = new Set<string>();
-  for (const id of MONKEY_ROLE_IDS) {
+  for (const id of monkeyRoleIdsFor(rolesRequired)) {
     const role = requiredRole(entries, id);
-    validateRoleExpectation(role, id);
+    validateRoleExpectation(role, id, rolesRequired);
     const signature = JSON.stringify(
       MONKEY_ROLE_LIST_KEYS.map((key) => [...new Set(role[key] as string[])].sort()),
     );
