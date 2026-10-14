@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+### Added
+
+- **`kit statusline --json`.** Prints the statusline as one object: mode, setup
+  score, cached update, open action count, the next setup step, every open setup
+  gap, and the exact text line. A UI (a Claude Code mod, a shell prompt) can
+  render kit's own facts instead of parsing the text form.
+
+### Changed
+
+- **Five verbs no longer accept a `--mode` flag they never read.** `kit skills`,
+  `escalate`, `governance`, `team` and `agent-config` shared a module with
+  `statusline`, so the generated flag surface admitted its `--mode` for all of
+  them, where it did nothing. `statusline` now has its own module; passing
+  `--mode` to the other five is refused as an unknown flag, and `statusline` no
+  longer accepts the four gate flags it never read.
+
 ### Fixed
 
 - **Windows CI failed at random on `EBUSY` while deleting a fake `.exe`.** Windows can hold a
