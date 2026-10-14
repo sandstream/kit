@@ -81,6 +81,11 @@ const DIACRITIC_RE = /[åäöÅÄÖ]/gu;
 /** Each entry is an exact substring, a file it may appear in, and why it is not a violation. */
 const ALLOWED: { file: string; snippet: string; why: string }[] = [
   {
+    file: "src/monkey-test-desktop-page.ts",
+    snippet: "ÅÄÖ 🎉",
+    why: "hostile input typed into the app under test, to prove Swedish letters survive a form field",
+  },
+  {
     file: "*",
     snippet: "Sandström",
     why: "a person's name, spelled the way its owner spells it",
