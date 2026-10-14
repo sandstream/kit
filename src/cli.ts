@@ -54,9 +54,9 @@ import {
   cmdEscalate,
   cmdAgentConfig,
   cmdGovernance,
-  cmdStatusline,
   cmdTeam,
 } from "./commands/agent.js";
+import { cmdStatusline } from "./commands/statusline.js";
 import { cmdSelfAudit, cmdCoverage, cmdAnalyze } from "./commands/coverage.js";
 import { cmdAdr } from "./commands/adr.js";
 import { cmdDecisions } from "./commands/decisions.js";
@@ -399,8 +399,8 @@ export async function main(): Promise<void> {
   try {
     let ok: boolean;
 
-    // --version flag before dispatch
-    if (positional[0] === "--version" || positional[0] === "-v") {
+    // --version anywhere (it is global), before dispatch: `kit upgrade --version` must not upgrade.
+    if (positional[0] === "-v" || hasFlag(args, "--version")) {
       ok = cmdVersion();
       process.exitCode = ok ? 0 : 1;
       return;
@@ -656,7 +656,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   init: {
     handler: cmdInit,
     stability: "stable",
-    help: "Detect stack, generate .kit.toml, and run full setup (--no-setup: config + lock files only; offers ~/.kit/defaults.toml [init] known_services, --services a,b answers without a prompt)",
+    help: "Detect stack, generate .kit.toml, and run full setup (runs git init first when there is no repo; --no-setup: config + lock files only; offers ~/.kit/defaults.toml [init] known_services, --services a,b answers without a prompt)",
     mcp: true,
   },
   upgrade: { handler: cmdUpgrade, stability: "stable", help: "Update lock files from .kit.toml" },
@@ -827,7 +827,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   tools: {
     handler: cmdTools,
     stability: "experimental",
-    help: "Inventory the CLIs on this machine — path, installer, installed version, and (with --latest) how far behind each one is",
+    help: "Inventory the CLIs on this machine — path, installer, installed version, and (with --latest) how far behind each one is, and (with --auth) whether it is logged in",
   },
   slopsquat: {
     handler: cmdSlopsquat,

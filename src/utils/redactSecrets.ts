@@ -84,7 +84,7 @@ const KEYED_QUOTED_RE = new RegExp(
   "gi",
 );
 const KEYED_UNQUOTED_RE = new RegExp(
-  String.raw`(?<![A-Za-z0-9_])((?:\\?["'])?${KEYED_SECRET_NAME}(?:\\?["'])?[ \t]*[:=][ \t]*)([A-Za-z0-9_+./~-]{20,})`,
+  String.raw`(?<![A-Za-z0-9_])((?:\\?["'])?${KEYED_SECRET_NAME}(?:\\?["'])?[ \t]*[:=][ \t]*)(?![A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+(?![\w+./~-]))([A-Za-z0-9_+./~-]{20,})(?![\w+./~(-])`,
   "gi",
 );
 

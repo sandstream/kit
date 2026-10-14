@@ -81,9 +81,15 @@ function applicationEnvFiles(env: NodeJS.ProcessEnv): string[] {
   return files;
 }
 
-function assertLiteralValues(env: object): void {
+function nonLiteralKeys(env: object): string[] {
   const referenceOrNul = new RegExp("\\0|\\$\\S|`");
-  if (Object.values(env).some((value) => typeof value === "string" && referenceOrNul.test(value))) {
+  return Object.entries(env)
+    .filter(([, value]) => typeof value === "string" && referenceOrNul.test(value))
+    .map(([key]) => key);
+}
+
+function assertLiteralValues(env: object): void {
+  if (nonLiteralKeys(env).length > 0) {
     throw new Error("Environment values must be literal and contain no NUL bytes");
   }
 }
@@ -179,21 +185,25 @@ async function applicationEnvFindings(root: string, file: string): Promise<Monke
   }
 }
 
+// Prompt formats use `$` as escape syntax (cmd's PROMPT=$P$G, bash's PS1), and no application
+// loader reads them. Windows inherits PROMPT into every shell, so screening it refused every run.
+const SHELL_PROMPTS = new Set(["PROMPT", "PROMPT_COMMAND", "PS1", "PS2", "PS3", "PS4"]);
+
 export async function monkeyEnvironmentFindings(
   root: string,
   env: NodeJS.ProcessEnv,
 ): Promise<MonkeyFinding[]> {
   const findings = livePaymentEnvironmentFindings(env, "process environment");
   if (findings.length > 0) return findings;
-  try {
-    assertLiteralValues(env);
-  } catch {
+  const unresolved = nonLiteralKeys(env).filter((key) => !SHELL_PROMPTS.has(key.toUpperCase()));
+  if (unresolved.length > 0) {
     return [
       monkeyFinding({
         severity: "critical",
         area: "runner",
         title: "Application environment could not be inspected",
-        repro: "Inspect the effective process environment before running Monkey Test",
+        // Names only: the values are exactly what must not be echoed.
+        repro: `Inspect the effective process environment before running Monkey Test; unresolved references in ${unresolved.join(", ")}`,
         fix: "Resolve environment references and use literal sandbox/test values with no NUL bytes.",
       }),
     ];

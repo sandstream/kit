@@ -3,7 +3,9 @@ import { exec } from "./utils/exec.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { homedir } from "node:os";
 import { classifyToolPath, type ToolSource } from "./tool-provenance.js";
-import { probeName } from "./tool-inventory.js";
+import { isPresencePin, probeName, versionSatisfies } from "./tool-inventory.js";
+
+export { isPresencePin };
 import type { DriftVerdict } from "./tool-latest.js";
 
 /** Resolve a tool name to its executable path (mise-first), or null. */
@@ -35,6 +37,7 @@ export type CurrencyChecker = (
   tool: string,
   source: ToolSource,
   installed: string | null,
+  path?: string | null,
 ) => Promise<DriftVerdict>;
 
 async function getToolVersion(tool: string, resolve: ToolResolver): Promise<string | null> {
@@ -67,31 +70,6 @@ async function getToolVersion(tool: string, resolve: ToolResolver): Promise<stri
   }
 }
 
-/**
- * Pins that only assert PRESENCE. `latest` is deliberately not one of them any more: it reads
- * as a promise of currency, and for six majors it meant "answered --version" (#500). A repo that
- * genuinely wants "whatever is installed" now says so with a pin that does not promise more.
- */
-const PRESENCE_PINS = new Set(["any", "present", "*"]);
-
-export function isPresencePin(required: string): boolean {
-  return PRESENCE_PINS.has(required.trim().toLowerCase());
-}
-
-/**
- * Does the installed version satisfy the pin's MATCHING requirement?
- *
- * `latest` and the presence pins have nothing to match, so they are satisfied by existing —
- * currency is reported separately (`ToolStatus.currency`) rather than folded in here, because
- * an outdated tool is a warning and a missing one is a failure, and collapsing them is what
- * made drift invisible.
- */
-function versionSatisfies(installed: string, required: string): boolean {
-  if (required === "latest" || isPresencePin(required)) return true;
-  // Simple prefix match: required "22" matches "22.x.x", required "2.78" matches "2.78.x"
-  return installed.startsWith(required);
-}
-
 export async function checkTools(
   tools: ToolConfig,
   resolve: ToolResolver = resolveToolBin,
@@ -109,7 +87,7 @@ export async function checkTools(
     // being newest, and asking anyway would put the network on the gate's critical path.
     const drift =
       currency && required === "latest"
-        ? await currency(name, source ?? "unknown", installed)
+        ? await currency(name, source ?? "unknown", installed, path ?? null)
         : undefined;
     results.push({ name, required, installed, ok, path, source, currency: drift });
   }

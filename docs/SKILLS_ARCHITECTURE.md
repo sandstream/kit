@@ -1,8 +1,14 @@
 # Skills architecture
 
-> Status: **spec / design**. No code committed against this yet. This is the
-> target architecture for how kit manages agent skills across a fragmented
-> ecosystem of registries and runtimes.
+> Status: **spec / design, partly implemented**. This is the target architecture
+> for how kit manages agent skills across a fragmented ecosystem of registries and
+> runtimes. Implemented today: `[skills]` in `.kit.toml` checked by `kit skills`
+> (clawhub registry by default), skill source resolution and pinning in
+> `skills-lock.json` (`src/lock.ts`: clawhub, github, github-private, local),
+> `kit triage skill` and the `kit triage check-skills` pre-commit gate, and the
+> `kit skill test` module-discipline linter. Design only, not implemented:
+> `kit skills search`, `kit skills add`, `kit skills new`, `kit skills validate`
+> and `kit skills publish`.
 
 ## Thesis
 

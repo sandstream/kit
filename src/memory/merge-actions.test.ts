@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { openMemoryDb } from "./db.js";
 import { mergeDb } from "./merge.js";
 import {
@@ -203,13 +203,14 @@ it("keeps portable identity stable across reopen and forwarding through another 
     target.prepare("VACUUM INTO ?").run(forwarded);
     const third = openMemoryDb(":memory:");
     try {
-      mergeDb(third, forwarded, { projectMappings: [{ from: origin, to: "/third/checkout" }] });
+      const thirdProject = resolve("/third/checkout");
+      mergeDb(third, forwarded, { projectMappings: [{ from: origin, to: thirdProject }] });
       const copy = row(third, id);
       assert.equal(copy.sync_id, original.sync_id);
       assert.equal(copy.origin_id, id);
       assert.equal(copy.origin_device, "source-device");
       assert.equal(copy.origin_root, origin);
-      assert.equal(copy.recall_scope, "/third/checkout");
+      assert.equal(copy.recall_scope, thirdProject);
       assert.equal(
         mergeDb(third, path).pending,
         0,

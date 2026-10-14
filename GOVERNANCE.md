@@ -122,9 +122,8 @@ Emergency kill-switch for agent access:
 
 ## CLI Commands
 
-- `kit governance check` - Check governance status
-- `kit governance audit` - View audit log
-- `kit governance revoke` - Revoke agent access locally
+- `kit governance` - Show governance status: the merged `[governance]` config, revocation status when enabled, budget usage and agent information. It takes no subcommands.
+- `kit audit` - View the audit log.
 
 ## Integration Points
 

@@ -111,13 +111,13 @@ kit plugin list
 
 # Add each service
 kit add stripe/payments
-kit add supabase/database
+kit add supabase/db
 kit add vercel/hosting
 
 # Or manually edit .kit.toml
 # [adapters]
 # payments = "stripe/payments"
-# database = "supabase/database"
+# database = "supabase/db"
 ```
 
 ### Step 5: Run Setup
@@ -178,7 +178,7 @@ Don't migrate all services at once. Migrate incrementally:
 
 ```bash
 # Week 1: Migrate database
-kit add supabase/database
+kit add supabase/db
 
 # Week 2: Migrate auth
 kit add clerk/auth
@@ -202,7 +202,7 @@ Run both systems in parallel:
 ```bash
 # .kit.toml (new way)
 [adapters]
-database = "supabase/database"
+database = "supabase/db"
 
 # .env.local-legacy (old way)
 DATABASE_URL=postgresql://...
@@ -316,7 +316,7 @@ RUN kit setup
 kit setup --mode full
 
 # Preview a service provision
-kit add database/supabase --dry-run
+kit add supabase/db --dry-run
 
 # Verify environment
 kit check

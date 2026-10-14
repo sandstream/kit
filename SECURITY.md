@@ -11,6 +11,13 @@ If you believe you've found a security issue in `sandstream-kit`, **please do no
 
 Coordinated disclosure: we'll publish a CVE + advisory after the fix is released. Reporter attribution by default unless you prefer anonymity.
 
+## Supported versions
+
+| Version  | Supported                                   |
+| -------- | ------------------------------------------- |
+| 6.12.x   | Yes, receives security fixes                |
+| < 6.12   | No, upgrade to the latest 6.12.x release    |
+
 ## Threat model + data flow
 
 The trust model is documented in [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) and the data flows in [`docs/DATA_FLOW.md`](docs/DATA_FLOW.md). Key claims:
@@ -981,12 +988,4 @@ Incident Commander (on-call)
 - [OWASP Top 10](https://owasp.org/www-project-top-ten/)
 - [OWASP Testing Guide](https://owasp.org/www-project-web-security-testing-guide/)
 - [GDPR Compliance Checklist](https://gdpr-info.eu/)
-- [AWS Security Best Practices](https://docs.aws.amazon.com/security/)
-- [Kubernetes Security](https://kubernetes.io/docs/concepts/security/)
-
----
-
-**Last Updated:** 2026-04-15  
-**Version:** 1.0  
-**Maintained By:** Security Team
 

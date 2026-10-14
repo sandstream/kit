@@ -14,7 +14,15 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, realpathSync, symlinkSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  rmSync,
+  mkdirSync,
+  writeFileSync,
+  realpathSync,
+  symlinkSync,
+} from "node:fs";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
@@ -76,6 +84,28 @@ describe("hook floor — describeHookFloor", () => {
     const f = describeHookFloor(r);
     assert.deepEqual(f.installed, ["secret-scan"]);
     assert.equal(judgeHookFloor(f).status, "pass");
+  });
+
+  it("husky 8 (hooks directly in core.hooksPath) counts, husky 9's `_` shim directory is a documented limit (BH-06)", () => {
+    const r = repo();
+    mkdirSync(join(r, ".husky", "_"), { recursive: true });
+    // husky 9: the shim in `_` sources a runner that executes `.husky/pre-commit`; kit reads only
+    // the directory git runs, so the real hook one level up is not followed.
+    writeFileSync(join(r, ".husky", "pre-commit"), "kit security scan-staged\n");
+    writeFileSync(
+      join(r, ".husky", "_", "pre-commit"),
+      '#!/usr/bin/env sh\n. "$(dirname "$0")/h"\n',
+      {
+        mode: 0o755,
+      },
+    );
+    execFileSync("git", ["-C", r, "config", "core.hooksPath", ".husky/_"], { stdio: "ignore" });
+    assert.deepEqual(describeHookFloor(r).installed, [], "the shim is not the hook");
+
+    writeFileSync(join(r, ".husky", "pre-commit"), "#!/bin/sh\nkit security scan-staged\n");
+    chmodSync(join(r, ".husky", "pre-commit"), 0o755); // `mode` only applies to a new file
+    execFileSync("git", ["-C", r, "config", "core.hooksPath", ".husky"], { stdio: "ignore" });
+    assert.deepEqual(describeHookFloor(r).installed, ["secret-scan"], "husky 8 layout counts");
   });
 
   it("does not call an external configured pre-push hook context-check", () => {

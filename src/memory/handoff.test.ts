@@ -9,6 +9,7 @@ import { indexClaudeTranscripts } from "./parser.js";
 import { indexCodexSessions } from "./codex.js";
 import { sessionStartRecovery } from "./hook.js";
 import { listThreads, saveThread } from "./threads.js";
+import { getProjectRecallRoots } from "./project.js";
 
 let tmp: string;
 let root: string;
@@ -141,6 +142,11 @@ it("recalls both agents from either worktree without mixing unrelated repositori
           .map((hit) => hit.sessionId)
           .sort(),
         ["claude-handoff", "codex-handoff"],
+        JSON.stringify({
+          projectPath,
+          roots: getProjectRecallRoots(projectPath, db),
+          stored: db.prepare("SELECT session_id, project FROM sessions").all(),
+        }),
       );
       assert.deepEqual(
         listThreads(db, { projectPath })

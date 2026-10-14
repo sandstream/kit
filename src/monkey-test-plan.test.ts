@@ -111,3 +111,28 @@ it("detects package manager, runner, server, seed, env, and payment provider", a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("reports the role matrix state instead of an implicit pass", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kit-monkey-plan-roles-"));
+  try {
+    await writeFile(join(root, "package.json"), "{}");
+    const missing = await buildMonkeyTestPlan(root);
+    const check = missing.checks.find((entry) => entry.name === "role matrix");
+    assert.ok(check, "plan has a role matrix check");
+    assert.equal(check.status, "warn");
+    assert.match(check.detail, /role-matrix\.json/);
+    assert.ok(missing.nextSteps.some((step) => step.includes("role-matrix.json")));
+
+    await mkdir(join(root, ".kit", "monkey-test"), { recursive: true });
+    await writeFile(
+      join(root, ".kit", "monkey-test", "role-matrix.json"),
+      JSON.stringify({ configured: false, roles: [] }),
+    );
+    const unconfigured = await buildMonkeyTestPlan(root);
+    const state = unconfigured.checks.find((entry) => entry.name === "role matrix");
+    assert.equal(state?.status, "warn");
+    assert.match(state?.detail ?? "", /configured: true/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

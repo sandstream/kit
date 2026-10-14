@@ -27,8 +27,10 @@ import {
   type DriftVerdict,
   type LatestCache,
   type LatestDeps,
+  type LatestOutcome,
 } from "./tool-latest.js";
 import { execFileNoThrow } from "./utils/execFileNoThrow.js";
+import { latestQueryFor } from "./tool-query.js";
 
 /**
  * Tools whose output an agent treats as authority, beyond whatever `[tools]` declares.
@@ -54,6 +56,10 @@ export const AGENT_RELEVANT_TOOLS = [
   "python3",
   "vercel",
   "convex",
+  "infisical",
+  "aws",
+  "wrangler",
+  "flyctl",
 ] as const;
 
 export interface ToolFacts {
@@ -137,11 +143,28 @@ export async function realLatestDeps(): Promise<LatestDeps> {
  * Silence would be the old false green with extra steps.
  */
 export async function cachedCurrencyChecker(): Promise<
-  (tool: string, source: ToolSource, installed: string | null) => Promise<DriftVerdict>
+  (
+    tool: string,
+    source: ToolSource,
+    installed: string | null,
+    path?: string | null,
+  ) => Promise<DriftVerdict>
 > {
   const deps = { ...(await realLatestDeps()), cacheOnly: true };
-  return async (tool, source, installed) =>
-    judgeDrift(installed, await latestVersion(probeName(tool), source, deps));
+  return async (tool, source, installed, path = null) =>
+    judgeDrift(installed, await latestFor(tool, source, path, deps));
+}
+
+/** The gate and `kit tools list` must ask the same question, or they read different cache keys. */
+async function latestFor(
+  declaration: string,
+  source: ToolSource,
+  path: string | null,
+  deps: LatestDeps,
+): Promise<LatestOutcome> {
+  const query = latestQueryFor(declaration, source, path);
+  if ("unsupported" in query) return { status: "unsupported", reason: query.unsupported };
+  return latestVersion(query.name, source, deps);
 }
 
 /** Measure one tool. `withCurrency` gates the (possibly networked) latest lookup. */
@@ -155,10 +178,7 @@ export async function describeTool(
   const facts: ToolFacts = { name, declared: opts.declared, path, provenance, installed };
   if (opts.withCurrency && provenance) {
     const deps = opts.deps ?? (await realLatestDeps());
-    facts.currency = judgeDrift(
-      installed,
-      await latestVersion(probeName(name), provenance.source, deps),
-    );
+    facts.currency = judgeDrift(installed, await latestFor(name, provenance.source, path, deps));
   }
   return facts;
 }
@@ -212,22 +232,75 @@ export function toLockSource(source: ToolSource | undefined): LockSource {
  * Lock entries for the declared tools, with the version and source MEASURED.
  *
  * The resolved version is recorded when the tool is installed; when it is not, the declared pin
- * is kept so the entry still says what was asked for. `sourceDetail` carries the installer kit
- * actually saw, because the lock's four-value vocabulary cannot say "brew". Executable paths stay
- * in `kit tools list`; recording absolute machine paths in a committed lock leaks local identity
+ * is kept so the entry still says what was asked for. An installed version that does not satisfy
+ * its pin throws a `LockMismatchError`: the caller must not write that lock. `sourceDetail` carries
+ * the installer kit actually saw, because the lock's four-value vocabulary cannot say "brew".
+ * Executable paths stay in `kit tools list`; recording absolute machine paths in a committed lock leaks local identity
  * and makes the artifact non-portable.
  */
 export async function resolveLockEntries(
   declared: Record<string, string>,
 ): Promise<Record<string, { version: string; source: LockSource; sourceDetail?: string }>> {
   const out: Record<string, { version: string; source: LockSource; sourceDetail?: string }> = {};
+  const mismatches: LockMismatch[] = [];
   for (const [name, pin] of Object.entries(declared)) {
     const facts = await describeTool(name);
+    if (facts.installed && !versionSatisfies(facts.installed, pin)) {
+      mismatches.push({ name, installed: facts.installed, required: pin });
+    }
     out[name] = {
       version: facts.installed ?? pin,
       source: toLockSource(facts.provenance?.source),
       sourceDetail: facts.provenance?.source,
     };
   }
+  // A lock that contradicts its own declaration reads as in sync while it is not.
+  if (mismatches.length > 0) throw lockMismatchError(mismatches);
   return out;
+}
+
+/**
+ * Pins that only assert PRESENCE. `latest` is deliberately not one of them any more: it reads
+ * as a promise of currency, and for six majors it meant "answered --version" (#500). A repo that
+ * genuinely wants "whatever is installed" now says so with a pin that does not promise more.
+ */
+const PRESENCE_PINS = new Set(["any", "present", "*"]);
+
+export function isPresencePin(required: string): boolean {
+  return PRESENCE_PINS.has(required.trim().toLowerCase());
+}
+
+/**
+ * Does the installed version satisfy the pin's MATCHING requirement?
+ *
+ * `latest` and the presence pins have nothing to match, so they are satisfied by existing —
+ * currency is reported separately (`ToolStatus.currency`) rather than folded in here, because
+ * an outdated tool is a warning and a missing one is a failure, and collapsing them is what
+ * made drift invisible.
+ */
+export function versionSatisfies(installed: string, required: string): boolean {
+  if (required === "latest" || isPresencePin(required)) return true;
+  // Simple prefix match: required "22" matches "22.x.x", required "2.78" matches "2.78.x"
+  return installed.startsWith(required);
+}
+
+/** A declared tool whose installed version does not satisfy its pin. */
+export interface LockMismatch {
+  name: string;
+  installed: string;
+  required: string;
+}
+
+/** Thrown instead of writing a lock that contradicts the declaration it was built from. */
+export type LockMismatchError = Error & { mismatches: LockMismatch[] };
+
+export function isLockMismatchError(err: unknown): err is LockMismatchError {
+  return err instanceof Error && err.name === "LockMismatchError";
+}
+
+function lockMismatchError(mismatches: LockMismatch[]): LockMismatchError {
+  const text = mismatches.map(
+    (m) => `${m.name}: installed ${m.installed} does not satisfy ${m.required}`,
+  );
+  return Object.assign(new Error(text.join("; ")), { name: "LockMismatchError", mismatches });
 }

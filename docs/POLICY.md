@@ -131,6 +131,6 @@ anchor. Without an anchor, an unknown signer stays a warn (trust-absence ≠ for
 
 ## What's next
 
-Signed org **bundles** (packaging the policy + signer manifest for drop-in) and
-RBAC keyed to identity (which role may read/write/elevate/install/deploy) —
-Phase 2 depth.
+Signed org **bundles** (packaging the policy + signer manifest for drop-in) are
+Phase 2 depth. RBAC keyed to identity already ships as the `[rbac]` table in the
+signed policy (see [CONTROL_PLANE.md](./CONTROL_PLANE.md)).

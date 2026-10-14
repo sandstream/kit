@@ -1,13 +1,13 @@
 # kit Roadmap
 
-State on **2026-06-02** — what's shipped, what's coming. Public-flip happens with
-everything in **Shipped**; items in **Planned** land as incremental releases.
+State at **kit 6.12.x** (2026-09-30): what has shipped and what is planned. Items in
+**Planned** land as incremental releases.
 
 Contributions on any planned item are welcome — open an issue first to coordinate.
 
 ---
 
-## Shipped (v1.1.x)
+## Shipped
 
 ### Core
 - `kit init / check / fix / install / login / secrets / setup / audit / doctor / env`
@@ -15,9 +15,10 @@ Contributions on any planned item are welcome — open an issue first to coordin
 - Mise integration for tool versions
 - Git hooks management
 - Skills system (`.claude/skills`)
-- Plugin system + adapter SDK (`packages/adapter-sdk`, `packages/sandstream-kit-plugin-railway` reference)
+- Plugin system + adapter SDK (`packages/adapter-sdk`, `packages/kit-plugin-railway` reference)
 - MCP server (`kit mcp`)
-- Team / RBAC (`kit team`)
+- RBAC: the `[rbac]` role table in the signed org policy (`src/rbac/`, see `docs/CONTROL_PLANE.md`).
+  `kit team` itself is `experimental` and not implemented (no team backend).
 
 ### Security
 - `npm audit`, `semgrep`, `trivy`, `license-checker` (with `npx` fallback), `bumblebee`
@@ -38,6 +39,19 @@ Contributions on any planned item are welcome — open an issue first to coordin
 - `gcp-sm` — GCP Secret Manager
 - `azure-kv` — Azure Key Vault
 - `dotenvx` — encrypted `.env`-in-git via `dotenvx get`/`set` (ECIES)
+
+### Shipped from the original plan
+- `kit analyze`: repo analysis that emits a draft `CLAUDE.md` / `RULES.md` by pattern-mining (`src/analyze.ts`)
+- `kit security policy init|add|check`: dependency-allowlist enforcement (`src/security-policy.ts`)
+- `kit agent-config`: managed, idempotent "use kit" block in `CLAUDE.md` / `AGENTS.md` /
+  `.cursorrules` / `.clinerules` / `.github/copilot-instructions.md` (`src/agent-config.ts`)
+- OneCLI integration: `kit secrets onecli` registers a key with the OneCLI gateway so the agent
+  only sees a placeholder (`src/secrets-onecli.ts`)
+- `kit secrets migrate`: move plaintext secrets in `.env*` into the configured vault (`src/secrets-migrate.ts`)
+- Secret rotation: `kit secrets rotate` (`src/secrets-rotate-cli.ts`), `kit secrets propagate`,
+  `kit secrets revoke-old` (Supabase) and `kit secrets purge-history` (opt-in, `--force-history`)
+- First-party plugins `kit-plugin-supabase`, `kit-plugin-stripe` and `kit-plugin-vercel`
+  (`packages/`), alongside railway, fly, cloudflare, github, sentry, snyk, wiz, aisle and sentrux
 
 ### Brownfield UX
 - `#`-prefixed informational service config no longer exec'd
@@ -411,32 +425,6 @@ together. "Loudly" is a claim about a reader, and the reader is the weak link.
 Found while comparing agent session managers that give every session its own worktree, which turns
 "N working trees on one machine" from an edge case into the normal case.
 
-### PR 2 — `kit analyze` subcommand (1d)
-Walk git log + scan framework markers (`next.config.*`, `pyproject.toml`,
-`Cargo.toml`, `drizzle.config.*`, etc.) to emit a draft `CLAUDE.md` + `RULES.md`
-suitable for committing. Pure pattern-mining for v1; LLM-augmented version after PR 4.
-
-### PR 3 — Security-policy enforcement (1d)
-Translate dependency-allowlist policy into `.kit-allowlist.json` +
-`kit security policy` subcommand that fails the build on un-allowlisted deps
-and queries the GitHub Advisory DB. Builds on existing `check-security.ts`.
-
-### PR 4 — LLM provider abstraction (2-3d)
-Add an `src/llm/` module exposing a single `runLLM({provider, model,
-messages, tools})` interface covering Anthropic, OpenAI, OpenRouter, xAI,
-Google, Mistral, Ollama. Retry/failover, rate-limit cooldown, cost accounting.
-Wire into `kit triage` (LLM-summarized risk) and `kit skills` (relevance ranking).
-
-### PR 5 — Agent telemetry rollup (1d)
-Per-agent tokens / cost / quality metrics. Append to existing
-`.kit-audit.jsonl`; new `kit ops --rollup` subcommand for summaries.
-Depends on PR 4 for cost-accounting hooks.
-
-### PR 6 — DeepEval-style quality gates (1-2d)
-`kit eval` subcommand running golden-case suites with G-Eval, AnswerRelevancy,
-Faithfulness, TaskCompletion metrics. PR-blocking at configurable threshold.
-Depends on PR 4 (LLM-as-judge).
-
 ### PR 1.5 — Extract `eas` to `sandstream-kit-plugin-expo` (0.5d)
 Move EAS-secrets case from core to a plugin alongside other Expo-specific tooling
 (EAS build, app.json validation, OTA updates). Backward-compat via plugin
@@ -446,41 +434,17 @@ auto-load when `eas-cli` is detected.
 
 Based on a survey of several real-world projects. Each plugin bundles: CLI install
 + service config + MCP server registration + skills install + domain code.
+Supabase, Stripe and Vercel have shipped as `packages/kit-plugin-*` (see Shipped); the rows
+below remain planned.
 
 | Plugin | Hits | Priority | Domain code |
 |---|---|---|---|
-| `sandstream-kit-plugin-supabase` | 4 projects | P1 | migrations, types-gen, local stack, RLS verify, seed mgmt |
 | `sandstream-kit-plugin-next` | 2+ projects | P1 | env promotion, build/deploy hooks, ISR cache mgmt |
 | `sandstream-kit-plugin-expo` | 1 project | P1 | EAS build, app.json validation, OTA updates + eas-secrets |
-| `sandstream-kit-plugin-stripe` | 2+ projects | P2 | products/prices sync, webhook registration, test-mode switch |
 | `sandstream-kit-plugin-resend` | 2+ projects | P2 | template deploy, domain verification, webhook mgmt |
 | `sandstream-kit-plugin-netlify` | 1 project | P3 | deploy + env mgmt |
-| `sandstream-kit-plugin-vercel` | 1 project | P3 | deploy + env promotion |
 | `sandstream-kit-plugin-capacitor` | 1 project | P3 | native build, plugin sync |
 | `sandstream-kit-plugin-playwright` | 1+ projects | P3 | trace mgmt, browser install pinning |
-
-### Agent-config injection — "teach the agent to use kit" (1-2d)
-Today `kit setup` writes only `.kit.toml`; wiring an agent to actually *use* kit
-is manual copy-paste from `examples/agent-hooks/`. Add an **opt-in** setup step
-(`kit setup` prompt + standalone `kit agent-config`) that detects the agent(s)
-present and injects a **managed, idempotent block** (BEGIN/END markers, re-runs
-update in place) instructing the agent to run kit:
-
-  - **Claude Code** → append the block to `CLAUDE.md`; optionally register a
-    `.claude/settings.json` PostToolUse hook running `kit check --category security`.
-  - **Codex** → block in `AGENTS.md` (per `examples/agent-hooks/codex`).
-  - **Cursor** → `.cursorrules`; **Cline** → `.clinerules`.
-
-Default to the doc-block only (safe, just text the agent reads); the
-settings.json hook (which makes kit auto-run on the user's machine) is a
-separate explicit confirm. Never overwrite outside the managed markers.
-
-### Integration with OneCLI (1d)
-New `[secrets.store = "onecli"]` backend that registers placeholder keys with
-the OneCLI gateway (https://github.com/onecli/onecli) for runtime credential
-injection. Complements existing config-time backends — kit writes
-`.env.local` with the fake keys; OneCLI swaps them at HTTP-request time so
-agents never see real credentials.
 
 ### Encrypted-env & agent-auth backends (dotenvx, SOPS, VestAuth/as2)
 kit stays vault-agnostic — new sources slot in as backends, new identities as
@@ -509,38 +473,12 @@ supply-chain triage + governance/elevation **on top of** whichever store you use
 Support them as backends; watch **as2** as the closest competitor to kit's
 secrets-resolution core.
 
-### Secret-migration wizard (2d)
-New `kit secrets migrate` subcommand that turns the init-time plaintext
-warning into an actual move:
+### Short-TTL backend re-auth detection (1d, partial)
+Partly shipped: `src/check-secrets.ts` names the re-auth command for an expired AWS
+credential (`aws sso login`) and `src/hitl.ts` turns auth failures into a HITL block with the
+command to run (for example `op signin`). Not yet done: per-backend expiry detection for every
+backend below, and offering to re-run after auth.
 
-  1. Re-scan via `scanPlaintextSecrets` to find current plaintext credentials
-  2. Confirm target vault (re-read `secrets.store` from `.kit.toml`)
-  3. Install vault CLI if missing (via mise) and trigger login
-  4. For each finding: push value to vault → record ref in `[secrets.keys]`
-  5. Replace plaintext in source file with the appropriate vault reference
-     comment (or remove and rely on `kit secrets` to regenerate)
-  6. Verify by re-running scan — expect zero findings post-migration
-
-### Secret rotation (PR R1-R4, ~5-7d)
-Production rotation orchestration. Replaces a key everywhere it lives.
-
-  - **R1**: `kit secrets rotate <KEY>` — generate-new-via-source-API
-    (Stripe roll-keys, AWS IAM create-access-key, GCP IAM service-account key
-    create), write to vault.
-  - **R2**: Multi-target propagation adapters:
-    - Vercel (`vercel env add/rm`)
-    - GitHub Secrets (`gh secret set`)
-    - Fly (`fly secrets set`)
-    - Cloudflare Workers (`wrangler secret put`)
-    - Railway (`railway variables set`)
-    - AWS Parameter Store (`aws ssm put-parameter`)
-  - **R3**: Revoke / delete old credential after smoke-test passes against
-    new credential; rollback on failure.
-  - **R4**: History scrubbing — redact rotated key from `.kit-audit.jsonl`,
-    surface git-history scrubbing via `git-filter-repo`/`bfg` for accidentally
-    committed credentials (opt-in, destructive — requires explicit `--force-history`).
-
-### Short-TTL backend re-auth detection (1d)
 Cloud secret backends (AWS Secrets Manager, GCP Secret Manager, Azure Key Vault,
 HashiCorp Vault) have session lifetimes from 1h (AWS STS) to 32d (Vault policy).
 When a `op read` / `aws secretsmanager get-secret-value` / `gcloud secrets
@@ -552,6 +490,20 @@ the right re-auth command (`op signin`, `aws sso login`, `gcloud auth login`,
 ---
 
 ## Considered and rejected
+
+### Violates the zero-LLM contract
+
+These were planned as PR 4, 5 and 6. Each puts a model call inside kit, which
+[`docs/ZERO_LLM_CONTRACT.md`](docs/ZERO_LLM_CONTRACT.md) and ADR-0001 rule out (no model client
+anywhere in `src/**`). ADR-0007 allows kit to own the rig for measuring model output, never the
+judgement.
+
+- **LLM provider abstraction** (`src/llm/` with a `runLLM()` interface, LLM-summarized triage,
+  LLM relevance ranking in `kit skills`).
+- **Agent telemetry rollup with cost accounting**, which depended on that abstraction.
+- **DeepEval-style quality gates** (`kit eval` with LLM-as-judge metrics).
+
+### Other
 
 - **Third-party CLI tool-version lockers and skill-loaders** — evaluated several
   overlapping early-stage projects; kit's mise integration + `cli-lock.json` and

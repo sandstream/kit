@@ -208,6 +208,66 @@ export function recallRootVariants(root: string): string[] {
   return [...new Set([root, root.replaceAll("\\", "/"), root.replaceAll("/", "\\")])];
 }
 
+/**
+ * Stored spellings of the same directories, for Windows recall.
+ *
+ * Rows keep the cwd spelling they were recorded with. On Windows, 8.3 short names (RUNNER~1)
+ * survive Node's realpath while git reports long names, so a short-spelled row never matched
+ * a long-spelled root. A stored path counts only when it resolves,
+ * natively, to a recall root or a path below it, so recall cannot widen to other folders.
+ */
+// A named type: lizard misreads an inline function-typed parameter and merges functions.
+type NativeResolver = (path: string) => string | null;
+
+export function storedAliases(roots: string[], stored: string[], native: NativeResolver): string[] {
+  const key = (path: string) => {
+    let normalized = path.replaceAll("\\", "/").toLowerCase();
+    while (normalized.endsWith("/")) normalized = normalized.slice(0, -1);
+    return normalized;
+  };
+  const targets = roots.flatMap((root) => {
+    const resolved = native(root);
+    return resolved ? [key(resolved)] : [];
+  });
+  return stored.filter((path) => {
+    const resolved = native(path);
+    if (!resolved) return false;
+    const candidate = key(resolved);
+    return targets.some((target) => candidate === target || candidate.startsWith(target + "/"));
+  });
+}
+
+function nativePath(path: string): string | null {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return null;
+  }
+}
+
+/** Distinct absolute Windows paths the store has recorded as a scope, across recall tables. */
+function storedWindowsScopes(db: DatabaseSync): string[] {
+  // Case and separator variants are already matched by the recall SQL; only 8.3 names
+  // (always containing `~`) need resolving, which keeps this to a filtered scan per recall.
+  const queries = [
+    "SELECT DISTINCT COALESCE(recall_cwd, cwd) AS p FROM messages WHERE instr(COALESCE(recall_cwd, cwd), '~') > 0",
+    "SELECT DISTINCT COALESCE(recall_scope, scope) AS p FROM pending_actions WHERE instr(COALESCE(recall_scope, scope), '~') > 0",
+    "SELECT DISTINCT COALESCE(recall_project_path, project_path) AS p FROM saved_threads WHERE instr(COALESCE(recall_project_path, project_path), '~') > 0",
+  ];
+  const paths = new Set<string>();
+  for (const sql of queries) {
+    try {
+      for (const row of db.prepare(sql).all()) {
+        const p = row.p;
+        if (typeof p === "string" && /^[A-Za-z]:[\\/]/.test(p)) paths.add(p);
+      }
+    } catch {
+      // Older stores lack some recall columns or tables; the others still apply.
+    }
+  }
+  return [...paths];
+}
+
 function sameLocalDirectory(left: string, right: string): boolean {
   if (left === right) return true;
   try {
@@ -230,6 +290,37 @@ function distinctRecallRoots(roots: string[]): string[] {
 
 /** Expand recall only to Git-registered worktrees, never unrelated clones with the same name. */
 export function getProjectRecallRoots(projectPath: string, db?: DatabaseSync): string[] {
+  const roots = registeredRecallRoots(projectPath, db);
+  if (process.platform !== "win32" || !db) return roots;
+  return distinctRecallRoots([
+    ...roots,
+    ...storedAliases(roots, storedWindowsScopes(db), nativePath),
+  ]);
+}
+
+/** Worktree paths from `git worktree list --porcelain -z`, minus those git marks `prunable`
+ *  (the directory is gone): a deleted worktree must not keep widening the recall scope. */
+function livingWorktrees(porcelain: string): string[] {
+  const roots: string[] = [];
+  let current: string | null = null;
+  let isPrunable = false;
+  const flush = () => {
+    if (current !== null && !isPrunable) roots.push(current);
+  };
+  for (const field of porcelain.split("\0")) {
+    if (field.startsWith("worktree ")) {
+      flush();
+      current = field.slice("worktree ".length);
+      isPrunable = false;
+    } else if (field === "prunable" || field.startsWith("prunable ")) {
+      isPrunable = true;
+    }
+  }
+  flush();
+  return roots;
+}
+
+function registeredRecallRoots(projectPath: string, db?: DatabaseSync): string[] {
   // A path imported from another OS is evidence, not a local alias. Resolving /srv on Windows
   // would silently turn it into the current drive's \srv and widen the recall scope.
   if (process.platform === "win32" && /^\/(?!\/)/.test(projectPath)) return [projectPath];
@@ -259,10 +350,7 @@ export function getProjectRecallRoots(projectPath: string, db?: DatabaseSync): s
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 2000,
     });
-    const roots = records
-      .split("\0")
-      .filter((field) => field.startsWith("worktree "))
-      .map((field) => field.slice("worktree ".length));
+    const roots = livingWorktrees(records);
     return distinctRecallRoots([
       ...localRoots,
       ...roots.flatMap((root) => [root, resolveLocalProjectPath(root)]),

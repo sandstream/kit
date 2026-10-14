@@ -4,7 +4,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, upsertSession, insertMessage, getStats, markFileIndexed } from "./db.js";
-import { backupEncrypted } from "./backup.js";
+import {
+  backupEncrypted,
+  backupToRecipient,
+  generateMemoryKeypair,
+  saveMemoryKey,
+} from "./backup.js";
 import { syncFromExport } from "./sync.js";
 
 const PASSPHRASE = "round-trip-secret-phrase-9182";
@@ -237,5 +242,33 @@ describe("memory sync", () => {
     const target = openMemoryDb(":memory:");
     assert.throws(() => syncFromExport(target, "/nope/missing.db"), /export not found/);
     target.close();
+  });
+});
+
+describe("memory sync: public-key blob with a mismatched local key (MP-9)", () => {
+  it("says the blob was encrypted to a different key, not a raw OpenSSL error", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "kit-sync-key-"));
+    const prevDir = process.env.KIT_MEMORY_DIR;
+    try {
+      process.env.KIT_MEMORY_DIR = join(tmp, "mem");
+      const src = join(tmp, "src.db");
+      openMemoryDb(src).close();
+      const blob = join(tmp, "blob.kitmem");
+      const theirs = generateMemoryKeypair();
+      backupToRecipient(theirs.publicKey, src, blob);
+      saveMemoryKey(generateMemoryKeypair().privateJwk); // a different local key
+      const target = openMemoryDb(join(tmp, "target.db"));
+      assert.throws(
+        () => syncFromExport(target, blob),
+        (err: Error) =>
+          /different public key|does not match/.test(err.message) &&
+          !/unable to authenticate|Unsupported state/.test(err.message),
+      );
+      target.close();
+    } finally {
+      if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
+      else process.env.KIT_MEMORY_DIR = prevDir;
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

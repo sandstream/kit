@@ -12,7 +12,7 @@ import { hasFlag, unknownFlags, GLOBAL_FLAGS } from "../utils/flags.js";
 import { loadConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { readkitMeta, updateSkillsLock, updateCliLock } from "../lock.js";
-import { resolveLockEntries } from "../tool-inventory.js";
+import { isLockMismatchError, resolveLockEntries } from "../tool-inventory.js";
 
 /**
  * Detect the npm global-install permission failure (EACCES / EPERM writing into
@@ -127,7 +127,22 @@ export async function cmdUpgrade(): Promise<boolean> {
 
   const config = await loadConfig(resolveConfigPath());
 
-  // Update skills lock
+  // Lock what is actually installed. A declared `latest` and an assumed mise
+  // source are requests, not provenance evidence.
+  let tools: Awaited<ReturnType<typeof resolveLockEntries>>;
+  try {
+    tools = config.tools ? await resolveLockEntries(config.tools) : {};
+  } catch (err) {
+    if (!isLockMismatchError(err)) throw err;
+    for (const m of err.mismatches) {
+      console.error(
+        `${c.red}✗ ${m.name}: installed ${m.installed} does not satisfy ${m.required}${c.reset}`,
+      );
+    }
+    console.error(`${c.dim}Lock files not written. Run kit install, then kit upgrade.${c.reset}`);
+    return false;
+  }
+  // Skills lock only after the tool lock is known to be writable: a refusal writes nothing.
   const skills: Record<string, string> = {};
   if (config.skills?.required) {
     Object.assign(skills, config.skills.required);
@@ -139,9 +154,6 @@ export async function cmdUpgrade(): Promise<boolean> {
   const kitMeta = await readkitMeta();
   await updateSkillsLock(skills, kitMeta?.name ? `${kitMeta.name}@${kitMeta.version}` : undefined);
 
-  // Lock what is actually installed. A declared `latest` and an assumed mise
-  // source are requests, not provenance evidence.
-  const tools = config.tools ? await resolveLockEntries(config.tools) : {};
   await updateCliLock(tools);
 
   console.log(`${c.green}✓${c.reset} Updated lock files from .kit.toml\n`);

@@ -70,8 +70,12 @@ exists partly to keep its enforcement side honest.
 
 As an audit tool kit is strong on **integrity evidence**, but its trust anchor is
 **machine-local**: everything is tamper-*evident* against someone who can write the log, not
-tamper-*resistant* against a same-UID principal who can read a `0600` file. Closing that gap is
-the point of hardware-rooted identity (TPM/HSM) on the kit 5.0 roadmap. Until then: kit is
+tamper-*resistant* against a same-UID principal who can read a `0600` file. Closing that gap
+means a non-exportable signing key. kit supports one today through an external signer:
+`KIT_KEYSTORE=command` with `KIT_KEYSTORE_SIGN_CMD` and `KIT_KEYSTORE_PUBKEY`, for a TPM,
+HSM, enclave or YubiKey you drive yourself; `kit identity keystore` reports which backend
+is active. The native TPM and Secure Enclave stores are stubs that report unavailable.
+Without an external signer, kit is
 excellent proof of what **you** did under enforcement — not forensic proof against an attacker
 who already owns your user account.
 

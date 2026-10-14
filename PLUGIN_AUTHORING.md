@@ -8,19 +8,19 @@ kit supports community-built adapter plugins. Plugins are regular npm packages t
 
 ```bash
 kit create-plugin my-service
-cd sandstream-kit-plugin-my-service
+cd kit-plugin-my-service
 npm run build
 npm test
 ```
 
-This scaffolds a working adapter in `./sandstream-kit-plugin-my-service/` that you can customise and publish.
+This scaffolds a working adapter in `./kit-plugin-my-service/` that you can customise and publish.
 
 ---
 
 ## Plugin package structure
 
 ```
-sandstream-kit-plugin-my-service/
+kit-plugin-my-service/
   src/
     my-service.ts         # ServiceAdapter implementation
     my-service.test.ts    # Tests
@@ -35,7 +35,7 @@ sandstream-kit-plugin-my-service/
 
 ```json
 {
-  "name": "sandstream-kit-plugin-my-service",
+  "name": "kit-plugin-my-service",
   "type": "module",
   "exports": {
     ".": {
@@ -185,12 +185,12 @@ npm run build && npm test
 
 Users add your plugin to their project by:
 
-1. Installing it: `npm install --save-dev sandstream-kit-plugin-my-service`
+1. Installing it: `npm install --save-dev kit-plugin-my-service`
 2. Adding it to `package.json`:
 
 ```json
 {
-  "kitPlugins": ["sandstream-kit-plugin-my-service"]
+  "kitPlugins": ["kit-plugin-my-service"]
 }
 ```
 
@@ -206,7 +206,7 @@ npm pack --dry-run   # verify contents
 npm publish
 ```
 
-Name your package `sandstream-kit-plugin-<service>` so it's discoverable.
+Name your package `kit-plugin-<service>` (the unscoped community convention `kit create-plugin` uses) so it is discoverable. The `sandstream-kit-plugin-*` names belong to the first-party packages in this repo.
 
 ---
 
@@ -225,7 +225,7 @@ kit will warn when loading an unrecognised plugin for the first time (future fea
 
 ## Reference implementation
 
-`packages/sandstream-kit-plugin-railway/` in this repo is the canonical example. It demonstrates:
+`packages/kit-plugin-railway/` in this repo is the canonical example. It demonstrates:
 
 - CLI-based provisioning (`railway` CLI)
 - Key-reuse pattern
@@ -243,4 +243,4 @@ The fastest way to get started:
 kit create-plugin <short-name>
 ```
 
-This creates `./sandstream-kit-plugin-<short-name>/` with a working adapter, tests, and configuration. The generated plugin passes `npm run build` and `npm test` immediately so you can start from green.
+This creates `./kit-plugin-<short-name>/` with a working adapter, tests, and configuration. The generated plugin passes `npm run build` and `npm test` immediately so you can start from green.

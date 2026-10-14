@@ -111,19 +111,17 @@ kit versions are compatible with:
 ### Plugin Compatibility Matrix
 
 ```
-kit Version  | Compatible Plugin API | Status
-─────────────────────────────────────────────────
-0.1.x          | ServiceAdapter v0.1   | Stable
-1.0.x - 1.x.x  | ServiceAdapter v1.0   | Stable
-2.0.x - 2.x.x  | ServiceAdapter v2.0   | Stable (future)
+kit Version  | Compatible Plugin API                  | Status
+─────────────────────────────────────────────────────────────────
+6.x          | ServiceAdapter via @sandstream/adapter-sdk 1.x | Current
 ```
 
-Plugins specify minimum kit version:
+First-party plugins in `packages/` declare `kitVersion: ">=6.0.0"` (see `src/plugin-registry.generated.ts`). Plugins specify minimum kit version:
 
 ```json
 {
   "name": "@provider/kit-stripe",
-  "kitVersion": ">=1.0.0 <2.0.0"
+  "kitVersion": ">=6.0.0"
 }
 ```
 
@@ -240,40 +238,12 @@ Breaking changes require:
 
 ### Release Steps
 
-```bash
-# 1. Prepare release branch
-git checkout -b release/1.2.0
+Publishing is OIDC-only (npm trusted publishing). It runs from `.github/workflows/publish.yml` when a signed `v*` tag is pushed, inside the protected `npm-publish` environment. Never run `npm publish` locally. The full procedure is in [RELEASING.md](./RELEASING.md).
 
-# 2. Update version
-npm version minor  # Bumps 1.1.x → 1.2.0
-
-# 3. Build and test
-npm run build
-npm test
-
-# 4. Update CHANGELOG
-vim CHANGELOG.md
-# Add: ## [1.2.0] - 2026-04-15
-#      ### Added
-#      - New feature description
-
-# 5. Commit changes
-git add package.json CHANGELOG.md
-git commit -m "chore: release 1.2.0"
-
-# 6. Create git tag
-git tag v1.2.0
-
-# 7. Push and create PR
-git push origin release/1.2.0
-# Create PR, wait for review and merge
-
-# 8. Publish to npm
-npm publish
-
-# 9. Create GitHub release
-gh release create v1.2.0 --generate-notes
-```
+1. Open a release PR that bumps the version in `package.json`, adds the `CHANGELOG.md` entry and updates `README.md`.
+2. Merge the release PR once CI is green.
+3. Push a signed tag for the merged commit: `git tag -s vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
+4. Approve the `npm-publish` environment deployment when the publish workflow asks for it.
 
 ### Release Cadence
 
@@ -343,10 +313,11 @@ export const adapter: ServiceAdapter = {
 
 Major versions are designated as LTS (Long-Term Support):
 
-| Version | Type | Released | End of Support |
-|---------|------|----------|---|
-| 1.0.x | LTS | 2026-04-15 | 2028-04-15 |
-| 2.0.x | Current | 2026-10-15 | TBD |
+| Version | Type | End of Support |
+|---------|------|---|
+| 6.x | Current | Only the latest 6.x minor receives fixes |
+
+There is no separate LTS line today. The policy below describes how an LTS line would be handled if one is designated.
 
 ### LTS Support Policy
 
@@ -359,15 +330,6 @@ Major versions are designated as LTS (Long-Term Support):
 **Non-LTS Versions** receive:
 - ✅ All patches until end of life
 - ❌ Support after next MAJOR released
-
-Example:
-```
-1.0.0 (LTS)  - Release: 2026-04-15
-1.1.0        - Release: 2026-06-15 (MINOR updates allowed)
-1.0.5        - Release: 2026-08-15 (Security patch for 1.0 line)
-2.0.0        - Release: 2026-10-15 (Next major)
-1.0.x        - Support until: 2028-04-15
-```
 
 ## Plugin Compatibility
 
@@ -495,10 +457,10 @@ Both work in the same kit 2.x project if compatible.
 - [Keep a Changelog](https://keepachangelog.com/)
 - [Node.js Version Policy](https://nodejs.org/en/about/releases/)
 - [Plugin Development Guide](./PLUGIN_DEVELOPMENT.md)
-- [Changelog Format](./CHANGELOG.md)
+- [Changelog Format](../CHANGELOG.md)
 
 ---
 
 **Last Updated:** 2026-04-15  
 **Status:** Stable  
-**Applies to:** kit 1.0.0+
+**Applies to:** kit 6.x

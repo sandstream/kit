@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdMonkeyTest } from "./monkey-test.js";
@@ -11,8 +11,22 @@ let argv: string[];
 let exitCode: string | number | null | undefined;
 let logs: string[];
 let origLog: typeof console.log;
+const isolatedEnv = new Map<string, string | undefined>();
 
 beforeEach(() => {
+  isolatedEnv.clear();
+  for (const [key, value] of Object.entries(process.env)) {
+    if (
+      key === "SKIP_SEED" ||
+      /^(?:MONKEY_PAYMENT|STRIPE|PAYPAL|BRAINTREE|ADYEN|SQUARE)_(?:MODE|ENV|ENVIRONMENT)$/i.test(
+        key,
+      ) ||
+      /^(?:sk|pk|rk)_live_/.test(value?.trim() ?? "")
+    ) {
+      isolatedEnv.set(key, value);
+      delete process.env[key];
+    }
+  }
   dir = mkdtempSync(join(tmpdir(), "kit-monkey-cmd-"));
   cwd = process.cwd();
   process.chdir(dir);
@@ -28,6 +42,10 @@ afterEach(() => {
   process.argv = argv;
   process.exitCode = exitCode;
   console.log = origLog;
+  for (const [key, value] of isolatedEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -51,7 +69,7 @@ describe("cmdMonkeyTest", () => {
     });
     setArgs("plan", "--json");
 
-    assert.equal(await cmdMonkeyTest(), true);
+    assert.equal(await cmdMonkeyTest(), true, logs.join("\n"));
     const plan = outputJson<{ roles: { id: string; label: string }[] }>();
 
     assert.ok(plan.roles.some((role) => role.id === "staff" && role.label === "Kiosk staff"));
@@ -73,7 +91,7 @@ describe("cmdMonkeyTest", () => {
     writePackage({ scripts: {} });
     setArgs("run", "--skip-browser", "--expected", "browser is covered by release smoke", "--json");
 
-    assert.equal(await cmdMonkeyTest(), false);
+    assert.equal(await cmdMonkeyTest(), false, logs.join("\n"));
     const result = outputJson<{
       ok: boolean;
       findings: { title: string }[];
@@ -96,4 +114,48 @@ describe("cmdMonkeyTest", () => {
     assert.equal(process.exitCode, 1);
     assert.match(logs.join("\n"), /kit monkey-test/);
   });
+
+  it("usage and command docs do not call the release gate experimental", async () => {
+    setArgs("nope");
+
+    await cmdMonkeyTest();
+    assert.doesNotMatch(logs.join("\n"), /experimental/i);
+    const doc = readFileSync(join(import.meta.dirname, "..", "..", "docs", "COMMANDS.md"), "utf8");
+    const row = doc.split("\n").find((line) => line.includes("kit monkey-test plan"));
+    assert.ok(row, "COMMANDS.md documents the plan command");
+    assert.doesNotMatch(row, /experimental/i);
+  });
+});
+
+describe("cmdMonkeyTest desktop", () => {
+  it("fails closed with a config finding when the desktop config is missing", async () => {
+    setArgs("desktop", "--json", "--steps", "1", "--seed", "3");
+
+    assert.equal(await cmdMonkeyTest(), false);
+    const result = JSON.parse(logs.join("\n")) as { seed: number; findings: { title: string }[] };
+    assert.equal(result.seed, 3);
+    assert.deepEqual(
+      result.findings.map((finding) => finding.title),
+      ["Desktop monkey config missing or invalid"],
+    );
+  });
+
+  for (const [flag, value] of [
+    ["--actions", "kill,explode"],
+    ["--seed", "abc"],
+  ]) {
+    it(`rejects ${flag} ${value} before starting anything`, async () => {
+      const errors: string[] = [];
+      const origError = console.error;
+      console.error = (...args: unknown[]) => void errors.push(args.join(" "));
+      try {
+        setArgs("desktop", flag, value);
+        assert.equal(await cmdMonkeyTest(), false);
+        assert.equal(process.exitCode, 1);
+        assert.match(errors.join("\n"), new RegExp(flag));
+      } finally {
+        console.error = origError;
+      }
+    });
+  }
 });

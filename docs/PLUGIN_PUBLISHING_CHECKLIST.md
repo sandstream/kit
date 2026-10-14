@@ -1,6 +1,6 @@
 # Plugin Publishing Checklist
 
-Use this checklist before publishing your plugin to npm and registering with the kit registry.
+Use this checklist before publishing your plugin to npm. There is no third-party kit registry to register with: kit's registry is generated from the first-party packages in this repo's `packages/`, and users install a community plugin with npm plus a `kitPlugins` entry in their `package.json` (see [PLUGIN_DEVELOPMENT.md](./PLUGIN_DEVELOPMENT.md#3-how-users-install-it)).
 
 Apply adapter-specific `check`/`provision` items only to packages that export a `ServiceAdapter`. API clients and scanner-ingestion packages document and test their actual exports instead. A small package may cover API, configuration, examples, testing, and troubleshooting in its README; separate `docs/` files are optional when that coverage is complete.
 
@@ -48,6 +48,7 @@ For API clients, verify exported calls, authentication, read-only and policy ref
 - [ ] Spell-checked
 
 ### Other Documentation
+These paths are relative to **your plugin repo**, not this one.
 - [ ] `docs/API.md` exists (or in README)
 - [ ] `docs/CONFIGURATION.md` exists (or in README)
 - [ ] `docs/EXAMPLES.md` exists (or in README)
@@ -110,23 +111,12 @@ For API clients, verify exported calls, authentication, read-only and policy ref
 - [ ] Package name is available and not taken
 - [ ] Package prefix or scope is correct (`kit-plugin-` for scaffolded community packages, `@provider/` if scoped, `sandstream-kit-plugin-` for first-party packages)
 
-### Plugin.json Metadata
-- [ ] Create `plugin.json` if the target registry requires it:
-  ```json
-  {
-    "name": "provider/service",
-    "description": "...",
-    "version": "1.0.0",
-    "author": "Your Name",
-    "license": "MIT",
-    "repository": "https://github.com/.../...",
-    "package": "@provider/kit-service",
-    "kitVersion": ">=0.1.0",
-    "tags": ["category1", "category2"],
-    "published": "2026-04-15T00:00:00Z",
-    "install": "npm install @provider/kit-service"
-  }
-  ```
+### package.json Metadata
+- [ ] kit reads plugin metadata from `package.json`, not a separate `plugin.json`. The
+  first-party registry generator (`scripts/gen-plugin-registry.mjs`) uses `name`, `version`,
+  `description`, `author`, `license`, `repository`, `keywords`, `kitAdapter` and the
+  `sandstream-kit` peer range (default `>=6.0.0`). Fill these in the same way so your
+  package describes itself accurately.
 
 ## Publishing Steps
 
@@ -173,7 +163,7 @@ npm publish
 - [ ] Post on GitHub Discussions/Issues
 - [ ] Create release on GitHub
 - [ ] Share on Twitter/community channels
-- [ ] Update kit registry (submit PR or form)
+- [ ] Document the install steps (`npm install` plus the `kitPlugins` entry) in your README
 
 ## Post-Publishing
 
@@ -183,10 +173,9 @@ npm publish
 - [ ] Installation works: `npm install @provider/kit-service`
 - [ ] Package can be imported in a test project
 
-### Registry Registration (when registering an adapter)
-- [ ] Submitted plugin info to kit registry
-- [ ] Plugin appears in the registry's listing
-- [ ] Plugin is searchable through the registry's supported interface
+### Loading check (when shipping an adapter)
+- [ ] In a test project, `npm install` the package and add it to `kitPlugins` in `package.json`
+- [ ] `kit add --list` shows the adapter
 
 ### Maintenance
 - [ ] Monitor for issues and bug reports

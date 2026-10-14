@@ -36,7 +36,7 @@ Per memory `feedback_owasp_2025`, security reviews target the **2025** Top 10
 | Bumblebee supply-chain scanner integrated (PR #2, PR #17, PR #20) | ✅ shipped |
 | `kit triage npm <pkg> --sandbox` — pre-install offline tarball inspection | ✅ shipped |
 | Pre-commit triage gate (`kit triage check-deps`) refuses commits adding untriaged deps | ✅ shipped (P1.6) |
-| npm publish `--provenance` (SLSA Level 3 attestation) | ✅ shipped |
+| npm publish `--provenance` (SLSA build-provenance attestation; no certified SLSA level, see [VERIFY.md](./VERIFY.md)) | ✅ shipped |
 | GitHub artifact attestation cross-verification | ✅ shipped **from 6.3.2**, and this row previously proved the wrong thing. Its evidence was "the `actions/attest-build-provenance` step is in publish.yml" — the step WAS there, and errored in 327 ms on every release (`subject-path: dist/**/*` = 1920 files vs the action's 1024-subject limit) while `continue-on-error: true` reported it to the jobs API as success. Presence of a step is not evidence that it ran. The evidence now is the consumer-side measurement: `gh attestation verify sandstream-kit-6.3.2.tgz --repo sandstream/kit` exits 0 with exactly ONE subject, `digest.sha256 = de2f6328…85dd`, against a tarball whose sha512 equals npm's own `dist.integrity` — so the GitHub attestation and the npm provenance describe the same bytes. Run `30890753307`. Nothing to verify on ≤6.3.1. |
 | CycloneDX + SPDX SBOM published per release | ✅ shipped |
 | GPG-signed tags required by publish.yml | ✅ shipped (T.5) |

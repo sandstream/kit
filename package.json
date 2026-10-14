@@ -1,6 +1,6 @@
 {
   "name": "sandstream-kit",
-  "version": "6.12.0",
+  "version": "6.12.1",
   "description": "developer kit. zero LLM, local-first, multi-vault. one command from git clone to working dev environment.",
   "license": "MIT",
   "funding": "https://buymeacoffee.com/sandstream",
@@ -39,13 +39,13 @@
     "format:check": "prettier --check \"**/*.ts\""
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@upstash/redis": "1.37.0",
-    "smol-toml": "1.8.0",
+    "smol-toml": "1.9.0",
     "zod": "4.3.6"
   },
   "overrides": {
-    "hono": "4.13.5"
+    "hono": "4.13.7"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

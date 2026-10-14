@@ -375,6 +375,11 @@ export function restoreEncrypted(
     (header) => {
       const magic = header.subarray(0, MAGIC_LEN);
       const scrypt = magic.equals(MAGIC_V2) ? SCRYPT_V2 : magic.equals(MAGIC_V1) ? undefined : null;
+      if (magic.equals(MAGIC_V5)) {
+        throw new Error(
+          "this is a public-key backup: restore it with your private key, not a passphrase",
+        );
+      }
       if (scrypt === null) throw new Error("not a kit memory backup (bad magic)");
       const salt = header.subarray(MAGIC_LEN, MAGIC_LEN + SALT_LEN);
       const iv = header.subarray(MAGIC_LEN + SALT_LEN, MAGIC_LEN + SALT_LEN + IV_LEN);

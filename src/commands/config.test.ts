@@ -52,7 +52,7 @@ describe("migrateConfigFile", () => {
     // Migrated file now declares version = 1 and keeps existing data.
     const written = parse(await readFile(cfgPath, "utf-8")) as Record<string, unknown>;
     assert.equal(written.version, 1);
-    assert.deepEqual(written.tools, { node: "22", pnpm: "latest" });
+    assert.deepEqual({ ...(written.tools as object) }, { node: "22", pnpm: "latest" }); // null-prototype table
 
     // Original backed up verbatim.
     assert.ok(await exists(backupPath));

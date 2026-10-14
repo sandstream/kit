@@ -73,7 +73,8 @@ async function probe(options: {
     }
     return await pending;
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    // Windows can hold the just-run infisical.exe for a moment (EBUSY); retry the cleanup.
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 

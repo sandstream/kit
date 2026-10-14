@@ -40,6 +40,11 @@ const SKIP_DIRS = new Set([
   "tmp",
   "test-results",
   "playwright-report",
+  // Build output of Cargo (Tauri's src-tauri/target) and SvelteKit. A Rust build folder
+  // alone holds thousands of files and used to fill the scan budget before any app
+  // source was read, which hid auth and payment markers.
+  "target",
+  ".svelte-kit",
 ]);
 
 const SOURCE_LITERAL = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/;

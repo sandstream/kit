@@ -9,7 +9,7 @@ import { openMemoryDb } from "./db.js";
 import { sessionStartRecovery } from "./hook.js";
 import { palAdd, palList } from "./pal.js";
 import { buildSuggestPrompt } from "./suggest.js";
-import { getCurrentProjectRoot } from "./project.js";
+import { getCurrentProjectRoot, getProjectRecallRoots } from "./project.js";
 import { claimTask, setPalClock, withPalDevice } from "./pal-fixture.test-support.js";
 
 let tmp: string;
@@ -98,7 +98,15 @@ it("lists the same pending work from both registered worktrees without widening 
   try {
     for (const scope of [root, worktree]) {
       const items = palList(db, { scope });
-      assert.equal(items.length, 3);
+      assert.equal(
+        items.length,
+        3,
+        JSON.stringify({
+          scope,
+          roots: getProjectRecallRoots(scope, db),
+          titles: items.map((i) => i.title),
+        }),
+      );
       assertHandoff(items.map((item) => item.title).join("\n"));
       assert.equal(palList(db, { scope, allDevices: true }).length, 4);
     }

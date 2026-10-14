@@ -15,7 +15,9 @@ those purchases buy. Every item maps to a kit control.
 - [ ] Org-wide 2FA required; no SMS fallback.
 - [ ] Short-lived tokens (OIDC / workload identity) over long-lived PATs.
 - [ ] Rotate any credential that ever touched a laptop or an `.env`.
-- [ ] kit identity key stays `0600`; move to a hardware `KeyStore` when available.
+- [ ] kit identity key stays `0600`, or better, lives in an external keystore
+      (`KIT_KEYSTORE=command`, checked with `kit identity keystore`); enforce that
+      with `require_hardware_identity` in the signed policy.
 
 ### B. Secrets — makes stolen infostealer logs worthless
 
@@ -37,8 +39,9 @@ those purchases buy. Every item maps to a kit control.
 
 ### D. Release / publish — stops shipping malware to your users
 
-- [ ] npm publish behind a protected `environment:` (`npm-publish`) with required
-      reviewers, so `NPM_TOKEN` is never exposed to an unreviewed run.
+- [ ] npm publish via trusted publishing (OIDC, `--provenance`) behind a protected
+      `environment:` (`npm-publish`) with required reviewers. No long-lived npm
+      token: npm mints a short-lived credential only for runs that reach that environment.
 - [ ] Maintainer key fingerprint pinned in the **`MAINTAINER_KEY_FPR`** secret
       (required; a swapped/appended in-repo pubkey is refused).
 - [ ] Signed release tags (`git tag -s`; see CONTRIBUTING → "Signed release tags").
@@ -182,7 +185,7 @@ STRIPE_SECRET_KEY=sk_test_...
 GITHUB_API_TOKEN=ghp_...
 
 # JWT
-JWT_SECRET=your_secret_key_change_in_production
+JWT_SECRET=<generate: openssl rand -base64 32>
 
 # Third-party services
 SENTRY_DSN=https://...
