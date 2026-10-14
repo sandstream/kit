@@ -1,6 +1,11 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { resolve, join, relative, sep } from "node:path";
-import { findSecrets, type SecretFinding } from "./utils/redactSecrets.js";
+import {
+  findSecrets,
+  SECRET_PATTERNS,
+  shannonEntropy,
+  type SecretFinding,
+} from "./utils/redactSecrets.js";
 
 /**
  * Walks built-artifact directories looking for leaked credentials. The
@@ -42,6 +47,8 @@ const SCANNABLE_EXTS = new Set([
   ".json",
   ".map",
   ".txt",
+  ".rsc",
+  ".body",
   ".env",
   ".env.local",
   ".env.production",
@@ -57,6 +64,44 @@ const MAX_BYTES = 5 * 1024 * 1024; // 5 MiB
 // A build-artifact leak is an inlined CREDENTIAL (sk_/JWT/AWS/…), not an HCL or
 // state construct, so these labels are filtered out here.
 const BUILD_IRRELEVANT_LABELS = new Set(["tfstate-value", "terraform-sensitive"]);
+const BUILD_GENERIC_LABELS = new Set(["keyed-secret", "url-query-token"]);
+const OPAQUE_MIN_LENGTH = 20;
+const OPAQUE_MIN_ENTROPY = 4.2;
+
+function findBuildSecrets(content: string): SecretFinding[] {
+  const findings = findSecrets(content).filter(
+    (finding) =>
+      !BUILD_IRRELEVANT_LABELS.has(finding.label) && !BUILD_GENERIC_LABELS.has(finding.label),
+  );
+
+  // Minified UI code routinely contains `key:"description"` and example URLs.
+  // Generic names only justify a build failure when their values look opaque.
+  for (const { re, label } of SECRET_PATTERNS) {
+    if (!BUILD_GENERIC_LABELS.has(label)) continue;
+    for (const match of content.matchAll(new RegExp(re.source, re.flags))) {
+      const value =
+        label === "keyed-secret" ? (match[3] ?? match[2]) : match[0].slice(match[1].length);
+      if (value.length < OPAQUE_MIN_LENGTH || shannonEntropy(value) < OPAQUE_MIN_ENTROPY) continue;
+      findings.push({ label, preview: "[REDACTED]" });
+    }
+  }
+
+  return findings;
+}
+
+/** Next.js server modules are deployed to the runtime, not downloaded by visitors. */
+function isBrowserVisibleNextArtifact(file: string): boolean {
+  const parts = file.split("/");
+  const nextIndex = parts.indexOf(".next");
+  if (nextIndex === -1) return true;
+
+  const output = parts.slice(nextIndex + 1);
+  if (output[0] === "static") return true;
+  if (output[0] !== "server" || !["app", "pages"].includes(output[1])) return false;
+
+  // Prerendered responses in the server tree are served as page content.
+  return /\.(?:html|rsc|body|json|txt)$/.test(file);
+}
 
 async function walk(dir: string, out: string[], depth = 0, maxDepth = 8): Promise<void> {
   if (depth > maxDepth) return;
@@ -99,6 +144,8 @@ export async function scanBuildArtifacts(
 
   const hits: BuildHit[] = [];
   for (const path of files) {
+    const rel = relative(cwd, path).split(sep).join("/");
+    if (!isBrowserVisibleNextArtifact(rel)) continue;
     let content: string;
     try {
       const st = await stat(path);
@@ -107,11 +154,10 @@ export async function scanBuildArtifacts(
     } catch {
       continue;
     }
-    const findings = findSecrets(content).filter((f) => !BUILD_IRRELEVANT_LABELS.has(f.label));
+    const findings = findBuildSecrets(content);
     if (findings.length > 0) {
       // Report repository-style paths so diagnostics and baselines are stable
       // across Windows and POSIX hosts.
-      const rel = relative(cwd, path).split(sep).join("/");
       hits.push({ file: rel, findings });
     }
   }
