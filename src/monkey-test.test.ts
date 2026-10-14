@@ -204,7 +204,9 @@ describe("monkey-test planning - payment source detection", () => {
     const plan = await buildMonkeyTestPlan(dir);
 
     assert.deepEqual(plan.money.providers, []);
-    assert.equal(plan.checks.find((check) => check.name === "money provider")?.status, "warn");
+    // No runtime provider: the money flow is not required, so the check is skipped.
+    assert.equal(plan.checks.find((check) => check.name === "money provider")?.status, "skip");
+    assert.equal(plan.requirements.money.required, false);
     assert.equal(
       plan.findings.some((finding) => finding.title.includes("Payment provider detected")),
       false,
@@ -370,6 +372,9 @@ describe("monkey-test security pack", () => {
 describe("monkey-test harness writer", () => {
   it("creates managed Playwright harness files and updates them idempotently", async () => {
     const dir = tempRepo();
+    // An auth dependency means roles; an app without one gets a public-only matrix
+    // (monkey-test-requirements.test.ts covers that case).
+    writeJson(join(dir, "package.json"), { dependencies: { "next-auth": "5.0.0" } });
     const first = await writeMonkeyHarness(dir);
     assert.equal(first.ok, true);
     assert.ok(first.writes.every((write) => write.action === "created"));

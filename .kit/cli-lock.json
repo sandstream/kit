@@ -7,12 +7,6 @@
       "sourceDetail": "mise",
       "installedAt": "2026-09-04T15:16:40.580Z"
     },
-    "pnpm": {
-      "version": "10.32.1",
-      "source": "manual",
-      "sourceDetail": "kit-shim",
-      "installedAt": "2026-09-04T15:16:40.580Z"
-    },
     "aqua:aquasecurity/trivy": {
       "version": "0.72.0",
       "source": "mise",

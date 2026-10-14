@@ -126,3 +126,36 @@ describe("cmdMonkeyTest", () => {
     assert.doesNotMatch(row, /experimental/i);
   });
 });
+
+describe("cmdMonkeyTest desktop", () => {
+  it("fails closed with a config finding when the desktop config is missing", async () => {
+    setArgs("desktop", "--json", "--steps", "1", "--seed", "3");
+
+    assert.equal(await cmdMonkeyTest(), false);
+    const result = JSON.parse(logs.join("\n")) as { seed: number; findings: { title: string }[] };
+    assert.equal(result.seed, 3);
+    assert.deepEqual(
+      result.findings.map((finding) => finding.title),
+      ["Desktop monkey config missing or invalid"],
+    );
+  });
+
+  for (const [flag, value] of [
+    ["--actions", "kill,explode"],
+    ["--seed", "abc"],
+  ]) {
+    it(`rejects ${flag} ${value} before starting anything`, async () => {
+      const errors: string[] = [];
+      const origError = console.error;
+      console.error = (...args: unknown[]) => void errors.push(args.join(" "));
+      try {
+        setArgs("desktop", flag, value);
+        assert.equal(await cmdMonkeyTest(), false);
+        assert.equal(process.exitCode, 1);
+        assert.match(errors.join("\n"), new RegExp(flag));
+      } finally {
+        console.error = origError;
+      }
+    });
+  }
+});

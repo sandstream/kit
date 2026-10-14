@@ -4,8 +4,10 @@ import {
   MONKEY_PLAYWRIGHT_REPORT,
   MONKEY_ROLES,
   monkeyFinding,
+  monkeyRoleIdsFor,
   validateRoleMatrix,
   type MonkeyFinding,
+  type MonkeyRequirements,
 } from "./monkey-test-contract.js";
 import { readMonkeyJson } from "./monkey-test-scan.js";
 
@@ -73,10 +75,24 @@ function contractCasePassed(test: PlaywrightReportTest): boolean {
   return (test.results ?? []).some((result) => result.status === "passed");
 }
 
-function contractCaseProblems(tests: PlaywrightEvidenceTest[]): string[] {
+/** The full gate, for callers that do not pass the plan's requirements. Fail-closed. */
+const FULL_REQUIREMENTS: MonkeyRequirements = {
+  roles: { required: true, reason: "default" },
+  money: { required: true, reason: "default" },
+};
+
+function requiredRoles(requirements: MonkeyRequirements) {
+  const ids = monkeyRoleIdsFor(requirements.roles.required);
+  return MONKEY_ROLES.filter((role) => ids.includes(role.id));
+}
+
+function contractCaseProblems(
+  tests: PlaywrightEvidenceTest[],
+  requirements: MonkeyRequirements,
+): string[] {
   const missing: string[] = [];
   for (const project of MONKEY_PROJECTS) {
-    for (const role of MONKEY_ROLES) {
+    for (const role of requiredRoles(requirements)) {
       const matches = tests.filter(
         (test) =>
           test.projectName === project &&
@@ -87,6 +103,7 @@ function contractCaseProblems(tests: PlaywrightEvidenceTest[]): string[] {
       else if (!matches[0] || !contractCasePassed(matches[0]))
         missing.push(`${project}/${role.id}/route crawl`);
     }
+    if (!requirements.money.required) continue;
     const money = tests.filter(
       (test) =>
         test.projectName === project &&
@@ -102,6 +119,7 @@ function contractCaseProblems(tests: PlaywrightEvidenceTest[]): string[] {
 export async function validatePlaywrightEvidence(
   root: string,
   runId: string,
+  requirements: MonkeyRequirements = FULL_REQUIREMENTS,
 ): Promise<{ ok: boolean; detail: string }> {
   const report = await readMonkeyJson<PlaywrightReport>(join(root, MONKEY_PLAYWRIGHT_REPORT));
   if (!report) return { ok: false, detail: `${MONKEY_PLAYWRIGHT_REPORT} was not created` };
@@ -127,11 +145,20 @@ export async function validatePlaywrightEvidence(
   if (stats.unexpected || stats.skipped || stats.flaky || stats.expected !== tests.length) {
     return { ok: false, detail: "Playwright stats contain unexpected, skipped, or flaky tests" };
   }
-  const problems = contractCaseProblems(tests);
+  return contractCasesEvidence(tests, requirements);
+}
+
+function contractCasesEvidence(
+  tests: PlaywrightEvidenceTest[],
+  requirements: MonkeyRequirements,
+): { ok: boolean; detail: string } {
+  const problems = contractCaseProblems(tests, requirements);
   if (problems.length > 0) {
     return { ok: false, detail: `missing successful contract cases: ${problems.join(", ")}` };
   }
-  const requiredCases = MONKEY_PROJECTS.length * (MONKEY_ROLES.length + 1);
+  const requiredCases =
+    MONKEY_PROJECTS.length *
+    (requiredRoles(requirements).length + (requirements.money.required ? 1 : 0));
   if (tests.length !== requiredCases) {
     return {
       ok: false,
@@ -148,12 +175,13 @@ export async function validatePlaywrightEvidence(
 export async function runnerRoleMatrixFinding(
   root: string,
   env: NodeJS.ProcessEnv,
+  rolesRequired = true,
 ): Promise<MonkeyFinding | null> {
   const configuredPath = env.MONKEY_ROLE_MATRIX ?? ".kit/monkey-test/role-matrix.json";
   const path = resolve(root, configuredPath);
   try {
     if (!existsSync(path)) throw new Error(`Role matrix not found: ${configuredPath}`);
-    validateRoleMatrix(await readMonkeyJson<unknown>(path));
+    validateRoleMatrix(await readMonkeyJson<unknown>(path), rolesRequired);
     const states = new Map<string, string>();
     for (const role of MONKEY_ROLES) {
       if (!role.storageStateEnv || !role.defaultStorageState) continue;
