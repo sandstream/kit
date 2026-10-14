@@ -1,9 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildStatuslineParts, formatStatusline } from "./statusline.js";
+import { buildStatuslineParts, formatStatusline, quickSubsystems } from "./statusline.js";
 
 describe("formatStatusline", () => {
   it("renders mode score + update + actions, dot-separated", () => {
@@ -69,6 +69,26 @@ describe("formatStatusline", () => {
     );
     assert.equal(formatStatusline({ next: "kit init" }), "");
     assert.equal(formatStatusline({ mode: "full", score: { done: 1, total: 6 } }), "kit:full 1/6");
+  });
+});
+
+describe("quickSubsystems secrets hint", () => {
+  const nextFor = (toml: string): string | undefined => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-statusline-"));
+    try {
+      writeFileSync(join(dir, ".kit.toml"), toml);
+      return quickSubsystems(dir).find((s) => s.key === "secrets")?.next;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it("points at .kit.toml when no [secrets] section exists, since `kit secrets` can do nothing yet", () => {
+    assert.equal(nextFor('[project]\nname = "x"\n'), "add [secrets] to .kit.toml");
+  });
+
+  it("points at `kit secrets` once a [secrets] section exists", () => {
+    assert.equal(nextFor('[secrets]\nprovider = "env"\n'), "kit secrets");
   });
 });
 

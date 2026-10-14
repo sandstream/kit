@@ -24,6 +24,10 @@
 
 ### Fixed
 
+- **The statusline told a repo without `[secrets]` to run `kit secrets` forever.** With no
+  `[secrets]` section the command resolves nothing and writes no `.env.local`, so the
+  score stayed at 4/6 and the hint never changed. The hint now says
+  `add [secrets] to .kit.toml` until the section exists.
 - **Windows CI failed at random on `EBUSY` while deleting a fake `.exe`.** Windows can hold a
   just-run test binary for a moment, so cleanup in `cli.test.ts` and
   `check-services-cwd.test.ts` now retries, as `infisical-status.test.ts` already did.
