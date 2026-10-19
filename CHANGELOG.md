@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+## [7.0.1] - 2026-10-19
+
+### Fixed
+
+- **A release rerun died before it reached the GitHub release.** `npm publish --dry-run`
+  fails for a version that is already on npm, so rerunning the publish workflow after a
+  partial release stopped in "Show what will be published". The step now skips the dry run
+  when the version is already published, like the publish steps after it.
+- **The Docker image failed to build when Alpine updated a package.** The runtime stage pinned
+  six apk packages to exact versions. When Alpine replaced `libexpat` 2.8.5 with 2.9.0, every
+  build stopped with "unable to select packages", which failed the Trivy stage, the security
+  gate and the Docker build, and the recurring Full App Scan failures. The packages now use a
+  `>=` floor, so the security minimum stays and the build survives index updates.
+- **A Windows test failed on a locked file.** The dotenvx secrets test could not delete
+  `dotenvx.exe` while Windows still held it (`EBUSY`). The cleanup now retries.
+
 ## [7.0.0] - 2026-10-14
 
 ### Breaking

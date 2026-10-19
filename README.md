@@ -77,6 +77,9 @@ recall — with zero manual steps. See [docs/ENV_FUELING.md](docs/ENV_FUELING.md
 
 The 7.x line starts with one breaking change to the skill fingerprint.
 
+- **7.0.1: release and image build fixes.** A rerun of the publish workflow no longer stops
+  in the npm dry run when the version is already published. The Docker image no longer
+  fails to build when Alpine updates a package. No change to the CLI.
 - **7.0.0: skill fingerprints that cover the body, and desktop apps in the Monkey test.**
   The skill fingerprint now hashes the whole `SKILL.md` as a full SHA-256, so a changed
   payload under a pinned name no longer reports "matches committed snapshot". Re-pin each
