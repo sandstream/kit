@@ -49,13 +49,18 @@ WORKDIR /app
 # Plugin installation needs npm; its mandatory triage gate needs Python and the
 # bundled triage skill copied below. Keep npm on the triaged, Node 22-compatible
 # release instead of inheriting whichever version ships in the base image.
+#
+# The apk packages use a FLOOR (>=), not an exact pin: Alpine replaces a package in its
+# index when a fix lands (libexpat 2.8.5 became 2.9.0), and an exact pin then fails the
+# whole image build with "unable to select packages". The floor keeps the security
+# minimum and still builds when the index moves on.
 RUN apk add --no-cache --upgrade \
-        bash=5.3.9-r1 \
-        dumb-init=1.2.5-r4 \
-        libcrypto3=3.5.9-r0 \
-        libexpat=2.8.5-r0 \
-        libssl3=3.5.9-r0 \
-        python3=3.14.8-r0 \
+        'bash>=5.3.9-r1' \
+        'dumb-init>=1.2.5-r4' \
+        'libcrypto3>=3.5.9-r0' \
+        'libexpat>=2.8.5-r0' \
+        'libssl3>=3.5.9-r0' \
+        'python3>=3.14.8-r0' \
     && npm install -g npm@11.19.1 --ignore-scripts \
     && npm cache clean --force
 
