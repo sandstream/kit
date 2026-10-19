@@ -254,7 +254,21 @@ jobs:
       - name: Show what will be published
         # `npm publish --dry-run` lists the exact files going into the tarball
         # and prints the tarball SHA — gives auditors a verifiable trail.
-        run: npm publish --dry-run --tag ${{ steps.disttag.outputs.tag }}
+        #
+        # IDEMPOTENT like the publish step below: npm refuses even a dry run for a version
+        # already on the registry, which made a rerun after a partial release die here
+        # before reaching the GitHub-release recovery steps.
+        env:
+          DIST_TAG: ${{ steps.disttag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "· $name@$version already on npm, skipping dry run"
+            exit 0
+          fi
+          npm publish --dry-run --tag "$DIST_TAG"
 
       - name: Publish to npm with provenance
         # No NODE_AUTH_TOKEN: the credential comes from this job's OIDC identity, exchanged
