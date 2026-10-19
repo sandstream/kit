@@ -233,7 +233,7 @@ describe("checkSecrets - dotenvx source", () => {
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
-      await rm(project, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 });
