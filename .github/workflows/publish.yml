@@ -362,10 +362,10 @@ jobs:
         # created no release at all, so every SBOM step silently no-opped and
         # the SBOMs only ever survived as workflow artifacts (which expire).
         #
-        # Notes are the file rendered by the "Verify the CHANGELOG documents this
-        # version" step near the top of the job — reused verbatim rather than
-        # regenerated, so the pre-publish check and the published notes can never
-        # disagree. Idempotent: re-running on an existing release reuses it.
+        # Notes come from the same script as the "Verify the CHANGELOG documents
+        # this version" step near the top of the job, rendered again here, so the
+        # pre-publish check and the published notes cannot disagree. Idempotent:
+        # re-running on an existing release reuses it.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
@@ -375,8 +375,13 @@ jobs:
             echo "Release $TAG already exists — reusing it."
             exit 0
           fi
-          if [ ! -s /tmp/release-notes.md ]; then
-            echo "::error::/tmp/release-notes.md is missing or empty — the pre-publish CHANGELOG step should have produced it."
+          # Rendered here, from the same script as the pre-publish check, instead of read
+          # from the file that step wrote: /tmp/release-notes.md was gone by this point on
+          # two runs (v7.0.0, v7.0.1) and no step deletes it. $RUNNER_TEMP is per-job and
+          # the script is deterministic, so the notes cannot differ from the checked ones.
+          NOTES="$RUNNER_TEMP/release-notes.md"
+          if ! node scripts/changelog-section.mjs "$VERSION" > "$NOTES" || [ ! -s "$NOTES" ]; then
+            echo "::error::CHANGELOG has no section for $VERSION, or it is empty."
             exit 1
           fi
           # --verify-tag: refuse to invent a release for a tag that isn't on the
@@ -386,7 +391,7 @@ jobs:
           # shellcheck disable=SC2086  # EXTRA is a controlled, single-flag value
           gh release create "$TAG" \
             --title "kit $VERSION" \
-            --notes-file /tmp/release-notes.md \
+            --notes-file "$NOTES" \
             --verify-tag $EXTRA
           echo "Created release $TAG"
 
