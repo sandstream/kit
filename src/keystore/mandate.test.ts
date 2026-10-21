@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -16,6 +16,7 @@ import { keystoreRecordRevocation } from "./revoke.js";
 import { hardwareRequired, policyRequiresHardware } from "./active.js";
 import { existsSync, writeFileSync } from "node:fs";
 import { signAttestation } from "../check-attestation.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 // The mandate must be COMPREHENSIVE: with KIT_REQUIRE_HARDWARE_IDENTITY set and only a
 // file key present, NO code path may emit a file-key signature — not policy sign, not the
@@ -45,8 +46,8 @@ describe("hardware mandate — no file-key signature escapes", () => {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     }
-    rmSync(idDir, { recursive: true, force: true });
-    rmSync(cwd, { recursive: true, force: true });
+    rmTemp(idDir);
+    rmTemp(cwd);
   });
 
   it("signWithIdentity refuses the file key under the mandate", () => {

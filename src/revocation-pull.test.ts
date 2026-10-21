@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -14,6 +14,7 @@ import {
 import { resolveKeyStore } from "./keystore/index.js";
 import { addPolicySigner } from "./policy-trust.js";
 import { REVOCATIONS_FEED_FILE, pullRevocations } from "./revocation-pull.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 let idDir: string;
 let source: string;
@@ -56,7 +57,7 @@ beforeEach(() => {
 afterEach(() => {
   if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
   else process.env.KIT_IDENTITY_DIR = savedId;
-  for (const d of [idDir, source, dest]) rmSync(d, { recursive: true, force: true });
+  for (const d of [idDir, source, dest]) rmTemp(d);
 });
 
 describe("pullRevocations", () => {
@@ -119,7 +120,7 @@ describe("pullRevocations repeated and invalid sources", () => {
       assert.equal(r.status, "no-anchor");
       assert.equal(isRevoked("target-D", idDir), false);
     } finally {
-      rmSync(bare, { recursive: true, force: true });
+      rmTemp(bare);
     }
   });
 

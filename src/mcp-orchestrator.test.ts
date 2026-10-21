@@ -13,6 +13,7 @@ import {
   storeStaticToken,
 } from "./mcp-orchestrator.js";
 import type { McpServerConfig } from "./config.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 /**
  * The token store, redirected into a temp dir for the whole file.
@@ -36,7 +37,7 @@ before(() => {
 after(() => {
   if (prevTokenDir === undefined) delete process.env.KIT_MCP_TOKENS_DIR;
   else process.env.KIT_MCP_TOKENS_DIR = prevTokenDir;
-  rmSync(TOKEN_DIR, { recursive: true, force: true });
+  rmTemp(TOKEN_DIR);
 });
 
 async function reset() {

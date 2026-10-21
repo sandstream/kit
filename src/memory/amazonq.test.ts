@@ -1,11 +1,12 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openMemoryDb, getStats, searchMessages } from "./db.js";
 import { indexAmazonQSessions } from "./amazonq.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory amazon-q parser", () => {
   let tmp: string;
@@ -43,7 +44,7 @@ describe("memory amazon-q parser", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_AMAZONQ_DB;
     else process.env.KIT_AMAZONQ_DB = prev;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("indexes history turns (defensive content extraction), project-scopes via key, tags harness=amazon-q", () => {
@@ -85,6 +86,6 @@ describe("memory amazon-q parser", () => {
     assert.equal(indexAmazonQSessions(db2).messages, 0);
     db2.close();
     process.env.KIT_AMAZONQ_DB = fixture;
-    rmSync(otherDir, { recursive: true, force: true });
+    rmTemp(otherDir);
   });
 });

@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { getPolicyPath, getPolicySigPath } from "./policy-doc.js";
 import { applyPolicyPairAtomically } from "./policy-pull.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 it("policy rollback does not follow a link inserted during signature restore", () => {
   const dest = mkdtempSync(join(tmpdir(), "kit-policy-rollback-race-"));
@@ -44,6 +45,6 @@ it("policy rollback does not follow a link inserted during signature restore", (
     assert.equal(lstatSync(getPolicySigPath(dest)).isFile(), true);
     assert.deepEqual(readFileSync(getPolicySigPath(dest)), oldSignature);
   } finally {
-    rmSync(dest, { recursive: true, force: true });
+    rmTemp(dest);
   }
 });

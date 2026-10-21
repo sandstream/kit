@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanBuildArtifacts } from "./scan-build.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function makeRepo(): string {
   return mkdtempSync(join(tmpdir(), "kit-scan-build-"));
@@ -16,7 +17,7 @@ describe("scanBuildArtifacts", () => {
       const hits = await scanBuildArtifacts(dir);
       assert.equal(hits.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -28,7 +29,7 @@ describe("scanBuildArtifacts", () => {
       const hits = await scanBuildArtifacts(dir);
       assert.equal(hits.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -45,7 +46,7 @@ describe("scanBuildArtifacts", () => {
       assert.ok(hits[0].file.includes("page.js"));
       assert.ok(hits[0].findings.some((f) => f.label === "stripe-key"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -64,7 +65,7 @@ describe("scanBuildArtifacts", () => {
 
       assert.deepEqual(await scanBuildArtifacts(dir), []);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -83,7 +84,7 @@ describe("scanBuildArtifacts browser output", () => {
       assert.equal(hits.length, 1);
       assert.equal(hits[0].file, ".next/server/app/page.html");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -100,7 +101,7 @@ describe("scanBuildArtifacts browser output", () => {
       assert.equal(hits.length, 1);
       assert.equal(hits[0].file, ".next/server/app/page.rsc");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -118,7 +119,7 @@ describe("scanBuildArtifacts credential shapes", () => {
 
       assert.deepEqual(await scanBuildArtifacts(dir), []);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -133,7 +134,7 @@ describe("scanBuildArtifacts credential shapes", () => {
       assert.equal(hits.length, 1);
       assert.ok(hits[0].findings.some((f) => f.label === "keyed-secret"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -148,7 +149,7 @@ describe("scanBuildArtifacts credential shapes", () => {
       assert.equal(hits.length, 1);
       assert.ok(hits[0].findings.some((f) => f.label === "url-query-token"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -167,7 +168,7 @@ describe("scanBuildArtifacts directory scope", () => {
       const hits = await scanBuildArtifacts(dir);
       assert.equal(hits.length, 2);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -191,7 +192,7 @@ describe("scanBuildArtifacts directory scope", () => {
       const hits = await scanBuildArtifacts(dir);
       assert.equal(hits.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -212,7 +213,7 @@ describe("scanBuildArtifacts directory scope", () => {
       assert.equal(hits.length, 1);
       assert.ok(hits[0].file.includes("leak.js"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -227,7 +228,7 @@ describe("scanBuildArtifacts directory scope", () => {
       assert.equal(hits.length, 1);
       assert.ok(hits[0].file.includes("my-bundle"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

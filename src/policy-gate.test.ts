@@ -17,7 +17,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { mkdtempSync, readFileSync, existsSync, rmSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -37,6 +37,7 @@ import {
 import { propagate, ALL_TARGETS } from "./secrets-propagate.js";
 import { withFakeGh as fakeGh } from "./fake-gh.test-support.js";
 import type { PolicyConfig } from "./config.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("trap 1 — an empty vendor list denies", () => {
   it("`stripe = []` refuses the op, matching kit's own config comment", () => {
@@ -245,7 +246,7 @@ describe("enforced decisions reach the audit trail", () => {
       assert.equal(meta.policy_state, "denied");
       assert.equal(typeof meta.policy_hash, "string", "the hash correlates the entry to a config");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -261,7 +262,7 @@ describe("enforced decisions reach the audit trail", () => {
       assert.equal(rows[0]!.success, true);
       assert.equal((rows[0]!.metadata as Record<string, unknown>).policy_state, "approved");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -276,7 +277,7 @@ describe("enforced decisions reach the audit trail", () => {
       });
       assert.deepEqual(auditLines(dir), [], "no policy opinion must leave no policy entry");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -291,8 +292,8 @@ describe("enforced decisions reach the audit trail", () => {
       assert.deepEqual(auditLines(elsewhere), [], "the process's own tree must not collect it");
     } finally {
       process.chdir(prev);
-      rmSync(governed, { recursive: true, force: true });
-      rmSync(elsewhere, { recursive: true, force: true });
+      rmTemp(governed);
+      rmTemp(elsewhere);
     }
   });
 
@@ -317,7 +318,7 @@ describe("enforced decisions reach the audit trail", () => {
       );
     } finally {
       process.chdir(prev);
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -373,7 +374,7 @@ describe("trap 4, end to end — an APPROVED op is still stopped by a live gate"
         "the vendor CLI must not be spawned",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -400,7 +401,7 @@ describe("trap 4, end to end — an APPROVED op is still stopped by a live gate"
       );
       assert.doesNotMatch(JSON.stringify(rows), /s3cret/, "the refused value must not be recorded");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -428,7 +429,7 @@ describe("trap 4, end to end — an APPROVED op is still stopped by a live gate"
         "read-only short-circuits, so the policy gate should not also file a decision",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

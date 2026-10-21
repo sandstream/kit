@@ -1,12 +1,13 @@
 import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { _resetRemotePushWarningForTests, logAuditEvent } from "./audit.js";
 import type { GovernanceConfig } from "./config.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const originalFetch = globalThis.fetch;
 const originalRemoteUrl = process.env.KIT_REMOTE_URL;
@@ -87,7 +88,7 @@ describe("remote audit delivery", () => {
       ]);
     } finally {
       console.error = oldError;
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -116,8 +117,8 @@ describe("remote audit delivery", () => {
     } finally {
       process.chdir(previousCwd);
       console.error = oldError;
-      rmSync(caller, { recursive: true, force: true });
-      rmSync(target, { recursive: true, force: true });
+      rmTemp(caller);
+      rmTemp(target);
     }
   });
 });
@@ -148,7 +149,7 @@ describe("remote audit diagnostics", () => {
       assert.match(output, /audit\.invalid/);
     } finally {
       console.error = oldError;
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });
@@ -183,7 +184,7 @@ describe("remote audit pending queue", () => {
       if (previousSecret === undefined) delete process.env.TEST_API_TOKEN;
       else process.env.TEST_API_TOKEN = previousSecret;
       console.error = oldError;
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -212,7 +213,7 @@ describe("remote audit pending queue", () => {
       if (previousSecret === undefined) delete process.env.TEST_API_TOKEN;
       else process.env.TEST_API_TOKEN = previousSecret;
       console.error = oldError;
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });

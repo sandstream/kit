@@ -2,7 +2,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
-  rmSync,
   existsSync,
   statSync,
   readFileSync,
@@ -25,6 +24,7 @@ import {
   parseRecipient,
   restoreFailureMessage,
 } from "./backup.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory encrypted backup / restore", () => {
   it("roundtrips data; a wrong passphrase fails", () => {
@@ -49,7 +49,7 @@ describe("memory encrypted backup / restore", () => {
     assert.equal(getStats(db).messages, 1);
     db.close();
 
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it(
@@ -75,7 +75,7 @@ describe("memory encrypted backup / restore", () => {
 
       restoreEncrypted("Galaxy-Vortex-Quartz-2026-x9", enc, dest);
       assert.equal(statSync(dest).mode & 0o777, 0o600, "restored plaintext db must be 0600");
-      rmSync(tmp, { recursive: true, force: true });
+      rmTemp(tmp);
     },
   );
 
@@ -87,7 +87,7 @@ describe("memory encrypted backup / restore", () => {
     assert.throws(() => backupEncrypted("short", src, enc), /weak/);
     assert.throws(() => backupEncrypted("valfri-stark-passphrase", src, enc), /weak/); // long but placeholder
     assert.ok(!existsSync(enc), "no backup is written when the passphrase is rejected");
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("rejects a non-backup file (bad magic)", () => {
@@ -96,7 +96,7 @@ describe("memory encrypted backup / restore", () => {
     const db = openMemoryDb(join(tmp, "x.db")); // create a plain sqlite file
     db.close();
     assert.throws(() => restoreEncrypted("p", join(tmp, "x.db"), bogus), /magic/);
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 });
 
@@ -115,7 +115,7 @@ describe("memory restore: passphrase restore of a public-key blob points at the 
         /private key/.test(err.message) &&
         !/bad magic/.test(err.message),
     );
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 });
 
@@ -144,7 +144,7 @@ describe("memory asymmetric (public-key) backup — no passphrase, ephemeral-saf
     db = openMemoryDb(dest);
     assert.equal(getStats(db).messages, 1);
     db.close();
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("a DIFFERENT private key cannot decrypt (confidentiality holds)", () => {
@@ -159,7 +159,7 @@ describe("memory asymmetric (public-key) backup — no passphrase, ephemeral-saf
     // Mallory's key is a valid X25519 key but the wrong recipient → GCM auth fails
     assert.throws(() => restoreWithKey(mallory.privateJwk, enc, join(tmp, "x.db")), /./);
     assert.ok(!existsSync(join(tmp, "x.db")), "no plaintext written on a failed decrypt");
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("parseRecipient rejects a malformed public key", () => {
@@ -202,7 +202,7 @@ describe("memory backup — gzip compression (fits under host size caps)", () =>
     const rdb = openMemoryDb(dest);
     assert.equal(getStats(rdb).messages, 500);
     rdb.close();
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 });
 

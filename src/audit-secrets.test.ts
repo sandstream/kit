@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readSecretAuditEvents, groupBySecret, summarize } from "./audit-secrets.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function makeRepo(events: object[]): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-audit-"));
@@ -19,7 +20,7 @@ describe("readSecretAuditEvents", () => {
       const events = await readSecretAuditEvents(dir);
       assert.equal(events.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -49,7 +50,7 @@ describe("readSecretAuditEvents", () => {
       assert.equal(events.length, 2);
       assert.ok(events.every((e) => e.operation.startsWith("secrets.")));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -65,7 +66,7 @@ describe("readSecretAuditEvents", () => {
       assert.equal(events.length, 1);
       assert.equal(events[0].timestamp, recent);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -79,7 +80,7 @@ describe("readSecretAuditEvents", () => {
       const events = await readSecretAuditEvents(dir);
       assert.equal(events.length, 1);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,10 +9,11 @@ import { insertMessage, openMemoryDb, searchMessages, upsertSession } from "./db
 import { mergeDb } from "./merge.js";
 import { getProjectIdentity, initializeProjectIdentity } from "./project.js";
 import { listThreads, saveThread } from "./threads.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 it("recalls imported work in another clone carrying the same explicit project identity", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "kit-project-identity-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmTemp(dir));
   const sourceRoot = join(dir, "source-clone");
   const targetRoot = join(dir, "target-clone");
   const config = '[memory]\nproject_id = "018f55d8-df5d-7f2a-a8c9-e3518d89d42f"\n';
@@ -59,7 +60,7 @@ it(
   { timeout: 90_000 },
   (t) => {
     const dir = mkdtempSync(join(tmpdir(), "kit-project-identity-cli-"));
-    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    t.after(() => rmTemp(dir));
     writeFileSync(join(dir, ".kit.toml"), 'version = 1\n\n[tools]\nnode = "22"\n');
     const source = import.meta.url.endsWith(".ts");
     const cli = fileURLToPath(new URL(source ? "../cli.ts" : "../cli.js", import.meta.url));
@@ -101,7 +102,7 @@ it(
 
 it("refuses identity publication when a TOML string mimics a memory table", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "kit-project-identity-string-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmTemp(dir));
   const path = join(dir, ".kit.toml");
   const original = 'version = 1\nmessage = """\n[memory]\n"""\n';
   writeFileSync(path, original);

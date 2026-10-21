@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COMMANDS, main } from "./cli.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("CLI unexpected-error boundary (RED-8)", () => {
   it("returns JSON failure and redacts opaque environment credentials", async (t) => {
@@ -48,7 +49,7 @@ describe("CLI unexpected-error boundary (RED-8)", () => {
       else process.env.KIT_HIDE_HOOK_SKIP_BANNER = priorHide;
       if (priorToken === undefined) delete process.env.TEST_TOKEN;
       else process.env.TEST_TOKEN = priorToken;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

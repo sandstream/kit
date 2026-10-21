@@ -1,12 +1,13 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { PendingAction } from "./pal.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const exec = promisify(execFile);
 
@@ -76,6 +77,6 @@ it("simultaneous fresh CLI sessions share pending work and claim ownership", asy
     await cli("release", actions[0].id, ...ownerArgs, "--expect", receipt.view.frontier);
     assert.equal((await list()).find((action) => action.id === actions[0].id)?.status, "open");
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   }
 });

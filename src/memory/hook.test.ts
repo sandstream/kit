@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, statSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, statSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, upsertSession, insertMessage } from "./db.js";
@@ -20,6 +20,7 @@ import {
 } from "./hook.js";
 import { getCurrentProjectRoot } from "./project.js";
 import { shareEntry } from "./shared.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory hook — UserPromptSubmit reminder", () => {
   let tmp: string;
@@ -37,7 +38,7 @@ describe("memory hook — UserPromptSubmit reminder", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_MEMORY_DB;
     else process.env.KIT_MEMORY_DB = prev;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("nudges the agent to search and reports the message count", () => {
@@ -63,7 +64,7 @@ describe("memory hook — SessionStart recovery", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_MEMORY_DB;
     else process.env.KIT_MEMORY_DB = prev;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("returns empty when there is nothing to recover (fail-open)", () => {
@@ -173,7 +174,7 @@ describe("memory hook — detached-worker log surfacing (R5)", () => {
     else process.env.KIT_MEMORY_DIR = prevDir;
     if (prevDb === undefined) delete process.env.KIT_MEMORY_DB;
     else process.env.KIT_MEMORY_DB = prevDb;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("consumeSessionEndLog reads then clears the log (surfaced exactly once)", () => {
@@ -225,7 +226,7 @@ describe("memory hook — recentDecisions (shared curated tier)", () => {
     );
   });
 
-  after(() => rmSync(root, { recursive: true, force: true }));
+  after(() => rmTemp(root));
 
   it("returns only durable kinds, newest-first, capped at the limit", () => {
     const d = recentDecisions(root, 3);
@@ -259,7 +260,7 @@ describe("memory hook — recentDecisions (shared curated tier)", () => {
       const titles = recentDecisions(r, 5).map((e) => e.title);
       assert.deepEqual(titles, ["use Ed25519"], "superseded RSA decision is not surfaced");
     } finally {
-      rmSync(r, { recursive: true, force: true });
+      rmTemp(r);
     }
   });
 
@@ -268,7 +269,7 @@ describe("memory hook — recentDecisions (shared curated tier)", () => {
     try {
       assert.deepEqual(recentDecisions(empty, 3), []);
     } finally {
-      rmSync(empty, { recursive: true, force: true });
+      rmTemp(empty);
     }
   });
 });
@@ -326,7 +327,7 @@ describe("memory hook — shared aging notice", () => {
       assert.doesNotMatch(text, /cli/);
       assert.match(text, /kit memory area memory --stale/);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -352,7 +353,7 @@ describe("memory hook — shared aging notice", () => {
         "",
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });
@@ -369,7 +370,7 @@ describe("memory hook — harness sweep debounce", () => {
   after(() => {
     if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
     else process.env.KIT_MEMORY_DIR = prevDir;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("is due when no sweep marker exists yet", () => {
@@ -397,7 +398,7 @@ describe("memory hook — mid-session index debounce", () => {
   after(() => {
     if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
     else process.env.KIT_MEMORY_DIR = prevDir;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("is due when no marker exists yet", () => {
@@ -453,7 +454,7 @@ describe("memory hook — detached SessionEnd", () => {
       if (previous === undefined) delete process.env[key];
       else process.env[key] = previous;
     }
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   // The happy path spawns a detached child, which is environment-dependent and
@@ -529,7 +530,7 @@ describe("memory hook — harness-aware SessionEnd capture", () => {
       if (value === undefined) delete process.env[envKey];
       else process.env[envKey] = value;
     }
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("indexes the just-ended Codex rollout even when the global sweep is not due", () => {

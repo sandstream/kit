@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
   checkExternalFindings,
   EXTERNAL_FINDINGS_FILE,
 } from "./external-findings.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("parseExternalFindings", () => {
   it("parses valid finding lines (case-insensitive severity, extra keys ignored)", () => {
@@ -123,7 +124,7 @@ describe("checkExternalFindings (IO)", () => {
     try {
       assert.deepEqual(await checkExternalFindings(dir), []);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -145,7 +146,7 @@ describe("checkExternalFindings (IO)", () => {
         "the garbage line is surfaced, not silently dropped",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

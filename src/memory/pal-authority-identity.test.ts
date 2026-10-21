@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it, type TestContext } from "node:test";
 import { openMemoryDb } from "./db.js";
 import { fixture as cliFixture } from "./pal-cli.test-support.js";
 import { seedLegacyPalDb } from "./pal-fixture.test-support.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 async function fixture(t: TestContext) {
   const home = mkdtempSync(join(tmpdir(), "kit-authority-home-"));
-  t.after(() => rmSync(home, { recursive: true, force: true }));
+  t.after(() => rmTemp(home));
   const files = await cliFixture(t, "", {
     HOME: home,
     USERPROFILE: home,

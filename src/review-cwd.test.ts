@@ -19,11 +19,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { collectReview } from "./commands/review.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function baseProject(): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-review-cwd-"));
@@ -80,7 +81,7 @@ async function inCwd<T>(dir: string, fn: () => Promise<T>): Promise<T> {
     process.chdir(prevCwd);
     if (prevId === undefined) delete process.env.KIT_IDENTITY_DIR;
     else process.env.KIT_IDENTITY_DIR = prevId;
-    rmSync(idDir, { recursive: true, force: true });
+    rmTemp(idDir);
   }
 }
 
@@ -109,8 +110,8 @@ describe("collectReview honours cwd in every stage", () => {
       );
       assert.equal((a?.findings.length ?? 0) > (b?.findings.length ?? 0), true);
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 
@@ -125,8 +126,8 @@ describe("collectReview honours cwd in every stage", () => {
       // for a file that sits plainly at src/Bad.tsx inside B.
       assert.doesNotMatch(text, /\.\.\//, `a finding must not be reported via a ../ path: ${text}`);
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 
@@ -149,8 +150,8 @@ describe("collectReview honours cwd in every stage", () => {
         "B declares none and must be reported as such",
       );
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 
@@ -182,8 +183,8 @@ describe("collectReview honours cwd in every stage", () => {
         "B has no .gitignore and must not inherit A's security verdict",
       );
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 
@@ -199,7 +200,7 @@ describe("collectReview honours cwd in every stage", () => {
         "the default must resolve to the process's own tree",
       );
     } finally {
-      rmSync(A, { recursive: true, force: true });
+      rmTemp(A);
     }
   });
 });

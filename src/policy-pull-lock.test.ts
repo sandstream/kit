@@ -28,6 +28,7 @@ import {
 } from "./policy-doc.js";
 import { pullPolicy, type PullResult } from "./policy-pull.js";
 import { addPolicySigner } from "./policy-trust.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 let root: string;
 let dest: string;
@@ -93,7 +94,7 @@ afterEach(() => {
   syncBuiltinESMExports();
   if (savedIdentity === undefined) delete process.env.KIT_IDENTITY_DIR;
   else process.env.KIT_IDENTITY_DIR = savedIdentity;
-  rmSync(root, { recursive: true, force: true });
+  rmTemp(root);
 });
 
 describe("policy pull destination lock", () => {

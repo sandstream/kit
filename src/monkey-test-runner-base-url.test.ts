@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import type { MonkeyRunResult } from "./monkey-test-contract.js";
 import { markerCommand, runnerFixture, serverCommand } from "./monkey-test-runner.test-support.js";
 import { runMonkey } from "./monkey-test-runner-subprocess.test-support.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 for (const [name, baseUrl, title] of [
   ["remote", "http://example.invalid:3199", "Invalid base URL"],
@@ -31,7 +32,7 @@ for (const [name, baseUrl, title] of [
       assert.equal(existsSync(join(root, "server.ran")), false);
       assert.equal(existsSync(join(root, "test.ran")), false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 }

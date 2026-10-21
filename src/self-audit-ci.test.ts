@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,7 @@ import {
   runCiScriptAudit,
   unreferencedScripts,
 } from "./self-audit-ci.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 // Repo root: this compiled test lives at dist/self-audit-ci.test.js, so the repo
 // root is one directory up from dist/.
@@ -114,7 +115,7 @@ describe("runCiScriptAudit", () => {
       assert.equal(fails[0].category, "self-audit/ci-script-paths");
       assert.deepEqual(fails[0].files, [join(dir, ".github", "workflows", "broken.yml")]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -136,7 +137,7 @@ describe("runCiScriptAudit", () => {
       assert.equal(fails.length, 1);
       assert.equal(fails[0].name, "nonexistent");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -167,7 +168,7 @@ describe("runCiScriptAudit", () => {
         false,
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -194,7 +195,7 @@ describe("runCiScriptAudit", () => {
       assert.equal(results.length, 1);
       assert.match(results[0].detail, /1 scripts referenced or declared operator-run/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -217,7 +218,7 @@ describe("runCiScriptAudit", () => {
       );
       assert.equal(report.total, 3);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -228,7 +229,7 @@ describe("runCiScriptAudit", () => {
       assert.equal(results.length, 1);
       assert.equal(results[0].status, "skip");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

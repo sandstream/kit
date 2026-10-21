@@ -1,10 +1,11 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, getStats, searchMessages } from "./db.js";
 import { indexClineSessions } from "./cline.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory cline parser", () => {
   let tmp: string;
@@ -37,7 +38,7 @@ describe("memory cline parser", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_CLINE_DIR;
     else process.env.KIT_CLINE_DIR = prev;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("indexes user+assistant text turns, skips tool-only turns + fileless tasks, tags harness=cline", () => {

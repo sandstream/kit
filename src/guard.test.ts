@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   mkdtempSync,
   mkdirSync,
-  rmSync,
   writeFileSync,
   readFileSync,
   readdirSync,
@@ -33,6 +32,7 @@ import {
   guardPathWinners,
   gitCloneObservation,
 } from "./guard.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 // kit guard v1 (observe): the shim's contract is FAIL-OPEN by construction —
 // it may observe, it must never block or break the real tool. These tests pin
@@ -65,7 +65,7 @@ it(
         );
       }
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   },
 );
@@ -117,7 +117,7 @@ describe("shim + rc file handling", () => {
       // kit-managed files ARE overwritable (idempotent re-install)
       assert.equal(writeShim("brew", dir), "written");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -159,7 +159,7 @@ describe("shim + rc file handling", () => {
           "no temp file left behind",
         );
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     },
   );
@@ -184,7 +184,7 @@ describe("shim + rc file handling", () => {
         "foreign file untouched",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -235,7 +235,7 @@ describe("observation log", () => {
     } finally {
       if (saved === undefined) delete process.env.KIT_GUARD_LOG;
       else process.env.KIT_GUARD_LOG = saved;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -271,7 +271,7 @@ describe("guard PATH effectiveness (#538)", { skip: process.platform === "win32"
       assert.equal(covered.kitWins, true);
       assert.equal(covered.winner, join(kitShims, "npm"));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });
@@ -387,7 +387,7 @@ exit 127
       signal: r.signal ?? null,
     };
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 }
 

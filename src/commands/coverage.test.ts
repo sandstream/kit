@@ -1,9 +1,10 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdCoverage } from "./coverage.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 let dir: string;
 let cwd0: string;
@@ -32,7 +33,7 @@ afterEach(() => {
   process.exitCode = exitCode0;
   console.log = origLog;
   console.error = origErr;
-  rmSync(dir, { recursive: true, force: true });
+  rmTemp(dir);
 });
 
 const setArgs = (...flags: string[]): void => {

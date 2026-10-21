@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { securityFindings } from "./monkey-test-security.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("monkey-test immutable journal evidence", () => {
   it("does not mistake an append call for protection against update or delete", async () => {
@@ -29,7 +30,7 @@ describe("monkey-test immutable journal evidence", () => {
       const findings = await securityFindings(root);
       assert.ok(findings.some((finding) => finding.title === "Immutable money journal not found"));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });

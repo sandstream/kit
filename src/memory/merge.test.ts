@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -15,6 +15,7 @@ import {
 } from "./db.js";
 import { palAdd } from "./pal.js";
 import { mergeDb, projectKeyFor } from "./merge.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 function messageCount(db: ReturnType<typeof openMemoryDb>, uuid: string): number {
   return (db.prepare("SELECT COUNT(*) c FROM messages WHERE uuid = ?").get(uuid) as { c: number })
@@ -55,7 +56,7 @@ describe("memory merge", () => {
     assert.equal(getStats(target).messages, 3);
 
     target.close();
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("throws on a missing source", () => {
@@ -88,7 +89,7 @@ describe("memory merge", () => {
     assert.equal(countTombstones(target), 1);
 
     target.close();
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("propagates source tombstones and deletes stale target messages (#549)", () => {
@@ -125,7 +126,7 @@ describe("memory merge", () => {
     assert.equal(messageCount(target, "gone"), 0);
 
     target.close();
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("reports imported project keys so a foreign scope is loud (#247)", () => {
@@ -141,7 +142,7 @@ describe("memory merge", () => {
     const r = mergeDb(target, srcPath);
     assert.deepEqual(r.projects, { "-home-user": 1 });
     target.close();
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("--remap-project rehomes imported sessions into the given project (#247)", () => {
@@ -178,6 +179,6 @@ describe("memory merge", () => {
     assert.equal(searchMessages(target2, "container", { projectPath: remapProject }).length, 1);
     target.close();
     target2.close();
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 });

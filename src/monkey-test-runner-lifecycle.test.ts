@@ -24,6 +24,7 @@ import {
 } from "./monkey-test-runner-subprocess.test-support.js";
 import { runMonkeyTest as executeMonkeyTest } from "./monkey-test-runner.js";
 import type { MonkeyRunResult } from "./monkey-test-contract.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const runMonkeyTest = (root: string, options?: Parameters<typeof executeMonkeyTest>[1]) =>
   withFixtureEnvironment(root, () => executeMonkeyTest(root, options));
@@ -64,7 +65,7 @@ it(
       await cleanScenario(run, root, scenario.names);
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
-      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+      rmTemp(root);
     }
   },
 );
@@ -80,7 +81,7 @@ it("MSG-03: failed prerequisites restore signal listeners on repeated calls", as
       assert.deepEqual([process.listeners("SIGINT"), process.listeners("SIGTERM")], original);
     }
   } finally {
-    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    rmTemp(root);
   }
 });
 
@@ -115,7 +116,7 @@ for (const outcome of ["missing evidence", "exception"]) {
           /* Already stopped. */
         }
       }
-      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+      rmTemp(root);
     }
   });
 }
@@ -161,7 +162,7 @@ it(
           /* Already stopped. */
         }
       }
-      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+      rmTemp(root);
     }
   },
 );

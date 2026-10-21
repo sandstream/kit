@@ -12,12 +12,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { brokerPolicyPath, loadBrokerPolicy, BROKER_POLICY_ENV } from "./policy.js";
 import { runBrokered } from "./broker.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 /** A valid policy whose write-root is `<dir>/allowed` and nothing else. */
 function policyAllowingOnly(dir: string): string {
@@ -38,7 +39,7 @@ function twoProjects(): { base: string; A: string; B: string; cleanup: () => voi
   const B = join(base, "B");
   mkdirSync(A);
   mkdirSync(B);
-  return { base, A, B, cleanup: () => rmSync(base, { recursive: true, force: true }) };
+  return { base, A, B, cleanup: () => rmTemp(base) };
 }
 
 /** Run `fn` with cwd = `dir` and the env override cleared, restoring both afterwards. */

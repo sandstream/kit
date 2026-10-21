@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { runMonkeyTest } from "./monkey-test-runner.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("monkey-test browser skip fail-closed regression", () => {
   it("records both missing justification and missing browser evidence", async () => {
@@ -39,7 +40,7 @@ describe("monkey-test browser skip fail-closed regression", () => {
         ),
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

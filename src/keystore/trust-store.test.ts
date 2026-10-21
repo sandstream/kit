@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, existsSync, statSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, statSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateKeyPairSync } from "node:crypto";
@@ -20,6 +20,7 @@ import {
 } from "../identity.js";
 import { resolveKeyStore } from "./resolve.js";
 import type { KeyStore } from "./types.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 // The behaviour under test is the one that made `kit profile sign` under a hardware backend
 // produce a signature `kit profile verify` could not check one second later on the SAME machine:
@@ -69,7 +70,7 @@ beforeEach(() => {
 afterEach(() => {
   if (saved === undefined) delete process.env.KIT_IDENTITY_DIR;
   else process.env.KIT_IDENTITY_DIR = saved;
-  rmSync(dir, { recursive: true, force: true });
+  rmTemp(dir);
 });
 
 describe("recordExternalIdentity", () => {

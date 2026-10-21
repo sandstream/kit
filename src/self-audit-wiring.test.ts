@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,7 @@ import {
   analyzeWiring,
   runWiringAudit,
 } from "./self-audit-wiring.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("self-audit-wiring — collectExportedFunctions (pure)", () => {
   it("finds exported and exported-async declarations with 1-based lines", () => {
@@ -69,7 +70,7 @@ describe("self-audit-wiring — loadSdkExports", () => {
       );
       assert.deepEqual([...loadSdkExports(root)].sort(), ["a", "b"]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -78,7 +79,7 @@ describe("self-audit-wiring — loadSdkExports", () => {
     try {
       assert.equal(loadSdkExports(root).size, 0);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -89,7 +90,7 @@ describe("self-audit-wiring — loadSdkExports", () => {
       writeFileSync(join(root, "contracts", "public-surface.json"), "{ not json", "utf-8");
       assert.equal(loadSdkExports(root).size, 0);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });
@@ -117,7 +118,7 @@ describe("self-audit-wiring — readSources", () => {
       assert.deepEqual(analyzeWiring(root), []);
       assert.match(readSources(root).scriptText, /buildOpenCliDoc/);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -126,7 +127,7 @@ describe("self-audit-wiring — readSources", () => {
     try {
       assert.equal(readSources(root).scriptText, "");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -144,7 +145,7 @@ describe("self-audit-wiring — readSources", () => {
       );
       assert.match(testText, /a\(\)/);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });
@@ -158,7 +159,7 @@ describe("self-audit-wiring — analyzeWiring", () => {
     try {
       assert.deepEqual(analyzeWiring(root), []);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -175,7 +176,7 @@ describe("self-audit-wiring — analyzeWiring", () => {
         [],
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -193,7 +194,7 @@ describe("self-audit-wiring — analyzeWiring", () => {
       assert.equal(found[0].testedOnly, true);
       assert.equal(found[0].line, 1);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -210,7 +211,7 @@ describe("self-audit-wiring — analyzeWiring", () => {
       assert.equal(byName.get("deadEverywhere"), false);
       assert.equal(byName.get("deadButTested"), true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -226,7 +227,7 @@ describe("self-audit-wiring — analyzeWiring", () => {
     try {
       assert.deepEqual(analyzeWiring(root), []);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });
@@ -242,7 +243,7 @@ describe("self-audit-wiring — runWiringAudit", () => {
       assert.equal(res.length, 1);
       assert.equal(res[0].status, "pass");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -263,7 +264,7 @@ describe("self-audit-wiring — runWiringAudit", () => {
       }
       assert.match(res[0].detail, /referenced nowhere in production/);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -275,7 +276,7 @@ describe("self-audit-wiring — runWiringAudit", () => {
     try {
       assert.match(runWiringAudit(root)[0].detail, /TESTED but has no production call site/);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -284,7 +285,7 @@ describe("self-audit-wiring — runWiringAudit", () => {
     try {
       assert.equal(runWiringAudit(root)[0].status, "pass");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });

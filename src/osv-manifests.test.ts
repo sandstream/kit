@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { hasOsvManifest } from "./osv-manifests.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 async function inTempDir(files: string[], body: (dir: string) => Promise<void>): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "kit-osv-"));
@@ -15,7 +16,7 @@ async function inTempDir(files: string[], body: (dir: string) => Promise<void>):
     }
     await body(dir);
   } finally {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmTemp(dir);
   }
 }
 

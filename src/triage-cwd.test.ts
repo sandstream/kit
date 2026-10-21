@@ -5,7 +5,6 @@ import {
   linkSync,
   mkdtempSync,
   mkdirSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -14,6 +13,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const MIRRORS = {
   KIT_NPM_REGISTRY: "npm_registry",
@@ -137,7 +137,7 @@ async function withServer(
   } finally {
     await client.close();
     await transport.close();
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    rmTemp(root);
   }
 }
 

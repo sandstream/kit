@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -18,6 +18,7 @@ import {
   type AnchorVerifyResult,
   type AnchorRecord,
 } from "./audit-anchor.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 // The verdict and compatibility tests use real hash-chained logs without auto-anchoring.
 async function buildChain(cwd: string, n: number): Promise<string> {
@@ -132,8 +133,8 @@ describe("audit anchor - hasAnyAnchoredLogs", () => {
       await anchorAuditLog(join(cwd, ".kit-audit.jsonl"), content, dir);
       assert.equal(await hasAnyAnchoredLogs(dir), true);
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(cwd);
+      rmTemp(dir);
     }
   });
 });
@@ -207,8 +208,8 @@ describe("audit anchor - external receipt policy", () => {
         );
       });
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(cwd);
+      rmTemp(dir);
     }
   });
 

@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { computeProfileDrift, discoverActualState, type DiscoveredState } from "./reconcile.js";
 import type { KitProfile } from "./schema.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 function profile(over: Partial<KitProfile> = {}): KitProfile {
   return { version: 1, generated: "1970-01-01T00:00:00.000Z", ...over };
@@ -156,7 +157,7 @@ describe("discoverActualState", () => {
       assert.equal(state.vaultStore, "1password");
       assert.equal(state.workflows, null); // no on-disk workflow convention yet
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -168,7 +169,7 @@ describe("discoverActualState", () => {
       assert.deepEqual(state.skills, []);
       assert.deepEqual(state.mcp, []);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -181,7 +182,7 @@ describe("discoverActualState", () => {
       const d = computeProfileDrift(profile({ skills: [{ name: "api-test" }] }), state);
       assert.equal(d.clean, true);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -199,7 +200,7 @@ describe("discoverActualState", () => {
       assert.equal(statuses["@acme/kit-old"], "removed");
       assert.equal(statuses["@acme/kit-x"], "added");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import type { MonkeyRunResult, MonkeyTestPlan } from "./monkey-test-contract.js";
@@ -14,6 +14,7 @@ import {
   syntheticLiveKey,
   unsupportedDotenvInputs,
 } from "./monkey-test-runner-env.test-support.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 it("MSG-06: inherited references cannot override a literal sandbox file through loader expansion", async () => {
   const root = await runnerFixture();
@@ -41,7 +42,7 @@ it("MSG-06: inherited references cannot override a literal sandbox file through 
       !`${planned.stdout}${planned.stderr}${result.stdout}${result.stderr}`.includes(env.API_TOKEN),
     );
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 });
 
@@ -65,7 +66,7 @@ for (const [syntax, output] of Object.entries({
       assert.ok(report.steps.some((step) => step.name === "env" && step.status === "fail"));
       assert.equal(existsSync(join(root, "env.ran")), true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 }
@@ -105,7 +106,7 @@ for (const format of ["json", "dotenv"]) {
       for (const stage of ["seed", "server", "test"])
         assert.equal(existsSync(join(root, `${stage}.ran`)), false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 }
@@ -128,7 +129,7 @@ for (const prefix of ["sk", "pk", "rk"]) {
       assert.ok(!`${result.stdout}${result.stderr}`.includes(value));
       assert.ok(report.findings.some((finding) => finding.title === "Browser evidence skipped"));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 }
@@ -142,7 +143,7 @@ it("MSG-06: live output is checked before reserved runner fields are discarded",
     });
     assertRefused(root, result);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 });
 
@@ -161,7 +162,7 @@ for (const source of ["process", "provider"]) {
             });
       assertRefused(root, result);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 }
@@ -192,7 +193,7 @@ for (const failure of ["exit", "json syntax", "json array"]) {
         assert.equal(existsSync(join(root, `${stage}.ran`)), false);
       assert.ok(!`${result.stdout}${result.stderr}`.includes(syntheticLiveKey));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 }

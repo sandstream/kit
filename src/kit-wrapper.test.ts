@@ -1,14 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-  readFileSync,
-  statSync,
-  mkdirSync,
-  existsSync,
-} from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, statSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -21,6 +13,7 @@ import {
   WRAPPER_MARKER,
   type WrapperSpec,
 } from "./kit-wrapper.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const SPEC: WrapperSpec = {
   nodePath: "/opt/node22/bin/node",
@@ -132,7 +125,7 @@ describe("ensureKitWrapper", () => {
       });
       assert.equal(r2.action, "unchanged");
     } finally {
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(home);
     }
   });
 
@@ -144,7 +137,7 @@ describe("ensureKitWrapper", () => {
       assert.equal(r.action, "updated");
       assert.ok(readFileSync(r.path, "utf-8").includes('exec "/new/node"'));
     } finally {
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(home);
     }
   });
 
@@ -159,7 +152,7 @@ describe("ensureKitWrapper", () => {
       assert.equal(r.action, "unmanaged");
       assert.equal(readFileSync(path, "utf-8"), userOwn, "user's file is untouched");
     } finally {
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(home);
     }
   });
 
@@ -173,7 +166,7 @@ describe("ensureKitWrapper", () => {
       assert.equal(r.action, "skipped");
     } finally {
       process.argv[1] = prevArgv;
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(home);
     }
   });
 });

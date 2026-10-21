@@ -27,10 +27,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 /** The SDK's HTTP-transport and OAuth dependencies. kit must never load any of them. */
 const HTTP_OAUTH_STACK = [
@@ -110,7 +111,7 @@ function tracePackagesLoaded(body: string): Set<string> {
     }
     return packages;
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   }
 }
 

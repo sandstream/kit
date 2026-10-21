@@ -1,6 +1,6 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, statSync, symlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,7 @@ import {
   recallRootVariants,
   resolveLocalProjectPath,
 } from "./project.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 // Same directory under any spelling (slashes, case, 8.3 short names, inode).
 const same = (candidate: string, path: string) => {
@@ -42,7 +43,7 @@ it("keeps non-repositories and explicit subdirectory scopes local", () => {
     assert.deepEqual(getProjectRecallRoots(subdir), recallRootVariants(subdir));
     assert.ok(getProjectRecallRoots(root).includes(root));
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 });
 
@@ -62,7 +63,7 @@ it("resolves symlinked roots and future descendants without losing the original 
       ...new Set([alias, real].flatMap(recallRootVariants)),
     ]);
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   }
 });
 
@@ -97,7 +98,7 @@ it("expands only repository roots to their registered worktrees", () => {
     assert.ok(!getProjectRecallRoots(subdir).some((candidate) => same(candidate, worktree)));
     assert.ok(!getProjectRecallRoots(root).some((candidate) => same(candidate, unrelated)));
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   }
 });
 
@@ -141,7 +142,7 @@ it("drops a registered worktree whose directory was deleted (git marks it prunab
     git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
     git("worktree", "add", "-q", "-b", "live", live);
     git("worktree", "add", "-q", "-b", "gone", gone);
-    rmSync(gone, { recursive: true, force: true });
+    rmTemp(gone);
 
     const roots = getProjectRecallRoots(root);
     assert.ok(
@@ -153,6 +154,6 @@ it("drops a registered worktree whose directory was deleted (git marks it prunab
       "a deleted worktree must not widen the recall scope",
     );
   } finally {
-    rmSync(base, { recursive: true, force: true });
+    rmTemp(base);
   }
 });

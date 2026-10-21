@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import type { MonkeyRunResult } from "./monkey-test-contract.js";
@@ -10,6 +10,7 @@ import {
   serverCommand,
 } from "./monkey-test-runner.test-support.js";
 import { runMonkey } from "./monkey-test-runner-subprocess.test-support.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const matrixPath = ".kit/monkey-test/role-matrix.json";
 const invalidMatrix = JSON.stringify({ configured: true, roles: [] });
@@ -59,7 +60,7 @@ for (const kind of ["malformed", "invalid"]) {
             report.findings.some((finding) => finding.title === "Browser evidence skipped"),
           );
       } finally {
-        rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+        rmTemp(root);
       }
     });
   }
@@ -116,7 +117,7 @@ for (const selectedValid of [false, true]) {
         );
       }
     } finally {
-      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+      rmTemp(root);
     }
   });
 }
@@ -156,6 +157,6 @@ it("MHB-10: shared authenticated storage state blocks seed and browser", async (
     assert.equal(existsSync(join(root, "server.ran")), false);
     assert.equal(existsSync(join(root, "test.ran")), false);
   } finally {
-    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    rmTemp(root);
   }
 });

@@ -1,14 +1,15 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { discoverSkills, runSkillGate, SNAPSHOT_NAME } from "./skill-run.js";
 import { parseSkillManifest, snapshotOf } from "./skill/test.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const dirs: string[] = [];
 after(() => {
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  for (const d of dirs) rmTemp(d);
 });
 
 function repo(): string {

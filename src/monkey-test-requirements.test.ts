@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +11,7 @@ import { writeMonkeyHarness } from "./monkey-test-harness.js";
 import { buildMonkeyTestPlan } from "./monkey-test-plan.js";
 import { runMonkeyTest } from "./monkey-test-runner.js";
 import { fixtureCommand, withFixtureEnvironment } from "./monkey-test-runner.test-support.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const roots: string[] = [];
 
@@ -26,7 +27,7 @@ function writeJson(path: string, value: unknown): void {
 }
 
 afterEach(() => {
-  while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
+  while (roots.length) rmTemp(roots.pop()!);
 });
 
 const publicOnly = {

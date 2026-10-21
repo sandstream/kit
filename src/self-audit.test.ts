@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,7 @@ import {
   type SelfAuditCtx,
   type SourceFile,
 } from "./self-audit.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 // Compiled test lives at dist/self-audit.test.js; repo root is one dir up.
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -531,7 +532,7 @@ jobs:
       assert.equal(fail?.severity, "high");
       assert.equal(countStatus(res, "warn"), 1);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -556,7 +557,7 @@ jobs:
       assert.equal(res.length, 1);
       assert.equal(res[0].status, "pass");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -591,7 +592,7 @@ jobs:
       assert.equal(fail?.severity, "high");
       assert.match(String(fail?.detail), /pipe|pipefail/i);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -612,7 +613,7 @@ jobs:
       const res = ruleById("R1-fail-open-ci").run({ repoRoot: dir, sources: [], pkgJson: {} });
       assert.equal(countStatus(res, "fail"), 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -637,7 +638,7 @@ jobs:
         const res = ruleById("R1-fail-open-ci").run({ repoRoot: dir, sources: [], pkgJson: {} });
         assert.equal(countStatus(res, "fail"), 1, sink);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     }
   });
@@ -661,7 +662,7 @@ jobs:
       const res = ruleById("R1-fail-open-ci").run({ repoRoot: dir, sources: [], pkgJson: {} });
       assert.equal(countStatus(res, "fail"), 1);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -680,7 +681,7 @@ jobs:
       const res = ruleById("R1-fail-open-ci").run({ repoRoot: dir, sources: [], pkgJson: {} });
       assert.equal(countStatus(res, "fail"), 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -700,7 +701,7 @@ describe("R11-script-paths", () => {
       assert.equal(countStatus(res, "fail"), 1);
       assert.equal(res[0].category, "self-audit/ci-script-paths");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -757,7 +758,7 @@ describe("R12-dup-source", () => {
       assert.ok(!flagged.some((f) => f.includes("cloudflare-r2.ts")));
       assert.ok(!flagged.some((f) => f.startsWith("cli.ts")));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -780,7 +781,7 @@ describe("resolveKitRoot", () => {
       // A tmp dir under /tmp has no sandstream-kit ancestor.
       assert.equal(resolveKitRoot(dir), null);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

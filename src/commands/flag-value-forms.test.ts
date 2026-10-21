@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 /**
  * `--flag value` and `--flag=value` are the same flag. kit's own `flagValue`/`flagInt` handle
@@ -69,7 +70,7 @@ describe("kit audit log --limit accepts both flag forms", () => {
       const out = run(["audit", "log", ...limitArgs], dir, env);
       return (out.match(/synthetic-op-\d+/g) ?? []).length;
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   }
 
@@ -113,7 +114,7 @@ describe("kit auth elevate --list-scopes lists instead of elevating", () => {
       // A description from the real SCOPE_MAP — proves it rendered the mapping, not a stub.
       assert.match(out, /one-shot|reusable for the TTL/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -139,7 +140,7 @@ describe("kit auth elevate --list-scopes lists instead of elevating", () => {
         "at least one scope is one-shot — that distinction is why the list exists",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -149,7 +150,7 @@ describe("kit auth elevate --list-scopes lists instead of elevating", () => {
       const out = run(["auth", "elevate", "--ttl-minutes=999"], dir, env);
       assert.match(out, /--ttl-minutes must be between 1 and 240/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

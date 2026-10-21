@@ -1,10 +1,11 @@
 import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { loadConfig } from "./config.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 async function warningsFor(toml: string): Promise<string[]> {
   const dir = mkdtempSync(join(tmpdir(), "kit-browser-keys-"));
@@ -16,7 +17,7 @@ async function warningsFor(toml: string): Promise<string[]> {
     return warn.mock.calls.map((call) => String(call.arguments[0]));
   } finally {
     warn.mock.restore();
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   }
 }
 

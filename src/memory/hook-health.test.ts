@@ -1,7 +1,7 @@
 import { it, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,12 +17,13 @@ import {
   setPalClock,
   withPalDevice,
 } from "./pal-fixture.test-support.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const exec = promisify(execFile);
 
 async function fixture(t: TestContext) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "kit-hook-health-")));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmTemp(root));
   await exec("git", ["init", "-q", root]);
   const store = join(root, "store");
   mkdirSync(store);

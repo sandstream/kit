@@ -1,9 +1,10 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { loadBrokerPolicy, brokerPolicyPath, BROKER_POLICY_ENV } from "./policy.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const VALID = {
   egress: { allow: ["api.example.com"] },
@@ -42,7 +43,7 @@ describe("loadBrokerPolicy", () => {
     try {
       assert.equal(loadBrokerPolicy(join(dir, "nope.json")), null);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -54,7 +55,7 @@ describe("loadBrokerPolicy", () => {
       const loaded = loadBrokerPolicy(p);
       assert.deepEqual(loaded, VALID);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -66,7 +67,7 @@ describe("loadBrokerPolicy", () => {
       process.env[BROKER_POLICY_ENV] = p;
       assert.deepEqual(loadBrokerPolicy(), VALID);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -77,7 +78,7 @@ describe("loadBrokerPolicy", () => {
       writeFileSync(p, "{ not json");
       assert.equal(loadBrokerPolicy(p), null);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -102,7 +103,7 @@ describe("loadBrokerPolicy", () => {
         assert.equal(loadBrokerPolicy(p), null, `case ${i} should be null`);
       });
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -114,7 +115,7 @@ describe("loadBrokerPolicy", () => {
       writeFileSync(p, JSON.stringify(pol));
       assert.deepEqual(loadBrokerPolicy(p), pol);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

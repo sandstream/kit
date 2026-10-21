@@ -17,7 +17,6 @@ import assert from "node:assert/strict";
 import {
   chmodSync,
   mkdtempSync,
-  rmSync,
   mkdirSync,
   writeFileSync,
   realpathSync,
@@ -30,6 +29,7 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describeHookFloor, judgeHookFloor, type HookFloorReport } from "./hook-floor.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const exec = promisify(execFile);
 const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
@@ -53,7 +53,7 @@ describe("hook floor — describeHookFloor", () => {
     dirs = [];
   });
   afterEach(() => {
-    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    for (const d of dirs) rmTemp(d);
   });
 
   it("reports the repo-local floor and the kit hooks in it", () => {
@@ -214,8 +214,8 @@ describe("hook floor — compiled CLI", () => {
     writeFileSync(join(repoDir, ".kit.toml"), '[tools]\nnode = "22"\n');
   });
   afterEach(() => {
-    rmSync(repoDir, { recursive: true, force: true });
-    for (const d of extras) rmSync(d, { recursive: true, force: true });
+    rmTemp(repoDir);
+    for (const d of extras) rmTemp(d);
   });
 
   it("refuses to install context-check with no [context] — a gate that cannot fail", async () => {

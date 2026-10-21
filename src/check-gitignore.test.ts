@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, execSync } from "node:child_process";
 import { checkGitignore, patchGitignore, findCommittedSensitive } from "./check-gitignore.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function tmpRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-gi-"));
@@ -20,7 +21,7 @@ describe("checkGitignore", () => {
       assert.equal(r.exists, false);
       assert.ok(r.missingPatterns.length > 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -33,7 +34,7 @@ describe("checkGitignore", () => {
       assert.deepEqual(r.presentPatterns, ["!.kit/shared/"]);
       assert.ok(r.missingPatterns.length > 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -48,7 +49,7 @@ describe("checkGitignore", () => {
       assert.ok(!stillMissing.includes(".env.local"));
       assert.ok(!stillMissing.includes(".env.*.local"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -61,7 +62,7 @@ describe("checkGitignore", () => {
       const stillMissing = r.missingPatterns.map((m) => m.pattern);
       assert.ok(!stillMissing.includes(".env"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -122,7 +123,7 @@ describe("patched .gitignore is honored by GIT, not just by kit", () => {
         `kit claims to cover these but git does not ignore them: ${notIgnored.join(", ")}`,
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -139,7 +140,7 @@ describe("patched .gitignore is honored by GIT, not just by kit", () => {
         "curated shared memory must stay tracked",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -156,7 +157,7 @@ describe("patched .gitignore is honored by GIT, not just by kit", () => {
         "an inline-commented pattern must count as MISSING, since git ignores nothing",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -190,7 +191,7 @@ describe("patched .gitignore is honored by GIT, not just by kit", () => {
         .filter((l) => l.trim() && !l.trimStart().startsWith("#") && /\s#/.test(l));
       assert.deepEqual(offenders, [], "a pattern line must not carry a trailing comment");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -204,7 +205,7 @@ describe("patched .gitignore is honored by GIT, not just by kit", () => {
       assert.equal(second.written, false);
       assert.equal(readFileSync(join(dir, ".gitignore"), "utf-8"), first);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -220,7 +221,7 @@ describe("patchGitignore", () => {
       assert.ok(text.includes(".env"));
       assert.ok(text.includes("node_modules"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -234,7 +235,7 @@ describe("patchGitignore", () => {
       assert.ok(text.includes("kit security check-gitignore")); // marker present
       assert.ok(text.includes("node_modules"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -250,7 +251,7 @@ describe("patchGitignore", () => {
       assert.equal(count(first), 1);
       assert.equal(count(second), 1);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -261,7 +262,7 @@ describe("patchGitignore", () => {
       const second = await patchGitignore(dir);
       assert.equal(second.added, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -282,7 +283,7 @@ describe("patchGitignore", () => {
         "negation must follow .kit/*",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -291,10 +292,10 @@ describe("findCommittedSensitive", () => {
   it("explicitly rejects verification outside a git repo", async () => {
     const dir = tmpRepo();
     try {
-      rmSync(join(dir, ".git"), { recursive: true, force: true });
+      rmTemp(join(dir, ".git"));
       await assert.rejects(findCommittedSensitive(dir), /Git.*could not be verified/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -313,7 +314,7 @@ describe("findCommittedSensitive", () => {
       assert.ok(r.includes("deploy.pem"));
       assert.ok(!r.includes("README.md"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -329,7 +330,7 @@ describe("findCommittedSensitive", () => {
       const r = await findCommittedSensitive(dir);
       assert.equal(r.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -355,7 +356,7 @@ describe("checkGitignore covers the dotenvx keyfile (F2)", () => {
         `expected .env.keys to be required, got: ${r.missingPatterns.map((m) => m.pattern).join(", ")}`,
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -367,7 +368,7 @@ describe("checkGitignore covers the dotenvx keyfile (F2)", () => {
       assert.ok(!r.missingPatterns.some((m) => m.pattern === ".env.keys"));
       assert.ok(r.presentPatterns.includes(".env.keys"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

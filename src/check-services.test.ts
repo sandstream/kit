@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { copyFileSync, linkSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, linkSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkServices } from "./check-services.js";
 import { isInfisicalLoginStatus } from "./infisical-status.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const infisicalHelp = `Used to get properties of an Infisical profile
 
@@ -53,7 +54,7 @@ async function withCli(
     await run(bin, dir);
   } finally {
     // Windows keeps a just-exited executable locked briefly (EBUSY on unlink).
-    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    rmTemp(dir);
   }
 }
 

@@ -19,9 +19,10 @@ import {
   gcpProjectMismatch,
   type LiveContext,
 } from "./context-lock.js";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("context lock", () => {
   it("passes only when the exact declared pair matches", () => {
@@ -344,7 +345,7 @@ describe("gcloud vs repo-declared projects (.firebaserc, #251)", () => {
       if (firebaserc !== null) writeFileSync(join(dir, ".firebaserc"), firebaserc);
       fn(dir);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   };
   const liveWith = (project: string | null): LiveContext => ({

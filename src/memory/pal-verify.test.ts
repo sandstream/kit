@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -21,6 +21,7 @@ import {
   importLegacyLedger,
 } from "./pal.js";
 import { mergeDb } from "./merge.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 it("an imported revision invalidates a delayed verifier even when the display state is identical", async (t) => {
   const { db, id, request, path } = await fixture(t);
@@ -75,7 +76,7 @@ async function fixture(t: TestContext) {
     else process.env.KIT_DEVICE_ID = previous;
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();

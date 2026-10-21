@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { diffEnvFiles, formatEnvDiff } from "./env-diff.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function fixture(setup: (dir: string) => void): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-envdiff-"));
@@ -24,7 +25,7 @@ describe("diffEnvFiles", () => {
       assert.deepEqual(diff.changed, []);
       assert.equal(diff.identicalCount, 2);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -39,7 +40,7 @@ describe("diffEnvFiles", () => {
       assert.deepEqual(diff.onlyInB, ["Z"]);
       assert.equal(diff.identicalCount, 1);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -57,7 +58,7 @@ describe("diffEnvFiles", () => {
       // Hashes must NOT contain the value.
       assert.ok(!diff.changed[0]!.aHash.includes("value"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -71,7 +72,7 @@ describe("diffEnvFiles", () => {
       assert.equal(diff.changed.length, 0);
       assert.equal(diff.identicalCount, 1);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -84,7 +85,7 @@ describe("diffEnvFiles", () => {
       assert.deepEqual(diff.onlyInA, ["X"]);
       assert.deepEqual(diff.onlyInB, []);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -248,7 +249,7 @@ describe("formatEnvDiff — section structure and redaction", () => {
       assert.ok(out.includes(diff.changed[0]!.bHash));
       assert.ok(out.includes("Identical keys: 1"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

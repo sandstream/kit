@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { analyzeRepo, renderClaudeMd, renderRulesMd } from "./analyze.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function fixtureRepo(setup: (dir: string) => void): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-analyze-"));
@@ -22,7 +23,7 @@ describe("analyzeRepo", () => {
       assert.deepEqual(r.commitPrefixes, []);
       assert.deepEqual(r.ciFiles, []);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -44,7 +45,7 @@ describe("analyzeRepo", () => {
       assert.ok(r.testRunners.includes("vitest"));
       assert.ok(r.testRunners.includes("playwright"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -59,7 +60,7 @@ describe("analyzeRepo", () => {
       const r = await analyzeRepo(dir);
       assert.ok(r.testRunners.includes("pytest"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -73,7 +74,7 @@ describe("analyzeRepo", () => {
       assert.equal(r.hasClaudeMd, true);
       assert.equal(r.hasRulesMd, true);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -86,7 +87,7 @@ describe("analyzeRepo", () => {
       const r = await analyzeRepo(dir);
       assert.ok(r.ciFiles.length >= 1, "found at least one CI file");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -108,7 +109,7 @@ describe("renderClaudeMd", () => {
       assert.match(md, /vitest/i);
       assert.match(md, /Stack/i);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -119,7 +120,7 @@ describe("renderClaudeMd", () => {
       const md = renderClaudeMd(r);
       assert.ok(md.length > 50, "output has content");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -133,7 +134,7 @@ describe("renderRulesMd", () => {
       assert.equal(typeof md, "string");
       assert.ok(md.length > 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

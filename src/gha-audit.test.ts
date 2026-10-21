@@ -42,9 +42,10 @@ describe("auditWorkflow", () => {
 });
 
 import { runGhaAudit } from "./gha-audit.js";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("runGhaAudit — unreadable workflow never yields a false-green pass", () => {
   it("emits a scanner-health warn (not 'all pinned' pass) when a workflow can't be read", () => {
@@ -69,7 +70,7 @@ describe("runGhaAudit — unreadable workflow never yields a false-green pass", 
         "must NOT emit the blanket all-pinned pass when a workflow was not audited",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

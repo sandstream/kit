@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { it } from "node:test";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const exec = promisify(execFile);
 const source = import.meta.url.endsWith(".ts");
@@ -13,7 +14,7 @@ const moduleUrl = new URL(source ? "./config.ts" : "./config.js", import.meta.ur
 for (const input of ["a=[1 #", "a={b=1 #"]) {
   it("configuration rejects an unterminated comment without hanging: " + input, async (t) => {
     const dir = mkdtempSync(join(tmpdir(), "kit-toml-parser-"));
-    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    t.after(() => rmTemp(dir));
     const path = join(dir, ".kit.toml");
     writeFileSync(path, input);
     // A synchronous parser loop cannot be interrupted by a same-process test timeout.

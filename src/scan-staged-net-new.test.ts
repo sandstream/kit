@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanStagedFiles } from "./scan-staged.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function tmpGitRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-scan-staged-new-"));
@@ -34,7 +35,7 @@ describe("only findings new to this commit block it", () => {
       execSync("git add CHANGELOG.md", { cwd: dir });
       assert.deepEqual(await scanStagedFiles(dir), []);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -50,7 +51,7 @@ describe("only findings new to this commit block it", () => {
       // Every remaining finding belongs to the new Stripe line, none to the committed example.
       assert.ok(hits[0].findings.every((f) => !f.preview.startsWith("VITE_D")));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -64,7 +65,7 @@ describe("only findings new to this commit block it", () => {
       assert.equal(hits.length, 1);
       assert.ok(hits[0].findings.some((f) => f.label === "stripe-key"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -78,7 +79,7 @@ describe("only findings new to this commit block it", () => {
       assert.equal(hits.length, 1);
       assert.equal(hits[0].file, "new.md");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

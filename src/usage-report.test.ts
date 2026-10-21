@@ -9,7 +9,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
@@ -23,6 +23,7 @@ import {
   machineFromAnchor,
   memoryFromDb,
 } from "./usage-report.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), "kit-usage-test-"));
@@ -65,7 +66,7 @@ describe("coverageFromRuns", () => {
       );
       assert.equal(cv.at, new Date(2000).toISOString());
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -76,7 +77,7 @@ describe("coverageFromRuns", () => {
       assert.equal(cv.enumerated, 0);
       assert.equal(cv.at, null, "no run means no timestamp — not the epoch");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -101,7 +102,7 @@ describe("floorFromLogs", () => {
       assert.deepEqual(fl.byOperation[0], ["policy-check", 2]);
       assert.equal(fl.actorUnknown, true, "no entry carries a cwd");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -117,7 +118,7 @@ describe("floorFromLogs", () => {
       );
       assert.equal(floorFromLogs(dir).actorUnknown, false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -128,7 +129,7 @@ describe("floorFromLogs", () => {
       assert.equal(fl.events, 0);
       assert.equal(fl.actorUnknown, false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -150,7 +151,7 @@ describe("triageFromLog and machineFromAnchor", () => {
       assert.deepEqual(t.byType[0], ["npm", 2]);
       assert.equal(t.latest?.target, "requests");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -176,8 +177,8 @@ describe("triageFromLog and machineFromAnchor", () => {
         "a log that no longer exists is attrition, and must show as such",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(dir);
+      rmTemp(home);
     }
   });
 });
@@ -234,7 +235,7 @@ describe("memoryFromDb", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_DB;
       else process.env.KIT_MEMORY_DB = prev;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -253,7 +254,7 @@ describe("memoryFromDb", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_DB;
       else process.env.KIT_MEMORY_DB = prev;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -289,7 +290,7 @@ describe("standardsFromRuns", () => {
         );
       }
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -304,7 +305,7 @@ describe("standardsFromRuns", () => {
         "no run means no date — a coverage map with no evidence is a claim",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -338,7 +339,7 @@ describe("keysFromConfigAndRun", () => {
       assert.equal(k.history, null);
       assert.equal(k.envIgnored, null);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -377,7 +378,7 @@ describe("keysFromConfigAndRun", () => {
       });
       assert.equal(k.envIgnored, true);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -395,7 +396,7 @@ describe("keysFromConfigAndRun", () => {
       );
       assert.equal(keysFromConfigAndRun(dir).history, null);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
