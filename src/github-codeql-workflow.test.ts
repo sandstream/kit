@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const CODEQL_ACTION_SHA = "24c54180a607b1449ed407dd24f251e4e9147c8d";
+const CODEQL_ACTION_SHA = "6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee";
 
 describe("CodeQL workflow action", () => {
   it("uses one supported v4 action commit for every CodeQL step", () => {
@@ -20,7 +20,7 @@ describe("CodeQL workflow action", () => {
     assert.ok(references.length > 0, "expected at least one CodeQL action step");
     for (const reference of references) {
       assert.equal(reference.sha, CODEQL_ACTION_SHA, `${reference.name} has a stale CodeQL pin`);
-      assert.equal(reference.version, "v4.38.3", `${reference.name} must identify supported major`);
+      assert.equal(reference.version, "v4.39.0", `${reference.name} must identify supported major`);
     }
   });
 });
