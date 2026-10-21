@@ -228,7 +228,7 @@ describe(
         const neutered = script.replace(/exit 1/g, "true");
         assert.equal(runScript(neutered, root, { TAG: "v9.9.9" }).status, 0, "the check bites");
       } finally {
-        rmSync(root, { recursive: true, force: true });
+        rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       }
     });
 
@@ -245,7 +245,7 @@ describe(
         const neutered = script.replace(/exit 1/g, "true");
         assert.equal(runScript(neutered, root, { TAG: "v1.2.4" }).status, 0, "the check bites");
       } finally {
-        rmSync(root, { recursive: true, force: true });
+        rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       }
     });
   },
@@ -428,7 +428,7 @@ describe("publish.yml — published versions bind to the source tree", () => {
       assert.equal(offline.status, 1, offline.stderr);
       assert.match(offline.stderr, /registry lookup failed/);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 });

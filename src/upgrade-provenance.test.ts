@@ -64,7 +64,7 @@ describe("kit upgrade CLI lock provenance", () => {
         "committed locks must not contain machine-specific absolute paths",
       );
     } finally {
-      rmSync(project, { recursive: true, force: true });
+      rmSync(project, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 });

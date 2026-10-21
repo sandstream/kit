@@ -163,7 +163,7 @@ describe("system Chrome selection", () => {
       assert.equal(result.status, "blocker");
       assert.equal(result.strategy, "none");
     } finally {
-      rmSync(path, { recursive: true, force: true });
+      rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 });
@@ -224,7 +224,7 @@ describe("system Chrome fallback", () => {
         join(second, valid),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 });
