@@ -469,6 +469,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--expected",
     "--force",
     "--help",
+    "--install",
     "--interruptions",
     "--json",
     "--link-depth",

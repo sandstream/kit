@@ -25,7 +25,7 @@ import { monkeyEnvironmentFindings } from "./monkey-test-runner-env.js";
 import { detectStack } from "./stack-detector.js";
 import { redactSecrets, secretValuesFromEnv } from "./utils/redactSecrets.js";
 
-function detectPackageManager(
+export function detectPackageManager(
   pkg: MonkeyPackageJson | null,
   cwd: string,
 ): MonkeyTestPlan["packageManager"] {

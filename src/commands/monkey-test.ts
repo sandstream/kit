@@ -10,6 +10,7 @@ import {
   type MonkeyRunResult,
   type MonkeyTestPlan,
 } from "../monkey-test.js";
+import { installPlaywright, type InstallResult } from "../monkey-test-install.js";
 import {
   DESKTOP_ACTIONS,
   runDesktopMonkey,
@@ -33,7 +34,7 @@ function usage(): void {
     `  ${c.cyan}kit monkey-test plan [--json]${c.reset}                 Detect stack, desktop shell, env, seed, roles, money/security gaps`,
   );
   console.log(
-    `  ${c.cyan}kit monkey-test init [--force] [--json]${c.reset}        Create/update the portable Playwright monkey harness`,
+    `  ${c.cyan}kit monkey-test init [--force] [--install] [--json]${c.reset} Create/update the portable Playwright monkey harness; --install adds a pinned @playwright/test (after triage) and Chromium`,
   );
   console.log(
     `  ${c.cyan}kit monkey-test run [flags] [--json]${c.reset}           Run security pack + role crawl + sandbox money flow`,
@@ -100,14 +101,7 @@ export async function cmdMonkeyTest(): Promise<boolean> {
     return plan.checks.every((check) => check.status !== "fail");
   }
 
-  if (sub === "init") {
-    const result = await writeMonkeyHarness(process.cwd(), {
-      force: hasFlag(process.argv, "--force"),
-    });
-    if (json) console.log(JSON.stringify(result, null, 2));
-    else renderWrites(result.writes);
-    return result.ok;
-  }
+  if (sub === "init") return runInit(json);
 
   if (sub === "desktop") return runDesktop(json);
 
@@ -135,6 +129,21 @@ function desktopActions(): DesktopAction[] | null | undefined {
   const known = new Set<string>(DESKTOP_ACTIONS);
   if (actions.length === 0 || actions.some((action) => !known.has(action))) return null;
   return actions as DesktopAction[];
+}
+
+async function runInit(json: boolean): Promise<boolean> {
+  const result = await writeMonkeyHarness(process.cwd(), {
+    force: hasFlag(process.argv, "--force"),
+  });
+  const install = hasFlag(process.argv, "--install")
+    ? await installPlaywright(process.cwd())
+    : undefined;
+  if (json) console.log(JSON.stringify(install ? { ...result, install } : result, null, 2));
+  else {
+    renderWrites(result.writes);
+    if (install) renderInstall(install);
+  }
+  return result.ok && (install?.ok ?? true);
 }
 
 async function runDesktop(json: boolean): Promise<boolean> {
@@ -231,6 +240,14 @@ function renderWrites(writes: HarnessWrite[]): void {
   for (const write of writes) {
     const reason = write.reason ? ` ${c.dim}${write.reason}${c.reset}` : "";
     console.log(`  ${mark(write.action)} ${write.action.padEnd(9)} ${write.path}${reason}`);
+  }
+}
+
+function renderInstall(result: InstallResult): void {
+  console.log("");
+  console.log(`${c.bold}kit monkey-test init --install${c.reset}`);
+  for (const step of result.steps) {
+    console.log(`  ${mark(step.status)} ${step.name.padEnd(10)} ${c.dim}${step.detail}${c.reset}`);
   }
 }
 
