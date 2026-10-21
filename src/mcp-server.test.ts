@@ -110,12 +110,28 @@ describe("MCP server tool registration", () => {
   // (snapshotted in contracts/public-surface.json) must match the tools actually
   // registered on the server. Adding/removing a register_kit_* call without
   // updating KIT_MCP_TOOLS fails here.
-  it("KIT_MCP_TOOLS matches the actually-registered tool names", async () => {
+  //
+  // ORDER IS PART OF THE CONTRACT, so this comparison is deliberately NOT sorted.
+  // A client's prompt cache keys on the rendered prefix, and tool definitions —
+  // "names, descriptions, schemas, ordering" — are inside it and inside the routing
+  // hash. Emitting the same ten tools in a different order is therefore a wire
+  // change: it invalidates the cached prefix for every agent that loads this server.
+  // The order held before this assertion existed, but only because tools are
+  // registered in source order; registering them from a map or a loop would reorder
+  // the list, and a sorted comparison would not notice.
+  //
+  // KIT_MCP_TOOLS is the canonical order (it calls itself "[c]anonical, frozen"),
+  // NOT contracts/public-surface.json, whose `mcpTools` is stored alphabetically and
+  // is a set. The two differ; this pins the one that goes over the wire.
+  it("KIT_MCP_TOOLS matches the actually-registered tool names, in order", async () => {
     const { client, cleanup } = await createTestClient();
     try {
       const { tools } = await client.listTools();
-      const registered = tools.map((t) => t.name).sort();
-      assert.deepEqual(registered, [...KIT_MCP_TOOLS].sort());
+      const registered = tools.map((t) => t.name);
+      assert.deepEqual(registered, [...KIT_MCP_TOOLS], "registered tool ORDER drifted");
+      // Belt and braces: the set must match too, so a failure above is read as a
+      // reordering rather than an addition when the names are the same.
+      assert.deepEqual([...registered].sort(), [...KIT_MCP_TOOLS].sort());
     } finally {
       await cleanup();
     }
@@ -127,6 +143,11 @@ describe("MCP server tool registration", () => {
   // therefore the actually-registered tools (guarded above) — match that single
   // source, so a verb can't be MCP-exposed without a registry entry, nor a
   // registry `mcp` marker exist without a registered tool.
+  //
+  // This one stays a SET comparison, unlike the wire-order guard above:
+  // mcpExposedToolNames() sorts internally, and COMMAND_REGISTRY's declaration
+  // order answers a different question (how the CLI lists verbs) than the order
+  // tools go out on. Coupling them would constrain one for the other's reasons.
   it("KIT_MCP_TOOLS matches the CLI COMMAND_REGISTRY mcp-exposed verbs (CLI = MCP)", () => {
     assert.deepEqual([...KIT_MCP_TOOLS].sort(), mcpExposedToolNames());
   });
