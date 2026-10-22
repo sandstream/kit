@@ -38,6 +38,16 @@ const KIT_FILE = ".kit.toml";
 // with the register_kit_* calls in createMcpServer below. A listTools()-vs-this
 // guard in mcp-server.test.ts fails if a tool is added/removed without updating
 // this list, so the snapshot can never silently drift.
+//
+// THE ORDER HERE IS THE CONTRACT, not just the membership, and the guard compares
+// it unsorted. A client's prompt cache keys on the rendered prefix, and tool
+// definitions — names, descriptions, schemas, ordering — sit inside it and inside
+// the provider's cache-routing hash, so shipping the same ten tools in a different
+// order invalidates the cached prefix for every agent that loads this server.
+// Register below in exactly this order; `contracts/public-surface.json` stores
+// `mcpTools` alphabetically and is a SET, so it is not the place order is pinned.
+// The second guard (KIT_MCP_TOOLS vs COMMAND_REGISTRY) stays a set comparison on
+// purpose: how the CLI lists verbs is a different question from wire order.
 export const KIT_MCP_TOOLS: readonly string[] = [
   "kit_check",
   "kit_review",

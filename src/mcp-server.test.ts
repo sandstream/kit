@@ -109,13 +109,13 @@ describe("MCP server tool registration", () => {
   // Drift guard for the frozen public surface: the canonical KIT_MCP_TOOLS list
   // (snapshotted in contracts/public-surface.json) must match the tools actually
   // registered on the server. Adding/removing a register_kit_* call without
-  // updating KIT_MCP_TOOLS fails here.
-  it("KIT_MCP_TOOLS matches the actually-registered tool names", async () => {
+  // updating KIT_MCP_TOOLS fails here. Unsorted: ORDER is the contract (see KIT_MCP_TOOLS).
+  it("KIT_MCP_TOOLS matches the actually-registered tool names, in order", async () => {
     const { client, cleanup } = await createTestClient();
     try {
       const { tools } = await client.listTools();
-      const registered = tools.map((t) => t.name).sort();
-      assert.deepEqual(registered, [...KIT_MCP_TOOLS].sort());
+      const registered = tools.map((t) => t.name);
+      assert.deepEqual(registered, [...KIT_MCP_TOOLS], "registered tool ORDER drifted");
     } finally {
       await cleanup();
     }
