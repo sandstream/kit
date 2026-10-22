@@ -10,22 +10,13 @@ const MAX_BYTES = 8 * 1024 * 1024;
 
 /**
  * The file's text, or null when it does not exist. Throws a fixed-message error otherwise.
- * The checks run on the open descriptor, not on the path, so the file cannot be swapped for a
- * symlink between the check and the read. `O_NOFOLLOW` makes the open itself refuse a symlink and
- * `O_NONBLOCK` keeps a pipe swapped in during the race from blocking, where the platform has them.
- * The `lstat` first gives the clear message everywhere.
+ * The file is opened first and every check runs on the open descriptor, never on the path, so it
+ * cannot be swapped between a check and the read. `O_NOFOLLOW` makes the open itself refuse a
+ * symlink and `O_NONBLOCK` keeps a named pipe from waiting for a writer, where the platform has
+ * them. Where it has no `O_NOFOLLOW` (Windows) the opened file is compared with the path's own
+ * entry afterwards, and the read still goes through the descriptor.
  */
 export function readRegularFileIfPresent(path: string): string | null {
-  let linkStat;
-  try {
-    linkStat = lstatSync(path);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw new Error("could not be read", { cause: err });
-  }
-  if (linkStat.isSymbolicLink()) throw new Error("is a symlink, not read");
-  // Before the open: opening a named pipe for reading waits for a writer and would hang the run.
-  if (!linkStat.isFile()) throw new Error("is not a regular file");
   let fd: number;
   try {
     fd = openSync(
@@ -34,6 +25,7 @@ export function readRegularFileIfPresent(path: string): string | null {
     );
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return null;
     if (code === "ELOOP") throw new Error("is a symlink, not read", { cause: err });
     throw new Error("could not be read", { cause: err });
   }
@@ -41,12 +33,19 @@ export function readRegularFileIfPresent(path: string): string | null {
     const stat = fstatSync(fd);
     if (!stat.isFile()) throw new Error("is not a regular file");
     if (stat.size > MAX_BYTES) throw new Error("is too large to read");
-    if (stat.ino !== linkStat.ino || stat.dev !== linkStat.dev)
-      throw new Error("changed while it was read");
+    if (constants.O_NOFOLLOW === undefined) rejectLink(path, stat);
     return readFileSync(fd, "utf-8");
   } finally {
     closeSync(fd);
   }
+}
+
+/** Without `O_NOFOLLOW`: refuse when the path is a link or no longer names the file that was opened. */
+function rejectLink(path: string, opened: { ino: number; dev: number }): void {
+  const entry = lstatSync(path);
+  if (entry.isSymbolicLink()) throw new Error("is a symlink, not read");
+  if (entry.ino !== opened.ino || entry.dev !== opened.dev)
+    throw new Error("changed while it was read");
 }
 
 /** True when something (file, symlink or folder) exists at `path`. Reads no content. */
