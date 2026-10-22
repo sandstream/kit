@@ -46,6 +46,8 @@ const KIT_FILE = ".kit.toml";
 // order invalidates the cached prefix for every agent that loads this server.
 // Register below in exactly this order; `contracts/public-surface.json` stores
 // `mcpTools` alphabetically and is a SET, so it is not the place order is pinned.
+// The second guard (KIT_MCP_TOOLS vs COMMAND_REGISTRY) stays a set comparison on
+// purpose: how the CLI lists verbs is a different question from wire order.
 export const KIT_MCP_TOOLS: readonly string[] = [
   "kit_check",
   "kit_review",
