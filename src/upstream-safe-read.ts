@@ -11,8 +11,9 @@ const MAX_BYTES = 8 * 1024 * 1024;
 /**
  * The file's text, or null when it does not exist. Throws a fixed-message error otherwise.
  * The checks run on the open descriptor, not on the path, so the file cannot be swapped for a
- * symlink between the check and the read. `O_NOFOLLOW` makes the open itself refuse a symlink
- * where the platform has it, and the folder-level `lstat` gives the clear message everywhere.
+ * symlink between the check and the read. `O_NOFOLLOW` makes the open itself refuse a symlink and
+ * `O_NONBLOCK` keeps a pipe swapped in during the race from blocking, where the platform has them.
+ * The `lstat` first gives the clear message everywhere.
  */
 export function readRegularFileIfPresent(path: string): string | null {
   let linkStat;
@@ -23,9 +24,14 @@ export function readRegularFileIfPresent(path: string): string | null {
     throw new Error("could not be read", { cause: err });
   }
   if (linkStat.isSymbolicLink()) throw new Error("is a symlink, not read");
+  // Before the open: opening a named pipe for reading waits for a writer and would hang the run.
+  if (!linkStat.isFile()) throw new Error("is not a regular file");
   let fd: number;
   try {
-    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    fd = openSync(
+      path,
+      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+    );
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ELOOP") throw new Error("is a symlink, not read", { cause: err });

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -46,6 +47,16 @@ describe("readRegularFileIfPresent", () => {
       mkdirSync(join(dir, "sub"));
       assert.throws(() => readRegularFileIfPresent(join(dir, "sub")), /not a regular file/);
     }));
+
+  it(
+    "refuses a named pipe at once instead of waiting for a writer",
+    { skip: process.platform === "win32", timeout: 5_000 },
+    () =>
+      inDir((dir) => {
+        execFileSync("mkfifo", [join(dir, "pipe")]);
+        assert.throws(() => readRegularFileIfPresent(join(dir, "pipe")), /not a regular file/);
+      }),
+  );
 
   it("refuses a file above the size cap", () =>
     inDir((dir) => {
