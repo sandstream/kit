@@ -80,13 +80,17 @@ export function compareTrees(installedDir: string, referenceDir: string): string
  * Runs in a scratch directory with an empty npm config, so no repo setting redirects the download.
  */
 export async function verifyAgainstRegistry(
+  name: string,
   installedDir: string,
   version: string,
 ): Promise<{ ok: boolean; detail: string }> {
-  if (!PLAIN_SEMVER.test(version)) {
+  if (
+    !/^(?:@playwright\/test|playwright|playwright-core)$/.test(name) ||
+    !PLAIN_SEMVER.test(version)
+  ) {
     return {
       ok: false,
-      detail: "the installed version is not a plain semver, so it cannot be checked",
+      detail: "the package name or version is not one kit can check (plain semver only)",
     };
   }
   const scratch = mkdtempSync(join(tmpdir(), "kit-pkg-verify-"));
@@ -97,7 +101,7 @@ export async function verifyAgainstRegistry(
       "npm",
       [
         "pack",
-        `@playwright/test@${version}`,
+        `${name}@${version}`,
         `--registry=${PUBLIC_REGISTRY}`,
         `--userconfig=${userconfig}`,
         "--ignore-scripts",

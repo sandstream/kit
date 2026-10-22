@@ -87,7 +87,7 @@ Kit triages whatever `@playwright/test` version will run: the pin for a fresh in
 installed version for a project that declares its own. Before it runs the installed cli, kit
 downloads the tarball for that version from the public npm registry (in a scratch directory,
 with an empty npm config, so no repo setting redirects it) and compares every file with the
-installed package. A modified, missing or extra file stops the Chromium download. This covers
+installed package, for `@playwright/test` and for `playwright` and `playwright-core`, the packages whose code the cli runs. A modified, missing or extra file stops the Chromium download. This covers
 every package manager and the declared-version case.
 
 Kit refuses to install when the repo could run its own code during install: `.pnpmfile.cjs`, a

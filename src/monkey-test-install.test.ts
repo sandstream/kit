@@ -30,12 +30,15 @@ function fakeDeps(
     noCli?: boolean;
     cliVersion?: string;
     verifyOk?: boolean;
+    badPackage?: string;
   } = {},
 ): {
   deps: InstallDeps;
   calls: string[];
+  verified: string[];
 } {
   const calls: string[] = [];
+  const verified: string[] = [];
   const deps: InstallDeps = {
     platform: "linux",
     playwrightCli: () =>
@@ -44,9 +47,19 @@ function fakeDeps(
         : {
             path: "/app/node_modules/@playwright/test/cli.js",
             version: opts.cliVersion ?? PLAYWRIGHT_PIN,
+            packages: [
+              {
+                name: "@playwright/test",
+                dir: "/app/a",
+                version: opts.cliVersion ?? PLAYWRIGHT_PIN,
+              },
+              { name: "playwright", dir: "/app/b", version: PLAYWRIGHT_PIN },
+              { name: "playwright-core", dir: "/app/c", version: PLAYWRIGHT_PIN },
+            ],
           },
-    async verifyPackage() {
-      return opts.verifyOk === false
+    async verifyPackage(name) {
+      verified.push(name);
+      return opts.verifyOk === false || name === opts.badPackage
         ? { ok: false, detail: "modified: cli.js" }
         : { ok: true, detail: "match" };
     },
@@ -60,7 +73,7 @@ function fakeDeps(
       return { ok, output: ok ? "" : "boom" };
     },
   };
-  return { deps, calls };
+  return { deps, calls, verified };
 }
 
 function step(result: InstallResult, name: string): { status: string; detail: string } {
@@ -195,7 +208,7 @@ describe("installPlaywright package checks", () => {
     assert.equal(result.ok, false);
     assert.match(
       step(result, "browser").detail,
-      /Refused to run the installed cli: modified: cli\.js/,
+      /Refused to run the installed cli: @playwright\/test@1\.55\.0: modified: cli\.js/,
     );
     assert.ok(!calls.includes(CHROMIUM));
   });
@@ -208,5 +221,18 @@ describe("installPlaywright package checks", () => {
     assert.equal(result.ok, false);
     assert.match(step(result, "package").detail, /not a plain name@version/);
     assert.deepEqual(calls, []);
+  });
+
+  it("verifies all three packages whose code runs, and refuses on a bad dependency", async () => {
+    writePackage({ devDependencies: { "@playwright/test": "1.55.0" } });
+    const ok = fakeDeps();
+    await installPlaywright(dir, ok.deps);
+    assert.deepEqual(ok.verified, ["@playwright/test", "playwright", "playwright-core"]);
+
+    const bad = fakeDeps({ badPackage: "playwright-core" });
+    const result = await installPlaywright(dir, bad.deps);
+    assert.equal(result.ok, false);
+    assert.match(step(result, "browser").detail, /playwright-core@1\.55\.0: modified/);
+    assert.ok(!bad.calls.includes(CHROMIUM));
   });
 });

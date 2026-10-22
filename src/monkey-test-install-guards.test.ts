@@ -92,8 +92,17 @@ describe("version check before the registry download", () => {
   });
 
   it("refuses a non-semver version without touching the network", async () => {
-    const result = await verifyAgainstRegistry(dir, "git+https://example.test/evil.git");
+    const result = await verifyAgainstRegistry(
+      "playwright",
+      dir,
+      "git+https://example.test/evil.git",
+    );
     assert.equal(result.ok, false);
-    assert.match(result.detail, /not a plain semver/);
+    assert.match(result.detail, /not one kit can check/);
+  });
+
+  it("refuses a package name outside the three kit checks", async () => {
+    const result = await verifyAgainstRegistry("evil-package", dir, "1.0.0");
+    assert.equal(result.ok, false);
   });
 });

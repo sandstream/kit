@@ -27,12 +27,29 @@ export interface InstallResult {
   steps: InstallStep[];
 }
 
+export interface InstalledPackage {
+  name: string;
+  dir: string;
+  version: string;
+}
+
+/** The cli plus every package whose code it runs: @playwright/test, playwright, playwright-core. */
+export interface InstalledCli {
+  path: string;
+  version: string;
+  packages: InstalledPackage[];
+}
+
 export interface InstallDeps {
   platform: NodeJS.Platform;
   /** The installed @playwright/test cli and its version, or null when it is not installed. */
-  playwrightCli(root: string): { path: string; version: string } | null;
+  playwrightCli(root: string): InstalledCli | null;
   /** Compare the installed package directory with the public registry tarball for `version`. */
-  verifyPackage(dir: string, version: string): Promise<{ ok: boolean; detail: string }>;
+  verifyPackage(
+    name: string,
+    dir: string,
+    version: string,
+  ): Promise<{ ok: boolean; detail: string }>;
   triage(target: string): Promise<{ passed: boolean; output: string }>;
   run(command: string, args: string[], cwd: string): Promise<{ ok: boolean; output: string }>;
 }
@@ -51,8 +68,16 @@ export const defaultInstallDeps: InstallDeps = {
   playwrightCli(root) {
     try {
       const path = createRequire(join(root, "package.json")).resolve("@playwright/test/cli");
-      const manifest = JSON.parse(readFileSync(join(dirname(path), "package.json"), "utf8"));
-      return typeof manifest.version === "string" ? { path, version: manifest.version } : null;
+      const packages: InstalledPackage[] = [];
+      let from = path;
+      for (const name of ["@playwright/test", "playwright", "playwright-core"]) {
+        const manifestPath = createRequire(from).resolve(`${name}/package.json`);
+        const version = JSON.parse(readFileSync(manifestPath, "utf8")).version;
+        if (typeof version !== "string") return null;
+        packages.push({ name, dir: dirname(manifestPath), version });
+        from = manifestPath;
+      }
+      return { path, version: packages[0].version, packages };
     } catch {
       return null;
     }
@@ -100,13 +125,15 @@ async function fetchBrowser(
       };
     }
   }
-  const verified = await deps.verifyPackage(dirname(cli.path), cli.version);
-  if (!verified.ok) {
-    return {
-      name: "browser",
-      status: "fail",
-      detail: `Refused to run the installed cli: ${verified.detail}`,
-    };
+  for (const pkg of cli.packages) {
+    const verified = await deps.verifyPackage(pkg.name, pkg.dir, pkg.version);
+    if (!verified.ok) {
+      return {
+        name: "browser",
+        status: "fail",
+        detail: `Refused to run the installed cli: ${pkg.name}@${pkg.version}: ${verified.detail}`,
+      };
+    }
   }
   const fetched = await deps.run("node", [cli.path, "install", "chromium"], root);
   return {
