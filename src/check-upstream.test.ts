@@ -29,6 +29,7 @@ function row(over: Partial<UpstreamRow>): UpstreamRow {
 const report = (rows: UpstreamRow[], extra: Partial<UpstreamReport> = {}): UpstreamReport => ({
   status: "ok",
   rows,
+  runtimes: [],
   skippedInputs: [],
   ...extra,
 });
@@ -126,10 +127,10 @@ describe("the upstream category is opt-in", () => {
     const run = await runCheckGate({ cwd: dir, config: {}, categories: ["upstream"] });
     assert.deepEqual(run.scope, ["upstream"]);
     assert.equal(run.ok, true);
-    assert.equal(run.upstream.length, 1);
-    assert.equal(run.upstream[0].didNotRun, true);
+    assert.equal(run.upstream.length, 2, "one package row and one runtime row");
+    assert.ok(run.upstream.every((u) => u.didNotRun === true));
     const json = checkRunToJsonChecks(run).filter((c) => c.category === "upstream");
-    assert.equal(json.length, 1);
-    assert.match(json[0].detail, /skipped/);
+    assert.equal(json.length, 2);
+    assert.ok(json.every((j) => /skipped/.test(j.detail)));
   });
 });

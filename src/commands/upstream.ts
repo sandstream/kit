@@ -2,6 +2,7 @@
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
 import type { UpstreamReport, UpstreamRow } from "../upstream-report.js";
+import type { RuntimeRow } from "../upstream-runtime-report.js";
 
 function mark(verdict: UpstreamRow["verdict"]): string {
   switch (verdict) {
@@ -40,6 +41,27 @@ function describeRow(row: UpstreamRow): string[] {
   return lines;
 }
 
+function describeRuntime(row: RuntimeRow): string[] {
+  const mark =
+    row.verdict === "current"
+      ? `${c.green}✓${c.reset}`
+      : row.verdict === "unknown" || row.verdict === "skipped"
+        ? `${c.dim}?${c.reset}`
+        : row.verdict === "patch available"
+          ? `${c.yellow}!${c.reset}`
+          : `${c.red}✗${c.reset}`;
+  const versions = `${row.installed ?? "?"} -> ${row.latest ?? "?"}`;
+  const declared = row.declared
+    ? `  ${c.dim}declared ${row.declared} (${row.declaredFrom})${c.reset}`
+    : "";
+  const lines = [
+    `  ${mark} ${c.bold}${row.label}${c.reset}  ${versions}  ${c.dim}${row.verdict}${c.reset}${declared}`,
+  ];
+  for (const line of row.evidence) lines.push(`      ${c.dim}${line}${c.reset}`);
+  if (row.detail) lines.push(`      ${c.dim}${row.detail}${c.reset}`);
+  return lines;
+}
+
 function renderText(report: UpstreamReport): void {
   console.log(
     `${c.bold}kit upstream${c.reset}  ${c.dim}latest versions and release notes of the services in use${c.reset}`,
@@ -49,9 +71,16 @@ function renderText(report: UpstreamReport): void {
       `  skipped (${report.reason ?? "no network"}): no version was looked up, nothing is reported as current`,
     );
   }
-  if (report.rows.length === 0)
-    console.log("  no cataloged service found in .kit.toml or any package.json");
+  if (report.rows.length === 0 && report.runtimes.length === 0) {
+    console.log("  no cataloged service or runtime found in .kit.toml or the project files");
+  }
   for (const row of report.rows) for (const line of describeRow(row)) console.log(line);
+  if (report.runtimes.length > 0) {
+    console.log(
+      `${c.cyan}Runtimes${c.reset}  ${c.dim}installed interpreter against its latest patch${c.reset}`,
+    );
+    for (const row of report.runtimes) for (const line of describeRuntime(row)) console.log(line);
+  }
   for (const s of report.skippedInputs) {
     console.log(`  ${c.yellow}!${c.reset} could not read ${s.path}: ${s.reason}`);
   }

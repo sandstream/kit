@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   createGhReleaseFetcher,
+  createGhTagFetcher,
   createNpmLatestFetcher,
   lookupUpstream,
   parseReleases,
@@ -20,6 +21,9 @@ function fakeFetcher(calls: string[] = []): UpstreamFetcher {
     async npmLatest(name) {
       calls.push(`npm:${name}`);
       return name === "convex" ? "1.46.0" : "5.0.0";
+    },
+    async githubTags() {
+      return [];
     },
     async githubReleases(repo) {
       calls.push(`gh:${repo}`);
@@ -97,6 +101,9 @@ describe("lookupUpstream", () => {
       async githubReleases() {
         throw new Error("gh: not logged in");
       },
+      async githubTags() {
+        throw new Error("gh: not logged in");
+      },
     };
     const got = await lookupUpstream(SERVICE, { fetcher: failing, posture: allowed, cacheDir });
     assert.equal(got.status, "unknown");
@@ -148,6 +155,9 @@ describe("lookupUpstream cache and failures", () => {
         return "1.0.0";
       },
       async githubReleases() {
+        return [];
+      },
+      async githubTags() {
         return [];
       },
     };
@@ -312,5 +322,74 @@ describe("terminal control characters in remote text", () => {
     assert.ok(!text.includes("\\u001b") && !text.includes("\\u0007") && !text.includes("\\u0085"));
     assert.equal(out[0].body.split("\n").length, 2);
     assert.equal(out[0].tag, "v1.0.0[2J");
+  });
+});
+
+describe("GitHub tags and the release window", () => {
+  it("createGhTagFetcher lists tag names through gh api", async () => {
+    let args: string[] = [];
+    const fetcher = createGhTagFetcher(async (_cmd, a) => {
+      args = a;
+      return JSON.stringify([{ name: "v3.15.1" }, { name: "v3.15.0" }, { nope: 1 }]);
+    });
+    assert.deepEqual(await fetcher("python/cpython"), ["v3.15.1", "v3.15.0"]);
+    assert.deepEqual(args, ["api", "repos/python/cpython/tags?per_page=100"]);
+  });
+
+  it("createGhTagFetcher rejects output that is not JSON", async () => {
+    await assert.rejects(createGhTagFetcher(async () => "<html>")("o/r"), /JSON/);
+  });
+
+  it("createGhReleaseFetcher asks for the wider window when one is given", async () => {
+    let args: string[] = [];
+    const fetcher = createGhReleaseFetcher(async (_cmd, a) => {
+      args = a;
+      return "[]";
+    });
+    await fetcher("nodejs/node", 30);
+    assert.deepEqual(args, ["api", "repos/nodejs/node/releases?per_page=30"]);
+  });
+
+  it("lookupUpstream returns tags and passes the window to the fetcher", async () => {
+    const seen: (number | undefined)[] = [];
+    const fetcher: UpstreamFetcher = {
+      ...fakeFetcher(),
+      async githubReleases(_repo, perPage) {
+        seen.push(perPage);
+        return [];
+      },
+      async githubTags() {
+        return ["v3.15.1"];
+      },
+    };
+    const got = await lookupUpstream(
+      { npm: [], github: ["nodejs/node"], githubTags: ["python/cpython"], releaseWindow: 30 },
+      { fetcher, posture: allowed, cacheDir },
+    );
+    assert.deepEqual(seen, [30]);
+    assert.equal(got.status, "ok");
+    assert.deepEqual(got.tags[0].ok && got.tags[0].tags, ["v3.15.1"]);
+  });
+
+  it("does not mix a wide release window with the default one in the cache", async () => {
+    const seen: (number | undefined)[] = [];
+    const fetcher: UpstreamFetcher = {
+      ...fakeFetcher(),
+      async githubReleases(_repo, perPage) {
+        seen.push(perPage);
+        return [];
+      },
+    };
+    const deps = { fetcher, posture: allowed, cacheDir };
+    await lookupUpstream({ npm: [], github: ["o/r"] }, deps);
+    await lookupUpstream({ npm: [], github: ["o/r"], releaseWindow: 30 }, deps);
+    assert.deepEqual(seen, [undefined, 30]);
+  });
+
+  it("strips terminal control characters from tag names", async () => {
+    const fetcher = createGhTagFetcher(async () =>
+      JSON.stringify([{ name: `v1.0.0${String.fromCharCode(27)}[2J` }]),
+    );
+    assert.deepEqual(await fetcher("o/r"), ["v1.0.0[2J"]);
   });
 });

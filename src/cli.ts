@@ -597,7 +597,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   upstream: {
     handler: cmdUpstream,
     stability: "experimental",
-    help: "Latest versions and release notes of the services this project uses (npm + GitHub releases): what upgrade is due (kit upstream check [--json] [--enforce]; skipped in air gap)",
+    help: "Latest versions and release notes of the services and the Node, PHP and Python runtimes this project uses (npm + GitHub): what upgrade or security release is due (kit upstream check [--json] [--enforce]; skipped in air gap)",
   },
   sbom: {
     handler: cmdSbom,

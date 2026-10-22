@@ -54,6 +54,7 @@ function okLookup(latest: string, body = ""): () => Promise<UpstreamLookup> {
           : [],
       },
     ],
+    tags: [],
   });
 }
 
@@ -61,6 +62,7 @@ describe("buildUpstreamReport", () => {
   it("reports one minor behind with the deprecation line from the notes", () =>
     inProject(PROJECT, async (dir) => {
       const report = await buildUpstreamReport(dir, {
+        runtimes: false,
         lookup: okLookup("1.46.0", "- Deprecated the `foo` option"),
       });
       assert.equal(report.status, "ok");
@@ -80,7 +82,10 @@ describe("buildUpstreamReport", () => {
 
   it("says so when the service publishes no GitHub release notes", () =>
     inProject(PROJECT, async (dir) => {
-      const report = await buildUpstreamReport(dir, { lookup: okLookup("1.46.0") });
+      const report = await buildUpstreamReport(dir, {
+        lookup: okLookup("1.46.0"),
+        runtimes: false,
+      });
       assert.equal(report.rows[0].verdict, "upgrade available");
       assert.equal(report.rows[0].notesAvailable, false);
     }));
@@ -89,14 +94,24 @@ describe("buildUpstreamReport", () => {
 describe("buildUpstreamReport posture and edge cases", () => {
   it("is current when installed equals latest", () =>
     inProject(PROJECT, async (dir) => {
-      const report = await buildUpstreamReport(dir, { lookup: okLookup("1.45.2") });
+      const report = await buildUpstreamReport(dir, {
+        lookup: okLookup("1.45.2"),
+        runtimes: false,
+      });
       assert.equal(report.rows[0].verdict, "current");
     }));
 
   it("marks every row skipped and calls no fetch in air gap", () =>
     inProject(PROJECT, async (dir) => {
       const report = await buildUpstreamReport(dir, {
-        lookup: async () => ({ status: "skipped", reason: "air gap", npm: [], github: [] }),
+        runtimes: false,
+        lookup: async () => ({
+          status: "skipped",
+          reason: "air gap",
+          npm: [],
+          github: [],
+          tags: [],
+        }),
       });
       assert.equal(report.status, "skipped");
       assert.equal(report.reason, "air gap");
@@ -106,10 +121,12 @@ describe("buildUpstreamReport posture and edge cases", () => {
   it("reports unknown, not current, when the registry cannot be reached", () =>
     inProject(PROJECT, async (dir) => {
       const report = await buildUpstreamReport(dir, {
+        runtimes: false,
         lookup: async () => ({
           status: "unknown",
           npm: [{ name: "convex", ok: false, error: "fetch failed" }],
           github: [],
+          tags: [],
         }),
       });
       assert.equal(report.rows[0].verdict, "unknown");
@@ -118,12 +135,14 @@ describe("buildUpstreamReport posture and edge cases", () => {
 
   it("lists a service declared only in .kit.toml as unknown, with the reason", () =>
     inProject({ ".kit.toml": '[services.stripe]\ncheck = "x"\n' }, async (dir) => {
-      const report = await buildUpstreamReport(dir, { lookup: okLookup("1.0.0") });
+      const report = await buildUpstreamReport(dir, { lookup: okLookup("1.0.0"), runtimes: false });
       const row = report.rows.find((r) => r.id === "stripe");
       assert.equal(row?.verdict, "unknown");
       assert.match(row?.detail ?? "", /no package/);
     }));
+});
 
+describe("buildUpstreamReport configuration and empty projects", () => {
   it("applies an [upstream] override from .kit.toml", () =>
     inProject(
       {
@@ -132,10 +151,12 @@ describe("buildUpstreamReport posture and edge cases", () => {
       },
       async (dir) => {
         const report = await buildUpstreamReport(dir, {
+          runtimes: false,
           lookup: async () => ({
             status: "ok",
             npm: [{ name: "acme-sdk", ok: true, latest: "3.0.0" }],
             github: [],
+            tags: [],
           }),
         });
         assert.equal(report.rows[0].id, "acme");
@@ -146,7 +167,7 @@ describe("buildUpstreamReport posture and edge cases", () => {
   it("throws a clear error for an invalid [upstream] table", () =>
     inProject({ ".kit.toml": '[upstream.acme]\nnpm = "acme-sdk"\n' }, async (dir) => {
       await assert.rejects(
-        buildUpstreamReport(dir, { lookup: okLookup("1.0.0") }),
+        buildUpstreamReport(dir, { lookup: okLookup("1.0.0"), runtimes: false }),
         /\[upstream\.acme\]/,
       );
     }));
@@ -155,7 +176,10 @@ describe("buildUpstreamReport posture and edge cases", () => {
     inProject(
       { "package.json": JSON.stringify({ dependencies: { lodash: "^4" } }) },
       async (dir) => {
-        const report = await buildUpstreamReport(dir, { lookup: okLookup("1.0.0") });
+        const report = await buildUpstreamReport(dir, {
+          lookup: okLookup("1.0.0"),
+          runtimes: false,
+        });
         assert.deepEqual(report.rows, []);
         assert.equal(report.status, "ok");
       },
@@ -188,10 +212,12 @@ describe("terminal control characters in the report", () => {
   it("strips them from the detail text that comes from a failed fetch", () =>
     inProject(PROJECT, async (dir) => {
       const report = await buildUpstreamReport(dir, {
+        runtimes: false,
         lookup: async () => ({
           status: "unknown",
           npm: [{ name: "convex", ok: false, error: `bad\u001b[2Jnews` }],
           github: [],
+          tags: [],
         }),
       });
       assert.ok(!(report.rows[0].detail ?? "").includes("\u001b"));

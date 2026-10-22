@@ -18,6 +18,7 @@ const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 const FETCH_TIMEOUT_MS = 5_000;
 const GH_TIMEOUT_MS = 15_000;
 const RELEASES_PER_REPO = 10;
+const TAGS_PER_REPO = 100;
 const MAX_BODY_CHARS = 20_000;
 const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000;
 const CACHE_FILE = "upstream-cache.json";
@@ -35,7 +36,9 @@ export interface ReleaseInfo {
 
 export interface UpstreamFetcher {
   npmLatest(name: string): Promise<string>;
-  githubReleases(repo: string): Promise<ReleaseInfo[]>;
+  githubReleases(repo: string, perPage?: number): Promise<ReleaseInfo[]>;
+  /** Tag names, for projects that publish no GitHub releases (cpython). */
+  githubTags(repo: string): Promise<string[]>;
 }
 
 export interface UpstreamPosture {
@@ -127,9 +130,9 @@ const runGh: GhRun = async (command, args) => {
 
 export function createGhReleaseFetcher(
   run: GhRun = runGh,
-): (repo: string) => Promise<ReleaseInfo[]> {
-  return async (repo) => {
-    const out = await run("gh", ["api", `repos/${repo}/releases?per_page=${RELEASES_PER_REPO}`]);
+): (repo: string, perPage?: number) => Promise<ReleaseInfo[]> {
+  return async (repo, perPage = RELEASES_PER_REPO) => {
+    const out = await run("gh", ["api", `repos/${repo}/releases?per_page=${perPage}`]);
     let payload: unknown;
     try {
       payload = JSON.parse(out);
@@ -140,10 +143,29 @@ export function createGhReleaseFetcher(
   };
 }
 
+export function createGhTagFetcher(run: GhRun = runGh): (repo: string) => Promise<string[]> {
+  return async (repo) => {
+    const out = await run("gh", ["api", `repos/${repo}/tags?per_page=${TAGS_PER_REPO}`]);
+    let payload: unknown;
+    try {
+      payload = JSON.parse(out);
+    } catch {
+      throw new Error(`gh gave output that is not JSON for ${repo}`);
+    }
+    if (!Array.isArray(payload)) return [];
+    return payload.flatMap((t: unknown) => {
+      const name = (t as { name?: unknown } | null)?.name;
+      return typeof name === "string" ? [stripControl(name)] : [];
+    });
+  };
+}
+
 export function createDefaultFetcher(): UpstreamFetcher {
-  const npmLatest = createNpmLatestFetcher();
-  const githubReleases = createGhReleaseFetcher();
-  return { npmLatest, githubReleases };
+  return {
+    npmLatest: createNpmLatestFetcher(),
+    githubReleases: createGhReleaseFetcher(),
+    githubTags: createGhTagFetcher(),
+  };
 }
 
 export type SourceResult<T> =
@@ -156,6 +178,7 @@ export interface UpstreamLookup {
   reason?: string;
   npm: SourceResult<{ latest: string }>[];
   github: SourceResult<{ releases: ReleaseInfo[] }>[];
+  tags: SourceResult<{ tags: string[] }>[];
 }
 
 export interface LookupDeps {
@@ -168,7 +191,10 @@ export interface LookupDeps {
 
 interface CacheFile {
   version: 1;
-  entries: Record<string, { at: number; latest?: string; releases?: ReleaseInfo[] }>;
+  entries: Record<
+    string,
+    { at: number; latest?: string; releases?: ReleaseInfo[]; tags?: string[] }
+  >;
 }
 
 async function readCache(dir: string): Promise<CacheFile> {
@@ -195,13 +221,24 @@ function message(err: unknown): string {
   return stripControl(err instanceof Error ? err.message : String(err));
 }
 
+export interface UpstreamService {
+  npm: readonly string[];
+  github: readonly string[];
+  /** Repos whose tag names are read because they publish no GitHub releases. */
+  githubTags?: readonly string[];
+  /** How many releases to read per repo (default 10). A wider window reaches an older release line. */
+  releaseWindow?: number;
+}
+
+type Entry = Omit<CacheFile["entries"][string], "at">;
+
 export async function lookupUpstream(
-  service: { npm: readonly string[]; github: readonly string[] },
+  service: UpstreamService,
   deps: LookupDeps = {},
 ): Promise<UpstreamLookup> {
   const posture = deps.posture ?? (await upstreamPosture());
   if (!posture.allowed) {
-    return { status: "skipped", reason: posture.reason, npm: [], github: [] };
+    return { status: "skipped", reason: posture.reason, npm: [], github: [], tags: [] };
   }
   const fetcher = deps.fetcher ?? createDefaultFetcher();
   const dir = deps.cacheDir ?? join(homedir(), ".kit");
@@ -210,41 +247,67 @@ export async function lookupUpstream(
   const cache = await readCache(dir);
   let dirty = false;
 
-  const fresh = (key: string) => {
+  /** One source: a fresh cache hit, else a fetch. A failure is reported and never cached. */
+  const source = async <T>(
+    key: string,
+    name: string,
+    pick: (e: Entry) => T | undefined,
+    fetchIt: () => Promise<T>,
+    store: (value: T) => Entry,
+  ): Promise<SourceResult<{ value: T }>> => {
     const hit = cache.entries[key];
-    return hit && now - hit.at >= 0 && now - hit.at < ttl ? hit : undefined;
+    const cached = hit && now - hit.at >= 0 && now - hit.at < ttl ? pick(hit) : undefined;
+    if (cached !== undefined) return { name, ok: true, value: cached };
+    try {
+      const value = await fetchIt();
+      cache.entries[key] = { at: now, ...store(value) };
+      dirty = true;
+      return { name, ok: true, value };
+    } catch (err) {
+      return { name, ok: false, error: message(err) };
+    }
   };
 
+  const window = service.releaseWindow;
   const npm = await Promise.all(
     service.npm.map(async (name): Promise<SourceResult<{ latest: string }>> => {
-      const hit = fresh(`npm:${name}`);
-      if (hit?.latest) return { name, ok: true, latest: hit.latest };
-      try {
-        const latest = await fetcher.npmLatest(name);
-        cache.entries[`npm:${name}`] = { at: now, latest };
-        dirty = true;
-        return { name, ok: true, latest };
-      } catch (err) {
-        return { name, ok: false, error: message(err) };
-      }
+      const r = await source(
+        `npm:${name}`,
+        name,
+        (e) => e.latest,
+        () => fetcher.npmLatest(name),
+        (latest) => ({ latest }),
+      );
+      return r.ok ? { name, ok: true, latest: r.value } : r;
     }),
   );
   const github = await Promise.all(
     service.github.map(async (name): Promise<SourceResult<{ releases: ReleaseInfo[] }>> => {
-      const hit = fresh(`gh:${name}`);
-      if (hit?.releases) return { name, ok: true, releases: hit.releases };
-      try {
-        const releases = await fetcher.githubReleases(name);
-        cache.entries[`gh:${name}`] = { at: now, releases };
-        dirty = true;
-        return { name, ok: true, releases };
-      } catch (err) {
-        return { name, ok: false, error: message(err) };
-      }
+      const key = window === undefined ? `gh:${name}` : `gh:${name}:${window}`;
+      const r = await source(
+        key,
+        name,
+        (e) => e.releases,
+        () => fetcher.githubReleases(name, window),
+        (releases) => ({ releases }),
+      );
+      return r.ok ? { name, ok: true, releases: r.value } : r;
+    }),
+  );
+  const tags = await Promise.all(
+    (service.githubTags ?? []).map(async (name): Promise<SourceResult<{ tags: string[] }>> => {
+      const r = await source(
+        `tags:${name}`,
+        name,
+        (e) => e.tags,
+        () => fetcher.githubTags(name),
+        (list) => ({ tags: list }),
+      );
+      return r.ok ? { name, ok: true, tags: r.value } : r;
     }),
   );
 
   if (dirty) await writeCache(dir, cache);
-  const anyOk = [...npm, ...github].some((r) => r.ok);
-  return { status: anyOk ? "ok" : "unknown", npm, github };
+  const anyOk = [...npm, ...github, ...tags].some((r) => r.ok);
+  return { status: anyOk ? "ok" : "unknown", npm, github, tags };
 }

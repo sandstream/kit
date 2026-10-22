@@ -10,7 +10,14 @@
   `upgrade available`, `upgrade recommended (deprecation)` or `major, read notes`. The notes
   check is a keyword match (`breaking`, `deprecat`, `migrat`, `removed`) and does not prove that
   code must change. It is skipped in air-gap and read-only mode, a fetch that fails is
-  `unknown` and never `current`, and `--enforce` exits 1 only for a major or a deprecation.
+  `unknown` and never `current`, and `--enforce` exits 1 only for a major, a deprecation or a
+  runtime security release. The same command now checks the interpreters: Node.js, PHP and
+  Python are read from `.nvmrc`, `.node-version`, `.tool-versions`, `mise.toml`, `package.json`,
+  `composer.json` and `pyproject.toml`, the installed version comes from running the binary in
+  the project folder, and the latest patch of that release line comes from the GitHub releases
+  of `nodejs/node` and `php/php-src` (CVE and "security release" lines are quoted) or the tags of
+  `python/cpython`, which publishes no releases and so carries no notes. A line that is no
+  longer in the fetched window is reported as `unknown`, not as safe.
   `kit check --category upstream` runs the same check as an opt-in, informational dimension that
   never changes the verdict. Release text and repository files are treated as untrusted: kit
   refuses symlinked lockfiles, never quotes parser errors, and strips terminal control

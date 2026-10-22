@@ -4833,7 +4833,7 @@
     },
     "upstream": {
       "kind": "command",
-      "summary": "Latest versions and release notes of the services this project uses (npm + GitHub releases): what upgrade is due (kit upstream check [--json] [--enforce]; skipped in air gap)",
+      "summary": "Latest versions and release notes of the services and the Node, PHP and Python runtimes this project uses (npm + GitHub): what upgrade or security release is due (kit upstream check [--json] [--enforce]; skipped in air gap)",
       "x-kit-accepted-flags": ["--enforce","--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",

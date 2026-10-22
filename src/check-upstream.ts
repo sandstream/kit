@@ -5,6 +5,7 @@
  * offline and stable.
  */
 import { c } from "./utils/colors.js";
+import type { RuntimeRow } from "./upstream-runtime-report.js";
 import type { UpstreamReport, UpstreamRow } from "./upstream-report.js";
 
 export interface UpstreamCheckRow {
@@ -22,6 +23,22 @@ function describe(row: UpstreamRow): string {
   return `${versions}${row.verdict}`;
 }
 
+function runtimeRow(row: RuntimeRow, report: UpstreamReport): UpstreamCheckRow {
+  const didNotRun = row.verdict === "unknown" || row.verdict === "skipped";
+  const versions =
+    row.installed || row.latest ? `${row.installed ?? "?"} -> ${row.latest ?? "?"}, ` : "";
+  const detail =
+    report.status === "skipped"
+      ? `skipped (${report.reason ?? "no network"})`
+      : `${versions}${row.verdict}`;
+  return {
+    name: `${row.label}: runtime`,
+    status: row.verdict === "current" ? "pass" : "warn",
+    detail,
+    ...(didNotRun ? { didNotRun: true as const } : {}),
+  };
+}
+
 export function upstreamRowsFromReport(report: UpstreamReport): UpstreamCheckRow[] {
   const rows: UpstreamCheckRow[] = report.rows.map((row) => {
     const didNotRun = row.verdict === "unknown" || row.verdict === "skipped";
@@ -33,6 +50,7 @@ export function upstreamRowsFromReport(report: UpstreamReport): UpstreamCheckRow
       ...(didNotRun ? { didNotRun: true as const } : {}),
     };
   });
+  rows.push(...report.runtimes.map((r) => runtimeRow(r, report)));
   for (const skipped of report.skippedInputs) {
     rows.push({
       name: "upstream input",
@@ -41,7 +59,7 @@ export function upstreamRowsFromReport(report: UpstreamReport): UpstreamCheckRow
       didNotRun: true,
     });
   }
-  if (report.rows.length === 0 && report.skippedInputs.length === 0) {
+  if (rows.length === 0) {
     rows.push({ name: "upstream", status: "pass", detail: "no cataloged service found" });
   }
   return rows;
