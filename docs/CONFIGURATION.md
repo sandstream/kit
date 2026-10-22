@@ -8,7 +8,7 @@ code in either direction.
 Everything below lives in `.kit.toml` at the project root. `kit config sections` prints the same
 list in the terminal, marking which ones this repo already declares.
 
-kit accepts **24 sections**.
+kit accepts **25 sections**.
 
 | Section | What it configures | Set up with |
 | --- | --- | --- |
@@ -34,6 +34,7 @@ kit accepts **24 sections**.
 | [`[supply_chain]`](#supply_chain) | Install-time triage settings — notably which package scopes count as internal. | `kit supply-chain` |
 | [`[tools]`](#tools) | Tool versions this project requires, provisioned through mise. | `kit install` |
 | [`[update]`](#update) | Whether kit surfaces a newer published version, and whether it may self-update. | `kit upgrade --self` |
+| [`[upstream]`](#upstream) | Adds or overrides the release sources kit upstream watches: npm packages and GitHub repos per service, or disables a built-in one. | `kit upstream check` |
 | [`[version]`](#version) | Schema version of this file, as a top-level integer. | `kit config migrate` |
 | [`[web]`](#web) | Web-search provider used by the features that need one. | [docs](PERFORMANCE_AND_DIAGNOSTICS.md) |
 
@@ -333,6 +334,20 @@ check = true
 ```
 
 Set up with `kit upgrade --self`.
+
+## upstream
+
+Adds or overrides the release sources kit upstream watches: npm packages and GitHub repos per service, or disables a built-in one.
+
+**What it buys.** A service kit does not know yet, or a fork with its own release feed, is watched without a code change.
+
+```toml
+[upstream.acme]
+npm = ["acme-sdk"]
+github = ["acme/acme-js"]
+```
+
+Set up with `kit upstream check`.
 
 ## version
 

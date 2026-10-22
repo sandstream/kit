@@ -175,6 +175,13 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
     example: "[decisions]\nrequire = true",
     command: "kit decisions",
   },
+  upstream: {
+    purpose:
+      "Adds or overrides the release sources kit upstream watches: npm packages and GitHub repos per service, or disables a built-in one.",
+    buys: "A service kit does not know yet, or a fork with its own release feed, is watched without a code change.",
+    example: '[upstream.acme]\nnpm = ["acme-sdk"]\ngithub = ["acme/acme-js"]',
+    command: "kit upstream check",
+  },
   update: {
     purpose: "Whether kit surfaces a newer published version, and whether it may self-update.",
     buys: "A pinned fleet stays pinned, and an operator who wants the banner keeps it — the choice is in the repo rather than in each shell.",
