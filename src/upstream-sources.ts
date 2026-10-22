@@ -104,7 +104,7 @@ export function createNpmLatestFetcher(
   );
   const fetchFn = options.fetchFn ?? fetch;
   return async (name) => {
-    const url = `${registry}/${name.replace("/", "%2F")}`;
+    const url = `${registry}/${name.replaceAll("/", "%2F")}`;
     const res = await fetchFn(url, {
       headers: { accept: "application/vnd.npm.install-v1+json" },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),

@@ -222,6 +222,19 @@ describe("createNpmLatestFetcher", () => {
     assert.match(seen[0].accept ?? "", /vnd\.npm\.install-v1\+json/);
   });
 
+  it("encodes every slash of a package name", async () => {
+    let url = "";
+    const fetcher = createNpmLatestFetcher({
+      registry: "https://registry.example",
+      fetchFn: async (u) => {
+        url = String(u);
+        return new Response(JSON.stringify({ "dist-tags": { latest: "1.0.0" } }), { status: 200 });
+      },
+    });
+    await fetcher("a/b/c");
+    assert.equal(url, "https://registry.example/a%2Fb%2Fc");
+  });
+
   it("rejects a non-200 answer", async () => {
     const fetcher = createNpmLatestFetcher({
       fetchFn: async () => new Response("nope", { status: 404 }),
