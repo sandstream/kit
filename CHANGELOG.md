@@ -16,7 +16,10 @@
   `composer.json` and `pyproject.toml`, the installed version comes from running the binary in
   the project folder, and the latest patch of that release line comes from the GitHub releases
   of `nodejs/node` and `php/php-src` (CVE and "security release" lines are quoted) or the tags of
-  `python/cpython`, which publishes no releases and so carries no notes. A line that is no
+  `python/cpython`, which publishes no releases and so carries no notes. The version probe runs the
+  interpreter from a neutral folder, never from the repository, so a repository you do not trust
+  cannot steer a version-manager shim; `KIT_UPSTREAM_PROJECT_PINS=1` runs it in the project so
+  its mise or asdf pin applies. A line that is no
   longer in the fetched window is reported as `unknown`, not as safe.
   `kit check --category upstream` runs the same check as an opt-in, informational dimension that
   never changes the verdict. Release text and repository files are treated as untrusted: kit

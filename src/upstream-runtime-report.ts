@@ -6,6 +6,7 @@
 import {
   decideRuntime,
   detectRuntimes,
+  projectPinsApplied,
   readInstalledVersion,
   RUNTIME_SPECS,
 } from "./upstream-runtimes.js";
@@ -44,9 +45,11 @@ function serviceFor(spec: RuntimeSpec): UpstreamService {
 function declaredNote(declared: string | null, installed: string | null): string | undefined {
   const wanted = /^\D*(\d+)/.exec(declared ?? "")?.[1];
   const have = installed?.split(".")[0];
-  return wanted && have && wanted !== have
-    ? `declared ${declared}, installed ${installed}`
-    : undefined;
+  if (!wanted || !have || wanted === have) return undefined;
+  const hint = projectPinsApplied()
+    ? ""
+    : " (the machine default; project pins are not applied, see KIT_UPSTREAM_PROJECT_PINS)";
+  return `declared ${declared}, installed ${installed}${hint}`;
 }
 
 function sourceError(lookup: UpstreamLookup): string | undefined {

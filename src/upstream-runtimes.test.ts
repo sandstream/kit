@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -7,6 +7,7 @@ import {
   decideRuntime,
   detectRuntimes,
   parseVersionOutput,
+  readInstalledVersion,
   resolveBinary,
   RUNTIME_SPECS,
 } from "./upstream-runtimes.js";
@@ -307,3 +308,43 @@ describe("resolveBinary (no planted interpreter from the repository)", () => {
     }
   });
 });
+
+describe(
+  "readInstalledVersion runs from a neutral folder",
+  { skip: process.platform === "win32" },
+  () => {
+    function withFakeNode(body: (project: string) => Promise<void>): Promise<void> {
+      const base = mkdtempSync(join(tmpdir(), "kit-probe-"));
+      const project = join(base, "project");
+      const bin = join(base, "bin");
+      mkdirSync(project);
+      mkdirSync(bin);
+      // Reports 22.1.1 from the project folder (a pin applied) and 22.9.9 from anywhere else.
+      writeFileSync(
+        join(bin, "node"),
+        `#!/bin/sh\nif [ "$(pwd -P)" = "${realpathSync(project)}" ]; then echo v22.1.1; else echo v22.9.9; fi\n`,
+        { mode: 0o755 },
+      );
+      const saved = { path: process.env.PATH, pins: process.env.KIT_UPSTREAM_PROJECT_PINS };
+      process.env.PATH = bin;
+      delete process.env.KIT_UPSTREAM_PROJECT_PINS;
+      return body(project).finally(() => {
+        process.env.PATH = saved.path;
+        if (saved.pins === undefined) delete process.env.KIT_UPSTREAM_PROJECT_PINS;
+        else process.env.KIT_UPSTREAM_PROJECT_PINS = saved.pins;
+        rmTemp(base);
+      });
+    }
+
+    it("does not run the interpreter inside the project by default", () =>
+      withFakeNode(async (project) => {
+        assert.equal(await readInstalledVersion(spec("node"), project), "22.9.9");
+      }));
+
+    it("applies the project's pins only when asked with KIT_UPSTREAM_PROJECT_PINS=1", () =>
+      withFakeNode(async (project) => {
+        process.env.KIT_UPSTREAM_PROJECT_PINS = "1";
+        assert.equal(await readInstalledVersion(spec("node"), project), "22.1.1");
+      }));
+  },
+);

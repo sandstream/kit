@@ -7,6 +7,7 @@
  */
 import { execFile } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { parse as parseToml } from "smol-toml";
@@ -344,14 +345,25 @@ export function resolveBinary(
   return null;
 }
 
+/** True when the project's own version-manager pins should apply to the version probe. */
+export function projectPinsApplied(): boolean {
+  return process.env.KIT_UPSTREAM_PROJECT_PINS === "1";
+}
+
 /**
- * The installed version, from running the binary in the project folder. The folder is the working
- * directory so a version manager's pin (a mise or asdf shim) applies; the binary itself is
- * resolved to an absolute path outside the project first.
+ * The installed version, from running the binary with `--version`. The binary is resolved to an
+ * absolute path outside the project first. It runs from a neutral folder, because a version-manager
+ * shim (mise, asdf, pyenv) reads the configuration of its working directory, and a repository that
+ * is not yours must not be that directory. `KIT_UPSTREAM_PROJECT_PINS=1` runs it in the project so
+ * the project's pin applies; do that only for a repository you trust.
  */
-export async function readInstalledVersion(spec: RuntimeSpec, cwd: string): Promise<string | null> {
+export async function readInstalledVersion(
+  spec: RuntimeSpec,
+  projectRoot: string,
+): Promise<string | null> {
+  const cwd = projectPinsApplied() ? projectRoot : tmpdir();
   for (const bin of spec.bins) {
-    const path = resolveBinary(bin, process.env.PATH, cwd);
+    const path = resolveBinary(bin, process.env.PATH, projectRoot);
     if (path === null) continue;
     try {
       const { stdout, stderr } = await execFileAsync(path, ["--version"], { cwd, timeout: 5_000 });
