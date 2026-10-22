@@ -310,7 +310,9 @@ describe("resolveBinary (no planted interpreter from the repository)", () => {
       writeFileSync(join(base, "node"), "x", { mode: 0o644 });
       assert.equal(resolveBinary("../node", base, join(base, "p")), null);
       assert.equal(resolveBinary("nothing", base, join(base, "p")), null);
-      assert.equal(resolveBinary("node", base, join(base, "p")), null);
+      // Windows has no execute permission bit, so a plain file there counts as runnable.
+      if (process.platform !== "win32")
+        assert.equal(resolveBinary("node", base, join(base, "p")), null);
     } finally {
       rmTemp(base);
     }

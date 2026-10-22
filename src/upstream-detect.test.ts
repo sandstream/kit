@@ -193,19 +193,24 @@ describe("untrusted repository content", () => {
     }
   });
 
-  it("skips a folder whose name carries terminal control characters", () => {
-    const dir = mkdtempSync(join(tmpdir(), "kit-upstream-safe-"));
-    try {
-      const evil = `web${String.fromCharCode(27)}[2J`;
-      mkdirSync(join(dir, evil), { recursive: true });
-      writeFileSync(join(dir, evil, "package.json"), "{}");
-      writeFileSync(join(dir, "package.json"), "{}");
-      assert.deepEqual(
-        loadUpstreamInputs(dir).manifests.map((m) => m.path),
-        ["package.json"],
-      );
-    } finally {
-      rmTemp(dir);
-    }
-  });
+  // Windows refuses a folder name with control characters, so there is nothing to skip there.
+  it(
+    "skips a folder whose name carries terminal control characters",
+    { skip: process.platform === "win32" },
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "kit-upstream-safe-"));
+      try {
+        const evil = `web${String.fromCharCode(27)}[2J`;
+        mkdirSync(join(dir, evil), { recursive: true });
+        writeFileSync(join(dir, evil, "package.json"), "{}");
+        writeFileSync(join(dir, "package.json"), "{}");
+        assert.deepEqual(
+          loadUpstreamInputs(dir).manifests.map((m) => m.path),
+          ["package.json"],
+        );
+      } finally {
+        rmTemp(dir);
+      }
+    },
+  );
 });

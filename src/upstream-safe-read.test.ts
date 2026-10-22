@@ -39,7 +39,10 @@ describe("readRegularFileIfPresent", () => {
   it("refuses a dangling symlink the same way", () =>
     inDir((dir) => {
       symlinkSync(join(dir, "nowhere"), join(dir, "dangling"));
-      assert.throws(() => readRegularFileIfPresent(join(dir, "dangling")), /is a symlink/);
+      // Windows opens the link's target, finds nothing there and reports the file as absent.
+      if (process.platform === "win32")
+        assert.equal(readRegularFileIfPresent(join(dir, "dangling")), null);
+      else assert.throws(() => readRegularFileIfPresent(join(dir, "dangling")), /is a symlink/);
     }));
 
   it("refuses a folder", () =>
