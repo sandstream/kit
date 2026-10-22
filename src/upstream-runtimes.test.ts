@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import {
   decideRuntime,
@@ -339,6 +347,21 @@ describe(
     it("does not run the interpreter inside the project by default", () =>
       withFakeNode(async (project) => {
         assert.equal(await readInstalledVersion(spec("node"), project), "22.9.9");
+      }));
+
+    it("probes from a fresh private folder that is removed afterwards", () =>
+      withFakeNode(async (project) => {
+        const log = join(dirname(project), "pwd.log");
+        writeFileSync(
+          join(dirname(project), "bin", "node"),
+          `#!/bin/sh\npwd -P > "${log}"\nn=0\nfor f in ./* ./.[!.]*; do [ -e "$f" ] && n=$((n+1)); done\necho $n >> "${log}"\necho v22.9.9\n`,
+          { mode: 0o755 },
+        );
+        await readInstalledVersion(spec("node"), project);
+        const [dir, entries] = readFileSync(log, "utf-8").trim().split("\n");
+        assert.match(basename(dir), /^kit-probe-/);
+        assert.equal(entries.trim(), "0", "the probe folder starts empty");
+        assert.equal(existsSync(dir), false, "and is removed afterwards");
       }));
 
     it("applies the project's pins only when asked with KIT_UPSTREAM_PROJECT_PINS=1", () =>

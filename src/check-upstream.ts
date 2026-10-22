@@ -5,6 +5,7 @@
  * offline and stable.
  */
 import { c } from "./utils/colors.js";
+import { stripControl } from "./upstream-sources.js";
 import type { RuntimeRow } from "./upstream-runtime-report.js";
 import type { UpstreamReport, UpstreamRow } from "./upstream-report.js";
 
@@ -32,7 +33,7 @@ function runtimeRow(row: RuntimeRow, report: UpstreamReport): UpstreamCheckRow {
       ? `skipped (${report.reason ?? "no network"})`
       : `${versions}${row.verdict}`;
   return {
-    name: `${row.label}: runtime`,
+    name: stripControl(`${row.label}: runtime`),
     status: row.verdict === "current" ? "pass" : "warn",
     detail,
     ...(didNotRun ? { didNotRun: true as const } : {}),
@@ -43,7 +44,7 @@ export function upstreamRowsFromReport(report: UpstreamReport): UpstreamCheckRow
   const rows: UpstreamCheckRow[] = report.rows.map((row) => {
     const didNotRun = row.verdict === "unknown" || row.verdict === "skipped";
     return {
-      name: `${row.label}: ${row.package ?? "no package"}`,
+      name: stripControl(`${row.label}: ${row.package ?? "no package"}`),
       status: row.verdict === "current" ? "pass" : "warn",
       detail:
         report.status === "skipped" ? `skipped (${report.reason ?? "no network"})` : describe(row),
@@ -84,7 +85,6 @@ export function upstreamToJsonChecks(rows: readonly UpstreamCheckRow[]): {
 
 export async function checkUpstream(cwd: string): Promise<UpstreamCheckRow[]> {
   const { buildUpstreamReport } = await import("./upstream-report.js");
-  const { stripControl } = await import("./upstream-sources.js");
   try {
     return upstreamRowsFromReport(await buildUpstreamReport(cwd));
   } catch (err) {

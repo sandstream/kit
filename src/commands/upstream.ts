@@ -1,8 +1,14 @@
 // `kit upstream check` command: what changed upstream for the services this project uses.
 import { c } from "../utils/colors.js";
 import { hasFlag } from "../utils/flags.js";
+import { stripControl } from "../upstream-sources.js";
 import type { UpstreamReport, UpstreamRow } from "../upstream-report.js";
 import type { RuntimeRow } from "../upstream-runtime-report.js";
+
+/** An error message with any terminal control character removed, for text a repository can shape. */
+export function safeMessage(err: unknown): string {
+  return stripControl(err instanceof Error ? err.message : String(err));
+}
 
 function mark(verdict: UpstreamRow["verdict"]): string {
   switch (verdict) {
@@ -18,9 +24,10 @@ function mark(verdict: UpstreamRow["verdict"]): string {
   }
 }
 
-function describeRow(row: UpstreamRow): string[] {
-  const name = row.package ?? row.label;
-  const where = row.manifest && row.manifest !== "package.json" ? ` (${row.manifest})` : "";
+export function describeRow(row: UpstreamRow): string[] {
+  const name = stripControl(row.package ?? row.label);
+  const where =
+    row.manifest && row.manifest !== "package.json" ? ` (${stripControl(row.manifest)})` : "";
   const versions =
     row.installed || row.latest
       ? `${row.installed ?? "?"} -> ${row.latest ?? "?"}${row.bump !== "unknown" && row.bump !== "none" ? ` (${row.bump})` : ""}`
@@ -28,7 +35,8 @@ function describeRow(row: UpstreamRow): string[] {
   const lines = [
     `  ${mark(row.verdict)} ${c.bold}${name}${c.reset}${where}  ${versions}  ${c.dim}${row.verdict}${c.reset}`,
   ];
-  for (const hit of row.notes) lines.push(`      ${c.dim}${hit.tag}: ${hit.line}${c.reset}`);
+  for (const hit of row.notes)
+    lines.push(`      ${c.dim}${stripControl(hit.tag)}: ${stripControl(hit.line)}${c.reset}`);
   if (row.notes.length > 0) {
     lines.push(
       `      ${c.dim}(keyword match on release notes, not proof that code must change)${c.reset}`,
@@ -37,11 +45,11 @@ function describeRow(row: UpstreamRow): string[] {
   if (!row.notesAvailable && row.verdict !== "current" && row.verdict !== "skipped") {
     lines.push(`      ${c.dim}no GitHub release notes could be read for this service${c.reset}`);
   }
-  if (row.detail) lines.push(`      ${c.dim}${row.detail}${c.reset}`);
+  if (row.detail) lines.push(`      ${c.dim}${stripControl(row.detail)}${c.reset}`);
   return lines;
 }
 
-function describeRuntime(row: RuntimeRow): string[] {
+export function describeRuntime(row: RuntimeRow): string[] {
   const mark =
     row.verdict === "current"
       ? `${c.green}✓${c.reset}`
@@ -52,13 +60,13 @@ function describeRuntime(row: RuntimeRow): string[] {
           : `${c.red}✗${c.reset}`;
   const versions = `${row.installed ?? "?"} -> ${row.latest ?? "?"}`;
   const declared = row.declared
-    ? `  ${c.dim}declared ${row.declared} (${row.declaredFrom})${c.reset}`
+    ? `  ${c.dim}declared ${stripControl(row.declared)} (${stripControl(row.declaredFrom ?? "")})${c.reset}`
     : "";
   const lines = [
-    `  ${mark} ${c.bold}${row.label}${c.reset}  ${versions}  ${c.dim}${row.verdict}${c.reset}${declared}`,
+    `  ${mark} ${c.bold}${stripControl(row.label)}${c.reset}  ${versions}  ${c.dim}${row.verdict}${c.reset}${declared}`,
   ];
-  for (const line of row.evidence) lines.push(`      ${c.dim}${line}${c.reset}`);
-  if (row.detail) lines.push(`      ${c.dim}${row.detail}${c.reset}`);
+  for (const line of row.evidence) lines.push(`      ${c.dim}${stripControl(line)}${c.reset}`);
+  if (row.detail) lines.push(`      ${c.dim}${stripControl(row.detail)}${c.reset}`);
   return lines;
 }
 
@@ -97,9 +105,7 @@ export async function cmdUpstream(): Promise<boolean> {
   try {
     report = await buildUpstreamReport(process.cwd());
   } catch (err) {
-    console.error(
-      `${c.red}kit upstream: ${err instanceof Error ? err.message : String(err)}${c.reset}`,
-    );
+    console.error(`${c.red}kit upstream: ${safeMessage(err)}${c.reset}`);
     return false;
   }
   const failed = hasFlag(process.argv, "--enforce") && enforceFails(report);

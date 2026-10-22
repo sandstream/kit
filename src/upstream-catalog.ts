@@ -26,8 +26,20 @@ export interface UpstreamOverride {
 
 const ENTRY_KEYS = new Set(["id", "label", "npm", "github", "kitServices"]);
 const OVERRIDE_KEYS = new Set(["label", "npm", "github", "kitServices", "disabled"]);
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 const GITHUB_REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const SERVICE_ID = /^[a-z0-9][a-z0-9_-]*$/;
+
+/** A key or value from a repository's `.kit.toml` must not carry a terminal escape into a message. */
+function printable(value: string): string {
+  return value.replace(new RegExp(CONTROL.source, "g"), "");
+}
+
+function noControl(where: string, key: string, value: string): string {
+  if (CONTROL.test(value))
+    throw new Error(`${where}: "${key}" must not contain control characters`);
+  return value;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -44,7 +56,7 @@ function stringList(where: string, key: string, value: unknown): string[] {
   if (!Array.isArray(value) || value.some((v) => typeof v !== "string" || v.trim() === "")) {
     throw new Error(`${where}: "${key}" must be a list of non-empty strings`);
   }
-  return [...new Set((value as string[]).map((v) => v.trim()))];
+  return [...new Set((value as string[]).map((v) => noControl(where, key, v.trim())))];
 }
 
 function githubList(where: string, value: unknown): string[] {
@@ -86,7 +98,7 @@ export function validateUpstreamCatalog(data: unknown): UpstreamEntry[] {
     }
     return requireSource(where, {
       id,
-      label: row.label,
+      label: noControl(where, "label", row.label),
       npm: stringList(where, "npm", row.npm),
       github: githubList(where, row.github),
       kitServices: stringList(where, "kitServices", row.kitServices),
@@ -99,7 +111,7 @@ export function parseUpstreamTable(table: unknown): UpstreamOverride[] {
   if (table === undefined) return [];
   if (!isRecord(table)) throw new Error("[upstream] must be a table");
   return Object.entries(table).map(([id, row]) => {
-    const where = `[upstream.${id}]`;
+    const where = `[upstream.${printable(id)}]`;
     checkId(where, id);
     if (!isRecord(row)) throw new Error(`${where} must be a table`);
     rejectUnknownKeys(where, row, OVERRIDE_KEYS);
@@ -110,7 +122,7 @@ export function parseUpstreamTable(table: unknown): UpstreamOverride[] {
       throw new Error(`${where}: label must be a non-empty string`);
     }
     const out: UpstreamOverride = { id };
-    if (row.label !== undefined) out.label = row.label as string;
+    if (row.label !== undefined) out.label = noControl(where, "label", row.label as string);
     if (row.npm !== undefined) out.npm = stringList(where, "npm", row.npm);
     if (row.github !== undefined) out.github = githubList(where, row.github);
     if (row.kitServices !== undefined)

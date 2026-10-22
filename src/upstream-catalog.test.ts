@@ -145,3 +145,36 @@ describe("mergeUpstreamCatalog", () => {
     assert.equal(JSON.stringify(base), before);
   });
 });
+
+describe("control characters in an untrusted [upstream] table", () => {
+  const ESC = String.fromCharCode(27);
+
+  it("rejects them in a label, a package name and a service key", () => {
+    assert.throws(
+      () => parseUpstreamTable({ acme: { label: `A${ESC}[2J`, npm: ["a"] } }),
+      /control characters/,
+    );
+    assert.throws(
+      () => parseUpstreamTable({ acme: { npm: [`a${ESC}[2J`] } }),
+      /control characters/,
+    );
+    assert.throws(
+      () => parseUpstreamTable({ acme: { kitServices: [`a${ESC}`] } }),
+      /control characters/,
+    );
+  });
+
+  it("keeps the raw key out of the error message", () => {
+    try {
+      parseUpstreamTable({ [`bad${ESC}[2Jkey`]: { npm: ["a"] } });
+      assert.fail("must reject");
+    } catch (err) {
+      assert.ok(!(err as Error).message.includes(ESC));
+    }
+  });
+
+  it("rejects them in the built-in catalog shape too", () => {
+    const row = { id: "a", label: `A${ESC}`, npm: ["a"], github: [], kitServices: [] };
+    assert.throws(() => validateUpstreamCatalog([row]), /control characters/);
+  });
+});

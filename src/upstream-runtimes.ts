@@ -6,7 +6,7 @@
  * version and one for the installed one. A version file in the repository is untrusted input.
  */
 import { execFile } from "node:child_process";
-import { accessSync, constants, statSync } from "node:fs";
+import { accessSync, constants, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
@@ -361,17 +361,26 @@ export async function readInstalledVersion(
   spec: RuntimeSpec,
   projectRoot: string,
 ): Promise<string | null> {
-  const cwd = projectPinsApplied() ? projectRoot : tmpdir();
-  for (const bin of spec.bins) {
-    const path = resolveBinary(bin, process.env.PATH, projectRoot);
-    if (path === null) continue;
-    try {
-      const { stdout, stderr } = await execFileAsync(path, ["--version"], { cwd, timeout: 5_000 });
-      const version = parseVersionOutput(`${stdout}\n${stderr}`);
-      if (version) return version;
-    } catch {
-      // this binary did not answer: try the next name
+  // A fresh empty folder (mode 0700) holds no version-manager configuration and no other user can
+  // write to it, which a shared temp folder cannot promise. It is removed when the probe is done.
+  const probe = projectPinsApplied() ? null : mkdtempSync(join(tmpdir(), "kit-probe-"));
+  try {
+    for (const bin of spec.bins) {
+      const path = resolveBinary(bin, process.env.PATH, projectRoot);
+      if (path === null) continue;
+      try {
+        const { stdout, stderr } = await execFileAsync(path, ["--version"], {
+          cwd: probe ?? projectRoot,
+          timeout: 5_000,
+        });
+        const version = parseVersionOutput(`${stdout}\n${stderr}`);
+        if (version) return version;
+      } catch {
+        // this binary did not answer: try the next name
+      }
     }
+    return null;
+  } finally {
+    if (probe) rmSync(probe, { recursive: true, force: true });
   }
-  return null;
 }
