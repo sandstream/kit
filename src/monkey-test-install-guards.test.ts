@@ -10,13 +10,14 @@ import {
   PLAIN_SEMVER,
   verifyAgainstRegistry,
 } from "./monkey-test-install-guards.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 let dir: string;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "kit-install-guards-"));
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
+afterEach(() => rmTemp(dir));
 
 function tree(name: string, files: Record<string, string>): string {
   const root = join(dir, name);

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
   type InstallDeps,
   type InstallResult,
 } from "./monkey-test-install.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const CHROMIUM = "node /app/node_modules/@playwright/test/cli.js install chromium";
 
@@ -17,7 +18,7 @@ let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "kit-monkey-install-"));
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
+afterEach(() => rmTemp(dir));
 
 function writePackage(extra: Record<string, unknown> = {}): void {
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "app", ...extra }));
