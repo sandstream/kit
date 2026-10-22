@@ -2,6 +2,21 @@
 
 ### Added
 
+- **`kit upstream check` tells you what changed upstream.** For the services a project uses
+  (Convex, Stripe and WorkOS are built in, `[upstream.<id>]` in `.kit.toml` adds or overrides
+  one), it reads the latest npm version and the GitHub release notes, compares them with the
+  installed version from `package-lock.json`, `bun.lock` or `pnpm-lock.yaml` (the declared range
+  is the fallback, and the report says so), and prints one verdict per package: `current`,
+  `upgrade available`, `upgrade recommended (deprecation)` or `major, read notes`. The notes
+  check is a keyword match (`breaking`, `deprecat`, `migrat`, `removed`) and does not prove that
+  code must change. It is skipped in air-gap and read-only mode, a fetch that fails is
+  `unknown` and never `current`, and `--enforce` exits 1 only for a major or a deprecation.
+  `kit check --category upstream` runs the same check as an opt-in, informational dimension that
+  never changes the verdict. Release text and repository files are treated as untrusted: kit
+  refuses symlinked lockfiles, never quotes parser errors, and strips terminal control
+  characters. Known limit: Convex publishes no GitHub releases, so for Convex only the version
+  difference is reported.
+
 - **`kit monkey-test init --install` sets up the browser runner.** It triages
   `@playwright/test` at an exact pinned version, installs it as a devDependency with
   `--ignore-scripts` through the project's package manager, and downloads Chromium. A

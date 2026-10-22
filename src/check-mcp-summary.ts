@@ -102,5 +102,6 @@ export function fullCheckPayload(run: CheckRunResult): Record<string, unknown> {
     security: run.security,
     tests: run.tests,
     locks: run.locks,
+    upstream: run.upstream,
   };
 }

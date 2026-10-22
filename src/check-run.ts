@@ -28,6 +28,7 @@ import { checkSecurity, type SecurityCheckResult, type GateOpts } from "./check-
 import { checkLockFiles, type LockCheckResult } from "./check-lock.js";
 import { checkTests, type TestCheckResult } from "./check-tests.js";
 import { checkDeploy, type DeployCheckResult } from "./check-deploy.js";
+import { checkUpstream, upstreamToJsonChecks, type UpstreamCheckRow } from "./check-upstream.js";
 import { loadBaselineForGate, baselineGet, BASELINE_FILE } from "./baseline.js";
 import { computeCheckVerdict, type CheckVerdict } from "./check-verdict.js";
 import type { JsonCheck } from "./cli-checks-shared.js";
@@ -45,6 +46,8 @@ export interface CheckRunResult {
   security: SecurityCheckResult[];
   tests: TestCheckResult[];
   locks: LockCheckResult[];
+  /** Empty unless `upstream` was selected: it is opt-in and never part of the verdict. */
+  upstream: UpstreamCheckRow[];
   /**
    * Non-null when the run was narrowed with `--category`: the dimensions that were
    * actually run. `ok` is then a verdict over THOSE ONLY — every consumer that
@@ -70,7 +73,14 @@ export const CHECK_CATEGORIES = [
   "security",
   "locks",
   "tests",
+  "upstream",
 ] as const;
+
+/**
+ * Dimensions that run only when named in `--category`. A default check stays offline and its
+ * verdict does not move because a new dimension exists.
+ */
+export const OPT_IN_CATEGORIES: readonly CheckCategory[] = ["upstream"];
 
 export type CheckCategory = (typeof CHECK_CATEGORIES)[number];
 
@@ -123,16 +133,34 @@ export interface RunCheckOptions {
   categories?: readonly CheckCategory[];
 }
 
+/**
+ * Narrowing. An empty or absent list means every default dimension, so the default path cannot be
+ * narrowed by accident, and an opt-in dimension runs only when it is named. `scope` is what was
+ * actually selected (null for a default run), so no consumer can read a partial green as a full one.
+ */
+function resolveSelection(categories: readonly CheckCategory[] | undefined): {
+  wants: (dim: CheckCategory) => boolean;
+  scope: CheckCategory[] | null;
+} {
+  const selected = categories && categories.length > 0 ? categories : null;
+  const effective = selected ?? CHECK_CATEGORIES.filter((c) => !OPT_IN_CATEGORIES.includes(c));
+  return { wants: (dim) => effective.includes(dim), scope: selected ? [...selected] : null };
+}
+
+async function upstreamDimension(
+  run: boolean,
+  step: <T>(label: string, fn: () => Promise<T>) => Promise<T>,
+  cwd: string,
+): Promise<UpstreamCheckRow[]> {
+  return run ? await step("upstream versions", () => checkUpstream(cwd)) : [];
+}
+
 export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRunResult> {
   const cwd = opts.cwd ?? process.cwd();
   const config = opts.config ?? (await loadConfig(resolve(cwd, KIT_FILE)));
   const step = opts.step ?? (<T>(_label: string, fn: () => Promise<T>): Promise<T> => fn());
 
-  // Narrowing predicate. An empty/absent list means "everything", so the default
-  // path is unchanged and cannot be narrowed by accident.
-  const selected = opts.categories && opts.categories.length > 0 ? opts.categories : null;
-  const wants = (dim: CheckCategory): boolean => selected === null || selected.includes(dim);
-  const scope: CheckCategory[] | null = selected ? [...selected] : null;
+  const { wants, scope } = resolveSelection(opts.categories);
 
   const tools =
     wants("tools") && config.tools
@@ -167,6 +195,7 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
     : [];
   const security = wants("security") ? await step("security scan", () => checkSecurity(cwd)) : [];
   const locks = wants("locks") ? await step("lock files", () => checkLockFiles(config, cwd)) : [];
+  const upstream = await upstreamDimension(wants("upstream"), step, cwd);
 
   // Test-coverage is part of the verdict on every surface (omitting it on one
   // was half of the historical CLI-vs-MCP divergence). Baseline-aware; a
@@ -223,6 +252,7 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
     security,
     tests,
     locks,
+    upstream,
     scope,
   };
 }
@@ -306,5 +336,6 @@ export function checkRunToJsonChecks(r: CheckRunResult): JsonCheck[] {
       detail: t.detail,
       category: "tests",
     })),
+    ...upstreamToJsonChecks(r.upstream),
   ];
 }

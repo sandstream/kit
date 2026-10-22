@@ -120,6 +120,7 @@ describe("checkRunToJsonChecks", () => {
     security: [{ category: "secrets", name: "gitleaks", status: "pass", detail: "clean" }],
     tests: [{ name: "unit-test coverage", status: "warn", detail: "1 untested" }],
     locks: [{ category: "skills-lock", exists: true, inSync: true, detail: "in sync" }],
+    upstream: [] as CheckRunResult["upstream"],
   } as CheckRunResult;
 
   it("maps every dimension to rows with the CLI's exact status rules", () => {

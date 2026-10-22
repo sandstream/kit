@@ -48,6 +48,7 @@ function runFixture(over: Partial<CheckRunResult> = {}): CheckRunResult {
     ],
     tests: [{ name: "unit-test coverage", status: "pass", detail: "84 files" }] as never,
     locks: [],
+    upstream: [],
     scope: null,
     ...over,
   } as CheckRunResult;
