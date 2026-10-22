@@ -7,12 +7,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { SecretStatus } from "./check-secrets.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const session = {
   tokenSource: "infisical login (keyring)",
@@ -142,7 +142,7 @@ function fallback(
         .map((line) => JSON.parse(line)),
     };
   } finally {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    rmTemp(dir);
   }
 }
 

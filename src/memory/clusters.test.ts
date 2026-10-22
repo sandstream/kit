@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -11,6 +11,7 @@ import {
   getClustersPath,
 } from "./clusters.js";
 import { shareEntry } from "./shared.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory clusters — glob matching (gap #3)", () => {
   it("** spans path segments, * stays within one", () => {
@@ -96,7 +97,7 @@ describe("memory clusters — readClusters + decisionsForPaths", () => {
       writeMap(root, { memory: "not-an-array", ok: ["a"] });
       assert.deepEqual(readClusters(root), { ok: ["a"] });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -127,7 +128,7 @@ describe("memory clusters — readClusters + decisionsForPaths", () => {
       // touching an unmapped path yields nothing
       assert.deepEqual(decisionsForPaths(root, ["README.md"]), []);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });

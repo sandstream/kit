@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sampleCosts, detectCostAnomalies, type CostSample } from "./cost-monitor.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function tmpDir(): string {
   return mkdtempSync(join(tmpdir(), "kit-cost-"));
@@ -80,7 +81,7 @@ describe("detectCostAnomalies", () => {
       const alerts = await detectCostAnomalies([sample({ current: 100 })], { cwd: dir });
       assert.equal(alerts.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -104,7 +105,7 @@ describe("detectCostAnomalies", () => {
       assert.equal(alerts[0]!.severity, "warn");
       assert.equal(alerts[0]!.multiplier, 2);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -128,7 +129,7 @@ describe("detectCostAnomalies", () => {
       assert.equal(alerts[0]!.severity, "critical");
       assert.equal(alerts[0]!.multiplier, 4);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -153,7 +154,7 @@ describe("detectCostAnomalies", () => {
       assert.equal(alerts.length, 1);
       assert.equal(alerts[0]!.severity, "critical");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -169,7 +170,7 @@ describe("detectCostAnomalies", () => {
       );
       assert.equal(alerts.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -194,7 +195,7 @@ describe("detectCostAnomalies", () => {
       assert.equal(parsed.STRIPE_SECRET_KEY.avgDailyUsd, 60);
       assert.equal(parsed.STRIPE_SECRET_KEY.sampleCount, 6);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -213,7 +214,7 @@ describe("detectCostAnomalies", () => {
       }
       assert.equal(exists, false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -247,7 +248,7 @@ describe("detectCostAnomalies — boundaries, malformed baselines and fail-open 
       // (and the next run's JSON.parse) depends on, newline included.
       assert.equal(readFileSync(join(dir, BASELINE), "utf-8"), "{}\n");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -264,7 +265,7 @@ describe("detectCostAnomalies — boundaries, malformed baselines and fail-open 
       // The spike still moves the EMA: 0 * 0.8 + 5000 * 0.2
       assert.equal(parsed.STRIPE_SECRET_KEY.avgDailyUsd, 1000);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -276,7 +277,7 @@ describe("detectCostAnomalies — boundaries, malformed baselines and fail-open 
       // 100 USD against a zero cap produces no alert.
       assert.equal(alerts.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -294,7 +295,7 @@ describe("detectCostAnomalies — boundaries, malformed baselines and fail-open 
       assert.equal(alerts[0]!.baselineUsd, 100);
       assert.equal(alerts[0]!.detail, "current 100.00 USD vs baseline 100.00 (1.0×); cap 10");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -306,7 +307,7 @@ describe("detectCostAnomalies — boundaries, malformed baselines and fail-open 
       const alerts = await detectCostAnomalies([sample({ current: 99 })], { cwd: dir });
       assert.equal(alerts.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -334,7 +335,7 @@ describe("detectCostAnomalies — boundaries, malformed baselines and fail-open 
       });
       assert.equal(silenced.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -356,7 +357,7 @@ describe("detectCostAnomalies — boundaries, malformed baselines and fail-open 
       assert.equal(parsed.STRIPE_SECRET_KEY.avgDailyUsd, 160);
       assert.equal(parsed.STRIPE_SECRET_KEY.sampleCount, 2);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -372,7 +373,7 @@ describe("detectCostAnomalies — boundaries, malformed baselines and fail-open 
       assert.equal(parsed.STRIPE_SECRET_KEY.avgDailyUsd, 9999);
       assert.equal(parsed.STRIPE_SECRET_KEY.sampleCount, 1);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -388,7 +389,7 @@ describe("detectCostAnomalies — boundaries, malformed baselines and fail-open 
       // baseline and every future run restarts from scratch.
       assert.equal(raw.trim(), "[]");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -403,7 +404,7 @@ describe("detectCostAnomalies — boundaries, malformed baselines and fail-open 
         TypeError,
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

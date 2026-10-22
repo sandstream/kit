@@ -18,7 +18,7 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
@@ -35,6 +35,7 @@ import {
   type AnchoredLogStatus,
   type LogRead,
 } from "./audit-anchor-all.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const exec = promisify(execFile);
 const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
@@ -76,7 +77,7 @@ describe("audit union view - classification", () => {
     dirs = [];
   });
   afterEach(() => {
-    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+    for (const d of dirs) rmTemp(d);
   });
 
   it("a log path that is gone reads as missing, never as a finding", () => {
@@ -318,8 +319,8 @@ describe("kit audit verify --all (compiled CLI)", () => {
     trees = [];
   });
   afterEach(() => {
-    rmSync(anchorHome, { recursive: true, force: true });
-    for (const d of trees) rmSync(d, { recursive: true, force: true });
+    rmTemp(anchorHome);
+    for (const d of trees) rmTemp(d);
   });
 
   it("reports nothing sealed as a warning, not a green verdict", async () => {
@@ -344,7 +345,7 @@ describe("kit audit verify --all (compiled CLI)", () => {
 
     const gContent = await buildChain(goneTree, 1, "g");
     await anchorAuditLog(join(goneTree, LOG), gContent, anchorHome);
-    rmSync(goneTree, { recursive: true, force: true });
+    rmTemp(goneTree);
 
     const r = await runCli(["audit", "verify", "--all", "--json"], verifiedTree);
     const report = JSON.parse(r.stdout) as {

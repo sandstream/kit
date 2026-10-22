@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { it } from "node:test";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 it("policy pull refusals name the real trust command", () => {
   const root = mkdtempSync(join(tmpdir(), "kit-policy-hint-"));
@@ -35,6 +36,6 @@ it("policy pull refusals name the real trust command", () => {
       assert.doesNotMatch(run.stderr, /kit policy trust add/);
     }
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 });

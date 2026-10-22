@@ -1,10 +1,11 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdPanic } from "./panic.js";
 import { loadOrCreateIdentity, tryLoadIdentity, loadRevocations } from "../identity.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 // kit panic reaches rotateIdentity() directly, whose guard is env-only. A policy-only
 // mandate must still block it — otherwise panic re-mints exactly the same-UID file key the
@@ -32,8 +33,8 @@ describe("kit panic — hardware mandate", () => {
     else process.env.KIT_AUDIT_ANCHOR = saved.anchor;
     process.argv = saved.argv;
     process.chdir(saved.cwd);
-    rmSync(idDir, { recursive: true, force: true });
-    rmSync(cwd, { recursive: true, force: true });
+    rmTemp(idDir);
+    rmTemp(cwd);
   });
 
   it("refuses to rotate (mint a file key) under a policy-only mandate", async () => {

@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentToolchainComponents, mcpServersFromConfig, discoverPlugins } from "./agent-sbom.js";
 import { toCycloneDX, toSpdx, type Component } from "./sbom.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("agentToolchainComponents", () => {
   it("maps skills / mcp-servers / plugins to components with generic purls + provenance", () => {
@@ -76,7 +77,7 @@ describe("discoverPlugins", () => {
       assert.equal(byName["@acme/kit-railway"].source, "package.json:kitPlugins");
       assert.equal(byName["kit-plugin-x"].version, undefined); // declared but not installed
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -89,7 +90,7 @@ describe("discoverPlugins", () => {
       writeFileSync(join(dir, "package.json"), "{ not json");
       assert.deepEqual(discoverPlugins(dir), []);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

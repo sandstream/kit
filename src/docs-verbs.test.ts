@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { securityFindings } from "./monkey-test-security.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const root = join(import.meta.dirname, "..");
 
@@ -61,7 +62,7 @@ describe("monkey-test status is described consistently", () => {
       );
       assert.ok(!titles.includes("Supabase detected without obvious RLS policy coverage"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
     const doc = readFileSync(join(root, "docs", "MONKEY_TEST.md"), "utf8");
     assert.match(doc, /stub/i);

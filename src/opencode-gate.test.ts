@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { installInstallGateOpenCode, renderOpenCodeInstallGate } from "./agent-config.js";
 import { generateKitCmdWrapper } from "./kit-wrapper.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 async function withTempHome<T>(fn: (home: string) => T | Promise<T>): Promise<T> {
   const prev = process.env.HOME;
@@ -29,7 +30,7 @@ async function withTempHome<T>(fn: (home: string) => T | Promise<T>): Promise<T>
     else process.env.HOME = prev;
     if (prevUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = prevUserProfile;
-    rmSync(home, { recursive: true, force: true });
+    rmTemp(home);
   }
 }
 
@@ -54,7 +55,7 @@ it("writes a tool.execute.before plugin that loads as a module, idempotently", a
     await hooks["tool.execute.before"]({ tool: "read" }, { args: {} });
     assert.equal((await installInstallGateOpenCode(dir)).action, "unchanged");
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   }
 });
 it("detects an opencode.json project even without a .opencode dir", async () => {
@@ -63,7 +64,7 @@ it("detects an opencode.json project even without a .opencode dir", async () => 
     writeFileSync(join(dir, "opencode.json"), "{}");
     assert.equal((await installInstallGateOpenCode(dir)).action, "created");
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   }
 });
 it("preserves the failed gate process as the blocking error cause", async () => {
@@ -103,7 +104,7 @@ it("preserves the failed gate process as the blocking error cause", async () => 
       );
     });
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   }
 });
 it(
@@ -141,7 +142,7 @@ it(
         );
       });
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   },
 );
@@ -171,7 +172,7 @@ it("updates stale kit-managed output but preserves an external gate", async () =
     assert.match(refused.detail ?? "", /external file.*refusing overwrite/);
     assert.equal(readFileSync(pluginPath, "utf-8"), unrelated);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   }
 });
 it("refuses a symlinked OpenCode gate path", async () => {
@@ -187,7 +188,7 @@ it("refuses a symlinked OpenCode gate path", async () => {
     assert.match(result.detail ?? "", /symlinked path/);
     assert.equal(existsSync(outside), false, "dangling symlink target must not be created");
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
     rmSync(outside, { force: true });
   }
 });
@@ -196,6 +197,6 @@ it("skips when no OpenCode project is present", async () => {
   try {
     assert.equal((await installInstallGateOpenCode(dir)).action, "skipped");
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   }
 });

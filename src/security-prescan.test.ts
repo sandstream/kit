@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -15,6 +15,7 @@ import {
   type PrescanReport,
   type PrescanCheck,
 } from "./security-prescan.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const exec = promisify(execFile);
 
@@ -59,7 +60,7 @@ describe("runPrescan", () => {
       );
       assert.equal(offenders.length, 0, JSON.stringify(offenders));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -78,7 +79,7 @@ describe("runPrescan", () => {
       assert.equal(tracked.severity, "critical");
       assert.match(tracked.detail, /\.env\.local/);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -96,7 +97,7 @@ describe("runPrescan", () => {
       assert.ok(f, "expected gitignore-missing finding");
       assert.equal(f.severity, "high");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -116,7 +117,7 @@ describe("runPrescan", () => {
       assert.equal(holes.severity, "medium");
       assert.match(holes.detail, /\.env/);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -136,7 +137,7 @@ describe("runPrescan", () => {
       const report = await runPrescan({ root, persist: false, maxDepth: 4 });
       assert.equal(report.repoCount, 2);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -153,7 +154,7 @@ describe("runPrescan", () => {
       const report = await runPrescan({ root, persist: false, maxDepth: 5 });
       assert.equal(report.repoCount, 1);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -273,7 +274,7 @@ describe("diffReports", () => {
       assert.equal(report.findings.length, 2);
       assert.equal(report.repoCount, 2);
     } finally {
-      rmSync(path, { recursive: true, force: true });
+      rmTemp(path);
     }
   });
 
@@ -328,7 +329,7 @@ describe("plugin-pattern checks", () => {
         `expected only tracked-secret-files, got: ${JSON.stringify(report.findings.map((f) => f.category))}`,
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -353,7 +354,7 @@ describe("plugin-pattern checks", () => {
         `expected no gitignore-holes, got: ${JSON.stringify(report.findings.map((f) => f.category))}`,
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -402,7 +403,7 @@ describe("plugin-pattern checks", () => {
       const marker = report.findings.find((f) => f.category === "custom-test-marker");
       assert.ok(marker, "expected custom-test-marker finding");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -438,7 +439,7 @@ describe("plugin-pattern checks", () => {
       const found = report.findings.filter((f) => deepCategories.includes(f.category));
       assert.equal(found.length, 0, `unexpected deep-tier findings: ${JSON.stringify(found)}`);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });

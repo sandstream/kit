@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const adjacentCli = resolve(import.meta.dirname, "../cli.js");
 const CLI = existsSync(adjacentCli)
@@ -27,7 +28,7 @@ describe("kit statusline", () => {
       assert.ok(Array.isArray(data.gaps) && data.gaps.length > 0);
       assert.equal(data.pal, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

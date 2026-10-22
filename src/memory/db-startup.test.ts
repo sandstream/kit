@@ -1,13 +1,14 @@
 import { it, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { openMemoryDb, SCHEMA_VERSION } from "./db.js";
 import { seedLegacyPalDb } from "./pal-fixture.test-support.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 // Exercise startup through openMemoryDb, gating real SQLite operations across processes.
 // Never manufacture SQLITE_BUSY.
@@ -97,7 +98,7 @@ function fixture(t: TestContext) {
   const cleanups: (() => Promise<void>)[] = [];
   t.after(async () => {
     await Promise.all(cleanups.map((cleanup) => cleanup()));
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
   return { dir, cleanups };
 }

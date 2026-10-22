@@ -1,9 +1,10 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deriveAdrs } from "./adr-derive.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("deriveAdrs — a proposal is not shown until the repo disproves nothing", () => {
   let dir = "";
@@ -24,7 +25,7 @@ describe("deriveAdrs — a proposal is not shown until the repo disproves nothin
     return root;
   };
 
-  after(() => rmSync(dir, { recursive: true, force: true }));
+  after(() => rmTemp(dir));
 
   it("proposes the asymmetric direction, verified against the real repo", async () => {
     dir = seed();

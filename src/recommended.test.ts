@@ -1,9 +1,10 @@
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyRecommendedHardening } from "./recommended.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("applyRecommendedHardening", () => {
   let tmp: string;
@@ -33,7 +34,7 @@ describe("applyRecommendedHardening", () => {
     else process.env.KIT_MEMORY_HOOK_MARKER = prevClaudeMarker;
     if (prevCodexMarker === undefined) delete process.env.KIT_CODEX_MEMORY_HOOK_MARKER;
     else process.env.KIT_CODEX_MEMORY_HOOK_MARKER = prevCodexMarker;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   function gitDir(): string {

@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { auditPull, reportSeverity } from "./post-pull-audit.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function git(dir: string, ...args: string[]): void {
   execFileSync("git", args, { cwd: dir });
@@ -36,7 +37,7 @@ describe("auditPull", () => {
       assert.equal(r.plaintextHits.length, 0);
       assert.equal(reportSeverity(r), "ok");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -64,7 +65,7 @@ describe("auditPull", () => {
       assert.deepEqual(r.newDependencies, ["left-pad"]);
       assert.equal(reportSeverity(r), "warn");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -80,7 +81,7 @@ describe("auditPull", () => {
       assert.ok(r.removedGitignoreEntries.includes("*.pem"));
       assert.equal(reportSeverity(r), "fail");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -99,7 +100,7 @@ describe("auditPull", () => {
       assert.equal(r.plaintextHits[0].file, "config.ts");
       assert.equal(reportSeverity(r), "fail");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -134,7 +135,7 @@ describe("auditPull", () => {
       assert.equal(r.allowlistChanged, true);
       assert.equal(reportSeverity(r), "warn");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

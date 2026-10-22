@@ -1,13 +1,14 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { findUntestedSources } from "./check-tests.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 it("coverage inventory separates test support from production sources without hiding similarly named modules", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "kit-test-support-coverage-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmTemp(root));
   mkdirSync(join(root, "src"));
   for (const file of [
     "app.ts",

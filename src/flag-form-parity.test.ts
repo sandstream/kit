@@ -22,9 +22,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 // Compiles to dist/flag-form-parity.test.js, so the built CLI is its sibling.
 const CLI = resolve(import.meta.dirname, "cli.js");
@@ -58,7 +59,7 @@ function kit(args: string[], cwd: string): string {
     const err = e as { stdout?: string; stderr?: string };
     return String(err.stdout ?? "") + String(err.stderr ?? "");
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    rmTemp(home);
   }
 }
 
@@ -73,7 +74,7 @@ describe("value flags accept both --flag value and --flag=value", () => {
       assert.match(spaced, /limit: 3\b/, "space form must be honoured");
       assert.match(equals, /limit: 3\b/, "equals form must stay honoured");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -84,7 +85,7 @@ describe("value flags accept both --flag value and --flag=value", () => {
       assert.doesNotMatch(out, /limit: NaN/, "unparsable limit must not surface as NaN");
       assert.match(out, /limit: 50\b/, "it must fall back to the documented default");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -111,7 +112,7 @@ describe("value flags accept both --flag value and --flag=value", () => {
       assert.equal(isJson(spaced), true, "space form must produce JSON");
       assert.equal(isJson(equals), true, "equals form must stay producing JSON");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -142,7 +143,7 @@ describe("kit secrets vault-migrate requires --from and --to explicitly", () => 
       assert.doesNotMatch(out, /From: .*--to/, "a flag token must never become the value");
       assert.doesNotMatch(out, /source="--to"/, "the missing value must not reach the config scan");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -153,7 +154,7 @@ describe("kit secrets vault-migrate requires --from and --to explicitly", () => 
       assert.match(out, /Usage:/);
       assert.doesNotMatch(out, /From: .*--dry-run/, "--dry-run must not become the source backend");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -164,7 +165,7 @@ describe("kit secrets vault-migrate requires --from and --to explicitly", () => 
       assert.match(out, /Usage:/);
       assert.doesNotMatch(out, /To: .*--from/, "a flag token must never become the target");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -189,7 +190,7 @@ describe("kit secrets vault-migrate requires --from and --to explicitly", () => 
         assert.doesNotMatch(out, /Usage:/, `${label} form must not fall back to usage`);
       }
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

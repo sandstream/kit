@@ -6,6 +6,7 @@ import {
   isNewer,
   postCommandNoticesAllowed,
 } from "./update-check.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("isValidVersion (R1: no poisoned version string reaches a prompt)", () => {
   it("accepts well-formed semver (optionally v-prefixed / pre-release)", () => {
@@ -129,7 +130,7 @@ describe("checkForUpdate", () => {
   });
 
   it("returns null under CONFIG-declared air-gap (.kit.toml) even without KIT_AIRGAP env", async () => {
-    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
     const saved = {
@@ -154,7 +155,7 @@ describe("checkForUpdate", () => {
       assert.equal(await checkForUpdate("0.1.0"), null);
     } finally {
       process.chdir(cwd0);
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
       for (const [k, v] of [
         ["CI", saved.CI],
         ["GITHUB_ACTIONS", saved.GH],

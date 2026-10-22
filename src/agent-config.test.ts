@@ -2,7 +2,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
-  rmSync,
   mkdirSync,
   writeFileSync,
   readFileSync,
@@ -46,6 +45,7 @@ import { kitWrapperPath, kitBinDir } from "./kit-wrapper.js";
 import { statSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function tmpRepo(): string {
   return mkdtempSync(join(tmpdir(), "kit-agentcfg-"));
@@ -64,7 +64,7 @@ async function withTempHome<T>(fn: (home: string) => T | Promise<T>): Promise<T>
     else process.env.HOME = prev;
     if (prevUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = prevUserProfile;
-    rmSync(home, { recursive: true, force: true });
+    rmTemp(home);
   }
 }
 
@@ -163,7 +163,7 @@ describe("loadUserRulesProfile", () => {
       assert.match(r.error ?? "", /3 line/);
       assert.equal(r.profile, null);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -182,7 +182,7 @@ describe("loadUserRulesProfile", () => {
       assert.equal(r.profile?.text, "Always add a permission comment.");
       assert.match(r.warnings[0] ?? "", /\.kit\/standards\.d/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -196,7 +196,7 @@ describe("detectAgentTargets", () => {
         .sort();
       assert.deepEqual(files, ["AGENTS.md", "CLAUDE.md"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -207,7 +207,7 @@ describe("detectAgentTargets", () => {
       const files = detectAgentTargets(dir).map((t) => t.file);
       assert.deepEqual(files, ["CLAUDE.md"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -218,7 +218,7 @@ describe("detectAgentTargets", () => {
       const files = detectAgentTargets(dir).map((t) => t.file);
       assert.deepEqual(files, ["AGENTS.md"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -229,7 +229,7 @@ describe("detectAgentTargets", () => {
       const files = detectAgentTargets(dir).map((t) => t.file);
       assert.deepEqual(files, ["AGENTS.md"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -243,7 +243,7 @@ describe("detectAgentTargets", () => {
         .sort();
       assert.deepEqual(agents, ["Cline", "Cursor"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -254,7 +254,7 @@ describe("detectAgentTargets", () => {
       const files = detectAgentTargets(dir).map((t) => t.file);
       assert.deepEqual(files, [".github/copilot-instructions.md"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -266,7 +266,7 @@ describe("detectAgentTargets", () => {
       const agents = detectAgentTargets(dir).map((t) => t.agent);
       assert.deepEqual(agents, ["Copilot"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -277,7 +277,7 @@ describe("detectAgentTargets", () => {
       const files = detectAgentTargets(dir).map((t) => t.file);
       assert.deepEqual(files, ["GEMINI.md"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -288,7 +288,7 @@ describe("detectAgentTargets", () => {
       const files = detectAgentTargets(dir).map((t) => t.file);
       assert.deepEqual(files, [".augment-guidelines"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -300,7 +300,7 @@ describe("detectAgentTargets", () => {
         const files = detectAgentTargets(dir).map((t) => t.file);
         assert.deepEqual(files, ["AGENTS.md"], `${marker} → AGENTS.md`);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     }
   });
@@ -312,7 +312,7 @@ describe("detectAgentTargets", () => {
       const files = detectAgentTargets(dir).map((t) => t.file);
       assert.deepEqual(files, ["AGENTS.md"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -329,7 +329,7 @@ describe("writeAgentConfig", () => {
       const written = readFileSync(join(dir, "CLAUDE.md"), "utf-8");
       assert.ok(written.includes(KIT_BLOCK_BEGIN) && written.includes(KIT_BLOCK_END));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -343,7 +343,7 @@ describe("writeAgentConfig", () => {
       const written = readFileSync(join(dir, ".github", "copilot-instructions.md"), "utf-8");
       assert.ok(written.includes(KIT_BLOCK_BEGIN) && written.includes(KIT_BLOCK_END));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -356,7 +356,7 @@ describe("writeAgentConfig", () => {
       assert.ok(written.startsWith("# Existing\n\nMy rules.\n"));
       assert.ok(written.includes(KIT_BLOCK_BEGIN));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -370,7 +370,7 @@ describe("writeAgentConfig", () => {
       assert.equal(results[0].action, "unchanged");
       assert.equal(readFileSync(join(dir, "CLAUDE.md"), "utf-8"), after1);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -383,7 +383,7 @@ describe("writeAgentConfig", () => {
       assert.equal(existsSync(join(dir, "CLAUDE.md")), false);
     } finally {
       delete process.env.KIT_READ_ONLY;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -423,7 +423,7 @@ describe("writeAgentConfig", () => {
       const r2 = await writeAgentConfig(dir, targets, { userRules: profile });
       assert.ok(r2.every((r) => r.action === "unchanged"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -453,7 +453,7 @@ describe("installKitPermissions", () => {
       assert.equal(r2.action, "unchanged");
       assert.equal(r2.added.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -474,7 +474,7 @@ describe("installKitPermissions", () => {
       assert.ok(s.permissions.allow.includes("Bash(kit check:*)"), "adds kit rules");
       assert.equal(s.enableAllProjectMcpServers, true, "preserves unrelated keys");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -485,7 +485,7 @@ describe("installKitPermissions", () => {
       assert.equal(r.action, "skipped");
       assert.equal(existsSync(join(dir, ".claude", "settings.json")), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -508,7 +508,7 @@ describe("installCodexKitProfile", () => {
       assert.equal(r2.action, "unchanged");
       assert.equal(readFileSync(profile, "utf-8"), txt);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -523,7 +523,7 @@ describe("installCodexKitProfile", () => {
       assert.ok(txt.startsWith('model = "gpt-5"\n'));
       assert.ok(txt.includes('sandbox_mode = "workspace-write"'));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -537,7 +537,7 @@ describe("installCodexKitProfile", () => {
       assert.match(r.detail ?? "", /not overwriting/);
       assert.equal(readFileSync(profile, "utf-8"), 'approval_policy = "never"\n');
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -560,7 +560,7 @@ describe("installInstallGate", () => {
       const s2 = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
       assert.equal(s2.hooks.PreToolUse.length, 1, "no duplicate group on re-run");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -581,7 +581,7 @@ describe("installInstallGate", () => {
       assert.ok(s.hooks.SessionStart, "keeps other hooks");
       assert.ok(s.hooks.PreToolUse[0].hooks[0].command.endsWith("gate-bash"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -591,7 +591,7 @@ describe("installInstallGate", () => {
       const r = await installInstallGate(dir);
       assert.equal(r.action, "skipped");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -611,7 +611,7 @@ describe("installInstallGate", () => {
           assert.equal(command, '"$HOME/.kit/bin/kit" gate-bash');
           assert.ok(!command.includes(home), "repo-shared hook must not bake installer HOME");
         } finally {
-          rmSync(dir, { recursive: true, force: true });
+          rmTemp(dir);
         }
       });
     },
@@ -642,7 +642,7 @@ describe("installInstallGate", () => {
         assert.equal(s.hooks.PreToolUse.length, 1);
         assert.equal(s.hooks.PreToolUse[0].hooks[0].command, kitGateInvocation());
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     });
   });
@@ -668,7 +668,7 @@ describe("installBrokerGates (Pillar 3, opt-in)", () => {
       const s2 = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf-8"));
       assert.equal(s2.hooks.PreToolUse.length, 2, "no duplicate groups on re-run");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -696,7 +696,7 @@ describe("installBrokerGates (Pillar 3, opt-in)", () => {
         ),
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -705,7 +705,7 @@ describe("installBrokerGates (Pillar 3, opt-in)", () => {
     try {
       assert.equal((await installBrokerGates(dir)).action, "skipped");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -799,7 +799,7 @@ describe("installInstallGateCodex", () => {
       const r2 = await installInstallGateCodex(dir);
       assert.equal(r2.action, "unchanged");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -818,7 +818,7 @@ describe("installInstallGateCodex", () => {
           assert.ok(txt.includes(`command = '"$HOME/.kit/bin/kit" gate-bash'`));
           assert.ok(!txt.includes(home), "repo-shared hook must not bake installer HOME");
         } finally {
-          rmSync(dir, { recursive: true, force: true });
+          rmTemp(dir);
         }
       });
     },
@@ -840,7 +840,7 @@ describe("installInstallGateCodex", () => {
         assert.ok(txt.includes(`command = '${kitGateInvocation()}'`));
         assert.ok(!txt.includes("/root/.kit/bin/kit"));
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     });
   });
@@ -850,7 +850,7 @@ describe("installInstallGateCodex", () => {
     try {
       assert.equal((await installInstallGateCodex(dir)).action, "skipped");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -875,7 +875,7 @@ describe("installInstallGateAmazonQ", () => {
       const r2 = await installInstallGateAmazonQ(dir);
       assert.equal(r2.action, "unchanged");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -884,7 +884,7 @@ describe("installInstallGateAmazonQ", () => {
     try {
       assert.equal((await installInstallGateAmazonQ(dir)).action, "skipped");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -907,7 +907,7 @@ describe("installInstallGateKiro", () => {
       const r2 = await installInstallGateKiro(dir);
       assert.equal(r2.action, "unchanged");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -916,7 +916,7 @@ describe("installInstallGateKiro", () => {
     try {
       assert.equal((await installInstallGateKiro(dir)).action, "skipped");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -940,7 +940,7 @@ describe("installInstallGateDroid", () => {
       const s2 = JSON.parse(readFileSync(join(dir, ".factory", "hooks.json"), "utf-8"));
       assert.equal(s2.hooks.PreToolUse.length, 1, "no duplicate group on re-run");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -963,7 +963,7 @@ describe("installInstallGateDroid", () => {
       // must NOT create a second scope-root file
       assert.equal(existsSync(join(dir, ".factory", "hooks.json")), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -972,7 +972,7 @@ describe("installInstallGateDroid", () => {
     try {
       assert.equal((await installInstallGateDroid(dir)).action, "skipped");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -996,7 +996,7 @@ describe("installInstallGateAugment", () => {
       const s2 = JSON.parse(readFileSync(join(dir, ".augment", "settings.json"), "utf-8"));
       assert.equal(s2.hooks.PreToolUse.length, 1, "no duplicate group on re-run");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -1008,7 +1008,7 @@ describe("installInstallGateAugment", () => {
       assert.equal(r.action, "created");
       assert.ok(existsSync(join(dir, ".augment", "settings.json")));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -1017,7 +1017,7 @@ describe("installInstallGateAugment", () => {
     try {
       assert.equal((await installInstallGateAugment(dir)).action, "skipped");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -1040,7 +1040,7 @@ describe("installInstallGateAntigravity", () => {
       const s2 = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf-8"));
       assert.equal(s2.hooks.PreToolUse.length, 1, "no duplicate group on re-run");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -1049,7 +1049,7 @@ describe("installInstallGateAntigravity", () => {
     try {
       assert.equal((await installInstallGateAntigravity(dir)).action, "skipped");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -1100,7 +1100,7 @@ describe("installAiderRules (bespoke: CONVENTIONS.md + conf.yml)", () => {
       const r2 = await installAiderRules(dir);
       assert.equal(r2.action, "unchanged");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -1113,7 +1113,7 @@ describe("installAiderRules (bespoke: CONVENTIONS.md + conf.yml)", () => {
       assert.ok(existsSync(join(dir, "CONVENTIONS.md")));
       assert.ok(readFileSync(join(dir, ".aider.conf.yml"), "utf-8").includes("CONVENTIONS.md"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -1124,7 +1124,7 @@ describe("installAiderRules (bespoke: CONVENTIONS.md + conf.yml)", () => {
       assert.equal(r.detail, "no Aider project detected");
       assert.equal(existsSync(join(dir, "CONVENTIONS.md")), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -1140,7 +1140,7 @@ describe("installInstallGateGemini", () => {
       assert.ok(s.hooks.BeforeTool[0].hooks[0].command.endsWith("gate-bash"));
       assert.equal((await installInstallGateGemini(dir)).action, "unchanged");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
   it("skips when no Gemini project is present", async () => {
@@ -1148,7 +1148,7 @@ describe("installInstallGateGemini", () => {
     try {
       assert.equal((await installInstallGateGemini(dir)).action, "skipped");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -1165,7 +1165,7 @@ describe("installInstallGateCursor", () => {
       assert.ok(c.hooks.beforeShellExecution[0].command.endsWith("gate-bash"));
       assert.equal((await installInstallGateCursor(dir)).action, "unchanged");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
   it("skips when no Cursor project is present", async () => {
@@ -1173,7 +1173,7 @@ describe("installInstallGateCursor", () => {
     try {
       assert.equal((await installInstallGateCursor(dir)).action, "skipped");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -1196,7 +1196,7 @@ describe("installInstallGateCline", () => {
       }
       assert.equal((await installInstallGateCline(dir)).action, "unchanged");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
   it("detects a .cline project dir too", async () => {
@@ -1205,7 +1205,7 @@ describe("installInstallGateCline", () => {
       mkdirSync(join(dir, ".cline"), { recursive: true });
       assert.equal((await installInstallGateCline(dir)).action, "created");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
   it("skips when no Cline project is present", async () => {
@@ -1213,7 +1213,7 @@ describe("installInstallGateCline", () => {
     try {
       assert.equal((await installInstallGateCline(dir)).action, "skipped");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -1237,7 +1237,7 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
         assert.equal(live.installGate, true);
         assert.deepEqual(live.problems, []);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     },
   );
@@ -1266,7 +1266,7 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
         );
         assert.match(gateLiveness(dir).problems[0], /kit CLI missing/);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     },
   );
@@ -1309,7 +1309,7 @@ describe("gateLiveness (enforcement floor must prove it exists)", () => {
       mkdirSync(join(dir, ".claude"), { recursive: true });
       return fn(dir);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   }
 

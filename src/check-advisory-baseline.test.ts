@@ -16,12 +16,13 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { checkAdvisoryBaseline } from "./check-advisory-baseline.js";
 import { ADVISORY_BASELINE_FILE, renderBaseline, type Advisory } from "./advisory-baseline.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function repo(opts: { baseline?: Advisory[]; lockfile?: string } = {}): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-adv-check-"));
@@ -48,7 +49,7 @@ describe("checkAdvisoryBaseline", () => {
       assert.equal(r.status, "skip");
       assert.match(r.detail, /kit security advisories --accept/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -59,7 +60,7 @@ describe("checkAdvisoryBaseline", () => {
       assert.equal(r.status, "skip");
       assert.match(r.detail, /no lockfile/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -77,7 +78,7 @@ describe("checkAdvisoryBaseline", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_AIRGAP;
       else process.env.KIT_AIRGAP = prev;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -96,7 +97,7 @@ describe("checkAdvisoryBaseline", () => {
       assert.equal(r.didNotRun, true, "an audit that did not happen is not a clean audit");
     } finally {
       process.env.PATH = prev;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

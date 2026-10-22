@@ -1,18 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  chmodSync,
-  copyFileSync,
-  linkSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, copyFileSync, linkSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { diagnoseBrowser } from "./browser.js";
 import type { BrowserProbeDeps } from "./browser.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const noMachineDeps: BrowserProbeDeps = {
   existsSync: () => false,
@@ -163,7 +156,7 @@ describe("system Chrome selection", () => {
       assert.equal(result.status, "blocker");
       assert.equal(result.strategy, "none");
     } finally {
-      rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      rmTemp(path);
     }
   });
 });
@@ -224,7 +217,7 @@ describe("system Chrome fallback", () => {
         join(second, valid),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      rmTemp(root);
     }
   });
 });

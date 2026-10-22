@@ -17,12 +17,13 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkDecisionLedger } from "./check-decision-ledger.js";
 import { gateStatus, type SecurityCheckResult } from "./check-security.js";
 import { DECISION_LEDGER_FILE } from "./decision-ledger.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const entry = (over: Record<string, unknown> = {}): string =>
   JSON.stringify({
@@ -54,7 +55,7 @@ describe("checkDecisionLedger", () => {
       assert.notEqual(r.didNotRun, true);
       assert.match(r.detail, /kit decisions/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -67,7 +68,7 @@ describe("checkDecisionLedger", () => {
       assert.match(r.detail, /no \.kit\/decisions\.jsonl/);
       assert.equal(gateStatus(r), "fail");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -79,7 +80,7 @@ describe("checkDecisionLedger", () => {
       assert.equal(r.didNotRun, true);
       assert.match(r.detail, /no decisions recorded/i);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -91,7 +92,7 @@ describe("checkDecisionLedger", () => {
       assert.match(r.detail, /2 decision/);
       assert.match(r.detail, /1 unreviewed/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -104,7 +105,7 @@ describe("checkDecisionLedger", () => {
       assert.match(r.detail, /line 2/);
       assert.match(r.detail, /confidence/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -115,7 +116,7 @@ describe("checkDecisionLedger", () => {
       assert.equal(r.status, "fail");
       assert.match(r.detail, /decision/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -127,7 +128,7 @@ describe("checkDecisionLedger", () => {
       const r = await checkDecisionLedger(dir, true);
       assert.equal(r.status, "pass");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -140,7 +141,7 @@ describe("checkDecisionLedger", () => {
       assert.equal(r.status, "fail");
       assert.equal(r.didNotRun, true);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -151,7 +152,7 @@ describe("checkDecisionLedger", () => {
       assert.equal(r.status, "fail");
       assert.match(r.detail, /2 of 3/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -203,7 +204,7 @@ describe("decision ledger, wired into checkSecurity", () => {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
       }
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   }
 

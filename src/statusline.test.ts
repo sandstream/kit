@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildStatuslineParts, formatStatusline, quickSubsystems } from "./statusline.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("formatStatusline", () => {
   it("renders mode score + update + actions, dot-separated", () => {
@@ -79,7 +80,7 @@ describe("quickSubsystems secrets hint", () => {
       writeFileSync(join(dir, ".kit.toml"), toml);
       return quickSubsystems(dir).find((s) => s.key === "secrets")?.next;
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   };
 
@@ -107,7 +108,7 @@ describe("statusline as data (for UI mods)", () => {
       assert.deepEqual(parts.gaps[0], { key: "config", label: ".kit.toml", next: "kit init" });
       assert.equal(typeof parts.pal, "number");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

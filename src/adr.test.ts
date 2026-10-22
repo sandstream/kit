@@ -11,7 +11,7 @@ import {
   type PackageResolver,
 } from "./adr.js";
 import { createNodeModulesResolver } from "./commands/adr.js";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -171,6 +171,7 @@ paths = "src/web/**/*.ts"
 message = "web must not import pg directly"
 \`\`\`
 `;
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("forbid_import (direct)", () => {
   const adr = parseAdr(FORBID_IMPORT)!;
@@ -289,7 +290,7 @@ describe("forbid_import (follow_packages — across npm package boundaries)", ()
     // The chain is shortened to package-relative keys, so it reads as a dependency path.
     assert.ok(v[0].message.includes("wrapper/lib/db.js"), v[0].message);
     assert.ok(!v[0].message.includes("node_modules"), "chain is not a wall of temp paths");
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   });
 
   it("shortens Windows package paths in dependency chains", () => {
@@ -326,7 +327,7 @@ describe("forbid_import (follow_packages — across npm package boundaries)", ()
       { packages: createNodeModulesResolver(root) },
     );
     assert.equal(v.length, 0);
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   });
 
   it("degrades to the in-repo walk when no resolver is injected (never a crash)", () => {
@@ -346,7 +347,7 @@ describe("forbid_import (follow_packages — across npm package boundaries)", ()
     assert.equal(v.length, 1);
     assert.equal(v[0].kind, "gap");
     assert.ok(v[0].message.includes('unresolved import "not-installed"'), v[0].message);
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   });
 
   it("node builtins stay leaves — following them would gap on every file", () => {
@@ -365,7 +366,7 @@ describe("forbid_import (follow_packages — across npm package boundaries)", ()
       { packages: createNodeModulesResolver(root) },
     );
     assert.equal(v.length, 0);
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   });
 
   it("the depth bound reports a gap instead of silently stopping", () => {
@@ -378,7 +379,7 @@ describe("forbid_import (follow_packages — across npm package boundaries)", ()
     assert.equal(v.length, 1);
     assert.equal(v[0].kind, "gap", "a bounded walk is unproven, never clean");
     assert.ok(v[0].message.includes("depth 0"), v[0].message);
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   });
 
   it("the node bound reports a gap instead of silently stopping", () => {
@@ -427,7 +428,7 @@ describe("createNodeModulesResolver", () => {
       join(root, "node_modules", "wrapper", "lib", "db.js"),
     );
     assert.equal(r.read(entry!)?.includes("./db.js"), true);
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   });
 
   it("returns null (→ gap) for anything it cannot resolve or read", () => {
@@ -437,7 +438,7 @@ describe("createNodeModulesResolver", () => {
     assert.equal(r.resolve("src/web/h.ts", "#private/map"), null);
     assert.equal(r.resolve("src/web/h.ts", "./nope.js"), null);
     assert.equal(r.read(join(root, "nope.js")), null);
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   });
 
   it("prefers exports over main, including a conditional exports object", () => {
@@ -458,7 +459,7 @@ describe("createNodeModulesResolver", () => {
       createNodeModulesResolver(root).resolve("src/web/h.ts", "modern"),
       join(pkg, "esm.mjs"),
     );
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   });
 });
 

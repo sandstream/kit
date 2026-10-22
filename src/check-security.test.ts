@@ -40,6 +40,7 @@ import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { insertMessage, openMemoryDb, upsertSession } from "./memory/db.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("bumblebeeDownloadAllowed", () => {
   it("blocks downloads in air-gap mode even when KIT_NO_DOWNLOAD is unset", () => {
@@ -116,7 +117,7 @@ describe("checkDeviceIdOverride (#79 — trust-bearing env override)", () => {
     try {
       await withEnv("laptop-1", join(dir, "nope.db"), (r) => assert.equal(r.status, "skip"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -130,7 +131,7 @@ describe("checkDeviceIdOverride (#79 — trust-bearing env override)", () => {
         assert.match(r.detail, /KIT_DEVICE_ID/);
       });
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -176,7 +177,7 @@ describe("checkMemoryHooksLiveness (R5 — self-playing loop gate)", () => {
       else process.env.KIT_CODEX_MEMORY_HOOK_MARKER = prevCodexM;
       if (prevCodexS === undefined) delete process.env.KIT_CODEX_HOOKS;
       else process.env.KIT_CODEX_HOOKS = prevCodexS;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   };
 
@@ -225,7 +226,7 @@ describe("checkMemoryHooksLiveness (R5 — self-playing loop gate)", () => {
       restore("KIT_CLAUDE_SETTINGS", previous.claudeSettings);
       restore("KIT_CODEX_MEMORY_HOOK_MARKER", previous.codexMarker);
       restore("KIT_CODEX_HOOKS", previous.codexHooks);
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -284,7 +285,7 @@ describe("checkMemoryInjection", () => {
       if (prevDb === undefined) delete process.env.KIT_MEMORY_DB;
       else process.env.KIT_MEMORY_DB = prevDb;
       chmodSync(dir, 0o700);
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -311,7 +312,7 @@ describe("checkGateLiveness", () => {
     } finally {
       if (prevHome === undefined) delete process.env.HOME;
       else process.env.HOME = prevHome;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -690,7 +691,7 @@ describe("license check tool boundary", () => {
     } finally {
       if (prevPath === undefined) delete process.env.PATH;
       else process.env.PATH = prevPath;
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });
@@ -798,7 +799,7 @@ describe("checkSecurity", () => {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   });
 
   it("returns an array of security check results", () => {

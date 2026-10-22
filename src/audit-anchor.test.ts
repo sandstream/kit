@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { appendAuditEventDirect } from "./audit.js";
@@ -19,6 +19,7 @@ import {
   tryAdvanceAnchorOnAppend,
   type AnchorRecord,
 } from "./audit-anchor.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 // Build a real hash-chained log without auto-anchoring (KIT_AUDIT_ANCHOR=0 is
 // set by the test runner) so each test controls anchoring explicitly.
@@ -126,7 +127,7 @@ describe("audit anchor - key file", () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "kit-anchor-key-"));
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => rmTemp(dir));
 
   it("creates the key on first use (0600) and re-reads the same key", async () => {
     const k1 = await getAuditAnchorKey(dir);
@@ -140,7 +141,7 @@ describe("audit anchor - key file", () => {
     try {
       assert.equal(await tryReadAuditAnchorKey(empty), null);
     } finally {
-      rmSync(empty, { recursive: true, force: true });
+      rmTemp(empty);
     }
   });
 });
@@ -153,8 +154,8 @@ describe("audit anchor - sign + verify round-trip", () => {
     dir = mkdtempSync(join(tmpdir(), "kit-anchor-home-"));
   });
   afterEach(() => {
-    rmSync(cwd, { recursive: true, force: true });
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(cwd);
+    rmTemp(dir);
   });
 
   it("anchors a chain and verifies it as anchored-ok", async () => {
@@ -198,8 +199,8 @@ describe("audit anchor - tamper detection", () => {
     dir = mkdtempSync(join(tmpdir(), "kit-anchor-th-"));
   });
   afterEach(() => {
-    rmSync(cwd, { recursive: true, force: true });
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(cwd);
+    rmTemp(dir);
   });
 
   it("a chain recomputed WITHOUT the key fails on tip-mismatch", async () => {
@@ -291,8 +292,8 @@ describe("audit anchor - append-path advance", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_AUDIT_ANCHOR;
       else process.env.KIT_AUDIT_ANCHOR = prev;
-      rmSync(cwd, { recursive: true, force: true });
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(cwd);
+      rmTemp(dir);
     }
   });
 
@@ -318,8 +319,8 @@ describe("audit anchor - append-path advance", () => {
       else process.env.KIT_AUDIT_ANCHOR = prev;
       if (prevDir === undefined) delete process.env.KIT_AUDIT_ANCHOR_DIR;
       else process.env.KIT_AUDIT_ANCHOR_DIR = prevDir;
-      rmSync(cwd, { recursive: true, force: true });
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(cwd);
+      rmTemp(dir);
     }
   });
 
@@ -343,8 +344,8 @@ describe("audit anchor - append-path advance", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_AUDIT_ANCHOR;
       else process.env.KIT_AUDIT_ANCHOR = prev;
-      rmSync(cwd, { recursive: true, force: true });
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(cwd);
+      rmTemp(dir);
     }
   });
 });
@@ -357,8 +358,8 @@ describe("audit anchor - key rotation (FIX 4)", () => {
     dir = mkdtempSync(join(tmpdir(), "kit-anchor-roth-"));
   });
   afterEach(() => {
-    rmSync(cwd, { recursive: true, force: true });
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(cwd);
+    rmTemp(dir);
   });
 
   it("anchorAuditLog records the key fingerprint (v3, attribution-bound)", async () => {

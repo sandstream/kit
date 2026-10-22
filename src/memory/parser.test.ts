@@ -1,10 +1,11 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, getStats, searchMessages } from "./db.js";
 import { extractText, extractToolUses, indexClaudeTranscripts } from "./parser.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory parser — content extraction", () => {
   it("returns strings unchanged", () => {
@@ -78,7 +79,7 @@ describe("memory parser — indexing", () => {
   after(() => {
     if (prevClaudeDir === undefined) delete process.env.KIT_CLAUDE_DIR;
     else process.env.KIT_CLAUDE_DIR = prevClaudeDir;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("indexes user + assistant messages, skips summary/blank/malformed", () => {

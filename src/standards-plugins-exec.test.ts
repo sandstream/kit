@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
   collectMjsPluginKeys,
 } from "./standards-plugins-exec.js";
 import { DEFAULT_PLUGIN_DIR, pluginKey } from "./standards-plugins.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function tmpRepo(): string {
   return mkdtempSync(join(tmpdir(), "kit-mjs-"));
@@ -53,7 +54,7 @@ export function evaluate(ctx) {
       assert.equal(frozen[0].status, "warn");
       assert.equal(frozen[0].severity, "low");
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -74,7 +75,7 @@ export function evaluate(ctx) {
       });
       assert.equal(r[0].status, "fail");
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -94,7 +95,7 @@ export function evaluate(ctx) {
       assert.ok(runs[0].integrity, "flaky plugin flagged as integrity failure");
       assert.match(runs[0].integrity?.detail ?? "", /non-deterministic/);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -122,7 +123,7 @@ export function evaluate(ctx) {
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_PASSPHRASE;
       else process.env.KIT_MEMORY_PASSPHRASE = prev;
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -142,7 +143,7 @@ export function evaluate(ctx) {
         "both flagged as integrity failures",
       );
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -166,7 +167,7 @@ export function evaluate(ctx) {
       const keys = await collectMjsPluginKeys(repo, "python", [DEFAULT_PLUGIN_DIR]);
       assert.deepEqual(keys, [pluginKey("py-only", "a.py", 3)]);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 });

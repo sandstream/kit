@@ -5,6 +5,7 @@ import { it } from "node:test";
 import type { MonkeyRunResult } from "./monkey-test-contract.js";
 import { markerCommand, runnerFixture, serverCommand } from "./monkey-test-runner.test-support.js";
 import { runMonkey } from "./monkey-test-runner-subprocess.test-support.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 for (const missing of ["dependency", "harness"] as const) {
   it(`MSG-02: missing ${missing} prevents commands before side effects`, async () => {
@@ -39,7 +40,7 @@ for (const missing of ["dependency", "harness"] as const) {
       assert.ok(report.steps.some((step) => step.name === "seed" && step.status === "skip"));
       assert.ok(report.steps.some((step) => step.name === "browser" && step.status === "skip"));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 }
@@ -47,7 +48,7 @@ for (const missing of ["dependency", "harness"] as const) {
 it("MSG-01: a package.json Playwright declaration without an installed module cannot seed", async () => {
   const root = await runnerFixture();
   try {
-    rmSync(join(root, "node_modules", "@playwright", "test"), { recursive: true, force: true });
+    rmTemp(join(root, "node_modules", "@playwright", "test"));
     const result = await runMonkey(root, [
       "--json",
       "--seed-command",
@@ -64,6 +65,6 @@ it("MSG-01: a package.json Playwright declaration without an installed module ca
       assert.equal(existsSync(join(root, `${stage}.ran`)), false);
     }
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 });

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+
 import { it } from "node:test";
 import type { MonkeyRunResult } from "./monkey-test-contract.js";
 import { fixtureCommand, runnerFixture, serverCommand } from "./monkey-test-runner.test-support.js";
 import { noisyCommand, OUTPUT_SECRET } from "./monkey-test-runner-report.test-support.js";
 import { runMonkey } from "./monkey-test-runner-subprocess.test-support.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 for (const outcome of ["test command success", "test failure", "seed failure", "browser skipped"]) {
   it(`MSG-04: --json stays parseable with noisy child output (${outcome})`, async () => {
@@ -56,7 +57,7 @@ for (const outcome of ["test command success", "test failure", "seed failure", "
       if (outcome === "browser skipped")
         assert.ok(report.findings.some((finding) => finding.title === "Browser evidence skipped"));
     } finally {
-      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+      rmTemp(root);
     }
   });
 }

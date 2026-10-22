@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,6 +10,7 @@ import {
   POLICY_SCHEMA_VERSION,
 } from "./policy-doc.js";
 import { loadOrCreateIdentity, signWithIdentity, verifySignature } from "./identity.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("policy-doc — validation", () => {
   it("accepts a minimal valid policy", () => {
@@ -123,7 +124,7 @@ describe("policy-doc — sign/verify roundtrip over canonical bytes", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_IDENTITY_DIR;
     else process.env.KIT_IDENTITY_DIR = prev;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
 
   it("verifies a signature over the canonical bytes, and fails on tamper", () => {

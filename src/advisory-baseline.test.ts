@@ -28,9 +28,10 @@ import {
   detectAuditRunner,
   type Advisory,
 } from "./advisory-baseline.js";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 /** Recorded from `bun audit --json` (bun 1.3.10): package name as the key, GHSA only in the url. */
 const BUN_OUTPUT = JSON.stringify({
@@ -215,7 +216,7 @@ describe("detectAuditRunner", () => {
         const runner = await detectAuditRunner(dir);
         assert.equal(runner?.manager, manager, lockfile);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     }
   });
@@ -225,7 +226,7 @@ describe("detectAuditRunner", () => {
     try {
       assert.equal(await detectAuditRunner(dir), null);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

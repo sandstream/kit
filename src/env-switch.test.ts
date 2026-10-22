@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,6 +10,7 @@ import {
   prodReadAllowed,
   looksLikeProdKey,
 } from "./env-switch.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("writeActiveEnv / readActiveEnv", () => {
   it("round-trips an env marker", async () => {
@@ -23,7 +24,7 @@ describe("writeActiveEnv / readActiveEnv", () => {
       assert.equal(read!.env, "staging");
       assert.ok(existsSync(join(dir, ".kit", "active-env.json")));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -32,7 +33,7 @@ describe("writeActiveEnv / readActiveEnv", () => {
     try {
       assert.equal(await readActiveEnv(dir), null);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -46,7 +47,7 @@ describe("writeActiveEnv / readActiveEnv", () => {
       assert.equal(await readActiveEnv(dir), null); // disk marker unchanged
     } finally {
       delete process.env.KIT_READ_ONLY;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -58,7 +59,7 @@ describe("writeActiveEnv / readActiveEnv", () => {
       writeFileSync(join(dir, ".kit", "active-env.json"), JSON.stringify({ env: "bogus" }));
       assert.equal(await readActiveEnv(dir), null);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -69,7 +70,7 @@ describe("getActiveEnv", () => {
     try {
       assert.equal(await getActiveEnv(dir), "dev");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

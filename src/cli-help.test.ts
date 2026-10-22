@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { COMMAND_HELP } from "./cli.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const source = import.meta.url.endsWith(".ts");
 const cli = fileURLToPath(new URL(source ? "./cli.ts" : "./cli.js", import.meta.url));
@@ -85,7 +86,7 @@ beforeEach(() => {
   };
 });
 
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => rmTemp(root));
 
 function run(args: string[], status = 0): string {
   const before = snapshot(root);

@@ -7,6 +7,7 @@ import { loadOrCreateIdentity, identityId, recordRevocation } from "./identity.j
 import { resolveKeyStore } from "./keystore/index.js";
 import { addPolicySigner, getSignersPath } from "./policy-trust.js";
 import { mintApprovalToken, checkSignedApproval, APPROVAL_TOKENS_FILE } from "./approval-tokens.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 let idDir: string;
 let root: string;
@@ -30,7 +31,7 @@ beforeEach(() => {
 afterEach(() => {
   if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
   else process.env.KIT_IDENTITY_DIR = savedId;
-  for (const d of [idDir, root]) rmSync(d, { recursive: true, force: true });
+  for (const d of [idDir, root]) rmTemp(d);
 });
 
 describe("signed approval tokens", () => {

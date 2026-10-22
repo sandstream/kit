@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   mkdtempSync,
   mkdirSync,
-  rmSync,
   readFileSync,
   writeFileSync,
   existsSync,
@@ -16,6 +15,7 @@ import type { BrokerPolicy } from "./policy.js";
 import { loadOrCreateIdentity } from "../identity.js";
 import { PROFILE_FILE } from "../profile/schema.js";
 import { signProfile } from "../profile/sign.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const POLICY: BrokerPolicy = {
   egress: { allow: ["api.example.com"] },
@@ -54,8 +54,8 @@ beforeEach(() => {
 afterEach(() => {
   process.chdir(cwd);
   delete process.env.KIT_IDENTITY_DIR;
-  rmSync(sandbox, { recursive: true, force: true });
-  rmSync(identityDir, { recursive: true, force: true });
+  rmTemp(sandbox);
+  rmTemp(identityDir);
 });
 
 describe("brokerExec default-deny", () => {
@@ -236,8 +236,8 @@ describe("brokerExec symlink hardening (impure realpath check)", () => {
       assert.equal(ran, false);
       assert.match(out.denials?.join(" ") ?? "", /escapes root|realpath/);
     } finally {
-      rmSync(root, { recursive: true, force: true });
-      rmSync(outside, { recursive: true, force: true });
+      rmTemp(root);
+      rmTemp(outside);
     }
   });
 
@@ -249,7 +249,7 @@ describe("brokerExec symlink hardening (impure realpath check)", () => {
       assert.equal(out.ok, true);
       assert.equal(out.result, "ok");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });
@@ -279,9 +279,9 @@ describe("brokerExec multi-root fs (policy.fs.roots)", () => {
       );
       assert.equal(out.ok, false);
     } finally {
-      rmSync(a, { recursive: true, force: true });
-      rmSync(b, { recursive: true, force: true });
-      rmSync(outside, { recursive: true, force: true });
+      rmTemp(a);
+      rmTemp(b);
+      rmTemp(outside);
     }
   });
 });
@@ -555,7 +555,7 @@ enforce_runtime = true
         "no observe entry leaked into process.cwd()'s log",
       );
     } finally {
-      rmSync(project, { recursive: true, force: true });
+      rmTemp(project);
     }
   });
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import type { MonkeyRunResult } from "./monkey-test-contract.js";
@@ -10,6 +10,7 @@ import {
   serverCommand,
 } from "./monkey-test-runner.test-support.js";
 import { runMonkey } from "./monkey-test-runner-subprocess.test-support.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function failedSeedCommand(root: string): string {
   return fixtureCommand(
@@ -60,7 +61,7 @@ it("MSG-02: failed seed prevents dev-server and test-command side effects", asyn
       ),
     );
   } finally {
-    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    rmTemp(root);
   }
 });
 
@@ -92,6 +93,6 @@ it("MSG-02: justified --skip-seed still starts browser execution", async () => {
     );
     assert.ok(!report.findings.some((finding) => finding.title === "Seed command failed"));
   } finally {
-    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    rmTemp(root);
   }
 });

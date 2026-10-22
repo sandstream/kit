@@ -1,6 +1,6 @@
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -13,6 +13,7 @@ import {
   memoryHooksLiveness,
   codexMemoryHooksLiveness,
 } from "./install.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory hook installer", () => {
   let tmp: string;
@@ -44,7 +45,7 @@ describe("memory hook installer", () => {
     else process.env.KIT_CLAUDE_SETTINGS = prev;
     if (prevMarker === undefined) delete process.env.KIT_MEMORY_HOOK_MARKER;
     else process.env.KIT_MEMORY_HOOK_MARKER = prevMarker;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("installs all hooks without clobbering existing ones", () => {
@@ -172,7 +173,7 @@ describe("Codex memory hook installer", () => {
     else process.env.KIT_CODEX_HOOKS = prevHooks;
     if (prevMarker === undefined) delete process.env.KIT_CODEX_MEMORY_HOOK_MARKER;
     else process.env.KIT_CODEX_MEMORY_HOOK_MARKER = prevMarker;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("merges Codex lifecycle hooks with UI status messages and SessionEnd timeout", () => {
@@ -332,7 +333,7 @@ describe("status-line installer", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_CLAUDE_SETTINGS;
     else process.env.KIT_CLAUDE_SETTINGS = prev;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("wires kit statusline when absent, idempotently", () => {
@@ -394,7 +395,7 @@ describe("memoryHooksLiveness (R5: silent hook removal is visible)", () => {
     settings = join(tmp, "settings.json");
     marker = join(tmp, "marker");
   });
-  after(() => rmSync(tmp, { recursive: true, force: true }));
+  after(() => rmTemp(tmp));
 
   it("everInstalled=false when the marker is absent (never installed → no false alarm)", () => {
     writeFileSync(settings, "{}");

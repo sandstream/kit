@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanStagedFiles } from "./scan-staged.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function tmpGitRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-scan-staged-"));
@@ -21,7 +22,7 @@ describe("scanStagedFiles", () => {
       const hits = await scanStagedFiles(dir);
       assert.equal(hits.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -33,7 +34,7 @@ describe("scanStagedFiles", () => {
       const hits = await scanStagedFiles(dir);
       assert.equal(hits.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -50,7 +51,7 @@ describe("scanStagedFiles", () => {
       assert.equal(hits[0].file, ".env");
       assert.ok(hits[0].findings.some((f) => f.label === "stripe-key"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -70,7 +71,7 @@ describe("scanStagedFiles", () => {
       assert.equal(hits.length, 1);
       assert.ok(hits[0].findings.some((f) => f.label === "stripe-key"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -84,7 +85,7 @@ describe("scanStagedFiles", () => {
       assert.equal(hits.length, 1);
       assert.ok(hits[0].findings.some((f) => f.label === "jwt"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -97,7 +98,7 @@ describe("scanStagedFiles", () => {
       const hits = await scanStagedFiles(dir);
       assert.equal(hits.length, 2);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -107,7 +108,7 @@ describe("scanStagedFiles", () => {
       const hits = await scanStagedFiles(dir);
       assert.equal(hits.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

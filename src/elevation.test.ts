@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -20,6 +20,7 @@ import {
   elevationCoversScope,
 } from "./elevation.js";
 import { readFileSync, existsSync } from "node:fs";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function tmpRepo(): string {
   return mkdtempSync(join(tmpdir(), "kit-elev-"));
@@ -32,7 +33,7 @@ describe("grantElevation / isElevated", () => {
       await grantElevation("rotate", "yes-prompt", dir);
       assert.equal(await isElevated("rotate", dir), true);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -42,7 +43,7 @@ describe("grantElevation / isElevated", () => {
       await grantElevation("rotate", "yes-prompt", dir);
       assert.equal(await isElevated("migrate", dir), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -54,7 +55,7 @@ describe("grantElevation / isElevated", () => {
       assert.equal(await isElevated("migrate", dir), true);
       assert.equal(await isElevated("onecli-register", dir), true);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -74,7 +75,7 @@ describe("grantElevation / isElevated", () => {
       );
       assert.equal(await isElevated("rotate", dir), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -88,7 +89,7 @@ describe("clearElevation", () => {
       await clearElevation(dir);
       assert.equal(await readElevation(dir), null);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -101,7 +102,7 @@ describe("requireElevation", () => {
       assert.equal(r.ok, false);
       assert.ok(r.reason.includes("auth elevate"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -125,7 +126,7 @@ describe("requireElevation", () => {
       const r = await requireElevation("rotate", dir);
       assert.equal(r.ok, true);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -242,7 +243,7 @@ describe("requireElevation audit emission", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_ELEVATED;
       else process.env.KIT_ELEVATED = prev;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -257,7 +258,7 @@ describe("requireElevation audit emission", () => {
       assert.equal(last.success, false);
       assert.equal(last.metadata.method, "none");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -277,7 +278,7 @@ describe("consumeElevation (one-shot)", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_ELEVATED;
       else process.env.KIT_ELEVATED = prev;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -291,7 +292,7 @@ describe("consumeElevation (one-shot)", () => {
       assert.equal(result.ok, true);
       assert.equal(await readElevation(dir), null);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -312,7 +313,7 @@ describe("elevation marker forgery resistance", () => {
       assert.equal(await isElevated("rotate", dir), false);
       assert.equal((await requireElevation("rotate", dir)).ok, false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -328,7 +329,7 @@ describe("elevation marker forgery resistance", () => {
       assert.equal(await readElevation(dir), null);
       assert.equal((await requireElevation("purge-history", dir)).ok, false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -361,7 +362,7 @@ describe("isElevated (gate semantics)", () => {
     try {
       assert.equal(await isElevated("rotate", dir), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -373,7 +374,7 @@ describe("isElevated (gate semantics)", () => {
       assert.notEqual(await readElevation(dir), null, "marker must pass signature check");
       assert.equal(await isElevated("rotate", dir), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -387,7 +388,7 @@ describe("isElevated (gate semantics)", () => {
       await writeSigned(dir, { expiresAt: "", scope: "all" });
       assert.equal(await isElevated("rotate", dir), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -402,7 +403,7 @@ describe("isElevated (gate semantics)", () => {
       assert.equal(await isElevated("Rotate", dir), false);
       assert.equal(await isElevated("", dir), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -415,7 +416,7 @@ describe("isElevated (gate semantics)", () => {
       assert.equal(await isElevated("rotate", dir), false);
       assert.equal(await isElevated("ALL", dir), true);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -434,7 +435,7 @@ describe("isElevated (gate semantics)", () => {
       writeFileSync(path, "{not json");
       assert.equal(await isElevated("rotate", dir), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -450,7 +451,7 @@ describe("isElevated (gate semantics)", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_ELEVATED;
       else process.env.KIT_ELEVATED = prev;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -466,7 +467,7 @@ describe("isElevated (gate semantics)", () => {
       // gate in front of a destructive op, which needs the forensic record.
       assert.equal(existsSync(join(dir, ".kit-audit.jsonl")), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

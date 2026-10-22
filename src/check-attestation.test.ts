@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -18,6 +18,7 @@ import {
   type AttestationPayload,
   type BuildAttestationInput,
 } from "./check-attestation.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const SAMPLE: BuildAttestationInput = {
   command: "check",
@@ -52,7 +53,7 @@ describe("check-attestation - HMAC is the authoritative default", () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "kit-att-hmac-"));
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => rmTemp(dir));
 
   it("signs with HMAC by default and verifies via the machine-local anchor key", async () => {
     const att = await signAttestation(buildAttestationPayload(SAMPLE), { dir });
@@ -90,7 +91,7 @@ describe("check-attestation - Ed25519 authenticity (FIX 1: embedded key is untru
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "kit-att-ed-"));
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => rmTemp(dir));
 
   /** Mint a fully self-signed, green Ed25519 receipt (the forgery attack). */
   function forgeGreenEd25519Receipt(payload: AttestationPayload): {
@@ -195,8 +196,8 @@ describe("check-attestation - emit writes the receipt file", () => {
       const r = await verifyAttestation(onDisk, { dir });
       assert.equal(r.ok, true);
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(cwd);
+      rmTemp(dir);
     }
   });
 });

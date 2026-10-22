@@ -1,7 +1,7 @@
 import { after, before, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,7 @@ import { palAdd, palList } from "./pal.js";
 import { buildSuggestPrompt } from "./suggest.js";
 import { getCurrentProjectRoot, getProjectRecallRoots } from "./project.js";
 import { claimTask, setPalClock, withPalDevice } from "./pal-fixture.test-support.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 let tmp: string;
 let root: string;
@@ -83,7 +84,7 @@ after(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  rmSync(tmp, { recursive: true, force: true });
+  rmTemp(tmp);
 });
 
 function assertHandoff(text: string): void {

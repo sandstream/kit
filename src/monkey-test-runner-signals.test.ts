@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { runnerFixture } from "./monkey-test-runner.test-support.js";
@@ -15,6 +15,7 @@ import {
   waitForExit,
   type SignalStage,
 } from "./monkey-test-runner-signal.test-support.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   for (const stage of ["env", "seed", "startup", "test"] satisfies SignalStage[]) {
@@ -48,7 +49,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
           if (stage !== "test") assert.equal(existsSync(join(root, "test.ran")), false);
         } finally {
           await cleanScenario(run, root, scenario.names);
-          rmSync(root, { recursive: true, force: true });
+          rmTemp(root);
         }
       },
     );

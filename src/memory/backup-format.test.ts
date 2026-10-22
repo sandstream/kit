@@ -1,22 +1,16 @@
 import assert from "node:assert/strict";
-import fs, {
-  existsSync,
-  fstatSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import fs, { existsSync, fstatSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { it, type TestContext } from "node:test";
 import { isAsymmetricBackup, isEncryptedBackup } from "./backup.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 function fixture(t: TestContext): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-backup-format-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmTemp(dir));
   return join(dir, "input");
 }
 

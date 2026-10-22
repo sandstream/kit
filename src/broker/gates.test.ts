@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { loadOrCreateIdentity } from "../identity.js";
 import { PROFILE_FILE } from "../profile/schema.js";
 import { signProfile } from "../profile/sign.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const CLI = fileURLToPath(new URL("../cli.js", import.meta.url));
 
@@ -63,8 +64,8 @@ beforeEach(async () => {
 afterEach(() => {
   if (savedIdEnv === undefined) delete process.env.KIT_IDENTITY_DIR;
   else process.env.KIT_IDENTITY_DIR = savedIdEnv;
-  rmSync(idDir, { recursive: true, force: true });
-  rmSync(proj, { recursive: true, force: true });
+  rmTemp(idDir);
+  rmTemp(proj);
 });
 
 describe("kit gate-egress (subprocess)", () => {

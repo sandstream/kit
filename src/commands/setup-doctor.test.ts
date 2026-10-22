@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { cmdDoctor } from "./setup.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("kit doctor output", () => {
   it("emits one machine-readable document for --json", async () => {
@@ -40,7 +41,7 @@ describe("kit doctor output", () => {
       console.error = oldError;
       process.chdir(previousCwd);
       process.argv = previousArgv;
-      rmSync(cwd, { recursive: true, force: true });
+      rmTemp(cwd);
     }
   });
 });

@@ -1,11 +1,12 @@
 import { describe, it, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkEnvGitignored } from "./check-security.js";
 import { runHeal, safeRecipe, type HealDeps } from "./heal.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function fixture(
   t: TestContext,
@@ -15,7 +16,7 @@ function fixture(
   const previous = process.cwd();
   t.after(() => {
     process.chdir(previous);
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
   execFileSync("git", ["init", "-q", dir]);
   writeFileSync(join(dir, ".gitignore"), ignore);

@@ -5,6 +5,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const workflow = readFileSync(join(root, ".github", "workflows", "docker-build.yml"), "utf8");
@@ -136,7 +137,7 @@ describe("Docker image release gate (CI-08)", () => {
         assert.match(mismatch.stderr, /different image digests/);
         assert.equal(readFileSync(output, "utf8"), "");
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     },
   );
@@ -205,7 +206,7 @@ describe("Docker failed scan diagnostics", () => {
       assert.equal(malformed.status, 0, malformed.stderr);
       assert.match(malformed.stdout, /SARIF unreadable/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

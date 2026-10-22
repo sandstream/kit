@@ -1,11 +1,12 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openMemoryDb, getStats, searchMessages } from "./db.js";
 import { indexKiroSessions } from "./kiro.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory kiro parser", () => {
   let tmp: string;
@@ -49,7 +50,7 @@ describe("memory kiro parser", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_KIRO_DB;
     else process.env.KIT_KIRO_DB = prev;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("prefers conversations_v2, indexes history turns (defensive extraction), tags harness=kiro", () => {
@@ -90,7 +91,7 @@ describe("memory kiro parser", () => {
     assert.equal(searchMessages(db, "old cli").length, 1);
     db.close();
     process.env.KIT_KIRO_DB = fixture;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
 
   it("is incremental + idempotent, and fail-safe on a foreign DB shape", () => {
@@ -112,6 +113,6 @@ describe("memory kiro parser", () => {
     assert.equal(indexKiroSessions(db2).messages, 0);
     db2.close();
     process.env.KIT_KIRO_DB = fixture;
-    rmSync(otherDir, { recursive: true, force: true });
+    rmTemp(otherDir);
   });
 });

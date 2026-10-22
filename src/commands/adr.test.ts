@@ -1,11 +1,12 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { adrFindingKey, collectAdrFindings, freezeAdrBaseline } from "./adr.js";
 import { baselineGet, type Baseline } from "../baseline.js";
 import type { AdrViolation } from "../adr.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("adrFindingKey", () => {
   it("is stable across line-number changes (excludes the line)", () => {
@@ -64,7 +65,7 @@ describe("collectAdrFindings + freezeAdrBaseline (temp repo)", () => {
     writeFileSync(join(dir, "src", "web", "h.ts"), "import { Client } from 'pg'\n");
   });
 
-  after(() => rmSync(dir, { recursive: true, force: true }));
+  after(() => rmTemp(dir));
 
   it("finds the accepted ADR's violation", () => {
     const f = collectAdrFindings(dir);
@@ -98,7 +99,7 @@ describe("collectAdrFindings — an enforced_by pointer must point at something 
     return root;
   };
 
-  after(() => rmSync(dir, { recursive: true, force: true }));
+  after(() => rmTemp(dir));
 
   it("fails when the named file does not exist — a claim of coverage that is not coverage", () => {
     dir = seed("enforced_by: [src/gone.test.ts]\n");

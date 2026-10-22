@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { depsHashFor, loadGuardDogCache, saveGuardDogCache } from "./guarddog-cache.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("guarddog verdict cache (#205)", () => {
   it("depsHashFor is stable across key order, changes with any dep change", () => {
@@ -30,6 +31,6 @@ describe("guarddog verdict cache (#205)", () => {
     const loaded = loadGuardDogCache(path);
     assert.equal(loaded?.depsHash, "abc");
     assert.equal(loaded?.packages, 12);
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
 });

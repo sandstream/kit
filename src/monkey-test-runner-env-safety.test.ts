@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import type { MonkeyRunResult, MonkeyTestPlan } from "./monkey-test-contract.js";
@@ -13,6 +13,7 @@ import {
   syntheticLiveKey,
   syntheticTestKey,
 } from "./monkey-test-runner-env.test-support.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 it("MSG-05: exported dotenv reaches a real seed without writing env files or changing caller env", async () => {
   const root = await runnerFixture();
@@ -39,7 +40,7 @@ writeFileSync("seed.ran", valid ? "loaded" : "missing");`,
     for (const file of [".env", ".env.local"]) assert.equal(existsSync(join(root, file)), false);
     assert.ok(!`${result.stdout}${result.stderr}`.includes(syntheticTestKey));
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 });
 
@@ -60,7 +61,7 @@ for (const dialect of ["export", "arbitrary name", "whitespace", "json whitespac
       assertRefused(root, result);
       assert.equal(existsSync(join(root, "env.ran")), true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 }
@@ -78,7 +79,7 @@ it("MSG-06: inherited live value blocks even the provider and cannot be replaced
     );
     assertRefused(root, result, ["env", "seed", "server", "test"]);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 });
 
@@ -94,7 +95,7 @@ it("MSG-07: actual CLI plan reports app-autoloaded .env.local without revealing 
     assert.ok(!`${result.stdout}${result.stderr}`.includes(syntheticLiveKey));
     assert.equal(result.code, 1);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 });
 
@@ -123,6 +124,6 @@ it("MSG-07: actual CLI refuses .env.local before provider even with explicit sec
     assertRefused(root, result, ["env", "seed", "server", "test"]);
     assert.equal(readFileSync(join(root, ".env.local"), "utf8"), content);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 });

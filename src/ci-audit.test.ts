@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { auditCiYaml, runCiAudit } from "./ci-audit.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("auditCiYaml — image pinning", () => {
   it("flags :latest and untagged images, not version- or digest-pinned ones", () => {
@@ -90,7 +91,7 @@ describe("runCiAudit", () => {
       assert.equal(results.length, 1);
       assert.equal(results[0].status, "skip");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -102,7 +103,7 @@ describe("runCiAudit", () => {
       assert.equal(results.length, 1);
       assert.equal(results[0].status, "pass");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -119,7 +120,7 @@ describe("runCiAudit", () => {
       assert.ok(results.some((r) => r.name.includes("node:latest")));
       assert.ok(results.some((r) => r.name.startsWith("pipe-to-shell")));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

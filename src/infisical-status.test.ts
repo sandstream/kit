@@ -7,12 +7,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkInfisicalStatus } from "./infisical-status.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const keyring = {
   tokenSource: "infisical login (keyring)",
@@ -74,7 +74,7 @@ async function probe(options: {
     return await pending;
   } finally {
     // Windows can hold the just-run infisical.exe for a moment (EBUSY); retry the cleanup.
-    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmTemp(dir);
   }
 }
 

@@ -1,6 +1,6 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateKeyPairSync } from "node:crypto";
@@ -13,6 +13,7 @@ import {
 } from "./active.js";
 import { resolveKeyStore } from "./resolve.js";
 import { loadOrCreateIdentity, verifySignature } from "../identity.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const SIGNER = `const c=require("node:crypto");const fs=require("node:fs");const k=c.createPrivateKey(fs.readFileSync(process.argv[2]));process.stdout.write(c.sign(null,fs.readFileSync(0),k).toString("base64"));`;
 
@@ -43,7 +44,7 @@ describe("keystore/active — hardware enforcement + signing facade", () => {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     }
-    rmSync(d, { recursive: true, force: true });
+    rmTemp(d);
   });
 
   beforeEach(() => {
@@ -54,7 +55,7 @@ describe("keystore/active — hardware enforcement + signing facade", () => {
     process.env.KIT_IDENTITY_DIR = mkdtempSync(join(tmpdir(), "kit-active-id-"));
   });
   afterEach(() => {
-    rmSync(process.env.KIT_IDENTITY_DIR!, { recursive: true, force: true });
+    rmTemp(process.env.KIT_IDENTITY_DIR!);
   });
 
   function configureCommand(): void {

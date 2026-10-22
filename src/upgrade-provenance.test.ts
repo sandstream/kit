@@ -9,12 +9,12 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const exec = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -64,7 +64,7 @@ describe("kit upgrade CLI lock provenance", () => {
         "committed locks must not contain machine-specific absolute paths",
       );
     } finally {
-      rmSync(project, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      rmTemp(project);
     }
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,6 +10,7 @@ import {
   missingDeepSkillTriage,
 } from "./triage.js";
 import { installBundledTriageSkill } from "../triage.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 // Only the honest-skip path of `kit triage plugin` is exercised here — the happy path calls the
 // live npm registry triage (network), which is out of scope for a unit test.
@@ -34,7 +35,7 @@ describe("kit triage plugin (no plugins declared → honest skip)", () => {
     process.chdir(cwd);
     process.argv = argv;
     console.log = origLog;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
 
   it("skips cleanly (exit 0) when package.json has no kitPlugins", async () => {
@@ -168,7 +169,7 @@ describe("kit triage <type> <target> never echoes an embedded credential (RED-1)
     process.chdir(cwd);
     process.argv = argv;
     console.log = origLog;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
 
   it("does not print the token embedded in a `triage repo` target", async () => {

@@ -1,10 +1,11 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, getStats, searchMessages } from "./db.js";
 import { indexDroidSessions } from "./droid.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory droid parser", () => {
   let tmp: string;
@@ -47,7 +48,7 @@ describe("memory droid parser", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_DROID_DIR;
     else process.env.KIT_DROID_DIR = prev;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("indexes user + assistant turns (Claude-shaped blocks), skips non-turns, tags harness=droid", () => {
@@ -89,6 +90,6 @@ describe("memory droid parser", () => {
     assert.equal(indexDroidSessions(db).messages, 0);
     db.close();
     process.env.KIT_DROID_DIR = tmp;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
 });

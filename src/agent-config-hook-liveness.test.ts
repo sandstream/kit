@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { WRAPPER_MARKER } from "./kit-wrapper.js";
@@ -10,6 +10,7 @@ import {
   expandHomePath,
   hookCommandProblems,
 } from "./agent-config-hook-liveness.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const q = (s: string) => `"${s}"`;
 
@@ -50,7 +51,7 @@ describe("hookCommandProblems", () => {
       const cmd = `${q(process.execPath)} ${q(join(dir, "missing-cli.js"))} gate-bash`;
       assert.match(hookCommandProblems(cmd).join(), /kit CLI missing/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -61,7 +62,7 @@ describe("hookCommandProblems", () => {
       writeFileSync(cli, "");
       assert.deepEqual(hookCommandProblems(`${q(process.execPath)} ${q(cli)} gate-bash`), []);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -78,7 +79,7 @@ describe("hookCommandProblems", () => {
       writeFileSync(wrapper, `#!/bin/sh\n${WRAPPER_MARKER}\necho broken\n`, { mode: 0o755 });
       assert.match(hookCommandProblems(`${q(wrapper)} gate-bash`).join(), /wrapper is malformed/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -117,7 +118,7 @@ describe("hook wrapper version drift (BH-13)", () => {
         );
         assert.match(problems, /kit agent-config/);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     },
   );
@@ -132,10 +133,10 @@ describe("hook wrapper version drift (BH-13)", () => {
           hookCommandProblems(`${q(wrapperTo(dir, getKitVersionSync()))} gate-bash`),
           [],
         );
-        rmSync(join(dir, "lib"), { recursive: true, force: true });
+        rmTemp(join(dir, "lib"));
         assert.deepEqual(hookCommandProblems(`${q(wrapperTo(dir, null))} gate-bash`), []);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     },
   );

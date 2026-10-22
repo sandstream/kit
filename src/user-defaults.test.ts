@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadUserInitDefaults, resolveInitServices } from "./user-defaults.js";
 import type { DetectedStack } from "./stack-detector.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 // User-level init defaults (~/.kit/defaults.toml [init] known_services) — the services the
 // operator uses, offered as candidates for a new project. These tests pin two contracts:
@@ -22,7 +23,7 @@ function withDefaultsFile(content: string | null, fn: () => void | Promise<void>
   return Promise.resolve(fn()).finally(() => {
     if (saved === undefined) delete process.env.KIT_DEFAULTS_FILE;
     else process.env.KIT_DEFAULTS_FILE = saved;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
 }
 

@@ -6,6 +6,7 @@ import { it, type TestContext } from "node:test";
 import { openMemoryDb } from "./db.js";
 import { palAdd, palAutoVerify, palConfigure, palDone, palList, palShow } from "./pal.js";
 import { legacyPalDb } from "./pal-fixture.test-support.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 function fixture(t: TestContext) {
   const previousCwd = process.cwd();
@@ -22,7 +23,7 @@ function fixture(t: TestContext) {
     if (previousDevice === undefined) delete process.env.KIT_DEVICE_ID;
     else process.env.KIT_DEVICE_ID = previousDevice;
     db.close();
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   });
   return { db, A, B };
 }

@@ -1,6 +1,6 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ts from "typescript";
@@ -16,6 +16,7 @@ import {
   writeMonkeyHarness,
   type MonkeyFinding,
 } from "./monkey-test.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const roots: string[] = [];
 
@@ -30,7 +31,7 @@ function writeJson(path: string, value: unknown): void {
 }
 
 afterEach(() => {
-  while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
+  while (roots.length) rmTemp(roots.pop()!);
 });
 
 describe("monkey-test role matrix", () => {

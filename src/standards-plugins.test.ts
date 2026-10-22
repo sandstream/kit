@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -13,6 +13,7 @@ import {
   hasReDoSRisk,
   DEFAULT_PLUGIN_DIR,
 } from "./standards-plugins.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function tmpRepo(): string {
   return mkdtempSync(join(tmpdir(), "kit-splugin-"));
@@ -53,7 +54,7 @@ match = 'console\\.log'
       assert.equal(plugins[0].id, "no-console");
       assert.equal(plugins[0].severity, "warn");
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -82,7 +83,7 @@ match = 'console\\.log'
       assert.equal(integrity.length, 5);
       assert.ok(integrity.every((i) => i.status === "warn" && i.dimension === "plugin"));
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -95,7 +96,7 @@ match = 'console\\.log'
       assert.equal(plugins.length, 1);
       assert.ok(integrity.some((i) => /duplicate plugin id/.test(i.detail)));
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 });
@@ -123,7 +124,7 @@ describe("standards-plugins — evaluate + gate", () => {
       assert.equal(findings[0].file, "src/a.ts");
       assert.equal(findings[0].line, 2);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -143,7 +144,7 @@ describe("standards-plugins — evaluate + gate", () => {
       const findings = evaluatePluginFindings(repo, plugins[0]);
       assert.deepEqual(findings, [{ file: "src/a.ts", line: 1 }]);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -162,7 +163,7 @@ describe("standards-plugins — evaluate + gate", () => {
         r.some((row) => /exclude pattern/.test(row.detail) && /scripts\/\*\*/.test(row.detail)),
       );
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -187,7 +188,7 @@ describe("standards-plugins — evaluate + gate", () => {
       assert.match(plugin?.detail ?? "", /missing required pattern/);
       assert.deepEqual(plugin?.files, ["src/bad.ts:missing"]);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -207,7 +208,7 @@ describe("standards-plugins — evaluate + gate", () => {
       const r = checkStandardsPlugins({ cwd: repo, language: "typescript" });
       assert.equal(r.find((row) => row.name === "plugin: perm")?.status, "pass");
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -233,7 +234,7 @@ describe("standards-plugins — evaluate + gate", () => {
       assert.equal(plugin?.status, "warn");
       assert.equal(plugin?.severity, "low");
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -248,7 +249,7 @@ describe("standards-plugins — evaluate + gate", () => {
       const r = checkStandardsPlugins({ cwd: repo, language: "typescript" });
       assert.equal(r.length, 0); // skipped: applies_to excludes typescript
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -273,7 +274,7 @@ describe("standards-plugins — evaluate + gate", () => {
       assert.equal(frozen[0].status, "warn");
       assert.equal(frozen[0].severity, "low");
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -288,7 +289,7 @@ describe("standards-plugins — evaluate + gate", () => {
       const keys = collectPluginKeys(repo, "typescript");
       assert.deepEqual(keys, [pluginKey("nc", "src/a.ts", 2)]);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -297,7 +298,7 @@ describe("standards-plugins — evaluate + gate", () => {
     try {
       assert.deepEqual(checkStandardsPlugins({ cwd: repo, language: "typescript" }), []);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 });
@@ -339,7 +340,7 @@ describe("standards-plugins — ReDoS-prone plugin rejected at load", () => {
         "must surface a ReDoS integrity warning",
       );
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 });

@@ -1,9 +1,10 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkLicenses } from "./check-security.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 it("uses JSON scan even when --version would fail", async () => {
   const root = mkdtempSync(join(tmpdir(), "kit-license-version-"));
@@ -33,6 +34,6 @@ it("uses JSON scan even when --version would fail", async () => {
     assert.equal(result.status, "pass", result.detail);
     assert.equal(result.didNotRun, undefined);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 });

@@ -14,7 +14,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -27,6 +27,7 @@ import {
   type ScanScope,
 } from "./check-nested-projects.js";
 import type { SecurityCheckResult } from "./check-security.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function tree(spec: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-scope-"));
@@ -55,7 +56,7 @@ describe("checkScanScope", () => {
       assert.match(r.detail, /web/);
       assert.match(String(r.suggestion), /kit check/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -70,7 +71,7 @@ describe("checkScanScope", () => {
       assert.equal(r.status, "pass", r.detail);
       assert.match(r.detail, /covered via workspaces/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -85,7 +86,7 @@ describe("checkScanScope", () => {
       assert.equal(r.status, "pass", r.detail);
       assert.match(r.detail, /covered via workspaces/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -109,7 +110,7 @@ describe("checkScanScope: Cargo workspaces", () => {
       assert.equal(r.status, "pass", r.detail);
       assert.match(r.detail, /Cargo workspace: crates\/core, src-tauri/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -120,7 +121,7 @@ describe("checkScanScope: Cargo workspaces", () => {
       assert.equal(r.status, "warn", r.detail);
       assert.match(r.detail, /2 nested project\(s\) NOT covered/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -132,7 +133,7 @@ describe("checkScanScope: Cargo workspaces", () => {
       // Only the non-member is named: the members are covered and listing them would mislead.
       assert.match(r.detail, /1 nested project\(s\) NOT covered by this scan: tools\/web /);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -149,7 +150,7 @@ describe("checkScanScope: sibling projects", () => {
       assert.equal(r.severity, "medium", "the root itself WAS scanned, so this is weaker");
       assert.match(r.detail, /NOT covered/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -160,7 +161,7 @@ describe("checkScanScope: sibling projects", () => {
       assert.equal(r.status, "pass");
       assert.match(r.detail, /scanned in place/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -177,7 +178,7 @@ describe("findNestedProjects", () => {
     try {
       assert.deepEqual(await findNestedProjects(dir), ["app"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -191,7 +192,7 @@ describe("findNestedProjects", () => {
       // turn one misplaced run into a wall of rows.
       assert.deepEqual(await findNestedProjects(dir), ["web"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -200,7 +201,7 @@ describe("findNestedProjects", () => {
     try {
       assert.deepEqual(await findNestedProjects(dir), ["packages/a", "packages/b"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -274,7 +275,7 @@ describe("escalateManifestSkips", () => {
       const input = [skip("npm audit", "no package.json found")];
       assert.deepEqual(escalateManifestSkips(input, facts), input);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 

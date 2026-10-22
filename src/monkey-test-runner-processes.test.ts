@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { ChildProcess } from "node:child_process";
-import { rmSync } from "node:fs";
+
 import { it } from "node:test";
 import { runShell, stopProcess } from "./monkey-test-process.js";
 import { MonkeyProcessScope } from "./monkey-test-runner-processes.js";
 import { fixtureEnvironment, runnerFixture } from "./monkey-test-runner.test-support.js";
 import { completedStageCommand, scenarioPids } from "./monkey-test-runner-signal.test-support.js";
 import { processRunning } from "./monkey-test-runner-subprocess.test-support.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function modelChild(): ChildProcess {
   const child = new ChildProcess();
@@ -100,7 +101,7 @@ for (const inheritOutput of [false, true]) {
         );
       } finally {
         await scope.close();
-        rmSync(root, { recursive: true, force: true });
+        rmTemp(root);
       }
     },
   );

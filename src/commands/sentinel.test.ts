@@ -8,12 +8,13 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const exec = promisify(execFile);
 const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "..", "cli.js");
@@ -33,7 +34,7 @@ describe("kit sentinel run (compiled CLI): read-only mode (RO-5)", () => {
         "read-only mode must not leave an untracked .kit/sentinel.json behind",
       );
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      rmTemp(cwd);
     }
   });
 
@@ -49,7 +50,7 @@ describe("kit sentinel run (compiled CLI): read-only mode (RO-5)", () => {
       });
       assert.equal(existsSync(join(cwd, ".kit", "sentinel.json")), true);
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      rmTemp(cwd);
     }
   });
 });

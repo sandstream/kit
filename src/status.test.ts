@@ -1,13 +1,14 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gatherStatus } from "./status.js";
 import { openMemoryDb, insertMessage } from "./memory/db.js";
 import { CONFIG_SCHEMA_VERSION } from "./config.js";
 import { KIT_BLOCK_BEGIN } from "./agent-config.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 let tmp: string;
 const statusEnvKeys = [
@@ -28,7 +29,7 @@ after(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  rmSync(tmp, { recursive: true, force: true });
+  rmTemp(tmp);
 });
 
 const find = (items: Awaited<ReturnType<typeof gatherStatus>>, key: string) =>

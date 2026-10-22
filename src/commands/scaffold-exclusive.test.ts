@@ -6,7 +6,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -14,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { it } from "node:test";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const sourceTest = import.meta.url.endsWith(".ts");
 const cli = fileURLToPath(new URL(sourceTest ? "../cli.ts" : "../cli.js", import.meta.url));
@@ -41,7 +41,7 @@ it("policy init never writes through a dangling policy symlink", () => {
     assert.equal(lstatSync(policy).isSymbolicLink(), true);
     assert.equal(existsSync(target), false);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 });
 
@@ -57,7 +57,7 @@ it("policy init --force replaces the link rather than its target", () => {
     assert.equal(lstatSync(policy).isFile(), true);
     assert.equal(readFileSync(target, "utf8"), "leave alone\n");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 });
 
@@ -72,7 +72,7 @@ it("sentinel install never writes through a dangling workflow symlink", () => {
     assert.equal(lstatSync(workflow).isSymbolicLink(), true);
     assert.equal(existsSync(join(dirname(workflow), "unrelated")), false);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 });
 
@@ -89,6 +89,6 @@ it("sentinel install --force replaces the link rather than its target", () => {
     assert.equal(lstatSync(workflow).isFile(), true);
     assert.equal(readFileSync(target, "utf8"), "leave alone\n");
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 });

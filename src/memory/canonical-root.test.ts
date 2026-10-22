@@ -1,11 +1,12 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { getCanonicalProjectRoot } from "./canonical-root.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 let base: string;
 let main: string;
@@ -23,7 +24,7 @@ before(() => {
   mkdirSync(join(main, "sub"));
 });
 
-after(() => rmSync(base, { recursive: true, force: true }));
+after(() => rmTemp(base));
 
 describe("getCanonicalProjectRoot", () => {
   it("resolves a linked worktree to the main checkout", () => {
@@ -40,7 +41,7 @@ describe("getCanonicalProjectRoot", () => {
     try {
       assert.equal(getCanonicalProjectRoot(plain), plain);
     } finally {
-      rmSync(plain, { recursive: true, force: true });
+      rmTemp(plain);
     }
   });
 });

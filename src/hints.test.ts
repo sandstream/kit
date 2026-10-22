@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collectHints } from "./hints.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 // Isolate every external surface the detectors read so a test never depends on
 // what's installed / present on the host: markers + identity + anchor store all
@@ -35,8 +36,7 @@ function withEnv(fn: (repo: string, claudeDir: string) => void | Promise<void>):
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     }
-    for (const d of [repo, home, anchor, ident, claude])
-      rmSync(d, { recursive: true, force: true });
+    for (const d of [repo, home, anchor, ident, claude]) rmTemp(d);
   });
 }
 

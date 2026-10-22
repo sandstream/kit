@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { previewMatches, purgeHistory, detectTools } from "./secrets-purge-history.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function git(dir: string, ...args: string[]): void {
   execFileSync("git", args, { cwd: dir });
@@ -39,7 +40,7 @@ describe("previewMatches", () => {
       assert.equal(p.matchedCommits, 0);
       assert.equal(p.matchedFiles.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -51,7 +52,7 @@ describe("previewMatches", () => {
       assert.ok(p.matchedFiles.includes("config.txt"));
       assert.equal(p.sampleHashes.length, 1);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -78,7 +79,7 @@ describe("purgeHistory", () => {
       assert.ok(typeof r.detail === "string");
       assert.ok(r.toolUsed === "git-filter-repo" || r.toolUsed === "bfg");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

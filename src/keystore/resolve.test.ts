@@ -4,12 +4,13 @@
  */
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verifySignature } from "../identity.js";
 import { FileKeyStore } from "./file-store.js";
 import { resolveKeyStore } from "./resolve.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("resolveKeyStore", () => {
   let dir: string;
@@ -25,7 +26,7 @@ describe("resolveKeyStore", () => {
     else process.env.KIT_IDENTITY_DIR = prevIdentityDir;
     if (prevKeystore === undefined) delete process.env.KIT_KEYSTORE;
     else process.env.KIT_KEYSTORE = prevKeystore;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
   beforeEach(() => {
     delete process.env.KIT_KEYSTORE;

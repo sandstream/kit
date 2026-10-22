@@ -17,7 +17,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -29,6 +29,7 @@ import {
   suggestContextToml,
   type LiveContext,
 } from "./context-lock.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("identity assertion", () => {
   it("a declared identity that differs is a mismatch, not a note", () => {
@@ -108,7 +109,7 @@ describe("readConvexAccount", () => {
     try {
       assert.equal(readConvexAccount(h), "ops@example.test");
     } finally {
-      rmSync(h, { recursive: true, force: true });
+      rmTemp(h);
     }
   });
 
@@ -119,7 +120,7 @@ describe("readConvexAccount", () => {
       assert.match(String(got), /logged in/);
       assert.doesNotMatch(String(got), /secret/, "never echo the token");
     } finally {
-      rmSync(h, { recursive: true, force: true });
+      rmTemp(h);
     }
   });
 
@@ -128,7 +129,7 @@ describe("readConvexAccount", () => {
     try {
       assert.equal(readConvexAccount(h), null);
     } finally {
-      rmSync(h, { recursive: true, force: true });
+      rmTemp(h);
     }
   });
 });

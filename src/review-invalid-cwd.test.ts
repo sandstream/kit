@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { collectReview, REVIEW_STAGES } from "./commands/review.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const source = import.meta.url.endsWith(".ts");
 const extension = source ? "ts" : "js";
@@ -52,7 +53,7 @@ describe("review rejects invalid cwd before any stage", () => {
             return true;
           });
         } finally {
-          rmSync(root, { recursive: true, force: true });
+          rmTemp(root);
         }
       });
     }
@@ -103,7 +104,7 @@ describe("kit_review rejects invalid requested cwd over MCP", () => {
         } finally {
           await client.close();
           await transport.close();
-          rmSync(root, { recursive: true, force: true });
+          rmTemp(root);
         }
       });
     }
@@ -139,7 +140,7 @@ it(
       assert.equal(result.status, 1, result.stderr + result.stdout);
       assertDirectoryError(result.stderr + result.stdout, cwd);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   },
 );
