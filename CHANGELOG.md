@@ -26,6 +26,13 @@
   repo can run its own code during install (pnpm hook files, yarn plugins or `yarnPath`, a
   `packageManager` value that is not a plain `name@version`).
 
+### Fixed
+
+- **A narrowed `kit check` no longer closes your tracked security findings.** A run such as
+  `kit check --category tools` never looks at security, but it passed an empty security list to
+  the findings ledger, which then auto-closed every open security finding of the project. The
+  ledger is now left alone unless the security dimension ran.
+
 ## [7.0.1] - 2026-10-19
 
 ### Fixed
