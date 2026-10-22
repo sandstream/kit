@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Added
+
+- **`kit monkey-test init --install` sets up the browser runner.** It triages
+  `@playwright/test` at an exact pinned version, installs it as a devDependency with
+  `--ignore-scripts` through the project's package manager, and downloads Chromium. A
+  project that already declares `@playwright/test` keeps its version. On Windows kit prints
+  the commands instead of running them. Before it runs the installed cli, kit compares every
+  file of the package with the public registry tarball, and it refuses to install when the
+  repo can run its own code during install (pnpm hook files, yarn plugins or `yarnPath`, a
+  `packageManager` value that is not a plain `name@version`).
+
 ## [7.0.1] - 2026-10-19
 
 ### Fixed
@@ -692,11 +703,11 @@
   ordinary apply error cannot leave a new policy sitting under an old signature.
 
 - **Redaction gaps beyond the pattern list.** Env-name-based redaction (`kit
-  run`, MCP `kit_run`) missed common but unrecognized secret-bearing names,
+run`, MCP `kit_run`) missed common but unrecognized secret-bearing names,
   such as `PGPASSWORD`, `DB_PASS`, `MYSQL_PWD`, `AUTH_HEADER`, and
   `WEBHOOK_URL`, because the matcher required an underscore boundary a glued
   name like `PGPASSWORD` never has. The direct audit-log writer sanitized by
-  pattern and by env-value but not by metadata *key* name, so a field
+  pattern and by env-value but not by metadata _key_ name, so a field
   literally named `password` persisted verbatim. Six of the seven plugin
   management-API clients (all but `vercel`, already fixed) surfaced raw
   upstream error bodies with no redaction, so a provider echoing a bearer
@@ -713,7 +724,7 @@
   check `KIT_READ_ONLY` before touching disk. (Global `~/.kit` state, namely
   `memory.db` and the per-machine `device-id`, is out of scope: it lives
   outside the audited project tree, never shows up in that repo's `git
-  status`, and is machine identity rather than project mutation.)
+status`, and is machine identity rather than project mutation.)
 
 ### Known limitations (2026-09-27)
 
@@ -845,8 +856,8 @@
   - **The file may only shrink.** A baseline entry that no longer applies is a finding of its own.
     Without that rule the list silently accumulates dead ids and the gate stops meaning anything;
     with it, fixing a vulnerability and pruning its line belong in the same commit.
-  - **Remaining debt is summarised per severity** on every run — *"no new advisories (npm); known
-    debt: 1 critical, 3 high, 4 moderate"* — so the size is visible without opening the file.
+  - **Remaining debt is summarised per severity** on every run — _"no new advisories (npm); known
+    debt: 1 critical, 3 high, 4 moderate"_ — so the size is visible without opening the file.
 
   `kit security advisories` reports the current state; `--accept` writes the baseline, adding and
   pruning in one step. Opt-in by construction: with no baseline committed the check skips, naming
@@ -864,7 +875,7 @@
 
 - **What reaches the browser is now checked** (#523).
 
-  kit covered credentials that were *committed* (trufflehog over history, the staged-file scan) and
+  kit covered credentials that were _committed_ (trufflehog over history, the staged-file scan) and
   `.env` hygiene. Neither sees the leak that costs the most: a `VITE_*` or `NEXT_PUBLIC_*` variable
   holding a real secret is inlined into the bundle at build time and shipped to every visitor —
   without ever being committed. `.gitignore` does not protect against it and history scanning cannot
@@ -903,8 +914,8 @@
   test fixture or one of kit's own detection patterns), and it looks in workspace packages, not just
   the root (a real repo declares `workspaces` at the root and ships from `apps/web`, so a root-only
   check called it "nothing builds for a browser"). Compiled tests, mocks and fixtures are excluded
-  and the count of what was set aside is printed. An unbuilt project reports *"present but not built
-  — run the build, then re-check"* rather than passing.
+  and the count of what was set aside is printed. An unbuilt project reports _"present but not built
+  — run the build, then re-check"_ rather than passing.
 
   Verified against a real Vite workspace (`apps/web/dist` — pass) and against a planted leak: the
   name check fails on `VITE_STRIPE_SECRET_KEY` while leaving `VITE_API_URL` and
@@ -916,7 +927,7 @@
 
   Six tabs, switchable in the terminal with the number keys: **Floor** (audited operations and
   refusals per operation), **Coverage** (the enumerated checks of the last saved run — pass, warn,
-  fail, and *what could not run, with each reason*), **Memory** (the store you own: its path, its
+  fail, and _what could not run, with each reason_), **Memory** (the store you own: its path, its
   size on disk, messages and sessions, tokens generated vs context re-read, and the per-project
   breakdown), **Triage** (what was checked before it was installed), **Machine** (every repo this
   machine has sealed an audit log in) and **Proof**.
@@ -952,7 +963,7 @@
     nist-800-53             4      11     0       3
   ```
 
-  A control kit *maps* to a check is a claim; a control whose check actually **ran and passed** is
+  A control kit _maps_ to a check is a claim; a control whose check actually **ran and passed** is
   evidence. `mapped − verified` is claimed coverage with nothing behind it yet, and reporting only
   the first number is how a coverage map becomes marketing.
 
@@ -960,7 +971,7 @@
   declared and by which backend, which the last run could not resolve, what the history scan found
   split into verified-live / unverified / fixtures / accepted, and whether `.env` is gitignored.
   Names only — the module never reads a value. A repo with no saved run reports resolution as
-  *unknown*, not as zero resolved, because those look identical and mean opposite things.
+  _unknown_, not as zero resolved, because those look identical and mean opposite things.
 
   `--json` for the whole set, `--tab <name>` for one; a non-TTY prints every tab rather than
   silently handing a piped reader one eighth of the report. Eight tabs no longer fit on one row, so
@@ -1006,8 +1017,8 @@
 
   kit's own log had **7 199 events and not one carried a location**. Every entry named a key and an
   operation, and no place — so the 4 053 `policy-check` events, almost all of them the test suite
-  exercising the gate, could not be separated from an operator's. `kit usage` had to print *"operator
-  and test activity cannot be told apart in these totals"* instead of a number. The evidence existed
+  exercising the gate, could not be separated from an operator's. `kit usage` had to print _"operator
+  and test activity cannot be told apart in these totals"_ instead of a number. The evidence existed
   and was unusable.
 
   Two fields, and the choice of fields is the point:
@@ -1049,8 +1060,8 @@
   grep for `label:` said 29 and the derived count said 25 — the grep had counted the interface field
   and a doc line, which is the argument for deriving it in one datum.
 
-  `secrets scan`'s clean line now names its detector too — *"no committed secrets (trufflehog
-  detector set, full history)"* — because that path's bound is trufflehog's set over history, a much
+  `secrets scan`'s clean line now names its detector too — _"no committed secrets (trufflehog
+  detector set, full history)"_ — because that path's bound is trufflehog's set over history, a much
   larger one than kit's own pattern list used by `scan-staged` and `scan-build`, and a reader cannot
   size the claim without knowing which applied. The fallback path already stated its bound
   explicitly and is unchanged.
@@ -1088,16 +1099,16 @@
 
   Checked against npm and GitHub, every claim on that line was false:
 
-  | Claimed | Actual |
-  | --- | --- |
-  | `@kit/plugins/stripe` | no such package — the real one is `sandstream-kit-plugin-stripe`, so the install command could not work |
-  | version `1.0.0` | the published packages are `0.1.0` / `0.2.0` |
-  | `github.com/sandstream/kit-stripe` | HTTP 404 |
-  | `★★★★◆ 4.8`, `1250 downloads` | invented — no source exists for either |
-  | `updated: <now>` | `new Date().toISOString()` at import, so the registry always claimed to be current |
+  | Claimed                            | Actual                                                                                                  |
+  | ---------------------------------- | ------------------------------------------------------------------------------------------------------- |
+  | `@kit/plugins/stripe`              | no such package — the real one is `sandstream-kit-plugin-stripe`, so the install command could not work |
+  | version `1.0.0`                    | the published packages are `0.1.0` / `0.2.0`                                                            |
+  | `github.com/sandstream/kit-stripe` | HTTP 404                                                                                                |
+  | `★★★★◆ 4.8`, `1250 downloads`      | invented — no source exists for either                                                                  |
+  | `updated: <now>`                   | `new Date().toISOString()` at import, so the registry always claimed to be current                      |
 
-  And it listed **five of eleven** shipped plugins, so `kit plugin search cloudflare` answered *"No
-  plugins found matching: cloudflare"* about a package published on npm at that moment. Six plugins
+  And it listed **five of eleven** shipped plugins, so `kit plugin search cloudflare` answered _"No
+  plugins found matching: cloudflare"_ about a package published on npm at that moment. Six plugins
   — cloudflare, github, sentrux, sentry, snyk, wiz — were undiscoverable through kit's own discovery
   surface.
 
@@ -1119,7 +1130,7 @@
   worse than no banner: it teaches the operator to skip the line, and then the real `--no-verify`
   scrolls past unread.
 
-  Git replays commits without running pre-commit, but it *does* run post-commit for each replayed
+  Git replays commits without running pre-commit, but it _does_ run post-commit for each replayed
   commit, so the sentinel is absent and the commit looked bypassed. Measured while fixing it: during
   a replay the post-commit hook sees `rebase-merge/` and `CHERRY_PICK_HEAD` present, an ordinary
   commit sees neither, and `GIT_REFLOG_ACTION` is not exported to post-commit at all — so the state
@@ -1129,7 +1140,7 @@
 
   **Entries written before this fix are re-classified too**, so the four already in a log stop being
   counted without anyone editing an append-only file. The witness is the reflog, which records the
-  operation that created each sha. Only messages that *create* a commit count — `rebase (pick)`,
+  operation that created each sha. Only messages that _create_ a commit count — `rebase (pick)`,
   `(squash)`, `(fixup)`, `(reword)`, `cherry-pick`, `am` — and deliberately not `rebase (finish)`,
   which names the branch tip afterwards and would therefore excuse a genuine `--no-verify` commit
   that happened to be that tip. That would turn a false positive into a false negative, which is the
@@ -1172,18 +1183,16 @@
   and the missing row was the one stating the consequence — that the verdict described an empty
   directory while the code sat one level down:
 
-  - no manifest here, projects below → **warn (high)**, naming them: *"no manifest here — this
-    verdict covers none of 3 project(s) below: illithid, web, web-corrupt-backup"*;
-  - a root manifest declaring workspaces → **pass**: *"12 nested package(s) covered via
-    workspaces"* — a root-level scan genuinely does cover those;
+  - no manifest here, projects below → **warn (high)**, naming them: _"no manifest here — this
+    verdict covers none of 3 project(s) below: illithid, web, web-corrupt-backup"_;
+  - a root manifest declaring workspaces → **pass**: _"12 nested package(s) covered via
+    workspaces"_ — a root-level scan genuinely does cover those;
   - a root manifest without workspaces, siblings below → **warn (medium)**: they are separate
     projects and were not scanned;
   - an ordinary single project → **pass**, quietly.
 
   The three passing cases carry as much weight as the warning one: a check that warns on every
   monorepo gets switched off within a week, and then the case it was written for goes unnoticed too.
-
-
 
   And in that wrong-directory case the individual skips are no longer left as honest
   not-applicables. "No manifest at this path" and "I looked in the wrong place" are the same
@@ -1205,13 +1214,13 @@
 
   The step-summary icon was `pass ? ✅ : warn ? ⚠️ : ❌` — no branch for `skip` — so a run in a
   directory that is not a project printed twenty-plus ❌ rows above a footer reading
-  *"2 passed, 1 failed, 1 warnings"*: the table and the tally contradicted each other in the same
+  _"2 passed, 1 failed, 1 warnings"_: the table and the tally contradicted each other in the same
   output, because the summary counted skips and the footer never printed them. Three of those red
   rows were worse than misleading — `socket scan` is **excluded by design** (cloud-only),
   `bumblebee` was **switched off by the operator** via `KIT_BUMBLEBEE`, and SAST/guarddog are
   **opt-in** — so kit's own documented design read as broken.
 
-  The GitLab JUnit writer emitted a *bare* `<testcase>` for a skip, and JUnit reads an empty
+  The GitLab JUnit writer emitted a _bare_ `<testcase>` for a skip, and JUnit reads an empty
   testcase as PASSED. Measured on the same run: `tests="26" failures="1"`, zero `<skipped>` tags,
   24 empty testcases — 24 checks that never ran, reported green.
 
@@ -1221,7 +1230,7 @@
   unread), and JUnit emits `<skipped message="…"/>` with a `skipped=` count on the suite.
 
   Skips still do not gate: `allOk` remains `failed === 0 && (!failOnWarning || warnings === 0)`.
-  Only what the report *says* changed. The machine-read surface was already correct — annotations
+  Only what the report _says_ changed. The machine-read surface was already correct — annotations
   only ever fired for `fail`/`warn` — which is the worse way round, since the human is the one
   who concludes "twenty things are broken here".
 
@@ -1233,7 +1242,7 @@
   neither reached the operator.
 
   **Schema drift had a detector and no caller.** `kit config migrate --check` has answered
-  *"Config is at v0; current is v1"* since versioning landed, and `kit status` said only
+  _"Config is at v0; current is v1"_ since versioning landed, and `kit status` said only
   `✓ .kit.toml present` — "present" is not "current". Measured on kit's own repo: the config was
   v0 while the schema was v1, and nothing said so. `kit status` now carries a `config schema` row
   (`○ config schema  v0, current is v1  → run kit config migrate`) via a new read-only
@@ -1276,12 +1285,12 @@
   convex, that it has **no** profiles (`~/.convex/config.json` is global and `convex login`
   overwrites it), so the isolation is `CONVEX_DEPLOY_KEY` / `CONVEX_DEPLOYMENT` per repo.
 
-  And it says the part that turns a wrong identity into wrong conclusions out loud: *anything you
+  And it says the part that turns a wrong identity into wrong conclusions out loud: _anything you
   already read as this identity may have been a PARTIAL view — permissions filter listings
-  silently.*
+  silently._
 
   `kit context check`'s ready-to-paste block offers the detected identities, hedged (`⚠ the gh
-  account logged in NOW — VERIFY it is right for THIS repo`), since the live identity is exactly
+account logged in NOW — VERIFY it is right for THIS repo`), since the live identity is exactly
   what the lock exists to question. A value kit could not resolve to a real identity is reported
   but never offered as something to declare.
 
@@ -1322,8 +1331,8 @@
   forced through an edit that cannot express it, and then the run is **refused** while comments
   exist unless `--allow-comment-loss` is passed, naming how many lines are at stake.
 
-  `--dry-run` now says which path would be taken — *"Applied as a text edit: comments and
-  formatting are preserved"* or the count that would be deleted. A preview that omits the
+  `--dry-run` now says which path would be taken — _"Applied as a text edit: comments and
+  formatting are preserved"_ or the count that would be deleted. A preview that omits the
   destructive half of a change is worse than no preview.
 
 - **The machine-wide wrapper pointed at whichever kit wrote it** (#509). `~/.kit/bin/kit` is what
@@ -1334,7 +1343,7 @@
   **ungated**, because a hook that cannot start is reported non-blocking.
 
   Four properties made it worse than a stale path, and the fix addresses each: a repo-local
-  command had a machine-wide effect; a dev build is transient *by design*; it failed open; and it
+  command had a machine-wide effect; a dev build is transient _by design_; it failed open; and it
   was silent in both directions.
 
   Now: an **installed** kit wins over a checkout when the wrapper is written (probing the usual
@@ -1379,8 +1388,8 @@
   `author_email` — `opensandbox-server` had exactly that), and PyPI's list is **self-declared
   package metadata** while npm's is the registry's own record of who may publish. So the probe
   runs, reports `N declared maintainer(s) in <field> (self-declared package metadata)`, and when
-  it warns it says outright that this is *not registry publish rights* and *not comparable to
-  npm's maintainer count*. A package that names nobody still declares the probe unavailable —
+  it warns it says outright that this is _not registry publish rights_ and _not comparable to
+  npm's maintainer count_. A package that names nobody still declares the probe unavailable —
   with an accurate reason this time.
 
   Consequence, measured: `pip opensandbox-server` goes from `100/100` with a partial-coverage
@@ -1391,7 +1400,7 @@
   Both writers did the same thing:
 
   ```ts
-  tools[name] = { version, source: "mise" };   // version = the DECLARED string
+  tools[name] = { version, source: "mise" }; // version = the DECLARED string
   ```
 
   so an entry read `{"vercel":{"version":"latest","source":"mise"}}` for a binary in
@@ -1520,7 +1529,7 @@
   inherits it. Brace form counts, so `kit hooks {install,add,sync}` documents each member.
 
   **Known limit:** the same inverse check is not possible for flags. No machine-readable
-  inventory of the flags kit *accepts* exists — `contracts/kit.opencli.json` carries
+  inventory of the flags kit _accepts_ exists — `contracts/kit.opencli.json` carries
   `x-kit-args-modeled: false` on all 71 commands, and the flag oracle used by the forward
   rule is a scrape of source literals that also contains flags kit passes to subprocesses
   (`--severity` for trivy, `--name-only` for git). Answering "which flags are
@@ -1567,7 +1576,7 @@
   back — measured: `author: unknown` → `author: OpenSandbox Team <…@alibaba-inc.com>`.
 
 - **A comment promised a flag that never existed.** `mise-path.ts` said `kit setup
-  --activate-mise` appends the mise-shims PATH line; no code reads that flag, and
+--activate-mise` appends the mise-shims PATH line; no code reads that flag, and
   `ensureMiseActivation` — the appender — has no production caller at all (it sits in
   self-audit's unwired-code advisory). `kit doctor` reports the gap and prints the line. The
   claim is corrected rather than the feature quietly invented: writing to a user's shell
@@ -1585,7 +1594,7 @@
 
 - **A third test that reported a verdict its environment could not support.** The
   `writeCheckDetail` failed-write test forced its precondition with `chmod 0o500` without
-  checking whether the mode denied *this* process — root mkdirs straight through it, so the
+  checking whether the mode denied _this_ process — root mkdirs straight through it, so the
   failure path was never exercised and the test reported a working write path as broken. It
   now probes with a real `mkdir` and skips loudly when the mode does not deny, the same
   guard applied to the WAL-sidecar test in 6.6.3. Verified pre-existing on a clean tree
@@ -1596,17 +1605,16 @@
 - **The 13 commands above are now in `docs/COMMANDS.md`**, with two new sections —
   exec-broker runtime posture (`broker enforce-readiness` / `enforce`) and the traveling
   profile (`profile show/freeze/check/sign/verify/export/import`) — plus `kit hooks
-  uninstall`, `kit memory context` and `kit insight` in the tables they belong to. Text is
+uninstall`, `kit memory context` and `kit insight` in the tables they belong to. Text is
   taken from each command's own help string rather than written from the outside.
-
 
 ## [6.6.5] - 2026-08-19
 
 ### Changed
 
 - **Token publishing is now disallowed on all 13 packages.** With 6.6.5-rc.1 proving the OIDC
-  path, every package's npm "Publishing access" moved to *require two-factor authentication and
-  disallow bypass 2fa tokens* — the setting that turns "we also have OIDC" into "only OIDC can
+  path, every package's npm "Publishing access" moved to _require two-factor authentication and
+  disallow bypass 2fa tokens_ — the setting that turns "we also have OIDC" into "only OIDC can
   publish". Each was read back from its own settings page. There is no token fallback left, so
   a misconfigured trusted publisher now fails that package's publish step and is fixed in npm's
   UI rather than worked around; the workspace loop is idempotent, so re-running completes the
@@ -1645,7 +1653,7 @@
   copied, so `check-deps` and this check cannot drift to different windows.
 
   When the log is absent — most repos have never run `kit triage` — the row says the
-  cross-check *did not run* instead of reporting every grant as untriaged. A confident finding
+  cross-check _did not run_ instead of reporting every grant as untriaged. A confident finding
   built on an absent file is the failure mode this codebase keeps catching in itself. A torn
   append is skipped rather than allowed to fail the check.
 
@@ -1655,13 +1663,13 @@
   status/collaborators/grant/revoke with no read or write path for the setting. So the wizard
   is honest about what it cannot verify and rigorous about the rest. It derives the package
   list from the repo rather than carrying a copy — a hardcoded list drifts the moment someone
-  adds a plugin, and a *missed* package is the one failure this migration must not have, since
+  adds a plugin, and a _missed_ package is the one failure this migration must not have, since
   no token plus no trusted publisher means that package's publish step fails. Progress is
   recorded in `.kit/trusted-publishing.state`, so it is resumable across sessions; the
   token-removal stage refuses to run until every package is confirmed; and the final stage
   points at a prerelease (routed to `next`, so `latest` cannot move) as the only honest test.
   Its `publish.yml` edit is fail-closed — it removes the parent `env:` when the token was its
-  only child, refuses if any *executing* line still references `NPM_TOKEN`, and lists the
+  only child, refuses if any _executing_ line still references `NPM_TOKEN`, and lists the
   comment lines that still describe the token so the prose is fixed in the same PR.
 - **A dialect gate for that script (`src/wizard-script.test.ts`).** Nothing in this repo lints
   shell — `lint` and `format:check` are TypeScript-only and CI has no shellcheck — so a
@@ -1736,7 +1744,7 @@ shipped.
   the condition was never true: the gate could not fail, and every GPG control around it
   (the pinned `MAINTAINER_KEY_FPR`, the single-key keyring check, the ownertrust import) was
   intact and useless. `v6.6.3` was tagged with `git tag -a` and published; `git tag -v
-  v6.6.3` prints `error: no signature found`. Re-signing it would mean force-pushing a
+v6.6.3` prints `error: no signature found`. Re-signing it would mean force-pushing a
   published tag, which re-triggers the publish workflow against a version already on the
   registry, so the tag stands and `docs/VERIFY.md` records why. Fixed with `set -o pipefail`
   and a redirect instead of the pipe; `src/publish-workflow.test.ts` asserts the verdict
@@ -1753,7 +1761,7 @@ shipped.
 ### Changed
 
 - **The install gate holds install-script approval, not just installs.** `npm approve-scripts
-  <pkg>` and `npm install-scripts approve <pkg>` are the moment an already-installed
+<pkg>` and `npm install-scripts approve <pkg>` are the moment an already-installed
   dependency gains arbitrary code execution — the exact decision the gate exists to hold —
   and neither was matched, so an agent in auto-mode could grant it unchecked. Both spellings
   now triage the named package like an install target; `--all` / `-a` and the bare
@@ -1988,7 +1996,7 @@ shipped.
   resolves past every shims directory instead of spinning. A hand-off to a real
   binary is unchanged: `PATH` and the environment are left alone, so what the tool
   spawns is still observed. The version manager keeps choosing the binary — kit hands
-  off *through* it, never past it, which a test pins with a decoy `npm` further down
+  off _through_ it, never past it, which a test pins with a decoy `npm` further down
   `PATH`. Measured on the reporting machine with its real mise shims and mise in
   fall-through mode: the old shim was killed after 8s having printed nothing, the new
   one answers `11.11.0`; with mise owning node for the directory, both resolve the
@@ -2183,7 +2191,7 @@ shipped.
 - **`gate-bash` read here-document bodies as commands, and blocked kit's own PR
   description.** `SEGMENT_SPLIT` includes `\n`, so every line of a here-document
   was scanned as its own command. Measured: a `gh pr create --body "$(cat <<'EOF'
-  … EOF)"` whose body contained the prose `` `npx tsc --noEmit` `` was refused
+… EOF)"` whose body contained the prose `` `npx tsc --noEmit` `` was refused
   with `BLOCKED — Triage: npm tsc`, because a backtick in a sentence became a
   nested command. A false block in a security gate is not a harmless annoyance —
   it is what teaches people to pass `--no-verify`, and this repo already carries
@@ -2296,7 +2304,7 @@ shipped.
 - **`KIT_READ_ONLY=1` did not stop `kit secrets propagate`.** Propagation
   writes a secret into a third-party control plane, and with elevation
   satisfied, `KIT_READ_ONLY=1 kit secrets propagate API_KEY --value x --to
-  vercel` reached `spawn vercel` — nothing refused it.
+vercel` reached `spawn vercel` — nothing refused it.
   `read-only-surface.ts` omitted `secrets` because writes are "already
   refused inside their own modules": true of the local backend write, false
   of propagation. Now gated at `propagate()`'s choke point, ordered before
@@ -2397,7 +2405,7 @@ shipped.
   every plugin's peer range admits the SDK version being shipped.
 - **`KIT_READ_ONLY=1` let four commands write anyway.** `kit identity init`
   minted a private key, `kit policy init` wrote policy, `kit security
-  check-gitignore --fix` rewrote .gitignore, and `kit upgrade` rewrote lock
+check-gitignore --fix` rewrote .gitignore, and `kit upgrade` rewrote lock
   files — none refused, none audited. The worst is the first: an operator who
   locks an agent session down believing every mutation is refused, while the
   agent mints the signing identity that then attributes audit and policy
@@ -2444,11 +2452,11 @@ shipped.
 ### Fixed
 
 - **Three defects found by testing the README's pillars as behaviour, not as prose.** Each pillar
-  claim was run against a temp project and its artifacts, with the oracle being what kit *did* —
+  claim was run against a temp project and its artifacts, with the oracle being what kit _did_ —
   never the text that made the claim.
 
   - **A corrupted `.kit-profile.toml` turned runtime mediation off entirely.** Pillar 3 says
-    mediation is on by default in observe mode. It is — but an *unreadable* profile resolved to
+    mediation is on by default in observe mode. It is — but an _unreadable_ profile resolved to
     `runtimeMode: "off"`, and `runBrokered` skips the broker on "off". Tampering with
     `.kit-profile.sig` was denied while breaking the TOML syntax ran unmediated: the strictly
     easier attack had the weaker consequence, and the comment on that branch already claimed the
@@ -2502,7 +2510,7 @@ shipped.
   functions share their flaw with a wired sibling.
 
   - **`lineSeals` / `lineHashes` threw instead of failing closed on a `null` log line.**
-    `JSON.parse("null")` *succeeds* and yields `null`, and the `typeof obj.hash` guard sat
+    `JSON.parse("null")` _succeeds_ and yields `null`, and the `typeof obj.hash` guard sat
     **outside** the `try` — so a line containing exactly `null` in `.kit-audit.jsonl` escaped as
     a `TypeError` rather than the fail-closed `null` every other malformed line gets. `lineSeals`
     is the **live** extractor `verifyAgainstAnchor` calls, so this turned a documented
@@ -2511,7 +2519,7 @@ shipped.
     string, array, truncated object) already behaved correctly.
   - **`wouldRequireApproval` disagreed with the enforcer it predicts.** It gated prod on
     `production_writes === true` while `requestApproval` gates on bare truthiness, so a
-    hand-edited `production_writes = "yes"` made a dry-run report *no approval needed* and the
+    hand-edited `production_writes = "yes"` made a dry-run report _no approval needed_ and the
     real call then prompt or deny. It also ignored `enabled` entirely, predicting a prompt for
     configs where `withGovernance` returns before any approval is requested. Both corrected
     toward the enforcer: a predictor may over-predict a prompt, never under-predict one.
@@ -2546,8 +2554,8 @@ shipped.
     depends on: a malformed `[rbac]` table yields `null`, never a partial grant.
   - **`governance.ts`** (24) — `checkOperationAllowed`, the authorization verdict. The
     intentional fail-open when governance is disabled, the fail-closed branch for an
-    environment with no access entry, and the deliberate asymmetry that a denied *delete* is
-    always escalatable to approval while a denied *write* is only escalatable in prod.
+    environment with no access entry, and the deliberate asymmetry that a denied _delete_ is
+    always escalatable to approval while a denied _write_ is only escalatable in prod.
   - **`findings-track.ts`** (18) — which findings reach the PAL ledger, and that `dedupKey`
     excludes volatile values so a re-scan maps to the same row instead of forking a new one.
   - **`utils/ci-escape.ts`** (15) — the two escapers standing between a config-controlled
@@ -2566,8 +2574,8 @@ shipped.
 ### Fixed
 
 - **A false security claim in the README and in three compliance evidence maps.** kit's Pillar 2
-  entry stated in the present tense that *"keyless egress signs requests with RFC 9421 HTTP
-  Message Signatures for hosts in `[scope].sign`"*. Measured: the whole `src/keyless/` directory
+  entry stated in the present tense that _"keyless egress signs requests with RFC 9421 HTTP
+  Message Signatures for hosts in `[scope].sign`"_. Measured: the whole `src/keyless/` directory
   is unreachable — `http-sig.ts` is imported only by `sign-request.ts`, which is imported by
   nothing; no command exposes it; nothing on the egress path signs a request; and there is no
   `[scope].sign` field in the profile schema at all.
@@ -2575,12 +2583,12 @@ shipped.
   The primitives are real and tested, so they stay. What changed is every place that described
   them as shipped: the README, **`coverage/nist-800-53.ts` (both the IA and SC families)** and
   **`coverage/owasp-agentic-top10.ts`**, where "keyless egress" was also listed as one of the
-  *checks* backing a control. Evidence you would hand an auditor is the worst possible place for
+  _checks_ backing a control. Evidence you would hand an auditor is the worst possible place for
   a capability claim that is not wired, which is why this one is called out separately from the
   dead code below.
 
   (Care taken not to overclaim in the other direction: "keyless" in `kit audit verify` means a
-  keyless *hash chain* — no identity key — which is a different, working thing that happens to
+  keyless _hash chain_ — no identity key — which is a different, working thing that happens to
   share the word.)
 
 - **A false positive in rule 15, found by reading its own output instead of trusting it.**
@@ -2593,7 +2601,7 @@ shipped.
 ### Removed
 
 - **~1,100 lines of unreachable code, found by rule 15 and deleted.** Every export it flagged as
-  *referenced nowhere* is gone, and the count went **20 → 0**:
+  _referenced nowhere_ is gone, and the count went **20 → 0**:
 
   - `src/event-stream.ts` (220 lines) plus its 299-line test — an `EventStream` class with
     `initializeEventStream` / `getEventStream`, imported by **nothing**. Tested, complete, and
@@ -2637,7 +2645,7 @@ shipped.
   Tracked numbers after this batch: unwired exports **49 → 32**, referenced-nowhere back to
   **0**, untested files **90 → 89**.
 
-  **Not done, deliberately:** the 32 remaining *tested-but-never-called* exports in live
+  **Not done, deliberately:** the 32 remaining _tested-but-never-called_ exports in live
   modules. A bulk brace-matching pass over 26 of them corrupted `cost-monitor.ts` (it removed 30
   functions where 26 were named) and was reverted whole. They are dead weight, not false claims,
   and the tracked number is a better outcome than a broken tree at the end of a long change.
@@ -2708,8 +2716,8 @@ shipped.
   progress.
 
 - **Rule 14 also resolves documented `KIT_*` env vars against the code that reads them.**
-  78 references across 63 docs. A documented switch no code branch on is a *silent
-  false-secure*: the user believes a control is on. The oracle counts a name as known if the
+  78 references across 63 docs. A documented switch no code branch on is a _silent
+  false-secure_: the user believes a control is on. The oracle counts a name as known if the
   implementation reads it via `process.env.X`, via a destructured `env.X` (how
   `airgap/config.ts` does it), or sets it for a child process — generous on purpose, so only a
   name the implementation never touches is reported. Test files do **not** count: a pure
@@ -2725,13 +2733,13 @@ shipped.
     (`resolveMemoryClass` had 0 production callers while its tests passed).
   - **referenced nowhere** — plain dead code, safe to delete.
 
-  kit's own tree: **69**. The oracle is deliberately *not* the test suite — a green unit test is
+  kit's own tree: **69**. The oracle is deliberately _not_ the test suite — a green unit test is
   not evidence a feature is reachable, which is the whole lesson. A helper used only inside its
   own module counts as wired (that is normal code); `_`-prefixed / `…ForTests` seams and the
   declared adapter-SDK exports are excluded with the reason in code.
 
   Advisory, one row per finding, same trade as flag-validation: deleting a dead export is safe,
-  but deciding whether an unreachable *control* should be wired or withdrawn is a human call,
+  but deciding whether an unreachable _control_ should be wired or withdrawn is a human call,
   so it reports and never gates.
 
 - **Flag-validation coverage is now measured, not invisible.** `kit check` is the only one of
@@ -2754,7 +2762,7 @@ shipped.
   now a **fail**, not something a reader discovers as `Unknown command:` at the terminal.
 
   This is the R11 pattern (CI script paths must resolve) applied one surface out: docs are
-  instructions to humans *and* to agents, and a stale instruction is indistinguishable from a
+  instructions to humans _and_ to agents, and a stale instruction is indistinguishable from a
   live one to the reader. Scanning is restricted to command position — inside code fences and
   backticked spans — because an unanchored scan matches English prose ("kit is", "kit ships")
   and buries the signal: 193 hits versus 6.
@@ -2764,7 +2772,7 @@ shipped.
   commands that do not currently exist.
 
   A `toml` fence is only checked when it says it shows `.kit.toml` — in the fence or in the
-  prose introducing it. `docs/POLICY.md` documents a *policy* file whose `[thresholds]` is
+  prose introducing it. `docs/POLICY.md` documents a _policy_ file whose `[thresholds]` is
   correct there and unknown to `.kit.toml`; guessing would fire the gate on correct
   documentation.
 
@@ -2779,22 +2787,21 @@ shipped.
 
 ### Fixed
 
-
 - **Two documented security switches that no code read.**
   - `KIT_REQUIRE_HARDWARE` appeared in the README, in `kit doctor`'s own remediation hint, and
     in the **NIST 800-53 evidence map** as the way to make a missing hardware key backend
     fail closed. The variable the implementation reads is `KIT_REQUIRE_HARDWARE_IDENTITY`.
     Setting the documented one did nothing at all. Corrected in all four places.
-  - `docs/OWASP_2025.md` listed *"Rate-limiter failed OPEN on Redis error → Fail-closed;
-    opt-in `KIT_RATE_LIMIT_FAIL_OPEN=1`"* as **✅ shipped (P0.3)**. kit has no rate limiter —
+  - `docs/OWASP_2025.md` listed _"Rate-limiter failed OPEN on Redis error → Fail-closed;
+    opt-in `KIT_RATE_LIMIT_FAIL_OPEN=1`"_ as **✅ shipped (P0.3)**. kit has no rate limiter —
     the only match in the tree is a SQL column name — and no `KIT_RATE_LIMIT_FAIL_OPEN`
     anywhere. Row removed. The sibling rows in that table (`KIT_ELEVATED`, `KIT_PROD_OK`) were
     checked and do hold.
 
 - **README no longer overstates classified memory.** The README described a working disclosure
-  control: *"every row carries a sensitivity class, and recall never returns a row more
+  control: _"every row carries a sensitivity class, and recall never returns a row more
   restrictive than the asking context — so a note captured in a restricted repo cannot surface
-  while you work in a public one."* Measured: `KIT_MEMORY_CLASS` is read in **0** places,
+  while you work in a public one."_ Measured: `KIT_MEMORY_CLASS` is read in **0** places,
   `[memory] default_class` in **0**, `resolveMemoryClass()` has **0** production callers,
   **0 of 30** `openMemoryDb()` call sites pass a class, no indexer ever sets `memoryClass`, and
   `contextClass` is never supplied outside `memory/`.
@@ -2804,7 +2811,6 @@ shipped.
   is inert. The README now states that plainly. **Wiring it is a deliberate change to
   disclosure semantics and is not attempted here**; the honest description is the fix, and the
   gate above is what keeps the claim and the code together from now on.
-
 
 - **Documented surface that did not exist.** Found by the rule above on its first runs against
   kit's own tree — 3 commands, 8 flags, 3 config sections:
@@ -2849,7 +2855,6 @@ shipped.
   (`>-`, `|+`, …) are handled, the block correctly ends at the next key rather than swallowing
   it, and an empty block yields an empty string rather than the literal indicator character.
 
-
 ## [6.1.0] - 2026-07-31
 
 ### Added
@@ -2862,7 +2867,7 @@ shipped.
 
   - **Lost coverage ranks above a regression, and that is the whole point.** A naive differ
     reads `fail → skip` as "no longer failing" and calls it an improvement. It is the
-    opposite: the check stopped running, so the finding is *unknown*, not fixed. `coverage-lost`
+    opposite: the check stopped running, so the finding is _unknown_, not fixed. `coverage-lost`
     and `disappeared` are first-class buckets sorted above `regressed`, and a check that
     **could not run** is treated as lost coverage even when its status reads `skip`.
   - Eight movement kinds (`coverage-lost`, `disappeared`, `regressed`, `appeared`,
@@ -2873,7 +2878,7 @@ shipped.
     `src/scan-diff.ts`. Same two files always produce the same diff, byte-stable regardless of
     the order checks appear in either array — which is what makes it usable in a gate.
   - Reports by default (it is a report, not a gate). **`--fail-on-worse`** exits non-zero on
-    lost coverage, a disappeared check, or a regression, so CI can hold a line on the *delta*
+    lost coverage, a disappeared check, or a regression, so CI can hold a line on the _delta_
     rather than on the absolute verdict. `--json` emits the whole diff.
   - `clean` deliberately does **not** mean "the second run is green" — two identically failing
     runs diff clean. Documented on the type and covered by a test, because that is exactly the
@@ -2894,7 +2899,6 @@ shipped.
 - **`didNotRun` is carried into `--json`** (new optional field on `JsonCheck`). Without it a
   consumer cannot tell an honest not-applicable skip from a scanner that crashed — i.e. cannot
   tell "stopped failing" from "stopped looking". Additive; absent unless true.
-
 
 ## [6.0.0] - 2026-07-30
 
@@ -2935,7 +2939,7 @@ number exists because semver requires removals to happen in one.
   harnesses), but a human typing `npm i x` / `npx y` / `brew install z` in
   their own shell reached the machine ungated. `kit guard install` writes
   PATH shims for the install + fetch-and-run family (`npm npx pnpm yarn bun
-  bunx pip pip3 pipx uv uvx brew gem cargo`) that run the SAME hardened
+bunx pip pip3 pipx uv uvx brew gem cargo`) that run the SAME hardened
   parser + triage verdict the agent gate uses, and log what it WOULD decide
   to `~/.kit/guard-observe.jsonl`. v1 is observe-only by the exec-broker
   discipline (observe → evidence → enforce, the 7.0 track): a shim never
@@ -2952,7 +2956,7 @@ number exists because semver requires removals to happen in one.
 
 - **`kit review` scopes: `--stages` + `--category`.** `collectReview` (and
   therefore both surfaces — `kit review --stages check,standards --category
-  general` and the `kit_review` MCP tool's `stages`/`category` params) can run
+general` and the `kit_review` MCP tool's `stages`/`category` params) can run
   a subset of the four gates, canonical order kept regardless of input order.
   Enum-validated: an unknown stage is a refusal with the valid list, never a
   silent full run. `stages: ["standards"]` is the fast, read-only lint loop —
@@ -2987,7 +2991,7 @@ next, and your standing service preferences apply themselves at init.
 ### Added
 
 - **User-level init defaults.** `~/.kit/defaults.toml` with `[init] services =
-  ["sentry", "posthog"]` is merged by BOTH init surfaces (the CLI flow and the
+["sentry", "posthog"]` is merged by BOTH init surfaces (the CLI flow and the
   MCP `kit_init` tool) after stack detection — the operator's standing
   preferences, declared once, outside any repo (personal taste, not project
   truth: the generated `.kit.toml` stays the committed source). Fail-safe by
@@ -3031,13 +3035,12 @@ next, and your standing service preferences apply themselves at init.
 
 - **Corrected the 5.22.0 claim that a newer bumblebee release brings no fresher threat
   intel.** It does here. The error was methodological and is now recorded in
-  `bumblebee-update.ts` so it is not repeated: the six pre-existing catalogs *are*
+  `bumblebee-update.ts` so it is not repeated: the six pre-existing catalogs _are_
   byte-identical across the two tags, and `raw.githubusercontent.com` cannot list a
   directory — so comparing only the filenames already known makes five ADDED catalogs
   invisible and looks like "nothing changed". Compare the release tarball, not a guessed
   file list. The suggestion text no longer asserts either direction: whether a bump
   refreshes the catalogs depends on the release, so it points at the evidence instead.
-
 
 ## [5.22.0] - 2026-07-27
 
@@ -3045,19 +3048,19 @@ next, and your standing service preferences apply themselves at init.
 
 - **Pinned-scanner release notice, and out-of-verdict advisories now reach the PAL ledger.**
   kit reported that bumblebee's threat-intel catalogs were N days old but never whether a
-  newer release existed to bump *to* — half a sentence. The other half is now there.
+  newer release existed to bump _to_ — half a sentence. The other half is now there.
 
   - **The binary pin stays.** `BUMBLEBEE_VERSION` + `TARBALL_CHECKSUMS` are never
     auto-updated: fetching an executable whose checksum cannot be verified in advance is
     the supply-chain attack kit exists to catch. This is a **notice**, and the bump remains
     a deliberate commit where the two constants move together.
-  - **The real defect it exposes** is that the `threat_intel/` catalogs ship *inside* the
+  - **The real defect it exposes** is that the `threat_intel/` catalogs ship _inside_ the
     pinned tarball, coupling data with a days-scale half-life to a binary with a
     months-scale one. The notice makes that coupling visible instead of silent.
   - **Not part of any verdict.** Whether upstream cut a release depends on the network and
     someone else's schedule, so letting it move pass/fail would make `kit ci --strict`
     non-deterministic for an unchanged repo — the same reasoning that already keeps catalog
-    *age* out of the verdict. The security check reads a **cache only** and never makes a
+    _age_ out of the verdict. The security check reads a **cache only** and never makes a
     network call.
   - **`SecurityCheckResult.advisory`** — a new optional `{ key, title, detail }` for
     signals that must not move the verdict but must still reach a human. Advisories mostly
@@ -3073,11 +3076,11 @@ next, and your standing service preferences apply themselves at init.
   - **Measured against upstream, and the wording follows the measurement:** a newer
     release does NOT imply newer threat intel. All six `threat_intel/*.json` catalogs are
     byte-identical between upstream v0.1.1 and v0.1.2; what v0.1.2 adds is inventory
-    *coverage* (an `agent-skill` ecosystem for skills.sh / vercel-labs lock files,
+    _coverage_ (an `agent-skill` ecosystem for skills.sh / vercel-labs lock files,
     `homebrew`, and `~/.claude.json` MCP parsing). So neither branch of the suggestion
     promises a bump will refresh the catalogs — the age can be upstream's own data age
     rather than a lagging pin, and the previous "bump to refresh the exposure catalogs"
-    wording was a false promise. A *tag* is also not a *release*: the notice reads the
+    wording was a false promise. A _tag_ is also not a _release_: the notice reads the
     releases API and skips drafts/prereleases, so a tagged-but-unreleased version
     correctly produces silence.
   - Network posture mirrors kit's own update check exactly, via a now-shared
@@ -3087,17 +3090,16 @@ next, and your standing service preferences apply themselves at init.
     `CI`, `GITHUB_ACTIONS`, `GITLAB_CI` and air-gap all suppress it; the notice prints to
     **stderr** so it cannot corrupt piped stdout.
 
-
 ## [5.21.0] - 2026-07-26
 
 ### Added
 
 - **Three stack-aware hint rules.** The deterministic hint engine (one tip per
   run, shown once, `KIT_NO_HINTS` silences, fail-safe detectors, zero LLM) now
-  also surfaces the right *workflow* at the moment the repo's own state makes
+  also surfaces the right _workflow_ at the moment the repo's own state makes
   it relevant: `.github/workflows/` present but never gha-audited → `kit
-  gha-audit`; a kit-managed repo with sources but no findings baseline → `kit
-  baseline freeze`; agent transcripts on the machine but no memory store →
+gha-audit`; a kit-managed repo with sources but no findings baseline → `kit
+baseline freeze`; agent transcripts on the machine but no memory store →
   `kit memory index`.
 
 ### Fixed
@@ -3131,7 +3133,7 @@ next, and your standing service preferences apply themselves at init.
   gate — check (via the new `runCheckGate` collection core), design
   (`runDesignGate`), standards (`runStandardsGate`), ADR (`runAdrGate`) — and
   returns one `ReviewReport { ok, failed, stages: [{ stage, ok, summary,
-  findings }] }`. The CLI is a renderer on top; `kit review --json` emits ONE
+findings }] }`. The CLI is a renderer on top; `kit review --json` emits ONE
   document and exits 1 on red. Same discipline as `computeCheckVerdict`: the
   collection can no longer fork between surfaces. `kit review` is now a pure
   read — `kit check` keeps its CLI extras (PAL sync, attestation, hints,
@@ -3150,7 +3152,7 @@ next, and your standing service preferences apply themselves at init.
 ### Fixed
 
 - **The hook-skip sentinel's STAMPING half is now tracked.** 5.19.0 shipped the
-  post-commit *detector*, but the pre-commit block that writes the sentinel it
+  post-commit _detector_, but the pre-commit block that writes the sentinel it
   reads existed only machine-locally (via `kit fix`) — so a fresh clone logged
   a false `sentinel-missing` skip on every commit (the 5.18.0 release commit is
   a recorded example). Both halves now travel with the repo. Plus gitignore
@@ -3170,7 +3172,7 @@ next, and your standing service preferences apply themselves at init.
   segment) and redirect tokens like `>/dev/null` reached the package matcher
   and fail-closed legitimate installs. `&` now splits only as a job-control
   separator, and redirections are stripped as I/O plumbing on the undequoted
-  token stream — a *quoted* redirect-shaped operand still fail-closes, a
+  token stream — a _quoted_ redirect-shaped operand still fail-closes, a
   background `&` still separates segments, and a stderr-dup piped into an
   xargs-driven install keeps its fail-close. Strictly precision, never
   looseness: all 75 existing bypass-resistance tests pass unchanged.
@@ -3178,7 +3180,7 @@ next, and your standing service preferences apply themselves at init.
 ### Added
 
 - **The hook-skip sentinel ships complete.** The tracked pre-commit hook wrote
-  the ran-sentinel, but the post-commit *detector* — which flags
+  the ran-sentinel, but the post-commit _detector_ — which flags
   `git commit --no-verify` bypasses to `.kit-skipped-commits.jsonl` — sat
   untracked in the working tree: half a mechanism. Now tracked, and verified
   live (it flagged a rebase commit exactly as designed). Plus `mise.toml`
@@ -3350,7 +3352,7 @@ cannot return.
     (default 3), a hard visited-node cap (default 2000), and the existing visited set.
   - **Every hop we cannot complete is a `gap`, never a silent pass.** A bare specifier that
     does not resolve in `node_modules`, a module that resolves but cannot be read, and a walk
-    that hits the depth or node bound all downgrade the result from clean-green to *unproven*
+    that hits the depth or node bound all downgrade the result from clean-green to _unproven_
     and are reported as such. `kit adr freeze` baselines them like any other finding.
   - **Node builtins stay leaves.** There is no user code behind `node:fs` to walk into, so an
     unfollowed builtin is not a gap — but a rule that forbids one still gates on the direct
@@ -3370,14 +3372,14 @@ cannot return.
   memory row now carries a **class**: `public` | `internal` | `restricted`.
   - **Label source** (the decision that unblocked the issue): a config default with a
     **per-project override**. `[memory] default_class` in `.kit.toml` sets it — and because kit
-    loads the *project's* `.kit.toml`, a project overrides the inherited default just by
+    loads the _project's_ `.kit.toml`, a project overrides the inherited default just by
     declaring its own. `KIT_MEMORY_CLASS` overrides both for an ephemeral session.
   - **The gate:** recall (`searchMessages` / `recentMessages`) accepts a `contextClass` and
     returns only rows no more restrictive than it. A row whose class is missing or
     unrecognized is **excluded from every context** — it is simply absent from the allow-list,
     so fail-closed needs no special case.
-  - **Deliberately asymmetric fail-closed rules:** a *missing* config value is not a security
-    event → the documented default (`internal`); an *invalid* one is (a typo must never
+  - **Deliberately asymmetric fail-closed rules:** a _missing_ config value is not a security
+    event → the documented default (`internal`); an _invalid_ one is (a typo must never
     silently widen disclosure) → `restricted`, flagged `recognized: false`. A row that cannot
     be classified at disclosure time → treated as `restricted`.
   - Schema v9 adds `messages.class` and backfills pre-existing rows to the configured default
@@ -3389,7 +3391,7 @@ cannot return.
 ### Fixed
 
 - **The v9 backfill can no longer brick `kit memory`.** `messages` is the external-content
-  source for the `messages_fts` index, and its update trigger re-indexes `content` on *any*
+  source for the `messages_fts` index, and its update trigger re-indexes `content` on _any_
   write — so a plain backfill `UPDATE` would rewrite the whole FTS index for a column FTS does
   not index, and on a store whose index is already inconsistent it raises
   `database disk image is malformed`, which from inside `openMemoryDb` would take down every
@@ -3462,7 +3464,7 @@ cannot return.
     identity, merged scanner verdict, triage/SBOM/provenance, OS-containment posture, the
     ClamAV byte-scan delegate, …).
   - `manual` (3): IR, PL, PM — kit ships real capability (`kit panic`, the ADR gate,
-    policy-as-code) but no check can verify that a human *program* exists.
+    policy-as-code) but no check can verify that a human _program_ exists.
   - `n-a` (6): AT, CP, MA, MP, PE, PS — physical/personnel/organizational by nature and
     deliberately out of charter, stated rather than quietly claimed.
 
@@ -3489,7 +3491,7 @@ cannot return.
   **fail**; a `scanerror` / missing scanner is a **gap** — surfaced, never a silent clean
   (absence of a scan is not a pass). Without `--scan-bytes` the byte layer is skipped (kit does
   not auto-run a multi-second scan). New pure `interpretClamscan` + `scanFileForMalware` in
-  `src/malware-scan.ts`. Honest limit: kit does not *detect* malware — it records that a verified
+  `src/malware-scan.ts`. Honest limit: kit does not _detect_ malware — it records that a verified
   ClamAV scan ran and what it returned; signature-based AV is known-malware-only.
 
 ## [5.10.1] - 2026-07-25
@@ -3570,12 +3572,12 @@ first release that exercises the repaired publish pipeline end to end.
   (5.6.0) grows two capabilities, both deterministic and zero-LLM:
   - **Sandboxed-runtime fingerprints** — `detectContainment` now names **gVisor** (`runsc`) and
     **Firecracker** microVMs from userspace-visible strings (`/proc/version`, DMI vendor). A
-    *positive* fingerprint names the mechanism (`heuristic` confidence); an *absence* claims
+    _positive_ fingerprint names the mechanism (`heuristic` confidence); an _absence_ claims
     nothing — these runtimes are deliberately stealthy, so kit never infers "not sandboxed" from
     a missing marker (no false green).
   - **`require containment` — a fail-closed gate.** New `[governance.containment] require = true`
     turns the advisory posture into a hard requirement: `kit doctor` **fails** (not warns) when a
-    container/seccomp/sandbox layer beneath the tool boundary cannot be *positively* established —
+    container/seccomp/sandbox layer beneath the tool boundary cannot be _positively_ established —
     **including** when it cannot be determined at all (a required control that cannot be proven
     present is treated as absent). The containment verdict is written to the sealed audit
     (`doctor.containment`) when the policy is in force.
@@ -3590,7 +3592,7 @@ first release that exercises the repaired publish pipeline end to end.
 
 - **`kit adr` — richer enforce rules (experimental).** Beyond `forbid_pattern`, an accepted
   ADR's ` ```toml kit-enforce ` block now supports two more deterministic rule types:
-  - **`require_pattern`** — a regex that **must** appear in each matching file; its *absence*
+  - **`require_pattern`** — a regex that **must** appear in each matching file; its _absence_
     gates (e.g. "every `src/web/**` handler must call `withGovernance`").
   - **`forbid_import`** — an import-statement-aware ban on a module specifier (parses real
     `import`/`require`/`from`/dynamic-import specifiers, not any line, so `pg-promise` no longer
@@ -3625,7 +3627,7 @@ first release that exercises the repaired publish pipeline end to end.
 ### Added
 
 - **`kit doctor`: OS-containment posture (defense-in-depth).** Deterministically detects the
-  sandbox *below* the tool boundary from Linux `/proc` (container markers, seccomp mode,
+  sandbox _below_ the tool boundary from Linux `/proc` (container markers, seccomp mode,
   no_new_privs, user namespace) and folds it into the posture: `pass` when contained,
   `warn` when an install/exec gate is wired with **no** OS containment beneath it (pair kit
   with a sandbox), and honest `skip`/`unknown` on non-Linux — never a false "not contained".
@@ -3696,8 +3698,8 @@ first release that exercises the repaired publish pipeline end to end.
   bytes, no writes); write errors fail closed (never a partial-export "success"). Read-only over
   already-secret-scanned entries, so the export never re-introduces a secret.
 
-- **`kit memory search --brief` — progressive-disclosure recall (B3).** Returns the *minimal
-  sufficient slice* of a recall — top-ranked hits trimmed to budget-bounded snippets — and reports
+- **`kit memory search --brief` — progressive-disclosure recall (B3).** Returns the _minimal
+  sufficient slice_ of a recall — top-ranked hits trimmed to budget-bounded snippets — and reports
   how many were **withheld** so you can expand (`--limit` / drop `--brief`), instead of dumping
   every match into context. Never silently truncates: the withheld count is explicit (same
   discipline as `kit map`'s logged drops), and the first hit is always disclosed. Pure core
@@ -3706,10 +3708,10 @@ first release that exercises the repaired publish pipeline end to end.
 
 - **`kit memory` rule aging — surface stale machine-origin rules for review, never auto-drop (B2).**
   Curated shared-tier rules now carry a deterministic **aging class**: only `derived`/`inferred`
-  *active* rules age (fresh < 180d ≤ aging < 360d ≤ stale); an **operator's explicit rule is
+  _active_ rules age (fresh < 180d ≤ aging < 360d ≤ stale); an **operator's explicit rule is
   foundational and never ages** (the human owns its relevance), and superseded/reversed entries are
   history. `kit memory areas` prints an aging nudge when machine-origin rules go stale; `kit memory
-  area <name>` badges each entry and takes `--stale` to show only aged-out rules for review (JSON
+area <name>` badges each entry and takes `--stale` to show only aged-out rules for review (JSON
   carries the `aging` field). kit never deletes — it flags for re-affirm/supersede. Pure core
   (`classifyAging` / `agingReport`), unit-tested; deterministic, zero-LLM.
 
@@ -3718,7 +3720,7 @@ first release that exercises the repaired publish pipeline end to end.
   library**, mirroring the coverage-standards registry: `kit scan --list-delegates` enumerates it
   with on/off state, and `[scan].delegates` in `.kit.toml` is an allow-list that picks which
   scanners run (absent/empty ⇒ all on, backwards-compatible). The principle it encodes: **kit
-  delegates *detection* to best-of-breed tools, never its *verdict*** — findings still merge into
+  delegates _detection_ to best-of-breed tools, never its _verdict_** — findings still merge into
   one deterministic, fail-closed result. `enabledScanners` / `isScannerEnabled` / `SCANNER_IDS`
   are exported + unit-tested.
 

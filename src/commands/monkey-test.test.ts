@@ -160,3 +160,23 @@ describe("cmdMonkeyTest desktop", () => {
     });
   }
 });
+
+describe("cmdMonkeyTest init --install", () => {
+  it("init --install writes the harness but reports a failed install when there is no package.json", async () => {
+    setArgs("init", "--install", "--json");
+
+    assert.equal(await cmdMonkeyTest(), false, logs.join("\n"));
+    const result = outputJson<{
+      ok: boolean;
+      install: { ok: boolean; steps: { name: string; status: string }[] };
+    }>();
+
+    assert.equal(result.ok, true);
+    assert.equal(result.install.ok, false);
+    assert.deepEqual(
+      result.install.steps.map((step) => [step.name, step.status]),
+      [["package", "fail"]],
+    );
+    assert.equal(existsSync(join(dir, "playwright.monkey.config.ts")), true);
+  });
+});

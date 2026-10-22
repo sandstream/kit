@@ -10,6 +10,7 @@ money-flow check.
 ```sh
 kit monkey-test plan --json
 kit monkey-test init
+kit monkey-test init --install
 kit monkey-test run \
   --env-command 'provider-or-vault-cli export --format=dotenv' \
   --seed-command 'npm run seed:test'
@@ -73,6 +74,30 @@ touches real user data, and confirm afterwards that every folder in
 - `tests/monkey/security-checklist.md`
 - `.kit/monkey-test/role-matrix.json`
 - `.kit/monkey-test/expected-findings.example.json`
+
+`init --install` also sets up the browser runner. It runs `kit triage npm` on
+`@playwright/test` at the exact version kit pins (1.55.0), and only if triage passes it
+installs that version as an exact devDependency with the project's package manager and
+`--ignore-scripts`. It then runs `playwright install chromium`, the one step that
+downloads a browser. A project that already declares `@playwright/test` keeps its version:
+only the Chromium download runs. On Windows kit prints the commands instead of running
+them, because `.cmd` shims need a shell.
+
+Kit triages whatever `@playwright/test` version will run: the pin for a fresh install, or the
+installed version for a project that declares its own. Before it runs the installed cli, kit
+downloads the tarball for that version from the public npm registry (in a scratch directory,
+with an empty npm config, so no repo setting redirects it) and compares every file with the
+installed package, for `@playwright/test` and for `playwright` and `playwright-core`, the packages whose code the cli runs. A modified, missing or extra file stops the Chromium download. This covers
+every package manager and the declared-version case.
+
+Kit refuses to install when the repo could run its own code during install: `.pnpmfile.cjs`, a
+`pnpmfile` or `global-pnpmfile` setting in `.npmrc` or `pnpm-workspace.yaml`, a yarn
+`yarnPath`, `yarn-path` or `plugins` entry, or a `packageManager` value that is not a plain
+`name@version` (corepack can fetch a package manager from a URL). A project registry
+override cannot change what runs, because the files are checked against the public tarball.
+
+Run `init --install` in a project you trust anyway. The guard is a tripwire, not a sandbox: a
+package manager setting that kit does not know about can still run code during the install.
 
 Repeat init preserves existing Playwright configuration, role matrix, and expected
 findings example byte-for-byte, including with `--force`. Other existing files are
@@ -283,13 +308,14 @@ repeats the run.
 
    | Action         | What it does                                                   |
    | -------------- | -------------------------------------------------------------- |
-   | `close-window` | Runs `closeWindow` in the page, the user's close button.        |
-   | `quit`         | SIGTERM to the app's process group, a pause, then a new start.  |
-   | `kill`         | SIGKILL, as a crash or a forced quit does. No cleanup runs.     |
-   | `reload`       | Reloads the page. The process keeps running.                    |
-   | `restart`      | SIGTERM and a new start at once.                                |
+   | `close-window` | Runs `closeWindow` in the page, the user's close button.       |
+   | `quit`         | SIGTERM to the app's process group, a pause, then a new start. |
+   | `kill`         | SIGKILL, as a crash or a forced quit does. No cleanup runs.    |
+   | `reload`       | Reloads the page. The process keeps running.                   |
+   | `restart`      | SIGTERM and a new start at once.                               |
 
    The first five interruptions use each action once, in seeded order.
+
 7. After each interruption it brings the app back and checks:
    - The app starts, its ready check answers, and the app log has no crash
      (Rust panic, `fatal runtime error`, segmentation fault, or a configured

@@ -3344,6 +3344,7 @@
         "--expected",
         "--force",
         "--help",
+        "--install",
         "--interruptions",
         "--json",
         "--link-depth",
