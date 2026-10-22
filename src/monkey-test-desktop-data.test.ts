@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { checkDataFiles, fingerprintDirs, matchesDataGlob } from "./monkey-test-desktop-data.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function fixture(files: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-desktop-data-"));
@@ -16,7 +17,7 @@ function fixture(files: Record<string, string>): string {
 }
 
 function cleanup(dir: string): void {
-  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  rmTemp(dir);
 }
 
 it("star matches inside one folder only", () => {

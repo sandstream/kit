@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runStandardsGate } from "./standards-run.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 async function withoutToolPath<T>(run: () => Promise<T>): Promise<T> {
   const previous = process.env.PATH;
@@ -35,7 +36,7 @@ describe("standards-run — summary separates setup gaps from findings", () => {
     } finally {
       if (prevBaseline === undefined) delete process.env.KIT_BASELINE_FILE;
       else process.env.KIT_BASELINE_FILE = prevBaseline;
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -49,7 +50,7 @@ describe("standards-run — summary separates setup gaps from findings", () => {
       assert.equal(r.ok, false, "setup gaps fail closed under --enforce");
       assert.equal(r.summary.failed >= 1, true);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 
@@ -62,7 +63,7 @@ describe("standards-run — summary separates setup gaps from findings", () => {
       assert.equal(r.checks.length, 0);
       assert.equal(r.summary.score, "0/0");
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 });

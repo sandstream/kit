@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
@@ -8,6 +8,7 @@ import {
   detectDesktopApp,
   platformDataDirs,
 } from "./monkey-test-desktop-detect.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 async function inRepo(
   files: Record<string, string>,
@@ -21,7 +22,7 @@ async function inRepo(
     }
     await body(root);
   } finally {
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmTemp(root);
   }
 }
 

@@ -1,9 +1,10 @@
 import { afterEach, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunContext } from "./monkey-test-runner-context.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const roots: string[] = [];
 
@@ -18,7 +19,7 @@ function project(): string {
 }
 
 afterEach(() => {
-  while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
+  while (roots.length) rmTemp(roots.pop()!);
 });
 
 it("initializes a run with detected project commands and isolated execution state", async () => {

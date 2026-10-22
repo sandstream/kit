@@ -7,7 +7,7 @@
  */
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadOrCreateIdentity, identityId } from "./identity.js";
@@ -23,6 +23,7 @@ import {
 import { addPolicySigner } from "./policy-trust.js";
 import { pullPolicy } from "./policy-pull.js";
 import { loadVerifiedPolicy, effectivePermissions, can } from "./rbac/resolve.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 let idDir: string;
 let source: string;
@@ -67,7 +68,7 @@ beforeEach(() => {
 afterEach(() => {
   if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
   else process.env.KIT_IDENTITY_DIR = savedId;
-  for (const d of [idDir, source, dest]) rmSync(d, { recursive: true, force: true });
+  for (const d of [idDir, source, dest]) rmTemp(d);
 });
 
 describe("fleet-RBAC distributes via kit policy pull (Pillar 2 §4.4)", () => {

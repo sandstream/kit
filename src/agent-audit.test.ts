@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -11,6 +11,7 @@ import {
   auditSettingsCommands,
   runAgentAudit,
 } from "./agent-audit.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 // Built at runtime (split literal) so kit's own secret-scan doesn't flag this test.
 const FAKE_STRIPE = ["sk", "live", "A".repeat(40)].join("_");
@@ -166,7 +167,7 @@ describe("runAgentAudit — Claude command/agent/skill/plugin surfaces", () => {
         "should flag the plaintext secret in the subagent",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -184,7 +185,7 @@ describe("runAgentAudit — Claude command/agent/skill/plugin surfaces", () => {
         "should flag the inline-code MCP server in the plugin bundle",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -197,7 +198,7 @@ describe("runAgentAudit — Claude command/agent/skill/plugin surfaces", () => {
       assert.equal(results.length, 1);
       assert.equal(results[0].status, "pass");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -264,7 +265,7 @@ describe("runAgentAudit — OpenCode plugin surface", () => {
         "should warn on the malware-shaped OpenCode plugin",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -284,7 +285,7 @@ describe("runAgentAudit — OpenCode plugin surface", () => {
         "should flag the plaintext secret",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

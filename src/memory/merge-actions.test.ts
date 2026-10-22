@@ -1,6 +1,6 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -17,6 +17,7 @@ import {
   importLegacyLedger,
 } from "./pal.js";
 import { claimTask, seedLegacyPalDb, withPalDevice } from "./pal-fixture.test-support.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 type Db = ReturnType<typeof openMemoryDb>;
 type Row = Record<string, unknown>;
@@ -38,7 +39,7 @@ function fixture(run: (source: Db, target: Db, path: string) => void): void {
     target.close();
     if (previous === undefined) delete process.env.KIT_DEVICE_ID;
     else process.env.KIT_DEVICE_ID = previous;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   }
 }
 

@@ -1,11 +1,12 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateKeyPairSync } from "node:crypto";
 import { ExternalCommandKeyStore } from "./command-store.js";
 import { identityId, verifySignature } from "../identity.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 // A tiny external "hardware" signer: reads bytes on stdin, signs with the private key at
 // argv[2], prints base64. Stands in for a TPM/HSM/YubiKey command — the private key
@@ -35,7 +36,7 @@ describe("ExternalCommandKeyStore (hardware-rooted, operator-fronted)", () => {
     else process.env.KIT_KEYSTORE_SIGN_CMD = saved.cmd;
     if (saved.pub === undefined) delete process.env.KIT_KEYSTORE_PUBKEY;
     else process.env.KIT_KEYSTORE_PUBKEY = saved.pub;
-    rmSync(d, { recursive: true, force: true });
+    rmTemp(d);
   });
 
   function configure(pubPem: string, privPemPath: string) {

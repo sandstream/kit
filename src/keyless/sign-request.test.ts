@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadOrCreateIdentity, recordRevocation } from "../identity.js";
@@ -8,6 +8,7 @@ import { PROFILE_FILE } from "../profile/schema.js";
 import { signProfile } from "../profile/sign.js";
 import { signOutbound, verifyInbound, hostRequiresSigning } from "./sign-request.js";
 import type { SignableRequest } from "./http-sig.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 let idDir: string;
 let proj: string;
@@ -32,8 +33,8 @@ beforeEach(() => {
 afterEach(() => {
   if (savedIdEnv === undefined) delete process.env.KIT_IDENTITY_DIR;
   else process.env.KIT_IDENTITY_DIR = savedIdEnv;
-  rmSync(idDir, { recursive: true, force: true });
-  rmSync(proj, { recursive: true, force: true });
+  rmTemp(idDir);
+  rmTemp(proj);
 });
 
 describe("keyless hostRequiresSigning", () => {
@@ -167,7 +168,7 @@ describe("keyless signOutbound — fail-closed edges and minted parameters", () 
       assert.equal(r.status, "denied", r.detail);
       assert.match(r.detail, /no identity/);
     } finally {
-      rmSync(empty, { recursive: true, force: true });
+      rmTemp(empty);
     }
   });
 
@@ -192,7 +193,7 @@ describe("keyless signOutbound — fail-closed edges and minted parameters", () 
       assert.equal(r.status, "denied", r.detail);
       assert.match(r.detail, /cannot sign/);
     } finally {
-      rmSync(partial, { recursive: true, force: true });
+      rmTemp(partial);
     }
   });
 
@@ -308,7 +309,7 @@ describe("keyless verifyInbound — trust resolution and replay bounds", () => {
       assert.match(v.detail, /unknown keyid/);
       assert.equal(v.keyid, h.keyid);
     } finally {
-      rmSync(stranger, { recursive: true, force: true });
+      rmTemp(stranger);
     }
   });
 

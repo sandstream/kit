@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
   refuseWrite,
   _resetReadOnlyModeForTests,
 } from "./read-only-mode.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("read-only mode", () => {
   it("isReadOnlyMode is false when env var unset", () => {
@@ -75,7 +76,7 @@ describe("read-only mode", () => {
     } finally {
       process.chdir(prev);
       _resetReadOnlyModeForTests();
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

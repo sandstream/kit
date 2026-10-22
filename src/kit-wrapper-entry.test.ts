@@ -19,12 +19,13 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 
 import { chooseWrapperEntry, pathInWorkingTree, defaultGlobalBins } from "./kit-wrapper.js";
 import { describeWrapper, judgeWrapper } from "./hook-floor.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const FIXTURE_ROOT = join(tmpdir(), "kit-wrapper-entry-fixture");
 const CHECKOUT = join(FIXTURE_ROOT, "work", "kit-public", "dist", "cli.js");
@@ -140,7 +141,7 @@ describe("describeWrapper / judgeWrapper", () => {
       const v = judgeWrapper(describeWrapper(home));
       assert.equal(v.status, "skip");
     } finally {
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(home);
     }
   });
 
@@ -151,7 +152,7 @@ describe("describeWrapper / judgeWrapper", () => {
       assert.equal(r.managed, false);
       assert.equal(judgeWrapper(r).status, "skip");
     } finally {
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(home);
     }
   });
 
@@ -167,7 +168,7 @@ describe("describeWrapper / judgeWrapper", () => {
       assert.match(v.detail, /EVERY kit hook on this machine is dead/);
       assert.match(v.detail, /non-blocking, so sessions run ungated/);
     } finally {
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(home);
     }
   });
 
@@ -190,8 +191,8 @@ describe("describeWrapper / judgeWrapper", () => {
       assert.match(v.detail, /inside a git working tree/);
       assert.match(v.detail, /disarm every kit hook/);
     } finally {
-      rmSync(home, { recursive: true, force: true });
-      rmSync(tree, { recursive: true, force: true });
+      rmTemp(home);
+      rmTemp(tree);
     }
   });
 
@@ -208,8 +209,8 @@ describe("describeWrapper / judgeWrapper", () => {
       assert.equal(v.status, "pass");
       assert.match(v.detail, new RegExp(cli.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     } finally {
-      rmSync(home, { recursive: true, force: true });
-      rmSync(install, { recursive: true, force: true });
+      rmTemp(home);
+      rmTemp(install);
     }
   });
 });

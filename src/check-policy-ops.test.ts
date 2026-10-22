@@ -17,12 +17,13 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, realpathSync } from "node:fs";
+import { mkdtempSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { checkPolicyAgentWrites } from "./check-policy-ops.js";
 import { checkSecurity } from "./check-security.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function project(kitToml: string | null): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "kit-policy-row-")));
@@ -42,7 +43,7 @@ describe("the policy agent-writes row", () => {
       // would fail the strict CI gate for every project that does not use kit's policy block.
       assert.notEqual(r.didNotRun, true);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -53,7 +54,7 @@ describe("the policy agent-writes row", () => {
       assert.equal(r.status, "skip");
       assert.match(r.detail, /not in use/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -67,7 +68,7 @@ describe("the policy agent-writes row", () => {
       assert.equal(r.status, "warn");
       assert.equal(r.didNotRun, true);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -84,7 +85,7 @@ describe("the policy agent-writes row", () => {
       // And the consequence must be stated: the vendor is now DECLARED, so its real ops are refused.
       assert.match(r.detail, /refuses its real ops/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -100,7 +101,7 @@ describe("the policy agent-writes row", () => {
       // learns only from a refusal at the moment they hit one.
       assert.match(r.detail, /policy refuses 3 of the \d+ ops/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -124,8 +125,8 @@ describe("the policy agent-writes row", () => {
       assert.notEqual(a.status, b.status, "the two trees must not answer the same");
     } finally {
       process.chdir(prev);
-      rmSync(clean, { recursive: true, force: true });
-      rmSync(typo, { recursive: true, force: true });
+      rmTemp(clean);
+      rmTemp(typo);
     }
   });
 
@@ -140,7 +141,7 @@ describe("the policy agent-writes row", () => {
       assert.equal(row.status, "warn");
       assert.match(row.detail, /env-set/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

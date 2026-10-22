@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,10 +15,11 @@ import {
   type DesktopRunResult,
 } from "./monkey-test-desktop.js";
 import { fakeDesktopRepo, type FakeDesktopMode } from "./monkey-test-desktop.test-support.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const roots: string[] = [];
 afterEach(() => {
-  while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
+  while (roots.length) rmTemp(roots.pop()!);
 });
 
 function tempDir(): string {

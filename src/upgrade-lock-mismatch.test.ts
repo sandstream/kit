@@ -5,12 +5,13 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const exec = promisify(execFile);
 const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
@@ -41,7 +42,7 @@ describe("kit upgrade: the lock never contradicts the declaration (compiled CLI)
       // "Lock files not written" must be true of every lock file, not only the cli lock.
       assert.equal(existsSync(join(r.cwd, ".kit")), false, "a refused upgrade writes nothing");
     } finally {
-      rmSync(r.cwd, { recursive: true, force: true });
+      rmTemp(r.cwd);
     }
   });
 
@@ -53,7 +54,7 @@ describe("kit upgrade: the lock never contradicts the declaration (compiled CLI)
       const lock = JSON.parse(readFileSync(join(r.cwd, ".kit", "cli-lock.json"), "utf8"));
       assert.match(lock.tools.node.version, new RegExp(`^${major}\\.\\d+\\.\\d+$`));
     } finally {
-      rmSync(r.cwd, { recursive: true, force: true });
+      rmTemp(r.cwd);
     }
   });
 });

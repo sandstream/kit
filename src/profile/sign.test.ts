@@ -1,11 +1,12 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadOrCreateIdentity } from "../identity.js";
 import { PROFILE_FILE } from "./schema.js";
 import { signProfile, verifyProfileSignature, verifiedScope, getProfileSigPath } from "./sign.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 let idDir: string;
 let proj: string;
@@ -30,8 +31,8 @@ beforeEach(() => {
 afterEach(() => {
   if (savedIdEnv === undefined) delete process.env.KIT_IDENTITY_DIR;
   else process.env.KIT_IDENTITY_DIR = savedIdEnv;
-  rmSync(idDir, { recursive: true, force: true });
-  rmSync(proj, { recursive: true, force: true });
+  rmTemp(idDir);
+  rmTemp(proj);
 });
 
 describe("signProfile / verifyProfileSignature", () => {

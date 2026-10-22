@@ -1,13 +1,14 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { syncSecurityFindings } from "./findings-track.js";
 import { openMemoryDb } from "./memory/db.js";
 import type { SecurityCheckResult } from "./check-security.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 // PAL-WT-2: the same scanner finding raised in two live worktrees of one repo used to be
 // two open actions. Findings that are not about the code (an advisory such as threat-intel
@@ -58,7 +59,7 @@ after(() => {
   process.chdir(originalCwd);
   if (originalDb === undefined) delete process.env.KIT_MEMORY_DB;
   else process.env.KIT_MEMORY_DB = originalDb;
-  rmSync(base, { recursive: true, force: true });
+  rmTemp(base);
 });
 
 function openIds(source: string): string[] {

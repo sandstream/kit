@@ -22,7 +22,6 @@ import {
   writeFileSync,
   readFileSync,
   existsSync,
-  rmSync,
   mkdirSync,
   symlinkSync,
 } from "node:fs";
@@ -30,6 +29,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { cmdFix } from "./fix.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 /** A minimal project: no tools/services/skills/hooks, so fix only writes locks + files. */
 function project(extra = ""): string {
@@ -57,7 +57,7 @@ async function inCwd<T>(dir: string, fn: () => Promise<T>): Promise<T> {
     process.chdir(prevCwd);
     if (prevId === undefined) delete process.env.KIT_IDENTITY_DIR;
     else process.env.KIT_IDENTITY_DIR = prevId;
-    rmSync(idDir, { recursive: true, force: true });
+    rmTemp(idDir);
   }
 }
 
@@ -89,8 +89,8 @@ describe("cmdFix writes into the project it was given", () => {
         "A must not have gained B's CLI lock",
       );
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 
@@ -111,8 +111,8 @@ describe("cmdFix writes into the project it was given", () => {
       assert.notEqual(bAfter, "node_modules\n", "B's .gitignore must have been hardened");
       assert.match(bAfter, /\.env/, "B's .gitignore must have gained the .env patterns");
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 
@@ -136,8 +136,8 @@ describe("cmdFix writes into the project it was given", () => {
       );
       assert.match(readFileSync(join(B, ".env.template"), "utf-8"), /API_KEY=/);
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 
@@ -161,8 +161,8 @@ describe("cmdFix writes into the project it was given", () => {
         "A's template must be left exactly as it was",
       );
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 
@@ -177,7 +177,7 @@ describe("cmdFix writes into the project it was given", () => {
         "the default must resolve to the process's own tree",
       );
     } finally {
-      rmSync(A, { recursive: true, force: true });
+      rmTemp(A);
     }
   });
 
@@ -200,8 +200,8 @@ describe("cmdFix writes into the project it was given", () => {
         "A's pre-existing lock must not be rewritten by a fix aimed at B",
       );
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 });
@@ -218,7 +218,7 @@ describe("cmdFix template path safety", () => {
       await inCwd(dir, () => cmdFix(dir));
       assert.equal(readFileSync(target, "utf-8"), "keep this content\n");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -244,7 +244,7 @@ describe("cmdFix verifies effective Git protection", () => {
       );
     } finally {
       console.log = prevLog;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -292,8 +292,8 @@ describe("a governed operation files its evidence in the governed tree", () => {
         "A must not have gained an audit entry for an operation performed on B",
       );
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 
@@ -307,7 +307,7 @@ describe("a governed operation files its evidence in the governed tree", () => {
         "the default must keep filing evidence where it always did",
       );
     } finally {
-      rmSync(A, { recursive: true, force: true });
+      rmTemp(A);
     }
   });
 });

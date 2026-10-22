@@ -33,6 +33,7 @@ import {
   getPolicySigPath,
   type PolicyVerifyStatus,
 } from "../policy-doc.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 // A doc as smol-toml would parse `.kit-policy.toml` (the [rbac] table is a plain object).
 function docWith(rbac: unknown): Record<string, unknown> {
@@ -244,7 +245,7 @@ describe("rbac/resolve — end-to-end signed policy + revocation + tamper", () =
   after(() => {
     if (prev === undefined) delete process.env.KIT_IDENTITY_DIR;
     else process.env.KIT_IDENTITY_DIR = prev;
-    rmSync(idDir, { recursive: true, force: true });
+    rmTemp(idDir);
   });
 
   function repo(): string {
@@ -293,7 +294,7 @@ describe("rbac/resolve — end-to-end signed policy + revocation + tamper", () =
       assert.equal(can("kid_stranger", "deploy:prod", loaded), false); // no binding
       assert.equal(can("kid_stranger", "read:logs", loaded), true); // defaultRole viewer
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -311,7 +312,7 @@ describe("rbac/resolve — end-to-end signed policy + revocation + tamper", () =
       assert.equal(loadVerifiedPolicy(root), null);
       assert.equal(can(subjectKid, "deploy:prod", loadVerifiedPolicy(root)), false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -328,7 +329,7 @@ describe("rbac/resolve — end-to-end signed policy + revocation + tamper", () =
       recordRevocation(revKid, "compromised"); // into KIT_IDENTITY_DIR revocations.jsonl
       assert.equal(can(revKid, "deploy:prod", loaded), false); // secondary deny
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -359,7 +360,7 @@ describe("rbac/resolve — end-to-end signed policy + revocation + tamper", () =
         "planted revocation must not deny the subject",
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
       rmSync(revFile, { force: true });
     }
   });

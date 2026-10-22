@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -14,6 +14,7 @@ import {
   PROFILE_SCHEMA_VERSION,
   type KitProfile,
 } from "./schema.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "kit-profile-"));
@@ -105,7 +106,7 @@ describe("loadProfile", () => {
     try {
       assert.equal(await loadProfile(dir), null);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -116,7 +117,7 @@ describe("loadProfile", () => {
       const p = await loadProfile(dir);
       assert.equal(p?.name, "acme-api");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -126,7 +127,7 @@ describe("loadProfile", () => {
       writeFileSync(join(dir, PROFILE_FILE), "not = = toml");
       await assert.rejects(loadProfile(dir), InvalidProfileError);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -147,7 +148,7 @@ describe("saveProfile", () => {
       assert.equal(loaded?.name, "rt");
       assert.equal(loaded?.skills?.[0]?.name, "a");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

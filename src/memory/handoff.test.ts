@@ -1,7 +1,7 @@
 import { after, before, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { openMemoryDb, searchMessages, upsertSession, insertMessage } from "./db.js";
@@ -10,6 +10,7 @@ import { indexCodexSessions } from "./codex.js";
 import { sessionStartRecovery } from "./hook.js";
 import { listThreads, saveThread } from "./threads.js";
 import { getProjectRecallRoots } from "./project.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 let tmp: string;
 let root: string;
@@ -114,7 +115,7 @@ after(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  rmSync(tmp, { recursive: true, force: true });
+  rmTemp(tmp);
 });
 
 it("indexes both real transcript formats idempotently into one private store", () => {

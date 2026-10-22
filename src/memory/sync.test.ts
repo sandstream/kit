@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, upsertSession, insertMessage, getStats, markFileIndexed } from "./db.js";
@@ -11,6 +11,7 @@ import {
   saveMemoryKey,
 } from "./backup.js";
 import { syncFromExport } from "./sync.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const PASSPHRASE = "round-trip-secret-phrase-9182";
 
@@ -45,7 +46,7 @@ describe("memory sync", () => {
 
       target.close();
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      rmTemp(tmp);
     }
   });
 
@@ -78,7 +79,7 @@ describe("memory sync", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_ALLOW_UNSAFE;
       else process.env.KIT_MEMORY_ALLOW_UNSAFE = prev;
-      rmSync(tmp, { recursive: true, force: true });
+      rmTemp(tmp);
     }
   });
 
@@ -110,7 +111,7 @@ describe("memory sync", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_ALLOW_UNSAFE;
       else process.env.KIT_MEMORY_ALLOW_UNSAFE = prev;
-      rmSync(tmp, { recursive: true, force: true });
+      rmTemp(tmp);
     }
   });
 
@@ -141,7 +142,7 @@ describe("memory sync", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_ALLOW_UNSAFE;
       else process.env.KIT_MEMORY_ALLOW_UNSAFE = prev;
-      rmSync(tmp, { recursive: true, force: true });
+      rmTemp(tmp);
     }
   });
 
@@ -160,7 +161,7 @@ describe("memory sync", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_ALLOW_UNSAFE;
       else process.env.KIT_MEMORY_ALLOW_UNSAFE = prev;
-      rmSync(tmp, { recursive: true, force: true });
+      rmTemp(tmp);
     }
   });
 
@@ -192,7 +193,7 @@ describe("memory sync", () => {
       assert.equal(row.last_message_at, "2026-06-27T10:00:00Z");
       target.close();
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      rmTemp(tmp);
     }
   });
 
@@ -215,7 +216,7 @@ describe("memory sync", () => {
       assert.equal(getStats(target).messages, 1);
       target.close();
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      rmTemp(tmp);
     }
   });
 
@@ -234,7 +235,7 @@ describe("memory sync", () => {
       assert.throws(() => syncFromExport(target, blob), /encrypted backup/);
       target.close();
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      rmTemp(tmp);
     }
   });
 
@@ -268,7 +269,7 @@ describe("memory sync: public-key blob with a mismatched local key (MP-9)", () =
     } finally {
       if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
       else process.env.KIT_MEMORY_DIR = prevDir;
-      rmSync(tmp, { recursive: true, force: true });
+      rmTemp(tmp);
     }
   });
 });

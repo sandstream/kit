@@ -1,11 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { WRITE_SURFACE, matchWriteSurface } from "./read-only-surface.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 /**
  * `KIT_READ_ONLY=1` claims to refuse every mutation. It did not: `identity init` minted a private
@@ -59,7 +60,7 @@ function kit(args: string[], cwd: string, env: Record<string, string> = {}): Run
     const err = e as { status?: number; stdout?: string; stderr?: string };
     return { code: err.status ?? -1, out: String(err.stdout ?? "") + String(err.stderr ?? "") };
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    rmTemp(home);
   }
 }
 
@@ -136,7 +137,7 @@ describe("KIT_READ_ONLY=1 refuses every declared mutation (behavioural)", () => 
         `audit: ${JSON.stringify(auditRefusals(dir))}`,
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -160,8 +161,8 @@ describe("KIT_READ_ONLY=1 refuses every declared mutation (behavioural)", () => 
       assert.match(out, /identity (created|already exists)/);
       assert.ok(readdirSync(idDir).includes("identity.key"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(dir);
+      rmTemp(home);
     }
   });
 
@@ -173,7 +174,7 @@ describe("KIT_READ_ONLY=1 refuses every declared mutation (behavioural)", () => 
       assert.equal(existsSync(join(dir, ".kit-policy.toml")), false, "policy doc was written");
       assert.ok(auditRefusals(dir).includes("policy-init"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -189,7 +190,7 @@ describe("KIT_READ_ONLY=1 refuses every declared mutation (behavioural)", () => 
       );
       assert.ok(auditRefusals(dir).includes("monkey-test-init"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -202,7 +203,7 @@ describe("KIT_READ_ONLY=1 refuses every declared mutation (behavioural)", () => 
       assert.equal(readFileSync(join(dir, ".gitignore"), "utf-8"), before, ".gitignore changed");
       assert.ok(auditRefusals(dir).includes("check-gitignore-fix"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -215,7 +216,7 @@ describe("KIT_READ_ONLY=1 refuses every declared mutation (behavioural)", () => 
         `a read must not be refused: ${r.out.slice(0, 300)}`,
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -229,7 +230,7 @@ describe("KIT_READ_ONLY=1 refuses every declared mutation (behavioural)", () => 
       assert.deepEqual(written, [], `lock files written: ${written.join(", ")}`);
       assert.ok(auditRefusals(dir).includes("upgrade"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -240,7 +241,7 @@ describe("KIT_READ_ONLY=1 refuses every declared mutation (behavioural)", () => 
       assert.equal(r.code, 1, r.out);
       assert.equal(existsSync(join(dir, ".kit-policy.toml")), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

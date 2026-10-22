@@ -6,7 +6,6 @@ import {
   lstatSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -26,6 +25,7 @@ import {
   type SyncConfig,
 } from "./remote-sync.js";
 import { openMemoryDb, searchMessages, upsertSession, insertMessage } from "./db.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 // A strong passphrase (≥12 chars, no weak markers) so validatePassphrase accepts it.
 const PASS = "Zephyr-Quokka-Lantern-9931";
@@ -65,7 +65,7 @@ describe("remote-sync — loadSyncConfig (LOCAL, ~/.kit only)", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_DIR;
       else process.env.KIT_MEMORY_DIR = prev;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -88,7 +88,7 @@ describe("remote-sync — loadSyncConfig (LOCAL, ~/.kit only)", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_DIR;
       else process.env.KIT_MEMORY_DIR = prev;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -122,7 +122,7 @@ describe("remote-sync — loadSyncConfig (LOCAL, ~/.kit only)", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_DIR;
       else process.env.KIT_MEMORY_DIR = prev;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -147,7 +147,7 @@ describe("remote-sync — loadSyncConfig (LOCAL, ~/.kit only)", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_DIR;
       else process.env.KIT_MEMORY_DIR = prev;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -168,7 +168,7 @@ describe("remote-sync — assertRemoteNotProjectOrigin (anti-exfil guard)", () =
         assertRemoteNotProjectOrigin("git@github.com:me/private-memory.git", proj),
       );
     } finally {
-      rmSync(proj, { recursive: true, force: true });
+      rmTemp(proj);
     }
   });
 
@@ -190,7 +190,7 @@ describe("remote-sync — assertRemoteNotProjectOrigin (anti-exfil guard)", () =
         },
       );
     } finally {
-      rmSync(proj, { recursive: true, force: true });
+      rmTemp(proj);
     }
   });
 });
@@ -233,7 +233,7 @@ describe("remote-sync — push → pull round trip over a git remote", () => {
       const inspect = mkdtempSync(join(tmpdir(), "kit-inspect-"));
       git(["clone", "-q", "--branch", "main", bare, "."], inspect);
       assert.ok(existsSync(join(inspect, "memory.enc")), "blob present on remote");
-      rmSync(inspect, { recursive: true, force: true });
+      rmTemp(inspect);
 
       // --- machine B: empty store, pull, confirm the message arrived ---
       process.env.KIT_MEMORY_DIR = machineB;
@@ -252,7 +252,7 @@ describe("remote-sync — push → pull round trip over a git remote", () => {
       if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
       else process.env.KIT_MEMORY_DIR = prevDir;
       for (const d of [bare.replace(/\/mem\.git$/, ""), machineA, machineB, proj]) {
-        rmSync(d, { recursive: true, force: true });
+        rmTemp(d);
       }
     }
   });
@@ -278,7 +278,7 @@ describe("remote-sync — push → pull round trip over a git remote", () => {
     } finally {
       if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
       else process.env.KIT_MEMORY_DIR = prevDir;
-      for (const d of [machine, proj]) rmSync(d, { recursive: true, force: true });
+      for (const d of [machine, proj]) rmTemp(d);
     }
   });
 
@@ -300,7 +300,7 @@ describe("remote-sync — push → pull round trip over a git remote", () => {
       if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
       else process.env.KIT_MEMORY_DIR = prevDir;
       for (const d of [bare.replace(/\/mem\.git$/, ""), machine, proj]) {
-        rmSync(d, { recursive: true, force: true });
+        rmTemp(d);
       }
     }
   });
@@ -325,7 +325,7 @@ describe("remote-sync — command transport (bring-your-own move: S3/rclone/scp/
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_DIR;
       else process.env.KIT_MEMORY_DIR = prev;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -374,7 +374,7 @@ describe("remote-sync — command transport (bring-your-own move: S3/rclone/scp/
       if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
       else process.env.KIT_MEMORY_DIR = prevDir;
       for (const d of [store, machineA, machineB, proj]) {
-        rmSync(d, { recursive: true, force: true });
+        rmTemp(d);
       }
     }
   });
@@ -412,7 +412,7 @@ describe("remote-sync — command transport (bring-your-own move: S3/rclone/scp/
       else process.env.KIT_MEMORY_DIR = prevDir;
       if (prevPass === undefined) delete process.env.KIT_MEMORY_PASSPHRASE;
       else process.env.KIT_MEMORY_PASSPHRASE = prevPass;
-      for (const d of [store, machine, proj]) rmSync(d, { recursive: true, force: true });
+      for (const d of [store, machine, proj]) rmTemp(d);
     }
   });
 
@@ -437,7 +437,7 @@ describe("remote-sync — command transport (bring-your-own move: S3/rclone/scp/
     } finally {
       if (prevDir === undefined) delete process.env.KIT_MEMORY_DIR;
       else process.env.KIT_MEMORY_DIR = prevDir;
-      for (const d of [machine, proj]) rmSync(d, { recursive: true, force: true });
+      for (const d of [machine, proj]) rmTemp(d);
     }
   });
 });
@@ -452,7 +452,7 @@ describe("remote-sync — init + auto-sync wiring + nudge", () => {
     } finally {
       if (prev === undefined) delete process.env.KIT_MEMORY_DIR;
       else process.env.KIT_MEMORY_DIR = prev;
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   };
 
@@ -535,7 +535,7 @@ describe("remote-sync — init + auto-sync wiring + nudge", () => {
       else process.env.KIT_MEMORY_DIR = prevDir;
       if (prevPass === undefined) delete process.env.KIT_MEMORY_PASSPHRASE;
       else process.env.KIT_MEMORY_PASSPHRASE = prevPass;
-      for (const d of [store, machine, proj]) rmSync(d, { recursive: true, force: true });
+      for (const d of [store, machine, proj]) rmTemp(d);
     }
   });
 

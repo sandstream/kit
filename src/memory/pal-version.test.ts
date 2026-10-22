@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -8,6 +8,7 @@ import { openMemoryDb, SCHEMA_VERSION } from "./db.js";
 import { mergeDb } from "./merge.js";
 import { palAdd, palDone, palShow } from "./pal.js";
 import { seedLegacyPalDb } from "./pal-fixture.test-support.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 function fixture(t: TestContext) {
   const previousDevice = process.env.KIT_DEVICE_ID;
@@ -17,7 +18,7 @@ function fixture(t: TestContext) {
   t.after(() => {
     if (previousDevice === undefined) delete process.env.KIT_DEVICE_ID;
     else process.env.KIT_DEVICE_ID = previousDevice;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
   return { path };
 }

@@ -9,9 +9,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const adjacentCli = resolve(import.meta.dirname, "cli.js");
 const CLI = existsSync(adjacentCli) ? adjacentCli : resolve(import.meta.dirname, "../dist/cli.js");
@@ -65,7 +66,7 @@ function run(dir: string, args: string[]): { status: number | null; out: string 
     });
     return { status: result.status, out: `${result.stdout ?? ""}${result.stderr ?? ""}` };
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    rmTemp(home);
   }
 }
 
@@ -82,7 +83,7 @@ describe(
         assert.equal(status, 1, out);
         assert.match(out, /not executable/);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     });
 
@@ -100,7 +101,7 @@ describe(
         assert.equal(hook.status, "fail");
         assert.match(hook.detail, /not executable/);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     });
 
@@ -116,7 +117,7 @@ describe(
         assert.equal(hook.status, "fail");
         assert.match(hook.detail, /not executable/);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     });
   },
@@ -144,7 +145,7 @@ it(
       ) as { checks: { name: string; category: string; status: string }[] };
       assert.equal(doctorReport.checks.find((row) => row.name === "pre-commit")?.status, "pass");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   },
 );
@@ -173,7 +174,7 @@ describe("an outdated git hook has one verdict across all reporting surfaces (BH
       assert.equal(doctorReport.ok, false);
       assert.equal(doctorReport.checks.find((row) => row.name === "pre-commit")?.status, "fail");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

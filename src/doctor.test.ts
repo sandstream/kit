@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { writeFile, unlink, mkdtemp, rmdir, rm } from "node:fs/promises";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -26,6 +26,7 @@ import {
 import { addPolicySigner } from "./policy-trust.js";
 import { PROFILE_FILE } from "./profile/schema.js";
 import { signProfile } from "./profile/sign.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("doctor tool resolution", () => {
   it("probes the executable name for scheme-qualified tool declarations", async () => {
@@ -291,8 +292,8 @@ describe("runDoctor — control plane (org policy) row (Pillar 2 §4.6)", () => 
   afterEach(() => {
     if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
     else process.env.KIT_IDENTITY_DIR = savedId;
-    rmSync(idDir, { recursive: true, force: true });
-    rmSync(proj, { recursive: true, force: true });
+    rmTemp(idDir);
+    rmTemp(proj);
   });
 
   const cpRow = async () =>
@@ -351,8 +352,8 @@ describe("runDoctor — keyless credentials row (Pillar 2 tail)", () => {
   afterEach(() => {
     if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
     else process.env.KIT_IDENTITY_DIR = savedId;
-    rmSync(idDir, { recursive: true, force: true });
-    rmSync(proj, { recursive: true, force: true });
+    rmTemp(idDir);
+    rmTemp(proj);
   });
 
   const klRow = async () =>
@@ -406,8 +407,8 @@ describe("runDoctor — exec-broker runtime observe→enforce nudge (E3)", () =>
   afterEach(() => {
     if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
     else process.env.KIT_IDENTITY_DIR = savedId;
-    rmSync(idDir, { recursive: true, force: true });
-    rmSync(proj, { recursive: true, force: true });
+    rmTemp(idDir);
+    rmTemp(proj);
   });
 
   const observe = (wouldDeny: string[]) =>

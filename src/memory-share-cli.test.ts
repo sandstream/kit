@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
 
@@ -42,7 +43,7 @@ describe("kit memory share CLI", () => {
       const entry = JSON.parse(raw) as { provenance?: string };
       assert.equal(entry.provenance, "operator");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -81,7 +82,7 @@ describe("kit memory share CLI", () => {
       const entry = JSON.parse(raw) as { provenance?: string };
       assert.equal(entry.provenance, "derived");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });

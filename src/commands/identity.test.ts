@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateKeyPairSync } from "node:crypto";
@@ -8,6 +8,7 @@ import { cmdIdentity } from "./identity.js";
 import { loadOrCreateIdentity, isRevoked } from "../identity.js";
 import { resolveKeyStore } from "../keystore/resolve.js";
 import { runDoctor } from "../doctor.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 // `kit identity migrate` must FAIL CLOSED unless an external/hardware keystore is
 // actually active — it revokes the old file key, so running it while still on the
@@ -63,8 +64,8 @@ describe("kit identity migrate — end to end with a real external backend", () 
       if (savedEnv[k] === undefined) delete process.env[k];
       else process.env[k] = savedEnv[k];
     }
-    rmSync(dir, { recursive: true, force: true });
-    rmSync(hw, { recursive: true, force: true });
+    rmTemp(dir);
+    rmTemp(hw);
   });
 
   it("revokes the old file key, and the revocation actually bites", async () => {

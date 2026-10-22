@@ -12,10 +12,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "..", "cli.js");
 const LEDGER = ".kit/decisions.jsonl";
@@ -73,7 +74,7 @@ describe("kit decisions add", () => {
       const verified = run(dir, ["decisions", "verify"]);
       assert.equal(verified.exitCode, 0, verified.stdout + verified.stderr);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -86,7 +87,7 @@ describe("kit decisions add", () => {
       assert.match(r.stdout + r.stderr, /--assumed/);
       assert.equal(existsSync(join(dir, LEDGER)), false, "a refused add must not leave a line");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -101,7 +102,7 @@ describe("kit decisions add", () => {
       assert.match(r.stdout + r.stderr, /confidence/);
       assert.equal(existsSync(join(dir, LEDGER)), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -118,7 +119,7 @@ describe("kit decisions add", () => {
       const ids = lines.map((l) => JSON.parse(l).id);
       assert.notEqual(ids[0], ids[1], "two decisions must be distinguishable");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -129,7 +130,7 @@ describe("kit decisions add", () => {
       assert.notEqual(r.exitCode, 0);
       assert.equal(existsSync(join(dir, LEDGER)), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -145,7 +146,7 @@ describe("kit decisions list", () => {
       assert.equal(parsed.entries.length, 1);
       assert.equal(parsed.entries[0].confidence, 0.6);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -156,7 +157,7 @@ describe("kit decisions list", () => {
       assert.equal(r.exitCode, 0, r.stderr);
       assert.match(r.stdout, /no decisions/i);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -168,7 +169,7 @@ describe("kit decisions verify", () => {
       const r = run(dir, ["decisions", "verify"]);
       assert.equal(r.exitCode, 0, r.stdout + r.stderr);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -180,7 +181,7 @@ describe("kit decisions verify", () => {
       assert.notEqual(r.exitCode, 0);
       assert.match(r.stdout + r.stderr, /decisions\.jsonl/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -193,7 +194,7 @@ describe("kit decisions verify", () => {
       assert.notEqual(r.exitCode, 0);
       assert.match(r.stdout + r.stderr, /line 1/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -206,7 +207,7 @@ describe("kit decisions — surface", () => {
       assert.notEqual(r.exitCode, 0);
       assert.match(r.stdout + r.stderr, /add \| list \| verify/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -217,7 +218,7 @@ describe("kit decisions — surface", () => {
       assert.notEqual(r.exitCode, 0);
       assert.match(r.stdout + r.stderr, /--reviewed/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

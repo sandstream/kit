@@ -1,10 +1,11 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, getStats, searchMessages } from "./db.js";
 import { indexAntigravitySessions } from "./antigravity.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory antigravity parser", () => {
   let tmp: string;
@@ -35,7 +36,7 @@ describe("memory antigravity parser", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_ANTIGRAVITY_DIR;
     else process.env.KIT_ANTIGRAVITY_DIR = prev;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("maps source/type enums to roles, skips non-turns, tags harness=antigravity", () => {
@@ -74,6 +75,6 @@ describe("memory antigravity parser", () => {
     assert.equal(indexAntigravitySessions(db).messages, 0);
     db.close();
     process.env.KIT_ANTIGRAVITY_DIR = tmp;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
 });

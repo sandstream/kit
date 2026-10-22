@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -17,6 +17,7 @@ import {
   withFixtureEnvironment,
 } from "./monkey-test-runner.test-support.js";
 import { providerCommand } from "./monkey-test-runner-env.test-support.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const runMonkeyTest = (root: string, options?: Parameters<typeof executeMonkeyTest>[1]) =>
   withFixtureEnvironment(root, () => executeMonkeyTest(root, options));
@@ -105,8 +106,7 @@ function captureOutput(): { output: () => string; restore: () => void } {
 }
 
 afterEach(() => {
-  while (roots.length)
-    rmSync(roots.pop()!, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  while (roots.length) rmTemp(roots.pop()!);
 });
 
 describe("monkey-test money flow contract", () => {

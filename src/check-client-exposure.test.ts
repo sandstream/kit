@@ -19,7 +19,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -33,6 +33,7 @@ import {
   detectClientBuilds,
   isTestArtifact,
 } from "./check-client-exposure.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function tree(spec: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-client-exp-"));
@@ -118,7 +119,7 @@ describe("collectEnvNames", () => {
       // The values are dropped at the parse — nothing downstream can leak what it never received.
       assert.equal(JSON.stringify([...names.values()]).includes("super-secret-value"), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -186,7 +187,7 @@ describe("collectEnvDeclarations", () => {
       assert.equal(d.get("NEXT_PUBLIC_MAP_STYLE")?.sensitive, false);
       assert.equal(d.get("VITE_API_URL")?.sensitive, undefined, "no annotation stays undefined");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -196,7 +197,7 @@ describe("collectEnvDeclarations", () => {
       const d = await collectEnvDeclarations(dir);
       assert.equal(d.get("VITE_API_URL")?.sensitive, undefined);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -210,7 +211,7 @@ describe("collectEnvDeclarations", () => {
       assert.equal(d.get("VITE_TWILIO_AUTH")?.sensitive, true);
       assert.equal(d.get("VITE_TWILIO_AUTH")?.sources.length, 2);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -220,7 +221,7 @@ describe("collectEnvDeclarations", () => {
       const d = await collectEnvDeclarations(dir);
       assert.equal(JSON.stringify([...d.values()]).includes("super-secret-value"), false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -235,7 +236,7 @@ describe("checkClientExposedNames", () => {
       assert.match(r.detail, /VITE_STRIPE_SECRET_KEY/);
       assert.match(String(r.suggestion), /client_exposed_allow/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -247,7 +248,7 @@ describe("checkClientExposedNames", () => {
       });
       assert.equal(r.status, "pass");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -258,7 +259,7 @@ describe("checkClientExposedNames", () => {
       assert.equal(r.status, "warn");
       assert.match(r.detail, /carry no reason/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -269,7 +270,7 @@ describe("checkClientExposedNames", () => {
       assert.equal(r.status, "skip");
       assert.match(r.detail, /no \.env\* files/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -280,7 +281,7 @@ describe("checkClientExposedNames", () => {
       assert.equal(r.status, "fail");
       assert.match(r.detail, /\.kit\.toml/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -298,7 +299,7 @@ describe("detectClientBuilds", () => {
       const builds = await detectClientBuilds(dir);
       assert.deepEqual(builds, [{ framework: "vite", dir: "apps/web" }]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -309,7 +310,7 @@ describe("detectClientBuilds", () => {
     try {
       assert.deepEqual(await detectClientBuilds(dir), []);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -328,7 +329,7 @@ describe("checkBuiltBundleSecrets", () => {
       // Rotation first: removing it from the build does not un-publish what already shipped.
       assert.match(String(r.suggestion), /Rotate/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -342,7 +343,7 @@ describe("checkBuiltBundleSecrets", () => {
       assert.equal(r.status, "skip");
       assert.match(r.detail, /nothing builds for a browser/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -353,7 +354,7 @@ describe("checkBuiltBundleSecrets", () => {
       assert.equal(r.status, "skip");
       assert.match(r.detail, /not built/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -367,7 +368,7 @@ describe("checkBuiltBundleSecrets", () => {
       assert.equal(r.status, "pass");
       assert.match(r.detail, /test fixture\(s\) not counted/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 

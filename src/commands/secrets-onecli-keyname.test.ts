@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { cmdSecrets } from "./secrets.js";
 import { _resetConsumedElevationForTests } from "../elevation.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 it("rejects invalid OneCLI environment key names before any registration side effect", async () => {
   const project = mkdtempSync(join(tmpdir(), "kit-onecli-keyname-"));
@@ -36,7 +37,7 @@ it("rejects invalid OneCLI environment key names before any registration side ef
     console.error = originalError;
     process.argv = originalArgv;
     process.chdir(originalCwd);
-    rmSync(project, { recursive: true, force: true });
+    rmTemp(project);
   }
 });
 
@@ -100,6 +101,6 @@ it("refuses to replace a symlinked .env.local after registering with OneCLI", as
     }
     _resetConsumedElevationForTests();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    rmSync(project, { recursive: true, force: true });
+    rmTemp(project);
   }
 });

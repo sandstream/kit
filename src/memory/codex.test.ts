@@ -1,10 +1,11 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, getStats, searchMessages } from "./db.js";
 import { indexCodexSessions } from "./codex.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory codex parser", () => {
   let tmp: string;
@@ -60,7 +61,7 @@ describe("memory codex parser", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_CODEX_DIR;
     else process.env.KIT_CODEX_DIR = prev;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("indexes user + assistant turns, skips developer/event_msg, tags harness=codex", () => {

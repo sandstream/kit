@@ -20,13 +20,14 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { statusIcon, statusRank } from "./commands/ci.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
 
@@ -100,7 +101,7 @@ describe("GitHub step summary", () => {
       assert.ok(gitRow.startsWith("| ❌ |"), "Git verification failure must stay a blocker");
       assert.match(gitRow, /could not be verified/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -119,7 +120,7 @@ describe("GitHub step summary", () => {
       assert.equal(icons[0], "❌", "act-on-this belongs at the top");
       assert.equal(icons[icons.length - 1], "➖", "could-not-run belongs at the bottom");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -158,7 +159,7 @@ describe("GitLab JUnit", () => {
       // And the reason survives into the report.
       assert.match(xml, /<skipped message="[^"]+"/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

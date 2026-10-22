@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { scanPlaintextSecrets } from "./scan-plaintext.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function withTmp(fn: (dir: string) => Promise<void>) {
   return async () => {
@@ -11,7 +12,7 @@ function withTmp(fn: (dir: string) => Promise<void>) {
     try {
       await fn(dir);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   };
 }

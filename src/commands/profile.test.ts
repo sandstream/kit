@@ -1,10 +1,11 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdProfile } from "./profile.js";
 import { PROFILE_FILE } from "../profile/schema.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 let dir: string;
 let cwd: string;
@@ -30,7 +31,7 @@ afterEach(() => {
   process.argv = argv;
   console.log = origLog;
   console.error = origErr;
-  rmSync(dir, { recursive: true, force: true });
+  rmTemp(dir);
 });
 
 function setArgs(...sub: string[]): void {

@@ -5,11 +5,12 @@
  */
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verifySignature, localPublicKeys } from "../identity.js";
 import { FileKeyStore } from "./file-store.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("FileKeyStore", () => {
   let dir: string;
@@ -22,7 +23,7 @@ describe("FileKeyStore", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_IDENTITY_DIR;
     else process.env.KIT_IDENTITY_DIR = prev;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
 
   it("is available and reports kind 'file'", () => {

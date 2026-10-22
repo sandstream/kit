@@ -6,12 +6,13 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const exec = promisify(execFile);
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -32,7 +33,7 @@ describe("--version after a command (compiled CLI)", () => {
         assert.ok(stdout.includes(VERSION), `expected ${VERSION} in: ${stdout}`);
         assert.equal(existsSync(join(cwd, ".kit")), false, "no lock or state file may be written");
       } finally {
-        rmSync(cwd, { recursive: true, force: true });
+        rmTemp(cwd);
       }
     });
   }

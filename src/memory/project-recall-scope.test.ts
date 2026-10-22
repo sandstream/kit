@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { projectRecallClause } from "./project-recall-scope.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 function matches(projectPath: string, rows: Array<[string, string | null]>): string[] {
   const db = new DatabaseSync(":memory:");
@@ -34,7 +35,7 @@ describe("projectRecallClause", () => {
       ]);
       assert.deepEqual(got.sort(), [root, join(root, "src")].sort());
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -47,7 +48,7 @@ describe("projectRecallClause", () => {
       ]);
       assert.deepEqual(got, [root]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 

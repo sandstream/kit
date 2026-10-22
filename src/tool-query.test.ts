@@ -1,13 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brewPackageFor, latestQueryFor } from "./tool-query.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function brewPrefix(t: { after: (fn: () => void) => void }): string {
   const prefix = mkdtempSync(join(tmpdir(), "kit-brew-"));
-  t.after(() => rmSync(prefix, { recursive: true, force: true }));
+  t.after(() => rmTemp(prefix));
   mkdirSync(join(prefix, "bin"));
   return prefix;
 }

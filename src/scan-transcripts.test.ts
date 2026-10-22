@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanTranscripts } from "./scan-transcripts.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function makeRepo(): string {
   return mkdtempSync(join(tmpdir(), "kit-scan-tx-"));
@@ -16,7 +17,7 @@ describe("scanTranscripts", () => {
       const hits = await scanTranscripts(dir);
       assert.equal(hits.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -31,7 +32,7 @@ describe("scanTranscripts", () => {
       const hits = await scanTranscripts(dir);
       assert.equal(hits.length, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -50,7 +51,7 @@ describe("scanTranscripts", () => {
       assert.equal(hits.length, 1);
       assert.ok(hits[0].findings.some((f) => f.label === "stripe-key"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -63,7 +64,7 @@ describe("scanTranscripts", () => {
       assert.equal(hits.length, 1);
       assert.ok(hits[0].file.includes(".opencode"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -76,7 +77,7 @@ describe("scanTranscripts", () => {
       assert.equal(hits.length, 1);
       assert.ok(hits[0].file.includes(".codex"));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

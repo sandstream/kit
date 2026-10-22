@@ -19,7 +19,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { parse } from "smol-toml";
 
 import { patchConfigText, countCommentLines } from "./config-migrate.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
 
@@ -128,7 +129,7 @@ describe("kit config migrate (compiled CLI)", () => {
       assert.match(after, /# inline note/);
       assert.equal((parse(after) as { version?: number }).version, 1);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -141,7 +142,7 @@ describe("kit config migrate (compiled CLI)", () => {
       // And it still wrote nothing.
       assert.equal(readFileSync(join(dir, ".kit.toml"), "utf-8"), COMMENTED);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -153,7 +154,7 @@ describe("kit config migrate (compiled CLI)", () => {
       assert.match(r.out, /Config is at v0/);
       assert.equal(readFileSync(join(dir, ".kit.toml"), "utf-8"), COMMENTED);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

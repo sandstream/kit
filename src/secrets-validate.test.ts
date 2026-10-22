@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateSecrets, summarizeValidation } from "./secrets-validate.js";
 import type { kitConfig, SecretKeyConfig } from "./config.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function configFor(keys: Record<string, SecretKeyConfig>): kitConfig {
   return {
@@ -61,7 +62,7 @@ describe("validateSecrets", () => {
         assert.ok(!r.detail.includes("no value in"), `detail=${r.detail}`);
       }
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -76,7 +77,7 @@ describe("validateSecrets", () => {
       assert.equal(results[0]!.status, "unfixable");
       assert.match(results[0]!.detail, /no value in/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 

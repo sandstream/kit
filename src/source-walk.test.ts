@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, isAbsolute, relative } from "node:path";
 import { walkSourceFiles } from "./source-walk.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function tmpTree(): string {
   return mkdtempSync(join(tmpdir(), "kit-walk-"));
@@ -30,7 +31,7 @@ describe("walkSourceFiles", () => {
       assert.ok(files.every((f) => isAbsolute(f)));
       assert.deepEqual(rels(root, files), ["a.ts", "nested/b.ts", "nested/deep/c.ts"]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -41,7 +42,7 @@ describe("walkSourceFiles", () => {
       touch(root, "a.test.ts");
       assert.deepEqual(rels(root, walkSourceFiles(root)), ["a.ts"]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -58,7 +59,7 @@ describe("walkSourceFiles", () => {
         "test-support-client.ts",
       ]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -72,7 +73,7 @@ describe("walkSourceFiles", () => {
         "a.ts",
       ]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -87,7 +88,7 @@ describe("walkSourceFiles", () => {
       touch(root, "coverage/report.ts");
       assert.deepEqual(rels(root, walkSourceFiles(root)), ["src.ts"]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -99,7 +100,7 @@ describe("walkSourceFiles", () => {
       touch(root, ".eslintrc.ts");
       assert.deepEqual(rels(root, walkSourceFiles(root)), ["keep.ts"]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -112,7 +113,7 @@ describe("walkSourceFiles", () => {
       const files = walkSourceFiles(root, { exts: [".ts", ".tsx"] });
       assert.deepEqual(rels(root, files), ["a.ts", "b.tsx"]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -126,7 +127,7 @@ describe("walkSourceFiles", () => {
       const files = walkSourceFiles(root, { skipDirs: ["vendor"] });
       assert.deepEqual(rels(root, files), ["dist/out.ts", "keep.ts"]);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 

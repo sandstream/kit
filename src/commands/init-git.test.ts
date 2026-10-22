@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { ensureGitRepo } from "./init-git.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const never = async (): Promise<boolean> => {
   throw new Error("must not prompt");
@@ -15,7 +16,7 @@ async function inTempDir(body: (dir: string) => Promise<void>): Promise<void> {
   try {
     await body(dir);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   }
 }
 

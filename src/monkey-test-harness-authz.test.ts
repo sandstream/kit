@@ -26,18 +26,19 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ts from "typescript";
 
 import { MONKEY_ROLES } from "./monkey-test-contract.js";
 import { monkeySpec } from "./monkey-test-harness-spec.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const roots: string[] = [];
 
 afterEach(() => {
-  while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
+  while (roots.length) rmTemp(roots.pop()!);
 });
 
 interface Finding {

@@ -1,10 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runDoctor } from "./doctor.js";
 import { checkGitHookFloor } from "./check-security.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("doctor and security agree about hook wrapper health (BH-05)", () => {
   it("warns when the wrapper points into a git working tree", async () => {
@@ -44,7 +45,7 @@ describe("doctor and security agree about hook wrapper health (BH-05)", () => {
       process.chdir(previousCwd);
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(home);
     }
   });
 });

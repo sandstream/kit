@@ -1,11 +1,12 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openMemoryDb, searchMessages } from "./db.js";
 import { indexOpenCodeSessions } from "./opencode.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 /** Lay out a minimal OpenCode storage tree matching the documented flat-JSON format. */
 function writeFixture(root: string): void {
@@ -65,7 +66,7 @@ describe("indexOpenCodeSessions", () => {
   after(() => {
     db.close();
     delete process.env.KIT_OPENCODE_DIR;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
 
   it("indexes a message, joining only its text parts", () => {
@@ -142,7 +143,7 @@ describe("indexOpenCodeSessions — SQLite store (current OpenCode)", () => {
   after(() => {
     db.close();
     delete process.env.KIT_OPENCODE_DIR;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
 
   it("prefers opencode.db and indexes message text from part data blobs", () => {

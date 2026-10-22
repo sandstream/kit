@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import {
@@ -11,6 +11,7 @@ import {
   type PlatformScan,
 } from "./check-standards-platform.js";
 import type { ExecResult } from "./utils/execFileNoThrow.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const ok = (stdout: string, exitCode = 0): ExecResult => ({
   stdout,
@@ -56,7 +57,7 @@ describe("check-standards-platform — findDockerfiles", () => {
         .sort();
       assert.deepEqual(found, ["Dockerfile", "Dockerfile.prod", "svc/app.Dockerfile"]);
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 });
@@ -75,7 +76,7 @@ describe("check-standards-platform — gating", () => {
       const result = await checkStandardsPlatform({ cwd: repo, scan, baseline, enforce: true });
       assert.equal(result[0].status, "warn");
     } finally {
-      rmSync(repo, { recursive: true, force: true });
+      rmTemp(repo);
     }
   });
 

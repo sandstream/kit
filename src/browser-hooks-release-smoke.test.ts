@@ -6,7 +6,6 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
-  rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -15,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const sourceMode = import.meta.url.endsWith(".ts");
@@ -23,7 +23,7 @@ const cliArgs = sourceMode ? ["--import", import.meta.resolve("tsx"), cli] : [cl
 const dirs: string[] = [];
 
 afterEach(() => {
-  while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  while (dirs.length) rmTemp(dirs.pop()!);
 });
 
 async function runCli(

@@ -1,12 +1,13 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
 import { openMemoryDb, insertMessage } from "./db.js";
 import { palAdd } from "./pal.js";
 import { getCurrentProjectRoot } from "./project.js";
 import { buildSuggestPrompt } from "./suggest.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory suggest — BYO-LLM prompt builder", () => {
   let tmp: string;
@@ -20,7 +21,7 @@ describe("memory suggest — BYO-LLM prompt builder", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_MEMORY_DB;
     else process.env.KIT_MEMORY_DB = prev;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("builds a prompt from recent project messages + open items, never calls a model", () => {

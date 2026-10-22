@@ -1,6 +1,6 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,6 +9,7 @@ import {
   formatClassResolution,
   MEMORY_CLASS_ENV,
 } from "./effective-class.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 // effectiveMemoryClass is the wire that did not exist: resolveMemoryClass had zero
 // production callers, so `[memory] default_class` and KIT_MEMORY_CLASS were inert while
@@ -42,7 +43,7 @@ describe("effectiveMemoryClass", () => {
       assert.equal(r.recognized, true);
     } finally {
       process.chdir(originalCwd);
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -56,7 +57,7 @@ describe("effectiveMemoryClass", () => {
       assert.equal(r.source, "config");
     } finally {
       process.chdir(originalCwd);
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -70,7 +71,7 @@ describe("effectiveMemoryClass", () => {
       assert.equal(r.source, "env");
     } finally {
       process.chdir(originalCwd);
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -85,7 +86,7 @@ describe("effectiveMemoryClass", () => {
       assert.equal(r.recognized, false);
     } finally {
       process.chdir(originalCwd);
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -99,7 +100,7 @@ describe("effectiveMemoryClass", () => {
       assert.equal(r.recognized, true);
     } finally {
       process.chdir(originalCwd);
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

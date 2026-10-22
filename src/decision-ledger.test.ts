@@ -15,7 +15,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -28,6 +28,7 @@ import {
   readLedger,
   appendEntry,
 } from "./decision-ledger.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const VALID = {
   id: "a1b2c3",
@@ -215,7 +216,7 @@ describe("readLedger / appendEntry", () => {
     try {
       assert.equal(await readLedger(dir), null);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -252,7 +253,7 @@ describe("readLedger / appendEntry", () => {
         ["one", "two"],
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

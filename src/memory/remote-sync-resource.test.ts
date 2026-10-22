@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const SNAPSHOTS = 12_000;
 
@@ -68,6 +69,6 @@ it("starts replaying a large Git history without one Git process per snapshot", 
     );
     assert.equal(output, "snapshot-0");
   } finally {
-    rmSync(repo, { recursive: true, force: true });
+    rmTemp(repo);
   }
 });

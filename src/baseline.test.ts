@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -12,6 +12,7 @@ import {
   BASELINE_FILE,
   type Baseline,
 } from "./baseline.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), "kit-baseline-"));
@@ -25,7 +26,7 @@ describe("loadBaseline", () => {
       assert.equal(b.version, 1);
       assert.deepEqual(b.categories, {});
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -45,7 +46,7 @@ describe("loadBaseline", () => {
       const b = await loadBaseline(dir);
       assert.deepEqual(b.categories.tests.untested_files, ["src/a.ts", "src/b.ts"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -58,7 +59,7 @@ describe("loadBaseline", () => {
       );
       await assert.rejects(() => loadBaseline(dir), /unsupported baseline version: 2/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -71,7 +72,7 @@ describe("loadBaseline", () => {
         new RegExp(`failed to read ${BASELINE_FILE.replace(".", "\\.")}`),
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -81,7 +82,7 @@ describe("loadBaseline", () => {
       writeFileSync(join(dir, BASELINE_FILE), JSON.stringify({ version: 1 }));
       await assert.rejects(() => loadBaseline(dir), /missing 'categories' object/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -111,7 +112,7 @@ describe("loadBaselineForGate (fail-closed, never throws)", () => {
         // and the empty baseline is safe to query without throwing
         assert.deepEqual(baselineGet(baseline, "tests", "untested_files"), []);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     });
   }
@@ -123,7 +124,7 @@ describe("loadBaselineForGate (fail-closed, never throws)", () => {
       assert.equal(ignored, null);
       assert.deepEqual(baseline.categories, {});
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -142,7 +143,7 @@ describe("loadBaselineForGate (fail-closed, never throws)", () => {
       assert.equal(ignored, null);
       assert.deepEqual(baselineGet(baseline, "tests", "untested_files"), ["src/a.ts"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -208,7 +209,7 @@ describe("saveBaseline", () => {
       const ts = Date.parse(parsed.generated);
       assert.ok(ts >= before && ts <= after, "generated timestamp updated");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -224,7 +225,7 @@ describe("saveBaseline", () => {
       const reloaded = await loadBaseline(dir);
       assert.deepEqual(reloaded.categories.tests.untested_files, ["a", "b"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

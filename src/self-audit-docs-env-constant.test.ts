@@ -5,10 +5,11 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadKnownEnvVars } from "./self-audit-docs.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("self-audit-docs: env var names held in constants", () => {
   it("counts a quoted KIT_ name assigned to a constant", () => {
@@ -21,7 +22,7 @@ describe("self-audit-docs: env var names held in constants", () => {
       );
       assert.ok(loadKnownEnvVars(root).has("KIT_NAMED_CONSTANT"));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });

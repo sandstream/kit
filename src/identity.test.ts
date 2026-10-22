@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateKeyPairSync } from "node:crypto";
@@ -22,6 +22,7 @@ import {
   revocationStatement,
   type RevocationRecord,
 } from "./identity.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("identity", () => {
   let dir: string;
@@ -34,7 +35,7 @@ describe("identity", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_IDENTITY_DIR;
     else process.env.KIT_IDENTITY_DIR = prev;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
 
   it("creates an identity on first use, then is idempotent", () => {
@@ -107,7 +108,7 @@ describe("identity", () => {
       assert.equal(keys.size, 2);
     } finally {
       process.env.KIT_IDENTITY_DIR = dir;
-      rmSync(own, { recursive: true, force: true });
+      rmTemp(own);
     }
   });
 
@@ -134,7 +135,7 @@ describe("identity", () => {
       assert.equal(loadRevocations().length, 1);
     } finally {
       process.env.KIT_IDENTITY_DIR = dir;
-      rmSync(own, { recursive: true, force: true });
+      rmTemp(own);
     }
   });
 
@@ -159,7 +160,7 @@ describe("identity", () => {
       assert.notEqual(localPublicKeys().get(me.id), attacker);
     } finally {
       process.env.KIT_IDENTITY_DIR = dir;
-      rmSync(d, { recursive: true, force: true });
+      rmTemp(d);
     }
   });
 
@@ -190,7 +191,7 @@ describe("identity", () => {
       assert.equal(isRevoked(me.id), false, "forged self-revocation with a bad sig is ignored");
     } finally {
       process.env.KIT_IDENTITY_DIR = dir;
-      rmSync(d, { recursive: true, force: true });
+      rmTemp(d);
     }
   });
 
@@ -241,7 +242,7 @@ describe("identity", () => {
       assert.equal(revokedKids(keys, new Set()).has(victim.id), false);
     } finally {
       process.env.KIT_IDENTITY_DIR = dir;
-      rmSync(d, { recursive: true, force: true });
+      rmTemp(d);
     }
   });
 
@@ -253,7 +254,7 @@ describe("identity", () => {
       assert.deepEqual(loadRevocations(), []);
     } finally {
       process.env.KIT_IDENTITY_DIR = dir;
-      rmSync(empty, { recursive: true, force: true });
+      rmTemp(empty);
     }
   });
 
@@ -264,7 +265,7 @@ describe("identity", () => {
       assert.equal(tryLoadIdentity(), null);
     } finally {
       process.env.KIT_IDENTITY_DIR = dir;
-      rmSync(empty, { recursive: true, force: true });
+      rmTemp(empty);
     }
   });
 });

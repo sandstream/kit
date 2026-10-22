@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { loadOrCreateIdentity, identityId, recordRevocation } from "../identity.js";
@@ -9,6 +9,7 @@ import { addPolicySigner } from "../policy-trust.js";
 import { PROFILE_FILE } from "./schema.js";
 import { signProfile, PROFILE_SIG_FILE } from "./sign.js";
 import { exportBundle, importBundle, type ProfileBundle } from "./portable.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 let idDir: string;
 let src: string;
@@ -29,7 +30,7 @@ beforeEach(() => {
 afterEach(() => {
   if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
   else process.env.KIT_IDENTITY_DIR = savedId;
-  for (const d of [idDir, src, dest]) rmSync(d, { recursive: true, force: true });
+  for (const d of [idDir, src, dest]) rmTemp(d);
 });
 
 async function signedSource(): Promise<void> {
@@ -75,7 +76,7 @@ describe("profile portable — import (fresh host, no local identity/anchor)", (
       assert.ok(existsSync(resolve(dest, PROFILE_SIG_FILE)), "signature written");
       assert.equal(readFileSync(resolve(dest, PROFILE_FILE), "utf-8"), PROFILE);
     } finally {
-      rmSync(other, { recursive: true, force: true });
+      rmTemp(other);
     }
   });
 
@@ -116,7 +117,7 @@ describe("profile portable — fail-closed", () => {
       assert.equal(r.status, "invalid");
       assert.match(r.detail, /does not match signature kid/);
     } finally {
-      rmSync(evilDir, { recursive: true, force: true });
+      rmTemp(evilDir);
     }
   });
 

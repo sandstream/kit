@@ -1,10 +1,11 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, realpathSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { rbacPolicyRoot } from "./resolve.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 // `rbacPolicyRoot` picks the directory every RBAC decision is loaded from, so its
 // precedence IS a trust decision: whoever controls `KIT_RBAC_POLICY` controls which
@@ -126,7 +127,7 @@ describe("rbacPolicyRoot", () => {
       });
     } finally {
       process.chdir(origin);
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

@@ -8,12 +8,12 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { ServiceStatus } from "./check-services.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 type ProbeEntry = "services" | "gate";
 interface ProbeOptions {
@@ -164,7 +164,7 @@ function probe(
       caller,
     };
   } finally {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmTemp(dir);
   }
 }
 

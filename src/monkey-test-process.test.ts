@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { runShell, stopProcess } from "./monkey-test-process.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function nodeShellCommand(source: string): string {
   return `${JSON.stringify(process.execPath)} -e ${JSON.stringify(source)}`;
@@ -64,7 +65,7 @@ describe("monkey-test process runner", () => {
         assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
       } finally {
         if (pid) spawnSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"]);
-        rmSync(dir, { recursive: true, force: true });
+        rmTemp(dir);
       }
     },
   );

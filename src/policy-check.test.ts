@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { evaluatePolicy, versionGte } from "./policy-check.js";
@@ -11,6 +11,7 @@ import {
   policyFingerprint,
 } from "./policy-doc.js";
 import { loadOrCreateIdentity, signWithIdentity } from "./identity.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("policy-check — versionGte", () => {
   it("compares dotted numeric versions", () => {
@@ -33,7 +34,7 @@ describe("policy-check — evaluatePolicy", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_IDENTITY_DIR;
     else process.env.KIT_IDENTITY_DIR = prev;
-    rmSync(idDir, { recursive: true, force: true });
+    rmTemp(idDir);
   });
 
   function repo(): string {
@@ -58,7 +59,7 @@ describe("policy-check — evaluatePolicy", () => {
     try {
       assert.deepEqual(await evaluatePolicy(root), { present: false, items: [], ok: true });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -73,7 +74,7 @@ describe("policy-check — evaluatePolicy", () => {
       assert.equal(r.items.find((i) => i.requirement === "min_kit_version")?.status, "pass");
       assert.equal(r.ok, true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -86,7 +87,7 @@ describe("policy-check — evaluatePolicy", () => {
       assert.equal(r.items.find((i) => i.requirement === "min_kit_version")?.status, "fail");
       assert.equal(r.ok, false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -103,7 +104,7 @@ describe("policy-check — evaluatePolicy", () => {
       assert.equal(strict.items.find((i) => i.requirement.startsWith("scanner:"))?.status, "fail");
       assert.equal(strict.ok, false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -118,7 +119,7 @@ describe("policy-check — evaluatePolicy", () => {
       assert.equal(r.signature?.status, "fail");
       assert.equal(r.ok, false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });

@@ -1,7 +1,7 @@
 import { it, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,6 +23,7 @@ import {
   sessionStartSystemMessage,
   claudeSessionStartPayload,
 } from "./hook.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const PASS = "Local-Transfer-Cipher-9362";
 const blobOperand = process.platform === "win32" ? "%KIT_MEMORY_BLOB%" : "$KIT_MEMORY_BLOB";
@@ -95,7 +96,7 @@ function setup(t: TestContext, actions = false) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
   const projectMappings = [{ from: "/srv/alpha", to: destination }];
   const mapFile = join(tmp, "projects.json");

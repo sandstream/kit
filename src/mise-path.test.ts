@@ -10,6 +10,7 @@ import {
   profileNeedsActivation,
   ensureMiseActivation,
 } from "./mise-path.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("mise-path helpers", () => {
   const shims = miseShimsDir("/home/u");
@@ -59,7 +60,7 @@ describe("ensureMiseActivation (append semantics, fail-closed cases)", () => {
     try {
       fn(dir);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   }
 

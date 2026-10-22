@@ -1,11 +1,12 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdBroker, enforceGateDecision } from "./broker.js";
 import { loadOrCreateIdentity } from "../identity.js";
 import { loadProfile, PROFILE_FILE } from "../profile/schema.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 let dir: string;
 let cwd: string;
@@ -31,7 +32,7 @@ afterEach(() => {
   process.argv = argv;
   console.log = origLog;
   console.error = origErr;
-  rmSync(dir, { recursive: true, force: true });
+  rmTemp(dir);
 });
 
 function setArgs(...sub: string[]): void {
@@ -198,8 +199,8 @@ describe("cmdBroker enforce (guided, signed flip)", () => {
     console.error = origErr;
     if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
     else process.env.KIT_IDENTITY_DIR = savedId;
-    rmSync(idDir, { recursive: true, force: true });
-    rmSync(projDir, { recursive: true, force: true });
+    rmTemp(idDir);
+    rmTemp(projDir);
   });
 
   const setArgs = (...sub: string[]): void => {

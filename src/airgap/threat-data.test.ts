@@ -11,6 +11,7 @@ import {
   type ThreatManifest,
   type VerifyDeps,
 } from "./threat-data.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 function deps(dir: string, publicKeyPem: string): VerifyDeps {
   return {
@@ -76,7 +77,7 @@ describe("verifyThreatData", () => {
       assert.equal(r.ok && r.env.GRYPE_DB_CACHE_DIR, resolve(dir, "grype.db"));
       assert.ok(r.ok && !("OSV" in r.env)); // no env declared for osv.db
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -88,7 +89,7 @@ describe("verifyThreatData", () => {
       assert.equal(r.ok, false);
       assert.match(r.ok === false ? r.reason : "", /tampered|mismatch/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -103,7 +104,7 @@ describe("verifyThreatData", () => {
       assert.equal(r.ok, false);
       assert.match(r.ok === false ? r.reason : "", /signature/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -115,7 +116,7 @@ describe("verifyThreatData", () => {
       assert.equal(r.ok, false);
       assert.match(r.ok === false ? r.reason : "", /missing/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -126,7 +127,7 @@ describe("verifyThreatData", () => {
       assert.equal(r.ok, false);
       assert.match(r.ok === false ? r.reason : "", /manifest\.json not found/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

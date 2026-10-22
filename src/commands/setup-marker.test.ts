@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { recordFirstInstallPrompt } from "./setup-marker.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 it("first-install marker creation leaves a dangling symlink and its target untouched", async () => {
   const dir = mkdtempSync(join(tmpdir(), "kit-setup-marker-"));
@@ -14,7 +15,7 @@ it("first-install marker creation leaves a dangling symlink and its target untou
     assert.equal(lstatSync(marker).isSymbolicLink(), true);
     assert.equal(existsSync(join(dir, "unrelated")), false);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   }
 });
 
@@ -28,6 +29,6 @@ it("first-install marker is created once with owner-only permissions", async () 
     assert.equal(readFileSync(marker, "utf8"), first);
     if (process.platform !== "win32") assert.equal(lstatSync(marker).mode & 0o777, 0o600);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   }
 });

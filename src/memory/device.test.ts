@@ -1,12 +1,13 @@
 import { it, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import fs, { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import fs, { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { deviceId, deviceIdOverrideActive, resolveDeviceIdentity } from "./device.js";
 import { deviceId as palDeviceId, deviceIdOverrideActive as palOverrideActive } from "./pal.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 function resolveInProcess(dir: string, override = ""): string {
   const source = import.meta.url.endsWith(".ts");
@@ -40,7 +41,7 @@ function isolatedDevice(t: TestContext): string {
     else process.env.KIT_MEMORY_DIR = previousDir;
     if (previousOverride === undefined) delete process.env.KIT_DEVICE_ID;
     else process.env.KIT_DEVICE_ID = previousOverride;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
   return dir;
 }
@@ -86,7 +87,7 @@ it("separate processes recover the same persisted private device identity", () =
     if (process.platform !== "win32")
       assert.equal(statSync(join(tmp, "device-id")).mode & 0o777, 0o600);
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   }
 });
 

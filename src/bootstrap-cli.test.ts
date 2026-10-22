@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const commandUrl = new URL("../dist/commands/bootstrap.js", import.meta.url);
 
@@ -36,7 +37,7 @@ appendFileSync(process.env.KIT_BOOTSTRAP_TEST_LOG, JSON.stringify(process.argv.s
       : [];
     return { run, steps };
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmTemp(root);
   }
 }
 

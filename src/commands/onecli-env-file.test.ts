@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import { writeOneCliPlaceholder } from "./onecli-env-file.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 it("creates a private .env.local and replaces only the matching key", async () => {
   const project = mkdtempSync(join(tmpdir(), "kit-onecli-env-"));
@@ -34,6 +35,6 @@ it("creates a private .env.local and replaces only the matching key", async () =
     );
   } finally {
     process.chdir(originalCwd);
-    rmSync(project, { recursive: true, force: true });
+    rmTemp(project);
   }
 });

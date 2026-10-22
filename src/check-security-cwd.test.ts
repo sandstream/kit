@@ -23,7 +23,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -35,6 +35,7 @@ import {
   checkSecurity,
 } from "./check-security.js";
 import { fakeNpmAudit, npmPath } from "./check-security-cwd-fixture.test-support.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 /** A project whose .gitignore covers every .env spelling the check looks for. */
 function projectWithGitignore(): string {
@@ -132,8 +133,8 @@ describe("checkSecurity honours the cwd it is given", () => {
       assert.equal(aStatus, "pass", "A has a complete .gitignore and must pass");
       assert.notEqual(bStatus, "pass", "B has no .gitignore at all and must not pass");
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 
@@ -149,8 +150,8 @@ describe("checkSecurity honours the cwd it is given", () => {
       assert.equal(statusOf(aboutA, ".env gitignored"), "pass");
       assert.notEqual(statusOf(aboutB, ".env gitignored"), "pass");
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 
@@ -167,7 +168,7 @@ describe("checkSecurity honours the cwd it is given", () => {
         "the default must resolve to the process's own tree",
       );
     } finally {
-      rmSync(A, { recursive: true, force: true });
+      rmTemp(A);
     }
   });
 
@@ -201,8 +202,8 @@ describe("checkSecurity honours the cwd it is given", () => {
         "two different trees must not produce an identical result vector",
       );
     } finally {
-      rmSync(withLock, { recursive: true, force: true });
-      rmSync(without, { recursive: true, force: true });
+      rmTemp(withLock);
+      rmTemp(without);
     }
   });
 });
@@ -293,9 +294,9 @@ process.exit(high ? 1 : 0);`,
       assert.equal(result.status, "fail");
       assert.match(result.detail, /1 high/);
     } finally {
-      rmSync(caller, { recursive: true, force: true });
-      rmSync(target, { recursive: true, force: true });
-      rmSync(bin, { recursive: true, force: true });
+      rmTemp(caller);
+      rmTemp(target);
+      rmTemp(bin);
     }
   });
 
@@ -315,8 +316,8 @@ process.exit(high ? 1 : 0);`,
       assert.match(result.detail, /timed out/i);
       assert.doesNotMatch(result.detail, /high|critical/i);
     } finally {
-      rmSync(target, { recursive: true, force: true });
-      rmSync(bin, { recursive: true, force: true });
+      rmTemp(target);
+      rmTemp(bin);
     }
   });
 
@@ -339,8 +340,8 @@ process.exit(high ? 1 : 0);`,
       assert.equal(result.severity, "medium");
       assert.match(result.detail, /could not run|unavailable|failed/i);
     } finally {
-      rmSync(target, { recursive: true, force: true });
-      rmSync(bin, { recursive: true, force: true });
+      rmTemp(target);
+      rmTemp(bin);
     }
   });
 });
@@ -362,8 +363,8 @@ describe("target-sensitive Git checks use the governed tree", () => {
         "target's untracked lockfile must not inherit caller pass",
       );
     } finally {
-      rmSync(caller, { recursive: true, force: true });
-      rmSync(target, { recursive: true, force: true });
+      rmTemp(caller);
+      rmTemp(target);
     }
   });
 
@@ -390,8 +391,8 @@ describe("target-sensitive Git checks use the governed tree", () => {
       assert.equal(result.status, "warn");
       assert.deepEqual(result.files, ["src/prod.ts"]);
     } finally {
-      rmSync(caller, { recursive: true, force: true });
-      rmSync(target, { recursive: true, force: true });
+      rmTemp(caller);
+      rmTemp(target);
     }
   });
 });
@@ -430,8 +431,8 @@ describe("runCheckGate threads cwd to the dimensions that read the filesystem", 
       assert.notEqual(bEnv, "pass", "B has no .gitignore — it must not inherit A's pass");
       assert.notEqual(bEnv, aEnv);
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 
@@ -452,8 +453,8 @@ describe("runCheckGate threads cwd to the dimensions that read the filesystem", 
         "B declares the same path but has no file — it must not see A's",
       );
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 });
@@ -492,8 +493,8 @@ describe("the scanner-spawn mechanism actually relocates the child process", () 
       // The pair: a helper that ignored the option would put both children in A.
       assert.notEqual(realpathSync(inB.stdout.trim()), realpathSync(inherited.stdout.trim()));
     } finally {
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 });
@@ -564,8 +565,8 @@ describe("a REAL scanner subprocess reads the governed tree", () => {
     } finally {
       if (prevCfg === undefined) delete process.env.KIT_SEMGREP_CONFIG;
       else process.env.KIT_SEMGREP_CONFIG = prevCfg;
-      rmSync(A, { recursive: true, force: true });
-      rmSync(B, { recursive: true, force: true });
+      rmTemp(A);
+      rmTemp(B);
     }
   });
 });

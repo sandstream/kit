@@ -15,7 +15,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import { planConfigMigration } from "./config-migrate.js";
 import { recommendPosture } from "./recommended.js";
 import { CONFIG_SCHEMA_VERSION } from "./config.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "cli.js");
 
@@ -44,7 +45,7 @@ describe("planConfigMigration — the detector, without a write path", () => {
       assert.equal(plan.current, false);
       assert.ok(plan.steps > 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -55,7 +56,7 @@ describe("planConfigMigration — the detector, without a write path", () => {
       assert.equal(plan?.current, true);
       assert.equal(plan?.steps, 0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -66,8 +67,8 @@ describe("planConfigMigration — the detector, without a write path", () => {
       assert.equal(planConfigMigration(empty), null);
       assert.equal(planConfigMigration(broken), null);
     } finally {
-      rmSync(empty, { recursive: true, force: true });
-      rmSync(broken, { recursive: true, force: true });
+      rmTemp(empty);
+      rmTemp(broken);
     }
   });
 
@@ -79,7 +80,7 @@ describe("planConfigMigration — the detector, without a write path", () => {
       const after = spawnSync("cat", [join(dir, ".kit.toml")], { encoding: "utf-8" }).stdout;
       assert.equal(after, before);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });
@@ -146,7 +147,7 @@ describe("the readers, through the compiled CLI", () => {
       assert.match(r.out, /current is v/);
       assert.match(r.out, /kit config migrate/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -162,7 +163,7 @@ describe("the readers, through the compiled CLI", () => {
       // Nothing created, nothing removed.
       assert.equal(spawnSync("ls", ["-a", dir], { encoding: "utf-8" }).stdout, before);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 });

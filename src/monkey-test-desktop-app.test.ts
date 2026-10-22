@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it as nodeIt } from "node:test";
 import { DesktopApp } from "./monkey-test-desktop-app.js";
 import { shellQuote } from "./monkey-test-runner.test-support.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 // The rig launches the fake app through a POSIX shell and relies on SIGTERM/SIGKILL semantics;
 // Windows has neither, so these tests run on macOS and Linux only.
@@ -60,7 +61,7 @@ async function withApp(mode: string, run: (rigged: Rig) => Promise<void>): Promi
     await run(rigged);
   } finally {
     await rigged.app.stop("SIGKILL", 500);
-    rmSync(rigged.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmTemp(rigged.dir);
   }
 }
 
@@ -137,7 +138,7 @@ it("newLog returns only text written since the last call", async () => {
     assert.equal(rigged.app.newLog(), "");
     assert.match(readFileSync(join(rigged.dir, "app.log"), "utf8"), /hello-log/);
   } finally {
-    rmSync(rigged.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmTemp(rigged.dir);
   }
 });
 
@@ -158,7 +159,7 @@ it("stop escalates to SIGKILL when the app ignores SIGTERM", async () => {
     assert.equal(await rigged.app.stop("SIGTERM", 200), true);
     assert.equal(rigged.app.running(), false);
   } finally {
-    rmSync(rigged.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmTemp(rigged.dir);
   }
 });
 

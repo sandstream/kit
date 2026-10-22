@@ -14,9 +14,10 @@ import {
 } from "./class.js";
 import { openMemoryDb, insertMessage, upsertSession, searchMessages } from "./db.js";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory class ordering", () => {
   it("is least → most restrictive, and the order is the policy", () => {
@@ -191,6 +192,6 @@ describe("class gate against a real store (#348)", () => {
     };
     assert.equal(row.class, "restricted", "backfilled to the configured default, not left NULL");
     db.close();
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
 });

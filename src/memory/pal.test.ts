@@ -22,6 +22,7 @@ import {
   findingPalId,
 } from "./pal.js";
 import { claimTask, legacyPalDb, setPalClock } from "./pal-fixture.test-support.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 const previousDevice = process.env.KIT_DEVICE_ID;
 before(() => {
@@ -221,7 +222,7 @@ describe("PAL — pending actions", () => {
     const open = palList(db);
     assert.equal(open.length, 1);
     assert.equal(open[0]?.id, fails);
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
     db.close();
   });
 
@@ -240,7 +241,7 @@ describe("PAL — pending actions", () => {
     const r = await palAutoVerify(db); // fail on a closed auto item -> reopen
     assert.deepEqual(r.reopened, [id]);
     assert.equal(palList(db).length, 1);
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
     db.close();
   });
 
@@ -286,7 +287,7 @@ describe("PAL — pending actions", () => {
       "cert fixed",
     ); // done → closed
     assert.equal(importLegacyLedger(db, led).imported, 0); // idempotent
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
     db.close();
   });
 
@@ -296,7 +297,7 @@ describe("PAL — pending actions", () => {
     try {
       assert.throws(() => importLegacyLedger(db, dir), /EISDIR|directory|read/i);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
       db.close();
     }
   });
@@ -322,7 +323,7 @@ describe("PAL — pending actions", () => {
     assert.equal(item?.verify_cmd ?? null, null); // executable command dropped on import
     await palAutoVerify(db); // must NOT run `touch ${marker}`
     assert.equal(existsSync(marker), false, "imported verify_cmd must never execute");
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
     db.close();
   });
 
@@ -345,7 +346,7 @@ describe("PAL — pending actions", () => {
       [{ id, reason: "invalid-check" }],
     );
     assert.equal(existsSync(marker), false, "injected verify_check must never execute");
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
     db.close();
   });
 
@@ -517,7 +518,7 @@ describe("PAL — device coupling (don't nag about ephemeral-session items)", ()
   it("prune closes this device's dead-origin items, keeps live ones, ignores other devices", (t) => {
     const db = fresh();
     const directory = realpathSync(mkdtempSync(join(tmpdir(), "kit-pal-prune-")));
-    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    t.after(() => rmTemp(directory));
     const live = join(directory, "live");
     const dead = join(directory, "dead");
     mkdirSync(live);

@@ -1,10 +1,11 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openMemoryDb, getStats, searchMessages } from "./db.js";
 import { indexAiderSessions } from "./aider.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory aider parser", () => {
   let tmp: string;
@@ -39,7 +40,7 @@ describe("memory aider parser", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_AIDER_HISTORY;
     else process.env.KIT_AIDER_HISTORY = prev;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("parses #### user turns + plain assistant prose, skips > output, tags harness=aider", () => {
@@ -79,6 +80,6 @@ describe("memory aider parser", () => {
     assert.equal(indexAiderSessions(db).messages, 0);
     db.close();
     process.env.KIT_AIDER_HISTORY = historyFile;
-    rmSync(dir, { recursive: true, force: true });
+    rmTemp(dir);
   });
 });

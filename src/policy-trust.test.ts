@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateKeyPairSync, sign as edSign, type KeyObject } from "node:crypto";
@@ -19,6 +19,7 @@ import {
   hasPolicyAnchor,
 } from "./policy-trust.js";
 import { evaluatePolicy } from "./policy-check.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function orgKey(): { priv: KeyObject; pubPem: string; id: string } {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -55,7 +56,7 @@ describe("policy-trust — the org trust anchor", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_IDENTITY_DIR;
     else process.env.KIT_IDENTITY_DIR = prev;
-    rmSync(idDir, { recursive: true, force: true });
+    rmTemp(idDir);
   });
 
   it("add/load/dedupe/remove roundtrip; malformed key throws", () => {
@@ -76,7 +77,7 @@ describe("policy-trust — the org trust anchor", () => {
       // malformed
       assert.throws(() => addPolicySigner(root, "not a key"));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -96,7 +97,7 @@ describe("policy-trust — the org trust anchor", () => {
       assert.equal(after.via, "org");
       assert.equal(after.anchored, true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 
@@ -116,7 +117,7 @@ describe("policy-trust — the org trust anchor", () => {
       assert.equal(report.signature?.status, "fail", JSON.stringify(report.signature));
       assert.equal(report.ok, false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmTemp(root);
     }
   });
 });

@@ -1,11 +1,12 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openMemoryDb, getStats, searchMessages } from "./db.js";
 import { indexCursorSessions } from "./cursor.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 describe("memory cursor parser", () => {
   let tmp: string;
@@ -31,7 +32,7 @@ describe("memory cursor parser", () => {
   after(() => {
     if (prev === undefined) delete process.env.KIT_CURSOR_DB;
     else process.env.KIT_CURSOR_DB = prev;
-    rmSync(tmp, { recursive: true, force: true });
+    rmTemp(tmp);
   });
 
   it("indexes user(type1)+assistant(type2) bubbles, skips empty/non-turn/metadata, tags harness=cursor", () => {
@@ -75,6 +76,6 @@ describe("memory cursor parser", () => {
     db.close();
 
     process.env.KIT_CURSOR_DB = fixture;
-    rmSync(otherDir, { recursive: true, force: true });
+    rmTemp(otherDir);
   });
 });

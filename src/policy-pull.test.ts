@@ -9,7 +9,6 @@ import {
   existsSync,
   lstatSync,
   readlinkSync,
-  rmSync,
   renameSync,
   symlinkSync,
 } from "node:fs";
@@ -31,6 +30,7 @@ import {
 import { addPolicySigner, getSignersPath } from "./policy-trust.js";
 import { applyPolicyPairAtomically, pullPolicy } from "./policy-pull.js";
 import { evaluatePolicy } from "./policy-check.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 let idDir: string;
 let source: string;
@@ -63,7 +63,7 @@ beforeEach(() => {
 afterEach(() => {
   if (savedId === undefined) delete process.env.KIT_IDENTITY_DIR;
   else process.env.KIT_IDENTITY_DIR = savedId;
-  for (const d of [idDir, source, dest]) rmSync(d, { recursive: true, force: true });
+  for (const d of [idDir, source, dest]) rmTemp(d);
 });
 
 describe("pullPolicy", () => {

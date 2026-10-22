@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,6 +14,7 @@ import {
   identityId,
 } from "../identity.js";
 import type { KeyStore } from "./types.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 // `kit identity migrate` revokes the old file key. Before this guard, that revocation changed
 // nothing: the revoked key went on signing profiles, policies and audit entries, and `kit doctor`
@@ -31,7 +32,7 @@ beforeEach(() => {
 afterEach(() => {
   if (saved === undefined) delete process.env.KIT_IDENTITY_DIR;
   else process.env.KIT_IDENTITY_DIR = saved;
-  rmSync(dir, { recursive: true, force: true });
+  rmTemp(dir);
 });
 
 function counting(pub: string | null): KeyStore & { signs: number } {

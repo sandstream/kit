@@ -1,9 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 const adjacentCli = resolve(import.meta.dirname, "cli.js");
 const CLI = existsSync(adjacentCli) ? adjacentCli : resolve(import.meta.dirname, "../dist/cli.js");
@@ -53,8 +54,8 @@ describe("read-only flag value parsing (RO-1)", () => {
       assert.equal(result.status, 1, output);
       assert.match(output, /read-only mode active/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(dir);
+      rmTemp(home);
     }
   });
 
@@ -72,8 +73,8 @@ describe("read-only flag value parsing (RO-1)", () => {
       assert.equal(result.status, 1, output);
       assert.match(output, /read-only mode active/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(dir);
+      rmTemp(home);
     }
   });
 
@@ -91,8 +92,8 @@ describe("read-only flag value parsing (RO-1)", () => {
       assert.equal(result.status, 2, output);
       assert.doesNotMatch(output, /read-only mode active/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(dir);
+      rmTemp(home);
     }
   });
 });
@@ -122,8 +123,8 @@ describe("KIT_READ_ONLY environment values (RO-4)", () => {
         assert.match(output, /read-only mode active/, value);
       }
     } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(dir);
+      rmTemp(home);
     }
   });
 });
@@ -156,8 +157,8 @@ describe("read-only global flags on a command without a subcommand (RO-6)", () =
         assert.doesNotMatch(output, /Unknown subcommand/);
       }
     } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(dir);
+      rmTemp(home);
     }
   });
 });
@@ -194,8 +195,8 @@ describe("policy default_mode forces read-only regardless of KIT_READ_ONLY value
       assert.equal(result.status, 1, output);
       assert.match(output, /read-only mode active/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(home, { recursive: true, force: true });
+      rmTemp(dir);
+      rmTemp(home);
     }
   });
 });
@@ -213,7 +214,7 @@ describe("unknown subcommand never falls through to a default write (RO-3)", () 
       assert.notEqual(result.status, 0);
       assert.ok(!existsSync(join(dir, ".env.local")), ".env.local must not be written");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmTemp(dir);
     }
   });
 
@@ -242,8 +243,8 @@ describe("unknown subcommand never falls through to a default write (RO-3)", () 
         assert.notEqual(result.status, 0);
         assert.ok(!existsSync(join(dir, ".env.local")));
       } finally {
-        rmSync(dir, { recursive: true, force: true });
-        rmSync(home, { recursive: true, force: true });
+        rmTemp(dir);
+        rmTemp(home);
       }
     },
   );
@@ -265,8 +266,8 @@ describe("unknown subcommand never falls through to a default write (RO-3)", () 
         assert.notEqual(result.status, 0);
         assert.ok(!existsSync(join(home, ".kit", "audit-anchor.key")));
       } finally {
-        rmSync(dir, { recursive: true, force: true });
-        rmSync(home, { recursive: true, force: true });
+        rmTemp(dir);
+        rmTemp(home);
       }
     },
   );

@@ -1,16 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkEnvGitignored, gateStatus } from "./check-security.js";
 import { checkGitignore, findCommittedSensitive, patchGitignore } from "./check-gitignore.js";
+import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function repo(t: { after: (fn: () => void) => void }, ignore = ".env*\n"): string {
   const dir = mkdtempSync(join(tmpdir(), "kit-effective-ignore-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmTemp(dir));
   execFileSync("git", ["init", "-q", dir]);
   writeFileSync(join(dir, ".gitignore"), ignore);
   return dir;
@@ -58,7 +59,7 @@ describe("effective Git ignore protection", () => {
 describe("Git verification availability", () => {
   it("a non-repository cannot earn a pass from pattern text", async (t) => {
     const dir = repo(t);
-    rmSync(join(dir, ".git"), { recursive: true, force: true });
+    rmTemp(join(dir, ".git"));
     const result = await checkEnvGitignored(dir);
     assert.notEqual(result.status, "pass");
     assert.equal(result.didNotRun, true);
@@ -238,7 +239,7 @@ describe("standalone gitignore command", () => {
     });
     assert.equal(missingGit.status, 1);
     assert.match(missingGit.stderr, /Git.*could not be verified/);
-    rmSync(join(dir, ".git"), { recursive: true, force: true });
+    rmTemp(join(dir, ".git"));
     const nonrepo = spawnSync(process.execPath, args, { cwd: dir, env, encoding: "utf8" });
     assert.equal(nonrepo.status, 1);
     assert.match(nonrepo.stderr, /Git.*could not be verified/);

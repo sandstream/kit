@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdMonkeyTest } from "./monkey-test.js";
+import { rmTemp } from "../temp-cleanup.test-support.js";
 
 let dir: string;
 let cwd: string;
@@ -46,7 +47,7 @@ afterEach(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  rmSync(dir, { recursive: true, force: true });
+  rmTemp(dir);
 });
 
 function setArgs(...args: string[]): void {
