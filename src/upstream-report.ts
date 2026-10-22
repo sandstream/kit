@@ -15,7 +15,7 @@ import { detectUpstreamServices, loadUpstreamInputs } from "./upstream-detect.js
 import type { SkippedInput } from "./upstream-detect.js";
 import { resolveInstalledVersion } from "./upstream-installed.js";
 import type { InstalledSource } from "./upstream-installed.js";
-import { lookupUpstream } from "./upstream-sources.js";
+import { lookupUpstream, stripControl } from "./upstream-sources.js";
 import type { ReleaseInfo, UpstreamLookup } from "./upstream-sources.js";
 
 export interface UpstreamRow {
@@ -53,7 +53,7 @@ function releasesOf(lookup: UpstreamLookup): ReleaseInfo[] {
 }
 
 function joinDetail(parts: (string | undefined)[]): string | undefined {
-  const text = parts.filter(Boolean).join("; ");
+  const text = stripControl(parts.filter(Boolean).join("; "));
   return text === "" ? undefined : text;
 }
 

@@ -50,8 +50,20 @@ export async function upstreamPosture(): Promise<UpstreamPosture> {
   return { allowed: true };
 }
 
-function text(value: unknown): string {
-  return typeof value === "string" ? value : "";
+/**
+ * Remove terminal control characters (ESC, BEL, C1 controls) from text that came from the network,
+ * so a release note cannot move the cursor, clear the screen or set the window title. Line breaks
+ * and tabs stay when `keepLayout` is true (release bodies); single-line fields lose them too.
+ */
+export function stripControl(value: string, keepLayout = false): string {
+  const pattern = keepLayout
+    ? /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g
+    : /[\u0000-\u001f\u007f-\u009f]/g;
+  return value.replace(pattern, "");
+}
+
+function text(value: unknown, keepLayout = false): string {
+  return typeof value === "string" ? stripControl(value, keepLayout) : "";
 }
 
 export function parseReleases(payload: unknown): ReleaseInfo[] {
@@ -61,12 +73,12 @@ export function parseReleases(payload: unknown): ReleaseInfo[] {
     if (typeof raw !== "object" || raw === null) continue;
     const r = raw as Record<string, unknown>;
     if (r.draft === true || typeof r.tag_name !== "string") continue;
-    const bare = r.tag_name.trim().replace(/^v/i, "");
+    const bare = stripControl(r.tag_name).trim().replace(/^v/i, "");
     out.push({
-      tag: r.tag_name,
+      tag: stripControl(r.tag_name),
       version: isValidVersion(bare) ? bare : null,
       name: text(r.name),
-      body: text(r.body).slice(0, MAX_BODY_CHARS),
+      body: text(r.body, true).slice(0, MAX_BODY_CHARS),
       url: text(r.html_url),
       prerelease: r.prerelease === true,
       publishedAt: text(r.published_at),
@@ -180,7 +192,7 @@ async function writeCache(dir: string, cache: CacheFile): Promise<void> {
 }
 
 function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return stripControl(err instanceof Error ? err.message : String(err));
 }
 
 export async function lookupUpstream(

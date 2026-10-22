@@ -183,3 +183,17 @@ describe("enforceFails", () => {
     }
   });
 });
+
+describe("terminal control characters in the report", () => {
+  it("strips them from the detail text that comes from a failed fetch", () =>
+    inProject(PROJECT, async (dir) => {
+      const report = await buildUpstreamReport(dir, {
+        lookup: async () => ({
+          status: "unknown",
+          npm: [{ name: "convex", ok: false, error: `bad\u001b[2Jnews` }],
+          github: [],
+        }),
+      });
+      assert.ok(!(report.rows[0].detail ?? "").includes("\u001b"));
+    }));
+});

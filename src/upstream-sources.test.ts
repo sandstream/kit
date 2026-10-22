@@ -295,3 +295,22 @@ describe("parseReleases", () => {
     assert.deepEqual(parseReleases({ message: "Not Found" }), []);
   });
 });
+
+describe("terminal control characters in remote text", () => {
+  const ESC = String.fromCharCode(27);
+
+  it("strips them from every release field and keeps line breaks in the body", () => {
+    const out = parseReleases([
+      {
+        tag_name: `v1.0.0${ESC}[2J`,
+        name: `name${ESC}]0;evil\u0007`,
+        body: `- Deprecated ${ESC}[31mred\n- second\u0085line`,
+        html_url: `https://u${ESC}[0m`,
+      },
+    ]);
+    const text = JSON.stringify(out[0]);
+    assert.ok(!text.includes("\\u001b") && !text.includes("\\u0007") && !text.includes("\\u0085"));
+    assert.equal(out[0].body.split("\n").length, 2);
+    assert.equal(out[0].tag, "v1.0.0[2J");
+  });
+});

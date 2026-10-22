@@ -4,9 +4,9 @@
  * package, the lower bound of the declared range is the estimate and the result says so. No yaml
  * dependency is added (ADR-0002): pnpm-lock.yaml is read line by line, only for the two fields needed.
  */
-import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isValidVersion } from "./update-check.js";
+import { entryExists, readRegularFileIfPresent } from "./upstream-safe-read.js";
 
 export type InstalledSource =
   | "package-lock.json"
@@ -131,24 +131,23 @@ function tryLockfiles(
   for (const folder of lockfileFolders(manifestPath)) {
     for (const lock of LOCKFILES) {
       const rel = folder === "" ? lock.file : `${folder}/${lock.file}`;
-      let text: string;
+      let text: string | null;
       try {
-        text = readFileSync(join(root, rel), "utf-8");
-      } catch {
+        text = readRegularFileIfPresent(join(root, rel));
+      } catch (err) {
+        notes.push(`${rel} ${err instanceof Error ? err.message : "could not be read"}`);
         continue;
       }
+      if (text === null) continue;
       try {
         const version = lock.read(text, name, importerFor(manifestPath, folder));
         if (version) return { hit: { version, source: lock.source }, notes };
-      } catch (err) {
-        notes.push(`${rel} could not be read (${err instanceof Error ? err.message : "error"})`);
+      } catch {
+        notes.push(`${rel} could not be parsed`);
       }
     }
-    try {
-      readFileSync(join(root, folder === "" ? "bun.lockb" : `${folder}/bun.lockb`));
+    if (entryExists(join(root, folder === "" ? "bun.lockb" : `${folder}/bun.lockb`))) {
       notes.push("bun.lockb is a binary lockfile kit does not read; save a text bun.lock");
-    } catch {
-      // no binary lockfile here
     }
   }
   return { notes };

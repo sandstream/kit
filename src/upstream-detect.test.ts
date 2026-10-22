@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -169,4 +169,43 @@ describe("loadUpstreamInputs (filesystem, no network)", () => {
         skipped: [],
       });
     }));
+});
+
+describe("untrusted repository content", () => {
+  it("does not follow a symlinked .kit.toml and does not echo a broken one", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-upstream-safe-"));
+    try {
+      writeFileSync(join(dir, "secret.txt"), "TOP-SECRET-VALUE");
+      symlinkSync(join(dir, "secret.txt"), join(dir, ".kit.toml"));
+      const linked = loadUpstreamInputs(dir);
+      assert.deepEqual(linked.kitServices, []);
+      assert.match(linked.skipped[0]?.reason ?? "", /symlink/);
+      assert.ok(!JSON.stringify(linked).includes("TOP-SECRET-VALUE"));
+
+      rmTemp(join(dir, ".kit.toml"));
+      writeFileSync(join(dir, ".kit.toml"), 'token = "TOP-SECRET-VALUE" nope');
+      writeFileSync(join(dir, "package.json"), '{ "x": "TOP-SECRET-VALUE" nope');
+      const broken = loadUpstreamInputs(dir);
+      assert.equal(broken.skipped.length, 2);
+      assert.ok(!JSON.stringify(broken).includes("TOP-SECRET-VALUE"));
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("skips a folder whose name carries terminal control characters", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-upstream-safe-"));
+    try {
+      const evil = `web${String.fromCharCode(27)}[2J`;
+      mkdirSync(join(dir, evil), { recursive: true });
+      writeFileSync(join(dir, evil, "package.json"), "{}");
+      writeFileSync(join(dir, "package.json"), "{}");
+      assert.deepEqual(
+        loadUpstreamInputs(dir).manifests.map((m) => m.path),
+        ["package.json"],
+      );
+    } finally {
+      rmTemp(dir);
+    }
+  });
 });

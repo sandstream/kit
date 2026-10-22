@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -199,4 +199,25 @@ describe("fallback to the declared range", () => {
         assert.equal(got.source, "unresolved", range);
       }
     }));
+});
+
+describe("untrusted repository content", () => {
+  it("refuses a symlinked lockfile and never echoes the file it points at", () =>
+    inTempDir({ "package.json": PKG, "outside/secret.txt": "TOP-SECRET-VALUE" }, (dir) => {
+      symlinkSync(join(dir, "outside", "secret.txt"), join(dir, "package-lock.json"));
+      const got = resolveInstalledVersion(dir, "package.json", "convex", "^1.45.0");
+      assert.equal(got.source, "declared-range");
+      assert.match(got.note ?? "", /package-lock\.json is a symlink/);
+      assert.ok(!JSON.stringify(got).includes("TOP-SECRET-VALUE"));
+    }));
+
+  it("reports a broken lockfile with a fixed message, not the parser's excerpt", () =>
+    inTempDir(
+      { "package.json": PKG, "package-lock.json": '{ "token": "TOP-SECRET-VALUE" nope' },
+      (dir) => {
+        const got = resolveInstalledVersion(dir, "package.json", "convex", "^1.45.0");
+        assert.match(got.note ?? "", /package-lock\.json could not be parsed/);
+        assert.ok(!JSON.stringify(got).includes("TOP-SECRET-VALUE"));
+      },
+    ));
 });

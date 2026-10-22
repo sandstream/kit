@@ -4,10 +4,12 @@
  * catalog (already merged with the project's `[upstream]` table). `loadUpstreamInputs` reads those
  * inputs from disk. Neither opens a network connection.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import type { UpstreamEntry } from "./upstream-catalog.js";
+import { readRegularFileIfPresent } from "./upstream-safe-read.js";
+import { stripControl } from "./upstream-sources.js";
 
 export interface ManifestDeps {
   /** Path relative to the project root, with `/` separators. */
@@ -96,6 +98,8 @@ function findPackageJsonPaths(root: string): string[] {
     }
     for (const entry of entries) {
       if (++seen > MAX_ENTRIES) return;
+      // A folder name with terminal control characters would reach the report as a manifest path.
+      if (stripControl(entry.name) !== entry.name) continue;
       const childRel = rel ? `${rel}/${entry.name}` : entry.name;
       if (entry.isFile() && entry.name === "package.json") found.push(childRel);
       else if (
@@ -113,9 +117,16 @@ function findPackageJsonPaths(root: string): string[] {
 }
 
 function readManifest(root: string, rel: string): ManifestDeps {
-  const parsed: unknown = JSON.parse(readFileSync(join(root, rel), "utf-8"));
+  const text = readRegularFileIfPresent(join(root, rel));
+  if (text === null) throw new Error("is missing");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("is not valid JSON");
+  }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error("not a JSON object");
+    throw new Error("is not a JSON object");
   }
   const dependencies: Record<string, string> = {};
   for (const field of DEP_FIELDS) {
@@ -131,12 +142,14 @@ function readManifest(root: string, rel: string): ManifestDeps {
 function readKitToml(
   root: string,
 ): Pick<UpstreamInputs, "kitServices" | "upstream"> & { skipped?: SkippedInput } {
-  let text: string;
+  let text: string | null;
   try {
-    text = readFileSync(join(root, ".kit.toml"), "utf-8");
-  } catch {
-    return { kitServices: [], upstream: undefined };
+    text = readRegularFileIfPresent(join(root, ".kit.toml"));
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "could not be read";
+    return { kitServices: [], upstream: undefined, skipped: { path: ".kit.toml", reason } };
   }
+  if (text === null) return { kitServices: [], upstream: undefined };
   try {
     const raw = parseToml(text) as Record<string, unknown>;
     const services = raw.services;
@@ -149,9 +162,12 @@ function readKitToml(
           ? (upstream as Record<string, unknown>)
           : undefined,
     };
-  } catch (err) {
-    const reason = err instanceof Error ? err.message.split("\n")[0] : "unreadable";
-    return { kitServices: [], upstream: undefined, skipped: { path: ".kit.toml", reason } };
+  } catch {
+    return {
+      kitServices: [],
+      upstream: undefined,
+      skipped: { path: ".kit.toml", reason: "is not valid TOML" },
+    };
   }
 }
 
@@ -162,7 +178,7 @@ export function loadUpstreamInputs(root: string): UpstreamInputs {
     try {
       manifests.push(readManifest(root, rel));
     } catch (err) {
-      skipped.push({ path: rel, reason: err instanceof Error ? err.message : "unreadable" });
+      skipped.push({ path: rel, reason: err instanceof Error ? err.message : "could not be read" });
     }
   }
   const { skipped: tomlSkipped, ...toml } = readKitToml(root);
