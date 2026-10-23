@@ -48,14 +48,14 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
   {
     name: "fly",
     description: "Fly.io app-secret rotation via flyctl GraphQL API",
-    version: "0.2.2",
+    version: "0.3.0",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
     package: "sandstream-kit-plugin-fly",
     kitVersion: ">=6.0.0",
     tags: ["deployment", "fly", "fly.io", "hosting", "kit-plugin", "official", "secrets"],
-    install: "npm install sandstream-kit-plugin-fly@0.2.2",
+    install: "npm install sandstream-kit-plugin-fly@0.3.0",
   },
   {
     name: "github",

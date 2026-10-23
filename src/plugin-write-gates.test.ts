@@ -44,6 +44,8 @@ const EXPECTED: Record<string, { fn: string; vendor: string; op: string }[]> = {
   fly: [
     { fn: "setAppSecrets", vendor: "fly", op: "env_set" },
     { fn: "unsetAppSecrets", vendor: "fly", op: "env_unset" },
+    { fn: "setAppSecretsV1", vendor: "fly", op: "env_set" },
+    { fn: "deleteAppSecretV1", vendor: "fly", op: "env_unset" },
   ],
   cloudflare: [
     { fn: "putWorkerSecret", vendor: "cloudflare", op: "env_set" },
