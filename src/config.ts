@@ -528,6 +528,7 @@ export interface kitConfig {
    * writing them is model work, scoring them would re-create the incentive the ledger removes.
    */
   decisions?: { require?: boolean };
+  upstream?: Record<string, unknown>;
   /** Update behavior. `check` (default true): surface a newer published kit in
    *  `kit check` + the update banner. (Set false, or KIT_NO_UPDATE_CHECK=1.)
    *  `auto` (default false, opt-in): when a newer kit is found during `kit check`,
@@ -820,6 +821,7 @@ export const KNOWN_SECTIONS = new Set([
   "supply_chain", // [supply_chain] — install-time triage settings (kit supply-chain)
   "coverage", // [coverage] — control-coverage evidence (kit coverage)
   "decisions", // [decisions] — require a per-run decision ledger (kit decisions)
+  "upstream", // [upstream.<id>] — release sources for kit upstream
 ]);
 
 export const kitConfigSchema = z
@@ -986,6 +988,7 @@ export const kitConfigSchema = z
       .passthrough()
       .optional(),
     decisions: z.object({ require: z.boolean().optional() }).passthrough().optional(),
+    upstream: z.record(z.string(), z.unknown()).optional(),
     update: z
       .object({
         check: z.boolean().optional(),

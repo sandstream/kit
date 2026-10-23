@@ -234,6 +234,7 @@ export const PURE_READ_COMMANDS = [
   "statusline",
   "supply-chain",
   "tools",
+  "upstream",
   "usage",
   "verify-provenance",
   "whoami",

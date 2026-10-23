@@ -4831,6 +4831,15 @@
       "x-kit-mcp": false,
       "x-kit-stability": "stable"
     },
+    "upstream": {
+      "kind": "command",
+      "summary": "Latest versions and release notes of the services and the Node, PHP and Python runtimes this project uses (npm + GitHub): what upgrade or security release is due (kit upstream check [--json] [--enforce]; skipped in air gap)",
+      "x-kit-accepted-flags": ["--enforce","--env","--help","--json","--non-interactive","--read-only","--readonly","--version"],
+      "x-kit-args-modeled": true,
+      "x-kit-audience": "all",
+      "x-kit-mcp": false,
+      "x-kit-stability": "experimental"
+    },
     "usage": {
       "kind": "command",
       "summary": "Tabbed report of what kit has recorded — coverage with its denominator, refusals, memory, triage — plus --prove, which runs the floor against inputs it must refuse",

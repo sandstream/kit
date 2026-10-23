@@ -32,6 +32,7 @@ import {
   CHECK_CATEGORIES,
   parseCategoryFlag,
 } from "../check-run.js";
+import { printUpstreamTable } from "../check-upstream.js";
 import { syncSecurityFindings } from "../findings-track.js";
 import { collectHints } from "../hints.js";
 import {
@@ -154,10 +155,9 @@ export async function cmdCheck(): Promise<boolean> {
         live ? runStep(label, fn) : fn();
 
       await autoInstallScanners(config, live); // self-heal missing scanners before scanning
-      // Collection + verdict live in the shared core (check-run.ts) — the SAME
-      // path the MCP `kit_check` tool and `kit review` use, so the surfaces can
-      // never disagree on what runs or what "green" means. The CLI adds its
-      // extras around it: spinners (step), PAL sync, attestation, hints.
+      // Collection and verdict live in the shared core (check-run.ts), the SAME path the MCP
+      // `kit_check` tool and `kit review` use, so the surfaces never disagree on what runs or
+      // what "green" means. The CLI adds spinners (step), PAL sync, attestation and hints.
       const run = await runCheckGate({
         config,
         enforceTests,
@@ -182,7 +182,7 @@ export async function cmdCheck(): Promise<boolean> {
       // Track security findings in the PAL ledger (cross-session reminders +
       // auto-close on a clean re-scan). Opt out with [memory] track_findings = false.
       if (config.memory?.track_findings !== false) {
-        const r = await syncSecurityFindings(securityResults);
+        const r = await syncSecurityFindings(securityResults, run.scope);
         if (!jsonMode && r && (r.added || r.closed.length || r.reopened)) {
           const parts = [`+${r.added} tracked`];
           if (r.reopened) parts.push(`${r.reopened} reopened`);
@@ -230,6 +230,7 @@ export async function cmdCheck(): Promise<boolean> {
       printWebSearchStatus(webSearchResult);
       printDeployTable(deployResults);
       printLockTable(lockResults);
+      printUpstreamTable(run.upstream);
 
       // Print hooks status if configured
       if (hookResults.length > 0) {

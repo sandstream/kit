@@ -20,6 +20,8 @@ import { cmdAirgap } from "./commands/airgap.js";
 import { cmdScan } from "./commands/scan.js";
 import { cmdVerifyProvenance } from "./commands/verify-provenance.js";
 import { cmdGhaAudit } from "./commands/gha-audit.js";
+import { cmdUpstream } from "./commands/upstream.js";
+import { HELP_CATEGORIES as CATEGORIES } from "./help-categories.js";
 import { cmdIdentity } from "./commands/identity.js";
 import { cmdPanic } from "./commands/panic.js";
 import { cmdPolicy } from "./commands/policy.js";
@@ -141,62 +143,6 @@ function cmdHelp(args: readonly string[] = []): boolean {
   // cover every top-level command; any command not listed still prints under "Other",
   // so help can never silently drop one. Subcommands are reached via `kit <cmd> --help`
   // (or `kit help <cmd>`) rather than firehosed here.
-  const CATEGORIES: [string, string[]][] = [
-    [
-      "Setup & lifecycle",
-      [
-        "init",
-        "setup",
-        "install",
-        "upgrade",
-        "clone",
-        "fix",
-        "heal",
-        "doctor",
-        "status",
-        "check",
-        "health",
-      ],
-    ],
-    [
-      "Review & quality",
-      ["review", "design", "standards", "coverage", "baseline", "analyze", "monkey-test"],
-    ],
-    ["Secrets & environments", ["secrets", "env", "login"]],
-    [
-      "Security & supply chain",
-      [
-        "scan",
-        "security",
-        "triage",
-        "guard",
-        "supply-chain",
-        "sbom",
-        "gha-audit",
-        "agent-audit",
-        "verify-provenance",
-        "ingest",
-        "sentinel",
-      ],
-    ],
-    ["Agents & memory", ["memory", "agent-config", "mcp", "skills", "context", "hooks"]],
-    [
-      "Governance & access",
-      [
-        "governance",
-        "audit",
-        "decisions",
-        "auth",
-        "team",
-        "escalate",
-        "identity",
-        "panic",
-        "policy",
-      ],
-    ],
-    ["Packages & services", ["pkg", "add", "plugin", "create-plugin", "run", "open", "ci"]],
-    ["Meta", ["whoami", "version", "completions", "help"]],
-  ];
 
   // top-level keys have no space; subcommand keys ("memory index") do.
   const topLevel = Object.keys(COMMAND_HELP).filter((k) => !k.includes(" "));
@@ -647,6 +593,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     handler: cmdGhaAudit,
     stability: "stable",
     help: "CI hardening lint — unpinned actions/images + pwn-request/remote-include (GitHub Actions, GitLab CI, Bitbucket Pipelines)",
+  },
+  upstream: {
+    handler: cmdUpstream,
+    stability: "experimental",
+    help: "Latest versions and release notes of the services and the Node, PHP and Python runtimes this project uses (npm + GitHub): what upgrade or security release is due (kit upstream check [--json] [--enforce]; skipped in air gap)",
   },
   sbom: {
     handler: cmdSbom,

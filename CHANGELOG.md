@@ -2,6 +2,31 @@
 
 ### Added
 
+- **`kit upstream check` tells you what changed upstream.** For the services a project uses
+  (Convex, Stripe and WorkOS are built in, `[upstream.<id>]` in `.kit.toml` adds or overrides
+  one), it reads the latest npm version and the GitHub release notes, compares them with the
+  installed version from `package-lock.json`, `bun.lock` or `pnpm-lock.yaml` (the declared range
+  is the fallback, and the report says so), and prints one verdict per package: `current`,
+  `upgrade available`, `upgrade recommended (deprecation)` or `major, read notes`. The notes
+  check is a keyword match (`breaking`, `deprecat`, `migrat`, `removed`) and does not prove that
+  code must change. It is skipped in air-gap and read-only mode, a fetch that fails is
+  `unknown` and never `current`, and `--enforce` exits 1 only for a major, a deprecation or a
+  runtime security release. The same command now checks the interpreters: Node.js, PHP and
+  Python are read from `.nvmrc`, `.node-version`, `.tool-versions`, `mise.toml`, `package.json`,
+  `composer.json` and `pyproject.toml`, the installed version comes from running the binary in
+  the project folder, and the latest patch of that release line comes from the GitHub releases
+  of `nodejs/node` and `php/php-src` (CVE and "security release" lines are quoted) or the tags of
+  `python/cpython`, which publishes no releases and so carries no notes. The version probe runs the
+  interpreter from a neutral folder, never from the repository, so a repository you do not trust
+  cannot steer a version-manager shim; `KIT_UPSTREAM_PROJECT_PINS=1` runs it in the project so
+  its mise or asdf pin applies. A line that is no
+  longer in the fetched window is reported as `unknown`, not as safe.
+  `kit check --category upstream` runs the same check as an opt-in, informational dimension that
+  never changes the verdict. Release text and repository files are treated as untrusted: kit
+  refuses symlinked lockfiles, never quotes parser errors, and strips terminal control
+  characters. Known limit: Convex publishes no GitHub releases, so for Convex only the version
+  difference is reported.
+
 - **`kit monkey-test init --install` sets up the browser runner.** It triages
   `@playwright/test` at an exact pinned version, installs it as a devDependency with
   `--ignore-scripts` through the project's package manager, and downloads Chromium. A
@@ -10,6 +35,13 @@
   file of the package with the public registry tarball, and it refuses to install when the
   repo can run its own code during install (pnpm hook files, yarn plugins or `yarnPath`, a
   `packageManager` value that is not a plain `name@version`).
+
+### Fixed
+
+- **A narrowed `kit check` no longer closes your tracked security findings.** A run such as
+  `kit check --category tools` never looks at security, but it passed an empty security list to
+  the findings ledger, which then auto-closed every open security finding of the project. The
+  ledger is now left alone unless the security dimension ran.
 
 ## [7.0.1] - 2026-10-19
 

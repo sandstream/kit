@@ -52,10 +52,17 @@ export function advisoryFindings(results: SecurityCheckResult[]): SyncFinding[] 
  * Sync security findings into the PAL ledger (track + auto-close cleared ones).
  * Fail-open: returns the sync counts, or null if the store is unavailable —
  * tracking must never break the calling command.
+ *
+ * `scope` is the dimensions the run actually covered (null for a full run). A run that skipped the
+ * security dimension has an empty security list that says nothing about the open findings, so it
+ * must not reconcile: reconciling would close every tracked finding. It returns null, like an
+ * unavailable store.
  */
 export async function syncSecurityFindings(
   results: SecurityCheckResult[],
+  scope: readonly string[] | null = null,
 ): Promise<{ added: number; reopened: number; closed: string[] } | null> {
+  if (scope !== null && !scope.includes("security")) return null;
   try {
     const { openMemoryDb } = await import("./memory/db.js");
     const { palSyncFindings } = await import("./memory/pal.js");

@@ -251,6 +251,7 @@ Complete reference: [`docs/COMMANDS.md`](./docs/COMMANDS.md). The shortlist:
 - `kit init`: Auto-detect project stack → generate `.kit.toml`
 - `kit setup`: Full pipeline: install → hooks → login → secrets → check
 - `kit check`: Status of tools, services, secrets, hooks, deploy env, security, tests
+- `kit upstream check`: Latest npm version and GitHub release notes of the services a project uses, and the Node, PHP and Python runtimes against their latest patch (a security release is flagged with its CVE lines) (Convex, Stripe, WorkOS built in, `[upstream.<id>]` adds more), against the installed version from the lockfile. Keyword match on notes, skipped in air gap, `unknown` and never `current` when a fetch fails. Also `kit check --category upstream` (opt-in, informational)
 - `kit fix`: Auto-remediate gaps (tools, gitignore, hooks, .env.template, declared deploy env) and print HITL blocks for auth / DSN setup
 - `kit review` / `kit heal`: One-gate repo audit (check + design + standards + ADR + skill discipline); bounded self-heal loop
 - `kit adr {check,list,freeze}`: Turn an Architecture Decision Record into a deterministic gate — enforce a `kit-enforce` block (`forbid_pattern` / `require_pattern` / `forbid_import`, incl. transitive and across npm package boundaries) cited back to the ADR. Zero-LLM (prose is never interpreted)
