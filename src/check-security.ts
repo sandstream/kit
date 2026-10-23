@@ -14,6 +14,7 @@ import { depsHashFor, loadGuardDogCache, saveGuardDogCache } from "./guarddog-ca
 import { buildSemgrepArgs, semgrepConfig, isAirGap, isLocalSemgrepConfig } from "./scanners.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
 import { hasOsvManifest } from "./osv-manifests.js";
+import { unpinnedRequirements } from "./pinned-requirements.js";
 import { TRIAGE_MAX_AGE_DAYS } from "./commands/triage.js";
 import {
   ensureBumblebee,
@@ -1160,59 +1161,53 @@ function workspaceMemberNames(cwd: string): Set<string> {
 }
 
 /**
- * Check if dependencies use pinned versions
+ * Check if dependencies use pinned versions. Says which manifests it read: with none, or
+ * an unparseable package.json, there is nothing to vouch for, so it never claims "pinned".
  */
-async function checkPinnedVersions(root: string): Promise<SecurityCheckResult> {
+export async function checkPinnedVersions(root: string): Promise<SecurityCheckResult> {
   const unpinned: string[] = [];
+  const checked: string[] = [];
+  const result = (status: "pass" | "warn" | "skip", detail: string): SecurityCheckResult => ({
+    category: "supply-chain",
+    name: "pinned versions",
+    status,
+    detail,
+    ...(status === "warn" ? { severity: "medium" as const } : {}),
+  });
 
-  // Check package.json
-  try {
-    const packageJsonContent = await readFile(resolve(root, "package.json"), "utf-8");
-    const packageJson = JSON.parse(packageJsonContent);
+  const packageJsonContent = await readFile(resolve(root, "package.json"), "utf-8").catch(
+    () => undefined,
+  );
+  if (packageJsonContent !== undefined) {
+    let packageJson: {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    try {
+      packageJson = JSON.parse(packageJsonContent);
+    } catch {
+      return result("warn", "package.json could not be parsed — its pins were NOT checked");
+    }
     const members = workspaceMemberNames(root);
     const isMember = (name: string) => members.has(name);
-
     unpinned.push(
       ...unpinnedNodeDeps(packageJson.dependencies, isMember),
       ...unpinnedNodeDeps(packageJson.devDependencies, isMember),
     );
-  } catch {
-    // No package.json or parse error
+    checked.push("package.json");
   }
 
-  // Check requirements.txt
-  try {
-    const requirementsContent = await readFile(resolve(root, "requirements.txt"), "utf-8");
-
-    for (const line of requirementsContent.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-
-      // Check for range specifiers: >=, >, ~=, !=
-      if (/[>~!]=?/.test(trimmed)) {
-        unpinned.push(trimmed.split(/\s+/)[0]);
-      }
-    }
-  } catch {
-    // No requirements.txt or read error
+  const requirements = await readFile(resolve(root, "requirements.txt"), "utf-8").catch(
+    () => undefined,
+  );
+  if (requirements !== undefined) {
+    unpinned.push(...unpinnedRequirements(requirements));
+    checked.push("requirements.txt");
   }
 
-  if (unpinned.length > 0) {
-    return {
-      category: "supply-chain",
-      name: "pinned versions",
-      status: "warn",
-      detail: `${unpinned.length} unpinned dependencies`,
-      severity: "medium",
-    };
-  }
-
-  return {
-    category: "supply-chain",
-    name: "pinned versions",
-    status: "pass",
-    detail: "all dependencies pinned",
-  };
+  if (unpinned.length > 0) return result("warn", `${unpinned.length} unpinned dependencies`);
+  if (checked.length === 0) return result("skip", "no package.json or requirements.txt to check");
+  return result("pass", `all dependencies pinned (${checked.join(", ")})`);
 }
 
 /**
