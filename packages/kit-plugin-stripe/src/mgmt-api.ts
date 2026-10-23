@@ -13,7 +13,11 @@
  */
 
 const DEFAULT_BASE_URL = "https://api.stripe.com";
-const API_VERSION = "2024-12-18.acacia";
+// Moved from 2024-12-18.acacia on 2026-10-23 after checking the basil, clover, dahlia and
+// endive changelogs: none changes a field this plugin reads (webhook endpoint id/url/status/
+// enabled_events/secret; account id/charges_enabled/payouts_enabled/details_submitted/
+// country/default_currency).
+export const API_VERSION = "2026-09-30.endive";
 
 // Stripe API errors (and the raw HTTP body) can echo back caller-supplied or
 // provider-side credentials verbatim. Mirrors the redaction the vercel plugin
@@ -144,6 +148,8 @@ export interface CreateWebhookEndpointParams {
   enabled_events: string[];
   description?: string;
   metadata?: Record<string, string>;
+  /** Stripe version the endpoint's events are generated in; defaults to the pinned API_VERSION. */
+  api_version?: string;
 }
 
 /**
@@ -197,6 +203,10 @@ export async function createWebhookEndpoint(
   assertModeForUrl(client, params.url, { force: params.force });
   const body = new URLSearchParams();
   body.set("url", params.url);
+  // Without this, events delivered to the endpoint use the ACCOUNT's default Stripe version,
+  // not the one this plugin pins: Stripe's reference, "Events sent to this endpoint will be
+  // generated with this Stripe Version instead of your account's default Stripe Version."
+  body.set("api_version", params.api_version ?? API_VERSION);
   for (const evt of params.enabled_events) {
     body.append("enabled_events[]", evt);
   }

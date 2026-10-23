@@ -123,14 +123,14 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
     name: "stripe",
     description:
       "Stripe Management API surface for kit (webhook endpoint rotation + account introspection)",
-    version: "0.2.2",
+    version: "0.3.0",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
     package: "sandstream-kit-plugin-stripe",
     kitVersion: ">=6.0.0",
     tags: ["kit-plugin", "official", "payments", "stripe", "webhooks"],
-    install: "npm install sandstream-kit-plugin-stripe@0.2.2",
+    install: "npm install sandstream-kit-plugin-stripe@0.3.0",
   },
   {
     name: "supabase",

@@ -1,6 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { makeClient, detectMode, listWebhookEndpoints, assertModeForUrl } from "./mgmt-api.js";
+import {
+  API_VERSION,
+  assertModeForUrl,
+  createWebhookEndpoint,
+  detectMode,
+  listWebhookEndpoints,
+  makeClient,
+} from "./mgmt-api.js";
 
 describe("makeClient", () => {
   it("throws when STRIPE_SECRET_KEY is missing", () => {
@@ -24,7 +31,7 @@ describe("makeClient", () => {
   it("pins the Stripe API version + User-Agent", () => {
     const client = makeClient({ secretKey: "sk_test_x" });
     const h = client.headers as Record<string, string>;
-    assert.equal(h["Stripe-Version"], "2024-12-18.acacia");
+    assert.equal(h["Stripe-Version"], API_VERSION);
     assert.equal(h["User-Agent"], "sandstream-kit-plugin-stripe");
     assert.equal(client.mode, "test");
   });
@@ -96,6 +103,33 @@ describe("listWebhookEndpoints (network error path)", () => {
           return true;
         },
       );
+    } finally {
+      globalThis.fetch = priorFetch;
+    }
+  });
+});
+
+describe("createWebhookEndpoint", () => {
+  it("pins the endpoint's event version to the plugin's API version", async () => {
+    const priorFetch = globalThis.fetch;
+    let sent = "";
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      sent = String(init?.body ?? "");
+      return new Response(JSON.stringify({ id: "we_1", secret: "whsec_x" }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const client = makeClient({ secretKey: "sk_test_x", baseUrl: "https://api.example.test" });
+      await createWebhookEndpoint(client, {
+        url: "https://example.com/hook",
+        enabled_events: ["charge.succeeded"],
+      });
+      assert.equal(new URLSearchParams(sent).get("api_version"), API_VERSION);
+      await createWebhookEndpoint(client, {
+        url: "https://example.com/hook",
+        enabled_events: ["charge.succeeded"],
+        api_version: "2025-03-31.basil",
+      });
+      assert.equal(new URLSearchParams(sent).get("api_version"), "2025-03-31.basil");
     } finally {
       globalThis.fetch = priorFetch;
     }
