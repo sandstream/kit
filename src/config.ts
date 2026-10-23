@@ -472,6 +472,8 @@ export interface kitConfig {
      *  registered scanners on (backwards-compatible); `kit scan --list-delegates`
      *  shows on/off. kit delegates DETECTION here, never its verdict. */
     delegates?: string[];
+    images?: string[]; // container images `kit scan` also scans (osv-scanner + trivy)
+    images_from_dockerfiles?: boolean; // also scan the images of the Dockerfiles' FROM lines
     /**
      * Client-exposed env names (VITE_*, NEXT_PUBLIC_*, …) that are secret-shaped by name but
      * genuinely safe to publish, each mapped to the REASON. The reason is required: an allowlist

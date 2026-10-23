@@ -27,6 +27,7 @@ import {
   type ScannerInstall,
   type ScanOutcome,
 } from "./bumblebee.js";
+import { describeTrivyFsResult } from "./check-trivy-text.js";
 
 const exec = promisify(execFile);
 
@@ -1810,7 +1811,7 @@ async function checkTrivy(root: string): Promise<SecurityCheckResult> {
       category: "supply-chain",
       name: "trivy container scan",
       status: "warn",
-      detail: "trivy not installed -container CVEs undetected",
+      detail: "trivy not installed, so vulnerabilities in the project files are undetected",
       severity: "medium",
       suggestion: "mise use aqua:aquasecurity/trivy  (or: brew install trivy)",
       // A Dockerfile is present but trivy is absent → container CVEs UNSCANNED: a
@@ -1842,20 +1843,10 @@ async function checkTrivy(root: string): Promise<SecurityCheckResult> {
       (r: { Vulnerabilities?: unknown[] }) => r.Vulnerabilities ?? [],
     );
 
-    if (vulns.length === 0) {
-      return {
-        category: "supply-chain",
-        name: "trivy container scan",
-        status: "pass",
-        detail: "no high/critical container vulnerabilities",
-      };
-    }
     return {
       category: "supply-chain",
       name: "trivy container scan",
-      status: "fail",
-      detail: `${vulns.length} high/critical vulnerability(ies) in container`,
-      severity: "high",
+      ...describeTrivyFsResult(vulns.length),
     };
   } catch {
     return {

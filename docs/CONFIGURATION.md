@@ -25,7 +25,7 @@ kit accepts **25 sections**.
 | [`[mcp]`](#mcp) | Declared MCP-server connections for this project. | [docs](MCP_TOOLS_GUIDE.md) |
 | [`[memory]`](#memory) | Memory capture and PAL behaviour, including this project's sensitivity class. | `kit memory` |
 | [`[policy]`](#policy) | Which vendor writes an agent may perform, pre-approved by operation. | `kit governance` |
-| [`[scan]`](#scan) | Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, and the client-exposed env allowlist. | `kit scan --list-delegates` |
+| [`[scan]`](#scan) | Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles) and the client-exposed env allowlist. | `kit scan --list-delegates` |
 | [`[secrets]`](#secrets) | Which vault backs this project's secrets, and the key names it needs. | `kit secrets` |
 | [`[services]`](#services) | External CLIs this project authenticates against, with the login and check command for each. | `kit login` |
 | [`[setup]`](#setup) | Project bootstrap commands — install dependencies, migrate, verify. | `kit bootstrap` |
@@ -213,7 +213,7 @@ Set up with `kit governance`. Fuller treatment: [`docs/POLICY.md`](POLICY.md).
 
 ## scan
 
-Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, and the client-exposed env allowlist.
+Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles) and the client-exposed env allowlist.
 
 **What it buys.** The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it.
 
@@ -221,6 +221,7 @@ Scanner settings: which delegates run, the GuardDog toggle, a vault project for 
 [scan]
 guarddog = true
 delegates = ["osv-scanner", "trivy"]
+images = ["ghcr.io/acme/api:1.4.2"]
 ```
 
 Set up with `kit scan --list-delegates`.

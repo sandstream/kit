@@ -96,13 +96,13 @@ export interface ScannerDef {
   detect?: string[];
   /** Cannot run with no network (needs a hosted backend) — dropped in air-gap mode. */
   cloudOnly?: boolean;
+  timeoutMs?: number; // longer than the default, for a run that is slow by nature (an image pull)
   /** Extra args/env applied in air-gap mode so the scanner runs against a local DB. */
   offline?: { args?: string[]; env?: Record<string, string> };
   /**
-   * Exit-code gate: the tool has no stable findings-JSON to parse, so its own exit
-   * status IS the verdict — exit 0 = clean, non-zero = one high-severity policy
-   * violation. (Socket: `socket ci` uploads manifests + fails on policy; `format`
-   * is unused because the exitGate branch short-circuits before ingest.)
+   * Exit-code gate: the tool has no stable findings-JSON to parse, so its own exit status IS the
+   * verdict: 0 = clean, non-zero = one high-severity policy violation. (Socket: `socket ci`
+   * uploads manifests and fails on policy; `format` is unused, the branch skips ingest.)
    */
   exitGate?: boolean;
 }
@@ -410,7 +410,7 @@ export function scanHealthGate(runs: ScannerRun[], opts: ScanGateOptions = {}): 
 
 export interface ScanDeps {
   resolve(bin: string): Promise<string | null>;
-  run(bin: string, args: string[]): Promise<{ ok: boolean; stdout: string }>;
+  run(bin: string, args: string[], timeoutMs?: number): Promise<{ ok: boolean; stdout: string }>;
   hasEnv(name: string): boolean;
   detect(markers: string[]): boolean;
 }
@@ -436,7 +436,7 @@ export async function runScanners(
       runs.push({ id: s.id, status: "no-token", findings: 0 });
       continue;
     }
-    const res = await deps.run(bin, s.args);
+    const res = await deps.run(bin, s.args, s.timeoutMs);
     // Exit-code-gated scanners (e.g. Socket): no parseable findings — the tool's
     // own exit status IS the verdict. Never false-green on a crash: any non-zero
     // exit becomes one high-severity policy-violation finding.
