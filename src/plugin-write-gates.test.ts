@@ -60,6 +60,8 @@ const EXPECTED: Record<string, { fn: string; vendor: string; op: string }[]> = {
   stripe: [
     { fn: "createWebhookEndpoint", vendor: "stripe", op: "webhook_create" },
     { fn: "deleteWebhookEndpoint", vendor: "stripe", op: "webhook_delete" },
+    { fn: "createEventDestination", vendor: "stripe", op: "webhook_create" },
+    { fn: "deleteEventDestination", vendor: "stripe", op: "webhook_delete" },
   ],
   sentry: [
     { fn: "updateIssue", vendor: "sentry", op: "resolve_issue" },

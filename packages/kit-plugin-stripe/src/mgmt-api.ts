@@ -5,6 +5,8 @@
  * keys (those live in the dashboard). The automatable surface this plugin
  * targets:
  *   - webhook_endpoints   — create/list/delete; secret returned at creation
+ *   - event destinations  — API v2 (/v2/core/event_destinations), webhook type:
+ *                           create/list/delete; signing secret returned at creation only
  *   - account             — introspection (id, charges_enabled, livemode)
  *
  * Auth: `STRIPE_SECRET_KEY` env var (sk_test_* in test mode, sk_live_* in
@@ -260,6 +262,112 @@ export async function deleteWebhookEndpoint(
   if (!res.ok && res.status !== 404) {
     throw new Error(
       `DELETE webhook_endpoint returned ${res.status}: ${await safeText(res, client)}`,
+    );
+  }
+}
+
+// ── Event destinations (API v2) ─────────────────────────────────────────────────────────────
+//
+// Stripe's successor surface for event delivery (docs.stripe.com/api/v2/core/event_destinations,
+// 2026-10-23): JSON bodies, thin or snapshot payloads, and webhook, EventBridge or Event Grid
+// transports. This plugin manages the webhook transport, the same job as webhook_endpoints, so it
+// gates on the same webhook_create / webhook_delete ops.
+
+export interface EventDestination {
+  id: string;
+  name: string;
+  type: "webhook_endpoint" | "amazon_eventbridge" | "azure_event_grid";
+  status: "enabled" | "disabled";
+  enabled_events: string[];
+  event_payload: "thin" | "snapshot";
+  snapshot_api_version?: string | null;
+  livemode: boolean;
+  webhook_endpoint?: { url?: string | null; signing_secret?: string | null } | null;
+}
+
+export interface CreateEventDestinationParams {
+  name: string;
+  url: string;
+  enabled_events: string[];
+  /** Defaults to "thin", which Stripe describes as less coupled to API-versioned objects. */
+  event_payload?: "thin" | "snapshot";
+  /** Snapshot payloads only; defaults to the pinned API_VERSION. Never sent for thin. */
+  snapshot_api_version?: string;
+  description?: string;
+  force?: boolean;
+}
+
+const v2Headers = (client: MgmtClient) => ({
+  ...(client.headers as Record<string, string>),
+  "Content-Type": "application/json",
+});
+
+export async function createEventDestination(
+  client: MgmtClient,
+  params: CreateEventDestinationParams,
+): Promise<EventDestination> {
+  assertNotReadOnly("stripe/createEventDestination");
+  assertPolicyAllows("stripe", "webhook_create");
+  assertModeForUrl(client, params.url, { force: params.force });
+  const payload = params.event_payload ?? "thin";
+  const res = await fetch(`${client.baseUrl}/v2/core/event_destinations`, {
+    method: "POST",
+    headers: v2Headers(client),
+    body: JSON.stringify({
+      name: params.name,
+      ...(params.description ? { description: params.description } : {}),
+      type: "webhook_endpoint",
+      webhook_endpoint: { url: params.url },
+      enabled_events: params.enabled_events,
+      event_payload: payload,
+      ...(payload === "snapshot"
+        ? { snapshot_api_version: params.snapshot_api_version ?? API_VERSION }
+        : {}),
+      // Stripe returns the signing secret ONLY here, and only when asked: "Public API clients
+      // cannot retrieve it later." Without this the destination works and its secret is lost.
+      include: ["webhook_endpoint.signing_secret"],
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `POST /v2/core/event_destinations returned ${res.status}: ${await safeText(res, client)}`,
+    );
+  }
+  const created = (await res.json()) as EventDestination;
+  if (!created.webhook_endpoint?.signing_secret) {
+    throw new Error(
+      `event destination ${created.id} was created but Stripe returned no signing secret; ` +
+        "it cannot be retrieved later, so delete and recreate it",
+    );
+  }
+  return created;
+}
+
+export async function listEventDestinations(client: MgmtClient): Promise<EventDestination[]> {
+  const res = await fetch(`${client.baseUrl}/v2/core/event_destinations`, {
+    headers: v2Headers(client),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `GET /v2/core/event_destinations returned ${res.status}: ${await safeText(res, client)}`,
+    );
+  }
+  const body = (await res.json()) as { data?: EventDestination[] };
+  return body.data ?? [];
+}
+
+export async function deleteEventDestination(client: MgmtClient, id: string): Promise<void> {
+  assertNotReadOnly("stripe/deleteEventDestination");
+  assertPolicyAllows("stripe", "webhook_delete");
+  const res = await fetch(
+    `${client.baseUrl}/v2/core/event_destinations/${encodeURIComponent(id)}`,
+    { method: "DELETE", headers: v2Headers(client), signal: AbortSignal.timeout(10_000) },
+  );
+  if (!res.ok && res.status !== 404) {
+    throw new Error(
+      `DELETE event destination returned ${res.status}: ${await safeText(res, client)}`,
     );
   }
 }
