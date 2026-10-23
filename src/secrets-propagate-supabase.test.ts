@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { flagsForCommand } from "./flag-surface.js";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   ALL_TARGETS,
@@ -61,6 +62,27 @@ describe("quoteEnvValue writes one value so an env file reads back exactly it", 
 
   it("refuses a value with a NUL byte, which no env file can carry", () => {
     assert.throws(() => quoteEnvValue("a\u0000b"), /NUL/);
+  });
+});
+
+describe("propagationOptionsFromArgs flags", () => {
+  it("every platform flag it reads is accepted by kit secrets", () => {
+    const flags = [
+      "--target-env",
+      "--vercel-project",
+      "--vercel-team",
+      "--vercel-scope",
+      "--supabase-project",
+      "--fly-app",
+      "--cf-worker",
+      "--railway-service",
+      "--aws-region",
+      "--github-repo",
+    ];
+    const accepted = flagsForCommand("secrets") ?? [];
+    for (const flag of flags) {
+      assert.ok(accepted.includes(flag), `${flag} is read by propagate but refused by kit secrets`);
+    }
   });
 });
 

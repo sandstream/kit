@@ -231,20 +231,21 @@ async function propagateAwsSsm(
 /** The platform flags shared by `kit secrets propagate` and `kit secrets rotate --propagate`. */
 export function propagationOptionsFromArgs(args: readonly string[]): PropagationOptions {
   const o: PropagationOptions = {};
-  const take = <K extends keyof PropagationOptions>(flag: string, key: K) => {
-    const v = flagValue(args, flag);
+  // Each flag is named in a literal flagValue call: the flag-surface scan finds flags there, and a
+  // helper that takes the flag as an argument hides it, so `kit secrets` would refuse it.
+  const set = <K extends keyof PropagationOptions>(key: K, v: string | undefined) => {
     if (v !== undefined) o[key] = v as PropagationOptions[K];
   };
-  take("--target-env", "env");
-  take("--vercel-project", "vercelProject");
-  take("--vercel-team", "vercelTeamId");
-  take("--vercel-scope", "vercelScope");
-  take("--supabase-project", "supabaseProject");
-  take("--fly-app", "flyApp");
-  take("--cf-worker", "cfWorker");
-  take("--railway-service", "railwayService");
-  take("--aws-region", "awsRegion");
-  take("--github-repo", "githubRepo");
+  set("env", flagValue(args, "--target-env"));
+  set("vercelProject", flagValue(args, "--vercel-project"));
+  set("vercelTeamId", flagValue(args, "--vercel-team"));
+  set("vercelScope", flagValue(args, "--vercel-scope"));
+  set("supabaseProject", flagValue(args, "--supabase-project"));
+  set("flyApp", flagValue(args, "--fly-app"));
+  set("cfWorker", flagValue(args, "--cf-worker"));
+  set("railwayService", flagValue(args, "--railway-service"));
+  set("awsRegion", flagValue(args, "--aws-region"));
+  set("githubRepo", flagValue(args, "--github-repo"));
   return o;
 }
 
