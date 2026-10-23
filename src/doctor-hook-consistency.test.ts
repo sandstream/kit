@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { runDoctor } from "./doctor.js";
 import { checkGitHookFloor } from "./check-security.js";
@@ -12,6 +12,10 @@ describe("doctor and security agree about hook wrapper health (BH-05)", () => {
     const home = mkdtempSync(join(tmpdir(), "kit-wrapper-home-"));
     const repo = join(home, "repo");
     const previousHome = process.env.HOME;
+    // Windows reads the home folder from USERPROFILE, not HOME. Setting only HOME made this test read
+    // the real profile there, where another test may have left a wrapper behind (it passed in a full run
+    // and failed once the suite was split into shards).
+    const previousProfile = process.env.USERPROFILE;
     const previousCwd = process.cwd();
     try {
       mkdirSync(join(home, ".kit", "bin"), { recursive: true });
@@ -31,6 +35,8 @@ describe("doctor and security agree about hook wrapper health (BH-05)", () => {
         { mode: 0o755 },
       );
       process.env.HOME = home;
+      process.env.USERPROFILE = home;
+      assert.equal(homedir(), home, "the test must own the home folder it asserts about");
       process.chdir(repo);
 
       const security = await checkGitHookFloor(repo);
@@ -45,6 +51,8 @@ describe("doctor and security agree about hook wrapper health (BH-05)", () => {
       process.chdir(previousCwd);
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
+      if (previousProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousProfile;
       rmTemp(home);
     }
   });
