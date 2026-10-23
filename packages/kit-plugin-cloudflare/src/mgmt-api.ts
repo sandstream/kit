@@ -3,7 +3,11 @@
  *
  * Surface kit uses:
  *   - Workers script secrets   PUT/GET/DELETE /accounts/{acct}/workers/scripts/{name}/secrets
- *   - API tokens (read + revoke)              /user/tokens, /user/tokens/{id}
+ *   - User API tokens (read + revoke)         /user/tokens, /user/tokens/{id}
+ *   - Account API tokens (read + revoke)      /accounts/{acct}/tokens, /accounts/{acct}/tokens/{id}
+ *     Account-owned tokens are separate from user tokens (developers.cloudflare.com, 2026-10-23):
+ *     "durable integrations that can act as service principals". A sweep that lists only
+ *     /user/tokens never sees them.
  *
  * Auth: `CLOUDFLARE_API_TOKEN` env var with the relevant scopes
  *       (Workers Scripts:Edit, User API Tokens:Edit).
@@ -235,6 +239,21 @@ export async function revokeApiToken(client: MgmtClient, tokenId: string): Promi
   assertNotReadOnly("cloudflare/revokeApiToken");
   assertPolicyAllows("cloudflare", "api_token_revoke");
   await cfFetch<unknown>(client, `/user/tokens/${encodeURIComponent(tokenId)}`, {
+    method: "DELETE",
+  });
+}
+
+/** Account-owned API tokens: invisible to `listApiTokens`, which reads the user's tokens. */
+export async function listAccountApiTokens(client: MgmtClient): Promise<ApiTokenSummary[]> {
+  const accountId = requireAccountId(client);
+  return cfFetch<ApiTokenSummary[]>(client, `/accounts/${accountId}/tokens`);
+}
+
+export async function revokeAccountApiToken(client: MgmtClient, tokenId: string): Promise<void> {
+  assertNotReadOnly("cloudflare/revokeAccountApiToken");
+  assertPolicyAllows("cloudflare", "api_token_revoke");
+  const accountId = requireAccountId(client);
+  await cfFetch<unknown>(client, `/accounts/${accountId}/tokens/${encodeURIComponent(tokenId)}`, {
     method: "DELETE",
   });
 }

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- **New: account-owned API tokens.** `listAccountApiTokens` and `revokeAccountApiToken` (`/accounts/{account_id}/tokens`). Account tokens are separate from user tokens, so a rotation sweep built on `listApiTokens` (`/user/tokens`) never saw them. Revoking is gated by the same `api_token_revoke` op.
+- Previous package manifest version: `0.2.2`.
+
 ## 0.2.2
 
 - Redacts the client token and recognized credential patterns from HTTP and Cloudflare API error details.

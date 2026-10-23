@@ -1,0 +1,57 @@
+name: Upstream watch
+
+# Weekly: has any vendor API a plugin calls, or any scanner kit delegates to, moved or died
+# since its last reviewed baseline (contracts/upstream-watch.json)? Opens or updates ONE
+# issue labelled upstream-drift, and closes it when everything is back to unchanged.
+# Never part of a PR verdict: the answer depends on other people's release schedules.
+
+on:
+  schedule:
+    - cron: "23 5 * * 1" # Mondays 05:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      - name: Observe upstreams
+        id: watch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/upstream-watch.mjs > upstream-watch.md
+      - name: Open, update or close the upstream-drift issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ATTENTION: ${{ steps.watch.outputs.attention }}
+        run: |
+          label=upstream-drift
+          gh label create "$label" --color B60205 \
+            --description "An upstream a plugin or scanner depends on moved or died" --force
+          open=$(gh issue list --label "$label" --state open --json number --jq '.[0].number // empty')
+          title="Upstream watch: ${ATTENTION} upstream(s) need a look"
+          if [ "${ATTENTION:-0}" -gt 0 ]; then
+            if [ -n "$open" ]; then
+              gh issue edit "$open" --title "$title" --body-file upstream-watch.md
+              gh issue comment "$open" --body "Re-observed $(date -u +%F): ${ATTENTION} need a look. Report above is current."
+            else
+              gh issue create --title "$title" --label "$label" --body-file upstream-watch.md
+            fi
+          elif [ -n "$open" ]; then
+            gh issue close "$open" --comment "All watched upstreams unchanged as of $(date -u +%F)."
+          fi

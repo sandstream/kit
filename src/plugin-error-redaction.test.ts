@@ -102,7 +102,7 @@ const paths: ErrorPath[] = [
     operation: "listProjects",
     config: { baseUrl, token: clientToken, teamId: "" },
     args: [],
-    prefix: "/v9/projects returned 403: ",
+    prefix: "/v10/projects returned 403: ",
   },
   {
     plugin: "github",

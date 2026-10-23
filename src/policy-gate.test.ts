@@ -553,11 +553,10 @@ describe("the deny list that crosses into the plugins", () => {
     const denied = policyDenyList({
       agent_writes: { supabase: ["scoped_key_mint"], sentry: ["resolve_issue"] },
     });
-    assert.deepEqual(denied, [
-      "supabase:jwt_secret_roll",
-      "supabase:scoped_key_revoke",
-      "sentry:create_release",
-    ]);
+    const otherSupabase = [...knownPolicyOps()].filter(
+      (o) => o.startsWith("supabase:") && o !== "supabase:scoped_key_mint",
+    );
+    assert.deepEqual(denied, [...otherSupabase, "sentry:create_release"]);
     // vercel is not declared at all — unconfigured, no opinion, so none of its ops appear.
     assert.ok(!denied.some((d) => d.startsWith("vercel:")));
   });
@@ -605,7 +604,7 @@ describe("the deny list that crosses into the plugins", () => {
       );
       assert.equal(
         process.env[POLICY_DENY_ENV],
-        "supabase:jwt_secret_roll,supabase:scoped_key_revoke",
+        "supabase:jwt_secret_roll,supabase:scoped_key_revoke,supabase:signing_key_rotate,supabase:signing_key_revoke",
         "the decisions must travel",
       );
     } finally {

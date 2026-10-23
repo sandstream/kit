@@ -13,6 +13,9 @@ export {
   rollJwtSecret,
   mintScopedKey,
   revokeScopedKey,
+  listSigningKeys,
+  rotateSigningKey,
+  revokeSigningKey,
   type MgmtClient,
   type MgmtClientConfig,
   type ProjectSummary,
@@ -20,4 +23,8 @@ export {
   type ProjectKeyMode,
   type RotateMode,
   type RotateResult,
+  type SigningKey,
+  type SigningKeyAlgorithm,
+  type SigningKeyRotation,
+  type SigningKeyStatus,
 } from "./mgmt-api.js";

@@ -40,19 +40,28 @@ const EXPECTED: Record<string, { fn: string; vendor: string; op: string }[]> = {
   github: [
     { fn: "createOrUpdateRepoSecret", vendor: "github", op: "env_set" },
     { fn: "deleteRepoSecret", vendor: "github", op: "env_unset" },
+    { fn: "createOrUpdateEnvironmentSecret", vendor: "github", op: "env_set" },
+    { fn: "deleteEnvironmentSecret", vendor: "github", op: "env_unset" },
+    { fn: "createOrUpdateOrgSecret", vendor: "github", op: "org_secret_set" },
+    { fn: "deleteOrgSecret", vendor: "github", op: "org_secret_unset" },
   ],
   fly: [
     { fn: "setAppSecrets", vendor: "fly", op: "env_set" },
     { fn: "unsetAppSecrets", vendor: "fly", op: "env_unset" },
+    { fn: "setAppSecretsV1", vendor: "fly", op: "env_set" },
+    { fn: "deleteAppSecretV1", vendor: "fly", op: "env_unset" },
   ],
   cloudflare: [
     { fn: "putWorkerSecret", vendor: "cloudflare", op: "env_set" },
     { fn: "deleteWorkerSecret", vendor: "cloudflare", op: "env_unset" },
     { fn: "revokeApiToken", vendor: "cloudflare", op: "api_token_revoke" },
+    { fn: "revokeAccountApiToken", vendor: "cloudflare", op: "api_token_revoke" },
   ],
   stripe: [
     { fn: "createWebhookEndpoint", vendor: "stripe", op: "webhook_create" },
     { fn: "deleteWebhookEndpoint", vendor: "stripe", op: "webhook_delete" },
+    { fn: "createEventDestination", vendor: "stripe", op: "webhook_create" },
+    { fn: "deleteEventDestination", vendor: "stripe", op: "webhook_delete" },
   ],
   sentry: [
     { fn: "updateIssue", vendor: "sentry", op: "resolve_issue" },
@@ -62,6 +71,8 @@ const EXPECTED: Record<string, { fn: string; vendor: string; op: string }[]> = {
     { fn: "rollJwtSecret", vendor: "supabase", op: "jwt_secret_roll" },
     { fn: "revokeScopedKey", vendor: "supabase", op: "scoped_key_revoke" },
     { fn: "mintScopedKey", vendor: "supabase", op: "scoped_key_mint" },
+    { fn: "rotateSigningKey", vendor: "supabase", op: "signing_key_rotate" },
+    { fn: "revokeSigningKey", vendor: "supabase", op: "signing_key_revoke" },
   ],
 };
 

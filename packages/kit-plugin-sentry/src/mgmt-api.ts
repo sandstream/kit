@@ -240,6 +240,22 @@ export interface UpdateIssueOptions {
   reason?: string;
   /** Assign to a user (`user:ID`) or team (`team:SLUG`). */
   assignedTo?: string;
+  /** Overrides the client's organization for the org-scoped issue path. */
+  organizationSlug?: string;
+}
+
+/**
+ * Sentry documents issue retrieve/update/events only org-scoped
+ * (`/api/0/organizations/{org}/issues/{id}/`, docs.sentry.io/api/events, 2026-10-23). The short
+ * `/api/0/issues/{id}/` form is no longer documented; it is used only when no organization is
+ * known, so existing callers without one keep working.
+ */
+export function issuePath(client: MgmtClient, issueId: string, organizationSlug?: string): string {
+  const org = organizationSlug ?? client.organizationSlug;
+  const id = encodeURIComponent(issueId);
+  return org
+    ? `/api/0/organizations/${encodeURIComponent(org)}/issues/${id}/`
+    : `/api/0/issues/${id}/`;
 }
 
 /**
@@ -257,16 +273,15 @@ export async function updateIssue(
   const body: Record<string, unknown> = {};
   if (opts.status) body.status = opts.status;
   if (opts.assignedTo) body.assignedTo = opts.assignedTo;
-  const res = await fetch(`${client.host}/api/0/issues/${encodeURIComponent(issueId)}/`, {
+  const path = issuePath(client, issueId, opts.organizationSlug);
+  const res = await fetch(`${client.host}${path}`, {
     method: "PUT",
     headers: client.headers,
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
-    throw new Error(
-      `PUT /api/0/issues/${issueId}/ returned ${res.status}: ${await safeText(res, client)}`,
-    );
+    throw new Error(`PUT ${path} returned ${res.status}: ${await safeText(res, client)}`);
   }
   const updated = (await res.json()) as SentryIssue;
 
@@ -282,6 +297,8 @@ async function postIssueComment(
   issueId: string,
   comment: string,
 ): Promise<void> {
+  // Comments are absent from Sentry's public API docs in both forms, so this keeps the form
+  // that has worked rather than guess an org-scoped one.
   const res = await fetch(`${client.host}/api/0/issues/${encodeURIComponent(issueId)}/comments/`, {
     method: "POST",
     headers: client.headers,
@@ -309,16 +326,16 @@ export async function getIssueEvents(
   client: MgmtClient,
   issueId: string,
   limit = 10,
+  organizationSlug?: string,
 ): Promise<SentryEvent[]> {
   const params = new URLSearchParams({ limit: String(Math.min(limit, 100)) });
-  const res = await fetch(
-    `${client.host}/api/0/issues/${encodeURIComponent(issueId)}/events/?${params}`,
-    { headers: client.headers, signal: AbortSignal.timeout(15_000) },
-  );
+  const path = `${issuePath(client, issueId, organizationSlug)}events/`;
+  const res = await fetch(`${client.host}${path}?${params}`, {
+    headers: client.headers,
+    signal: AbortSignal.timeout(15_000),
+  });
   if (!res.ok) {
-    throw new Error(
-      `GET /api/0/issues/${issueId}/events/ returned ${res.status}: ${await safeText(res, client)}`,
-    );
+    throw new Error(`GET ${path} returned ${res.status}: ${await safeText(res, client)}`);
   }
   return (await res.json()) as SentryEvent[];
 }

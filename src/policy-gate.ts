@@ -100,6 +100,33 @@ export const POLICY_OPS: readonly { vendor: string; op: string; description: str
       op: "scoped_key_revoke",
       description: "revoke one scoped Supabase key — whatever is using that key loses access",
     },
+    // GitHub organization secrets can reach every repository in the org, so they are not the
+    // repo-scoped env_set/env_unset: pre-approving one repository's secrets does not approve these.
+    {
+      vendor: "github",
+      op: "org_secret_set",
+      description:
+        "create or update a GitHub ORGANIZATION secret — readable by every repository its visibility allows",
+    },
+    {
+      vendor: "github",
+      op: "org_secret_unset",
+      description:
+        "delete a GitHub ORGANIZATION secret — every workflow in the org that reads it loses it",
+    },
+    // Supabase's signing-keys system (the successor to the JWT secret) splits the same way:
+    // rotating is reversible (the old key keeps verifying what it signed), revoking is not.
+    {
+      vendor: "supabase",
+      op: "signing_key_rotate",
+      description:
+        "rotate the Supabase JWT signing key — new tokens use a new key; the old one still verifies what it signed",
+    },
+    {
+      vendor: "supabase",
+      op: "signing_key_revoke",
+      description: "revoke one Supabase JWT signing key — every token it signed stops verifying",
+    },
     // ── The plugin ops ────────────────────────────────────────────────────────────────────────────
     //
     // These gate the write surfaces in `packages/kit-plugin-*`, which no kit-core code path can
