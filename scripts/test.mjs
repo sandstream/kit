@@ -3,9 +3,10 @@
 // here, collect the compiled test files ourselves (no shell-glob dependency, which
 // also differs across shells), and invoke `node --test`. No external dep.
 import { spawnSync } from "node:child_process";
-import { readdirSync, existsSync, readFileSync } from "node:fs";
+import { readdirSync, existsSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { classifyTap, describeFailureKinds } from "./test-failure-kinds.mjs";
+import { parseShard, selectShard } from "./test-shard.mjs";
 
 const env = {
   ...process.env,
@@ -17,6 +18,15 @@ const env = {
   // that exercise anchoring opt back in with an explicit KIT_AUDIT_ANCHOR_DIR.
   KIT_AUDIT_ANCHOR: "0",
 };
+
+// KIT_TEST_SHARD=2/4 runs the second of four shards. A malformed value stops here, before anything runs.
+let shard = null;
+try {
+  shard = parseShard(process.env.KIT_TEST_SHARD);
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(2);
+}
 
 if (!existsSync("dist")) {
   console.error("dist/ not found — run `npm run build` first");
@@ -59,7 +69,7 @@ if (rootTests.length === 0) {
   );
   process.exit(1);
 }
-const files = [...rootTests, ...collectWorkspaceTests()];
+const allFiles = [...rootTests, ...collectWorkspaceTests()];
 
 // This repo can live in a synced folder (iCloud Drive), where a conflicted file gains a
 // ` 2` twin. A twin under dist/ is a STALE compiled test: it runs old assertions against
@@ -68,7 +78,7 @@ const files = [...rootTests, ...collectWorkspaceTests()];
 // Imported dynamically: it lives in dist/, so the friendly "run npm run build first"
 // check above must get to run before this resolves.
 const { isSyncDuplicateName } = await import("../dist/utils/sync-duplicate.js");
-const stale = files.filter((f) => isSyncDuplicateName(basename(f)));
+const stale = allFiles.filter((f) => isSyncDuplicateName(basename(f)));
 if (stale.length > 0) {
   console.error(
     `refusing to run: ${stale.length} cloud-sync duplicate test file(s) under dist/ —\n` +
@@ -77,6 +87,14 @@ if (stale.length > 0) {
       `\nFix: npm run build   (clean-dist removes dist/ first)`,
   );
   process.exit(1);
+}
+
+// The stale-copy check above looks at every file, whatever the shard. Then the shard picks its own.
+const files = shard ? selectShard(allFiles, shard, (f) => statSync(f).size) : allFiles;
+if (shard) {
+  console.error(
+    `[kit] shard ${shard.index}/${shard.total}: ${files.length} of ${allFiles.length} test files`,
+  );
 }
 
 // A FULL TAP log always lands on disk, in addition to whatever the caller sees on stdout.

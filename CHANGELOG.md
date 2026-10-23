@@ -55,6 +55,15 @@
   the findings ledger, which then auto-closed every open security finding of the project. The
   ledger is now left alone unless the security dimension ran.
 
+### Changed
+
+- **The Windows CI check runs in four parallel shards.** The Windows runner needed 31 to 48 minutes
+  for the whole unit suite (46 of them in one step), against about 9 minutes on Linux. The suite is now
+  split in four by file size (`KIT_TEST_SHARD=2/4 npm test` runs the second shard, every test file
+  runs exactly once, a malformed value stops before anything runs), so a shard takes about a quarter
+  of that. The job named `windows-native` stays as the single result and passes only when all four
+  shards passed.
+
 ## [7.0.1] - 2026-10-19
 
 ### Fixed
