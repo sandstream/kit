@@ -36,14 +36,14 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
   {
     name: "cloudflare",
     description: "Cloudflare Workers secret + API token surface for kit",
-    version: "0.2.2",
+    version: "0.3.0",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
     package: "sandstream-kit-plugin-cloudflare",
     kitVersion: ">=6.0.0",
     tags: ["cloudflare", "hosting", "kit-plugin", "official", "secrets", "workers"],
-    install: "npm install sandstream-kit-plugin-cloudflare@0.2.2",
+    install: "npm install sandstream-kit-plugin-cloudflare@0.3.0",
   },
   {
     name: "fly",

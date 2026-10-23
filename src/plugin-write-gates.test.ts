@@ -55,6 +55,7 @@ const EXPECTED: Record<string, { fn: string; vendor: string; op: string }[]> = {
     { fn: "putWorkerSecret", vendor: "cloudflare", op: "env_set" },
     { fn: "deleteWorkerSecret", vendor: "cloudflare", op: "env_unset" },
     { fn: "revokeApiToken", vendor: "cloudflare", op: "api_token_revoke" },
+    { fn: "revokeAccountApiToken", vendor: "cloudflare", op: "api_token_revoke" },
   ],
   stripe: [
     { fn: "createWebhookEndpoint", vendor: "stripe", op: "webhook_create" },
