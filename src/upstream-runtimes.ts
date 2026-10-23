@@ -30,6 +30,8 @@ export interface RuntimeSpec {
   tagPrefix: string;
   /** Read GitHub releases (with notes) or only tags. */
   source: "releases" | "tags";
+  /** Where the vendor's end-of-life dates are read from, when a GitHub-hosted source exists. */
+  schedule?: { repo: string; path: string };
   /** Which part of the installed version names its release line. */
   line: "major" | "minor";
   /** Releases to read; wide enough to reach older supported lines. */
@@ -46,6 +48,7 @@ export const RUNTIME_SPECS: readonly RuntimeSpec[] = [
     source: "releases",
     line: "major",
     window: 40,
+    schedule: { repo: "nodejs/Release", path: "schedule.json" },
   },
   {
     id: "php",
@@ -71,6 +74,7 @@ export const RUNTIME_SPECS: readonly RuntimeSpec[] = [
 
 export type RuntimeVerdict =
   | "current"
+  | "end of life"
   | "patch available"
   | "security release available"
   | "unknown"
@@ -83,6 +87,8 @@ export interface RuntimeAssessment {
   /** Lines of the newer release notes that mention a security release or a CVE. */
   evidence: string[];
   detail?: string;
+  /** The date the installed line stops getting fixes, when the vendor's schedule says so. */
+  supportedUntil?: string;
 }
 
 const PLAIN_VERSION = /^\d+\.\d+\.\d+$/;
@@ -124,11 +130,51 @@ function evidenceLines(releases: readonly { tag: string; body: string }[]): stri
   return lines;
 }
 
+export interface LineEnd {
+  ended: boolean;
+  /** The date the line stops getting fixes, as the vendor writes it. */
+  end: string;
+}
+
+/**
+ * Whether the installed release line is past its end, from the vendor's own schedule. Only the Node
+ * schedule is read, because it is the only one hosted on GitHub; PHP and Python return null (nothing
+ * is claimed). A line the schedule does not list or date, or a schedule that is not readable, is null,
+ * which the caller reports as unverified and never as supported.
+ */
+/** The `end` date the Node schedule lists for a major, or null when it is absent or not a date. */
+function scheduledEnd(scheduleText: string, major: string): string | null {
+  let schedule: unknown;
+  try {
+    schedule = JSON.parse(scheduleText);
+  } catch {
+    return null;
+  }
+  if (typeof schedule !== "object" || schedule === null || Array.isArray(schedule)) return null;
+  const entry = (schedule as Record<string, unknown>)[`v${major}`];
+  const end = typeof entry === "object" && entry !== null ? (entry as { end?: unknown }).end : null;
+  return typeof end === "string" && !Number.isNaN(Date.parse(end)) ? end : null;
+}
+
+export function lineEndOfLife(
+  spec: RuntimeSpec,
+  installed: string,
+  scheduleText: string,
+  nowMs: number,
+): LineEnd | null {
+  if (spec.id !== "node") return null;
+  const end = scheduledEnd(scheduleText, installed.split(".")[0]);
+  return end === null
+    ? null
+    : { ended: Date.parse(end) < nowMs, end: stripControl(end).slice(0, 10) };
+}
+
 export function decideRuntime(
   spec: RuntimeSpec,
   installed: string | null,
   releases: readonly ReleaseInfo[],
   tags: readonly string[],
+  lineEnd: LineEnd | null = null,
 ): RuntimeAssessment {
   if (installed === null) {
     return {
@@ -139,6 +185,13 @@ export function decideRuntime(
     };
   }
   const line = lineOf(spec, installed);
+  if (lineEnd?.ended) {
+    return {
+      verdict: "end of life",
+      latest: null,
+      evidence: [`the ${spec.label} ${line} line reached end of life on ${lineEnd.end}`],
+    };
+  }
   const candidates = [
     ...releases
       .filter((r) => !r.prerelease)

@@ -14,6 +14,7 @@ import { describe, it } from "node:test";
 import {
   decideRuntime,
   detectRuntimes,
+  lineEndOfLife,
   parseVersionOutput,
   readInstalledVersion,
   resolveBinary,
@@ -373,3 +374,73 @@ describe(
       }));
   },
 );
+
+describe("end of life from the Node release schedule", () => {
+  const NOW = Date.parse("2026-10-23T00:00:00Z");
+  const SCHEDULE = JSON.stringify({
+    v18: { start: "2022-04-19", lts: "2022-10-25", maintenance: "2023-10-18", end: "2025-04-30" },
+    v22: { start: "2024-04-24", lts: "2024-10-29", maintenance: "2025-10-21", end: "2027-04-30" },
+    v25: { start: "2025-10-15", maintenance: "2026-04-01", end: "2026-06-01" },
+    v30: { start: "2027-05-01" },
+  });
+
+  it("says a line past its end date is end of life, with the date", () => {
+    assert.deepEqual(lineEndOfLife(spec("node"), "25.8.0", SCHEDULE, NOW), {
+      ended: true,
+      end: "2026-06-01",
+    });
+    assert.deepEqual(lineEndOfLife(spec("node"), "18.20.8", SCHEDULE, NOW), {
+      ended: true,
+      end: "2025-04-30",
+    });
+  });
+
+  it("says a supported line is not", () => {
+    assert.deepEqual(lineEndOfLife(spec("node"), "22.23.3", SCHEDULE, NOW), {
+      ended: false,
+      end: "2027-04-30",
+    });
+  });
+
+  it("knows nothing about a line the schedule does not list or date, or a schedule it cannot read", () => {
+    assert.equal(lineEndOfLife(spec("node"), "99.0.0", SCHEDULE, NOW), null);
+    assert.equal(lineEndOfLife(spec("node"), "30.0.0", SCHEDULE, NOW), null);
+    assert.equal(lineEndOfLife(spec("node"), "22.0.0", "{ nope", NOW), null);
+    assert.equal(lineEndOfLife(spec("node"), "22.0.0", "[1,2]", NOW), null);
+  });
+
+  it("has no schedule for PHP or Python, so it never claims one", () => {
+    assert.equal(lineEndOfLife(spec("php"), "8.5.6", SCHEDULE, NOW), null);
+    assert.equal(lineEndOfLife(spec("python"), "3.9.6", SCHEDULE, NOW), null);
+  });
+});
+
+describe("decideRuntime with an end-of-life line", () => {
+  const eol = { ended: true, end: "2026-06-01" };
+
+  it("is end of life even when no release of the line is in the fetched window", () => {
+    const got = decideRuntime(spec("node"), "18.20.8", [], [], { ended: true, end: "2025-04-30" });
+    assert.equal(got.verdict, "end of life");
+    assert.match(got.evidence.join("\n"), /end of life on 2025-04-30/);
+  });
+
+  it("ranks end of life above a security release and above current", () => {
+    const rel = [
+      release("v25.9.0", "This is a security release.\n(CVE-2026-1) x", { version: "25.9.0" }),
+    ];
+    assert.equal(decideRuntime(spec("node"), "25.8.0", rel, [], eol).verdict, "end of life");
+    assert.equal(decideRuntime(spec("node"), "25.9.0", rel, [], eol).verdict, "end of life");
+  });
+
+  it("leaves a supported line as it was", () => {
+    const supported = { ended: false, end: "2027-04-30" };
+    assert.equal(
+      decideRuntime(spec("node"), "22.23.4", nodeReleases, [], supported).verdict,
+      "current",
+    );
+    assert.equal(
+      decideRuntime(spec("node"), "22.23.3", nodeReleases, [], supported).verdict,
+      "security release available",
+    );
+  });
+});

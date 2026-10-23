@@ -28,6 +28,7 @@ import { checkSecurity, type SecurityCheckResult, type GateOpts } from "./check-
 import { checkLockFiles, type LockCheckResult } from "./check-lock.js";
 import { checkTests, type TestCheckResult } from "./check-tests.js";
 import { checkDeploy, type DeployCheckResult } from "./check-deploy.js";
+import { checkRuntimes } from "./check-runtimes.js";
 import { checkUpstream, upstreamToJsonChecks, type UpstreamCheckRow } from "./check-upstream.js";
 import { loadBaselineForGate, baselineGet, BASELINE_FILE } from "./baseline.js";
 import { computeCheckVerdict, type CheckVerdict } from "./check-verdict.js";
@@ -117,6 +118,8 @@ export interface RunCheckOptions {
   cwd?: string;
   /** Preloaded config (the CLI already has one for governance); else loaded from cwd. */
   config?: kitConfig;
+  /** Fetch release data for the runtime rows instead of reading the cache only (`--online`). */
+  online?: boolean;
   /** Fail (not warn) on untested files — the CLI's --enforce-tests. */
   enforceTests?: boolean;
   /** Security gate posture (lenient / fail-on-warning) for the verdict. */
@@ -153,6 +156,11 @@ async function upstreamDimension(
   cwd: string,
 ): Promise<UpstreamCheckRow[]> {
   return run ? await step("upstream versions", () => checkUpstream(cwd)) : [];
+}
+
+/** The security dimension: the scanners, then one row per runtime the project uses. */
+async function securityRows(cwd: string, online: boolean | undefined) {
+  return [...(await checkSecurity(cwd)), ...(await checkRuntimes(cwd, { online }))];
 }
 
 export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRunResult> {
@@ -193,7 +201,9 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
   const deploy = wants("deploy")
     ? await step("deploy config", () => checkDeploy(config.deploy, cwd))
     : [];
-  const security = wants("security") ? await step("security scan", () => checkSecurity(cwd)) : [];
+  const security = wants("security")
+    ? await step("security scan", () => securityRows(cwd, opts.online))
+    : [];
   const locks = wants("locks") ? await step("lock files", () => checkLockFiles(config, cwd)) : [];
   const upstream = await upstreamDimension(wants("upstream"), step, cwd);
 

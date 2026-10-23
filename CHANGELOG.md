@@ -14,6 +14,18 @@
   The `trivy container scan` row of `kit check` now says what it does: it runs `trivy fs` on the
   project files and never scans a built image, and its text points to `[scan].images`.
 
+- **`kit check` fails a runtime that has a security fix, or whose line has ended.** The tools row
+  `node 24.13.1 (need 24)` compared only the major, so it stayed green for a Node line with a
+  security release (the Brotli fix in 24.22.1). The security dimension now has a row per Node, PHP
+  or Python interpreter the project uses: a newer release whose notes say security release or name a
+  CVE is a failure, a Node line past its end date in the vendor's schedule is a failure (25.x, 18.x),
+  a plain patch is a warning, and `unverified` (a warning, never green) when the cache holds nothing
+  from the last 24 hours. `kit check` stays offline: it reads the cache that `kit upstream check` fills,
+  and `kit check --online` fetches instead (for CI). PHP and Python have no end-of-life source on
+  GitHub, so their line is reported as unverified until one is added. The row names the command that
+  fixes it (`mise install node@24.22.1`). `kit upstream check --enforce` now also exits 1 for an
+  end-of-life runtime.
+
 - **`kit upstream check` tells you what changed upstream.** For the services a project uses
   (Convex, Stripe and WorkOS are built in, `[upstream.<id>]` in `.kit.toml` adds or overrides
   one), it reads the latest npm version and the GitHub release notes, compares them with the
