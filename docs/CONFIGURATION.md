@@ -122,7 +122,7 @@ Set up with `kit decisions`.
 
 Required platform env-var NAMES per project and environment.
 
-**What it buys.** `kit check --category deploy` diffs the names your platform has against the names this repo needs — without reading a single value.
+**What it buys.** `kit check --category deploy` diffs the names your platform has against the names this repo needs, and on Vercel fails a readable-secret, a secret shared by production and preview (`shared_ok` lists accepted ones) and a variable no code reads (`implicit_env` lists library-read ones), without reading a single value.
 
 ```toml
 [deploy.vercel.environments.production]

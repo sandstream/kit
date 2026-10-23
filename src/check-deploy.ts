@@ -5,6 +5,11 @@ import type {
   DeployVercelConfig,
   VercelDeployEnvironment,
 } from "./config.js";
+import {
+  assessVercelRow,
+  parseVercelEnvMeta,
+  type VercelEnvMeta,
+} from "./check-deploy-vercel-safety.js";
 import { execFileNoThrow } from "./utils/exec.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 
@@ -20,6 +25,10 @@ export interface DeployCheckResult {
   missing?: string[];
   drift?: string[];
   buildTime?: string[];
+  /** Variables of this row that fail a safety check (names only, never values). */
+  unsafe?: { readableSecret?: string[]; shared?: string[]; unread?: string[] };
+  /** Safety checks that could not run for this row, and so say nothing. */
+  unverified?: string[];
   didNotRun?: boolean;
   remoteEnv?: VercelDeployEnvironment;
   cwd?: string;
@@ -42,6 +51,8 @@ export interface DeployListResult {
   ok: boolean;
   names: string[];
   detail: string;
+  /** Type, targets and security issues per variable, when the listing carries them (the API does). */
+  vars?: VercelEnvMeta[];
   didNotRun?: boolean;
 }
 
@@ -113,6 +124,11 @@ function collectVercelApiEnvNames(
     if (!remoteEnv || targets.length === 0 || targets.includes(remoteEnv)) names.add(key);
   }
   return uniqueSorted(names);
+}
+
+/** The names and the per-variable metadata of one Vercel API env list. */
+function apiListing(json: unknown, remoteEnv: VercelDeployEnvironment | undefined) {
+  return { names: collectVercelApiEnvNames(json, remoteEnv), vars: parseVercelEnvMeta(json) };
 }
 
 export function parseVercelEnvNames(output: string): string[] {
@@ -228,7 +244,7 @@ async function listVercelEnvNamesViaApi(target: VercelDeployTarget): Promise<Dep
   try {
     return {
       ok: true,
-      names: collectVercelApiEnvNames(await res.json(), target.remoteEnv),
+      ...apiListing(await res.json(), target.remoteEnv),
       detail: "listed remote key names via Vercel API",
     };
   } catch (err) {
@@ -286,72 +302,53 @@ function noDeployConfigured(): DeployCheckResult {
   };
 }
 
-async function checkVercelDeploy(
-  config: DeployVercelConfig,
-  cwd: string,
-  listEnv: DeployListEnv,
-): Promise<DeployCheckResult[]> {
-  const targets = buildVercelDeployTargets(config, cwd);
-  if (targets.length === 0) {
-    return [
-      {
-        provider: "vercel",
-        environment: "-",
-        project: "-",
-        status: "skip",
-        detail:
-          "No [deploy.vercel.environments] configured. Add one table per deploy target with project + required key names.",
-      },
-    ];
+function noEnvironmentsConfigured(): DeployCheckResult {
+  return {
+    provider: "vercel",
+    environment: "-",
+    project: "-",
+    status: "skip",
+    detail:
+      "No [deploy.vercel.environments] configured. Add one table per deploy target with project + required key names.",
+  };
+}
+
+function listFailureRow(target: VercelDeployTarget, listed: DeployListResult): DeployCheckResult {
+  return {
+    provider: "vercel",
+    environment: target.environment,
+    project: target.project,
+    status: "fail",
+    detail: listed.detail,
+    didNotRun: listed.didNotRun,
+    remoteEnv: target.remoteEnv,
+    cwd: target.cwd,
+  };
+}
+
+function requiredDetail(
+  target: VercelDeployTarget,
+  missing: readonly string[],
+  buildTime: readonly string[],
+): string {
+  if (missing.length > 0) {
+    const redeploy =
+      buildTime.length > 0
+        ? `; build-time key(s) require redeploy after setting: ${formatNames([...buildTime])}`
+        : "";
+    return `missing required key name(s): ${formatNames([...missing])}${redeploy}`;
   }
+  return target.required.length > 0
+    ? `all ${target.required.length} required key name(s) present`
+    : "no required key names declared for this environment";
+}
 
-  const remoteNames = new Map<string, Set<string>>();
-  const results: DeployCheckResult[] = [];
-
-  for (const target of targets) {
-    const listed = await listEnv(target);
-    if (!listed.ok) {
-      results.push({
-        provider: "vercel",
-        environment: target.environment,
-        project: target.project,
-        status: "fail",
-        detail: listed.detail,
-        didNotRun: listed.didNotRun,
-        remoteEnv: target.remoteEnv,
-        cwd: target.cwd,
-      });
-      continue;
-    }
-
-    const names = new Set(listed.names);
-    remoteNames.set(target.environment, names);
-    const missing = target.required.filter((name) => !names.has(name));
-    const buildTime = missing.filter((name) => target.buildTime.includes(name));
-    const detail =
-      missing.length > 0
-        ? `missing required key name(s): ${formatNames(missing)}${
-            buildTime.length > 0
-              ? `; build-time key(s) require redeploy after setting: ${formatNames(buildTime)}`
-              : ""
-          }`
-        : target.required.length > 0
-          ? `all ${target.required.length} required key name(s) present`
-          : "no required key names declared for this environment";
-
-    results.push({
-      provider: "vercel",
-      environment: target.environment,
-      project: target.project,
-      status: missing.length > 0 ? "fail" : "pass",
-      detail,
-      ...(missing.length > 0 ? { missing } : {}),
-      ...(buildTime.length > 0 ? { buildTime } : {}),
-      remoteEnv: target.remoteEnv,
-      cwd: target.cwd,
-    });
-  }
-
+/** Warn when a key is present in one deploy target but missing in another (minus declared exceptions). */
+function markDrift(
+  results: DeployCheckResult[],
+  targets: readonly VercelDeployTarget[],
+  remoteNames: ReadonlyMap<string, Set<string>>,
+): void {
   const listedTargets = targets.filter((target) => remoteNames.has(target.environment));
   if (listedTargets.length >= 2) {
     const allNames = uniqueSorted(
@@ -372,6 +369,57 @@ async function checkVercelDeploy(
       row.detail = `${row.detail}; drift: remote key name(s) present in another deploy target but missing here: ${formatNames(drift)}`;
     }
   }
+}
+
+async function checkVercelDeploy(
+  config: DeployVercelConfig,
+  cwd: string,
+  listEnv: DeployListEnv,
+): Promise<DeployCheckResult[]> {
+  const targets = buildVercelDeployTargets(config, cwd);
+  if (targets.length === 0) return [noEnvironmentsConfigured()];
+
+  const remoteNames = new Map<string, Set<string>>();
+  const codeCache = new Map<string, Set<string> | null>();
+  const results: DeployCheckResult[] = [];
+
+  for (const target of targets) {
+    const listed = await listEnv(target);
+    if (!listed.ok) {
+      results.push(listFailureRow(target, listed));
+      continue;
+    }
+
+    const names = new Set(listed.names);
+    remoteNames.set(target.environment, names);
+    const missing = target.required.filter((name) => !names.has(name));
+    const buildTime = missing.filter((name) => target.buildTime.includes(name));
+    const detail = requiredDetail(target, missing, buildTime);
+
+    const safety = assessVercelRow({
+      vars: listed.vars,
+      remoteEnv: target.remoteEnv,
+      cwd: target.cwd,
+      provider: config,
+      declared: [...target.required, ...target.buildTime],
+      codeCache,
+    });
+    results.push({
+      provider: "vercel",
+      environment: target.environment,
+      project: target.project,
+      status: missing.length > 0 || safety.failed ? "fail" : "pass",
+      detail: [detail, safety.detail].filter(Boolean).join("; "),
+      ...(safety.unsafe ? { unsafe: safety.unsafe } : {}),
+      ...(safety.unverified ? { unverified: safety.unverified } : {}),
+      ...(missing.length > 0 ? { missing } : {}),
+      ...(buildTime.length > 0 ? { buildTime } : {}),
+      remoteEnv: target.remoteEnv,
+      cwd: target.cwd,
+    });
+  }
+
+  markDrift(results, targets, remoteNames);
 
   return results;
 }
