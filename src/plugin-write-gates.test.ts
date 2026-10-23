@@ -40,6 +40,10 @@ const EXPECTED: Record<string, { fn: string; vendor: string; op: string }[]> = {
   github: [
     { fn: "createOrUpdateRepoSecret", vendor: "github", op: "env_set" },
     { fn: "deleteRepoSecret", vendor: "github", op: "env_unset" },
+    { fn: "createOrUpdateEnvironmentSecret", vendor: "github", op: "env_set" },
+    { fn: "deleteEnvironmentSecret", vendor: "github", op: "env_unset" },
+    { fn: "createOrUpdateOrgSecret", vendor: "github", op: "org_secret_set" },
+    { fn: "deleteOrgSecret", vendor: "github", op: "org_secret_unset" },
   ],
   fly: [
     { fn: "setAppSecrets", vendor: "fly", op: "env_set" },

@@ -263,6 +263,169 @@ export interface DeployKey {
   created_at: string;
 }
 
+// ── Environment and organization secrets ─────────────────────────────────────────────────────
+//
+// Same sealed-box scheme as repository secrets, each scope with its own public key
+// (docs.github.com/en/rest/actions/secrets, 2026-10-23). Environment secrets have a
+// repository's blast radius and gate on env_set/env_unset. Organization secrets can reach every
+// repository in the org, so they gate on their own ops, org_secret_set/org_secret_unset: a repo
+// that pre-approved env_set has not approved writing to the whole org.
+
+async function getPublicKeyAt(client: MgmtClient, path: string): Promise<RepoPublicKey> {
+  const res = await fetch(`${client.baseUrl}${path}`, {
+    headers: client.headers,
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    throw new Error(`GET ${path} returned ${res.status}: ${await safeText(res, client)}`);
+  }
+  return (await res.json()) as RepoPublicKey;
+}
+
+async function listSecretsAt(client: MgmtClient, path: string): Promise<RepoSecretSummary[]> {
+  const res = await fetch(`${client.baseUrl}${path}`, {
+    headers: client.headers,
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    throw new Error(`GET ${path} returned ${res.status}: ${await safeText(res, client)}`);
+  }
+  const body = (await res.json()) as { secrets?: RepoSecretSummary[] };
+  return body.secrets ?? [];
+}
+
+/** A repository environment, e.g. `{ owner: "acme", repo: "app", environment: "production" }`. */
+export interface EnvironmentRef {
+  owner: string;
+  repo: string;
+  environment: string;
+}
+
+const envSecretsPath = ({ owner, repo, environment }: EnvironmentRef) =>
+  `/repos/${owner}/${repo}/environments/${encodeURIComponent(environment)}/secrets`;
+const orgSecretsPath = (org: string) => `/orgs/${encodeURIComponent(org)}/actions/secrets`;
+
+export function listEnvironmentSecrets(
+  client: MgmtClient,
+  env: EnvironmentRef,
+): Promise<RepoSecretSummary[]> {
+  return listSecretsAt(client, envSecretsPath(env));
+}
+
+export async function createOrUpdateEnvironmentSecret(
+  client: MgmtClient,
+  env: EnvironmentRef,
+  secretName: string,
+  value: string,
+): Promise<void> {
+  assertNotReadOnly("github/createOrUpdateEnvironmentSecret");
+  assertPolicyAllows("github", "env_set");
+  const base = envSecretsPath(env);
+  const publicKey = await getPublicKeyAt(client, `${base}/public-key`);
+  const encryptedValue = await encryptForRepo(publicKey.key, value);
+  const res = await fetch(`${client.baseUrl}${base}/${encodeURIComponent(secretName)}`, {
+    method: "PUT",
+    headers: client.headers,
+    body: JSON.stringify({ encrypted_value: encryptedValue, key_id: publicKey.key_id }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `PUT environment secret returned ${res.status}: ${await safeText(res, client)}`,
+    );
+  }
+}
+
+export async function deleteEnvironmentSecret(
+  client: MgmtClient,
+  env: EnvironmentRef,
+  secretName: string,
+): Promise<void> {
+  assertNotReadOnly("github/deleteEnvironmentSecret");
+  assertPolicyAllows("github", "env_unset");
+  const path = `${envSecretsPath(env)}/${encodeURIComponent(secretName)}`;
+  const res = await fetch(`${client.baseUrl}${path}`, {
+    method: "DELETE",
+    headers: client.headers,
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(
+      `DELETE environment secret returned ${res.status}: ${await safeText(res, client)}`,
+    );
+  }
+}
+
+export function listOrgSecrets(client: MgmtClient, org: string): Promise<RepoSecretSummary[]> {
+  return listSecretsAt(client, orgSecretsPath(org));
+}
+
+/** Which repositories may read an organization secret. */
+export type OrgSecretVisibility =
+  | { visibility: "all" }
+  | { visibility: "private" }
+  | { visibility: "selected"; selectedRepositoryIds: number[] };
+
+export async function createOrUpdateOrgSecret(
+  client: MgmtClient,
+  org: string,
+  secretName: string,
+  value: string,
+  access: OrgSecretVisibility,
+): Promise<void> {
+  assertNotReadOnly("github/createOrUpdateOrgSecret");
+  assertPolicyAllows("github", "org_secret_set");
+  // GitHub: "You can only provide a list of repository ids when the visibility is set to
+  // selected." An empty selection is refused here rather than sent, because it would read as
+  // "nobody", which is never what a caller writing a secret meant.
+  if (access.visibility === "selected" && access.selectedRepositoryIds.length === 0) {
+    throw new Error(
+      `refusing ${secretName}: visibility "selected" needs at least one repository id`,
+    );
+  }
+  const base = orgSecretsPath(org);
+  const publicKey = await getPublicKeyAt(client, `${base}/public-key`);
+  const encryptedValue = await encryptForRepo(publicKey.key, value);
+  const res = await fetch(`${client.baseUrl}${base}/${encodeURIComponent(secretName)}`, {
+    method: "PUT",
+    headers: client.headers,
+    body: JSON.stringify({
+      encrypted_value: encryptedValue,
+      key_id: publicKey.key_id,
+      visibility: access.visibility,
+      ...(access.visibility === "selected"
+        ? { selected_repository_ids: access.selectedRepositoryIds }
+        : {}),
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `PUT organization secret returned ${res.status}: ${await safeText(res, client)}`,
+    );
+  }
+}
+
+export async function deleteOrgSecret(
+  client: MgmtClient,
+  org: string,
+  secretName: string,
+): Promise<void> {
+  assertNotReadOnly("github/deleteOrgSecret");
+  assertPolicyAllows("github", "org_secret_unset");
+  const path = `${orgSecretsPath(org)}/${encodeURIComponent(secretName)}`;
+  const res = await fetch(`${client.baseUrl}${path}`, {
+    method: "DELETE",
+    headers: client.headers,
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(
+      `DELETE organization secret returned ${res.status}: ${await safeText(res, client)}`,
+    );
+  }
+}
+
 export async function listDeployKeys(
   client: MgmtClient,
   owner: string,
