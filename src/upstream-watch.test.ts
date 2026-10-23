@@ -55,7 +55,7 @@ describe("observe", () => {
     const o = await observe(
       { kind: "npm", package: "@scope/tool" },
       fake({
-        "https://registry.npmjs.org/@scope%2ftool": {
+        "https://registry.npmjs.org/%40scope%2Ftool": {
           "dist-tags": { latest: "2.0.0" },
           versions: { "2.0.0": { deprecated: "use other-tool" } },
         },
@@ -77,7 +77,7 @@ describe("observe", () => {
   });
 
   it("reports a pinned API version that left the supported list as dead", async () => {
-    const url = "https://example.test/versions";
+    const url = "https://api.snyk.io/rest/openapi";
     const live = await observe(
       { kind: "api-versions", url, pinned: "2024-10-15" },
       fake({ [url]: ["2024-10-15", "2026-03-25", "2026-04-01~beta"] }),
@@ -91,7 +91,7 @@ describe("observe", () => {
   });
 
   it("reports a called path missing from the spec as dead, unless acknowledged", async () => {
-    const url = "https://example.test/openapi";
+    const url = "https://openapi.vercel.sh/";
     const fetchJson = fake({ [url]: { paths: { "/v10/projects/{id}/env": {} } } });
     const o = await observe(
       {
@@ -107,6 +107,38 @@ describe("observe", () => {
       o.notes[0],
       /\/v6\/deployments absent from the spec \(acknowledged: still served\)/,
     );
+  });
+});
+
+describe("observe refuses what it should not touch", () => {
+  const never: FetchJson = async () => {
+    throw new Error("must not be fetched");
+  };
+
+  it("refuses a host outside WATCH_HOSTS before fetching", async () => {
+    await assert.rejects(
+      observe({ kind: "api-versions", url: "https://evil.example/versions", pinned: "x" }, never),
+      /not an https URL on a watched host/,
+    );
+    await assert.rejects(
+      observe({ kind: "openapi-paths", url: "http://openapi.vercel.sh/", paths: [] }, never),
+      /not an https URL on a watched host/,
+    );
+  });
+
+  it("refuses a malformed package name or repo before building a URL", async () => {
+    await assert.rejects(observe({ kind: "pypi", package: "../x" }, never), /malformed name/);
+    await assert.rejects(
+      observe({ kind: "github-release", repo: "o/r/../../x" }, never),
+      /malformed name/,
+    );
+  });
+
+  it("refuses a version string that does not look like a version", async () => {
+    const fetchJson = fake({
+      "https://pypi.org/pypi/x/json": { info: { version: "1.0 <img src=x>" } },
+    });
+    await assert.rejects(observe({ kind: "pypi", package: "x" }, fetchJson), /malformed version/);
   });
 });
 
@@ -151,6 +183,11 @@ describe("evaluate", () => {
     assert.strictEqual(r.state, "not-watchable");
     assert.deepStrictEqual(needsAttention([r]), []);
     assert.match(renderReport([r], "2026-10-23"), /private API/);
+  });
+
+  it("escapes table syntax and drops control characters in report cells", () => {
+    const r = evaluate(entry({ source: { kind: "none", reason: "a\\|b\nc" } }), null);
+    assert.match(renderReport([r], "2026-10-23"), /a\\\\\\\|b c/);
   });
 });
 

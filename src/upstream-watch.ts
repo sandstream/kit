@@ -95,7 +95,42 @@ export function normalizePath(path: string): string {
     .replace(/\/+$/, "");
 }
 
-const registryName = (pkg: string) => pkg.replace("/", "%2f");
+/**
+ * The only hosts the watch may contact. The contract is reviewed code, but a URL in it still
+ * should not be able to point the runner, or the GitHub token it carries, anywhere else.
+ */
+export const WATCH_HOSTS = new Set([
+  "registry.npmjs.org",
+  "pypi.org",
+  "api.github.com",
+  "api.snyk.io",
+  "api.supabase.com",
+  "openapi.vercel.sh",
+]);
+
+/** Names and versions from the contract and from registries, before they reach a URL or a report. */
+const SAFE_NAME = /^(@[a-z0-9._-]+\/)?[A-Za-z0-9._-]+$/;
+const SAFE_REPO = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+const SAFE_VERSION = /^[A-Za-z0-9._+~-]{1,64}$/;
+
+export function assertWatchedUrl(url: string): void {
+  const u = new URL(url);
+  if (u.protocol !== "https:" || !WATCH_HOSTS.has(u.hostname)) {
+    throw new Error(`refusing ${url}: not an https URL on a watched host`);
+  }
+}
+
+function assertSafeSource(source: Source): void {
+  const bad =
+    (source.kind === "npm" || source.kind === "pypi") && !SAFE_NAME.test(source.package)
+      ? source.package
+      : source.kind === "github-release" && !SAFE_REPO.test(source.repo)
+        ? source.repo
+        : null;
+  if (bad !== null) throw new Error(`refusing malformed name ${JSON.stringify(bad)}`);
+}
+
+const registryName = (pkg: string) => encodeURIComponent(pkg);
 
 type Observer<K extends Source["kind"]> = (
   source: Extract<Source, { kind: K }>,
@@ -169,7 +204,27 @@ const observeOpenapiPaths: Observer<"openapi-paths"> = async (source, fetchJson)
   return { dead, notes };
 };
 
-export function observe(source: Source, fetchJson: FetchJson): Promise<Observation> {
+/**
+ * Observe one upstream. Every URL is checked against WATCH_HOSTS before it is fetched, and a
+ * version string a registry returns must look like a version before it is reported or written
+ * to the baseline; anything else is a failed lookup, never a value.
+ */
+export async function observe(source: Source, fetchJson: FetchJson): Promise<Observation> {
+  assertSafeSource(source);
+  const guarded: FetchJson = (url) => {
+    assertWatchedUrl(url);
+    return fetchJson(url);
+  };
+  const observation = await observeKind(source, guarded);
+  if (observation.version !== undefined && !SAFE_VERSION.test(observation.version)) {
+    throw new Error(
+      `refusing malformed version ${JSON.stringify(observation.version.slice(0, 80))}`,
+    );
+  }
+  return observation;
+}
+
+function observeKind(source: Source, fetchJson: FetchJson): Promise<Observation> {
   switch (source.kind) {
     case "npm":
       return observeNpm(source, fetchJson);
@@ -252,7 +307,14 @@ export function renderReport(results: WatchResult[], date: string): string {
   const sorted = [...results].sort(
     (a, b) => ORDER.indexOf(a.state) - ORDER.indexOf(b.state) || a.id.localeCompare(b.id),
   );
-  const cell = (s: string) => s.replace(/\|/g, "\\|").replace(/\n/g, " ");
+  // Details carry registry text (a deprecation message, say) into a GitHub issue: escape the
+  // table syntax, drop control characters, and cap the length.
+  const cell = (s: string) =>
+    s
+      .replace(/[\u0000-\u001f\u007f]+/g, " ")
+      .replace(/\\/g, "\\\\")
+      .replace(/\|/g, "\\|")
+      .slice(0, 400);
   const rows = sorted.map(
     (r) => `| \`${r.id}\` | **${r.state}** | ${cell(r.detail)} | \`${r.owner}\` |`,
   );

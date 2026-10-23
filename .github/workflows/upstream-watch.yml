@@ -34,7 +34,7 @@ jobs:
         id: watch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/upstream-watch.mjs --out upstream-watch.md
+        run: node scripts/upstream-watch.mjs > upstream-watch.md
       - name: Open, update or close the upstream-drift issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

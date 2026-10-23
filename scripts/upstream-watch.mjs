@@ -2,7 +2,7 @@
 // Weekly upstream watch: observe every entry in contracts/upstream-watch.json, classify it
 // against its baseline (src/upstream-watch.ts), print a markdown report.
 //
-//   node scripts/upstream-watch.mjs [--out report.md] [--write-baseline]
+//   node scripts/upstream-watch.mjs [--write-baseline] > report.md
 //
 // --write-baseline records today's observations as the reviewed state. Run it in a PR,
 // after reading what changed; never from the scheduled workflow.
@@ -14,8 +14,6 @@ import { evaluate, needsAttention, observe, renderReport } from "../dist/upstrea
 
 const CONTRACT = join(import.meta.dirname, "..", "contracts", "upstream-watch.json");
 const args = process.argv.slice(2);
-const outIndex = args.indexOf("--out");
-const out = outIndex >= 0 ? args[outIndex + 1] : null;
 const writeBaseline = args.includes("--write-baseline");
 
 const token = process.env.GITHUB_TOKEN;
@@ -45,7 +43,6 @@ for (const entry of contract.entries) {
 
 const report = renderReport(results, today);
 process.stdout.write(report);
-if (out) writeFileSync(out, report);
 
 const attention = needsAttention(results).length;
 process.stderr.write(`${attention} of ${results.length} upstream(s) need a look\n`);
