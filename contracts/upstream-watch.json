@@ -40,19 +40,12 @@
         "kind": "openapi-paths",
         "url": "https://openapi.vercel.sh/",
         "paths": [
-          "/v6/deployments",
-          "/v9/projects",
-          "/v9/projects/{id}",
-          "/v9/projects/{id}/env",
-          "/v9/projects/{id}/env/{envId}",
+          "/v7/deployments",
+          "/v10/projects",
           "/v10/projects/{id}/env",
+          "/v9/projects/{id}/env/{envId}",
           "/v13/deployments"
-        ],
-        "acknowledged": {
-          "/v6/deployments": "still served on 2026-10-23 (unauthenticated 403 'missing token' vs 404 for a made-up path); the spec lists /v7 and /v13",
-          "/v9/projects": "still served on 2026-10-23 (403 vs 404 control); the spec lists /v10 and /v11",
-          "/v9/projects/{id}/env": "absent from the 2026-10-23 spec, which lists /v10; the sibling /v9/projects is still served"
-        }
+        ]
       }
     },
     {

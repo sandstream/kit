@@ -149,14 +149,14 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
     name: "vercel",
     description:
       "kit plugin: Vercel Management API (env management, project metadata, redeploy triggers).",
-    version: "0.2.2",
+    version: "0.3.0",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
     package: "sandstream-kit-plugin-vercel",
     kitVersion: ">=6.0.0",
     tags: ["deployment", "env", "hosting", "kit-plugin", "official", "vercel"],
-    install: "npm install sandstream-kit-plugin-vercel@0.2.2",
+    install: "npm install sandstream-kit-plugin-vercel@0.3.0",
   },
   {
     name: "wiz",
