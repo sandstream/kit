@@ -98,14 +98,14 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
     name: "sentry",
     description:
       "Sentry REST API client for kit — issue triage, release tagging, project introspection.",
-    version: "0.2.2",
+    version: "0.3.0",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
     package: "sandstream-kit-plugin-sentry",
     kitVersion: ">=6.0.0",
     tags: ["kit-plugin", "monitoring", "observability", "official", "sentry"],
-    install: "npm install sandstream-kit-plugin-sentry@0.2.2",
+    install: "npm install sandstream-kit-plugin-sentry@0.3.0",
   },
   {
     name: "snyk",
