@@ -213,3 +213,43 @@ describe("configuredImages", () => {
     assert.deepEqual(configuredImages(["a:1", 2, null, "b:2"]), ["a:1", "b:2"]);
   });
 });
+
+describe("skipped references carry no terminal control characters", () => {
+  const ESC = String.fromCharCode(27);
+
+  it("cleans a skipped Dockerfile reference", () => {
+    const got = parseDockerfileImages(`FROM node:22${ESC}[2J;rm\n`);
+    assert.equal(got.skipped.length, 1);
+    assert.ok(!got.skipped[0].ref.includes(ESC));
+  });
+
+  it("cleans an unresolved ARG reference", () => {
+    const got = parseDockerfileImages(`ARG BASE\nFROM \${BASE}${ESC}[2J\n`);
+    assert.equal(got.skipped.length, 1);
+    assert.ok(!got.skipped[0].ref.includes(ESC));
+  });
+
+  it("cleans a skipped configured reference", () => {
+    const got = collectImages("/nonexistent", {
+      configured: [`-bad${ESC}[2J`],
+      fromDockerfiles: false,
+    });
+    assert.ok(!got.skipped[0].ref.includes(ESC));
+  });
+
+  it(
+    "ignores a Dockerfile in a folder whose name has control characters",
+    { skip: process.platform === "win32" },
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "kit-image-scan-"));
+      try {
+        const evil = join(dir, `svc${ESC}[2J`);
+        mkdirSync(evil);
+        writeFileSync(join(evil, "Dockerfile"), "FROM a:1\n");
+        assert.deepEqual(findDockerfiles(dir), []);
+      } finally {
+        rmTemp(dir);
+      }
+    },
+  );
+});

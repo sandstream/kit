@@ -11,6 +11,7 @@ import { readdirSync } from "node:fs";
 import { isScannerEnabled } from "./scanners.js";
 import type { ScannerDef } from "./scanners.js";
 import { readRegularFileIfPresent } from "./upstream-safe-read.js";
+import { stripControl } from "./upstream-sources.js";
 import { join } from "node:path";
 
 export interface ImageRef {
@@ -90,18 +91,21 @@ export function parseDockerfileImages(text: string): { images: string[]; skipped
     const token = operands[0];
     if (operands[1]?.toLowerCase() === "as" && operands[2]) stages.add(operands[2].toLowerCase());
     if (!token) {
-      skipped.push({ ref: line.trim().slice(0, 80), reason: "FROM line without an image" });
+      skipped.push({
+        ref: stripControl(line.trim()).slice(0, 80),
+        reason: "FROM line without an image",
+      });
       continue;
     }
     if (token.toLowerCase() === "scratch" || stages.has(token.toLowerCase())) continue;
     const ref = substitute(token, args);
     if (ref === null) {
       skipped.push({
-        ref: token.slice(0, 80),
+        ref: stripControl(token).slice(0, 80),
         reason: "uses an unresolved ARG, so the image is not known",
       });
     } else if (!isSafeImageRef(ref)) {
-      skipped.push({ ref: ref.slice(0, 80), reason: "not a valid image reference" });
+      skipped.push({ ref: stripControl(ref).slice(0, 80), reason: "not a valid image reference" });
     } else if (!images.includes(ref)) {
       images.push(ref);
     }
@@ -128,6 +132,7 @@ export function findDockerfiles(root: string): string[] {
     }
     for (const entry of entries) {
       if (++seen > MAX_ENTRIES || found.length >= MAX_DOCKERFILES) return;
+      if (stripControl(entry.name) !== entry.name) continue; // a name with control characters is never printed
       const childRel = rel ? `${rel}/${entry.name}` : entry.name;
       if (entry.isFile() && isDockerfileName(entry.name)) found.push(childRel);
       else if (
@@ -167,7 +172,8 @@ export function collectImages(
   };
   for (const ref of options.configured) {
     if (isSafeImageRef(ref)) add(ref, "[scan].images");
-    else skipped.push({ ref: ref.slice(0, 80), reason: "not a valid image reference" });
+    else
+      skipped.push({ ref: stripControl(ref).slice(0, 80), reason: "not a valid image reference" });
   }
   if (!options.fromDockerfiles) return { images, skipped };
   for (const rel of findDockerfiles(root)) {
