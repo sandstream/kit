@@ -116,7 +116,9 @@ export function makeClient(cfg: MgmtClientConfig = {}): MgmtClient {
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
+      // 2026-03-10 (2022-11-28 ends 2028-03-10, then 410 Gone). Its breaking changes, checked
+      // on 2026-10-23, touch no field the secrets/deploy-key calls here read.
+      "X-GitHub-Api-Version": "2026-03-10",
       "User-Agent": "sandstream-kit-plugin-github",
     },
   };

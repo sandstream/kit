@@ -28,7 +28,7 @@ describe("makeClient", () => {
     try {
       const client = makeClient();
       const h = client.headers as Record<string, string>;
-      assert.equal(h["X-GitHub-Api-Version"], "2022-11-28");
+      assert.equal(h["X-GitHub-Api-Version"], "2026-03-10");
       assert.equal(h["User-Agent"], "sandstream-kit-plugin-github");
     } finally {
       delete process.env.GITHUB_TOKEN;

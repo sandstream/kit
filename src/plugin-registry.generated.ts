@@ -60,14 +60,14 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
   {
     name: "github",
     description: "kit plugin: GitHub REST API (repo + org secrets, deploy keys, workflow runs).",
-    version: "0.2.2",
+    version: "0.3.0",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
     package: "sandstream-kit-plugin-github",
     kitVersion: ">=6.0.0",
     tags: ["ci", "github", "kit-plugin", "official", "secrets", "vcs"],
-    install: "npm install sandstream-kit-plugin-github@0.2.2",
+    install: "npm install sandstream-kit-plugin-github@0.3.0",
   },
   {
     name: "railway",

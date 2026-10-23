@@ -180,7 +180,9 @@ export function createGithubApiSource(opts: {
   const headers = {
     Authorization: `Bearer ${opts.token}`,
     Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
+    // 2026-03-10: its breaking changes (checked 2026-10-23) do not touch GET /orgs/{org}/teams
+    // or GET team memberships. 2022-11-28 ends 2028-03-10.
+    "X-GitHub-Api-Version": "2026-03-10",
   };
 
   return {
