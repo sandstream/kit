@@ -47,17 +47,24 @@ describe("isValidSupabaseSecretName", () => {
   });
 });
 
-describe("quoteEnvValue writes one value so an env file reads back exactly it", () => {
-  it("wraps in double quotes and escapes backslash, quote, dollar, newline and return", () => {
-    assert.equal(quoteEnvValue("plain"), '"plain"');
-    assert.equal(quoteEnvValue('a"b'), '"a\\"b"');
-    assert.equal(quoteEnvValue("a\\b"), '"a\\\\b"');
-    assert.equal(quoteEnvValue("$HOME ${X}"), '"\\$HOME \\${X}"');
+describe("quoteEnvValue writes one value so the Supabase CLI reads back exactly it", () => {
+  // Measured against a real project: single quotes are literal, double quotes expand only \n and \r.
+  it("uses single quotes when the value has no single quote and no line break", () => {
+    assert.equal(quoteEnvValue("plain"), "'plain'");
+    assert.equal(quoteEnvValue('a"b $X \\ #c = d'), "'a\"b $X \\ #c = d'");
+    assert.equal(quoteEnvValue("a\\nb"), "'a\\nb'");
+    assert.equal(quoteEnvValue(""), "''");
+  });
+
+  it("uses double quotes with \\n and \\r when the value has a single quote or a line break", () => {
+    assert.equal(quoteEnvValue("it's"), '"it\'s"');
     assert.equal(quoteEnvValue("l1\nl2\r"), '"l1\\nl2\\r"');
   });
 
-  it("leaves a hash, a single quote, spaces and equals signs alone inside the quotes", () => {
-    assert.equal(quoteEnvValue("a # b = 'c'"), "\"a # b = 'c'\"");
+  it("refuses a value that has no exact form instead of storing it changed", () => {
+    assert.throws(() => quoteEnvValue('it\'s "x"'), /cannot read that back exactly/);
+    assert.throws(() => quoteEnvValue("l1\n$HOME"), /cannot read that back exactly/);
+    assert.throws(() => quoteEnvValue("l1\nback\\slash"), /cannot read that back exactly/);
   });
 
   it("refuses a value with a NUL byte, which no env file can carry", () => {
@@ -155,7 +162,7 @@ function installFakeSupabase(): void {
   });
 }
 
-const SECRET = 'p@ss "w0rd" $HOME\nline2';
+const SECRET = "p@ss 'w0rd' #x=y\nline2";
 const run = (
   name = "API_KEY",
   value = SECRET,
@@ -164,6 +171,14 @@ const run = (
 
 describe("propagate --to supabase: the command", { skip: process.platform === "win32" }, () => {
   installFakeSupabase();
+
+  it("refuses a value that has no exact env-file form, without running the CLI or echoing the value", async () => {
+    const [r] = await run("API_KEY", `it's "x" $HOME`);
+    assert.equal(r.ok, false);
+    assert.match(r.detail, /cannot read that back exactly/);
+    assert.ok(!r.detail.includes("$HOME"));
+    assert.equal(existsSync(log), false);
+  });
 
   it("runs supabase secrets set with an env file and the project ref, and never puts the value in argv", async () => {
     const [r] = await run();

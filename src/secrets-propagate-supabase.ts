@@ -18,26 +18,26 @@ export function isValidSupabaseSecretName(name: string): boolean {
 }
 
 /**
- * One value as an env-file entry. Double quotes with the characters an env file would otherwise read
- * as syntax escaped: a backslash, a quote, a dollar (variable expansion), a newline and a return.
+ * One value as an env-file entry that the Supabase CLI reads back exactly. Measured against a real
+ * project, the CLI reads single quotes literally and reads double quotes with only `\n` and `\r`
+ * expanded: a quote, a dollar and a backslash cannot be escaped inside double quotes (they are
+ * stored with the backslash kept). So the quoting follows the value:
+ *   - no single quote, newline or return: single quotes, everything literal;
+ *   - otherwise double quotes with `\n` and `\r`, which is exact only without `"`, `$` and `\`;
+ *   - otherwise the value has no exact form and is refused, never stored changed.
  */
 export function quoteEnvValue(value: string): string {
   if (value.includes("\u0000")) {
     throw new Error("the value contains a NUL byte, which an env file cannot carry");
   }
-  // String splits, not regex literals: the escape order matters (the backslash goes first).
-  const escaped = value
-    .split("\\")
-    .join("\\\\")
-    .split('"')
-    .join('\\"')
-    .split("$")
-    .join("\\$")
-    .split("\n")
-    .join("\\n")
-    .split("\r")
-    .join("\\r");
-  return `"${escaped}"`;
+  const needsDouble = ["'", "\r", "\n"].some((ch) => value.includes(ch));
+  if (!needsDouble) return `'${value}'`;
+  if (['"', "$", "\\"].some((ch) => value.includes(ch))) {
+    throw new Error(
+      "the value has a single quote or a line break together with a double quote, a dollar or a backslash, and the Supabase CLI cannot read that back exactly; set it in the Supabase dashboard",
+    );
+  }
+  return `"${value.split("\n").join("\\n").split("\r").join("\\r")}"`;
 }
 
 /** An env file with one entry, in a folder only this user can open. `remove` deletes both. */
