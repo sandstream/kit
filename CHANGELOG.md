@@ -2,6 +2,18 @@
 
 ### Added
 
+- **`kit scan` scans container images.** `[scan].images = ["ghcr.io/acme/api:1.4.2"]` adds an
+  osv-scanner and a trivy run per image, and `images_from_dockerfiles = true` also takes the
+  images named by the `FROM` lines of the repository's Dockerfiles (an `ARG` default is resolved,
+  `scratch` and earlier stage names are not images, an unresolved `ARG` is reported and not
+  guessed). Until now kit scanned only the files of a repository, so a component that runs in
+  production but has no manifest in the repository was never seen. Findings join the same merged
+  verdict, and a finding that both tools report is one row. Pulling an image is network, so the
+  runs are dropped in air-gap mode and named when they are. An image reference comes from a
+  repository, so it must be a plain reference (no leading dash, no space, no control character).
+  The `trivy container scan` row of `kit check` now says what it does: it runs `trivy fs` on the
+  project files and never scans a built image, and its text points to `[scan].images`.
+
 - **`kit upstream check` tells you what changed upstream.** For the services a project uses
   (Convex, Stripe and WorkOS are built in, `[upstream.<id>]` in `.kit.toml` adds or overrides
   one), it reads the latest npm version and the GitHub release notes, compares them with the

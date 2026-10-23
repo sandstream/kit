@@ -42,6 +42,18 @@ export async function cmdScan(): Promise<boolean> {
   }
   const selectedScanners = enabledScanners(SCANNERS, delegates);
 
+  // Container images (L1): `[scan].images` and, when asked, the Dockerfiles' FROM lines. Each image
+  // adds an osv-scanner and a trivy run that pull the image, so air-gap mode drops them below.
+  const { collectImages, configuredImages, imageScanners } = await import("../image-scan.js");
+  const imagePlan = collectImages(cwd, {
+    configured: configuredImages(config.scan?.images),
+    fromDockerfiles: config.scan?.images_from_dockerfiles === true,
+  });
+  for (const s of imagePlan.skipped) {
+    console.error(`${c.yellow}! image not scanned: ${s.ref} (${s.reason})${c.reset}`);
+  }
+  selectedScanners.push(...imageScanners(imagePlan.images, delegates));
+
   // Air-gap posture from `.kit.toml [air_gap]` + env (env overrides). When
   // enabled, drop cloud-only scanners and run the rest against local DBs with no
   // network. See docs/AIR_GAP.md.
@@ -115,9 +127,9 @@ export async function cmdScan(): Promise<boolean> {
   const { merged, runs } = await runScanners(
     {
       resolve: (bin) => resolveToolBin(bin),
-      run: async (bin, args) => {
+      run: async (bin, args, timeoutMs) => {
         const r = await execFileNoThrow(bin, args, {
-          timeout: 180_000,
+          timeout: timeoutMs ?? 180_000,
           env: { ...process.env, ...airgap.env, ...toolingTokens },
         });
         return { ok: r.ok, stdout: r.stdout };
