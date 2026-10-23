@@ -39,6 +39,8 @@ export interface UpstreamFetcher {
   githubReleases(repo: string, perPage?: number): Promise<ReleaseInfo[]>;
   /** Tag names, for projects that publish no GitHub releases (cpython). */
   githubTags(repo: string): Promise<string[]>;
+  /** One file of a repository as raw text (a release schedule). */
+  githubFile(repo: string, path: string): Promise<string>;
 }
 
 export interface UpstreamPosture {
@@ -160,11 +162,34 @@ export function createGhTagFetcher(run: GhRun = runGh): (repo: string) => Promis
   };
 }
 
+const MAX_FILE_CHARS = 1_000_000;
+const FILE_PATH = /^[A-Za-z0-9._][A-Za-z0-9._/-]*$/;
+
+/** One file of a repository, raw. The path is validated: it cannot leave the repository or look like an option. */
+export function createGhFileFetcher(
+  run: GhRun = runGh,
+): (repo: string, path: string) => Promise<string> {
+  return async (repo, path) => {
+    if (!FILE_PATH.test(path) || path.split("/").includes("..")) {
+      throw new Error(`not a repository file path: ${stripControl(path).slice(0, 60)}`);
+    }
+    const out = await run("gh", [
+      "api",
+      "-H",
+      "Accept: application/vnd.github.raw+json",
+      `repos/${repo}/contents/${path}`,
+    ]);
+    if (out.length > MAX_FILE_CHARS) throw new Error(`${path} is too large to read`);
+    return out;
+  };
+}
+
 export function createDefaultFetcher(): UpstreamFetcher {
   return {
     npmLatest: createNpmLatestFetcher(),
     githubReleases: createGhReleaseFetcher(),
     githubTags: createGhTagFetcher(),
+    githubFile: createGhFileFetcher(),
   };
 }
 
@@ -179,6 +204,7 @@ export interface UpstreamLookup {
   npm: SourceResult<{ latest: string }>[];
   github: SourceResult<{ releases: ReleaseInfo[] }>[];
   tags: SourceResult<{ tags: string[] }>[];
+  files: SourceResult<{ text: string }>[];
 }
 
 export interface LookupDeps {
@@ -187,13 +213,15 @@ export interface LookupDeps {
   cacheDir?: string;
   ttlMs?: number;
   now?: () => number;
+  /** Read the cache only: no fetch, no write, no network posture check. A miss is reported, never filled. */
+  cacheOnly?: boolean;
 }
 
 interface CacheFile {
   version: 1;
   entries: Record<
     string,
-    { at: number; latest?: string; releases?: ReleaseInfo[]; tags?: string[] }
+    { at: number; latest?: string; releases?: ReleaseInfo[]; tags?: string[]; text?: string }
   >;
 }
 
@@ -226,6 +254,8 @@ export interface UpstreamService {
   github: readonly string[];
   /** Repos whose tag names are read because they publish no GitHub releases. */
   githubTags?: readonly string[];
+  /** Repository files to read as text (a release schedule), as `{ repo, path }`. */
+  githubFiles?: readonly { repo: string; path: string }[];
   /** How many releases to read per repo (default 10). A wider window reaches an older release line. */
   releaseWindow?: number;
 }
@@ -236,9 +266,17 @@ export async function lookupUpstream(
   service: UpstreamService,
   deps: LookupDeps = {},
 ): Promise<UpstreamLookup> {
-  const posture = deps.posture ?? (await upstreamPosture());
+  // A cache-only read opens no socket, so the air-gap and read-only postures do not apply to it.
+  const posture = deps.cacheOnly ? { allowed: true } : (deps.posture ?? (await upstreamPosture()));
   if (!posture.allowed) {
-    return { status: "skipped", reason: posture.reason, npm: [], github: [], tags: [] };
+    return {
+      status: "skipped",
+      reason: (posture as UpstreamPosture).reason,
+      npm: [],
+      github: [],
+      tags: [],
+      files: [],
+    };
   }
   const fetcher = deps.fetcher ?? createDefaultFetcher();
   const dir = deps.cacheDir ?? join(homedir(), ".kit");
@@ -258,6 +296,13 @@ export async function lookupUpstream(
     const hit = cache.entries[key];
     const cached = hit && now - hit.at >= 0 && now - hit.at < ttl ? pick(hit) : undefined;
     if (cached !== undefined) return { name, ok: true, value: cached };
+    if (deps.cacheOnly) {
+      return {
+        name,
+        ok: false,
+        error: "not in the cache or older than its limit (run kit upstream check)",
+      };
+    }
     try {
       const value = await fetchIt();
       cache.entries[key] = { at: now, ...store(value) };
@@ -307,7 +352,23 @@ export async function lookupUpstream(
     }),
   );
 
+  const files = await Promise.all(
+    (service.githubFiles ?? []).map(
+      async ({ repo, path }): Promise<SourceResult<{ text: string }>> => {
+        const name = `${repo}:${path}`;
+        const r = await source(
+          `file:${name}`,
+          name,
+          (e) => e.text,
+          () => fetcher.githubFile(repo, path),
+          (text) => ({ text }),
+        );
+        return r.ok ? { name, ok: true, text: r.value } : r;
+      },
+    ),
+  );
+
   if (dirty) await writeCache(dir, cache);
-  const anyOk = [...npm, ...github, ...tags].some((r) => r.ok);
-  return { status: anyOk ? "ok" : "unknown", npm, github, tags };
+  const anyOk = [...npm, ...github, ...tags, ...files].some((r) => r.ok);
+  return { status: anyOk ? "ok" : "unknown", npm, github, tags, files };
 }

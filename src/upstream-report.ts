@@ -166,13 +166,16 @@ export async function buildUpstreamReport(
   };
 }
 
-/** `--enforce` fails on a major, a deprecation hit or a runtime security release, and on nothing else. */
+/** `--enforce` fails on a major, a deprecation hit, a runtime security release or an end-of-life runtime, and on nothing else. */
 export function enforceFails(
   report: Pick<UpstreamReport, "rows"> & { runtimes?: RuntimeRow[] },
 ): boolean {
   return (
     report.rows.some(
       (r) => r.verdict === "major, read notes" || r.verdict === "upgrade recommended (deprecation)",
-    ) || (report.runtimes ?? []).some((r) => r.verdict === "security release available")
+    ) ||
+    (report.runtimes ?? []).some(
+      (r) => r.verdict === "security release available" || r.verdict === "end of life",
+    )
   );
 }

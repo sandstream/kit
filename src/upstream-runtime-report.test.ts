@@ -5,6 +5,8 @@ import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { upstreamRowsFromReport } from "./check-upstream.js";
 import { buildUpstreamReport, enforceFails } from "./upstream-report.js";
+import { serviceFor } from "./upstream-runtime-report.js";
+import { RUNTIME_SPECS } from "./upstream-runtimes.js";
 import type { UpstreamLookup } from "./upstream-sources.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
@@ -45,6 +47,7 @@ const NODE_LOOKUP: UpstreamLookup = {
     },
   ],
   tags: [],
+  files: [],
 };
 
 const PROJECT = { ".nvmrc": "22\n", "package.json": "{}" };
@@ -85,6 +88,7 @@ describe("runtime rows in the upstream report", () => {
           npm: [],
           github: [],
           tags: [],
+          files: [],
         }),
         readInstalled: installed("22.23.3"),
       });
@@ -103,6 +107,7 @@ describe("runtime rows when the lookup fails or the install differs", () => {
           npm: [],
           github: [{ name: "nodejs/node", ok: false, error: "gh: not logged in" }],
           tags: [],
+          files: [],
         }),
         readInstalled: installed("22.23.3"),
       });
@@ -155,6 +160,7 @@ describe("runtime verdicts in enforce and in kit check", () => {
 
   it("--enforce fails on a security release and not on a plain patch", () => {
     assert.equal(enforceFails({ ...base, runtimes: [rt("security release available")] }), true);
+    assert.equal(enforceFails({ ...base, runtimes: [rt("end of life")] }), true);
     assert.equal(enforceFails({ ...base, runtimes: [rt("patch available")] }), false);
     assert.equal(enforceFails({ ...base, runtimes: [rt("current")] }), false);
   });
@@ -171,5 +177,21 @@ describe("runtime verdicts in enforce and in kit check", () => {
     assert.equal(rows[2].didNotRun, true);
     assert.match(rows[0].name, /Node\.js/);
     assert.match(rows[0].detail, /22\.0\.0 -> 22\.1\.0/);
+  });
+});
+
+describe("the sources each runtime asks for", () => {
+  it("asks for the Node release schedule, so an end-of-life line can be seen", () => {
+    const node = RUNTIME_SPECS.find((s) => s.id === "node")!;
+    assert.deepEqual(serviceFor(node).githubFiles, [
+      { repo: "nodejs/Release", path: "schedule.json" },
+    ]);
+  });
+
+  it("asks for no schedule for PHP and Python, which have no GitHub-hosted one", () => {
+    for (const id of ["php", "python"]) {
+      const spec = RUNTIME_SPECS.find((s) => s.id === id)!;
+      assert.equal(serviceFor(spec).githubFiles, undefined, id);
+    }
   });
 });

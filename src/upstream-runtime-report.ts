@@ -6,12 +6,14 @@
 import {
   decideRuntime,
   detectRuntimes,
+  lineEndOfLife,
   projectPinsApplied,
   readInstalledVersion,
   RUNTIME_SPECS,
 } from "./upstream-runtimes.js";
 import type {
   DetectedRuntime,
+  RuntimeAssessment,
   RuntimeId,
   RuntimeSpec,
   RuntimeVerdict,
@@ -36,10 +38,55 @@ export interface RuntimeDeps {
   readInstalled?: ((spec: RuntimeSpec, cwd: string) => Promise<string | null>) | undefined;
 }
 
-function serviceFor(spec: RuntimeSpec): UpstreamService {
-  return spec.source === "releases"
-    ? { npm: [], github: [spec.github], releaseWindow: spec.window }
-    : { npm: [], github: [], githubTags: [spec.github] };
+/** The sources one runtime needs: its releases or tags, and its end-of-life schedule when one is hosted. */
+export function serviceFor(spec: RuntimeSpec): UpstreamService {
+  const base: UpstreamService =
+    spec.source === "releases"
+      ? { npm: [], github: [spec.github], releaseWindow: spec.window }
+      : { npm: [], github: [], githubTags: [spec.github] };
+  return spec.schedule ? { ...base, githubFiles: [spec.schedule] } : base;
+}
+
+/**
+ * One verdict from what a lookup returned. An end-of-life line is decided from the schedule alone, so
+ * it is reported even when the release data is missing. Anything that cannot be read is `unknown`,
+ * and a source that answered nothing never reads as current.
+ */
+export function assessFromLookup(
+  spec: RuntimeSpec,
+  installed: string | null,
+  lookup: UpstreamLookup,
+  nowMs: number,
+): RuntimeAssessment {
+  if (installed === null) return decideRuntime(spec, null, [], []);
+  const file = lookup.files[0];
+  const lineEnd = file?.ok ? lineEndOfLife(spec, installed, file.text, nowMs) : null;
+  if (lineEnd?.ended) return decideRuntime(spec, installed, [], [], lineEnd);
+  const error = sourceError(lookup);
+  if (lookup.status === "unknown" || error !== undefined) {
+    return {
+      verdict: "unknown",
+      latest: null,
+      evidence: [],
+      detail: error ?? "release data could not be read",
+    };
+  }
+  const releases = lookup.github.flatMap((g) => (g.ok ? g.releases : []));
+  const tags = lookup.tags.flatMap((t) => (t.ok ? t.tags : []));
+  const out = decideRuntime(spec, installed, releases, tags, lineEnd);
+  const scheduleNote = !spec.schedule
+    ? undefined
+    : !file?.ok
+      ? "end-of-life data not available"
+      : lineEnd === null
+        ? "the release schedule does not date this line"
+        : undefined;
+  const detail = [out.detail, scheduleNote].filter(Boolean).join("; ");
+  return {
+    ...out,
+    ...(detail ? { detail } : {}),
+    ...(lineEnd && !lineEnd.ended ? { supportedUntil: lineEnd.end } : {}),
+  };
 }
 
 function declaredNote(declared: string | null, installed: string | null): string | undefined {
@@ -81,19 +128,7 @@ async function rowFor(
       detail: declaredNote(detected.declared, installed),
     };
   }
-  const error = sourceError(lookup);
-  if (lookup.status === "unknown" || (error !== undefined && installed !== null)) {
-    return {
-      ...base,
-      latest: null,
-      verdict: "unknown",
-      evidence: [],
-      detail: error ?? "release data could not be read",
-    };
-  }
-  const releases = lookup.github.flatMap((g) => (g.ok ? g.releases : []));
-  const tags = lookup.tags.flatMap((t) => (t.ok ? t.tags : []));
-  const verdict = decideRuntime(spec, installed, releases, tags);
+  const verdict = assessFromLookup(spec, installed, lookup, Date.now());
   const note = declaredNote(detected.declared, installed);
   const detail = [verdict.detail, note].filter(Boolean).join("; ");
   return {

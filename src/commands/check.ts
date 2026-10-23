@@ -67,6 +67,7 @@ export const CHECK_FLAGS = [
   "--fail-on-warning",
   "--fail-on-worse",
   "--enforce-tests",
+  "--online", // check-run.ts: fetch release data for the runtime rows
   "--category",
   "--pin",
   "--key",
@@ -130,7 +131,6 @@ export async function cmdCheck(): Promise<boolean> {
   }
   const categories = parsed.categories;
 
-  const enforceTests = hasFlag(process.argv, "--enforce-tests");
   // Scanner-health strict by default (see cmdCi): a check that could not RUN fails;
   // --lenient / KIT_CI_LENIENT downgrades those to warnings. Finding-warns stay
   // warnings unless --fail-on-warning / --strict / KIT_CI_STRICT.
@@ -160,7 +160,8 @@ export async function cmdCheck(): Promise<boolean> {
       // what "green" means. The CLI adds spinners (step), PAL sync, attestation and hints.
       const run = await runCheckGate({
         config,
-        enforceTests,
+        enforceTests: hasFlag(process.argv, "--enforce-tests"),
+        online: hasFlag(process.argv, "--online"),
         categories,
         gate: { lenient, failOnWarning },
         step,

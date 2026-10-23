@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
+  createGhFileFetcher,
   createGhReleaseFetcher,
   createGhTagFetcher,
   createNpmLatestFetcher,
@@ -24,6 +25,9 @@ function fakeFetcher(calls: string[] = []): UpstreamFetcher {
     },
     async githubTags() {
       return [];
+    },
+    async githubFile() {
+      return "{}";
     },
     async githubReleases(repo) {
       calls.push(`gh:${repo}`);
@@ -104,6 +108,9 @@ describe("lookupUpstream", () => {
       async githubTags() {
         throw new Error("gh: not logged in");
       },
+      async githubFile() {
+        return "{}";
+      },
     };
     const got = await lookupUpstream(SERVICE, { fetcher: failing, posture: allowed, cacheDir });
     assert.equal(got.status, "unknown");
@@ -159,6 +166,9 @@ describe("lookupUpstream cache and failures", () => {
       },
       async githubTags() {
         return [];
+      },
+      async githubFile() {
+        return "{}";
       },
     };
     const deps = { fetcher: flaky, posture: allowed, cacheDir };
@@ -404,5 +414,93 @@ describe("GitHub tags and the release window", () => {
       JSON.stringify([{ name: `v1.0.0${String.fromCharCode(27)}[2J` }]),
     );
     assert.deepEqual(await fetcher("o/r"), ["v1.0.0[2J"]);
+  });
+});
+
+describe("GitHub files and the cache-only read", () => {
+  const SCHEDULE = JSON.stringify({ v22: { end: "2027-04-30" } });
+
+  it("createGhFileFetcher reads one file as raw text through gh api", async () => {
+    let args: string[] = [];
+    const fetcher = createGhFileFetcher(async (_cmd, a) => {
+      args = a;
+      return SCHEDULE;
+    });
+    assert.equal(await fetcher("nodejs/Release", "schedule.json"), SCHEDULE);
+    assert.deepEqual(args, [
+      "api",
+      "-H",
+      "Accept: application/vnd.github.raw+json",
+      "repos/nodejs/Release/contents/schedule.json",
+    ]);
+  });
+
+  it("createGhFileFetcher refuses a path that could leave the repository or add an option", async () => {
+    const fetcher = createGhFileFetcher(async () => "x");
+    for (const bad of ["../x", "/etc/passwd", "-H", "a b", "a?b=1"]) {
+      await assert.rejects(fetcher("o/r", bad), /path/, bad);
+    }
+  });
+
+  it("lookupUpstream returns the files it was asked for", async () => {
+    const fetcher: UpstreamFetcher = {
+      ...fakeFetcher(),
+      async githubFile() {
+        return SCHEDULE;
+      },
+    };
+    const got = await lookupUpstream(
+      { npm: [], github: [], githubFiles: [{ repo: "nodejs/Release", path: "schedule.json" }] },
+      { fetcher, posture: allowed, cacheDir },
+    );
+    assert.equal(got.status, "ok");
+    assert.equal(got.files[0].ok && got.files[0].text, SCHEDULE);
+  });
+});
+
+describe("the cache-only read", () => {
+  const SCHEDULE = JSON.stringify({ v22: { end: "2027-04-30" } });
+
+  it("cacheOnly never calls the fetcher and says where the answer is missing", async () => {
+    const calls: string[] = [];
+    const fetcher = {
+      ...fakeFetcher(calls),
+      async githubFile() {
+        calls.push("file");
+        return SCHEDULE;
+      },
+    };
+    const got = await lookupUpstream(
+      {
+        npm: ["convex"],
+        github: ["o/r"],
+        githubFiles: [{ repo: "nodejs/Release", path: "schedule.json" }],
+      },
+      { fetcher, posture: allowed, cacheDir, cacheOnly: true },
+    );
+    assert.deepEqual(calls, []);
+    assert.equal(got.status, "unknown");
+    assert.match(String(!got.npm[0].ok && got.npm[0].error), /not in the cache/);
+  });
+
+  it("cacheOnly serves what a fetching run stored, and drops it once it is older than the limit", async () => {
+    let now = 1_000_000;
+    const base = { fetcher: fakeFetcher(), posture: allowed, cacheDir, now: () => now };
+    const svc = { npm: ["convex"], github: [] };
+    await lookupUpstream(svc, { ...base, ttlMs: 60_000 });
+    now += 30_000;
+    const fresh = await lookupUpstream(svc, { ...base, ttlMs: 60_000, cacheOnly: true });
+    assert.equal(fresh.npm[0].ok && fresh.npm[0].latest, "1.46.0");
+    now += 60_000;
+    const stale = await lookupUpstream(svc, { ...base, ttlMs: 60_000, cacheOnly: true });
+    assert.equal(stale.npm[0].ok, false);
+  });
+
+  it("cacheOnly writes nothing", async () => {
+    await lookupUpstream(
+      { npm: ["convex"], github: [] },
+      { fetcher: fakeFetcher(), posture: allowed, cacheDir, cacheOnly: true },
+    );
+    assert.deepEqual(readdirSync(cacheDir), []);
   });
 });

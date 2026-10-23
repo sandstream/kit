@@ -55,6 +55,7 @@ function okLookup(latest: string, body = ""): () => Promise<UpstreamLookup> {
       },
     ],
     tags: [],
+    files: [],
   });
 }
 
@@ -111,6 +112,7 @@ describe("buildUpstreamReport posture and edge cases", () => {
           npm: [],
           github: [],
           tags: [],
+          files: [],
         }),
       });
       assert.equal(report.status, "skipped");
@@ -127,6 +129,7 @@ describe("buildUpstreamReport posture and edge cases", () => {
           npm: [{ name: "convex", ok: false, error: "fetch failed" }],
           github: [],
           tags: [],
+          files: [],
         }),
       });
       assert.equal(report.rows[0].verdict, "unknown");
@@ -157,6 +160,7 @@ describe("buildUpstreamReport configuration and empty projects", () => {
             npm: [{ name: "acme-sdk", ok: true, latest: "3.0.0" }],
             github: [],
             tags: [],
+            files: [],
           }),
         });
         assert.equal(report.rows[0].id, "acme");
@@ -218,6 +222,7 @@ describe("terminal control characters in the report", () => {
           npm: [{ name: "convex", ok: false, error: `bad\u001b[2Jnews` }],
           github: [],
           tags: [],
+          files: [],
         }),
       });
       assert.ok(!(report.rows[0].detail ?? "").includes("\u001b"));
