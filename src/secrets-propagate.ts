@@ -16,14 +16,26 @@
  *   - railway      `railway variables --set <name>=<value>` (argv)
  *   - aws-ssm      `aws ssm put-parameter --name <key> --value file:///dev/stdin
  *                  --type SecureString --overwrite` (stdin via --value file://)
+ *   - supabase     `supabase secrets set --env-file <private file>` (Edge Function
+ *                  secrets; Supabase's CLI has no stdin path, so the value goes in a
+ *                  0600 file inside a 0700 folder that is removed afterwards)
  */
 
-import { spawn } from "node:child_process";
 import type { PolicyConfig } from "./config.js";
 import { enforcePolicy } from "./policy-gate.js";
-import { redactSecrets } from "./utils/redactSecrets.js";
+import { flagValue } from "./utils/flags.js";
+import { propagateSupabase } from "./secrets-propagate-supabase.js";
+import { propagateVercel } from "./secrets-propagate-vercel.js";
+import { safeDiagnostic, spawnWithStdin } from "./secrets-propagate-exec.js";
 
-export type PropagationTarget = "vercel" | "github" | "fly" | "cloudflare" | "railway" | "aws-ssm";
+export type PropagationTarget =
+  | "vercel"
+  | "github"
+  | "fly"
+  | "cloudflare"
+  | "railway"
+  | "aws-ssm"
+  | "supabase";
 
 export const ALL_TARGETS: PropagationTarget[] = [
   "vercel",
@@ -32,6 +44,7 @@ export const ALL_TARGETS: PropagationTarget[] = [
   "cloudflare",
   "railway",
   "aws-ssm",
+  "supabase",
 ];
 
 export interface PropagationResult {
@@ -45,6 +58,8 @@ export interface PropagationResult {
 export interface PropagationOptions {
   /** Logical env to write into (Vercel: "production"|"preview"|"development"). */
   env?: "production" | "preview" | "development";
+  /** Supabase project ref for Edge Function secrets. Omitted: the project linked in the working folder. */
+  supabaseProject?: string;
   /** Vercel scope (team or user). */
   vercelScope?: string;
   /** Vercel project name/id for Management API writes. */
@@ -81,219 +96,6 @@ export interface PropagationOptions {
    * the project it was performed for, not in whatever directory the process happens to occupy.
    */
   cwd?: string;
-}
-
-function safeDiagnostic(value: unknown, knownSecrets: readonly string[] = [], max = 300): string {
-  const text = redactSecrets(value instanceof Error ? value.message : String(value), knownSecrets);
-  return (text.split(/\r?\n/)[0] ?? "").slice(0, max);
-}
-
-/**
- * Spawns a CLI with the value piped via stdin. Returns the exit code +
- * captured stderr for diagnostics. The value never appears in argv.
- */
-async function spawnWithStdin(
-  cmd: string,
-  args: string[],
-  stdinValue: string,
-  sensitiveValues: readonly string[] = [],
-): Promise<{ code: number; stderr: string }> {
-  return new Promise((resolve) => {
-    const knownSecrets = [stdinValue, ...sensitiveValues];
-    const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "pipe"] });
-    let stderr = "";
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", (err) => {
-      resolve({ code: 127, stderr: safeDiagnostic(err, knownSecrets) });
-    });
-    child.on("close", (code) => {
-      resolve({ code: code ?? 1, stderr: redactSecrets(stderr, knownSecrets) });
-    });
-    child.stdin.write(stdinValue);
-    child.stdin.end();
-  });
-}
-
-type VercelEnvTarget = "production" | "preview" | "development";
-
-interface VercelEnvVar {
-  id: string;
-  key: string;
-  target: VercelEnvTarget[];
-}
-
-function vercelApiPath(project: string, teamId: string | undefined, suffix: string = ""): string {
-  const params = new URLSearchParams();
-  if (teamId) params.set("teamId", teamId);
-  const query = params.toString();
-  return `https://api.vercel.com/v9/projects/${encodeURIComponent(project)}/env${suffix}${query ? `?${query}` : ""}`;
-}
-
-function vercelCreateApiPath(project: string, teamId: string | undefined): string {
-  const params = new URLSearchParams();
-  if (teamId) params.set("teamId", teamId);
-  const query = params.toString();
-  return `https://api.vercel.com/v10/projects/${encodeURIComponent(project)}/env${query ? `?${query}` : ""}`;
-}
-
-async function vercelJson<T>(
-  url: string,
-  token: string,
-  init: RequestInit = {},
-  sensitiveValues: readonly string[] = [],
-): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(init.headers ?? {}),
-    },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(
-      `Vercel API ${res.status}: ${safeDiagnostic(text, [token, ...sensitiveValues])}`.trim(),
-    );
-  }
-  return (await res.json()) as T;
-}
-
-async function listVercelEnvVars(
-  token: string,
-  project: string,
-  teamId: string | undefined,
-): Promise<VercelEnvVar[]> {
-  const params = new URLSearchParams({ decrypt: "false" });
-  if (teamId) params.set("teamId", teamId);
-  const body = await vercelJson<{ envs?: VercelEnvVar[] }>(
-    `https://api.vercel.com/v9/projects/${encodeURIComponent(project)}/env?${params.toString()}`,
-    token,
-  );
-  return body.envs ?? [];
-}
-
-async function propagateVercelViaApi(
-  name: string,
-  value: string,
-  opts: PropagationOptions,
-): Promise<PropagationResult> {
-  const token = process.env.VERCEL_TOKEN;
-  const project = opts.vercelProject;
-  if (!token || !project) throw new Error("missing VERCEL_TOKEN or vercelProject");
-
-  const target = opts.env ?? "production";
-  const existing = await listVercelEnvVars(token, project, opts.vercelTeamId);
-  const sameKey = existing.filter((entry) => entry.key === name);
-  const exact = sameKey.find((entry) => entry.target.length === 1 && entry.target[0] === target);
-  if (exact) {
-    await vercelJson<VercelEnvVar>(
-      vercelApiPath(project, opts.vercelTeamId, `/${encodeURIComponent(exact.id)}`),
-      token,
-      { method: "PATCH", body: JSON.stringify({ value }) },
-      [value],
-    );
-    return {
-      target: "vercel",
-      ok: true,
-      detail: `pushed to vercel project=${project} env=${target}`,
-      valueInArgv: false,
-    };
-  }
-
-  await vercelJson<VercelEnvVar>(
-    vercelCreateApiPath(project, opts.vercelTeamId),
-    token,
-    {
-      method: "POST",
-      body: JSON.stringify({ key: name, value, target: [target], type: "encrypted" }),
-    },
-    [value],
-  );
-
-  const staleDeleteFailures: string[] = [];
-  for (const stale of sameKey.filter((entry) => entry.target.includes(target))) {
-    try {
-      const res = await fetch(
-        vercelApiPath(project, opts.vercelTeamId, `/${encodeURIComponent(stale.id)}`),
-        {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
-          signal: AbortSignal.timeout(10_000),
-        },
-      );
-      if (!res.ok) staleDeleteFailures.push(stale.id);
-    } catch {
-      staleDeleteFailures.push(stale.id);
-    }
-  }
-
-  if (staleDeleteFailures.length > 0) {
-    return {
-      target: "vercel",
-      ok: false,
-      detail: `created new vercel env entry for project=${project} env=${target}, but failed to delete stale id(s): ${staleDeleteFailures.join(", ")}`,
-      valueInArgv: false,
-    };
-  }
-
-  return {
-    target: "vercel",
-    ok: true,
-    detail: `pushed to vercel project=${project} env=${target}`,
-    valueInArgv: false,
-  };
-}
-
-async function propagateVercel(
-  name: string,
-  value: string,
-  opts: PropagationOptions,
-): Promise<PropagationResult> {
-  if (opts.vercelProject && process.env.VERCEL_TOKEN) {
-    try {
-      return await propagateVercelViaApi(name, value, opts);
-    } catch (err) {
-      return {
-        target: "vercel",
-        ok: false,
-        detail: `vercel API failed: ${safeDiagnostic(err)}`,
-        valueInArgv: false,
-      };
-    }
-  }
-
-  const env = opts.env ?? "production";
-  // vercel env add accepts the value via stdin when invoked non-interactively
-  // and printed to a stream that has no TTY.
-  const args = ["env", "add", name, env];
-  if (opts.vercelScope) args.push("--scope", opts.vercelScope);
-  if (opts.vercelCwd) args.push("--cwd", opts.vercelCwd);
-  // Remove existing first so add doesn't error on duplicate.
-  await spawnWithStdin(
-    "vercel",
-    [
-      "env",
-      "rm",
-      name,
-      env,
-      "--yes",
-      ...(opts.vercelScope ? ["--scope", opts.vercelScope] : []),
-      ...(opts.vercelCwd ? ["--cwd", opts.vercelCwd] : []),
-    ],
-    "",
-  );
-  const { code, stderr } = await spawnWithStdin("vercel", args, value);
-  return {
-    target: "vercel",
-    ok: code === 0,
-    detail:
-      code === 0 ? `pushed to vercel env=${env}` : `vercel exit ${code}: ${stderr.split("\n")[0]}`,
-    valueInArgv: false,
-  };
 }
 
 async function propagateGithub(
@@ -426,6 +228,26 @@ async function propagateAwsSsm(
   };
 }
 
+/** The platform flags shared by `kit secrets propagate` and `kit secrets rotate --propagate`. */
+export function propagationOptionsFromArgs(args: readonly string[]): PropagationOptions {
+  const o: PropagationOptions = {};
+  const take = <K extends keyof PropagationOptions>(flag: string, key: K) => {
+    const v = flagValue(args, flag);
+    if (v !== undefined) o[key] = v as PropagationOptions[K];
+  };
+  take("--target-env", "env");
+  take("--vercel-project", "vercelProject");
+  take("--vercel-team", "vercelTeamId");
+  take("--vercel-scope", "vercelScope");
+  take("--supabase-project", "supabaseProject");
+  take("--fly-app", "flyApp");
+  take("--cf-worker", "cfWorker");
+  take("--railway-service", "railwayService");
+  take("--aws-region", "awsRegion");
+  take("--github-repo", "githubRepo");
+  return o;
+}
+
 const ADAPTERS: Record<
   PropagationTarget,
   (name: string, value: string, opts: PropagationOptions) => Promise<PropagationResult>
@@ -436,6 +258,7 @@ const ADAPTERS: Record<
   cloudflare: propagateCloudflare,
   railway: propagateRailway,
   "aws-ssm": propagateAwsSsm,
+  supabase: propagateSupabase,
 };
 
 export async function propagate(
@@ -522,3 +345,10 @@ export function parseTargets(spec: string): PropagationTarget[] {
     .map((t) => t.trim())
     .filter((t): t is PropagationTarget => known.has(t as PropagationTarget));
 }
+
+export { vercelEnvAddArgs } from "./secrets-propagate-vercel.js";
+export {
+  isValidSupabaseSecretName,
+  quoteEnvValue,
+  writePrivateEnvFile,
+} from "./secrets-propagate-supabase.js";

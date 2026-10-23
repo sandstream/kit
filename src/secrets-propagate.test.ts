@@ -39,6 +39,7 @@ describe("ALL_TARGETS", () => {
     assert.ok(ALL_TARGETS.includes("cloudflare"));
     assert.ok(ALL_TARGETS.includes("railway"));
     assert.ok(ALL_TARGETS.includes("aws-ssm"));
+    assert.ok(ALL_TARGETS.includes("supabase"));
   });
 });
 

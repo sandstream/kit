@@ -71,6 +71,11 @@ export const POLICY_OPS: readonly { vendor: string; op: string; description: str
     { vendor: "cloudflare", op: "env_set", description: "set a secret on a Cloudflare Worker" },
     { vendor: "railway", op: "env_set", description: "set a variable on a Railway service" },
     { vendor: "aws-ssm", op: "env_set", description: "put a parameter in AWS SSM Parameter Store" },
+    {
+      vendor: "supabase",
+      op: "env_set",
+      description: "set an Edge Function secret on a Supabase project",
+    },
     // Supabase key rotation, registered as TWO ops because their blast radii are not comparable
     // and pre-approving the reversible one must not pre-approve the catastrophic one. This mirrors
     // the reasoning already in `elevation-scopes.ts`, where `jwt-secret-roll` needs a DISTINCT

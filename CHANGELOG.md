@@ -2,6 +2,20 @@
 
 ### Added
 
+- **`kit secrets propagate --to supabase` sets Edge Function secrets.** It runs `supabase secrets
+set --env-file` with the value in a file of mode 0600 inside a 0700 folder that is removed
+  afterwards (the Supabase CLI has no stdin path), never in argv. Names that start with `SUPABASE_`
+  (reserved) or are not upper case are refused, a value is quoted so the file reads back exactly it,
+  and `--supabase-project <ref>` picks the project (the linked one otherwise). `--vercel-project` and
+  `--vercel-team` now reach the Vercel API path from the command line, for both `propagate` and
+  `rotate --propagate`, which share one flag reader. `[policy.agent_writes]` can gate it as
+  `supabase = ["env_set"]`.
+- **`kit check --category deploy` fails three unsafe Vercel states.** From the metadata the Vercel API
+  returns (never a value): a variable Vercel flags `readable-secret`, a secret held in one entry that
+  targets both production and preview, and a variable no source file names. Each row lists the names
+  and the way out; `shared_ok` and `implicit_env` in `[deploy.vercel]` accept known exceptions.
+  Without `VERCEL_TOKEN` the listing has no such metadata, and the row says the checks did not run.
+
 - **`kit scan` scans container images.** `[scan].images = ["ghcr.io/acme/api:1.4.2"]` adds an
   osv-scanner and a trivy run per image, and `images_from_dockerfiles = true` also takes the
   images named by the `FROM` lines of the repository's Dockerfiles (an `ARG` default is resolved,
@@ -61,6 +75,12 @@
   `packageManager` value that is not a plain `name@version`).
 
 ### Fixed
+
+- **`kit secrets propagate --to vercel` creates `sensitive` variables, not `encrypted`.** Vercel keeps
+  a `sensitive` value write-only. It is allowed only for production and preview, so development stays
+  `encrypted` and the result says so. A type cannot be changed afterwards, so an existing entry of
+  another type is deleted and created again instead of patched (a failure between the two steps is
+  reported, and the command can be run again). The CLI path passes `--sensitive` too.
 
 - **A narrowed `kit check` no longer closes your tracked security findings.** A run such as
   `kit check --category tools` never looks at security, but it passed an empty security list to
