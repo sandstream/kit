@@ -62,6 +62,8 @@ const EXPECTED: Record<string, { fn: string; vendor: string; op: string }[]> = {
     { fn: "rollJwtSecret", vendor: "supabase", op: "jwt_secret_roll" },
     { fn: "revokeScopedKey", vendor: "supabase", op: "scoped_key_revoke" },
     { fn: "mintScopedKey", vendor: "supabase", op: "scoped_key_mint" },
+    { fn: "rotateSigningKey", vendor: "supabase", op: "signing_key_rotate" },
+    { fn: "revokeSigningKey", vendor: "supabase", op: "signing_key_revoke" },
   ],
 };
 

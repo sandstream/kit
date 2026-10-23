@@ -99,7 +99,7 @@ describe("the policy agent-writes row", () => {
       assert.match(r.detail, /2 op\(s\) pre-approved/);
       // The count of refusals is the answer to "what is denied here?", which an operator otherwise
       // learns only from a refusal at the moment they hit one.
-      assert.match(r.detail, /policy refuses 3 of the \d+ ops/);
+      assert.match(r.detail, /policy refuses 5 of the \d+ ops/);
     } finally {
       rmTemp(dir);
     }

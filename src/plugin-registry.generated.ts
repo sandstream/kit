@@ -136,14 +136,14 @@ export const OFFICIAL_PLUGINS: PluginMetadata[] = [
     name: "supabase",
     description:
       "kit plugin: Supabase Management API integration (service-role key rotation, project introspection).",
-    version: "0.2.2",
+    version: "0.3.0",
     author: "Sandstream",
     license: "MIT",
     repository: "https://github.com/sandstream/kit",
     package: "sandstream-kit-plugin-supabase",
     kitVersion: ">=6.0.0",
     tags: ["database", "kit-plugin", "official", "secrets", "supabase"],
-    install: "npm install sandstream-kit-plugin-supabase@0.2.2",
+    install: "npm install sandstream-kit-plugin-supabase@0.3.0",
   },
   {
     name: "vercel",

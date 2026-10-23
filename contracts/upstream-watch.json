@@ -38,7 +38,9 @@
           "/v1/projects",
           "/v1/projects/{ref}/api-keys",
           "/v1/projects/{ref}/api-keys/{id}",
-          "/v1/projects/{ref}/config/jwt-secret/roll"
+          "/v1/projects/{ref}/config/jwt-secret/roll",
+          "/v1/projects/{ref}/config/auth/signing-keys",
+          "/v1/projects/{ref}/config/auth/signing-keys/{id}"
         ]
       }
     },
