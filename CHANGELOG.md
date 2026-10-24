@@ -77,6 +77,16 @@
 
 ### Fixed
 
+- **`kit security scan-staged` no longer blocks commits on i18n labels and navigation keys
+  (#580).** The keyed-secret patterns are case-insensitive. Any `key`, `password` or `token` with
+  a value of 8 or more characters counted as a secret, so `"password": "Lösenord"` and
+  `{ key: 'sessions' }` blocked every commit to those files.
+  - Detection now skips a value that reads as a word or a label: letters, an optional space or
+    basic punctuation, and no inner capitals.
+  - Digits, symbols, mixed case, or any all-caps env-style name (`DB_PASSWORD=...`) still count.
+  - Redaction still masks these values.
+  - Accepted miss: an all-lowercase, letters-only password under a lowercase key.
+
 - **The monkey-test runner no longer fails a passing stage in a container without an init.** It
   confirms a stage's process group is gone with `kill(-pgid, 0)`, which also succeeds on zombies.
   An orphaned descendant is reparented to PID 1, and where PID 1 does not reap (`docker run` without
