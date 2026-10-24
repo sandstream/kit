@@ -207,6 +207,7 @@ jobs:
           ignore-unfixed: true
           scanners: vuln
           limit-severities-for-sarif: true
+          version: v0.76.1
       - name: Upload SARIF
         # SARIF upload requires Code Scanning enabled in repo settings.
         # Don't fail the job if Code Scanning is off — scan result is the gate.
