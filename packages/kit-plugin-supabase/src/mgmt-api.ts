@@ -169,7 +169,7 @@ export async function listApiKeys(client: MgmtClient, projectRef: string): Promi
 export interface ProjectKeyMode {
   /** Project is on the new Sb scoped-keys system — mint with scoped-key-mint. */
   supportsScopedKeys: boolean;
-  /** Project still uses JWT-based anon + service_role — must use jwt-secret-roll. */
+  /** Project still uses JWT-based anon + service_role: scoped-key-mint would break it. */
   supportsLegacyJwt: boolean;
   /** Raw count of API keys for diagnostics. */
   keyCount: number;

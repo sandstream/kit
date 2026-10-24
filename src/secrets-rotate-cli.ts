@@ -140,6 +140,7 @@ import { scopeFor } from "./elevation-scopes.js";
 import {
   cmdRotateSupabaseSigningKey,
   isSigningKeyMode,
+  JWT_ROLL_LEGACY_NOTICE,
   parseSupabaseMode,
 } from "./secrets-rotate-signing-key.js";
 import {
@@ -281,7 +282,7 @@ async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Pr
       `${c.dim}A scoped key minted now would be treated as anon by PostgREST and break every service_role call.${c.reset}`,
     );
     console.error(
-      `${c.dim}Recommended: ${c.bold}--mode jwt-secret-roll${c.reset}${c.dim} (invalidates all tokens) or migrate the project to scoped keys first.${c.reset}`,
+      `${c.dim}Recommended: ${c.bold}--mode signing-key-cutover${c.reset}${c.dim} (legacy: --mode jwt-secret-roll) or migrate the project to scoped keys first.${c.reset}`,
     );
     if (!force) {
       console.error(
@@ -302,6 +303,7 @@ async function cmdSecretsRotateSupabaseMgmt(keyName: string, args: string[]): Pr
     console.warn(
       `${c.yellow}⚠ jwt-secret-roll invalidates EVERY existing token (anon, service_role, signed URLs, active sessions).${c.reset}`,
     );
+    console.warn(`${c.yellow}⚠ ${JWT_ROLL_LEGACY_NOTICE}${c.reset}`);
   }
   console.log();
 

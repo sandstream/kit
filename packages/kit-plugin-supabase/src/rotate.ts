@@ -103,7 +103,8 @@ export async function previewSupabaseRotation(opts: {
       warning =
         "Project still uses legacy JWT keys (anon/service_role). " +
         "scoped-key-mint would mint a key the project's PostgREST won't accept as service_role — " +
-        "must use jwt-secret-roll instead (invalidates all existing tokens atomically).";
+        "kit falls back to the legacy jwt-secret-roll (invalidates all existing tokens atomically). " +
+        "Prefer signing-key-cutover once the project's JWT secret is migrated to signing keys.";
     } else {
       recommendedMode = "scoped-key-mint";
       warning = "Could not detect key mode from API response — using scoped-key-mint default.";

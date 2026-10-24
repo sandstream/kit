@@ -47,6 +47,20 @@ export function parseSupabaseMode(
   return "invalid";
 }
 
+/**
+ * What `jwt-secret-roll` users are pointed to. The roll calls an endpoint Supabase's published
+ * Management API no longer lists; signing keys are the documented successor.
+ */
+export const JWT_ROLL_LEGACY_NOTICE =
+  "jwt-secret-roll is legacy: Supabase's published Management API no longer lists its endpoint. " +
+  "Prefer --mode signing-key-cutover (rotates the JWT signing key and revokes the old one).";
+
+/** Why a cutover refuses a project with no signing key in use. */
+export const CUTOVER_NOTHING_TO_REVOKE =
+  "signing-key-cutover refused: the project has no signing key in use, so nothing would be revoked " +
+  "and tokens signed with its legacy JWT secret would stay valid. Migrate the JWT secret to signing " +
+  "keys in the Supabase dashboard first, or use the legacy --mode jwt-secret-roll.";
+
 /** The two modes this module handles; the rest stay in `secrets-rotate-cli.ts`. */
 export function isSigningKeyMode(
   mode: SupabaseRotateMode | "invalid" | undefined,
@@ -140,6 +154,11 @@ export async function runSigningKeyRotation(
       ? `${c.yellow}⚠ signing-key-cutover: every token the current key signed stops verifying (sessions end).${c.reset}`
       : `${c.dim}The current key moves to previously_used and keeps verifying the tokens it signed.${c.reset}`,
   );
+  if (opts.revokePrevious && inUse.length === 0) {
+    // Nothing would be demoted, so nothing revoked: the cutover would leave every leaked token valid.
+    err(`${c.red}✗ ${CUTOVER_NOTHING_TO_REVOKE}${c.reset}`);
+    return false;
+  }
   if (opts.dryRun) {
     log(`${c.dim}--dry-run: not rotating. Remove flag to proceed.${c.reset}`);
     return true;

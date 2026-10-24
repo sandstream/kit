@@ -11,7 +11,11 @@
   That half is irreversible: it needs a one-shot elevation of its own (`rotate-signing-key-cutover`),
   checks both `signing_key_rotate` and `signing_key_revoke` against `[policy.agent_writes]`, and its
   prompt defaults to no. Nothing is written to the vault, since Supabase keeps the private key and
-  verifiers read the project's JWKS. A failed revoke names the key that still verifies.
+  verifiers read the project's JWKS. A failed revoke names the key that still verifies. A cutover refuses
+  a project with no signing key in use, because it would revoke nothing and leave tokens signed with
+  the legacy JWT secret valid. `jwt-secret-roll` is now labelled legacy wherever kit runs or
+  recommends it, and the refusal for scoped-key-mint on a legacy-JWT project recommends
+  `signing-key-cutover` first (`sandstream-kit-plugin-supabase` 0.3.1).
 
 - **`kit scan` scans container images.** `[scan].images = ["ghcr.io/acme/api:1.4.2"]` adds an
   osv-scanner and a trivy run per image, and `images_from_dockerfiles = true` also takes the

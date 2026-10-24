@@ -148,20 +148,20 @@ severity = "warn"
 
 ## Secrets
 
-| Command                                                                                                         | Purpose                                                                                                             |
-| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `kit secrets sync [--target=<github\|dotenv-ci\|stdout>]`                                                       | Sync vault → CI / `.env.local`.                                                                                     |
-| `kit secrets migrate [--keep-commented \| --purge]`                                                             | Plaintext `.env*` → vault. Default leaves `KEY=` (value blanked).                                                   |
-| `kit secrets vault-migrate --from <a> --to <b>`                                                                 | Cross-vault key transfer (1Password → Infisical, etc.).                                                             |
-| `kit secrets set <KEY> [--stdin \| --value <v>] [--store <backend>]`                                            | Capture a value to the vault. `--stdin` (safer — not in argv/ps) or `--value`. Execution behind `auth = "capture"`. |
-| `kit secrets rotate [--mode <jwt-secret-roll \| scoped-key-mint \| signing-key-rotate \| signing-key-cutover>]` | Rotate via supabase-mgmt-api. JWT roll, and `signing-key-cutover`, are one-shot elevation.                          |
-| `kit secrets onecli register`                                                                                   | Register fake-key in OneCLI gateway.                                                                                |
-| `kit secrets purge-history --force-history`                                                                     | git-history rewrite to scrub leaked credentials.                                                                    |
-| `kit secrets propagate`                                                                                         | Sync vault → deploy platform (Vercel / Fly / etc.).                                                                 |
-| `kit secrets revoke-old`                                                                                        | Revoke superseded credential after rotation.                                                                        |
-| `kit secrets pull --from <vercel\|github\|fly\|cloudflare>`                                                     | Read env-vars from deploy platform into vault.                                                                      |
-| `kit secrets set-value <KEY> <VALUE>`                                                                           | Write a single key/value to the configured vault.                                                                   |
-| `kit secrets validate [--fix\|--auto]`                                                                          | Verify every declared key resolves in vault. `--auto` pulls from `.env.template`.                                   |
+| Command                                                                                                         | Purpose                                                                                                                         |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `kit secrets sync [--target=<github\|dotenv-ci\|stdout>]`                                                       | Sync vault → CI / `.env.local`.                                                                                                 |
+| `kit secrets migrate [--keep-commented \| --purge]`                                                             | Plaintext `.env*` → vault. Default leaves `KEY=` (value blanked).                                                               |
+| `kit secrets vault-migrate --from <a> --to <b>`                                                                 | Cross-vault key transfer (1Password → Infisical, etc.).                                                                         |
+| `kit secrets set <KEY> [--stdin \| --value <v>] [--store <backend>]`                                            | Capture a value to the vault. `--stdin` (safer — not in argv/ps) or `--value`. Execution behind `auth = "capture"`.             |
+| `kit secrets rotate [--mode <jwt-secret-roll \| scoped-key-mint \| signing-key-rotate \| signing-key-cutover>]` | Rotate via supabase-mgmt-api. JWT roll (legacy; prefer `signing-key-cutover`) and `signing-key-cutover` are one-shot elevation. |
+| `kit secrets onecli register`                                                                                   | Register fake-key in OneCLI gateway.                                                                                            |
+| `kit secrets purge-history --force-history`                                                                     | git-history rewrite to scrub leaked credentials.                                                                                |
+| `kit secrets propagate`                                                                                         | Sync vault → deploy platform (Vercel / Fly / etc.).                                                                             |
+| `kit secrets revoke-old`                                                                                        | Revoke superseded credential after rotation.                                                                                    |
+| `kit secrets pull --from <vercel\|github\|fly\|cloudflare>`                                                     | Read env-vars from deploy platform into vault.                                                                                  |
+| `kit secrets set-value <KEY> <VALUE>`                                                                           | Write a single key/value to the configured vault.                                                                               |
+| `kit secrets validate [--fix\|--auto]`                                                                          | Verify every declared key resolves in vault. `--auto` pulls from `.env.template`.                                               |
 
 ## Auth + elevation
 

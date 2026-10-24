@@ -125,8 +125,8 @@ migration, to deploy-platform propagation, to destructive history cleanup.
 - `kit secrets migrate`: Move plaintext credentials from `.env*` into the vault
 - `kit secrets rotate <KEY>`: Mint a new value (`--random` opaque token / `--value <new>` explicit)
 - `kit secrets rotate <KEY> --from-cli`: Provider-native playbooks (Stripe / AWS-IAM / GCP-IAM / GitHub PAT / OpenAI)
-- `kit secrets rotate <KEY> --via supabase-mgmt-api --project <ref>`: Full automation via Supabase Mgmt API. Auto-detects scoped-key-mint vs jwt-secret-roll.
-- `kit secrets rotate <KEY> --via supabase-mgmt-api --mode signing-key-rotate|signing-key-cutover`: Rotate the project's JWT signing key (Supabase's successor to the JWT secret). Reversible: the old key keeps verifying what it signed. `signing-key-cutover` also revokes it, so its tokens stop verifying; that takes a one-shot elevation. Nothing is written to the vault, since the private key stays with Supabase.
+- `kit secrets rotate <KEY> --via supabase-mgmt-api --project <ref>`: Full automation via Supabase Mgmt API. Auto-detects scoped-key-mint vs jwt-secret-roll. `jwt-secret-roll` is legacy (its endpoint is no longer in Supabase's published API); prefer `signing-key-cutover` below.
+- `kit secrets rotate <KEY> --via supabase-mgmt-api --mode signing-key-rotate|signing-key-cutover`: Rotate the project's JWT signing key (Supabase's successor to the JWT secret). Reversible: the old key keeps verifying what it signed. `signing-key-cutover` also revokes it, so its tokens stop verifying; that takes a one-shot elevation. Nothing is written to the vault, since the private key stays with Supabase. A cutover refuses a project with no signing key in use, because it would revoke nothing: migrate the JWT secret to signing keys first.
 - `kit secrets propagate <KEY> --to vercel,github,...`: Push value to deploy targets (stdin-safe via `--stdin`)
 - `kit secrets revoke-old --via supabase-mgmt-api --key-id <id>`: Revoke a previously-minted scoped key
 - `kit secrets onecli register <KEY> --host <pattern>`: Register with the OneCLI gateway so the agent process never sees the real value

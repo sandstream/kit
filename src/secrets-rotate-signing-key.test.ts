@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  CUTOVER_NOTHING_TO_REVOKE,
   isSigningKeyMode,
   parseSupabaseMode,
   runSigningKeyRotation,
@@ -140,6 +141,23 @@ describe("runSigningKeyRotation", () => {
     assert.equal(await runSigningKeyRotation(deps, { revokePrevious: true, dryRun: false }), false);
     assert.equal(seenDefault, false);
     assert.ok(!calls.includes("rotate"));
+  });
+
+  it("a cutover with no key in use refuses before anything, since it would revoke nothing", async () => {
+    for (const dryRun of [false, true]) {
+      const { deps, calls, out } = fakeDeps({
+        listSigningKeys: async () => (calls.push("list"), [key("standby", "standby")]),
+      });
+      assert.equal(await runSigningKeyRotation(deps, { revokePrevious: true, dryRun }), false);
+      assert.deepEqual(calls, ["list"]);
+      assert.ok(out.some((l) => l.includes(CUTOVER_NOTHING_TO_REVOKE)));
+    }
+  });
+
+  it("a plain rotate with no key in use still proceeds: nothing was promised to be revoked", async () => {
+    const { deps, calls } = fakeDeps({ listSigningKeys: async () => (calls.push("list"), []) });
+    assert.equal(await runSigningKeyRotation(deps, { revokePrevious: false, dryRun: false }), true);
+    assert.ok(calls.includes("rotate"));
   });
 
   it("--dry-run reads the keys and changes nothing", async () => {
