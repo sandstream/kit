@@ -293,8 +293,9 @@ export async function checkGateLiveness(cwd?: string): Promise<SecurityCheckResu
     const { getCanonicalProjectRoot } = await import("./memory/canonical-root.js");
     const { getCurrentProjectRoot } = await import("./memory/project.js");
     const { gateMarkerPath } = await import("./agent-config.js");
-    const here = getCurrentProjectRoot(cwd);
-    const main = getCanonicalProjectRoot(cwd);
+    // Both come from git (forward slashes on Windows too); resolve() puts them in one form.
+    const here = resolve(getCurrentProjectRoot(cwd));
+    const main = resolve(getCanonicalProjectRoot(cwd));
     if (main !== here && existsSync(gateMarkerPath(main))) {
       return {
         category,

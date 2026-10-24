@@ -39,7 +39,12 @@ describe("gate liveness in a linked git worktree", () => {
       const res = await checkGateLiveness(r.task);
       assert.strictEqual(res.status, "fail");
       assert.strictEqual(res.severity, "high");
-      assert.ok(res.detail.includes(`linked git worktree of ${r.main}`), res.detail);
+      // git reports long, forward-slash paths; os.tmpdir() on Windows can be an 8.3 short
+      // path. Assert the shape and the main checkout's own directory name, not one spelling.
+      assert.match(
+        res.detail,
+        /^this is a linked git worktree of .*main: the gates are installed there/,
+      );
       assert.match(res.detail, /Run: kit agent-config/);
     } finally {
       r.cleanup();
