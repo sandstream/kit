@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { runShell, stopProcess } from "./monkey-test-process.js";
+import { groupHasLiveMember, runShell, stopProcess } from "./monkey-test-process.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function nodeShellCommand(source: string): string {
@@ -82,5 +82,37 @@ describe("monkey-test process runner", () => {
     } finally {
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
     }
+  });
+});
+
+describe("groupHasLiveMember reads /proc so zombies do not count as running", () => {
+  // A fake /proc: pid -> [comm, state, pgrp]. comm can hold spaces and parentheses.
+  function fakeProc(procs: Record<string, [string, string, number]>): string {
+    const root = mkdtempSync(join(tmpdir(), "kit-fake-proc-"));
+    mkdirSync(join(root, "self"));
+    for (const [pid, [comm, state, pgrp]] of Object.entries(procs)) {
+      mkdirSync(join(root, pid));
+      writeFileSync(join(root, pid, "stat"), `${pid} (${comm}) ${state} 1 ${pgrp} ${pgrp} 0 -1`);
+    }
+    return root;
+  }
+
+  it("a group whose members are all zombies is not running; one live member is", (t) => {
+    const root = fakeProc({
+      "40": ["node", "Z", 40],
+      "41": ["sh ) (x", "Z", 40],
+      "50": ["node", "S", 50],
+      "51": ["node", "Z", 50],
+    });
+    t.after(() => rmTemp(root));
+    assert.equal(groupHasLiveMember(40, root), false);
+    assert.equal(groupHasLiveMember(50, root), true);
+  });
+
+  it("answers undefined, never false, when /proc shows no member or cannot be read", (t) => {
+    const root = fakeProc({ "60": ["node", "S", 60] });
+    t.after(() => rmTemp(root));
+    assert.equal(groupHasLiveMember(99, root), undefined);
+    assert.equal(groupHasLiveMember(60, join(root, "missing")), undefined);
   });
 });

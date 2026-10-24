@@ -73,6 +73,13 @@
 
 ### Fixed
 
+- **The monkey-test runner no longer fails a passing stage in a container without an init.** It
+  confirms a stage's process group is gone with `kill(-pgid, 0)`, which also succeeds on zombies.
+  An orphaned descendant is reparented to PID 1, and where PID 1 does not reap (`docker run` without
+  `--init`, sandboxed runners) the stopped descendant stays a zombie, so a stage that exited 0 was
+  reported as failed. On Linux the runner now reads `/proc`: a group whose members are all zombies
+  is stopped, and when `/proc` cannot answer the group still counts as running.
+
 - **The container image carried a new HIGH advisory in npm's bundled undici.** The image already
   replaces npm's bundled `undici` with 6.28.1; GHSA-xjj6-f33q-929c (a denial of service through
   excessive content-encodings, published 2026-10-23) affects `>= 6.23.0 < 6.29.1`, so Trivy failed
