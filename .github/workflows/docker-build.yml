@@ -99,6 +99,7 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           limit-severities-for-sarif: true
+          version: v0.76.1
 
       - name: Explain failed image scan
         if: ${{ !cancelled() && steps.scan.outcome == 'failure' }}

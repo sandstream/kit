@@ -77,6 +77,16 @@
 
 ### Fixed
 
+- **`kit security scan-staged` no longer blocks commits on i18n labels and navigation keys
+  (#580).** The keyed-secret patterns are case-insensitive. Any `key`, `password` or `token` with
+  a value of 8 or more characters counted as a secret, so `"password": "Contraseña"` and
+  `{ key: 'sessions' }` blocked every commit to those files.
+  - Detection now skips a value that reads as a word or a label: letters, an optional space or
+    basic punctuation, and no inner capitals.
+  - Digits, symbols, mixed case, or any all-caps env-style name (`DB_PASSWORD=...`) still count.
+  - Redaction still masks these values.
+  - Accepted miss: an all-lowercase, letters-only password under a lowercase key.
+
 - **The monkey-test runner no longer fails a passing stage in a container without an init.** It
   confirms a stage's process group is gone with `kill(-pgid, 0)`, which also succeeds on zombies.
   An orphaned descendant is reparented to PID 1, and where PID 1 does not reap (`docker run` without
@@ -96,6 +106,16 @@
   ledger is now left alone unless the security dimension ran.
 
 ### Changed
+
+- **Scanner pins follow the first upstream-watch report.**
+  - trivy and trufflehog are pinned (0.76.1, 3.99.4) instead of `latest`, and CI's image scans run
+    Trivy 0.76.1 instead of the action's default 0.70.0.
+  - scc moves to 4.1.0. Line counts are identical on this repository.
+  - jscpd moves to 5.4.2. It measures 4.0% duplication here against 3.7% before, still under the
+    gate.
+  - lizard stays on 1.24.0, because 1.24.2 crashes on this repository.
+  - The image installs npm 11.21.1, which ships the fixed `brace-expansion` and
+    `http-cache-semantics`, so only the `undici` swap remains.
 
 - **`sandstream-kit-plugin-vercel` 0.4.0 creates write-only env vars by default.** A create that
   names no `type` used to get `encrypted`, which Vercel decrypts back through its API. It now gets

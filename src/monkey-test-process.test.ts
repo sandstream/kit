@@ -109,6 +109,12 @@ describe("groupHasLiveMember reads /proc so zombies do not count as running", ()
     assert.equal(groupHasLiveMember(50, root), true);
   });
 
+  it("a zombie leader with a live member is still running (the fast path cannot skip the scan)", (t) => {
+    const root = fakeProc({ "70": ["sh", "Z", 70], "71": ["node", "S", 70] });
+    t.after(() => rmTemp(root));
+    assert.equal(groupHasLiveMember(70, root), true);
+  });
+
   it("answers undefined, never false, when /proc shows no member or cannot be read", (t) => {
     const root = fakeProc({ "60": ["node", "S", 60] });
     t.after(() => rmTemp(root));
