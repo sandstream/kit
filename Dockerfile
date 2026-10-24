@@ -64,14 +64,15 @@ RUN apk add --no-cache --upgrade \
     && npm install -g npm@11.19.1 --ignore-scripts \
     && npm cache clean --force
 
-# npm 11.19.1 (and 11.20.0, the newest) bundles brace-expansion 5.0.9 and undici 6.28.0,
-# both with HIGH advisories fixed in the next patch, and http-cache-semantics 4.2.0
-# (CVE-2026-93748, max-stale cache disclosure, affected range <= 4.2.0). Until npm ships
-# them, replace the three bundled copies with the fixed releases; same major, same
-# dependencies, all triaged.
+# npm 11.19.1 (and 11.20.0) bundles brace-expansion 5.0.9 and undici 6.28.0, both with
+# HIGH advisories fixed in the next patch, and http-cache-semantics 4.2.0 (CVE-2026-93748,
+# max-stale cache disclosure, affected range <= 4.2.0). undici then needed 6.29.1 for
+# GHSA-xjj6-f33q-929c (excessive content-encodings DoS, affected >= 6.23.0 < 6.29.1).
+# Until npm ships them, replace the three bundled copies with the fixed releases; same
+# major, same dependencies, all triaged.
 # `npm pack` verifies each tarball's integrity against the registry.
 RUN bundled=/usr/local/lib/node_modules/npm/node_modules \
-    && for spec in brace-expansion@5.0.12 undici@6.28.1 http-cache-semantics@4.3.0; do \
+    && for spec in brace-expansion@5.0.12 undici@6.29.1 http-cache-semantics@4.3.0; do \
         name="${spec%@*}"; \
         tarball="/tmp/$(npm pack "$spec" --silent --pack-destination /tmp)"; \
         rm -rf "${bundled:?}/$name" && mkdir "$bundled/$name"; \
