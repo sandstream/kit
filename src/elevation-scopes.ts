@@ -46,6 +46,20 @@ const SCOPE_MAP: Record<string, ElevationScopeMapping> = {
     oneShot: false,
     description: "Supabase scoped-key mint — additive, old key remains until revoke-old",
   },
+  "rotate:signing-key-rotate": {
+    scope: "rotate",
+    oneShot: false,
+    description:
+      "Supabase signing-key rotation — reversible, the old key still verifies what it signed",
+  },
+  "rotate:signing-key-cutover": {
+    // Rotate AND revoke the demoted keys: every token they signed stops verifying, so this is a
+    // hard cutover like jwt-secret-roll and must not ride on a reversible "rotate" elevation.
+    scope: "rotate-signing-key-cutover",
+    oneShot: true,
+    description:
+      "Supabase signing-key rotation with revoke — tokens signed by the old key stop verifying",
+  },
   rotate: {
     scope: "rotate",
     oneShot: false,

@@ -2,6 +2,17 @@
 
 ### Added
 
+- **`kit secrets rotate --via supabase-mgmt-api --mode signing-key-rotate | signing-key-cutover`.**
+  Supabase replaced the JWT secret with JWT signing keys, and `--mode jwt-secret-roll` calls an
+  endpoint its published Management API no longer lists. `signing-key-rotate` puts a new key in use
+  and moves the old one to `previously_used`, where it still verifies the tokens it signed: it is
+  reversible and takes the ordinary `rotate` elevation. After a leak that is not enough, because the
+  old key can still mint tokens that verify, so `signing-key-cutover` also revokes the demoted keys.
+  That half is irreversible: it needs a one-shot elevation of its own (`rotate-signing-key-cutover`),
+  checks both `signing_key_rotate` and `signing_key_revoke` against `[policy.agent_writes]`, and its
+  prompt defaults to no. Nothing is written to the vault, since Supabase keeps the private key and
+  verifiers read the project's JWKS. A failed revoke names the key that still verifies.
+
 - **`kit scan` scans container images.** `[scan].images = ["ghcr.io/acme/api:1.4.2"]` adds an
   osv-scanner and a trivy run per image, and `images_from_dockerfiles = true` also takes the
   images named by the `FROM` lines of the repository's Dockerfiles (an `ARG` default is resolved,
