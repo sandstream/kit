@@ -75,6 +75,12 @@
 
 ### Changed
 
+- **`sandstream-kit-plugin-vercel` 0.4.0 creates write-only env vars by default.** A create that
+  names no `type` used to get `encrypted`, which Vercel decrypts back through its API. It now gets
+  `sensitive`, which can be written and never read back. Vercel refuses `sensitive` for the
+  `development` target, so a target set that includes it still gets `encrypted`; `defaultEnvType`
+  says which. An explicit `type` still wins, and an in-place update keeps the entry's type.
+
 - **The Windows CI check runs in four parallel shards.** The Windows runner needed 31 to 48 minutes
   for the whole unit suite (46 of them in one step), against about 9 minutes on Linux. The suite is now
   split in four by file size (`KIT_TEST_SHARD=2/4 npm test` runs the second shard, every test file

@@ -7,10 +7,12 @@ export {
   deleteEnvVar,
   upsertEnvVar,
   redeployLatest,
+  defaultEnvType,
   type MgmtClient,
   type MgmtClientConfig,
   type ProjectSummary,
   type EnvVar,
   type VercelEnvTarget,
+  type WritableEnvType,
   type RedeployResult,
 } from "./mgmt-api.js";

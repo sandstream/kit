@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   createEnvVar,
+  defaultEnvType,
   listEnvVars,
   listProjects,
   makeClient,
@@ -150,6 +151,41 @@ describe("createEnvVar reads v10's { created, failed }", () => {
           ["GET", "POST"],
           "no DELETE may follow a rejected create",
         );
+      },
+    );
+  });
+});
+
+describe("the type a create gets by default", () => {
+  it("is write-only `sensitive` where Vercel allows it, `encrypted` when development is a target", async () => {
+    assert.equal(defaultEnvType(["production", "preview"]), "sensitive");
+    assert.equal(defaultEnvType(["production", "development"]), "encrypted");
+    for (const target of [["production"], ["preview", "development"]] as const) {
+      await withVercel(
+        () => ({ created: { id: "e1", key: "K", target }, failed: [] }),
+        async (client, calls) => {
+          await createEnvVar(client, "p", { key: "K", value: "v".repeat(16), target: [...target] });
+          assert.equal(
+            (calls[0]!.body as { type: string }).type,
+            defaultEnvType([...target]),
+            "createEnvVar sends the default when no type is named",
+          );
+        },
+      );
+    }
+  });
+
+  it("an explicit type still wins", async () => {
+    await withVercel(
+      () => ({ created: { id: "e1", key: "K", target: ["production"] }, failed: [] }),
+      async (client, calls) => {
+        await createEnvVar(client, "p", {
+          key: "K",
+          value: "v".repeat(16),
+          target: ["production"],
+          type: "encrypted",
+        });
+        assert.equal((calls[0]!.body as { type: string }).type, "encrypted");
       },
     );
   });
