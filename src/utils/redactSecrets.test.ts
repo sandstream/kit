@@ -349,7 +349,7 @@ describe("keyed-secret detection skips labels, not credentials (#580)", () => {
   it("does not flag i18n labels or navigation keys", () => {
     for (const input of [
       `{ key: 'sessions', href: '/dashboard/sessions' }`,
-      `"password": "Lösenord"`,
+      `"password": "Contraseña"`,
       `"passwordCode": "Adgangskode"`,
       `"password_hint": "Enter your password"`,
     ])
@@ -362,13 +362,13 @@ describe("keyed-secret detection skips labels, not credentials (#580)", () => {
       `"api_key": "SuperSecretValue"`,
       `token = 'abc.def-ghi_jkl'`,
       `DB_PASSWORD="letmeinplease"`,
-      `PASSWORD='Lösenordet är hemligt'`,
+      `PASSWORD='Contraseña secreta'`,
     ])
       assert.equal(keyed(input), true, input);
   });
 
   it("redaction still masks a label-like value", () => {
-    assert.equal(redactSecrets(`"password": "Lösenord"`), `"password": "[REDACTED]"`);
+    assert.equal(redactSecrets(`"password": "Contraseña"`), `"password": "[REDACTED]"`);
   });
 });
 

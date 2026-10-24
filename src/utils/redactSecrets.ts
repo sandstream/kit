@@ -439,7 +439,7 @@ function findSwedishPersonnummer(text: string): SecretFinding[] {
 
 /**
  * A `keyed-secret` match whose value reads as a word or a label, not a credential (#580). i18n
- * files and navigation configs key plain labels as `password` or `key` (`"password": "Lösenord"`,
+ * files and navigation configs key plain labels as `password` or `key` (`"password": "Contraseña"`,
  * `{ key: 'sessions' }`), and the keyed patterns are case-insensitive, so every such file blocked
  * commits. A value is label-like when it is letters with optional spaces and basic punctuation,
  * and either holds a space, or is lower case after its first letter. Digits, symbols or inner
@@ -457,6 +457,14 @@ export function isLabelLikeKeyedValue(keyAndSeparator: string, value: string): b
   return rest === rest.toLowerCase();
 }
 
+/** Matches that are not findings: public demo JWTs, and label-like keyed values (#580). */
+function isBenignMatch(label: string, m: RegExpMatchArray): boolean {
+  // Well-known public demo JWTs (e.g. the `supabase start` anon key).
+  if (label === "jwt") return isPublicDemoJwt(m[0]);
+  if (label === "keyed-secret") return isLabelLikeKeyedValue(m[1] ?? "", m[3] ?? m[2] ?? "");
+  return false;
+}
+
 export function findSecrets(
   text: string,
   opts: { entropyBackstop?: boolean } = {},
@@ -467,10 +475,7 @@ export function findSecrets(
     const matches = text.matchAll(new RegExp(re.source, re.flags));
     for (const m of matches) {
       const raw = m[0];
-      // Skip well-known public demo JWTs (e.g. `supabase start` anon key).
-      if (label === "jwt" && isPublicDemoJwt(raw)) continue;
-      if (label === "keyed-secret" && isLabelLikeKeyedValue(m[1] ?? "", m[3] ?? m[2] ?? ""))
-        continue;
+      if (isBenignMatch(label, m)) continue;
       const head = raw.slice(0, 6);
       const tail = raw.length > 12 ? raw.slice(-4) : "";
       findings.push({

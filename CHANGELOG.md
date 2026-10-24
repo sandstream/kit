@@ -79,7 +79,7 @@
 
 - **`kit security scan-staged` no longer blocks commits on i18n labels and navigation keys
   (#580).** The keyed-secret patterns are case-insensitive. Any `key`, `password` or `token` with
-  a value of 8 or more characters counted as a secret, so `"password": "Lösenord"` and
+  a value of 8 or more characters counted as a secret, so `"password": "Contraseña"` and
   `{ key: 'sessions' }` blocked every commit to those files.
   - Detection now skips a value that reads as a word or a label: letters, an optional space or
     basic punctuation, and no inner capitals.
