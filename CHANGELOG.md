@@ -97,6 +97,16 @@
 
 ### Changed
 
+- **Scanner pins follow the first upstream-watch report.**
+  - trivy and trufflehog are pinned (0.76.1, 3.99.4) instead of `latest`, and CI's image scans run
+    Trivy 0.76.1 instead of the action's default 0.70.0.
+  - scc moves to 4.1.0. Line counts are identical on this repository.
+  - jscpd moves to 5.4.2. It measures 4.0% duplication here against 3.7% before, still under the
+    gate.
+  - lizard stays on 1.24.0, because 1.24.2 crashes on this repository.
+  - The image installs npm 11.21.1, which ships the fixed `brace-expansion` and
+    `http-cache-semantics`, so only the `undici` swap remains.
+
 - **`sandstream-kit-plugin-vercel` 0.4.0 creates write-only env vars by default.** A create that
   names no `type` used to get `encrypted`, which Vercel decrypts back through its API. It now gets
   `sensitive`, which can be written and never read back. Vercel refuses `sensitive` for the
