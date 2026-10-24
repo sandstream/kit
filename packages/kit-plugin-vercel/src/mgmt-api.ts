@@ -16,7 +16,8 @@
  *
  * `sensitive` env vars can be written but never read back (Vercel's write-only type);
  * `encrypted` ones can be decrypted through the API. Vercel accepts `sensitive` for the
- * production and preview targets only.
+ * production and preview targets only. A create that names no type gets `sensitive` where
+ * Vercel allows it (see `defaultEnvType`); an in-place update keeps the entry's existing type.
  *
  * The existing `propagate` adapter in core kit already wraps
  * `vercel env add` via the CLI. This module gives the API-level path for
@@ -150,6 +151,15 @@ export type VercelEnvTarget = "production" | "preview" | "development";
 /** Types kit may create or set. `sensitive` is write-only on Vercel's side. */
 export type WritableEnvType = "encrypted" | "plain" | "sensitive";
 
+/**
+ * The type a create gets when the caller names none. kit writes credentials, so the default is
+ * the write-only `sensitive`. Vercel refuses `sensitive` for the development target, so a target
+ * set that includes development falls back to `encrypted`, the readable type.
+ */
+export function defaultEnvType(target: VercelEnvTarget[]): WritableEnvType {
+  return target.includes("development") ? "encrypted" : "sensitive";
+}
+
 export interface EnvVar {
   id: string;
   key: string;
@@ -191,7 +201,7 @@ export async function createEnvVar(
         key: entry.key,
         value: entry.value,
         target: entry.target,
-        type: entry.type ?? "encrypted",
+        type: entry.type ?? defaultEnvType(entry.target),
       }),
       signal: AbortSignal.timeout(15_000),
     },

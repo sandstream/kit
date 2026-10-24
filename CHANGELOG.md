@@ -2,6 +2,21 @@
 
 ### Added
 
+- **`kit secrets rotate --via supabase-mgmt-api --mode signing-key-rotate | signing-key-cutover`.**
+  Supabase replaced the JWT secret with JWT signing keys, and `--mode jwt-secret-roll` calls an
+  endpoint its published Management API no longer lists. `signing-key-rotate` puts a new key in use
+  and moves the old one to `previously_used`, where it still verifies the tokens it signed: it is
+  reversible and takes the ordinary `rotate` elevation. After a leak that is not enough, because the
+  old key can still mint tokens that verify, so `signing-key-cutover` also revokes the demoted keys.
+  That half is irreversible: it needs a one-shot elevation of its own (`rotate-signing-key-cutover`),
+  checks both `signing_key_rotate` and `signing_key_revoke` against `[policy.agent_writes]`, and its
+  prompt defaults to no. Nothing is written to the vault, since Supabase keeps the private key and
+  verifiers read the project's JWKS. A failed revoke names the key that still verifies. A cutover refuses
+  a project with no signing key in use, because it would revoke nothing and leave tokens signed with
+  the legacy JWT secret valid. `jwt-secret-roll` is now labelled legacy wherever kit runs or
+  recommends it, and the refusal for scoped-key-mint on a legacy-JWT project recommends
+  `signing-key-cutover` first (`sandstream-kit-plugin-supabase` 0.3.1).
+
 - **`kit scan` scans container images.** `[scan].images = ["ghcr.io/acme/api:1.4.2"]` adds an
   osv-scanner and a trivy run per image, and `images_from_dockerfiles = true` also takes the
   images named by the `FROM` lines of the repository's Dockerfiles (an `ARG` default is resolved,
@@ -62,6 +77,13 @@
 
 ### Fixed
 
+- **The monkey-test runner no longer fails a passing stage in a container without an init.** It
+  confirms a stage's process group is gone with `kill(-pgid, 0)`, which also succeeds on zombies.
+  An orphaned descendant is reparented to PID 1, and where PID 1 does not reap (`docker run` without
+  `--init`, sandboxed runners) the stopped descendant stays a zombie, so a stage that exited 0 was
+  reported as failed. On Linux the runner now reads `/proc`: a group whose members are all zombies
+  is stopped, and when `/proc` cannot answer the group still counts as running.
+
 - **The container image carried a new HIGH advisory in npm's bundled undici.** The image already
   replaces npm's bundled `undici` with 6.28.1; GHSA-xjj6-f33q-929c (a denial of service through
   excessive content-encodings, published 2026-10-23) affects `>= 6.23.0 < 6.29.1`, so Trivy failed
@@ -74,6 +96,12 @@
   ledger is now left alone unless the security dimension ran.
 
 ### Changed
+
+- **`sandstream-kit-plugin-vercel` 0.4.0 creates write-only env vars by default.** A create that
+  names no `type` used to get `encrypted`, which Vercel decrypts back through its API. It now gets
+  `sensitive`, which can be written and never read back. Vercel refuses `sensitive` for the
+  `development` target, so a target set that includes it still gets `encrypted`; `defaultEnvType`
+  says which. An explicit `type` still wins, and an in-place update keeps the entry's type.
 
 - **The Windows CI check runs in four parallel shards.** The Windows runner needed 31 to 48 minutes
   for the whole unit suite (46 of them in one step), against about 9 minutes on Linux. The suite is now
