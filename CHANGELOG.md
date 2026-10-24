@@ -62,6 +62,12 @@
 
 ### Fixed
 
+- **The container image carried a new HIGH advisory in npm's bundled undici.** The image already
+  replaces npm's bundled `undici` with 6.28.1; GHSA-xjj6-f33q-929c (a denial of service through
+  excessive content-encodings, published 2026-10-23) affects `>= 6.23.0 < 6.29.1`, so Trivy failed
+  every image build from that day on. The replacement is now 6.29.1 (same major, no dependencies,
+  triaged).
+
 - **A narrowed `kit check` no longer closes your tracked security findings.** A run such as
   `kit check --category tools` never looks at security, but it passed an empty security list to
   the findings ledger, which then auto-closed every open security finding of the project. The
