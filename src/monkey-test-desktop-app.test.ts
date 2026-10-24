@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it as nodeIt } from "node:test";
@@ -37,6 +37,24 @@ interface Rig {
   dir: string;
   hook: string;
   app: DesktopApp;
+}
+
+/** Each member of the app's process group as "pid state comm", read from /proc (Linux only). */
+function groupStates(rigged: Rig): string {
+  const pgid = (rigged.app as unknown as { child?: { pid?: number } }).child?.pid;
+  if (!pgid || process.platform !== "linux") return "(no /proc view)";
+  const rows: string[] = [];
+  for (const name of readdirSync("/proc").filter((n) => /^\d+$/.test(n))) {
+    try {
+      const stat = readFileSync(`/proc/${name}/stat`, "utf8");
+      const [state, , pgrp] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      if (Number(pgrp) === pgid)
+        rows.push(`${name} ${state} ${stat.slice(stat.indexOf("("), stat.lastIndexOf(")") + 1)}`);
+    } catch {
+      // exited meanwhile
+    }
+  }
+  return rows.join("\n") || `(no member of group ${pgid} in /proc)`;
 }
 
 function rig(mode: string, command?: string): Rig {
@@ -156,7 +174,9 @@ it("stop escalates to SIGKILL when the app ignores SIGTERM", async () => {
   try {
     rigged.app.start();
     await new Promise((resolve) => setTimeout(resolve, 300));
-    assert.equal(await rigged.app.stop("SIGTERM", 200), true);
+    const stopped = await rigged.app.stop("SIGTERM", 200);
+    // CI has seen this fail without a reproduction; make a failure say what was still there.
+    assert.equal(stopped, true, `group still present after SIGKILL:\n${groupStates(rigged)}`);
     assert.equal(rigged.app.running(), false);
   } finally {
     rmTemp(rigged.dir);

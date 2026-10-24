@@ -58,6 +58,9 @@ async function signalProcess(child: ChildProcess, signal: NodeJS.Signals): Promi
  * treat as running.
  */
 export function groupHasLiveMember(pgid: number, procRoot = "/proc"): boolean | undefined {
+  // Fast path: a detached spawn's group id is its leader's pid, so one read settles the common
+  // case (leader alive) without scanning /proc, which costs ~20 ms with 1600 processes.
+  if (procState(`${procRoot}/${pgid}/stat`, pgid) === "live") return true;
   let entries: string[];
   try {
     entries = readdirSync(procRoot);
@@ -67,20 +70,29 @@ export function groupHasLiveMember(pgid: number, procRoot = "/proc"): boolean | 
   let sawMember = false;
   for (const name of entries) {
     if (!/^\d+$/.test(name)) continue;
-    let stat: string;
-    try {
-      stat = readFileSync(`${procRoot}/${name}/stat`, "utf8");
-    } catch {
-      continue; // exited between readdir and read
-    }
-    // comm (field 2) may hold spaces and parentheses; the fields after its last ")" are fixed:
-    // state, ppid, pgrp.
-    const [state, , pgrp] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-    if (Number(pgrp) !== pgid) continue;
-    sawMember = true;
-    if (state !== "Z" && state !== "X") return true;
+    const state = procState(`${procRoot}/${name}/stat`, pgid);
+    if (state === "live") return true;
+    if (state === "zombie") sawMember = true;
   }
   return sawMember ? false : undefined;
+}
+
+/**
+ * One /proc/<pid>/stat: "live" or "zombie" when the process belongs to group `pgid`, else
+ * "other" (another group, or gone between readdir and read).
+ */
+function procState(statPath: string, pgid: number): "live" | "zombie" | "other" {
+  let stat: string;
+  try {
+    stat = readFileSync(statPath, "utf8");
+  } catch {
+    return "other";
+  }
+  // comm (field 2) may hold spaces and parentheses; the fields after its last ")" are fixed:
+  // state, ppid, pgrp.
+  const [state, , pgrp] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  if (Number(pgrp) !== pgid) return "other";
+  return state === "Z" || state === "X" ? "zombie" : "live";
 }
 
 export function processTreeRunning(child: ChildProcess): boolean {
