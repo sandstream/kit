@@ -91,7 +91,7 @@ describe("signing-key elevation and policy", () => {
   });
 });
 
-describe("runSigningKeyRotation", () => {
+describe("runSigningKeyRotation: gates and order", () => {
   it("rotates after policy then elevation, and never revokes outside the cutover mode", async () => {
     const { deps, calls } = fakeDeps();
     assert.equal(await runSigningKeyRotation(deps, { revokePrevious: false, dryRun: false }), true);
@@ -142,7 +142,9 @@ describe("runSigningKeyRotation", () => {
     assert.equal(seenDefault, false);
     assert.ok(!calls.includes("rotate"));
   });
+});
 
+describe("runSigningKeyRotation: edge cases", () => {
   it("a cutover with no key in use refuses before anything, since it would revoke nothing", async () => {
     for (const dryRun of [false, true]) {
       const { deps, calls, out } = fakeDeps({
