@@ -70,13 +70,10 @@ RUN apk add --no-cache --upgrade \
 # with 6.29.1 (same major, no dependencies, triaged) until npm ships it.
 # `npm pack` verifies each tarball's integrity against the registry.
 RUN bundled=/usr/local/lib/node_modules/npm/node_modules \
-    && for spec in undici@6.29.1; do \
-        name="${spec%@*}"; \
-        tarball="/tmp/$(npm pack "$spec" --silent --pack-destination /tmp)"; \
-        rm -rf "${bundled:?}/$name" && mkdir "$bundled/$name"; \
-        tar -xzf "$tarball" -C "$bundled/$name" --strip-components=1; \
-        rm -f "$tarball"; \
-    done \
+    && tarball="/tmp/$(npm pack undici@6.29.1 --silent --pack-destination /tmp)" \
+    && rm -rf "${bundled:?}/undici" && mkdir "$bundled/undici" \
+    && tar -xzf "$tarball" -C "$bundled/undici" --strip-components=1 \
+    && rm -f "$tarball" \
     && npm cache clean --force \
     && npm --version
 
