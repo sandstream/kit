@@ -30,6 +30,7 @@ import {
 } from "./bumblebee.js";
 import { describeTrivyFsResult } from "./check-trivy-text.js";
 import { osvFinding } from "./osv-summary.js";
+import { checkTranscriptSecrets } from "./check-transcripts.js";
 
 const exec = promisify(execFile);
 
@@ -2659,10 +2660,9 @@ async function appendHostSecurityChecks(
   const { checkDiskEncryption, checkMemoryDirSafety } = await import("./check-disk-encryption.js");
   results.push(await checkDiskEncryption());
   results.push(checkMemoryDirSafety());
-  results.push(await checkMemoryInjection());
-  results.push(await checkMemoryHooksLiveness());
-  results.push(await checkGateLiveness(root));
-  results.push(await checkGitHookFloor(root));
+  results.push(await checkMemoryInjection(), await checkMemoryHooksLiveness());
+  results.push(await checkTranscriptSecrets(undefined, root));
+  results.push(await checkGateLiveness(root), await checkGitHookFloor(root));
   results.push(await checkDeviceIdOverride());
 }
 

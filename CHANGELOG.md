@@ -11,7 +11,24 @@
   package names and versions from the lockfile are shown only as plain names (at most ten, the rest
   counted), so control characters in a lockfile cannot reach the terminal or the suggested command.
 
+- **`kit secrets propagate` no longer crashes with `write EPIPE`.** A target CLI that exits before it
+  reads stdin (a rejected argument, a missing login) broke the pipe, and the failed write escaped as
+  an uncaught exception instead of the CLI's own exit code and message. The write error is now
+  ignored, since the exit code from the closed process is the answer. It showed up as a test that
+  failed on Linux CI and passed locally.
+
 ### Added
+
+- **`kit check --category security` scans agent transcripts for credentials.** A key pasted into a
+  conversation is stored in the transcript and replayed into every later prompt. The new row
+  `agent transcripts` is a high-severity warning that names the files and says to rotate and purge.
+  It never prints a value. Because it is a `secrets` warning, the findings tracker opens a ledger
+  item for it, and the item closes when the files are clean. `kit security scan-transcripts` already
+  listed the same files; now the check reaches the ledger without anyone running it by hand.
+- **`kit check` tells an unreadable secret from a missing one.** A variable that is set but empty
+  (what `vercel env run` gives for a Sensitive variable) is now a warning, `unverified`, with the
+  state `unreadable`. An unset variable stays a failure with the state `missing`. Before, both
+  read as "not set". The `invalid` state (a live probe rejected the key) is not built yet.
 
 - **`kit statusline --json` carries `vault`.** It names the secrets store the project chose
   (`[secrets].store`) and the CLI that logs in to it (`infisical` for Infisical, `op` for
