@@ -2,6 +2,12 @@
 
 ### Added
 
+- **`kit check --category security` scans agent transcripts for credentials.** A key pasted into a
+  conversation is stored in the transcript and replayed into every later prompt. The new row
+  `agent transcripts` is a high-severity warning that names the files and says to rotate and purge.
+  It never prints a value. Because it is a `secrets` warning, the findings tracker opens a ledger
+  item for it, and the item closes when the files are clean. `kit security scan-transcripts` already
+  listed the same files; now the check reaches the ledger without anyone running it by hand.
 - **`kit check` tells an unreadable secret from a missing one.** A variable that is set but empty
   (what `vercel env run` gives for a Sensitive variable) is now a warning, `unverified`, with the
   state `unreadable`. An unset variable stays a failure with the state `missing`. Before, both
