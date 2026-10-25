@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+### Fixed
+
+- **`kit secrets propagate` no longer crashes with `write EPIPE`.** A target CLI that exits before it
+  reads stdin (a rejected argument, a missing login) broke the pipe, and the failed write escaped as
+  an uncaught exception instead of the CLI's own exit code and message. The write error is now
+  ignored, since the exit code from the closed process is the answer. It showed up as a test that
+  failed on Linux CI and passed locally.
+
 ### Added
 
 - **`kit statusline --json` carries `vault`.** It names the secrets store the project chose
