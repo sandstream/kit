@@ -2,6 +2,15 @@
 
 ### Fixed
 
+- **The `osv-scanner (deps)` row rated every finding `high`.** It now takes the severity from the
+  worst CVSS score osv reports (critical from 9.0, high from 7.0, medium from 4.0), names the
+  vulnerable packages with their versions, and for npm packages suggests
+  `npm update <packages> --ignore-scripts`. A hole with no score stays `high` and the row says so.
+  `kit check` still never changes the lockfile.
+  A hole with no score is never rated below `high`, a `MAL-` (malware) advisory is `critical`, and
+  package names and versions from the lockfile are shown only as plain names (at most ten, the rest
+  counted), so control characters in a lockfile cannot reach the terminal or the suggested command.
+
 - **`kit secrets propagate` no longer crashes with `write EPIPE`.** A target CLI that exits before it
   reads stdin (a rejected argument, a missing login) broke the pipe, and the failed write escaped as
   an uncaught exception instead of the CLI's own exit code and message. The write error is now
