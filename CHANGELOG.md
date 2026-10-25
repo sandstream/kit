@@ -2,6 +2,11 @@
 
 ### Added
 
+- **`kit check` tells an unreadable secret from a missing one.** A variable that is set but empty
+  (what `vercel env run` gives for a Sensitive variable) is now a warning, `unverified`, with the
+  state `unreadable`. An unset variable stays a failure with the state `missing`. Before, both
+  read as "not set". The `invalid` state (a live probe rejected the key) is not built yet.
+
 - **`kit statusline --json` carries `vault`.** It names the secrets store the project chose
   (`[secrets].store`) and the CLI that logs in to it (`infisical` for Infisical, `op` for
   1Password). A UI can then say "Infisical is not logged in" or "no vault chosen", and stop listing

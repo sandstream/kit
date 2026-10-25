@@ -14,13 +14,35 @@ export interface SecretStatus {
   /** Couldn't actually confirm the key (e.g. auth verified but presence not) →
    *  render as warn, not a green pass. Avoids a false-green in degraded paths. */
   unverified?: boolean;
+  /** Why the key is not usable: `missing` (no such value), `unreadable` (the
+   *  store has it but gave no value, e.g. a Sensitive platform variable),
+   *  `invalid` (a live probe rejected it). Absent when the key is available. */
+  state?: "missing" | "unreadable" | "invalid";
 }
 
-async function checkEnvSecret(name: string): Promise<{ available: boolean; detail: string }> {
+async function checkEnvSecret(
+  name: string,
+): Promise<{ available: boolean; detail: string; unverified?: boolean }> {
   if (process.env[name]) {
     return { available: true, detail: "Set in environment" };
   }
+  if (process.env[name] === "") {
+    return {
+      available: false,
+      detail: "Set but empty in environment (a Sensitive platform variable gives no value locally)",
+      unverified: true,
+    };
+  }
   return { available: false, detail: "Not set in environment" };
+}
+
+function secretState(result: {
+  available: boolean;
+  detail: string;
+  unverified?: boolean;
+}): SecretStatus["state"] {
+  if (result.available) return undefined;
+  return result.unverified && /empty/i.test(result.detail) ? "unreadable" : "missing";
 }
 
 interface OnePasswordCache {
@@ -412,6 +434,7 @@ export async function checkSecrets(
         available: result.available,
         detail: result.detail,
         unverified: result.unverified,
+        state: secretState(result),
       });
     }
   }
