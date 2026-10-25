@@ -2,6 +2,10 @@
 
 ### Added
 
+- **`kit statusline --json` carries `features`.** The list names what this kit can do
+  (`image-scan`, `upstream`). A UI such as the kit-health mod can be newer than the installed kit and
+  would otherwise offer a command that is not there. It now asks kit and offers only what is listed.
+  A kit without the field reads as "none of these".
 - **`kit secrets rotate --via supabase-mgmt-api --mode signing-key-rotate | signing-key-cutover`.**
   Supabase replaced the JWT secret with JWT signing keys, and `--mode jwt-secret-roll` calls an
   endpoint its published Management API no longer lists. `signing-key-rotate` puts a new key in use
