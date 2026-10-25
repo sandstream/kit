@@ -59,7 +59,7 @@ preflight:   kit check --category services,secrets,hooks
 new deps:    kit triage / kit pkg
 secrets:     kit secrets set <KEY> --stdin
 repo slice:  kit map <path> --json
-finish:      kit check --category security,tests,standards
+finish:      kit check --category security,tests && kit standards
 large diff:  kit review --json
 durable why: kit memory share --area <area> --kind decision|convention|abandoned|idea
 ```
@@ -269,8 +269,8 @@ decides when to use it):
 | Author the skill body | Claude / Cowork (LLM) |
 | scaffold / validate / lock / place / publish | kit (deterministic) |
 
-So `kit skills search` is exposed as an MCP tool: when an agent realizes mid-task it
-lacks a capability, it calls the tool, kit returns candidates, and the agent or user
+So `kit skills search` would be exposed as an MCP tool (design only, like the rest of this
+section): when an agent realizes mid-task it lacks a capability, it would call the tool, kit returns candidates, and the agent or user
 picks. kit never guesses what you need and never writes the content. It finds, vets,
 locks, places, and publishes.
 

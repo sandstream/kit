@@ -98,6 +98,19 @@ set --env-file` with the value in a file of mode 0600 inside a 0700 folder that 
 
 ### Fixed
 
+- **The docs no longer name commands that do not exist, or claim RBAC is enforced.**
+  - COMMANDS.md listed `kit secrets pull` and `kit secrets set-value`, which the CLI has never
+    routed (both exit 1), and `kit pkg install <pkg>`, whose real form is `kit pkg npm:express`.
+  - `kit context [--format json]` documented a flag nothing reads. Because documented flags are
+    accepted, it was taken and silently ignored; it is now an unknown flag, and `--json` is the
+    documented form.
+  - The agent recipe `kit check --category security,tests,standards` failed on `standards`, which
+    is its own command.
+  - TEAM_MANAGEMENT_API.md said the `[rbac]` table "is enforced offline". kit validates,
+    distributes and reports it, and the decision engine exists, but no command consults it yet.
+  - Also fixed: two links to migration guides that do not exist, three dead anchors, and a design
+    section written in the present tense.
+
 - **The dependency triage gate let three kinds of change through untriaged.**
   `triage-deps.yml` took each changed package from the lockfile's registry URL.
   - A scoped package (`@scope/name`) came out as the bare `@scope`, failed the name check and was
