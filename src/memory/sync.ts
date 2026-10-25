@@ -57,14 +57,15 @@ function scanIncoming(
   dbPath: string,
   allowUnsafe: boolean,
   observe?: (db: DatabaseSync, occurrence: ScanOccurrence) => void,
+  authenticated = false,
 ): { label: string }[] {
   if (allowUnsafe || process.env.KIT_MEMORY_ALLOW_UNSAFE === "1") return [];
   let high: { label: string }[];
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
-    high = scanDbForInjection(db, observe && ((occurrence) => observe(db, occurrence))).filter(
-      (f) => f.confidence === "high",
-    );
+    high = scanDbForInjection(db, observe && ((occurrence) => observe(db, occurrence)), {
+      replayableOnly: authenticated,
+    }).filter((f) => f.confidence === "high");
   } catch (e) {
     // Fail CLOSED — untrusted input we couldn't scan is not certified clean.
     throw new Error(
@@ -93,7 +94,11 @@ function assertNoHighFindings(high: { label: string }[]): void {
  * exported `.db` or an encrypted `kit memory backup` blob (decrypted to a temp
  * file first). Returns the MergeResult so the caller can report counts.
  */
-function withExport<T>(exportPath: string, opts: SyncOptions, read: (path: string) => T): T {
+function withExport<T>(
+  exportPath: string,
+  opts: SyncOptions,
+  read: (path: string, authenticated: boolean) => T,
+): T {
   createProjectMapper(opts);
   if (!existsSync(exportPath)) {
     throw new Error(`export not found: ${exportPath}`);
@@ -101,7 +106,7 @@ function withExport<T>(exportPath: string, opts: SyncOptions, read: (path: strin
 
   if (!isEncryptedBackup(exportPath)) {
     // Plaintext .db (e.g. committed to the user's own repo) — merge directly.
-    return read(exportPath);
+    return read(exportPath, false);
   }
 
   const asymmetric = isAsymmetricBackup(exportPath);
@@ -135,7 +140,9 @@ function withExport<T>(exportPath: string, opts: SyncOptions, read: (path: strin
         throw err;
       }
     } else restoreEncrypted(opts.passphrase!, exportPath, tmpDb, "import");
-    return read(tmpDb);
+    // Only the passphrase proves who wrote the blob: AES-GCM fails on any other key, and only the
+    // owner has it. A public-key blob proves nothing, since the recipient string is public.
+    return read(tmpDb, !asymmetric);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -146,8 +153,8 @@ export function syncFromExport(
   exportPath: string,
   opts: SyncOptions = {},
 ): MergeResult {
-  return withExport(exportPath, opts, (path) => {
-    assertNoHighFindings(scanIncoming(path, !!opts.allowUnsafe));
+  return withExport(exportPath, opts, (path, authenticated) => {
+    assertNoHighFindings(scanIncoming(path, !!opts.allowUnsafe, undefined, authenticated));
     return mergeDb(target, path, opts);
   });
 }
@@ -205,12 +212,17 @@ export function syncFromExports(
   target.exec("SAVEPOINT kit_memory_history");
   try {
     for (const path of exports) {
-      const current = withExport(path, opts, (source) => {
-        scanIncoming(source, !!opts.allowUnsafe, (db, occurrence) => {
-          if (occurrence.confidence !== "high") return;
-          const finding = historyFinding(db, occurrence);
-          findings.set(JSON.stringify(finding), finding);
-        });
+      const current = withExport(path, opts, (source, authenticated) => {
+        scanIncoming(
+          source,
+          !!opts.allowUnsafe,
+          (db, occurrence) => {
+            if (occurrence.confidence !== "high") return;
+            const finding = historyFinding(db, occurrence);
+            findings.set(JSON.stringify(finding), finding);
+          },
+          authenticated,
+        );
         return mergeDb(target, source, opts);
       });
       current.pendingDifferenceIds.forEach((id) => differences.add(id));

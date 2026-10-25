@@ -204,9 +204,10 @@ function scanDbWith(
   db: DatabaseSync,
   finder: CellFinder,
   observe?: OccurrenceObserver,
+  targets: Target[] = TARGETS,
 ): ScanFinding[] {
   const byKey = new Map<string, FindingEntry>();
-  for (const target of TARGETS) scanTarget(db, target, finder, byKey, observe);
+  for (const target of targets) scanTarget(db, target, finder, byKey, observe);
   return [...byKey.values()]
     .map(({ _projects, ...f }) => ({ ...f, projects: [..._projects].sort() }))
     .sort((a, b) => {
@@ -231,9 +232,29 @@ export function scanDbForSecrets(db: DatabaseSync): ScanFinding[] {
  * the agent's prompt, so a poisoned entry is a delayed injection vector). Same
  * shape as the secret scan — deduped, confidence-tiered, project-attributed.
  */
-export function scanDbForInjection(db: DatabaseSync, observe?: OccurrenceObserver): ScanFinding[] {
-  return scanDbWith(db, (text) => findInjection(text), observe);
+export function scanDbForInjection(
+  db: DatabaseSync,
+  observe?: OccurrenceObserver,
+  opts: { replayableOnly?: boolean } = {},
+): ScanFinding[] {
+  return scanDbWith(
+    db,
+    (text) => findInjection(text),
+    observe,
+    opts.replayableOnly ? REPLAYABLE_TARGETS : TARGETS,
+  );
 }
+
+/**
+ * What a model can be shown again from a store. Recall skips quarantined messages, and no recall
+ * path reads `tool_uses` (it feeds counts and skill statistics only), so a pattern in either is
+ * stored evidence, not a live vector. The other tables are read at session start or by search and
+ * stay in. If `messages.quarantined` is missing the narrowed SELECT throws, `scanTarget` falls back
+ * to every column, and the scan fails closed: nothing is excused.
+ */
+const REPLAYABLE_TARGETS: Target[] = TARGETS.filter((t) => t.table !== "tool_uses").map((t) =>
+  t.table === "messages" ? { ...t, select: `${t.select} WHERE quarantined = 0` } : t,
+);
 
 /**
  * Count the messages that would actually be REPLAYED into a prompt (quarantined = 0)

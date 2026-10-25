@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+### Changed
+
+- **`kit memory pull` accepts your own memory when it holds quotes of injection text.** The
+  pre-merge scan refused any incoming store with a high-confidence injection pattern, including
+  patterns that sit in rows already quarantined, so a developer who works on security could never
+  pull their own export (the refusal listed hundreds of quoted "ignore all previous instructions"
+  lines). For a blob decrypted with the passphrase, which only the owner can produce, the scan now
+  counts only what recall can show again: messages that are not quarantined, and the action,
+  thread and revision tables. Every message still passes this machine's own write gate. A
+  public-key blob and a raw `.db` keep the strict scan, since neither proves who wrote it.
+  Checked on a copy of a real 370 000-message store: the merge went through and the receiving
+  store had 0 recallable injection rows.
+
 ### Fixed
 
 - **`kit secrets propagate` no longer crashes with `write EPIPE`.** A target CLI that exits before it
