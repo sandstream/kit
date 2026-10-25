@@ -5,7 +5,7 @@
 - **`kit secrets propagate --to supabase` sets Edge Function secrets.** It runs `supabase secrets
 set --env-file` with the value in a file of mode 0600 inside a 0700 folder that is removed
   afterwards (the Supabase CLI has no stdin path), never in argv. Names that start with `SUPABASE_`
-  (reserved) or are not upper case are refused, a value is quoted so the file reads back exactly it,
+  (reserved) or are not upper case are refused, a value is written in the form the CLI reads back exactly (single quotes, or double quotes when it holds a line break) and one with no exact form is refused, never stored changed,
   and `--supabase-project <ref>` picks the project (the linked one otherwise). `--vercel-project` and
   `--vercel-team` now reach the Vercel API path from the command line, for both `propagate` and
   `rotate --propagate`, which share one flag reader. `[policy.agent_writes]` can gate it as
@@ -15,6 +15,10 @@ set --env-file` with the value in a file of mode 0600 inside a 0700 folder that 
   targets both production and preview, and a variable no source file names. Each row lists the names
   and the way out; `shared_ok` and `implicit_env` in `[deploy.vercel]` accept known exceptions.
   Without `VERCEL_TOKEN` the listing has no such metadata, and the row says the checks did not run.
+- **`kit statusline --json` carries `features`.** The list names what this kit can do
+  (`image-scan`, `upstream`). A UI such as the kit-health mod can be newer than the installed kit and
+  would otherwise offer a command that is not there. It now asks kit and offers only what is listed.
+  A kit without the field reads as "none of these".
 - **`kit secrets rotate --via supabase-mgmt-api --mode signing-key-rotate | signing-key-cutover`.**
   Supabase replaced the JWT secret with JWT signing keys, and `--mode jwt-secret-roll` calls an
   endpoint its published Management API no longer lists. `signing-key-rotate` puts a new key in use
