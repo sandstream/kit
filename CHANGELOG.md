@@ -98,6 +98,18 @@ set --env-file` with the value in a file of mode 0600 inside a 0700 folder that 
 
 ### Fixed
 
+- **The dependency triage gate let three kinds of change through untriaged.**
+  `triage-deps.yml` took each changed package from the lockfile's registry URL.
+  - A scoped package (`@scope/name`) came out as the bare `@scope`, failed the name check and was
+    skipped with a warning. This included `@modelcontextprotocol/sdk`, a runtime dependency.
+  - Every package was triaged by name, so a clean `latest` vouched for whatever version the lockfile
+    actually installs.
+  - The list was cut at 20 packages without a word.
+
+  `scripts/lockfile-changed-packages.sh` now emits the exact `name@version` of every added
+  package, scoped ones included, and the triage script checks that version. Past 150 packages the
+  job fails and asks for a smaller PR instead of truncating.
+
 - **`kit secrets propagate --to vercel` creates `sensitive` variables, not `encrypted`.** Vercel keeps
   a `sensitive` value write-only. It is allowed only for production and preview, so development stays
   `encrypted` and the result says so. A type cannot be changed afterwards, so an existing entry of
@@ -133,6 +145,10 @@ set --env-file` with the value in a file of mode 0600 inside a 0700 folder that 
   ledger is now left alone unless the security dimension ran.
 
 ### Changed
+
+- **Dependabot also proposes npm devDependency updates.** One grouped PR a week, through the
+  repaired triage gate, never merged on its own. The four runtime dependencies stay manual under
+  ADR-0002.
 
 - **Scanner pins follow the first upstream-watch report.**
   - trivy and trufflehog are pinned (0.76.1, 3.99.4) instead of `latest`, and CI's image scans run
