@@ -2,6 +2,10 @@
 
 ### Added
 
+- **`kit statusline --json` carries `vault`.** It names the secrets store the project chose
+  (`[secrets].store`) and the CLI that logs in to it (`infisical` for Infisical, `op` for
+  1Password). A UI can then say "Infisical is not logged in" or "no vault chosen", and stop listing
+  tools kit merely found on the machine, such as `op` on a project whose vault is Infisical.
 - **`kit secrets propagate --to supabase` sets Edge Function secrets.** It runs `supabase secrets
 set --env-file` with the value in a file of mode 0600 inside a 0700 folder that is removed
   afterwards (the Supabase CLI has no stdin path), never in argv. Names that start with `SUPABASE_`

@@ -12,6 +12,7 @@
  * go run `kit statusline` itself (prose advises; the hook delivers).
  */
 import { KIT_FEATURES } from "./kit-features.js";
+import { vaultToolFor } from "./vault-tool.js";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { loadConfig, type kitConfig } from "./config.js";
@@ -137,6 +138,8 @@ export interface StatuslineData extends StatuslineParts {
   gaps: { key: string; label: string; next?: string }[];
   /** What this kit can do; a UI offers only these (see `kit-features.ts`). */
   features: string[];
+  /** The secrets vault the project chose and the CLI behind it; null without a .kit.toml. */
+  vault: { store: string | null; tool: string | null } | null;
 }
 
 /**
@@ -149,8 +152,10 @@ export async function buildStatuslineParts(
 ): Promise<StatuslineData> {
   const cwd = opts.cwd ?? process.cwd();
   let config: kitConfig = {} as kitConfig;
+  let hasConfig = false;
   try {
     config = await loadConfig(resolveConfigPath());
+    hasConfig = true;
   } catch {
     /* no/invalid .kit.toml — statusline still works (mode=full default) */
   }
@@ -171,6 +176,9 @@ export async function buildStatuslineParts(
     text: formatStatusline(parts),
     gaps: gaps.map(({ key, label, next }) => ({ key, label, next })),
     features: [...KIT_FEATURES],
+    vault: hasConfig
+      ? { store: config.secrets?.store ?? null, tool: vaultToolFor(config.secrets?.store) }
+      : null,
   };
 }
 
