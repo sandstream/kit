@@ -2,6 +2,10 @@
 
 ### Added
 
+- **`kit statusline --json` carries `vault`.** It names the secrets store the project chose
+  (`[secrets].store`) and the CLI that logs in to it (`infisical` for Infisical, `op` for
+  1Password). A UI can then say "Infisical is not logged in" or "no vault chosen", and stop listing
+  tools kit merely found on the machine, such as `op` on a project whose vault is Infisical.
 - **`kit statusline --json` carries `features`.** The list names what this kit can do
   (`image-scan`, `upstream`). A UI such as the kit-health mod can be newer than the installed kit and
   would otherwise offer a command that is not there. It now asks kit and offers only what is listed.

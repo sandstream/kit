@@ -11,4 +11,6 @@ export const KIT_FEATURES: readonly string[] = [
   "image-scan",
   /** `kit upstream check`: latest versions of services and runtimes. */
   "upstream",
+  /** `kit statusline --json` reports the vault the project chose and its CLI (`vault`). */
+  "vault",
 ];
