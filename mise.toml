@@ -1,6 +1,8 @@
 [tools]
+"aqua:aquasecurity/trivy" = "0.76.1"
 "aqua:boyter/scc" = "4.1.0"
 "aqua:hadolint/hadolint" = "2.15.1"
+"aqua:trufflesecurity/trufflehog" = "3.99.4"
 node = "22"
 "npm:jscpd" = "5.4.2"
 "npm:license-checker" = "25.0.1"

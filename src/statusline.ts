@@ -11,6 +11,7 @@
  * hook can INJECT the line as context instead of a rules file asking the agent to
  * go run `kit statusline` itself (prose advises; the hook delivers).
  */
+import { KIT_FEATURES } from "./kit-features.js";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { loadConfig, type kitConfig } from "./config.js";
@@ -134,6 +135,8 @@ export async function quickPalCount(cwd?: string): Promise<number> {
 export interface StatuslineData extends StatuslineParts {
   text: string;
   gaps: { key: string; label: string; next?: string }[];
+  /** What this kit can do; a UI offers only these (see `kit-features.ts`). */
+  features: string[];
 }
 
 /**
@@ -167,6 +170,7 @@ export async function buildStatuslineParts(
     ...parts,
     text: formatStatusline(parts),
     gaps: gaps.map(({ key, label, next }) => ({ key, label, next })),
+    features: [...KIT_FEATURES],
   };
 }
 
