@@ -1,10 +1,16 @@
 /**
  * Fly.io Management API client.
  *
- * Fly's app-secret surface is the GraphQL endpoint at
- * https://api.fly.io/graphql (flyctl talks to the same one). The Machines
- * REST API at https://api.machines.dev/v1 is read-mostly and used here
- * for machine introspection only.
+ * App secrets have two routes:
+ *   - Machines REST API (https://api.machines.dev/v1, spec at
+ *     docs.fly.io/api/machines/openapi.json): `listAppSecretsV1`, `setAppSecretsV1`,
+ *     `deleteAppSecretV1`. This is the documented API (checked 2026-10-23) and the one to use.
+ *   - GraphQL (https://api.fly.io/graphql): `listAppSecrets`, `setAppSecrets`,
+ *     `unsetAppSecrets`. Kept for existing callers; Fly's published API reference no longer
+ *     covers it.
+ * On either route, running Machines do not pick up a change on their own. The REST answer
+ * carries the secrets `version` to pass as `min_secrets_version` when Machines are next
+ * created or updated; this plugin does not restart anything.
  *
  * Auth: `FLY_API_TOKEN` env var (fly auth token).
  */
@@ -224,10 +230,102 @@ export async function listMachines(client: MgmtClient, appName: string): Promise
   return (await res.json()) as MachineSummary[];
 }
 
-async function safeText(res: Response, client: MgmtClient): Promise<string> {
+export interface AppSecretV1 {
+  name: string;
+  digest?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** The app's secrets version after a change; pass as `min_secrets_version` to Machines. */
+export interface SecretsVersionV1 {
+  version: number;
+}
+
+const appSecretsUrl = (client: MgmtClient, appName: string) =>
+  `${client.machinesUrl}/apps/${encodeURIComponent(appName)}/secrets`;
+
+/** Names and digests only: `show_secrets` is never requested. */
+export async function listAppSecretsV1(
+  client: MgmtClient,
+  appName: string,
+): Promise<AppSecretV1[]> {
+  const res = await fetch(appSecretsUrl(client, appName), {
+    headers: client.headers,
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `GET /apps/${appName}/secrets returned ${res.status}: ${await safeText(res, client)}`,
+    );
+  }
+  const body = (await res.json()) as { secrets?: AppSecretV1[] };
+  return (body.secrets ?? []).map(({ name, digest, created_at, updated_at }) => ({
+    name,
+    digest,
+    created_at,
+    updated_at,
+  }));
+}
+
+/** Sets one or more app secrets in a single request (POST /v1/apps/{app}/secrets). */
+export async function setAppSecretsV1(
+  client: MgmtClient,
+  appName: string,
+  secrets: Record<string, string>,
+): Promise<SecretsVersionV1> {
+  assertNotReadOnly("fly/setAppSecretsV1");
+  assertPolicyAllows("fly", "env_set");
+  const res = await fetch(appSecretsUrl(client, appName), {
+    method: "POST",
+    headers: client.headers,
+    body: JSON.stringify({ values: secrets }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `POST /apps/${appName}/secrets returned ${res.status}: ${await safeText(res, client, Object.values(secrets))}`,
+    );
+  }
+  const body = (await res.json()) as { version?: number };
+  if (typeof body.version !== "number") {
+    throw new Error(`POST /apps/${appName}/secrets: no secrets version in Fly's answer`);
+  }
+  return { version: body.version };
+}
+
+export async function deleteAppSecretV1(
+  client: MgmtClient,
+  appName: string,
+  name: string,
+): Promise<SecretsVersionV1> {
+  assertNotReadOnly("fly/deleteAppSecretV1");
+  assertPolicyAllows("fly", "env_unset");
+  const res = await fetch(`${appSecretsUrl(client, appName)}/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+    headers: client.headers,
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `DELETE /apps/${appName}/secrets/${name} returned ${res.status}: ${await safeText(res, client)}`,
+    );
+  }
+  const body = (await res.json()) as { version?: number };
+  if (typeof body.version !== "number") {
+    throw new Error(`DELETE /apps/${appName}/secrets/${name}: no secrets version in Fly's answer`);
+  }
+  return { version: body.version };
+}
+
+async function safeText(
+  res: Response,
+  client: MgmtClient,
+  extraSecrets: readonly string[] = [],
+): Promise<string> {
   try {
     const t = await res.text();
-    return redactErrorText(t, clientSecrets(client)).slice(0, 200);
+    return redactErrorText(t, [...clientSecrets(client), ...extraSecrets]).slice(0, 200);
   } catch {
     return "<no body>";
   }

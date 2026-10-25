@@ -5,13 +5,19 @@
  * https://vercel.com/account/tokens). For team-scoped operations also
  * pass `--team-id <id>` or set `VERCEL_TEAM_ID`.
  *
- * Implemented:
- *   GET    /v9/projects                     list projects
- *   GET    /v9/projects/{idOrName}          project metadata
- *   GET    /v9/projects/{idOrName}/env      list env vars
- *   POST   /v10/projects/{idOrName}/env     create env var
- *   DELETE /v9/projects/{idOrName}/env/{id} delete env var
- *   POST   /v13/deployments                 trigger new deployment (redeploy)
+ * Implemented (checked against openapi.vercel.sh on 2026-10-23):
+ *   GET    /v10/projects                     list projects
+ *   GET    /v10/projects/{idOrName}/env      list env vars
+ *   POST   /v10/projects/{idOrName}/env      create env var
+ *   PATCH  /v9/projects/{idOrName}/env/{id}  update env var
+ *   DELETE /v9/projects/{idOrName}/env/{id}  delete env var
+ *   GET    /v7/deployments                   latest deployment (for redeploy)
+ *   POST   /v13/deployments                  trigger new deployment (redeploy)
+ *
+ * `sensitive` env vars can be written but never read back (Vercel's write-only type);
+ * `encrypted` ones can be decrypted through the API. Vercel accepts `sensitive` for the
+ * production and preview targets only. A create that names no type gets `sensitive` where
+ * Vercel allows it (see `defaultEnvType`); an in-place update keeps the entry's existing type.
  *
  * The existing `propagate` adapter in core kit already wraps
  * `vercel env add` via the CLI. This module gives the API-level path for
@@ -127,46 +133,62 @@ export interface ProjectSummary {
 }
 
 export async function listProjects(client: MgmtClient): Promise<ProjectSummary[]> {
-  const res = await fetch(`${client.baseUrl}/v9/projects${client.teamQuery}`, {
+  const res = await fetch(`${client.baseUrl}/v10/projects${client.teamQuery}`, {
     headers: client.headers,
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
-    throw new Error(`/v9/projects returned ${res.status}: ${await safeText(res, client)}`);
+    throw new Error(`/v10/projects returned ${res.status}: ${await safeText(res, client)}`);
   }
-  const body = (await res.json()) as { projects: ProjectSummary[] };
-  return body.projects ?? [];
+  // The v10 spec allows a bare array or { projects, pagination }; reading only `.projects`
+  // would turn the array form into an empty list.
+  const body = (await res.json()) as ProjectSummary[] | { projects?: ProjectSummary[] };
+  return Array.isArray(body) ? body : (body.projects ?? []);
 }
 
 export type VercelEnvTarget = "production" | "preview" | "development";
+
+/** Types kit may create or set. `sensitive` is write-only on Vercel's side. */
+export type WritableEnvType = "encrypted" | "plain" | "sensitive";
+
+/**
+ * The type a create gets when the caller names none. kit writes credentials, so the default is
+ * the write-only `sensitive`. Vercel refuses `sensitive` for the development target, so a target
+ * set that includes development falls back to `encrypted`, the readable type.
+ */
+export function defaultEnvType(target: VercelEnvTarget[]): WritableEnvType {
+  return target.includes("development") ? "encrypted" : "sensitive";
+}
 
 export interface EnvVar {
   id: string;
   key: string;
   value?: string;
   target: VercelEnvTarget[];
-  type?: "plain" | "secret" | "encrypted" | "system";
+  type?: "plain" | "secret" | "encrypted" | "system" | "sensitive";
 }
 
 export async function listEnvVars(client: MgmtClient, projectIdOrName: string): Promise<EnvVar[]> {
   const sep = client.teamQuery ? "&" : "?";
   const res = await fetch(
-    `${client.baseUrl}/v9/projects/${encodeURIComponent(projectIdOrName)}/env${client.teamQuery}${sep}decrypt=false`,
+    `${client.baseUrl}/v10/projects/${encodeURIComponent(projectIdOrName)}/env${client.teamQuery}${sep}decrypt=false`,
     { headers: client.headers, signal: AbortSignal.timeout(10_000) },
   );
   if (!res.ok) {
     throw new Error(
-      `/v9/projects/${projectIdOrName}/env returned ${res.status}: ${await safeText(res, client)}`,
+      `/v10/projects/${projectIdOrName}/env returned ${res.status}: ${await safeText(res, client)}`,
     );
   }
-  const body = (await res.json()) as { envs: EnvVar[] };
-  return body.envs ?? [];
+  // The v10 spec allows { envs }, { envs, pagination } or a single env object.
+  const body = (await res.json()) as { envs?: EnvVar[] } | EnvVar;
+  if ("envs" in body) return body.envs ?? [];
+  return "key" in body ? [body] : [];
 }
 
 export async function createEnvVar(
   client: MgmtClient,
   projectIdOrName: string,
-  entry: { key: string; value: string; target: VercelEnvTarget[]; type?: "encrypted" | "plain" },
+  entry: { key: string; value: string; target: VercelEnvTarget[]; type?: WritableEnvType },
 ): Promise<EnvVar> {
   assertNotReadOnly("vercel/createEnvVar");
   assertPolicyAllows("vercel", "env_set");
@@ -179,7 +201,7 @@ export async function createEnvVar(
         key: entry.key,
         value: entry.value,
         target: entry.target,
-        type: entry.type ?? "encrypted",
+        type: entry.type ?? defaultEnvType(entry.target),
       }),
       signal: AbortSignal.timeout(15_000),
     },
@@ -189,7 +211,22 @@ export async function createEnvVar(
       `POST env returned ${res.status}: ${await safeText(res, client, [entry.value])}`,
     );
   }
-  return (await res.json()) as EnvVar;
+  // v10 answers 201 with { created, failed }: a create Vercel rejected can still be a 201.
+  // Treating that as success would let upsertEnvVar delete the old entries next.
+  const body = (await res.json()) as {
+    created?: EnvVar | EnvVar[];
+    failed?: { error?: { code?: string; message?: string; key?: string } }[];
+  };
+  if (body.failed?.length) {
+    const why = body.failed.map((f) => f.error?.code ?? f.error?.message ?? "unknown").join(", ");
+    throw new Error(
+      `POST env: Vercel rejected ${entry.key} (${redactErrorText(why, [entry.value])})`,
+    );
+  }
+  const created = Array.isArray(body.created) ? body.created[0] : body.created;
+  if (!created?.id)
+    throw new Error(`POST env: no created entry for ${entry.key} in Vercel's answer`);
+  return created;
 }
 
 export async function deleteEnvVar(
@@ -218,7 +255,7 @@ export async function updateEnvVar(
   client: MgmtClient,
   projectIdOrName: string,
   envId: string,
-  patch: { value?: string; target?: VercelEnvTarget[]; type?: "encrypted" | "plain" },
+  patch: { value?: string; target?: VercelEnvTarget[]; type?: WritableEnvType },
 ): Promise<EnvVar> {
   assertNotReadOnly("vercel/updateEnvVar");
   assertPolicyAllows("vercel", "env_set");
@@ -264,7 +301,7 @@ function targetsMatch(a: VercelEnvTarget[], b: VercelEnvTarget[]): boolean {
 export async function upsertEnvVar(
   client: MgmtClient,
   projectIdOrName: string,
-  entry: { key: string; value: string; target: VercelEnvTarget[] },
+  entry: { key: string; value: string; target: VercelEnvTarget[]; type?: WritableEnvType },
 ): Promise<EnvVar> {
   assertNotReadOnly("vercel/upsertEnvVar");
   assertPolicyAllows("vercel", "env_set");
@@ -275,6 +312,7 @@ export async function upsertEnvVar(
   if (sameKey.length === 1 && targetsMatch(sameKey[0]!.target, entry.target)) {
     return updateEnvVar(client, projectIdOrName, sameKey[0]!.id, {
       value: entry.value,
+      ...(entry.type ? { type: entry.type } : {}),
     });
   }
 
@@ -332,12 +370,12 @@ export async function redeployLatest(
   // Find the latest deployment for the project.
   const sep = client.teamQuery ? "&" : "?";
   const listRes = await fetch(
-    `${client.baseUrl}/v6/deployments${client.teamQuery}${sep}projectId=${encodeURIComponent(projectIdOrName)}&limit=1&target=${opts.target ?? "production"}`,
+    `${client.baseUrl}/v7/deployments${client.teamQuery}${sep}projectId=${encodeURIComponent(projectIdOrName)}&limit=1&target=${opts.target ?? "production"}`,
     { headers: client.headers, signal: AbortSignal.timeout(10_000) },
   );
   if (!listRes.ok) {
     throw new Error(
-      `/v6/deployments returned ${listRes.status}: ${await safeText(listRes, client)}`,
+      `/v7/deployments returned ${listRes.status}: ${await safeText(listRes, client)}`,
     );
   }
   const listBody = (await listRes.json()) as { deployments?: { uid: string; name?: string }[] };

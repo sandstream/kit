@@ -1,0 +1,365 @@
+{
+  "$comment": "Upstreams kit's plugins and delegated scanners depend on. Read by scripts/upstream-watch.mjs (weekly, .github/workflows/upstream-watch.yml); the logic is src/upstream-watch.ts. A baseline is the last reviewed state: update it only in a PR, with --write-baseline, after looking at what changed. 'acknowledged' entries must say why.",
+  "entries": [
+    {
+      "id": "plugin-github/api-version",
+      "owner": "packages/kit-plugin-github/src/mgmt-api.ts",
+      "source": {
+        "kind": "api-versions",
+        "url": "https://api.github.com/versions",
+        "pinned": "2026-03-10"
+      },
+      "baseline": {
+        "version": "2026-03-10",
+        "observedAt": "2026-10-23"
+      }
+    },
+    {
+      "id": "core-rbac/github-api-version",
+      "owner": "src/rbac/identity-provider.ts",
+      "source": {
+        "kind": "api-versions",
+        "url": "https://api.github.com/versions",
+        "pinned": "2026-03-10"
+      },
+      "baseline": {
+        "version": "2026-03-10",
+        "observedAt": "2026-10-23"
+      }
+    },
+    {
+      "id": "plugin-snyk/api-version",
+      "owner": "packages/kit-plugin-snyk/src/scan.ts",
+      "source": {
+        "kind": "api-versions",
+        "url": "https://api.snyk.io/rest/openapi",
+        "pinned": "2024-10-15"
+      },
+      "baseline": {
+        "version": "2026-03-25",
+        "observedAt": "2026-10-24"
+      }
+    },
+    {
+      "id": "plugin-supabase/paths",
+      "owner": "packages/kit-plugin-supabase/src/mgmt-api.ts",
+      "source": {
+        "kind": "openapi-paths",
+        "url": "https://api.supabase.com/api/v1-json",
+        "paths": [
+          "/v1/projects",
+          "/v1/projects/{ref}/api-keys",
+          "/v1/projects/{ref}/api-keys/{id}",
+          "/v1/projects/{ref}/config/jwt-secret/roll",
+          "/v1/projects/{ref}/config/auth/signing-keys",
+          "/v1/projects/{ref}/config/auth/signing-keys/{id}"
+        ],
+        "acknowledged": {
+          "/v1/projects/{ref}/config/jwt-secret/roll": "legacy JWT roll kept by owner decision 2026-10-24 (kit#610); successor is signing-keys, removal planned"
+        }
+      },
+      "baseline": {
+        "observedAt": "2026-10-24"
+      }
+    },
+    {
+      "id": "plugin-vercel/paths",
+      "owner": "packages/kit-plugin-vercel/src/mgmt-api.ts",
+      "source": {
+        "kind": "openapi-paths",
+        "url": "https://openapi.vercel.sh/",
+        "paths": [
+          "/v7/deployments",
+          "/v10/projects",
+          "/v10/projects/{id}/env",
+          "/v9/projects/{id}/env/{envId}",
+          "/v13/deployments"
+        ]
+      },
+      "baseline": {
+        "observedAt": "2026-10-24"
+      }
+    },
+    {
+      "id": "plugin-stripe/sdk",
+      "owner": "packages/kit-plugin-stripe/src/mgmt-api.ts",
+      "track": "major",
+      "source": {
+        "kind": "npm",
+        "package": "stripe"
+      },
+      "baseline": {
+        "version": "23.0.1",
+        "observedAt": "2026-10-24"
+      }
+    },
+    {
+      "id": "plugin-cloudflare/sdk",
+      "owner": "packages/kit-plugin-cloudflare/src/mgmt-api.ts",
+      "track": "major",
+      "source": {
+        "kind": "npm",
+        "package": "cloudflare"
+      },
+      "baseline": {
+        "version": "7.3.0",
+        "observedAt": "2026-10-24"
+      }
+    },
+    {
+      "id": "plugin-railway/cli",
+      "owner": "packages/kit-plugin-railway/src/railway-deploy.ts",
+      "track": "major",
+      "source": {
+        "kind": "npm",
+        "package": "@railway/cli"
+      },
+      "baseline": {
+        "version": "5.71.0",
+        "observedAt": "2026-10-24"
+      }
+    },
+    {
+      "id": "plugin-sentry/cli",
+      "owner": "packages/kit-plugin-sentry/src/mgmt-api.ts",
+      "track": "major",
+      "source": {
+        "kind": "npm",
+        "package": "@sentry/cli"
+      },
+      "baseline": {
+        "version": "3.8.2",
+        "observedAt": "2026-10-24"
+      }
+    },
+    {
+      "id": "plugin-fly/flyctl",
+      "owner": "packages/kit-plugin-fly/src/mgmt-api.ts",
+      "track": "major",
+      "source": {
+        "kind": "github-release",
+        "repo": "superfly/flyctl"
+      },
+      "baseline": {
+        "version": "v0.4.121",
+        "observedAt": "2026-10-23"
+      }
+    },
+    {
+      "id": "plugin-wiz/issue-graph",
+      "owner": "packages/kit-plugin-wiz/src/scan.ts",
+      "source": {
+        "kind": "none",
+        "reason": "private GraphQL behind tenant auth; no public version or schema feed"
+      }
+    },
+    {
+      "id": "plugin-aisle/result-format",
+      "owner": "packages/kit-plugin-aisle/src/scan.ts",
+      "source": {
+        "kind": "none",
+        "reason": "ingests a result file; no public format or release feed identified"
+      }
+    },
+    {
+      "id": "plugin-sentrux/result-format",
+      "owner": "packages/kit-plugin-sentrux/src/scan.ts",
+      "source": {
+        "kind": "none",
+        "reason": "ingests a result file; no public format or release feed identified"
+      }
+    },
+    {
+      "id": "scanner/trivy",
+      "owner": ".kit.toml",
+      "pinned": "0.76.1",
+      "track": "minor",
+      "source": {
+        "kind": "github-release",
+        "repo": "aquasecurity/trivy"
+      },
+      "baseline": {
+        "version": "v0.76.1",
+        "observedAt": "2026-10-23"
+      }
+    },
+    {
+      "id": "scanner/trufflehog",
+      "owner": ".kit.toml",
+      "pinned": "3.99.4",
+      "track": "minor",
+      "source": {
+        "kind": "github-release",
+        "repo": "trufflesecurity/trufflehog"
+      },
+      "baseline": {
+        "version": "v3.99.4",
+        "observedAt": "2026-10-23"
+      }
+    },
+    {
+      "id": "scanner/scc",
+      "owner": ".kit.toml",
+      "pinned": "4.1.0",
+      "track": "minor",
+      "source": {
+        "kind": "github-release",
+        "repo": "boyter/scc"
+      },
+      "baseline": {
+        "version": "v4.1.0",
+        "observedAt": "2026-10-23"
+      }
+    },
+    {
+      "id": "scanner/hadolint",
+      "owner": ".kit.toml",
+      "pinned": "2.15.1",
+      "track": "minor",
+      "source": {
+        "kind": "github-release",
+        "repo": "hadolint/hadolint"
+      },
+      "baseline": {
+        "version": "v2.15.1",
+        "observedAt": "2026-10-23"
+      }
+    },
+    {
+      "id": "scanner/bumblebee",
+      "owner": "src/bumblebee.ts",
+      "pinned": "0.1.2",
+      "source": {
+        "kind": "github-release",
+        "repo": "perplexityai/bumblebee"
+      },
+      "baseline": {
+        "version": "v0.1.2",
+        "observedAt": "2026-10-23"
+      }
+    },
+    {
+      "id": "scanner/osv-scanner",
+      "owner": "src/check-security.ts",
+      "track": "minor",
+      "source": {
+        "kind": "github-release",
+        "repo": "google/osv-scanner"
+      },
+      "baseline": {
+        "version": "v2.7.0",
+        "observedAt": "2026-10-23"
+      }
+    },
+    {
+      "id": "scanner/jscpd",
+      "owner": ".kit.toml",
+      "pinned": "5.4.2",
+      "track": "minor",
+      "source": {
+        "kind": "npm",
+        "package": "jscpd"
+      },
+      "baseline": {
+        "version": "5.4.2",
+        "observedAt": "2026-10-24"
+      }
+    },
+    {
+      "id": "scanner/license-checker",
+      "owner": ".kit.toml",
+      "pinned": "25.0.1",
+      "track": "minor",
+      "source": {
+        "kind": "npm",
+        "package": "license-checker"
+      },
+      "baseline": {
+        "version": "25.0.1",
+        "observedAt": "2026-10-24"
+      }
+    },
+    {
+      "id": "scanner/socket-cli",
+      "owner": "src/check-security.ts",
+      "track": "major",
+      "source": {
+        "kind": "npm",
+        "package": "@socketsecurity/cli"
+      },
+      "baseline": {
+        "version": "1.10.1",
+        "observedAt": "2026-10-24"
+      }
+    },
+    {
+      "id": "scanner/lizard",
+      "owner": ".kit.toml",
+      "pinned": "1.24.0",
+      "track": "minor",
+      "source": {
+        "kind": "pypi",
+        "package": "lizard"
+      },
+      "baseline": {
+        "version": "1.24.2",
+        "observedAt": "2026-10-24"
+      }
+    },
+    {
+      "id": "scanner/semgrep",
+      "owner": "src/scanners.ts",
+      "track": "minor",
+      "source": {
+        "kind": "pypi",
+        "package": "semgrep"
+      },
+      "baseline": {
+        "version": "1.182.1",
+        "observedAt": "2026-10-24"
+      }
+    },
+    {
+      "id": "scanner/pip-audit",
+      "owner": "src/check-security.ts",
+      "track": "minor",
+      "source": {
+        "kind": "pypi",
+        "package": "pip-audit"
+      },
+      "baseline": {
+        "version": "2.10.1",
+        "observedAt": "2026-10-24"
+      }
+    },
+    {
+      "id": "scanner/guarddog",
+      "owner": "src/guarddog.ts",
+      "track": "minor",
+      "source": {
+        "kind": "pypi",
+        "package": "guarddog"
+      },
+      "baseline": {
+        "version": "3.2.0",
+        "observedAt": "2026-10-24"
+      }
+    },
+    {
+      "id": "scanner/skillspector",
+      "owner": "src/skillspector-delegate.ts",
+      "source": {
+        "kind": "none",
+        "reason": "kit neither pins nor installs it; the user provisions the binary"
+      }
+    },
+    {
+      "id": "scanner/clamav",
+      "owner": "src/malware-scan.ts",
+      "source": {
+        "kind": "none",
+        "reason": "an OS package (clamscan); its version comes from the host, not from kit"
+      }
+    }
+  ]
+}

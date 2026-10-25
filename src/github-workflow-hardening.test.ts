@@ -63,10 +63,10 @@ describe("GitHub workflow hardening", () => {
   it("downloads a fixed Trivy release and verifies its published digest before install", () => {
     const triage = workflow("triage-deps.yml");
     assert.doesNotMatch(triage, /curl[^\n|]*\|\s*(?:sh|bash)\b/);
-    assert.match(triage, /TRIVY_VERSION:\s*"0\.74\.0"/);
+    assert.match(triage, /TRIVY_VERSION:\s*"0\.76\.1"/);
     assert.match(
       triage,
-      /TRIVY_SHA256:\s*"2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a"/,
+      /TRIVY_SHA256:\s*"c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0"/,
     );
     assert.match(triage, /sha256sum --check/);
   });

@@ -36,7 +36,7 @@ describe("Docker plugin runtime", () => {
     assert.match(builder, /COPY skills \.\/skills/);
     assert.match(runtime, /apk add[^\n\\]*(?:\\\n[^\n]*)*\bbash\b/);
     assert.match(runtime, /apk add[^\n\\]*(?:\\\n[^\n]*)*\bpython3\b/);
-    assert.match(runtime, /npm\s+install\s+-g\s+npm@11\.19\.1\s+--ignore-scripts/);
+    assert.match(runtime, /npm\s+install\s+-g\s+npm@11\.21\.1\s+--ignore-scripts/);
     assert.match(runtime, /npm\s+cache\s+clean\s+--force/);
     assert.match(runtime, /COPY --from=builder[^\n]*\/build\/skills\s+\.\/skills/);
     assert.doesNotMatch(runtime, /COPY --from=[^\n]*--chown=kit:kit/);

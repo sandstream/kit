@@ -61,23 +61,19 @@ RUN apk add --no-cache --upgrade \
         'libexpat>=2.8.5-r0' \
         'libssl3>=3.5.9-r0' \
         'python3>=3.14.8-r0' \
-    && npm install -g npm@11.19.1 --ignore-scripts \
+    && npm install -g npm@11.21.1 --ignore-scripts \
     && npm cache clean --force
 
-# npm 11.19.1 (and 11.20.0, the newest) bundles brace-expansion 5.0.9 and undici 6.28.0,
-# both with HIGH advisories fixed in the next patch, and http-cache-semantics 4.2.0
-# (CVE-2026-93748, max-stale cache disclosure, affected range <= 4.2.0). Until npm ships
-# them, replace the three bundled copies with the fixed releases; same major, same
-# dependencies, all triaged.
+# npm 11.21.1 ships fixed brace-expansion (5.0.12) and http-cache-semantics (4.3.0), which this
+# image used to swap in by hand. Its bundled undici is 6.29.0, still inside GHSA-xjj6-f33q-929c
+# (excessive content-encodings DoS, affected >= 6.23.0 < 6.29.1), so that one copy is replaced
+# with 6.29.1 (same major, no dependencies, triaged) until npm ships it.
 # `npm pack` verifies each tarball's integrity against the registry.
 RUN bundled=/usr/local/lib/node_modules/npm/node_modules \
-    && for spec in brace-expansion@5.0.12 undici@6.28.1 http-cache-semantics@4.3.0; do \
-        name="${spec%@*}"; \
-        tarball="/tmp/$(npm pack "$spec" --silent --pack-destination /tmp)"; \
-        rm -rf "${bundled:?}/$name" && mkdir "$bundled/$name"; \
-        tar -xzf "$tarball" -C "$bundled/$name" --strip-components=1; \
-        rm -f "$tarball"; \
-    done \
+    && tarball="/tmp/$(npm pack undici@6.29.1 --silent --pack-destination /tmp)" \
+    && rm -rf "${bundled:?}/undici" && mkdir "$bundled/undici" \
+    && tar -xzf "$tarball" -C "$bundled/undici" --strip-components=1 \
+    && rm -f "$tarball" \
     && npm cache clean --force \
     && npm --version
 

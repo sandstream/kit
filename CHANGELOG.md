@@ -15,6 +15,20 @@ set --env-file` with the value in a file of mode 0600 inside a 0700 folder that 
   targets both production and preview, and a variable no source file names. Each row lists the names
   and the way out; `shared_ok` and `implicit_env` in `[deploy.vercel]` accept known exceptions.
   Without `VERCEL_TOKEN` the listing has no such metadata, and the row says the checks did not run.
+- **`kit secrets rotate --via supabase-mgmt-api --mode signing-key-rotate | signing-key-cutover`.**
+  Supabase replaced the JWT secret with JWT signing keys, and `--mode jwt-secret-roll` calls an
+  endpoint its published Management API no longer lists. `signing-key-rotate` puts a new key in use
+  and moves the old one to `previously_used`, where it still verifies the tokens it signed: it is
+  reversible and takes the ordinary `rotate` elevation. After a leak that is not enough, because the
+  old key can still mint tokens that verify, so `signing-key-cutover` also revokes the demoted keys.
+  That half is irreversible: it needs a one-shot elevation of its own (`rotate-signing-key-cutover`),
+  checks both `signing_key_rotate` and `signing_key_revoke` against `[policy.agent_writes]`, and its
+  prompt defaults to no. Nothing is written to the vault, since Supabase keeps the private key and
+  verifiers read the project's JWKS. A failed revoke names the key that still verifies. A cutover refuses
+  a project with no signing key in use, because it would revoke nothing and leave tokens signed with
+  the legacy JWT secret valid. `jwt-secret-roll` is now labelled legacy wherever kit runs or
+  recommends it, and the refusal for scoped-key-mint on a legacy-JWT project recommends
+  `signing-key-cutover` first (`sandstream-kit-plugin-supabase` 0.3.1).
 
 - **`kit scan` scans container images.** `[scan].images = ["ghcr.io/acme/api:1.4.2"]` adds an
   osv-scanner and a trivy run per image, and `images_from_dockerfiles = true` also takes the
@@ -82,12 +96,51 @@ set --env-file` with the value in a file of mode 0600 inside a 0700 folder that 
   another type is deleted and created again instead of patched (a failure between the two steps is
   reported, and the command can be run again). The CLI path passes `--sensitive` too.
 
+- **`kit security scan-staged` no longer blocks commits on i18n labels and navigation keys
+  (#580).** The keyed-secret patterns are case-insensitive. Any `key`, `password` or `token` with
+  a value of 8 or more characters counted as a secret, so `"password": "Contraseña"` and
+  `{ key: 'sessions' }` blocked every commit to those files.
+  - Detection now skips a value that reads as a word or a label: letters, an optional space or
+    basic punctuation, and no inner capitals.
+  - Digits, symbols, mixed case, or any all-caps env-style name (`DB_PASSWORD=...`) still count.
+  - Redaction still masks these values.
+  - Accepted miss: an all-lowercase, letters-only password under a lowercase key.
+
+- **The monkey-test runner no longer fails a passing stage in a container without an init.** It
+  confirms a stage's process group is gone with `kill(-pgid, 0)`, which also succeeds on zombies.
+  An orphaned descendant is reparented to PID 1, and where PID 1 does not reap (`docker run` without
+  `--init`, sandboxed runners) the stopped descendant stays a zombie, so a stage that exited 0 was
+  reported as failed. On Linux the runner now reads `/proc`: a group whose members are all zombies
+  is stopped, and when `/proc` cannot answer the group still counts as running.
+
+- **The container image carried a new HIGH advisory in npm's bundled undici.** The image already
+  replaces npm's bundled `undici` with 6.28.1; GHSA-xjj6-f33q-929c (a denial of service through
+  excessive content-encodings, published 2026-10-23) affects `>= 6.23.0 < 6.29.1`, so Trivy failed
+  every image build from that day on. The replacement is now 6.29.1 (same major, no dependencies,
+  triaged).
+
 - **A narrowed `kit check` no longer closes your tracked security findings.** A run such as
   `kit check --category tools` never looks at security, but it passed an empty security list to
   the findings ledger, which then auto-closed every open security finding of the project. The
   ledger is now left alone unless the security dimension ran.
 
 ### Changed
+
+- **Scanner pins follow the first upstream-watch report.**
+  - trivy and trufflehog are pinned (0.76.1, 3.99.4) instead of `latest`, and CI's image scans run
+    Trivy 0.76.1 instead of the action's default 0.70.0.
+  - scc moves to 4.1.0. Line counts are identical on this repository.
+  - jscpd moves to 5.4.2. It measures 4.0% duplication here against 3.7% before, still under the
+    gate.
+  - lizard stays on 1.24.0, because 1.24.2 crashes on this repository.
+  - The image installs npm 11.21.1, which ships the fixed `brace-expansion` and
+    `http-cache-semantics`, so only the `undici` swap remains.
+
+- **`sandstream-kit-plugin-vercel` 0.4.0 creates write-only env vars by default.** A create that
+  names no `type` used to get `encrypted`, which Vercel decrypts back through its API. It now gets
+  `sensitive`, which can be written and never read back. Vercel refuses `sensitive` for the
+  `development` target, so a target set that includes it still gets `encrypted`; `defaultEnvType`
+  says which. An explicit `type` still wins, and an in-place update keeps the entry's type.
 
 - **The Windows CI check runs in four parallel shards.** The Windows runner needed 31 to 48 minutes
   for the whole unit suite (46 of them in one step), against about 9 minutes on Linux. The suite is now

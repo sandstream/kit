@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
 import type { MonkeyProcessScope } from "./monkey-test-runner-processes.js";
 import {
   createRedactingLineWriter,
@@ -49,6 +50,51 @@ async function signalProcess(child: ChildProcess, signal: NodeJS.Signals): Promi
   }
 }
 
+/**
+ * Linux: whether process group `pgid` has a member that is not a zombie. `kill(-pgid, 0)` succeeds
+ * on zombies, and an orphan whose new parent never reaps it stays one: PID 1 in a container without
+ * an init (`docker run` without `--init`, sandboxed runners) is such a parent. A group that was
+ * stopped would then read as running forever. `undefined` when /proc cannot answer, which callers
+ * treat as running.
+ */
+export function groupHasLiveMember(pgid: number, procRoot = "/proc"): boolean | undefined {
+  // Fast path: a detached spawn's group id is its leader's pid, so one read settles the common
+  // case (leader alive) without scanning /proc, which costs ~20 ms with 1600 processes.
+  if (procState(`${procRoot}/${pgid}/stat`, pgid) === "live") return true;
+  let entries: string[];
+  try {
+    entries = readdirSync(procRoot);
+  } catch {
+    return undefined;
+  }
+  let sawMember = false;
+  for (const name of entries) {
+    if (!/^\d+$/.test(name)) continue;
+    const state = procState(`${procRoot}/${name}/stat`, pgid);
+    if (state === "live") return true;
+    if (state === "zombie") sawMember = true;
+  }
+  return sawMember ? false : undefined;
+}
+
+/**
+ * One /proc/<pid>/stat: "live" or "zombie" when the process belongs to group `pgid`, else
+ * "other" (another group, or gone between readdir and read).
+ */
+function procState(statPath: string, pgid: number): "live" | "zombie" | "other" {
+  let stat: string;
+  try {
+    stat = readFileSync(statPath, "utf8");
+  } catch {
+    return "other";
+  }
+  // comm (field 2) may hold spaces and parentheses; the fields after its last ")" are fixed:
+  // state, ppid, pgrp.
+  const [state, , pgrp] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  if (Number(pgrp) !== pgid) return "other";
+  return state === "Z" || state === "X" ? "zombie" : "live";
+}
+
 export function processTreeRunning(child: ChildProcess): boolean {
   if (!child.pid) return false;
   if (process.platform === "win32") {
@@ -56,10 +102,10 @@ export function processTreeRunning(child: ChildProcess): boolean {
   }
   try {
     process.kill(-child.pid, 0);
-    return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code !== "ESRCH";
   }
+  return process.platform !== "linux" || groupHasLiveMember(child.pid) !== false;
 }
 
 async function waitForProcessTreeExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {

@@ -437,6 +437,34 @@ function findSwedishPersonnummer(text: string): SecretFinding[] {
   return out;
 }
 
+/**
+ * A `keyed-secret` match whose value reads as a word or a label, not a credential (#580). i18n
+ * files and navigation configs key plain labels as `password` or `key` (`"password": "Contraseña"`,
+ * `{ key: 'sessions' }`), and the keyed patterns are case-insensitive, so every such file blocked
+ * commits. A value is label-like when it is letters with optional spaces and basic punctuation,
+ * and either holds a space, or is lower case after its first letter. Digits, symbols or inner
+ * capitals still count as a credential, and so does any value under an all-caps env-style name
+ * (`DB_PASSWORD=...`), whatever it looks like.
+ *
+ * Detection only. Redaction keeps masking these, since over-masking a log line costs nothing.
+ * Accepted miss: an all-lowercase letters-only password under a lowercase key.
+ */
+export function isLabelLikeKeyedValue(keyAndSeparator: string, value: string): boolean {
+  if (!/[a-z]/.test(keyAndSeparator)) return false;
+  if (!/^\p{L}[\p{L}\p{M} '’.,!?-]*$/u.test(value)) return false;
+  if (/\s/.test(value)) return true;
+  const rest = value.slice(1);
+  return rest === rest.toLowerCase();
+}
+
+/** Matches that are not findings: public demo JWTs, and label-like keyed values (#580). */
+function isBenignMatch(label: string, m: RegExpMatchArray): boolean {
+  // Well-known public demo JWTs (e.g. the `supabase start` anon key).
+  if (label === "jwt") return isPublicDemoJwt(m[0]);
+  if (label === "keyed-secret") return isLabelLikeKeyedValue(m[1] ?? "", m[3] ?? m[2] ?? "");
+  return false;
+}
+
 export function findSecrets(
   text: string,
   opts: { entropyBackstop?: boolean } = {},
@@ -447,8 +475,7 @@ export function findSecrets(
     const matches = text.matchAll(new RegExp(re.source, re.flags));
     for (const m of matches) {
       const raw = m[0];
-      // Skip well-known public demo JWTs (e.g. `supabase start` anon key).
-      if (label === "jwt" && isPublicDemoJwt(raw)) continue;
+      if (isBenignMatch(label, m)) continue;
       const head = raw.slice(0, 6);
       const tail = raw.length > 12 ? raw.slice(-4) : "";
       findings.push({

@@ -1,5 +1,6 @@
 /** Isolated subprocess launcher for source and compiled runner tests. */
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { fixtureEnvironment } from "./monkey-test-runner.test-support.js";
@@ -101,11 +102,18 @@ export async function eventually(check: () => boolean, timeoutMs = 5_000): Promi
   return check();
 }
 
+/** A zombie is not running: `kill(pid, 0)` succeeds on one, so Linux asks /proc for its state. */
 export function processRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch {
     return false;
+  }
+  if (process.platform !== "linux") return true;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return !["Z", "X"].includes(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0]!);
+  } catch {
+    return false; // gone between the signal probe and the read
   }
 }

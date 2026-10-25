@@ -343,6 +343,35 @@ describe("redactSecrets: keyed values in logs and JSON (RED-6)", () => {
   });
 });
 
+describe("keyed-secret detection skips labels, not credentials (#580)", () => {
+  const keyed = (input: string) => findSecrets(input).some((f) => f.label === "keyed-secret");
+
+  it("does not flag i18n labels or navigation keys", () => {
+    for (const input of [
+      `{ key: 'sessions', href: '/dashboard/sessions' }`,
+      `"password": "Contraseña"`,
+      `"passwordCode": "Adgangskode"`,
+      `"password_hint": "Enter your password"`,
+    ])
+      assert.equal(keyed(input), false, input);
+  });
+
+  it("still flags credential-shaped values and anything under an env-style name", () => {
+    for (const input of [
+      `password: "hunter22"`,
+      `"api_key": "SuperSecretValue"`,
+      `token = 'abc.def-ghi_jkl'`,
+      `DB_PASSWORD="letmeinplease"`,
+      `PASSWORD='Contraseña secreta'`,
+    ])
+      assert.equal(keyed(input), true, input);
+  });
+
+  it("redaction still masks a label-like value", () => {
+    assert.equal(redactSecrets(`"password": "Contraseña"`), `"password": "[REDACTED]"`);
+  });
+});
+
 describe("safeStatusLine", () => {
   it("collapses a multi-line check dump to the first non-empty line", () => {
     const dump = "color = ''\nproject-name = 'default'\n['acme']\naccount_id = 'acct_123'";

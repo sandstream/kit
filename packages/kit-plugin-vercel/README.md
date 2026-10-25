@@ -26,6 +26,8 @@ console.log(projects.map(({ name }) => name));
 
 `listProjects` and `listEnvVars` read metadata. `createEnvVar`, `updateEnvVar`, `deleteEnvVar`, `upsertEnvVar`, and `redeployLatest` make remote changes and enforce kit's read-only and policy controls. Environment-variable reads request metadata without decrypted values.
 
+A create that names no `type` gets `sensitive`, Vercel's write-only type, so the value cannot be read back through the API. Vercel refuses `sensitive` for the `development` target, so a target set that includes it falls back to `encrypted`. `defaultEnvType(target)` returns the type a create would get. Pass `type` to choose another, and note that an in-place update keeps the entry's existing type.
+
 ## Testing
 
 From the repository root, run `npm run build --workspace=sandstream-kit-plugin-vercel` and `npm test --workspace=sandstream-kit-plugin-vercel`. The test command runs the package's compiled tests.

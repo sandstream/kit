@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, access, readdir } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
@@ -14,6 +14,7 @@ import { depsHashFor, loadGuardDogCache, saveGuardDogCache } from "./guarddog-ca
 import { buildSemgrepArgs, semgrepConfig, isAirGap, isLocalSemgrepConfig } from "./scanners.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
 import { hasOsvManifest } from "./osv-manifests.js";
+import { unpinnedRequirements } from "./pinned-requirements.js";
 import { TRIAGE_MAX_AGE_DAYS } from "./commands/triage.js";
 import {
   ensureBumblebee,
@@ -264,6 +265,12 @@ export async function checkGitHookFloor(cwd?: string): Promise<SecurityCheckResu
  * the committed CLAUDE.md block, which travels to every clone/CI where the gitignored
  * `.claude/settings.json` legitimately doesn't exist. Skips where gates were never
  * installed (fresh checkout / CI / un-adopted); fails on a machine that lost a gate.
+ *
+ * A linked git worktree is the case that looked like "never installed" and is not: the
+ * marker and the hooks live in the gitignored `.claude/`, so a worktree of a gated main
+ * checkout has neither, and an agent working there runs ungated on the very machine where
+ * the gates were installed. Worktree-per-task harnesses (T3 Code, Claude Code worktrees)
+ * produce exactly that, so it fails like a lost gate rather than skipping.
  */
 export async function checkGateLiveness(cwd?: string): Promise<SecurityCheckResult> {
   const name = "enforcement gate liveness";
@@ -283,11 +290,26 @@ export async function checkGateLiveness(cwd?: string): Promise<SecurityCheckResu
     };
   }
   if (!live.everInstalled) {
+    const { getCanonicalProjectRoot } = await import("./memory/canonical-root.js");
+    const { getCurrentProjectRoot } = await import("./memory/project.js");
+    const { gateMarkerPath } = await import("./agent-config.js");
+    // Both come from git (forward slashes on Windows too); resolve() puts them in one form.
+    const here = resolve(getCurrentProjectRoot(cwd));
+    const main = resolve(getCanonicalProjectRoot(cwd));
+    if (main !== here && existsSync(gateMarkerPath(main))) {
+      return {
+        category,
+        name,
+        status: "fail",
+        severity: "high",
+        detail: `this is a linked git worktree of ${main}: the gates are installed there, not here, so an agent working in this worktree runs ungated. Run: kit agent-config (in this worktree)`,
+      };
+    }
     return {
       category,
       name,
       status: "skip",
-      detail: "enforcement gates not installed on this machine",
+      detail: "enforcement gates not installed in this checkout",
     };
   }
   if (missing.length === 0) {
@@ -1161,59 +1183,53 @@ function workspaceMemberNames(cwd: string): Set<string> {
 }
 
 /**
- * Check if dependencies use pinned versions
+ * Check if dependencies use pinned versions. Says which manifests it read: with none, or
+ * an unparseable package.json, there is nothing to vouch for, so it never claims "pinned".
  */
-async function checkPinnedVersions(root: string): Promise<SecurityCheckResult> {
+export async function checkPinnedVersions(root: string): Promise<SecurityCheckResult> {
   const unpinned: string[] = [];
+  const checked: string[] = [];
+  const result = (status: "pass" | "warn" | "skip", detail: string): SecurityCheckResult => ({
+    category: "supply-chain",
+    name: "pinned versions",
+    status,
+    detail,
+    ...(status === "warn" ? { severity: "medium" as const } : {}),
+  });
 
-  // Check package.json
-  try {
-    const packageJsonContent = await readFile(resolve(root, "package.json"), "utf-8");
-    const packageJson = JSON.parse(packageJsonContent);
+  const packageJsonContent = await readFile(resolve(root, "package.json"), "utf-8").catch(
+    () => undefined,
+  );
+  if (packageJsonContent !== undefined) {
+    let packageJson: {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    try {
+      packageJson = JSON.parse(packageJsonContent);
+    } catch {
+      return result("warn", "package.json could not be parsed — its pins were NOT checked");
+    }
     const members = workspaceMemberNames(root);
     const isMember = (name: string) => members.has(name);
-
     unpinned.push(
       ...unpinnedNodeDeps(packageJson.dependencies, isMember),
       ...unpinnedNodeDeps(packageJson.devDependencies, isMember),
     );
-  } catch {
-    // No package.json or parse error
+    checked.push("package.json");
   }
 
-  // Check requirements.txt
-  try {
-    const requirementsContent = await readFile(resolve(root, "requirements.txt"), "utf-8");
-
-    for (const line of requirementsContent.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-
-      // Check for range specifiers: >=, >, ~=, !=
-      if (/[>~!]=?/.test(trimmed)) {
-        unpinned.push(trimmed.split(/\s+/)[0]);
-      }
-    }
-  } catch {
-    // No requirements.txt or read error
+  const requirements = await readFile(resolve(root, "requirements.txt"), "utf-8").catch(
+    () => undefined,
+  );
+  if (requirements !== undefined) {
+    unpinned.push(...unpinnedRequirements(requirements));
+    checked.push("requirements.txt");
   }
 
-  if (unpinned.length > 0) {
-    return {
-      category: "supply-chain",
-      name: "pinned versions",
-      status: "warn",
-      detail: `${unpinned.length} unpinned dependencies`,
-      severity: "medium",
-    };
-  }
-
-  return {
-    category: "supply-chain",
-    name: "pinned versions",
-    status: "pass",
-    detail: "all dependencies pinned",
-  };
+  if (unpinned.length > 0) return result("warn", `${unpinned.length} unpinned dependencies`);
+  if (checked.length === 0) return result("skip", "no package.json or requirements.txt to check");
+  return result("pass", `all dependencies pinned (${checked.join(", ")})`);
 }
 
 /**

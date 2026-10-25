@@ -5,6 +5,8 @@ export {
   deleteWorkerSecret,
   listApiTokens,
   revokeApiToken,
+  listAccountApiTokens,
+  revokeAccountApiToken,
   type MgmtClient,
   type MgmtClientConfig,
   type WorkerSecretSummary,

@@ -11,11 +11,15 @@
  *   GET  /v1/projects/{ref}/api-keys  → current anon / service_role / publishable keys
  *   POST /v1/projects/{ref}/api-keys  → mint a fresh secret (Sb scoped key family)
  *
- * Older projects still use the JWT-secret model where rolling the JWT secret
- * regenerates anon + service_role atomically. That endpoint:
- *   POST /v1/projects/{ref}/config/jwt-secret/roll
+ * JWT signing keys (Supabase's successor to the JWT secret):
+ *   GET   /v1/projects/{ref}/config/auth/signing-keys        → list
+ *   POST  /v1/projects/{ref}/config/auth/signing-keys        → create (standby)
+ *   PATCH /v1/projects/{ref}/config/auth/signing-keys/{id}   → status (in_use, previously_used, revoked)
  *
- * Both are supported; the caller picks via `mode`.
+ * Older projects still use the JWT-secret model where rolling the JWT secret
+ * regenerates anon + service_role atomically. That endpoint is an internal dashboard
+ * path, absent from the published spec:
+ *   POST /v1/projects/{ref}/config/jwt-secret/roll
  */
 
 const DEFAULT_BASE_URL = "https://api.supabase.com";
@@ -165,7 +169,7 @@ export async function listApiKeys(client: MgmtClient, projectRef: string): Promi
 export interface ProjectKeyMode {
   /** Project is on the new Sb scoped-keys system — mint with scoped-key-mint. */
   supportsScopedKeys: boolean;
-  /** Project still uses JWT-based anon + service_role — must use jwt-secret-roll. */
+  /** Project still uses JWT-based anon + service_role: scoped-key-mint would break it. */
   supportsLegacyJwt: boolean;
   /** Raw count of API keys for diagnostics. */
   keyCount: number;
@@ -224,6 +228,11 @@ export interface RotateResult {
  * Rolls the project's JWT secret. **Invalidates every existing token**
  * (anon, service_role, signed URLs, session JWTs) atomically. Use only
  * when the leak severity warrants a hard cutover.
+ *
+ * LEGACY. This path is absent from Supabase's published Management API spec
+ * (api.supabase.com/api/v1-json, checked 2026-10-23): Supabase moved JWT signing to
+ * signing keys, and marks its remaining legacy endpoints "will be removed in the future".
+ * Prefer `rotateSigningKey`, which is reversible.
  */
 export async function rollJwtSecret(client: MgmtClient, projectRef: string): Promise<RotateResult> {
   assertNotReadOnly("supabase/rollJwtSecret");
@@ -310,6 +319,129 @@ export async function mintScopedKey(
   }
   const key = (await res.json()) as ApiKey;
   return { mode: "scoped-key-mint", newKey: key.api_key };
+}
+
+export type SigningKeyAlgorithm = "EdDSA" | "ES256" | "RS256" | "HS256";
+export type SigningKeyStatus = "in_use" | "previously_used" | "revoked" | "standby";
+
+/** A JWT signing key as the Management API returns it. Only the public JWK is ever exposed. */
+export interface SigningKey {
+  id: string;
+  algorithm: SigningKeyAlgorithm;
+  status: SigningKeyStatus;
+  public_jwk?: unknown;
+  created_at?: string;
+  updated_at?: string;
+}
+
+const signingKeysPath = (client: MgmtClient, projectRef: string) =>
+  `${client.baseUrl}/v1/projects/${encodeURIComponent(projectRef)}/config/auth/signing-keys`;
+
+export async function listSigningKeys(
+  client: MgmtClient,
+  projectRef: string,
+): Promise<SigningKey[]> {
+  const res = await fetch(signingKeysPath(client, projectRef), {
+    headers: client.headers,
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    throw new Error(`GET signing-keys returned ${res.status}: ${await safeText(res, client)}`);
+  }
+  const body = (await res.json()) as { keys?: SigningKey[] };
+  return body.keys ?? [];
+}
+
+export interface SigningKeyRotation {
+  /** The key now signing new JWTs. */
+  activated: SigningKey;
+  /** Keys moved from in_use to previously_used. They still verify tokens they signed. */
+  demoted: SigningKey[];
+}
+
+/**
+ * Rotates the project's JWT signing key the way Supabase's signing-keys system intends:
+ * create a key in standby, make it in_use, then move whatever else was in_use to
+ * previously_used. REVERSIBLE: a previously_used key keeps verifying the tokens it signed and
+ * can be made in_use again. Nothing is revoked here; that is `revokeSigningKey`, on purpose.
+ *
+ * Order matters: the new key is activated BEFORE the old one is demoted, so the project never
+ * has zero keys in use. If activation fails, the new key is left in standby, which is harmless.
+ */
+export async function rotateSigningKey(
+  client: MgmtClient,
+  projectRef: string,
+  opts: { algorithm?: SigningKeyAlgorithm } = {},
+): Promise<SigningKeyRotation> {
+  assertNotReadOnly("supabase/rotateSigningKey");
+  assertPolicyAllows("supabase", "signing_key_rotate");
+  const base = signingKeysPath(client, projectRef);
+  const send = async (url: string, method: "POST" | "PATCH", body: object, what: string) => {
+    const res = await fetch(url, {
+      method,
+      headers: client.headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new Error(`${what} returned ${res.status}: ${await safeText(res, client)}`);
+    return (await res.json()) as SigningKey;
+  };
+
+  const before = await listSigningKeys(client, projectRef);
+  const created = await send(
+    base,
+    "POST",
+    { algorithm: opts.algorithm ?? "ES256", status: "standby" },
+    "create standby signing key",
+  );
+  const activated = await send(
+    `${base}/${encodeURIComponent(created.id)}`,
+    "PATCH",
+    { status: "in_use" },
+    `activate signing key ${created.id}`,
+  );
+  const demoted: SigningKey[] = [];
+  for (const key of before.filter((k) => k.status === "in_use" && k.id !== created.id)) {
+    demoted.push(
+      await send(
+        `${base}/${encodeURIComponent(key.id)}`,
+        "PATCH",
+        { status: "previously_used" },
+        `demote signing key ${key.id}`,
+      ),
+    );
+  }
+  return { activated, demoted };
+}
+
+/**
+ * Revokes one signing key: tokens it signed stop verifying. Refuses the key that is in_use,
+ * because revoking it would leave the project signing with nothing; rotate first.
+ */
+export async function revokeSigningKey(
+  client: MgmtClient,
+  projectRef: string,
+  keyId: string,
+): Promise<SigningKey> {
+  assertNotReadOnly("supabase/revokeSigningKey");
+  assertPolicyAllows("supabase", "signing_key_revoke");
+  const current = (await listSigningKeys(client, projectRef)).find((k) => k.id === keyId);
+  if (!current) throw new Error(`signing key ${keyId} not found in project ${projectRef}`);
+  if (current.status === "in_use") {
+    throw new Error(`refusing to revoke ${keyId}: it is the key in use — rotate first`);
+  }
+  const res = await fetch(`${signingKeysPath(client, projectRef)}/${encodeURIComponent(keyId)}`, {
+    method: "PATCH",
+    headers: client.headers,
+    body: JSON.stringify({ status: "revoked" }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `revoke signing key ${keyId} returned ${res.status}: ${await safeText(res, client)}`,
+    );
+  }
+  return (await res.json()) as SigningKey;
 }
 
 async function safeText(res: Response, client: MgmtClient): Promise<string> {

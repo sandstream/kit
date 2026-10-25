@@ -97,9 +97,9 @@ describe("the policy agent-writes row", () => {
       const r = await checkPolicyAgentWrites(dir);
       assert.equal(r.status, "pass");
       assert.match(r.detail, /2 op\(s\) pre-approved/);
-      // The refusal count answers "what is denied here?" (4: two supabase rotation ops, supabase env_set,
-      // sentry create_release), which an operator otherwise learns only when a refusal hits.
-      assert.match(r.detail, /policy refuses 4 of the \d+ ops/);
+      // The refusal count answers "what is denied here?", which an operator otherwise learns only
+      // from a refusal at the moment they hit one.
+      assert.match(r.detail, /policy refuses 6 of the \d+ ops/);
     } finally {
       rmTemp(dir);
     }
