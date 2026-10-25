@@ -37,6 +37,9 @@ export async function spawnWithStdin(
     child.on("close", (code) => {
       resolve({ code: code ?? 1, stderr: redactSecrets(stderr, knownSecrets) });
     });
+    // A CLI that exits before it reads stdin (bad argument, missing login) breaks the pipe. The
+    // write then fails with EPIPE; the exit code and stderr from "close" are the real answer.
+    child.stdin.on("error", () => undefined);
     child.stdin.write(stdinValue);
     child.stdin.end();
   });

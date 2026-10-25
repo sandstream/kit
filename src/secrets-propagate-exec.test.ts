@@ -18,6 +18,19 @@ describe("safeDiagnostic", () => {
 });
 
 describe("spawnWithStdin", () => {
+  it("reports the exit code of a child that quits without reading stdin (no EPIPE crash)", async () => {
+    // A CLI that rejects its arguments exits at once. The write to its stdin then fails with
+    // EPIPE, which must not escape as an uncaught exception: the exit code is the answer.
+    for (let i = 0; i < 20; i++) {
+      const r = await spawnWithStdin(
+        process.execPath,
+        ["-e", "process.exit(5)"],
+        "x".repeat(1 << 20),
+      );
+      assert.equal(r.code, 5);
+    }
+  });
+
   it("passes the value on stdin and reports the exit code", async () => {
     const r = await spawnWithStdin(
       process.execPath,
