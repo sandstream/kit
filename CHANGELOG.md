@@ -6,6 +6,19 @@
   (`[secrets].store`) and the CLI that logs in to it (`infisical` for Infisical, `op` for
   1Password). A UI can then say "Infisical is not logged in" or "no vault chosen", and stop listing
   tools kit merely found on the machine, such as `op` on a project whose vault is Infisical.
+- **`kit secrets propagate --to supabase` sets Edge Function secrets.** It runs `supabase secrets
+set --env-file` with the value in a file of mode 0600 inside a 0700 folder that is removed
+  afterwards (the Supabase CLI has no stdin path), never in argv. Names that start with `SUPABASE_`
+  (reserved) or are not upper case are refused, a value is written in the form the CLI reads back exactly (single quotes, or double quotes when it holds a line break) and one with no exact form is refused, never stored changed,
+  and `--supabase-project <ref>` picks the project (the linked one otherwise). `--vercel-project` and
+  `--vercel-team` now reach the Vercel API path from the command line, for both `propagate` and
+  `rotate --propagate`, which share one flag reader. `[policy.agent_writes]` can gate it as
+  `supabase = ["env_set"]`.
+- **`kit check --category deploy` fails three unsafe Vercel states.** From the metadata the Vercel API
+  returns (never a value): a variable Vercel flags `readable-secret`, a secret held in one entry that
+  targets both production and preview, and a variable no source file names. Each row lists the names
+  and the way out; `shared_ok` and `implicit_env` in `[deploy.vercel]` accept known exceptions.
+  Without `VERCEL_TOKEN` the listing has no such metadata, and the row says the checks did not run.
 - **`kit statusline --json` carries `features`.** The list names what this kit can do
   (`image-scan`, `upstream`). A UI such as the kit-health mod can be newer than the installed kit and
   would otherwise offer a command that is not there. It now asks kit and offers only what is listed.
@@ -84,6 +97,12 @@
   `packageManager` value that is not a plain `name@version`).
 
 ### Fixed
+
+- **`kit secrets propagate --to vercel` creates `sensitive` variables, not `encrypted`.** Vercel keeps
+  a `sensitive` value write-only. It is allowed only for production and preview, so development stays
+  `encrypted` and the result says so. A type cannot be changed afterwards, so an existing entry of
+  another type is deleted and created again instead of patched (a failure between the two steps is
+  reported, and the command can be run again). The CLI path passes `--sensitive` too.
 
 - **`kit security scan-staged` no longer blocks commits on i18n labels and navigation keys
   (#580).** The keyed-secret patterns are case-insensitive. Any `key`, `password` or `token` with

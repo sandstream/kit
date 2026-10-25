@@ -146,6 +146,7 @@ import {
 import {
   propagate,
   parseTargets,
+  propagationOptionsFromArgs,
   ALL_TARGETS,
   type PropagationOptions,
 } from "./secrets-propagate.js";
@@ -546,21 +547,7 @@ export async function cmdSecretsRotate(): Promise<boolean> {
       return false;
     }
 
-    const propOpts: PropagationOptions = {};
-    const targetEnv = flagValue(args, "--target-env");
-    if (targetEnv !== undefined) propOpts.env = targetEnv as PropagationOptions["env"];
-    const flyApp = flagValue(args, "--fly-app");
-    if (flyApp !== undefined) propOpts.flyApp = flyApp;
-    const cfWorker = flagValue(args, "--cf-worker");
-    if (cfWorker !== undefined) propOpts.cfWorker = cfWorker;
-    const railwayService = flagValue(args, "--railway-service");
-    if (railwayService !== undefined) propOpts.railwayService = railwayService;
-    const awsRegion = flagValue(args, "--aws-region");
-    if (awsRegion !== undefined) propOpts.awsRegion = awsRegion;
-    const ghRepo = flagValue(args, "--github-repo");
-    if (ghRepo !== undefined) propOpts.githubRepo = ghRepo;
-    const vercelScope = flagValue(args, "--vercel-scope");
-    if (vercelScope !== undefined) propOpts.vercelScope = vercelScope;
+    const propOpts: PropagationOptions = propagationOptionsFromArgs(args);
     // Same gate as `kit secrets propagate` — rotation must not be the way around the policy.
     if (config.policy) propOpts.policy = config.policy;
 

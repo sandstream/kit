@@ -34,6 +34,7 @@ import {
 import {
   propagate,
   parseTargets,
+  propagationOptionsFromArgs,
   ALL_TARGETS,
   type PropagationOptions,
 } from "../secrets-propagate.js";
@@ -641,21 +642,7 @@ async function cmdSecretsPropagateStandalone(): Promise<boolean> {
   }
 
   // Parse propagation options (same flag surface as rotate --propagate).
-  const propOpts: PropagationOptions = {};
-  const targetEnv = flagValue(args, "--target-env");
-  if (targetEnv !== undefined) propOpts.env = targetEnv as PropagationOptions["env"];
-  const flyApp = flagValue(args, "--fly-app");
-  if (flyApp !== undefined) propOpts.flyApp = flyApp;
-  const cfWorker = flagValue(args, "--cf-worker");
-  if (cfWorker !== undefined) propOpts.cfWorker = cfWorker;
-  const railwayService = flagValue(args, "--railway-service");
-  if (railwayService !== undefined) propOpts.railwayService = railwayService;
-  const awsRegion = flagValue(args, "--aws-region");
-  if (awsRegion !== undefined) propOpts.awsRegion = awsRegion;
-  const ghRepo = flagValue(args, "--github-repo");
-  if (ghRepo !== undefined) propOpts.githubRepo = ghRepo;
-  const vercelScope = flagValue(args, "--vercel-scope");
-  if (vercelScope !== undefined) propOpts.vercelScope = vercelScope;
+  const propOpts: PropagationOptions = propagationOptionsFromArgs(args);
   // `[policy.agent_writes]` gates each target inside `propagate`. This command did not otherwise
   // need the config, so loading it here is what makes the gate reachable at all — an enforcement
   // point nobody hands the policy to is exactly the inert state this arc exists to fix.
