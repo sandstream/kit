@@ -43,6 +43,36 @@ describe("checkSecrets - template", () => {
 });
 
 describe("checkSecrets - env source", () => {
+  it("reports a variable that is set but empty as unreadable, not missing", async () => {
+    // `vercel env run` gives a Sensitive variable as an empty string: the platform
+    // has it, kit cannot read it. That is not the same finding as "not set".
+    process.env._KIT_EMPTY_VAR = "";
+    try {
+      const config: SecretsConfig = {
+        store: "env",
+        keys: { _KIT_EMPTY_VAR: { source: "env" } },
+      };
+      const { keys } = await checkSecrets(config);
+      assert.equal(keys[0].state, "unreadable");
+      assert.equal(keys[0].unverified, true);
+      assert.equal(keys[0].available, false);
+      assert.match(keys[0].detail, /empty/i);
+    } finally {
+      delete process.env._KIT_EMPTY_VAR;
+    }
+  });
+
+  it("labels an unset variable as missing", async () => {
+    delete process.env._KIT_MISSING_VAR2;
+    const config: SecretsConfig = {
+      store: "env",
+      keys: { _KIT_MISSING_VAR2: { source: "env" } },
+    };
+    const { keys } = await checkSecrets(config);
+    assert.equal(keys[0].state, "missing");
+    assert.notEqual(keys[0].unverified, true);
+  });
+
   it("returns available when env variable is set", async () => {
     process.env._KIT_TEST_VAR = "hello";
     try {
