@@ -7,6 +7,9 @@
   vulnerable packages with their versions, and for npm packages suggests
   `npm update <packages> --ignore-scripts`. A hole with no score stays `high` and the row says so.
   `kit check` still never changes the lockfile.
+  A hole with no score is never rated below `high`, a `MAL-` (malware) advisory is `critical`, and
+  package names and versions from the lockfile are shown only as plain names (at most ten, the rest
+  counted), so control characters in a lockfile cannot reach the terminal or the suggested command.
 
 ### Added
 
