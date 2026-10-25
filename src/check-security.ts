@@ -29,6 +29,7 @@ import {
   type ScanOutcome,
 } from "./bumblebee.js";
 import { describeTrivyFsResult } from "./check-trivy-text.js";
+import { osvFinding } from "./osv-summary.js";
 
 const exec = promisify(execFile);
 
@@ -2255,13 +2256,7 @@ async function checkOsvScanner(root: string): Promise<SecurityCheckResult> {
       detail: "no known dependency vulnerabilities",
     };
   }
-  return {
-    category: "supply-chain",
-    name,
-    status: "warn",
-    detail: `${count} known dependency vulnerability(ies) -run: osv-scanner -r .`,
-    severity: "high",
-  };
+  return osvFinding(name, result.stdout);
 }
 
 /**

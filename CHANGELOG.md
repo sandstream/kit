@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+### Fixed
+
+- **The `osv-scanner (deps)` row rated every finding `high`.** It now takes the severity from the
+  worst CVSS score osv reports (critical from 9.0, high from 7.0, medium from 4.0), names the
+  vulnerable packages with their versions, and for npm packages suggests
+  `npm update <packages> --ignore-scripts`. A hole with no score stays `high` and the row says so.
+  `kit check` still never changes the lockfile.
+
 ### Added
 
 - **`kit statusline --json` carries `vault`.** It names the secrets store the project chose
