@@ -604,7 +604,7 @@ describe("the deny list that crosses into the plugins", () => {
       );
       assert.equal(
         process.env[POLICY_DENY_ENV],
-        "supabase:jwt_secret_roll,supabase:scoped_key_revoke,supabase:signing_key_rotate,supabase:signing_key_revoke",
+        "supabase:env_set,supabase:jwt_secret_roll,supabase:scoped_key_revoke,supabase:signing_key_rotate,supabase:signing_key_revoke",
         "the decisions must travel",
       );
     } finally {

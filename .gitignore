@@ -64,3 +64,6 @@ id_ed25519
 
 # kit config migration leaves this behind; git history is the real backup
 .kit.toml.backup
+
+# Supabase CLI local state (linked project ref, CLI version cache); never commit.
+supabase/.temp/
