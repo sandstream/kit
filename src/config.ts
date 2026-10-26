@@ -413,6 +413,7 @@ export interface ContextConfig {
   keycloak?: { realm?: string };
   auth0?: { tenant?: string };
   clerk?: { env?: string };
+  terraform?: { bucket?: string; prefix?: string; workspace?: string; dir?: string };
 }
 
 /** [setup] — project bootstrap commands run by `kit setup`. install/verify run

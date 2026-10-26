@@ -17,13 +17,15 @@ import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 import type { ContextConfig } from "./config.js";
 import { uncheckedContext } from "./context-unchecked.js";
+import { terraformFindings } from "./context-terraform.js";
+import { field, activationProject } from "./context-field.js";
 
 const exec = promisify(execFile);
 
 export interface ContextFinding {
   tool: string; // gcloud | git | github | npm | vercel
   field: string; // account | project | email | org | remote | registry | ...
-  status: "ok" | "mismatch" | "unknown" | "unchecked"; // unknown = live state could not be read; unchecked = declared but no check reads it
+  status: "ok" | "mismatch" | "unknown" | "unchecked"; // unknown: unreadable; unchecked: no check reads it
   expected: string;
   actual: string | null;
 }
@@ -42,26 +44,6 @@ export interface LiveContext {
   keycloak?: { realm: string | null };
   auth0?: { tenant: string | null };
   clerk?: { env: string | null };
-}
-
-function field(
-  tool: string,
-  name: string,
-  declared: string | string[] | undefined,
-  actual: string | null,
-): ContextFinding | null {
-  if (declared === undefined) return null; // not declared -> not checked
-  // A list is a set of exact names. No glob: `acme-*` would also match `acme-prod-old`.
-  const names = Array.isArray(declared) ? declared : [declared];
-  const expected = Array.isArray(declared) ? names.join(" | ") || "(empty list)" : declared;
-  if (actual === null) return { tool, field: name, status: "unknown", expected, actual: null };
-  return {
-    tool,
-    field: name,
-    status: names.includes(actual) ? "ok" : "mismatch",
-    expected,
-    actual,
-  };
 }
 
 // One row per checkable (tool, field). Adding a CLI to the lock is one row.
@@ -592,7 +574,11 @@ export async function checkContext(
     };
   }
   const live = await gatherLive(cwd);
-  const findings = [...compareContext(declared, live), ...uncheckedContext(ctx)];
+  const findings = [
+    ...compareContext(declared, live),
+    ...terraformFindings(ctx, cwd),
+    ...uncheckedContext(ctx),
+  ];
   // Repo-declared truth beats ambient state (#251): even when [context.gcloud]
   // itself is not declared, an active gcloud project that is not one of the
   // repo's own .firebaserc projects is a cross-account mismatch.
@@ -640,12 +626,7 @@ export function planContext(ctx: ContextConfig): ContextStep[] {
       argv: ["config", "set", "account", g.account],
       describe: `account=${g.account}`,
     });
-  // A list names several allowed projects: kit cannot pick one to activate.
-  const project = Array.isArray(g?.project)
-    ? g.project.length === 1
-      ? g.project[0]
-      : undefined
-    : g?.project;
+  const project = activationProject(g);
   if (project)
     steps.push({
       tool: "gcloud",

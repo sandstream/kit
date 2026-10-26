@@ -19,6 +19,7 @@ const KNOWN: Record<string, readonly string[]> = {
   keycloak: ["realm"],
   auth0: ["tenant"],
   clerk: ["env"],
+  terraform: ["bucket", "prefix", "workspace", "dir"],
 };
 
 function isTable(v: unknown): v is Record<string, unknown> {
