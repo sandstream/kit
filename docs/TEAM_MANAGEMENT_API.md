@@ -19,8 +19,10 @@ The command refuses rather than reporting a success that did not happen.
 Role-based access control ships as part of the signed org policy, not as a team
 service. The `[rbac]` table inside `.kit-policy.toml` maps subject identities
 (`kid_...`) to roles and roles to permissions. It is covered by the same org
-signature as the rest of the policy and is enforced offline, with no network call at
-decision time (`src/rbac/`).
+signature as the rest of the policy. kit validates it, distributes it with the policy and
+reports it (`kit policy pull`, `kit doctor`). The offline decision engine exists
+(`can()` in `src/rbac/resolve.ts`, no network at decision time), but **no kit command consults
+it yet**: a role does not currently allow or deny anything kit does.
 
 - Distribute and verify it with `kit policy sign`, `kit policy pull` and
   `kit policy verify`.
