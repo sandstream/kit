@@ -47,12 +47,21 @@ export interface LiveContext {
 function field(
   tool: string,
   name: string,
-  expected: string | undefined,
+  declared: string | string[] | undefined,
   actual: string | null,
 ): ContextFinding | null {
-  if (expected === undefined) return null; // not declared -> not checked
+  if (declared === undefined) return null; // not declared -> not checked
+  // A list is a set of exact names. No glob: `acme-*` would also match `acme-prod-old`.
+  const names = Array.isArray(declared) ? declared : [declared];
+  const expected = Array.isArray(declared) ? names.join(" | ") || "(empty list)" : declared;
   if (actual === null) return { tool, field: name, status: "unknown", expected, actual: null };
-  return { tool, field: name, status: actual === expected ? "ok" : "mismatch", expected, actual };
+  return {
+    tool,
+    field: name,
+    status: names.includes(actual) ? "ok" : "mismatch",
+    expected,
+    actual,
+  };
 }
 
 // One row per checkable (tool, field). Adding a CLI to the lock is one row.
@@ -62,7 +71,7 @@ function field(
 const FIELD_SPECS: {
   tool: string;
   field: string;
-  declared: (d: ContextConfig) => string | undefined;
+  declared: (d: ContextConfig) => string | string[] | undefined;
   live: (l: LiveContext) => string | null;
 }[] = [
   {
@@ -631,11 +640,17 @@ export function planContext(ctx: ContextConfig): ContextStep[] {
       argv: ["config", "set", "account", g.account],
       describe: `account=${g.account}`,
     });
-  if (g?.project)
+  // A list names several allowed projects: kit cannot pick one to activate.
+  const project = Array.isArray(g?.project)
+    ? g.project.length === 1
+      ? g.project[0]
+      : undefined
+    : g?.project;
+  if (project)
     steps.push({
       tool: "gcloud",
-      argv: ["config", "set", "project", g.project],
-      describe: `project=${g.project}`,
+      argv: ["config", "set", "project", project],
+      describe: `project=${project}`,
     });
   if (g?.region)
     steps.push({
