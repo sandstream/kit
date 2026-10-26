@@ -194,4 +194,11 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   "memory pull":
     "Sync the store from your PRIVATE remote; blobs are always encrypted (passphrase or recipient key)",
   "mcp list": "Show declared MCPs + auth status",
+  "memory status": "Alias for kit memory stats",
+  "memory learn": "Surface recurring instructions you keep re-typing: candidates for a memory rule",
+  "memory verify":
+    "Verify the shared tier's signatures (trusted / bad-sig / untrusted / unsigned); exit 1 on a bad signature",
+  "memory export": "Render the curated shared tier as an Obsidian vault (--obsidian <dir>)",
+  "memory forget-message":
+    "Verified-forget one memory row by uuid and prove it is gone (row, FTS index, tombstone)",
 };
