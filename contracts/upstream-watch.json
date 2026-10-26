@@ -15,19 +15,6 @@
       }
     },
     {
-      "id": "core-rbac/github-api-version",
-      "owner": "src/rbac/identity-provider.ts",
-      "source": {
-        "kind": "api-versions",
-        "url": "https://api.github.com/versions",
-        "pinned": "2026-03-10"
-      },
-      "baseline": {
-        "version": "2026-03-10",
-        "observedAt": "2026-10-23"
-      }
-    },
-    {
       "id": "plugin-snyk/api-version",
       "owner": "packages/kit-plugin-snyk/src/scan.ts",
       "source": {

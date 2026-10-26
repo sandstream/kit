@@ -74,6 +74,8 @@ export interface ProfileScope {
    * a stored bearer token. Same host-matching as `egress` (exact, or a leading-dot suffix match).
    * Being inside the signed `[scope]`, this list is covered by the signature — a host cannot be
    * marked keyless without re-signing, and it only takes effect once the scope verifies.
+   *
+   * EXPERIMENTAL: accepted and validated, but no kit command signs requests yet (src/keyless/).
    */
   sign?: string[];
   /**

@@ -333,6 +333,7 @@ describe("runDoctor — control plane (org policy) row (Pillar 2 §4.6)", () => 
     assert.ok(row);
     assert.equal(row.status, "pass", row.detail);
     assert.match(row.detail, /RBAC 1 role/);
+    assert.match(row.detail, /experimental: not enforced/);
   });
 });
 
