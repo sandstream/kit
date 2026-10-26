@@ -1,6 +1,10 @@
 /**
  * kit RBAC identity providers — the ENROLLMENT-ONLY IdP layer for Pillar 2.
  *
+ * EXPERIMENTAL, NOT WIRED: no kit command calls this module yet (docs/TEAM_MANAGEMENT_API.md). It is
+ * tested and kept for when RBAC is wired to a decision about what a role governs; until then the
+ * `[rbac]` table is validated, distributed and reported, and allows or denies nothing.
+ *
  * An IdP (GitHub today; Azure/Entra and Google are documented future backends of
  * the SAME interface) is consulted ONLY at enrollment time to compile role
  * bindings. It is NEVER imported by the enforcement path (`resolve.ts`) — the

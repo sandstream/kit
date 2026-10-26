@@ -18,12 +18,12 @@ import {
   realpathSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, posix, resolve, win32 } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { parse } from "smol-toml";
+import { identityOf, sameIdentity } from "../utils/same-file.js";
 
 const PROJECT_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
@@ -276,9 +276,9 @@ function sameLocalDirectory(left: string, right: string): boolean {
         ? resolveLocalProjectPath(path).replaceAll("\\", "/").toLowerCase()
         : resolveLocalProjectPath(path);
     if (normalized(left) === normalized(right)) return true;
-    const a = statSync(left);
-    const b = statSync(right);
-    return a.isDirectory() && b.isDirectory() && a.ino !== 0 && a.dev === b.dev && a.ino === b.ino;
+    const a = identityOf(left);
+    const b = identityOf(right);
+    return !!a?.isDirectory() && !!b?.isDirectory() && sameIdentity(a, b);
   } catch {
     return false;
   }

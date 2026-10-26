@@ -9,7 +9,9 @@ node = "22"
 # installs on PASS — bare names are untriageable and the gate blocks them.
 "aqua:aquasecurity/trivy" = "0.76.1"
 "aqua:trufflesecurity/trufflehog" = "3.99.4"
-# lizard stays on 1.24.0: 1.24.2 crashes on this repo (IndexError in its JS/TS parser).
+# lizard stays on 1.24.0: 1.24.2 crashes on this repo (IndexError in its JS/TS parser), and
+# 1.24.3 runs but misplaces TypeScript function ends (memoryScopeOptions, 17 lines, measured
+# as 865), so it moves 181 functions across the CCN/length limits. Measured 2026-10-26.
 # Strict `kit review --enforce` delegates to these scanners. Exact pins keep
 # local and CI findings stable; `kit install` triages each backend ref before
 # mise installs it, and `resolveToolBin` finds the resulting binary mise-first.

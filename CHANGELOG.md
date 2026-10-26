@@ -2,6 +2,10 @@
 
 ### Fixed
 
+- **`kit memory restore` could refuse a valid restore on Windows.** Its "input and output are the
+  same file" guard compared file ids as JS numbers, and Windows file ids above 2^53 lose their
+  low bits, so two different files could match. File identity is now compared as bigint, and an
+  id of 0 never matches. The same fix applies to the project-directory comparison in memory scoping.
 - **`--help` covers every subcommand, and asking for a command that does not exist is an error.**
   - 46 documented subcommands printed only their parent's one-liner under `--help` and were missing
     from `contracts/kit.opencli.json`. Examples: `kit memory push`, `kit secrets validate`,
@@ -15,7 +19,6 @@
   now prints the first lines of each failure's own error, where a reader of a long CI log
   actually looks. The Windows worktree test that failed intermittently now names the assertion and
   prints the recall roots and `git worktree list` output it saw.
-
 - **The `osv-scanner (deps)` row rated every finding `high`.** It now takes the severity from the
   worst CVSS score osv reports (critical from 9.0, high from 7.0, medium from 4.0), names the
   vulnerable packages with their versions, and for npm packages suggests
@@ -200,6 +203,18 @@ set --env-file` with the value in a file of mode 0600 inside a 0700 folder that 
   ledger is now left alone unless the security dimension ran.
 
 ### Changed
+
+- **RBAC and keyless request signing are labelled experimental where kit reports them.** The
+  `[rbac]` table is validated, distributed and reported, and no command enforces it.
+  - `kit doctor` and `kit policy pull` now say "experimental: not enforced" next to the role counts.
+    `kit doctor` used to describe RBAC as governing.
+  - The decision engine, the IdP backends and the RFC 9421 request signer say in their headers that
+    nothing calls them yet. `[scope].sign` in a profile is accepted and has no effect.
+- **Removed: six source files nothing imported.** `src/database.ts`, `src/migrations.ts`,
+  `src/service-adapter.ts` (a monitoring-service abstraction, not the plugin `ServiceAdapter`),
+  `src/secrets-pull.ts` (types for a `kit secrets pull` that was never routed) and their tests,
+  about 2,000 lines. The upstream watch no longer tracks the GitHub API version of the unwired IdP
+  backend; the GitHub plugin's row still tracks the same API.
 
 - **Dependabot also proposes npm devDependency updates.** One grouped PR a week, through the
   repaired triage gate, never merged on its own. The four runtime dependencies stay manual under

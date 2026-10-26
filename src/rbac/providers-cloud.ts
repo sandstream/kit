@@ -16,6 +16,10 @@
  * on them in production. Fail-CLOSED: any non-OK response THROWS rather than
  * reporting spurious (empty) membership. Enrollment egress MUST be gated by kit's
  * egress policy (exec-broker) — same note as the GitHub source.
+ *
+ * EXPERIMENTAL, NOT WIRED: no kit command calls this module yet (docs/TEAM_MANAGEMENT_API.md). It is
+ * tested and kept for when RBAC is wired to a decision about what a role governs; until then the
+ * `[rbac]` table is validated, distributed and reported, and allows or denies nothing.
  */
 import type { IdentityProvider } from "./identity-provider.js";
 
