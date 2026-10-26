@@ -20,6 +20,7 @@
 import { existsSync, readFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import {
+  identityId,
   signWithIdentity,
   tryLoadIdentity,
   localPublicKeys,
@@ -58,28 +59,51 @@ function tokensPath(root: string): string {
   return join(root, APPROVAL_TOKENS_FILE);
 }
 
+/** A key that can sign an approval: the resolved keystore, so a hardware backend signs it. */
+export interface ApprovalSigner {
+  publicKeyPem(): string | null;
+  sign(data: Buffer | string): Buffer;
+}
+
 /**
- * Mint a signed approval token for `operation`+`environment`, valid for `ttlSeconds`, signed by the
- * CURRENT identity, and append it to `<root>/.kit-approvals.jsonl`. The verifier only honors it if
- * that identity is in the org trust anchor. Throws if there is no identity to sign with.
+ * Can a person answer here? An approval stands for a person, so it is minted only on a terminal
+ * (stdin and stdout) that is not in a declared non-interactive mode. An agent's tool call, CI and
+ * piped input all fail this. It is a gate on the obvious path, not proof: a process running as
+ * the same user can read a file-backed key and sign without kit. Only a hardware key that needs
+ * a touch proves presence; `require_hardware_identity` makes approvals demand one.
+ */
+export function personCanAnswer(t: {
+  stdinTTY: boolean;
+  stdoutTTY: boolean;
+  nonInteractive: boolean;
+}): boolean {
+  return t.stdinTTY && t.stdoutTTY && !t.nonInteractive;
+}
+
+/**
+ * Mint a signed approval token for `operation`+`environment`, valid for `ttlSeconds`, and append it
+ * to `<root>/.kit-approvals.jsonl`. Signed by `opts.signer` when given (the CLI passes the resolved
+ * keystore), else by the CURRENT file identity. The verifier only honors it if that identity is in
+ * the org trust anchor. Throws if there is no identity to sign with.
  */
 export function mintApprovalToken(
   operation: string,
   environment: string,
   ttlSeconds: number,
-  opts: { root?: string; dir?: string; now?: Date } = {},
+  opts: { root?: string; dir?: string; now?: Date; signer?: ApprovalSigner } = {},
 ): ApprovalToken {
   const root = opts.root ?? process.cwd();
-  const signer = tryLoadIdentity(opts.dir);
-  if (!signer) throw new Error("no current identity to sign the approval token");
+  const signerPub = opts.signer?.publicKeyPem();
+  const kid = opts.signer ? signerPub && identityId(signerPub) : tryLoadIdentity(opts.dir)?.id;
+  if (!kid) throw new Error("no current identity to sign the approval token");
   const now = opts.now ?? new Date();
   const ts = now.toISOString();
   const expires = new Date(now.getTime() + ttlSeconds * 1000).toISOString();
-  const sig = signWithIdentity(
-    approvalStatement(operation, environment, ts, expires),
-    opts.dir,
+  const statement = approvalStatement(operation, environment, ts, expires);
+  const sig = (
+    opts.signer ? opts.signer.sign(statement) : signWithIdentity(statement, opts.dir)
   ).toString("base64");
-  const token: ApprovalToken = { operation, environment, kid: signer.id, ts, expires, sig };
+  const token: ApprovalToken = { operation, environment, kid, ts, expires, sig };
   const path = tokensPath(root);
   mkdirSync(dirname(path), { recursive: true });
   appendFileSync(path, JSON.stringify(token) + "\n", { encoding: "utf-8", mode: 0o600 });
