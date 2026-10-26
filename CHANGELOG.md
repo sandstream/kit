@@ -19,6 +19,19 @@
   same file" guard compared file ids as JS numbers, and Windows file ids above 2^53 lose their
   low bits, so two different files could match. File identity is now compared as bigint, and an
   id of 0 never matches. The same fix applies to the project-directory comparison in memory scoping.
+- **`--help` covers every subcommand, and asking for a command that does not exist is an error.**
+  - 46 documented subcommands printed only their parent's one-liner under `--help` and were missing
+    from `contracts/kit.opencli.json`. Examples: `kit memory push`, `kit secrets validate`,
+    `kit plugin install`, `kit triage npm`. Each now has its own line, and a test fails when a
+    documented subcommand has none.
+  - `kit frobnicate --help` and `kit help chek` printed the general help and exited 0. They now say
+    `Unknown command`, suggest the nearest command, and exit 1.
+  - 14 commands that printed under "Other" in `kit help` have a group.
+  - COMMANDS.md documents the five memory subcommands it left out.
+- **A failing test explains itself at the end of the run.** The runner's `[kit] N not ok` summary
+  now prints the first lines of each failure's own error, where a reader of a long CI log
+  actually looks. The Windows worktree test that failed intermittently now names the assertion and
+  prints the recall roots and `git worktree list` output it saw.
 - **The `osv-scanner (deps)` row rated every finding `high`.** It now takes the severity from the
   worst CVSS score osv reports (critical from 9.0, high from 7.0, medium from 4.0), names the
   vulnerable packages with their versions, and for npm packages suggests

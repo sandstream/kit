@@ -79,7 +79,6 @@ describe("OpenCLI document shape", () => {
       assert.ok(Array.isArray(c["x-kit-accepted-flags"]), `${name} must carry a flag list`);
       for (const [sub, s] of Object.entries(c.commands ?? {})) {
         assert.equal(s["x-kit-args-modeled"], true, `${name} ${sub} must inherit parent flags`);
-        assert.deepEqual(s["x-kit-accepted-flags"], c["x-kit-accepted-flags"]);
       }
     }
   });
@@ -107,6 +106,7 @@ describe("OpenCLI document shape", () => {
       "x-kit-audience",
       "x-kit-args-modeled",
       "x-kit-accepted-flags",
+      "x-kit-flags-inherited",
     ]);
     const walk = (c: OpenCliDoc["commands"][string]) => {
       for (const k of Object.keys(c)) assert.ok(allowed.has(k), `unexpected command key: ${k}`);
@@ -138,5 +138,20 @@ describe("OpenCLI document shape", () => {
       for (const [sub, s] of Object.entries(c.commands ?? {})) walk(`${name} ${sub}`, s);
     };
     for (const [name, c] of Object.entries(doc.commands)) walk(name, c);
+  });
+});
+
+describe("OpenCLI subcommand flags", () => {
+  it("inherit the parent's list instead of repeating it on every subcommand", () => {
+    const doc = buildOpenCliDoc();
+    let subcommands = 0;
+    for (const [name, c] of Object.entries(doc.commands)) {
+      for (const [sub, s] of Object.entries(c.commands ?? {})) {
+        subcommands++;
+        assert.equal(s["x-kit-flags-inherited"], true, `${name} ${sub} must mark inheritance`);
+        assert.equal(s["x-kit-accepted-flags"], undefined, `${name} ${sub} repeats the list`);
+      }
+    }
+    assert.ok(subcommands > 50, "the check saw the subcommands");
   });
 });

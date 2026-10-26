@@ -16,11 +16,11 @@ the same name as the dispatch table (`COMMANDS`) and the help table
 (`COMMAND_HELP`). `command-surface.test.ts` enforces three-way parity: every
 command has a tier _and_ a help entry, so the surface can never silently drift.
 
-| Tier           | Promise                                                                                                                              | Breaking change allowed in |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- |
+| Tier           | Promise                                                                                                                                                 | Breaking change allowed in |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
 | `stable`       | Covered by the current major's compatibility promise (6.x). The command keeps working with the same name and core behavior across the whole major line. | MAJOR only (7.0)           |
-| `experimental` | Shipped, but the shape (flags, output, subcommands) may change across MINOR versions. Use with that caveat.                          | MINOR                      |
-| `deprecated`   | Slated for removal in a future MAJOR. Still runs, but prints a deprecation warning to stderr on every invocation.                    | removed in next MAJOR      |
+| `experimental` | Shipped, but the shape (flags, output, subcommands) may change across MINOR versions. Use with that caveat.                                             | MINOR                      |
+| `deprecated`   | Slated for removal in a future MAJOR. Still runs, but prints a deprecation warning to stderr on every invocation.                                       | removed in next MAJOR      |
 
 ### Current tiers
 
@@ -41,7 +41,9 @@ by `opencli.test.ts`). It's an "OpenAPI for CLIs" description so an external age
 can learn kit's commands without scraping `--help`; each command carries `x-kit-stability`
 and `x-kit-mcp`. Each command also carries `x-kit-args-modeled: true` plus
 `x-kit-accepted-flags`, the dispatch-level long-flag allowlist generated from
-`src/flag-surface.ts` and kit's global flags. Standard OpenCLI `args` / `flags`
+`src/flag-surface.ts` and kit's global flags. A subcommand accepts exactly its parent's flags
+(kit checks flags per top-level command), so it carries `x-kit-flags-inherited: true` instead of
+repeating the list. Standard OpenCLI `args` / `flags`
 objects are still omitted because kit does not yet model positional args or flag
 type/arity/choice metadata; absent standard args/flags must not be read as "takes
 none". Treated as an output format, not a dependency — the spec is pre-1.0.
