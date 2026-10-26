@@ -16,13 +16,14 @@ import { readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 import type { ContextConfig } from "./config.js";
+import { uncheckedContext } from "./context-unchecked.js";
 
 const exec = promisify(execFile);
 
 export interface ContextFinding {
   tool: string; // gcloud | git | github | npm | vercel
   field: string; // account | project | email | org | remote | registry | ...
-  status: "ok" | "mismatch" | "unknown"; // unknown = live state could not be read
+  status: "ok" | "mismatch" | "unknown" | "unchecked"; // unknown = live state could not be read; unchecked = declared but no check reads it
   expected: string;
   actual: string | null;
 }
@@ -582,7 +583,7 @@ export async function checkContext(
     };
   }
   const live = await gatherLive(cwd);
-  const findings = compareContext(declared, live);
+  const findings = [...compareContext(declared, live), ...uncheckedContext(ctx)];
   // Repo-declared truth beats ambient state (#251): even when [context.gcloud]
   // itself is not declared, an active gcloud project that is not one of the
   // repo's own .firebaserc projects is a cross-account mismatch.

@@ -20,7 +20,7 @@ async function cmdContextCheck(): Promise<boolean> {
 
   if (jsonMode) {
     console.log(JSON.stringify(findings, null, 2));
-    return findings.every((f) => f.status !== "mismatch");
+    return findings.every((f) => f.status !== "mismatch" && f.status !== "unchecked");
   }
   if (!config.context) {
     // The hook path passes --require-declaration: for a gate someone installed on purpose,
@@ -71,14 +71,16 @@ async function cmdContextCheck(): Promise<boolean> {
     const icon =
       f.status === "ok"
         ? `${c.green}✓${c.reset}`
-        : f.status === "mismatch"
+        : f.status === "mismatch" || f.status === "unchecked"
           ? `${c.red}✗${c.reset}`
           : `${c.yellow}!${c.reset}`;
     const actual = f.actual ?? `${c.dim}(unreadable)${c.reset}`;
     const detail =
       f.status === "ok"
         ? `${c.dim}${f.expected}${c.reset}`
-        : `expected ${c.bold}${f.expected}${c.reset}, live ${c.bold}${actual}${c.reset}`;
+        : f.status === "unchecked"
+          ? `${c.yellow}declared but not checked: kit has no check for this ${f.field === "(section)" ? "tool" : "key"}${c.reset}`
+          : `expected ${c.bold}${f.expected}${c.reset}, live ${c.bold}${actual}${c.reset}`;
     console.log(`  ${icon} ${f.tool}.${f.field}  ${detail}`);
   }
   const mismatches = findings.filter((f) => f.status === "mismatch");
@@ -107,9 +109,15 @@ async function cmdContextCheck(): Promise<boolean> {
       );
     }
   }
-  // Mismatch = non-zero exit so this can gate a hook / agent before acting.
+  const unchecked = findings.filter((f) => f.status === "unchecked");
+  if (unchecked.length > 0) {
+    console.log(
+      `\n${c.red}${unchecked.length} declared value(s) are not checked by kit. A typo or an unsupported tool leaves the lock open while this reads green. Fix the name or remove the line.${c.reset}`,
+    );
+  }
+  // Mismatch or unchecked = non-zero exit so this can gate a hook / agent before acting.
   // Unknown (tool absent / unreadable) does not block.
-  return mismatches.length === 0;
+  return mismatches.length === 0 && unchecked.length === 0;
 }
 
 async function cmdContextUse(): Promise<boolean> {
