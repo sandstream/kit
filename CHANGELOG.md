@@ -26,9 +26,6 @@
   skill directory is now scanned, and any file it cannot read as text is named in a warning. The
   skill checks moved into `skills/triage/scripts/skill_scan.py` (`triage.py` is size-frozen), and
   kit installs and byte-verifies that file exactly as it does `triage.py`.
-
-### Fixed
-
 - **`kit monkey-test` could report a stopped app as running again.** After a stop, the check asked
   the kernel whether the process group existed and then scanned `/proc` for its members; when the
   last zombie was reaped in between, the empty scan was read as "still running". It now asks the
