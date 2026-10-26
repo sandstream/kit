@@ -2,6 +2,10 @@
  * kit RBAC resolver — the OFFLINE, deterministic, fail-CLOSED decision engine
  * for Pillar 2.
  *
+ * EXPERIMENTAL, NOT WIRED: no kit command calls this module yet (docs/TEAM_MANAGEMENT_API.md). It is
+ * tested and kept for when RBAC is wired to a decision about what a role governs; until then the
+ * `[rbac]` table is validated, distributed and reported, and allows or denies nothing.
+ *
  * `can(subjectKid, permission, verifiedPolicy)` and
  * `effectivePermissions(subjectKid, verifiedPolicy)` are PURE functions over a
  * `VerifiedPolicy`. There is ZERO network at decision time: authority comes

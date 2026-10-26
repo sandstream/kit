@@ -187,6 +187,18 @@ set --env-file` with the value in a file of mode 0600 inside a 0700 folder that 
 
 ### Changed
 
+- **RBAC and keyless request signing are labelled experimental where kit reports them.** The
+  `[rbac]` table is validated, distributed and reported, and no command enforces it.
+  - `kit doctor` and `kit policy pull` now say "experimental: not enforced" next to the role counts.
+    `kit doctor` used to describe RBAC as governing.
+  - The decision engine, the IdP backends and the RFC 9421 request signer say in their headers that
+    nothing calls them yet. `[scope].sign` in a profile is accepted and has no effect.
+- **Removed: six source files nothing imported.** `src/database.ts`, `src/migrations.ts`,
+  `src/service-adapter.ts` (a monitoring-service abstraction, not the plugin `ServiceAdapter`),
+  `src/secrets-pull.ts` (types for a `kit secrets pull` that was never routed) and their tests,
+  about 2,000 lines. The upstream watch no longer tracks the GitHub API version of the unwired IdP
+  backend; the GitHub plugin's row still tracks the same API.
+
 - **Dependabot also proposes npm devDependency updates.** One grouped PR a week, through the
   repaired triage gate, never merged on its own. The four runtime dependencies stay manual under
   ADR-0002.

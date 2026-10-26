@@ -1,6 +1,10 @@
 /**
  * kit keyless credentials (Pillar 2 tail) — the identity bridge for "sign, don't store".
  *
+ * EXPERIMENTAL, NOT WIRED: no kit command calls this module yet. The profile schema accepts
+ * `[scope].sign`, but nothing signs an outbound request today, so listing a host there has no effect.
+ * Kept, tested, for when a caller is wired.
+ *
  * `http-sig.ts` is the pure RFC 9421 core (no I/O, no identity). This module wires it to kit's
  * primitives: it decides whether an outbound request's host requires signing (from the SIGNED
  * profile `[scope].sign`, verified offline), and mints the `Signature-Input` + `Signature` headers

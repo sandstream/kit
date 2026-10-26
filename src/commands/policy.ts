@@ -151,7 +151,7 @@ function policyPull(root: string): boolean {
       const rbac = extractRbac(loadPolicy(root));
       if (rbac) {
         console.log(
-          `${c.dim}distributed RBAC: ${Object.keys(rbac.roles).length} role(s), ${rbac.bindings.length} binding(s)${rbac.defaultRole ? `, default role ${rbac.defaultRole}` : ""}${c.reset}`,
+          `${c.dim}distributed RBAC: ${Object.keys(rbac.roles).length} role(s), ${rbac.bindings.length} binding(s)${rbac.defaultRole ? `, default role ${rbac.defaultRole}` : ""} (experimental: no kit command enforces it yet)${c.reset}`,
         );
       }
     } catch {

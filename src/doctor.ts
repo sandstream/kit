@@ -777,7 +777,8 @@ async function checkKeyless(cwd: string): Promise<DoctorCheck> {
  * Control-plane posture (Pillar 2): is a DISTRIBUTED org policy present at this project, and is it
  * trustworthy? Honest — "distributed" must never silently mean "unverified":
  *   skip  no .kit-policy.toml here (nothing distributed yet)
- *   pass  policy present + signature verified (org standard + any RBAC it carries govern)
+ *   pass  policy present + signature verified (org standard governs; any RBAC it carries is
+ *         reported, and no kit command enforces it yet: experimental)
  *   warn  present but unsigned/unverifiable — run kit policy verify
  *   fail  present but signature invalid/revoked, or unparseable — not trusted
  */
@@ -804,7 +805,7 @@ function checkControlPlane(cwd: string): DoctorCheck {
   const v = verifyPolicy(cwd);
   const rbac = extractRbac(doc);
   const rbacNote = rbac
-    ? ` · RBAC ${Object.keys(rbac.roles).length} role(s), ${rbac.bindings.length} binding(s)`
+    ? ` · RBAC ${Object.keys(rbac.roles).length} role(s), ${rbac.bindings.length} binding(s) (experimental: not enforced)`
     : "";
   if (v.status === "valid") {
     return {
