@@ -15,6 +15,28 @@ This repo is managed by [kit](https://github.com/sandstream/kit) (env, secrets, 
 
 <!-- END kit -->
 
+## You are on Linux; kit also runs on macOS and Windows
+
+Agent sessions on this repo usually run in a Linux container, so local tests prove Linux only.
+kit ships to macOS and Windows too. Before committing code that touches the filesystem, processes,
+paths, shells or permissions, check it against all three:
+
+- **Paths:** use `node:path` (`join`, `resolve`, `sep`); never build paths with `/` or compare
+  them as strings. Windows is case-insensitive and uses `\`; macOS is usually case-insensitive
+  and `/tmp` is a symlink to `/private/tmp`, so compare `realpath`s.
+- **Processes and shells:** no `bash`, `grep -P`, `sed -i` or POSIX-only signals in code that runs
+  on users' machines. On Windows, `spawn` needs `shell` or a `.cmd` shim for npm-style tools.
+  Process groups and `SIGKILL` behave differently there.
+- **Files:** Windows refuses to delete or rename an open file. `chmod` modes and symlinks mostly
+  do not apply there (use `src/utils/secure-perms.ts`). File ids (`ino`) need `bigint` stats
+  (`src/utils/same-file.ts`).
+- **Tests:** a test that only makes sense on POSIX skips on `win32` and says why; it is never
+  deleted to make a shard green.
+
+CI runs Linux and Windows (`.github/workflows/windows.yml`, four shards plus `windows-native`).
+**No CI job runs macOS.** A macOS-specific path is unverified until someone runs it on a Mac, so
+say so in the PR instead of claiming it works.
+
 ## Public artifacts — issue & PR hygiene
 
 `sandstream/kit` is a **public** repository. When opening issues or PRs here:
