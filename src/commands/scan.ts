@@ -5,7 +5,7 @@ import { loadConfig, type kitConfig } from "../config.js";
 import { c } from "../utils/colors.js";
 import { hasFlag, envTruthy } from "../utils/flags.js";
 import { resolveConfigPath } from "../cli-shared.js";
-import { hasMarker, trackedProviderFiles } from "../scan-detect.js";
+import { hasMarker, scanProvidersTracked } from "../scan-detect.js";
 
 export async function cmdScan(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
@@ -133,14 +133,13 @@ export async function cmdScan(): Promise<boolean> {
   }
 
   // A tracked file under .terraform/providers is not downloaded output: scan it like any other.
-  const tracked = await execFileNoThrow("git", ["ls-files"], { cwd });
-  const providersTracked = tracked.ok && trackedProviderFiles(tracked.stdout);
-  if (providersTracked) {
+  const scanProviders = await scanProvidersTracked(cwd);
+  if (scanProviders) {
     console.error(
-      `${c.yellow}! git tracks files under .terraform/providers, so that directory is scanned this run.${c.reset}`,
+      `${c.yellow}! git tracks files under .terraform/providers (or could not be asked), so that directory is scanned this run.${c.reset}`,
     );
   }
-  const planned = providersTracked ? airgap.scanners.map(dropProviderExclusion) : airgap.scanners;
+  const planned = scanProviders ? airgap.scanners.map(dropProviderExclusion) : airgap.scanners;
 
   const { merged, runs } = await runScanners(
     {

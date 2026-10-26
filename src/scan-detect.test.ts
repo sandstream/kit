@@ -52,20 +52,43 @@ describe("hasMarker", () => {
   it("cleanup", () => rmTemp(root));
 });
 
-import { trackedProviderFiles } from "./scan-detect.js";
+import { trackedProviderFiles, providersTracked } from "./scan-detect.js";
 
 describe("trackedProviderFiles", () => {
   it("is true when git tracks a file under a terraform providers directory", () => {
-    assert.equal(trackedProviderFiles("src/a.ts\n.terraform/providers/x/lock.json\n"), true);
-    assert.equal(trackedProviderFiles("infra/dev/.terraform/providers/y/bin\n"), true);
+    assert.equal(trackedProviderFiles("src/a.ts\0.terraform/providers/x/lock.json\0"), true);
+    assert.equal(trackedProviderFiles("infra/dev/.terraform/providers/y/bin\0"), true);
+  });
+
+  it("is true for a path with characters that git would quote without -z", () => {
+    assert.equal(trackedProviderFiles("infra/\u00f6 dir/.terraform/providers/y/bin\0"), true);
+    assert.equal(trackedProviderFiles("a\nb/.terraform/providers/y/bin\0"), true);
   });
 
   it("is false for ordinary tracked files, including the lock file", () => {
-    assert.equal(trackedProviderFiles(".terraform.lock.hcl\ninfra/main.tf\n"), false);
+    assert.equal(trackedProviderFiles(".terraform.lock.hcl\0infra/main.tf\0"), false);
     assert.equal(trackedProviderFiles(""), false);
   });
 
   it("does not match a lookalike directory name", () => {
-    assert.equal(trackedProviderFiles("my.terraform/providers/x\nterraform/providers/x\n"), false);
+    assert.equal(trackedProviderFiles("my.terraform/providers/x\0terraform/providers/x\0"), false);
+  });
+});
+
+describe("providersTracked", () => {
+  const ok = (stdout: string) => ({ ok: true, stdout });
+  const bad = { ok: false, stdout: "" };
+
+  it("is false outside a git repository, where nothing can be tracked", () => {
+    assert.equal(providersTracked(bad, bad), false);
+  });
+
+  it("fails closed when git is inside a repository but ls-files fails", () => {
+    assert.equal(providersTracked(ok("true\n"), bad), true);
+  });
+
+  it("reads the listing when git works", () => {
+    assert.equal(providersTracked(ok("true\n"), ok("a\0")), false);
+    assert.equal(providersTracked(ok("true\n"), ok(".terraform/providers/x\0")), true);
   });
 });
