@@ -63,16 +63,17 @@ def _scan_other_files(rep, skill_dir, skill_md):
             full = os.path.join(root, name)
             if full == skill_md:
                 continue
+            rel = os.path.relpath(full, skill_dir).replace(os.sep, "/")  # same report on Windows
             try:
                 if os.path.islink(full) or os.path.getsize(full) > FILE_LIMIT:
                     raise ValueError(name)
                 with open(full, "r", encoding="utf-8") as f:
                     body = f.read()
             except (OSError, ValueError, UnicodeDecodeError):
-                unread.append(os.path.relpath(full, skill_dir))
+                unread.append(rel)
                 continue
             read += 1
-            _secrets_in(rep, os.path.relpath(full, skill_dir), body)
+            _secrets_in(rep, rel, body)
     rep.fact(f"scanned {read} other file(s) in the skill directory")
     if unread:
         more = f" and {len(unread) - 10} more" if len(unread) > 10 else ""
