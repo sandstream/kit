@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+### Security
+
+- **A module planted beside the triage script could run unverified.** kit byte-verifies the
+  triage scripts it installs in `~/.claude/skills/triage/scripts/`, but ran them as
+  `python3 triage.py`, which puts that directory first on `sys.path`: a `json.py` placed there
+  would shadow the stdlib module and execute. kit now runs them with `python3 -I`.
+
 ### Fixed
 
 - **`kit triage skill` failed real skills on ordinary words, and never read their scripts.** Its

@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, readdir, access, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, rm, readFile, readdir, access, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,7 @@ import {
   listTriageTools,
   installBundledTriageSkill,
   TRIAGE_SCRIPTS,
+  triagePythonArgs,
   ensureTriageScript,
   verdictPassed,
   parseBrewInfo,
@@ -381,5 +383,29 @@ describe("parseTriageOutput (real report shape, precedence and malformed metrics
     const blank = parseTriageOutput("   \n\n  ");
     assert.deepEqual(blank.sections, []);
     assert.equal(blank.healthScore, undefined);
+  });
+});
+
+describe("triage script isolation (python3 -I)", () => {
+  it("a module planted beside the verified scripts never runs", async (t) => {
+    const dir = await mkdtemp(join(tmpdir(), "kit-triage-"));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const target = resolve(dir, ".claude/skills/triage");
+    assert.equal(await installBundledTriageSkill(target), true);
+    await writeFile(resolve(target, "scripts/json.py"), 'print("PLANTED")\nraise SystemExit(0)\n');
+    const skill = resolve(dir, "skill");
+    await mkdir(skill);
+    await writeFile(resolve(skill, "SKILL.md"), "---\nname: s\ndescription: d\n---\nBody.\n");
+    const script = resolve(target, "scripts/triage.py");
+    const run = (args: string[]) =>
+      spawnSync("python3", args, { encoding: "utf8", timeout: 30_000 });
+
+    const control = run([script, "skill", skill]);
+    if (control.error) return t.skip("python3 not installed — isolation NOT verified in this run");
+    assert.match(control.stdout, /PLANTED/, "control: without -I the planted json.py runs");
+
+    const isolated = run(triagePythonArgs(script, "skill", skill));
+    assert.doesNotMatch(isolated.stdout, /PLANTED/);
+    assert.match(isolated.stdout, /TRIAGE PASSED/);
   });
 });

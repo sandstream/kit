@@ -342,6 +342,15 @@ async function triageBrew(formula: string, cwd: string): Promise<TriageResult> {
 }
 
 /**
+ * How kit runs the triage script. `-I` keeps the script's own directory (and user site-packages)
+ * off `sys.path`: kit byte-verifies the files it installed there, but without `-I` a planted
+ * `json.py` beside them would shadow the stdlib module triage.py imports and run unverified.
+ */
+export function triagePythonArgs(script: string, type: string, target: string): string[] {
+  return ["-I", script, type, target];
+}
+
+/**
  * Run triage on a target, resolving project config and local paths from cwd.
  */
 export async function runTriage(
@@ -362,12 +371,16 @@ export async function runTriage(
   }
 
   try {
-    const { stdout, stderr } = await exec("python3", [TRIAGE_SCRIPT, type, target], {
-      timeout: 300_000, // 5 min for Docker pulls
-      cwd,
-      // config-declared mirrors, with real env taking precedence
-      env: { ...(await airGapMirrorEnv(cwd)), ...process.env },
-    });
+    const { stdout, stderr } = await exec(
+      "python3",
+      triagePythonArgs(TRIAGE_SCRIPT, type, target),
+      {
+        timeout: 300_000, // 5 min for Docker pulls
+        cwd,
+        // config-declared mirrors, with real env taking precedence
+        env: { ...(await airGapMirrorEnv(cwd)), ...process.env },
+      },
+    );
 
     const output = stdout + (stderr ? `\n${stderr}` : "");
     const passed = verdictPassed(output);
