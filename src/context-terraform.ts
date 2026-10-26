@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { ContextConfig } from "./config.js";
 import type { ContextFinding } from "./context-lock.js";
@@ -36,12 +36,17 @@ function text(v: unknown): string | null {
   return typeof v === "string" ? v : null;
 }
 
+/** Read through one file descriptor, so the size that was checked is the file that is read. */
 function readJson(path: string): unknown {
+  let fd: number | null = null;
   try {
-    if (statSync(path).size > MAX_STATE_BYTES) return null;
-    return JSON.parse(readFileSync(path, "utf8"));
+    fd = openSync(path, "r");
+    if (fstatSync(fd).size > MAX_STATE_BYTES) return null;
+    return JSON.parse(readFileSync(fd, "utf8"));
   } catch {
     return null;
+  } finally {
+    if (fd !== null) closeSync(fd);
   }
 }
 

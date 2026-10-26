@@ -87,6 +87,18 @@ describe("terraform context", () => {
   });
 });
 
+describe("terraform state file size", () => {
+  it("is unknown when the state file is over the size limit", () => {
+    const root = repo();
+    writeFileSync(join(root, ".terraform", "terraform.tfstate"), "x".repeat(1024 * 1024 + 1));
+    try {
+      assert.equal(terraformFindings(declare({ bucket: "b" }), root)[0].status, "unknown");
+    } finally {
+      rmTemp(root);
+    }
+  });
+});
+
 describe("terraform context dir", () => {
   it("refuses a dir outside the repository, absolute or with ..", () => {
     const root = repo(backend("b", "p"));
