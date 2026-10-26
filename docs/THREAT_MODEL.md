@@ -35,27 +35,27 @@ config knob says otherwise.
 
 ## What kit reads
 
-| Source | Purpose | Confidentiality |
-|---|---|---|
-| `.kit.toml` | Project declaration of tools / services / secrets refs | Plain text. Safe to commit — refs only, not values. |
-| `.env*` | Plaintext secrets during development. Scanned, never echoed. | High — scanner truncates/redacts before log writes. |
-| `.kit-audit.jsonl` | Local audit log. Append-only JSONL. | Medium — contains operation names + metadata but never secret values (sanitized via `redactSecrets()`). |
-| Vault (1Password / Infisical / AWS-SM / GCP-SM / Azure-KV / Vault / Bitwarden / Doppler) | Secret values resolved on-demand via the vault's CLI/API | The vault stays the authority; kit only reads what an individual call needs. |
-| `~/.kit/totp-secret` | TOTP seed for elevation | chmod 0o600; never sent over network. |
-| `.kit/elevation.json` | Short-lived (default 15 min) elevation marker | Local only; deleted after `consumeElevation` for one-shot scopes. |
+| Source                                                                                   | Purpose                                                      | Confidentiality                                                                                         |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `.kit.toml`                                                                              | Project declaration of tools / services / secrets refs       | Plain text. Safe to commit — refs only, not values.                                                     |
+| `.env*`                                                                                  | Plaintext secrets during development. Scanned, never echoed. | High — scanner truncates/redacts before log writes.                                                     |
+| `.kit-audit.jsonl`                                                                       | Local audit log. Append-only JSONL.                          | Medium — contains operation names + metadata but never secret values (sanitized via `redactSecrets()`). |
+| Vault (1Password / Infisical / AWS-SM / GCP-SM / Azure-KV / Vault / Bitwarden / Doppler) | Secret values resolved on-demand via the vault's CLI/API     | The vault stays the authority; kit only reads what an individual call needs.                            |
+| `~/.kit/totp-secret`                                                                     | TOTP seed for elevation                                      | chmod 0o600; never sent over network.                                                                   |
+| `.kit/elevation.json`                                                                    | Short-lived (default 15 min) elevation marker                | Local only; deleted after `consumeElevation` for one-shot scopes.                                       |
 
 ## What kit writes
 
-| Destination | Trigger | Notes |
-|---|---|---|
-| `.kit.toml` | `secrets vault-migrate`, `init`, `analyze --write` | In-place TOML edit. Always re-readable. |
-| `.env*` | `secrets migrate` cleanup | Default mode replaces value with blank (`KEY=`), preserving var-name visibility. |
-| `.kit-audit.jsonl` | Every sensitive operation | Local append-only. |
-| `.kit-skipped-commits.jsonl` | Post-commit detector fires | `git commit --no-verify` traces. |
-| `.kit/elevation.json` | `auth elevate` | TTL'd marker. |
-| Vault backend | `secrets migrate`, `rotate`, `vault-migrate`, `set-value` | Mediated by `writeSecretToBackend()` (`src/secrets-migrate.ts`). Read-only mode refuses here. |
-| Vendor API (Stripe, Supabase, Vercel, GitHub, Fly, Cloudflare, Sentry) | Plugin write surfaces | Each plugin's write function calls `assertNotReadOnly()` and `appendAuditEventDirect()`. |
-| `git` hooks under `.git/hooks/` | `hooks install` | Includes a sentinel writer + bypass detector. |
+| Destination                                                            | Trigger                                                   | Notes                                                                                         |
+| ---------------------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `.kit.toml`                                                            | `secrets vault-migrate`, `init`, `analyze --write`        | In-place TOML edit. Always re-readable.                                                       |
+| `.env*`                                                                | `secrets migrate` cleanup                                 | Default mode replaces value with blank (`KEY=`), preserving var-name visibility.              |
+| `.kit-audit.jsonl`                                                     | Every sensitive operation                                 | Local append-only.                                                                            |
+| `.kit-skipped-commits.jsonl`                                           | Post-commit detector fires                                | `git commit --no-verify` traces.                                                              |
+| `.kit/elevation.json`                                                  | `auth elevate`                                            | TTL'd marker.                                                                                 |
+| Vault backend                                                          | `secrets migrate`, `rotate`, `vault-migrate`, `set-value` | Mediated by `writeSecretToBackend()` (`src/secrets-migrate.ts`). Read-only mode refuses here. |
+| Vendor API (Stripe, Supabase, Vercel, GitHub, Fly, Cloudflare, Sentry) | Plugin write surfaces                                     | Each plugin's write function calls `assertNotReadOnly()` and `appendAuditEventDirect()`.      |
+| `git` hooks under `.git/hooks/`                                        | `hooks install`                                           | Includes a sentinel writer + bypass detector.                                                 |
 
 ## What kit does NOT do
 
@@ -208,7 +208,7 @@ understanding:
 - **`gcloud components update`** rests on TLS to Google's servers plus checksums
   in Google's own component manifest. That blocks an in-transit MITM and a
   corrupted download, but the checksum comes from the same manifest, so it is
-  integrity *from Google*, not independent of Google. There is no GPG/Sigstore
+  integrity _from Google_, not independent of Google. There is no GPG/Sigstore
   signature you pin. A friendly `Continue (Y/n)?` prompt confirms intent, not
   authenticity.
 - **Homebrew** is a second supply chain (bottles from ghcr.io). Its tap-trust
@@ -314,7 +314,7 @@ kit's stance is deterministic defence-in-depth, never model-side "please ignore"
 - **Reviewed shared tier.** The curated (team) tier travels with the repo and is
   reviewed like code; the personal tier is 0600 + encrypted at rest/in transit.
 
-Honest limits: recall is *pull-based* (the agent is nudged, not forced, to
+Honest limits: recall is _pull-based_ (the agent is nudged, not forced, to
 search); a same-UID process can still write the local store outside kit (the
 same boundary the audit anchor documents); and the heuristic tier is advisory,
 not a guarantee. Signing the shared tier with the machine identity and a
@@ -328,19 +328,34 @@ fail-closed. That is a real, deterministic control — but it is **one layer, no
 containment sandbox.**
 
 The 2026-07 OpenAI×HuggingFace eval-escape is the worked example: a model with a
-package-install tool found a zero-day *inside* that tool and opened its own socket
+package-install tool found a zero-day _inside_ that tool and opened its own socket
 to the open internet. kit's `gate-egress` is a **PreToolUse + scope-level** control;
-it closes the *declared* egress path and raises attacker cost, but a zero-day RCE in
+it closes the _declared_ egress path and raises attacker cost, but a zero-day RCE in
 a spawned subprocess that opens a raw socket is **below** the layer a PreToolUse hook
 can see. kit does not provide kernel/network containment (namespaces, seccomp, a
 network jail) and does not claim to.
 
 The honest posture: **pair kit with a real OS/network sandbox.** kit enforces and
 proves the policy at the tool boundary and attests that the boundary held; the
-sandbox contains what happens *below* the tool boundary. `kit doctor` will warn
+sandbox contains what happens _below_ the tool boundary. `kit doctor` will warn
 (`agent egress exposure`) when an install/exec capability is wired without a
 scope-bound egress gate — the exact gap that became the escape hatch — but a green
 kit is a governed tool boundary, never a guarantee of containment.
+
+## The lethal trifecta in the agent setup
+
+An agent is open to prompt injection when one context holds three things at once: it reads input an
+outsider can write (a web page, a mail, an issue), it can read private data (files, secrets, a
+database), and it can send data out (a web request, a network command, a chat post). Language models
+cannot tell data from instructions, so the fix is structural: remove one leg, or split the work over
+two agents with different tools and a strict, validated message between them.
+
+`kit agent-audit` reports each unit (the main session, and each subagent in `.claude/agents`) that
+holds all three legs in its declared grants, and names the grants. Honest limits: it sees declared
+grants, not what an approval prompt or auto mode decides at run time; MCP servers are placed by name
+and an unplaced one is listed as unclassified; and it does not see what a hijacked agent does below
+its tools, which is the boundary this document already draws. Internal damage without a way out (an
+agent that deletes tables) is not covered by the egress leg and is not checked yet.
 
 ## Out of scope (and why)
 
