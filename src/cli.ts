@@ -12,6 +12,7 @@ import { SKIPPED_COMMITS_LOG } from "./hooks.js";
 import { cmdFix } from "./fix.js";
 import { c } from "./utils/colors.js";
 import { SUBCOMMAND_HELP } from "./subcommand-help.js";
+import { didYouMean } from "./utils/didYouMean.js";
 import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
 import { reportUnexpectedCliError } from "./cli-error.js";
 import { cmdEnv } from "./commands/env.js";
@@ -121,6 +122,26 @@ function printCommandHelp(args: readonly string[]): boolean {
     }
   }
   return true;
+}
+
+/**
+ * `kit help [<cmd> [<sub>]]` and `kit <cmd> [<sub>] --help`. A named command that does not exist is
+ * an error (exit 1, with a did-you-mean), not the general help with exit 0: a typo'd help request
+ * used to look like an answer.
+ */
+function runHelp(args: readonly string[]): number {
+  // No target, or a flag first (`kit help --all`, `kit --help memory`): the general help.
+  if (args.length === 0 || args[0]!.startsWith("-")) return cmdHelp(args) ? 0 : 1;
+  // Matched as before, so flag-shaped entries (`setup --recommended`) still resolve.
+  if (printCommandHelp(args)) return 0;
+  console.error(`Unknown command: ${args[0]}`);
+  const known = [...new Set(Object.keys(COMMAND_HELP).map((k) => k.split(" ")[0]!))];
+  const suggestions = didYouMean(args[0]!, known);
+  if (suggestions.length > 0) {
+    console.error(`Did you mean: ${suggestions.map((s) => `'${s}'`).join(", ")}?`);
+  }
+  console.error(`Run 'kit help' for a list of available commands.`);
+  return 1;
 }
 
 function cmdHelp(args: readonly string[] = []): boolean {
@@ -288,8 +309,7 @@ export async function main(): Promise<void> {
   // Help must precede policy/read-only initialization too: activating read-only
   // mode writes an audit event. Render only registry data, never dispatch a handler.
   if (command === "help" || hasFlag(args, "--help", "-h")) {
-    cmdHelp(command === "help" ? positional.slice(1) : positional);
-    process.exitCode = 0;
+    process.exitCode = runHelp(command === "help" ? positional.slice(1) : positional);
     return;
   }
   const nonInteractive =
