@@ -25,28 +25,43 @@ export function classifyTap(tap) {
  * @param {string} tap @param {number} [maxLines] @returns {Record<string, string>}
  */
 export function failureReasons(tap, maxLines = 8) {
+  // node prints a test's subtests BEFORE its own `not ok` line, then the test's own YAML after it.
+  // So for each top-level failure, look first at its own error, and when that is only
+  // "N subtests failed", at the nested block printed just above it.
   const reasons = {};
-  for (const block of tap.split(/^(?=not ok \d+ - )/m)) {
-    const head = /^not ok \d+ - (.+)$/m.exec(block);
+  const lines = tap.split("\n");
+  let blockStart = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const head = /^(not )?ok \d+ - (.+)$/.exec(lines[i]);
     if (!head) continue;
-    const errors = [...block.matchAll(/^(\s*)error: (.*)$/gm)].filter(
-      (m) => !/subtests? failed/.test(m[2]),
-    );
-    if (errors.length === 0) continue;
-    const [match, indent, first] = errors[0];
-    const rest = block
-      .slice(block.indexOf(match) + match.length)
-      .split("\n")
-      .slice(1);
+    if (head[1]) {
+      let end = i + 1;
+      while (end < lines.length && (lines[end] === "" || /^\s/.test(lines[end]))) end++;
+      const why =
+        firstError(lines.slice(i + 1, end), maxLines) ??
+        firstError(lines.slice(blockStart, i), maxLines);
+      if (why) reasons[head[2].trim()] = why;
+    }
+    blockStart = i + 1;
+  }
+  return reasons;
+}
+
+/** The first `error:` in a slice of TAP lines that is not a suite's subtest count, as text. */
+function firstError(lines, maxLines) {
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(\s*)error: (.*)$/.exec(lines[i]);
+    if (!m || /subtests? failed/.test(m[2])) continue;
+    const [, indent, first] = m;
     const body = first.trim() === "|-" ? [] : [first.replace(/^'|'$/g, "")];
-    for (const line of rest) {
+    for (const line of lines.slice(i + 1)) {
       if (!line.startsWith(`${indent}  `)) break;
       body.push(line.slice(indent.length + 2));
     }
     const text = body.filter((l) => l.trim().length > 0);
-    reasons[head[1].trim()] = text.slice(0, maxLines).join("\n");
+    if (text.length > 0) return text.slice(0, maxLines).join("\n");
   }
-  return reasons;
+  return undefined;
 }
 
 /**

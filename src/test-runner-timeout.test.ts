@@ -50,17 +50,22 @@ describe("test runner failure kinds (CI-15)", () => {
   });
 
   it("puts each failure's own error in the summary, skipping the suite's subtest count", () => {
-    const tap = `not ok 3 - suite with a nested failure
-  ---
-  error: '1 subtest failed'
-  ...
+    // node's real order: a suite's subtests come BEFORE the suite's own `not ok` line.
+    const tap = `# Subtest: suite with a nested failure
+    # Subtest: inner
     not ok 1 - inner
       ---
       error: |-
         root should expand to the worktree D:/tmp/x
         roots from D:/tmp/repo: ["D:/tmp/repo"]
       ...
-not ok 4 - top level
+    1..1
+not ok 3 - suite with a nested failure
+  ---
+  error: '1 subtest failed'
+  ...
+ok 4 - passes
+not ok 5 - top level
   ---
   error: 'boom'
   ...
