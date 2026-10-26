@@ -5,11 +5,18 @@ import { loadConfig, type kitConfig } from "../config.js";
 import { c } from "../utils/colors.js";
 import { hasFlag, envTruthy } from "../utils/flags.js";
 import { resolveConfigPath } from "../cli-shared.js";
+import { hasMarker } from "../scan-detect.js";
 
 export async function cmdScan(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
-  const { runScanners, suppressBaselined, dedupKey, scanHealthGate, isLocalSemgrepConfig } =
-    await import("../scanners.js");
+  const {
+    runScanners,
+    suppressBaselined,
+    dedupKey,
+    scanHealthGate,
+    isLocalSemgrepConfig,
+    scannerEnv,
+  } = await import("../scanners.js");
   const { resolveToolBin } = await import("../utils/resolveTool.js");
   const { execFileNoThrow } = await import("../utils/execFileNoThrow.js");
   const { loadBaseline, baselineGet, baselineSet, saveBaseline } = await import("../baseline.js");
@@ -130,12 +137,12 @@ export async function cmdScan(): Promise<boolean> {
       run: async (bin, args, timeoutMs) => {
         const r = await execFileNoThrow(bin, args, {
           timeout: timeoutMs ?? 180_000,
-          env: { ...process.env, ...airgap.env, ...toolingTokens },
+          env: scannerEnv(process.env, { ...airgap.env, ...toolingTokens }, process.cwd()),
         });
-        return { ok: r.ok, stdout: r.stdout };
+        return { ok: r.ok, stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode };
       },
       hasEnv: (name) => Boolean(process.env[name] || toolingTokens[name]),
-      detect: (markers) => markers.some((m) => existsSync(resolve(cwd, m))),
+      detect: (markers) => hasMarker(cwd, markers),
     },
     airgap.scanners,
   );
@@ -192,7 +199,12 @@ export async function cmdScan(): Promise<boolean> {
         : r.status === "error"
           ? `${c.red}✗${c.reset}`
           : `${c.dim}−${c.reset}`;
-    const note = r.status === "ran" ? `${r.findings} finding(s)` : r.status;
+    const note =
+      r.status === "ran"
+        ? `${r.findings} finding(s)`
+        : r.reason
+          ? `${r.status}: ${r.reason}`
+          : r.status;
     console.log(`  ${mark} ${r.id}  ${c.dim}${note}${c.reset}`);
   }
   console.log("");

@@ -2,6 +2,9 @@
 
 ### Fixed
 
+- **osv-scanner no longer shows `error` for a repo with nothing to scan.** Its exit code 128 means no package sources were found, which is not a failure. The run is now `not-applicable` with that reason, so a repo without lockfiles does not fail `--strict`.
+- **Scanner exclusions now work from a symlinked directory.** Go-based scanners trust `$PWD` over the real directory, so a scan started from a path such as `/var/...` on macOS ignored every exclude. kit now sets `PWD` to the real working directory for each scanner.
+
 - **The `osv-scanner (deps)` row rated every finding `high`.** It now takes the severity from the
   worst CVSS score osv reports (critical from 9.0, high from 7.0, medium from 4.0), names the
   vulnerable packages with their versions, and for npm packages suggests
@@ -18,6 +21,10 @@
   failed on Linux CI and passed locally.
 
 ### Added
+
+- **`kit scan` skips downloaded terraform provider binaries.** `.terraform/providers/` holds vendored Go programs, and in one infrastructure repo they produced 54 percent of the findings. trivy, grype, osv-scanner and semgrep now exclude that directory and only that directory: the lock file and the `.tf` sources next to it are still scanned, and a vulnerable file in tracked code is still reported.
+- **`kit scan` runs trivy in config mode when the repo has a `.tf` file or a Dockerfile.** The new delegate `trivy-config` reports misconfigurations such as a container that runs as root (DS-0002). It applies only where such files exist (up to three levels down, not in `node_modules`, `.terraform` or `vendor`). Air gap passes `--skip-check-update`.
+- **A scanner that errors now says why.** `kit scan` and `kit scan --json` carry a `reason` on the run: the stderr line that names the failure (credentials redacted, control characters removed, 160 characters at most), or the parse error when the output was not valid.
 
 - **`kit check --category security` scans agent transcripts for credentials.** A key pasted into a
   conversation is stored in the transcript and replayed into every later prompt. The new row
