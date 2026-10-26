@@ -10,6 +10,22 @@
   now signs through the resolved keystore and fails closed under that mandate, as `kit policy sign`
   does. With a file-backed key a same-user process can still sign without kit; only a hardware key
   that needs a touch proves presence (docs/CONTROL_PLANE.md).
+- **A module planted beside the triage script could run unverified.** kit byte-verifies the
+  triage scripts it installs in `~/.claude/skills/triage/scripts/`, but Python puts a script's own
+  directory first on `sys.path`, so a `json.py` placed there would shadow the stdlib and execute.
+  `triage.py` now removes its directory from `sys.path` before importing anything else, which also
+  covers running it directly as the skill's instructions say.
+
+### Fixed
+
+- **`kit triage skill` failed real skills on ordinary words, and never read their scripts.** Its
+  secret scan matched bare substrings, so a skill saying "ask-first", "task-" or "risk-" was
+  CRITICAL for `sk-` and `kit triage check-skills` refused the commit. It now matches the anchored
+  credential shapes kit already redacts (OpenAI/Anthropic, GitHub, AWS, private-key blocks, Slack,
+  Google). It also read only `SKILL.md`, so a skill's `scripts/` passed unread; every file in the
+  skill directory is now scanned, and any file it cannot read as text is named in a warning. The
+  skill checks moved into `skills/triage/scripts/skill_scan.py` (`triage.py` is size-frozen), and
+  kit installs and byte-verifies that file exactly as it does `triage.py`.
 
 ### Changed
 
