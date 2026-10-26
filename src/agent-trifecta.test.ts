@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { legsOf, parseAgentTools, runAgentTrifecta } from "./agent-trifecta.js";
+import { legsOf, parseAgentTools, runAgentTrifecta, shown } from "./agent-trifecta.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 describe("legsOf", () => {
@@ -66,17 +66,17 @@ describe("parseAgentTools", () => {
   });
 });
 
-describe("runAgentTrifecta", () => {
-  const project = (files: Record<string, string>): string => {
-    const root = mkdtempSync(join(tmpdir(), "kit-tri-"));
-    for (const [rel, text] of Object.entries(files)) {
-      mkdirSync(join(root, rel, ".."), { recursive: true });
-      writeFileSync(join(root, rel), text);
-    }
-    return root;
-  };
-  const home = mkdtempSync(join(tmpdir(), "kit-tri-home-"));
+const project = (files: Record<string, string>): string => {
+  const root = mkdtempSync(join(tmpdir(), "kit-tri-"));
+  for (const [rel, text] of Object.entries(files)) {
+    mkdirSync(join(root, rel, ".."), { recursive: true });
+    writeFileSync(join(root, rel), text);
+  }
+  return root;
+};
+const home = mkdtempSync(join(tmpdir(), "kit-tri-home-"));
 
+describe("runAgentTrifecta", () => {
   it("warns for a subagent that reads the web, reads files and can send", () => {
     const root = project({
       ".claude/agents/triage.md": "---\nname: triage\ntools: WebFetch, Read, Grep\n---\n",
@@ -144,7 +144,9 @@ describe("runAgentTrifecta", () => {
       rmTemp(root);
     }
   });
+});
 
+describe("runAgentTrifecta, unclassified and quiet cases", () => {
   it("names unclassified MCP servers instead of passing them silently", () => {
     const root = project({
       ".mcp.json": JSON.stringify({ mcpServers: { frobnicator: { command: "x" } } }),
@@ -180,6 +182,49 @@ describe("runAgentTrifecta", () => {
       assert.equal(rows[0].status, "pass");
     } finally {
       rmTemp(root);
+    }
+  });
+});
+
+describe("text from config files is shown safely", () => {
+  it("removes control characters and caps the length", () => {
+    assert.equal(shown("a\u001b[31mred\u0007b\n"), "a[31mredb");
+    assert.equal(shown("x\u009by"), "xy");
+    assert.equal(shown("x".repeat(500)).length, 80);
+  });
+
+  it("an agent file name with an escape sequence cannot reach the output", () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-tri-"));
+    const home = mkdtempSync(join(tmpdir(), "kit-tri-home-"));
+    try {
+      mkdirSync(join(root, ".claude", "agents"), { recursive: true });
+      writeFileSync(
+        join(root, ".claude", "agents", "evil\u001b[2Jname.md"),
+        "---\nname: e\ntools: WebFetch, Read\n---\n",
+      );
+      const text = JSON.stringify(runAgentTrifecta(root, home));
+      assert.ok(!text.includes("\\u001b"));
+    } finally {
+      rmTemp(root);
+      rmTemp(home);
+    }
+  });
+
+  it("a grant with control characters is shown clean in the detail", () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-tri-"));
+    const home = mkdtempSync(join(tmpdir(), "kit-tri-home-"));
+    try {
+      mkdirSync(join(root, ".claude"), { recursive: true });
+      writeFileSync(
+        join(root, ".claude", "settings.json"),
+        JSON.stringify({ permissions: { allow: ["mcp__fro\u001b[2Jb__x"] } }),
+      );
+      const text = JSON.stringify(runAgentTrifecta(root, home));
+      assert.ok(!text.includes("\\u001b"));
+      assert.match(text, /fro/);
+    } finally {
+      rmTemp(root);
+      rmTemp(home);
     }
   });
 });

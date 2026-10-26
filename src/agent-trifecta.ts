@@ -40,6 +40,18 @@ const DATA_FAMILY = [
 const FILE_READERS = ["Read", "Grep", "Glob"];
 const NOT_LEGS = ["Edit", "Write", "MultiEdit", "NotebookEdit", "TodoWrite", "Task", "Agent"];
 
+const MAX_SHOWN = 80;
+
+/** Text from a config file or a file name, safe to print: control characters out, length capped. */
+export function shown(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    const code = ch.charCodeAt(0);
+    if (code > 31 && (code < 127 || code > 159)) out += ch;
+  }
+  return out.slice(0, MAX_SHOWN);
+}
+
 function split(grant: string): { name: string; arg: string | null } {
   const open = grant.indexOf("(");
   if (open < 0 || !grant.endsWith(")")) return { name: grant, arg: null };
@@ -179,7 +191,7 @@ const REMOVE_HINT: Record<string, string> = {
 
 function unitRow(unit: string, legs: Legs): SecurityCheckResult | null {
   if (!legs.vector.length || !legs.payload.length || !legs.egress.length) return null;
-  const evidence = (g: string[]): string => [...new Set(g)].slice(0, 3).join(", ");
+  const evidence = (g: string[]): string => [...new Set(g)].slice(0, 3).map(shown).join(", ");
   return {
     category: "exposure",
     name: `lethal trifecta: ${unit}`,
@@ -200,7 +212,7 @@ export function runAgentTrifecta(root: string, home: string): SecurityCheckResul
     ...agentFiles(join(root, ".claude", "agents")),
     ...agentFiles(join(home, ".claude", "agents")),
   ]) {
-    units.push({ unit: `agent ${a.name}`, grants: a.tools ?? session });
+    units.push({ unit: `agent ${shown(a.name)}`, grants: a.tools ?? session });
   }
   const rows: SecurityCheckResult[] = [];
   const unknown = new Set<string>();
@@ -216,7 +228,7 @@ export function runAgentTrifecta(root: string, home: string): SecurityCheckResul
       name: "lethal trifecta: unclassified grants",
       status: "warn",
       severity: "low",
-      detail: `kit cannot place ${[...unknown].slice(0, 5).join(", ")} as input, private data or way out, so it counts none of them`,
+      detail: `kit cannot place ${[...unknown].slice(0, 5).map(shown).join(", ")} as input, private data or way out, so it counts none of them`,
       suggestion: "check by hand whether any of these reads outside text or sends data out",
     });
   }
