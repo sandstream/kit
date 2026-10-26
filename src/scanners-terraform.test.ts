@@ -6,6 +6,8 @@ import {
   SCANNERS,
   SEMGREP_EXCLUDES,
   scannerEnv,
+  scanHealthGate,
+  dropProviderExclusion,
   type ScanDeps,
   type ScannerDef,
 } from "./scanners.js";
@@ -149,6 +151,7 @@ describe("osv-scanner with nothing to scan", () => {
       [osv],
     );
     assert.equal(runs[0].status, "not-applicable");
+    assert.equal(runs[0].noTarget, true);
     assert.match(runs[0].reason ?? "", /No package sources found/);
   });
 
@@ -193,5 +196,55 @@ describe("scannerEnv", () => {
     assert.equal(env.PWD, "/private/var/real");
     assert.equal(env.A, "1");
     assert.equal(env.B, "2");
+  });
+});
+
+describe("a tracked provider directory is scanned", () => {
+  for (const id of ["trivy", "grype", "osv-scanner", "trivy-config"]) {
+    it(`${id}: dropProviderExclusion removes the exclusion and nothing else`, () => {
+      const d = def(id);
+      const dropped = dropProviderExclusion(d);
+      assert.ok(!dropped.args.some((a) => a.includes(".terraform/providers")));
+      // the target and the output flags are untouched
+      assert.equal(dropped.args.length, d.args.length - 2);
+      assert.ok(dropped.args.includes("sarif") || dropped.args.includes("json"));
+    });
+  }
+
+  it("keeps a def that has no exclusion as it is", () => {
+    const d = { id: "x", bin: "x", args: ["a", "b"], format: "sarif" } as ScannerDef;
+    assert.deepEqual(dropProviderExclusion(d).args, ["a", "b"]);
+  });
+
+  it("drops the semgrep exclusion from the built args", () => {
+    const d = dropProviderExclusion({
+      id: "semgrep",
+      bin: "semgrep",
+      format: "sarif",
+      args: ["scan", "--exclude", "node_modules", "--exclude", ".terraform/providers", "."],
+    });
+    assert.deepEqual(d.args, ["scan", "--exclude", "node_modules", "."]);
+  });
+});
+
+describe("nothing to scan does not satisfy a required scanner", () => {
+  const run = { id: "osv-scanner", status: "not-applicable" as const, findings: 0, noTarget: true };
+
+  it("a required scanner with nothing to scan fails the gate and says so", () => {
+    const g = scanHealthGate([run], { requiredScanners: ["osv-scanner"] });
+    assert.equal(g.ok, false);
+    assert.match(g.failures[0], /osv-scanner/);
+    assert.match(g.failures[0], /nothing to scan/);
+  });
+
+  it("an optional scanner with nothing to scan passes, also under strict", () => {
+    assert.equal(scanHealthGate([run], { strict: true }).ok, true);
+  });
+
+  it("an ordinary not-applicable stays a legitimate skip for a required scanner", () => {
+    const g = scanHealthGate([{ ...run, noTarget: undefined }], {
+      requiredScanners: ["osv-scanner"],
+    });
+    assert.equal(g.ok, true);
   });
 });

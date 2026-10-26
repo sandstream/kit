@@ -197,6 +197,21 @@ export const SCANNERS: ScannerDef[] = [
   },
 ];
 
+/**
+ * The scanner def without its provider-directory exclusion. Used when git tracks files there: a
+ * tracked directory is not downloaded provider output, and skipping it would let a vulnerable file
+ * be committed under that name to avoid every scanner.
+ */
+export function dropProviderExclusion(def: ScannerDef): ScannerDef {
+  const args: string[] = [];
+  for (let i = 0; i < def.args.length; i++) {
+    const isExclusion = def.args[i + 1]?.includes(PROVIDER_DIR) && def.args[i].startsWith("--");
+    if (isExclusion) i++;
+    else args.push(def.args[i]);
+  }
+  return { ...def, args };
+}
+
 /** Every registered scanner id, in registry order — the delegate library. */
 export const SCANNER_IDS: readonly string[] = SCANNERS.map((s) => s.id);
 
@@ -380,6 +395,8 @@ export interface ScannerRun {
   findings: number;
   /** Why a scanner errored: its first stderr line, cleaned. Never set for a scanner that ran. */
   reason?: string;
+  /** The scanner found nothing to scan (not-applicable). A required scanner does not accept this. */
+  noTarget?: boolean;
 }
 
 const MAX_REASON = 160;
@@ -461,6 +478,10 @@ export function scanHealthGate(runs: ScannerRun[], opts: ScanGateOptions = {}): 
   const seen = new Set<string>();
   for (const r of runs) {
     seen.add(r.id);
+    if (r.noTarget && required.has(r.id)) {
+      failures.push(`required scanner ${r.id} found nothing to scan`);
+      continue;
+    }
     if (!NON_RUNNING_STATUSES.includes(r.status)) continue; // ran or not-applicable
     const why = `${r.id} did not run (${r.status})`;
     if (required.has(r.id)) failures.push(`required scanner ${why}`);
@@ -497,7 +518,7 @@ function settleRun(
 ): { run: ScannerRun; findings?: SecurityCheckResult[] } {
   const reason = scannerReason(res.stderr);
   if (!res.stdout && s.noTargetExit !== undefined && res.exitCode === s.noTargetExit) {
-    return { run: { id: s.id, status: "not-applicable", findings: 0, reason } };
+    return { run: { id: s.id, status: "not-applicable", findings: 0, reason, noTarget: true } };
   }
   if (!res.stdout) {
     return res.ok

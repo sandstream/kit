@@ -5,7 +5,7 @@ import { loadConfig, type kitConfig } from "../config.js";
 import { c } from "../utils/colors.js";
 import { hasFlag, envTruthy } from "../utils/flags.js";
 import { resolveConfigPath } from "../cli-shared.js";
-import { hasMarker } from "../scan-detect.js";
+import { hasMarker, trackedProviderFiles } from "../scan-detect.js";
 
 export async function cmdScan(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
@@ -16,6 +16,7 @@ export async function cmdScan(): Promise<boolean> {
     scanHealthGate,
     isLocalSemgrepConfig,
     scannerEnv,
+    dropProviderExclusion,
   } = await import("../scanners.js");
   const { resolveToolBin } = await import("../utils/resolveTool.js");
   const { execFileNoThrow } = await import("../utils/execFileNoThrow.js");
@@ -131,6 +132,16 @@ export async function cmdScan(): Promise<boolean> {
     }
   }
 
+  // A tracked file under .terraform/providers is not downloaded output: scan it like any other.
+  const tracked = await execFileNoThrow("git", ["ls-files"], { cwd });
+  const providersTracked = tracked.ok && trackedProviderFiles(tracked.stdout);
+  if (providersTracked) {
+    console.error(
+      `${c.yellow}! git tracks files under .terraform/providers, so that directory is scanned this run.${c.reset}`,
+    );
+  }
+  const planned = providersTracked ? airgap.scanners.map(dropProviderExclusion) : airgap.scanners;
+
   const { merged, runs } = await runScanners(
     {
       resolve: (bin) => resolveToolBin(bin),
@@ -144,7 +155,7 @@ export async function cmdScan(): Promise<boolean> {
       hasEnv: (name) => Boolean(process.env[name] || toolingTokens[name]),
       detect: (markers) => hasMarker(cwd, markers),
     },
-    airgap.scanners,
+    planned,
   );
 
   // --update-baseline: freeze the current findings as accepted (#59 noise-reduction),

@@ -36,3 +36,16 @@ export function hasMarker(root: string, markers: string[]): boolean {
   if (exact.some((m) => existsSync(join(root, m)))) return true;
   return patterns.length > 0 && walk(root, patterns, 0);
 }
+
+const PROVIDER_PATH = ".terraform/providers/";
+
+/**
+ * True when `git ls-files` output lists a file under a terraform providers directory. That
+ * directory is download output and is normally ignored, so a tracked file there is suspicious and
+ * must be scanned like any other.
+ */
+export function trackedProviderFiles(lsFiles: string): boolean {
+  return lsFiles
+    .split("\n")
+    .some((line) => line.startsWith(PROVIDER_PATH) || line.includes("/" + PROVIDER_PATH));
+}

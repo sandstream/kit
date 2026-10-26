@@ -51,3 +51,21 @@ describe("hasMarker", () => {
 
   it("cleanup", () => rmTemp(root));
 });
+
+import { trackedProviderFiles } from "./scan-detect.js";
+
+describe("trackedProviderFiles", () => {
+  it("is true when git tracks a file under a terraform providers directory", () => {
+    assert.equal(trackedProviderFiles("src/a.ts\n.terraform/providers/x/lock.json\n"), true);
+    assert.equal(trackedProviderFiles("infra/dev/.terraform/providers/y/bin\n"), true);
+  });
+
+  it("is false for ordinary tracked files, including the lock file", () => {
+    assert.equal(trackedProviderFiles(".terraform.lock.hcl\ninfra/main.tf\n"), false);
+    assert.equal(trackedProviderFiles(""), false);
+  });
+
+  it("does not match a lookalike directory name", () => {
+    assert.equal(trackedProviderFiles("my.terraform/providers/x\nterraform/providers/x\n"), false);
+  });
+});

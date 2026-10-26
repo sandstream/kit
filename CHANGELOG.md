@@ -22,7 +22,7 @@
 
 ### Added
 
-- **`kit scan` skips downloaded terraform provider binaries.** `.terraform/providers/` holds vendored Go programs, and in one infrastructure repo they produced 54 percent of the findings. trivy, grype, osv-scanner and semgrep now exclude that directory and only that directory: the lock file and the `.tf` sources next to it are still scanned, and a vulnerable file in tracked code is still reported.
+- **`kit scan` skips downloaded terraform provider binaries.** `.terraform/providers/` holds vendored Go programs, and in one infrastructure repo they produced 54 percent of the findings. trivy, grype, osv-scanner and semgrep now exclude that directory and only that directory: the lock file and the `.tf` sources next to it are still scanned, and a vulnerable file in tracked code is still reported. If git tracks files under `.terraform/providers/`, that directory is not download output, so it is scanned and `kit scan` says so. A required scanner that finds nothing to scan (osv-scanner without a lockfile) fails the gate.
 - **`kit scan` runs trivy in config mode when the repo has a `.tf` file or a Dockerfile.** The new delegate `trivy-config` reports misconfigurations such as a container that runs as root (DS-0002). It applies only where such files exist (up to three levels down, not in `node_modules`, `.terraform` or `vendor`). Air gap passes `--skip-check-update`.
 - **A scanner that errors now says why.** `kit scan` and `kit scan --json` carry a `reason` on the run: the stderr line that names the failure (credentials redacted, control characters removed, 160 characters at most), or the parse error when the output was not valid.
 
