@@ -12,6 +12,7 @@ import {
   gcpProjectMismatch,
 } from "../context-lock.js";
 import { gatherProjectContext } from "../context.js";
+import { printContextReport } from "./context-report.js";
 
 async function cmdContextCheck(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
@@ -20,7 +21,7 @@ async function cmdContextCheck(): Promise<boolean> {
 
   if (jsonMode) {
     console.log(JSON.stringify(findings, null, 2));
-    return findings.every((f) => f.status !== "mismatch");
+    return findings.every((f) => f.status !== "mismatch" && f.status !== "unchecked");
   }
   if (!config.context) {
     // The hook path passes --require-declaration: for a gate someone installed on purpose,
@@ -66,50 +67,7 @@ async function cmdContextCheck(): Promise<boolean> {
     }
     return true;
   }
-  console.log(`${c.bold}Context lock${c.reset}\n`);
-  for (const f of findings) {
-    const icon =
-      f.status === "ok"
-        ? `${c.green}✓${c.reset}`
-        : f.status === "mismatch"
-          ? `${c.red}✗${c.reset}`
-          : `${c.yellow}!${c.reset}`;
-    const actual = f.actual ?? `${c.dim}(unreadable)${c.reset}`;
-    const detail =
-      f.status === "ok"
-        ? `${c.dim}${f.expected}${c.reset}`
-        : `expected ${c.bold}${f.expected}${c.reset}, live ${c.bold}${actual}${c.reset}`;
-    console.log(`  ${icon} ${f.tool}.${f.field}  ${detail}`);
-  }
-  const mismatches = findings.filter((f) => f.status === "mismatch");
-  if (mismatches.length > 0) {
-    console.log(
-      `\n${c.red}${mismatches.length} mismatch(es) — you are NOT locked to the declared account/project. Do not run outward/destructive commands until this is green.${c.reset}`,
-    );
-    // An identity mismatch is not fixed by logging in again — a global login is what produced
-    // it. Name the per-tool mechanism that scopes an identity to a repo (#503).
-    const { identityRemediation } = await import("../context-lock.js");
-    const seen = new Set<string>();
-    for (const f of mismatches) {
-      if (f.field !== "user" && f.field !== "account") continue;
-      const hint = identityRemediation(f.tool);
-      if (hint && !seen.has(hint)) {
-        seen.add(hint);
-        console.log(`  ${c.dim}${hint}${c.reset}`);
-      }
-    }
-    // A wrong identity does not merely mean "wrong account": the output of everything you ran
-    // as it may have been a filtered subset, which is how this defect cost two wrong
-    // conclusions in a row.
-    if (mismatches.some((f) => f.field === "user" || f.field === "account")) {
-      console.log(
-        `  ${c.yellow}Anything you already read as this identity may have been a PARTIAL view — permissions filter listings silently.${c.reset}`,
-      );
-    }
-  }
-  // Mismatch = non-zero exit so this can gate a hook / agent before acting.
-  // Unknown (tool absent / unreadable) does not block.
-  return mismatches.length === 0;
+  return printContextReport(findings);
 }
 
 async function cmdContextUse(): Promise<boolean> {

@@ -387,7 +387,7 @@ export interface EnvOverride {
  * with stay in the vault (`[secrets]`).
  */
 export interface ContextConfig {
-  gcloud?: { account?: string; project?: string; config?: string; region?: string };
+  gcloud?: { account?: string; project?: string | string[]; config?: string; region?: string };
   /**
    * `user` is the IDENTITY the CLI must be logged in as — declared and asserted like
    * `gcloud.account` already was. Reporting an identity without comparing it is how a session
@@ -413,6 +413,7 @@ export interface ContextConfig {
   keycloak?: { realm?: string };
   auth0?: { tenant?: string };
   clerk?: { env?: string };
+  terraform?: { bucket?: string; prefix?: string; workspace?: string; dir?: string };
 }
 
 /** [setup] — project bootstrap commands run by `kit setup`. install/verify run
@@ -853,7 +854,7 @@ export const kitConfigSchema = z
         gcloud: z
           .object({
             account: z.string().optional(),
-            project: z.string().optional(),
+            project: z.union([z.string(), z.array(z.string())]).optional(),
             config: z.string().optional(),
             region: z.string().optional(),
           })

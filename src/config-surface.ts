@@ -113,7 +113,8 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
   context: {
     purpose: "The account and project each CLI must be pointed at, per tool.",
     buys: "A tool answering as the wrong org becomes a red row instead of a filtered result set that looks complete — and a pre-push hook can block the wrong-project push outright.",
-    example: '[context.gcloud]\naccount = "me@example.com"\nproject = "acme-prod"',
+    example:
+      '[context.gcloud]\naccount = "me@example.com"\nproject = ["acme-dev", "acme-prod"]\n\n[context.terraform]\nbucket = "acme-state-dev"\nworkspace = "dev"',
     command: "kit context check",
   },
   supply_chain: {
