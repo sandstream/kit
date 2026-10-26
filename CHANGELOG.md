@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Fixed
+
+- **`kit triage skill` failed real skills on ordinary words, and never read their scripts.** Its
+  secret scan matched bare substrings, so a skill saying "ask-first", "task-" or "risk-" was
+  CRITICAL for `sk-` and `kit triage check-skills` refused the commit. It now matches the anchored
+  credential shapes kit already redacts (OpenAI/Anthropic, GitHub, AWS, private-key blocks, Slack,
+  Google). It also read only `SKILL.md`, so a skill's `scripts/` passed unread; every file in the
+  skill directory is now scanned, and any file it cannot read as text is named in a warning. The
+  skill checks moved into `skills/triage/scripts/skill_scan.py` (`triage.py` is size-frozen), and
+  kit installs and byte-verifies that file exactly as it does `triage.py`.
+
 ### Changed
 
 - **`kit memory pull` accepts your own memory when it holds quotes of injection text.** The

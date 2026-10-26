@@ -767,32 +767,21 @@ def triage_docker(rep):
         rep.warn("unofficial image with low pull count -- verify the publisher")
 
 
+def _skill_scan():
+    """skill_scan.py from this script's own directory, loaded by path: kit runs this script with
+    `python3 -I`, so the directory is not on sys.path and nothing planted there can shadow it."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skill_scan.py")
+    spec = importlib.util.spec_from_file_location("kit_skill_scan", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def triage_skill(rep):
-    target = rep.target
-    # Local path -> validate the SKILL.md deterministically.
-    candidates = [target, os.path.join(target, "SKILL.md")]
-    path = next((p for p in candidates if os.path.isfile(p)), None)
-    if path:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                text = f.read()
-        except OSError as e:
-            rep.critical(f"cannot read skill at '{path}': {e}")
-            return
-        head = text[:400]
-        if not head.lstrip().startswith("---"):
-            rep.critical("SKILL.md has no YAML frontmatter (--- ... ---)")
-        if "name:" not in head:
-            rep.warn("frontmatter missing 'name:'")
-        if "description:" not in head:
-            rep.warn("frontmatter missing 'description:'")
-        # crude secret scan
-        for marker in ("sk-", "ghp_", "AKIA", "-----BEGIN", "xoxb-", "AIza"):
-            if marker in text:
-                rep.critical(f"possible secret in skill body (matched '{marker}')")
-        rep.fact(f"validated local skill at {path} ({len(text)} bytes)")
+    # A local path is validated deterministically (skill_scan.py); a name/owner-repo is a repo.
+    if _skill_scan().triage_local_skill(rep):
         return
-    # Otherwise treat a name/owner-repo as a repo triage.
     rep.fact("no local SKILL.md found; treating target as a repo")
     triage_repo(rep)
 

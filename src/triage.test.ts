@@ -9,6 +9,7 @@ import {
   parseTriageOutput,
   listTriageTools,
   installBundledTriageSkill,
+  TRIAGE_SCRIPTS,
   ensureTriageScript,
   verdictPassed,
   parseBrewInfo,
@@ -197,7 +198,7 @@ describe("installBundledTriageSkill (self-bootstrapping the gate)", () => {
     try {
       const ok = await installBundledTriageSkill(target);
       assert.equal(ok, true);
-      await access(resolve(target, "scripts/triage.py"));
+      for (const rel of TRIAGE_SCRIPTS) await access(resolve(target, rel));
       const skill = await readFile(resolve(target, "SKILL.md"), "utf8");
       assert.match(skill, /name:\s*triage/);
       const py = await readFile(resolve(target, "scripts/triage.py"), "utf8");
@@ -273,23 +274,25 @@ describe("installBundledTriageSkill (self-bootstrapping the gate)", () => {
   });
 });
 
-it("repairs a tampered triage script even when its version marker is current", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "kit-triage-"));
-  const target = resolve(dir, ".claude/skills/triage");
-  try {
-    assert.equal(await installBundledTriageSkill(target), true);
-    const script = resolve(target, "scripts/triage.py");
-    const bundled = await readFile(
-      resolve(dirname(fileURLToPath(import.meta.url)), "../skills/triage/scripts/triage.py"),
-    );
-    await writeFile(script, 'print("TRIAGE PASSED")\n');
+for (const rel of TRIAGE_SCRIPTS) {
+  it(`repairs a tampered ${rel} even when the version marker is current`, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "kit-triage-"));
+    const target = resolve(dir, ".claude/skills/triage");
+    try {
+      assert.equal(await installBundledTriageSkill(target), true);
+      const script = resolve(target, rel);
+      const bundled = await readFile(
+        resolve(dirname(fileURLToPath(import.meta.url)), "../skills/triage", rel),
+      );
+      await writeFile(script, 'print("TRIAGE PASSED")\n');
 
-    assert.equal(await ensureTriageScript(target), true);
-    assert.deepEqual(await readFile(script), bundled);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
+      assert.equal(await ensureTriageScript(target), true);
+      assert.deepEqual(await readFile(script), bundled);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 describe("parseTriageOutput (real report shape, precedence and malformed metrics)", () => {
   /** A report in the exact shape `skills/triage/scripts/triage.py` emit() prints. */
