@@ -11,7 +11,6 @@ import {
   listTriageTools,
   installBundledTriageSkill,
   TRIAGE_SCRIPTS,
-  triagePythonArgs,
   ensureTriageScript,
   verdictPassed,
   parseBrewInfo,
@@ -386,26 +385,25 @@ describe("parseTriageOutput (real report shape, precedence and malformed metrics
   });
 });
 
-describe("triage script isolation (python3 -I)", () => {
+describe("triage script isolation", () => {
   it("a module planted beside the verified scripts never runs", async (t) => {
     const dir = await mkdtemp(join(tmpdir(), "kit-triage-"));
     t.after(() => rm(dir, { recursive: true, force: true }));
     const target = resolve(dir, ".claude/skills/triage");
     assert.equal(await installBundledTriageSkill(target), true);
-    await writeFile(resolve(target, "scripts/json.py"), 'print("PLANTED")\nraise SystemExit(0)\n');
+    for (const name of ["json", "re", "urllib"]) {
+      await writeFile(resolve(target, `scripts/${name}.py`), `print("PLANTED ${name}")\n`);
+    }
     const skill = resolve(dir, "skill");
     await mkdir(skill);
     await writeFile(resolve(skill, "SKILL.md"), "---\nname: s\ndescription: d\n---\nBody.\n");
-    const script = resolve(target, "scripts/triage.py");
-    const run = (args: string[]) =>
-      spawnSync("python3", args, { encoding: "utf8", timeout: 30_000 });
-
-    const control = run([script, "skill", skill]);
-    if (control.error) return t.skip("python3 not installed — isolation NOT verified in this run");
-    assert.match(control.stdout, /PLANTED/, "control: without -I the planted json.py runs");
-
-    const isolated = run(triagePythonArgs(script, "skill", skill));
-    assert.doesNotMatch(isolated.stdout, /PLANTED/);
-    assert.match(isolated.stdout, /TRIAGE PASSED/);
+    // Exactly how runTriage invokes it, and how the skill's own SKILL.md tells agents to.
+    const run = spawnSync("python3", [resolve(target, "scripts/triage.py"), "skill", skill], {
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    if (run.error) return t.skip("python3 not installed — isolation NOT verified in this run");
+    assert.doesNotMatch(run.stdout, /PLANTED/);
+    assert.match(run.stdout, /TRIAGE PASSED/);
   });
 });
