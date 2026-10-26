@@ -6,7 +6,12 @@ import { join } from "node:path";
 import { loadOrCreateIdentity, identityId, recordRevocation } from "./identity.js";
 import { resolveKeyStore } from "./keystore/index.js";
 import { addPolicySigner, getSignersPath } from "./policy-trust.js";
-import { mintApprovalToken, checkSignedApproval, APPROVAL_TOKENS_FILE } from "./approval-tokens.js";
+import {
+  mintApprovalToken,
+  checkSignedApproval,
+  personCanAnswer,
+  APPROVAL_TOKENS_FILE,
+} from "./approval-tokens.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 let idDir: string;
@@ -107,5 +112,36 @@ describe("signed approval tokens", () => {
     const r = checkSignedApproval({ operation: OP, environment: ENV }, root, { dir: idDir });
     assert.equal(r.approved, false);
     assert.match(r.detail, /no approval tokens/);
+  });
+});
+
+describe("who can mint an approval", () => {
+  it("a person can answer only on a terminal, both ways, outside non-interactive mode", () => {
+    assert.equal(personCanAnswer({ stdinTTY: true, stdoutTTY: true, nonInteractive: false }), true);
+    for (const t of [
+      { stdinTTY: false, stdoutTTY: true, nonInteractive: false }, // an agent's tool call, a pipe
+      { stdinTTY: true, stdoutTTY: false, nonInteractive: false }, // output captured
+      { stdinTTY: true, stdoutTTY: true, nonInteractive: true }, // CI or --non-interactive
+    ]) {
+      assert.equal(personCanAnswer(t), false, JSON.stringify(t));
+    }
+  });
+
+  it("signs through the given keystore, and the verifier honors it", () => {
+    const store = resolveKeyStore().store;
+    let signed = 0;
+    const signer = {
+      publicKeyPem: () => store.publicKeyPem(),
+      sign: (data: Buffer | string) => (signed++, store.sign(data)),
+    };
+    const tk = mintApprovalToken(OP, ENV, 3600, { root, signer });
+    assert.equal(signed, 1);
+    assert.equal(tk.kid, orgId);
+    assert.equal(checkSignedApproval({ operation: OP, environment: ENV }, root).approved, true);
+  });
+
+  it("a keystore with no key mints nothing", () => {
+    const signer = { publicKeyPem: () => null, sign: () => Buffer.alloc(0) };
+    assert.throws(() => mintApprovalToken(OP, ENV, 3600, { root, signer }), /no current identity/);
   });
 });

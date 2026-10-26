@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Security
+
+- **An agent could approve its own operation.** `kit policy approve` signed an approval token with no
+  person present: run with no terminal, as an agent's tool call runs, it minted a token that
+  `requestApproval` honors for any identity in the org trust anchor. It now refuses unless stdin and
+  stdout are a terminal outside non-interactive mode and the operation's name is typed back. It also
+  signed with the file key directly, so `require_hardware_identity` did not apply to approvals; it
+  now signs through the resolved keystore and fails closed under that mandate, as `kit policy sign`
+  does. With a file-backed key a same-user process can still sign without kit; only a hardware key
+  that needs a touch proves presence (docs/CONTROL_PLANE.md).
+
 ### Changed
 
 - **`kit memory pull` accepts your own memory when it holds quotes of injection text.** The

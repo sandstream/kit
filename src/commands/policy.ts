@@ -6,6 +6,7 @@
 // per-repo agent-write pre-approval) — this is the org-level standard.
 import { existsSync, writeFileSync, readFileSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
+import * as readline from "node:readline/promises";
 import { c } from "../utils/colors.js";
 import { writeFileExclusiveSync } from "../utils/exclusive-file.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
@@ -32,7 +33,9 @@ import { evaluatePolicy, formatPolicyEval } from "../policy-check.js";
 import { pullPolicy, type PullStatus } from "../policy-pull.js";
 import { pullRevocations } from "../revocation-pull.js";
 import { extractRbac } from "../rbac/policy-schema.js";
-import { mintApprovalToken, APPROVAL_TOKENS_FILE } from "../approval-tokens.js";
+import { mintApprovalToken, personCanAnswer, APPROVAL_TOKENS_FILE } from "../approval-tokens.js";
+import { isNonInteractive } from "../environment.js";
+import { askQuestion } from "../utils/askQuestion.js";
 import { identityId } from "../identity.js";
 import {
   resolveKeyStore,
@@ -75,11 +78,13 @@ export async function cmdPolicy(): Promise<boolean> {
 
 /**
  * `kit policy approve <operation> [--env <env>] [--ttl <seconds>]` — mint a signed, time-boxed
- * approval token for an operation, signed by this identity. Honored offline by `requestApproval`
- * ONLY if this identity is in the verifier's `.kit-policy.signers` org trust anchor (fail-closed).
- * Distribute the token like any other signed artifact (commit / pull channel).
+ * approval token for an operation. An approval stands for a person, so it needs one: a terminal
+ * and the operation's name typed back. An agent's tool call, CI and piped input are refused; no
+ * flag or variable skips this. Signed through the resolved keystore, so a hardware mandate
+ * (`require_hardware_identity`) applies exactly as it does to `kit policy sign`. Honored offline
+ * by `requestApproval` ONLY if this identity is in the verifier's `.kit-policy.signers` anchor.
  */
-function policyApprove(root: string): boolean {
+async function policyApprove(root: string): Promise<boolean> {
   const operation = process.argv[4];
   if (!operation || operation.startsWith("-")) {
     console.error(
@@ -93,8 +98,16 @@ function policyApprove(root: string): boolean {
     console.error(`${c.red}--ttl must be a positive number of seconds${c.reset}`);
     return false;
   }
+  const res = resolveKeyStore();
   try {
-    const tk = mintApprovalToken(operation, environment, ttl, { root });
+    assertHardwareIdentity(res, hardwareRequired(root));
+  } catch (e) {
+    console.error(`${c.red}✗ ${(e as Error).message}${c.reset}`);
+    return false;
+  }
+  if (!(await personConfirms(operation, environment, ttl))) return false;
+  try {
+    const tk = mintApprovalToken(operation, environment, ttl, { root, signer: res.store });
     console.log(
       `${c.green}✓${c.reset} minted approval for ${c.bold}${operation}${c.reset} ${c.dim}(env ${environment}, expires ${tk.expires}) as ${tk.kid} → ${join(root, APPROVAL_TOKENS_FILE)}${c.reset}`,
     );
@@ -106,6 +119,31 @@ function policyApprove(root: string): boolean {
     console.error(`${c.red}✗ approve failed: ${(e as Error).message}${c.reset}`);
     return false;
   }
+}
+
+/** Refuse unless a person is at a terminal and types the operation's name back. */
+async function personConfirms(operation: string, environment: string, ttl: number) {
+  const present = personCanAnswer({
+    stdinTTY: process.stdin.isTTY === true,
+    stdoutTTY: process.stdout.isTTY === true,
+    nonInteractive: isNonInteractive(),
+  });
+  if (!present) {
+    console.error(
+      `${c.red}✗ not approved: an approval stands for a person, and nobody can answer here.${c.reset} ` +
+        `Run ${c.bold}kit policy approve${c.reset} yourself at a terminal; an agent, CI or piped input cannot mint one.`,
+    );
+    return false;
+  }
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const typed = await askQuestion(
+    rl,
+    `Type ${c.bold}${operation}${c.reset} to approve it in ${environment} for ${ttl}s: `,
+  );
+  rl.close();
+  if (typed?.trim() === operation) return true;
+  console.error(`${c.red}✗ not approved: the typed name did not match ${operation}${c.reset}`);
+  return false;
 }
 
 /**
