@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { groupHasLiveMember, runShell, stopProcess } from "./monkey-test-process.js";
+import { groupHasLiveMember, groupRunning, runShell, stopProcess } from "./monkey-test-process.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function nodeShellCommand(source: string): string {
@@ -120,5 +120,67 @@ describe("groupHasLiveMember reads /proc so zombies do not count as running", ()
     t.after(() => rmTemp(root));
     assert.equal(groupHasLiveMember(99, root), undefined);
     assert.equal(groupHasLiveMember(60, join(root, "missing")), undefined);
+  });
+});
+
+describe("groupRunning: a stopped group stays stopped", () => {
+  it("rechecks the group when the /proc scan finds no member, so a reap in between reads as gone", () => {
+    const answers = [true, false]; // exists before the scan; reaped by the time we ask again
+    const exists = () => answers.shift() ?? false;
+    assert.equal(
+      groupRunning(80, true, exists, () => undefined),
+      false,
+    );
+  });
+
+  it("still reads an unanswerable scan as running while the group exists", () => {
+    assert.equal(
+      groupRunning(
+        81,
+        true,
+        () => true,
+        () => undefined,
+      ),
+      true,
+    );
+  });
+
+  it("trusts the scan when it answers, and kill(-pgid, 0) alone off Linux", () => {
+    assert.equal(
+      groupRunning(
+        82,
+        true,
+        () => true,
+        () => false,
+      ),
+      false,
+    );
+    assert.equal(
+      groupRunning(
+        83,
+        true,
+        () => true,
+        () => true,
+      ),
+      true,
+    );
+    assert.equal(
+      groupRunning(
+        84,
+        false,
+        () => true,
+        () => false,
+      ),
+      true,
+    );
+    assert.equal(
+      groupRunning(
+        85,
+        true,
+        () => false,
+        () => true,
+      ),
+      false,
+    );
   });
 });

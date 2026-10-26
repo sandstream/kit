@@ -95,17 +95,39 @@ function procState(statPath: string, pgid: number): "live" | "zombie" | "other" 
   return state === "Z" || state === "X" ? "zombie" : "live";
 }
 
+/** Does process group `pgid` still exist? `kill(-pgid, 0)`: only ESRCH means gone. */
+function groupExists(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+/**
+ * POSIX: is any member of group `pgid` still running? `exists` is asked again when the /proc scan
+ * found no member at all: the last zombie can be reaped between the first `kill(-pgid, 0)` and the
+ * scan, and reading that gap as "running" made a stopped group come back to life (a stop that
+ * returned true, then `running()` true on the next call).
+ */
+export function groupRunning(
+  pgid: number,
+  linux: boolean,
+  exists: (pgid: number) => boolean = groupExists,
+  scan: (pgid: number) => boolean | undefined = groupHasLiveMember,
+): boolean {
+  if (!exists(pgid)) return false;
+  if (!linux) return true;
+  return scan(pgid) ?? exists(pgid);
+}
+
 export function processTreeRunning(child: ChildProcess): boolean {
   if (!child.pid) return false;
   if (process.platform === "win32") {
     return child.exitCode === null && child.signalCode === null;
   }
-  try {
-    process.kill(-child.pid, 0);
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ESRCH";
-  }
-  return process.platform !== "linux" || groupHasLiveMember(child.pid) !== false;
+  return groupRunning(child.pid, process.platform === "linux");
 }
 
 async function waitForProcessTreeExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
