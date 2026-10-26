@@ -504,6 +504,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--key",
     "--label",
     "--list",
+    "--non-interactive",
     "--remove",
     "--strict",
     "--ttl",
