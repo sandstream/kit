@@ -2,6 +2,10 @@
 
 ### Fixed
 
+- **`kit memory restore` could refuse a valid restore on Windows.** Its "input and output are the
+  same file" guard compared file ids as JS numbers, and Windows file ids above 2^53 lose their
+  low bits, so two different files could match. File identity is now compared as bigint, and an
+  id of 0 never matches. The same fix applies to the project-directory comparison in memory scoping.
 - **The `osv-scanner (deps)` row rated every finding `high`.** It now takes the severity from the
   worst CVSS score osv reports (critical from 9.0, high from 7.0, medium from 4.0), names the
   vulnerable packages with their versions, and for npm packages suggests
