@@ -93,10 +93,27 @@ it("expands only repository roots to their registered worktrees", () => {
     execFileSync("git", ["-C", root, "worktree", "add", "-q", "--detach", worktree]);
     const subdir = join(root, "src");
     mkdirSync(subdir);
-    assert.ok(getProjectRecallRoots(root).some((candidate) => same(candidate, worktree)));
-    assert.ok(getProjectRecallRoots(worktree).some((candidate) => same(candidate, root)));
-    assert.ok(!getProjectRecallRoots(subdir).some((candidate) => same(candidate, worktree)));
-    assert.ok(!getProjectRecallRoots(root).some((candidate) => same(candidate, unrelated)));
+    // This test has failed intermittently on the Windows runner without a reproduction. Each
+    // assertion names itself and prints what it saw, so the next failure explains itself.
+    const seen = (from: string) =>
+      `roots from ${from}: ${JSON.stringify(getProjectRecallRoots(from))}\n` +
+      `git worktree list:\n${execFileSync("git", ["-C", root, "worktree", "list", "--porcelain"], { encoding: "utf8" })}`;
+    assert.ok(
+      getProjectRecallRoots(root).some((candidate) => same(candidate, worktree)),
+      `root should expand to the worktree ${worktree}\n${seen(root)}`,
+    );
+    assert.ok(
+      getProjectRecallRoots(worktree).some((candidate) => same(candidate, root)),
+      `worktree should expand to the root ${root}\n${seen(worktree)}`,
+    );
+    assert.ok(
+      !getProjectRecallRoots(subdir).some((candidate) => same(candidate, worktree)),
+      `a subdirectory must not expand to the worktree\n${seen(subdir)}`,
+    );
+    assert.ok(
+      !getProjectRecallRoots(root).some((candidate) => same(candidate, unrelated)),
+      `an unrelated sibling ${unrelated} must not be a root\n${seen(root)}`,
+    );
   } finally {
     rmTemp(tmp);
   }
