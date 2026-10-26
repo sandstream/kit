@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, readdir, access, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, rm, readFile, readdir, access, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +10,7 @@ import {
   parseTriageOutput,
   listTriageTools,
   installBundledTriageSkill,
+  TRIAGE_SCRIPTS,
   ensureTriageScript,
   verdictPassed,
   parseBrewInfo,
@@ -197,7 +199,7 @@ describe("installBundledTriageSkill (self-bootstrapping the gate)", () => {
     try {
       const ok = await installBundledTriageSkill(target);
       assert.equal(ok, true);
-      await access(resolve(target, "scripts/triage.py"));
+      for (const rel of TRIAGE_SCRIPTS) await access(resolve(target, rel));
       const skill = await readFile(resolve(target, "SKILL.md"), "utf8");
       assert.match(skill, /name:\s*triage/);
       const py = await readFile(resolve(target, "scripts/triage.py"), "utf8");
@@ -273,23 +275,25 @@ describe("installBundledTriageSkill (self-bootstrapping the gate)", () => {
   });
 });
 
-it("repairs a tampered triage script even when its version marker is current", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "kit-triage-"));
-  const target = resolve(dir, ".claude/skills/triage");
-  try {
-    assert.equal(await installBundledTriageSkill(target), true);
-    const script = resolve(target, "scripts/triage.py");
-    const bundled = await readFile(
-      resolve(dirname(fileURLToPath(import.meta.url)), "../skills/triage/scripts/triage.py"),
-    );
-    await writeFile(script, 'print("TRIAGE PASSED")\n');
+for (const rel of TRIAGE_SCRIPTS) {
+  it(`repairs a tampered ${rel} even when the version marker is current`, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "kit-triage-"));
+    const target = resolve(dir, ".claude/skills/triage");
+    try {
+      assert.equal(await installBundledTriageSkill(target), true);
+      const script = resolve(target, rel);
+      const bundled = await readFile(
+        resolve(dirname(fileURLToPath(import.meta.url)), "../skills/triage", rel),
+      );
+      await writeFile(script, 'print("TRIAGE PASSED")\n');
 
-    assert.equal(await ensureTriageScript(target), true);
-    assert.deepEqual(await readFile(script), bundled);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
+      assert.equal(await ensureTriageScript(target), true);
+      assert.deepEqual(await readFile(script), bundled);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 describe("parseTriageOutput (real report shape, precedence and malformed metrics)", () => {
   /** A report in the exact shape `skills/triage/scripts/triage.py` emit() prints. */
@@ -378,5 +382,28 @@ describe("parseTriageOutput (real report shape, precedence and malformed metrics
     const blank = parseTriageOutput("   \n\n  ");
     assert.deepEqual(blank.sections, []);
     assert.equal(blank.healthScore, undefined);
+  });
+});
+
+describe("triage script isolation", () => {
+  it("a module planted beside the verified scripts never runs", async (t) => {
+    const dir = await mkdtemp(join(tmpdir(), "kit-triage-"));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const target = resolve(dir, ".claude/skills/triage");
+    assert.equal(await installBundledTriageSkill(target), true);
+    for (const name of ["json", "re", "urllib"]) {
+      await writeFile(resolve(target, `scripts/${name}.py`), `print("PLANTED ${name}")\n`);
+    }
+    const skill = resolve(dir, "skill");
+    await mkdir(skill);
+    await writeFile(resolve(skill, "SKILL.md"), "---\nname: s\ndescription: d\n---\nBody.\n");
+    // Exactly how runTriage invokes it, and how the skill's own SKILL.md tells agents to.
+    const run = spawnSync("python3", [resolve(target, "scripts/triage.py"), "skill", skill], {
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    if (run.error) return t.skip("python3 not installed — isolation NOT verified in this run");
+    assert.doesNotMatch(run.stdout, /PLANTED/);
+    assert.match(run.stdout, /TRIAGE PASSED/);
   });
 });

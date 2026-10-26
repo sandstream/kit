@@ -21,6 +21,10 @@ const TRIAGE_SKILL_DIR = resolve(homedir(), ".claude/skills/triage");
 const TRIAGE_SCRIPT = resolve(TRIAGE_SKILL_DIR, "scripts/triage.py");
 /** The copy kit ships in its own package (published via package.json "files"). */
 const BUNDLED_TRIAGE_SKILL = resolve(__dirname, "..", "skills", "triage");
+/** Every file the triage script executes. Each is installed and byte-verified against the
+ *  bundled copy before use (ADR-0004): verifying triage.py alone would let a stale or planted
+ *  sibling it loads run unchecked. */
+export const TRIAGE_SCRIPTS = ["scripts/triage.py", "scripts/skill_scan.py"] as const;
 /** Stamp of the kit version that produced the installed skill copy. Used to refresh a STALE
  *  copy after a kit upgrade — otherwise an improved `triage.py` (e.g. a fixed version resolver
  *  or a new secret pattern) would never reach existing installs, silently running old logic. */
@@ -99,9 +103,11 @@ export async function installBundledTriageSkill(
     await mkdir(scriptsDir, { recursive: true });
     const skillDoc = await readFile(resolve(BUNDLED_TRIAGE_SKILL, "SKILL.md"));
     await writeFileAtomic(resolve(targetDir, "SKILL.md"), skillDoc);
-    const script = await readFile(resolve(BUNDLED_TRIAGE_SKILL, "scripts/triage.py"));
-    await writeFileAtomic(resolve(scriptsDir, "triage.py"), script);
-    await access(resolve(targetDir, "scripts/triage.py"));
+    for (const rel of TRIAGE_SCRIPTS) {
+      const script = await readFile(resolve(BUNDLED_TRIAGE_SKILL, rel));
+      await writeFileAtomic(resolve(targetDir, rel), script);
+      await access(resolve(targetDir, rel));
+    }
     // Stamp the version LAST — until this lands, installedSkillIsCurrent() stays
     // false and a concurrent caller re-attempts the refresh instead of trusting a
     // half-updated copy (script renamed, marker not yet current).
@@ -124,13 +130,16 @@ async function installedSkillIsCurrent(targetDir: string): Promise<boolean> {
 }
 
 async function installedScriptMatchesBundled(targetDir: string): Promise<boolean> {
+  const digest = (value: Buffer): string => createHash("sha256").update(value).digest("hex");
   try {
-    const [installed, bundled] = await Promise.all([
-      readFile(resolve(targetDir, "scripts/triage.py")),
-      readFile(resolve(BUNDLED_TRIAGE_SKILL, "scripts/triage.py")),
-    ]);
-    const digest = (value: Buffer): string => createHash("sha256").update(value).digest("hex");
-    return digest(installed) === digest(bundled);
+    for (const rel of TRIAGE_SCRIPTS) {
+      const [installed, bundled] = await Promise.all([
+        readFile(resolve(targetDir, rel)),
+        readFile(resolve(BUNDLED_TRIAGE_SKILL, rel)),
+      ]);
+      if (digest(installed) !== digest(bundled)) return false;
+    }
+    return true;
   } catch {
     return false;
   }
@@ -332,9 +341,6 @@ async function triageBrew(formula: string, cwd: string): Promise<TriageResult> {
   };
 }
 
-/**
- * Run triage on a target, resolving project config and local paths from cwd.
- */
 export async function runTriage(
   type: TriageType,
   target: string,
