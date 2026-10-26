@@ -170,7 +170,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--yes",
   ],
   config: ["--allow-comment-loss", "--check", "--dry-run", "--force", "--help", "--json"],
-  context: ["--format", "--json", "--prompt", "--require-declaration"],
+  context: ["--json", "--prompt", "--require-declaration"],
   coverage: [
     "--attest",
     "--claude",

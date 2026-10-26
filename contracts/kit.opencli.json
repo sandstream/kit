@@ -778,7 +778,6 @@
           "summary": "Print a compact active-gcloud indicator for your shell prompt (PS1)",
           "x-kit-accepted-flags": [
             "--env",
-            "--format",
             "--help",
             "--json",
             "--non-interactive",
@@ -798,7 +797,6 @@
           "summary": "Verify each CLI's live account+project matches .kit.toml [context] (exits non-zero on mismatch)",
           "x-kit-accepted-flags": [
             "--env",
-            "--format",
             "--help",
             "--json",
             "--non-interactive",
@@ -818,7 +816,6 @@
           "summary": "Activate the declared context: gcloud config + repo git identity",
           "x-kit-accepted-flags": [
             "--env",
-            "--format",
             "--help",
             "--json",
             "--non-interactive",
@@ -838,7 +835,6 @@
       "summary": "Show project context: tools, services, secrets, environment",
       "x-kit-accepted-flags": [
         "--env",
-        "--format",
         "--help",
         "--json",
         "--non-interactive",
