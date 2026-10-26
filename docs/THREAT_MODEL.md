@@ -62,7 +62,7 @@ config knob says otherwise.
 - **No central server.** kit publishes no agent, listens on no socket, has
   no SaaS dashboard. The CLI is the product.
 - **No telemetry by default.** No anonymous usage data collected. If telemetry
-  is ever added, it MUST be opt-in (see [out-of-scope](#out-of-scope)).
+  is ever added, it MUST be opt-in (see [out-of-scope](#out-of-scope-and-why)).
 - **No cred caching outside the user vault.** Tokens fetched from 1P/Infisical
   exist only in the call's local memory; never persisted in a kit-owned
   database.

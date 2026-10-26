@@ -126,6 +126,31 @@ set --env-file` with the value in a file of mode 0600 inside a 0700 folder that 
 
 ### Fixed
 
+- **The docs no longer name commands that do not exist, or claim RBAC is enforced.**
+  - COMMANDS.md listed `kit secrets pull` and `kit secrets set-value`, which the CLI has never
+    routed (both exit 1), and `kit pkg install <pkg>`, whose real form is `kit pkg npm:express`.
+  - `kit context [--format json]` documented a flag nothing reads. Because documented flags are
+    accepted, it was taken and silently ignored; it is now an unknown flag, and `--json` is the
+    documented form.
+  - The agent recipe `kit check --category security,tests,standards` failed on `standards`, which
+    is its own command.
+  - TEAM_MANAGEMENT_API.md said the `[rbac]` table "is enforced offline". kit validates,
+    distributes and reports it, and the decision engine exists, but no command consults it yet.
+  - Also fixed: two links to migration guides that do not exist, three dead anchors, and a design
+    section written in the present tense.
+
+- **The dependency triage gate let three kinds of change through untriaged.**
+  `triage-deps.yml` took each changed package from the lockfile's registry URL.
+  - A scoped package (`@scope/name`) came out as the bare `@scope`, failed the name check and was
+    skipped with a warning. This included `@modelcontextprotocol/sdk`, a runtime dependency.
+  - Every package was triaged by name, so a clean `latest` vouched for whatever version the lockfile
+    actually installs.
+  - The list was cut at 20 packages without a word.
+
+  `scripts/lockfile-changed-packages.sh` now emits the exact `name@version` of every added
+  package, scoped ones included, and the triage script checks that version. Past 150 packages the
+  job fails and asks for a smaller PR instead of truncating.
+
 - **`kit secrets propagate --to vercel` creates `sensitive` variables, not `encrypted`.** Vercel keeps
   a `sensitive` value write-only. It is allowed only for production and preview, so development stays
   `encrypted` and the result says so. A type cannot be changed afterwards, so an existing entry of
@@ -161,6 +186,10 @@ set --env-file` with the value in a file of mode 0600 inside a 0700 folder that 
   ledger is now left alone unless the security dimension ran.
 
 ### Changed
+
+- **Dependabot also proposes npm devDependency updates.** One grouped PR a week, through the
+  repaired triage gate, never merged on its own. The four runtime dependencies stay manual under
+  ADR-0002.
 
 - **Scanner pins follow the first upstream-watch report.**
   - trivy and trufflehog are pinned (0.76.1, 3.99.4) instead of `latest`, and CI's image scans run

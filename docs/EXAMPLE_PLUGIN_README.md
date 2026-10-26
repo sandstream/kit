@@ -380,7 +380,7 @@ For testing guidelines, see [docs/TESTING.md](./PLUGIN_DOCUMENTATION_STANDARDS.m
 3. Use test keys for development, live keys for production
 4. If using Node.js library, verify you've initialized with the key
 
-For more troubleshooting, see [docs/TROUBLESHOOTING.md](./PLUGIN_DOCUMENTATION_STANDARDS.md#troubleshooting).
+For more troubleshooting, see the Troubleshooting section of the template in [PLUGIN_DOCUMENTATION_STANDARDS.md](./PLUGIN_DOCUMENTATION_STANDARDS.md).
 
 ## Support
 
