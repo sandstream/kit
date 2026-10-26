@@ -1,7 +1,37 @@
 ## [Unreleased]
 
+### Changed
+
+- **`kit memory pull` accepts your own memory when it holds quotes of injection text.** The
+  pre-merge scan refused any incoming store with a high-confidence injection pattern, including
+  patterns that sit in rows already quarantined, so a developer who works on security could never
+  pull their own export (the refusal listed hundreds of quoted "ignore all previous instructions"
+  lines). For a blob decrypted with the passphrase, which only the owner can produce, the scan now
+  counts only what recall can show again: messages that are not quarantined, and the action,
+  thread and revision tables. Every message still passes this machine's own write gate. A
+  public-key blob and a raw `.db` keep the strict scan, since neither proves who wrote it.
+  Checked on a copy of a real 370 000-message store: the merge went through and the receiving
+  store had 0 recallable injection rows.
+
 ### Fixed
 
+- **`kit memory restore` could refuse a valid restore on Windows.** Its "input and output are the
+  same file" guard compared file ids as JS numbers, and Windows file ids above 2^53 lose their
+  low bits, so two different files could match. File identity is now compared as bigint, and an
+  id of 0 never matches. The same fix applies to the project-directory comparison in memory scoping.
+- **`--help` covers every subcommand, and asking for a command that does not exist is an error.**
+  - 46 documented subcommands printed only their parent's one-liner under `--help` and were missing
+    from `contracts/kit.opencli.json`. Examples: `kit memory push`, `kit secrets validate`,
+    `kit plugin install`, `kit triage npm`. Each now has its own line, and a test fails when a
+    documented subcommand has none.
+  - `kit frobnicate --help` and `kit help chek` printed the general help and exited 0. They now say
+    `Unknown command`, suggest the nearest command, and exit 1.
+  - 14 commands that printed under "Other" in `kit help` have a group.
+  - COMMANDS.md documents the five memory subcommands it left out.
+- **A failing test explains itself at the end of the run.** The runner's `[kit] N not ok` summary
+  now prints the first lines of each failure's own error, where a reader of a long CI log
+  actually looks. The Windows worktree test that failed intermittently now names the assertion and
+  prints the recall roots and `git worktree list` output it saw.
 - **The `osv-scanner (deps)` row rated every finding `high`.** It now takes the severity from the
   worst CVSS score osv reports (critical from 9.0, high from 7.0, medium from 4.0), names the
   vulnerable packages with their versions, and for npm packages suggests
@@ -128,6 +158,31 @@ set --env-file` with the value in a file of mode 0600 inside a 0700 folder that 
 
 ### Fixed
 
+- **The docs no longer name commands that do not exist, or claim RBAC is enforced.**
+  - COMMANDS.md listed `kit secrets pull` and `kit secrets set-value`, which the CLI has never
+    routed (both exit 1), and `kit pkg install <pkg>`, whose real form is `kit pkg npm:express`.
+  - `kit context [--format json]` documented a flag nothing reads. Because documented flags are
+    accepted, it was taken and silently ignored; it is now an unknown flag, and `--json` is the
+    documented form.
+  - The agent recipe `kit check --category security,tests,standards` failed on `standards`, which
+    is its own command.
+  - TEAM_MANAGEMENT_API.md said the `[rbac]` table "is enforced offline". kit validates,
+    distributes and reports it, and the decision engine exists, but no command consults it yet.
+  - Also fixed: two links to migration guides that do not exist, three dead anchors, and a design
+    section written in the present tense.
+
+- **The dependency triage gate let three kinds of change through untriaged.**
+  `triage-deps.yml` took each changed package from the lockfile's registry URL.
+  - A scoped package (`@scope/name`) came out as the bare `@scope`, failed the name check and was
+    skipped with a warning. This included `@modelcontextprotocol/sdk`, a runtime dependency.
+  - Every package was triaged by name, so a clean `latest` vouched for whatever version the lockfile
+    actually installs.
+  - The list was cut at 20 packages without a word.
+
+  `scripts/lockfile-changed-packages.sh` now emits the exact `name@version` of every added
+  package, scoped ones included, and the triage script checks that version. Past 150 packages the
+  job fails and asks for a smaller PR instead of truncating.
+
 - **`kit secrets propagate --to vercel` creates `sensitive` variables, not `encrypted`.** Vercel keeps
   a `sensitive` value write-only. It is allowed only for production and preview, so development stays
   `encrypted` and the result says so. A type cannot be changed afterwards, so an existing entry of
@@ -163,6 +218,22 @@ set --env-file` with the value in a file of mode 0600 inside a 0700 folder that 
   ledger is now left alone unless the security dimension ran.
 
 ### Changed
+
+- **RBAC and keyless request signing are labelled experimental where kit reports them.** The
+  `[rbac]` table is validated, distributed and reported, and no command enforces it.
+  - `kit doctor` and `kit policy pull` now say "experimental: not enforced" next to the role counts.
+    `kit doctor` used to describe RBAC as governing.
+  - The decision engine, the IdP backends and the RFC 9421 request signer say in their headers that
+    nothing calls them yet. `[scope].sign` in a profile is accepted and has no effect.
+- **Removed: six source files nothing imported.** `src/database.ts`, `src/migrations.ts`,
+  `src/service-adapter.ts` (a monitoring-service abstraction, not the plugin `ServiceAdapter`),
+  `src/secrets-pull.ts` (types for a `kit secrets pull` that was never routed) and their tests,
+  about 2,000 lines. The upstream watch no longer tracks the GitHub API version of the unwired IdP
+  backend; the GitHub plugin's row still tracks the same API.
+
+- **Dependabot also proposes npm devDependency updates.** One grouped PR a week, through the
+  repaired triage gate, never merged on its own. The four runtime dependencies stay manual under
+  ADR-0002.
 
 - **Scanner pins follow the first upstream-watch report.**
   - trivy and trufflehog are pinned (0.76.1, 3.99.4) instead of `latest`, and CI's image scans run

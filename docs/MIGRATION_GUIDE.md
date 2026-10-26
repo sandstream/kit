@@ -407,7 +407,7 @@ After migration, you should see:
 ## Getting Help
 
 - [kit Documentation](./GETTING_STARTED_PLUGINS.md)
-- [Troubleshooting Guide](./PLUGIN_DOCUMENTATION_STANDARDS.md#troubleshooting)
+- [Troubleshooting (in the plugin documentation template)](./PLUGIN_DOCUMENTATION_STANDARDS.md)
 - [FAQ](#)
 - [GitHub Issues](https://github.com/sandstream/kit/issues)
 

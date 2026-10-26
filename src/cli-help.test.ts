@@ -157,16 +157,18 @@ it("keeps top-level, known command, and unknown help semantics", () => {
   const global = run(["--help"]);
   assert.match(global, /Usage:/);
   assert.match(global, /kit <command>/);
+  for (const args of [["-h"], ["help"], ["--help", "memory", "install"], ["help", "--all"]]) {
+    assert.match(run(args), /Usage:/);
+  }
+  // A help request for a command that does not exist is an error, not the general help with
+  // exit 0, which looked like an answer. stdout stays empty; stderr names the command.
   for (const args of [
-    ["-h"],
-    ["help"],
-    ["--help", "memory", "install"],
     ["no-such-command", "--help"],
     ["help", "no-such-command"],
     ["help", "toString"],
     ["memory-unknown", "--help"],
   ]) {
-    assert.equal(run(args), global);
+    assert.equal(run(args, 1), "");
   }
   assert.ok(run(["status", "-h"]).startsWith(`kit status \u2014 ${COMMAND_HELP.status}`));
   assert.equal(run(["memory", "no-such-subcommand", "--help"]), run(["memory", "--help"]));

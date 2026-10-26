@@ -46,6 +46,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { getMemoryDbPath, getMemoryDir } from "./db.js";
+import { identityOf, sameIdentity } from "../utils/same-file.js";
 import { assertRecoveryCompatible } from "./pal-check-storage.js";
 import { assertActionDeletionsPreserved } from "./pal-recovery.js";
 import {
@@ -100,16 +101,16 @@ function destinationPath(path: string): string {
 function assertDistinctFiles(input: string, output: string, sqlite: boolean): void {
   const source = realpathSync(input);
   const destination = destinationPath(output);
-  const target = statSync(destination, { throwIfNoEntry: false });
+  const target = identityOf(destination);
   const suffixes = sqlite ? ["", "-wal", "-shm", "-journal"] : [""];
   for (const base of new Set([source, resolve(input)])) {
     for (const suffix of suffixes) {
       const protectedPath = destinationPath(base + suffix);
-      const original = statSync(protectedPath, { throwIfNoEntry: false });
+      const original = identityOf(protectedPath);
       if (
         destination === protectedPath ||
         destination.startsWith(protectedPath + sep) ||
-        (original && target && original.dev === target.dev && original.ino === target.ino)
+        sameIdentity(original, target)
       ) {
         throw new Error(
           "backup input and output must be different files (including SQLite sidecar aliases)",

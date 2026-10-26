@@ -11,6 +11,8 @@ import { checkForUpdate, postCommandNoticesAllowed, printUpdateNotice } from "./
 import { SKIPPED_COMMITS_LOG } from "./hooks.js";
 import { cmdFix } from "./fix.js";
 import { c } from "./utils/colors.js";
+import { SUBCOMMAND_HELP } from "./subcommand-help.js";
+import { didYouMean } from "./utils/didYouMean.js";
 import { KIT_FILE, resolveConfigPath } from "./cli-shared.js";
 import { reportUnexpectedCliError } from "./cli-error.js";
 import { cmdEnv } from "./commands/env.js";
@@ -120,6 +122,26 @@ function printCommandHelp(args: readonly string[]): boolean {
     }
   }
   return true;
+}
+
+/**
+ * `kit help [<cmd> [<sub>]]` and `kit <cmd> [<sub>] --help`. A named command that does not exist is
+ * an error (exit 1, with a did-you-mean), not the general help with exit 0: a typo'd help request
+ * used to look like an answer.
+ */
+function runHelp(args: readonly string[]): number {
+  // No target, or a flag first (`kit help --all`, `kit --help memory`): the general help.
+  if (args.length === 0 || args[0]!.startsWith("-")) return cmdHelp(args) ? 0 : 1;
+  // Matched as before, so flag-shaped entries (`setup --recommended`) still resolve.
+  if (printCommandHelp(args)) return 0;
+  console.error(`Unknown command: ${args[0]}`);
+  const known = [...new Set(Object.keys(COMMAND_HELP).map((k) => k.split(" ")[0]!))];
+  const suggestions = didYouMean(args[0]!, known);
+  if (suggestions.length > 0) {
+    console.error(`Did you mean: ${suggestions.map((s) => `'${s}'`).join(", ")}?`);
+  }
+  console.error(`Run 'kit help' for a list of available commands.`);
+  return 1;
 }
 
 function cmdHelp(args: readonly string[] = []): boolean {
@@ -287,8 +309,7 @@ export async function main(): Promise<void> {
   // Help must precede policy/read-only initialization too: activating read-only
   // mode writes an audit event. Render only registry data, never dispatch a handler.
   if (command === "help" || hasFlag(args, "--help", "-h")) {
-    cmdHelp(command === "help" ? positional.slice(1) : positional);
-    process.exitCode = 0;
+    process.exitCode = runHelp(command === "help" ? positional.slice(1) : positional);
     return;
   }
   const nonInteractive =
@@ -897,133 +918,6 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
 // PreToolUse deny gates: an internal fault in one must DENY (exit 2), never fall through to the
 // generic exit-1 path (non-blocking → the op would proceed). Dispatched via runGateFailClosed.
 const GATE_VERBS = new Set(["gate-bash", "gate-env", "gate-egress", "gate-fs"]);
-
-// Help for multi-word sub-commands (e.g. `kit memory search`). Help-only: no
-// dispatch handler or stability tier of their own — merged into COMMAND_HELP below.
-const SUBCOMMAND_HELP: Record<string, string> = {
-  "check verify-attestation": "Verify a signed .kit-check-attestation.json receipt",
-  "check compare":
-    "Diff two `kit check --json` runs — what changed, with lost coverage ranked above a regression",
-  "airgap verify":
-    "Prove zero-egress: assert every scanner that would run air-gapped resolves to a local artifact (no cloud-only, no registry semgrep config)",
-  "profile show": "Render the declared project profile with per-line reconciliation marks",
-  "profile freeze":
-    "Snapshot the discovered toolchain into .kit-profile.toml (preserves operator-authored workflows/plugins/scope/gates)",
-  "profile check":
-    "Report declared-vs-discovered drift (--gate fails CI on any drift; honest skip when no profile declared)",
-  "profile sign":
-    "Sign the profile (scope/RoE) into .kit-profile.sig via your identity/keystore — offline-verifiable",
-  "profile verify":
-    "Verify .kit-profile.sig offline (--key pin → local identity → org .kit-policy.signers)",
-  "profile export":
-    "Export a portable signed bundle (profile + signature + signer key) to --out or stdout",
-  "profile import":
-    "Import a portable bundle on a fresh host — integrity-verify offline, fail-closed on tamper/revoked (authoritative only once the signer is anchored)",
-  "broker enforce-readiness":
-    "Read the recorded observe window (.kit-audit.jsonl) and report whether it's safe to flip exec-broker to enforce: ready | would-block (+ exactly what breaks) | untested (--gate fails CI on any not-ready verdict)",
-  "broker enforce":
-    "Guided observe→enforce flip: readiness pre-flight (refuses unless ready; --force overrides), set [scope].enforce_runtime = true, re-sign the profile scope, and audit the transition",
-  "browser doctor":
-    "Diagnose browser-verification readiness from [browser], selecting Playwright, system Chrome, CDP, or a blocker (--json)",
-  "browser status": "Print the selected browser strategy and top-level verdict (--json)",
-  "browser cdp-url":
-    "Print the detected Chrome DevTools Protocol URL, if one is configured or reachable (--json)",
-  "browser playwright-env":
-    "Print shell exports for browser test runners (--json emits the same env object)",
-  "memory index": "Index every supported agent transcript into the SQLite memory store",
-  "memory search":
-    "Full-text search memory (current project; --global for all; --fresh = recency-aware ranking)",
-  "memory stats": "Show what the local memory store contains",
-  "memory project":
-    "Show or initialize the checked-in project identity used for cross-clone recall",
-  "memory suggest":
-    "Emit a BYO-LLM review prompt (recent activity + open items) — pipe to your own model",
-  "memory merge": "Merge another machine's memory.db into this one (dedup by uuid)",
-  "memory sync":
-    "Import a memory export or encrypted backup (task descendants advance, concurrent alternatives retained; file_index excluded)",
-  "memory install":
-    "Wire Claude Code prompt/start/end hooks and silent Codex start/end hooks into lifecycle config",
-  "memory scan":
-    "Scan the memory store for stored secrets, or prompt-injection patterns with --injection (exit 1 on a high-confidence finding)",
-  "memory backup": "Encrypted backup of the memory store (AES-256-GCM; KIT_MEMORY_PASSPHRASE)",
-  "memory restore": "Restore an encrypted memory backup (e.g. on a new machine)",
-  "memory share": "Promote a curated, secret-scanned entry to the shared (team) memory",
-  "memory areas": "List shared responsibility areas (stripe, whatsapp, …)",
-  "memory area": "Show shared entries for one area (decisions, how-built, status, security)",
-  "memory context":
-    "Push-surface active decisions for the area(s) whose files you're touching (deterministic, path→cluster)",
-  "memory pal":
-    "Pending action ledger — list/show/add/configure/claim/renew/takeover/release/reopen/done/snooze/resolve/forget/verify/import/prune",
-  "memory pal claim":
-    "Claim inspected work: kit memory pal claim <id> [label] --harness <name> --session <id> --expect <frontier>",
-  "memory pal renew":
-    "Renew owned work and receive a new frontier: kit memory pal renew <id> --harness <name> --session <id> --expect <frontier>",
-  "memory pal takeover":
-    "Explicitly take over claimed work: kit memory pal takeover <id> [label] --harness <name> --session <id> --expect <frontier> [--take <head>] (required for multiple heads)",
-  "memory pal configure":
-    "Configure a local verifier: kit memory pal configure <id> (--manual | --verify-file <path> | --verify-http <url> [--expect <code>])",
-  "memory pal show":
-    "Inspect causal task state without writes: kit memory pal show <id> [--history] [--json]",
-  "memory pal resolve":
-    "Resolve observed alternatives: kit memory pal resolve <id> --expect <frontier> (--take <revision> | --state <file>) [--harness <name> --session <id>] (contested claims require takeover)",
-  "memory pal forget":
-    "Erase a task and its history with a sync tombstone: kit memory pal forget <id> --expect <frontier> [--harness <name> --session <id>] [--json] (claimed work requires its owner)",
-  "memory save": "Bookmark the current session as a named copilot",
-  "memory threads": "List saved copilots (current project; --global for all)",
-  "memory resume": "Print the resume command for a saved copilot (by name or number)",
-  "login --plan":
-    "Show the resolved auth strategy per service (vault/interactive/capture + passkey) without logging in",
-  "secrets sync": "Push resolved secrets to GitHub Actions / .env.ci / stdout",
-  "secrets migrate": "Migrate plaintext secrets in .env* → configured vault",
-  "secrets set":
-    "Capture a value to the vault: kit secrets set <KEY> --stdin (safer) | --value <v>",
-  "secrets rotate": "Rotate a key: write new value to vault (explicit / random)",
-  "secrets onecli": "Register a key with OneCLI gateway so agent never sees the real value",
-  "secrets purge-history":
-    "Destructive: rewrite git history to remove a leaked value (--force-history)",
-  "secrets propagate":
-    "Push a value to deploy targets only (skips vault-write). --stdin safer than --value",
-  "secrets revoke-old": "Revoke a previously-minted scoped key (Supabase Mgmt API)",
-  "env switch": "Switch active environment (dev/staging/prod). Gates prod-key reads.",
-  "env current": "Show active environment marker",
-  "security policy": "Dependency allowlist enforcement (init|add|check)",
-  "security clear-cache": "Clear cached scanner binary (after intentional rebuild)",
-  "security scan-staged": "Pre-commit: scan staged files for credential patterns",
-  "security scan-build": "Scan build artifacts (.next/, dist/) for inlined secrets",
-  "security scan-transcripts": "Scan agent transcripts + prompt caches for leaked credentials",
-  "security costs": "Snapshot per-key spend vs policy cap (Stripe live; others stubbed)",
-  "security check-gitignore": "Verify .gitignore covers sensitive paths (--fix to auto-patch)",
-  "security verify-pull": "After git pull: audit new deps, gitignore drops, introduced secrets",
-  "security prescan":
-    "Multi-repo baseline sweep (secrets, gitignore, branch-protect; --deep adds CVE/workflow-drift/bumblebee; --format=json + --vs-baseline=<path> for CI drift)",
-  "security prescan-diff":
-    "Diff two prescan reports — surface new regressions + fixed findings since baseline",
-  "audit secrets": "Forensics: who/what touched each key + when (reads audit log)",
-  "audit verify":
-    "Verify the audit log's keyless hash chain + HMAC anchor (--require-external demands a TSA receipt; exit 1 on break/forge/truncation)",
-  "audit anchor":
-    "Seal the audit log with the machine-local HMAC key (--external also gets a receipt from KIT_EXTERNAL_ANCHOR_CMD — closes the same-UID gap)",
-  "audit export": "Emit the audit log for a SIEM (--format cef|syslog|json)",
-  "auth elevate":
-    "Mint elevation marker for destructive secret ops (TOTP/yes-prompt); --list-scopes to see what each scope unlocks first (--json)",
-  "auth status": "Show active elevation",
-  "auth revoke": "Drop the elevation marker",
-  "auth setup-totp": "Enroll TOTP secret (writes ~/.kit/totp-secret 0600)",
-  "hooks add": "Install a built-in hook (secret-scan, post-pull-audit, context-check)",
-  "hooks uninstall": "Remove the configured git hooks (enforcement off until re-installed)",
-  "setup --recommended":
-    "Opinionated profile: setup + memory hooks + git secret-scan/context-check gates",
-  "context check":
-    "Verify each CLI's live account+project matches .kit.toml [context] (exits non-zero on mismatch)",
-  "context use": "Activate the declared context: gcloud config + repo git identity",
-  "context --prompt": "Print a compact active-gcloud indicator for your shell prompt (PS1)",
-  "config migrate":
-    "Migrate .kit.toml to the current schema version (--dry-run inspect, --check CI gate, --force overwrite backup)",
-  "config knobs": "List power-user env vars + .kit.toml fields kit honors (--json)",
-  version: "Print kit version",
-  completions: "Output shell completion script (bash, zsh, fish)",
-  help: "Show this help",
-};
 
 // Derived surfaces — DO NOT hand-edit; add commands to COMMAND_REGISTRY above.
 // Single source of truth for kit's top-level command surface; referenced by main()

@@ -5,7 +5,7 @@
 import { spawnSync } from "node:child_process";
 import { readdirSync, existsSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { classifyTap, describeFailureKinds } from "./test-failure-kinds.mjs";
+import { classifyTap, describeFailureKinds, failureReasons } from "./test-failure-kinds.mjs";
 import { parseShard, selectShard } from "./test-shard.mjs";
 
 const env = {
@@ -133,10 +133,8 @@ if (result.status !== 0) {
     `\n[kit] full TAP report written to ${TAP_LOG} - grep '^not ok' for the failing test names.`,
   );
   try {
-    const summary = describeFailureKinds(
-      classifyTap(readFileSync(TAP_LOG, "utf-8")),
-      TEST_TIMEOUT_MS,
-    );
+    const tap = readFileSync(TAP_LOG, "utf-8");
+    const summary = describeFailureKinds(classifyTap(tap), TEST_TIMEOUT_MS, failureReasons(tap));
     if (summary) console.error(summary);
   } catch {
     // The TAP log is a convenience; the exit status below is what counts.

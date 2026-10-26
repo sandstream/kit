@@ -65,6 +65,11 @@ export interface OpenCliCommand {
    * kit does not yet model.
    */
   "x-kit-accepted-flags"?: string[];
+  /**
+   * On a subcommand: it accepts exactly its parent command's `x-kit-accepted-flags` (kit checks
+   * flags per top-level command), so the list is not repeated on every child.
+   */
+  "x-kit-flags-inherited"?: true;
   /** Nested subcommands, present only on `kind: "group"`. */
   commands?: Record<string, OpenCliCommand>;
 }
@@ -127,6 +132,10 @@ export function buildOpenCliDoc(): OpenCliDoc {
     child["x-kit-stability"] = parentNode["x-kit-stability"];
     child["x-kit-audience"] = parentNode["x-kit-audience"];
     child["x-kit-mcp"] = false;
+    if (child["x-kit-accepted-flags"]) {
+      delete child["x-kit-accepted-flags"];
+      child["x-kit-flags-inherited"] = true;
+    }
     (parentNode.commands ??= {})[sub] = child;
   }
 

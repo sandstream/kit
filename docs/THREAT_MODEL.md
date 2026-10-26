@@ -62,7 +62,7 @@ config knob says otherwise.
 - **No central server.** kit publishes no agent, listens on no socket, has
   no SaaS dashboard. The CLI is the product.
 - **No telemetry by default.** No anonymous usage data collected. If telemetry
-  is ever added, it MUST be opt-in (see [out-of-scope](#out-of-scope)).
+  is ever added, it MUST be opt-in (see [out-of-scope](#out-of-scope-and-why)).
 - **No cred caching outside the user vault.** Tokens fetched from 1P/Infisical
   exist only in the call's local memory; never persisted in a kit-owned
   database.
@@ -310,7 +310,16 @@ kit's stance is deterministic defence-in-depth, never model-side "please ignore"
   pipe-to-shell / exfil / prompt-role refs = heuristic), exit-1 on a high finding.
 - **Guarded pull.** A cross-machine `pull` scans the incoming store before merge
   and fails closed on a high-confidence finding (override:
-  `KIT_MEMORY_ALLOW_UNSAFE=1`), so a poisoned store can't silently land.
+  `KIT_MEMORY_ALLOW_UNSAFE=1`), so a poisoned store can't silently land. A blob
+  decrypted with the passphrase is authenticated (AES-GCM fails on any other key,
+  and only the owner holds it), so for that blob the scan counts only what a model
+  can be shown again: messages that are not quarantined, and the action, thread and
+  revision tables. Quarantined messages and stored tool inputs are evidence, not
+  recall, so a developer who works on security can pull their own memory. Every
+  imported message still goes through this machine's own write gate, which
+  quarantines on its own judgment and never takes the sender's flag as proof. A
+  public-key blob proves nothing about its writer (the recipient string is public),
+  and a raw `.db` has no author at all, so both keep the strict scan.
 - **Reviewed shared tier.** The curated (team) tier travels with the repo and is
   reviewed like code; the personal tier is 0600 + encrypted at rest/in transit.
 
