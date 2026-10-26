@@ -19,7 +19,8 @@ import { homedir } from "node:os";
 import { join, basename } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { insertMessage, upsertSession, isFileIndexed, markFileIndexed } from "./db.js";
-import { extractText, type IndexResult } from "./parser.js";
+import { extractText } from "./content.js";
+import type { IndexResult } from "./parser.js";
 
 export function getDroidProjectsDir(): string {
   const base = process.env.KIT_DROID_DIR ?? join(homedir(), ".factory");
