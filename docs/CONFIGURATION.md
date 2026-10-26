@@ -87,7 +87,11 @@ The account and project each CLI must be pointed at, per tool.
 ```toml
 [context.gcloud]
 account = "me@example.com"
-project = "acme-prod"
+project = ["acme-dev", "acme-prod"]
+
+[context.terraform]
+bucket = "acme-state-dev"
+workspace = "dev"
 ```
 
 Set up with `kit context check`.

@@ -15,6 +15,9 @@
 
 ### Fixed
 
+- **osv-scanner no longer shows `error` for a repo with nothing to scan.** Its exit code 128 means no package sources were found, which is not a failure. The run is now `not-applicable` with that reason, so a repo without lockfiles does not fail `--strict`.
+- **Scanner exclusions now work from a symlinked directory.** Go-based scanners trust `$PWD` over the real directory, so a scan started from a path such as `/var/...` on macOS ignored every exclude. kit now sets `PWD` to the real working directory for each scanner.
+
 - **`kit memory restore` could refuse a valid restore on Windows.** Its "input and output are the
   same file" guard compared file ids as JS numbers, and Windows file ids above 2^53 lose their
   low bits, so two different files could match. File identity is now compared as bigint, and an
@@ -48,6 +51,13 @@
   failed on Linux CI and passed locally.
 
 ### Added
+- `kit context check` reports every declared `[context]` section or key that no check reads as `unchecked` and exits non-zero. A misspelled key or an unsupported tool no longer reads as a lock that holds.
+- `[context.gcloud] project` accepts a list of exact project names. The live project must equal one of them. A pattern is not supported, since it would also match a project such as `<name>-prod-old`.
+- `[context.terraform]` locks the state backend `bucket` and `prefix` and the `workspace`, read from `.terraform/` without running terraform. `dir` selects a subdirectory and must stay inside the repository, also through a symlink.
+
+- **`kit scan` skips downloaded terraform provider binaries.** `.terraform/providers/` holds vendored Go programs, and in one infrastructure repo they produced 54 percent of the findings. trivy, grype, osv-scanner and semgrep now exclude that directory and only that directory: the lock file and the `.tf` sources next to it are still scanned, and a vulnerable file in tracked code is still reported. If git tracks files under `.terraform/providers/`, that directory is not download output, so it is scanned and `kit scan` says so. A required scanner that finds nothing to scan (osv-scanner without a lockfile) fails the gate.
+- **`kit scan` runs trivy in config mode when the repo has a `.tf` file or a Dockerfile.** The new delegate `trivy-config` reports misconfigurations such as a container that runs as root (DS-0002). It applies only where such files exist (up to three levels down, not in `node_modules`, `.terraform` or `vendor`). Air gap passes `--skip-check-update`.
+- **A scanner that errors now says why.** `kit scan` and `kit scan --json` carry a `reason` on the run: the stderr line that names the failure (credentials redacted, control characters removed, 160 characters at most), or the parse error when the output was not valid.
 
 - **`kit agent-audit` checks the lethal trifecta.** An agent that reads text an outsider can write, can read private data and can send data out in one context can be steered by that text. The new rows `lethal trifecta: main session` and `lethal trifecta: agent <name>` warn when one unit holds all three legs, name the grants that hold each leg, and suggest removing the way out or splitting the work over two agents with different tools. It reads permission rules and the `tools` line of `.claude/agents/*.md` (project and user), never a value from a config file. MCP servers are placed by name; a grant it cannot place is listed as unclassified and never passed. Limits: approvals and auto mode decided at run time are not visible, and a deny rule with an argument (for example `Bash(curl:*)`) is not applied.
 

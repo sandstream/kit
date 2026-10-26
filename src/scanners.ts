@@ -12,6 +12,17 @@
  */
 import type { SecurityCheckResult } from "./check-security.js";
 import { ingestStrict, type IngestFormat } from "./adapters/ingest.js";
+import { redactSecrets } from "./utils/redactSecrets.js";
+
+/**
+ * Downloaded terraform provider binaries. They are vendored Go programs: scanning them produced 54
+ * percent of the findings in one repo. Only this directory is skipped, never `.terraform/` itself or
+ * the lock file and sources next to it.
+ */
+export const PROVIDER_DIR = ".terraform/providers";
+// Built from parts: a literal slash-star-star inside a string is read as a comment start by lizard.
+const PROVIDER_GLOB = ["**", PROVIDER_DIR].join("/");
+const PROVIDER_GLOB_ALL = [PROVIDER_GLOB, "**"].join("/");
 
 /**
  * Default semgrep ruleset. `p/<pack>` packs are FETCHED from the semgrep registry
@@ -23,6 +34,7 @@ export const DEFAULT_SEMGREP_CONFIG = "p/default";
 /** Noise dirs/globs excluded from semgrep scans (vendored code, build output, tests). */
 export const SEMGREP_EXCLUDES = [
   "node_modules",
+  PROVIDER_DIR,
   "dist",
   ".next",
   ".git",
@@ -55,7 +67,8 @@ export function semgrepConfig(env?: Record<string, string | undefined>): string 
 export function isLocalSemgrepConfig(config: string): boolean {
   const c = config.trim();
   if (!c || c === "auto") return false;
-  if (/^[pr]\//.test(c)) return false; // p/<pack>, r/<rule> — registry fetch = egress
+  // p/<pack>, r/<rule>: a registry fetch is egress
+  if (c.startsWith("p/") || c.startsWith("r/")) return false;
   return true;
 }
 
@@ -105,6 +118,8 @@ export interface ScannerDef {
    * uploads manifests and fails on policy; `format` is unused, the branch skips ingest.)
    */
   exitGate?: boolean;
+  /** Exit code that means "nothing here to scan" (osv-scanner: 128), not a failure. */
+  noTargetExit?: number;
 }
 
 export const SCANNERS: ScannerDef[] = [
@@ -120,15 +135,26 @@ export const SCANNERS: ScannerDef[] = [
   {
     id: "trivy",
     bin: "trivy",
-    args: ["fs", "--format", "sarif", "--quiet", "."],
+    args: ["fs", "--skip-dirs", PROVIDER_GLOB, "--format", "sarif", "--quiet", "."],
     format: "sarif",
     // run against the pre-synced local DB; never reach out to update it
     offline: { args: ["--offline-scan", "--skip-db-update"] },
   },
   {
+    // Infrastructure code: Dockerfile and terraform misconfigurations (for example a container that
+    // runs as root). `trivy fs` above looks at dependencies only. Applies only where such files exist.
+    id: "trivy-config",
+    bin: "trivy",
+    args: ["config", "--skip-dirs", PROVIDER_GLOB, "--format", "sarif", "--quiet", "."],
+    format: "sarif",
+    detect: ["*.tf", "Dockerfile"],
+    // the check bundle is fetched from a registry unless told not to
+    offline: { args: ["--skip-check-update"] },
+  },
+  {
     id: "grype",
     bin: "grype",
-    args: ["dir:.", "-o", "sarif", "-q"],
+    args: ["dir:.", "--exclude", PROVIDER_GLOB_ALL, "-o", "sarif", "-q"],
     format: "sarif",
     offline: { env: { GRYPE_DB_AUTO_UPDATE: "false" } },
   },
@@ -151,9 +177,10 @@ export const SCANNERS: ScannerDef[] = [
   {
     id: "osv-scanner",
     bin: "osv-scanner",
-    args: ["--format", "json", "-r", "."],
+    args: ["--format", "json", "--experimental-exclude", `g:${PROVIDER_GLOB}`, "-r", "."],
     format: "osv",
     offline: { args: ["--offline"] },
+    noTargetExit: 128,
   },
   {
     // Socket uploads manifests to socket.dev (cloud) → not air-gappable. The CLI
@@ -169,6 +196,21 @@ export const SCANNERS: ScannerDef[] = [
     exitGate: true,
   },
 ];
+
+/**
+ * The scanner def without its provider-directory exclusion. Used when git tracks files there: a
+ * tracked directory is not downloaded provider output, and skipping it would let a vulnerable file
+ * be committed under that name to avoid every scanner.
+ */
+export function dropProviderExclusion(def: ScannerDef): ScannerDef {
+  const args: string[] = [];
+  for (let i = 0; i < def.args.length; i++) {
+    const isExclusion = def.args[i + 1]?.includes(PROVIDER_DIR) && def.args[i].startsWith("--");
+    if (isExclusion) i++;
+    else args.push(def.args[i]);
+  }
+  return { ...def, args };
+}
 
 /** Every registered scanner id, in registry order — the delegate library. */
 export const SCANNER_IDS: readonly string[] = SCANNERS.map((s) => s.id);
@@ -269,45 +311,41 @@ export interface AirGapVerifyReport {
  * trusting the drop, so a cloud/registry scanner that slipped through is named +
  * fails. Read-only, pure + deterministic.
  */
+function semgrepAirGapRow(id: string, config: string): AirGapVerifyRow {
+  if (isLocalSemgrepConfig(config)) {
+    return { id, ok: true, detail: "local ruleset " + config + " (no registry fetch)" };
+  }
+  const shown = config || DEFAULT_SEMGREP_CONFIG;
+  const detail = "registry config " + shown + " would fetch rules from the registry (egress)";
+  return { id, ok: false, detail };
+}
+
 export function verifyAirGapScanners(
   scanners: ScannerDef[],
   opts: { semgrepConfig?: string } = {},
 ): AirGapVerifyReport {
-  const rows: AirGapVerifyRow[] = [];
-  for (const s of scanners) {
-    if (s.id === "semgrep") {
-      const cfg = (opts.semgrepConfig ?? "").trim();
-      rows.push(
-        isLocalSemgrepConfig(cfg)
-          ? { id: s.id, ok: true, detail: `local ruleset ${cfg} (no registry fetch)` }
-          : {
-              id: s.id,
-              ok: false,
-              detail: `registry config '${cfg || DEFAULT_SEMGREP_CONFIG}' would fetch rules from the registry (egress)`,
-            },
-      );
-      continue;
-    }
+  const rows: AirGapVerifyRow[] = scanners.map((s) => {
+    if (s.id === "semgrep") return semgrepAirGapRow(s.id, (opts.semgrepConfig ?? "").trim());
     if (s.cloudOnly) {
-      rows.push({
-        id: s.id,
-        ok: false,
-        detail: "cloud-only scanner (needs a hosted backend) — must be dropped in air-gap",
-      });
-      continue;
+      const detail = "cloud-only scanner (needs a hosted backend), must be dropped in air-gap";
+      return { id: s.id, ok: false, detail };
     }
-    rows.push({ id: s.id, ok: true, detail: "local scanner (offline DB)" });
-  }
+    return { id: s.id, ok: true, detail: "local scanner (offline DB)" };
+  });
   return { ok: rows.every((r) => r.ok), rows };
 }
 
 const RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
 
+// A constructor, not a literal: lizard misreads this literal and stretches the previous function.
+const ADVISORY_ID = new RegExp(
+  "(CVE-\\d{4}-\\d{1,7}|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})",
+  "i",
+);
+
 /** Cross-scanner dedup key: a CVE/GHSA id if present in the finding, else its name. */
 export function dedupKey(f: SecurityCheckResult): string {
-  const m = /(CVE-\d{4}-\d{1,7}|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})/i.exec(
-    `${f.name} ${f.detail ?? ""}`,
-  );
+  const m = ADVISORY_ID.exec(`${f.name} ${f.detail ?? ""}`);
   return m ? m[1].toUpperCase() : f.name;
 }
 
@@ -355,6 +393,50 @@ export interface ScannerRun {
   id: string;
   status: ScannerStatus;
   findings: number;
+  /** Why a scanner errored: its first stderr line, cleaned. Never set for a scanner that ran. */
+  reason?: string;
+  /** The scanner found nothing to scan (not-applicable). A required scanner does not accept this. */
+  noTarget?: boolean;
+}
+
+const MAX_REASON = 160;
+const FAILURE_LINE = new RegExp(
+  "error|fatal|fail|cannot|unable|denied|not found|no package|invalid",
+  "i",
+);
+const ANSI_SEQUENCE = new RegExp(String.fromCharCode(27) + "\\[[0-9;]*[A-Za-z]", "g");
+
+/** Drop control characters except the newline, so a scanner cannot steer the terminal. */
+function withoutControls(text: string): string {
+  let out = "";
+  for (const ch of text.replace(ANSI_SEQUENCE, "")) {
+    const code = ch.charCodeAt(0);
+    if (code === 10 || (code > 31 && code !== 127)) out += ch;
+  }
+  return out;
+}
+
+/**
+ * One safe line from scanner stderr. Progress lines come first and the cause comes later, so the
+ * line that names a failure wins, else the last line. Control characters are removed, credentials
+ * redacted, and the length capped.
+ */
+export function scannerReason(stderr: string | undefined): string | undefined {
+  const lines = redactSecrets(withoutControls(stderr ?? ""))
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  const line = lines.find((l) => FAILURE_LINE.test(l)) ?? lines[lines.length - 1];
+  return line ? line.slice(0, MAX_REASON) : undefined;
+}
+
+/** Environment for a scanner child. PWD is reset because Go tools trust it over the real directory. */
+export function scannerEnv(
+  base: Record<string, string | undefined>,
+  extra: Record<string, string>,
+  cwd: string,
+): Record<string, string | undefined> {
+  return { ...base, ...extra, PWD: cwd };
 }
 
 /**
@@ -396,6 +478,10 @@ export function scanHealthGate(runs: ScannerRun[], opts: ScanGateOptions = {}): 
   const seen = new Set<string>();
   for (const r of runs) {
     seen.add(r.id);
+    if (r.noTarget && required.has(r.id)) {
+      failures.push(`required scanner ${r.id} found nothing to scan`);
+      continue;
+    }
     if (!NON_RUNNING_STATUSES.includes(r.status)) continue; // ran or not-applicable
     const why = `${r.id} did not run (${r.status})`;
     if (required.has(r.id)) failures.push(`required scanner ${why}`);
@@ -410,9 +496,41 @@ export function scanHealthGate(runs: ScannerRun[], opts: ScanGateOptions = {}): 
 
 export interface ScanDeps {
   resolve(bin: string): Promise<string | null>;
-  run(bin: string, args: string[], timeoutMs?: number): Promise<{ ok: boolean; stdout: string }>;
+  run(bin: string, args: string[], timeoutMs?: number): Promise<ScanResult>;
   hasEnv(name: string): boolean;
   detect(markers: string[]): boolean;
+}
+
+type ScanResult = { ok: boolean; stdout: string; stderr?: string; exitCode?: number };
+
+/**
+ * Turn a scanner's raw result into its run record and findings.
+ *
+ * Most scanners exit non-zero WHEN findings exist, so a non-zero exit alone is not an error: the
+ * output is parsed regardless. But a non-empty output kit CANNOT parse (junk, an error blob, the
+ * wrong format) must NOT be treated as "ran clean", or a broken scanner hides behind a green
+ * verdict. Empty output is "ran/0" only if the process also succeeded. An exit code the scanner
+ * defines as "nothing to scan" is not-applicable, not a failure.
+ */
+function settleRun(
+  s: ScannerDef,
+  res: ScanResult,
+): { run: ScannerRun; findings?: SecurityCheckResult[] } {
+  const reason = scannerReason(res.stderr);
+  if (!res.stdout && s.noTargetExit !== undefined && res.exitCode === s.noTargetExit) {
+    return { run: { id: s.id, status: "not-applicable", findings: 0, reason, noTarget: true } };
+  }
+  if (!res.stdout) {
+    return res.ok
+      ? { run: { id: s.id, status: "ran", findings: 0 } }
+      : { run: { id: s.id, status: "error", findings: 0, reason } };
+  }
+  const outcome = ingestStrict(s.format, res.stdout);
+  if (!outcome.ok) {
+    return { run: { id: s.id, status: "error", findings: 0, reason: reason ?? outcome.reason } };
+  }
+  const run: ScannerRun = { id: s.id, status: "ran", findings: outcome.findings.length };
+  return { run, findings: outcome.findings };
 }
 
 /** Run each applicable+installed scanner, ingest its output, merge into one verdict. */
@@ -460,22 +578,9 @@ export async function runScanners(
       }
       continue;
     }
-    // Most scanners exit non-zero WHEN findings exist, so a non-zero exit alone
-    // is not an error — parse the output regardless. But a non-empty output we
-    // CANNOT parse (junk, an error blob, the wrong format) must NOT be silently
-    // treated as "ran clean": that lets a broken scanner hide behind a green
-    // verdict. Empty output is "ran/0" only if the process also succeeded.
-    if (!res.stdout) {
-      runs.push({ id: s.id, status: res.ok ? "ran" : "error", findings: 0 });
-      continue;
-    }
-    const outcome = ingestStrict(s.format, res.stdout);
-    if (!outcome.ok) {
-      runs.push({ id: s.id, status: "error", findings: 0 });
-      continue;
-    }
-    perScanner.push({ id: s.id, findings: outcome.findings });
-    runs.push({ id: s.id, status: "ran", findings: outcome.findings.length });
+    const settled = settleRun(s, res);
+    runs.push(settled.run);
+    if (settled.findings) perScanner.push({ id: s.id, findings: settled.findings });
   }
   return { merged: mergeFindings(perScanner), runs };
 }

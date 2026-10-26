@@ -193,22 +193,26 @@ describe("text from config files is shown safely", () => {
     assert.equal(shown("x".repeat(500)).length, 80);
   });
 
-  it("an agent file name with an escape sequence cannot reach the output", () => {
-    const root = mkdtempSync(join(tmpdir(), "kit-tri-"));
-    const home = mkdtempSync(join(tmpdir(), "kit-tri-home-"));
-    try {
-      mkdirSync(join(root, ".claude", "agents"), { recursive: true });
-      writeFileSync(
-        join(root, ".claude", "agents", "evil\u001b[2Jname.md"),
-        "---\nname: e\ntools: WebFetch, Read\n---\n",
-      );
-      const text = JSON.stringify(runAgentTrifecta(root, home));
-      assert.ok(!text.includes("\\u001b"));
-    } finally {
-      rmTemp(root);
-      rmTemp(home);
-    }
-  });
+  it(
+    "an agent file name with an escape sequence cannot reach the output",
+    { skip: process.platform === "win32" },
+    () => {
+      const root = mkdtempSync(join(tmpdir(), "kit-tri-"));
+      const home = mkdtempSync(join(tmpdir(), "kit-tri-home-"));
+      try {
+        mkdirSync(join(root, ".claude", "agents"), { recursive: true });
+        writeFileSync(
+          join(root, ".claude", "agents", "evil\u001b[2Jname.md"),
+          "---\nname: e\ntools: WebFetch, Read\n---\n",
+        );
+        const text = JSON.stringify(runAgentTrifecta(root, home));
+        assert.ok(!text.includes("\\u001b"));
+      } finally {
+        rmTemp(root);
+        rmTemp(home);
+      }
+    },
+  );
 
   it("a grant with control characters is shown clean in the detail", () => {
     const root = mkdtempSync(join(tmpdir(), "kit-tri-"));
