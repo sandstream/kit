@@ -161,7 +161,7 @@ export interface ServiceAdapter {
   /**
    * @deprecated Use `getRequiredTools()` instead.
    * Will be removed in kit 2.0.0
-   * See migration guide: docs/MIGRATION_1_5_TO_2_0.md
+   * See migration guide: docs/MIGRATION_GUIDE.md
    */
   requiredTools?: string[];
   
@@ -257,11 +257,11 @@ Publishing is OIDC-only (npm trusted publishing). It runs from `.github/workflow
 
 ### Versioning Migration Documents
 
-Migration guides are provided for each MAJOR version:
+Migration notes for each MAJOR version live in the CHANGELOG, with the longer guide in one file:
 
 ```
 ../CHANGELOG.md
-docs/MIGRATION_2_TO_3.md
+docs/MIGRATION_GUIDE.md
 ```
 
 ### Migration Guide Structure

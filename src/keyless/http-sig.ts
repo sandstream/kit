@@ -1,6 +1,10 @@
 /**
  * kit keyless credentials (Pillar 2 tail) — RFC 9421 HTTP Message Signatures.
  *
+ * EXPERIMENTAL, NOT WIRED: no kit command calls this module yet. The profile schema accepts
+ * `[scope].sign`, but nothing signs an outbound request today, so listing a host there has no effect.
+ * Kept, tested, for when a caller is wired.
+ *
  * "Sign, don't store": instead of carrying a long-lived bearer token, an agent
  * signs each outbound request with its Ed25519 identity (Pillar 1). The server
  * verifies against the agent's PUBLIC key — there is no secret at rest to steal,

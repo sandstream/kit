@@ -11,11 +11,18 @@
 # Dependabot version-updates only run from a committed .github/dependabot.yml on the default
 # branch; there is no repo setting that substitutes for it.
 #
-# SCOPE: github-actions only, matching what the OWASP row claims. The npm ecosystem is
-# deliberately NOT enabled here — kit gates its own dependency changes through
-# `kit triage` (see .github/workflows/triage-deps.yml), and an unreviewed flood of npm bumps
-# would arrive around that gate rather than through it. Add an `npm` entry when that
-# interaction has been designed, not before.
+# SCOPE: github-actions, and npm devDependencies.
+#
+# npm was left out until its interaction with `kit triage` was designed, because an unreviewed
+# flood of bumps would arrive around that gate rather than through it. The design:
+#   - Every npm bump PR changes package-lock.json, so triage-deps.yml runs on it. That gate now
+#     triages each package at the exact version the lockfile adds, scoped packages included
+#     (scripts/lockfile-changed-packages.sh), and fails closed instead of cutting the list short.
+#   - devDependencies only, grouped into one weekly PR, so the gate runs once on one reviewable
+#     diff. Nothing merges on its own: the PR waits for a human like any other.
+#   - Runtime dependencies are NOT bumped by Dependabot. There are exactly four, pinned, and
+#     ADR-0002 plus src/dependency-floor.test.ts govern them; a change there is a reviewed
+#     decision, not a weekly chore.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -39,3 +46,25 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+      timezone: "Etc/UTC"
+    allow:
+      - dependency-type: "development"
+    groups:
+      npm-dev:
+        dependency-type: "development"
+        patterns:
+          - "*"
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "npm"
