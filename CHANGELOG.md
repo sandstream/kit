@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+### Fixed
+
+- **`kit monkey-test` could report a stopped app as running again.** After a stop, the check asked
+  the kernel whether the process group existed and then scanned `/proc` for its members; when the
+  last zombie was reaped in between, the empty scan was read as "still running". It now asks the
+  kernel again before deciding. This was the intermittent `stop escalates to SIGKILL` CI failure.
+
 ### Changed
 
 - **`kit memory pull` accepts your own memory when it holds quotes of injection text.** The
