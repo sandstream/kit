@@ -3,6 +3,7 @@
  * (tracks findings each run) and `kit heal` (re-scans + confirms healing via
  * auto-close). Kept separate so neither command owns the mapping.
  */
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { relative } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
@@ -13,10 +14,19 @@ const TRACK_WARN = new Set(["secrets", "exposure", "supply-chain"]);
 
 /** A root run reconciles legacy findings. A direct subproject run owns a separate batch. */
 export function securitySourceTag(repoRoot: string, scanRoot: string): string {
-  const projectPath = relative(
-    resolveLocalProjectPath(repoRoot),
-    resolveLocalProjectPath(scanRoot),
-  );
+  let projectPath: string;
+  try {
+    projectPath = execFileSync("git", ["rev-parse", "--show-prefix"], {
+      cwd: scanRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .trim()
+      .replaceAll("\\", "/")
+      .replace(/\/+$/, "");
+  } catch {
+    projectPath = relative(resolveLocalProjectPath(repoRoot), resolveLocalProjectPath(scanRoot));
+  }
   if (!projectPath) return "sec";
   const pathId = createHash("sha256").update(projectPath).digest("hex").slice(0, 16);
   return `secsub${pathId}`;

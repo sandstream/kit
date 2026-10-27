@@ -39,6 +39,18 @@ it(
   },
 );
 
+it("uses Git's project prefix when the checkout path has another spelling", () => {
+  const root = mkdtempSync(join(tmpdir(), "kit-finding-git-prefix-"));
+  try {
+    mkdirSync(join(root, "frontend"));
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    assert.equal(securitySourceTag(join(root, "other-spelling"), root), "sec");
+    assert.notEqual(securitySourceTag(join(root, "other-spelling"), join(root, "frontend")), "sec");
+  } finally {
+    rmTemp(root);
+  }
+});
+
 function openFindings(path: string): Array<{ id: string; title: string }> {
   const db = openMemoryDb(path);
   try {
