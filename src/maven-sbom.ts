@@ -1,6 +1,7 @@
 import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
+import { getCurrentProjectRoot, resolveLocalProjectPath } from "./memory/project.js";
 import { SCANNERS, isScannerEnabled, type ScannerDef } from "./scanners.js";
 
 const MAX_DEPTH = 3;
@@ -50,6 +51,83 @@ function mavenProjects(root: string): MavenProject[] {
   return found;
 }
 
+/** Only unconditional project/modules/module entries are in the Maven reactor. */
+function declaredModules(root: string, dir: string): string[] {
+  let xml: string;
+  try {
+    xml = readFileSync(join(root, dir, "pom.xml"), "utf8");
+  } catch {
+    return [];
+  }
+  const tokens = xml.replace(/<!--[\s\S]*?-->/g, "").match(/<[^>]*>|[^<]+/g) ?? [];
+  const stack: string[] = [];
+  const modules: string[] = [];
+  let value = "";
+  for (const token of tokens) {
+    if (!token.startsWith("<")) {
+      if (stack.join("/") === "project/modules/module") value += token;
+      continue;
+    }
+    const tag = token.match(/^<\/?\s*([A-Za-z_][\w:.-]*)/);
+    if (!tag) continue;
+    const name = tag[1].split(":").at(-1)!;
+    if (token.startsWith("</")) {
+      if (stack.join("/") === "project/modules/module" && name === "module" && value.trim()) {
+        modules.push(value.trim());
+      }
+      value = "";
+      if (stack.at(-1) === name) stack.pop();
+      else stack.length = 0;
+    } else if (!/\/\s*>$/.test(token)) {
+      stack.push(name);
+    }
+  }
+  return modules;
+}
+
+function bomSources(root: string, projects: MavenProject[]): Map<string, string> {
+  const byDir = new Map(projects.map((project) => [project.dir, project]));
+  const sources = new Map<string, string>();
+  const visit = (project: MavenProject, bom: string): void => {
+    if (sources.has(project.dir)) return;
+    sources.set(project.dir, bom);
+    for (const module of declaredModules(root, project.dir)) {
+      if (isAbsolute(module)) continue;
+      const path = relative(root, resolve(root, project.dir, module));
+      if (path === ".." || path.startsWith(".." + sep)) continue;
+      const child = byDir.get(path.replaceAll(sep, "/") || ".");
+      if (child) visit(child, bom);
+    }
+  };
+  for (const project of projects) {
+    if (project.bom) visit(project, project.bom);
+  }
+  return sources;
+}
+
+function ancestorSources(
+  root: string,
+  projects: MavenProject[],
+  localSources: Map<string, string>,
+): Map<string, string> {
+  const found = new Map<string, string>();
+  if (localSources.size === projects.length) return found;
+  const scanRoot = resolveLocalProjectPath(root);
+  const repoRoot = resolveLocalProjectPath(getCurrentProjectRoot(root));
+  const within = relative(repoRoot, scanRoot);
+  if (!within || within === ".." || within.startsWith(".." + sep) || isAbsolute(within)) {
+    return found;
+  }
+  const repoSources = bomSources(repoRoot, mavenProjects(repoRoot));
+  for (const project of projects) {
+    if (localSources.has(project.dir)) continue;
+    const path = relative(repoRoot, resolve(scanRoot, project.dir));
+    const source = repoSources.get(path.replaceAll(sep, "/") || ".");
+    if (source) found.set(project.dir, join(repoRoot, source));
+  }
+  return found;
+}
+
 /** State the missing transitive input. Presence is not a vulnerability verdict. */
 export async function checkMavenSbomCoverage(root: string): Promise<SecurityCheckResult> {
   const projects = mavenProjects(root);
@@ -57,7 +135,9 @@ export async function checkMavenSbomCoverage(root: string): Promise<SecurityChec
   if (projects.length === 0) {
     return { category: "supply-chain", name, status: "skip", detail: "no pom.xml found" };
   }
-  const missing = projects.filter((p) => !p.bom);
+  const localSources = bomSources(root, projects);
+  const inheritedSources = ancestorSources(root, projects, localSources);
+  const missing = projects.filter((p) => !localSources.has(p.dir) && !inheritedSources.has(p.dir));
   if (missing.length > 0) {
     const projectWord = missing.length === 1 ? "project" : "projects";
     const firstDirectory = missing[0].dir === "." ? "this directory" : missing[0].dir;
@@ -71,19 +151,32 @@ export async function checkMavenSbomCoverage(root: string): Promise<SecurityChec
       suggestion: `Run ${COMMAND} in ${firstDirectory}. Then run kit scan to check the generated SBOM.`,
     };
   }
+  const bomInputs = new Set([
+    ...projects.flatMap((p) => (p.bom ? [p.bom] : [])),
+    ...inheritedSources.values(),
+  ]);
   return {
     category: "supply-chain",
     name,
     status: "pass",
-    detail: `${projects.length} CycloneDX BOM input(s) available for osv-scanner and grype in kit scan`,
+    detail: `${bomInputs.size} CycloneDX BOM input(s) cover ${projects.length} Maven project(s) for osv-scanner and grype in kit scan`,
   };
 }
 
 /** Give both scanners the BOM path explicitly because target/ is usually gitignored. */
 export function mavenSbomScanners(root: string, delegates?: readonly string[]): ScannerDef[] {
   const result: ScannerDef[] = [];
-  for (const project of mavenProjects(root)) {
-    if (!project.bom) continue;
+  const projects = mavenProjects(root);
+  const localSources = bomSources(root, projects);
+  const inheritedSources = ancestorSources(root, projects, localSources);
+  const inputs = [
+    ...projects.flatMap((project) => (project.bom ? [{ dir: project.dir, bom: project.bom }] : [])),
+    ...[...inheritedSources].map(([dir, bom]) => ({ dir, bom })),
+  ];
+  const seen = new Set<string>();
+  for (const project of inputs) {
+    if (seen.has(project.bom)) continue;
+    seen.add(project.bom);
     const grype = SCANNERS.find((s) => s.id === "grype");
     if (grype && isScannerEnabled("grype", delegates)) {
       result.push({

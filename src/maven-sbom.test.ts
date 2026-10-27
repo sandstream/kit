@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -100,6 +101,92 @@ describe("Maven SBOM coverage", () => {
     try {
       assert.deepEqual(mavenSbomScanners(root), []);
       assert.equal((await checkMavenSbomCoverage(root)).status, "warn");
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("uses a root aggregate BOM for declared Maven modules, but not unrelated POMs", async () => {
+    const root = mavenRepo();
+    writeFileSync(
+      join(root, "pom.xml"),
+      "<project><modules><module>backend</module></modules></project>",
+    );
+    mkdirSync(join(root, "backend"));
+    mkdirSync(join(root, "unrelated"));
+    writeFileSync(join(root, "backend", "pom.xml"), "<project/>");
+    writeFileSync(join(root, "unrelated", "pom.xml"), "<project/>");
+    mkdirSync(join(root, "target"));
+    writeFileSync(join(root, "target", "bom.json"), BOM);
+    try {
+      const row = await checkMavenSbomCoverage(root);
+      assert.equal(row.status, "warn");
+      assert.match(row.detail, /unrelated/);
+      assert.doesNotMatch(row.detail, /backend/);
+      assert.deepEqual(
+        mavenSbomScanners(root, ["grype"]).map((scanner) => scanner.id),
+        ["grype-sbom:."],
+      );
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("accepts a root aggregate BOM when every nested POM is a declared module", async () => {
+    const root = mavenRepo();
+    writeFileSync(
+      join(root, "pom.xml"),
+      "<project><modules><module>backend</module></modules></project>",
+    );
+    mkdirSync(join(root, "backend"));
+    writeFileSync(join(root, "backend", "pom.xml"), "<project/>");
+    mkdirSync(join(root, "target"));
+    writeFileSync(join(root, "target", "bom.json"), BOM);
+    try {
+      assert.equal((await checkMavenSbomCoverage(root)).status, "pass");
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("does not infer aggregate coverage from commented or profile-only modules", async () => {
+    const root = mavenRepo();
+    writeFileSync(
+      join(root, "pom.xml"),
+      "<project><!-- <modules><module>backend</module></modules> -->" +
+        "<profiles><profile><modules><module>backend</module></modules></profile></profiles></project>",
+    );
+    mkdirSync(join(root, "backend"));
+    writeFileSync(join(root, "backend", "pom.xml"), "<project/>");
+    mkdirSync(join(root, "target"));
+    writeFileSync(join(root, "target", "bom.json"), BOM);
+    try {
+      const row = await checkMavenSbomCoverage(root);
+      assert.equal(row.status, "warn");
+      assert.match(row.detail, /backend/);
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("credits a declared subproject with the reactor root's aggregate BOM", async () => {
+    const root = mavenRepo();
+    writeFileSync(
+      join(root, "pom.xml"),
+      "<project><modules><module>backend</module></modules></project>",
+    );
+    mkdirSync(join(root, "backend"));
+    writeFileSync(join(root, "backend", "pom.xml"), "<project/>");
+    mkdirSync(join(root, "target"));
+    writeFileSync(join(root, "target", "bom.json"), BOM);
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    try {
+      assert.equal((await checkMavenSbomCoverage(join(root, "backend"))).status, "pass");
+      const scanners = mavenSbomScanners(join(root, "backend"), ["grype", "osv-scanner"]);
+      assert.equal(scanners.length, 2);
+      const aggregateBom = join(realpathSync(root), "target", "bom.json");
+      assert.equal(scanners[0].args[0], "sbom:" + aggregateBom);
+      assert.ok(scanners[1].args.includes(aggregateBom));
     } finally {
       rmTemp(root);
     }
