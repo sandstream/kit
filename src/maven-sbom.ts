@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
@@ -112,17 +113,26 @@ function ancestorSources(
 ): Map<string, string> {
   const found = new Map<string, string>();
   if (localSources.size === projects.length) return found;
-  const scanRoot = resolveLocalProjectPath(root);
-  const repoRoot = resolveLocalProjectPath(getCurrentProjectRoot(root));
-  const within = relative(repoRoot, scanRoot);
-  if (!within || within === ".." || within.startsWith(".." + sep) || isAbsolute(within)) {
+  let prefix: string;
+  try {
+    prefix = execFileSync("git", ["rev-parse", "--show-prefix"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .trim()
+      .replaceAll("\\", "/")
+      .replace(/\/+$/, "");
+  } catch {
     return found;
   }
+  if (!prefix) return found;
+  const repoRoot = resolveLocalProjectPath(getCurrentProjectRoot(root));
   const repoSources = bomSources(repoRoot, mavenProjects(repoRoot));
   for (const project of projects) {
     if (localSources.has(project.dir)) continue;
-    const path = relative(repoRoot, resolve(scanRoot, project.dir));
-    const source = repoSources.get(path.replaceAll(sep, "/") || ".");
+    const path = project.dir === "." ? prefix : prefix + "/" + project.dir;
+    const source = repoSources.get(path);
     if (source) found.set(project.dir, join(repoRoot, source));
   }
   return found;
