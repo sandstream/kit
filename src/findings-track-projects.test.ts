@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 import type { SecurityCheckResult } from "./check-security.js";
-import { syncSecurityFindings } from "./findings-track.js";
+import { securitySourceTag, syncSecurityFindings } from "./findings-track.js";
 import { openMemoryDb } from "./memory/db.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
@@ -16,6 +16,28 @@ const oldFinding: SecurityCheckResult = {
   detail: "one vulnerable dependency",
 };
 const namedFinding: SecurityCheckResult = { ...oldFinding, name: "npm audit [frontend]" };
+
+it(
+  "uses the same finding source for two paths to one checkout",
+  { skip: process.platform === "win32" },
+  () => {
+    const parent = mkdtempSync(join(tmpdir(), "kit-finding-source-"));
+    const root = join(parent, "repo");
+    const alias = join(parent, "alias");
+    try {
+      mkdirSync(root);
+      mkdirSync(join(root, "frontend"));
+      symlinkSync(root, alias, "dir");
+      assert.equal(securitySourceTag(root, alias), "sec");
+      assert.equal(
+        securitySourceTag(root, join(alias, "frontend")),
+        securitySourceTag(root, join(root, "frontend")),
+      );
+    } finally {
+      rmTemp(parent);
+    }
+  },
+);
 
 function openFindings(path: string): Array<{ id: string; title: string }> {
   const db = openMemoryDb(path);
