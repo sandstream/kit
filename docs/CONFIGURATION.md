@@ -220,15 +220,12 @@ Set up with `kit governance`. Fuller treatment: [`docs/POLICY.md`](POLICY.md).
 
 The project directories of a repository that holds several projects.
 
-**What it buys.** The repo level (git history, hooks) is checked once in the root and each project path is checked as a project of its own, so a root without a manifest is not a verdict about nothing.
+**What it buys.** Kit checks the repo once in the root. It checks each declared project and any root manifest or infrastructure outside those projects. It warns when a project lacks scan inputs or has an unlisted child manifest.
 
 ```toml
 [projects]
 paths = ["backend", "frontend", "infra/prod", "docker"]
 ```
-
-List each directory that has its own manifest. A parent entry does not cover a child manifest.
-Kit warns when a listed directory has no manifest or infrastructure code. Kit also checks root manifests and infrastructure outside the listed directories.
 
 Set up with `kit check`.
 
