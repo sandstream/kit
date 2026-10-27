@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { checkMavenSbomCoverage, mavenSbomScanners } from "./maven-sbom.js";
 import { runScanners } from "./scanners.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
+import { identityOf, sameIdentity } from "./utils/same-file.js";
 
 function mavenRepo(): string {
   const root = mkdtempSync(join(tmpdir(), "kit-maven-sbom-"));
@@ -184,9 +185,11 @@ describe("Maven SBOM coverage", () => {
       assert.equal((await checkMavenSbomCoverage(join(root, "backend"))).status, "pass");
       const scanners = mavenSbomScanners(join(root, "backend"), ["grype", "osv-scanner"]);
       assert.equal(scanners.length, 2);
-      const aggregateBom = join(realpathSync(root), "target", "bom.json");
-      assert.equal(scanners[0].args[0], "sbom:" + aggregateBom);
-      assert.ok(scanners[1].args.includes(aggregateBom));
+      const aggregateBom = join(root, "target", "bom.json");
+      assert.ok(scanners[0].args[0].startsWith("sbom:"));
+      assert.ok(sameIdentity(identityOf(scanners[0].args[0].slice(5)), identityOf(aggregateBom)));
+      const osvInput = scanners[1].args[scanners[1].args.indexOf("-L") + 1];
+      assert.ok(sameIdentity(identityOf(osvInput), identityOf(aggregateBom)));
     } finally {
       rmTemp(root);
     }
