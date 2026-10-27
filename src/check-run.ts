@@ -25,6 +25,7 @@ import {
 } from "./check-hooks.js";
 import { checkWebSearch, type WebSearchStatus } from "./check-web-search.js";
 import { checkSecurity, type SecurityCheckResult, type GateOpts } from "./check-security.js";
+import { checkSecurityWithProjects } from "./check-projects.js";
 import { checkLockFiles, type LockCheckResult } from "./check-lock.js";
 import { checkTests, type TestCheckResult } from "./check-tests.js";
 import { checkDeploy, type DeployCheckResult } from "./check-deploy.js";
@@ -159,8 +160,13 @@ async function upstreamDimension(
 }
 
 /** The security dimension: the scanners, then one row per runtime the project uses. */
-async function securityRows(cwd: string, online: boolean | undefined) {
-  return [...(await checkSecurity(cwd)), ...(await checkRuntimes(cwd, { online }))];
+async function securityRows(
+  cwd: string,
+  online: boolean | undefined,
+  projects: string[] | undefined,
+) {
+  const rows = await checkSecurityWithProjects(cwd, projects, checkSecurity);
+  return [...rows, ...(await checkRuntimes(cwd, { online }))];
 }
 
 export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRunResult> {
@@ -202,7 +208,7 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
     ? await step("deploy config", () => checkDeploy(config.deploy, cwd))
     : [];
   const security = wants("security")
-    ? await step("security scan", () => securityRows(cwd, opts.online))
+    ? await step("security scan", () => securityRows(cwd, opts.online, config.projects?.paths))
     : [];
   const locks = wants("locks") ? await step("lock files", () => checkLockFiles(config, cwd)) : [];
   const upstream = await upstreamDimension(wants("upstream"), step, cwd);

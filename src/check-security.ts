@@ -19,6 +19,7 @@ import {
   PROVIDER_GLOB,
 } from "./scanners.js";
 import { findIac } from "./check-iac-detect.js";
+import type { SecurityLevel } from "./check-projects.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
 import { hasOsvManifest } from "./osv-manifests.js";
 import { unpinnedRequirements } from "./pinned-requirements.js";
@@ -2622,26 +2623,33 @@ function describeFindings(findings: BumblebeeFinding[]): string {
   return labels.length > 3 ? `${shown}; +${labels.length - 3} more` : shown;
 }
 
-async function runPrimarySecurityChecks(root: string): Promise<SecurityCheckResult[]> {
-  const checks = [
-    checkNpmAudit(root),
-    checkPipAudit(root),
-    checkEnvGitignored(root),
-    checkPinnedVersions(root),
-    checkSecretsInCode(root),
-    checkSocket(),
-    checkTrivy(root),
-    checkLicenses(root),
-    checkSemgrep(root),
-    checkBumblebee(root),
-    checkTrivyConfig(root),
-    checkOsvScanner(root),
-    checkMavenAudit(root),
-    checkGuardDog(root),
-    checkAllowScripts(root),
-  ];
-  const lockfileResults = await checkLockfilesCommitted(root);
-  return [...(await Promise.all(checks)), ...lockfileResults];
+async function runPrimarySecurityChecks(
+  root: string,
+  level: SecurityLevel = "all",
+): Promise<SecurityCheckResult[]> {
+  // Started only when asked for, so a project run does not scan git history again.
+  const repo =
+    level === "project"
+      ? []
+      : [checkEnvGitignored(root), checkSecretsInCode(root), checkSocket(), checkBumblebee(root)];
+  const project =
+    level === "repo"
+      ? []
+      : [
+          checkNpmAudit(root),
+          checkPipAudit(root),
+          checkPinnedVersions(root),
+          checkTrivy(root),
+          checkLicenses(root),
+          checkSemgrep(root),
+          checkTrivyConfig(root),
+          checkOsvScanner(root),
+          checkMavenAudit(root),
+          checkGuardDog(root),
+          checkAllowScripts(root),
+        ];
+  const lockfileResults = level === "repo" ? [] : await checkLockfilesCommitted(root);
+  return [...(await Promise.all([...project, ...repo])), ...lockfileResults];
 }
 
 async function appendHostSecurityChecks(
@@ -2704,9 +2712,13 @@ function attachRuleCitations(results: SecurityCheckResult[]): SecurityCheckResul
  * Run all security checks against the governed root. Every filesystem read and scanner spawn
  * receives this root; callers may therefore audit another project without changing process cwd.
  */
-export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]> {
+export async function checkSecurity(
+  cwd?: string,
+  level: SecurityLevel = "all",
+): Promise<SecurityCheckResult[]> {
   const root = cwd ?? process.cwd();
-  const results = await runPrimarySecurityChecks(root);
+  const results = await runPrimarySecurityChecks(root, level);
+  if (level === "project") return attachRuleCitations(results);
   await appendHostSecurityChecks(results, root);
   return attachRuleCitations(await appendProjectSecurityChecks(results, root));
 }
