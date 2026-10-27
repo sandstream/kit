@@ -2,6 +2,9 @@
 
 ### Security
 
+- **Maven dependency scans now name their partial coverage.** A `pom.xml` without a valid CycloneDX
+  `target/bom.json` gets a warning and the aggregate BOM command. `kit scan` passes an existing BOM
+  directly to osv-scanner and grype, even when `target/` is ignored by git. Kit does not run Maven.
 - **An agent could approve its own operation.** `kit policy approve` signed an approval token with no
   person present: run with no terminal, as an agent's tool call runs, it minted a token that
   `requestApproval` honors for any identity in the org trust anchor. It now refuses unless stdin and

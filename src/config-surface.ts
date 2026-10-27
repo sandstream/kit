@@ -132,7 +132,7 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
   scan: {
     purpose:
       "Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles) and the client-exposed env allowlist.",
-    buys: "The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it.",
+    buys: "The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it. For Maven, kit scan reads a generated target/bom.json with osv-scanner and grype. Generate it with mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom. Kit does not run Maven automatically.",
     example:
       '[scan]\nguarddog = true\ndelegates = ["osv-scanner", "trivy"]\nimages = ["ghcr.io/acme/api:1.4.2"]',
     command: "kit scan --list-delegates",

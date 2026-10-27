@@ -19,6 +19,7 @@ import {
   PROVIDER_GLOB,
 } from "./scanners.js";
 import { findIac } from "./check-iac-detect.js";
+import { checkMavenSbomCoverage } from "./maven-sbom.js";
 import type { SecurityLevel } from "./check-projects.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
 import { hasOsvManifest } from "./osv-manifests.js";
@@ -2645,6 +2646,7 @@ async function runPrimarySecurityChecks(
           checkTrivyConfig(root),
           checkOsvScanner(root),
           checkMavenAudit(root),
+          checkMavenSbomCoverage(root),
           checkGuardDog(root),
           checkAllowScripts(root),
         ];
