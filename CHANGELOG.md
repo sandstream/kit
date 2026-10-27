@@ -18,6 +18,8 @@
 
 ### Fixed
 
+- **A check inside one project could close findings from the repo root.** Both runs used the same PAL source key. Direct project runs now use a stable path-specific source key. The next root run still closes old unnamed findings when named findings replace them.
+
 - **`trivy config (IaC)` no longer skips a repo whose Dockerfiles and Terraform sit below the root.** It looked for a Dockerfile, a compose file or a `.tf` file in the root only, said "no Dockerfile/Compose/Terraform found" and skipped, while `docker/` and `infra/` held five Dockerfiles and Terraform for three environments. In one repo that hid a container running as root in production for months. It now looks three levels down (not in `node_modules`, `.terraform`, `vendor` or build output), scans the tree, and skips downloaded provider binaries. The skip text says it looked three levels deep.
 
 - **`kit triage skill` failed real skills on ordinary words, and never read their scripts.** Its

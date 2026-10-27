@@ -220,7 +220,7 @@ Set up with `kit governance`. Fuller treatment: [`docs/POLICY.md`](POLICY.md).
 
 The project directories of a repository that holds several projects.
 
-**What it buys.** Kit checks the repo once in the root. It checks each declared project and any root manifest or infrastructure outside those projects. It warns when a project lacks scan inputs or has an unlisted child manifest.
+**What it buys.** Kit checks the repo once in the root. It checks each declared project and any root manifest or infrastructure outside those projects. It warns when a project lacks scan inputs or has an unlisted child manifest. The next root run closes old unnamed findings when named project findings replace them. A direct run inside one project tracks its own findings.
 
 ```toml
 [projects]

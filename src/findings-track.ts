@@ -3,10 +3,34 @@
  * (tracks findings each run) and `kit heal` (re-scans + confirms healing via
  * auto-close). Kept separate so neither command owns the mapping.
  */
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { relative } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import type { SyncFinding } from "./memory/pal.js";
+import { resolveLocalProjectPath } from "./memory/project.js";
 
 const TRACK_WARN = new Set(["secrets", "exposure", "supply-chain"]);
+
+/** A root run reconciles legacy findings. A direct subproject run owns a separate batch. */
+export function securitySourceTag(repoRoot: string, scanRoot: string): string {
+  let projectPath: string;
+  try {
+    projectPath = execFileSync("git", ["rev-parse", "--show-prefix"], {
+      cwd: scanRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .trim()
+      .replaceAll("\\", "/")
+      .replace(/\/+$/, "");
+  } catch {
+    projectPath = relative(resolveLocalProjectPath(repoRoot), resolveLocalProjectPath(scanRoot));
+  }
+  if (!projectPath) return "sec";
+  const pathId = createHash("sha256").update(projectPath).digest("hex").slice(0, 16);
+  return `secsub${pathId}`;
+}
 
 /** Findings worth acting on: fails always, warns only in security-relevant
  *  categories (not every warn — avoids ledger/heal noise). */
@@ -74,9 +98,13 @@ export async function syncSecurityFindings(
     const scope = getCurrentProjectRoot();
     const db = openMemoryDb();
     try {
-      const r = palSyncFindings(db, "sec", actionableFindings(results).map(securityFindingToSync), {
-        scope,
-      });
+      const sourceTag = securitySourceTag(scope, process.cwd());
+      const r = palSyncFindings(
+        db,
+        sourceTag,
+        actionableFindings(results).map(securityFindingToSync),
+        { scope },
+      );
       // Advisories reconcile under their OWN source tag. palSyncFindings closes every
       // row of its tag that is absent from the batch, so folding advisories into "sec"
       // would make each sync close the other's items on every run.

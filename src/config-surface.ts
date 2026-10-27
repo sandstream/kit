@@ -119,7 +119,7 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
   },
   projects: {
     purpose: "The project directories of a repository that holds several projects.",
-    buys: "Kit checks the repo once in the root. It checks each declared project and any root manifest or infrastructure outside those projects. It warns when a project lacks scan inputs or has an unlisted child manifest.",
+    buys: "Kit checks the repo once in the root. It checks each declared project and any root manifest or infrastructure outside those projects. It warns when a project lacks scan inputs or has an unlisted child manifest. The next root run closes old unnamed findings when named project findings replace them. A direct run inside one project tracks its own findings.",
     example: '[projects]\npaths = ["backend", "frontend", "infra/prod", "docker"]',
     command: "kit check",
   },
