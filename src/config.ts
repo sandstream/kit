@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import { parse } from "smol-toml";
 import { z } from "zod";
 import { warnUnknownConfigKeys } from "./config-unknown-keys.js";
+import { ContextSchema } from "./config-context-schema.js";
+import { ProjectsSchema, type ProjectsConfig } from "./projects-config.js";
 
 /**
  * A `.kit.toml` that exists but is unparseable or fails schema validation. Tagged so the
@@ -460,6 +462,7 @@ export interface kitConfig {
   agent_config?: AgentConfigConfig;
   /** Per-project CLI context lock (account+project per tool). */
   context?: ContextConfig;
+  projects?: ProjectsConfig;
   /** Install-time supply-chain triage settings (`kit supply-chain`). */
   supply_chain?: { internal_scopes?: string[] };
   /** `kit scan` / `kit check` scanner settings. `tooling` = an Infisical project to
@@ -808,6 +811,7 @@ export const KNOWN_SECTIONS = new Set([
   "setup",
   "env",
   "context",
+  "projects",
   "memory",
   "update",
   "scan", // [scan.tooling] — vault-backed scanner tokens (#65)
@@ -849,58 +853,8 @@ export const kitConfigSchema = z
       .passthrough()
       .optional(),
     agent_config: AgentConfigSchema,
-    context: z
-      .object({
-        gcloud: z
-          .object({
-            account: z.string().optional(),
-            project: z.union([z.string(), z.array(z.string())]).optional(),
-            config: z.string().optional(),
-            region: z.string().optional(),
-          })
-          .passthrough()
-          .optional(),
-        vercel: z
-          .object({
-            team: z.string().optional(),
-            project: z.string().optional(),
-            user: z.string().optional(),
-          })
-          .passthrough()
-          .optional(),
-        github: z
-          .object({
-            org: z.string().optional(),
-            remote: z.string().optional(),
-            user: z.string().optional(),
-          })
-          .passthrough()
-          .optional(),
-        convex: z.object({ account: z.string().optional() }).passthrough().optional(),
-        gitlab: z
-          .object({ group: z.string().optional(), remote: z.string().optional() })
-          .passthrough()
-          .optional(),
-        bitbucket: z
-          .object({ workspace: z.string().optional(), remote: z.string().optional() })
-          .passthrough()
-          .optional(),
-        ssh: z
-          .object({
-            identity: z.string().optional(),
-            fingerprint: z.string().optional(),
-            host_alias: z.string().optional(),
-          })
-          .passthrough()
-          .optional(),
-        git: z.object({ email: z.string().optional() }).passthrough().optional(),
-        npm: z.object({ registry: z.string().optional() }).passthrough().optional(),
-        keycloak: z.object({ realm: z.string().optional() }).passthrough().optional(),
-        auth0: z.object({ tenant: z.string().optional() }).passthrough().optional(),
-        clerk: z.object({ env: z.string().optional() }).passthrough().optional(),
-      })
-      .passthrough()
-      .optional(),
+    context: ContextSchema,
+    projects: ProjectsSchema.optional(),
     supply_chain: z
       .object({ internal_scopes: z.array(z.string()).optional() })
       .passthrough()
