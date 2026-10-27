@@ -178,7 +178,9 @@ export async function cmdSupplyChain(): Promise<boolean> {
 export async function cmdAgentAudit(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
   const { runAgentAudit } = await import("../agent-audit.js");
-  const results = runAgentAudit(process.cwd());
+  const { runAgentTrifecta } = await import("../agent-trifecta.js");
+  const { homedir } = await import("node:os");
+  const results = [...runAgentAudit(process.cwd()), ...runAgentTrifecta(process.cwd(), homedir())];
   const fails = results.filter((r) => r.status === "fail").length;
 
   if (jsonMode) {
@@ -187,7 +189,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
   }
 
   console.log(
-    `${c.bold}kit agent-audit${c.reset}  ${c.dim}agent/MCP configs + git hooks${c.reset}`,
+    `${c.bold}kit agent-audit${c.reset}  ${c.dim}agent/MCP configs + git hooks + lethal trifecta${c.reset}`,
   );
   for (const r of results) {
     const mark =

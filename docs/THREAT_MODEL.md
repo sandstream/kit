@@ -351,6 +351,21 @@ sandbox contains what happens _below_ the tool boundary. `kit doctor` will warn
 scope-bound egress gate — the exact gap that became the escape hatch — but a green
 kit is a governed tool boundary, never a guarantee of containment.
 
+## The lethal trifecta in the agent setup
+
+An agent is open to prompt injection when one context holds three things at once: it reads input an
+outsider can write (a web page, a mail, an issue), it can read private data (files, secrets, a
+database), and it can send data out (a web request, a network command, a chat post). Language models
+cannot tell data from instructions, so the fix is structural: remove one leg, or split the work over
+two agents with different tools and a strict, validated message between them.
+
+`kit agent-audit` reports each unit (the main session, and each subagent in `.claude/agents`) that
+holds all three legs in its declared grants, and names the grants. Honest limits: it sees declared
+grants, not what an approval prompt or auto mode decides at run time; MCP servers are placed by name
+and an unplaced one is listed as unclassified; and it does not see what a hijacked agent does below
+its tools, which is the boundary this document already draws. Internal damage without a way out (an
+agent that deletes tables) is not covered by the egress leg and is not checked yet.
+
 ## Out of scope (and why)
 
 - **LLM-router / orchestrator features.** kit is not Ruflo / Gas Town.

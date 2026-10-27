@@ -90,6 +90,8 @@
 - **`kit scan` runs trivy in config mode when the repo has a `.tf` file or a Dockerfile.** The new delegate `trivy-config` reports misconfigurations such as a container that runs as root (DS-0002). It applies only where such files exist (up to three levels down, not in `node_modules`, `.terraform` or `vendor`). Air gap passes `--skip-check-update`.
 - **A scanner that errors now says why.** `kit scan` and `kit scan --json` carry a `reason` on the run: the stderr line that names the failure (credentials redacted, control characters removed, 160 characters at most), or the parse error when the output was not valid.
 
+- **`kit agent-audit` checks the lethal trifecta.** An agent that reads text an outsider can write, can read private data and can send data out in one context can be steered by that text. The new rows `lethal trifecta: main session` and `lethal trifecta: agent <name>` warn when one unit holds all three legs, name the grants that hold each leg, and suggest removing the way out or splitting the work over two agents with different tools. It reads permission rules and the `tools` line of `.claude/agents/*.md` (project and user), never a value from a config file. MCP servers are placed by name; a grant it cannot place is listed as unclassified and never passed. Limits: approvals and auto mode decided at run time are not visible, and a deny rule with an argument (for example `Bash(curl:*)`) is not applied.
+
 - **`kit check --category security` scans agent transcripts for credentials.** A key pasted into a
   conversation is stored in the transcript and replayed into every later prompt. The new row
   `agent transcripts` is a high-severity warning that names the files and says to rotate and purge.
