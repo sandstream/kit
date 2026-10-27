@@ -2,6 +2,14 @@
 
 ### Security
 
+- **`claude plugin install` passed the install gate.** A Claude Code plugin's hooks module runs inside
+  the agent and can drop prompts, submit text as the user and send billed model requests, yet
+  `kit gate-bash` let `claude plugin install … --marketplace <repo>` and
+  `claude plugin marketplace add <repo>` through silently while it gated `npx skills add`. Adding a
+  marketplace is now triaged like `skills add`: a GitHub repo becomes a `github:` triage ref, a local
+  path is the user's own code, and any other source (another host, a URL to a `marketplace.json`)
+  is blocked as unverifiable. Installing from a marketplace added earlier is not re-gated. `/plugin
+  install` typed inside Claude Code never reaches a Bash hook and is not covered.
 - **An agent could approve its own operation.** `kit policy approve` signed an approval token with no
   person present: run with no terminal, as an agent's tool call runs, it minted a token that
   `requestApproval` honors for any identity in the org trust anchor. It now refuses unless stdin and
