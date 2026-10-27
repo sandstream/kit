@@ -21,7 +21,7 @@ import { redactSecrets } from "./utils/redactSecrets.js";
  */
 export const PROVIDER_DIR = ".terraform/providers";
 // Built from parts: a literal slash-star-star inside a string is read as a comment start by lizard.
-const PROVIDER_GLOB = ["**", PROVIDER_DIR].join("/");
+export const PROVIDER_GLOB = ["**", PROVIDER_DIR].join("/");
 const PROVIDER_GLOB_ALL = [PROVIDER_GLOB, "**"].join("/");
 
 /**
