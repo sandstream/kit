@@ -99,7 +99,7 @@ describe("checkSecurityWithProjects, the rows", () => {
     }
   });
 
-  it("keeps the root repo-level rows as they are and has no wrong-place row of its own", async () => {
+  it("keeps the root repo-level rows and reports an unscanned project in scope", async () => {
     const root = repo(["a"]);
     try {
       const r = recorder({
@@ -110,7 +110,8 @@ describe("checkSecurityWithProjects, the rows", () => {
       const out = await checkSecurityWithProjects(root, ["a"], r.run);
       assert.ok(out.some((x) => x.name === "secrets scan"));
       assert.equal(out.filter((x) => x.name === "scan scope").length, 1);
-      assert.equal(out.find((x) => x.name === "scan scope")?.status, "pass");
+      assert.equal(out.find((x) => x.name === "scan scope")?.status, "warn");
+      assert.match(out.find((x) => x.name === "scan scope")?.detail ?? "", /not fully scanned: a/);
     } finally {
       rmTemp(root);
     }
@@ -169,6 +170,132 @@ describe("checkSecurityWithProjects, the scope row", () => {
       const r = recorder({ all: [row("x", "pass")], repo: [], project: [] });
       await checkSecurityWithProjects(root, [], r.run);
       assert.deepEqual(r.calls, [{ dir: root, level: "all" }]);
+    } finally {
+      rmTemp(root);
+    }
+  });
+});
+
+describe("checkSecurityWithProjects, coverage the review asked for", () => {
+  it("warns about a project where every scanner skipped, instead of listing it as covered", async () => {
+    const root = repo(["empty", "real"]);
+    try {
+      const run = async (dir: string, level: SecurityLevel) =>
+        level === "project" && dir.endsWith("empty")
+          ? [row("npm audit", "skip", "no package.json found")]
+          : level === "project"
+            ? [row("npm audit", "pass")]
+            : [];
+      const out = await checkSecurityWithProjects(root, ["empty", "real"], run);
+      const w = out.find((x) => x.name === "nothing scanned [empty]");
+      assert.equal(w?.status, "warn");
+      assert.ok(!out.some((x) => x.name === "nothing scanned [real]"));
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("also runs the project level in the root when the root has a manifest of its own", async () => {
+    const root = repo(["backend"], ["package.json"]);
+    try {
+      const r = recorder({ all: [], repo: [], project: [row("npm audit", "warn", "1 low")] });
+      const out = await checkSecurityWithProjects(root, ["backend"], r.run);
+      assert.ok(r.calls.some((c) => c.dir === root && c.level === "project"));
+      assert.ok(out.some((x) => x.name === "npm audit"));
+      assert.ok(out.some((x) => x.name === "npm audit [backend]"));
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("also runs it in the root when the root holds infrastructure code", async () => {
+    const root = repo(["backend"], ["Dockerfile"]);
+    try {
+      const r = recorder({ all: [], repo: [], project: [row("trivy config (IaC)", "pass")] });
+      await checkSecurityWithProjects(root, ["backend"], r.run);
+      assert.ok(r.calls.some((c) => c.dir === root && c.level === "project"));
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("does not run it in a root that has neither", async () => {
+    const root = repo(["backend"]);
+    try {
+      const r = recorder({ all: [], repo: [], project: [row("npm audit", "pass")] });
+      await checkSecurityWithProjects(root, ["backend"], r.run);
+      assert.ok(!r.calls.some((c) => c.dir === root && c.level === "project"));
+    } finally {
+      rmTemp(root);
+    }
+  });
+});
+
+describe("checkSecurityWithProjects, remaining coverage paths", () => {
+  it("runs the extra project checks in every project and names them by path", async () => {
+    const root = repo(["frontend"]);
+    try {
+      const r = recorder({ all: [], repo: [], project: [row("npm audit", "pass")] });
+      const seen: string[] = [];
+      const extras = async (dir: string) => {
+        seen.push(dir);
+        return [row("built bundle secrets", "pass"), row("client-exposed env names", "skip")];
+      };
+      const out = await checkSecurityWithProjects(root, ["frontend"], r.run, extras);
+      assert.deepEqual(seen, [join(root, "frontend")]);
+      assert.ok(out.some((x) => x.name === "built bundle secrets [frontend]"));
+      assert.ok(!out.some((x) => x.name.startsWith("client-exposed")));
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("a project that is the parent of a listed path is not covered by it", async () => {
+    const root = repo(["services/api"]);
+    writeFileSync(join(root, "services", "package.json"), "{}");
+    try {
+      const r = recorder({ all: [], repo: [], project: [row("npm audit", "pass")] });
+      const out = await checkSecurityWithProjects(root, ["services/api"], r.run);
+      const scope = out.find((x) => x.name === "scan scope");
+      assert.equal(scope?.status, "warn");
+      assert.match(scope?.detail ?? "", /services/);
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("does not treat a nested manifest as covered by its listed parent", async () => {
+    const root = repo(["services/api"], ["services/package.json"]);
+    writeFileSync(join(root, "services", "api", "package.json"), "{}");
+    try {
+      const r = recorder({ all: [], repo: [], project: [row("npm audit", "pass")] });
+      const out = await checkSecurityWithProjects(root, ["services"], r.run);
+      const scope = out.find((x) => x.name === "scan scope");
+      assert.equal(scope?.status, "warn");
+      assert.match(scope?.detail ?? "", /services\/api/);
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("runs the root project scan for infrastructure outside the listed paths", async () => {
+    const root = repo(["frontend", "docker"], ["docker/Dockerfile"]);
+    try {
+      const r = recorder({ all: [], repo: [], project: [row("trivy config (IaC)", "pass")] });
+      await checkSecurityWithProjects(root, ["frontend"], r.run);
+      assert.ok(r.calls.some((c) => c.dir === root && c.level === "project"));
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("warns when a declared project has no manifest even if an unrelated scanner passes", async () => {
+    const root = repo(["empty"]);
+    try {
+      const r = recorder({ all: [], repo: [], project: [row("semgrep", "pass")] });
+      const out = await checkSecurityWithProjects(root, ["empty"], r.run);
+      assert.ok(out.some((x) => x.name === "manifest scope [empty]" && x.status === "warn"));
+      assert.equal(out.find((x) => x.name === "scan scope")?.status, "warn");
     } finally {
       rmTemp(root);
     }

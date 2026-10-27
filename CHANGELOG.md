@@ -86,6 +86,8 @@
 ### Added
 
 - **`kit check --category security` uses `[projects] paths`.** The repo level (secrets in git history, ignore rules, host, hooks) runs once in the root, and the project level (npm audit, osv-scanner, licences, install scripts, trivy fs and config, lockfiles) runs once per declared path, so a root without a manifest no longer gives "this scan looked in the wrong place" rows. Each project row carries its path in its name (`npm audit [frontend]`), so the same check in two projects is two findings and a run opens and closes only its own records. Project skips are not listed. The `scan scope` row says what was covered, any path that was refused, and any project below the root that is not listed. Without `[projects]` nothing changes.
+  Kit also checks root manifests and infrastructure outside the listed paths. Kit warns when a listed path lacks scan inputs or contains an unlisted child manifest.
+  Kit runs Semgrep once at the repo root and checks client exposure in every listed project.
 
 - **`[projects] paths` in `.kit.toml` names the project directories of a repository that holds several.** It is read and validated now, and `kit check` will use it to check the repo level once in the root and each path as a project of its own (a later change). A path must be a relative directory inside the repository: an absolute path or `..` is a config error, and a path that does not exist, is not a directory or is a symlink out of the repository is refused with its reason. The scope is declared, never guessed. The `[context]` schema moved to its own module to keep `config.ts` under its size baseline.
 

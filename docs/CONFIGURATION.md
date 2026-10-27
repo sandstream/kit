@@ -227,6 +227,9 @@ The project directories of a repository that holds several projects.
 paths = ["backend", "frontend", "infra/prod", "docker"]
 ```
 
+List each directory that has its own manifest. A parent entry does not cover a child manifest.
+Kit warns when a listed directory has no manifest or infrastructure code. Kit also checks root manifests and infrastructure outside the listed directories.
+
 Set up with `kit check`.
 
 ## scan

@@ -2632,6 +2632,7 @@ async function runPrimarySecurityChecks(
     level === "project"
       ? []
       : [checkEnvGitignored(root), checkSecretsInCode(root), checkSocket(), checkBumblebee(root)];
+  if (level !== "project") repo.push(checkSemgrep(root));
   const project =
     level === "repo"
       ? []
@@ -2641,7 +2642,6 @@ async function runPrimarySecurityChecks(
           checkPinnedVersions(root),
           checkTrivy(root),
           checkLicenses(root),
-          checkSemgrep(root),
           checkTrivyConfig(root),
           checkOsvScanner(root),
           checkMavenAudit(root),
