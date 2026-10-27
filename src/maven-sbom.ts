@@ -59,14 +59,16 @@ export async function checkMavenSbomCoverage(root: string): Promise<SecurityChec
   }
   const missing = projects.filter((p) => !p.bom);
   if (missing.length > 0) {
+    const projectWord = missing.length === 1 ? "project" : "projects";
+    const firstDirectory = missing[0].dir === "." ? "this directory" : missing[0].dir;
     return {
       category: "supply-chain",
       name,
       status: "warn",
       severity: "high",
       didNotRun: true,
-      detail: `pom.xml lists direct dependencies only; ${missing.length} Maven project(s) lack a valid CycloneDX target/bom.json: ${missing.map((p) => p.dir).join(", ")}`,
-      suggestion: `In ${missing[0].dir}, run: ${COMMAND}. Then run kit scan to check the generated SBOM.`,
+      detail: `pom.xml lists direct dependencies only. ${missing.length} Maven ${projectWord} lack a valid CycloneDX target/bom.json: ${missing.map((p) => p.dir).join(", ")}. Run ${COMMAND} in each listed directory, then run kit scan.`,
+      suggestion: `Run ${COMMAND} in ${firstDirectory}. Then run kit scan to check the generated SBOM.`,
     };
   }
   return {

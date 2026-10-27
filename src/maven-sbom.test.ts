@@ -28,6 +28,7 @@ describe("Maven SBOM coverage", () => {
       const row = await checkMavenSbomCoverage(root);
       assert.equal(row.status, "warn");
       assert.match(row.detail, /direct dependencies only/i);
+      assert.match(row.detail, /mvn org\.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom/);
       assert.match(
         row.suggestion ?? "",
         /mvn org\.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom/,
