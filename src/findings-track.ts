@@ -7,12 +7,16 @@ import { createHash } from "node:crypto";
 import { relative } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import type { SyncFinding } from "./memory/pal.js";
+import { resolveLocalProjectPath } from "./memory/project.js";
 
 const TRACK_WARN = new Set(["secrets", "exposure", "supply-chain"]);
 
 /** A root run reconciles legacy findings. A direct subproject run owns a separate batch. */
-function securitySourceTag(repoRoot: string, scanRoot: string): string {
-  const projectPath = relative(repoRoot, scanRoot);
+export function securitySourceTag(repoRoot: string, scanRoot: string): string {
+  const projectPath = relative(
+    resolveLocalProjectPath(repoRoot),
+    resolveLocalProjectPath(scanRoot),
+  );
   if (!projectPath) return "sec";
   const pathId = createHash("sha256").update(projectPath).digest("hex").slice(0, 16);
   return `secsub${pathId}`;
