@@ -85,6 +85,8 @@
 
 ### Added
 
+- **`[projects] paths` in `.kit.toml` names the project directories of a repository that holds several.** It is read and validated now, and `kit check` will use it to check the repo level once in the root and each path as a project of its own (a later change). A path must be a relative directory inside the repository: an absolute path or `..` is a config error, and a path that does not exist, is not a directory or is a symlink out of the repository is refused with its reason. The scope is declared, never guessed. The `[context]` schema moved to its own module to keep `config.ts` under its size baseline.
+
 - `kit context check` reports every declared `[context]` section or key that no check reads as `unchecked` and exits non-zero. A misspelled key or an unsupported tool no longer reads as a lock that holds.
 - `[context.gcloud] project` accepts a list of exact project names. The live project must equal one of them. A pattern is not supported, since it would also match a project such as `<name>-prod-old`.
 - `[context.terraform]` locks the state backend `bucket` and `prefix` and the `workspace`, read from `.terraform/` without running terraform. `dir` selects a subdirectory and must stay inside the repository, also through a symlink.

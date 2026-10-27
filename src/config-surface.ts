@@ -117,6 +117,12 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
       '[context.gcloud]\naccount = "me@example.com"\nproject = ["acme-dev", "acme-prod"]\n\n[context.terraform]\nbucket = "acme-state-dev"\nworkspace = "dev"',
     command: "kit context check",
   },
+  projects: {
+    purpose: "The project directories of a repository that holds several projects.",
+    buys: "The repo level (git history, hooks) is checked once in the root and each project path is checked as a project of its own, so a root without a manifest is not a verdict about nothing.",
+    example: '[projects]\npaths = ["backend", "frontend", "infra/prod", "docker"]',
+    command: "kit check",
+  },
   supply_chain: {
     purpose: "Install-time triage settings — notably which package scopes count as internal.",
     buys: "A first-party scope is not triaged as an unknown third-party package, so the gate stops crying wolf on your own code.",
