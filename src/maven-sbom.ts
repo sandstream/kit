@@ -1,9 +1,18 @@
 import { execFileSync } from "node:child_process";
-import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+} from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { getCurrentProjectRoot, resolveLocalProjectPath } from "./memory/project.js";
 import { SCANNERS, isScannerEnabled, type ScannerDef } from "./scanners.js";
+import { identityOf, sameIdentity } from "./utils/same-file.js";
 
 const MAX_DEPTH = 3;
 const SKIP = new Set(["node_modules", ".git", "target", "dist", "build", "vendor", ".m2"]);
@@ -15,15 +24,23 @@ interface MavenProject {
 }
 
 function safeBom(root: string, relativePath: string): boolean {
+  let fd: number | undefined;
   try {
     const absolute = join(root, relativePath);
-    if (!lstatSync(absolute).isFile()) return false;
-    const within = relative(realpathSync(root), realpathSync(absolute));
+    const flags = constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0);
+    fd = openSync(absolute, flags);
+    const opened = fstatSync(fd, { bigint: true });
+    if (!opened.isFile()) return false;
+    const resolved = realpathSync(absolute);
+    const within = relative(realpathSync(root), resolved);
     if (within === ".." || within.startsWith(`..${sep}`) || isAbsolute(within)) return false;
-    const bom = JSON.parse(readFileSync(absolute, "utf8"));
+    if (!sameIdentity(opened, identityOf(resolved))) return false;
+    const bom = JSON.parse(readFileSync(fd, "utf8"));
     return bom?.bomFormat === "CycloneDX" && typeof bom.specVersion === "string";
   } catch {
     return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
@@ -60,11 +77,12 @@ function declaredModules(root: string, dir: string): string[] {
   } catch {
     return [];
   }
-  const tokens = xml.replace(/<!--[\s\S]*?-->/g, "").match(/<[^>]*>|[^<]+/g) ?? [];
+  const tokens = xml.match(/<!--[\s\S]*?-->|<[^>]*>|[^<]+/g) ?? [];
   const stack: string[] = [];
   const modules: string[] = [];
   let value = "";
   for (const token of tokens) {
+    if (token.startsWith("<!--")) continue;
     if (!token.startsWith("<")) {
       if (stack.join("/") === "project/modules/module") value += token;
       continue;
