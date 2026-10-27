@@ -18,6 +18,8 @@
 
 ### Fixed
 
+- **`trivy config (IaC)` no longer skips a repo whose Dockerfiles and Terraform sit below the root.** It looked for a Dockerfile, a compose file or a `.tf` file in the root only, said "no Dockerfile/Compose/Terraform found" and skipped, while `docker/` and `infra/` held five Dockerfiles and Terraform for three environments. In one repo that hid a container running as root in production for months. It now looks three levels down (not in `node_modules`, `.terraform`, `vendor` or build output), scans the tree, and skips downloaded provider binaries. The skip text says it looked three levels deep.
+
 - **`kit triage skill` failed real skills on ordinary words, and never read their scripts.** Its
   secret scan matched bare substrings, so a skill saying "ask-first", "task-" or "risk-" was
   CRITICAL for `sk-` and `kit triage check-skills` refused the commit. It now matches the anchored
@@ -82,6 +84,7 @@
   failed on Linux CI and passed locally.
 
 ### Added
+
 - `kit context check` reports every declared `[context]` section or key that no check reads as `unchecked` and exits non-zero. A misspelled key or an unsupported tool no longer reads as a lock that holds.
 - `[context.gcloud] project` accepts a list of exact project names. The live project must equal one of them. A pattern is not supported, since it would also match a project such as `<name>-prod-old`.
 - `[context.terraform]` locks the state backend `bucket` and `prefix` and the `workspace`, read from `.terraform/` without running terraform. `dir` selects a subdirectory and must stay inside the repository, also through a symlink.

@@ -11,7 +11,14 @@ import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { classifyGuardDog } from "./guarddog.js";
 import { depsHashFor, loadGuardDogCache, saveGuardDogCache } from "./guarddog-cache.js";
-import { buildSemgrepArgs, semgrepConfig, isAirGap, isLocalSemgrepConfig } from "./scanners.js";
+import {
+  buildSemgrepArgs,
+  semgrepConfig,
+  isAirGap,
+  isLocalSemgrepConfig,
+  PROVIDER_GLOB,
+} from "./scanners.js";
+import { findIac } from "./check-iac-detect.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
 import { hasOsvManifest } from "./osv-manifests.js";
 import { unpinnedRequirements } from "./pinned-requirements.js";
@@ -1903,39 +1910,14 @@ export function parseTrivyMisconfigCount(stdout: string): number {
 async function checkTrivyConfig(root: string): Promise<SecurityCheckResult> {
   const name = "trivy config (IaC)";
   const cwd = root;
-  const fileMarkers = [
-    "Dockerfile",
-    "docker-compose.yml",
-    "docker-compose.yaml",
-    "compose.yml",
-    "compose.yaml",
-  ];
-  let hasIaC = false;
-  for (const m of fileMarkers) {
-    if (
-      await access(resolve(cwd, m))
-        .then(() => true)
-        .catch(() => false)
-    ) {
-      hasIaC = true;
-      break;
-    }
-  }
-  if (!hasIaC) {
-    // Any top-level Terraform?
-    try {
-      const entries = await readdir(cwd);
-      hasIaC = entries.some((e) => e.endsWith(".tf"));
-    } catch {
-      /* unreadable cwd — treat as no IaC */
-    }
-  }
+  const iac = await findIac(cwd);
+  const hasIaC = iac.length > 0;
   if (!hasIaC) {
     return {
       category: "supply-chain",
       name,
       status: "skip",
-      detail: "no Dockerfile/Compose/Terraform found",
+      detail: "no Dockerfile/Compose/Terraform found in this tree (three levels)",
     };
   }
 
@@ -1956,7 +1938,17 @@ async function checkTrivyConfig(root: string): Promise<SecurityCheckResult> {
 
   const result = await execFileNoThrow(
     trivyBin,
-    ["config", ".", "--format", "json", "--severity", "HIGH,CRITICAL", "--quiet"],
+    [
+      "config",
+      ".",
+      "--skip-dirs",
+      PROVIDER_GLOB,
+      "--format",
+      "json",
+      "--severity",
+      "HIGH,CRITICAL",
+      "--quiet",
+    ],
     { timeout: 120_000, cwd: root },
   );
   const count = parseTrivyMisconfigCount(result.stdout);
@@ -1974,7 +1966,7 @@ async function checkTrivyConfig(root: string): Promise<SecurityCheckResult> {
       category: "supply-chain",
       name,
       status: "pass",
-      detail: "no high/critical IaC misconfigurations",
+      detail: `no high/critical IaC misconfigurations in ${iac.length} location(s)`,
     };
   }
   return {
