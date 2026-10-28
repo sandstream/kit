@@ -274,6 +274,10 @@ check = "gh auth status"
 
 Set up with `kit login`.
 
+The service provider owns browser and passkey approval. Store automation tokens in
+the configured secret source. See [ADR-0008](adr/0008-service-passkeys-and-tokens.md)
+for the credential boundaries.
+
 ## setup
 
 Project bootstrap commands — install dependencies, migrate, verify.

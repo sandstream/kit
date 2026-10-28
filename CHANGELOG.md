@@ -2,6 +2,7 @@
 
 ### Authentication
 
+- **Service passkeys and tokens have separate owners.** ADR-0008 records the boundary between provider login, scoped service tokens, and Kit's signing identity.
 - **`kit login --plan` now labels documentation-only service logins as manual.** It no longer presents comment text as an interactive command or suggests a passkey for it. Browser and passkey warnings describe a possibility, not a completed authentication step.
 
 ### Memory
