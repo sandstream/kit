@@ -19,6 +19,20 @@ describe("service auth resolver", () => {
     assert.match(r.instruction, /vault/);
   });
 
+  it("plans documentation-only service logins as manual", () => {
+    for (const [name, login] of [
+      ["resend", "# resend: set the API key in the environment"],
+      ["sentry", "  # sentry: add the DSN manually"],
+      ["vercel", "# no CLI login for this integration"],
+    ] as const) {
+      const plan = resolveServiceAuth(name, svc({ login }));
+      assert.equal(plan.strategy, "manual");
+      assert.equal(plan.passkey, false);
+      assert.match(plan.instruction, /manual setup/);
+      assert.doesNotMatch(plan.instruction, /^#/);
+    }
+  });
+
   it("honors an explicit auth override over inference", () => {
     const r = resolveServiceAuth(
       "github",
@@ -35,7 +49,7 @@ describe("service auth resolver", () => {
     );
     assert.equal(gh.strategy, "interactive");
     assert.equal(gh.passkey, true);
-    assert.match(gh.instruction, /passkey/);
+    assert.match(gh.instruction, /passkey may be required/);
 
     const other = resolveServiceAuth("myapi", svc({ login: "myapi login", check: "myapi whoami" }));
     assert.equal(other.passkey, false);
