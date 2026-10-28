@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Authentication
+
+- **`kit login --plan` now labels documentation-only service logins as manual.** It no longer presents comment text as an interactive command or suggests a passkey for it.
+
 ### Memory
 
 - **PAL now tracks unfinished plan files.** Session start and `kit memory pal list` scan bounded project directories and matching adjacent files. An explicit completed status closes the item. Missing or unreadable files never count as completion. Read-only mode does not update PAL.
