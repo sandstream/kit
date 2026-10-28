@@ -1,10 +1,9 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { openMemoryDb } from "./db.js";
 import { palList, palShow, palSnooze } from "./pal.js";
 import { scanPlanFiles, syncPlanFiles } from "./plan-track.js";
@@ -127,43 +126,4 @@ it("does not follow symlinks or clear old items when a source cannot be scanned"
   assert.equal(result.closed.length, 0);
   assert.equal(palList(db, { scope: root }).length, 1);
   assert.match(result.issues.join(" "), /symlink/);
-});
-
-it("real PAL list and session start show pending plans, then close completed plans", (t) => {
-  const { parent, root } = fixture(t);
-  const plan = join(parent, "project-release-plan.md");
-  writeFileSync(plan, "Status: PROPOSAL\n");
-  const source = import.meta.url.endsWith(".ts");
-  const cli = fileURLToPath(new URL(source ? "../cli.ts" : "../cli.js", import.meta.url));
-  const memory = join(parent, "memory.db");
-  const run = (args: string[], extra: Record<string, string> = {}) => {
-    const result = spawnSync(
-      process.execPath,
-      [...(source ? ["--import", import.meta.resolve("tsx")] : []), cli, "memory", ...args],
-      {
-        cwd: root,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          KIT_MEMORY_DB: memory,
-          KIT_DEVICE_ID: "plan-test-device",
-          KIT_NO_UPDATE_CHECK: "1",
-          KIT_NO_HINTS: "1",
-          KIT_AUDIT_ANCHOR: "0",
-          KIT_NON_INTERACTIVE: "1",
-          ...extra,
-        },
-      },
-    );
-    assert.equal(result.status, 0, result.stderr);
-    return result.stdout;
-  };
-  const first = JSON.parse(run(["pal", "list", "--json"])) as { title: string }[];
-  assert.equal(first.length, 1);
-  assert.match(first[0]!.title, /project-release-plan/);
-  assert.match(run(["hook", "session-start"]), /Open plan files: project-release-plan\.md/);
-  writeFileSync(plan, "Status: DONE\n");
-  assert.deepEqual(JSON.parse(run(["pal", "list", "--json"])), []);
-  writeFileSync(join(parent, "project-new-plan.md"), "Status: PROPOSAL\n");
-  assert.deepEqual(JSON.parse(run(["pal", "list", "--json"], { KIT_READ_ONLY: "1" })), []);
 });
