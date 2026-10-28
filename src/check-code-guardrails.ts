@@ -1,5 +1,5 @@
 /** Static code checks for access grants, Dockerfile secrets and disabled guards. */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync, readdirSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 
@@ -16,6 +16,8 @@ const SKIP_DIRS = new Set([
 const MAX_FILES = 20_000;
 const MAX_FILE_BYTES = 256 * 1024;
 const SOURCE_FILE = /\.(?:[cm]?[jt]sx?|java|cs|go|php)$/i;
+const TEST_DIR = /(?:^|\/)(?:tests?|fixtures?|__tests__)\//i;
+const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/i;
 const SHELL_FILE = /\.(?:sh|bash|zsh|command)$/i;
 const WORKFLOW_FILE = /^\.github\/workflows\/[^/]+\.ya?ml$/i;
 const CLOUD_COMMAND = /^(?:(?:sudo|env|if)\s+)*(?:gcloud|aws|az|kubectl|terraform|ufw|iptables)\b/i;
@@ -171,6 +173,40 @@ function result(
     : { category, name, status: "pass", detail: "no matching unsafe code pattern" };
 }
 
+function readCandidate(path: string, file: string, errors: string[]): string | null {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  } catch {
+    errors.push(`cannot open ${file}`);
+    return null;
+  }
+  try {
+    const stats = fstatSync(fd);
+    if (!stats.isFile() || stats.size > MAX_FILE_BYTES) {
+      errors.push(`file too large or not regular: ${file}`);
+      return null;
+    }
+    const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const read = readSync(fd, buffer, length, buffer.length - length, null);
+      if (!read) break;
+      length += read;
+    }
+    if (length > MAX_FILE_BYTES) {
+      errors.push(`file grew while scanning: ${file}`);
+      return null;
+    }
+    return buffer.subarray(0, length).toString("utf8");
+  } catch {
+    errors.push(`cannot read ${file}`);
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** Scan the supplied project root without invoking shell commands or reading generated trees. */
 export async function checkCodeGuardrails(root: string): Promise<SecurityCheckResult[]> {
   const cloud: Hit[] = [];
@@ -178,25 +214,12 @@ export async function checkCodeGuardrails(root: string): Promise<SecurityCheckRe
   const guards: Hit[] = [];
   const { files, errors } = candidates(root);
   for (const file of files) {
-    let content: string;
-    try {
-      const path = join(root, file);
-      if (statSync(path).size > MAX_FILE_BYTES) {
-        errors.push(`file too large: ${file}`);
-        continue;
-      }
-      content = readFileSync(path, "utf8");
-    } catch {
-      errors.push(`cannot read ${file}`);
-      continue;
-    }
+    const content = readCandidate(join(root, file), file, errors);
+    if (content === null) continue;
     const lines = content.split(/\r?\n/);
     if (SHELL_FILE.test(file) || WORKFLOW_FILE.test(file)) scanCloud(lines, file, cloud);
     if (/^Dockerfile(?:\..+)?$/i.test(basename(file))) scanDockerfile(lines, file, docker);
-    if (
-      SOURCE_FILE.test(file) &&
-      !/(?:^|\/)(?:tests?|fixtures?|__tests__)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(file)
-    )
+    if (SOURCE_FILE.test(file) && !TEST_DIR.test(file) && !TEST_FILE.test(file))
       scanGuards(lines, file, guards);
   }
   const results = [

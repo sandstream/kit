@@ -60,7 +60,7 @@ RUN apk add --no-cache --upgrade \
         'libcrypto3>=3.5.9-r0' \
         'libexpat>=2.8.5-r0' \
         'libssl3>=3.5.9-r0' \
-        'python3>=3.14.8-r0' \
+        'python3>=3.14.10-r1' \
     && npm install -g npm@11.21.1 --ignore-scripts \
     && npm cache clean --force
 
