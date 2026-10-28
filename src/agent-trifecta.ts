@@ -142,11 +142,15 @@ function strings(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 }
 
-/** The main session's grants: allow rules minus tools denied by name, or everything when bypassed. */
-function sessionGrants(root: string, home: string): string[] {
+/** The main session's grants from declared rules and the configured starting mode. */
+function sessionPermissions(
+  root: string,
+  home: string,
+): { grants: string[]; blocked: Set<string>; mode: string } {
   const allow: string[] = [];
   const deny: string[] = [];
-  let bypass = false;
+  const ask: string[] = [];
+  let mode = "default";
   for (const path of [
     join(home, ".claude", "settings.json"),
     join(root, ".claude", "settings.json"),
@@ -155,11 +159,19 @@ function sessionGrants(root: string, home: string): string[] {
     const p = (readJson(path).permissions ?? {}) as Record<string, unknown>;
     allow.push(...strings(p.allow));
     deny.push(...strings(p.deny));
-    if (p.defaultMode === "bypassPermissions") bypass = true;
+    ask.push(...strings(p.ask));
+    if (typeof p.defaultMode === "string") mode = p.defaultMode;
   }
-  if (bypass) return ["*"];
-  const denied = new Set(deny.filter((d) => !d.includes("(")));
-  return allow.filter((g) => !denied.has(split(g).name));
+  const blocked = new Set([...deny, ...ask].filter((rule) => !rule.includes("(")));
+  if (mode === "bypassPermissions") return { grants: ["*"], blocked, mode };
+  if (mode === "acceptEdits") {
+    allow.push("Edit", "Bash(mkdir *)", "Bash(touch *)", "Bash(mv *)", "Bash(cp *)");
+  }
+  return {
+    grants: allow.filter((grant) => !blocked.has("*") && !blocked.has(split(grant).name)),
+    blocked,
+    mode,
+  };
 }
 
 interface AgentFile {
@@ -189,6 +201,70 @@ const REMOVE_HINT: Record<string, string> = {
   payload: "keep this agent away from private files and databases",
 };
 
+function writeGrants(grants: string[]): string[] {
+  return grants.filter((grant) => {
+    const { name, arg } = split(grant);
+    const command = (arg ?? "").split(/[\s:]/)[0];
+    const fileCommand = [
+      "rm",
+      "rmdir",
+      "mv",
+      "cp",
+      "mkdir",
+      "touch",
+      "tee",
+      "truncate",
+      "install",
+      "patch",
+      "python",
+      "python3",
+      "node",
+      "ruby",
+      "perl",
+      "sh",
+      "bash",
+    ].includes(command);
+    return (
+      name === "*" ||
+      ["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(name) ||
+      ((name === "Bash" || name === "PowerShell") &&
+        (arg === null || arg === "*" || arg === "" || fileCommand))
+    );
+  });
+}
+
+function preapprovedWrites(grants: string[], blocked: Set<string>): string[] {
+  const candidates = grants.includes("*") ? ["Edit", "Bash", "PowerShell"] : writeGrants(grants);
+  return candidates.filter((grant) => !blocked.has("*") && !blocked.has(split(grant).name));
+}
+
+function writeRow(unit: string, grants: string[]): SecurityCheckResult | null {
+  const writes = writeGrants(grants);
+  if (!writes.length) return null;
+  return {
+    category: "exposure",
+    name: `write access without confirmation: ${unit}`,
+    status: "warn",
+    severity: "medium",
+    detail: `declared permissions allow writes without a prompt: ${writes.slice(0, 3).map(shown).join(", ")}`,
+    suggestion: "remove the allow rule, change the permission mode, or add an ask rule for writes",
+  };
+}
+
+function approvedAgentWrites(session: string[], tools: string[] | null): string[] {
+  const allowed = writeGrants(session);
+  if (tools === null || tools.includes("*")) return allowed;
+  if (allowed.includes("*")) return writeGrants(tools);
+  const toolNames = new Set(writeGrants(tools).map((grant) => split(grant).name));
+  const fileTools = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
+  return allowed.filter((grant) => {
+    const name = split(grant).name;
+    return (
+      toolNames.has(name) || (name === "Edit" && fileTools.some((tool) => toolNames.has(tool)))
+    );
+  });
+}
+
 function unitRow(unit: string, legs: Legs): SecurityCheckResult | null {
   if (!legs.vector.length || !legs.payload.length || !legs.egress.length) return null;
   const evidence = (g: string[]): string => [...new Set(g)].slice(0, 3).map(shown).join(", ");
@@ -204,19 +280,28 @@ function unitRow(unit: string, legs: Legs): SecurityCheckResult | null {
   };
 }
 
-/** One row per agent unit that holds all three legs, plus unclassified servers, or one pass row. */
+/** Separate rows for the trifecta and prompt-free writes, plus unknown grants or one pass row. */
 export function runAgentTrifecta(root: string, home: string): SecurityCheckResult[] {
-  const session = sessionGrants(root, home);
-  const units: { unit: string; grants: string[] }[] = [{ unit: "main session", grants: session }];
+  const { grants: session, blocked, mode } = sessionPermissions(root, home);
+  const approvedWrites = mode === "plan" ? [] : preapprovedWrites(session, blocked);
+  const units: { unit: string; grants: string[]; approvedWrites: string[] }[] = [
+    { unit: "main session", grants: session, approvedWrites },
+  ];
   for (const a of [
     ...agentFiles(join(root, ".claude", "agents")),
     ...agentFiles(join(home, ".claude", "agents")),
   ]) {
-    units.push({ unit: `agent ${shown(a.name)}`, grants: a.tools ?? session });
+    units.push({
+      unit: `agent ${shown(a.name)}`,
+      grants: a.tools ?? session,
+      approvedWrites: approvedAgentWrites(approvedWrites, a.tools),
+    });
   }
   const rows: SecurityCheckResult[] = [];
   const unknown = new Set<string>();
   for (const u of units) {
+    const write = writeRow(u.unit, u.approvedWrites);
+    if (write) rows.push(write);
     const legs = legsOf(u.grants);
     legs.unknown.forEach((g) => unknown.add(g));
     const row = unitRow(u.unit, legs);

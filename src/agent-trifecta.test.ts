@@ -77,6 +77,130 @@ const project = (files: Record<string, string>): string => {
 const home = mkdtempSync(join(tmpdir(), "kit-tri-home-"));
 
 describe("runAgentTrifecta", () => {
+  it("warns separately when the main session can edit without confirmation", () => {
+    const root = project({
+      ".claude/settings.json": JSON.stringify({ permissions: { allow: ["Edit"] } }),
+    });
+    try {
+      const rows = runAgentTrifecta(root, home);
+      const write = rows.find((r) => r.name === "write access without confirmation: main session");
+      assert.equal(write?.status, "warn");
+      assert.match(write?.detail ?? "", /Edit/);
+      assert.ok(rows.every((r) => !r.name.startsWith("lethal trifecta: main session")));
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("warns when acceptEdits approves file edits without a prompt", () => {
+    const root = project({
+      ".claude/settings.json": JSON.stringify({ permissions: { defaultMode: "acceptEdits" } }),
+    });
+    try {
+      const rows = runAgentTrifecta(root, home);
+      const write = rows.find((r) => r.name === "write access without confirmation: main session");
+      assert.equal(write?.status, "warn");
+      assert.match(write?.detail ?? "", /Edit/);
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("does not call an Edit allow rule prompt-free when ask overrides it", () => {
+    const root = project({
+      ".claude/settings.json": JSON.stringify({
+        permissions: { allow: ["Edit"], ask: ["Edit"] },
+      }),
+    });
+    try {
+      const rows = runAgentTrifecta(root, home);
+      assert.ok(rows.every((r) => !r.name.startsWith("write access without confirmation")));
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("does not warn about file edits in plan mode", () => {
+    const root = project({
+      ".claude/settings.json": JSON.stringify({
+        permissions: { defaultMode: "plan", allow: ["Edit"] },
+      }),
+    });
+    try {
+      const rows = runAgentTrifecta(root, home);
+      assert.ok(rows.every((r) => !r.name.startsWith("write access without confirmation")));
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("still warns for filesystem commands when ask requires a prompt for Edit", () => {
+    const root = project({
+      ".claude/settings.json": JSON.stringify({
+        permissions: { defaultMode: "acceptEdits", ask: ["Edit"] },
+      }),
+    });
+    try {
+      const rows = runAgentTrifecta(root, home);
+      const write = rows.find((r) => r.name === "write access without confirmation: main session");
+      assert.equal(write?.status, "warn");
+      assert.match(write?.detail ?? "", /Bash\(mkdir/);
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("warns only for subagents that inherit an allowed write tool", () => {
+    const root = project({
+      ".claude/settings.json": JSON.stringify({ permissions: { allow: ["Edit"] } }),
+      ".claude/agents/editor.md": "---\nname: editor\ntools: Edit, Read\n---\n",
+      ".claude/agents/reader.md": "---\nname: reader\ntools: Read, Grep\n---\n",
+    });
+    try {
+      const rows = runAgentTrifecta(root, home);
+      assert.equal(
+        rows.find((r) => r.name === "write access without confirmation: agent editor")?.status,
+        "warn",
+      );
+      assert.ok(rows.every((r) => r.name !== "write access without confirmation: agent reader"));
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("applies an Edit allow rule to a subagent with the Write tool", () => {
+    const root = project({
+      ".claude/settings.json": JSON.stringify({ permissions: { allow: ["Edit"] } }),
+      ".claude/agents/writer.md": "---\nname: writer\ntools: Write\n---\n",
+    });
+    try {
+      const rows = runAgentTrifecta(root, home);
+      assert.equal(
+        rows.find((r) => r.name === "write access without confirmation: agent writer")?.status,
+        "warn",
+      );
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("warns for an approved filesystem command but not git status", () => {
+    const root = project({
+      ".claude/settings.json": JSON.stringify({
+        permissions: { allow: ["Bash(rm *)", "Bash(git status)"] },
+      }),
+    });
+    try {
+      const rows = runAgentTrifecta(root, home);
+      const write = rows.find((r) => r.name === "write access without confirmation: main session");
+      assert.equal(write?.status, "warn");
+      assert.match(write?.detail ?? "", /Bash\(rm/);
+      assert.doesNotMatch(write?.detail ?? "", /git status/);
+    } finally {
+      rmTemp(root);
+    }
+  });
+
   it("warns for a subagent that reads the web, reads files and can send", () => {
     const root = project({
       ".claude/agents/triage.md": "---\nname: triage\ntools: WebFetch, Read, Grep\n---\n",
@@ -126,6 +250,20 @@ describe("runAgentTrifecta", () => {
     try {
       const rows = runAgentTrifecta(root, home);
       assert.equal(rows.find((r) => r.name.includes("main session"))?.status, "warn");
+    } finally {
+      rmTemp(root);
+    }
+  });
+
+  it("does not call bypass mode prompt-free when ask covers every tool", () => {
+    const root = project({
+      ".claude/settings.json": JSON.stringify({
+        permissions: { defaultMode: "bypassPermissions", ask: ["*"] },
+      }),
+    });
+    try {
+      const rows = runAgentTrifecta(root, home);
+      assert.ok(rows.every((r) => !r.name.startsWith("write access without confirmation")));
     } finally {
       rmTemp(root);
     }

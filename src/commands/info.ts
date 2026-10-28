@@ -189,7 +189,7 @@ export async function cmdAgentAudit(): Promise<boolean> {
   }
 
   console.log(
-    `${c.bold}kit agent-audit${c.reset}  ${c.dim}agent/MCP configs + git hooks + lethal trifecta${c.reset}`,
+    `${c.bold}kit agent-audit${c.reset}  ${c.dim}agent/MCP configs + hooks + risky grants and writes${c.reset}`,
   );
   for (const r of results) {
     const mark =
