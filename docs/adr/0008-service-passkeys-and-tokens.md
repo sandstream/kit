@@ -25,3 +25,20 @@ Sources: [Vercel CLI login](https://vercel.com/changelog/new-vercel-cli-login-fl
 - A comment-only login entry means manual setup. Kit does not run it as a command.
 - The `capture` strategy remains a plan. Kit does not execute token capture through `kit login`.
 - Service tokens, provider CLI sessions, and Kit's signing identity remain separate credentials.
+
+## Kit approvals
+
+Kit has no browser-facing approval server. Kit does not add WebAuthn to its local approval flow.
+Existing local permission and approval controls handle human approval. Revisit WebAuthn only if Kit
+later adds remote human approval with a verifier and a recovery process.
+
+## Recovery
+
+- For a lost service passkey, use the provider's account recovery. Remove the lost passkey
+  and register a new one in the provider account. Kit never handles recovery codes.
+- For an expired provider CLI session, run `kit login --service <name>` again. For an
+  automation token, rotate it in the configured secret source and update its consumers.
+- For a lost Kit signing key, use Kit's separate identity process. Rotate a software
+  identity with `kit identity rotate`. Rotate a hardware identity in its key provider.
+  Update trust anchors for the new public key. Verification of old records still needs
+  the old public key.
