@@ -2,6 +2,7 @@
 
 ### Security
 
+- **`kit gha-audit` now checks CI gate coverage, deployment image tags, and default branch protection.** It reports whether CI declares `kit check`, `kit scan`, osv-scanner, and Trivy steps. It flags `latest` or branch-derived deployment tags in scripts, Compose files, and CI variables. The branch check reads GitHub or GitLab with a declared `GITHUB_TOKEN` or `GITLAB_TOKEN` from kit secrets. Missing tokens, API errors, and air-gap mode stay unverified.
 - **The CLI image now requires Alpine's patched Python package.** The container scan found CVE-2026-115557 in the cached Python layer. The package floor now requires `python3>=3.14.10-r1` and invalidates that layer.
 - **The security check now finds three unsafe code patterns.** It flags public cloud commands in shell scripts and GitHub workflows, literal secrets in Dockerfile `ENV`, and guards whose only action is a commented `throw` or `return`. Each finding names a file and line without printing secret values. A rule-specific inline comment with a reason can suppress a match.
 - **Maven dependency scans now name their partial coverage.** A `pom.xml` without a valid CycloneDX

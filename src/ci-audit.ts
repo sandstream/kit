@@ -17,6 +17,8 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
+import { runGhaAudit } from "./gha-audit.js";
+import { auditCiCoverage, auditDeploymentImageTags } from "./ci-coverage-audit.js";
 
 const IMAGE_RULE = {
   id: "CWE-1104",
@@ -144,4 +146,14 @@ export function runCiAudit(cwd: string): SecurityCheckResult[] {
     });
   }
   return out;
+}
+
+/** All local pipeline evidence, including gate presence and deployment tag usage. */
+export function runPipelineAudit(cwd: string): SecurityCheckResult[] {
+  return [
+    ...runGhaAudit(cwd),
+    ...runCiAudit(cwd),
+    ...auditCiCoverage(cwd),
+    ...auditDeploymentImageTags(cwd),
+  ];
 }
