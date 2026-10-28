@@ -3,6 +3,8 @@
 import { c } from "../utils/colors.js";
 import { hasFlag, flagValue } from "../utils/flags.js";
 import { isReadOnlyMode } from "../read-only-mode.js";
+import { memPalList } from "./memory-pal-list.js";
+import { planSessionStartLines } from "./memory-plan-hook.js";
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
@@ -102,8 +104,6 @@ import {
 } from "../memory/install.js";
 import {
   palAdd,
-  palList,
-  pendingActionOrigin,
   palAutoVerify,
   palPrune,
   importLegacyLedger,
@@ -256,61 +256,10 @@ async function memPal(): Promise<boolean> {
   if (action === "list" && !["open", "claimed", "snoozed", "closed"].includes(status)) {
     palUsageError("Invalid PAL status; expected open, claimed, snoozed or closed.");
   }
-  if (action === "list" && !existsSync(getMemoryDbPath())) {
-    if (jsonMode) console.log("[]");
-    else console.log(`${c.dim}no ${status} action items${c.reset}`);
-    return true;
-  }
-  let readOnly = isReadOnlyMode();
-  let db: ReturnType<typeof openMemoryDb>;
+  if (action === "list") return memPalList(status, jsonMode);
+  const readOnly = isReadOnlyMode();
+  const db = readOnly ? openMemoryDbReadOnly() : openMemoryDb();
   try {
-    db = readOnly ? openMemoryDbReadOnly() : openMemoryDb();
-  } catch (err) {
-    if (action !== "list" || readOnly) throw err;
-    db = openMemoryDbReadOnly();
-    readOnly = true;
-  }
-  try {
-    if (action === "list") {
-      // Canonical scope = ABSOLUTE project root (same as the auto-tracker writes —
-      // basenames collide across repos); palList also matches legacy basename rows.
-      const scope = hasFlag(process.argv, "--global") ? undefined : getCurrentProjectRoot();
-      // Device-coupled by default: only THIS device's items (+ legacy rows) show,
-      // so an ephemeral session's items don't nag here. --all opts back in.
-      const items = palList(db, {
-        status,
-        scope,
-        allDevices: hasFlag(process.argv, "--all"),
-        conflictsOnly: hasFlag(process.argv, "--conflicts"),
-        readOnly,
-      });
-      if (jsonMode) {
-        console.log(JSON.stringify(items));
-        return true;
-      }
-      if (!items.length) {
-        console.log(`${c.dim}no ${status} action items${c.reset}`);
-        return true;
-      }
-      console.log(`${c.bold}${items.length}${c.reset} ${status} action item(s):`);
-      for (const p of items) {
-        const tag = p.kind === "auto" ? ` ${c.dim}· auto${c.reset}` : "";
-        const scope = p.scope ? ` ${c.dim}[${p.scope}]${c.reset}` : "";
-        console.log(`  ${c.bold}${p.id}${c.reset}  ${p.title}${scope}${tag}`);
-        const origin = sanitizeForPrompt(pendingActionOrigin(p)).text.replace(/\s+/g, " ");
-        if (origin) console.log(`    ${c.dim}${origin}${c.reset}`);
-        if (p.status === "claimed") {
-          const identity = p.claim_owner;
-          const owner = sanitizeForPrompt(
-            identity
-              ? `${p.claimed_by ?? identity.harness}; device=${identity.device}; harness=${identity.harness}; session=${identity.session}`
-              : `${p.claimed_by ?? "unknown"}; unknown legacy session; explicit takeover required`,
-          ).text.replace(/\s+/g, " ");
-          console.log(`    ${c.dim}claimed by ${owner}${c.reset}`);
-        }
-      }
-      return true;
-    }
     if (action === "add") {
       const title = process.argv
         .slice(5)
@@ -1153,8 +1102,7 @@ async function memHook(): Promise<boolean> {
     // user-visible system message; stderr alone can disappear in a hook transcript.
     const pulled = tryAutoPull(getCurrentProjectRoot());
     if (pulled.note) console.error(`${c.dim}${pulled.note}${c.reset}`);
-    const contextLines: string[] = [];
-    if (pulled.note) contextLines.push(pulled.note);
+    const contextLines = planSessionStartLines(pulled.note);
     let statusline: string | undefined;
     // Inject the statusline (stdout → context) so the agent GETS the setup score /
     // update mark / PAL count deterministically — instead of a rules-file line

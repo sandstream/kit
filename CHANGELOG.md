@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Memory
+
+- **PAL now tracks unfinished plan files.** Session start and `kit memory pal list` scan bounded project directories and matching adjacent files. An explicit completed status closes the item. Missing or unreadable files never count as completion. Read-only mode does not update PAL.
+
 ### Security
 
 - **`kit gha-audit` now checks CI gate coverage, deployment image tags, and default branch protection.** It reports whether CI declares `kit check`, `kit scan`, osv-scanner, and Trivy steps. It flags `latest` or branch-derived deployment tags in scripts, Compose files, and CI variables. The branch check reads GitHub or GitLab with a declared `GITHUB_TOKEN` or `GITLAB_TOKEN` from kit secrets. Missing tokens, API errors, and air-gap mode stay unverified.

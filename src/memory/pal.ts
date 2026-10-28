@@ -436,7 +436,7 @@ export function palSyncFindings(
   // NULL-origin rows predate device coupling and are reconcilable by any device.
   const open = db
     .prepare(
-      "SELECT id, status FROM pending_actions WHERE kind='finding' AND (status IN ('open','claimed') OR state_conflict=1) AND id LIKE ? AND scope IS ? AND (origin_device = ? OR origin_device IS NULL)",
+      "SELECT id, status FROM pending_actions WHERE kind='finding' AND (status IN ('open','snoozed','claimed') OR state_conflict=1) AND id LIKE ? AND scope IS ? AND (origin_device = ? OR origin_device IS NULL)",
     )
     .all(`${sourceTag}-%`, scope, deviceId()) as { id: string; status: string }[];
   const closed: string[] = [];
