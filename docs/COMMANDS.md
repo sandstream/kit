@@ -254,6 +254,17 @@ max_bytes = 12000
 | `kit security prescan <path> [--deep] [--format=json] [--vs-baseline=<p>]` | Multi-repo baseline sweep (secrets, gitignore, branch-protect; `--deep` adds CVE / workflow-drift / bumblebee).                                                                                                      |
 | `kit security prescan-diff <baseline.jsonl> <latest.jsonl>`                | Diff two prescan reports — surface new regressions + fixed findings.                                                                                                                                                 |
 
+### Code guardrails in the security check
+
+`kit check --category security` scans shell scripts, GitHub workflow commands, Dockerfiles, and source files.
+It reports public cloud commands, literal Dockerfile secrets, and guards that contain only a commented `throw` or `return`.
+It reports the file and line. It does not print secret values.
+The scan skips generated directories and source files larger than 256 KB. It reports skipped source paths as an incomplete scan.
+
+Put `kit-ignore <rule>: <reason>` on the affected line or the line before it.
+Use `L2-cloud-public`, `L2-docker-env-secret`, or `L2-commented-guard` as the rule.
+Kit ignores a match only when the comment includes a reason.
+
 ### Secret findings: what is classified, and what you accept
 
 `kit check --category security` runs trufflehog over git history and splits the results
