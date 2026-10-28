@@ -2628,6 +2628,7 @@ async function runPrimarySecurityChecks(
   root: string,
   level: SecurityLevel = "all",
 ): Promise<SecurityCheckResult[]> {
+  const { checkCodeGuardrails } = await import("./check-code-guardrails.js");
   // Started only when asked for, so a project run does not scan git history again.
   const repo =
     level === "project"
@@ -2651,9 +2652,9 @@ async function runPrimarySecurityChecks(
           checkAllowScripts(root),
         ];
   const lockfileResults = level === "repo" ? [] : await checkLockfilesCommitted(root);
-  return [...(await Promise.all([...project, ...repo])), ...lockfileResults];
+  const codeResults = level === "repo" ? [] : await checkCodeGuardrails(root);
+  return [...(await Promise.all([...project, ...repo])), ...lockfileResults, ...codeResults];
 }
-
 async function appendHostSecurityChecks(
   results: SecurityCheckResult[],
   root: string,
