@@ -592,7 +592,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   "agent-audit": {
     handler: cmdAgentAudit,
     stability: "stable",
-    help: "Audit agent / MCP / hook configs for plaintext secrets + malware-shaped hooks",
+    help: "Audit agent, MCP, and hook configs for secrets, risky grants, and writes",
   },
   sentinel: {
     handler: cmdSentinel,

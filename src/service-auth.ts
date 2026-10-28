@@ -12,18 +12,20 @@
  *                     (capture-to-vault). Execution is intentionally NOT wired
  *                     here yet — this resolver only PLANS; `kit login --plan`
  *                     surfaces it. (The capture UX is a deliberate follow-up.)
+ *   - "manual"      A comment-only login value describes a setup task. Kit runs no CLI.
  *
  * Passkey-awareness: some interactive logins open a browser / require a passkey,
  * so they can't be scripted on a fresh machine — the plan flags that explicitly.
  */
 import type { ServiceConfig } from "./config.js";
+import { parseCommand } from "./utils/parseCommand.js";
 
-export type AuthStrategy = "vault" | "capture" | "interactive";
+export type AuthStrategy = "vault" | "capture" | "interactive" | "manual";
 
 export interface ResolvedAuth {
   name: string;
   strategy: AuthStrategy;
-  /** Interactive login likely opens a browser / needs a passkey (can't be scripted). */
+  /** Login may require browser approval or a passkey. This is a warning, not a result. */
   passkey: boolean;
   /** Deterministic next-step description. */
   instruction: string;
@@ -43,17 +45,20 @@ const PASSKEY_SERVICES = new Set([
   "azure",
 ]);
 
-function isStrategy(v: unknown): v is AuthStrategy {
+function isStrategy(v: unknown): v is Exclude<AuthStrategy, "manual"> {
   return v === "vault" || v === "capture" || v === "interactive";
 }
 
 export function resolveServiceAuth(name: string, config: ServiceConfig): ResolvedAuth {
   const explicit = (config as { auth?: unknown }).auth;
+  const parsedLogin = config.login ? parseCommand(config.login) : null;
   const strategy: AuthStrategy = isStrategy(explicit)
     ? explicit
-    : config.login
-      ? "interactive"
-      : "vault";
+    : parsedLogin?.kind === "informational"
+      ? "manual"
+      : parsedLogin
+        ? "interactive"
+        : "vault";
 
   const passkey = strategy === "interactive" && PASSKEY_SERVICES.has(name.toLowerCase());
 
@@ -66,9 +71,12 @@ export function resolveServiceAuth(name: string, config: ServiceConfig): Resolve
       instruction =
         "capture-to-vault: `kit secrets set <KEY> --stdin` (paste once, stored in the vault)";
       break;
+    case "manual":
+      instruction = `manual setup: ${parsedLogin?.kind === "informational" ? parsedLogin.message : "follow the service instructions"}`;
+      break;
     case "interactive":
       instruction = config.login
-        ? `interactive login: ${config.login}${passkey ? " — needs a browser/passkey, can't be scripted on a fresh machine" : ""}`
+        ? `interactive login: ${config.login}${passkey ? "; browser approval or a passkey may be required on a fresh machine" : ""}`
         : "interactive login required (no login command configured)";
       break;
   }

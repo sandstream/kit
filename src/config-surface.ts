@@ -117,6 +117,12 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
       '[context.gcloud]\naccount = "me@example.com"\nproject = ["acme-dev", "acme-prod"]\n\n[context.terraform]\nbucket = "acme-state-dev"\nworkspace = "dev"',
     command: "kit context check",
   },
+  projects: {
+    purpose: "The project directories of a repository that holds several projects.",
+    buys: "Kit checks the repo once in the root. It checks each declared project and any root manifest or infrastructure outside those projects. It warns when a project lacks scan inputs or has an unlisted child manifest. The next root run closes old unnamed findings when named project findings replace them. A direct run inside one project tracks its own findings.",
+    example: '[projects]\npaths = ["backend", "frontend", "infra/prod", "docker"]',
+    command: "kit check",
+  },
   supply_chain: {
     purpose: "Install-time triage settings — notably which package scopes count as internal.",
     buys: "A first-party scope is not triaged as an unknown third-party package, so the gate stops crying wolf on your own code.",
@@ -126,7 +132,7 @@ export const CONFIG_SECTIONS: Record<string, ConfigSection> = {
   scan: {
     purpose:
       "Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles) and the client-exposed env allowlist.",
-    buys: "The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it.",
+    buys: "The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it. For Maven, kit scan reads a generated target/bom.json with osv-scanner and grype. Generate it with mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom. Kit does not run Maven automatically.",
     example:
       '[scan]\nguarddog = true\ndelegates = ["osv-scanner", "trivy"]\nimages = ["ghcr.io/acme/api:1.4.2"]',
     command: "kit scan --list-delegates",

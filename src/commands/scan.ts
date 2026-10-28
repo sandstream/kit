@@ -6,6 +6,7 @@ import { c } from "../utils/colors.js";
 import { hasFlag, envTruthy } from "../utils/flags.js";
 import { resolveConfigPath } from "../cli-shared.js";
 import { hasMarker, scanProvidersTracked } from "../scan-detect.js";
+import { mavenSbomScanners } from "../maven-sbom.js";
 
 export async function cmdScan(): Promise<boolean> {
   const jsonMode = hasFlag(process.argv, "--json");
@@ -49,6 +50,7 @@ export async function cmdScan(): Promise<boolean> {
     return true;
   }
   const selectedScanners = enabledScanners(SCANNERS, delegates);
+  selectedScanners.push(...mavenSbomScanners(cwd, delegates));
 
   // Container images (L1): `[scan].images` and, when asked, the Dockerfiles' FROM lines. Each image
   // adds an osv-scanner and a trivy run that pull the image, so air-gap mode drops them below.

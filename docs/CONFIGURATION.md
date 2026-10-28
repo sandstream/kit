@@ -8,7 +8,7 @@ code in either direction.
 Everything below lives in `.kit.toml` at the project root. `kit config sections` prints the same
 list in the terminal, marking which ones this repo already declares.
 
-kit accepts **25 sections**.
+kit accepts **26 sections**.
 
 | Section | What it configures | Set up with |
 | --- | --- | --- |
@@ -25,6 +25,7 @@ kit accepts **25 sections**.
 | [`[mcp]`](#mcp) | Declared MCP-server connections for this project. | [docs](MCP_TOOLS_GUIDE.md) |
 | [`[memory]`](#memory) | Memory capture and PAL behaviour, including this project's sensitivity class. | `kit memory` |
 | [`[policy]`](#policy) | Which vendor writes an agent may perform, pre-approved by operation. | `kit governance` |
+| [`[projects]`](#projects) | The project directories of a repository that holds several projects. | `kit check` |
 | [`[scan]`](#scan) | Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles) and the client-exposed env allowlist. | `kit scan --list-delegates` |
 | [`[secrets]`](#secrets) | Which vault backs this project's secrets, and the key names it needs. | `kit secrets` |
 | [`[services]`](#services) | External CLIs this project authenticates against, with the login and check command for each. | `kit login` |
@@ -215,11 +216,24 @@ vercel = ["env:add"]
 
 Set up with `kit governance`. Fuller treatment: [`docs/POLICY.md`](POLICY.md).
 
+## projects
+
+The project directories of a repository that holds several projects.
+
+**What it buys.** Kit checks the repo once in the root. It checks each declared project and any root manifest or infrastructure outside those projects. It warns when a project lacks scan inputs or has an unlisted child manifest. The next root run closes old unnamed findings when named project findings replace them. A direct run inside one project tracks its own findings.
+
+```toml
+[projects]
+paths = ["backend", "frontend", "infra/prod", "docker"]
+```
+
+Set up with `kit check`.
+
 ## scan
 
 Scanner settings: which delegates run, the GuardDog toggle, a vault project for scanner tokens, container images to scan (images, images_from_dockerfiles) and the client-exposed env allowlist.
 
-**What it buys.** The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it.
+**What it buys.** The scan set is declared instead of improvised, and a deliberately allowed exception carries its reason next to it. For Maven, kit scan reads a generated target/bom.json with osv-scanner and grype. Generate it with mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom. Kit does not run Maven automatically.
 
 ```toml
 [scan]

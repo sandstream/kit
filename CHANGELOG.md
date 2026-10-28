@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### Authentication
+
+- **Service passkeys and tokens have separate owners.** ADR-0008 records the boundary between provider login, scoped service tokens, and Kit's signing identity.
+- **`kit login --plan` now labels documentation-only service logins as manual.** It no longer presents comment text as an interactive command or suggests a passkey for it. Browser and passkey warnings describe a possibility, not a completed authentication step.
+
+### Memory
+
+- **PAL now tracks unfinished plan files.** Session start and `kit memory pal list` scan bounded project directories and matching adjacent files. An explicit completed status closes the item. Missing or unreadable files never count as completion. Read-only mode does not update PAL.
+
 ### Security
 
 - **`claude plugin install` passed the install gate.** A Claude Code plugin's hooks module runs inside
@@ -10,6 +19,15 @@
   path is the user's own code, and any other source (another host, a URL to a `marketplace.json`)
   is blocked as unverifiable. Installing from a marketplace added earlier is not re-gated. `/plugin
   install` typed inside Claude Code never reaches a Bash hook and is not covered.
+- **Updated vulnerable transitive packages.** Hono 4.13.14, fast-uri 3.1.9, and ip-address 10.7.5 resolve the current npm advisories. `npm audit` reports zero vulnerabilities.
+
+- **`kit gha-audit` now checks CI gate coverage, deployment image tags, and default branch protection.** It reports whether CI declares `kit check`, `kit scan`, osv-scanner, and Trivy steps. It flags `latest` or branch-derived deployment tags in scripts, Compose files, and CI variables. The branch check reads GitHub or GitLab with a declared `GITHUB_TOKEN` or `GITLAB_TOKEN` from kit secrets. Missing tokens, API errors, and air-gap mode stay unverified.
+- **The CLI image now requires Alpine's patched Python package.** The container scan found CVE-2026-115557 in the cached Python layer. The package floor now requires `python3>=3.14.10-r1` and invalidates that layer.
+- **The security check now finds three unsafe code patterns.** It flags public cloud commands in shell scripts and GitHub workflows, literal secrets in Dockerfile `ENV`, and guards whose only action is a commented `throw` or `return`. Each finding names a file and line without printing secret values. A rule-specific inline comment with a reason can suppress a match.
+- **Maven dependency scans now name their partial coverage.** A `pom.xml` without a valid CycloneDX
+  BOM from its own directory or a declared Maven reactor gets a warning and the aggregate BOM
+  command. `kit scan` passes an existing `target/bom.json` directly to osv-scanner and grype,
+  even when `target/` is ignored by git. Kit does not run Maven.
 - **An agent could approve its own operation.** `kit policy approve` signed an approval token with no
   person present: run with no terminal, as an agent's tool call runs, it minted a token that
   `requestApproval` honors for any identity in the org trust anchor. It now refuses unless stdin and
@@ -25,6 +43,10 @@
   covers running it directly as the skill's instructions say.
 
 ### Fixed
+
+- **A check inside one project could close findings from the repo root.** Both runs used the same PAL source key. Direct project runs now use a stable path-specific source key. The next root run still closes old unnamed findings when named findings replace them.
+
+- **`trivy config (IaC)` no longer skips a repo whose Dockerfiles and Terraform sit below the root.** It looked for a Dockerfile, a compose file or a `.tf` file in the root only, said "no Dockerfile/Compose/Terraform found" and skipped, while `docker/` and `infra/` held five Dockerfiles and Terraform for three environments. In one repo that hid a container running as root in production for months. It now looks three levels down (not in `node_modules`, `.terraform`, `vendor` or build output), scans the tree, and skips downloaded provider binaries. The skip text says it looked three levels deep.
 
 - **`kit triage skill` failed real skills on ordinary words, and never read their scripts.** Its
   secret scan matched bare substrings, so a skill saying "ask-first", "task-" or "risk-" was
@@ -90,6 +112,15 @@
   failed on Linux CI and passed locally.
 
 ### Added
+
+- **`kit agent-audit` reports writes without confirmation.** A separate warning names the main session or subagent and its declared write permission. The check reads `allow` rules and configured `acceptEdits` or `bypassPermissions` modes. Bare `ask` and `deny` rules take precedence. It detects file tools, broad shell access, and common file commands. Runtime approvals, mode changes, and arbitrary shell or MCP writes remain outside this configuration check.
+
+- **`kit check --category security` uses `[projects] paths`.** The repo level (secrets in git history, ignore rules, host, hooks) runs once in the root, and the project level (npm audit, osv-scanner, licences, install scripts, trivy fs and config, lockfiles) runs once per declared path, so a root without a manifest no longer gives "this scan looked in the wrong place" rows. Each project row carries its path in its name (`npm audit [frontend]`), so the same check in two projects is two findings and a run opens and closes only its own records. Project skips are not listed. The `scan scope` row says what was covered, any path that was refused, and any project below the root that is not listed. Without `[projects]` nothing changes.
+  Kit also checks root manifests and infrastructure outside the listed paths. Kit warns when a listed path lacks scan inputs or contains an unlisted child manifest.
+  Kit runs Semgrep once at the repo root and checks client exposure in every listed project.
+
+- **`[projects] paths` in `.kit.toml` names the project directories of a repository that holds several.** It is read and validated now, and `kit check` will use it to check the repo level once in the root and each path as a project of its own (a later change). A path must be a relative directory inside the repository: an absolute path or `..` is a config error, and a path that does not exist, is not a directory or is a symlink out of the repository is refused with its reason. The scope is declared, never guessed. The `[context]` schema moved to its own module to keep `config.ts` under its size baseline.
+
 - `kit context check` reports every declared `[context]` section or key that no check reads as `unchecked` and exits non-zero. A misspelled key or an unsupported tool no longer reads as a lock that holds.
 - `[context.gcloud] project` accepts a list of exact project names. The live project must equal one of them. A pattern is not supported, since it would also match a project such as `<name>-prod-old`.
 - `[context.terraform]` locks the state backend `bucket` and `prefix` and the `workspace`, read from `.terraform/` without running terraform. `dir` selects a subdirectory and must stay inside the repository, also through a symlink.
