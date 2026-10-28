@@ -105,6 +105,8 @@
 
 ### Added
 
+- **`kit agent-audit` reports writes without confirmation.** A separate warning names the main session or subagent and its declared write permission. The check reads `allow` rules and configured `acceptEdits` or `bypassPermissions` modes. Bare `ask` and `deny` rules take precedence. It detects file tools, broad shell access, and common file commands. Runtime approvals, mode changes, and arbitrary shell or MCP writes remain outside this configuration check.
+
 - **`kit check --category security` uses `[projects] paths`.** The repo level (secrets in git history, ignore rules, host, hooks) runs once in the root, and the project level (npm audit, osv-scanner, licences, install scripts, trivy fs and config, lockfiles) runs once per declared path, so a root without a manifest no longer gives "this scan looked in the wrong place" rows. Each project row carries its path in its name (`npm audit [frontend]`), so the same check in two projects is two findings and a run opens and closes only its own records. Project skips are not listed. The `scan scope` row says what was covered, any path that was refused, and any project below the root that is not listed. Without `[projects]` nothing changes.
   Kit also checks root manifests and infrastructure outside the listed paths. Kit warns when a listed path lacks scan inputs or contains an unlisted child manifest.
   Kit runs Semgrep once at the repo root and checks client exposure in every listed project.

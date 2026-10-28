@@ -82,7 +82,7 @@
     },
     "agent-audit": {
       "kind": "command",
-      "summary": "Audit agent / MCP / hook configs for plaintext secrets + malware-shaped hooks",
+      "summary": "Audit agent, MCP, and hook configs for secrets, risky grants, and writes",
       "x-kit-accepted-flags": [
         "--attest",
         "--env",

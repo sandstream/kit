@@ -359,12 +359,19 @@ database), and it can send data out (a web request, a network command, a chat po
 cannot tell data from instructions, so the fix is structural: remove one leg, or split the work over
 two agents with different tools and a strict, validated message between them.
 
-`kit agent-audit` reports each unit (the main session, and each subagent in `.claude/agents`) that
-holds all three legs in its declared grants, and names the grants. Honest limits: it sees declared
-grants, not what an approval prompt or auto mode decides at run time; MCP servers are placed by name
-and an unplaced one is listed as unclassified; and it does not see what a hijacked agent does below
-its tools, which is the boundary this document already draws. Internal damage without a way out (an
-agent that deletes tables) is not covered by the egress leg and is not checked yet.
+`kit agent-audit` reports each unit that holds all three legs in its declared grants.
+It checks the main session and each subagent in `.claude/agents`.
+The report names the grants that create the risk.
+It also warns when declared permissions let a unit write without confirmation.
+This separate row covers file edits, broad shell access, and common file commands.
+It checks `allow` rules, `acceptEdits`, and `bypassPermissions`.
+Bare `ask` and `deny` rules take precedence for this row.
+
+The audit cannot see approvals or mode changes made during a session.
+It does not classify every shell command or write-capable MCP tool.
+It places MCP servers by name, so that classification can be wrong.
+An unknown grant is listed as unclassified.
+The audit cannot see actions below the tool boundary.
 
 ## Out of scope (and why)
 
