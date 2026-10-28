@@ -25,7 +25,7 @@ export type AuthStrategy = "vault" | "capture" | "interactive" | "manual";
 export interface ResolvedAuth {
   name: string;
   strategy: AuthStrategy;
-  /** Interactive login likely opens a browser / needs a passkey (can't be scripted). */
+  /** Login may require browser approval or a passkey. This is a warning, not a result. */
   passkey: boolean;
   /** Deterministic next-step description. */
   instruction: string;
@@ -76,7 +76,7 @@ export function resolveServiceAuth(name: string, config: ServiceConfig): Resolve
       break;
     case "interactive":
       instruction = config.login
-        ? `interactive login: ${config.login}${passkey ? " — needs a browser/passkey, can't be scripted on a fresh machine" : ""}`
+        ? `interactive login: ${config.login}${passkey ? "; browser approval or a passkey may be required on a fresh machine" : ""}`
         : "interactive login required (no login command configured)";
       break;
   }

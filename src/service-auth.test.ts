@@ -49,7 +49,7 @@ describe("service auth resolver", () => {
     );
     assert.equal(gh.strategy, "interactive");
     assert.equal(gh.passkey, true);
-    assert.match(gh.instruction, /passkey/);
+    assert.match(gh.instruction, /passkey may be required/);
 
     const other = resolveServiceAuth("myapi", svc({ login: "myapi login", check: "myapi whoami" }));
     assert.equal(other.passkey, false);
