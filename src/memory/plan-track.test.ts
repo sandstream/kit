@@ -114,7 +114,15 @@ it("does not follow symlinks or clear old items when a source cannot be scanned"
   writeFileSync(plan, "Status: PROPOSAL\n");
   syncPlanFiles(db, root);
   unlinkSync(plan);
-  symlinkSync(join(parent, "untrusted.md"), plan);
+  try {
+    symlinkSync(join(parent, "untrusted.md"), plan);
+  } catch (error) {
+    if (["EPERM", "EACCES", "ENOTSUP"].includes((error as NodeJS.ErrnoException).code ?? "")) {
+      t.skip("symbolic links are unavailable on this runner");
+      return;
+    }
+    throw error;
+  }
   const result = syncPlanFiles(db, root);
   assert.equal(result.closed.length, 0);
   assert.equal(palList(db, { scope: root }).length, 1);
