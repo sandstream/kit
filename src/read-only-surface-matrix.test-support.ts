@@ -134,6 +134,7 @@ export const MUTATING_COMMANDS: readonly CommandCase[] = [
     "remote",
   ),
   mutation("policy sign", "policy-sign", "policy", "sign"),
+  mutation("review --receipt", "review-receipt", "review", "--receipt"),
   mutation("policy trust add", "policy-trust-add", "policy", "trust", "signer.pem"),
   mutation("policy trust remove", "policy-trust-remove", "policy", "trust", "--remove=kid"),
   mutation("profile export --out", "profile-export", "profile", "export", "--out=bundle.json"),
@@ -225,7 +226,6 @@ export const PURE_READ_COMMANDS = [
   "insight",
   "map",
   "open",
-  "review",
   "sbom",
   "self-audit",
   "skills",
@@ -242,6 +242,9 @@ export const PURE_READ_COMMANDS = [
 
 /** Read forms inside otherwise mutation-capable command families. */
 export const READ_INVOCATIONS: readonly string[][] = [
+  ["review"],
+  ["review", "--json"],
+  ["review", "verify-receipt"],
   ["add", "--list"],
   ["adr"],
   ["adr", "check"],

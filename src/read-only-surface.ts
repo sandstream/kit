@@ -201,6 +201,7 @@ export const WRITE_SURFACE: readonly WriteSurfaceEntry[] = [
     operation: "policy-pull-revocations",
   },
   { command: "policy", subcommand: "sign", operation: "policy-sign" },
+  { command: "review", anyFlags: ["--receipt"], operation: "review-receipt" },
   {
     command: "policy",
     subcommand: "trust",
