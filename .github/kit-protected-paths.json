@@ -1,0 +1,18 @@
+{
+  "release": {
+    "exact": ["package.json", "package-lock.json", "docs/RELEASING.md"],
+    "prefix": [".github/workflows/publish", "packages/"]
+  },
+  "github": {
+    "exact": [],
+    "prefix": [".github/"]
+  },
+  "secrets": {
+    "exact": ["src/check-secrets.ts", "src/audit-secrets.ts", "src/agent-audit.ts", "src/utils/redactSecrets.ts"],
+    "prefix": ["src/secrets", "src/secret-", "src/vault-", "src/keystore/", "src/audit-anchor", ".env"]
+  },
+  "permissions": {
+    "exact": ["src/agent-config.ts", "src/commands/gate.ts", "src/hook-floor.ts", "src/install-gate.ts"],
+    "prefix": ["src/exec-broker/", "src/read-only-", "src/policy", "src/governance", "src/rbac/"]
+  }
+}

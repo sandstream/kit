@@ -166,6 +166,10 @@ with them. It runs them, folds in their results, and adds the layer they do not 
   and gets a single deterministic verdict across every source. No agent, no socket,
   no telemetry, zero LLM calls. Your code never leaves the machine.
 
+For a GitHub pull request, `kit review --receipt` writes signed evidence for the current commit.
+Use `kit review verify-receipt` to check its signature and commit.
+See [pull request review receipts](docs/PR_REVIEW_RECEIPT.md).
+
 Use kit **with** your scanners. It is the connective tissue that turns them into one
 local-first, agent-native gate.
 

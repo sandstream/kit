@@ -519,6 +519,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--json",
     "--lenient",
     "--no-auto-install",
+    "--receipt",
     "--stages",
     "--strict",
   ],
