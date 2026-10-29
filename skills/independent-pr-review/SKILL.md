@@ -11,7 +11,7 @@ The author coordinates the review. A fresh reviewer performs the review.
 
 ## Prepare
 
-1. Identify the GitHub repository, pull request number, base branch, and full head commit.
+1. Identify the GitHub repository, pull request number, base branch, base tip, and full head commit.
    Confirm that the clean local checkout and the pull request have the same head.
 2. Find the merge base of the current base branch and head. Collect the diff from that base to head.
    Collect the requirements for the change.
@@ -33,6 +33,9 @@ The reviewer reads the diff and the relevant surrounding code. The reviewer chec
 - Public repository hygiene, including secrets and private information in the diff and report.
 - Applicable architecture decisions and their enforced gates.
 
+Run code from the pull request only in an isolated environment without credentials, private data, or outbound network access.
+If that environment is unavailable, inspect the code without executing it and mark the affected checks `unverified`.
+
 For each finding, return a severity, repository-relative file, line, scenario, and supporting evidence.
 Return the full head commit and one verdict: `pass`, `findings`, or `incomplete`.
 Use `incomplete` when evidence is missing or a required check cannot be performed.
@@ -45,13 +48,14 @@ List the checks performed and any limits. Never claim a check ran without eviden
    If it changed, discard the result and review a clean checkout.
    Verify that a separate reviewer returned the full requested head and all required fields.
    Reject missing evidence, malformed findings, and a verdict that conflicts with the findings.
-2. Recheck the GitHub pull request head. If it changed, discard the result and review the new head.
+2. Recheck the GitHub pull request head and base branch. Fetch the current base tip and recompute the merge base.
+   If the head, base branch, or merge base changed, discard the result and review the new diff.
 3. Prepare a comment in a temporary file. Check the entire comment for secrets and private information.
    Include this exact marker on its own line: `<!-- kit-independent-review:v1 -->`.
    Follow the comment format below. Use the reviewer's findings and evidence without changing their meaning.
 4. Post the file with `gh pr comment <number> --repo <owner/repo> --body-file <file>`.
-   Read back the posted comment and verify its contents. Recheck the pull request head.
-   If publication fails or the head changed, report the failure and do not claim a current verdict.
+   Read back the posted comment and verify its contents. Recheck the head, base branch, and merge base.
+   If publication fails or any of these changed, report the failure and do not claim a current verdict.
 
 Each review gets a new comment. An older comment is historical after a new commit.
 This comment records the protocol. It does not prove reviewer independence or approve a merge.
@@ -66,6 +70,8 @@ Write the marker followed by one JSON code block. Use valid JSON with these fiel
   "schema": "kit-independent-review/v1",
   "repository": "owner/repo",
   "pull_request": 123,
+  "base_branch": "target branch",
+  "base_tip": "full base tip commit",
   "base": "full merge-base commit",
   "head": "full head commit",
   "verdict": "pass | findings | incomplete",
