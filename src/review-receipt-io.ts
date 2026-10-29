@@ -22,7 +22,12 @@ const REVIEW_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){r
 const PR_VIEW_FIELDS = "number,headRefOid,changedFiles,files,statusCheckRollup";
 
 function defaultReadCommand(command: string, args: string[], cwd: string): string {
-  return execFileSync(command, args, { cwd, encoding: "utf8", timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
+  return execFileSync(command, args, {
+    cwd,
+    encoding: "utf8",
+    timeout: 30_000,
+    maxBuffer: 16 * 1024 * 1024,
+  });
 }
 
 function gitHead(root: string, run: ReadCommand): string {
@@ -50,14 +55,33 @@ export function collectReviewReceipt(
   const root = resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim());
   clean(root, run);
   const localHead = gitHead(root, run);
-  const repoResponse = JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"], root)) as { nameWithOwner?: unknown };
+  const repoResponse = JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"], root)) as {
+    nameWithOwner?: unknown;
+  };
   const repo = repoResponse.nameWithOwner;
   if (typeof repo !== "string") throw new Error("invalid GitHub repository identity");
   const pr = prEvidence(root, run);
   if (pr.head !== localHead) throw new Error("pull request head does not match the local commit");
   const [owner, name] = repo.split("/");
   if (!owner || !name) throw new Error("invalid GitHub repository identity");
-  const threads = parseGitHubReviewThreads(run("gh", ["api", "graphql", "-F", `owner=${owner}`, "-F", `name=${name}`, "-F", `number=${pr.number}`, "-f", `query=${REVIEW_THREADS_QUERY}`], root));
+  const threads = parseGitHubReviewThreads(
+    run(
+      "gh",
+      [
+        "api",
+        "graphql",
+        "-F",
+        `owner=${owner}`,
+        "-F",
+        `name=${name}`,
+        "-F",
+        `number=${pr.number}`,
+        "-f",
+        `query=${REVIEW_THREADS_QUERY}`,
+      ],
+      root,
+    ),
+  );
   const protectedPaths = classifyProtectedPaths(pr.changedPaths, loadProtectedPathRules(root));
 
   // Refuse a receipt if the branch or PR moved while evidence was collected.
@@ -91,7 +115,11 @@ export async function writeReviewReceipt(
   const path = join(root, REVIEW_RECEIPT_FILE);
   const temp = join(root, `${REVIEW_RECEIPT_FILE}.${randomBytes(6).toString("hex")}.tmp`);
   try {
-    writeFileSync(temp, JSON.stringify(signed, null, 2) + "\n", { encoding: "utf8", mode: 0o600, flag: "wx" });
+    writeFileSync(temp, JSON.stringify(signed, null, 2) + "\n", {
+      encoding: "utf8",
+      mode: 0o600,
+      flag: "wx",
+    });
     renameSync(temp, path);
   } finally {
     rmSync(temp, { force: true });

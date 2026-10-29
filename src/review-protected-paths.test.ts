@@ -4,13 +4,16 @@ import { classifyProtectedPaths, loadProtectedPathRules } from "./review-protect
 
 it("names each protected class from the repository rule file", () => {
   const rules = loadProtectedPathRules(process.cwd());
-  const paths = classifyProtectedPaths([
-    "docs/RELEASING.md",
-    ".github/workflows/ci.yml",
-    "src/secrets-rotate.ts",
-    "src/read-only-surface.ts",
-    "src/ordinary.ts",
-  ], rules);
+  const paths = classifyProtectedPaths(
+    [
+      "docs/RELEASING.md",
+      ".github/workflows/ci.yml",
+      "src/secrets-rotate.ts",
+      "src/read-only-surface.ts",
+      "src/ordinary.ts",
+    ],
+    rules,
+  );
   assert.deepEqual(paths, [
     { path: "docs/RELEASING.md", classes: ["release"] },
     { path: ".github/workflows/ci.yml", classes: ["github"] },

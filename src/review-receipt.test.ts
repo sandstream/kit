@@ -19,10 +19,22 @@ describe("review receipt", () => {
       stderr: "",
     },
     checks: [
-      { name: "build-and-test", status: "COMPLETED", conclusion: "SUCCESS", url: "https://example.test/check" },
+      {
+        name: "build-and-test",
+        status: "COMPLETED",
+        conclusion: "SUCCESS",
+        url: "https://example.test/check",
+      },
     ],
     threads: [
-      { id: "thread-1", path: "src/x.ts", line: 12, resolved: false, resolvedBy: null, comments: [{ url: "https://example.test/comment", body: "Fix this unsafe case" }] },
+      {
+        id: "thread-1",
+        path: "src/x.ts",
+        line: 12,
+        resolved: false,
+        resolvedBy: null,
+        comments: [{ url: "https://example.test/comment", body: "Fix this unsafe case" }],
+      },
     ],
     changedPaths: ["src/x.ts"],
     protectedPaths: [],
@@ -45,7 +57,10 @@ describe("review receipt", () => {
   });
 
   it("marks missing and pending CI evidence as incomplete", () => {
-    assert.deepEqual(buildReviewReceipt({ ...input(), checks: [] }).evidence_issues, ["no CI checks were returned", "unresolved GitHub review threads exist"]);
+    assert.deepEqual(buildReviewReceipt({ ...input(), checks: [] }).evidence_issues, [
+      "no CI checks were returned",
+      "unresolved GitHub review threads exist",
+    ]);
     const pending = input();
     pending.checks[0]!.conclusion = "";
     assert.match(buildReviewReceipt(pending).evidence_issues[0] ?? "", /CI check/);

@@ -79,7 +79,9 @@ export function buildReviewReceipt(input: ReviewReceiptInput): ReviewReceipt {
     gate: {
       command: input.gate.command,
       exit_code: input.gate.exitCode,
-      output_sha256: sha256(JSON.stringify({ stdout: input.gate.stdout, stderr: input.gate.stderr })),
+      output_sha256: sha256(
+        JSON.stringify({ stdout: input.gate.stdout, stderr: input.gate.stderr }),
+      ),
     },
     checks: input.checks.map((check) => ({ ...check })),
     review_threads: input.threads.map((thread) => ({

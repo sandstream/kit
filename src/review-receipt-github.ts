@@ -98,10 +98,14 @@ export function parseGitHubReviewThreads(json: string): ReviewReceiptInput["thre
       path: string(thread.path, "review thread path"),
       line: thread.line as number | null,
       resolved: thread.isResolved,
-      resolvedBy: resolvedBy === null ? null : string(record(resolvedBy, "resolver").login, "resolver login"),
+      resolvedBy:
+        resolvedBy === null ? null : string(record(resolvedBy, "resolver").login, "resolver login"),
       comments: comments.nodes.map((rawComment: unknown) => {
         const comment = record(rawComment, "review comment");
-        return { url: string(comment.url, "comment URL"), body: string(comment.body, "comment body") };
+        return {
+          url: string(comment.url, "comment URL"),
+          body: string(comment.body, "comment body"),
+        };
       }),
     };
   });

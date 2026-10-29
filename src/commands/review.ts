@@ -220,7 +220,8 @@ export async function cmdReview(): Promise<boolean> {
   const jsonMode = receiptMode || hasFlag(process.argv, "--json");
   const enforce = receiptMode || hasFlag(process.argv, "--enforce");
   const enforceTests = receiptMode || hasFlag(process.argv, "--enforce-tests");
-  const lenient = !receiptMode && (hasFlag(process.argv, "--lenient") || envTruthy(process.env.KIT_CI_LENIENT));
+  const lenient =
+    !receiptMode && (hasFlag(process.argv, "--lenient") || envTruthy(process.env.KIT_CI_LENIENT));
   const failOnWarning =
     receiptMode ||
     hasFlag(process.argv, "--fail-on-warning") ||
@@ -246,7 +247,9 @@ export async function cmdReview(): Promise<boolean> {
   }
   const category = flagValue(process.argv, "--category");
   if (receiptMode && (stagesFlag || category || hasFlag(process.argv, "--lenient"))) {
-    console.error("✗ --receipt requires a full review and cannot use --stages, --category, or --lenient");
+    console.error(
+      "✗ --receipt requires a full review and cannot use --stages, --category, or --lenient",
+    );
     return false;
   }
   const config = await loadConfig(resolve(cwd, KIT_FILE));
@@ -281,7 +284,9 @@ export async function cmdReview(): Promise<boolean> {
             for (const issue of receipt.evidence_issues) console.error(`✗ ${issue}`);
             return receipt.evidence_issues.length === 0;
           } catch (error) {
-            console.error(`✗ Review receipt failed: ${error instanceof Error ? error.message : String(error)}`);
+            console.error(
+              `✗ Review receipt failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
             return false;
           }
         }

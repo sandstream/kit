@@ -9,7 +9,10 @@ export type ProtectedPathRules = Record<ProtectedClass, Patterns>;
 const CLASSES: readonly ProtectedClass[] = ["release", "github", "secrets", "permissions"];
 
 function strings(value: unknown): string[] {
-  if (!Array.isArray(value) || !value.every((item) => typeof item === "string" && item.length > 0)) {
+  if (
+    !Array.isArray(value) ||
+    !value.every((item) => typeof item === "string" && item.length > 0)
+  ) {
     throw new Error("invalid protected path rule list");
   }
   return value as string[];
