@@ -1,5 +1,6 @@
 /** Read all PR comments and bind independent review reports to current GitHub refs. */
 import {
+  isReviewCommentCandidate,
   selectReviewComments,
   type ReviewCommentInput,
   type SelectedReviewComment,
@@ -117,6 +118,12 @@ function parseComment(raw: unknown): ReviewCommentInput {
   };
 }
 
+function parseCandidate(raw: unknown): ReviewCommentInput[] {
+  const item = object(raw, "GitHub comment");
+  if (typeof item.body !== "string") throw new Error("invalid GitHub comment body");
+  return isReviewCommentCandidate(item.body) ? [parseComment(item)] : [];
+}
+
 function readComments(
   root: string,
   repo: string,
@@ -128,7 +135,7 @@ function readComments(
   if (!Array.isArray(response) || response.length === 0 || !response.every(Array.isArray)) {
     throw new Error("invalid GitHub comment pages");
   }
-  return response.flatMap((page: unknown[]) => page.map(parseComment));
+  return response.flatMap((page: unknown[]) => page.flatMap(parseCandidate));
 }
 
 export function collectIndependentReviewComments(

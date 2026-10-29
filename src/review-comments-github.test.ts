@@ -10,10 +10,15 @@ const REPO = "sandstream/kit";
 const NUMBER = 12;
 const EXPECTED_ROOT = "/repo";
 
-function comment(id: number, verdict: "pass" | "incomplete") {
+function comment(id: number, verdict: "pass" | "incomplete" | "findings") {
   const statuses = ["correctness", "security", "tests", "public-hygiene", "adr"].map((area) => ({
     area,
-    status: verdict === "pass" ? "pass" : "unverified",
+    status:
+      verdict === "incomplete"
+        ? "unverified"
+        : verdict === "findings" && area === "security"
+          ? "issue"
+          : "pass",
     evidence: "Checked the relevant code",
   }));
   const report = {
@@ -26,8 +31,19 @@ function comment(id: number, verdict: "pass" | "incomplete") {
     base: MERGE_BASE,
     verdict,
     checks: statuses,
-    limits: verdict === "pass" ? [] : ["Tests could not run"],
-    findings: [],
+    limits: verdict === "incomplete" ? ["Tests could not run"] : [],
+    findings:
+      verdict === "findings"
+        ? [
+            {
+              severity: "P1",
+              file: "src/example.ts",
+              line: 7,
+              scenario: "Unsafe input",
+              evidence: "Reproduced",
+            },
+          ]
+        : [],
   };
   return {
     id,
@@ -131,6 +147,35 @@ describe("collectIndependentReviewComments", () => {
           fakeRun({ pages: [[{ ...comment(1, "pass"), user: null }]] }).run,
         ),
       /author/i,
+    );
+  });
+});
+
+describe("collectIndependentReviewComments ignores unrelated comments", () => {
+  it("keeps reports visible when an ordinary comment has a deleted author", () => {
+    const pages = [
+      [{ ...comment(1, "pass"), body: "A normal comment", user: null }, comment(2, "findings")],
+    ];
+    const result = collectIndependentReviewComments(
+      EXPECTED_ROOT,
+      REPO,
+      NUMBER,
+      HEAD,
+      fakeRun({ pages }).run,
+    );
+    assert.equal(result.length, 1);
+    assert.equal(result[0]?.comment.id, "2");
+    assert.equal(result[0]?.result.kind, "current");
+    if (result[0]?.result.kind === "current")
+      assert.equal(result[0].result.report.findings.length, 1);
+  });
+
+  it("refuses a comment whose body is unavailable", () => {
+    const pages = [[{ ...comment(1, "pass"), body: null }]];
+    assert.throws(
+      () =>
+        collectIndependentReviewComments(EXPECTED_ROOT, REPO, NUMBER, HEAD, fakeRun({ pages }).run),
+      /body/i,
     );
   });
 });

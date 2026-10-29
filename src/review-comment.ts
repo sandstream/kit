@@ -5,6 +5,10 @@ const SHA = /^[a-f0-9]{40}$/;
 const AREAS = ["correctness", "security", "tests", "public-hygiene", "adr"] as const;
 const MAX_BODY_LENGTH = 1_000_000;
 
+export function isReviewCommentCandidate(body: string): boolean {
+  return body.includes("kit-independent-review:");
+}
+
 export interface ExpectedReviewComment {
   repository: string;
   pullRequest: number;
@@ -186,7 +190,7 @@ export function parseReviewComment(
   expected: ExpectedReviewComment,
 ): ReviewCommentResult {
   if (typeof body !== "string") return { kind: "invalid", reason: "invalid review comment body" };
-  if (!body.includes("kit-independent-review:")) return { kind: "unmarked" };
+  if (!isReviewCommentCandidate(body)) return { kind: "unmarked" };
   if (body.length > MAX_BODY_LENGTH)
     return { kind: "invalid", reason: "review comment is too large" };
   const match = /^\s*<!-- kit-independent-review:v1 -->\s*```json\s*\n([\s\S]*?)\n```\s*$/.exec(
