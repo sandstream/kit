@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { collectPrEscalations, type PrEscalationEvidence } from "./escalate-pr.js";
+import {
+  collectPrEscalations,
+  formatReportedReviewPasses,
+  type PrEscalationEvidence,
+} from "./escalate-pr.js";
+import type { SelectedReviewComment } from "./review-comment.js";
 
 const HEAD = "a".repeat(40);
 const goodCheck = {
@@ -9,6 +14,34 @@ const goodCheck = {
   conclusion: "SUCCESS",
   url: "https://example.test/ci",
 };
+
+function passReview(): SelectedReviewComment {
+  return {
+    comment: {
+      id: "123",
+      url: "https://github.com/sandstream/kit/pull/650#issuecomment-123",
+      author: "reviewer",
+      createdAt: "2026-10-29T12:00:00Z",
+      updatedAt: "2026-10-29T12:00:00Z",
+      body: "",
+    },
+    result: {
+      kind: "current",
+      report: {
+        repository: "sandstream/kit",
+        pullRequest: 650,
+        head: HEAD,
+        baseBranch: "main",
+        baseTip: HEAD,
+        mergeBase: HEAD,
+        verdict: "pass",
+        checks: [],
+        limits: [],
+        findings: [],
+      },
+    },
+  };
+}
 
 function evidence(changes: Partial<PrEscalationEvidence> = {}): PrEscalationEvidence {
   return {
@@ -27,6 +60,7 @@ function evidence(changes: Partial<PrEscalationEvidence> = {}): PrEscalationEvid
     checks: [goodCheck],
     threads: [],
     protectedPaths: [],
+    reviewComments: [passReview()],
     humanApproved: false,
     mergeDenied: false,
     ...changes,
@@ -34,6 +68,103 @@ function evidence(changes: Partial<PrEscalationEvidence> = {}): PrEscalationEvid
 }
 
 describe("collectPrEscalations", () => {
+  it("reports a missing, unavailable, stale, or malformed independent review", () => {
+    const missing = collectPrEscalations(evidence({ reviewComments: [] }));
+    assert.match(missing[0]?.issue ?? "", /no independent review/i);
+    const unavailable = collectPrEscalations(
+      evidence({ reviewCommentProblem: "GitHub comments unavailable" }),
+    );
+    assert.match(unavailable[0]?.issue ?? "", /unavailable/i);
+    const comment = passReview();
+    if (comment.result.kind !== "current") throw new Error("expected current report");
+    for (const kind of ["stale", "invalid"] as const) {
+      const result =
+        kind === "stale"
+          ? { kind, reason: "stale report", report: comment.result.report }
+          : { kind, reason: "invalid report" };
+      const items = collectPrEscalations(evidence({ reviewComments: [{ ...comment, result }] }));
+      assert.match(items[0]?.issue ?? "", new RegExp(kind));
+    }
+  });
+});
+
+describe("independent review findings", () => {
+  it("keeps findings visible when the base changes without a new head", () => {
+    const review = passReview();
+    if (review.result.kind !== "current") throw new Error("expected current report");
+    review.result.report.verdict = "findings";
+    review.result.report.findings = [
+      {
+        severity: "P1",
+        file: "src/x.ts",
+        line: 9,
+        scenario: "Missing access check",
+        evidence: "Reproduced",
+      },
+    ];
+    const stale: SelectedReviewComment = {
+      ...review,
+      result: {
+        kind: "stale",
+        reason: "review comment is for a different base",
+        report: review.result.report,
+      },
+    };
+    const items = collectPrEscalations(evidence({ reviewComments: [stale, passReview()] }));
+    assert.equal(items.length, 2);
+    assert.match(items[0]?.issue ?? "", /different base/);
+    assert.match(items[1]?.issue ?? "", /src\/x.ts:9.*Missing access check/);
+    assert.equal(
+      formatReportedReviewPasses(evidence({ reviewComments: [stale, passReview()] })),
+      "",
+    );
+  });
+
+  it("reports incomplete checks and all findings without terminal control characters", () => {
+    const review = passReview();
+    if (review.result.kind !== "current") throw new Error("expected current report");
+    review.result.report.verdict = "incomplete";
+    review.result.report.limits = ["Test\nnot run"];
+    review.result.report.findings = [
+      {
+        severity: "P1",
+        file: "src/x.ts",
+        line: 12,
+        scenario: "Unsafe\u001b\ninput",
+        evidence: "Reproduced",
+      },
+    ];
+    const items = collectPrEscalations(evidence({ reviewComments: [review] }));
+    assert.equal(items.length, 2);
+    assert.match(items[0]?.issue ?? "", /incomplete.*Test not run/i);
+    assert.match(items[1]?.issue ?? "", /src\/x.ts:12.*Unsafe input/);
+    assert.doesNotMatch(items[1]?.issue ?? "", /\u001b/);
+    assert.match(items[1]?.action ?? "", /accept it in writing/i);
+  });
+});
+
+describe("reported review pass", () => {
+  it("labels a reported pass without claiming approval or independence", () => {
+    const summary = formatReportedReviewPasses(evidence());
+    assert.match(summary, /reviewer/);
+    assert.match(summary, /does not prove independence or approve a merge/i);
+    assert.equal(formatReportedReviewPasses(evidence({ reviewCommentProblem: "offline" })), "");
+    const comment = passReview();
+    assert.equal(
+      formatReportedReviewPasses(
+        evidence({
+          reviewComments: [
+            passReview(),
+            { ...comment, result: { kind: "invalid", reason: "bad" } },
+          ],
+        }),
+      ),
+      "",
+    );
+  });
+});
+
+describe("receipt escalation", () => {
   it("reports a missing or invalid receipt with the recovery command", () => {
     const missing = collectPrEscalations(
       evidence({ receiptProblem: "receipt missing", gate: null }),
@@ -66,7 +197,9 @@ describe("collectPrEscalations", () => {
     assert.match(items[0]?.issue ?? "", /standards: complexity/);
     assert.match(items[0]?.action ?? "", /kit review --receipt/);
   });
+});
 
+describe("CI and review thread escalation", () => {
   it("names failed CI checks, review findings, and protected paths", () => {
     const items = collectPrEscalations(
       evidence({

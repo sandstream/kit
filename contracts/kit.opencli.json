@@ -867,7 +867,7 @@
     },
     "escalate": {
       "kind": "command",
-      "summary": "List what needs human action; 'kit escalate pr' reports PR blocks from signed receipts and GitHub checks",
+      "summary": "List what needs human action; 'kit escalate pr' reads receipts, GitHub checks, and review reports",
       "x-kit-accepted-flags": ["--env","--help","--merge-denied","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",

@@ -1,6 +1,8 @@
 /** Deterministic actions for a pull request that cannot yet proceed. */
 import type { EscalationItem } from "./escalate.js";
 import type { ProtectedClass } from "./review-protected-paths.js";
+import type { ReviewCommentFinding, SelectedReviewComment } from "./review-comment.js";
+import { redactSecrets } from "./utils/redactSecrets.js";
 
 export interface PrEscalationEvidence {
   repo: string;
@@ -24,8 +26,102 @@ export interface PrEscalationEvidence {
     resolved: boolean;
   }[];
   protectedPaths: { path: string; classes: ProtectedClass[] }[];
+  reviewComments?: SelectedReviewComment[];
+  reviewCommentProblem?: string | null;
   humanApproved: boolean;
   mergeDenied: boolean;
+}
+
+function safeText(value: string): string {
+  return redactSecrets(value)
+    .replace(/[\p{Cc}\p{Cf}]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 300);
+}
+
+function commentFindings(findings: ReviewCommentFinding[], url: string): EscalationItem[] {
+  return findings.map((finding) => {
+    const location = `${safeText(finding.file)}:${finding.line}`;
+    return item(
+      `independent finding ${location}`,
+      `${safeText(finding.severity)}: ${location}: ${safeText(finding.scenario)}`,
+      `Fix the finding or accept it in writing: ${url}`,
+    );
+  });
+}
+
+function reviewCommentItems(evidence: PrEscalationEvidence, prUrl: string): EscalationItem[] {
+  if (evidence.reviewCommentProblem) {
+    return [
+      item(
+        "independent review",
+        safeText(evidence.reviewCommentProblem),
+        `Inspect the PR comments and retry: kit escalate pr. ${prUrl}`,
+      ),
+    ];
+  }
+  if (!evidence.reviewComments || evidence.reviewComments.length === 0) {
+    return [
+      item(
+        "independent review",
+        "No independent review report was found for this pull request",
+        "Run the independent-pr-review skill for the current head",
+      ),
+    ];
+  }
+  return evidence.reviewComments.flatMap(({ comment, result }) => {
+    const url = safeText(comment.url);
+    const author = safeText(comment.author);
+    if (result.kind !== "current") {
+      const items = [
+        item(
+          `independent review by ${author}`,
+          safeText(result.reason),
+          `Inspect the report and request a current review: ${url}`,
+        ),
+      ];
+      if (result.kind === "stale" && result.report.head === evidence.head) {
+        items.push(...commentFindings(result.report.findings, url));
+      }
+      return items;
+    }
+    const items: EscalationItem[] = [];
+    if (result.report.verdict === "incomplete") {
+      items.push(
+        item(
+          `independent review by ${author}`,
+          `Review incomplete: ${safeText(result.report.limits.join("; "))}`,
+          `Complete the missing checks and record a new review: ${url}`,
+        ),
+      );
+    }
+    items.push(...commentFindings(result.report.findings, url));
+    return items;
+  });
+}
+
+/** Describe reported passes without treating comments as proof of independence or approval. */
+export function formatReportedReviewPasses(evidence: PrEscalationEvidence): string {
+  if (evidence.reviewCommentProblem) return "";
+  if (
+    evidence.reviewComments?.some(
+      ({ result }) => result.kind !== "current" || result.report.verdict !== "pass",
+    )
+  )
+    return "";
+  const passes = (evidence.reviewComments ?? []).filter(
+    ({ result }) => result.kind === "current" && result.report.verdict === "pass",
+  );
+  if (passes.length === 0) return "";
+  const lines = passes.map(
+    ({ comment }) => `  - ${safeText(comment.author)}: ${safeText(comment.url)}`,
+  );
+  return [
+    "Reported independent review: pass",
+    ...lines,
+    "The comment does not prove independence or approve a merge.",
+  ].join("\n");
 }
 
 function item(name: string, issue: string, action: string): EscalationItem {
@@ -133,6 +229,7 @@ export function collectPrEscalations(evidence: PrEscalationEvidence): Escalation
     ...receiptItems(evidence, shortHead),
     ...checkItems(evidence, shortHead, prUrl),
     ...threadItems(evidence),
+    ...reviewCommentItems(evidence, prUrl),
     ...protectedItems(evidence, shortHead, prUrl),
     ...(evidence.mergeDenied
       ? [

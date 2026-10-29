@@ -2,6 +2,7 @@
 import { resolve } from "node:path";
 import { parseCurrentHumanApproval } from "./escalate-pr-github.js";
 import type { PrEscalationEvidence } from "./escalate-pr.js";
+import { collectIndependentReviewComments } from "./review-comments-github.js";
 import { classifyProtectedPaths, loadProtectedPathRules } from "./review-protected-paths.js";
 import {
   parseGitHubPrView,
@@ -180,6 +181,13 @@ export async function collectPrEvidence(
   const { root, repo, pr } = prIdentity(cwd, run);
   const { threads, rawThreads, humanApproved } = reviewEvidence(root, repo, pr, run);
   const protectedPaths = classifyProtectedPaths(pr.changedPaths, loadProtectedPathRules(root));
+  let reviewComments: PrEscalationEvidence["reviewComments"];
+  let reviewCommentProblem: string | null = null;
+  try {
+    reviewComments = collectIndependentReviewComments(root, repo, pr.number, pr.head, run);
+  } catch (error) {
+    reviewCommentProblem = `review comments unavailable: ${errorMessage(error)}`;
+  }
   const current = prView(root, run);
   const receipt = await localReceipt(root, current, rawThreads, protectedPaths, run);
   if (
@@ -197,6 +205,8 @@ export async function collectPrEvidence(
     checks: current.checks,
     threads,
     protectedPaths,
+    reviewComments,
+    reviewCommentProblem,
     humanApproved,
     mergeDenied: options.mergeDenied,
   };

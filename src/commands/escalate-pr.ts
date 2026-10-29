@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { loadConfig } from "../config.js";
 import { resolveConfigPath } from "../cli-shared.js";
-import { collectPrEscalations } from "../escalate-pr.js";
+import { collectPrEscalations, formatReportedReviewPasses } from "../escalate-pr.js";
 import { collectPrEvidence } from "../escalate-pr-io.js";
 import { formatEscalationMessage } from "../escalate.js";
 import { withGovernance } from "../governance-middleware.js";
@@ -36,9 +36,11 @@ export async function cmdEscalatePr(): Promise<boolean> {
           items.length === 0
             ? "No pull request escalation actions found for this head. This does not approve a merge."
             : formatEscalationMessage(items, process.cwd());
+        const passes = formatReportedReviewPasses(evidence);
+        const output = passes ? `${message}\n\n${passes}` : message;
         const path = resolve(process.cwd(), ".kit-escalation.txt");
-        await writeFile(path, message + "\n", "utf8");
-        console.log(message);
+        await writeFile(path, output + "\n", "utf8");
+        console.log(output);
         console.log(`Written to ${path}`);
         return items.length === 0;
       } catch (error) {
