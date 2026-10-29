@@ -658,7 +658,7 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
   escalate: {
     handler: cmdEscalate,
     stability: "stable",
-    help: "List what needs human action; 'kit escalate pr' reports PR blocks from signed receipts and GitHub checks",
+    help: "List what needs human action; 'kit escalate pr' reads receipts, GitHub checks, and review reports",
   },
   governance: {
     handler: cmdGovernance,

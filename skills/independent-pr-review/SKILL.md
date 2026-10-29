@@ -59,7 +59,7 @@ List the checks performed and any limits. Never claim a check ran without eviden
 
 Each review gets a new comment. An older comment is historical after a new commit.
 This comment records the protocol. It does not prove reviewer independence or approve a merge.
-P0 reads GitHub review threads, not this comment. P3 and P4 must define verification and identity.
+`kit escalate pr` reads this comment and GitHub review threads. P3 and P4 must define verification and identity.
 
 ## Comment format
 
