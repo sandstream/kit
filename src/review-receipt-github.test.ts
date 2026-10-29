@@ -53,7 +53,9 @@ describe("GitHub review receipt evidence", () => {
       /incomplete/i,
     );
   });
+});
 
+describe("GitHub review threads", () => {
   it("keeps open and resolved threads but never prints comment text", () => {
     const threads = parseGitHubReviewThreads(
       JSON.stringify({
