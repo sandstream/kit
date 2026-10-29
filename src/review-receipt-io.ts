@@ -1,7 +1,7 @@
 /** Collect and store a signed receipt for the exact pull request head. */
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { getAuditAnchorKey, tryReadAuditAnchorKey } from "./audit-anchor.js";
 import { classifyProtectedPaths, loadProtectedPathRules } from "./review-protected-paths.js";
@@ -133,8 +133,12 @@ export async function verifyReviewReceiptFile(
   run: ReadCommand = defaultReadCommand,
 ): Promise<{ ok: boolean; reason: string }> {
   const root = resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim());
-  const json = readFileSync(resolve(root, file), "utf8");
-  if (json.length > 16 * 1024 * 1024) return { ok: false, reason: "review receipt is too large" };
+  clean(root, run);
+  const path = resolve(root, file);
+  if (statSync(path).size > 16 * 1024 * 1024) {
+    return { ok: false, reason: "review receipt is too large" };
+  }
+  const json = readFileSync(path, "utf8");
   const receipt = JSON.parse(json) as SignedReviewReceipt;
   const key = await tryReadAuditAnchorKey();
   if (!key) return { ok: false, reason: "review receipt signing key is unavailable" };
@@ -142,7 +146,14 @@ export async function verifyReviewReceiptFile(
   const signature = verifyReviewReceipt(receipt, key, head);
   if (!signature.ok) return signature;
   const pr = prEvidence(root, run);
-  if (receipt.pr !== pr.number || receipt.head !== pr.head) {
+  const repoResponse = JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"], root)) as {
+    nameWithOwner?: unknown;
+  };
+  if (
+    receipt.repo !== repoResponse.nameWithOwner ||
+    receipt.pr !== pr.number ||
+    receipt.head !== pr.head
+  ) {
     return { ok: false, reason: "review receipt does not match the current pull request" };
   }
   return signature;
