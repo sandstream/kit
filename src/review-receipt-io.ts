@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { getAuditAnchorKey, tryReadAuditAnchorKey } from "./audit-anchor.js";
 import { classifyProtectedPaths, loadProtectedPathRules } from "./review-protected-paths.js";
 import { parseGitHubPrView, parseGitHubReviewThreads } from "./review-receipt-github.js";
+import { isReadOnlyMode, refuseWrite } from "./read-only-mode.js";
 import {
   buildReviewReceipt,
   signReviewReceipt,
@@ -108,6 +109,10 @@ export async function writeReviewReceipt(
   gate: ReviewReceiptInput["gate"],
   run: ReadCommand = defaultReadCommand,
 ): Promise<{ path: string; receipt: ReviewReceipt }> {
+  if (isReadOnlyMode()) {
+    const refusal = await refuseWrite("review-receipt", {}, { cwd });
+    throw new Error(refusal.reason);
+  }
   const receipt = collectReviewReceipt(cwd, gate, run);
   const key = await getAuditAnchorKey();
   const signed = signReviewReceipt(receipt, key);

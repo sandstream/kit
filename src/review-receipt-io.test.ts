@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { collectReviewReceipt, type ReadCommand } from "./review-receipt-io.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { collectReviewReceipt, writeReviewReceipt, type ReadCommand } from "./review-receipt-io.js";
 
 const HEAD = "a".repeat(40);
 const root = process.cwd();
@@ -65,5 +68,20 @@ describe("collectReviewReceipt", () => {
       () => collectReviewReceipt(root, gate, fakeCommands({ remoteHead: "b".repeat(40) })),
       /head/i,
     );
+  });
+});
+
+describe("writeReviewReceipt", () => {
+  it("refuses a direct library write in read-only mode", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-review-receipt-read-only-"));
+    const previous = process.env.KIT_READ_ONLY;
+    process.env.KIT_READ_ONLY = "1";
+    try {
+      await assert.rejects(writeReviewReceipt(dir, gate, fakeCommands()), /read-only mode active/);
+    } finally {
+      if (previous === undefined) delete process.env.KIT_READ_ONLY;
+      else process.env.KIT_READ_ONLY = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
