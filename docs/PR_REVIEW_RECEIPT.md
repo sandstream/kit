@@ -32,4 +32,7 @@ The command checks approvals from another GitHub user for the exact PR head.
 Use `kit escalate pr --merge-denied` after a permission layer refuses the merge.
 That flag names the merge command in the handoff.
 Approval given only outside GitHub is not visible to this command.
-P2 will add the independent reviewer verdict. Later phases will enforce merge rules.
+The `independent-pr-review` skill asks a separate reviewer to inspect the diff.
+It records the verdict as a PR comment bound to the full head commit.
+`kit escalate pr` does not read that comment. The reviewer and author can share a GitHub identity.
+The comment does not prove independence. Later phases must verify the verdict and enforce merge rules.
