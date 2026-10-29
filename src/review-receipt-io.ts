@@ -1,7 +1,7 @@
 /** Collect and store a signed receipt for the exact pull request head. */
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { getAuditAnchorKey, tryReadAuditAnchorKey } from "./audit-anchor.js";
 import { classifyProtectedPaths, loadProtectedPathRules } from "./review-protected-paths.js";
@@ -21,6 +21,7 @@ export type ReadCommand = (command: string, args: string[], cwd: string) => stri
 
 const REVIEW_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){totalCount pageInfo{hasNextPage} nodes{id isResolved path line resolvedBy{login} comments(first:100){pageInfo{hasNextPage} nodes{url body}}}}}}}`;
 const PR_VIEW_FIELDS = "number,headRefOid,changedFiles,files,statusCheckRollup";
+const MAX_RECEIPT_BYTES = 16 * 1024 * 1024;
 
 function defaultReadCommand(command: string, args: string[], cwd: string): string {
   return execFileSync(command, args, {
@@ -44,6 +45,25 @@ function prEvidence(root: string, run: ReadCommand) {
 function clean(root: string, run: ReadCommand): void {
   if (run("git", ["status", "--porcelain", "--untracked-files=all"], root).trim()) {
     throw new Error("review receipt requires a clean worktree");
+  }
+}
+
+function readReceipt(path: string): string | null {
+  const fd = openSync(path, "r");
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    while (total <= MAX_RECEIPT_BYTES) {
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, MAX_RECEIPT_BYTES + 1 - total));
+      const count = readSync(fd, chunk, 0, chunk.length, null);
+      if (count === 0) return Buffer.concat(chunks, total).toString("utf8");
+      total += count;
+      if (total > MAX_RECEIPT_BYTES) return null;
+      chunks.push(chunk.subarray(0, count));
+    }
+    return null;
+  } finally {
+    closeSync(fd);
   }
 }
 
@@ -139,11 +159,10 @@ export async function verifyReviewReceiptFile(
 ): Promise<{ ok: boolean; reason: string }> {
   const root = resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim());
   clean(root, run);
-  const path = resolve(root, file);
-  if (statSync(path).size > 16 * 1024 * 1024) {
+  const json = readReceipt(resolve(root, file));
+  if (json === null) {
     return { ok: false, reason: "review receipt is too large" };
   }
-  const json = readFileSync(path, "utf8");
   const receipt = JSON.parse(json) as SignedReviewReceipt;
   const key = await tryReadAuditAnchorKey();
   if (!key) return { ok: false, reason: "review receipt signing key is unavailable" };

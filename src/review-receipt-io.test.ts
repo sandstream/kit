@@ -1,9 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collectReviewReceipt, writeReviewReceipt, type ReadCommand } from "./review-receipt-io.js";
+import {
+  collectReviewReceipt,
+  verifyReviewReceiptFile,
+  writeReviewReceipt,
+  type ReadCommand,
+} from "./review-receipt-io.js";
 
 const HEAD = "a".repeat(40);
 const root = process.cwd();
@@ -81,6 +86,20 @@ describe("writeReviewReceipt", () => {
     } finally {
       if (previous === undefined) delete process.env.KIT_READ_ONLY;
       else process.env.KIT_READ_ONLY = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("verifyReviewReceiptFile", () => {
+  it("refuses an oversized receipt before it reads signing keys", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-review-receipt-large-"));
+    const path = join(dir, "receipt.json");
+    try {
+      writeFileSync(path, Buffer.alloc(16 * 1024 * 1024 + 1));
+      const result = await verifyReviewReceiptFile(root, path, fakeCommands());
+      assert.deepEqual(result, { ok: false, reason: "review receipt is too large" });
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
