@@ -26,6 +26,7 @@ import { runSkillGate } from "../skill-run.js";
 import type { JsonCheck } from "../cli-checks-shared.js";
 import type { GateOpts } from "../check-security.js";
 import { verifyReviewReceiptFile, writeReviewReceipt } from "../review-receipt-io.js";
+import { redactSecrets } from "../utils/redactSecrets.js";
 
 export type ReviewStageName = "check" | "design" | "standards" | "adr" | "skill";
 
@@ -279,6 +280,17 @@ export async function cmdReview(): Promise<boolean> {
               exitCode: report.ok ? 0 : 1,
               stdout: output,
               stderr: "",
+              failures: report.stages
+                .filter((stage) => !stage.ok)
+                .flatMap((stage) => {
+                  const findings = stage.findings
+                    .filter((finding) => finding.status === "fail" || finding.status === "warn")
+                    .map(
+                      (finding) =>
+                        `${stage.stage}: ${finding.name}: ${redactSecrets(finding.detail)}`,
+                    );
+                  return findings.length > 0 ? findings : [`${stage.stage}: gate failed`];
+                }),
             });
             console.error(`Review receipt: ${path}`);
             for (const issue of receipt.evidence_issues) console.error(`✗ ${issue}`);

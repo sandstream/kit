@@ -53,13 +53,8 @@ import {
 } from "./commands/info.js";
 import { cmdCreatePlugin, cmdClone, cmdRun, cmdOpen } from "./commands/project.js";
 import { cmdHeal, cmdPkg } from "./commands/maintain.js";
-import {
-  cmdSkills,
-  cmdEscalate,
-  cmdAgentConfig,
-  cmdGovernance,
-  cmdTeam,
-} from "./commands/agent.js";
+import { cmdSkills, cmdAgentConfig, cmdGovernance, cmdTeam } from "./commands/agent.js";
+import { cmdEscalate } from "./commands/escalate.js";
 import { cmdStatusline } from "./commands/statusline.js";
 import { cmdSelfAudit, cmdCoverage, cmdAnalyze } from "./commands/coverage.js";
 import { cmdAdr } from "./commands/adr.js";
@@ -660,7 +655,11 @@ const COMMAND_REGISTRY: Record<string, CommandDescriptor> = {
     stability: "stable",
     help: "Loop: auto-fix safe findings, re-scan until green; gate destructive, fail-closed on tamper (--dry-run, --agent)",
   },
-  escalate: { handler: cmdEscalate, stability: "stable", help: "List what needs human action" },
+  escalate: {
+    handler: cmdEscalate,
+    stability: "stable",
+    help: "List what needs human action; 'kit escalate pr' reports PR blocks from signed receipts and GitHub checks",
+  },
   governance: {
     handler: cmdGovernance,
     stability: "stable",

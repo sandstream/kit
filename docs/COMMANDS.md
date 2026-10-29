@@ -419,6 +419,11 @@ scope/RoE, so a profile can move to a fresh host without trusting the transport.
 | `kit version`                                                                  | Print kit version + exit.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `kit completions <bash\|zsh\|fish>`                                            | Output shell completion script for the given shell.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
+`kit escalate pr` reads the current pull request and its signed review receipt.
+It writes exact actions to `.kit-escalation.txt`.
+Use `--merge-denied` after a permission layer refuses a merge.
+See [pull request escalation](PR_REVIEW_RECEIPT.md#pull-request-escalation).
+
 ## Repo-map (experimental)
 
 Deterministic, zero-LLM code map: load only the relevant slice of a growing repo. Also exposed to agents as the `kit_map` MCP tool (same core — CLI ≡ MCP).

@@ -261,7 +261,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--yes",
   ],
   env: ["--compare", "--json", "--missing", "--non-interactive", "--show-values"],
-  escalate: ["--broker-gate", "--help", "--limit", "--no-install-gate"],
+  escalate: ["--merge-denied"],
   fix: [
     "--aws-region",
     "--cf-worker",

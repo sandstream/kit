@@ -18,6 +18,7 @@ sandstream-kit-*.tgz
 .kit-triage.jsonl
 .kit-check-attestation.json
 .kit-review-receipt.json
+.kit-review-receipt-history.jsonl
 .kit-review-receipt.json.*.tmp
 .kit-budget.json
 .kit-escalation.txt

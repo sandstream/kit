@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   collectReviewReceipt,
+  readFailedReviewRuns,
   verifyReviewReceiptFile,
   writeReviewReceipt,
   type ReadCommand,
@@ -19,10 +20,12 @@ const gate = {
   stderr: "",
 };
 
-function fakeCommands(options: { dirty?: boolean; remoteHead?: string } = {}): ReadCommand {
+function fakeCommands(
+  options: { dirty?: boolean; remoteHead?: string; rootDir?: string } = {},
+): ReadCommand {
   return (command, args) => {
     const call = [command, ...args].join(" ");
-    if (call === "git rev-parse --show-toplevel") return root + "\n";
+    if (call === "git rev-parse --show-toplevel") return (options.rootDir ?? root) + "\n";
     if (call === "git rev-parse HEAD") return HEAD + "\n";
     if (call === "git status --porcelain --untracked-files=all")
       return options.dirty ? " M src/x.ts\n" : "";
@@ -86,6 +89,31 @@ describe("writeReviewReceipt", () => {
     } finally {
       if (previous === undefined) delete process.env.KIT_READ_ONLY;
       else process.env.KIT_READ_ONLY = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps two signed failed runs for the same PR head", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-review-receipt-history-"));
+    const previous = process.env.KIT_AUDIT_ANCHOR_DIR;
+    process.env.KIT_AUDIT_ANCHOR_DIR = join(dir, "anchor");
+    const run = fakeCommands({ rootDir: dir });
+    try {
+      await writeReviewReceipt(
+        dir,
+        { ...gate, command: "kit review --receipt", exitCode: 1, stdout: "first" },
+        run,
+      );
+      await writeReviewReceipt(
+        dir,
+        { ...gate, command: "kit review --receipt", exitCode: 1, stdout: "second" },
+        run,
+      );
+      assert.equal(await readFailedReviewRuns(dir, HEAD, "kit review --receipt"), 2);
+      assert.equal((await verifyReviewReceiptFile(dir, undefined, run)).ok, true);
+    } finally {
+      if (previous === undefined) delete process.env.KIT_AUDIT_ANCHOR_DIR;
+      else process.env.KIT_AUDIT_ANCHOR_DIR = previous;
       rmSync(dir, { recursive: true, force: true });
     }
   });
