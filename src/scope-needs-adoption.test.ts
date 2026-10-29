@@ -64,11 +64,6 @@ const REVIEWED_UNDECLARED: { file: string; operation: string; reason: string }[]
       "read-only sensors; the PAL sync writes kit-internal state under ~/.kit, which the project [scope] RoE does not govern",
   },
   {
-    file: "src/commands/agent.ts",
-    operation: "escalate",
-    reason: "pure read — lists pending escalations from check results",
-  },
-  {
     file: "src/commands/install.ts",
     operation: "tools.install",
     reason:

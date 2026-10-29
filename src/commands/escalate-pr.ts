@@ -15,7 +15,12 @@ export async function cmdEscalatePr(): Promise<boolean> {
   const config = await loadConfig(resolveConfigPath());
   return withGovernance(
     config,
-    { operation: "escalate-pr", operationType: "write", metadata: {} },
+    {
+      operation: "escalate-pr",
+      operationType: "write",
+      metadata: {},
+      scopeNeeds: { fsWrites: [".kit-escalation.txt"] },
+    },
     async () => {
       if (isReadOnlyMode()) {
         const refusal = await refuseWrite("escalate-pr", {}, { cwd: process.cwd() });

@@ -28,7 +28,12 @@ export async function cmdEscalate(): Promise<boolean> {
 
   return withGovernance(
     config,
-    { operation: "escalate", operationType: "read", metadata: {} },
+    {
+      operation: "escalate",
+      operationType: "read",
+      metadata: {},
+      scopeNeeds: { fsWrites: [".kit-escalation.txt"] },
+    },
     async () => {
       const toolResults = config.tools ? await checkTools(config.tools) : [];
       const serviceResults = config.services ? await checkServices(config.services) : [];
