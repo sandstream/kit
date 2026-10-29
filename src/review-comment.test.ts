@@ -199,6 +199,19 @@ describe("selectReviewComments", () => {
   });
 });
 
+describe("selectReviewComments missing authors", () => {
+  it("keeps comments with missing authors separate", () => {
+    const first = { ...comment("1", "unknown", report()), authorMissing: true };
+    const second = { ...comment("2", "unknown", report()), authorMissing: true };
+    const known = comment("3", "unknown", report());
+    const results = selectReviewComments([first, second, known], expected);
+    assert.deepEqual(
+      results.map((entry) => entry.comment.id),
+      ["1", "2", "3"],
+    );
+  });
+});
+
 describe("selectReviewComments invalid reports", () => {
   it("retains findings on the current head when the merge base changes", () => {
     const results = selectReviewComments(
@@ -227,7 +240,11 @@ describe("selectReviewComments invalid reports", () => {
       results.map((entry) => entry.comment.id),
       ["1", "2"],
     );
-    assert.deepEqual(results[0]?.result, { kind: "invalid", reason: "review comment was edited" });
+    assert.equal(results[0]?.result.kind, "invalid");
+    if (results[0]?.result.kind === "invalid") {
+      assert.equal(results[0].result.reason, "review comment was edited");
+      assert.deepEqual(results[0].result.report?.findings, [finding]);
+    }
     assert.equal(results[1]?.result.kind, "current");
   });
 
@@ -246,7 +263,9 @@ describe("selectReviewComments invalid reports", () => {
       [comment("1", "alice", report()), comment("2", "alice", report(), "2026-10-29T12:01:00Z")],
       expected,
     );
-    assert.deepEqual(edited[0]?.result, { kind: "invalid", reason: "review comment was edited" });
+    assert.equal(edited[0]?.result.kind, "invalid");
+    if (edited[0]?.result.kind === "invalid")
+      assert.equal(edited[0].result.reason, "review comment was edited");
     const brokenMarker = comment("2", "alice", report());
     brokenMarker.body = "<!-- kit-independent-review:v1";
     const malformed = selectReviewComments(

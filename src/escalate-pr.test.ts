@@ -1,10 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  collectPrEscalations,
-  formatReportedReviewPasses,
-  type PrEscalationEvidence,
-} from "./escalate-pr.js";
+import { collectPrEscalations, type PrEscalationEvidence } from "./escalate-pr.js";
 import type { SelectedReviewComment } from "./review-comment.js";
 
 const HEAD = "a".repeat(40);
@@ -111,13 +107,37 @@ describe("independent review findings", () => {
       },
     };
     const items = collectPrEscalations(evidence({ reviewComments: [stale, passReview()] }));
-    assert.equal(items.length, 2);
+    assert.equal(items.length, 3);
     assert.match(items[0]?.issue ?? "", /different base/);
     assert.match(items[1]?.issue ?? "", /src\/x.ts:9.*Missing access check/);
-    assert.equal(
-      formatReportedReviewPasses(evidence({ reviewComments: [stale, passReview()] })),
-      "",
-    );
+    assert.match(items[2]?.issue ?? "", /independence is not verified/i);
+  });
+
+  it("shows findings from an edited report while flagging the edit", () => {
+    const review = passReview();
+    if (review.result.kind !== "current") throw new Error("expected current report");
+    review.result.report.verdict = "findings";
+    review.result.report.findings = [
+      {
+        severity: "P1",
+        file: "src/x.ts",
+        line: 9,
+        scenario: "Missing access check",
+        evidence: "Reproduced",
+      },
+    ];
+    const edited: SelectedReviewComment = {
+      ...review,
+      result: {
+        kind: "invalid",
+        reason: "review comment was edited",
+        report: review.result.report,
+      },
+    };
+    const items = collectPrEscalations(evidence({ reviewComments: [edited] }));
+    assert.equal(items.length, 2);
+    assert.match(items[0]?.issue ?? "", /edited/);
+    assert.match(items[1]?.issue ?? "", /src\/x.ts:9.*Missing access check/);
   });
 
   it("reports incomplete checks and all findings without terminal control characters", () => {
@@ -144,23 +164,31 @@ describe("independent review findings", () => {
 });
 
 describe("reported review pass", () => {
-  it("labels a reported pass without claiming approval or independence", () => {
-    const summary = formatReportedReviewPasses(evidence());
-    assert.match(summary, /reviewer/);
-    assert.match(summary, /does not prove independence or approve a merge/i);
-    assert.equal(formatReportedReviewPasses(evidence({ reviewCommentProblem: "offline" })), "");
-    const comment = passReview();
-    assert.equal(
-      formatReportedReviewPasses(
-        evidence({
-          reviewComments: [
-            passReview(),
-            { ...comment, result: { kind: "invalid", reason: "bad" } },
-          ],
-        }),
-      ),
-      "",
-    );
+  it("requires verification of independence even when a comment reports pass", () => {
+    const items = collectPrEscalations(evidence());
+    assert.equal(items.length, 1);
+    assert.match(items[0]?.issue ?? "", /pass reported.*independence is not verified/i);
+    assert.match(items[0]?.action ?? "", /verify the reviewer/i);
+  });
+
+  it("shows a missing author as well as findings", () => {
+    const review = passReview();
+    if (review.result.kind !== "current") throw new Error("expected current report");
+    review.comment.authorMissing = true;
+    review.result.report.verdict = "findings";
+    review.result.report.findings = [
+      {
+        severity: "P1",
+        file: "src/x.ts",
+        line: 3,
+        scenario: "Unsafe input",
+        evidence: "Reproduced",
+      },
+    ];
+    const items = collectPrEscalations(evidence({ reviewComments: [review] }));
+    assert.equal(items.length, 2);
+    assert.match(items[0]?.issue ?? "", /no longer identifies the author/i);
+    assert.match(items[1]?.issue ?? "", /src\/x.ts:3.*Unsafe input/);
   });
 });
 
@@ -192,7 +220,12 @@ describe("receipt escalation", () => {
       outputSha256: "f".repeat(64),
       failures: ["standards: complexity in src/x.ts"],
     };
-    assert.deepEqual(collectPrEscalations(evidence({ gate, failedGateRuns: 1 })), []);
+    assert.equal(
+      collectPrEscalations(evidence({ gate, failedGateRuns: 1 })).some(
+        (x) => x.name === "review gate",
+      ),
+      false,
+    );
     const items = collectPrEscalations(evidence({ gate, failedGateRuns: 2 }));
     assert.match(items[0]?.issue ?? "", /standards: complexity/);
     assert.match(items[0]?.action ?? "", /kit review --receipt/);
@@ -216,10 +249,13 @@ describe("CI and review thread escalation", () => {
         protectedPaths: [{ path: ".github/workflows/ci.yml", classes: ["github"] }],
       }),
     );
-    assert.equal(items.length, 3);
+    assert.equal(items.length, 4);
     assert.match(items[0]?.action ?? "", /example.test\/ci/);
     assert.match(items[1]?.issue ?? "", /src\/x.ts:12.*Unsafe input/);
-    assert.match(items[2]?.action ?? "", /human.*approve/i);
+    assert.match(
+      items.find((x) => x.name.startsWith("protected path"))?.action ?? "",
+      /human.*approve/i,
+    );
   });
 
   it("clears protected paths after a current human approval", () => {
@@ -229,7 +265,10 @@ describe("CI and review thread escalation", () => {
         humanApproved: true,
       }),
     );
-    assert.deepEqual(items, []);
+    assert.equal(
+      items.some((x) => x.name.startsWith("protected path")),
+      false,
+    );
   });
 
   it("reports pending CI without calling it a failure, and names a denied merge", () => {
@@ -240,6 +279,9 @@ describe("CI and review thread escalation", () => {
       }),
     );
     assert.match(items[0]?.issue ?? "", /pending/i);
-    assert.match(items[1]?.action ?? "", /gh pr merge 650 --squash/);
+    assert.match(
+      items.find((x) => x.name === "merge permission")?.action ?? "",
+      /gh pr merge 650 --squash/,
+    );
   });
 });

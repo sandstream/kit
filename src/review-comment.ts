@@ -40,7 +40,7 @@ export interface ReviewCommentReport {
 
 export type ReviewCommentResult =
   | { kind: "unmarked" }
-  | { kind: "invalid"; reason: string }
+  | { kind: "invalid"; reason: string; report?: ReviewCommentReport }
   | { kind: "stale"; reason: string; report: ReviewCommentReport }
   | { kind: "current"; report: ReviewCommentReport };
 
@@ -220,6 +220,7 @@ export interface ReviewCommentInput {
   id: string;
   url: string;
   author: string;
+  authorMissing?: boolean;
   authorType?: string;
   authorAssociation?: string;
   createdAt: string;
@@ -244,6 +245,16 @@ function validMetadata(comment: ReviewCommentInput): boolean {
   );
 }
 
+function editedResult(
+  result: Exclude<ReviewCommentResult, { kind: "unmarked" }>,
+): Extract<ReviewCommentResult, { kind: "invalid" }> {
+  const parsedReport =
+    result.kind === "current" || result.kind === "stale" ? result.report : undefined;
+  return parsedReport
+    ? { kind: "invalid", reason: "review comment was edited", report: parsedReport }
+    : { kind: "invalid", reason: "review comment was edited" };
+}
+
 /** Retain edited comments and findings on the current head across base changes. */
 export function selectReviewComments(
   comments: ReviewCommentInput[],
@@ -258,8 +269,7 @@ export function selectReviewComments(
     if (!validMetadata(comment)) throw new Error("invalid GitHub comment metadata");
     if (ids.has(comment.id)) throw new Error("duplicate GitHub comment ID");
     ids.add(comment.id);
-    if (comment.createdAt !== comment.updatedAt)
-      result = { kind: "invalid", reason: "review comment was edited" };
+    if (comment.createdAt !== comment.updatedAt) result = editedResult(result);
     if (
       comment.createdAt !== comment.updatedAt ||
       ((result.kind === "current" || result.kind === "stale") &&
@@ -267,7 +277,9 @@ export function selectReviewComments(
         result.report.findings.length > 0)
     )
       retained.push({ comment, result });
-    const author = comment.author.toLowerCase();
+    const author = comment.authorMissing
+      ? `missing:${comment.id}`
+      : `author:${comment.author.toLowerCase()}`;
     const prior = latest.get(author);
     if (!prior || BigInt(comment.id) > BigInt(prior.comment.id))
       latest.set(author, { comment, result });

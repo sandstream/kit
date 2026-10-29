@@ -144,7 +144,7 @@ describe("collectIndependentReviewComments", () => {
           REPO,
           NUMBER,
           HEAD,
-          fakeRun({ pages: [[{ ...comment(1, "pass"), user: null }]] }).run,
+          fakeRun({ pages: [[{ ...comment(1, "pass"), user: {} }]] }).run,
         ),
       /author/i,
     );
@@ -152,6 +152,37 @@ describe("collectIndependentReviewComments", () => {
 });
 
 describe("collectIndependentReviewComments ignores unrelated comments", () => {
+  it("retains reports and findings from deleted and present authors", () => {
+    const pages = [
+      [
+        { ...comment(1, "findings"), user: null },
+        { ...comment(2, "pass"), user: null },
+      ],
+      [comment(3, "findings")],
+    ];
+    const result = collectIndependentReviewComments(
+      EXPECTED_ROOT,
+      REPO,
+      NUMBER,
+      HEAD,
+      fakeRun({ pages }).run,
+    );
+    assert.deepEqual(
+      result.map((entry) => entry.comment.id),
+      ["1", "2", "3"],
+    );
+    assert.equal(result[0]?.comment.author, "deleted-user-1");
+    assert.equal(result[1]?.comment.author, "deleted-user-2");
+    assert.equal(result[0]?.comment.authorMissing, true);
+    assert.equal(result[1]?.comment.authorMissing, true);
+    assert.equal(result[2]?.comment.author, "reviewer");
+    assert.equal(result[2]?.comment.authorMissing, undefined);
+    for (const entry of [result[0], result[2]]) {
+      assert.equal(entry?.result.kind, "current");
+      if (entry?.result.kind === "current") assert.equal(entry.result.report.findings.length, 1);
+    }
+  });
+
   it("keeps reports visible when an ordinary comment has a deleted author", () => {
     const pages = [
       [{ ...comment(1, "pass"), body: "A normal comment", user: null }, comment(2, "findings")],

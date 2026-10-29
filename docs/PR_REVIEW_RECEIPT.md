@@ -40,6 +40,8 @@ It also reports a comment when GitHub shows a different update time from its cre
 Edited reports remain visible even for an older head. Kit cannot verify their earlier contents.
 Kit cannot detect a deleted comment or a marker removed by editing.
 It shows a reported pass without treating the comment as proof of independence or merge approval.
+It asks for reviewer verification even when a comment reports pass. The command exits nonzero.
+The command cannot yet record that verification.
 The reviewer and author can share a GitHub identity. Later phases must verify identity and enforce merge rules.
 An earlier finding on the same head remains visible even after a later pass.
 Kit does not yet interpret written risk acceptance. A person must assess that acceptance.

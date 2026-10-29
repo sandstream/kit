@@ -51,6 +51,53 @@ function commentFindings(findings: ReviewCommentFinding[], url: string): Escalat
   });
 }
 
+function commentReportItems(entry: SelectedReviewComment, head: string): EscalationItem[] {
+  const { comment, result } = entry;
+  const url = safeText(comment.url);
+  const author = safeText(comment.author);
+  const items: EscalationItem[] = [];
+  if (comment.authorMissing) {
+    items.push(
+      item(
+        "independent review author",
+        "GitHub no longer identifies the author",
+        `Inspect the report: ${url}`,
+      ),
+    );
+  }
+  if (result.kind !== "current") {
+    items.push(
+      item(
+        `independent review by ${author}`,
+        safeText(result.reason),
+        `Inspect the report and request a current review: ${url}`,
+      ),
+    );
+    if (result.report?.head === head) items.push(...commentFindings(result.report.findings, url));
+    return items;
+  }
+  if (result.report.verdict === "incomplete") {
+    items.push(
+      item(
+        `independent review by ${author}`,
+        `Review incomplete: ${safeText(result.report.limits.join("; "))}`,
+        `Complete the missing checks and record a new review: ${url}`,
+      ),
+    );
+  }
+  if (result.report.verdict === "pass") {
+    items.push(
+      item(
+        `independent review by ${author}`,
+        "Pass reported; reviewer independence is not verified",
+        `Verify the reviewer and inspect the report: ${url}`,
+      ),
+    );
+  }
+  items.push(...commentFindings(result.report.findings, url));
+  return items;
+}
+
 function reviewCommentItems(evidence: PrEscalationEvidence, prUrl: string): EscalationItem[] {
   if (evidence.reviewCommentProblem) {
     return [
@@ -70,58 +117,7 @@ function reviewCommentItems(evidence: PrEscalationEvidence, prUrl: string): Esca
       ),
     ];
   }
-  return evidence.reviewComments.flatMap(({ comment, result }) => {
-    const url = safeText(comment.url);
-    const author = safeText(comment.author);
-    if (result.kind !== "current") {
-      const items = [
-        item(
-          `independent review by ${author}`,
-          safeText(result.reason),
-          `Inspect the report and request a current review: ${url}`,
-        ),
-      ];
-      if (result.kind === "stale" && result.report.head === evidence.head) {
-        items.push(...commentFindings(result.report.findings, url));
-      }
-      return items;
-    }
-    const items: EscalationItem[] = [];
-    if (result.report.verdict === "incomplete") {
-      items.push(
-        item(
-          `independent review by ${author}`,
-          `Review incomplete: ${safeText(result.report.limits.join("; "))}`,
-          `Complete the missing checks and record a new review: ${url}`,
-        ),
-      );
-    }
-    items.push(...commentFindings(result.report.findings, url));
-    return items;
-  });
-}
-
-/** Describe reported passes without treating comments as proof of independence or approval. */
-export function formatReportedReviewPasses(evidence: PrEscalationEvidence): string {
-  if (evidence.reviewCommentProblem) return "";
-  if (
-    evidence.reviewComments?.some(
-      ({ result }) => result.kind !== "current" || result.report.verdict !== "pass",
-    )
-  )
-    return "";
-  const passes = (evidence.reviewComments ?? []).filter(
-    ({ result }) => result.kind === "current" && result.report.verdict === "pass",
-  );
-  if (passes.length === 0) return "";
-  const lines = passes.map(
-    ({ comment }) => `  - ${safeText(comment.author)}: ${safeText(comment.url)}`,
-  );
-  return [
-    "Reported independent review: pass",
-    ...lines,
-    "The comment does not prove independence or approve a merge.",
-  ].join("\n");
+  return evidence.reviewComments.flatMap((entry) => commentReportItems(entry, evidence.head));
 }
 
 function item(name: string, issue: string, action: string): EscalationItem {

@@ -99,7 +99,7 @@ function parseComment(raw: unknown): ReviewCommentInput {
   if (!Number.isSafeInteger(item.id) || (item.id as number) < 1) {
     throw new Error("invalid GitHub comment ID");
   }
-  const user = object(item.user, "comment author");
+  const user = item.user === null ? null : object(item.user, "comment author");
   if (typeof item.body !== "string") throw new Error("invalid GitHub comment body");
   const createdAt = requiredText(item.created_at, "comment creation time");
   const updatedAt = requiredText(item.updated_at, "comment update time");
@@ -109,8 +109,10 @@ function parseComment(raw: unknown): ReviewCommentInput {
   return {
     id: String(item.id),
     url: commentUrl(item.html_url),
-    author: requiredText(user.login, "comment author"),
-    authorType: requiredText(user.type, "comment author type"),
+    author: user ? requiredText(user.login, "comment author") : `deleted-user-${item.id}`,
+    ...(user
+      ? { authorType: requiredText(user.type, "comment author type") }
+      : { authorMissing: true }),
     authorAssociation: requiredText(item.author_association, "comment author association"),
     createdAt,
     updatedAt,
