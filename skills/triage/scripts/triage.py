@@ -751,13 +751,17 @@ def triage_repo(rep):
 
 
 def triage_docker(rep):
-    repo = rep.target
+    # Hub's repository API takes the bare name: `name:tag` or `name@sha256:…` there is HTTP 400.
+    ref = rep.target.split("@", 1)[0]
+    repo, _, tag = ref.rpartition(":") if ":" in ref.rsplit("/", 1)[-1] else (ref, "", "")
     api_repo = repo if "/" in repo else f"library/{repo}"
     try:
         data, _ = _get_json(f"{DOCKER_REGISTRY}/v2/repositories/{api_repo}")
+        if tag:  # the tag must exist too, or the name alone would vouch for any tag
+            _get_json(f"{DOCKER_REGISTRY}/v2/repositories/{api_repo}/tags/{urllib.parse.quote(tag)}")
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            rep.critical(f"image '{repo}' not found on Docker Hub")
+            rep.critical(f"image '{rep.target}' not found on Docker Hub")
         else:
             rep.critical(f"Docker Hub returned HTTP {e.code} (cannot verify)")
         return

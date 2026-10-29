@@ -1,5 +1,14 @@
 ## [Unreleased]
 
+### Fixed
+
+- **`kit triage docker` failed every image named with a tag.** It sent `name:tag` to Docker Hub's
+  repository endpoint, which answers HTTP 400, so `qdrant/qdrant:latest` and every other tagged or
+  digest-pinned image was CRITICAL "cannot verify" and the install gate blocked it for a reason
+  unrelated to the image. The tag and digest are now split off; the repository is checked by name,
+  and a tag must also exist (`/tags/<tag>`), so a typo'd tag still fails. A digest is not verified
+  against Hub, which has no lookup for one.
+
 ### Authentication
 
 - **Service passkeys and tokens have separate owners.** ADR-0008 records the boundary between provider login, scoped service tokens, and Kit's signing identity.
