@@ -170,6 +170,8 @@ For a GitHub pull request, `kit review --receipt` writes signed evidence for the
 Use `kit review verify-receipt` to check its signature and commit.
 See [pull request review receipts](docs/PR_REVIEW_RECEIPT.md).
 Run `kit escalate pr` to list the actions needed for a blocked pull request.
+Ask your agent to follow `skills/independent-pr-review/SKILL.md` in the Kit repository or installed package.
+The skill records a separate review for a pull request commit.
 
 Use kit **with** your scanners. It is the connective tissue that turns them into one
 local-first, agent-native gate.
