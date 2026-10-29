@@ -7,6 +7,7 @@ The file records the PR head, the review command result, returned GitHub checks,
 It stores hashes of review output and comment text.
 It does not store the comment text.
 The command reports missing checks, failed checks, and open review threads as evidence issues.
+Failed local runs also enter `.kit-review-receipt-history.jsonl`.
 
 Run `kit review verify-receipt` to check the signature and current PR head.
 You can pass a receipt path after `verify-receipt`.
@@ -17,4 +18,18 @@ The receipt records GitHub review threads only.
 Other security findings need their own recorded source in a later review step.
 This command does not approve or merge a pull request.
 The protected path rules live in `.github/kit-protected-paths.json`.
+Kit ships these rules for projects that do not have their own rule file.
 Changes to those paths require a human approval before merge.
+
+## Pull request escalation
+
+Run `kit escalate pr` on a branch with an open GitHub pull request.
+It reads the signed receipt and current GitHub checks and review threads.
+It writes actions to `.kit-escalation.txt`.
+The actions name repeated local gate failures, failed or pending CI, open findings, and protected paths.
+The command reports every failed check. It does not decide whether Kit caused the failure.
+The command checks approvals from another GitHub user for the exact PR head.
+Use `kit escalate pr --merge-denied` after a permission layer refuses the merge.
+That flag names the merge command in the handoff.
+Approval given only outside GitHub is not visible to this command.
+P2 will add the independent reviewer verdict. Later phases will enforce merge rules.

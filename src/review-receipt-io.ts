@@ -1,7 +1,15 @@
 /** Collect and store a signed receipt for the exact pull request head. */
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { closeSync, openSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  openSync,
+  readSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { getAuditAnchorKey, tryReadAuditAnchorKey } from "./audit-anchor.js";
 import { classifyProtectedPaths, loadProtectedPathRules } from "./review-protected-paths.js";
@@ -17,13 +25,14 @@ import {
 } from "./review-receipt.js";
 
 export const REVIEW_RECEIPT_FILE = ".kit-review-receipt.json";
+export const REVIEW_RECEIPT_HISTORY_FILE = ".kit-review-receipt-history.jsonl";
 export type ReadCommand = (command: string, args: string[], cwd: string) => string;
 
 const REVIEW_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100){totalCount pageInfo{hasNextPage} nodes{id isResolved path line resolvedBy{login} comments(first:100){pageInfo{hasNextPage} nodes{url body}}}}}}}`;
 const PR_VIEW_FIELDS = "number,headRefOid,changedFiles,files,statusCheckRollup";
 const MAX_RECEIPT_BYTES = 16 * 1024 * 1024;
 
-function defaultReadCommand(command: string, args: string[], cwd: string): string {
+export function defaultReadCommand(command: string, args: string[], cwd: string): string {
   return execFileSync(command, args, {
     cwd,
     encoding: "utf8",
@@ -65,6 +74,46 @@ function readReceipt(path: string): string | null {
   } finally {
     closeSync(fd);
   }
+}
+
+export function countFailedReviewReceipts(
+  receipts: SignedReviewReceipt[],
+  key: Buffer,
+  head: string,
+  command: string,
+): number {
+  const failures = new Set<string>();
+  for (const receipt of receipts) {
+    if (!/^[a-f0-9]{40}$/.test(receipt.head)) throw new Error("invalid receipt history head");
+    const verdict = verifyReviewReceipt(receipt, key, receipt.head);
+    if (!verdict.ok) throw new Error(`invalid receipt history signature: ${verdict.reason}`);
+    if (receipt.head === head && receipt.gate.command === command && receipt.gate.exit_code !== 0) {
+      failures.add(receipt.signature);
+    }
+  }
+  return failures.size;
+}
+
+export async function readFailedReviewRuns(
+  root: string,
+  head: string,
+  command: string,
+): Promise<number> {
+  const path = join(root, REVIEW_RECEIPT_HISTORY_FILE);
+  let content: string | null;
+  try {
+    content = readReceipt(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+    throw error;
+  }
+  if (content === null) throw new Error("review receipt history is too large");
+  const lines = content.split("\n").filter(Boolean);
+  if (lines.length === 0) return 0;
+  const key = await tryReadAuditAnchorKey();
+  if (!key) throw new Error("review receipt history signing key is unavailable");
+  const receipts = lines.map((line) => JSON.parse(line) as SignedReviewReceipt);
+  return countFailedReviewReceipts(receipts, key, head, command);
 }
 
 export function collectReviewReceipt(
@@ -149,6 +198,12 @@ export async function writeReviewReceipt(
   } finally {
     rmSync(temp, { force: true });
   }
+  if (gate.exitCode !== 0) {
+    appendFileSync(join(root, REVIEW_RECEIPT_HISTORY_FILE), JSON.stringify(signed) + "\n", {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  }
   return { path, receipt };
 }
 
@@ -156,7 +211,7 @@ export async function verifyReviewReceiptFile(
   cwd: string,
   file = REVIEW_RECEIPT_FILE,
   run: ReadCommand = defaultReadCommand,
-): Promise<{ ok: boolean; reason: string }> {
+): Promise<{ ok: boolean; reason: string; receipt?: SignedReviewReceipt }> {
   const root = resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim());
   clean(root, run);
   const json = readReceipt(resolve(root, file));
@@ -180,5 +235,5 @@ export async function verifyReviewReceiptFile(
   ) {
     return { ok: false, reason: "review receipt does not match the current pull request" };
   }
-  return signature;
+  return { ...signature, receipt };
 }

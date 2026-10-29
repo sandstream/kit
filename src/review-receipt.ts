@@ -8,7 +8,7 @@ export interface ReviewReceiptInput {
   localHead: string;
   remoteHead: string;
   createdAt: string;
-  gate: { command: string; exitCode: number; stdout: string; stderr: string };
+  gate: { command: string; exitCode: number; stdout: string; stderr: string; failures?: string[] };
   checks: { name: string; status: string; conclusion: string; url: string }[];
   threads: {
     id: string;
@@ -28,7 +28,7 @@ export interface ReviewReceipt {
   pr: number;
   head: string;
   created_at: string;
-  gate: { command: string; exit_code: number; output_sha256: string };
+  gate: { command: string; exit_code: number; output_sha256: string; failures?: string[] };
   checks: { name: string; status: string; conclusion: string; url: string }[];
   review_threads: {
     id: string;
@@ -82,6 +82,7 @@ export function buildReviewReceipt(input: ReviewReceiptInput): ReviewReceipt {
       output_sha256: sha256(
         JSON.stringify({ stdout: input.gate.stdout, stderr: input.gate.stderr }),
       ),
+      failures: [...(input.gate.failures ?? [])],
     },
     checks: input.checks.map((check) => ({ ...check })),
     review_threads: input.threads.map((thread) => ({

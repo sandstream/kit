@@ -17,6 +17,7 @@ describe("review receipt", () => {
       exitCode: 0,
       stdout: '{"ok":true}',
       stderr: "",
+      failures: [] as string[],
     },
     checks: [
       {
@@ -74,5 +75,13 @@ describe("review receipt", () => {
     changed.checks[0]!.conclusion = "FAILURE";
     assert.equal(verifyReviewReceipt(changed, KEY, HEAD).ok, false);
     assert.equal(verifyReviewReceipt({ ...signed, signature: "bad" }, KEY, HEAD).ok, false);
+  });
+
+  it("records failing checks with the gate output", () => {
+    const failed = input();
+    failed.gate.exitCode = 1;
+    failed.gate.failures = ["standards: complexity in src/x.ts"];
+    const receipt = buildReviewReceipt(failed);
+    assert.deepEqual(receipt.gate.failures, ["standards: complexity in src/x.ts"]);
   });
 });

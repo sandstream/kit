@@ -1,5 +1,5 @@
 /** Review classes that require a person before merge. The rule file is protected too. */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export type ProtectedClass = "release" | "github" | "secrets" | "permissions";
@@ -19,8 +19,10 @@ function strings(value: unknown): string[] {
 }
 
 export function loadProtectedPathRules(root: string): ProtectedPathRules {
+  const projectRules = join(root, ".github", "kit-protected-paths.json");
+  const shippedRules = new URL("../.github/kit-protected-paths.json", import.meta.url);
   const parsed: unknown = JSON.parse(
-    readFileSync(join(root, ".github", "kit-protected-paths.json"), "utf8"),
+    readFileSync(existsSync(projectRules) ? projectRules : shippedRules, "utf8"),
   );
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error("invalid protected path rules");

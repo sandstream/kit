@@ -867,18 +867,8 @@
     },
     "escalate": {
       "kind": "command",
-      "summary": "List what needs human action",
-      "x-kit-accepted-flags": [
-        "--broker-gate",
-        "--env",
-        "--help",
-        "--limit",
-        "--no-install-gate",
-        "--non-interactive",
-        "--read-only",
-        "--readonly",
-        "--version"
-      ],
+      "summary": "List what needs human action; 'kit escalate pr' reports PR blocks from signed receipts and GitHub checks",
+      "x-kit-accepted-flags": ["--env","--help","--merge-denied","--non-interactive","--read-only","--readonly","--version"],
       "x-kit-args-modeled": true,
       "x-kit-audience": "all",
       "x-kit-mcp": false,

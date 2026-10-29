@@ -1,20 +1,14 @@
 /**
  * Agent-facing + governance leaves, extracted from cli.ts (5.0-alpha god-module
- * split): `kit skills`, `escalate`, `agent-config`, `governance`,
+ * split): `kit skills`, `agent-config`, `governance`,
  * `team`. Independent leaves (no cross-cluster cmd* calls), each returning a
  * boolean verdict for the COMMANDS dispatch table.
  */
-import { resolve } from "node:path";
 import { c } from "../utils/colors.js";
 import { hasFlag, flagInt } from "../utils/flags.js";
 import { loadConfig } from "../config.js";
 import { KIT_FILE, resolveConfigPath } from "../cli-shared.js";
 import { checkSkills } from "../check-skills.js";
-import { checkTools } from "../check-tools.js";
-import { checkServices } from "../check-services.js";
-import { checkSecrets } from "../check-secrets.js";
-import { collectEscalations, formatEscalationMessage } from "../escalate.js";
-import { withGovernance } from "../governance-middleware.js";
 import { mergeGovernanceConfigAsync, formatGovernanceStatus } from "../governance.js";
 import { checkRevocationStatus } from "../revocation.js";
 import { getBudgetStatus, formatBudgetStatus } from "../budget.js";
@@ -73,46 +67,6 @@ export async function cmdSkills(): Promise<boolean> {
   console.log();
   const requiredMissing = results.filter((r) => r.required && !r.installed);
   return requiredMissing.length === 0;
-}
-
-export async function cmdEscalate(): Promise<boolean> {
-  const config = await loadConfig(resolveConfigPath());
-
-  return await withGovernance(
-    config,
-    {
-      operation: "escalate",
-      operationType: "read",
-      metadata: {},
-    },
-    async () => {
-      const toolResults = config.tools ? await checkTools(config.tools) : [];
-      const serviceResults = config.services ? await checkServices(config.services) : [];
-      const secretResults = config.secrets
-        ? await checkSecrets(config.secrets)
-        : { templateExists: null, keys: [] };
-
-      const items = collectEscalations(toolResults, serviceResults, secretResults.keys);
-
-      if (items.length === 0) {
-        console.log(`${c.green}All checks passed — nothing to escalate.${c.reset}`);
-        return true;
-      }
-
-      const message = formatEscalationMessage(items, process.cwd());
-      console.log(`${c.bold}${c.yellow}Escalation summary${c.reset}\n`);
-      console.log(message);
-
-      // Write to file for easy copy/paste or piping
-      const { writeFile } = await import("node:fs/promises");
-      const escalationPath = resolve(process.cwd(), ".kit-escalation.txt");
-      await writeFile(escalationPath, message, "utf-8");
-      console.log(`${c.dim}Written to ${escalationPath}${c.reset}`);
-      console.log(`${c.dim}Send this to the project owner for manual resolution.${c.reset}\n`);
-
-      return false;
-    },
-  );
 }
 
 export async function cmdAgentConfig(): Promise<boolean> {
