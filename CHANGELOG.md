@@ -11,6 +11,14 @@
 
 ### Security
 
+- **`claude plugin install` passed the install gate.** A Claude Code plugin's hooks module runs inside
+  the agent and can drop prompts, submit text as the user and send billed model requests, yet
+  `kit gate-bash` let `claude plugin install … --marketplace <repo>` and
+  `claude plugin marketplace add <repo>` through silently while it gated `npx skills add`. Adding a
+  marketplace is now triaged like `skills add`: a GitHub repo becomes a `github:` triage ref, a local
+  path is the user's own code, and any other source (another host, a URL to a `marketplace.json`)
+  is blocked as unverifiable. Installing from a marketplace added earlier is not re-gated. `/plugin
+  install` typed inside Claude Code never reaches a Bash hook and is not covered.
 - **Updated vulnerable transitive packages.** Hono 4.13.14, fast-uri 3.1.9, and ip-address 10.7.5 resolve the current npm advisories. `npm audit` reports zero vulnerabilities.
 
 - **`kit gha-audit` now checks CI gate coverage, deployment image tags, and default branch protection.** It reports whether CI declares `kit check`, `kit scan`, osv-scanner, and Trivy steps. It flags `latest` or branch-derived deployment tags in scripts, Compose files, and CI variables. The branch check reads GitHub or GitLab with a declared `GITHUB_TOKEN` or `GITLAB_TOKEN` from kit secrets. Missing tokens, API errors, and air-gap mode stay unverified.
