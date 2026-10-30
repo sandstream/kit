@@ -217,6 +217,12 @@ understanding:
   never a blanket trust.
 - **`curl | sh` installers** fetch a moving target unless pinned to a release
   or commit.
+- **Code-loading environment variables** (`BUN_OPTIONS` or `NODE_OPTIONS` with
+  `--preload`/`--require`/`--import`, `LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`)
+  make one file part of every process of that runtime, the agent included.
+  Nothing is installed, so no install gate sees it. `kit agent-audit` names
+  each one it finds in its environment and in Claude Code's `settings.json`
+  `env` blocks; it cannot see shell rc files it is not run from.
 
 How to harden host CLIs (kit cannot do this for you):
 

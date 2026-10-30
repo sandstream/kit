@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+### Security
+
+- **`kit agent-audit` names code-loading environment variables.** A `--preload`, `--require`/`-r`,
+  `--import` or `--loader` in `BUN_OPTIONS` or `NODE_OPTIONS`, and any `LD_PRELOAD` or
+  `DYLD_INSERT_LIBRARIES`, puts a file inside every process of that runtime, the agent included, and
+  no install or plugin gate sees it. The audit now warns for each one it finds in its own process
+  environment or in the `env` block of Claude Code's project, local or user `settings.json`, and
+  names the file. It cannot tell a preload you chose from one that was planted, so it warns and never
+  fails.
+
 ### Fixed
 
 - **`kit triage docker` failed every image named with a tag.** It sent `name:tag` to Docker Hub's
