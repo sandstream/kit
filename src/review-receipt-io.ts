@@ -12,7 +12,11 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { getAuditAnchorKey, tryReadAuditAnchorKey } from "./audit-anchor.js";
-import { classifyProtectedPaths, loadProtectedPathRules } from "./review-protected-paths.js";
+import {
+  assertPrRefsUnchanged,
+  collectPrProtectedPaths,
+  readPrRefs,
+} from "./review-protected-paths-github.js";
 import { parseGitHubPrView, parseGitHubReviewThreads } from "./review-receipt-github.js";
 import { isReadOnlyMode, refuseWrite } from "./read-only-mode.js";
 import {
@@ -85,7 +89,7 @@ export function countFailedReviewReceipts(
   const failures = new Set<string>();
   for (const receipt of receipts) {
     if (!/^[a-f0-9]{40}$/.test(receipt.head)) throw new Error("invalid receipt history head");
-    const verdict = verifyReviewReceipt(receipt, key, receipt.head);
+    const verdict = verifyReviewReceipt(receipt, key, receipt.head, { allowLegacy: true });
     if (!verdict.ok) throw new Error(`invalid receipt history signature: ${verdict.reason}`);
     if (receipt.head === head && receipt.gate.command === command && receipt.gate.exit_code !== 0) {
       failures.add(receipt.signature);
@@ -152,18 +156,28 @@ export function collectReviewReceipt(
       root,
     ),
   );
-  const protectedPaths = classifyProtectedPaths(pr.changedPaths, loadProtectedPathRules(root));
+  const { refs, protectedPaths } = collectPrProtectedPaths(
+    root,
+    { repo, number: pr.number, head: localHead },
+    pr.changedPaths,
+    run,
+  );
 
   // Refuse a receipt if the branch or PR moved while evidence was collected.
   clean(root, run);
   if (gitHead(root, run) !== localHead || prEvidence(root, run).head !== localHead) {
     throw new Error("pull request head changed during receipt collection");
   }
+  assertPrRefsUnchanged(refs, root, repo, run);
   return buildReviewReceipt({
     repo,
     pr: pr.number,
     localHead,
     remoteHead: pr.head,
+    baseBranch: refs.baseName,
+    baseHead: refs.base,
+    policyBranch: refs.defaultName,
+    policyHead: refs.defaultHead,
     createdAt,
     gate,
     checks: pr.checks,
@@ -235,5 +249,16 @@ export async function verifyReviewReceiptFile(
   ) {
     return { ok: false, reason: "review receipt does not match the current pull request" };
   }
+  const refs = readPrRefs(root, receipt.repo, receipt.pr, run);
+  if (
+    refs.head !== receipt.head ||
+    refs.baseName !== receipt.base_branch ||
+    refs.base !== receipt.base_head ||
+    refs.defaultName !== receipt.policy_branch ||
+    refs.defaultHead !== receipt.policy_head
+  ) {
+    return { ok: false, reason: "review receipt does not match the current PR base or head" };
+  }
+  assertPrRefsUnchanged(refs, root, receipt.repo, run);
   return { ...signature, receipt };
 }

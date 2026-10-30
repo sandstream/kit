@@ -9,13 +9,21 @@ import { buildReviewReceipt } from "./review-receipt.js";
 
 const HEAD = "a".repeat(40);
 const BASE = "b".repeat(40);
+const RULES = JSON.stringify({
+  release: { exact: [], prefix: [] },
+  github: { exact: [], prefix: [".github/"] },
+  secrets: { exact: [], prefix: ["src/secrets"] },
+  permissions: { exact: [], prefix: [] },
+});
 
-function fakePrView(remoteHead: string): string {
+function fakePrView(remoteHead: string, weaken = false): string {
   return JSON.stringify({
     number: 12,
     headRefOid: remoteHead,
-    changedFiles: 1,
-    files: [{ path: ".github/workflows/ci.yml" }],
+    changedFiles: weaken ? 2 : 1,
+    files: weaken
+      ? [{ path: ".github/kit-protected-paths.json" }, { path: "src/secrets-rotate.ts" }]
+      : [{ path: ".github/workflows/ci.yml" }],
     statusCheckRollup: [
       {
         __typename: "CheckRun",
@@ -77,19 +85,88 @@ function fakeGraphql(remoteHead: string, baseQuery: boolean): string {
   return JSON.stringify({ data: { repository: { pullRequest } } });
 }
 
-function fakeCommands(root: string, remoteHead = HEAD, failComments = false): ReadCommand {
+interface FakeOptions {
+  weaken?: boolean;
+  missingBase?: boolean;
+  baseMoves?: boolean;
+}
+
+function fakeFiles(weaken?: boolean) {
+  return weaken
+    ? [
+        { filename: ".github/kit-protected-paths.json", status: "modified" },
+        { filename: "src/secrets-rotate.ts", status: "modified" },
+      ]
+    : [{ filename: ".github/workflows/ci.yml", status: "modified" }];
+}
+
+function fakeRefs(remoteHead: string, options: FakeOptions, refsCalls: number): string {
+  return JSON.stringify({
+    data: {
+      repository: {
+        defaultBranchRef: { name: "main", target: { oid: BASE } },
+        pullRequest: {
+          number: 12,
+          headRefOid: remoteHead,
+          baseRefName: "main",
+          baseRef: { target: { oid: options.baseMoves && refsCalls > 1 ? "c".repeat(40) : BASE } },
+        },
+      },
+    },
+  });
+}
+
+function fakeRuleSnapshot(options: FakeOptions): string {
+  const weakened = JSON.stringify({
+    release: { exact: [], prefix: [] },
+    github: { exact: [], prefix: [] },
+    secrets: { exact: [], prefix: [] },
+    permissions: { exact: [], prefix: [] },
+  });
+  const rule = options.missingBase ? null : { __typename: "Blob", text: RULES, isTruncated: false };
+  return JSON.stringify({
+    data: {
+      repository: {
+        baseCommit: { oid: BASE },
+        headCommit: { oid: HEAD },
+        defaultCommit: { oid: BASE },
+        defaultFile: rule,
+        baseFile: rule,
+        headFile: {
+          __typename: "Blob",
+          text: options.weaken ? weakened : RULES,
+          isTruncated: false,
+        },
+      },
+    },
+  });
+}
+
+function fakeCommands(
+  root: string,
+  remoteHead = HEAD,
+  failComments = false,
+  options: FakeOptions = {},
+): ReadCommand {
+  let refsCalls = 0;
   return (command, args) => {
     const call = [command, ...args].join(" ");
     if (call === "git rev-parse --show-toplevel") return root + "\n";
     if (call === "git rev-parse HEAD") return HEAD + "\n";
     if (call === "git status --porcelain --untracked-files=all") return "";
     if (call === "gh repo view --json nameWithOwner") return '{"nameWithOwner":"sandstream/kit"}';
-    if (call.startsWith("gh pr view --json ")) return fakePrView(remoteHead);
+    if (call.startsWith("gh api graphql ") && call.includes("baseRefName baseRef"))
+      return fakeRefs(remoteHead, options, ++refsCalls);
+    if (call.startsWith("gh pr view --json ")) return fakePrView(remoteHead, options.weaken);
+    if (call.startsWith("gh api --paginate --slurp repos/sandstream/kit/pulls/12/files"))
+      return JSON.stringify([fakeFiles(options.weaken)]);
     if (call.startsWith("gh api --paginate --slurp ")) {
       if (failComments) throw new Error("GitHub unavailable");
       return fakeReviewComments();
     }
     if (call.startsWith("gh api repos/sandstream/kit/compare/")) return `${BASE}\n`;
+    if (call.startsWith("gh api graphql ") && call.includes("baseCommit:object"))
+      return fakeRuleSnapshot(options);
     if (call.startsWith("gh api graphql "))
       return fakeGraphql(remoteHead, call.includes("baseRefName baseRef"));
     throw new Error(`unexpected command: ${call}`);
@@ -140,6 +217,49 @@ describe("collectPrEvidence", () => {
   });
 });
 
+describe("collectPrEvidence protection", () => {
+  it("retains base protection after a PR weakens the rule file", async () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-escalate-pr-rules-"));
+    try {
+      const evidence = await collectPrEvidence(
+        root,
+        { mergeDenied: false },
+        fakeCommands(root, HEAD, false, { weaken: true }),
+      );
+      assert.deepEqual(evidence.protectedPaths, [
+        { path: ".github/kit-protected-paths.json", classes: ["github"] },
+        { path: "src/secrets-rotate.ts", classes: ["secrets"] },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("uses built-in defaults for a missing base rule file and refuses a changing base", async () => {
+    const root = mkdtempSync(join(tmpdir(), "kit-escalate-pr-base-"));
+    try {
+      const evidence = await collectPrEvidence(
+        root,
+        { mergeDenied: false },
+        fakeCommands(root, HEAD, false, { missingBase: true }),
+      );
+      assert.deepEqual(evidence.protectedPaths, [
+        { path: ".github/workflows/ci.yml", classes: ["github"] },
+      ]);
+      await assert.rejects(
+        collectPrEvidence(
+          root,
+          { mergeDenied: false },
+          fakeCommands(root, HEAD, false, { baseMoves: true }),
+        ),
+        /base or head changed/i,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("receiptMatchesCurrent", () => {
   it("detects changed CI and review findings on the same commit", () => {
     const checks = [
@@ -160,6 +280,10 @@ describe("receiptMatchesCurrent", () => {
       pr: 12,
       localHead: HEAD,
       remoteHead: HEAD,
+      baseBranch: "main",
+      baseHead: BASE,
+      policyBranch: "main",
+      policyHead: BASE,
       createdAt: "2026-10-29T10:00:00.000Z",
       gate: { command: "kit review --receipt", exitCode: 0, stdout: "ok", stderr: "" },
       checks,
@@ -169,18 +293,28 @@ describe("receiptMatchesCurrent", () => {
     };
     const saved = buildReviewReceipt(input);
     const current = { number: 12, head: HEAD, checks, changedPaths: ["src/x.ts"] };
-    assert.equal(receiptMatchesCurrent(saved, current, threads, []), true);
+    const refs = { baseName: "main", base: BASE, defaultName: "main", defaultHead: BASE };
+    assert.equal(receiptMatchesCurrent(saved, current, threads, [], refs), true);
+    assert.equal(
+      receiptMatchesCurrent(saved, current, threads, [], { ...refs, baseName: "other" }),
+      false,
+    );
+    assert.equal(
+      receiptMatchesCurrent(saved, current, threads, [], { ...refs, base: HEAD }),
+      false,
+    );
     assert.equal(
       receiptMatchesCurrent(
         saved,
         { ...current, checks: [{ ...checks[0]!, conclusion: "FAILURE" }] },
         threads,
         [],
+        refs,
       ),
       false,
     );
     assert.equal(
-      receiptMatchesCurrent(saved, current, [{ ...threads[0]!, resolved: true }], []),
+      receiptMatchesCurrent(saved, current, [{ ...threads[0]!, resolved: true }], [], refs),
       false,
     );
   });

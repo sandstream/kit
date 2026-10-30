@@ -18,8 +18,18 @@ The receipt records GitHub review threads only.
 Other security findings need their own recorded source in a later review step.
 This command does not approve or merge a pull request.
 The protected path rules live in `.github/kit-protected-paths.json`.
-Kit ships these rules for projects that do not have their own rule file.
+Kit reads the rules from the current base commit and combines them with the proposed rules.
+It also applies the default branch rules when the PR targets another branch.
+If the base has no rule file, Kit uses the defaults built into the running Kit version.
+Use a trusted Kit version to evaluate pull requests.
+This keeps existing protections until the rule change is approved and merged.
+Kit also checks the original names of renamed files.
+Kit refuses the evidence if the base or head changes during collection, or if rules are unavailable.
+The rule file itself always requires human approval.
 Changes to those paths require a human approval before merge.
+Receipts use version 2 and record the base and default branch commits.
+Generate a new receipt after either branch changes.
+Version 1 receipts remain valid only as signed failure history.
 
 ## Pull request escalation
 
