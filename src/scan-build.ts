@@ -91,6 +91,28 @@ function findBuildSecrets(content: string): SecretFinding[] {
 
 type SourceRange = { start: number; end: number };
 
+// The complete JSON has already been validated. Skip a non-string array item
+// while leaving it in the raw map for the normal scan.
+function skipJsonValue(content: string, start: number): number {
+  if (content[start] !== "{" && content[start] !== "[") {
+    const scalar = /^(?:null|true|false|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(
+      content.slice(start),
+    );
+    if (!scalar) throw new Error("Invalid source map value");
+    return start + scalar[0].length;
+  }
+  const tokens = /"(?:\\.|[^"\\])*"|[{}[\]]/g;
+  tokens.lastIndex = start;
+  let depth = 0;
+  let token: RegExpExecArray | null;
+  while ((token = tokens.exec(content)) !== null) {
+    if (token[0] === "{" || token[0] === "[") depth++;
+    else if (token[0] === "}" || token[0] === "]") depth--;
+    if (depth === 0) return tokens.lastIndex;
+  }
+  throw new Error("Unclosed source map value");
+}
+
 function readSourceArray(
   content: string,
   start: number,
@@ -98,18 +120,25 @@ function readSourceArray(
   const strings = /"(?:\\.|[^"\\])*"/g;
   const findings: SecretFinding[] = [];
   let cursor = start;
+  let ordinary = true;
   while (true) {
     cursor += /^\s*/.exec(content.slice(cursor))![0].length;
-    if (content[cursor] === "]") return { end: cursor + 1, findings };
+    if (content[cursor] === "]") return { end: ordinary ? cursor + 1 : undefined, findings };
     if (content[cursor] === '"') {
       strings.lastIndex = cursor;
       const source = strings.exec(content)!;
       const decoded = JSON.parse(source[0]) as string;
-      for (const finding of findBuildSecrets(decoded)) findings.push(finding);
+      // No current credential or personal-number pattern can match fewer than eight characters.
+      if (decoded.length >= 8) {
+        for (const finding of findBuildSecrets(decoded)) findings.push(finding);
+      }
       cursor = strings.lastIndex;
     } else if (content.startsWith("null", cursor)) {
       cursor += 4;
-    } else return { findings };
+    } else {
+      ordinary = false;
+      cursor = skipJsonValue(content, cursor);
+    }
     cursor += /^\s*/.exec(content.slice(cursor))![0].length;
     if (content[cursor] === ",") cursor++;
     else if (content[cursor] !== "]") return { findings };

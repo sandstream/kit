@@ -209,14 +209,21 @@ describe("scanBuildArtifacts source map fields", () => {
     try {
       mkdirSync(join(dir, "build"), { recursive: true });
       const source = 'const token = "' + "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123" + '";';
-      const encoded = JSON.stringify({ sourcesContent: [source, { nested: true }] }).replace(
-        "sk_" + "live_",
-        "\\u0073k_" + "live_",
-      );
-      writeFileSync(join(dir, "build", "mixed.js.map"), encoded);
+      for (const [index, sourcesContent] of [
+        [source, { nested: true }],
+        [{ nested: [true, { deep: "value" }] }, source],
+      ].entries()) {
+        const encoded = JSON.stringify({ sourcesContent }).replace(
+          "sk_" + "live_",
+          "\\u0073k_" + "live_",
+        );
+        writeFileSync(join(dir, "build", `mixed${index}.js.map`), encoded);
+      }
       const hits = await scanBuildArtifacts(dir);
-      assert.equal(hits.length, 1);
-      assert.ok(hits[0].findings.some((finding) => finding.label === "stripe-key"));
+      assert.equal(hits.length, 2);
+      assert.ok(
+        hits.every((hit) => hit.findings.some((finding) => finding.label === "stripe-key")),
+      );
     } finally {
       rmTemp(dir);
     }
