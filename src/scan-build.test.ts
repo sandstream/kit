@@ -416,6 +416,27 @@ describe("source map metadata and invalid content", () => {
 });
 
 describe("source map encoded metadata and broken JSON", () => {
+  it("reports ambiguous keyed code as incomplete without a false credential", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const source =
+        'const value = {key: "." + key};\n' +
+        'console.log("AlphaBeta0123456789 punctuation and code");\n'.repeat(5);
+      writeFileSync(join(dir, "build", "metadata.js.map"), JSON.stringify({ key: source }));
+      writeFileSync(
+        join(dir, "build", "object.js.map"),
+        JSON.stringify({ sourcesContent: { key: source } }),
+      );
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.deepEqual(error.hits, []);
+        return true;
+      });
+    } finally {
+      rmTemp(dir);
+    }
+  });
   it("does not flag safe code in metadata or broken JSON", async () => {
     const dir = makeRepo();
     try {

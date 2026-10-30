@@ -1,4 +1,4 @@
-import { SECRET_PATTERNS, type SecretFinding } from "./utils/redactSecrets.js";
+import { SECRET_PATTERNS, shannonEntropy, type SecretFinding } from "./utils/redactSecrets.js";
 import { MAX_MAP_SOURCES, type SourceBudget } from "./scan-build-json.js";
 
 export function scanMalformedObject(
@@ -22,7 +22,10 @@ export function scanMalformedObject(
       const keyed = SECRET_PATTERNS.some(
         ({ label, re }) => label === "keyed-secret" && new RegExp(re.source, re.flags).test(probe),
       );
-      if (keyed) {
+      if (keyed && /[\s"'\\]/.test(value) && value.length >= 20 && shannonEntropy(value) >= 4.2) {
+        throw new Error("source map contains an ambiguous keyed value");
+      }
+      if (keyed && !/[\s"'\\]/.test(value)) {
         for (const finding of scan(`${JSON.stringify(decoded)}:${JSON.stringify(value)}`))
           findings.push(finding);
       }

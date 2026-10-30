@@ -255,7 +255,8 @@ max_bytes = 12000
 | `kit security prescan-diff <baseline.jsonl> <latest.jsonl>`                | Diff two prescan reports — surface new regressions + fixed findings.                                                                                                                                                 |
 
 The build scan reports an incomplete check for source maps over 5 MiB or 100,000 source entries.
-It also stops maps that exceed the nesting work limit. The report includes credentials found before a limit.
+It also reports incomplete scans for invalid maps and ambiguous keyed values.
+The report includes credentials found before a limit.
 
 ### Code guardrails in the security check
 
