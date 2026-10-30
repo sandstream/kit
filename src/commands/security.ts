@@ -305,7 +305,7 @@ export async function cmdSecurity(): Promise<boolean> {
 
   if (sub !== "policy") {
     console.error(
-      `${c.red}Usage: kit security policy [init|add <pkg>|check] | scan-staged | scan-build [dir...] | advisories [--accept] | scan-artifact <path> [--recursive] | scan-transcripts | costs | check-gitignore [--fix] | verify-pull [--base <ref>] | prescan <path> [--deep] | prescan-diff <baseline.jsonl> <latest.jsonl> | clear-cache${c.reset}`,
+      `${c.red}Usage: kit security policy [init|add <pkg>|check] | scan-staged | scan-build [dir...] [--include-tests] | advisories [--accept] | scan-artifact <path> [--recursive] | scan-transcripts | costs | check-gitignore [--fix] | verify-pull [--base <ref>] | prescan <path> [--deep] | prescan-diff <baseline.jsonl> <latest.jsonl> | clear-cache${c.reset}`,
     );
     return false;
   }

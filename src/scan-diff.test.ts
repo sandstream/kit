@@ -40,8 +40,20 @@ describe("didRun", () => {
 
 describe("incomplete scans with known findings", () => {
   it("reports increased severity when both scans are incomplete", () => {
-    const before = chk({ name: "bundle", status: "fail", didNotRun: true, hasFindings: true, severity: "high" });
-    const after = chk({ name: "bundle", status: "fail", didNotRun: true, hasFindings: true, severity: "critical" });
+    const before = chk({
+      name: "bundle",
+      status: "fail",
+      didNotRun: true,
+      hasFindings: true,
+      severity: "high",
+    });
+    const after = chk({
+      name: "bundle",
+      status: "fail",
+      didNotRun: true,
+      hasFindings: true,
+      severity: "critical",
+    });
     const result = diffScans(doc([before]), doc([after]));
     assert.equal(result.changes[0].kind, "regressed");
     assert.equal(result.worseThanBefore, true);

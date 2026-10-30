@@ -1,19 +1,28 @@
 import { c } from "../utils/colors.js";
 import { BuildScanIncompleteError, scanBuildArtifacts } from "../scan-build.js";
 import { SECRET_SHAPE_COUNT } from "../utils/redactSecrets.js";
+import { isTestArtifact } from "../check-client-exposure.js";
 
 export async function cmdSecurityScanBuild(): Promise<boolean> {
   // Optional positional: extra dirs to scan beyond the defaults.
   const extras = process.argv.slice(4).filter((a) => !a.startsWith("--"));
+  const includeTests = process.argv.includes("--include-tests");
+  const include = (file: string) => includeTests || !isTestArtifact(file);
   let hits: Awaited<ReturnType<typeof scanBuildArtifacts>>;
+  let incomplete = false;
   try {
     hits = await scanBuildArtifacts(process.cwd(), extras.length > 0 ? extras : undefined);
   } catch (error) {
     if (!(error instanceof BuildScanIncompleteError)) throw error;
-    console.error(`${c.red}✗ scan-build: incomplete: ${error.message}${c.reset}`);
+    const issue = error.issues.find((item) => include(item.file));
+    if (issue) {
+      incomplete = true;
+      console.error(`${c.red}✗ scan-build: incomplete: ${issue.detail}${c.reset}`);
+    }
     hits = error.hits;
-    if (hits.length === 0) return false;
   }
+  hits = hits.filter((hit) => include(hit.file));
+  if (incomplete && hits.length === 0) return false;
   if (hits.length === 0) {
     // The denominator belongs in the claim: "no patterns found" reads as "no secrets there", and
     // the honest statement is "none of the shapes kit knows".

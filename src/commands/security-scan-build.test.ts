@@ -6,7 +6,10 @@ import { join } from "node:path";
 import { cmdSecurityScanBuild } from "./security-scan-build.js";
 import { rmTemp } from "../temp-cleanup.test-support.js";
 
-async function runScan(dir: string): Promise<{ ok: boolean; output: string }> {
+async function runScan(
+  dir: string,
+  includeTests = false,
+): Promise<{ ok: boolean; output: string }> {
   const originalCwd = process.cwd();
   const originalArgs = process.argv;
   const originalLog = console.log;
@@ -14,7 +17,13 @@ async function runScan(dir: string): Promise<{ ok: boolean; output: string }> {
   const output: string[] = [];
   try {
     process.chdir(dir);
-    process.argv = ["node", "kit", "security", "scan-build"];
+    process.argv = [
+      "node",
+      "kit",
+      "security",
+      "scan-build",
+      ...(includeTests ? ["--include-tests"] : []),
+    ];
     console.log = (...args: unknown[]) => void output.push(args.join(" "));
     console.error = (...args: unknown[]) => void output.push(args.join(" "));
     return { ok: await cmdSecurityScanBuild(), output: output.join("\n") };
@@ -27,6 +36,26 @@ async function runScan(dir: string): Promise<{ ok: boolean; output: string }> {
 }
 
 describe("kit security scan-build", () => {
+  it("excludes test artifact findings and incomplete test maps", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-scan-build-cmd-"));
+    try {
+      mkdirSync(join(dir, "dist"));
+      writeFileSync(join(dir, "dist", "broken.test.js.map"), "{");
+      writeFileSync(
+        join(dir, "dist", "safe.spec.mjs.map"),
+        JSON.stringify({ sourcesContent: ["sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123"] }),
+      );
+      const result = await runScan(dir);
+      assert.equal(result.ok, true);
+      assert.doesNotMatch(result.output, /incomplete|stripe-key/);
+      const included = await runScan(dir, true);
+      assert.equal(included.ok, false);
+      assert.match(included.output, /incomplete/);
+      assert.match(included.output, /stripe-key/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
   it("fails an incomplete scan without claiming no matches", async () => {
     const dir = mkdtempSync(join(tmpdir(), "kit-scan-build-cmd-"));
     try {
