@@ -8,6 +8,10 @@ It stores hashes of review output and comment text.
 It does not store the comment text.
 The command reports missing checks, failed checks, and open review threads as evidence issues.
 Failed local runs also enter `.kit-review-receipt-history.jsonl`.
+Kit checks the worktree and PR identity before the review and before it signs the receipt.
+The checks cannot detect a file that changes and returns to its original state during the review.
+Git status also excludes ignored files from the worktree check.
+Run the review in a worktree that no other process changes.
 
 Run `kit review verify-receipt` to check the signature and current PR head.
 You can pass a receipt path after `verify-receipt`.

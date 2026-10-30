@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   collectReviewReceipt,
+  captureReviewSnapshot,
   readFailedReviewRuns,
   verifyReviewReceiptFile,
   writeReviewReceipt,
@@ -204,11 +205,13 @@ describe("writeReviewReceipt", () => {
         dir,
         { ...gate, command: "kit review --receipt", exitCode: 1, stdout: "first" },
         run,
+        captureReviewSnapshot(dir, run),
       );
       await writeReviewReceipt(
         dir,
         { ...gate, command: "kit review --receipt", exitCode: 1, stdout: "second" },
         run,
+        captureReviewSnapshot(dir, run),
       );
       assert.equal(await readFailedReviewRuns(dir, HEAD, "kit review --receipt"), 2);
       assert.equal((await verifyReviewReceiptFile(dir, undefined, run)).ok, true);
@@ -224,7 +227,8 @@ describe("writeReviewReceipt", () => {
     const previous = process.env.KIT_AUDIT_ANCHOR_DIR;
     process.env.KIT_AUDIT_ANCHOR_DIR = join(dir, "anchor");
     try {
-      await writeReviewReceipt(dir, gate, fakeCommands({ rootDir: dir }));
+      const run = fakeCommands({ rootDir: dir });
+      await writeReviewReceipt(dir, gate, run, captureReviewSnapshot(dir, run));
       assert.equal(
         (await verifyReviewReceiptFile(dir, undefined, fakeCommands({ rootDir: dir }))).ok,
         true,

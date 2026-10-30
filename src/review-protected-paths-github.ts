@@ -19,7 +19,7 @@ function object(value: unknown, label: string): RecordValue {
   return value as RecordValue;
 }
 
-interface PrRefs {
+export interface PrRefs {
   number: number;
   head: string;
   base: string;

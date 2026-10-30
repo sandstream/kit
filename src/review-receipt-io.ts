@@ -16,6 +16,7 @@ import {
   assertPrRefsUnchanged,
   collectPrProtectedPaths,
   readPrRefs,
+  type PrRefs,
 } from "./review-protected-paths-github.js";
 import { parseGitHubPrView, parseGitHubReviewThreads } from "./review-receipt-github.js";
 import { isReadOnlyMode, refuseWrite } from "./read-only-mode.js";
@@ -59,6 +60,63 @@ function clean(root: string, run: ReadCommand): void {
   if (run("git", ["status", "--porcelain", "--untracked-files=all"], root).trim()) {
     throw new Error("review receipt requires a clean worktree");
   }
+}
+
+export interface ReviewSnapshot {
+  root: string;
+  repo: string;
+  pr: number;
+  head: string;
+  refs: PrRefs;
+}
+
+/** Capture the source and PR identity before any review stages run. */
+export function captureReviewSnapshot(
+  cwd: string,
+  run: ReadCommand = defaultReadCommand,
+): ReviewSnapshot {
+  const root = resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim());
+  clean(root, run);
+  const head = gitHead(root, run);
+  const repoValue = JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"], root)) as {
+    nameWithOwner?: unknown;
+  };
+  if (
+    typeof repoValue.nameWithOwner !== "string" ||
+    !/^[^/\s]+\/[^/\s]+$/.test(repoValue.nameWithOwner)
+  ) {
+    throw new Error("invalid GitHub repository identity");
+  }
+  const repo = repoValue.nameWithOwner;
+  const pr = prEvidence(root, run);
+  const refs = readPrRefs(root, repo, pr.number, run);
+  if (pr.head !== head || refs.head !== head)
+    throw new Error("pull request head changed before review");
+  const snapshot = { root, repo, pr: pr.number, head, refs };
+  assertReviewSnapshot(snapshot, run);
+  return snapshot;
+}
+
+export function assertReviewSnapshot(
+  snapshot: ReviewSnapshot,
+  run: ReadCommand = defaultReadCommand,
+): void {
+  const root = resolve(run("git", ["rev-parse", "--show-toplevel"], snapshot.root).trim());
+  if (root !== snapshot.root) throw new Error("review root changed during review");
+  clean(root, run);
+  if (gitHead(root, run) !== snapshot.head) throw new Error("local commit changed during review");
+  const repoValue = JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"], root)) as {
+    nameWithOwner?: unknown;
+  };
+  const pr = prEvidence(root, run);
+  if (
+    repoValue.nameWithOwner !== snapshot.repo ||
+    pr.number !== snapshot.pr ||
+    pr.head !== snapshot.head
+  ) {
+    throw new Error("pull request changed during review");
+  }
+  assertPrRefsUnchanged(snapshot.refs, root, snapshot.repo, run);
 }
 
 function readReceipt(path: string): string | null {
@@ -191,13 +249,30 @@ export async function writeReviewReceipt(
   cwd: string,
   gate: ReviewReceiptInput["gate"],
   run: ReadCommand = defaultReadCommand,
+  snapshot?: ReviewSnapshot,
 ): Promise<{ path: string; receipt: ReviewReceipt }> {
   if (isReadOnlyMode()) {
     const refusal = await refuseWrite("review-receipt", {}, { cwd });
     throw new Error(refusal.reason);
   }
+  if (!snapshot) throw new Error("review receipt requires an identity captured before review");
+  if (resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim()) !== snapshot.root) {
+    throw new Error("review root changed during review");
+  }
+  assertReviewSnapshot(snapshot, run);
   const receipt = collectReviewReceipt(cwd, gate, run);
   const key = await getAuditAnchorKey();
+  assertReviewSnapshot(snapshot, run);
+  if (
+    receipt.repo !== snapshot.repo ||
+    receipt.pr !== snapshot.pr ||
+    receipt.head !== snapshot.head ||
+    receipt.base_branch !== snapshot.refs.baseName ||
+    receipt.base_head !== snapshot.refs.base ||
+    receipt.policy_branch !== snapshot.refs.defaultName ||
+    receipt.policy_head !== snapshot.refs.defaultHead
+  )
+    throw new Error("review receipt identity changed during review");
   const signed = signReviewReceipt(receipt, key);
   const root = resolve(run("git", ["rev-parse", "--show-toplevel"], cwd).trim());
   const path = join(root, REVIEW_RECEIPT_FILE);
