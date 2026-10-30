@@ -123,7 +123,11 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
     if (!map || typeof map !== "object" || Array.isArray(map))
       throw new Error("invalid source map");
   } catch {
-    const findings: SecretFinding[] = [];
+    // Raw provider patterns can still match a source string cut off mid-value.
+    // Generic key patterns need decoded delimiters and are scanned below.
+    const findings = findBuildSecrets(content).filter(
+      (finding) => !BUILD_GENERIC_LABELS.has(finding.label),
+    );
     try {
       scanMalformedObject(
         content,

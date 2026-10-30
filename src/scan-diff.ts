@@ -119,6 +119,13 @@ function incompleteChange(before: JsonCheck, after: JsonCheck): ScanChangeKind {
   return "unchanged";
 }
 
+function completedChange(before: JsonCheck, after: JsonCheck): ScanChangeKind {
+  if (!before.hasFindings && after.status === "fail") return "regressed";
+  const severity = (SEVERITY_RANK[after.severity!] ?? 0) - (SEVERITY_RANK[before.severity!] ?? 0);
+  if (before.hasFindings && after.status === "fail" && severity > 0) return "regressed";
+  return "coverage-gained";
+}
+
 /** Classify one check's movement. Pure; `before`/`after` may each be absent. */
 export function classifyChange(
   before: JsonCheck | undefined,
@@ -131,7 +138,7 @@ export function classifyChange(
   const ranAfter = didRun(after);
   // Coverage first: whether the check RAN dominates what it said.
   if (ranBefore && !ranAfter) return "coverage-lost";
-  if (!ranBefore && ranAfter) return "coverage-gained";
+  if (!ranBefore && ranAfter) return completedChange(before, after);
   if (!ranBefore && !ranAfter) return incompleteChange(before, after);
   const d = OUTCOME_RANK[after.status] - OUTCOME_RANK[before.status];
   if (d > 0) return "regressed";
@@ -174,6 +181,8 @@ function describe(kind: ScanChangeKind, key: string, b?: JsonCheck, a?: JsonChec
     case "disappeared":
       return `${key}: present before (${b!.status}${sev(b)}), absent from the second run entirely — check removed or not executed`;
     case "regressed":
+      if (b?.didNotRun && !b.hasFindings && !a?.didNotRun)
+        return `${key}: scan completed; confirmed finding reported`;
       return `${key}: ${b!.status}${sev(b)} → ${a!.status}${sev(a)}`;
     case "appeared":
       return `${key}: new check, ${a!.status}${sev(a)}`;

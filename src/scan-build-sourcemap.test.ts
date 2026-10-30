@@ -115,6 +115,21 @@ describe("scanBuildArtifacts source map fields", () => {
 });
 
 describe("source map encoded metadata and broken JSON", () => {
+  it("retains a recognizable credential when a JSON string is cut short", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const secret = "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123";
+      writeFileSync(join(dir, "build", "truncated.js.map"), `{"sourcesContent":["${secret}`);
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.ok(error.hits[0].findings.some((finding) => finding.label === "stripe-key"));
+        return true;
+      });
+    } finally {
+      rmTemp(dir);
+    }
+  });
   it("continues scanning when a keyed value is ambiguous", async () => {
     const dir = makeRepo();
     try {
