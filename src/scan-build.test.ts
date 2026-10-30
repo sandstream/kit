@@ -393,9 +393,14 @@ describe("source map test fixtures", () => {
       writeFileSync(join(dir, "package.json"), JSON.stringify({ devDependencies: { vite: "^5" } }));
       writeFileSync(join(dir, "dist", "fixtures", "broken.js.map"), "{");
       writeFileSync(join(dir, "dist", "fixtures", "large.js.map"), " ".repeat(5 * 1024 * 1024 + 1));
+      writeFileSync(join(dir, "dist", "widget.test.js.map"), "{");
+      writeFileSync(
+        join(dir, "dist", "widget.spec.mjs.map"),
+        JSON.stringify({ sourcesContent: ["sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123"] }),
+      );
       const result = await checkBuiltBundleSecrets(dir);
       assert.equal(result.status, "pass");
-      assert.match(result.detail, /2 test fixture\(s\) not counted/);
+      assert.match(result.detail, /4 test fixture\(s\) not counted/);
     } finally {
       rmTemp(dir);
     }

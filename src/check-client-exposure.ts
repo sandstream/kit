@@ -441,7 +441,7 @@ async function candidatePackageDirs(root: string): Promise<string[]> {
 export function isTestArtifact(file: string): boolean {
   return (
     /(^|[\\/])(__tests__|__mocks__|fixtures)[\\/]/.test(file) ||
-    /\.(test|spec)\.[cm]?[jt]sx?$/.test(file)
+    /\.(test|spec)\.[cm]?[jt]sx?(?:\.map)?$/.test(file)
   );
 }
 

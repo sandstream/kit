@@ -375,9 +375,12 @@ describe("checkBuiltBundleSecrets", () => {
   it("classifies test artifacts by path, including mocks and fixtures", () => {
     assert.equal(isTestArtifact("dist/a.test.js"), true);
     assert.equal(isTestArtifact("dist/a.spec.mjs"), true);
+    assert.equal(isTestArtifact("dist/a.test.js.map"), true);
+    assert.equal(isTestArtifact("dist/a.spec.mjs.map"), true);
     assert.equal(isTestArtifact("dist/__tests__/a.js"), true);
     assert.equal(isTestArtifact("dist/fixtures/a.js"), true);
     assert.equal(isTestArtifact("dist/assets/index-abc.js"), false);
     assert.equal(isTestArtifact("dist/latest.js"), false, "a name containing 'test' is not a test");
+    assert.equal(isTestArtifact("dist/latest.js.map"), false);
   });
 });
