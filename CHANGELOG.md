@@ -12,6 +12,16 @@
 
 ### Fixed
 
+- **`kit agent-audit` told a loopback MCP server to "use https".** For `http://localhost` or
+  `127.0.0.1`, TLS is not the risk: the server's bind address and missing authentication are,
+  and a client config cannot show either. A loopback server now gets its own low-severity row
+  that names that question; a remote `http://` server keeps the TLS advice.
+- **lizard measured the wrong functions in `src/agent-audit.ts`.** A `/^http:\/\//` regex read as
+  a comment made one function span the whole file and hid the real ones. The regexes are gone,
+  the hook-directory scan is its own function, and every function is now measured, under the limits.
+- **A stale comment in `src/keystore/active.ts`** said the `.kit-policy.toml` hardware mandate was
+  not wired. It is (`policyRequiresHardware`, ORed with the env mandate).
+
 - **`kit triage docker` failed every image named with a tag.** It sent `name:tag` to Docker Hub's
   repository endpoint, which answers HTTP 400, so `qdrant/qdrant:latest` and every other tagged or
   digest-pinned image was CRITICAL "cannot verify" and the install gate blocked it for a reason
