@@ -1,7 +1,12 @@
 export const MAX_BYTES = 5 * 1024 * 1024; // 5 MiB
 export const MAX_MAP_SOURCES = 100_000;
 
-export type SourceBudget = { sources: number; nestedBytes: number; malformed: boolean };
+export type SourceBudget = {
+  sources: number;
+  nestedBytes: number;
+  malformed: boolean;
+  ambiguous: boolean;
+};
 
 // The complete JSON has already been validated. Skip a non-string array item
 // while leaving it in the raw map for the normal scan.

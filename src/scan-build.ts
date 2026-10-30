@@ -20,12 +20,17 @@ export interface BuildHit {
   findings: SecretFinding[];
 }
 
+export interface BuildScanIssue {
+  file: string;
+  detail: string;
+}
+
 export class BuildScanIncompleteError extends Error {
   constructor(
-    message: string,
+    readonly issues: BuildScanIssue[],
     readonly hits: BuildHit[],
   ) {
-    super(message);
+    super(issues[0]?.detail ?? "build scan incomplete");
     this.name = "BuildScanIncompleteError";
   }
 }
@@ -116,7 +121,7 @@ export async function scanBuildArtifacts(
   }
 
   const hits: BuildHit[] = [];
-  const incomplete: string[] = [];
+  const incomplete: BuildScanIssue[] = [];
   for (const path of files) {
     const rel = relative(cwd, path).split(sep).join("/");
     if (!isBrowserVisibleNextArtifact(rel)) continue;
@@ -125,18 +130,21 @@ export async function scanBuildArtifacts(
       const st = await stat(path);
       size = st.size;
     } catch {
-      if (rel.endsWith(".map")) incomplete.push(`${rel}: source map could not be inspected`);
+      if (rel.endsWith(".map"))
+        incomplete.push({ file: rel, detail: `${rel}: source map could not be inspected` });
       continue;
     }
     if (size > MAX_BYTES) {
-      if (rel.endsWith(".map")) incomplete.push(`${rel}: source map exceeds 5 MiB`);
+      if (rel.endsWith(".map"))
+        incomplete.push({ file: rel, detail: `${rel}: source map exceeds 5 MiB` });
       continue;
     }
     let content: string;
     try {
       content = await readFile(path, "utf-8");
     } catch {
-      if (rel.endsWith(".map")) incomplete.push(`${rel}: source map could not be read`);
+      if (rel.endsWith(".map"))
+        incomplete.push({ file: rel, detail: `${rel}: source map could not be read` });
       continue;
     }
     let findings: SecretFinding[];
@@ -146,7 +154,7 @@ export async function scanBuildArtifacts(
       if (error instanceof ArtifactIncompleteError && error.findings.length) {
         hits.push({ file: rel, findings: error.findings });
       }
-      incomplete.push(`${rel}: ${(error as Error).message}`);
+      incomplete.push({ file: rel, detail: `${rel}: ${(error as Error).message}` });
       continue;
     }
     if (findings.length > 0) {
@@ -155,6 +163,6 @@ export async function scanBuildArtifacts(
       hits.push({ file: rel, findings });
     }
   }
-  if (incomplete.length) throw new BuildScanIncompleteError(incomplete[0], hits);
+  if (incomplete.length) throw new BuildScanIncompleteError(incomplete, hits);
   return hits;
 }

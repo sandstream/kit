@@ -92,7 +92,7 @@ function readSourceArray(
 function scanMapMetadata(content: string, findings: SecretFinding[]): void {
   const strings = /"(?:\\.|[^"\\])*"/g;
   const ranges: SourceRange[] = [];
-  const budget: SourceBudget = { sources: 0, nestedBytes: 0, malformed: false };
+  const budget: SourceBudget = { sources: 0, nestedBytes: 0, malformed: false, ambiguous: false };
   let token: RegExpExecArray | null;
   while ((token = strings.exec(content)) !== null) {
     if (JSON.parse(token[0]) !== "sourcesContent") continue;
@@ -111,6 +111,7 @@ function scanMapMetadata(content: string, findings: SecretFinding[]): void {
   }
   rest.push(content.slice(from));
   scanMalformedObject(rest.join(""), findings, budget, findBuildSecrets);
+  if (budget.ambiguous) throw new Error("source map contains an ambiguous keyed value");
 }
 
 // Scan decoded sources separately so escaped quotes cannot join unrelated code.
@@ -125,7 +126,7 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
       scanMalformedObject(
         content,
         findings,
-        { sources: 0, nestedBytes: 0, malformed: true },
+        { sources: 0, nestedBytes: 0, malformed: true, ambiguous: false },
         findBuildSecrets,
       );
     } catch {
@@ -134,7 +135,7 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
     throw new ArtifactIncompleteError("source map has invalid JSON", findings);
   }
   const findings: SecretFinding[] = [];
-  const budget: SourceBudget = { sources: 0, nestedBytes: 0, malformed: false };
+  const budget: SourceBudget = { sources: 0, nestedBytes: 0, malformed: false, ambiguous: false };
   const strings = /"(?:\\.|[^"\\])*"/g;
   let token: RegExpExecArray | null;
   try {
@@ -175,6 +176,9 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
   }
   if (budget.malformed) {
     throw new ArtifactIncompleteError("source map has invalid source content", findings);
+  }
+  if (budget.ambiguous) {
+    throw new ArtifactIncompleteError("source map contains an ambiguous keyed value", findings);
   }
   return findings;
 }

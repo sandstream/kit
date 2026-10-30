@@ -385,6 +385,42 @@ describe("source map partial findings", () => {
   });
 });
 
+describe("source map test fixtures", () => {
+  it("excludes incomplete fixtures from the automatic check", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "dist", "fixtures"), { recursive: true });
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ devDependencies: { vite: "^5" } }));
+      writeFileSync(join(dir, "dist", "fixtures", "broken.js.map"), "{");
+      writeFileSync(join(dir, "dist", "fixtures", "large.js.map"), " ".repeat(5 * 1024 * 1024 + 1));
+      const result = await checkBuiltBundleSecrets(dir);
+      assert.equal(result.status, "pass");
+      assert.match(result.detail, /2 test fixture\(s\) not counted/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("still reports a real credential and an incomplete non-fixture map", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "dist", "fixtures"), { recursive: true });
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ devDependencies: { vite: "^5" } }));
+      writeFileSync(join(dir, "dist", "fixtures", "broken.js.map"), "{");
+      writeFileSync(join(dir, "dist", "live.js.map"), "{");
+      writeFileSync(join(dir, "dist", "leak.js"), "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123");
+      const result = await checkBuiltBundleSecrets(dir);
+      assert.equal(result.status, "fail");
+      assert.equal(result.didNotRun, true);
+      assert.equal(result.severity, "critical");
+      assert.match(result.detail, /dist\/live\.js\.map/);
+      assert.ok(result.files?.includes("dist/leak.js"));
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
 describe("source map metadata and invalid content", () => {
   it("finds generic credentials in malformed object sources", async () => {
     const dir = makeRepo();
@@ -416,6 +452,34 @@ describe("source map metadata and invalid content", () => {
 });
 
 describe("source map encoded metadata and broken JSON", () => {
+  it("continues scanning when a keyed value is ambiguous", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const source =
+        'const value = {key: "." + key};\n' +
+        'console.log("AlphaBeta0123456789 punctuation and code");\n'.repeat(5);
+      const secret = "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123";
+      const maps = [
+        { key: source, custom: secret },
+        { sourcesContent: { key: source, custom: secret } },
+        { key: source + secret },
+      ];
+      for (const [index, map] of maps.entries()) {
+        writeFileSync(join(dir, "build", `ambiguous${index}.js.map`), JSON.stringify(map));
+      }
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.equal(error.hits.length, 3);
+        assert.ok(
+          error.hits.every((hit) => hit.findings.some((finding) => finding.label === "stripe-key")),
+        );
+        return true;
+      });
+    } finally {
+      rmTemp(dir);
+    }
+  });
   it("reports ambiguous keyed code as incomplete without a false credential", async () => {
     const dir = makeRepo();
     try {
@@ -437,6 +501,9 @@ describe("source map encoded metadata and broken JSON", () => {
       rmTemp(dir);
     }
   });
+});
+
+describe("source map metadata with incomplete JSON", () => {
   it("does not flag safe code in metadata or broken JSON", async () => {
     const dir = makeRepo();
     try {

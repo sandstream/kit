@@ -23,7 +23,7 @@ export function scanMalformedObject(
         ({ label, re }) => label === "keyed-secret" && new RegExp(re.source, re.flags).test(probe),
       );
       if (keyed && /[\s"'\\]/.test(value) && value.length >= 20 && shannonEntropy(value) >= 4.2) {
-        throw new Error("source map contains an ambiguous keyed value");
+        budget.ambiguous = true;
       }
       if (keyed && !/[\s"'\\]/.test(value)) {
         for (const finding of scan(`${JSON.stringify(decoded)}:${JSON.stringify(value)}`))
