@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { scanBuildArtifacts } from "./scan-build.js";
+import { BuildScanIncompleteError, scanBuildArtifacts } from "./scan-build.js";
 import { checkBuiltBundleSecrets } from "./check-client-exposure.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
@@ -165,14 +165,19 @@ describe("scanBuildArtifacts source map fields", () => {
         JSON.stringify({ api_key: opaque, sourcesContent: ["safe"] }),
       );
       writeFileSync(join(dir, "build", "broken.js.map"), `{"api_key":"${opaque}"`);
-      const hits = await scanBuildArtifacts(dir);
-      assert.deepEqual(hits.map((hit) => hit.file).sort(), [
-        "build/broken.js.map",
-        "build/valid.js.map",
-      ]);
-      assert.ok(
-        hits.every((hit) => hit.findings.some((finding) => finding.label === "keyed-secret")),
-      );
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.deepEqual(error.hits.map((hit) => hit.file).sort(), [
+          "build/broken.js.map",
+          "build/valid.js.map",
+        ]);
+        assert.ok(
+          error.hits.every((hit) =>
+            hit.findings.some((finding) => finding.label === "keyed-secret"),
+          ),
+        );
+        return true;
+      });
     } finally {
       rmTemp(dir);
     }
@@ -204,7 +209,9 @@ describe("scanBuildArtifacts source map fields", () => {
       rmTemp(dir);
     }
   });
+});
 
+describe("scanBuildArtifacts mixed source content", () => {
   it("retains decoded findings when source content contains an unexpected object", async () => {
     const dir = makeRepo();
     try {
@@ -220,11 +227,14 @@ describe("scanBuildArtifacts source map fields", () => {
         );
         writeFileSync(join(dir, "build", `mixed${index}.js.map`), encoded);
       }
-      const hits = await scanBuildArtifacts(dir);
-      assert.equal(hits.length, 2);
-      assert.ok(
-        hits.every((hit) => hit.findings.some((finding) => finding.label === "stripe-key")),
-      );
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.equal(error.hits.length, 2);
+        assert.ok(
+          error.hits.every((hit) => hit.findings.some((finding) => finding.label === "stripe-key")),
+        );
+        return true;
+      });
     } finally {
       rmTemp(dir);
     }
@@ -318,7 +328,7 @@ describe("source map scan limit reporting", () => {
     }
   });
 
-  it("reports excessive nesting as an incomplete scan", async () => {
+  it("reports deeply nested invalid sources as an incomplete scan", async () => {
     const dir = makeRepo();
     try {
       mkdirSync(join(dir, "dist"), { recursive: true });
@@ -328,7 +338,7 @@ describe("source map scan limit reporting", () => {
       const result = await checkBuiltBundleSecrets(dir);
       assert.equal(result.status, "fail");
       assert.equal(result.didNotRun, true);
-      assert.match(result.detail, /source map nesting exceeds scan work limit/);
+      assert.match(result.detail, /source map has non-string source content/);
     } finally {
       rmTemp(dir);
     }
@@ -344,8 +354,11 @@ describe("source map scan limit reporting", () => {
         "\\u0073k_" + "live_",
       );
       writeFileSync(join(dir, "dist", "mixed.js.map"), map);
-      const hits = await scanBuildArtifacts(dir);
-      assert.ok(hits[0].findings.some((finding) => finding.label === "stripe-key"));
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.ok(error.hits[0].findings.some((finding) => finding.label === "stripe-key"));
+        return true;
+      });
     } finally {
       rmTemp(dir);
     }
@@ -366,6 +379,71 @@ describe("source map partial findings", () => {
       assert.equal(result.didNotRun, true);
       assert.equal(result.severity, "critical");
       assert.ok(result.files?.includes("dist/large.js.map"));
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+describe("source map metadata and invalid content", () => {
+  it("detects an encoded credential in a metadata field", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const secret = "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123";
+      const map = JSON.stringify({ custom: secret, sourcesContent: [] }).replace(
+        "sk_" + "live_",
+        "\\u0073k_" + "live_",
+      );
+      writeFileSync(join(dir, "build", "metadata.js.map"), map);
+      const hits = await scanBuildArtifacts(dir);
+      assert.ok(hits[0].findings.some((finding) => finding.label === "stripe-key"));
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("keeps metadata findings before and after a source limit", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const secret = "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123";
+      const sourcesContent = Array<string>(100_001).fill("a");
+      for (const [index, map] of [
+        { custom: secret, sourcesContent },
+        { sourcesContent, custom: secret },
+      ].entries()) {
+        writeFileSync(join(dir, "build", `metadata${index}.js.map`), JSON.stringify(map));
+      }
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.equal(error.hits.length, 2);
+        assert.ok(
+          error.hits.every((hit) => hit.findings.some((finding) => finding.label === "stripe-key")),
+        );
+        return true;
+      });
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("reports invalid maps without a false credential finding", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const source =
+        'const value = {key: "." + key};\n' +
+        'console.log("AlphaBeta0123456789 punctuation and code");\n'.repeat(5);
+      writeFileSync(
+        join(dir, "build", "mixed.js.map"),
+        JSON.stringify({ sourcesContent: [source, {}] }),
+      );
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.deepEqual(error.hits, []);
+        return true;
+      });
     } finally {
       rmTemp(dir);
     }

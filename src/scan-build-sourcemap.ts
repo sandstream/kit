@@ -49,7 +49,7 @@ function findBuildSecrets(content: string): SecretFinding[] {
 }
 
 type SourceRange = { start: number; end: number };
-type SourceBudget = { sources: number; nestedBytes: number };
+type SourceBudget = { sources: number; nestedBytes: number; malformed: boolean };
 
 // The complete JSON has already been validated. Skip a non-string array item
 // while leaving it in the raw map for the normal scan.
@@ -87,10 +87,9 @@ function readSourceArray(
 ): number | undefined {
   const strings = /"(?:\\.|[^"\\])*"/g;
   let cursor = start;
-  let ordinary = true;
   while (true) {
     cursor += /^\s*/.exec(content.slice(cursor))![0].length;
-    if (content[cursor] === "]") return ordinary ? cursor + 1 : undefined;
+    if (content[cursor] === "]") return cursor + 1;
     budget.sources++;
     if (budget.sources > MAX_MAP_SOURCES) {
       throw new Error("source map exceeds 100000 source entries; scan could not finish");
@@ -107,7 +106,7 @@ function readSourceArray(
     } else if (content.startsWith("null", cursor)) {
       cursor += 4;
     } else {
-      ordinary = false;
+      budget.malformed = true;
       const end = skipJsonValue(content, cursor, budget);
       const normalized = content
         .slice(cursor, end)
@@ -121,6 +120,33 @@ function readSourceArray(
   }
 }
 
+function scanMapMetadata(content: string): SecretFinding[] {
+  const strings = /"(?:\\.|[^"\\])*"/g;
+  const ranges: SourceRange[] = [];
+  const budget: SourceBudget = { sources: 0, nestedBytes: 0, malformed: false };
+  let token: RegExpExecArray | null;
+  while ((token = strings.exec(content)) !== null) {
+    if (JSON.parse(token[0]) !== "sourcesContent") continue;
+    const prefix = /^\s*:\s*\[/.exec(content.slice(strings.lastIndex));
+    if (!prefix) continue;
+    const start = strings.lastIndex + prefix[0].length;
+    const end = skipJsonValue(content, start - 1, budget);
+    ranges.push({ start, end: end - 1 });
+    strings.lastIndex = end;
+  }
+  const rest: string[] = [];
+  let from = 0;
+  for (const range of ranges) {
+    rest.push(content.slice(from, range.start));
+    from = range.end;
+  }
+  rest.push(content.slice(from));
+  const normalized = rest
+    .join("")
+    .replace(/"(?:\\.|[^"\\])*"/g, (part) => JSON.stringify(JSON.parse(part)));
+  return findBuildSecrets(normalized);
+}
+
 // Scan decoded sources separately so escaped quotes cannot join unrelated code.
 // Keep the original remaining JSON, including duplicate fields, for the scan.
 export function findArtifactSecrets(content: string, file: string): SecretFinding[] {
@@ -128,11 +154,10 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
   try {
     JSON.parse(content);
   } catch {
-    return findBuildSecrets(content);
+    throw new ArtifactIncompleteError("source map has invalid JSON", findBuildSecrets(content));
   }
   const findings: SecretFinding[] = [];
-  const budget = { sources: 0, nestedBytes: 0 };
-  const ranges: SourceRange[] = [];
+  const budget: SourceBudget = { sources: 0, nestedBytes: 0, malformed: false };
   const strings = /"(?:\\.|[^"\\])*"/g;
   let token: RegExpExecArray | null;
   try {
@@ -143,18 +168,15 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
       const arrayStart = strings.lastIndex + prefix[0].length;
       const arrayEnd = readSourceArray(content, arrayStart, budget, findings);
       if (arrayEnd === undefined) continue;
-      ranges.push({ start: arrayStart, end: arrayEnd - 1 });
       strings.lastIndex = arrayEnd;
     }
   } catch (error) {
+    for (const finding of scanMapMetadata(content)) findings.push(finding);
     throw new ArtifactIncompleteError((error as Error).message, findings);
   }
-  const rest: string[] = [];
-  let from = 0;
-  for (const range of ranges) {
-    rest.push(content.slice(from, range.start));
-    from = range.end;
+  for (const finding of scanMapMetadata(content)) findings.push(finding);
+  if (budget.malformed) {
+    throw new ArtifactIncompleteError("source map has non-string source content", findings);
   }
-  rest.push(content.slice(from));
-  return findings.concat(findBuildSecrets(rest.join("")));
+  return findings;
 }
