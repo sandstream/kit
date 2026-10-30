@@ -66,6 +66,35 @@ describe("kit ci", () => {
     assert(typeof parsed.ok === "boolean");
   });
 
+  it("preserves an incomplete security scan and its finding in JSON", async () => {
+    const dist = join(testDir, "dist");
+    try {
+      await mkdir(dist, { recursive: true });
+      await writeFile(
+        join(testDir, "package.json"),
+        JSON.stringify({ devDependencies: { vite: "^5" } }),
+      );
+      await writeFile(join(dist, "broken.js.map"), "{");
+      await writeFile(join(dist, "leak.js"), "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123");
+      const { stdout } = await runCi(["--json", "--no-auto-install"], { KIT_BUMBLEBEE: "0" });
+      const output = JSON.parse(stdout);
+      const check = output.checks.find(
+        (row: { name: string }) => row.name === "built bundle secrets",
+      );
+      assert.ok(check);
+      assert.equal(check.status, "fail");
+      assert.equal(check.severity, "critical");
+      assert.equal(check.didNotRun, true);
+      assert.equal(check.scanIncomplete, true);
+      assert.equal(check.hasFindings, true);
+      assert.match(check.detail, /dist\/leak\.js/);
+      assert.doesNotMatch(check.detail, /--lenient to downgrade/);
+    } finally {
+      await rm(dist, { recursive: true, force: true });
+      await rm(join(testDir, "package.json"), { force: true });
+    }
+  });
+
   it("--format=text outputs a summary line", async () => {
     const { stdout } = await runCi(["--format=text"]);
     assert(stdout.includes("kit ci:"));

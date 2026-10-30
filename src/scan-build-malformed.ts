@@ -12,12 +12,22 @@ export function scanMalformedObject(
     if (budget.sources > MAX_MAP_SOURCES) {
       throw new Error("source map exceeds 100000 source entries; scan could not finish");
     }
-    const decoded = JSON.parse(token[0]) as string;
+    let decoded: string;
+    try {
+      decoded = JSON.parse(token[0]) as string;
+    } catch {
+      continue;
+    }
     const valueToken = /^\s*:\s*("(?:\\.|[^"\\])*")/.exec(
       content.slice(token.index! + token[0].length),
     );
     if (valueToken) {
-      const value = JSON.parse(valueToken[1]) as string;
+      let value: string;
+      try {
+        value = JSON.parse(valueToken[1]) as string;
+      } catch {
+        continue;
+      }
       const probe = `${JSON.stringify(decoded)}:"${"A".repeat(20)}"`;
       const keyed = SECRET_PATTERNS.some(
         ({ label, re }) => label === "keyed-secret" && new RegExp(re.source, re.flags).test(probe),

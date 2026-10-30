@@ -119,7 +119,9 @@ function scanMapMetadata(content: string, findings: SecretFinding[]): void {
 export function findArtifactSecrets(content: string, file: string): SecretFinding[] {
   if (!file.endsWith(".map")) return findBuildSecrets(content);
   try {
-    JSON.parse(content);
+    const map: unknown = JSON.parse(content);
+    if (!map || typeof map !== "object" || Array.isArray(map))
+      throw new Error("invalid source map");
   } catch {
     const findings: SecretFinding[] = [];
     try {

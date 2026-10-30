@@ -483,6 +483,8 @@ function incompleteBundleResult(
     status: "fail",
     severity: known.length ? "critical" : "medium",
     didNotRun: true,
+    scanIncomplete: true,
+    ...(known.length ? { hasFindings: true } : {}),
     detail: `bundle scan could not finish: ${reason.slice(0, 80)}${known.length ? `; credentials also found in ${known.map((h) => h.file).join(", ")}` : ""}`,
     ...(known.length ? { files: known.map((h) => h.file) } : {}),
   };

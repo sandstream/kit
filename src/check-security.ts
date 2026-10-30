@@ -93,7 +93,7 @@ export const SECURITY_CATEGORIES = [
 
 export type SecurityCategory = (typeof SECURITY_CATEGORIES)[number] | `self-audit/${string}`;
 
-export interface SecurityCheckResult {
+export interface SecurityCheckResult extends Partial<{ hasFindings: true; scanIncomplete: true }> {
   category: SecurityCategory;
   name: string;
   status: "pass" | "fail" | "warn" | "skip";

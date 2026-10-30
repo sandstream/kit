@@ -69,6 +69,10 @@ export interface JsonCheck {
    * "stopped looking" — see `scan-diff.ts`, which ranks lost coverage above a regression.
    */
   didNotRun?: boolean;
+  /** True when the check also reported a finding despite incomplete coverage. */
+  hasFindings?: boolean;
+  /** True when the scan started but could not finish. */
+  scanIncomplete?: boolean;
 }
 
 /** The full `--json` document for check / ci. */

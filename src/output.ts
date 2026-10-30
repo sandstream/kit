@@ -440,21 +440,26 @@ export function printSummary(
   // P5 — separate SETUP GAPS (a tool not installed, a service not logged in, a scanner that
   // couldn't run) from REAL issues (an actual finding a check produced). On a fresh clone the
   // gap is almost all setup, so a flat "8 issues" reads as failure when it isn't. Missing
-  // tools/auth/secrets are setup; a security result that FAILED because it couldn't run
-  // (didNotRun) is setup too; everything else non-passing is a real finding.
+  // tools/auth/secrets are setup. A security result can contain a real finding
+  // even when its scan is incomplete. Count both facts for that result.
   const setupGaps =
     tools.length -
     toolsOk +
     (services.length - servicesOk) +
     (secrets.length - secretsOk) +
     (deploy?.filter((d) => d.status !== "pass" && d.status !== "skip" && d.didNotRun).length ?? 0) +
-    (security?.filter((s) => s.status !== "pass" && s.status !== "skip" && s.didNotRun).length ??
-      0);
+    (security?.filter(
+      (s) => s.status !== "pass" && s.status !== "skip" && s.didNotRun && !s.scanIncomplete,
+    ).length ?? 0);
+  const incompleteScans =
+    security?.filter((s) => s.status !== "pass" && s.status !== "skip" && s.scanIncomplete)
+      .length ?? 0;
   const realIssues =
     (deploy?.filter((d) => d.status !== "pass" && d.status !== "skip" && !d.didNotRun).length ??
       0) +
-    (security?.filter((s) => s.status !== "pass" && s.status !== "skip" && !s.didNotRun).length ??
-      0);
+    (security?.filter(
+      (s) => s.status !== "pass" && s.status !== "skip" && (!s.didNotRun || s.hasFindings),
+    ).length ?? 0);
 
   if (total === 0) {
     // "All 0 checks passed" is the emptiest possible false green.
@@ -475,6 +480,10 @@ export function printSummary(
     if (skipped > 0) parts.push(`${c.dim}${skipped} could not run${c.reset}`);
     if (setupGaps > 0)
       parts.push(`${c.yellow}${setupGaps} setup gap${setupGaps === 1 ? "" : "s"}${c.reset}`);
+    if (incompleteScans > 0)
+      parts.push(
+        `${c.yellow}${incompleteScans} incomplete check${incompleteScans === 1 ? "" : "s"}${c.reset}`,
+      );
     if (realIssues > 0)
       parts.push(`${c.red}${realIssues} real issue${realIssues === 1 ? "" : "s"}${c.reset}`);
     console.log(parts.join(`${c.dim}  ·  ${c.reset}`));
