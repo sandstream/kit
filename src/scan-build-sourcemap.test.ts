@@ -269,6 +269,23 @@ describe("source map metadata with incomplete JSON", () => {
 });
 
 describe("source map metadata findings", () => {
+  it("reports the metadata token limit without calling names source entries", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const map = {
+        version: 3,
+        sources: [],
+        sourcesContent: [],
+        names: Array<string>(100_001).fill("a"),
+        mappings: "",
+      };
+      writeFileSync(join(dir, "build", "large-names.js.map"), JSON.stringify(map));
+      await assert.rejects(scanBuildArtifacts(dir), /source map exceeds 100000 string tokens/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
   it("detects an encoded credential in a metadata field", async () => {
     const dir = makeRepo();
     try {
@@ -286,6 +303,9 @@ describe("source map metadata findings", () => {
     }
   });
 
+});
+
+describe("source map partial metadata findings", () => {
   it("keeps metadata findings before and after a source limit", async () => {
     const dir = makeRepo();
     try {

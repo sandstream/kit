@@ -255,6 +255,7 @@ max_bytes = 12000
 | `kit security prescan-diff <baseline.jsonl> <latest.jsonl>`                | Diff two prescan reports — surface new regressions + fixed findings.                                                                                                                                                 |
 
 The build scan reports an incomplete check for source maps over 5 MiB or 100,000 source entries.
+It also limits scans of metadata and invalid content to 100,000 string tokens per map.
 It also reports incomplete scans for invalid maps and ambiguous keyed values.
 The report includes credentials found before a limit.
 The scan excludes `__tests__`, `__mocks__`, and `fixtures` directories by default.

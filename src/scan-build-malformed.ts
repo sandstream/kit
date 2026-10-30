@@ -40,7 +40,7 @@ export function scanMalformedObject(
   for (const token of jsonStringTokens(content)) {
     budget.sources++;
     if (budget.sources > MAX_MAP_SOURCES) {
-      throw new Error("source map exceeds 100000 source entries; scan could not finish");
+      throw new Error("source map exceeds 100000 string tokens; scan could not finish");
     }
     let decoded: string;
     try {
