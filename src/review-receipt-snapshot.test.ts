@@ -190,3 +190,27 @@ describe("receipt output file types", () => {
     }
   });
 });
+
+describe("case-insensitive tracked receipt paths", () => {
+  for (const name of [".KIT-REVIEW-RECEIPT.JSON", ".KIT-REVIEW-RECEIPT-HISTORY.JSONL"]) {
+    for (const directory of [false, true]) {
+      it(`rejects ${name}${directory ? " with a tracked child" : ""}`, () => {
+        const { dir, root, state, run } = setup(false);
+        try {
+          const entry = join(root, name);
+          if (directory) mkdirSync(entry);
+          const tracked = directory ? join(entry, "child") : entry;
+          writeFileSync(tracked, "original");
+          git(root, "add", ".");
+          git(root, "commit", "-qm", "track case variant");
+          state.remote = git(root, "rev-parse", "HEAD").trim();
+          assert.throws(() => captureReviewSnapshot(root, run), /tracked files/);
+          assert.equal(git(root, "status", "--porcelain"), "");
+          assert.equal(existsSync(tracked), true);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      });
+    }
+  }
+});

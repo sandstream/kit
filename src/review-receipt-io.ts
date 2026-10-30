@@ -51,7 +51,8 @@ function prEvidence(root: string, run: ReadCommand) {
 
 function clean(root: string, run: ReadCommand): void {
   const outputFiles = [REVIEW_RECEIPT_FILE, REVIEW_RECEIPT_HISTORY_FILE];
-  if (run("git", ["ls-files", "-z", "--", ...outputFiles], root) !== "") {
+  const indexedPaths = outputFiles.map((file) => `:(icase,literal)${file}`);
+  if (run("git", ["ls-files", "-z", "--", ...indexedPaths], root) !== "") {
     throw new Error("review receipt output paths must not contain tracked files");
   }
   const status = run("git", ["status", "--porcelain", "--untracked-files=all"], root);
