@@ -386,6 +386,33 @@ describe("source map partial findings", () => {
 });
 
 describe("source map metadata and invalid content", () => {
+  it("finds a credential in non-array object source content", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const secret = "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123";
+      const map = JSON.stringify({ sourcesContent: { data: secret } }).replace(
+        "sk_" + "live_",
+        "\\u0073k_" + "live_",
+      );
+      writeFileSync(join(dir, "build", "object.js.map"), map);
+      const source =
+        'const value = {key: "." + key};\n' +
+        'console.log("AlphaBeta0123456789 punctuation and code");\n'.repeat(5);
+      writeFileSync(
+        join(dir, "build", "safe-object.js.map"),
+        JSON.stringify({ sourcesContent: { data: source } }),
+      );
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.equal(error.hits.length, 1);
+        assert.ok(error.hits[0].findings.some((finding) => finding.label === "stripe-key"));
+        return true;
+      });
+    } finally {
+      rmTemp(dir);
+    }
+  });
   it("reports non-array source content as incomplete without false findings", async () => {
     const dir = makeRepo();
     try {

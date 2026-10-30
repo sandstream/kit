@@ -14,7 +14,8 @@ export class ArtifactIncompleteError extends Error {
   }
 }
 
-import { skipJsonValue, type SourceBudget } from "./scan-build-json.js";
+import { MAX_MAP_SOURCES, skipJsonValue, type SourceBudget } from "./scan-build-json.js";
+import { scanMalformedObject } from "./scan-build-malformed.js";
 export { MAX_BYTES } from "./scan-build-json.js";
 
 // Terraform / tfstate finding labels do not apply to build artifacts and
@@ -26,7 +27,6 @@ const BUILD_IRRELEVANT_LABELS = new Set(["tfstate-value", "terraform-sensitive"]
 const BUILD_GENERIC_LABELS = new Set(["keyed-secret", "url-query-token"]);
 const OPAQUE_MIN_LENGTH = 20;
 const OPAQUE_MIN_ENTROPY = 4.2;
-const MAX_MAP_SOURCES = 100_000;
 
 function findBuildSecrets(content: string): SecretFinding[] {
   const findings = findSecrets(content).filter(
@@ -50,6 +50,7 @@ function findBuildSecrets(content: string): SecretFinding[] {
 }
 
 type SourceRange = { start: number; end: number };
+
 function readSourceArray(
   content: string,
   start: number,
@@ -79,10 +80,7 @@ function readSourceArray(
     } else {
       budget.malformed = true;
       const end = skipJsonValue(content, cursor, budget);
-      const normalized = content
-        .slice(cursor, end)
-        .replace(/"(?:\\.|[^"\\])*"/g, (token) => JSON.stringify(JSON.parse(token)));
-      for (const finding of findBuildSecrets(normalized)) findings.push(finding);
+      scanMalformedObject(content.slice(cursor, end), findings, budget, findBuildSecrets);
       cursor = end;
     }
     cursor += /^\s*/.exec(content.slice(cursor))![0].length;
@@ -142,7 +140,9 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
         const end = skipJsonValue(content, valueStart, budget);
         if (content[valueStart] === '"') {
           const decoded = JSON.parse(content.slice(valueStart, end)) as string;
-          for (const finding of findBuildSecrets(decoded)) findings.push(finding);
+          findBuildSecrets(decoded).forEach((finding) => findings.push(finding));
+        } else if (content[valueStart] === "{") {
+          scanMalformedObject(content.slice(valueStart, end), findings, budget, findBuildSecrets);
         }
         strings.lastIndex = end;
         continue;

@@ -1,4 +1,5 @@
 export const MAX_BYTES = 5 * 1024 * 1024; // 5 MiB
+export const MAX_MAP_SOURCES = 100_000;
 
 export type SourceBudget = { sources: number; nestedBytes: number; malformed: boolean };
 
