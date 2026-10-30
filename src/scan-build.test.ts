@@ -386,6 +386,36 @@ describe("source map partial findings", () => {
 });
 
 describe("source map metadata and invalid content", () => {
+  it("finds generic credentials in malformed object sources", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const opaque = ["A0b1C2d3", "E4f5G6h7", "I8j9K0l1", "M2n3O4p5"].join("");
+      writeFileSync(
+        join(dir, "build", "object.js.map"),
+        JSON.stringify({ sourcesContent: { api_key: opaque } }),
+      );
+      writeFileSync(
+        join(dir, "build", "array.js.map"),
+        JSON.stringify({ sourcesContent: [{ api_key: opaque }] }),
+      );
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.equal(error.hits.length, 2);
+        assert.ok(
+          error.hits.every((hit) =>
+            hit.findings.some((finding) => finding.label === "keyed-secret"),
+          ),
+        );
+        return true;
+      });
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+describe("source map malformed object findings", () => {
   it("finds a credential in non-array object source content", async () => {
     const dir = makeRepo();
     try {
