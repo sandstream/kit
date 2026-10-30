@@ -22,7 +22,7 @@ export function scanMalformedObject(
       const keyed = SECRET_PATTERNS.some(
         ({ label, re }) => label === "keyed-secret" && new RegExp(re.source, re.flags).test(probe),
       );
-      if (keyed && /^[A-Za-z0-9_+./~%=-]+$/.test(value)) {
+      if (keyed) {
         for (const finding of scan(`${JSON.stringify(decoded)}:${JSON.stringify(value)}`))
           findings.push(finding);
       }

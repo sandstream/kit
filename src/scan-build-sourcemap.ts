@@ -89,7 +89,7 @@ function readSourceArray(
   }
 }
 
-function scanMapMetadata(content: string): SecretFinding[] {
+function scanMapMetadata(content: string, findings: SecretFinding[]): void {
   const strings = /"(?:\\.|[^"\\])*"/g;
   const ranges: SourceRange[] = [];
   const budget: SourceBudget = { sources: 0, nestedBytes: 0, malformed: false };
@@ -110,10 +110,7 @@ function scanMapMetadata(content: string): SecretFinding[] {
     from = range.end;
   }
   rest.push(content.slice(from));
-  const normalized = rest
-    .join("")
-    .replace(/"(?:\\.|[^"\\])*"/g, (part) => JSON.stringify(JSON.parse(part)));
-  return findBuildSecrets(normalized);
+  scanMalformedObject(rest.join(""), findings, budget, findBuildSecrets);
 }
 
 // Scan decoded sources separately so escaped quotes cannot join unrelated code.
@@ -123,7 +120,18 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
   try {
     JSON.parse(content);
   } catch {
-    throw new ArtifactIncompleteError("source map has invalid JSON", findBuildSecrets(content));
+    const findings: SecretFinding[] = [];
+    try {
+      scanMalformedObject(
+        content,
+        findings,
+        { sources: 0, nestedBytes: 0, malformed: true },
+        findBuildSecrets,
+      );
+    } catch {
+      // The incomplete result still reports findings collected before an invalid token or limit.
+    }
+    throw new ArtifactIncompleteError("source map has invalid JSON", findings);
   }
   const findings: SecretFinding[] = [];
   const budget: SourceBudget = { sources: 0, nestedBytes: 0, malformed: false };
@@ -153,10 +161,18 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
       strings.lastIndex = arrayEnd;
     }
   } catch (error) {
-    for (const finding of scanMapMetadata(content)) findings.push(finding);
+    try {
+      scanMapMetadata(content, findings);
+    } catch {
+      // The incomplete result still reports findings collected before the metadata limit.
+    }
     throw new ArtifactIncompleteError((error as Error).message, findings);
   }
-  for (const finding of scanMapMetadata(content)) findings.push(finding);
+  try {
+    scanMapMetadata(content, findings);
+  } catch (error) {
+    throw new ArtifactIncompleteError((error as Error).message, findings);
+  }
   if (budget.malformed) {
     throw new ArtifactIncompleteError("source map has invalid source content", findings);
   }

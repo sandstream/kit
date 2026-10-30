@@ -134,7 +134,7 @@ describe("scanBuildArtifacts source maps", () => {
     const dir = makeRepo();
     try {
       mkdirSync(join(dir, "build"), { recursive: true });
-      const opaque = ["A0b1C2d3", "E4f5G6h7", "I8j9K0l1", "M2n3O4p5"].join("");
+      const opaque = ["A0b1C2d3", "E4f5G6h7!", "I8j9K0l1", "M2n3O4p5"].join("");
       const map = {
         version: 3,
         sources: ["one.js", "two.js"],
@@ -390,7 +390,7 @@ describe("source map metadata and invalid content", () => {
     const dir = makeRepo();
     try {
       mkdirSync(join(dir, "build"), { recursive: true });
-      const opaque = ["A0b1C2d3", "E4f5G6h7", "I8j9K0l1", "M2n3O4p5"].join("");
+      const opaque = ["A0b1C2d3", "E4f5G6h7!", "I8j9K0l1", "M2n3O4p5"].join("");
       writeFileSync(
         join(dir, "build", "object.js.map"),
         JSON.stringify({ sourcesContent: { api_key: opaque } }),
@@ -407,6 +407,47 @@ describe("source map metadata and invalid content", () => {
             hit.findings.some((finding) => finding.label === "keyed-secret"),
           ),
         );
+        return true;
+      });
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+describe("source map encoded metadata and broken JSON", () => {
+  it("does not flag safe code in metadata or broken JSON", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const source =
+        'const value = {key: "." + key};\n' +
+        'console.log("AlphaBeta0123456789 punctuation and code");\n'.repeat(5);
+      writeFileSync(join(dir, "build", "metadata.js.map"), JSON.stringify({ custom: source }));
+      const broken = JSON.stringify({ sourcesContent: [source] }).slice(0, -1);
+      writeFileSync(join(dir, "build", "broken.js.map"), broken);
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.deepEqual(error.hits, []);
+        return true;
+      });
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("retains a decoded credential from broken JSON", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const secret = "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123";
+      const broken = JSON.stringify({ sourcesContent: [secret] })
+        .replace("sk_" + "live_", "\\u0073k_" + "live_")
+        .slice(0, -1);
+      writeFileSync(join(dir, "build", "broken.js.map"), broken);
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.ok(error.hits[0].findings.some((finding) => finding.label === "stripe-key"));
         return true;
       });
     } finally {
