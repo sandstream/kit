@@ -89,6 +89,70 @@ function findBuildSecrets(content: string): SecretFinding[] {
   return findings;
 }
 
+type SourceRange = { start: number; end: number };
+
+function readSourceArray(
+  content: string,
+  start: number,
+): { end: number; sources: string[]; ranges: SourceRange[] } | undefined {
+  const strings = /"(?:\\.|[^"\\])*"/g;
+  const sources: string[] = [];
+  const ranges: SourceRange[] = [];
+  let cursor = start;
+  while (true) {
+    cursor += /^\s*/.exec(content.slice(cursor))![0].length;
+    if (content[cursor] === "]") return { end: cursor + 1, sources, ranges };
+    if (content[cursor] === '"') {
+      strings.lastIndex = cursor;
+      const source = strings.exec(content)!;
+      const decoded = JSON.parse(source[0]) as string;
+      if (decoded) {
+        sources.push(decoded);
+        ranges.push({ start: cursor, end: strings.lastIndex });
+      }
+      cursor = strings.lastIndex;
+    } else if (content.startsWith("null", cursor)) {
+      cursor += 4;
+    } else return undefined;
+    cursor += /^\s*/.exec(content.slice(cursor))![0].length;
+    if (content[cursor] === ",") cursor++;
+    else if (content[cursor] !== "]") return undefined;
+  }
+}
+
+// Scan decoded sources separately so escaped quotes cannot join unrelated code.
+// Keep the original remaining JSON, including duplicate fields, for the scan.
+function findArtifactSecrets(content: string, file: string): SecretFinding[] {
+  if (!file.endsWith(".map")) return findBuildSecrets(content);
+  try {
+    JSON.parse(content);
+  } catch {
+    return findBuildSecrets(content);
+  }
+  const sources: string[] = [];
+  const ranges: SourceRange[] = [];
+  const strings = /"(?:\\.|[^"\\])*"/g;
+  let token: RegExpExecArray | null;
+  while ((token = strings.exec(content)) !== null) {
+    if (JSON.parse(token[0]) !== "sourcesContent") continue;
+    const prefix = /^\s*:\s*\[/.exec(content.slice(strings.lastIndex));
+    if (!prefix) continue;
+    const array = readSourceArray(content, strings.lastIndex + prefix[0].length);
+    if (!array) continue;
+    for (const source of array.sources) sources.push(source);
+    for (const range of array.ranges) ranges.push(range);
+    strings.lastIndex = array.end;
+  }
+  const rest: string[] = [];
+  let from = 0;
+  for (const range of ranges) {
+    rest.push(content.slice(from, range.start), '""');
+    from = range.end;
+  }
+  rest.push(content.slice(from));
+  return [rest.join(""), ...sources].flatMap(findBuildSecrets);
+}
+
 /** Next.js server modules are deployed to the runtime, not downloaded by visitors. */
 function isBrowserVisibleNextArtifact(file: string): boolean {
   const parts = file.split("/");
@@ -154,7 +218,7 @@ export async function scanBuildArtifacts(
     } catch {
       continue;
     }
-    const findings = findBuildSecrets(content);
+    const findings = findArtifactSecrets(content, rel);
     if (findings.length > 0) {
       // Report repository-style paths so diagnostics and baselines are stable
       // across Windows and POSIX hosts.

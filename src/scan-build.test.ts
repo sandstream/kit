@@ -107,6 +107,137 @@ describe("scanBuildArtifacts browser output", () => {
 });
 
 describe("scanBuildArtifacts credential shapes", () => {
+  it("does not join code in an encoded source map into a secret", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build", "server"), { recursive: true });
+      const source =
+        'const value = {key: "." + key};\n' +
+        'console.log("AlphaBeta0123456789 punctuation and code");\n'.repeat(5);
+      writeFileSync(
+        join(dir, "build", "server", "index.js.map"),
+        JSON.stringify({
+          version: 3,
+          sources: ["input.js"],
+          sourcesContent: [source],
+          mappings: "",
+        }),
+      );
+      assert.deepEqual(await scanBuildArtifacts(dir), []);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("finds credentials in source maps and keeps source files separate", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const opaque = ["A0b1C2d3", "E4f5G6h7", "I8j9K0l1", "M2n3O4p5"].join("");
+      const map = {
+        version: 3,
+        sources: ["one.js", "two.js"],
+        sourcesContent: [
+          'const item = {key: "." + key};\nconsole.log("ordinary code");',
+          `const config = {api_key: "${opaque}"};`,
+        ],
+        mappings: "",
+      };
+      writeFileSync(join(dir, "build", "client.js.map"), JSON.stringify(map));
+      const hits = await scanBuildArtifacts(dir);
+      assert.equal(hits.length, 1);
+      assert.ok(hits[0].findings.some((finding) => finding.label === "keyed-secret"));
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("scans other map fields and malformed maps", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const opaque = ["A0b1C2d3", "E4f5G6h7", "I8j9K0l1", "M2n3O4p5"].join("");
+      writeFileSync(
+        join(dir, "build", "valid.js.map"),
+        JSON.stringify({ api_key: opaque, sourcesContent: ["safe"] }),
+      );
+      writeFileSync(join(dir, "build", "broken.js.map"), `{"api_key":"${opaque}"`);
+      const hits = await scanBuildArtifacts(dir);
+      assert.deepEqual(hits.map((hit) => hit.file).sort(), [
+        "build/broken.js.map",
+        "build/valid.js.map",
+      ]);
+      assert.ok(
+        hits.every((hit) => hit.findings.some((finding) => finding.label === "keyed-secret")),
+      );
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("scans every occurrence of duplicate map fields", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const opaque = ["A0b1C2d3", "E4f5G6h7", "I8j9K0l1", "M2n3O4p5"].join("");
+      const source = JSON.stringify(`const config = {api_key: "${opaque}"};`);
+      writeFileSync(
+        join(dir, "build", "fields.js.map"),
+        `{"api_key":"${opaque}","api_key":"safe","sourcesContent":[]}`,
+      );
+      writeFileSync(
+        join(dir, "build", "sources.js.map"),
+        `{"sourcesContent":[${source}],"sourcesContent":["safe"]}`,
+      );
+      const hits = await scanBuildArtifacts(dir);
+      assert.deepEqual(hits.map((hit) => hit.file).sort(), [
+        "build/fields.js.map",
+        "build/sources.js.map",
+      ]);
+      assert.ok(
+        hits.every((hit) => hit.findings.some((finding) => finding.label === "keyed-secret")),
+      );
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("scans a large source map without falling back to encoded text", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const source = 'const token = "' + "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123" + '";';
+      const sourcesContent = [...Array<string>(145_000).fill(""), source];
+      const encoded = JSON.stringify({ sourcesContent }).replace(
+        "sk_" + "live_",
+        "\\u0073k_" + "live_",
+      );
+      writeFileSync(join(dir, "build", "large.js.map"), encoded);
+      const hits = await scanBuildArtifacts(dir);
+      assert.equal(hits.length, 1);
+      assert.ok(hits[0].findings.some((finding) => finding.label === "stripe-key"));
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("scans sources in nested map sections", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const opaque = ["A0b1C2d3", "E4f5G6h7", "I8j9K0l1", "M2n3O4p5"].join("");
+      const map = {
+        sections: [{ map: { sourcesContent: [null, `const x = {api_key: "${opaque}"};`] } }],
+      };
+      writeFileSync(join(dir, "build", "section.js.map"), JSON.stringify(map));
+      const hits = await scanBuildArtifacts(dir);
+      assert.equal(hits.length, 1);
+      assert.ok(hits[0].findings.some((finding) => finding.label === "keyed-secret"));
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
   it("does not treat ordinary client property names as credentials", async () => {
     const dir = makeRepo();
     try {
