@@ -2,7 +2,7 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { writeFile, rm, mkdir } from "node:fs/promises";
+import { writeFile, rm, mkdir, mkdtemp } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -26,8 +26,7 @@ async function runCi(args: string[] = [], env: Record<string, string> = {}) {
 }
 
 before(async () => {
-  testDir = join(tmpdir(), `kit-ci-test-${Date.now()}`);
-  await mkdir(testDir, { recursive: true });
+  testDir = await mkdtemp(join(tmpdir(), "kit-ci-test-"));
   // Minimal .kit.toml with no required tools/services/secrets
   await writeFile(join(testDir, ".kit.toml"), `[tools]\n`, "utf8");
 });
@@ -64,6 +63,35 @@ describe("kit ci", () => {
     const { stdout } = await runCi(["--format=json"]);
     const parsed = JSON.parse(stdout);
     assert(typeof parsed.ok === "boolean");
+  });
+
+  it("preserves an incomplete security scan and its finding in JSON", async () => {
+    const dist = join(testDir, "dist");
+    try {
+      await mkdir(dist, { recursive: true });
+      await writeFile(
+        join(testDir, "package.json"),
+        JSON.stringify({ devDependencies: { vite: "^5" } }),
+      );
+      await writeFile(join(dist, "broken.js.map"), "{");
+      await writeFile(join(dist, "leak.js"), "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123");
+      const { stdout } = await runCi(["--json", "--no-auto-install"], { KIT_BUMBLEBEE: "0" });
+      const output = JSON.parse(stdout);
+      const check = output.checks.find(
+        (row: { name: string }) => row.name === "built bundle secrets",
+      );
+      assert.ok(check);
+      assert.equal(check.status, "fail");
+      assert.equal(check.severity, "critical");
+      assert.equal(check.didNotRun, true);
+      assert.equal(check.scanIncomplete, true);
+      assert.equal(check.hasFindings, true);
+      assert.match(check.detail, /dist\/leak\.js/);
+      assert.doesNotMatch(check.detail, /--lenient to downgrade/);
+    } finally {
+      await rm(dist, { recursive: true, force: true });
+      await rm(join(testDir, "package.json"), { force: true });
+    }
   });
 
   it("--format=text outputs a summary line", async () => {

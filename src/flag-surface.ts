@@ -590,6 +590,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--fix",
     "--format",
     "--head",
+    "--include-tests",
     "--json",
     "--non-interactive",
     "--only",

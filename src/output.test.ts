@@ -150,3 +150,56 @@ describe("printSummary", () => {
     assert.match(cap.text(), /no checks applied/);
   });
 });
+
+describe("printSummary incomplete findings", () => {
+  const sec = (name: string, status: SecurityCheckResult["status"]): SecurityCheckResult => ({
+    category: "dependency",
+    name,
+    status,
+    detail: "",
+  });
+
+  it("reports an incomplete scan and its known finding together", () => {
+    const cap = captureStdout();
+    try {
+      printSummary(
+        [],
+        [],
+        [],
+        [{ ...sec("bundle", "fail"), didNotRun: true, scanIncomplete: true, hasFindings: true }],
+      );
+    } finally {
+      cap.restore();
+    }
+    assert.match(cap.text(), /1 incomplete check/);
+    assert.match(cap.text(), /1 real issue/);
+    assert.doesNotMatch(cap.text(), /setup gap|kit install/);
+  });
+
+  it("reports an incomplete scan without treating it as setup or a finding", () => {
+    const cap = captureStdout();
+    try {
+      printSummary(
+        [],
+        [],
+        [],
+        [{ ...sec("bundle", "fail"), didNotRun: true, scanIncomplete: true }],
+      );
+    } finally {
+      cap.restore();
+    }
+    assert.match(cap.text(), /1 incomplete check/);
+    assert.doesNotMatch(cap.text(), /setup gap|real issue|kit install/);
+  });
+
+  it("keeps a scan with no known findings as a setup gap", () => {
+    const cap = captureStdout();
+    try {
+      printSummary([], [], [], [{ ...sec("scanner", "fail"), didNotRun: true }]);
+    } finally {
+      cap.restore();
+    }
+    assert.match(cap.text(), /1 setup gap/);
+    assert.doesNotMatch(cap.text(), /real issue|incomplete check/);
+  });
+});

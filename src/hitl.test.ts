@@ -127,3 +127,40 @@ describe("HITL formatter", () => {
     assert.match(block.steps.join("\n"), /Install osv-scanner/);
   });
 });
+
+describe("HITL for incomplete scans with findings", () => {
+  it("distinguishes findings from incomplete scanner setup", () => {
+    const [block] = hitlBlocksForSecurity([
+      {
+        category: "exposure",
+        name: "built bundle secrets",
+        status: "fail",
+        detail: "a bundle contains a credential; another map was not scanned",
+        didNotRun: true,
+        scanIncomplete: true,
+        hasFindings: true,
+      },
+    ]);
+    assert.equal(block.reason, "security finding and incomplete scan");
+    assert.match(block.blocker, /found an issue and did not finish/);
+    assert.match(block.steps.join("\n"), /Investigate the reported finding and complete the scan/);
+    assert.doesNotMatch(block.steps.join("\n"), /Fix setup/);
+  });
+
+  it("gives an incomplete scan its own handoff", () => {
+    const [block] = hitlBlocksForSecurity([
+      {
+        category: "exposure",
+        name: "bundle",
+        status: "fail",
+        detail: "map exceeds limit",
+        didNotRun: true,
+        scanIncomplete: true,
+      },
+    ]);
+    assert.equal(block.reason, "incomplete scan");
+    assert.match(block.blocker, /did not finish/);
+    assert.match(block.steps.join("\n"), /Resolve the incomplete scan/);
+    assert.doesNotMatch(block.steps.join("\n"), /Fix setup/);
+  });
+});

@@ -38,6 +38,85 @@ describe("didRun", () => {
   });
 });
 
+describe("incomplete scans with known findings", () => {
+  it("keeps the coverage-gained classification for a previously skipped check", () => {
+    const before = chk({ name: "bundle", status: "skip" });
+    const after = chk({ name: "bundle", status: "fail", severity: "critical" });
+    const result = diffScans(doc([before]), doc([after]));
+    assert.equal(result.changes[0].kind, "coverage-gained");
+    assert.equal(result.worseThanBefore, false);
+  });
+  it("reports increased severity when an incomplete scan becomes complete", () => {
+    const before = chk({
+      name: "bundle",
+      status: "fail",
+      didNotRun: true,
+      hasFindings: true,
+      severity: "high",
+    });
+    const after = chk({ name: "bundle", status: "fail", severity: "critical" });
+    const result = diffScans(doc([before]), doc([after]));
+    assert.equal(result.changes[0].kind, "regressed");
+    assert.equal(result.worseThanBefore, true);
+  });
+  it("reports a new finding when an incomplete scan becomes complete", () => {
+    const before = chk({ name: "bundle", status: "fail", didNotRun: true, scanIncomplete: true });
+    const after = chk({ name: "bundle", status: "fail", severity: "critical" });
+    const result = diffScans(doc([before]), doc([after]));
+    assert.equal(result.changes[0].kind, "regressed");
+    assert.equal(result.worseThanBefore, true);
+    assert.equal(result.clean, false);
+    assert.match(result.changes[0].summary, /scan completed; confirmed finding reported/);
+  });
+  it("reports increased severity when both scans are incomplete", () => {
+    const before = chk({
+      name: "bundle",
+      status: "fail",
+      didNotRun: true,
+      hasFindings: true,
+      severity: "high",
+    });
+    const after = chk({
+      name: "bundle",
+      status: "fail",
+      didNotRun: true,
+      hasFindings: true,
+      severity: "critical",
+    });
+    const result = diffScans(doc([before]), doc([after]));
+    assert.equal(result.changes[0].kind, "regressed");
+    assert.equal(result.worseThanBefore, true);
+    assert.equal(result.clean, false);
+  });
+  it("reports a finding even when the scan lost coverage", () => {
+    const d = diffScans(
+      doc([chk({ name: "bundle", status: "pass" })]),
+      doc([chk({ name: "bundle", status: "fail", didNotRun: true, hasFindings: true })]),
+    );
+    assert.equal(d.changes[0].kind, "coverage-lost");
+    assert.match(d.changes[0].summary, /scan incomplete; confirmed findings remain/);
+    assert.equal(d.changes[0].after?.hasFindings, true);
+  });
+
+  it("detects findings that appear during repeated incomplete scans", () => {
+    const before = chk({ name: "bundle", status: "fail", didNotRun: true });
+    const after = chk({ name: "bundle", status: "fail", didNotRun: true, hasFindings: true });
+    const d = diffScans(doc([before]), doc([after]));
+    assert.equal(d.changes[0].kind, "regressed");
+    assert.equal(d.worseThanBefore, true);
+    assert.match(d.changes[0].summary, /scan incomplete; confirmed findings reported/);
+  });
+
+  it("does not call a finding resolved when a later incomplete scan omits it", () => {
+    const before = chk({ name: "bundle", status: "fail", didNotRun: true, hasFindings: true });
+    const after = chk({ name: "bundle", status: "fail", didNotRun: true });
+    const d = diffScans(doc([before]), doc([after]));
+    assert.equal(d.changes[0].kind, "coverage-lost");
+    assert.equal(d.worseThanBefore, true);
+    assert.match(d.changes[0].summary, /previous findings are not verified/);
+  });
+});
+
 describe("the coverage axis — the reason this is not a generic differ", () => {
   it("fail → skip is LOST COVERAGE, never an improvement", () => {
     const d = diffScans(

@@ -279,6 +279,20 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
  * and `kit review`'s check stage reports — one mapping, so the row shape can't
  * fork between surfaces.
  */
+/** Preserve both findings and incomplete coverage across check and CI output. */
+export function securityCheckToJson(s: SecurityCheckResult): JsonCheck {
+  return {
+    name: s.name,
+    status: s.status,
+    detail: s.detail,
+    category: `security/${s.category}`,
+    ...(s.severity ? { severity: s.severity } : {}),
+    ...(s.didNotRun ? { didNotRun: true } : {}),
+    ...(s.hasFindings ? { hasFindings: true } : {}),
+    ...(s.scanIncomplete ? { scanIncomplete: true } : {}),
+  };
+}
+
 export function checkRunToJsonChecks(r: CheckRunResult): JsonCheck[] {
   return [
     ...r.tools.map((t) => ({
@@ -339,14 +353,7 @@ export function checkRunToJsonChecks(r: CheckRunResult): JsonCheck[] {
     // `severity` and `didNotRun` are carried through deliberately: JsonCheck has always
     // declared severity and this projection silently dropped it, and didNotRun is what lets
     // a consumer tell "stopped failing" from "stopped looking" (see scan-diff.ts).
-    ...r.security.map((s) => ({
-      name: s.name,
-      status: s.status,
-      detail: s.detail,
-      category: `security/${s.category}`,
-      ...(s.severity ? { severity: s.severity } : {}),
-      ...(s.didNotRun ? { didNotRun: true as const } : {}),
-    })),
+    ...r.security.map(securityCheckToJson),
     ...r.tests.map((t) => ({
       name: t.name,
       status: t.status,
