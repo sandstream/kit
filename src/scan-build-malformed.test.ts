@@ -11,6 +11,39 @@ function makeRepo(): string {
 }
 
 describe("scanBuildArtifacts mixed source content", () => {
+  it("retains a generic credential in an unfinished JSON string", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const value = ["A7mK9qR2", "vX4yZ8bP", "5nW3dC6f"].join("");
+      const broken = `{"sourcesContent":["const PASSWORD = '${value}';`;
+      writeFileSync(join(dir, "build", "broken.js.map"), broken);
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.ok(error.hits[0].findings.some((finding) => finding.label === "keyed-secret"));
+        return true;
+      });
+    } finally {
+      rmTemp(dir);
+    }
+  });
+  it("retains a complete private-key block in an unfinished JSON string", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const pem =
+        "-----BEGIN " + "PRIVATE KEY-----\nFAKECONTENTFORTESTONLY\n-----END " + "PRIVATE KEY-----";
+      const broken = JSON.stringify({ sourcesContent: [pem] }).slice(0, -3);
+      writeFileSync(join(dir, "build", "broken.js.map"), broken);
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.ok(error.hits[0].findings.some((finding) => finding.label === "pem-private-key"));
+        return true;
+      });
+    } finally {
+      rmTemp(dir);
+    }
+  });
   it("handles a long unfinished JSON string within the work limit", async () => {
     const dir = makeRepo();
     try {
@@ -24,6 +57,9 @@ describe("scanBuildArtifacts mixed source content", () => {
       rmTemp(dir);
     }
   });
+});
+
+describe("scanBuildArtifacts invalid source values", () => {
   it("continues past invalid JSON escapes and retains later credentials", async () => {
     const dir = makeRepo();
     try {

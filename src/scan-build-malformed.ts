@@ -15,7 +15,12 @@ function* jsonStringTokens(content: string): Generator<{ index: number; text: st
         break;
       }
     }
-    if (!closed) return;
+    if (!closed) {
+      // Try the unfinished string as a partial JSON value. Invalid trailing
+      // escapes remain incomplete and are rejected by JSON.parse below.
+      yield { index: start, text: content.slice(start) + '"' };
+      return;
+    }
     yield { index: start, text: content.slice(start, cursor) };
   }
 }

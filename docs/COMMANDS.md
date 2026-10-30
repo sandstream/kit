@@ -257,7 +257,9 @@ max_bytes = 12000
 The build scan reports an incomplete check for source maps over 5 MiB or 100,000 source entries.
 It also reports incomplete scans for invalid maps and ambiguous keyed values.
 The report includes credentials found before a limit.
-The scan excludes test artifacts by default. Add `--include-tests` to scan them.
+The scan excludes `__tests__`, `__mocks__`, and `fixtures` directories by default.
+It also excludes `.test` and `.spec` JavaScript or TypeScript files and their source maps.
+Add `--include-tests` to scan them. Directories named `test` or `tests` are still scanned.
 
 ### Code guardrails in the security check
 
