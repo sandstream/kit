@@ -35,9 +35,15 @@ describe("scanBuildArtifacts mixed source content", () => {
         "-----BEGIN " + "PRIVATE KEY-----\nFAKECONTENTFORTESTONLY\n-----END " + "PRIVATE KEY-----";
       const broken = JSON.stringify({ sourcesContent: [pem] }).slice(0, -3);
       writeFileSync(join(dir, "build", "broken.js.map"), broken);
+      writeFileSync(join(dir, "build", "broken-escape.js.map"), broken + "\\");
       await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
         assert.ok(error instanceof BuildScanIncompleteError);
-        assert.ok(error.hits[0].findings.some((finding) => finding.label === "pem-private-key"));
+        assert.equal(error.hits.length, 2);
+        assert.ok(
+          error.hits.every((hit) =>
+            hit.findings.some((finding) => finding.label === "pem-private-key"),
+          ),
+        );
         return true;
       });
     } finally {

@@ -16,9 +16,15 @@ function* jsonStringTokens(content: string): Generator<{ index: number; text: st
       }
     }
     if (!closed) {
-      // Try the unfinished string as a partial JSON value. Invalid trailing
+      let end = content.length;
+      let trailingSlashes = 0;
+      while (end - trailingSlashes > start && content[end - trailingSlashes - 1] === "\\") {
+        trailingSlashes++;
+      }
+      if (trailingSlashes % 2 === 1) end--;
+      // A trailing backslash cannot complete an escape. Earlier invalid
       // escapes remain incomplete and are rejected by JSON.parse below.
-      yield { index: start, text: content.slice(start) + '"' };
+      yield { index: start, text: content.slice(start, end) + '"' };
       return;
     }
     yield { index: start, text: content.slice(start, cursor) };
