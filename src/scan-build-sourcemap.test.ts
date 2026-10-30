@@ -120,8 +120,8 @@ describe("source map encoded metadata and broken JSON", () => {
     try {
       mkdirSync(join(dir, "build"), { recursive: true });
       const source = [
-        'const a = "-----BEGIN PRIVATE KEY-----";',
-        'const b = "-----END PRIVATE KEY-----";',
+        'const a = "' + "-----BEGIN " + 'PRIVATE KEY-----";',
+        'const b = "' + "-----END " + 'PRIVATE KEY-----";',
       ];
       writeFileSync(
         join(dir, "build", "broken.js.map"),

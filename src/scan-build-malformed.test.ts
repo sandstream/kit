@@ -11,6 +11,19 @@ function makeRepo(): string {
 }
 
 describe("scanBuildArtifacts mixed source content", () => {
+  it("handles a long unfinished JSON string within the work limit", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const content = '{"sourcesContent":["' + '\\"'.repeat(100_000);
+      writeFileSync(join(dir, "build", "unfinished.js.map"), content);
+      const start = performance.now();
+      await assert.rejects(scanBuildArtifacts(dir), /source map has invalid JSON/);
+      assert.ok(performance.now() - start < 5_000, "scan exceeded the work limit");
+    } finally {
+      rmTemp(dir);
+    }
+  });
   it("continues past invalid JSON escapes and retains later credentials", async () => {
     const dir = makeRepo();
     try {
