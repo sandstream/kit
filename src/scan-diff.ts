@@ -120,6 +120,7 @@ function incompleteChange(before: JsonCheck, after: JsonCheck): ScanChangeKind {
 }
 
 function completedChange(before: JsonCheck, after: JsonCheck): ScanChangeKind {
+  if (!before.scanIncomplete && !before.hasFindings) return "coverage-gained";
   if (!before.hasFindings && after.status === "fail") return "regressed";
   const severity = (SEVERITY_RANK[after.severity!] ?? 0) - (SEVERITY_RANK[before.severity!] ?? 0);
   if (before.hasFindings && after.status === "fail" && severity > 0) return "regressed";

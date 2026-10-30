@@ -39,6 +39,13 @@ describe("didRun", () => {
 });
 
 describe("incomplete scans with known findings", () => {
+  it("keeps the coverage-gained classification for a previously skipped check", () => {
+    const before = chk({ name: "bundle", status: "skip" });
+    const after = chk({ name: "bundle", status: "fail", severity: "critical" });
+    const result = diffScans(doc([before]), doc([after]));
+    assert.equal(result.changes[0].kind, "coverage-gained");
+    assert.equal(result.worseThanBefore, false);
+  });
   it("reports increased severity when an incomplete scan becomes complete", () => {
     const before = chk({
       name: "bundle",
