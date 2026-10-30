@@ -2,7 +2,7 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { writeFile, rm, mkdir } from "node:fs/promises";
+import { writeFile, rm, mkdir, mkdtemp } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -26,8 +26,7 @@ async function runCi(args: string[] = [], env: Record<string, string> = {}) {
 }
 
 before(async () => {
-  testDir = join(tmpdir(), `kit-ci-test-${Date.now()}`);
-  await mkdir(testDir, { recursive: true });
+  testDir = await mkdtemp(join(tmpdir(), "kit-ci-test-"));
   // Minimal .kit.toml with no required tools/services/secrets
   await writeFile(join(testDir, ".kit.toml"), `[tools]\n`, "utf8");
 });

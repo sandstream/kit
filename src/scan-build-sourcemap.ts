@@ -120,6 +120,30 @@ function scanMapMetadata(content: string, findings: SecretFinding[]): void {
   if (budget.ambiguous) throw new Error("source map contains an ambiguous keyed value");
 }
 
+function reportInvalidMap(content: string): never {
+  // Raw provider patterns can still match a source string cut off mid-value.
+  // Generic key patterns need decoded delimiters and are scanned below.
+  const raw = findBuildSecrets(content).filter((finding) => !UNSAFE_RAW_LABELS.has(finding.label));
+  const findings: SecretFinding[] = [];
+  try {
+    scanMalformedObject(
+      content,
+      findings,
+      { sources: 0, nestedBytes: 0, malformed: true, ambiguous: false },
+      findBuildSecrets,
+    );
+  } catch {
+    // The incomplete result still reports findings collected before an invalid token or limit.
+  }
+  const seen = new Set(findings.map((finding) => `${finding.label}\0${finding.preview}`));
+  for (const finding of raw) {
+    const key = `${finding.label}\0${finding.preview}`;
+    if (!seen.has(key)) findings.push(finding);
+    seen.add(key);
+  }
+  throw new ArtifactIncompleteError("source map has invalid JSON", findings);
+}
+
 // Scan decoded sources separately so escaped quotes cannot join unrelated code.
 // Keep the original remaining JSON, including duplicate fields, for the scan.
 export function findArtifactSecrets(content: string, file: string): SecretFinding[] {
@@ -129,29 +153,7 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
     if (!map || typeof map !== "object" || Array.isArray(map))
       throw new Error("invalid source map");
   } catch {
-    // Raw provider patterns can still match a source string cut off mid-value.
-    // Generic key patterns need decoded delimiters and are scanned below.
-    const raw = findBuildSecrets(content).filter(
-      (finding) => !UNSAFE_RAW_LABELS.has(finding.label),
-    );
-    const findings: SecretFinding[] = [];
-    try {
-      scanMalformedObject(
-        content,
-        findings,
-        { sources: 0, nestedBytes: 0, malformed: true, ambiguous: false },
-        findBuildSecrets,
-      );
-    } catch {
-      // The incomplete result still reports findings collected before an invalid token or limit.
-    }
-    const seen = new Set(findings.map((finding) => `${finding.label}\0${finding.preview}`));
-    for (const finding of raw) {
-      const key = `${finding.label}\0${finding.preview}`;
-      if (!seen.has(key)) findings.push(finding);
-      seen.add(key);
-    }
-    throw new ArtifactIncompleteError("source map has invalid JSON", findings);
+    reportInvalidMap(content);
   }
   const findings: SecretFinding[] = [];
   const budget: SourceBudget = { sources: 0, nestedBytes: 0, malformed: false, ambiguous: false };
