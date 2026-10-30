@@ -338,7 +338,7 @@ describe("source map scan limit reporting", () => {
       const result = await checkBuiltBundleSecrets(dir);
       assert.equal(result.status, "fail");
       assert.equal(result.didNotRun, true);
-      assert.match(result.detail, /source map has non-string source content/);
+      assert.match(result.detail, /source map has invalid source content/);
     } finally {
       rmTemp(dir);
     }
@@ -386,6 +386,34 @@ describe("source map partial findings", () => {
 });
 
 describe("source map metadata and invalid content", () => {
+  it("reports non-array source content as incomplete without false findings", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const source =
+        'const value = {key: "." + key};\n' +
+        'console.log("AlphaBeta0123456789 punctuation and code");\n'.repeat(5);
+      writeFileSync(
+        join(dir, "build", "string.js.map"),
+        JSON.stringify({ sourcesContent: source }),
+      );
+      writeFileSync(
+        join(dir, "build", "boolean.js.map"),
+        JSON.stringify({ sourcesContent: false }),
+      );
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.match(error.message, /invalid source content/);
+        assert.deepEqual(error.hits, []);
+        return true;
+      });
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+describe("source map metadata findings", () => {
   it("detects an encoded credential in a metadata field", async () => {
     const dir = makeRepo();
     try {

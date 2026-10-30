@@ -14,7 +14,8 @@ export class ArtifactIncompleteError extends Error {
   }
 }
 
-export const MAX_BYTES = 5 * 1024 * 1024; // 5 MiB
+import { skipJsonValue, type SourceBudget } from "./scan-build-json.js";
+export { MAX_BYTES } from "./scan-build-json.js";
 
 // Terraform / tfstate finding labels do not apply to build artifacts and
 // false-positive on framework manifests. For example, Next.js `routes-manifest.json`
@@ -49,36 +50,6 @@ function findBuildSecrets(content: string): SecretFinding[] {
 }
 
 type SourceRange = { start: number; end: number };
-type SourceBudget = { sources: number; nestedBytes: number; malformed: boolean };
-
-// The complete JSON has already been validated. Skip a non-string array item
-// while leaving it in the raw map for the normal scan.
-function skipJsonValue(content: string, start: number, budget: SourceBudget): number {
-  if (content[start] !== "{" && content[start] !== "[") {
-    const scalar = /^(?:null|true|false|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(
-      content.slice(start),
-    );
-    if (!scalar) throw new Error("Invalid source map value");
-    return start + scalar[0].length;
-  }
-  const tokens = /"(?:\\.|[^"\\])*"|[{}[\]]/g;
-  tokens.lastIndex = start;
-  let depth = 0;
-  let previous = start;
-  let token: RegExpExecArray | null;
-  while ((token = tokens.exec(content)) !== null) {
-    budget.nestedBytes += tokens.lastIndex - previous;
-    previous = tokens.lastIndex;
-    if (budget.nestedBytes > MAX_BYTES) {
-      throw new Error("source map nesting exceeds scan work limit");
-    }
-    if (token[0] === "{" || token[0] === "[") depth++;
-    else if (token[0] === "}" || token[0] === "]") depth--;
-    if (depth === 0) return tokens.lastIndex;
-  }
-  throw new Error("Unclosed source map value");
-}
-
 function readSourceArray(
   content: string,
   start: number,
@@ -127,17 +98,17 @@ function scanMapMetadata(content: string): SecretFinding[] {
   let token: RegExpExecArray | null;
   while ((token = strings.exec(content)) !== null) {
     if (JSON.parse(token[0]) !== "sourcesContent") continue;
-    const prefix = /^\s*:\s*\[/.exec(content.slice(strings.lastIndex));
+    const prefix = /^\s*:\s*/.exec(content.slice(strings.lastIndex));
     if (!prefix) continue;
     const start = strings.lastIndex + prefix[0].length;
-    const end = skipJsonValue(content, start - 1, budget);
-    ranges.push({ start, end: end - 1 });
+    const end = skipJsonValue(content, start, budget);
+    ranges.push({ start, end });
     strings.lastIndex = end;
   }
   const rest: string[] = [];
   let from = 0;
   for (const range of ranges) {
-    rest.push(content.slice(from, range.start));
+    rest.push(content.slice(from, range.start), "null");
     from = range.end;
   }
   rest.push(content.slice(from));
@@ -163,9 +134,20 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
   try {
     while ((token = strings.exec(content)) !== null) {
       if (JSON.parse(token[0]) !== "sourcesContent") continue;
-      const prefix = /^\s*:\s*\[/.exec(content.slice(strings.lastIndex));
+      const prefix = /^\s*:\s*/.exec(content.slice(strings.lastIndex));
       if (!prefix) continue;
-      const arrayStart = strings.lastIndex + prefix[0].length;
+      const valueStart = strings.lastIndex + prefix[0].length;
+      if (content[valueStart] !== "[") {
+        budget.malformed = true;
+        const end = skipJsonValue(content, valueStart, budget);
+        if (content[valueStart] === '"') {
+          const decoded = JSON.parse(content.slice(valueStart, end)) as string;
+          for (const finding of findBuildSecrets(decoded)) findings.push(finding);
+        }
+        strings.lastIndex = end;
+        continue;
+      }
+      const arrayStart = valueStart + 1;
       const arrayEnd = readSourceArray(content, arrayStart, budget, findings);
       if (arrayEnd === undefined) continue;
       strings.lastIndex = arrayEnd;
@@ -176,7 +158,7 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
   }
   for (const finding of scanMapMetadata(content)) findings.push(finding);
   if (budget.malformed) {
-    throw new ArtifactIncompleteError("source map has non-string source content", findings);
+    throw new ArtifactIncompleteError("source map has invalid source content", findings);
   }
   return findings;
 }
