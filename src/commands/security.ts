@@ -26,7 +26,7 @@ import {
 import { clearBumblebeeCache } from "../bumblebee.js";
 import { scanStagedFiles } from "../scan-staged.js";
 import { existsSync } from "node:fs";
-import { scanBuildArtifacts } from "../scan-build.js";
+import { BuildScanIncompleteError, scanBuildArtifacts } from "../scan-build.js";
 import { SECRET_SHAPE_COUNT } from "../utils/redactSecrets.js";
 import { scanTranscripts } from "../scan-transcripts.js";
 import { sampleCosts } from "../cost-monitor.js";
@@ -512,7 +512,15 @@ async function cmdSecurityScanArtifact(): Promise<boolean> {
 async function cmdSecurityScanBuild(): Promise<boolean> {
   // Optional positional: extra dirs to scan beyond the defaults.
   const extras = process.argv.slice(4).filter((a) => !a.startsWith("--"));
-  const hits = await scanBuildArtifacts(process.cwd(), extras.length > 0 ? extras : undefined);
+  let hits: Awaited<ReturnType<typeof scanBuildArtifacts>>;
+  try {
+    hits = await scanBuildArtifacts(process.cwd(), extras.length > 0 ? extras : undefined);
+  } catch (error) {
+    if (!(error instanceof BuildScanIncompleteError)) throw error;
+    console.error(`${c.red}✗ scan-build: incomplete: ${error.message}${c.reset}`);
+    hits = error.hits;
+    if (hits.length === 0) return false;
+  }
   if (hits.length === 0) {
     // The denominator belongs in the claim: "no patterns found" reads as "no secrets there", and
     // the honest statement is "none of the shapes kit knows".

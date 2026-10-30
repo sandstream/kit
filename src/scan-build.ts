@@ -1,11 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { resolve, join, relative, sep } from "node:path";
-import {
-  findSecrets,
-  SECRET_PATTERNS,
-  shannonEntropy,
-  type SecretFinding,
-} from "./utils/redactSecrets.js";
+import type { SecretFinding } from "./utils/redactSecrets.js";
+import { ArtifactIncompleteError, findArtifactSecrets, MAX_BYTES } from "./scan-build-sourcemap.js";
 
 /**
  * Walks built-artifact directories looking for leaked credentials. The
@@ -22,6 +18,16 @@ import {
 export interface BuildHit {
   file: string;
   findings: SecretFinding[];
+}
+
+export class BuildScanIncompleteError extends Error {
+  constructor(
+    message: string,
+    readonly hits: BuildHit[],
+  ) {
+    super(message);
+    this.name = "BuildScanIncompleteError";
+  }
 }
 
 const DEFAULT_BUILD_DIRS = [
@@ -55,136 +61,6 @@ const SCANNABLE_EXTS = new Set([
 ]);
 
 const SKIP_DIRS = new Set(["node_modules", ".git", ".pnpm-store", "cache"]);
-
-const MAX_BYTES = 5 * 1024 * 1024; // 5 MiB
-
-// Terraform / tfstate finding labels do not apply to build artifacts and
-// false-positive on framework manifests — e.g. Next.js `routes-manifest.json`
-// has many `"value":"…"` route entries that match the tfstate `"value"` rule.
-// A build-artifact leak is an inlined CREDENTIAL (sk_/JWT/AWS/…), not an HCL or
-// state construct, so these labels are filtered out here.
-const BUILD_IRRELEVANT_LABELS = new Set(["tfstate-value", "terraform-sensitive"]);
-const BUILD_GENERIC_LABELS = new Set(["keyed-secret", "url-query-token"]);
-const OPAQUE_MIN_LENGTH = 20;
-const OPAQUE_MIN_ENTROPY = 4.2;
-const MAX_MAP_SOURCES = 100_000;
-
-function findBuildSecrets(content: string): SecretFinding[] {
-  const findings = findSecrets(content).filter(
-    (finding) =>
-      !BUILD_IRRELEVANT_LABELS.has(finding.label) && !BUILD_GENERIC_LABELS.has(finding.label),
-  );
-
-  // Minified UI code routinely contains `key:"description"` and example URLs.
-  // Generic names only justify a build failure when their values look opaque.
-  for (const { re, label } of SECRET_PATTERNS) {
-    if (!BUILD_GENERIC_LABELS.has(label)) continue;
-    for (const match of content.matchAll(new RegExp(re.source, re.flags))) {
-      const value =
-        label === "keyed-secret" ? (match[3] ?? match[2]) : match[0].slice(match[1].length);
-      if (value.length < OPAQUE_MIN_LENGTH || shannonEntropy(value) < OPAQUE_MIN_ENTROPY) continue;
-      findings.push({ label, preview: "[REDACTED]" });
-    }
-  }
-
-  return findings;
-}
-
-type SourceRange = { start: number; end: number };
-
-// The complete JSON has already been validated. Skip a non-string array item
-// while leaving it in the raw map for the normal scan.
-function skipJsonValue(content: string, start: number): number {
-  if (content[start] !== "{" && content[start] !== "[") {
-    const scalar = /^(?:null|true|false|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(
-      content.slice(start),
-    );
-    if (!scalar) throw new Error("Invalid source map value");
-    return start + scalar[0].length;
-  }
-  const tokens = /"(?:\\.|[^"\\])*"|[{}[\]]/g;
-  tokens.lastIndex = start;
-  let depth = 0;
-  let token: RegExpExecArray | null;
-  while ((token = tokens.exec(content)) !== null) {
-    if (token[0] === "{" || token[0] === "[") depth++;
-    else if (token[0] === "}" || token[0] === "]") depth--;
-    if (depth === 0) return tokens.lastIndex;
-  }
-  throw new Error("Unclosed source map value");
-}
-
-function readSourceArray(
-  content: string,
-  start: number,
-  budget: { sources: number },
-): { end?: number; findings: SecretFinding[] } {
-  const strings = /"(?:\\.|[^"\\])*"/g;
-  const findings: SecretFinding[] = [];
-  let cursor = start;
-  let ordinary = true;
-  while (true) {
-    cursor += /^\s*/.exec(content.slice(cursor))![0].length;
-    if (content[cursor] === "]") return { end: ordinary ? cursor + 1 : undefined, findings };
-    budget.sources++;
-    if (budget.sources > MAX_MAP_SOURCES) {
-      throw new Error("source map exceeds 100000 source entries; scan could not finish");
-    }
-    if (content[cursor] === '"') {
-      strings.lastIndex = cursor;
-      const source = strings.exec(content)!;
-      const decoded = JSON.parse(source[0]) as string;
-      // No current credential or personal-number pattern can match fewer than eight characters.
-      if (decoded.length >= 8) {
-        for (const finding of findBuildSecrets(decoded)) findings.push(finding);
-      }
-      cursor = strings.lastIndex;
-    } else if (content.startsWith("null", cursor)) {
-      cursor += 4;
-    } else {
-      ordinary = false;
-      cursor = skipJsonValue(content, cursor);
-    }
-    cursor += /^\s*/.exec(content.slice(cursor))![0].length;
-    if (content[cursor] === ",") cursor++;
-    else if (content[cursor] !== "]") return { findings };
-  }
-}
-
-// Scan decoded sources separately so escaped quotes cannot join unrelated code.
-// Keep the original remaining JSON, including duplicate fields, for the scan.
-function findArtifactSecrets(content: string, file: string): SecretFinding[] {
-  if (!file.endsWith(".map")) return findBuildSecrets(content);
-  try {
-    JSON.parse(content);
-  } catch {
-    return findBuildSecrets(content);
-  }
-  const findings: SecretFinding[] = [];
-  const budget = { sources: 0 };
-  const ranges: SourceRange[] = [];
-  const strings = /"(?:\\.|[^"\\])*"/g;
-  let token: RegExpExecArray | null;
-  while ((token = strings.exec(content)) !== null) {
-    if (JSON.parse(token[0]) !== "sourcesContent") continue;
-    const prefix = /^\s*:\s*\[/.exec(content.slice(strings.lastIndex));
-    if (!prefix) continue;
-    const arrayStart = strings.lastIndex + prefix[0].length;
-    const array = readSourceArray(content, arrayStart, budget);
-    for (const finding of array.findings) findings.push(finding);
-    if (array.end === undefined) continue;
-    ranges.push({ start: arrayStart, end: array.end - 1 });
-    strings.lastIndex = array.end;
-  }
-  const rest: string[] = [];
-  let from = 0;
-  for (const range of ranges) {
-    rest.push(content.slice(from, range.start));
-    from = range.end;
-  }
-  rest.push(content.slice(from));
-  return findings.concat(findBuildSecrets(rest.join("")));
-}
 
 /** Next.js server modules are deployed to the runtime, not downloaded by visitors. */
 function isBrowserVisibleNextArtifact(file: string): boolean {
@@ -240,23 +116,45 @@ export async function scanBuildArtifacts(
   }
 
   const hits: BuildHit[] = [];
+  const incomplete: string[] = [];
   for (const path of files) {
     const rel = relative(cwd, path).split(sep).join("/");
     if (!isBrowserVisibleNextArtifact(rel)) continue;
-    let content: string;
+    let size: number;
     try {
       const st = await stat(path);
-      if (st.size > MAX_BYTES) continue;
-      content = await readFile(path, "utf-8");
+      size = st.size;
     } catch {
+      if (rel.endsWith(".map")) incomplete.push(`${rel}: source map could not be inspected`);
       continue;
     }
-    const findings = findArtifactSecrets(content, rel);
+    if (size > MAX_BYTES) {
+      if (rel.endsWith(".map")) incomplete.push(`${rel}: source map exceeds 5 MiB`);
+      continue;
+    }
+    let content: string;
+    try {
+      content = await readFile(path, "utf-8");
+    } catch {
+      if (rel.endsWith(".map")) incomplete.push(`${rel}: source map could not be read`);
+      continue;
+    }
+    let findings: SecretFinding[];
+    try {
+      findings = findArtifactSecrets(content, rel);
+    } catch (error) {
+      if (error instanceof ArtifactIncompleteError && error.findings.length) {
+        hits.push({ file: rel, findings: error.findings });
+      }
+      incomplete.push(`${rel}: ${(error as Error).message}`);
+      continue;
+    }
     if (findings.length > 0) {
       // Report repository-style paths so diagnostics and baselines are stable
       // across Windows and POSIX hosts.
       hits.push({ file: rel, findings });
     }
   }
+  if (incomplete.length) throw new BuildScanIncompleteError(incomplete[0], hits);
   return hits;
 }

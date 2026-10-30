@@ -500,18 +500,21 @@ export async function checkBuiltBundleSecrets(root: string): Promise<SecurityChe
     };
   }
 
-  const { scanBuildArtifacts } = await import("./scan-build.js");
+  const { scanBuildArtifacts, BuildScanIncompleteError } = await import("./scan-build.js");
   let hits: Awaited<ReturnType<typeof scanBuildArtifacts>>;
   try {
     hits = await scanBuildArtifacts(root, present);
   } catch (e) {
     // A scan that crashed is not a clean scan: didNotRun makes the CI gate treat it as such.
+    const known =
+      e instanceof BuildScanIncompleteError ? e.hits.filter((h) => !isTestArtifact(h.file)) : [];
     return {
       ...base,
       status: "fail",
-      severity: "medium",
+      severity: known.length ? "critical" : "medium",
       didNotRun: true,
-      detail: `bundle scan could not run: ${(e as Error).message.slice(0, 80)}`,
+      detail: `bundle scan could not finish: ${(e as Error).message.slice(0, 80)}${known.length ? `; credentials also found in ${known.map((h) => h.file).join(", ")}` : ""}`,
+      ...(known.length ? { files: known.map((h) => h.file) } : {}),
     };
   }
 

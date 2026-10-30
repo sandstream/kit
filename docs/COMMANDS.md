@@ -254,6 +254,9 @@ max_bytes = 12000
 | `kit security prescan <path> [--deep] [--format=json] [--vs-baseline=<p>]` | Multi-repo baseline sweep (secrets, gitignore, branch-protect; `--deep` adds CVE / workflow-drift / bumblebee).                                                                                                      |
 | `kit security prescan-diff <baseline.jsonl> <latest.jsonl>`                | Diff two prescan reports — surface new regressions + fixed findings.                                                                                                                                                 |
 
+The build scan reports an incomplete check for source maps over 5 MiB or 100,000 source entries.
+It also stops maps that exceed the nesting work limit. The report includes credentials found before a limit.
+
 ### Code guardrails in the security check
 
 `kit check --category security` scans shell scripts, GitHub workflow commands, Dockerfiles, and source files.
