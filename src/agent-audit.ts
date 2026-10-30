@@ -22,7 +22,16 @@
  *
  * Pure analyzers (string in → findings out); `runAgentAudit` is the file-reading wrapper.
  */
-import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { resolve, join, relative, extname } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
 import { findSecrets } from "./utils/redactSecrets.js";
@@ -396,6 +405,20 @@ function scanAgentDirs(cwd: string): { results: SecurityCheckResult[]; scanned: 
   return { results: out, scanned };
 }
 
+/**
+ * A hook file's text, or null when it is not a regular file. The check and the read both go
+ * through one open descriptor, so the file cannot be swapped in between. A symlinked hook is
+ * still followed (git runs it), and `O_NONBLOCK` keeps a named pipe from waiting for a writer.
+ */
+function readHookFile(path: string): string | null {
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+  try {
+    return fstatSync(fd).isFile() ? readFileSync(fd, "utf8") : null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** Git hook files under `cwd` with a malware-shaped line. Read-only; fail-open per file. */
 function scanHookDirs(cwd: string): { results: SecurityCheckResult[]; scanned: number } {
   const out: SecurityCheckResult[] = [];
@@ -411,10 +434,9 @@ function scanHookDirs(cwd: string): { results: SecurityCheckResult[]; scanned: n
     }
     for (const entry of entries) {
       if (entry.endsWith(".sample")) continue;
-      const hpath = join(dpath, entry);
       try {
-        if (!statSync(hpath).isFile()) continue;
-        const body = readFileSync(hpath, "utf8");
+        const body = readHookFile(join(dpath, entry));
+        if (body === null) continue;
         scanned++;
         const reasons = auditHookBody(body);
         if (reasons.length > 0) {
