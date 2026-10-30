@@ -1,15 +1,7 @@
 /** Collect and store a signed receipt for the exact pull request head. */
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import {
-  appendFileSync,
-  closeSync,
-  openSync,
-  readSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { closeSync, lstatSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { getAuditAnchorKey, tryReadAuditAnchorKey } from "./audit-anchor.js";
 import {
@@ -19,6 +11,7 @@ import {
   type PrRefs,
 } from "./review-protected-paths-github.js";
 import { parseGitHubPrView, parseGitHubReviewThreads } from "./review-receipt-github.js";
+import { appendReceiptHistory, openReceiptForRead } from "./review-receipt-files.js";
 import { isReadOnlyMode, refuseWrite } from "./read-only-mode.js";
 import {
   buildReviewReceipt,
@@ -57,8 +50,28 @@ function prEvidence(root: string, run: ReadCommand) {
 }
 
 function clean(root: string, run: ReadCommand): void {
-  if (run("git", ["status", "--porcelain", "--untracked-files=all"], root).trim()) {
+  const outputFiles = [REVIEW_RECEIPT_FILE, REVIEW_RECEIPT_HISTORY_FILE];
+  if (run("git", ["ls-files", "-z", "--", ...outputFiles], root) !== "") {
+    throw new Error("review receipt output paths must not contain tracked files");
+  }
+  const status = run("git", ["status", "--porcelain", "--untracked-files=all"], root);
+  const dirty = status
+    .split("\n")
+    .some((line) => line !== "" && !outputFiles.some((file) => line === `?? ${file}`));
+  if (dirty) {
     throw new Error("review receipt requires a clean worktree");
+  }
+  for (const file of outputFiles) {
+    let stat;
+    try {
+      stat = lstatSync(join(root, file));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    if (!stat.isFile() || stat.nlink !== 1) {
+      throw new Error("review receipt output must be a regular file without hard links");
+    }
   }
 }
 
@@ -120,7 +133,7 @@ export function assertReviewSnapshot(
 }
 
 function readReceipt(path: string): string | null {
-  const fd = openSync(path, "r");
+  const fd = openReceiptForRead(path);
   const chunks: Buffer[] = [];
   let total = 0;
   try {
@@ -288,10 +301,7 @@ export async function writeReviewReceipt(
     rmSync(temp, { force: true });
   }
   if (gate.exitCode !== 0) {
-    appendFileSync(join(root, REVIEW_RECEIPT_HISTORY_FILE), JSON.stringify(signed) + "\n", {
-      encoding: "utf8",
-      mode: 0o600,
-    });
+    appendReceiptHistory(join(root, REVIEW_RECEIPT_HISTORY_FILE), JSON.stringify(signed) + "\n");
   }
   return { path, receipt };
 }

@@ -109,14 +109,21 @@ function fakeRuleSnapshot(options: FakeOptions): string {
   });
 }
 
+function fakeGitCommand(call: string, options: FakeOptions): string | null {
+  if (call === "git rev-parse --show-toplevel") return (options.rootDir ?? root) + "\n";
+  if (call === "git rev-parse HEAD") return HEAD + "\n";
+  if (call.startsWith("git ls-files -z -- ")) return "";
+  if (call === "git status --porcelain --untracked-files=all")
+    return options.dirty ? " M src/x.ts\n" : "";
+  return null;
+}
+
 function fakeCommands(options: FakeOptions = {}): ReadCommand {
   let refsCalls = 0;
   return (command, args) => {
     const call = [command, ...args].join(" ");
-    if (call === "git rev-parse --show-toplevel") return (options.rootDir ?? root) + "\n";
-    if (call === "git rev-parse HEAD") return HEAD + "\n";
-    if (call === "git status --porcelain --untracked-files=all")
-      return options.dirty ? " M src/x.ts\n" : "";
+    const gitResult = fakeGitCommand(call, options);
+    if (gitResult !== null) return gitResult;
     if (call === "gh repo view --json nameWithOwner") return '{"nameWithOwner":"sandstream/kit"}';
     if (call.startsWith("gh api --paginate --slurp repos/sandstream/kit/pulls/12/files"))
       return JSON.stringify([fakeFiles(options.weaken)]);

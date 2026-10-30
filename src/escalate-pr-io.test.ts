@@ -142,6 +142,14 @@ function fakeRuleSnapshot(options: FakeOptions): string {
   });
 }
 
+function fakeGitCommand(call: string, root: string): string | null {
+  if (call === "git rev-parse --show-toplevel") return root + "\n";
+  if (call === "git rev-parse HEAD") return HEAD + "\n";
+  if (call.startsWith("git ls-files -z -- ")) return "";
+  if (call === "git status --porcelain --untracked-files=all") return "";
+  return null;
+}
+
 function fakeCommands(
   root: string,
   remoteHead = HEAD,
@@ -151,9 +159,8 @@ function fakeCommands(
   let refsCalls = 0;
   return (command, args) => {
     const call = [command, ...args].join(" ");
-    if (call === "git rev-parse --show-toplevel") return root + "\n";
-    if (call === "git rev-parse HEAD") return HEAD + "\n";
-    if (call === "git status --porcelain --untracked-files=all") return "";
+    const gitResult = fakeGitCommand(call, root);
+    if (gitResult !== null) return gitResult;
     if (call === "gh repo view --json nameWithOwner") return '{"nameWithOwner":"sandstream/kit"}';
     if (call.startsWith("gh api graphql ") && call.includes("baseRefName baseRef"))
       return fakeRefs(remoteHead, options, ++refsCalls);
