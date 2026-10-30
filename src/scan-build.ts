@@ -67,6 +67,7 @@ const BUILD_IRRELEVANT_LABELS = new Set(["tfstate-value", "terraform-sensitive"]
 const BUILD_GENERIC_LABELS = new Set(["keyed-secret", "url-query-token"]);
 const OPAQUE_MIN_LENGTH = 20;
 const OPAQUE_MIN_ENTROPY = 4.2;
+const MAX_MAP_SOURCES = 100_000;
 
 function findBuildSecrets(content: string): SecretFinding[] {
   const findings = findSecrets(content).filter(
@@ -116,6 +117,7 @@ function skipJsonValue(content: string, start: number): number {
 function readSourceArray(
   content: string,
   start: number,
+  budget: { sources: number },
 ): { end?: number; findings: SecretFinding[] } {
   const strings = /"(?:\\.|[^"\\])*"/g;
   const findings: SecretFinding[] = [];
@@ -124,6 +126,10 @@ function readSourceArray(
   while (true) {
     cursor += /^\s*/.exec(content.slice(cursor))![0].length;
     if (content[cursor] === "]") return { end: ordinary ? cursor + 1 : undefined, findings };
+    budget.sources++;
+    if (budget.sources > MAX_MAP_SOURCES) {
+      throw new Error("source map exceeds 100000 source entries; scan could not finish");
+    }
     if (content[cursor] === '"') {
       strings.lastIndex = cursor;
       const source = strings.exec(content)!;
@@ -155,6 +161,7 @@ function findArtifactSecrets(content: string, file: string): SecretFinding[] {
     return findBuildSecrets(content);
   }
   const findings: SecretFinding[] = [];
+  const budget = { sources: 0 };
   const ranges: SourceRange[] = [];
   const strings = /"(?:\\.|[^"\\])*"/g;
   let token: RegExpExecArray | null;
@@ -163,7 +170,7 @@ function findArtifactSecrets(content: string, file: string): SecretFinding[] {
     const prefix = /^\s*:\s*\[/.exec(content.slice(strings.lastIndex));
     if (!prefix) continue;
     const arrayStart = strings.lastIndex + prefix[0].length;
-    const array = readSourceArray(content, arrayStart);
+    const array = readSourceArray(content, arrayStart, budget);
     for (const finding of array.findings) findings.push(finding);
     if (array.end === undefined) continue;
     ranges.push({ start: arrayStart, end: array.end - 1 });

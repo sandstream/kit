@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanBuildArtifacts } from "./scan-build.js";
+import { checkBuiltBundleSecrets } from "./check-client-exposure.js";
 import { rmTemp } from "./temp-cleanup.test-support.js";
 
 function makeRepo(): string {
@@ -236,7 +237,7 @@ describe("scanBuildArtifacts source map size and nesting", () => {
     try {
       mkdirSync(join(dir, "build"), { recursive: true });
       const source = 'const token = "' + "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123" + '";';
-      const sourcesContent = [...Array<string>(145_000).fill("a"), source];
+      const sourcesContent = [...Array<string>(50_000).fill("a"), source];
       const encoded = JSON.stringify({ sourcesContent }).replace(
         "sk_" + "live_",
         "\\u0073k_" + "live_",
@@ -245,6 +246,18 @@ describe("scanBuildArtifacts source map size and nesting", () => {
       const hits = await scanBuildArtifacts(dir);
       assert.equal(hits.length, 1);
       assert.ok(hits[0].findings.some((finding) => finding.label === "stripe-key"));
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("fails the scan when source maps exceed the entry limit", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const sourcesContent = Array<string>(100_001).fill("export{}");
+      writeFileSync(join(dir, "build", "too-many.js.map"), JSON.stringify({ sourcesContent }));
+      await assert.rejects(scanBuildArtifacts(dir), /source map exceeds 100000 source entries/);
     } finally {
       rmTemp(dir);
     }
@@ -262,6 +275,26 @@ describe("scanBuildArtifacts source map size and nesting", () => {
       const hits = await scanBuildArtifacts(dir);
       assert.equal(hits.length, 1);
       assert.ok(hits[0].findings.some((finding) => finding.label === "keyed-secret"));
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+describe("source map scan limit reporting", () => {
+  it("reports an incomplete security check when a map exceeds the limit", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "dist"), { recursive: true });
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ devDependencies: { vite: "^5" } }));
+      writeFileSync(
+        join(dir, "dist", "large.js.map"),
+        JSON.stringify({ sourcesContent: Array<string>(100_001).fill("export{}") }),
+      );
+      const result = await checkBuiltBundleSecrets(dir);
+      assert.equal(result.status, "fail");
+      assert.equal(result.didNotRun, true);
+      assert.match(result.detail, /source map exceeds 100000 source entries/);
     } finally {
       rmTemp(dir);
     }
