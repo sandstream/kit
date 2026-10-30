@@ -302,7 +302,6 @@ describe("source map metadata findings", () => {
       rmTemp(dir);
     }
   });
-
 });
 
 describe("source map partial metadata findings", () => {
