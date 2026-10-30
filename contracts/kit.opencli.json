@@ -2429,6 +2429,7 @@
         "--format",
         "--head",
         "--help",
+        "--include-tests",
         "--json",
         "--non-interactive",
         "--only",
