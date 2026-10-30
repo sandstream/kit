@@ -94,29 +94,25 @@ type SourceRange = { start: number; end: number };
 function readSourceArray(
   content: string,
   start: number,
-): { end: number; sources: string[]; ranges: SourceRange[] } | undefined {
+): { end?: number; findings: SecretFinding[] } {
   const strings = /"(?:\\.|[^"\\])*"/g;
-  const sources: string[] = [];
-  const ranges: SourceRange[] = [];
+  const findings: SecretFinding[] = [];
   let cursor = start;
   while (true) {
     cursor += /^\s*/.exec(content.slice(cursor))![0].length;
-    if (content[cursor] === "]") return { end: cursor + 1, sources, ranges };
+    if (content[cursor] === "]") return { end: cursor + 1, findings };
     if (content[cursor] === '"') {
       strings.lastIndex = cursor;
       const source = strings.exec(content)!;
       const decoded = JSON.parse(source[0]) as string;
-      if (decoded) {
-        sources.push(decoded);
-        ranges.push({ start: cursor, end: strings.lastIndex });
-      }
+      for (const finding of findBuildSecrets(decoded)) findings.push(finding);
       cursor = strings.lastIndex;
     } else if (content.startsWith("null", cursor)) {
       cursor += 4;
-    } else return undefined;
+    } else return { findings };
     cursor += /^\s*/.exec(content.slice(cursor))![0].length;
     if (content[cursor] === ",") cursor++;
-    else if (content[cursor] !== "]") return undefined;
+    else if (content[cursor] !== "]") return { findings };
   }
 }
 
@@ -129,7 +125,7 @@ function findArtifactSecrets(content: string, file: string): SecretFinding[] {
   } catch {
     return findBuildSecrets(content);
   }
-  const sources: string[] = [];
+  const findings: SecretFinding[] = [];
   const ranges: SourceRange[] = [];
   const strings = /"(?:\\.|[^"\\])*"/g;
   let token: RegExpExecArray | null;
@@ -137,20 +133,21 @@ function findArtifactSecrets(content: string, file: string): SecretFinding[] {
     if (JSON.parse(token[0]) !== "sourcesContent") continue;
     const prefix = /^\s*:\s*\[/.exec(content.slice(strings.lastIndex));
     if (!prefix) continue;
-    const array = readSourceArray(content, strings.lastIndex + prefix[0].length);
-    if (!array) continue;
-    for (const source of array.sources) sources.push(source);
-    for (const range of array.ranges) ranges.push(range);
+    const arrayStart = strings.lastIndex + prefix[0].length;
+    const array = readSourceArray(content, arrayStart);
+    for (const finding of array.findings) findings.push(finding);
+    if (array.end === undefined) continue;
+    ranges.push({ start: arrayStart, end: array.end - 1 });
     strings.lastIndex = array.end;
   }
   const rest: string[] = [];
   let from = 0;
   for (const range of ranges) {
-    rest.push(content.slice(from, range.start), '""');
+    rest.push(content.slice(from, range.start));
     from = range.end;
   }
   rest.push(content.slice(from));
-  return [rest.join(""), ...sources].flatMap(findBuildSecrets);
+  return findings.concat(findBuildSecrets(rest.join("")));
 }
 
 /** Next.js server modules are deployed to the runtime, not downloaded by visitors. */

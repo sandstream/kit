@@ -106,7 +106,7 @@ describe("scanBuildArtifacts browser output", () => {
   });
 });
 
-describe("scanBuildArtifacts credential shapes", () => {
+describe("scanBuildArtifacts source maps", () => {
   it("does not join code in an encoded source map into a secret", async () => {
     const dir = makeRepo();
     try {
@@ -151,7 +151,9 @@ describe("scanBuildArtifacts credential shapes", () => {
       rmTemp(dir);
     }
   });
+});
 
+describe("scanBuildArtifacts source map fields", () => {
   it("scans other map fields and malformed maps", async () => {
     const dir = makeRepo();
     try {
@@ -202,12 +204,32 @@ describe("scanBuildArtifacts credential shapes", () => {
     }
   });
 
+  it("retains decoded findings when source content contains an unexpected object", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const source = 'const token = "' + "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123" + '";';
+      const encoded = JSON.stringify({ sourcesContent: [source, { nested: true }] }).replace(
+        "sk_" + "live_",
+        "\\u0073k_" + "live_",
+      );
+      writeFileSync(join(dir, "build", "mixed.js.map"), encoded);
+      const hits = await scanBuildArtifacts(dir);
+      assert.equal(hits.length, 1);
+      assert.ok(hits[0].findings.some((finding) => finding.label === "stripe-key"));
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+describe("scanBuildArtifacts source map size and nesting", () => {
   it("scans a large source map without falling back to encoded text", async () => {
     const dir = makeRepo();
     try {
       mkdirSync(join(dir, "build"), { recursive: true });
       const source = 'const token = "' + "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123" + '";';
-      const sourcesContent = [...Array<string>(145_000).fill(""), source];
+      const sourcesContent = [...Array<string>(145_000).fill("a"), source];
       const encoded = JSON.stringify({ sourcesContent }).replace(
         "sk_" + "live_",
         "\\u0073k_" + "live_",
@@ -237,7 +259,9 @@ describe("scanBuildArtifacts credential shapes", () => {
       rmTemp(dir);
     }
   });
+});
 
+describe("scanBuildArtifacts credential shapes", () => {
   it("does not treat ordinary client property names as credentials", async () => {
     const dir = makeRepo();
     try {
