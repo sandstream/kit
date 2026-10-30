@@ -25,6 +25,12 @@ export { MAX_BYTES } from "./scan-build-json.js";
 // state construct, so these labels are filtered out here.
 const BUILD_IRRELEVANT_LABELS = new Set(["tfstate-value", "terraform-sensitive"]);
 const BUILD_GENERIC_LABELS = new Set(["keyed-secret", "url-query-token"]);
+const UNSAFE_RAW_LABELS = new Set([
+  ...BUILD_GENERIC_LABELS,
+  "pem-private-key",
+  "gcp-private-key",
+  "url-credentials",
+]);
 const OPAQUE_MIN_LENGTH = 20;
 const OPAQUE_MIN_ENTROPY = 4.2;
 
@@ -125,9 +131,10 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
   } catch {
     // Raw provider patterns can still match a source string cut off mid-value.
     // Generic key patterns need decoded delimiters and are scanned below.
-    const findings = findBuildSecrets(content).filter(
-      (finding) => !BUILD_GENERIC_LABELS.has(finding.label),
+    const raw = findBuildSecrets(content).filter(
+      (finding) => !UNSAFE_RAW_LABELS.has(finding.label),
     );
+    const findings: SecretFinding[] = [];
     try {
       scanMalformedObject(
         content,
@@ -137,6 +144,12 @@ export function findArtifactSecrets(content: string, file: string): SecretFindin
       );
     } catch {
       // The incomplete result still reports findings collected before an invalid token or limit.
+    }
+    const seen = new Set(findings.map((finding) => `${finding.label}\0${finding.preview}`));
+    for (const finding of raw) {
+      const key = `${finding.label}\0${finding.preview}`;
+      if (!seen.has(key)) findings.push(finding);
+      seen.add(key);
     }
     throw new ArtifactIncompleteError("source map has invalid JSON", findings);
   }

@@ -115,6 +115,49 @@ describe("scanBuildArtifacts source map fields", () => {
 });
 
 describe("source map encoded metadata and broken JSON", () => {
+  it("does not join separate sources into a private key in broken JSON", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const source = [
+        'const a = "-----BEGIN PRIVATE KEY-----";',
+        'const b = "-----END PRIVATE KEY-----";',
+      ];
+      writeFileSync(
+        join(dir, "build", "broken.js.map"),
+        JSON.stringify({ sourcesContent: source }).slice(0, -1),
+      );
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.deepEqual(error.hits, []);
+        return true;
+      });
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("does not count the same broken-map credential twice", async () => {
+    const dir = makeRepo();
+    try {
+      mkdirSync(join(dir, "build"), { recursive: true });
+      const secret = "sk_" + "live_AbCdEfGhIjKlMnOpQrStUvWxYz123";
+      writeFileSync(
+        join(dir, "build", "broken.js.map"),
+        JSON.stringify({ sourcesContent: [secret] }).slice(0, -1),
+      );
+      await assert.rejects(scanBuildArtifacts(dir), (error: unknown) => {
+        assert.ok(error instanceof BuildScanIncompleteError);
+        assert.equal(
+          error.hits[0].findings.filter((finding) => finding.label === "stripe-key").length,
+          1,
+        );
+        return true;
+      });
+    } finally {
+      rmTemp(dir);
+    }
+  });
   it("retains a recognizable credential when a JSON string is cut short", async () => {
     const dir = makeRepo();
     try {
@@ -130,6 +173,9 @@ describe("source map encoded metadata and broken JSON", () => {
       rmTemp(dir);
     }
   });
+});
+
+describe("source map ambiguous metadata", () => {
   it("continues scanning when a keyed value is ambiguous", async () => {
     const dir = makeRepo();
     try {
