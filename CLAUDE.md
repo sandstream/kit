@@ -29,7 +29,7 @@ paths, shells or permissions, check it against all three:
   Process groups and `SIGKILL` behave differently there.
 - **Files:** Windows refuses to delete or rename an open file. `chmod` modes and symlinks mostly
   do not apply there (use `src/utils/secure-perms.ts`). File ids (`ino`) need `bigint` stats
-  (`src/utils/same-file.ts`).
+  (`src/utils/same-file.ts`); `src/file-identity-discipline.test.ts` fails any other `ino` comparison.
 - **Tests:** a test that only makes sense on POSIX skips on `win32` and says why; it is never
   deleted to make a shard green.
 
