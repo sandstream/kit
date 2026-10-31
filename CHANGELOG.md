@@ -6,6 +6,10 @@
   GitHub's 4-core Linux runner the test step went from 408 s to 288 s with every test passing.
   Windows stays at 2: at one file per core its heavy memory tests hit the 180 s timeout.
   `KIT_TEST_CONCURRENCY` overrides both.
+- **The Windows shards are balanced by measured Windows time, not file size (#675).** Split by size,
+  the four shards summed to 1467/1270/1569/1314 s of Windows test time; by the measured table
+  (`scripts/test-weights.json`, from `node scripts/time-test-files.mjs`) each sums to 1406 s.
+  A `workflow_dispatch` of the Windows workflow with `time_files=true` regenerates the measurement.
 
 ### Added
 

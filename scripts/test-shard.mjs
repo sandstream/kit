@@ -1,11 +1,45 @@
 // Split the compiled test files into shards that run as separate CI jobs (the Windows runner needs
 // about 45 minutes for the whole suite and a quarter of that for one of four shards).
 //
-// The split is by file size, greedily and deterministically: the biggest file goes to the lightest
-// shard, ties to the lowest index. Every shard builds the same files, so every shard computes the same
-// partition from the same sizes, and no file runs twice or not at all.
+// The split is greedy and deterministic: the heaviest file goes to the lightest shard, ties to the
+// lowest index. Every shard builds the same files, so every shard computes the same partition from the
+// same weights, and no file runs twice or not at all.
+//
+// The weight is the file's measured wall time on the Windows runner (scripts/test-weights.json), the
+// platform the shards exist for. File size was within 4% of ideal on Linux, but on Windows it left
+// one shard ~1.2x the lightest (#675); a file the table does not know is weighted by its size at the
+// table's own ms-per-byte rate, so a new test still lands somewhere sensible.
 
 const MAX_SHARDS = 64;
+
+/**
+ * A weight function from a `{ files: { "dist/x.test.js": ms } }` table. Paths are compared with `/`
+ * separators, so a Windows checkout reads the same table.
+ * @param {{ files?: Record<string, number> } | null} table
+ * @param {(file: string) => number} sizeOf
+ * @returns {(file: string) => number}
+ */
+export function weightFrom(table, sizeOf) {
+  const known = table?.files ?? {};
+  const key = (/** @type {string} */ f) => f.split("\\").join("/");
+  let ms = 0;
+  let bytes = 0;
+  for (const [f, w] of Object.entries(known)) {
+    let size;
+    try {
+      size = sizeOf(f);
+    } catch {
+      continue;
+    }
+    ms += w;
+    bytes += size;
+  }
+  const rate = ms > 0 && bytes > 0 ? ms / bytes : 1;
+  return (file) => {
+    const w = known[key(file)];
+    return typeof w === "number" ? w : sizeOf(file) * rate;
+  };
+}
 
 /**
  * Parse `KIT_TEST_SHARD`, written `index/total` (for example `2/4`). Absent or empty means no sharding.

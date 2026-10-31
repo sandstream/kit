@@ -7,7 +7,7 @@ import { readdirSync, existsSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { availableParallelism } from "node:os";
 import { classifyTap, describeFailureKinds, failureReasons } from "./test-failure-kinds.mjs";
-import { parseShard, selectShard } from "./test-shard.mjs";
+import { parseShard, selectShard, weightFrom } from "./test-shard.mjs";
 
 const env = {
   ...process.env,
@@ -91,7 +91,20 @@ if (stale.length > 0) {
 }
 
 // The stale-copy check above looks at every file, whatever the shard. Then the shard picks its own.
-const files = shard ? selectShard(allFiles, shard, (f) => statSync(f).size) : allFiles;
+// Measured Windows wall times balance the shards (#675); without the table, size is the fallback.
+let weights;
+try {
+  weights = JSON.parse(readFileSync(join(import.meta.dirname, "test-weights.json"), "utf8"));
+} catch {
+  weights = null;
+}
+const files = shard
+  ? selectShard(
+      allFiles,
+      shard,
+      weightFrom(weights, (f) => statSync(f).size),
+    )
+  : allFiles;
 if (shard) {
   console.error(
     `[kit] shard ${shard.index}/${shard.total}: ${files.length} of ${allFiles.length} test files`,
