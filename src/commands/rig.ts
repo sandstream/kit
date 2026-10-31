@@ -6,6 +6,7 @@
  *   kit rig ingest <findings.jsonl> [--manifest p] [--strict] [--json]   store a reviewer's findings
  *   kit rig adjudicate [--manifest p] [--json]              decide caught/missed/false positives, sign
  *   kit rig report [--manifest p] [--json]                  the numbers, with ADR-0007's three limits
+ *   kit rig plant --from-fix <sha> --split tune|holdout     plant a defect by reversing a past fix
  *
  * The manifest defaults to `rig.toml` in the current directory.
  */
@@ -17,6 +18,7 @@ import { adjudicate } from "../rig/adjudicate.js";
 import { FindingsRefused, ingestFindings, type IngestResult } from "../rig/findings.js";
 import { loadManifest, RigManifestError, type RigManifest } from "../rig/manifest.js";
 import { renderPlan, renderReport } from "../rig/render.js";
+import { cmdRigPlant } from "./rig-plant.js";
 import { aggregate, LIMITS, splitWarnings } from "../rig/report.js";
 import {
   loadFindings,
@@ -30,12 +32,13 @@ import {
   type RigResult,
 } from "../rig/store.js";
 
-const USAGE = `Usage: kit rig [plan | ingest | adjudicate | report]
+const USAGE = `Usage: kit rig [plan | ingest | adjudicate | report | plant]
 
   plan        [rig.toml] [--json]
   ingest      <findings.jsonl> [--manifest <rig.toml>] [--strict] [--json]
   adjudicate  [--manifest <rig.toml>] [--json]
-  report      [--manifest <rig.toml>] [--json]`;
+  report      [--manifest <rig.toml>] [--json]
+  plant       --from-fix <sha> --split tune|holdout [--id <id>] [--repo <dir>] [--path <file>] [--pinned <sha>] [--manifest <rig.toml>] [--json]`;
 
 const PLAN_FLAGS = ["--json", ...GLOBAL_FLAGS];
 const INGEST_FLAGS = ["--manifest", "--strict", "--json", ...GLOBAL_FLAGS];
@@ -246,6 +249,7 @@ export async function cmdRig(): Promise<boolean> {
   if (sub === "ingest") return cmdIngest(cwd);
   if (sub === "adjudicate") return cmdAdjudicate(cwd);
   if (sub === "report") return cmdReport(cwd);
+  if (sub === "plant") return cmdRigPlant();
   console.error(sub ? `${c.red}unknown subcommand: ${sub}${c.reset}` : USAGE);
   if (sub) console.error(USAGE);
   return false;

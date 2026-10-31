@@ -2132,6 +2132,15 @@
           "x-kit-mcp": false,
           "x-kit-stability": "experimental"
         },
+        "plant": {
+          "kind": "command",
+          "summary": "Turn a past fix into a planted defect: reverse it onto the pinned commit in a throwaway index, write the patch, print the [[defect]] block; refused when the reverse does not apply cleanly",
+          "x-kit-args-modeled": true,
+          "x-kit-audience": "all",
+          "x-kit-flags-inherited": true,
+          "x-kit-mcp": false,
+          "x-kit-stability": "experimental"
+        },
         "report": {
           "kind": "command",
           "summary": "Recall and spread per config for tune and holdout, control false-positive rate, comparisons, and ADR-0007's three limits",
@@ -2146,12 +2155,18 @@
       "summary": "The rig (ADR-0007): measure a reviewer prompt or policy against planted defects and clean controls. 'plan' freezes the input and says what to run outside kit, 'ingest' stores the reviewer's findings, 'adjudicate' decides caught/missed/false positives deterministically and signs a receipt, 'report' prints recall and spread per config with ADR-0007's three limits. kit never runs the reviewer.",
       "x-kit-accepted-flags": [
         "--env",
+        "--from-fix",
         "--help",
+        "--id",
         "--json",
         "--manifest",
         "--non-interactive",
+        "--path",
+        "--pinned",
         "--read-only",
         "--readonly",
+        "--repo",
+        "--split",
         "--strict",
         "--version"
       ],

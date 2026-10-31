@@ -9,7 +9,9 @@
   input; `adjudicate` decides caught, missed and false positives from file and line alone and
   signs a receipt; `report` prints recall per config for the tune and holdout halves, the share of
   clean controls flagged, comparisons by non-overlapping min/max ranges (refused below three runs),
-  and ADR-0007's three limits. kit never runs the reviewer and never reads the claim text.
+  and ADR-0007's three limits. `plant --from-fix <sha>` turns a historical fix into a planted
+  defect by reversing it onto the pinned commit, refusing one that does not apply cleanly. kit never
+  runs the reviewer and never reads the claim text.
 
 ### Security
 

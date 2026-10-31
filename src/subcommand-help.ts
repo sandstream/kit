@@ -188,6 +188,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Decide caught, missed and false positives from file and line alone, write result.json and sign a receipt",
   "rig report":
     "Recall and spread per config for tune and holdout, control false-positive rate, comparisons, and ADR-0007's three limits",
+  "rig plant":
+    "Turn a past fix into a planted defect: reverse it onto the pinned commit in a throwaway index, write the patch, print the [[defect]] block; refused when the reverse does not apply cleanly",
   "decisions add":
     "Record one choice the run made where the spec was silent. kit never writes the content — that is model work — it provides the form and refuses a malformed entry",
   "decisions list":
