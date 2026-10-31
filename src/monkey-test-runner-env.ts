@@ -8,6 +8,7 @@ import {
   type MonkeyRunOptions,
 } from "./monkey-test-contract.js";
 import { redactSecrets, secretValuesFromEnv } from "./utils/redactSecrets.js";
+import { sameIdentity } from "./utils/same-file.js";
 
 export interface ExpectedReasonState {
   raw?: string;
@@ -143,14 +144,13 @@ async function readApplicationEnv(path: string): Promise<NodeJS.ProcessEnv | und
   if (!handle) return undefined;
   try {
     const maximum = 512 * 1024;
-    const entry = await lstat(path);
-    const target = await handle.stat();
+    const entry = await lstat(path, { bigint: true });
+    const target = await handle.stat({ bigint: true });
     if (
       !entry.isFile() ||
       !target.isFile() ||
-      target.dev !== entry.dev ||
-      target.ino !== entry.ino ||
-      target.size > maximum
+      !sameIdentity(target, entry) ||
+      target.size > BigInt(maximum)
     ) {
       throw new Error("Env file cannot be inspected");
     }

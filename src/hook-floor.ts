@@ -42,6 +42,7 @@ import { missingHookCommands, resolveHooksDir } from "./hooks.js";
 import { pathInWorkingTree } from "./kit-wrapper.js";
 import { homedir } from "node:os";
 import type { kitConfig } from "./config.js";
+import { sameIdentity } from "./utils/same-file.js";
 
 /** The kit-managed built-in hooks, keyed by the git hook file they install into. */
 export const BUILTIN_HOOK_FILES: Record<string, { name: string; command: string }> = {
@@ -80,12 +81,12 @@ function readExecutableHook(path: string): string | null {
     // Windows may not expose O_NOFOLLOW, so a post-read lstat guards that case.
     const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
     try {
-      const state = fstatSync(fd);
-      if (!state.isFile() || (process.platform !== "win32" && (state.mode & 0o111) === 0))
+      const state = fstatSync(fd, { bigint: true });
+      if (!state.isFile() || (process.platform !== "win32" && (state.mode & 0o111n) === 0n))
         return null;
       const body = readFileSync(fd, "utf-8");
-      const entry = lstatSync(path);
-      if (!entry.isFile() || state.dev !== entry.dev || state.ino !== entry.ino) return null;
+      const entry = lstatSync(path, { bigint: true });
+      if (!entry.isFile() || !sameIdentity(state, entry)) return null;
       return body;
     } finally {
       closeSync(fd);

@@ -19,6 +19,14 @@
 
 ### Security
 
+- **File identity checks now use full-width ids everywhere.** Six places compared `dev`/`ino` from
+  number stats, which on Windows squeeze a 64- or 128-bit file id into a double, so a swap check
+  could pass for a different file: the policy-pull signature snapshot, the upstream safe read, the
+  hook-floor hook read, the OneCLI `.env.local` publish, and the monkey-test harness and env-file
+  reads. They now read bigint stats and compare through `sameIdentity`. The rule was prose in
+  `CLAUDE.md`; `src/file-identity-discipline.test.ts` now fails any `ino` comparison outside
+  `src/utils/same-file.ts`.
+
 - **`kit triage npm --sandbox` looks one layer into opaque binaries.** A binary file that is not a
   known executable or media type is no longer silent. gzip and zip streams found anywhere in it are
   decompressed a little (16 KB in, 16 MB out at most, so a bomb cannot expand) and classified; a
