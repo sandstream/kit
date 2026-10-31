@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Added
+
+- **`kit rig` — the rig ADR-0007 accepted and kit had not built (experimental).** Measure a
+  reviewer prompt or policy against planted defects and clean controls, kept in a private
+  `rig.toml` corpus. `plan` freezes the input (a SHA-256 over the manifest, the prompt and every
+  patch) and prints what to run outside kit; `ingest` stores a reviewer's JSONL findings under that
+  input; `adjudicate` decides caught, missed and false positives from file and line alone and
+  signs a receipt; `report` prints recall per config for the tune and holdout halves, the share of
+  clean controls flagged, comparisons by non-overlapping min/max ranges (refused below three runs),
+  and ADR-0007's three limits. kit never runs the reviewer and never reads the claim text.
+
 ### Security
 
 - **`kit triage npm --sandbox` names binaries inside a tarball.** It used to flag scripts and

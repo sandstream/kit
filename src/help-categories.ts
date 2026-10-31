@@ -35,6 +35,7 @@ export const HELP_CATEGORIES: [string, string[]][] = [
       "analyze",
       "monkey-test",
       "adr",
+      "rig",
       "self-audit",
       "map",
       "browser",
