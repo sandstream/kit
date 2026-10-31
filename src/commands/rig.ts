@@ -38,7 +38,7 @@ const USAGE = `Usage: kit rig [plan | ingest | adjudicate | report | plant]
   ingest      <findings.jsonl> [--manifest <rig.toml>] [--strict] [--json]
   adjudicate  [--manifest <rig.toml>] [--json]
   report      [--manifest <rig.toml>] [--json]
-  plant       --from-fix <sha> --split tune|holdout [--id <id>] [--kind <kind>] [--repo <dir>] [--pinned <sha>] [--manifest <rig.toml>] [--json]`;
+  plant       --from-fix <sha> --split tune|holdout [--id <id>] [--kind <kind>] [--repo <dir>] [--path <file>] [--pinned <sha>] [--manifest <rig.toml>] [--json]`;
 
 const PLAN_FLAGS = ["--json", ...GLOBAL_FLAGS];
 const INGEST_FLAGS = ["--manifest", "--strict", "--json", ...GLOBAL_FLAGS];

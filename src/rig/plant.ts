@@ -77,13 +77,21 @@ function commit(repo: string, ref: string, what: string): string {
 }
 
 /**
- * Reverse `fix` onto `pinned` in a throwaway index and return the planted patch and its range.
+ * Reverse `fix` (or only its change to `path`) onto `pinned` in a throwaway index and return the
+ * planted patch and its range. A real fix usually touches a test and the changelog as well;
+ * `path` plants just the code change.
  * Throws `PlantRefused` when the fix is not a commit, touches more than one file, is binary, or
  * its reverse does not apply cleanly to the pinned tree.
  */
-export function plantFromFix(repo: string, pinned: string, fix: string): PlantedDefect {
+export function plantFromFix(
+  repo: string,
+  pinned: string,
+  fix: string,
+  path?: string,
+): PlantedDefect {
   const pinnedSha = commit(repo, pinned, "the pinned commit");
   const fixSha = commit(repo, fix, "--from-fix");
+  const only = path ? ["--", path.replace(/\\/g, "/")] : [];
   const reversed = git(repo, [
     "diff",
     "--no-color",
@@ -91,6 +99,7 @@ export function plantFromFix(repo: string, pinned: string, fix: string): Planted
     "--binary",
     fixSha,
     `${fixSha}^`,
+    ...only,
   ]);
   if (reversed.trim() === "") throw new PlantRefused(`${fix} changes nothing to reverse`);
   if (/^GIT binary patch$/m.test(reversed)) throw new PlantRefused(`${fix} changes a binary file`);

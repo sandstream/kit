@@ -21,6 +21,7 @@ export const PLANT_FLAGS = [
   "--id",
   "--kind",
   "--repo",
+  "--path",
   "--pinned",
   "--manifest",
   "--json",
@@ -77,6 +78,7 @@ export async function cmdRigPlant(): Promise<boolean> {
       resolve(flagValue(process.argv, "--repo") ?? "."),
       args.pinned,
       args.fix,
+      flagValue(process.argv, "--path"),
     );
   } catch (err) {
     if (err instanceof PlantRefused) return fail(err.message);

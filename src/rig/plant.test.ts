@@ -46,6 +46,8 @@ describe("plantFromFix", () => {
         /does not apply cleanly|touches 2 files/,
       );
       assert.throws(() => plantFromFix(dir, pinned, "deadbeef"), /is not a commit/);
+      const onlyAuth = plantFromFix(dir, twoFile, twoFile, "auth.ts");
+      assert.equal(onlyAuth.file, "auth.ts");
       assert.throws(() => plantFromFix(dir, pinned, "HEAD; rm -rf /"), /must be a hex commit id/);
     } finally {
       rmTemp(dir);
