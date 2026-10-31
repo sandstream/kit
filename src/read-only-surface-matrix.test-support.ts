@@ -54,6 +54,7 @@ export const MUTATING_COMMANDS: readonly CommandCase[] = [
   mutation("env switch", "env-switch", "env", "switch", "staging"),
   mutation("rig ingest", "rig-write", "rig", "ingest", "findings.jsonl"),
   mutation("rig adjudicate", "rig-write", "rig", "adjudicate"),
+  mutation("rig plant", "rig-write", "rig", "plant", "--from-fix", "abc1234", "--split", "tune"),
   mutation("escalate", "escalate", "escalate"),
   mutation("fix", "fix", "fix"),
   mutation("guard install", "guard-install", "guard", "install"),
