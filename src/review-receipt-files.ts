@@ -110,8 +110,12 @@ function openHistoryForAppend(
     try {
       fd = createHistory(path, flags, publish);
     } catch (createError) {
-      if ((createError as NodeJS.ErrnoException).code !== "EEXIST") throw createError;
-      fd = openSync(path, flags);
+      if ((createError as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new Error("review history changed while creating it; retry the operation", {
+          cause: createError,
+        });
+      }
+      throw createError;
     }
   }
   return validateHandle(fd, path, afterOpen);

@@ -182,6 +182,22 @@ it("removes the temporary file and preserves a hard link failure", () => {
   });
 });
 
+it("does not modify history created by another process during publication", () => {
+  withDirectory((dir) => {
+    const path = join(dir, "history");
+    assert.throws(
+      () =>
+        appendReceiptHistory(path, "entry", undefined, undefined, (source, destination) => {
+          writeFileSync(destination, "other process");
+          linkSync(source, destination);
+        }),
+      /review history changed while creating it; retry the operation/,
+    );
+    assert.equal(readFileSync(path, "utf8"), "other process");
+    assert.deepEqual(readdirSync(dir), ["history"]);
+  });
+});
+
 for (const noFollow of [undefined, 0]) {
   it(`does not delete or write a replaced temporary file with no-follow mode ${String(noFollow)}`, (t) => {
     withDirectory((dir) => {
