@@ -7,6 +7,7 @@
  *   commit = "<full sha>"
  *   prompt = "prompts/review.md"
  *   tolerance = 3            # lines, default 3
+ *   extra = ["excerpts/d1.txt"]   # optional: any other file the reviewer is shown
  *
  *   [[defect]]
  *   id = "d1"
@@ -27,7 +28,9 @@
  *
  * The input id is a SHA-256 over the canonical manifest plus the bytes of the prompt and
  * every patch, with line endings normalised. Two runs with the same id answered the same
- * question.
+ * question. A driver that shows the reviewer anything else (code excerpts, hints, a rules file)
+ * lists those files under `extra`, so they are frozen too; a manifest without `extra` keeps the
+ * id it always had.
  */
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -52,7 +55,7 @@ export interface RigControl {
 }
 
 export interface RigManifest {
-  input: { repo: string; commit: string; prompt: string; tolerance: number };
+  input: { repo: string; commit: string; prompt: string; tolerance: number; extra?: string[] };
   defects: RigDefect[];
   controls: RigControl[];
 }
@@ -62,7 +65,7 @@ export class RigManifestError extends Error {}
 export const DEFAULT_TOLERANCE = 3;
 
 const TOP_KEYS = new Set(["input", "defect", "control"]);
-const INPUT_KEYS = new Set(["repo", "commit", "prompt", "tolerance"]);
+const INPUT_KEYS = new Set(["repo", "commit", "prompt", "tolerance", "extra"]);
 const DEFECT_KEYS = new Set(["id", "file", "line_start", "line_end", "kind", "split", "patch"]);
 const CONTROL_KEYS = new Set(["id", "patch"]);
 
@@ -123,12 +126,23 @@ function parseInput(v: unknown): RigManifest["input"] {
     }
     tolerance = t.tolerance;
   }
-  return {
+  const input: RigManifest["input"] = {
     repo: str(t, "repo", "[input]"),
     commit,
     prompt: relPath(str(t, "prompt", "[input]"), "[input] prompt"),
     tolerance,
   };
+  // Only present when declared: an absent key must serialise exactly as before, or every
+  // existing corpus would get a new input id.
+  if (t.extra !== undefined) input.extra = parseExtra(t.extra);
+  return input;
+}
+
+function parseExtra(v: unknown): string[] {
+  if (!Array.isArray(v) || v.some((p) => typeof p !== "string" || p === "")) {
+    fail(`[input]: "extra" must be an array of non-empty relative paths`);
+  }
+  return [...new Set((v as string[]).map((p) => relPath(p, "[input] extra")))].sort();
 }
 
 function parseDefect(v: unknown, i: number): RigDefect {
@@ -201,7 +215,12 @@ export function canonicalJson(v: unknown): string {
 
 /** Every file the manifest references, relative to its folder, sorted and de-duplicated. */
 export function referencedFiles(m: RigManifest): string[] {
-  const all = [m.input.prompt, ...m.defects.map((d) => d.patch), ...m.controls.map((c) => c.patch)];
+  const all = [
+    m.input.prompt,
+    ...(m.input.extra ?? []),
+    ...m.defects.map((d) => d.patch),
+    ...m.controls.map((c) => c.patch),
+  ];
   return [...new Set(all)].sort();
 }
 

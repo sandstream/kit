@@ -12,6 +12,10 @@
   and ADR-0007's three limits. `plant --from-fix <sha>` turns a historical fix into a planted
   defect by reversing it onto the pinned commit, refusing one that does not apply cleanly. kit never
   runs the reviewer and never reads the claim text.
+- **`kit rig`: `[input] extra` freezes what else the reviewer is shown.** A driver that shows code
+  excerpts, change hints or a rules file instead of (or beside) the patches lists them under
+  `extra`; their bytes join the input id, so changing one changes the id. A manifest without
+  `extra` keeps the id it always had (pinned by a test).
 
 ### Security
 
