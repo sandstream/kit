@@ -2,7 +2,8 @@
  * GitHub Actions hardening — static YAML lint (#60).
  *
  * Deterministic, local-first, no network, no YAML dep (line-scan). Flags the two
- * highest-signal CI supply-chain footguns:
+ * highest-signal CI supply-chain footguns, plus a gate that can skip itself green
+ * (src/gha-skip-gate.ts):
  *   - unpinned action refs: `uses: owner/repo@v1` / `@main` instead of a full
  *     commit SHA (tj-actions/changed-files CVE-2025-30066, ~23k repos).
  *   - "pwn request": `pull_request_target` + `actions/checkout` (runs untrusted
@@ -13,6 +14,7 @@
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { SecurityCheckResult } from "./check-security.js";
+import { auditSkippableGates } from "./gha-skip-gate.js";
 
 const UNPINNED_RULE = {
   id: "CWE-1357",
@@ -70,6 +72,7 @@ export function auditWorkflow(content: string, file: string): SecurityCheckResul
     });
   }
 
+  out.push(...auditSkippableGates(content, file));
   return out;
 }
 
@@ -126,7 +129,7 @@ export function runGhaAudit(cwd: string): SecurityCheckResult[] {
       category: "supply-chain",
       name: "gha-audit",
       status: "pass",
-      detail: `${files.length} workflow(s): all actions pinned, no pwn-request`,
+      detail: `${files.length} workflow(s): all actions pinned, no pwn-request, no skippable gate`,
     });
   }
   return out;
