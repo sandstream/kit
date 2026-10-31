@@ -144,14 +144,30 @@ export function hitlBlocksForSecurity(results: SecurityCheckResult[]): HitlBlock
   return results
     .filter((r) => r.didNotRun && r.status !== "pass" && r.status !== "skip")
     .map((r) => ({
-      blocker: `${r.name} did not run`,
+      blocker: r.hasFindings
+        ? `${r.name} found an issue and did not finish`
+        : r.scanIncomplete
+          ? `${r.name} did not finish`
+          : `${r.name} did not run`,
       owner: "developer" as const,
-      reason: "scanner/check setup",
+      reason: r.hasFindings
+        ? "security finding and incomplete scan"
+        : r.scanIncomplete
+          ? "incomplete scan"
+          : "scanner/check setup",
       steps: [
-        r.suggestion ?? `Fix setup so this check can run: ${r.detail}.`,
+        r.hasFindings
+          ? `Investigate the reported finding and complete the scan: ${r.detail}.`
+          : r.scanIncomplete
+            ? `Resolve the incomplete scan: ${r.detail}.`
+            : (r.suggestion ?? `Fix setup so this check can run: ${r.detail}.`),
         "Run `kit check --category security`.",
       ],
-      respondWith: `${r.name} runs or is intentionally unavailable; no secret values pasted`,
+      respondWith: r.hasFindings
+        ? `${r.name} findings addressed and scan complete; no secret values pasted`
+        : r.scanIncomplete
+          ? `${r.name} scan complete; no secret values pasted`
+          : `${r.name} runs or is intentionally unavailable; no secret values pasted`,
       agentContinuesWith: "kit check --category security",
     }));
 }

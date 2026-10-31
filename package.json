@@ -19,6 +19,7 @@
   },
   "files": [
     "dist",
+    ".github/kit-protected-paths.json",
     "README.md",
     "skills",
     "docs/MONKEY_TEST.md",
@@ -45,7 +46,7 @@
     "zod": "4.6.7"
   },
   "overrides": {
-    "hono": "4.13.7"
+    "hono": "4.13.14"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

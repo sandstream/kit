@@ -89,7 +89,35 @@ describe("summarizeCheckRun", () => {
     const s = summarizeCheckRun(runFixture());
     assert.equal(s.findings.find((f) => f.name === "npm audit")?.severity, "high");
   });
+});
 
+describe("summarizeCheckRun incomplete findings", () => {
+  it("preserves known findings on an incomplete check", () => {
+    const summary = summarizeCheckRun(
+      runFixture({
+        security: [
+          {
+            category: "exposure",
+            name: "bundle",
+            status: "fail",
+            detail: "finding and incomplete scan",
+            didNotRun: true,
+            scanIncomplete: true,
+            hasFindings: true,
+            severity: "critical",
+          },
+        ],
+      }),
+    );
+    const bundle = summary.findings.find((finding) => finding.name === "bundle");
+    assert.equal(bundle?.didNotRun, true);
+    assert.equal(bundle?.scanIncomplete, true);
+    assert.equal(bundle?.hasFindings, true);
+    assert.equal(bundle?.severity, "critical");
+  });
+});
+
+describe("summarizeCheckRun scope and detail", () => {
   it("carries scope, so a narrowed green cannot read as a full one", () => {
     const s = summarizeCheckRun(runFixture({ scope: ["security"], ok: true }));
     assert.deepEqual(s.scope, ["security"]);

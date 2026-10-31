@@ -5,11 +5,16 @@ import { pathToFileURL } from "node:url";
 
 const ROOT = join(import.meta.dirname, "..");
 type Kinds = { timeouts: string[]; failures: string[] };
-const { classifyTap, describeFailureKinds } = (await import(
+const { classifyTap, describeFailureKinds, failureReasons } = (await import(
   pathToFileURL(join(ROOT, "scripts", "test-failure-kinds.mjs")).href
 )) as {
   classifyTap: (tap: string) => Kinds;
-  describeFailureKinds: (kinds: Kinds, timeoutMs: number) => string;
+  describeFailureKinds: (
+    kinds: Kinds,
+    timeoutMs: number,
+    reasons?: Record<string, string>,
+  ) => string;
+  failureReasons: (tap: string) => Record<string, string>;
 };
 
 const TIMEOUT_TAP = `not ok 1 - slow one
@@ -42,5 +47,37 @@ describe("test runner failure kinds (CI-15)", () => {
     assert.match(text, /failed: broken one/);
     assert.match(text, /180000ms/);
     assert.equal(describeFailureKinds({ timeouts: [], failures: [] }, 1), "");
+  });
+
+  it("puts each failure's own error in the summary, skipping the suite's subtest count", () => {
+    // node's real order: a suite's subtests come BEFORE the suite's own `not ok` line.
+    const tap = `# Subtest: suite with a nested failure
+    # Subtest: inner
+    not ok 1 - inner
+      ---
+      error: |-
+        root should expand to the worktree D:/tmp/x
+        roots from D:/tmp/repo: ["D:/tmp/repo"]
+      ...
+    1..1
+not ok 3 - suite with a nested failure
+  ---
+  error: '1 subtest failed'
+  ...
+ok 4 - passes
+not ok 5 - top level
+  ---
+  error: 'boom'
+  ...
+`;
+    const reasons = failureReasons(tap);
+    assert.equal(
+      reasons["suite with a nested failure"],
+      'root should expand to the worktree D:/tmp/x\nroots from D:/tmp/repo: ["D:/tmp/repo"]',
+    );
+    assert.equal(reasons["top level"], "boom");
+    const text = describeFailureKinds(classifyTap(tap), 1, reasons);
+    assert.match(text, /failed: top level\n {6}boom/);
+    assert.match(text, /roots from D:\/tmp\/repo/);
   });
 });

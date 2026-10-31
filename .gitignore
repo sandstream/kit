@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 dist/
 __pycache__/
 *.pyc
@@ -17,9 +17,15 @@ sandstream-kit-*.tgz
 .kit-audit.jsonl
 .kit-triage.jsonl
 .kit-check-attestation.json
+.kit-review-receipt.json
+.kit-review-receipt-history.jsonl
+.kit-review-receipt.json.*.tmp
 .kit-budget.json
 .kit-escalation.txt
-.claude/
+# Local Claude Code state stays out; the shared settings file carries the session-start
+# floor check (#671), so a fresh clone is told when its declared git hooks do not run.
+.claude/*
+!.claude/settings.json
 .cursor/
 .codex/
 .opencode/

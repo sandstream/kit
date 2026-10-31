@@ -40,10 +40,15 @@ Scope (what a PASS DOES and does NOT mean):
     or `[scan] guarddog = true`, run via `kit check`). Treat this as an existence + health +
     version gate, not proof the code is safe to run.
 """
-import json
-import os
-import re
+import os  # loaded at start-up (frozen from 3.11), so a planted os.py cannot shadow it
 import sys
+
+# Before any other import, drop this script's own directory from sys.path. kit byte-verifies the
+# files here, not the directory: a json.py planted beside them would otherwise shadow the stdlib.
+_HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path[:] = [p for p in sys.path if os.path.realpath(p or os.getcwd()) != _HERE]
+import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -746,13 +751,17 @@ def triage_repo(rep):
 
 
 def triage_docker(rep):
-    repo = rep.target
+    # Hub's repository API takes the bare name: `name:tag` or `name@sha256:…` there is HTTP 400.
+    ref = rep.target.split("@", 1)[0]
+    repo, _, tag = ref.rpartition(":") if ":" in ref.rsplit("/", 1)[-1] else (ref, "", "")
     api_repo = repo if "/" in repo else f"library/{repo}"
     try:
         data, _ = _get_json(f"{DOCKER_REGISTRY}/v2/repositories/{api_repo}")
+        if tag:  # the tag must exist too, or the name alone would vouch for any tag
+            _get_json(f"{DOCKER_REGISTRY}/v2/repositories/{api_repo}/tags/{urllib.parse.quote(tag)}")
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            rep.critical(f"image '{repo}' not found on Docker Hub")
+            rep.critical(f"image '{rep.target}' not found on Docker Hub")
         else:
             rep.critical(f"Docker Hub returned HTTP {e.code} (cannot verify)")
         return
@@ -767,32 +776,21 @@ def triage_docker(rep):
         rep.warn("unofficial image with low pull count -- verify the publisher")
 
 
+def _skill_scan():
+    """skill_scan.py from this script's own directory, loaded by path: that directory was taken off
+    sys.path at the top of this file, so nothing else planted there can be imported."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skill_scan.py")
+    spec = importlib.util.spec_from_file_location("kit_skill_scan", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def triage_skill(rep):
-    target = rep.target
-    # Local path -> validate the SKILL.md deterministically.
-    candidates = [target, os.path.join(target, "SKILL.md")]
-    path = next((p for p in candidates if os.path.isfile(p)), None)
-    if path:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                text = f.read()
-        except OSError as e:
-            rep.critical(f"cannot read skill at '{path}': {e}")
-            return
-        head = text[:400]
-        if not head.lstrip().startswith("---"):
-            rep.critical("SKILL.md has no YAML frontmatter (--- ... ---)")
-        if "name:" not in head:
-            rep.warn("frontmatter missing 'name:'")
-        if "description:" not in head:
-            rep.warn("frontmatter missing 'description:'")
-        # crude secret scan
-        for marker in ("sk-", "ghp_", "AKIA", "-----BEGIN", "xoxb-", "AIza"):
-            if marker in text:
-                rep.critical(f"possible secret in skill body (matched '{marker}')")
-        rep.fact(f"validated local skill at {path} ({len(text)} bytes)")
+    # A local path is validated deterministically (skill_scan.py); a name/owner-repo is a repo.
+    if _skill_scan().triage_local_skill(rep):
         return
-    # Otherwise treat a name/owner-repo as a repo triage.
     rep.fact("no local SKILL.md found; treating target as a repo")
     triage_repo(rep)
 

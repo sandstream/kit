@@ -201,6 +201,8 @@ kit memory pal verify                            # run checks: N=2 consecutive p
 kit memory pal import                            # migrate a legacy ~/.claude/pal/ledger.jsonl (verifies become manual)
 ```
 
+Kit tracks local plan files in PAL. See [Plan tracking](PLAN_TRACKING.md) for the file rules.
+
 **Claims and handoff:** read [Session-owned claims](MEMORY_CLAIMS.md) before claiming,
 renewing, taking over, or changing claimed work, resolving competing histories, or
 forgetting a task. That guide defines explicit session identity, frontier receipts,

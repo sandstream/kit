@@ -9,10 +9,10 @@
  * honest degradation reason — whenever hardware is required but the resolved backend
  * isn't hardware-rooted.
  *
- * The requirement is read from the environment (KIT_REQUIRE_HARDWARE_IDENTITY). The
- * `required` parameter also lets a caller fold in a policy/config mandate — the plumbing
- * is here, but a `.kit-policy` field is NOT wired yet, so today the mandate is env-driven
- * (a fleet-wide policy mandate is a follow-up).
+ * The requirement comes from the environment (KIT_REQUIRE_HARDWARE_IDENTITY) OR from the
+ * governing `.kit-policy.toml` (`require_hardware_identity`, found at the root or any
+ * ancestor). `hardwareRequired` below ORs the two, so a policy can add the mandate but never
+ * relax the env one.
  *
  * HONEST SCOPE: the env mandate enforces OPERATOR INTENT — it stops kit from silently
  * auto-using the same-UID file key when the operator wants hardware. It is NOT itself a

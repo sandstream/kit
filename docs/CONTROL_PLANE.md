@@ -50,6 +50,12 @@ artifacts your _existing_ trusted keys signed. Add a key with
 - **Approvals are org-signed + time-boxed.** `requestApproval` honors a signed token only if it is
   from an org authority, unexpired, matches the exact operation+environment, and the signer isn't
   revoked — otherwise it falls back to interactive approval. Never auto-approves.
+- **An approval needs a person.** `kit policy approve` mints a token only at a terminal, after the
+  operation's name is typed back; an agent's tool call, CI and piped input are refused, and no flag
+  or variable skips it. It signs through the resolved keystore, so `require_hardware_identity`
+  applies as it does to `kit policy sign`. The limit, stated plainly: with a file-backed key, any
+  process running as the same user can read the key and sign without kit. Only a hardware key that
+  needs a touch proves a person was there, so require one wherever approvals matter.
 - **Air-gap stays green.** Pull/approve are manual and offline; `kit airgap verify` never triggers a
   fetch. `kit doctor` surfaces the control-plane posture (org policy present / verified / RBAC).
 

@@ -28,6 +28,10 @@ import { indexKiroSessions } from "./kiro.js";
 import { indexDroidSessions } from "./droid.js";
 import { indexAiderSessions } from "./aider.js";
 import { indexAntigravitySessions } from "./antigravity.js";
+import { extractText, type Content } from "./content.js";
+
+// Re-exported: callers and tests import extractText from the parser.
+export { extractText };
 import { indexClineSessions } from "./cline.js";
 import { indexOpenCodeSessions } from "./opencode.js";
 
@@ -43,31 +47,6 @@ export interface IndexResult {
 export function getClaudeProjectsDir(): string {
   const base = process.env.KIT_CLAUDE_DIR ?? join(homedir(), ".claude");
   return join(base, "projects");
-}
-
-interface ContentBlock {
-  type?: string;
-  text?: string;
-  name?: string;
-  input?: unknown;
-}
-type Content = string | ContentBlock[] | undefined;
-
-/** Flatten transcript content (string or block array) into searchable plain text. */
-export function extractText(content: Content): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((b) => {
-        if (b?.type === "text") return b.text ?? "";
-        if (b?.type === "tool_use") return `[Tool: ${b.name ?? "unknown"}]`;
-        if (b?.type === "tool_result") return "[Tool Result]";
-        return "";
-      })
-      .filter(Boolean)
-      .join("\n");
-  }
-  return "";
 }
 
 /** Extract tool_use blocks from a message's content. */

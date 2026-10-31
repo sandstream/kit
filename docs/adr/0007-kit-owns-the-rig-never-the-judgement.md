@@ -41,8 +41,8 @@ Multi-tier verification research ([arXiv:2607.00107](https://arxiv.org/abs/2607.
 8,918 C++ programs across 851 tasks, four tiers, three models plus human-authored code)
 found:
 
-> *"AI-generated code is roughly twice as likely as human code to trigger a confirmed
-> runtime violation, even after controlling for code length and test pass-rate."*
+> _"AI-generated code is roughly twice as likely as human code to trigger a confirmed
+> runtime violation, even after controlling for code length and test pass-rate."_
 
 and, critically, that under **static analysis the two appear equally safe** — a similarity
 the authors call misleading. The tiers detect largely different classes of violation; no
@@ -60,12 +60,12 @@ The zero-LLM contract forbids a model call **in the gate loop**, because that wo
 the verdict probabilistic, add egress to the trust boundary, and put a prompt-injection
 surface inside the security tool. None of that applies here:
 
-| step | actor | deterministic? |
-|---|---|---|
-| produce the work | the model, outside kit | no — and it is not a verdict |
-| run the gates | kit | yes |
-| decide whether a finding is real | the **repository** | yes |
-| count, difference, report | kit | yes |
+| step                             | actor                  | deterministic?               |
+| -------------------------------- | ---------------------- | ---------------------------- |
+| produce the work                 | the model, outside kit | no — and it is not a verdict |
+| run the gates                    | kit                    | yes                          |
+| decide whether a finding is real | the **repository**     | yes                          |
+| count, difference, report        | kit                    | yes                          |
 
 No SDK import in `src/**` — which ADR-0001's `forbid_import` rule already enforces, and
 which is the mechanical half of this decision. No model judgement decides a pass or fail.
@@ -109,17 +109,34 @@ the fix and it shipped first.
 
 ## Implementation status
 
-As of 2026-09-21, the scope notice above is shipped. The frozen-input runner, structured
-finding ingest, deterministic adjudication, comparison arithmetic, and rig receipts are
-an accepted design but **not a shipped command surface**: there is no `rig`, ingest, or
-adjudicate command. This ADR constrains that future implementation; it must not be read as
-evidence that the rig already exists.
+As of 2026-09-21, the scope notice above was shipped and the rig was not.
+
+As of 2026-10-31, the rig is a shipped, experimental command surface: `kit rig plan|ingest|adjudicate|report`
+(`src/commands/rig.ts`, `src/rig/`). What shipped matches the decision above:
+
+- **Frozen input**: `rig.toml` names the pinned commit, the reviewer prompt, planted defects with a
+  required `tune`/`holdout` split, and clean controls. Its input id is a SHA-256 over the canonical
+  manifest plus the prompt and every patch, line endings normalised.
+- **Ingest schema**: JSONL rows `{run, config, target, file, line, claim, severity, model,
+model_version, date}`, plus a `"none": true` row for a run that found nothing. The claim text is
+  carried and never interpreted.
+- **Deterministic adjudication**: file and line against the planted range within a tolerance; a
+  control's findings are false positives. Nothing model-generated decides a verdict.
+- **Arithmetic**: recall and control false-positive rate per config, split by `tune` and `holdout`,
+  with min/max spread; two configs are compared only by non-overlapping ranges, never below three
+  runs each.
+- **Receipts**: `result.json` under `.kit/rig/<input-id>/`, a receipt signed through the active
+  keystore when an identity exists, and a `rig.adjudicate` audit event.
+
+Every report prints the three limits above. kit still runs no reviewer: the model is invoked
+outside kit and hands its findings in. Planting defects from historical fixes and the first
+workload (kit's own agent rules) are tracked in `docs/plans/2026-10-29-kit-rig-v1.md`.
 
 ## Status of enforcement
 
 This ADR carries **no `kit-enforce` block**, and that is deliberate rather than an
 oversight: its mechanical half is already ADR-0001's `forbid_import` over `src/**`, and
 duplicating it here would give two rules that can drift apart. What this ADR adds is a
-boundary that a human applies in review — which is why it is listed as *documented, not
-enforced*, and why building the rig before this file existed would have been the erosion
+boundary that a human applies in review — which is why it is listed as _documented, not
+enforced_, and why building the rig before this file existed would have been the erosion
 it guards against.

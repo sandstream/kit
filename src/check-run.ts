@@ -25,6 +25,7 @@ import {
 } from "./check-hooks.js";
 import { checkWebSearch, type WebSearchStatus } from "./check-web-search.js";
 import { checkSecurity, type SecurityCheckResult, type GateOpts } from "./check-security.js";
+import { checkSecurityWithProjects, clientExposureExtras } from "./check-projects.js";
 import { checkLockFiles, type LockCheckResult } from "./check-lock.js";
 import { checkTests, type TestCheckResult } from "./check-tests.js";
 import { checkDeploy, type DeployCheckResult } from "./check-deploy.js";
@@ -159,8 +160,14 @@ async function upstreamDimension(
 }
 
 /** The security dimension: the scanners, then one row per runtime the project uses. */
-async function securityRows(cwd: string, online: boolean | undefined) {
-  return [...(await checkSecurity(cwd)), ...(await checkRuntimes(cwd, { online }))];
+async function securityRows(cwd: string, online: boolean | undefined, config: kitConfig) {
+  const rows = await checkSecurityWithProjects(
+    cwd,
+    config.projects?.paths,
+    checkSecurity,
+    clientExposureExtras(config),
+  );
+  return [...rows, ...(await checkRuntimes(cwd, { online }))];
 }
 
 export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRunResult> {
@@ -202,7 +209,7 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
     ? await step("deploy config", () => checkDeploy(config.deploy, cwd))
     : [];
   const security = wants("security")
-    ? await step("security scan", () => securityRows(cwd, opts.online))
+    ? await step("security scan", () => securityRows(cwd, opts.online, config))
     : [];
   const locks = wants("locks") ? await step("lock files", () => checkLockFiles(config, cwd)) : [];
   const upstream = await upstreamDimension(wants("upstream"), step, cwd);
@@ -272,6 +279,20 @@ export async function runCheckGate(opts: RunCheckOptions = {}): Promise<CheckRun
  * and `kit review`'s check stage reports — one mapping, so the row shape can't
  * fork between surfaces.
  */
+/** Preserve both findings and incomplete coverage across check and CI output. */
+export function securityCheckToJson(s: SecurityCheckResult): JsonCheck {
+  return {
+    name: s.name,
+    status: s.status,
+    detail: s.detail,
+    category: `security/${s.category}`,
+    ...(s.severity ? { severity: s.severity } : {}),
+    ...(s.didNotRun ? { didNotRun: true } : {}),
+    ...(s.hasFindings ? { hasFindings: true } : {}),
+    ...(s.scanIncomplete ? { scanIncomplete: true } : {}),
+  };
+}
+
 export function checkRunToJsonChecks(r: CheckRunResult): JsonCheck[] {
   return [
     ...r.tools.map((t) => ({
@@ -332,14 +353,7 @@ export function checkRunToJsonChecks(r: CheckRunResult): JsonCheck[] {
     // `severity` and `didNotRun` are carried through deliberately: JsonCheck has always
     // declared severity and this projection silently dropped it, and didNotRun is what lets
     // a consumer tell "stopped failing" from "stopped looking" (see scan-diff.ts).
-    ...r.security.map((s) => ({
-      name: s.name,
-      status: s.status,
-      detail: s.detail,
-      category: `security/${s.category}`,
-      ...(s.severity ? { severity: s.severity } : {}),
-      ...(s.didNotRun ? { didNotRun: true as const } : {}),
-    })),
+    ...r.security.map(securityCheckToJson),
     ...r.tests.map((t) => ({
       name: t.name,
       status: t.status,

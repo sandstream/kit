@@ -11,7 +11,16 @@ import { resolveWorkspaceRoots } from "./workspaces.js";
 import { resolveToolBin } from "./utils/resolveTool.js";
 import { classifyGuardDog } from "./guarddog.js";
 import { depsHashFor, loadGuardDogCache, saveGuardDogCache } from "./guarddog-cache.js";
-import { buildSemgrepArgs, semgrepConfig, isAirGap, isLocalSemgrepConfig } from "./scanners.js";
+import {
+  buildSemgrepArgs,
+  semgrepConfig,
+  isAirGap,
+  isLocalSemgrepConfig,
+  PROVIDER_GLOB,
+} from "./scanners.js";
+import { findIac } from "./check-iac-detect.js";
+import { checkMavenSbomCoverage } from "./maven-sbom.js";
+import type { SecurityLevel } from "./check-projects.js";
 import { ruleForCheck, type RuleRef } from "./rules/catalog.js";
 import { hasOsvManifest } from "./osv-manifests.js";
 import { unpinnedRequirements } from "./pinned-requirements.js";
@@ -84,7 +93,7 @@ export const SECURITY_CATEGORIES = [
 
 export type SecurityCategory = (typeof SECURITY_CATEGORIES)[number] | `self-audit/${string}`;
 
-export interface SecurityCheckResult {
+export interface SecurityCheckResult extends Partial<{ hasFindings: true; scanIncomplete: true }> {
   category: SecurityCategory;
   name: string;
   status: "pass" | "fail" | "warn" | "skip";
@@ -1903,39 +1912,14 @@ export function parseTrivyMisconfigCount(stdout: string): number {
 async function checkTrivyConfig(root: string): Promise<SecurityCheckResult> {
   const name = "trivy config (IaC)";
   const cwd = root;
-  const fileMarkers = [
-    "Dockerfile",
-    "docker-compose.yml",
-    "docker-compose.yaml",
-    "compose.yml",
-    "compose.yaml",
-  ];
-  let hasIaC = false;
-  for (const m of fileMarkers) {
-    if (
-      await access(resolve(cwd, m))
-        .then(() => true)
-        .catch(() => false)
-    ) {
-      hasIaC = true;
-      break;
-    }
-  }
-  if (!hasIaC) {
-    // Any top-level Terraform?
-    try {
-      const entries = await readdir(cwd);
-      hasIaC = entries.some((e) => e.endsWith(".tf"));
-    } catch {
-      /* unreadable cwd — treat as no IaC */
-    }
-  }
+  const iac = await findIac(cwd);
+  const hasIaC = iac.length > 0;
   if (!hasIaC) {
     return {
       category: "supply-chain",
       name,
       status: "skip",
-      detail: "no Dockerfile/Compose/Terraform found",
+      detail: "no Dockerfile/Compose/Terraform found in this tree (three levels)",
     };
   }
 
@@ -1956,7 +1940,17 @@ async function checkTrivyConfig(root: string): Promise<SecurityCheckResult> {
 
   const result = await execFileNoThrow(
     trivyBin,
-    ["config", ".", "--format", "json", "--severity", "HIGH,CRITICAL", "--quiet"],
+    [
+      "config",
+      ".",
+      "--skip-dirs",
+      PROVIDER_GLOB,
+      "--format",
+      "json",
+      "--severity",
+      "HIGH,CRITICAL",
+      "--quiet",
+    ],
     { timeout: 120_000, cwd: root },
   );
   const count = parseTrivyMisconfigCount(result.stdout);
@@ -1974,7 +1968,7 @@ async function checkTrivyConfig(root: string): Promise<SecurityCheckResult> {
       category: "supply-chain",
       name,
       status: "pass",
-      detail: "no high/critical IaC misconfigurations",
+      detail: `no high/critical IaC misconfigurations in ${iac.length} location(s)`,
     };
   }
   return {
@@ -2630,28 +2624,37 @@ function describeFindings(findings: BumblebeeFinding[]): string {
   return labels.length > 3 ? `${shown}; +${labels.length - 3} more` : shown;
 }
 
-async function runPrimarySecurityChecks(root: string): Promise<SecurityCheckResult[]> {
-  const checks = [
-    checkNpmAudit(root),
-    checkPipAudit(root),
-    checkEnvGitignored(root),
-    checkPinnedVersions(root),
-    checkSecretsInCode(root),
-    checkSocket(),
-    checkTrivy(root),
-    checkLicenses(root),
-    checkSemgrep(root),
-    checkBumblebee(root),
-    checkTrivyConfig(root),
-    checkOsvScanner(root),
-    checkMavenAudit(root),
-    checkGuardDog(root),
-    checkAllowScripts(root),
-  ];
-  const lockfileResults = await checkLockfilesCommitted(root);
-  return [...(await Promise.all(checks)), ...lockfileResults];
+async function runPrimarySecurityChecks(
+  root: string,
+  level: SecurityLevel = "all",
+): Promise<SecurityCheckResult[]> {
+  const { checkCodeGuardrails } = await import("./check-code-guardrails.js");
+  // Started only when asked for, so a project run does not scan git history again.
+  const repo =
+    level === "project"
+      ? []
+      : [checkEnvGitignored(root), checkSecretsInCode(root), checkSocket(), checkBumblebee(root)];
+  if (level !== "project") repo.push(checkSemgrep(root));
+  const project =
+    level === "repo"
+      ? []
+      : [
+          checkNpmAudit(root),
+          checkPipAudit(root),
+          checkPinnedVersions(root),
+          checkTrivy(root),
+          checkLicenses(root),
+          checkTrivyConfig(root),
+          checkOsvScanner(root),
+          checkMavenAudit(root),
+          checkMavenSbomCoverage(root),
+          checkGuardDog(root),
+          checkAllowScripts(root),
+        ];
+  const lockfileResults = level === "repo" ? [] : await checkLockfilesCommitted(root);
+  const codeResults = level === "repo" ? [] : await checkCodeGuardrails(root);
+  return [...(await Promise.all([...project, ...repo])), ...lockfileResults, ...codeResults];
 }
-
 async function appendHostSecurityChecks(
   results: SecurityCheckResult[],
   root: string,
@@ -2712,9 +2715,13 @@ function attachRuleCitations(results: SecurityCheckResult[]): SecurityCheckResul
  * Run all security checks against the governed root. Every filesystem read and scanner spawn
  * receives this root; callers may therefore audit another project without changing process cwd.
  */
-export async function checkSecurity(cwd?: string): Promise<SecurityCheckResult[]> {
+export async function checkSecurity(
+  cwd?: string,
+  level: SecurityLevel = "all",
+): Promise<SecurityCheckResult[]> {
   const root = cwd ?? process.cwd();
-  const results = await runPrimarySecurityChecks(root);
+  const results = await runPrimarySecurityChecks(root, level);
+  if (level === "project") return attachRuleCitations(results);
   await appendHostSecurityChecks(results, root);
   return attachRuleCitations(await appendProjectSecurityChecks(results, root));
 }

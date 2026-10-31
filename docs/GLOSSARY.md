@@ -38,6 +38,10 @@ output. Grouped by area; kit-specific meaning noted where it matters.
 
 | Term | Expansion | What it means in kit |
 |---|---|---|
+| **Service session** | *(not an acronym)* | Authentication state owned by a provider CLI. Kit checks the state with the configured service command. |
+| **Service token** | *(not an acronym)* | A bearer credential for automation or an application. Kit resolves declared tokens from a configured secret source. |
+| **Passkey approval** | *(not an acronym)* | A human step at the service provider. Kit can warn that it may be needed, but cannot prove which login method the user chose. |
+| **Kit identity** | *(not an acronym)* | Kit's signing identity for its records. It is separate from service sessions, service tokens, and passkeys. |
 | **HMAC** | Hash-based Message Authentication Code | Keyed integrity tag; kit's audit-log anchor uses one. |
 | **Ed25519** | *(the signature scheme)* | The elliptic-curve algorithm kit signs identities, policy, and shared memory with. |
 | **SHA-256** | Secure Hash Algorithm, 256-bit | Content hashing — e.g. verified-forget tombstones, MCP toolset pins. |

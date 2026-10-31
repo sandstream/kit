@@ -1,11 +1,199 @@
 ## [Unreleased]
 
+### Changed
+
+- **`npm test` runs one test file per core on Linux and macOS instead of two at a time.** On
+  GitHub's 4-core Linux runner the test step went from 408 s to 288 s with every test passing.
+  Windows stays at 2: at one file per core its heavy memory tests hit the 180 s timeout.
+  `KIT_TEST_CONCURRENCY` overrides both.
+- **The Windows shards are balanced by measured Windows time, not file size (#675).** Split by size,
+  the four shards summed to 1467/1270/1569/1314 s of Windows test time; by the measured table
+  (`scripts/test-weights.json`, from `node scripts/time-test-files.mjs`) each sums to 1406 s.
+  A `workflow_dispatch` of the Windows workflow with `time_files=true` regenerates the measurement.
+- **`KIT_TEST_TIMEOUT_MS` sets the per-file test timeout (default 180 s).** The Windows shards
+  cache npm and run four files at once with a 600 s per-file timeout.
+
+### Added
+
+- **The git-hook floor's bootstrap is a hook, not a sentence (#671).** `kit hooks context`
+  prints one plain line when a hook declared in `.kit.toml` does not run in this checkout, nothing
+  when all do, and always exits 0. `kit agent-config` wires it as a Claude Code `SessionStart` hook,
+  and kit's own repository commits `.claude/settings.json` with it, so an agent in a fresh clone is
+  told at session start instead of relying on the managed block's "Start: `kit check`" line, which
+  an agent session skipped for its whole length.
+
+- **`kit rig` — the rig ADR-0007 accepted and kit had not built (experimental).** Measure a
+  reviewer prompt or policy against planted defects and clean controls, kept in a private
+  `rig.toml` corpus. `plan` freezes the input (a SHA-256 over the manifest, the prompt and every
+  patch) and prints what to run outside kit; `ingest` stores a reviewer's JSONL findings under that
+  input; `adjudicate` decides caught, missed and false positives from file and line alone and
+  signs a receipt; `report` prints recall per config for the tune and holdout halves, the share of
+  clean controls flagged, comparisons by non-overlapping min/max ranges (refused below three runs),
+  and ADR-0007's three limits. `plant --from-fix <sha>` turns a historical fix into a planted
+  defect by reversing it onto the pinned commit, refusing one that does not apply cleanly. kit never
+  runs the reviewer and never reads the claim text.
+- **`kit rig`: `[input] extra` freezes what else the reviewer is shown.** A driver that shows code
+  excerpts, change hints or a rules file instead of (or beside) the patches lists them under
+  `extra`; their bytes join the input id, so changing one changes the id. A manifest without
+  `extra` keeps the id it always had (pinned by a test).
+
+### Security
+
+- **Git hooks in a linked worktree are found where git runs them.** In a `git worktree`, `.git` is a
+  file, and kit looked for hooks in `<worktree>/.git/hooks`: every declared hook read as "not
+  installed" and `kit hooks install` could not land there. kit now asks git for the hooks path.
+
+- **The GitLab CI health sensor no longer sends `GITLAB_TOKEN` to whatever host `origin` names.**
+  It runs whenever `.gitlab-ci.yml` exists, so a GitLab project whose `origin` pointed at a mirror on
+  another host sent the token there as `PRIVATE-TOKEN`. The token now goes only to gitlab.com or to
+  the self-hosted instance named in `GITLAB_HOST` (the variable GitLab's own CLI reads); any other
+  host gives an `unknown` result that says why (#666).
+
+- **File identity checks now use full-width ids everywhere.** Six places compared `dev`/`ino` from
+  number stats, which on Windows squeeze a 64- or 128-bit file id into a double, so a swap check
+  could pass for a different file: the policy-pull signature snapshot, the upstream safe read, the
+  hook-floor hook read, the OneCLI `.env.local` publish, and the monkey-test harness and env-file
+  reads. They now read bigint stats and compare through `sameIdentity`. The rule was prose in
+  `CLAUDE.md`; `src/file-identity-discipline.test.ts` now fails any `ino` comparison outside
+  `src/utils/same-file.ts`.
+
+- **`kit triage npm --sandbox` looks one layer into opaque binaries.** A binary file that is not a
+  known executable or media type is no longer silent. gzip and zip streams found anywhere in it are
+  decompressed a little (16 KB in, 16 MB out at most, so a bomb cannot expand) and classified; a
+  package that hid a Linux kernel in a gzip stream inside a custom container is now reported as
+  such. Binary content behind a text extension (`.js`, `.json`, `.md`, …) is a warning, and any
+  other unknown binary is info below 256 KB and a warning above. xz and zstd streams are named, not
+  opened: Node's standard library cannot read them. The triage outcome does not change.
+- **`kit triage npm --sandbox` names binaries inside a tarball.** It used to flag scripts and
+  path traversal only, so a package shipping a prebuilt Linux kernel image passed without a word.
+  Each file's first bytes are now classified, and an ELF, Mach-O or PE executable, a Linux boot
+  image or a Java class is reported as a warning with its path, kind and size; a WebAssembly module
+  is reported as info. It is a fact, not a verdict: prebuilt addons are common and legitimate, so
+  the triage outcome does not change.
+
+- **`kit agent-audit` names code-loading environment variables.** A `--preload`, `--require`/`-r`,
+  `--import` or `--loader` in `BUN_OPTIONS` or `NODE_OPTIONS`, and any `LD_PRELOAD` or
+  `DYLD_INSERT_LIBRARIES`, puts a file inside every process of that runtime, the agent included, and
+  no install or plugin gate sees it. The audit now warns for each one it finds in its own process
+  environment or in the `env` block of Claude Code's project, local or user `settings.json`, and
+  names the file. It cannot tell a preload you chose from one that was planted, so it warns and never
+  fails.
+
 ### Fixed
+
+- **`kit agent-audit` told a loopback MCP server to "use https".** For `http://localhost` or
+  `127.0.0.1`, TLS is not the risk: the server's bind address and missing authentication are,
+  and a client config cannot show either. A loopback server now gets its own low-severity row
+  that names that question; a remote `http://` server keeps the TLS advice.
+- **lizard measured the wrong functions in `src/agent-audit.ts`.** A `/^http:\/\//` regex read as
+  a comment made one function span the whole file and hid the real ones. The regexes are gone,
+  the hook-directory scan is its own function, and every function is now measured, under the limits.
+- **A stale comment in `src/keystore/active.ts`** said the `.kit-policy.toml` hardware mandate was
+  not wired. It is (`policyRequiresHardware`, ORed with the env mandate).
+
+- **`kit triage docker` failed every image named with a tag.** It sent `name:tag` to Docker Hub's
+  repository endpoint, which answers HTTP 400, so `qdrant/qdrant:latest` and every other tagged or
+  digest-pinned image was CRITICAL "cannot verify" and the install gate blocked it for a reason
+  unrelated to the image. The tag and digest are now split off; the repository is checked by name,
+  and a tag must also exist (`/tags/<tag>`), so a typo'd tag still fails. A digest is not verified
+  against Hub, which has no lookup for one.
+
+### Authentication
+
+- **Service passkeys and tokens have separate owners.** ADR-0008 records the boundary between provider login, scoped service tokens, and Kit's signing identity.
+- **`kit login --plan` now labels documentation-only service logins as manual.** It no longer presents comment text as an interactive command or suggests a passkey for it. Browser and passkey warnings describe a possibility, not a completed authentication step.
+
+### Memory
+
+- **PAL now tracks unfinished plan files.** Session start and `kit memory pal list` scan bounded project directories and matching adjacent files. An explicit completed status closes the item. Missing or unreadable files never count as completion. Read-only mode does not update PAL.
+
+### Security
+
+- **`claude plugin install` passed the install gate.** A Claude Code plugin's hooks module runs inside
+  the agent and can drop prompts, submit text as the user and send billed model requests, yet
+  `kit gate-bash` let `claude plugin install … --marketplace <repo>` and
+  `claude plugin marketplace add <repo>` through silently while it gated `npx skills add`. Adding a
+  marketplace is now triaged like `skills add`: a GitHub repo becomes a `github:` triage ref, a local
+  path is the user's own code, and any other source (another host, a URL to a `marketplace.json`)
+  is blocked as unverifiable. Installing from a marketplace added earlier is not re-gated. `/plugin
+  install` typed inside Claude Code never reaches a Bash hook and is not covered.
+- **Updated vulnerable transitive packages.** Hono 4.13.14, fast-uri 3.1.9, and ip-address 10.7.5 resolve the current npm advisories. `npm audit` reports zero vulnerabilities.
+
+- **`kit gha-audit` now checks CI gate coverage, deployment image tags, and default branch protection.** It reports whether CI declares `kit check`, `kit scan`, osv-scanner, and Trivy steps. It flags `latest` or branch-derived deployment tags in scripts, Compose files, and CI variables. The branch check reads GitHub or GitLab with a declared `GITHUB_TOKEN` or `GITLAB_TOKEN` from kit secrets. Missing tokens, API errors, and air-gap mode stay unverified.
+- **The CLI image now requires Alpine's patched Python package.** The container scan found CVE-2026-115557 in the cached Python layer. The package floor now requires `python3>=3.14.10-r1` and invalidates that layer.
+- **The security check now finds three unsafe code patterns.** It flags public cloud commands in shell scripts and GitHub workflows, literal secrets in Dockerfile `ENV`, and guards whose only action is a commented `throw` or `return`. Each finding names a file and line without printing secret values. A rule-specific inline comment with a reason can suppress a match.
+- **Maven dependency scans now name their partial coverage.** A `pom.xml` without a valid CycloneDX
+  BOM from its own directory or a declared Maven reactor gets a warning and the aggregate BOM
+  command. `kit scan` passes an existing `target/bom.json` directly to osv-scanner and grype,
+  even when `target/` is ignored by git. Kit does not run Maven.
+- **An agent could approve its own operation.** `kit policy approve` signed an approval token with no
+  person present: run with no terminal, as an agent's tool call runs, it minted a token that
+  `requestApproval` honors for any identity in the org trust anchor. It now refuses unless stdin and
+  stdout are a terminal outside non-interactive mode and the operation's name is typed back. It also
+  signed with the file key directly, so `require_hardware_identity` did not apply to approvals; it
+  now signs through the resolved keystore and fails closed under that mandate, as `kit policy sign`
+  does. With a file-backed key a same-user process can still sign without kit; only a hardware key
+  that needs a touch proves presence (docs/CONTROL_PLANE.md).
+- **A module planted beside the triage script could run unverified.** kit byte-verifies the
+  triage scripts it installs in `~/.claude/skills/triage/scripts/`, but Python puts a script's own
+  directory first on `sys.path`, so a `json.py` placed there would shadow the stdlib and execute.
+  `triage.py` now removes its directory from `sys.path` before importing anything else, which also
+  covers running it directly as the skill's instructions say.
+
+### Fixed
+
+- **A check inside one project could close findings from the repo root.** Both runs used the same PAL source key. Direct project runs now use a stable path-specific source key. The next root run still closes old unnamed findings when named findings replace them.
+
+- **`trivy config (IaC)` no longer skips a repo whose Dockerfiles and Terraform sit below the root.** It looked for a Dockerfile, a compose file or a `.tf` file in the root only, said "no Dockerfile/Compose/Terraform found" and skipped, while `docker/` and `infra/` held five Dockerfiles and Terraform for three environments. In one repo that hid a container running as root in production for months. It now looks three levels down (not in `node_modules`, `.terraform`, `vendor` or build output), scans the tree, and skips downloaded provider binaries. The skip text says it looked three levels deep.
+
+- **`kit triage skill` failed real skills on ordinary words, and never read their scripts.** Its
+  secret scan matched bare substrings, so a skill saying "ask-first", "task-" or "risk-" was
+  CRITICAL for `sk-` and `kit triage check-skills` refused the commit. It now matches the anchored
+  credential shapes kit already redacts (OpenAI/Anthropic, GitHub, AWS, private-key blocks, Slack,
+  Google). It also read only `SKILL.md`, so a skill's `scripts/` passed unread; every file in the
+  skill directory is now scanned, and any file it cannot read as text is named in a warning. The
+  skill checks moved into `skills/triage/scripts/skill_scan.py` (`triage.py` is size-frozen), and
+  kit installs and byte-verifies that file exactly as it does `triage.py`.
+- **`kit monkey-test` could report a stopped app as running again.** After a stop, the check asked
+  the kernel whether the process group existed and then scanned `/proc` for its members; when the
+  last zombie was reaped in between, the empty scan was read as "still running". It now asks the
+  kernel again before deciding. This was the intermittent `stop escalates to SIGKILL` CI failure.
+
+### Changed
+
+- **`kit memory pull` accepts your own memory when it holds quotes of injection text.** The
+  pre-merge scan refused any incoming store with a high-confidence injection pattern, including
+  patterns that sit in rows already quarantined, so a developer who works on security could never
+  pull their own export (the refusal listed hundreds of quoted "ignore all previous instructions"
+  lines). For a blob decrypted with the passphrase, which only the owner can produce, the scan now
+  counts only what recall can show again: messages that are not quarantined, and the action,
+  thread and revision tables. Every message still passes this machine's own write gate. A
+  public-key blob and a raw `.db` keep the strict scan, since neither proves who wrote it.
+  Checked on a copy of a real 370 000-message store: the merge went through and the receiving
+  store had 0 recallable injection rows.
+
+### Fixed
+
+- **osv-scanner no longer shows `error` for a repo with nothing to scan.** Its exit code 128 means no package sources were found, which is not a failure. The run is now `not-applicable` with that reason, so a repo without lockfiles does not fail `--strict`.
+- **Scanner exclusions now work from a symlinked directory.** Go-based scanners trust `$PWD` over the real directory, so a scan started from a path such as `/var/...` on macOS ignored every exclude. kit now sets `PWD` to the real working directory for each scanner.
 
 - **`kit memory restore` could refuse a valid restore on Windows.** Its "input and output are the
   same file" guard compared file ids as JS numbers, and Windows file ids above 2^53 lose their
   low bits, so two different files could match. File identity is now compared as bigint, and an
   id of 0 never matches. The same fix applies to the project-directory comparison in memory scoping.
+- **`--help` covers every subcommand, and asking for a command that does not exist is an error.**
+  - 46 documented subcommands printed only their parent's one-liner under `--help` and were missing
+    from `contracts/kit.opencli.json`. Examples: `kit memory push`, `kit secrets validate`,
+    `kit plugin install`, `kit triage npm`. Each now has its own line, and a test fails when a
+    documented subcommand has none.
+  - `kit frobnicate --help` and `kit help chek` printed the general help and exited 0. They now say
+    `Unknown command`, suggest the nearest command, and exit 1.
+  - 14 commands that printed under "Other" in `kit help` have a group.
+  - COMMANDS.md documents the five memory subcommands it left out.
+- **A failing test explains itself at the end of the run.** The runner's `[kit] N not ok` summary
+  now prints the first lines of each failure's own error, where a reader of a long CI log
+  actually looks. The Windows worktree test that failed intermittently now names the assertion and
+  prints the recall roots and `git worktree list` output it saw.
 - **The `osv-scanner (deps)` row rated every finding `high`.** It now takes the severity from the
   worst CVSS score osv reports (critical from 9.0, high from 7.0, medium from 4.0), names the
   vulnerable packages with their versions, and for npm packages suggests
@@ -22,6 +210,24 @@
   failed on Linux CI and passed locally.
 
 ### Added
+
+- **`kit agent-audit` reports writes without confirmation.** A separate warning names the main session or subagent and its declared write permission. The check reads `allow` rules and configured `acceptEdits` or `bypassPermissions` modes. Bare `ask` and `deny` rules take precedence. It detects file tools, broad shell access, and common file commands. Runtime approvals, mode changes, and arbitrary shell or MCP writes remain outside this configuration check.
+
+- **`kit check --category security` uses `[projects] paths`.** The repo level (secrets in git history, ignore rules, host, hooks) runs once in the root, and the project level (npm audit, osv-scanner, licences, install scripts, trivy fs and config, lockfiles) runs once per declared path, so a root without a manifest no longer gives "this scan looked in the wrong place" rows. Each project row carries its path in its name (`npm audit [frontend]`), so the same check in two projects is two findings and a run opens and closes only its own records. Project skips are not listed. The `scan scope` row says what was covered, any path that was refused, and any project below the root that is not listed. Without `[projects]` nothing changes.
+  Kit also checks root manifests and infrastructure outside the listed paths. Kit warns when a listed path lacks scan inputs or contains an unlisted child manifest.
+  Kit runs Semgrep once at the repo root and checks client exposure in every listed project.
+
+- **`[projects] paths` in `.kit.toml` names the project directories of a repository that holds several.** It is read and validated now, and `kit check` will use it to check the repo level once in the root and each path as a project of its own (a later change). A path must be a relative directory inside the repository: an absolute path or `..` is a config error, and a path that does not exist, is not a directory or is a symlink out of the repository is refused with its reason. The scope is declared, never guessed. The `[context]` schema moved to its own module to keep `config.ts` under its size baseline.
+
+- `kit context check` reports every declared `[context]` section or key that no check reads as `unchecked` and exits non-zero. A misspelled key or an unsupported tool no longer reads as a lock that holds.
+- `[context.gcloud] project` accepts a list of exact project names. The live project must equal one of them. A pattern is not supported, since it would also match a project such as `<name>-prod-old`.
+- `[context.terraform]` locks the state backend `bucket` and `prefix` and the `workspace`, read from `.terraform/` without running terraform. `dir` selects a subdirectory and must stay inside the repository, also through a symlink.
+
+- **`kit scan` skips downloaded terraform provider binaries.** `.terraform/providers/` holds vendored Go programs, and in one infrastructure repo they produced 54 percent of the findings. trivy, grype, osv-scanner and semgrep now exclude that directory and only that directory: the lock file and the `.tf` sources next to it are still scanned, and a vulnerable file in tracked code is still reported. If git tracks files under `.terraform/providers/`, that directory is not download output, so it is scanned and `kit scan` says so. A required scanner that finds nothing to scan (osv-scanner without a lockfile) fails the gate.
+- **`kit scan` runs trivy in config mode when the repo has a `.tf` file or a Dockerfile.** The new delegate `trivy-config` reports misconfigurations such as a container that runs as root (DS-0002). It applies only where such files exist (up to three levels down, not in `node_modules`, `.terraform` or `vendor`). Air gap passes `--skip-check-update`.
+- **A scanner that errors now says why.** `kit scan` and `kit scan --json` carry a `reason` on the run: the stderr line that names the failure (credentials redacted, control characters removed, 160 characters at most), or the parse error when the output was not valid.
+
+- **`kit agent-audit` checks the lethal trifecta.** An agent that reads text an outsider can write, can read private data and can send data out in one context can be steered by that text. The new rows `lethal trifecta: main session` and `lethal trifecta: agent <name>` warn when one unit holds all three legs, name the grants that hold each leg, and suggest removing the way out or splitting the work over two agents with different tools. It reads permission rules and the `tools` line of `.claude/agents/*.md` (project and user), never a value from a config file. MCP servers are placed by name; a grant it cannot place is listed as unclassified and never passed. Limits: approvals and auto mode decided at run time are not visible, and a deny rule with an argument (for example `Bash(curl:*)`) is not applied.
 
 - **`kit check --category security` scans agent transcripts for credentials.** A key pasted into a
   conversation is stored in the transcript and replayed into every later prompt. The new row

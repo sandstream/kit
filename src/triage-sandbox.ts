@@ -12,6 +12,8 @@
  *     network calls, or filesystem reads outside the package root
  *   - tarball entries that escape the package directory (path traversal)
  *   - tarball entries marked executable that shouldn't be
+ *   - native executables, boot images and compiled modules, by their first bytes
+ *   - other binaries: an executable one gzip/zip layer in, binary "text" files, unknown blobs
  *
  * No code from the package is ever executed. All work is read-only on the
  * downloaded tarball.
@@ -20,8 +22,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, mkdtemp, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
+import { sniffBinary } from "./triage-sandbox-binary.js";
+import { inspectBlob } from "./triage-sandbox-blob.js";
 
 const exec = promisify(execFile);
 
@@ -276,16 +280,29 @@ async function listTarballEntries(
   return { ok, findings };
 }
 
-async function walkAndCheck(dir: string, findings: SandboxFinding[]): Promise<void> {
+async function walkAndCheck(dir: string, findings: SandboxFinding[], root = dir): Promise<void> {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === "node_modules") continue;
-      await walkAndCheck(full, findings);
+      await walkAndCheck(full, findings, root);
       continue;
     }
     if (!entry.isFile()) continue;
     const st = await stat(full);
+    const rel = relative(root, full).split(sep).join("/");
+    const binary = await sniffBinary(full);
+    if (binary) {
+      findings.push({
+        severity: binary.severity,
+        signal: "binary in package",
+        detail: `${rel}: ${binary.kind} (${st.size} bytes)`,
+      });
+    } else {
+      const blob = await inspectBlob(full, rel, st.size);
+      if (blob)
+        findings.push({ severity: blob.severity, signal: "opaque binary", detail: blob.detail });
+    }
     // Bash/python/Perl scripts dropped at the package root are unusual for
     // libraries — flag them.
     if (/\.(sh|py|pl|rb)$/i.test(entry.name)) {

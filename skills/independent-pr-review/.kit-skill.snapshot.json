@@ -1,0 +1,10 @@
+{
+  "name": "independent-pr-review",
+  "triggerKey": "request an independent review of a github pull request and record its verdict for the current commit",
+  "scope": [
+    "Agent",
+    "Bash",
+    "Read"
+  ],
+  "fingerprint": "sha256:3ac4c003ca1b660876230891bfff4c3f12fc1a0bbc4aa82ec34ef87ae585c139"
+}

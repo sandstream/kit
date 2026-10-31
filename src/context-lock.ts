@@ -16,13 +16,16 @@ import { readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 import type { ContextConfig } from "./config.js";
+import { uncheckedContext } from "./context-unchecked.js";
+import { terraformFindings } from "./context-terraform.js";
+import { field, activationProject } from "./context-field.js";
 
 const exec = promisify(execFile);
 
 export interface ContextFinding {
   tool: string; // gcloud | git | github | npm | vercel
   field: string; // account | project | email | org | remote | registry | ...
-  status: "ok" | "mismatch" | "unknown"; // unknown = live state could not be read
+  status: "ok" | "mismatch" | "unknown" | "unchecked"; // unknown: unreadable; unchecked: no check reads it
   expected: string;
   actual: string | null;
 }
@@ -43,17 +46,6 @@ export interface LiveContext {
   clerk?: { env: string | null };
 }
 
-function field(
-  tool: string,
-  name: string,
-  expected: string | undefined,
-  actual: string | null,
-): ContextFinding | null {
-  if (expected === undefined) return null; // not declared -> not checked
-  if (actual === null) return { tool, field: name, status: "unknown", expected, actual: null };
-  return { tool, field: name, status: actual === expected ? "ok" : "mismatch", expected, actual };
-}
-
 // One row per checkable (tool, field). Adding a CLI to the lock is one row.
 // `declared` returns the expected value (undefined = not declared = not checked);
 // `live` returns the read value (null = unreadable). vercel context = the ids in
@@ -61,7 +53,7 @@ function field(
 const FIELD_SPECS: {
   tool: string;
   field: string;
-  declared: (d: ContextConfig) => string | undefined;
+  declared: (d: ContextConfig) => string | string[] | undefined;
   live: (l: LiveContext) => string | null;
 }[] = [
   {
@@ -582,7 +574,11 @@ export async function checkContext(
     };
   }
   const live = await gatherLive(cwd);
-  const findings = compareContext(declared, live);
+  const findings = [
+    ...compareContext(declared, live),
+    ...terraformFindings(ctx, cwd),
+    ...uncheckedContext(ctx),
+  ];
   // Repo-declared truth beats ambient state (#251): even when [context.gcloud]
   // itself is not declared, an active gcloud project that is not one of the
   // repo's own .firebaserc projects is a cross-account mismatch.
@@ -630,11 +626,12 @@ export function planContext(ctx: ContextConfig): ContextStep[] {
       argv: ["config", "set", "account", g.account],
       describe: `account=${g.account}`,
     });
-  if (g?.project)
+  const project = activationProject(g);
+  if (project)
     steps.push({
       tool: "gcloud",
-      argv: ["config", "set", "project", g.project],
-      describe: `project=${g.project}`,
+      argv: ["config", "set", "project", project],
+      describe: `project=${project}`,
     });
   if (g?.region)
     steps.push({

