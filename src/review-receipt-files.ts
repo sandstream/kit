@@ -121,16 +121,27 @@ function openHistoryForAppend(
   return validateHandle(fd, path, afterOpen);
 }
 
+interface AppendReceiptHistoryOptions {
+  noFollowFlag?: number;
+  afterOpen?: () => void;
+  publish?: typeof linkSync;
+  write?: (fd: number, text: string) => void;
+}
+
 export function appendReceiptHistory(
   path: string,
   text: string,
-  noFollowFlag = noFollow,
-  afterOpen?: () => void,
-  publish: typeof linkSync = linkSync,
+  options: AppendReceiptHistoryOptions = {},
 ): void {
-  const fd = openHistoryForAppend(path, noFollowFlag, afterOpen, publish);
+  const fd = openHistoryForAppend(
+    path,
+    options.noFollowFlag ?? noFollow,
+    options.afterOpen,
+    options.publish ?? linkSync,
+  );
   try {
-    writeFileSync(fd, text, { encoding: "utf8" });
+    const write = options.write ?? ((handle, data) => writeFileSync(handle, data, "utf8"));
+    write(fd, text);
   } finally {
     closeSync(fd);
   }

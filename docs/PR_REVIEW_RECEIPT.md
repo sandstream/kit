@@ -60,6 +60,27 @@ Run the recovery command again.
 If staged evidence is incomplete or invalid, Kit leaves the review locked.
 Inspect the files in the lock directory before removing an invalid staged file.
 Run the recovery command again after that inspection.
+Find the primary lock with `git rev-parse --git-path kit-review-receipt.lock`.
+If its owner file is missing or damaged, preserve the complete lock directory first.
+Confirm that no review or recovery process is running.
+Have a qualified person inspect every file in the lock, including unknown files.
+Inspect `generation`, `started`, `pending.json`, and staged `pending-*` files.
+Also inspect the current receipt, history, and temporary receipt and history files in the worktree.
+Preserve all files while the result is uncertain.
+If the person confirms that no review result needs recovery, archive the complete lock directory.
+Use a new unique name in the same Git metadata directory and do not replace any existing file.
+Run a new review only after that inspection.
+Recovery also reports temporary files left in the worktree by an interrupted write.
+Preserve those files and the signed pending evidence before inspecting them.
+Matching file identities alone do not prove that Kit owns a temporary name.
+Kit does not bind the temporary name to the signed review identity.
+It may be impossible to establish the origin from Kit evidence alone.
+Keep both files if the origin cannot be established.
+Only remove or move a temporary file after a qualified person confirms its ownership.
+If history is incomplete or lacks a final newline, preserve its original bytes.
+Have a qualified person verify and repair a separate copy.
+Keep the original backup and place the verified copy at the original history path.
+Then retry recovery.
 This recovery flow covers process interruption. It does not guarantee recovery after power loss.
 Signatures reveal changes to retained history entries.
 They do not prove that earlier entries or the whole history file still exist.

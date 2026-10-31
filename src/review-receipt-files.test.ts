@@ -44,7 +44,7 @@ it("creates and appends regular history, then reads it through a descriptor", ()
     appendReceiptHistory(path, "two\n");
     assert.equal(readReceipt(path), "one\ntwo\n");
     assert.equal(readReceipt(path, 0), "one\ntwo\n");
-    appendReceiptHistory(path, "three\n", 0);
+    appendReceiptHistory(path, "three\n", { noFollowFlag: 0 });
     assert.equal(readReceipt(path), "one\ntwo\nthree\n");
   });
 });
@@ -76,7 +76,7 @@ for (const noFollow of [undefined, 0]) {
         throw error;
       }
       assert.throws(() => readReceipt(link, noFollow));
-      assert.throws(() => appendReceiptHistory(link, "write", noFollow));
+      assert.throws(() => appendReceiptHistory(link, "write", { noFollowFlag: noFollow }));
       assert.equal(readFileSync(target, "utf8"), "unchanged");
     });
   });
@@ -90,20 +90,22 @@ it("preserves a replaced temporary file if publication fails", (t) => {
     let cannotRename = false;
     let failure: unknown;
     try {
-      appendReceiptHistory(history, "entry", undefined, undefined, (source) => {
-        temp = String(source);
-        try {
-          renameSync(temp, original);
-        } catch (error) {
-          if (
-            process.platform === "win32" &&
-            ["EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")
-          )
-            cannotRename = true;
-          throw error;
-        }
-        writeFileSync(temp, "replacement");
-        throw new Error("publication failed");
+      appendReceiptHistory(history, "entry", {
+        publish: (source) => {
+          temp = String(source);
+          try {
+            renameSync(temp, original);
+          } catch (error) {
+            if (
+              process.platform === "win32" &&
+              ["EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")
+            )
+              cannotRename = true;
+            throw error;
+          }
+          writeFileSync(temp, "replacement");
+          throw new Error("publication failed");
+        },
       });
     } catch (error) {
       failure = error;
@@ -136,7 +138,7 @@ it("does not create the target of a dangling symbolic link", (t) => {
       throw error;
     }
     assert.throws(() => readReceipt(link, 0));
-    assert.throws(() => appendReceiptHistory(link, "write", 0));
+    assert.throws(() => appendReceiptHistory(link, "write", { noFollowFlag: 0 }));
     assert.equal(existsSync(target), false);
     assert.deepEqual(readdirSync(dir), ["history"]);
   });
@@ -172,8 +174,10 @@ it("removes the temporary file and preserves a hard link failure", () => {
     const failure = Object.assign(new Error("hard links unavailable"), { code: "ENOTSUP" });
     assert.throws(
       () =>
-        appendReceiptHistory(path, "entry", undefined, undefined, () => {
-          throw failure;
+        appendReceiptHistory(path, "entry", {
+          publish: () => {
+            throw failure;
+          },
         }),
       (error) => error === failure,
     );
@@ -187,9 +191,11 @@ it("does not modify history created by another process during publication", () =
     const path = join(dir, "history");
     assert.throws(
       () =>
-        appendReceiptHistory(path, "entry", undefined, undefined, (source, destination) => {
-          writeFileSync(destination, "other process");
-          linkSync(source, destination);
+        appendReceiptHistory(path, "entry", {
+          publish: (source, destination) => {
+            writeFileSync(destination, "other process");
+            linkSync(source, destination);
+          },
         }),
       /review history changed while creating it; retry the operation/,
     );
@@ -207,20 +213,23 @@ for (const noFollow of [undefined, 0]) {
       let cannotRename = false;
       let failure: unknown;
       try {
-        appendReceiptHistory(history, "entry", noFollow, undefined, (source, destination) => {
-          temp = String(source);
-          try {
-            renameSync(temp, original);
-          } catch (error) {
-            if (
-              process.platform === "win32" &&
-              ["EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")
-            )
-              cannotRename = true;
-            throw error;
-          }
-          writeFileSync(temp, "replacement");
-          linkSync(temp, destination);
+        appendReceiptHistory(history, "entry", {
+          noFollowFlag: noFollow,
+          publish: (source, destination) => {
+            temp = String(source);
+            try {
+              renameSync(temp, original);
+            } catch (error) {
+              if (
+                process.platform === "win32" &&
+                ["EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")
+              )
+                cannotRename = true;
+              throw error;
+            }
+            writeFileSync(temp, "replacement");
+            linkSync(temp, destination);
+          },
         });
       } catch (error) {
         failure = error;
@@ -266,7 +275,9 @@ for (const action of ["read", "append"] as const) {
       if (action === "read") {
         assert.throws(() => openReceiptForRead(path, 0, swap));
       } else {
-        assert.throws(() => appendReceiptHistory(path, "write", 0, swap));
+        assert.throws(() =>
+          appendReceiptHistory(path, "write", { noFollowFlag: 0, afterOpen: swap }),
+        );
       }
       assert.equal(readFileSync(old, "utf8"), "original");
       assert.equal(readFileSync(target, "utf8"), "unchanged");

@@ -117,7 +117,11 @@ function readOptionalFile(path: string, maxBytes = 16 * 1024 * 1024): string | n
   }
 }
 
-export function beginReviewTransaction(root: string, run: ReadCommand): ReviewTransaction {
+export function beginReviewTransaction(
+  root: string,
+  run: ReadCommand,
+  afterLockCreated?: () => void,
+): ReviewTransaction {
   const dir = lockPath(root, run);
   const runId = randomBytes(16).toString("hex");
   try {
@@ -131,6 +135,7 @@ export function beginReviewTransaction(root: string, run: ReadCommand): ReviewTr
     }
     throw error;
   }
+  afterLockCreated?.();
   const transaction = { root, dir, runId, pid: process.pid, host: hostname() };
   writeExclusive(join(dir, "owner.json"), JSON.stringify(transaction));
   const temp = join(dir, "generation");
@@ -294,13 +299,19 @@ export function finishReviewTransaction(
 export function loadReviewTransaction(root: string, run: ReadCommand): ReviewTransaction {
   const dir = lockPath(root, run);
   if (!lstatSync(dir).isDirectory()) throw new Error("invalid review transaction directory");
-  const content = readOptionalFile(join(dir, "owner.json"), 4096);
-  if (content === null)
-    throw new Error(
-      `review transaction owner is missing at ${join(dir, "owner.json")}; inspect the lock manually`,
-    );
-  const transaction = JSON.parse(content) as ReviewTransaction;
+  const ownerPath = join(dir, "owner.json");
+  const guidance = `Review owner is missing or invalid at ${ownerPath}. Preserve ${dir}, confirm no review or recovery process is running, and inspect every pending and staged file before any manual cleanup.`;
+  let transaction: ReviewTransaction;
+  try {
+    const content = readOptionalFile(ownerPath, 4096);
+    if (content === null) throw new Error("owner is missing");
+    transaction = JSON.parse(content) as ReviewTransaction;
+  } catch (error) {
+    throw new Error(guidance, { cause: error });
+  }
   if (
+    !transaction ||
+    typeof transaction !== "object" ||
     transaction.root !== root ||
     transaction.dir !== dir ||
     !RUN_ID.test(transaction.runId) ||
@@ -308,6 +319,6 @@ export function loadReviewTransaction(root: string, run: ReadCommand): ReviewTra
     transaction.pid < 1 ||
     !transaction.host
   )
-    throw new Error("invalid review transaction owner");
+    throw new Error(guidance);
   return transaction;
 }

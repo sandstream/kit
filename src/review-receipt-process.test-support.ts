@@ -1,6 +1,6 @@
 /** Separate process fixture for receipt transactions. */
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import {
   captureReviewSnapshot,
@@ -24,6 +24,11 @@ import { signReviewReceipt } from "./review-receipt.js";
 const root = process.argv[2]!;
 const mode = process.argv[3]!;
 const signals = process.argv[4]!;
+function stopAtBarrier(): never {
+  writeFileSync(join(signals, `${mode}.barrier`), "ready");
+  const cell = new Int32Array(new SharedArrayBuffer(4));
+  while (true) Atomics.wait(cell, 0, 0, 1000);
+}
 const head =
   process.env.KIT_TEST_REMOTE_HEAD ??
   execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
@@ -103,6 +108,27 @@ async function stageCompleted(
   writeFileSync(join(transaction.dir, "pending-0123456789abcdef"), JSON.stringify(signed));
 }
 
+function crashHooks() {
+  return {
+    historyPublish:
+      mode === "crash-history-link"
+        ? (source: Parameters<typeof linkSync>[0], destination: Parameters<typeof linkSync>[1]) => {
+            linkSync(source, destination);
+            stopAtBarrier();
+          }
+        : undefined,
+    historyWrite:
+      mode === "crash-partial-append"
+        ? (fd: number, text: string) => {
+            const bytes = Buffer.from(text, "utf8");
+            writeSync(fd, bytes.subarray(0, Math.floor(bytes.length / 2)));
+            stopAtBarrier();
+          }
+        : undefined,
+    afterReceiptTemp: mode === "crash-receipt-temp" ? stopAtBarrier : undefined,
+  };
+}
+
 async function main(): Promise<void> {
   if (mode === "claim-crash") {
     const canonicalRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
@@ -134,7 +160,11 @@ async function main(): Promise<void> {
     chmodSync(history, 0o400);
   }
   const snapshot = captureReviewSnapshot(root, run);
-  const transaction = beginReviewTransaction(snapshot.root, run);
+  const transaction = beginReviewTransaction(
+    snapshot.root,
+    run,
+    mode === "crash-ownerless" ? stopAtBarrier : undefined,
+  );
   await prepareReviewReceipt(snapshot, transaction, run);
   if (mode === "staged-completed") await stageCompleted(transaction);
   writeFileSync(join(signals, `${mode}.ready`), "ready");
@@ -156,6 +186,7 @@ async function main(): Promise<void> {
       snapshot,
       transaction,
       hooks: {
+        ...crashHooks(),
         afterPending: async () => {
           if (mode !== "crash-after-pending") return;
           writeFileSync(join(signals, `${mode}.pending`), "ready");
