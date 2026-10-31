@@ -19,6 +19,10 @@ on:
         description: Optional Node test name pattern for a focused run
         required: false
         default: ""
+      time_files:
+        description: Set to "true" to print per-file wall times for each shard instead of running the suite (#675)
+        required: false
+        default: ""
   pull_request: {}
   push:
     branches:
@@ -64,8 +68,14 @@ jobs:
           if ($env:KIT_TEST_PATTERN) { $testArgs += "--test-name-pattern=$env:KIT_TEST_PATTERN" }
           $testArgs += $env:KIT_TEST_FILE
           & node @testArgs
+      - name: Per-file timing (shard ${{ matrix.shard }}/4, dispatch only)
+        if: inputs.time_files == 'true'
+        shell: bash
+        env:
+          KIT_TEST_SHARD: ${{ matrix.shard }}/4
+        run: node scripts/time-test-files.mjs
       - name: Unit tests (shard ${{ matrix.shard }}/4)
-        if: inputs.test_file == ''
+        if: inputs.test_file == '' && inputs.time_files != 'true'
         shell: bash
         env:
           KIT_TEST_SHARD: ${{ matrix.shard }}/4
