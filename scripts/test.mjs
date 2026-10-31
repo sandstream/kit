@@ -126,23 +126,29 @@ if (shard) {
 // a `npm test | grep '# fail'` that worked before would stop matching. So the stdout reporter is
 // node's own choice, reproduced, and the file reporter is purely additive.
 const TAP_LOG = ".kit-test-run.tap";
-const TEST_TIMEOUT_MS = 180000;
-// Test files run in parallel. Measured on GitHub's 4-core runners, one file per core took the Linux
-// test step from 408 s to 288 s with every test passing. On the Windows runners it did not hold:
-// the heavy memory/PAL tests and cli.test hit the 180 s timeout with four files at once (three of
-// three runs), so Windows keeps the 2 that 768edcb set for exactly that cliff. KIT_TEST_CONCURRENCY
-// overrides both, for a loaded machine or to reproduce a timing-dependent failure.
-const TEST_CONCURRENCY = (() => {
-  const raw = process.env.KIT_TEST_CONCURRENCY;
-  if (raw === undefined || raw === "") {
-    return process.platform === "win32" ? 2 : availableParallelism();
-  }
-  if (!/^[1-9][0-9]{0,2}$/.test(raw)) {
-    console.error(`KIT_TEST_CONCURRENCY must be a positive integer (got ${JSON.stringify(raw)})`);
+/** A positive integer from the environment, or `fallback` when unset; a malformed value exits 2. */
+function positiveIntEnv(name, fallback, digits) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  if (!new RegExp(`^[1-9][0-9]{0,${digits - 1}}$`).test(raw)) {
+    console.error(`${name} must be a positive integer (got ${JSON.stringify(raw)})`);
     process.exit(2);
   }
   return Number(raw);
-})();
+}
+// Per-file timeout. 180 s catches a hung file on a quiet machine; a CI job that runs more files at
+// once than its cores comfortably hold sets KIT_TEST_TIMEOUT_MS so slow is not reported as hung.
+const TEST_TIMEOUT_MS = positiveIntEnv("KIT_TEST_TIMEOUT_MS", 180000, 7);
+// Test files run in parallel. Measured on GitHub's 4-core runners, one file per core took the Linux
+// test step from 408 s to 288 s with every test passing. On the Windows runners the heavy
+// memory/PAL tests and cli.test hit the 180 s timeout with four files at once (three of three
+// runs), so Windows defaults to the 2 that 768edcb set for exactly that cliff; the Windows workflow
+// sets its own concurrency and timeout explicitly. KIT_TEST_CONCURRENCY overrides both defaults.
+const TEST_CONCURRENCY = positiveIntEnv(
+  "KIT_TEST_CONCURRENCY",
+  process.platform === "win32" ? 2 : availableParallelism(),
+  3,
+);
 const stdoutReporter = process.stdout.isTTY ? "spec" : "tap";
 const result = spawnSync(
   process.execPath,

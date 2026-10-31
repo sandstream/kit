@@ -139,4 +139,15 @@ describe("scripts/test.mjs", () => {
     assert.equal(run.status, 2);
     assert.match(run.stderr, /KIT_TEST_CONCURRENCY must be a positive integer/);
   });
+
+  it("refuses a malformed KIT_TEST_TIMEOUT_MS before it runs anything", () => {
+    const run = spawnSync(process.execPath, [join(ROOT, "scripts", "test.mjs")], {
+      cwd: ROOT,
+      env: { ...process.env, KIT_TEST_TIMEOUT_MS: "3m" },
+      encoding: "utf8",
+      timeout: 60_000,
+    });
+    assert.equal(run.status, 2);
+    assert.match(run.stderr, /KIT_TEST_TIMEOUT_MS must be a positive integer/);
+  });
 });

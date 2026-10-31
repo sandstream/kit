@@ -10,6 +10,8 @@
   the four shards summed to 1467/1270/1569/1314 s of Windows test time; by the measured table
   (`scripts/test-weights.json`, from `node scripts/time-test-files.mjs`) each sums to 1406 s.
   A `workflow_dispatch` of the Windows workflow with `time_files=true` regenerates the measurement.
+- **`KIT_TEST_TIMEOUT_MS` sets the per-file test timeout (default 180 s).** The Windows shards
+  cache npm and run four files at once with a 600 s per-file timeout.
 
 ### Added
 

@@ -45,6 +45,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+          cache: "npm"
       - name: Install
         run: npm ci
       - name: Build (cross-platform — no POSIX rm/chmod)
@@ -79,6 +80,10 @@ jobs:
         shell: bash
         env:
           KIT_TEST_SHARD: ${{ matrix.shard }}/4
+          # Four files at once on the 4-core runner; the heavy memory/PAL files take up to ~170 s
+          # alone, so the per-file timeout is raised to keep slow from reading as hung.
+          KIT_TEST_CONCURRENCY: "4"
+          KIT_TEST_TIMEOUT_MS: "600000"
         run: |
           set -o pipefail
           npm test 2>&1 | tee win-tests.log
