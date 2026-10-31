@@ -39,6 +39,13 @@
 
 ### Security
 
+- **`kit gha-audit` flags a gate that can skip itself green.** In GitHub Actions a job whose
+  job-level `if:` is false is reported as skipped, and a skipped job satisfies a required check. A
+  pull-request job that runs only on a condition another job computes
+  (`if: needs.changes.outputs.server == 'true'`, the affected-only pattern) therefore lets a PR merge
+  untested when the change detection is wrong. The new rule warns unless an aggregator job with
+  `if: always()` (or `!cancelled()`) `needs` it and checks its `.result`.
+
 - **Git hooks in a linked worktree are found where git runs them.** In a `git worktree`, `.git` is a
   file, and kit looked for hooks in `<worktree>/.git/hooks`: every declared hook read as "not
   installed" and `kit hooks install` could not land there. kit now asks git for the hooks path.
