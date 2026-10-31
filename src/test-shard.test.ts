@@ -6,11 +6,15 @@ import { pathToFileURL } from "node:url";
 
 const ROOT = join(import.meta.dirname, "..");
 type Shard = { index: number; total: number };
-const { parseShard, selectShard } = (await import(
+const { parseShard, selectShard, weightFrom } = (await import(
   pathToFileURL(join(ROOT, "scripts", "test-shard.mjs")).href
 )) as {
   parseShard: (spec: string | undefined) => Shard | null;
   selectShard: (files: string[], shard: Shard, sizeOf: (f: string) => number) => string[];
+  weightFrom: (
+    table: { files?: Record<string, number> } | null,
+    sizeOf: (f: string) => number,
+  ) => (f: string) => number;
 };
 
 const SIZES: Record<string, number> = {
@@ -79,6 +83,37 @@ describe("selectShard", () => {
 
   it("returns each shard's files sorted by name", () => {
     for (const files of all(3)) assert.deepEqual(files, [...files].sort());
+  });
+});
+
+describe("weightFrom", () => {
+  const sizes: Record<string, number> = {
+    "dist/a.test.js": 100,
+    "dist/b.test.js": 300,
+    "dist/new.test.js": 50,
+  };
+  const size = (f: string): number => sizes[f.split("\\").join("/")] ?? 0;
+
+  it("uses the measured time, matching Windows separators to the table's", () => {
+    const w = weightFrom({ files: { "dist/a.test.js": 9000, "dist/b.test.js": 3000 } }, size);
+    assert.equal(w("dist/a.test.js"), 9000);
+    assert.equal(w("dist\\b.test.js"), 3000);
+  });
+
+  it("weights an unknown file by size at the table's own ms-per-byte rate", () => {
+    const w = weightFrom({ files: { "dist/a.test.js": 9000, "dist/b.test.js": 3000 } }, size);
+    assert.equal(w("dist/new.test.js"), 50 * (12000 / 400));
+  });
+
+  it("falls back to plain size without a table", () => {
+    assert.equal(weightFrom(null, size)("dist/b.test.js"), 300);
+  });
+
+  it("lets a measured heavy file pull a shard apart from its size", () => {
+    const files = ["dist/a.test.js", "dist/b.test.js"];
+    const w = weightFrom({ files: { "dist/a.test.js": 9000, "dist/b.test.js": 3000 } }, size);
+    assert.deepEqual(selectShard(files, { index: 1, total: 2 }, w), ["dist/a.test.js"]);
+    assert.deepEqual(selectShard(files, { index: 1, total: 2 }, size), ["dist/b.test.js"]);
   });
 });
 
