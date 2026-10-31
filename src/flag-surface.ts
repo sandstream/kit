@@ -523,6 +523,7 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--stages",
     "--strict",
   ],
+  rig: ["--json", "--manifest", "--strict"],
   run: [
     "--env",
     "--install",
