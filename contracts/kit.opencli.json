@@ -2159,7 +2159,6 @@
         "--help",
         "--id",
         "--json",
-        "--kind",
         "--manifest",
         "--non-interactive",
         "--path",

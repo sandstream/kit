@@ -527,7 +527,6 @@ export const COMMAND_FLAGS: Record<string, readonly string[]> = {
     "--from-fix",
     "--id",
     "--json",
-    "--kind",
     "--manifest",
     "--path",
     "--pinned",

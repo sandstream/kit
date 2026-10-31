@@ -19,7 +19,6 @@ export const PLANT_FLAGS = [
   "--from-fix",
   "--split",
   "--id",
-  "--kind",
   "--repo",
   "--path",
   "--pinned",
@@ -97,7 +96,6 @@ export async function cmdRigPlant(): Promise<boolean> {
     id: args.id,
     split: args.split,
     patchPath,
-    kind: flagValue(process.argv, "--kind"),
   });
   if (hasFlag(process.argv, "--json")) {
     const { patch: _patch, ...where } = planted;
