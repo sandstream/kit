@@ -5,7 +5,7 @@ The command runs all five review stages with strict checks.
 It writes `.kit-review-receipt.json` in the repository root.
 The receipt and history files can be untracked without entries in `.gitignore`.
 Both paths must be untracked regular files. Kit rejects symbolic links and hard links.
-On systems without `O_NOFOLLOW`, Kit requires a usable file identity to open the files.
+Kit requires a usable file identity to open the files.
 Kit rejects the operation if it cannot verify that identity.
 Keep the worktree and its parent directories under trusted control during the operation.
 The file records the PR head, the review command result, returned GitHub checks, review threads, and protected paths.
@@ -13,6 +13,8 @@ It stores hashes of review output and comment text.
 It does not store the comment text.
 The command reports missing checks, failed checks, and open review threads as evidence issues.
 Failed local runs also enter `.kit-review-receipt-history.jsonl`.
+The file system must support hard links to create a new history file.
+Kit stops if the file system cannot create the link.
 Kit checks the worktree and PR identity before the review and before it signs the receipt.
 The checks cannot detect a file that changes and returns to its original state during the review.
 Git status also excludes ignored files from the worktree check.

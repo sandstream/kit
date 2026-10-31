@@ -7,6 +7,7 @@ import {
   linkSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -81,6 +82,43 @@ for (const noFollow of [undefined, 0]) {
   });
 }
 
+it("preserves a replaced temporary file if publication fails", (t) => {
+  withDirectory((dir) => {
+    const history = join(dir, "history");
+    const original = join(dir, "original");
+    let temp = "";
+    let cannotRename = false;
+    let failure: unknown;
+    try {
+      appendReceiptHistory(history, "entry", undefined, undefined, (source) => {
+        temp = String(source);
+        try {
+          renameSync(temp, original);
+        } catch (error) {
+          if (
+            process.platform === "win32" &&
+            ["EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")
+          )
+            cannotRename = true;
+          throw error;
+        }
+        writeFileSync(temp, "replacement");
+        throw new Error("publication failed");
+      });
+    } catch (error) {
+      failure = error;
+    }
+    if (cannotRename) {
+      t.skip("Windows cannot rename an open file in this test environment");
+      return;
+    }
+    assert.ok(failure);
+    assert.equal(existsSync(history), false);
+    assert.equal(readFileSync(original, "utf8"), "");
+    assert.equal(readFileSync(temp, "utf8"), "replacement");
+  });
+});
+
 it("does not create the target of a dangling symbolic link", (t) => {
   withDirectory((dir) => {
     const target = join(dir, "missing-target");
@@ -100,8 +138,88 @@ it("does not create the target of a dangling symbolic link", (t) => {
     assert.throws(() => readReceipt(link, 0));
     assert.throws(() => appendReceiptHistory(link, "write", 0));
     assert.equal(existsSync(target), false);
+    assert.deepEqual(readdirSync(dir), ["history"]);
   });
 });
+
+it("cannot publish a hard link over a dangling symbolic link", (t) => {
+  withDirectory((dir) => {
+    const target = join(dir, "missing-target");
+    const link = join(dir, "history");
+    const temp = join(dir, "temp");
+    writeFileSync(temp, "unchanged");
+    try {
+      symlinkSync(target, link);
+    } catch (error) {
+      if (
+        process.platform === "win32" &&
+        ["EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")
+      ) {
+        t.skip("Windows cannot create symbolic links in this test environment");
+        return;
+      }
+      throw error;
+    }
+    assert.throws(() => linkSync(temp, link));
+    assert.equal(existsSync(target), false);
+    assert.equal(readFileSync(temp, "utf8"), "unchanged");
+  });
+});
+
+it("removes the temporary file and preserves a hard link failure", () => {
+  withDirectory((dir) => {
+    const path = join(dir, "history");
+    const failure = Object.assign(new Error("hard links unavailable"), { code: "ENOTSUP" });
+    assert.throws(
+      () =>
+        appendReceiptHistory(path, "entry", undefined, undefined, () => {
+          throw failure;
+        }),
+      (error) => error === failure,
+    );
+    assert.equal(existsSync(path), false);
+    assert.deepEqual(readdirSync(dir), []);
+  });
+});
+
+for (const noFollow of [undefined, 0]) {
+  it(`does not delete or write a replaced temporary file with no-follow mode ${String(noFollow)}`, (t) => {
+    withDirectory((dir) => {
+      const history = join(dir, "history");
+      const original = join(dir, "original");
+      let temp = "";
+      let cannotRename = false;
+      let failure: unknown;
+      try {
+        appendReceiptHistory(history, "entry", noFollow, undefined, (source, destination) => {
+          temp = String(source);
+          try {
+            renameSync(temp, original);
+          } catch (error) {
+            if (
+              process.platform === "win32" &&
+              ["EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "")
+            )
+              cannotRename = true;
+            throw error;
+          }
+          writeFileSync(temp, "replacement");
+          linkSync(temp, destination);
+        });
+      } catch (error) {
+        failure = error;
+      }
+      if (cannotRename) {
+        t.skip("Windows cannot rename an open file in this test environment");
+        return;
+      }
+      assert.ok(failure);
+      assert.equal(readFileSync(original, "utf8"), "");
+      assert.equal(readFileSync(temp, "utf8"), "replacement");
+      assert.equal(readFileSync(history, "utf8"), "replacement");
+    });
+  });
+}
 
 for (const action of ["read", "append"] as const) {
   it(`rejects a replaced link before ${action} in the Windows fallback`, (t) => {

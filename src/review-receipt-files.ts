@@ -1,39 +1,46 @@
 /** Open receipt files without following a replaced link. */
-import { closeSync, constants, fstatSync, lstatSync, openSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  linkSync,
+  lstatSync,
+  openSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 
 const noFollow = constants.O_NOFOLLOW ?? 0;
 const nonBlock = constants.O_NONBLOCK ?? 0;
 
-function checkOpenedFile(fd: number, path: string, noFollowFlag: number): void {
+function assertSameEntry(fd: number, path: string): void {
+  const opened = fstatSync(fd, { bigint: true });
+  const entry = lstatSync(path, { bigint: true });
+  if (
+    !opened.isFile() ||
+    !entry.isFile() ||
+    opened.ino === 0n ||
+    entry.dev !== opened.dev ||
+    entry.ino !== opened.ino
+  ) {
+    throw new Error("review receipt file changed while opening");
+  }
+}
+
+function checkOpenedFile(fd: number, path: string): void {
   const opened = fstatSync(fd, { bigint: true });
   if (!opened.isFile() || opened.nlink !== 1n) {
     throw new Error("review receipt file must be a regular file without hard links");
   }
-  // Windows may not expose O_NOFOLLOW. Compare the entry with the open handle
-  // before any read or write, and then use only that handle for the operation.
-  if (!noFollowFlag) {
-    const entry = lstatSync(path, { bigint: true });
-    if (
-      !entry.isFile() ||
-      entry.nlink !== 1n ||
-      opened.ino === 0n ||
-      entry.dev !== opened.dev ||
-      entry.ino !== opened.ino
-    ) {
-      throw new Error("review receipt file changed while opening");
-    }
-  }
+  assertSameEntry(fd, path);
 }
 
-function validateHandle(
-  fd: number,
-  path: string,
-  noFollowFlag: number,
-  afterOpen?: () => void,
-): number {
+function validateHandle(fd: number, path: string, afterOpen?: () => void): number {
   try {
     afterOpen?.();
-    checkOpenedFile(fd, path, noFollowFlag);
+    checkOpenedFile(fd, path);
     return fd;
   } catch (error) {
     closeSync(fd);
@@ -47,20 +54,67 @@ export function openReceiptForRead(
   afterOpen?: () => void,
 ): number {
   const fd = openSync(path, constants.O_RDONLY | noFollowFlag | nonBlock);
-  return validateHandle(fd, path, noFollowFlag, afterOpen);
+  return validateHandle(fd, path, afterOpen);
 }
 
-/** Create exclusively or open without creating; neither can follow a dangling link. */
-function openHistoryForAppend(path: string, noFollowFlag: number, afterOpen?: () => void): number {
+function unlinkOwnedTemp(fd: number, path: string): void {
+  assertSameEntry(fd, path);
+  unlinkSync(path);
+}
+
+/** Publish a new file without opening the destination with a create flag. */
+function createHistory(path: string, flags: number, publish: typeof linkSync): number {
+  const temp = join(dirname(path), `.kit-receipt-${randomBytes(16).toString("hex")}.tmp`);
+  const fd = openSync(temp, flags | constants.O_CREAT | constants.O_EXCL, 0o600);
+  try {
+    try {
+      publish(temp, path);
+      assertSameEntry(fd, path);
+    } catch (error) {
+      try {
+        unlinkOwnedTemp(fd, temp);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          "review history publication and cleanup failed",
+          { cause: cleanupError },
+        );
+      }
+      throw error;
+    }
+    try {
+      unlinkOwnedTemp(fd, temp);
+    } catch (error) {
+      throw new Error("review history temporary file cleanup failed", { cause: error });
+    }
+    return fd;
+  } catch (error) {
+    closeSync(fd);
+    throw error;
+  }
+}
+
+/** Open without creating, or publish a new file without following the destination. */
+function openHistoryForAppend(
+  path: string,
+  noFollowFlag: number,
+  afterOpen: (() => void) | undefined,
+  publish: typeof linkSync,
+): number {
   const flags = constants.O_WRONLY | constants.O_APPEND | noFollowFlag | nonBlock;
   let fd: number;
   try {
-    fd = openSync(path, flags | constants.O_CREAT | constants.O_EXCL, 0o600);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     fd = openSync(path, flags);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    try {
+      fd = createHistory(path, flags, publish);
+    } catch (createError) {
+      if ((createError as NodeJS.ErrnoException).code !== "EEXIST") throw createError;
+      fd = openSync(path, flags);
+    }
   }
-  return validateHandle(fd, path, noFollowFlag, afterOpen);
+  return validateHandle(fd, path, afterOpen);
 }
 
 export function appendReceiptHistory(
@@ -68,8 +122,9 @@ export function appendReceiptHistory(
   text: string,
   noFollowFlag = noFollow,
   afterOpen?: () => void,
+  publish: typeof linkSync = linkSync,
 ): void {
-  const fd = openHistoryForAppend(path, noFollowFlag, afterOpen);
+  const fd = openHistoryForAppend(path, noFollowFlag, afterOpen, publish);
   try {
     writeFileSync(fd, text, { encoding: "utf8" });
   } finally {
