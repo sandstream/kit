@@ -19,6 +19,12 @@
 
 ### Security
 
+- **The GitLab CI health sensor no longer sends `GITLAB_TOKEN` to whatever host `origin` names.**
+  It runs whenever `.gitlab-ci.yml` exists, so a GitLab project whose `origin` pointed at a mirror on
+  another host sent the token there as `PRIVATE-TOKEN`. The token now goes only to gitlab.com or to
+  the self-hosted instance named in `GITLAB_HOST` (the variable GitLab's own CLI reads); any other
+  host gives an `unknown` result that says why (#666).
+
 - **File identity checks now use full-width ids everywhere.** Six places compared `dev`/`ino` from
   number stats, which on Windows squeeze a 64- or 128-bit file id into a double, so a swap check
   could pass for a different file: the policy-pull signature snapshot, the upstream safe read, the
